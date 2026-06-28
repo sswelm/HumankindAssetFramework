@@ -21,8 +21,9 @@ namespace ENCAccessProof
         const string MissileMeshName = "Unit_Era6_CruiseMissile_01";
 
         private static object ourSkeleton;
+        private static object boundFxMgr;   // the FX mesh-content manager our mesh is currently uploaded against
         private static int ourMeshIndex;
-        private static bool tried, loaded, uploaded, meshSwapped;
+        private static bool tried, loaded, uploaded;
 
         private static MethodBase TargetMethod()
         {
@@ -40,15 +41,16 @@ namespace ENCAccessProof
             // ONLY the missile SKELETON (not its projectile/effect collections, which would break the bomb FX)
             if (name.IndexOf("CruiseMissile", StringComparison.OrdinalIgnoreCase) >= 0 && name.IndexOf("Skeleton", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                // Upload our mesh into the GPU mesh-content manager (gives it a valid MeshIndex). We pass the missile's
-                // slot only because LoadIFN wants a skeletonIndex; the upload itself is index-independent.
-                if (!uploaded) UploadIntoMissileSlot(__instance, __result);
+                // (Re)upload our mesh into the GPU mesh-content manager if needed (gives it a valid MeshIndex).
+                // Re-uploads after a save load / FX reload, when the manager instance changes.
+                EnsureUploaded(__instance, __result);
                 if (!uploaded || ourMeshIndex == 0) return;   // not ready yet -> show the missile, retry next call
 
                 // POC (CalmBreakfast's suggestion): do NOT inject our skeleton at all. Keep the REAL missile skeleton
                 // (its bones, animation, GPU skinning, slot are all proven-good) and only point its mesh entry at OUR
-                // uploaded mesh. This sidesteps the skinning hang that came from injecting our own skeleton object.
-                if (!meshSwapped) SwapMeshIndexInto(__result, ourMeshIndex);
+                // uploaded mesh. Re-apply EVERY call: the engine re-LoadIFNs the missile skeleton on re-present/reload,
+                // which resets MeshIndex back to the missile's mesh -> a one-time swap reverts. Idempotent.
+                SwapMeshIndexInto(__result, ourMeshIndex);
                 // __result stays the missile skeleton (now drawing our mesh)
             }
         }
@@ -65,39 +67,43 @@ namespace ENCAccessProof
                 var miField = AccessTools.Field(item.GetType(), "MeshIndex");
                 if (miField == null) { Plugin.Log.LogWarning("[ENCProof] swap: no MeshIndex field"); return; }
                 var old = miField.GetValue(item);
+                if (Convert.ToInt32(old) == idx) return;     // already ours -> nothing to do
                 miField.SetValue(item, Convert.ChangeType(idx, miField.FieldType));  // MeshIndex is uint
                 arr.SetValue(item, 0);
-                meshSwapped = true;
-                Plugin.Log.LogInfo($"[ENCProof] POC: repointed missile mesh index {old} -> {idx} on the REAL missile skeleton (skeleton+animation reused, only the mesh is ours)");
+                Plugin.Log.LogInfo($"[ENCProof] repointed missile mesh index {old} -> {idx} (reapplied after an engine/load reset)");
             }
             catch (Exception e) { Plugin.Log.LogError("[ENCProof] swap error: " + e); }
         }
 
-        // Reuse the missile's GPU skeleton slot: LoadIFN our mesh with the missile's SkeletonId so Skeleton.Load
-        // sets our SkeletonId = that slot (valid bone data already there) and uploads our mesh (sets MeshIndex).
-        private static void UploadIntoMissileSlot(object mgr, object missileSkel)
+        // (Re)upload our mesh into the GPU mesh-content manager. Re-runs when the manager instance changes (a save
+        // load / FX reload rebuilds it and drops our mesh), so the swap always has a valid MeshIndex to point at.
+        private static void EnsureUploaded(object mgr, object missileSkel)
         {
             try
             {
-                var mObj = GetMember(missileSkel, "SkeletonId");
-                int slot = (mObj is int i) ? i : -1;
-                if (slot < 0) return;            // missile not registered yet; try again on a later call
-
                 var fxMgr = GetMember(mgr, "FxComponentMeshContentManager");
+                if (fxMgr == null) return;
+                if (uploaded && ReferenceEquals(fxMgr, boundFxMgr) && ourMeshIndex != 0) return;   // still valid
+
+                var mObj = GetMember(missileSkel, "SkeletonId");
+                int slot = (mObj is int i) ? i : 0;          // any valid index; the mesh upload is index-independent
                 var layerIdx = GetMember(mgr, "FXMeshLayerIndex");
                 var loadIfn = AccessTools.Method(ourSkeleton.GetType(), "LoadIFN");
-                if (fxMgr == null || layerIdx == null || loadIfn == null) { Plugin.Log.LogWarning("[ENCProof] upload: missing fxMgr/layer/LoadIFN"); return; }
+                if (layerIdx == null || loadIfn == null) { Plugin.Log.LogWarning("[ENCProof] upload: missing layer/LoadIFN"); return; }
 
-                // loadingStatus was reset in EnsureInjected -> Load runs: sets MeshIndex (GPU upload) AND SkeletonId = slot
+                // force a fresh Load (loadingStatus is left Loaded after a prior upload -> LoadIFN would no-op)
+                var statusField = AccessTools.Field(ourSkeleton.GetType(), "loadingStatus");
+                if (statusField != null) statusField.SetValue(ourSkeleton, Enum.ToObject(statusField.FieldType, 0)); // NotLoaded
                 loadIfn.Invoke(ourSkeleton, new object[] { fxMgr, layerIdx, slot });
 
-                object skelId = GetMember(ourSkeleton, "SkeletonId"), meshIdx = null;
+                object meshIdx = null;
                 var smiArr = AccessTools.Field(ourSkeleton.GetType(), "skinnedMeshInfos")?.GetValue(ourSkeleton) as Array;
                 if (smiArr != null && smiArr.Length > 0)
                     meshIdx = AccessTools.Field(smiArr.GetValue(0).GetType(), "MeshIndex")?.GetValue(smiArr.GetValue(0));
-                if (meshIdx != null) ourMeshIndex = Convert.ToInt32(meshIdx);
-                Plugin.Log.LogInfo($"[ENCProof] uploaded our mesh: ourMeshIndex={ourMeshIndex} (slot used for LoadIFN={slot})");
-                uploaded = true;
+                ourMeshIndex = meshIdx != null ? Convert.ToInt32(meshIdx) : 0;
+                boundFxMgr = fxMgr;
+                uploaded = ourMeshIndex != 0;
+                Plugin.Log.LogInfo($"[ENCProof] (re)uploaded our mesh: ourMeshIndex={ourMeshIndex}");
             }
             catch (Exception e) { Plugin.Log.LogError("[ENCProof] upload error: " + e); }
         }

@@ -1,15 +1,35 @@
-# ENC Access Proof — first BepInEx mod
+# ENC Access Proof — custom 3D model injection for Humankind
 
-A minimal Humankind BepInEx (5 / Mono) plugin that **proves runtime access to a mod's assets**, with a
-**config file** and an **in-game feedback window**. It's the foundation for the larger 3D-asset-injection plugin.
+A Humankind BepInEx (5 / Mono) plugin that **renders a custom 3D model on a unit in the live game** — no executable
+patching. A procedurally-built zeppelin replaces the cruise-missile mesh the ENC zeppelin unit bombards with, keeping
+the unit's real skeleton, animation and material. Long thought impossible for a mod; done here with a baked mesh +
+this plugin.
 
-## What it proves
-1. The plugin **loads** under BepInEx.
-2. A Harmony hook **fires in-game** (postfix on `AnimationManager.AnimationResolveDependencies`, where the engine
-   loads its content).
-3. It can **read the live registry** (`AnimationManager.Content.MeshCollections` etc.).
-4. It can **reach the configured mod's own assets** — scans the `PresentationPawnDefinition` database for entries
-   matching `AssetNameFilter` (e.g. finds `Era5_Common_Zeppelins_01` for ENC).
+## How it works (the working recipe)
+The key insight (credit: CalmBreakfast) — **do not inject a custom skeleton** (that silently hangs the GPU skinning
+compute). Keep the unit's REAL skeleton and only swap the **mesh** it draws.
+
+1. Bake a mesh into an Amplitude `Skeleton`/`MeshCollection` asset in the Mod Editor (`baker/ZeppelinModel.cs`),
+   ship it inert in the mod's `Resources`.
+2. Harmony postfix on `AnimationManager.GetMeshCollection(Guid)` (`Patches/ZeppelinInjectPatch.cs`):
+   - Load our baked collection by `Amplitude.Framework.Guid`.
+   - **Reset its `loadingStatus` → NotLoaded** (it ships `Loaded`, which makes `LoadIFN` a no-op so the GPU upload
+     never runs), then **`LoadIFN(...)`** → uploads the mesh to the GPU mesh-content manager and yields a valid
+     `MeshIndex`.
+   - When `GetMeshCollection` returns the target unit's skeleton, **repoint that real skeleton's
+     `skinnedMeshInfos[0].MeshIndex` to our uploaded mesh** (struct-in-array → box/set/write-back). The unit keeps
+     its bones/animation/material and draws our mesh.
+   - **Reload-robust:** re-apply the swap on every call (the engine resets it on re-present/turn), and re-upload when
+     the FX manager instance changes (a save load rebuilds it).
+
+The model wears the borrowed unit's material — a custom **texture/material** is the remaining frontier (the
+"amplitude-passable material + shader" problem).
+
+## Also proves (foundation)
+- Plugin **loads** under BepInEx; a Harmony hook **fires in-game**.
+- **Reads the live registry** (`AnimationManager.Content.MeshCollections`).
+- **Reaches the configured mod's assets** — scans the `PresentationPawnDefinition` database for `AssetNameFilter`
+  (e.g. finds `Era5_Common_Zeppelins_01` for ENC). F8 opens an in-game feedback window of the scan.
 
 ## Config file
 Auto-created at `<Humankind>\BepInEx\config\community.humankind.encaccessproof.cfg`:
