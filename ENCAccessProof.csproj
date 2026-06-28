@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net471</TargetFramework>
+    <AssemblyName>ENCAccessProof</AssemblyName>
+    <Product>ENC Access Proof</Product>
+    <Version>0.1.0</Version>
+    <LangVersion>latest</LangVersion>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <DebugType>portable</DebugType>
+  </PropertyGroup>
+
+  <!-- net471 builds with just the .NET SDK (this package IS on nuget.org). -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- BepInEx isn't on nuget.org, so (like GUI-Tools & shakee) all DLLs are local, dropped into a
+       gitignored References\ folder. See README for exactly which files to copy in. -->
+  <ItemGroup>
+    <Reference Include="BepInEx">                      <HintPath>References\BepInEx.dll</HintPath>                       <Private>false</Private></Reference>
+    <Reference Include="0Harmony">                     <HintPath>References\0Harmony.dll</HintPath>                      <Private>false</Private></Reference>
+    <Reference Include="UnityEngine">                  <HintPath>References\UnityEngine.dll</HintPath>                   <Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule">       <HintPath>References\UnityEngine.CoreModule.dll</HintPath>       <Private>false</Private></Reference>
+    <Reference Include="UnityEngine.IMGUIModule">      <HintPath>References\UnityEngine.IMGUIModule.dll</HintPath>      <Private>false</Private></Reference>
+    <Reference Include="UnityEngine.InputLegacyModule"><HintPath>References\UnityEngine.InputLegacyModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Amplitude.Mercury.Animation">  <HintPath>References\Amplitude.Mercury.Animation.dll</HintPath>   <Private>false</Private></Reference>
+  </ItemGroup>
+
+</Project>
