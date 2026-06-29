@@ -285,24 +285,39 @@ material/`FxOutputLayer` + an `AnimationManagerContent` + a `Description` repoin
 - Alternative still on the table: keep the proven runtime register/repoint but drive it from a small JSON/asset
   manifest (per-model config), avoiding a deeper engine-content merge.
 
-### ✅ POC validated (2026-06-30): the merge registers a custom skeleton natively
-Proven end-to-end on the zeppelin skeleton:
+### ⚠️ Partial result (2026-06-30): the merge REGISTERS a skeleton — display is NOT proven
+**Do not read this as "shakee's method works."** What was actually shown is narrow:
+
 1. **Data file is authorable in modtools** (`ShakeeMethodProbe.cs`): `AnimationManagerContent` is a plain
    `ScriptableObject`; `CreateInstance` + set `MeshCollections = [skeleton asset GUID]` + `CreateAsset` round-trips.
-   Created `ENC_ModAnimationContent.asset` listing the zeppelin skeleton (asset GUID `e7ad…`).
-2. **Generic merge hook** (`ShakeeMergePatch.cs`): the decompile confirmed the seam — `AnimationResolveDependencies`
-   builds `loadedMeshCollections[]` from `loadedContent.MeshCollections` (AnimationManager.cs:463-468), then
-   `AnimationLoad` does `RegisterMeshCollection` per entry + `Apply()` (497-501). A **postfix on
-   `AnimationResolveDependencies`** loads the mod `AnimationManagerContent` (by GUID) and **appends its skeletons into
-   `loadedMeshCollections`** (private `MeshCollection[]` field).
-3. **Result (log):** `merged 1 mod skeleton(s) into loadedMeshCollections (110 -> 111)` then
-   `PROOF: zeppelin skeleton SkeletonId=70` — the engine registered it + built GPU bone buffers through the **native
-   path**, with **no manual `Apply()`/`LoadIFN`/fragment surgery**. (Gated by config `Shakee/MergeModContent`.)
+   Created `ENC_ModAnimationContent.asset` listing the zeppelin skeleton (asset GUID `e7ad…`). ✅
+2. **Generic merge hook** (`ShakeeMergePatch.cs`): postfix on `AnimationManager.AnimationResolveDependencies` loads
+   the mod content by GUID and appends its skeletons into the private `loadedMeshCollections[]`
+   (AnimationManager.cs:463-468); `AnimationLoad` then `RegisterMeshCollection`s them (497-501). ✅
+3. **Result (log):** `merged 1 mod skeleton(s) (110 -> 111)` + `zeppelin skeleton SkeletonId=70`. This proves the
+   skeleton **object landed in the registry list** — nothing more.
 
-So shakee's premise holds: a mod-authored data file + one generic hook registers a custom skeleton cleanly. The
-hovercraft's runtime path stayed live alongside it — both methods at once.
+**What `SkeletonId=70` does NOT prove (and what actually makes a model display):**
 
-**Remaining for a visible result:** repoint the Zeppelin unit's `Description.Template` → the skeleton's `SourcePrefab`
-(pure mod data; the Description `PresentationAirUnit_Era5_Common_Zeppelins_Default` is in the mod's
-`PresentationPawnDefinition_Era5_ENC.asset`). Because the skeleton is natively registered, the body fragment resolves
-against it from the start — no runtime repoint/fragment hack needed.
+| # | Requirement to render on a unit | Shown by the merge? |
+|---|---|---|
+| 1 | Skeleton registered (`SkeletonId`) | ✅ |
+| 2 | **Mesh uploaded to GPU** (`skinnedMeshInfos[0].MeshIndex ≠ 0`) | ❓ UNTESTED — the hovercraft needed an explicit `LoadIFN`; `RegisterMeshCollection` did not upload at `AnimationLoad` time |
+| 3 | GPU bone buffers built (`Apply` over `skeletons[]`) | ⚠️ likely (registered before `Apply`) but unverified |
+| 4 | A unit points at it (`Description.Template` → SourcePrefab) | ❌ not done |
+| 5 | Body fragment resolves the mesh by name (`GetFxMeshIndex`) | ❓ untested — the part that took hours on the hovercraft |
+| 6 | Material / output-layer for the body | ❌ not done; `OutputLayerEntries` is vanilla-locked |
+
+So **2, 4, 5, 6 — the things that make it visible — are unproven**, and they're exactly the walls the runtime
+hovercraft hit. The correction earlier in this doc claiming "no `Apply`/`LoadIFN`/fragment surgery" was premature:
+registration avoided those, but display has not been attempted.
+
+**Skepticism worth keeping (it doesn't add up if it's "easy"):** registration has always been the understood part;
+the years-long blocker is the **display chain** (GPU mesh upload + by-name fragment resolution + the vanilla-locked
+material/output-layer). shakee *proposed* the merge as an idea — proposing ≠ implementing+shipping; if a `SkeletonId`
+were enough this would have been solved long ago. The real friction (which shakee himself flagged) is also the
+**modtools authoring** of the content + `FxOutputLayer` materials.
+
+**Next, to actually prove or disprove it:** verify `MeshIndex` on the merged skeleton (if 0, it cannot draw — case
+closed for now), then do the `Description.Template` repoint and *look at the screen*. Only a unit visibly rendering
+the model counts. Expect to hit at least one of rows 2/5/6; if so, that obstacle is the honest finding.
