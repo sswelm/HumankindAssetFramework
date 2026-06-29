@@ -284,3 +284,25 @@ material/`FxOutputLayer` + an `AnimationManagerContent` + a `Description` repoin
   this plan is only for the **animated** case.
 - Alternative still on the table: keep the proven runtime register/repoint but drive it from a small JSON/asset
   manifest (per-model config), avoiding a deeper engine-content merge.
+
+### ✅ POC validated (2026-06-30): the merge registers a custom skeleton natively
+Proven end-to-end on the zeppelin skeleton:
+1. **Data file is authorable in modtools** (`ShakeeMethodProbe.cs`): `AnimationManagerContent` is a plain
+   `ScriptableObject`; `CreateInstance` + set `MeshCollections = [skeleton asset GUID]` + `CreateAsset` round-trips.
+   Created `ENC_ModAnimationContent.asset` listing the zeppelin skeleton (asset GUID `e7ad…`).
+2. **Generic merge hook** (`ShakeeMergePatch.cs`): the decompile confirmed the seam — `AnimationResolveDependencies`
+   builds `loadedMeshCollections[]` from `loadedContent.MeshCollections` (AnimationManager.cs:463-468), then
+   `AnimationLoad` does `RegisterMeshCollection` per entry + `Apply()` (497-501). A **postfix on
+   `AnimationResolveDependencies`** loads the mod `AnimationManagerContent` (by GUID) and **appends its skeletons into
+   `loadedMeshCollections`** (private `MeshCollection[]` field).
+3. **Result (log):** `merged 1 mod skeleton(s) into loadedMeshCollections (110 -> 111)` then
+   `PROOF: zeppelin skeleton SkeletonId=70` — the engine registered it + built GPU bone buffers through the **native
+   path**, with **no manual `Apply()`/`LoadIFN`/fragment surgery**. (Gated by config `Shakee/MergeModContent`.)
+
+So shakee's premise holds: a mod-authored data file + one generic hook registers a custom skeleton cleanly. The
+hovercraft's runtime path stayed live alongside it — both methods at once.
+
+**Remaining for a visible result:** repoint the Zeppelin unit's `Description.Template` → the skeleton's `SourcePrefab`
+(pure mod data; the Description `PresentationAirUnit_Era5_Common_Zeppelins_Default` is in the mod's
+`PresentationPawnDefinition_Era5_ENC.asset`). Because the skeleton is natively registered, the body fragment resolves
+against it from the start — no runtime repoint/fragment hack needed.

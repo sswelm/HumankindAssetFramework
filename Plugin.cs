@@ -22,6 +22,7 @@ namespace ENCAccessProof
         internal static ConfigEntry<bool>   RepointOnLoad;   // auto-repoint when the registry is ready
         internal static ConfigEntry<string> CopyFields;      // which pawn-def fields to copy
         internal static ConfigEntry<string> ClearFields;     // pawn-def fields to null out (kill duplicates)
+        internal static ConfigEntry<bool>   MergeModContent; // shakee POC: merge mod AnimationManagerContent at load
 
         private bool show;
         private Rect winRect = new Rect(60, 60, 480, 420);
@@ -51,6 +52,9 @@ namespace ENCAccessProof
             ClearFields     = Config.Bind("Repoint", "ClearFields", "",
                                   "Comma-separated pawn-def fields to null out after copying (e.g. SubPawnDefinitions) " +
                                   "to remove duplicate/overlapping geometry.");
+            MergeModContent = Config.Bind("Shakee", "MergeModContent", true,
+                                  "POC of shakee's data-driven approach: merge mod AnimationManagerContent assets into " +
+                                  "the game's loaded content at AnimationResolveDependencies so custom skeletons register natively.");
 
             new Harmony(GUID).PatchAll();
             Log.LogInfo($"ENC Access Proof loaded. Target='{TargetMod.Value}', Filter='{AssetNameFilter.Value}'. " +
