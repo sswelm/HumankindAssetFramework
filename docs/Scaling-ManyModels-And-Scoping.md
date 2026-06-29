@@ -112,22 +112,54 @@ So a unique texture needs a **new material GUID + `FxOutputLayer` + `OutputLayer
 GUID (bundle mounted). It is **read-only at runtime** — no `CreateAsset`/`Duplicate`; asset creation is a Unity
 mod-tools **Build** operation.
 
-### The recipe (editor-baker route — per model)
-1. **Clone the skeleton asset** → new asset GUID. Keep `BoneInfos`, `BBox`, `animator*` GUIDs **unchanged** (reuses
-   the original's working bones + animation). Replace `skinnedMeshInfos[i].FxMeshContent` with our baked mesh and
-   give that `FxMeshContent.Guid` a **unique** value. Set `prefab`/`SourcePrefab` to a **new unique GUID**.
-2. **Register it for `Apply()`** — add the clone's GUID to the mod's `AnimationManagerContent.MeshCollections[]` so
-   `AnimationLoad()` registers it **before** `Apply()` builds the GPU buffers. Add it to the relevant
-   `AnimationClipCollections[]` so it gets animation rows (for a static prop, reuse the original's idle).
-3. **Unique texture** — author a `Material` (unique GUID) + matching `FxOutputLayer`; add an
-   `OutputLayerEntry { Material, OutputLayer }` to `AnimationManagerContent.OutputLayerEntries[]`.
-4. **Body fragment** — a `PresentationPawnFragmentSkinnedMesh` with `MaterialRef =` your material GUID and
-   `SkinnedMeshPath =` your mesh name.
-5. **Point only the target unit** — clone its `PresentationPawnDescription` (new GUID), set `Template.Guid` = the
-   clone skeleton's new `SourcePrefab` GUID, set its slots to your fragment, and repoint just that unit definition.
+**CONFIRMED in-editor (2026-06-29, `HovercraftProbe.cs`):** the mod-tools editor has all game bundles mounted
+(`mercury.data.units.assetbundle`, `LoadedAssetBundleFlags = 0xFFFFFFFF`). `FindAssetPathsOfType<Skeleton>()` only
+walks the *Project Assets* provider (sees the mod's own 2 skeletons), but you can reach vanilla assets by pulling the
+provider's `AssetBundle` (`unityObject`/`UnityObject` field) and `GetAllAssetNames()` (21,575 unit assets), then
+`bundle.LoadAsset(name, typeof(Skeleton))`. Loaded `Unit_Era6_Common_LandingCrafts_01_Skeleton`:
+- `prefab` (SourcePrefab) = **`2bb20c2003488a04d84cf3b90917e764`** (the GetMeshCollection key)
+- `animatorOverrideController` = **`d3e591815e0d5b6468d590d47fc12273`**, `animatorController` = none
+- `BoneInfos` (4) = **`Dummy_Root, Base, Drapeau_00, Trappe_00`** — has a **`Base`** bone (our LCAC rigs to Base ✓)
+- `skinnedMeshInfos` = **null on the raw asset** (body mesh is built from the prefab at load) → the clone must
+  supply its own populated `skinnedMeshInfos` (we already have one in our baked `Hovercraft_Skeleton`).
 
-Every link is GUID-keyed and additive, so **N models coexist** with zero cross-talk. The whole thing is **native
-data — no runtime plugin swap needed** once baked.
+### Wiring — CONFIRMED constraints (2nd investigation)
+- **`AnimationManagerContent` is a single vanilla asset** (`AnimationManager.InstanceGUID =
+  f81c148cff973af4ca02dcc2f617f781` → its `content`), holding **fixed `Guid[]` arrays**: `MeshCollections`,
+  `AnimationClipCollections`, `AnimatorOverrideControllers`, `OutputLayerEntries`. `AnimationLoad()` registers each
+  `MeshCollections[]` entry (`RegisterMeshCollection`) then `Apply()` builds GPU bone buffers over `skeletons[]`.
+- **A mod CANNOT edit those arrays.** Asset GUID collisions resolve with `AssetDuplicateSolvingPolicy.Error` →
+  **vanilla always wins**, so a mod can't override the vanilla `AnimationManagerContent` (or any vanilla asset by
+  reusing its GUID). ⇒ **Shipping a skeleton asset in the mod does NOT auto-register it**, and a mod can't add an
+  `OutputLayerEntry`.
+- ⇒ **The skeleton MUST be registered at runtime by the plugin:**
+  `AnimationManager.Instance.RegisterMeshCollection(ourSkeleton)`. GPU bone buffers only (re)build in `Apply()`,
+  which runs inside `AnimationLoad()` — so register **before** `AnimationLoad`/`Apply` (hook it) or force
+  `AnimationUnloadIFN()`+`AnimationLoadIFN()` after registering. (This is why the runtime *Instantiate* clone slabbed
+  — it was never in `skeletons[]` when `Apply` ran. A registered REAL asset is fine.)
+- **The Description repoint IS pure mod data** (and is the scoping mechanism): `PresentationPawnDefinition` elements
+  are **name-keyed** `DatatableElement`s, so the mod overrides `Era6_Common_Hovercrafts_01` per-element without
+  touching the barge. `PresentationPawnDescription.Template` is a `GameObjectReference` whose `.Guid` is the skeleton
+  SourcePrefab matched by `GetMeshCollection`. The pawn-def's `Description` is a `PresentationPawnDescriptionReference`
+  (`AssetReference<PresentationPawnDescription>`, serialized `Description: { guid }`).
+
+### The recipe (per model) — corrected to the confirmed wiring
+1. **Bake the skeleton asset** → unique `SourcePrefab` GUID (ours: `{a:-161743038,b:1281290275,c:-429521739,
+   d:-847522509}`, no vanilla collision). Reuse the vanilla rig's `Base` bone (our LCAC rigs to it); for animation,
+   copy the vanilla `animatorOverrideController` GUID (`d3e591…`). Our `Hovercraft_Skeleton.asset` already exists.
+2. **Register at runtime (plugin):** `RegisterMeshCollection(ourSkeleton)` timed before `Apply()` (hook
+   `AnimationLoad`), so `GetMeshCollection(ourSourcePrefabGuid)` finds it AND its bones are in the GPU buffer.
+3. **Repoint ONLY the Hovercraft** (data OR runtime): make a new mod `PresentationPawnDescription` (copy the vanilla
+   Hovercraft Description's `Slots`/rotations/collider, set `Template.Guid` = our SourcePrefab) and point
+   `Era6_Common_Hovercrafts_01`'s `Description.guid` at it (the byte at `PresentationPawnDefinition_Era6_ENC.asset`
+   ~line 12939). The barge (different element, same vanilla Description) is untouched. *(Or do the repoint at runtime
+   in the Hovercraft AddOn.Load postfix: `addOn.Skeleton = addOn.MeshCollection = GetMeshCollection(ourSourcePrefab)`
+   — a reference swap to our REGISTERED skeleton, not a clone.)*
+4. **Texture:** the mod can't add an `OutputLayerEntry`, so reuse a vanilla output layer and set `_MainTex` from the
+   plugin (our existing technique). For true per-unit texture, pick an output layer the barge doesn't use.
+
+Scoping comes from the per-element Description repoint (unique SourcePrefab ⇒ unique skeleton ⇒ only that unit).
+**N models coexist** by construction. Plugin involvement shrinks to: register the skeleton(s) + set `_MainTex`.
 
 Key source: `MeshCollection.cs:25-40`; `Skeleton.cs:27-58`; `FxMeshContent.cs:109-152`;
 `AnimationManager.cs:261-301,372-391,495-501,557-685` (Apply/Register/GetMeshCollection);
