@@ -409,3 +409,119 @@ trick the old swap used (`ShakeeZeppelinCombo.ApplyTexture`/`TickTexture`, hooke
 **Net:** combination = shakee's merge (robust native registration + upload) + a thin runtime repoint (reuse the
 vanilla Description, no Description authoring). Genuinely more robust than runtime-only; remaining runtime bits are the
 repoint, the fragment re-resolve, and (until `OutputLayerEntry` scoping) the per-frame texture.
+
+## 8. ✅ Stealth Cruiser — first TEXTURED + first naval-COMBAT unit (USS Zumwalt) (2026-06-30)
+
+The 3rd working custom model and the most complete: **USS Zumwalt (DDG-1000)** onto the Era-6 **StealthCruisers**
+("Stealth Missile Cruiser") unit. First model with a **real texture**, first **naval combat** unit, and **verified in
+battle** (renders + behaves correctly mid-combat, not just on the map). Source: Yakudami, Sketchfab, CC-BY.
+
+It uses the **native-scoped runtime recipe** (same family as `HovercraftInjectPatch`), not the merge/combo —
+self-contained and proven. Patch: `StealthCruiserInjectPatch.cs` (`StealthCruiserInject`, hooks
+`CruiserRegisterHook` on `AnimationLoad` + `CruiserRepointHook` on `AddOn.Load`); config gate `Plugin.CruiserInject`
+(section `Cruiser`, default true, independent of `RepointOnLoad`).
+
+### What was new (and reusable)
+
+1. **Textured pipeline.** Keep the model's own UVs through the bake and apply its albedo. The baker bakes the
+   extracted albedo into `StealthCruiser_Atlas.asset` (alpha forced opaque); the plugin applies it as `_MainTex` on
+   the host output layer per-frame (`TickTexture`). No procedural skin like the hovercraft.
+
+2. **Faithful UV conversion (the texture-scramble fix).** The GLB→OBJ converter's default vertex-clustering
+   decimation merges coincident **UV-seam** verts and **averages their UVs** → the skin smears (red waterline bleeds
+   onto the deck). Added a **faithful mode (`grid 0` = no merging)** that preserves every vertex + its exact UV. Use
+   it for any low-poly textured model (decimation isn't needed there anyway). Unity's "Weld Vertices" is safe — it
+   only merges fully-identical verts, so seams survive import.
+
+3. **Angular look from a smooth-shaded source.** The model ships smooth normals → set the OBJ import to
+   `Normals = Calculate` with a low `SmoothingAngle` (~20°) so hull facets become hard edges (radar-defeating look).
+   Importing the model's own normals faithfully = rounded; flat-shading everything = wrong. Calculate+angle matches
+   the artist's intended creases.
+
+4. **Positioning is per-vehicle-type — do NOT inherit the hovercraft's.** A hovercraft hovers (a small gap *above*
+   the water read correctly). A **displacement ship sits IN the water at its painted waterline** — sink it with a
+   **negative Z offset** so the red boot-topping submerges and the surface lands on the red/grey line. Naval baseline
+   `≈ -0.2`. Orientation `OrientEuler = (180,0,0)` = deck-up **and bow-forward**; `(0,180,0)` kept the deck up but
+   reversed the heading (the ship "moved backwards").
+
+5. **Self-discovering scoped patch (key robustness win).** At repoint, the patch reads the host AddOn's OWN
+   `FragmentEntries[].meshName`, picks the hull (a `Unit_*` mesh that isn't Water/Wake/Foam/Proof), and **renames our
+   mesh to match** so the on-map body fragment resolves to ours (otherwise: INVISIBLE — the "truly stealth" bug). The
+   skin layer is `<bodyMeshName>_OutputLayer`, matched by the discovered name. **Zero hardcoding** → works for any
+   borrowed naval unit. Here StealthCruisers borrows the **Swedish Visby Corvette**
+   (`Unit_Era6_Sweden_VisbyCorvettes_01`, `AnimationCapabilityProfile = Boat`).
+
+6. **Persistent config dialog.** `Tools → StealthCruiser → Configure Stealth Ship` (`StealthShipConfigWindow`) —
+   offset X(sway)/Y(fore-aft)/Z(waterline)/size multiplier, persisted in **EditorPrefs** (survive recompiles +
+   restarts). Build button bakes with the current values; no const-edit/recompile loop.
+
+### How to find what a mod unit borrows (lesson)
+A mod `PresentationPawnDefinition` stores `Description`/`Attachements` as **bare GUIDs** in the `.asset` YAML — text
+grep for the borrowed name finds **nothing**. **Resolve the GUID** instead: the Unity Inspector shows the name
+(`Description`/`Body` fields), or `AssetDatabase.GUIDToAssetPath` in a script. (Confirmed: StealthCruisers → Visby.)
+
+### Files
+- Baker + dialog: `ENCReload/Assets/Scripts/Editor/StealthCruiserModel.cs`
+- Assets: `ENCReload/Assets/Resources/StealthCruiser/` (OBJ + albedo) → `StealthCruiser_Skeleton.asset`,
+  `StealthCruiser_Atlas.asset`
+- Patch: `ENCAccessProof/Patches/StealthCruiserInjectPatch.cs`; gate `Plugin.CruiserInject`
+- Converter faithful mode: scratchpad `glbconv` (`grid 0`)
+
+### Known UX cost — the real issue: it should work FIRST time
+The core problem isn't tuning *speed*, it's that the pipeline still needs **multiple in-game passes** (orientation,
+size, waterline) before a model is right. The config dialog removed the *recompile* wait, not the
+*bake → rebuild-mod → relaunch* round-trip. The goal is **first-time-right**: get the model correct in the editor so
+the first launch is a *confirmation*, not another iteration. Path:
+- **Calibrated editor preview** — render the baked prefab against a water plane at the calibrated surface height and at
+  the correct relative scale, so orientation / size / waterline are judged in the Scene, not in-game.
+- **Auto-detect to remove the guesses entirely**: waterline from the red/grey boot-topping line in the atlas; forward
+  axis from the longest bbox dimension; deck-up + target size from the borrowed unit (we already discover its mesh and
+  can read its bbox at runtime).
+Bow-vs-stern and final taste may still need one quick editor confirm — but **zero in-game iteration**.
+
+## 9. ✅ Universal Model Factory — data-driven, any model onto any unit (2026-07-01)
+
+Generalized everything above into a reusable tool: **Tools > Universal Model Factory**. Pick (or create) a 3D
+resource, pick a target pawn definition, pick a model file, set rotation / position / size / normals / smoothing /
+convert-grid, press **Bake** → it bakes a skeleton + atlas and writes a JSON registry that the runtime reads. **Adding
+a model is now zero new code.** Proven end-to-end in-game: the StealthCruiser (Zumwalt) is driven entirely by the
+registry with all the old per-unit patches OFF. Intended to ship as a **distributable Unity package** for any modder.
+
+### Pieces
+- **Editor:** `ModelFactoryWindow` (the window) + `UniversalBaker` (the bake engine, every knob a parameter) +
+  `ModelRegistry` (writes `enc_models.json`). A searchable **Pick** lists all `PresentationPawnDefinition`s; picking
+  one auto-suggests the resource name. A bundled GLB→OBJ converter (`Tools/glbconv`, invoked via `dotnet`) handles GLB.
+- **Runtime:** `UniversalInject` (`UniRegisterHook` on `AnimationLoad`, `UniRepointHook` on `AddOn.Load`) reads the
+  registry, registers every skeleton, and repoints each listed pawn-def with the same **self-discovery** as the
+  cruiser (read host body-mesh name → rename ours → resolve; skin via `<bodyMesh>_OutputLayer`). One patch, N models.
+  Config gate `[Factory] UniversalInject`; the per-unit gates (`CruiserInject`, `MergeModContent`, `RepointOnLoad`)
+  go OFF when the registry drives things.
+
+### Registry (`BepInEx/config/enc_models.json`)
+`{ "models": [ { resourceName, pawnDescription, modelFile, rotation, position, size, normalsMode, smoothingAngle,
+convertGrid, skel:[a,b,c,d], atlas:[a,b,c,d] } ] }`. The runtime only needs `pawnDescription` + `skel` + `atlas`
+(offsets are baked into the skeleton). Re-baking an existing resource keeps the same asset GUIDs (same path), so the
+registry entry stays valid.
+
+### ⚠️ Gotcha that cost an hour: `JsonUtility` is unreliable here
+`UnityEngine.JsonUtility.FromJson<Wrapper>(json)` returned **`models = null`** for a perfectly valid file (no
+exception, no BOM, full-mirror class) inside the BepInEx plugin — it silently fails to populate a `List<T>` of a
+nested-object class in this context. **Fix: parse the known fields directly** (regex for `resourceName` /
+`pawnDescription` / `skel[4]` / `atlas[4]`; the i-th match of each belongs to model i, since each appears once per
+entry in document order). Lesson: don't trust `JsonUtility` for non-trivial structures in a plugin — hand-parse.
+(Diagnosed by instrumenting every checkpoint: hook fired → `EnsureRegistered` fired → `read N chars; parsed
+models=NULL` was the smoking gun.)
+
+### ⚠️ KNOWN BUG to fix: texture is NOT scoped (mesh IS)
+The mesh swap is correctly scoped (only the target pawn-def gets our skeleton). But the **skin is applied to the host's
+*shared* output layer** (`<bodyMesh>_OutputLayer`) via per-frame `_MainTex`, so it paints **every** unit on that layer.
+Concretely: the Zumwalt and the vanilla **Visby Corvette are both Era 6** and can be fielded together — the real Visby
+then wears the Zumwalt skin. This is a genuine in-play bug, not just a comparison artifact. Proper fix = **per-unit
+texture scoping**: give our model its OWN output layer (a dedicated `OutputLayerEntry`, shakee-merge territory) instead
+of borrowing the host's. Deferred.
+
+### Toward a Unity package (gaps)
+Decouple hardcoded paths (`ModelRegistry.ConfigDir`, the `dotnet`/converter path) into settings; neutral naming (drop
+"ENC", namespace `ENCAccessProof`); ship the editor package + the companion BepInEx plugin together with docs; consider
+a Unity-native glTF importer (glTFast) instead of the `dotnet` converter. Mirror of editor scripts lives in
+`ENCAccessProof/baker/` (ENCReload git tracks only `Assets/Databases`).
