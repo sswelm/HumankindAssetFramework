@@ -563,6 +563,35 @@ Caveat: baking with Reuse **off** re-extracts the GLB and clobbers the edit.
 > **removed it** — hand-editing + Reuse is simpler, fully universal, and puts no image-editing logic in the tool. The
 > baker keeps only `reuseExtracted`; no colour-match code.
 
+### ⚠️ The albedo is found by NAME-SCAN, not a stored reference — keep the scan robust (2026-07-01)
+`BuildAtlas` doesn't hold a reference to a texture asset; it **scans the resource folder** for a `.png` and loads its
+raw bytes, because the GLB→OBJ converter names the albedo after the *model's own material* (`<Material>_albedo.png`),
+which the baker can't know ahead of time. Cost us ~an hour: a hand-made `..._albedo-backup.png` sitting in the folder
+got baked **instead** of the real albedo — `FirstOrDefault(name.Contains("albedo"))` returned it because Windows lists
+files alphabetically and `-` (ASCII 45) sorts before `.` (46), so `…albedo-backup.png` came first. The clean backup
+silently masked the real (yellow) file, so bakes looked fine for the wrong reason. **Fix:** exclude `backup`/`orig`
+sidecars and prefer the shortest matching name (`…_albedo.png` beats `…_albedo-backup.png`). Rule for modders: don't
+leave extra `*albedo*.png` files in a model's resource folder. (Cleaner long-term: have the converter record the exact
+extracted filename in the registry and read *that* directly — kills this bug class.)
+
+### Debugging orientation/texture: know WHICH asset reflects WHAT (2026-07-01)
+Hours were lost tweaking the rotation offset and "seeing no change" — because we kept looking at assets that don't
+reflect the setting under test. Map it once:
+- **The flat `*_albedo.png` texture** — never changes with rotation (rotation moves the mesh, not the UVs). Comparing
+  textures tells you nothing about orientation.
+- **The raw imported OBJ** (`Assets/Resources/<name>/<name>`, the *subfolder*) — the pre-bake import; `rotationEuler` is
+  **not** applied to it. It looks the same no matter the rotation.
+- **The baked `<name>_Model.prefab` / `<name>_ModelMesh`** (loose in `Resources/`) — these DO carry `rotationEuler`
+  (baked into the verts, `rot = Euler(rotationEuler) * align`). This is the source of truth for orientation.
+- **In game** — loads the baked skeleton/atlas by GUID. Confirm fresh bakes actually reach the game before diagnosing:
+  bake a deliberately visible change (e.g. the yellow patch) and check it appears. If it doesn't, it's a deploy/stale-
+  bundle problem, not a bake problem — chasing rotation is wasted effort until the pipeline is proven live.
+
+**Source-model quality is a real limit.** If the skin looks stretched along the hull with faithful UVs (`convertGrid=0`)
+and correct orientation, the source GLB's UVs are simply poor — no bake setting fixes it. The pipeline is faithful; a
+bad source stays bad. Options: repair UVs in Blender, or **swap to a better upload** — the Factory makes model-swap a
+2-minute op (point Model file at the new GLB, bake, rebuild), which is the pragmatic fix.
+
 ### Toward a Unity package (gaps)
 Decouple hardcoded paths (`ModelRegistry.ConfigDir`, the `dotnet`/converter path) into settings; neutral naming (drop
 "ENC", namespace `ENCAccessProof`); ship the editor package + the companion BepInEx plugin together with docs; consider

@@ -200,8 +200,14 @@ public static class UniversalBaker
         // Read the extracted albedo straight off disk. With "Reuse extracted files" on, this is the modder's hand-edited
         // copy (e.g. a texture fix done in paint.net), so their edits flow into the atlas untouched.
         string fsDir = Path.Combine(Directory.GetParent(Application.dataPath).FullName, resDir);
+        // Pick the canonical albedo png. Exclude sidecar copies (a hand-made "-backup", or the converter's ".orig") and
+        // prefer the shortest matching name so "<mat>_albedo.png" wins over "<mat>_albedo-backup.png" regardless of
+        // directory order — a stray backup used to sort first ('-' < '.') and silently get baked instead.
         string albedo = Directory.Exists(fsDir)
-            ? Directory.GetFiles(fsDir, "*.png").FirstOrDefault(p => p.ToLowerInvariant().Contains("albedo"))
+            ? Directory.GetFiles(fsDir, "*.png")
+                .Where(p => { var f = Path.GetFileNameWithoutExtension(p).ToLowerInvariant(); return f.Contains("albedo") && !f.Contains("backup") && !f.Contains("orig"); })
+                .OrderBy(p => Path.GetFileName(p).Length)
+                .FirstOrDefault()
             : null;
         Texture2D atlas;
         if (albedo != null && File.Exists(albedo))
