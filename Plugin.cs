@@ -19,12 +19,9 @@ namespace ENCAccessProof
         internal static ConfigEntry<KeyCode> ToggleKey;      // open/close the feedback window
         internal static ConfigEntry<string> SourcePawn;      // pawn def to repoint (the zeppelin)
         internal static ConfigEntry<string> TargetFilter;    // pawn def to copy visuals FROM (substring)
-        internal static ConfigEntry<bool>   RepointOnLoad;   // auto-repoint when the registry is ready
         internal static ConfigEntry<string> CopyFields;      // which pawn-def fields to copy
         internal static ConfigEntry<string> ClearFields;     // pawn-def fields to null out (kill duplicates)
-        internal static ConfigEntry<bool>   MergeModContent; // shakee POC: merge mod AnimationManagerContent at load
-        internal static ConfigEntry<bool>   CruiserInject;   // native scoped: Zumwalt skeleton onto the StealthCruisers unit
-        internal static ConfigEntry<bool>   UniversalInjectOn; // registry-driven universal injector (ENC Model Factory)
+        internal static ConfigEntry<bool>   UniversalInjectOn; // registry-driven universal injector (Model Factory)
 
         private bool show;
         private Rect winRect = new Rect(60, 60, 480, 420);
@@ -45,8 +42,6 @@ namespace ENCAccessProof
                                   "The pawn definition to repoint (the zeppelin).");
             TargetFilter    = Config.Bind("Repoint", "TargetFilter", "StrategicBomber",
                                   "Substring of the pawn definition to copy the visual from (e.g. StrategicBomber, Biplanes).");
-            RepointOnLoad   = Config.Bind("Repoint", "RepointOnLoad", false,
-                                  "If true, auto-repoint once the registry is ready (before pawns instantiate).");
             CopyFields      = Config.Bind("Repoint", "CopyFields", "Description,AnimatorOverrideController",
                                   "Comma-separated pawn-def fields to copy from target to source. Try dropping/adding " +
                                   "Attachements if you get a doubled model. Options: Description, Attachements, " +
@@ -54,29 +49,18 @@ namespace ENCAccessProof
             ClearFields     = Config.Bind("Repoint", "ClearFields", "",
                                   "Comma-separated pawn-def fields to null out after copying (e.g. SubPawnDefinitions) " +
                                   "to remove duplicate/overlapping geometry.");
-            MergeModContent = Config.Bind("Shakee", "MergeModContent", true,
-                                  "POC of shakee's data-driven approach: merge mod AnimationManagerContent assets into " +
-                                  "the game's loaded content at AnimationResolveDependencies so custom skeletons register natively.");
-            CruiserInject   = Config.Bind("Cruiser", "StealthCruiserInject", true,
-                                  "Native scoped: register + repoint the baked Zumwalt skeleton onto the Era6 StealthCruisers " +
-                                  "naval unit (independent of RepointOnLoad). First run logs discovery info ([Cruiser] lines).");
             UniversalInjectOn = Config.Bind("Factory", "UniversalInject", true,
-                                  "Registry-driven universal model injector (ENC Model Factory). Reads enc_models.json from this " +
-                                  "config folder and repoints each listed pawn definition onto its baked skeleton.");
+                                  "Registry-driven universal model injector (the Model Factory). Reads the model registry JSON " +
+                                  "from this config folder and repoints each listed pawn definition onto its baked skeleton.");
 
             new Harmony(GUID).PatchAll();
-            Log.LogInfo($"ENC Access Proof loaded. Target='{TargetMod.Value}', Filter='{AssetNameFilter.Value}'. " +
-                        $"Press {ToggleKey.Value} in-game to open the feedback window.");
-            Log.LogInfo($"[Uni] BUILD-DIAG switches: UniversalInject={UniversalInjectOn.Value}, CruiserInject={CruiserInject.Value}, " +
-                        $"MergeModContent={MergeModContent.Value}, RepointOnLoad={RepointOnLoad.Value}");
+            Log.LogInfo($"Model Factory plugin loaded. Press {ToggleKey.Value} in-game for the diagnostic window. " +
+                        $"UniversalInject={UniversalInjectOn.Value}");
         }
 
         private void Update()
         {
             if (Input.GetKeyDown(ToggleKey.Value)) show = !show;
-            if (RepointOnLoad.Value) { ZeppelinInject.TickTexture(); HovercraftInject.TickTexture(); }   // keep our textures past the async proxy load
-            if (MergeModContent.Value) ShakeeZeppelinCombo.TickTexture();   // combo: keep the zeppelin atlas applied
-            if (CruiserInject.Value && !UniversalInjectOn.Value) StealthCruiserInject.TickTexture();    // old path stands down when UniversalInject owns it
             if (UniversalInjectOn.Value) UniversalInject.TickTexture();     // keep registry-driven model atlases applied
         }
 
