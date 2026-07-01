@@ -1,65 +1,69 @@
-# ENC Access Proof — custom 3D model injection for Humankind
+# ENC Access Proof — Universal custom-3D-model injection for Humankind
 
-A Humankind BepInEx (5 / Mono) plugin that **renders a custom 3D model on a unit in the live game** — no executable
-patching. A procedurally-built zeppelin replaces the cruise-missile mesh the ENC zeppelin unit bombards with, keeping
-the unit's real skeleton, animation and material. Long thought impossible for a mod; done here with a baked mesh +
-this plugin.
+A Humankind BepInEx (5 / Mono) plugin + Unity editor tool that **renders arbitrary custom 3D models on live units** —
+no executable patching, and **no per-model code**. What began as a single proof (a procedural zeppelin replacing a
+unit's mesh) is now the **Universal Model Factory**: bake any model in the editor, and a data-driven runtime injects it
+onto its target unit, driven entirely by a JSON registry.
 
-## How it works (the working recipe)
-The key insight (credit: CalmBreakfast) — **do not inject a custom skeleton** (that silently hangs the GPU skinning
-compute). Keep the unit's REAL skeleton and only swap the **mesh** it draws.
+Three models ship proven in-game — a **Zeppelin**, an **LCAC Hovercraft**, and a **USS Zumwalt stealth cruiser** (first
+textured + naval-combat unit) — each added with **zero new code**.
 
-1. Bake a mesh into an Amplitude `Skeleton`/`MeshCollection` asset in the Mod Editor (`baker/ZeppelinModel.cs`),
-   ship it inert in the mod's `Resources`.
-2. Harmony postfix on `AnimationManager.GetMeshCollection(Guid)` (`Patches/ZeppelinInjectPatch.cs`):
-   - Load our baked collection by `Amplitude.Framework.Guid`.
-   - **Reset its `loadingStatus` → NotLoaded** (it ships `Loaded`, which makes `LoadIFN` a no-op so the GPU upload
-     never runs), then **`LoadIFN(...)`** → uploads the mesh to the GPU mesh-content manager and yields a valid
-     `MeshIndex`.
-   - When `GetMeshCollection` returns the target unit's skeleton, **repoint that real skeleton's
-     `skinnedMeshInfos[0].MeshIndex` to our uploaded mesh** (struct-in-array → box/set/write-back). The unit keeps
-     its bones/animation/material and draws our mesh.
-   - **Reload-robust:** re-apply the swap on every call (the engine resets it on re-present/turn), and re-upload when
-     the FX manager instance changes (a save load rebuilds it).
+## Architecture (data-driven, zero per-model code)
+**Editor — the Universal Model Factory** (`baker/`, menu *Tools > Universal Model Factory*):
+- `ModelFactoryWindow` — pick a target unit (pawn) + a model file, set rotation / position / size / normals, Bake.
+- `UniversalBaker` — imports the model and bakes it into an Amplitude `Skeleton` + atlas using the proven vehicle rig.
+- `ModelRegistry` — writes `enc_models.json` (into the game's `BepInEx/config`) mapping each baked model → its pawn.
+- **Formats:** GLB / glTF / OBJ / FBX, and **`.blend`** (auto-converted via an installed Blender — zero config; it
+  locates `blender.exe` automatically). Textures embed for modern Principled-BSDF materials; very old materials may
+  export untextured (supply the albedo manually).
 
-A custom **texture** works too, runtime-injected with no art: set our `Texture2D` on the unit material's `_MainTex`
-and re-apply it each frame from `Plugin.Update` (to beat the async proxy-texture rebind). Every unit shares one shader
-(`Amplitude/ParticleSkinnedMeshRender`), so the look is purely the material — see the texture section in
-[docs/Custom3DInjection-Spec.md](docs/Custom3DInjection-Spec.md). So **mesh and texture are both custom**, entirely
-via the plugin (a polished per-unit skin still wants real UVs + texture assets).
+**Runtime — `UniversalInject`** (`Patches/UniversalInjectPatch.cs`): one patch handles any number of models.
+- Reads `enc_models.json` and registers every baked skeleton.
+- On each unit's `AddOn.Load`, repoints the matching pawn onto its skeleton via **self-discovery** — reads the host's
+  body-mesh name, renames ours to match, resolves the mesh index. The unit keeps its real bones / animation / material.
+- **Texture isolation:** clones the host `FxOutputLayer` per model so our skin never bleeds onto a vanilla unit sharing
+  that layer, and neutralizes the host's overlay maps (`_NormalMap`/`_ColorMask`/…) so only our albedo shows.
 
-## Also proves (foundation)
-- Plugin **loads** under BepInEx; a Harmony hook **fires in-game**.
-- **Reads the live registry** (`AnimationManager.Content.MeshCollections`).
-- **Reaches the configured mod's assets** — scans the `PresentationPawnDefinition` database for `AssetNameFilter`
-  (e.g. finds `Era5_Common_Zeppelins_01` for ENC). F8 opens an in-game feedback window of the scan.
+Adding a model = bake in the Factory → the registry updates → the plugin picks it up on next launch. No new code.
 
-## Config file
-Auto-created at `<Humankind>\BepInEx\config\community.humankind.encaccessproof.cfg`:
-- `TargetMod` (default `ENCReload`) — the mod whose assets to access (label).
-- `AssetNameFilter` (default `Zeppelin`) — substring that identifies that mod's assets.
-- `ToggleWindowKey` (default `F8`) — opens/closes the feedback window.
+## The original insight (still the foundation)
+Credit: CalmBreakfast — **do not inject a custom skeleton** (it silently hangs the GPU skinning compute). Keep the
+unit's REAL skeleton and only swap the **mesh** it draws. The Factory generalizes this: it bakes a deep-cloned vehicle
+skeleton as a real asset per model, and the runtime repoints the host pawn onto it. A custom **texture** rides along via
+the material's `_MainTex` on the model's private output-layer clone.
+
+## Models shipped
+See [**CREDITS.md**](CREDITS.md) for authors + licenses. Models carry their own license (CC-BY requires attribution);
+**model files aren't committed** — download each per its license into `Assets/Resources/<name>/` and bake.
+
+## Config & registry
+- **Model registry:** `<Humankind>\BepInEx\config\enc_models.json` — written by the Factory, read by the plugin.
+- **Plugin config:** `<Humankind>\BepInEx\config\community.humankind.encaccessproof.cfg` — feedback-window key (F8), etc.
 
 ## Feedback window
-Press **F8** in-game → a draggable window shows the live scan results (registry counts + matching assets) with
-**Re-scan** / **Clear** buttons. Auto-scans once when a game loads.
-
-## Real model integration
-The plugin renders a real third-party airship — **"Дирижабль HD" by MMD_SonicNewYear** ([Sketchfab](https://sketchfab.com/3d-models/hd-92734a2c283e4d889fecbb010aaf7822), **CC-BY**) — not just the procedural one. `baker/ZeppelinModel.cs` makes an arbitrary FBX engine-ready: combine all parts into one mesh, atlas the hull albedos + remap UVs, force the atlas opaque and paint over its near-black UV dead-zone, normalize scale/orientation, and fix the model's inconsistent winding (radial-outward) so it renders correctly single-sided. The plugin then loads the baked skeleton + atlas by GUID (`MeshIndex` swap for geometry, `_MainTex` for the skin). Model files aren't committed (download them per the CC-BY license into `Assets/Resources/Airship/`).
+Press **F8** in-game → a draggable window shows live scan results (registry counts + matching assets). Auto-scans on load.
 
 ## Documentation
 Full write-ups in [`docs/`](docs/):
-- [**FBX-to-Humankind-Pipeline.md**](docs/FBX-to-Humankind-Pipeline.md) — *why it works*, end to end: the render
-  pipeline, the runtime injection contract, the FBX→asset baking steps (with the *why* for each), and a **blueprint
-  for a Unity package** that generates a Humankind asset from an FBX. **Start here for building tooling.**
-- [**Custom3DInjection-Spec.md**](docs/Custom3DInjection-Spec.md) — the complete working recipe + the decompiled
-  pipeline (AnimationManager / MeshCollection / Skeleton / PawnManager / AddOn / FragmentEntry) and how each blocker
-  fell. Start here.
+- [**Scaling-ManyModels-And-Scoping.md**](docs/Scaling-ManyModels-And-Scoping.md) — **start here.** The Universal Model
+  Factory end to end: the data-driven architecture, per-model recipes (hovercraft / zeppelin / stealth cruiser), texture
+  scoping (the `FxOutputLayer` clone) + overlay-map neutralization, the `.blend` import path, and the hard-won debugging
+  lessons (which asset reflects rotation, the albedo name-scan bug, verifying deploys reach the game).
+- [**FBX-to-Humankind-Pipeline.md**](docs/FBX-to-Humankind-Pipeline.md) — *why it works* end to end + the baking steps,
+  with a blueprint for a Unity package.
+- [**Custom3DInjection-Spec.md**](docs/Custom3DInjection-Spec.md) — the decompiled pipeline (AnimationManager /
+  MeshCollection / Skeleton / PawnManager / AddOn / FragmentEntry) and how each blocker fell.
 - [**Custom3DModels-Findings-Shareable.md**](docs/Custom3DModels-Findings-Shareable.md) — shareable findings & plan.
-- [**UnitPreview-Findings.md**](docs/UnitPreview-Findings.md) — the full investigation log (data-mod limits, the
-  skeleton-registry wall, the BepInEx route).
+- [**UnitPreview-Findings.md**](docs/UnitPreview-Findings.md) — investigation log (data-mod limits, the BepInEx route).
 
-## Build
+## Toward a Unity package
+The goal is to ship the Factory as a **distributable Unity package** any Humankind modder can use. Remaining gaps (docs
+§9): decouple the hardcoded paths (game / BepInEx config / dotnet / Blender) into settings, neutral naming (drop "ENC"),
+package scaffolding (`package.json`, README, LICENSE), and optionally a Unity-native glTF importer instead of the
+bundled `dotnet` converter. The editor scripts are mirrored in `baker/` (the ENCReload mod repo tracks only its
+`Databases`).
+
+## Build (plugin)
 Needs only the .NET SDK. All DLLs are local (BepInEx isn't on nuget.org — same setup as GUI-Tools/shakee).
 
 1. Create a `References\` folder next to the `.csproj` and copy in (from your install):
@@ -70,8 +74,9 @@ Needs only the .NET SDK. All DLLs are local (BepInEx isn't on nuget.org — same
      resolves through it.)*
 2. `dotnet build -c Release`
 3. Copy `bin\Release\ENCAccessProof.dll` → `<Humankind>\BepInEx\plugins\`
-4. Launch HK, load a save, press **F8** (and/or check `BepInEx\LogOutput.log` for `[ENCProof]` lines).
+4. Launch HK, load a save, press **F8** (and/or check `BepInEx\LogOutput.log` for `[ENCProof]` / `[Uni]` lines).
 
 ## Dependencies
 - BepInEx 5 + HarmonyX + Unity + Amplitude — all via the gitignored `References\` folder (copied from your
   install; not redistributable). `Microsoft.NETFramework.ReferenceAssemblies` (NuGet) only enables the net471 build.
+- **Blender** — optional, only for `.blend` import (auto-detected). The GLB path uses a bundled `dotnet` converter.
