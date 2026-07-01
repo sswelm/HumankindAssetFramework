@@ -60,7 +60,18 @@ public static class UniversalBaker
         if (!string.IsNullOrEmpty(cfg.modelFile) && (!cfg.reuseExtracted || !haveObj))
         {
             string ext = Path.GetExtension(cfg.modelFile).ToLowerInvariant();
-            if (ext == ".glb" || ext == ".gltf")
+            if (ext == ".blend")
+            {
+                // .blend isn't a transfer format — convert it to GLB via headless Blender first, then fall through the
+                // normal GLB path. Needs Blender installed (like GLB needs dotnet). Textures embed if the blend's material
+                // is a normal Principled-BSDF setup; very old materials may export untextured (supply the albedo manually).
+                string tmpGlb = Path.Combine(Path.GetTempPath(), name + "_fromblend.glb");
+                if (!ConvertBlend(cfg.modelFile, tmpGlb)) return Fail("Blender .blend -> GLB conversion failed (see console)");
+                string fsDir = Path.Combine(Application.dataPath, "Resources", name);
+                Directory.CreateDirectory(fsDir);
+                if (!ConvertGlb(tmpGlb, fsDir, name, cfg.convertGrid)) return Fail("GLB conversion failed (see console)");
+            }
+            else if (ext == ".glb" || ext == ".gltf")
             {
                 string fsDir = Path.Combine(Application.dataPath, "Resources", name);
                 Directory.CreateDirectory(fsDir);
@@ -250,6 +261,54 @@ public static class UniversalBaker
             }
         }
         catch (Exception ex) { Debug.LogError("[Factory] could not run dotnet ('" + dotnet + "'): " + ex.Message + "\nSet EditorPrefs 'ENC.dotnetPath' to the full dotnet path."); return false; }
+    }
+
+    // Locate blender.exe with zero config: explicit EditorPrefs override, else the newest install under Program Files,
+    // else fall back to "blender" on PATH. So .blend import "just works" whenever Blender is installed.
+    public static string FindBlender()
+    {
+        string pref = EditorPrefs.GetString("ENC.blenderPath", "");
+        if (!string.IsNullOrEmpty(pref) && File.Exists(pref)) return pref;
+        foreach (var root in new[] { @"C:\Program Files\Blender Foundation", @"C:\Program Files (x86)\Blender Foundation" })
+        {
+            if (!Directory.Exists(root)) continue;
+            var exe = Directory.GetDirectories(root, "Blender*")
+                .Select(d => Path.Combine(d, "blender.exe")).Where(File.Exists)
+                .OrderByDescending(p => p).FirstOrDefault();   // newest version folder wins ("Blender 5.1" > "Blender 4.2")
+            if (exe != null) return exe;
+        }
+        return "blender";   // on PATH
+    }
+
+    public static bool BlenderAvailable()
+    {
+        string b = FindBlender();
+        return b != "blender" || File.Exists(b);   // an absolute hit, or assume PATH has it
+    }
+
+    // Convert a .blend to GLB via headless Blender + the bundled export script, so the normal GLB path can take over.
+    static bool ConvertBlend(string blend, string outGlb)
+    {
+        string proj = Directory.GetParent(Application.dataPath).FullName;
+        string script = Path.Combine(proj, "Tools", "blend_export.py");
+        if (!File.Exists(script)) { Debug.LogError("[Factory] bundled blend exporter missing: " + script); return false; }
+        string blender = FindBlender();
+        var psi = new System.Diagnostics.ProcessStartInfo(blender, $"\"{blend}\" --background --python \"{script}\" -- \"{outGlb}\"")
+        { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        try
+        {
+            if (File.Exists(outGlb)) File.Delete(outGlb);
+            using (var p = System.Diagnostics.Process.Start(psi))
+            {
+                string o = p.StandardOutput.ReadToEnd(), e = p.StandardError.ReadToEnd();
+                p.WaitForExit();
+                if (!string.IsNullOrWhiteSpace(o)) Debug.Log("[blender] " + o.Trim());
+                if (!string.IsNullOrWhiteSpace(e)) Debug.LogWarning("[blender] " + e.Trim());
+                if (p.ExitCode != 0 || !File.Exists(outGlb)) { Debug.LogError("[Factory] Blender produced no GLB (exit " + p.ExitCode + ")."); return false; }
+                return true;
+            }
+        }
+        catch (Exception ex) { Debug.LogError("[Factory] could not run Blender ('" + blender + "'): " + ex.Message + "\nInstall Blender, or set EditorPrefs 'ENC.blenderPath' to blender.exe."); return false; }
     }
 
     static string AmplitudeGuid(UnityEngine.Object asset)

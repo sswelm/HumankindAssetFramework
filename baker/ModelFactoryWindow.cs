@@ -71,10 +71,12 @@ public class ModelFactoryWindow : EditorWindow
             cur.modelFile = EditorGUILayout.TextField("Model file", cur.modelFile);
             if (GUILayout.Button("Browse", GUILayout.Width(70)))
             {
-                var p = EditorUtility.OpenFilePanel("Select 3D model", "", "glb,gltf,obj,fbx");
+                var p = EditorUtility.OpenFilePanel("Select 3D model", "", "glb,gltf,obj,fbx,blend");
                 if (!string.IsNullOrEmpty(p)) cur.modelFile = p;
             }
         }
+        if ((cur.modelFile ?? "").ToLowerInvariant().EndsWith(".blend") && !UniversalBaker.BlenderAvailable())
+            EditorGUILayout.HelpBox(".blend import needs Blender installed (auto-detected). Install it, or set EditorPrefs 'ENC.blenderPath' to blender.exe.", MessageType.Warning);
 
         EditorGUILayout.Space();
         EditorGUILayout.LabelField("Transform", EditorStyles.miniBoldLabel);
@@ -118,6 +120,7 @@ public class ModelFactoryWindow : EditorWindow
         if (!string.IsNullOrEmpty(status)) EditorGUILayout.HelpBox(status, MessageType.Info);
         EditorGUILayout.HelpBox(
             "Bake imports the model, bakes a skeleton + atlas, and writes the JSON registry the in-game plugin reads.\n" +
+            "• Formats: GLB / glTF / OBJ / FBX, and .blend (auto-converted via installed Blender).\n" +
             "• Model file empty = re-bake the existing resource with new settings (fast iteration).\n" +
             "• Normals: KeepModel = the artist's; Recalculate = hard edges via smoothing angle; Faceted = fully flat.\n" +
             "• Convert grid: 0 keeps UV seams (textured models); >0 decimates (heavy untextured meshes).\n" +

@@ -592,6 +592,19 @@ and correct orientation, the source GLB's UVs are simply poor — no bake settin
 bad source stays bad. Options: repair UVs in Blender, or **swap to a better upload** — the Factory makes model-swap a
 2-minute op (point Model file at the new GLB, bake, rebuild), which is the pragmatic fix.
 
+### ✅ `.blend` import — auto-convert via installed Blender (2026-07-01)
+The Factory now accepts `.blend` directly. `.blend` isn't a transfer format, so `UniversalBaker.ConvertBlend` shells out
+to **headless Blender** (`blender file.blend --background --python Tools/blend_export.py -- out.glb`) to produce a GLB,
+then the normal GLB→OBJ→bake path takes over. **Zero config:** `FindBlender()` locates `blender.exe` (EditorPrefs
+`ENC.blenderPath` override → newest `C:\Program Files\Blender Foundation\Blender*` → `blender` on PATH), so it "just
+works" whenever Blender is installed; the Model-file field shows a warning if a `.blend` is picked with no Blender found.
+`Tools/blend_export.py` also **recovers textures**: many blends (e.g. Sketchfab's `source/*.blend` + `textures/*`) store
+dead absolute image paths, so the script re-points each missing image to a same-named file in the blend folder / a
+sibling `textures/` dir before export. **Caveat:** a very old material (pre-Principled-BSDF, e.g. a 2019 asset) may
+export **untextured** because the glTF exporter can't read its node setup — supply the albedo manually (drop it in the
+resource folder, bake with Reuse) or fix the material. Modern blends embed fine. Like the `dotnet` GLB converter, this
+adds a **Blender dependency** — fine for a modding tool, and to be surfaced as an install note when packaged.
+
 ### Toward a Unity package (gaps)
 Decouple hardcoded paths (`ModelRegistry.ConfigDir`, the `dotnet`/converter path) into settings; neutral naming (drop
 "ENC", namespace `ENCAccessProof`); ship the editor package + the companion BepInEx plugin together with docs; consider
