@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEditor;
 using System.IO;
@@ -25,6 +26,22 @@ public static class MeshDumper
         var baked = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Resources/StealthCruiser_ModelMesh.asset");
         if (baked != null) DumpMesh(baked, "baked");
         else Debug.LogWarning("[Dumper] StealthCruiser_ModelMesh.asset not found");
+
+        // 3) the ATLAS the preview + game actually sample — dump its pixels to PNG to compare vs the source albedo
+        var atlas = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Resources/StealthCruiser_Atlas.asset");
+        if (atlas != null)
+        {
+            try
+            {
+                var tmp = new Texture2D(atlas.width, atlas.height, TextureFormat.RGBA32, false);
+                tmp.SetPixels(atlas.GetPixels()); tmp.Apply();
+                string outp = Path.Combine(Directory.GetParent(Application.dataPath).FullName, "_DUMP_atlas.png");
+                File.WriteAllBytes(outp, tmp.EncodeToPNG());
+                Debug.Log($"[Dumper] atlas {atlas.width}x{atlas.height} -> {outp}");
+            }
+            catch (Exception e) { Debug.LogWarning("[Dumper] atlas dump failed (not readable?): " + e.Message); }
+        }
+        else Debug.LogWarning("[Dumper] StealthCruiser_Atlas.asset not found");
 
         AssetDatabase.Refresh();
         Debug.Log("[Dumper] done");

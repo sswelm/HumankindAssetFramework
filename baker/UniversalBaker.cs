@@ -108,25 +108,36 @@ public static class UniversalBaker
         }
 
         var src = AssetDatabase.LoadAssetAtPath<GameObject>(objPath);
-        var inst = (GameObject)UnityEngine.Object.Instantiate(src);
-        var parts = new List<CombineInstance>();
-        var rootInv = inst.transform.worldToLocalMatrix;
-        foreach (var mf in inst.GetComponentsInChildren<MeshFilter>())
+        // Read meshes STRAIGHT FROM THE IMPORTED ASSET — not an Instantiate'd copy. Unity has a known bug where a
+        // DUPLICATED imported model returns scrambled UVs (Unity issuetracker: "broken UV mapping when the imported
+        // model is duplicated"). Proven here: MeshDumper reads the asset directly and is UV-clean, while the bake's
+        // Instantiate produced a mesh with the deck markings mapped onto the superstructure. Combine manually
+        // (concatenate verts/UVs/normals, remap triangles) so every vertex keeps its own UV.
+        var rootInv = src.transform.worldToLocalMatrix;
+        var cVerts = new List<Vector3>(); var cUV = new List<Vector2>(); var cNorm = new List<Vector3>(); var cTris = new List<int>();
+        bool haveUV = false, haveNorm = false;
+        foreach (var mf in src.GetComponentsInChildren<MeshFilter>())
         {
             var m = mf.sharedMesh; if (m == null) continue;
             var local = rootInv * mf.transform.localToWorldMatrix;
-            for (int s = 0; s < m.subMeshCount; s++)
+            var v = m.vertices; var uv = m.uv; var nr = m.normals;
+            bool mUV = uv != null && uv.Length == v.Length, mNorm = nr != null && nr.Length == v.Length;
+            int baseIdx = cVerts.Count;
+            for (int i = 0; i < v.Length; i++)
             {
-                var sub = new Mesh { indexFormat = UnityEngine.Rendering.IndexFormat.UInt32, vertices = m.vertices };
-                if (m.uv != null && m.uv.Length == m.vertexCount) sub.uv = m.uv;
-                if (m.normals != null && m.normals.Length == m.vertexCount) sub.normals = m.normals;
-                sub.triangles = m.GetTriangles(s);
-                parts.Add(new CombineInstance { mesh = sub, transform = local });
+                cVerts.Add(local.MultiplyPoint3x4(v[i]));
+                cUV.Add(mUV ? uv[i] : Vector2.zero);
+                cNorm.Add(mNorm ? local.MultiplyVector(nr[i]).normalized : Vector3.up);
             }
+            haveUV |= mUV; haveNorm |= mNorm;
+            var tris = m.triangles;
+            for (int i = 0; i < tris.Length; i++) cTris.Add(baseIdx + tris[i]);
         }
-        UnityEngine.Object.DestroyImmediate(inst);
         var mesh = new Mesh { name = name + "_ModelMesh", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
-        mesh.CombineMeshes(parts.ToArray(), true, true);
+        mesh.SetVertices(cVerts);
+        if (haveUV) mesh.SetUVs(0, cUV);
+        if (haveNorm) mesh.SetNormals(cNorm);
+        mesh.SetTriangles(cTris, 0);
 
         // --- 2) normalize: recenter, scale longest axis -> size, align longest -> Y (+ rotationEuler) ---
         mesh.RecalculateBounds();

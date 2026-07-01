@@ -605,41 +605,41 @@ export **untextured** because the glTF exporter can't read its node setup — su
 resource folder, bake with Reuse) or fix the material. Modern blends embed fine. Like the `dotnet` GLB converter, this
 adds a **Blender dependency** — fine for a modding tool, and to be surfaced as an install note when packaged.
 
-### ⚠️ UNRESOLVED: detailed atlas maps scrambled in-game — full diagnosis (2026-07-01)
-The Stealth Cruiser's detailed atlas renders **scrambled in-game** (helipad marking lands on the superstructure, deck
-numbers on the hull, etc.), while the **Zeppelin (simpler texture) maps correctly**. A long, methodical hunt narrowed
-it down by *proving each stage clean* rather than guessing:
+### ✅ RESOLVED: detailed atlas scrambled in-game = a missing UV V-flip in `glbconv` (2026-07-01)
+**Root cause, one line:** the GLB→OBJ converter never flipped the V coordinate. **glTF/GLB store texture coords with
+V=0 at the TOP; OBJ (and Unity) use V=0 at the BOTTOM.** So every UV was vertically mirrored — the skin mapped
+upside-down in V, landing the deck markings on the superstructure and the hull numbers in the wrong place. **Fix:**
+`glbconv/Program.cs` writes `vt {U} {1 - V}` instead of `vt {U} {V}`. That's the entire bug.
 
-**Ruled OUT, each with a rendered proof:**
-- **Source model UVs** — the artist's `.blend` renders perfectly in Blender (clean grey hull, helipad aft, red+black
-  waterline). The UVs are a normal single [0,1] map. Not the source. *(The Sketchfab GLB, by contrast, arrives with
-  UVs already scrambled by Sketchfab's auto-conversion — always re-export from the `.blend`/original, not the GLB.)*
-- **Our GLB→OBJ converter (`glbconv`, grid 0)** — ran it on the clean GLB, rendered the resulting OBJ + extracted
-  albedo in Blender: **clean**. It reports `verts=1270 (UVs preserved)`, unified `v/vt/vn` indices. Converter is fine.
-- **Unity's OBJ import welding** — Unity re-splits the mesh (1270→1439 verts) on import. Set `weldVertices = false` in
-  the baker's `ModelImporter` so it stops merging seams; the re-split preserves UVs regardless.
-- **The baked mesh itself** — added `MeshDumper` (menu *Tools/Dump StealthCruiser Meshes*) to export the Unity-imported
-  mesh AND the final `_ModelMesh` back to OBJ. Rendered both with the atlas: **clean**. The baked mesh UVs are correct.
-- **The atlas** — 0 yellow, correct layout, `StealthCruiser_Atlas 2048x1024` loads fine (runtime log).
-- **Host material `_MainTex` crop** — runtime logs `host _MainTex_ST scale=(1,1) offset=(0,0)`. Identity; not a crop.
-  (Added a reset anyway — harmless, correct.)
-- **Texture V-flip** — rendered the mesh with a vertically-flipped atlas; the resulting scramble does **not** match the
-  in-game one. And logically **no texture transform (flip/crop/rotate) can move a flat-deck marking onto the raised
-  superstructure** — that needs genuinely wrong UV *coordinates*, not a shifted texture.
+**Why only the Stealth Cruiser:** it's the **first GLB-sourced model**. The Hovercraft and Zeppelin were baked from OBJ
+directly (no glTF→OBJ step), so they never hit the flip. Any GLB/glTF/`.blend` model would have shown it — the Cruiser
+just had a detailed, asymmetric skin that made the mirrored V obvious (a uniform skin would hide it).
 
-**Conclusion:** correct mesh UVs + correct atlas + identity transform go in, yet the game samples *wrong* UVs at render.
-The scramble is introduced **inside Amplitude's mesh upload / GPU-skinning path**, downstream of everything the bake and
-the atlas control. The hopeful sign: the **Zeppelin renders textured correctly**, so the mesh-swap *can* carry UVs —
-something about how this particular mesh uploads differs (candidate leads: the 1270→1439 re-split, or `skinnedMeshInfo`
-carrying UV/attribute data separate from the swapped `MeshIndex`).
+**Why it took so long (and the debugging lessons that matter):**
+- We kept "proving each stage clean" by **rendering meshes in Blender** — but Blender's OBJ import and our upside-down
+  bake orientation combined to *mask the V-flip* from certain camera angles. Rendering from a consistent angle, or
+  better, comparing raw data, is essential. **Never trust a textured 3D render across two different tools to judge a
+  V-flip** — the tools disagree on V origin, which is the very thing under test.
+- The **decisive test was data, not pixels**: `diff` the `vt` lines of the imported vs baked OBJ dumps → **byte-identical**.
+  That proved the *bake* preserved UVs perfectly and sent the hunt to the render/convention layer instead of the mesh.
+- The **confirming test**: render the baked mesh with a **V-flipped atlas** → clean. Flipping the atlas ≡ flipping the
+  UVs, so this pinned it to a V-convention mismatch introduced before Unity ever saw the mesh — i.e. `glbconv`.
+- Earlier I *wrongly* "ruled out" a V-flip (a flipped-atlas render "didn't match" in-game) and chased Amplitude's
+  GPU mesh-upload via ilspycmd (encoding bbox, `FxMeshContent`, quadification) and a real-but-unrelated **double-injection**
+  bug. All dead ends for *this* symptom. Lesson: when mesh UVs are provably intact but the engine renders them wrong,
+  suspect **texture-coordinate origin/convention** before deep engine internals.
 
-**Next step (open):** decompile Amplitude's `skinnedMeshInfo` + mesh-upload (`LoadIFN`/`GetFxMeshIndex`) path and add a
-runtime probe that reads back the uploaded mesh's UVs at skin time, to see where our UVs get replaced. This is the last
-mile for detailed position-specific textures; simpler/uniform textures already work.
+**Fixes that landed during the hunt (correct, kept even though not the culprit):**
+- `weldVertices = false` on the OBJ importer (stops Unity re-merging split seams).
+- Manual UV-preserving mesh combine (replaced `Mesh.CombineMeshes`) + read the mesh from the imported **asset**, not an
+  `Instantiate`'d copy (Unity has a known "duplicated model → broken UVs" bug; belt-and-suspenders).
+- Runtime `_MainTex` scale/offset reset to identity.
+- **Double-injection fix:** the old per-unit `StealthCruiserInject` and `UniversalInject` were BOTH live on the Cruiser
+  (config defaults `CruiserInject=true` + `UniversalInject=true`); gated the old one off under UniversalInject.
 
-**Tooling from this session (kept):** `baker/MeshDumper.cs` (mesh→OBJ dump); headless **Blender** render/export scripts
-(blend→GLB with material repair + texture recovery, OBJ+atlas render) — Blender is installed and drives cleanly from the
-command line. See also the `.blend` import path above.
+**Tooling from this session (kept):** `baker/MeshDumper.cs` (dump imported + baked mesh AND the atlas to files for
+external comparison); headless **Blender** render/export scripts (blend→GLB with material repair + texture recovery,
+OBJ+atlas render); the whole GLB→OBJ→Unity→bake→skeleton→GPU path decompiled and understood.
 
 ### Toward a Unity package (gaps)
 Decouple hardcoded paths (`ModelRegistry.ConfigDir`, the `dotnet`/converter path) into settings; neutral naming (drop

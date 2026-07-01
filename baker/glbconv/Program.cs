@@ -101,7 +101,10 @@ class Program
         var sb = new StringBuilder();
         sb.AppendLine("# " + Path.GetFileName(glbPath) + "  decimated grid=" + grid);
         foreach (var v in outV) sb.AppendLine($"v {F(v.X)} {F(v.Y)} {F(v.Z)}");
-        foreach (var t in outU) sb.AppendLine($"vt {F(t.X)} {F(t.Y)}");
+        // Flip V: glTF/GLB store texture coords with V=0 at the TOP; OBJ (and Unity) use V=0 at the BOTTOM. Without
+        // this, the skin maps upside-down in V and lands on the wrong faces in-engine (deck markings on the
+        // superstructure). This was THE bug behind the Stealth Cruiser's scrambled texture.
+        foreach (var t in outU) sb.AppendLine($"vt {F(t.X)} {F(1f - t.Y)}");
         foreach (var n in outN) sb.AppendLine($"vn {F(n.X)} {F(n.Y)} {F(n.Z)}");
         sb.AppendLine("g " + baseName);
         foreach (var (a, b, c) in outTri)
