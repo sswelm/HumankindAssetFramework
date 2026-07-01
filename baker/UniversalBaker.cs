@@ -148,8 +148,17 @@ public static class UniversalBaker
             var albs = matList.Select(mm => LoadReadableAlbedo(fsResDir, mm)).ToArray();
             packedAtlas = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = name + "_Atlas" };
             atlasRects = packedAtlas.PackTextures(albs, 2, 4096);
-            var apx = packedAtlas.GetPixels(); for (int i = 0; i < apx.Length; i++) apx[i].a = 1f;
-            packedAtlas.SetPixels(apx); packedAtlas.Apply();
+            // Force opaque AND repaint near-black regions neutral grey. Two sources of near-black: (a) unused UV
+            // "dead-zones" inside a source albedo (very common — e.g. the zeppelin hull texture's black corner that the
+            // hull top samples), and (b) the gaps PackTextures leaves between packed islands. Faces whose UVs land on
+            // either would render BLACK. The <32 threshold only catches near-pure-black, so real dark skins are safe.
+            var apx = packedAtlas.GetPixels32();
+            for (int i = 0; i < apx.Length; i++)
+            {
+                apx[i].a = 255;
+                if (apx[i].r < 32 && apx[i].g < 32 && apx[i].b < 32) { apx[i].r = 160; apx[i].g = 160; apx[i].b = 168; }
+            }
+            packedAtlas.SetPixels32(apx); packedAtlas.Apply();
             Debug.Log($"[Factory] {name} MULTI-MATERIAL: {matList.Count} materials [{string.Join(", ", matList.Select(mm => mm.name))}] -> packed atlas {packedAtlas.width}x{packedAtlas.height}");
         }
 
