@@ -263,11 +263,24 @@ public static class UniversalBaker
     static bool ConvertGlb(string glb, string outDir, string name, int grid)
     {
         string proj = Directory.GetParent(Application.dataPath).FullName;
-        string dll = Path.Combine(proj, "Tools", "glbconv", "glbconv.dll");
-        if (!File.Exists(dll)) { Debug.LogError("[Factory] bundled converter missing: " + dll); return false; }
-        string dotnet = EditorPrefs.GetString("ENC.dotnetPath", "dotnet");
-        var psi = new System.Diagnostics.ProcessStartInfo(dotnet, $"\"{dll}\" \"{glb}\" \"{outDir}\" {name} {Mathf.Max(0, grid)}")
-        { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        string tools = Path.Combine(proj, "Tools", "glbconv");
+        string exe = Path.Combine(tools, "glbconv.exe");
+        string dll = Path.Combine(tools, "glbconv.dll");
+        string args = $"\"{glb}\" \"{outDir}\" {name} {Mathf.Max(0, grid)}";
+
+        System.Diagnostics.ProcessStartInfo psi;
+        if (File.Exists(exe))
+            // Preferred: self-contained single-file exe — carries its own .NET runtime, so NO .NET install is needed.
+            psi = new System.Diagnostics.ProcessStartInfo(exe, args);
+        else if (File.Exists(dll))
+        {
+            // Dev fallback: framework-dependent dll run through an installed dotnet (needs the .NET runtime/SDK).
+            string dotnet = EditorPrefs.GetString("ENC.dotnetPath", "dotnet");
+            psi = new System.Diagnostics.ProcessStartInfo(dotnet, $"\"{dll}\" " + args);
+        }
+        else { Debug.LogError("[Factory] converter missing: no glbconv.exe or glbconv.dll in " + tools); return false; }
+
+        psi.UseShellExecute = false; psi.RedirectStandardOutput = true; psi.RedirectStandardError = true; psi.CreateNoWindow = true;
         try
         {
             using (var p = System.Diagnostics.Process.Start(psi))
@@ -279,7 +292,7 @@ public static class UniversalBaker
                 return p.ExitCode == 0;
             }
         }
-        catch (Exception ex) { Debug.LogError("[Factory] could not run dotnet ('" + dotnet + "'): " + ex.Message + "\nSet EditorPrefs 'ENC.dotnetPath' to the full dotnet path."); return false; }
+        catch (Exception ex) { Debug.LogError("[Factory] could not run converter ('" + psi.FileName + "'): " + ex.Message + "\n(GLB path uses Tools/glbconv/glbconv.exe; the dev fallback needs a dotnet on PATH or EditorPrefs 'ENC.dotnetPath'.)"); return false; }
     }
 
     // Locate blender.exe with zero config: explicit EditorPrefs override, else the newest install under Program Files,

@@ -97,7 +97,13 @@ public class ModelFactoryWindow : EditorWindow
         cur.normalsMode = (int)(NormalsMode)EditorGUILayout.EnumPopup("Normals", (NormalsMode)cur.normalsMode);
         using (new EditorGUI.DisabledScope(cur.normalsMode != (int)NormalsMode.Recalculate))
             cur.smoothingAngle = EditorGUILayout.Slider("Smoothing angle", cur.smoothingAngle, 0f, 180f);
-        cur.convertGrid = EditorGUILayout.IntField("Convert grid (0 = faithful UVs)", cur.convertGrid);
+        cur.convertGrid = EditorGUILayout.IntField(new GUIContent("Convert grid",
+            "GLB / glTF / .blend only — controls how the source mesh is converted to OBJ.\n\n" +
+            "0 = faithful: keep every vertex and UV exactly (preserves texture seams). Use this for " +
+            "textured models — any decimation averages UVs across seams and scrambles the skin.\n\n" +
+            ">0 = decimate to a vertex-cluster grid of this resolution along the longest axis " +
+            "(higher = more detail/vertices). Use only for heavy UNtextured meshes that need simplifying.\n\n" +
+            "Ignored for OBJ/FBX (already meshes)."), cur.convertGrid);
 
         EditorGUILayout.Space();
         EditorGUILayout.LabelField("Texture / import", EditorStyles.miniBoldLabel);
