@@ -679,6 +679,14 @@ private Vector3 encodingBBoxPosMin = (-8,-16,-8);  encodingBBoxPosMax = (8,16,8)
   so heavy models fit the shared buffer. Use **collapse**, NOT planar dissolve — planar merges near-coplanar faces and
   **flattens gently-curved features (it destroyed the skirt)**; collapse preserves distinct curved features. Reduce the
   *whole model* toward the budget; sharp detail (fans) degrades before big surfaces (hull, skirt).
+  - **It's a CEILING, not a quota.** A model already under the target passes through **untouched** — the decimate ratio
+    clamps to 1.0 and collapse never *adds* geometry, so light models are never upscaled or altered. Only heavy models
+    get trimmed. That's why a non-zero default is safe for everyone.
+  - **Default `25000`, and double-sided auto-halves it.** The Factory now defaults `targetTris` to **25000** (~the
+    observed per-model vertex ceiling) instead of off. Because double-sided doubles the baked geometry, the baker
+    **halves the effective target when double-sided is on** (25000 → 12500) and logs it. So the field is a single
+    "budget" you set once — flip Double-sided on/off and the baked result stays under it automatically. `0` still fully
+    disables the reducer.
 - **Winding fix** (`windingFix`): the documented CAD fix from §5 — `Dot(geoNormal, a+b+c) < 0 ⇒ flip`, run **after the
   raise** so the origin sits *below* the model (→ "outward" is horizontal for a low skirt, not downward). Rewinds faces
   outward so a single-sided/CAD mesh renders **single-sided** (no culling holes) with **no extra geometry**. This is the

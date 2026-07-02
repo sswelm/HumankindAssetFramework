@@ -110,9 +110,12 @@ public class ModelFactoryWindow : EditorWindow
             "engine culls backfaces). Enable for models with missing / see-through parts — e.g. a hovercraft skirt. " +
             "Doubles the triangle count."), cur.doubleSided);
         cur.targetTris = EditorGUILayout.IntField(new GUIContent("Reduce to ~tris (0 = off)",
-            "Quadric-decimate a heavy model to about this many triangles (via Blender) before baking. Fits the engine's " +
-            "shared buffer (~100k verts / ~83k tris across ALL injected models — double-sided counts twice). Preserves " +
-            "thin parts (per-object). 0 = no reduction. Needs Blender (auto-detected)."), cur.targetTris);
+            "Quadric-decimate a heavy model to about this many triangles (via Blender) before baking, to fit the engine's " +
+            "SHARED buffer (one budget across ALL injected models + the game's own fx meshes). Default 25000 ≈ the observed " +
+            "per-model ceiling. It's a CEILING, not a quota: a model already under it passes through untouched (never " +
+            "upscaled). Toggling Double-sided automatically HALVES the effective target (it doubles the baked geometry), so " +
+            "you set this once and just flip Double-sided on/off. Preserves thin parts (per-object). 0 = no reduction. " +
+            "Needs Blender (auto-detected)."), cur.targetTris);
         cur.convertGrid = EditorGUILayout.IntField(new GUIContent("Convert grid",
             "GLB / glTF / .blend only — controls how the source mesh is converted to OBJ.\n\n" +
             "0 = faithful: keep every vertex and UV exactly (preserves texture seams). Use this for " +

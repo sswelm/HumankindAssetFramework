@@ -66,11 +66,17 @@ public static class UniversalBaker
             string srcFile = cfg.modelFile;
             // Optional VERTEX REDUCER: quadric-decimate a heavy model via Blender (per-object, so thin parts survive)
             // down to ~targetTris, producing a reduced GLB the normal path then bakes — no offline tooling needed.
+            // targetTris is a CEILING, not a quota: a model already under it passes through unchanged (decimate ratio
+            // clamps to 1.0 — never adds geometry). Double-sided doubles the baked geometry, so we HALVE the reduce
+            // target when it's on — that way the field is a single "budget" the user sets once (default 25000, ~the
+            // observed per-model vertex ceiling) and toggling double-sided keeps the baked result under that budget.
             if (cfg.targetTris > 0)
             {
                 if (!BlenderAvailable()) return Fail("'Reduce to tris' needs Blender installed (auto-detected, or set EditorPrefs 'ENC.blenderPath').");
+                int effTarget = cfg.doubleSided ? Mathf.Max(1, cfg.targetTris / 2) : cfg.targetTris;
+                if (cfg.doubleSided) Debug.Log($"[Factory] reduce target {cfg.targetTris} -> {effTarget} tris (double-sided halves it; it doubles the baked geometry)");
                 string reduced = Path.Combine(Path.GetTempPath(), name + "_reduced.glb");
-                if (!ReduceViaBlender(srcFile, reduced, cfg.targetTris)) return Fail("mesh reduction failed (see console)");
+                if (!ReduceViaBlender(srcFile, reduced, effTarget)) return Fail("mesh reduction failed (see console)");
                 srcFile = reduced;
             }
             string ext = Path.GetExtension(srcFile).ToLowerInvariant();
