@@ -16,7 +16,9 @@ Factory**.
   so thin parts survive) shrinks oversized models to fit the engine's shared mesh buffer. A **winding fix** rewinds
   faces outward so single-sided / CAD "sketch" meshes render single-sided instead of culling to invisible (e.g. a
   hovercraft skirt) — the documented recipe, now in the Factory; a **double-sided** toggle is the heavier fallback for
-  genuinely non-convex thin shells.
+  genuinely non-convex thin shells (a mixed model — convex hull + non-convex fans — can use both). And **height-based
+  UVs** map a simple vertical-gradient albedo by height (black skirt low, grey hull high) so an untextured CAD model
+  gets a usable skin without UV-unwrapping.
 - **Know the ceiling.** Custom meshes share **one GPU buffer — ~100k vertices / ~250k indices (~83k triangles), 32-bit
   indices — across ALL injected models *and* the game's own fx meshes** (from the decompiled `FxComponentMeshContentManager`).
   Overflow is silently dropped (missing/see-through geometry); the reducer exists to stay under it, and double-sided

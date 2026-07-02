@@ -28,6 +28,7 @@ public struct BakeConfig
     public bool    reuseExtracted;  // true = reuse the existing OBJ/albedo (skip re-import) — lets the modder hand-edit the extracted texture and keep it
     public bool    doubleSided;     // true = add a reversed back face to every triangle (single-sided/CAD repair) so backface-culled parts render in-game
     public bool    windingFix;      // true = rewind faces outward from the origin (documented CAD winding fix) so single-sided meshes render, no geometry doubling
+    public bool    heightUV;        // true = override UVs with U=length, V=height so a vertical-gradient albedo maps by height (black skirt low, grey hull high)
     public int     targetTris;      // >0 = quadric-decimate the source to ~this many triangles (Blender) before baking, to fit the engine's shared vertex/index buffer
 }
 
@@ -286,6 +287,21 @@ public static class UniversalBaker
             mesh.SetTriangles(wt, 0);
             mesh.RecalculateNormals();   // normals follow the new winding so shading AND the engine's culling agree
             Debug.Log($"[Factory] {name} winding-fixed {flipped}/{wt.Length / 3} tris outward");
+        }
+
+        // --- 3.45) height-based UVs (optional): override the mesh UVs with U = position along the length (Y after align),
+        // V = normalized height (Z). A vertical-gradient albedo then reads by HEIGHT regardless of the source/CAD UVs —
+        // e.g. a black skirt low + grey hull high. The documented recipe (retired HovercraftModel builder).
+        if (cfg.heightUV)
+        {
+            var vp = mesh.vertices;
+            float mnz = float.MaxValue, mxz = float.MinValue, mny = float.MaxValue, mxy = float.MinValue;
+            foreach (var p in vp) { if (p.z < mnz) mnz = p.z; if (p.z > mxz) mxz = p.z; if (p.y < mny) mny = p.y; if (p.y > mxy) mxy = p.y; }
+            float hz = Mathf.Max(1e-4f, mxz - mnz), ly = Mathf.Max(1e-4f, mxy - mny);
+            var uv = new Vector2[vp.Length];
+            for (int i = 0; i < vp.Length; i++) uv[i] = new Vector2((vp[i].y - mny) / ly, (vp[i].z - mnz) / hz);
+            mesh.uv = uv;
+            Debug.Log($"[Factory] {name} height-based UVs (V=height): vertical-gradient albedo maps low->high");
         }
 
         // --- 3.5) double-sided (optional): the engine culls backfaces, so single-sided / CAD "sketch" meshes whose faces

@@ -714,3 +714,27 @@ of wrong diagnoses piled on:
 **Resolution:** the ~27k grid-180 OBJ was regenerated, the old builder restored the working skirt, and the winding fix
 was then ported into the Factory (correctly, from the below-model origin) — so the Factory now bakes CAD hulls
 single-sided with the skirt, no old builder required.
+
+### Height-based UVs + a gradient skin (2026-07-02)
+A fourth CAD option: **height-based UVs** (`heightUV`) overrides the mesh UVs with `U = position along length (Y after
+align)`, `V = normalized height (Z)` — the §5 recipe, now in the Factory. A **vertical-gradient albedo** then maps by
+HEIGHT regardless of the model's (arbitrary/absent) UVs: put a PNG named `*albedo*.png` in the resource folder with a
+black band at the **bottom** (V=0 → lowest geometry → skirt) fading to grey at the **top** (V=1 → hull/deck). BuildAtlas
+picks it up; the plugin applies it; the skirt reads black, the hull grey — matching the LCAC reference. Make the texture
+with ImageMagick, e.g.:
+```
+magick \( -size 64x176 xc:'#767d84' \) \( -size 64x24 gradient:'#767d84'-'#0d0d0d' \) \( -size 64x56 xc:'#0d0d0d' \) -append Hovercraft_albedo.png
+```
+Honest caveat: this is a **color gradient, not a real skin** — no panel lines, dots, or weathering. It's the cheap
+"good at RTS zoom" path; a detailed skin needs a proper UV-unwrap + paint on the model's real geometry.
+
+### Winding fix vs double-sided — the mixed-model rule (illustrated)
+- **Winding fix** rewinds faces outward from the below-model origin — perfect for a **convex hull** (the skirt), zero
+  extra geometry. But it can't orient **non-convex** parts (the LCAC's fan housings): from behind they show their culled
+  backfaces → see-through.
+- **Double-sided** gives every face a back side → fills those non-convex holes, at **2× vertices AND 2× triangles**.
+- A **mixed** model (convex hull + non-convex fans) legitimately wants **both** on: winding fix cleans the hull's
+  normals, double-sided fills the fans. The cost is the 2× (from double-sided) on the whole mesh, so pair it with a
+  **lower reduce target** — for the LCAC, `targetTris≈20000` double-sided (~48k final verts) fit the shared buffer
+  alongside the cruiser + Zeppelin. (Future optimization: a *selective* double-sided that only duplicates faces the
+  winding fix left inward-facing, so you pay ~1.2× instead of 2×.)
