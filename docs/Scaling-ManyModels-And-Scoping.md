@@ -749,6 +749,14 @@ Honest caveat: this is a **color gradient, not a real skin** — no panel lines,
   the sweet spot is at or below ~15000; keep lowering until it renders exactly like the preview. (Future optimization:
   a *selective* double-sided that only duplicates faces the winding fix left inward-facing, so you pay ~1.2× instead of
   2×, letting you keep a higher target.)
+- **Always verify from *behind*, not the flattering front-quarter shot.** Single-sided renders more *unique* detail for
+  the same budget (double-sided spends half on mirrored back-faces), so from the front a single-sided bake can look
+  **sharper** — and pass. But swing the camera to the **rear of the non-convex parts** (fan housings, open frames): that
+  is where single-sided culls to invisible. Confirmed on the LCAC — single-sided 24000 looked crisper head-on but the
+  fan housings were **see-through from behind**; double-sided 12000 stayed solid from every angle. In-game the camera
+  *does* orbit behind units, so the rear view is the deciding test — **sharper-but-hollow loses to softer-but-solid.**
+  This is why the double-sided toggle earns its keep: for non-convex thin parts it's the *only* thing that closes them —
+  the winding fix (convex-only) can't.
 - **Counterintuitively, a *lower* reduce target can render *more* complete.** In-game, `targetTris=15000` double-sided
   gave visibly **better fan housings than 20000** — fewer missing vertices. **Observed, not yet explained.** The leading
   hypothesis is the shared ceiling: 20000×2 ≈ 40k indices from the hovercraft alone, and when the total (all injected
