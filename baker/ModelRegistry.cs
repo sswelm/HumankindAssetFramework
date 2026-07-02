@@ -23,6 +23,9 @@ public class ModelDef
     public float smoothingAngle = 20f;
     public int convertGrid = 0;         // GLB->OBJ: 0 = faithful (preserve UV seams), >0 = decimate
     public bool reuseExtracted = false; // reuse existing OBJ/albedo on re-bake (skip re-import), preserving hand-edited textures
+    public bool doubleSided = false;    // add a reversed back face to every triangle — fixes single-sided/CAD meshes (e.g. a hovercraft skirt) that render invisible in-game because the engine culls backfaces
+    public bool windingFix = false;     // rewind every face OUTWARD (documented CAD winding fix) so single-sided/CAD meshes render single-sided without doubling geometry — preferred over doubleSided for convex hulls (hovercraft, ships)
+    public int targetTris = 0;          // >0 = quadric-decimate the source to ~this many triangles (via Blender) before baking, to fit the engine's ~100k-vertex / ~83k-triangle shared buffer
     public int[] skel = new int[4];     // baked skeleton Amplitude guid {a,b,c,d}
     public int[] atlas = new int[4];    // baked atlas Amplitude guid {a,b,c,d}
 }

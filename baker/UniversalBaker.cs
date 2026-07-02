@@ -26,6 +26,9 @@ public struct BakeConfig
     public float   smoothingAngle;  // hard-edge threshold for Recalculate
     public int     convertGrid;     // GLB->OBJ: 0 = faithful (preserve UV seams), >0 = vertex-cluster decimate
     public bool    reuseExtracted;  // true = reuse the existing OBJ/albedo (skip re-import) — lets the modder hand-edit the extracted texture and keep it
+    public bool    doubleSided;     // true = add a reversed back face to every triangle (single-sided/CAD repair) so backface-culled parts render in-game
+    public bool    windingFix;      // true = rewind faces outward from the origin (documented CAD winding fix) so single-sided meshes render, no geometry doubling
+    public int     targetTris;      // >0 = quadric-decimate the source to ~this many triangles (Blender) before baking, to fit the engine's shared vertex/index buffer
 }
 
 public struct BakeResult
@@ -59,14 +62,24 @@ public static class UniversalBaker
         //        OBJ/albedo edits survive a re-bake. Still imports on the first bake, or whenever reuse is off. ---
         if (!string.IsNullOrEmpty(cfg.modelFile) && (!cfg.reuseExtracted || !haveObj))
         {
-            string ext = Path.GetExtension(cfg.modelFile).ToLowerInvariant();
+            string srcFile = cfg.modelFile;
+            // Optional VERTEX REDUCER: quadric-decimate a heavy model via Blender (per-object, so thin parts survive)
+            // down to ~targetTris, producing a reduced GLB the normal path then bakes — no offline tooling needed.
+            if (cfg.targetTris > 0)
+            {
+                if (!BlenderAvailable()) return Fail("'Reduce to tris' needs Blender installed (auto-detected, or set EditorPrefs 'ENC.blenderPath').");
+                string reduced = Path.Combine(Path.GetTempPath(), name + "_reduced.glb");
+                if (!ReduceViaBlender(srcFile, reduced, cfg.targetTris)) return Fail("mesh reduction failed (see console)");
+                srcFile = reduced;
+            }
+            string ext = Path.GetExtension(srcFile).ToLowerInvariant();
             if (ext == ".blend")
             {
                 // .blend isn't a transfer format — convert it to GLB via headless Blender first, then fall through the
                 // normal GLB path. Needs Blender installed (like GLB needs dotnet). Textures embed if the blend's material
                 // is a normal Principled-BSDF setup; very old materials may export untextured (supply the albedo manually).
                 string tmpGlb = Path.Combine(Path.GetTempPath(), name + "_fromblend.glb");
-                if (!ConvertBlend(cfg.modelFile, tmpGlb)) return Fail("Blender .blend -> GLB conversion failed (see console)");
+                if (!ConvertBlend(srcFile, tmpGlb)) return Fail("Blender .blend -> GLB conversion failed (see console)");
                 string fsDir = Path.Combine(Application.dataPath, "Resources", name);
                 Directory.CreateDirectory(fsDir);
                 if (!ConvertGlb(tmpGlb, fsDir, name, cfg.convertGrid)) return Fail("GLB conversion failed (see console)");
@@ -75,7 +88,7 @@ public static class UniversalBaker
             {
                 string fsDir = Path.Combine(Application.dataPath, "Resources", name);
                 Directory.CreateDirectory(fsDir);
-                if (!ConvertGlb(cfg.modelFile, fsDir, name, cfg.convertGrid)) return Fail("GLB conversion failed (see console)");
+                if (!ConvertGlb(srcFile, fsDir, name, cfg.convertGrid)) return Fail("GLB conversion failed (see console)");
             }
             else if (ext == ".obj" || ext == ".fbx")
             {
@@ -84,12 +97,12 @@ public static class UniversalBaker
                 // Skip the copy when the picked file IS the destination (e.g. resource "Hovercraft" + a source already at
                 // Assets/Resources/Hovercraft/Hovercraft.obj) — copying a file onto itself throws "used by another
                 // process". Its siblings are already in place too, so there's nothing to bring along.
-                if (!string.Equals(Path.GetFullPath(cfg.modelFile), destFull, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(Path.GetFullPath(srcFile), destFull, StringComparison.OrdinalIgnoreCase))
                 {
-                    File.Copy(cfg.modelFile, destFull, true);
+                    File.Copy(srcFile, destFull, true);
                     // Bring the model's sibling assets along: textures (so multi-material albedos resolve on import) and,
                     // for OBJ, its .mtl. Copied under their ORIGINAL names so the material->texture references still match.
-                    string srcDir = Path.GetDirectoryName(cfg.modelFile);
+                    string srcDir = Path.GetDirectoryName(srcFile);
                     if (!string.IsNullOrEmpty(srcDir) && Directory.Exists(srcDir))
                         foreach (var sib in Directory.GetFiles(srcDir))
                         {
@@ -253,6 +266,56 @@ public static class UniversalBaker
             vr[i] = new Vector3(vr[i].x + cfg.positionOffset.x, vr[i].y + cfg.positionOffset.y, vr[i].z + raise + cfg.positionOffset.z);
         mesh.vertices = vr;
         Debug.Log($"[Factory] {name}: verts={mesh.vertexCount}, rawBox={dims}, size={size}, offset={cfg.positionOffset}, normals={cfg.normals}");
+
+        // --- 3.4) winding fix (optional): CAD/"sketch" meshes have inconsistent face winding, so the engine culls half
+        // their faces and parts render invisible (e.g. a hovercraft skirt). Rewind every triangle OUTWARD. Measured from
+        // the ORIGIN, which after step 3 sits BELOW the raised model — so "outward" points horizontally out for low
+        // side-walls like the skirt (not downward, as a model-CENTRE reference wrongly would). This is the exact test
+        // from the retired HovercraftModel builder (Dot(geoNormal, a+b+c) < 0 => flip). Lighter than double-sided (no
+        // extra geometry); assumes a roughly convex hull (true for vehicles). Preferred for CAD hulls; use double-sided
+        // for genuinely non-convex thin shells.
+        if (cfg.windingFix)
+        {
+            var wv = mesh.vertices; var wt = mesh.triangles; int flipped = 0;
+            for (int i = 0; i < wt.Length; i += 3)
+            {
+                int a = wt[i], b = wt[i + 1], c = wt[i + 2];
+                Vector3 geo = Vector3.Cross(wv[b] - wv[a], wv[c] - wv[a]);
+                if (Vector3.Dot(geo, wv[a] + wv[b] + wv[c]) < 0f) { wt[i + 1] = c; wt[i + 2] = b; flipped++; }
+            }
+            mesh.SetTriangles(wt, 0);
+            mesh.RecalculateNormals();   // normals follow the new winding so shading AND the engine's culling agree
+            Debug.Log($"[Factory] {name} winding-fixed {flipped}/{wt.Length / 3} tris outward");
+        }
+
+        // --- 3.5) double-sided (optional): the engine culls backfaces, so single-sided / CAD "sketch" meshes whose faces
+        // are wound inward render INVISIBLE in-game (e.g. a hovercraft skirt). Append a REVERSED copy of every triangle,
+        // on duplicated verts with flipped normals, so every surface has a face on BOTH sides. Non-destructive; doubles
+        // the triangle count. The back shell is nudged slightly inward so it isn't coincident with the front (coincident
+        // faces make the game's alpha-to-coverage shader read ~50% transparent).
+        if (cfg.doubleSided)
+        {
+            var sv = mesh.vertices; var sn = mesh.normals; var su = mesh.uv; var st = mesh.triangles;
+            bool hasN = sn != null && sn.Length == sv.Length;
+            bool hasU = su != null && su.Length == sv.Length;
+            int vn = sv.Length;
+            float off = Mathf.Max(0.002f, size * 0.004f);
+            var nv = new Vector3[vn * 2]; var nn = new Vector3[vn * 2]; var nu = new Vector2[vn * 2];
+            for (int i = 0; i < vn; i++)
+            {
+                nv[i] = sv[i];
+                nv[vn + i] = hasN ? sv[i] - sn[i].normalized * off : sv[i];
+                if (hasN) { nn[i] = sn[i]; nn[vn + i] = -sn[i]; }
+                if (hasU) { nu[i] = su[i]; nu[vn + i] = su[i]; }
+            }
+            var nt = new int[st.Length * 2];
+            System.Array.Copy(st, nt, st.Length);
+            for (int i = 0; i < st.Length; i += 3)
+            { nt[st.Length + i] = st[i] + vn; nt[st.Length + i + 1] = st[i + 2] + vn; nt[st.Length + i + 2] = st[i + 1] + vn; }
+            mesh.Clear(); mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            mesh.SetVertices(nv); if (hasN) mesh.SetNormals(nn); if (hasU) mesh.SetUVs(0, nu); mesh.SetTriangles(nt, 0);
+            Debug.Log($"[Factory] {name} double-sided: {st.Length / 3} -> {nt.Length / 3} tris");
+        }
 
         // --- 4) atlas (multi-material: the packed atlas built above; single: pick the one extracted albedo) ---
         var atlas = multiMat ? packedAtlas : BuildAtlas(resDir, name);
@@ -449,6 +512,32 @@ public static class UniversalBaker
     {
         string b = FindBlender();
         return b != "blender" || File.Exists(b);   // an absolute hit, or assume PATH has it
+    }
+
+    // Reduce any Blender-importable model (glb/gltf/obj/fbx) to ~targetTris via headless Blender + the bundled
+    // mesh_reduce.py (per-object quadric decimation), exporting a reduced GLB the Factory then bakes.
+    static bool ReduceViaBlender(string src, string outGlb, int targetTris)
+    {
+        string proj = Directory.GetParent(Application.dataPath).FullName;
+        string script = Path.Combine(proj, "Tools", "mesh_reduce.py");
+        if (!File.Exists(script)) { Debug.LogError("[Factory] bundled reducer missing: " + script); return false; }
+        string blender = FindBlender();
+        var psi = new System.Diagnostics.ProcessStartInfo(blender, $"--background --python \"{script}\" -- \"{src}\" \"{outGlb}\" {Mathf.Max(1, targetTris)}")
+        { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        try
+        {
+            if (File.Exists(outGlb)) File.Delete(outGlb);
+            using (var p = System.Diagnostics.Process.Start(psi))
+            {
+                string o = p.StandardOutput.ReadToEnd(), e = p.StandardError.ReadToEnd();
+                p.WaitForExit();
+                if (!string.IsNullOrWhiteSpace(o)) Debug.Log("[reduce] " + o.Trim());
+                if (!string.IsNullOrWhiteSpace(e)) Debug.LogWarning("[reduce] " + e.Trim());
+                if (p.ExitCode != 0 || !File.Exists(outGlb)) { Debug.LogError("[Factory] Blender reduce produced no GLB (exit " + p.ExitCode + ")."); return false; }
+                return true;
+            }
+        }
+        catch (Exception ex) { Debug.LogError("[Factory] could not run Blender reduce ('" + blender + "'): " + ex.Message); return false; }
     }
 
     // Convert a .blend to GLB via headless Blender + the bundled export script, so the normal GLB path can take over.

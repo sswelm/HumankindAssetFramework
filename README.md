@@ -12,6 +12,15 @@ Factory**.
 - **Any number of materials.** A model with N materials (the Zeppelin has 4) is packed into one atlas and each
   sub-mesh's UVs are remapped into its rect — no per-model code, no material cap. Near-black UV dead-zones are filled
   neutral so unused texture regions never render as black patches.
+- **Heavy or single-sided/CAD meshes, handled.** A built-in **vertex reducer** (Blender quadric decimation, per-object
+  so thin parts survive) shrinks oversized models to fit the engine's shared mesh buffer. A **winding fix** rewinds
+  faces outward so single-sided / CAD "sketch" meshes render single-sided instead of culling to invisible (e.g. a
+  hovercraft skirt) — the documented recipe, now in the Factory; a **double-sided** toggle is the heavier fallback for
+  genuinely non-convex thin shells.
+- **Know the ceiling.** Custom meshes share **one GPU buffer — ~100k vertices / ~250k indices (~83k triangles), 32-bit
+  indices — across ALL injected models *and* the game's own fx meshes** (from the decompiled `FxComponentMeshContentManager`).
+  Overflow is silently dropped (missing/see-through geometry); the reducer exists to stay under it, and double-sided
+  counts twice.
 - **Any format in:** GLB / glTF / OBJ / FBX, and **`.blend`** (auto-converted via an auto-detected Blender install).
 - **Correct textures out of the box:** the GLB→OBJ converter flips V (glTF is V-top, OBJ/Unity V-bottom), so skins map
   right — the bug that made the Zumwalt's markings land on the superstructure, now fixed for every model.

@@ -646,3 +646,71 @@ Decouple hardcoded paths (`ModelRegistry.ConfigDir`, the `dotnet`/converter path
 "ENC", namespace `ENCAccessProof`); ship the editor package + the companion BepInEx plugin together with docs; consider
 a Unity-native glTF importer (glTFast) instead of the `dotnet` converter. Mirror of editor scripts lives in
 `ENCAccessProof/baker/` (ENCReload git tracks only `Assets/Databases`).
+
+---
+
+## 10. Heavy / CAD models in the Factory + the engine's shared mesh buffer (2026-07-02)
+
+Baking a raw, high-poly, untextured **CAD** model (the LCAC hovercraft) through the *Universal Model Factory* forced
+three capabilities into the baker and surfaced a hard engine limit. It also cost most of a day to a chain of wrong
+guesses — the post-mortem is below, because the mistakes are instructive.
+
+### The engine's shared mesh buffer — the real ceiling (decompiled)
+From `Amplitude.Mercury.Animation.FxComponentMeshContentManager` (`ilspycmd`):
+```csharp
+private int baseVertexBufferSize = 100000;   // vertex budget
+private int baseIndexBufferSize  = 250000;   // index budget  (÷3 ≈ 83,333 triangles)
+private ReadWriteBuffer1D<uint> indexBuffer; // 32-bit indices -> NO 65,535 cap
+private Vector3 encodingBBoxPosMin = (-8,-16,-8);  encodingBBoxPosMax = (8,16,8);   // position must fit this box
+...FillMeshVertexAndBufferContent(..., maxMeshTriangleCount, minAreaTriangleToKeepIt, ref currentVertexIndex, ...)
+```
+- **~100k vertices / ~250k indices (~83k triangles)** is the budget; the encoder **skips the overflow** past it (missing
+  / see-through geometry — "it dropped vertices").
+- Indices are **32-bit** — the earlier "16-bit / 65,535" hunch was wrong.
+- `currentVertexIndex` / `currentIndexIndex` are **running offsets by ref → the buffer is SHARED** across *all* injected
+  custom meshes **and the game's own fx meshes**. So the ceiling is the **total**, not per-model, and the effective
+  headroom is less than the raw number. **Double-sided counts twice.** Plan every model against this shared budget.
+- Position must fit `[-8,8]×[-16,16]×[-8,8]` (the Factory's size-normalize already keeps models inside it).
+- (Escape hatch, untried: `baseVertexBufferSize`/`baseIndexBufferSize` are `[SerializeField]` — a plugin could reflect
+  them larger and recreate the buffers to raise the ceiling.)
+
+### Three baker options this added
+- **Vertex reducer** (`targetTris`, `Tools/mesh_reduce.py` via Blender): per-object quadric **collapse** to ~N triangles
+  so heavy models fit the shared buffer. Use **collapse**, NOT planar dissolve — planar merges near-coplanar faces and
+  **flattens gently-curved features (it destroyed the skirt)**; collapse preserves distinct curved features. Reduce the
+  *whole model* toward the budget; sharp detail (fans) degrades before big surfaces (hull, skirt).
+- **Winding fix** (`windingFix`): the documented CAD fix from §5 — `Dot(geoNormal, a+b+c) < 0 ⇒ flip`, run **after the
+  raise** so the origin sits *below* the model (→ "outward" is horizontal for a low skirt, not downward). Rewinds faces
+  outward so a single-sided/CAD mesh renders **single-sided** (no culling holes) with **no extra geometry**. This is the
+  right tool for convex hulls (hovercraft, ships) and is what makes the skirt render.
+- **Double-sided** (`doubleSided`): appends a reversed, slightly-inset copy of every face → renders from both sides
+  regardless of winding. Topology-independent but **doubles the vertex cost** (budget!). Fallback for genuinely
+  non-convex thin shells; prefer the winding fix for hulls.
+
+### Untextured models
+No albedo → the Factory bakes a flat-grey atlas and the plugin applies it. (An experiment to bake *no* atlas — so the
+plugin leaves the host material alone — was tried and reverted; it made models dark and solved a problem that was really
+the buffer overflow, not the atlas.)
+
+### ⚠️ Post-mortem — how this got broken, so it doesn't happen again
+The hovercraft **already worked** at the last git push, baked by the retired `HovercraftModel.cs` (§5) whose crucial
+step is the **winding fix**. Migrating it to the Factory — which never had that fix — is what broke it, and then a chain
+of wrong diagnoses piled on:
+1. **Baked over a working asset.** Re-baking through the Factory overwrote the working `Hovercraft_Skeleton.asset` (and
+   the ~27k grid-180 `Hovercraft.obj`); neither is in git, so there was no clean undo. **Lesson: don't overwrite a
+   working baked asset when migrating; keep the known-good input.**
+2. **Re-derived instead of re-reading.** The winding fix was *already documented in §5*. Instead of applying it, it got
+   re-derived badly (measured from the model **centre** instead of the below-model **origin** → flipped the wrong faces
+   → "mostly transparent"). **Lesson: read the existing docs before re-inventing.**
+3. **Chased symptoms.** The missing skirt was blamed in turn on a 16-bit cap, backface culling, coincident-face alpha,
+   and the grey atlas — each "fix" a detour. The actual causes were only two: **no winding fix** (skirt culled) and
+   **double-sided pushing over the shared buffer** (skirt truncated). **Lesson: the skirt lived in the baked skeleton,
+   not the code — a code revert can't fix a bad bake; re-bake with the right recipe.**
+4. **Edited shared tools mid-experiment, then a blunt revert.** Editing `UniversalBaker.cs` while the user was
+   experimenting polluted their tests; a subsequent `git checkout` (uncommitted work) wiped the good double-sided +
+   reducer features along with the bad edit. **Lesson: commit working features incrementally so a revert can be
+   surgical, and don't touch shared tooling mid-experiment.**
+
+**Resolution:** the ~27k grid-180 OBJ was regenerated, the old builder restored the working skirt, and the winding fix
+was then ported into the Factory (correctly, from the below-model origin) — so the Factory now bakes CAD hulls
+single-sided with the skirt, no old builder required.

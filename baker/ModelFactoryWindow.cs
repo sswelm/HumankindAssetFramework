@@ -97,6 +97,18 @@ public class ModelFactoryWindow : EditorWindow
         cur.normalsMode = (int)(NormalsMode)EditorGUILayout.EnumPopup("Normals", (NormalsMode)cur.normalsMode);
         using (new EditorGUI.DisabledScope(cur.normalsMode != (int)NormalsMode.Recalculate))
             cur.smoothingAngle = EditorGUILayout.Slider("Smoothing angle", cur.smoothingAngle, 0f, 180f);
+        cur.windingFix = EditorGUILayout.Toggle(new GUIContent("Winding fix (CAD/convex)",
+            "Rewind faces outward so single-sided / CAD 'sketch' meshes render single-sided instead of culling to invisible " +
+            "(e.g. a hovercraft skirt). Lighter than double-sided (no extra geometry). Assumes a roughly convex hull — " +
+            "true for vehicles/ships. Preferred for CAD hulls; use Double-sided for genuinely non-convex thin shells."), cur.windingFix);
+        cur.doubleSided = EditorGUILayout.Toggle(new GUIContent("Double-sided (single-sided/CAD)",
+            "Add a back face to every surface so single-sided or CAD 'sketch' meshes don't render invisible in-game (the " +
+            "engine culls backfaces). Enable for models with missing / see-through parts — e.g. a hovercraft skirt. " +
+            "Doubles the triangle count."), cur.doubleSided);
+        cur.targetTris = EditorGUILayout.IntField(new GUIContent("Reduce to ~tris (0 = off)",
+            "Quadric-decimate a heavy model to about this many triangles (via Blender) before baking. Fits the engine's " +
+            "shared buffer (~100k verts / ~83k tris across ALL injected models — double-sided counts twice). Preserves " +
+            "thin parts (per-object). 0 = no reduction. Needs Blender (auto-detected)."), cur.targetTris);
         cur.convertGrid = EditorGUILayout.IntField(new GUIContent("Convert grid",
             "GLB / glTF / .blend only — controls how the source mesh is converted to OBJ.\n\n" +
             "0 = faithful: keep every vertex and UV exactly (preserves texture seams). Use this for " +
@@ -210,7 +222,7 @@ public class ModelFactoryWindow : EditorWindow
             resourceName = cur.resourceName.Trim(), modelFile = (cur.modelFile ?? "").Trim(), pawnDescription = cur.pawnDescription.Trim(),
             rotationEuler = cur.rotation, positionOffset = cur.position, size = cur.size,
             normals = (NormalsMode)cur.normalsMode, smoothingAngle = cur.smoothingAngle, convertGrid = cur.convertGrid,
-            reuseExtracted = cur.reuseExtracted
+            reuseExtracted = cur.reuseExtracted, doubleSided = cur.doubleSided, windingFix = cur.windingFix, targetTris = cur.targetTris
         };
         var r = UniversalBaker.Build(cfg);
         if (!r.ok) { status = "Bake FAILED: " + r.error; return; }
