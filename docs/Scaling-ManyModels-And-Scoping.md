@@ -735,12 +735,17 @@ Honest caveat: this is a **color gradient, not a real skin** — no panel lines,
 - **Double-sided** gives every face a back side → fills those non-convex holes, at **2× vertices AND 2× triangles**.
 - A **mixed** model (convex hull + non-convex fans) legitimately wants **both** on: winding fix cleans the hull's
   normals, double-sided fills the fans. The cost is the 2× (from double-sided) on the whole mesh, so pair it with a
-  **lower reduce target** — for the LCAC, `targetTris≈15000` double-sided (~30k triangles) is the recommended point;
-  it fits the shared buffer comfortably alongside the cruiser + Zeppelin. (Future optimization: a *selective*
-  double-sided that only duplicates faces the winding fix left inward-facing, so you pay ~1.2× instead of 2×.)
+  **lower reduce target**. Don't guess the number — **bisect down until the in-game model matches the editor preview**
+  (no missing fan vertices). For the LCAC, 20000 double-sided still dropped fan detail and 15000 was clearly better, so
+  the sweet spot is at or below ~15000; keep lowering until it renders exactly like the preview. (Future optimization:
+  a *selective* double-sided that only duplicates faces the winding fix left inward-facing, so you pay ~1.2× instead of
+  2×, letting you keep a higher target.)
 - **Counterintuitively, a *lower* reduce target can render *more* complete.** In-game, `targetTris=15000` double-sided
-  gave visibly **better fan housings than 20000** — fewer missing vertices. The reason is the shared ceiling: 20000×2 ≈
-  40k indices from the hovercraft alone, and when the total (all injected models + the game's own fx meshes) crowds the
-  ~250k-index buffer, the *last* geometry written — the fine fan detail — is silently truncated. 15000×2 ≈ 30k leaves
-  more headroom, so the whole fan survives. When fine detail goes see-through, try reducing the target *further* before
-  reaching for a bigger budget — you may just be over the shared ceiling.
+  gave visibly **better fan housings than 20000** — fewer missing vertices. **Observed, not yet explained.** The leading
+  hypothesis is the shared ceiling: 20000×2 ≈ 40k indices from the hovercraft alone, and when the total (all injected
+  models + the game's own fx meshes) crowds the ~250k-index buffer, the *last* geometry written — the fine fan detail —
+  gets silently truncated; 15000×2 ≈ 30k leaves more headroom. But **the real cutoff hasn't been measured** — we don't
+  yet know at what total it starts dropping, whether it's the index buffer, the vertex buffer, or something else. Treat
+  the ~250k number as the decompiled buffer size, not a confirmed in-practice limit. Practical takeaway regardless: when
+  fine detail goes see-through, try reducing the target *further* before reaching for a bigger budget — empirically it
+  helps, even if we can't yet say exactly why.
