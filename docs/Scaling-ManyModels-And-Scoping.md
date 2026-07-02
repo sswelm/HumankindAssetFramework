@@ -755,3 +755,10 @@ Honest caveat: this is a **color gradient, not a real skin** — no panel lines,
   you *reduce* the budget can only mean it was being **silently dropped** at the higher total — strong corroboration that
   the cause is the shared buffer ceiling (later-written geometry truncated), not the reducer's quality. Rule of thumb:
   if parts *appear* as you lower the target, you were over the ceiling; keep going until nothing new shows up.
+- **Observed practical ceiling: ~25k *vertices* per model (estimate, to refine).** Watching where the LCAC's parts stop
+  dropping, truncation seems to kick in around **~25,000 vertices** for this model in a typical scene — far below the
+  decompiled ~100k *vertex* buffer. That's consistent with the buffer being **shared**: the game's own fx meshes plus the
+  other injected models (cruiser + Zeppelin) already consume most of it, leaving only ~1/4 for any one new model. So plan
+  a per-model budget around **~25k vertices, not 100k** — and remember double-sided doubles the vertex count, so a
+  double-sided model wants ~half that triangle target. This is a felt estimate from bisecting, **not a measured cutoff**;
+  the exact number will vary with how crowded the scene is.
