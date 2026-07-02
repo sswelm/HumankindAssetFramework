@@ -80,17 +80,24 @@ public static class UniversalBaker
             else if (ext == ".obj" || ext == ".fbx")
             {
                 objPath = resDir + "/" + name + ext;
-                File.Copy(cfg.modelFile, Path.Combine(projRoot, objPath), true);
-                // Bring the model's sibling assets along: textures (so multi-material albedos resolve on import) and,
-                // for OBJ, its .mtl. Copied under their ORIGINAL names so the material->texture references still match.
-                string srcDir = Path.GetDirectoryName(cfg.modelFile);
-                if (!string.IsNullOrEmpty(srcDir) && Directory.Exists(srcDir))
-                    foreach (var sib in Directory.GetFiles(srcDir))
-                    {
-                        string se = Path.GetExtension(sib).ToLowerInvariant();
-                        if (se == ".png" || se == ".jpg" || se == ".jpeg" || se == ".tga" || se == ".bmp" || se == ".mtl")
-                            File.Copy(sib, Path.Combine(projRoot, resDir, Path.GetFileName(sib)), true);
-                    }
+                string destFull = Path.GetFullPath(Path.Combine(projRoot, objPath));
+                // Skip the copy when the picked file IS the destination (e.g. resource "Hovercraft" + a source already at
+                // Assets/Resources/Hovercraft/Hovercraft.obj) — copying a file onto itself throws "used by another
+                // process". Its siblings are already in place too, so there's nothing to bring along.
+                if (!string.Equals(Path.GetFullPath(cfg.modelFile), destFull, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Copy(cfg.modelFile, destFull, true);
+                    // Bring the model's sibling assets along: textures (so multi-material albedos resolve on import) and,
+                    // for OBJ, its .mtl. Copied under their ORIGINAL names so the material->texture references still match.
+                    string srcDir = Path.GetDirectoryName(cfg.modelFile);
+                    if (!string.IsNullOrEmpty(srcDir) && Directory.Exists(srcDir))
+                        foreach (var sib in Directory.GetFiles(srcDir))
+                        {
+                            string se = Path.GetExtension(sib).ToLowerInvariant();
+                            if (se == ".png" || se == ".jpg" || se == ".jpeg" || se == ".tga" || se == ".bmp" || se == ".mtl")
+                                File.Copy(sib, Path.Combine(projRoot, resDir, Path.GetFileName(sib)), true);
+                        }
+                }
             }
             else return Fail("unsupported model format: " + ext);
             AssetDatabase.Refresh();
