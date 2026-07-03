@@ -22,6 +22,8 @@ namespace ENCAccessProof
         public UnityEngine.Texture2D tex;
         public string layerHint = "";
         public object isolatedLayer;     // our private clone of the host output layer (texture isolation)
+        public string hideMeshes = "";   // comma-separated donor-FRAGMENT name substrings to hide (works for fragment-based extras; a donor's animated skinned sub-parts, e.g. a helicopter rotor, are encoded at pawn-spawn and cannot be hidden this late — pick a rotor-free donor instead)
+        public bool fragsLogged;         // one-shot: dump the donor's fragment mesh names once, so the modder can find hide targets
         public bool repointed;
     }
 
@@ -30,7 +32,7 @@ namespace ENCAccessProof
     // JSON has nested objects like rotation/position that the target class doesn't declare).
     [Serializable] internal class JsonModel
     {
-        public string resourceName, pawnDescription, modelFile;
+        public string resourceName, pawnDescription, modelFile, hideMeshes;
         public UnityEngine.Vector3 rotation, position;
         public float size, smoothingAngle;
         public int normalsMode, convertGrid;
@@ -60,6 +62,7 @@ namespace ENCAccessProof
                 const string i4 = @"\[\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\]";
                 var rn = Regex.Matches(text, "\"resourceName\"\\s*:\\s*\"([^\"]*)\"");
                 var pd = Regex.Matches(text, "\"pawnDescription\"\\s*:\\s*\"([^\"]*)\"");
+                var hm = Regex.Matches(text, "\"hideMeshes\"\\s*:\\s*\"([^\"]*)\"");
                 var sk = Regex.Matches(text, "\"skel\"\\s*:\\s*" + i4);
                 var at = Regex.Matches(text, "\"atlas\"\\s*:\\s*" + i4);
                 int G(Match m, int g) => int.TryParse(m.Groups[g].Value, out var r) ? r : 0;
@@ -70,6 +73,7 @@ namespace ENCAccessProof
                     {
                         resourceName = i < rn.Count ? rn[i].Groups[1].Value : ("model" + i),
                         pawnDescription = pd[i].Groups[1].Value,
+                        hideMeshes = i < hm.Count ? hm[i].Groups[1].Value : "",   // hideMeshes appears once per model in doc order, same as the others
                         sa = G(sk[i], 1), sb = G(sk[i], 2), sc = G(sk[i], 3), sd = G(sk[i], 4),
                         ta = G(at[i], 1), tb = G(at[i], 2), tc = G(at[i], 3), td = G(at[i], 4),
                     });
@@ -131,6 +135,20 @@ namespace ENCAccessProof
                 if (e == null) return;
                 Plugin.Log.LogInfo($"[Uni] MATCH addon='{name}' -> {e.resourceName} (skel {e.sa},{e.sb},{e.sc},{e.sd})");
 
+                // One-shot diagnostic (BEFORE we swap): dump the DONOR skeleton / mesh-collection sub-meshes, so we can
+                // find parts that aren't separate fragments (e.g. a helicopter rotor baked as its own skinned sub-mesh).
+                if (!e.fragsLogged)
+                {
+                    var sk0 = GetMember(addon, "Skeleton"); var mc0 = GetMember(addon, "MeshCollection");
+                    Plugin.Log.LogInfo($"[Uni] {e.resourceName} donor Skeleton='{(sk0 as UnityEngine.Object)?.name}' MeshCollection='{(mc0 as UnityEngine.Object)?.name}'");
+                    DumpSkinned(sk0, e.resourceName + " donor.Skeleton");
+                    if (mc0 != null && !ReferenceEquals(mc0, sk0)) DumpSkinned(mc0, e.resourceName + " donor.MeshCollection");
+                    // WIDE NET: the rotor is neither a sub-mesh nor a fragment, so dump every field/array on the addon
+                    // and the skeleton to find where that mesh is referenced (or confirm it's engine-procedural).
+                    DumpFields(addon, e.resourceName + " addon");
+                    DumpFields(sk0, e.resourceName + " skeleton");
+                }
+
                 EnsureRegistered(animMgr);
                 if (e.skeleton == null) return;
 
@@ -184,6 +202,66 @@ namespace ENCAccessProof
                 AccessTools.Method(e.skeleton.GetType(), "LoadIFN")?.Invoke(e.skeleton, new object[] { fxMgr, layerIdx, slot });
             }
             catch (Exception ex) { Plugin.Log.LogError("[Uni] upload: " + ex); }
+        }
+
+        // Diagnostic: list a MeshCollection/Skeleton's skinned sub-meshes (names + fx mesh index), to spot baked-in
+        // parts like a rotor that aren't separate fragments.
+        static void DumpSkinned(object mc, string label)
+        {
+            try
+            {
+                if (mc == null) { Plugin.Log.LogInfo($"[Uni] {label}: <null>"); return; }
+                var arr = AccessTools.Field(mc.GetType(), "skinnedMeshInfos")?.GetValue(mc) as Array;
+                if (arr == null) { Plugin.Log.LogInfo($"[Uni] {label}: no skinnedMeshInfos field"); return; }
+                Plugin.Log.LogInfo($"[Uni] {label}: {arr.Length} skinned sub-mesh(es)");
+                for (int i = 0; i < arr.Length; i++)
+                {
+                    var it = arr.GetValue(i);
+                    var nm = GetMember(it, "MeshName");
+                    var mi = GetMember(it, "MeshIndex");
+                    Plugin.Log.LogInfo($"[Uni]    {label}[{i}] mesh='{nm}' meshIndex={mi}");
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning($"[Uni] DumpSkinned {label}: " + ex.Message); }
+        }
+
+        // Wide diagnostic: shallow-dump every field of an object — arrays (length + any MeshName/name elements),
+        // Unity object refs (name), strings, primitives — to find a mesh/rotor reference hiding outside the usual slots.
+        static void DumpFields(object o, string label)
+        {
+            try
+            {
+                if (o == null) { Plugin.Log.LogInfo($"[Uni] {label}: <null>"); return; }
+                var t = o.GetType();
+                Plugin.Log.LogInfo($"[Uni] === {label} ({t.Name}) fields ===");
+                for (var bt = t; bt != null && bt != typeof(object); bt = bt.BaseType)
+                    foreach (var f in bt.GetFields(BF | BindingFlags.DeclaredOnly))
+                    {
+                        object v = null; try { v = f.GetValue(o); } catch { }
+                        string disp;
+                        if (v == null) disp = "null";
+                        else if (v is Array a)
+                        {
+                            var parts = new List<string>();
+                            for (int i = 0; i < a.Length && i < 8; i++)
+                            {
+                                var el = a.GetValue(i);
+                                var nm = GetMember(el, "MeshName") ?? GetMember(el, "meshName") ?? GetMember(el, "Name") ?? (el as UnityEngine.Object)?.name;
+                                parts.Add(nm?.ToString() ?? el?.GetType().Name ?? "null");
+                            }
+                            disp = $"[{a.Length}] {{{string.Join(", ", parts)}}}";
+                        }
+                        else if (v is UnityEngine.Object uo) disp = "obj:" + uo.name;
+                        else if (v is string s) disp = "\"" + s + "\"";
+                        else if (f.FieldType.IsPrimitive || f.FieldType.IsEnum) disp = v.ToString();
+                        else disp = v.GetType().Name;
+                        // only log the interesting ones to keep the log readable
+                        string ln = f.Name.ToLowerInvariant();
+                        if (v is Array || v is UnityEngine.Object || v is string || ln.Contains("mesh") || ln.Contains("rotor") || ln.Contains("fx") || ln.Contains("bone") || ln.Contains("attach") || ln.Contains("sub") || ln.Contains("frag"))
+                            Plugin.Log.LogInfo($"[Uni]    {label}.{f.Name} ({f.FieldType.Name}) = {disp}");
+                    }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning($"[Uni] DumpFields {label}: " + ex.Message); }
         }
 
         static string DiscoverBodyMeshName(object addon)
@@ -251,11 +329,28 @@ namespace ENCAccessProof
                 var mcField = AccessTools.Field(fragType, "meshCollection");
                 var mnField = AccessTools.Field(fragType, "meshName");
                 var folField = AccessTools.Field(fragType, "fxOutputLayer");
+                var encField = AccessTools.Field(fragType, "EncodedMeshAndVisualParticleCount"); // 0 => fragment renders nothing
                 var load = AccessTools.Method(fragType, "Load");
+                var hides = (e?.hideMeshes ?? "").Split(',').Select(s => s.Trim()).Where(s => s.Length > 0).ToArray();
                 for (int i = 0; i < frags.Length; i++)
                 {
                     var item = frags.GetValue(i);
                     if (item == null) continue;
+
+                    // Dump the donor's fragment mesh names once, so the modder can see what to hide (e.g. a rotor).
+                    var fragMesh = mnField?.GetValue(item) as string;
+                    if (e != null && !e.fragsLogged) Plugin.Log.LogInfo($"[Uni] {e.resourceName} donor fragment[{i}] mesh='{fragMesh}'");
+
+                    // HIDE donor fragments whose mesh name matches hideMeshes (kept separate per model: a drone hides the
+                    // helicopter rotor; a custom helicopter leaves hideMeshes empty and borrows that same spinning rotor).
+                    if (!string.IsNullOrEmpty(fragMesh) && hides.Any(h => fragMesh.IndexOf(h, StringComparison.OrdinalIgnoreCase) >= 0))
+                    {
+                        encField?.SetValue(item, (uint)0);   // force EncodedMeshAndVisualParticleCount = 0 => invisible
+                        frags.SetValue(item, i);
+                        if (e != null && !e.fragsLogged) Plugin.Log.LogInfo($"[Uni] {e.resourceName} HID donor fragment[{i}] mesh='{fragMesh}'");
+                        continue;
+                    }
+
                     mcField?.SetValue(item, skel);
                     // TEXTURE ISOLATION: give OUR body fragment a private CLONE of the output layer. Load() then calls
                     // GetLayerIndexAddItIFN(clone), allocating it a fresh GPU slot -> our skin (painted on the clone)
@@ -276,6 +371,7 @@ namespace ENCAccessProof
                     catch (Exception ex) { Plugin.Log.LogWarning("[Uni] frag reload: " + (ex.InnerException ?? ex).Message); }
                     frags.SetValue(item, i);
                 }
+                if (e != null) e.fragsLogged = true;   // dumped the donor fragment names once; don't spam on every load
             }
             catch (Exception ex) { Plugin.Log.LogError("[Uni] ReloadFragments: " + ex); }
         }

@@ -6,9 +6,14 @@ in-game, driven entirely by a JSON registry. What started as a single procedural
 Factory**.
 
 ## What works (proven in-game)
-- **Three models live**, each added with no new code: a **Zeppelin**, an **LCAC Hovercraft**, and a fully-textured
-  **USS Zumwalt stealth cruiser** (first textured naval-combat unit) — correct orientation, correct skin, sitting at
-  the waterline.
+- **Multiple models live**, each added with no new code: a **Zeppelin**, an **LCAC Hovercraft**, a fully-textured
+  **USS Zumwalt stealth cruiser** (first textured naval-combat unit), and a **77-material quadcopter drone** — correct
+  orientation, correct skin, sitting at the waterline (or flying).
+- **Match the donor to your model.** A model rides a donor unit's skeleton + animation, so pick a donor whose *moving
+  parts* match yours: a custom **helicopter** body (modelled rotor-less) borrows the donor's spinning rotor for free; a
+  drone/ground model wants a donor with **no animated sub-parts and a full idle/move animation set** (a land vehicle is
+  ideal). The one thing injection **can't** do: remove a donor's *animated* sub-part (a rotor, spinning wheels) — those
+  are baked into the pawn at spawn, before our hook. Choose the donor accordingly. See the drone case study in the docs.
 - **Any number of materials.** A model with N materials (the Zeppelin has 4) is packed into one atlas and each
   sub-mesh's UVs are remapped into its rect — no per-model code, no material cap. Near-black UV dead-zones are filled
   neutral so unused texture regions never render as black patches.

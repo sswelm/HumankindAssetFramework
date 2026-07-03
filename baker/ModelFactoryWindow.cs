@@ -117,6 +117,13 @@ public class ModelFactoryWindow : EditorWindow
             "upscaled). Toggling Double-sided automatically HALVES the effective target (it doubles the baked geometry), so " +
             "you set this once and just flip Double-sided on/off. Preserves thin parts (per-object). 0 = no reduction. " +
             "Needs Blender (auto-detected)."), cur.targetTris);
+        cur.hideMeshes = EditorGUILayout.TextField(new GUIContent("Hide donor meshes",
+            "RUNTIME, not baked. Comma-separated name substrings of the DONOR unit's extra parts to hide on this unit — " +
+            "e.g. 'Rotor' to remove the attack-helicopter rotor from a drone. Leave EMPTY to keep them (a custom " +
+            "helicopter can borrow the donor's spinning rotor by leaving this blank). Find the exact names in the " +
+            "BepInEx log after a launch: \"[Uni] <name> donor fragment[i] mesh='...'\". Takes effect on reload — no re-bake. " +
+            "NOTE: only hides FRAGMENT-based extras; a donor's animated skinned sub-parts (helicopter rotor, spinning " +
+            "wheels) are encoded at pawn-spawn and can't be hidden — pick a donor without them."), cur.hideMeshes ?? "");
         cur.convertGrid = EditorGUILayout.IntField(new GUIContent("Convert grid",
             "GLB / glTF / .blend only — controls how the source mesh is converted to OBJ.\n\n" +
             "0 = faithful: keep every vertex and UV exactly (preserves texture seams). Use this for " +

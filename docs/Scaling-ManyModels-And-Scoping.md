@@ -779,3 +779,66 @@ Honest caveat: this is a **color gradient, not a real skin** — no panel lines,
   a per-model budget around **~25k vertices, not 100k** — and remember double-sided doubles the vertex count, so a
   double-sided model wants ~half that triangle target. This is a felt estimate from bisecting, **not a measured cutoff**;
   the exact number will vary with how crowded the scene is.
+
+## 11. Animated donors & donor-matching — the drone case study (2026-07-03)
+
+Injecting a **quadcopter drone** (a free CC-BY Sketchfab model) onto a new `Era6_Common_Drone_01` pawn that borrows the
+**attack-helicopter** animation. It surfaced the single most important rule for picking a donor, plus the first thing the
+injection approach genuinely **cannot** do.
+
+### What worked (and proves the Factory scales)
+- **A 77-material model baked with a correct skin.** The drone GLB had 78 objects / 77 materials / ~84k tris. The
+  reducer crushed it to ~10k tris; the bake produced a single correct atlas. Turns out all 77 materials **shared one
+  texture** (the author's UV atlas), so the GLB→OBJ material-flatten cost nothing here — the skin came out right (white
+  body, black props). *Lesson: many-material CAD models often share one atlas; don't assume the flatten ruins them.*
+- **`glbconv` emits one albedo per material** even when they're byte-identical → a folder of 77 identical PNGs. Harmless
+  (the bake uses one), but a **texture-dedup** in `glbconv` (hash → write once) is a worthwhile cleanup.
+- **Orientation** was a simple bake `Rotation X≈90` to lay the flat/Z-up drone level.
+
+### What did NOT work — the animated-donor ceiling
+The drone rendered correctly **but the helicopter's spinning rotor stayed on top of it.** Chasing it mapped the exact
+boundary of the injection approach. The rotor is **not** a fragment and **not** a separate sub-mesh — the helicopter
+skeleton has **one** skinned mesh (the body) whose rotor-blade verts are weighted to `Helix` / `Helix_back` bones. It's
+drawn by the **animated skinned-mesh path**, which is *separate* from the fragment path our injection swaps. Every lever
+we have runs at `AddOn.Load`, which is **too late**:
+
+| Attempt | Why it failed |
+|---|---|
+| Swap the body **fragment** (our normal mechanism) | Replaced the body ✓ but not the animated draw → rotor survives |
+| **Hide** the rotor as a fragment (`hideMeshes`) | The rotor isn't a fragment — nothing to hide |
+| **Collapse** the `Helix` bones via `BindPose` scale | Animated bones read their transform from the **animation clip**, not bind pose → no effect |
+| **Redirect** the donor skeleton's skinned-mesh index to our mesh | The animated draw's geometry is **encoded once at pawn-spawn** → late edits don't re-encode |
+
+**The ceiling, stated plainly:** the injection can replace a donor's **body mesh**, but it **cannot remove animated
+skinned sub-parts** (a rotor, spinning wheels) that the engine bakes into the pawn's render encoding at spawn time. Our
+`AddOn.Load` hook is downstream of that encoding. Removing them would mean Harmony-patching the spawn-time encode path —
+deep in the GPU skinning the whole architecture deliberately avoids. `hideMeshes` was kept (it works for **fragment**-based
+extras); the `hideBones`/bind-pose/redirect experiments were removed as dead ends. *(Diagnostics were kept: on each
+model's first load the plugin logs the donor's fragment names and skinned sub-mesh count — `[Uni] <name> donor.Skeleton:
+N skinned sub-mesh(es)` — which is exactly how you vet a candidate donor.)*
+
+### The real lesson: **donor matching** (and the rotor is a *feature*)
+The rotor isn't a bug — it's a mismatch. **Match the donor's animated silhouette to your model:**
+
+- **Rotorcraft model → helicopter donor.** A custom **scout/stealth helicopter** body, modeled *without* its own rotor,
+  swapped onto a helicopter donor **keeps the borrowed spinning rotor** → a fully-animated custom helicopter for **free**,
+  no rotor rigging. The exact thing that ruined the drone makes rotorcraft trivial. (Model the body rotor-less so you
+  don't get a double rotor; the donor supplies it.)
+- **Non-rotorcraft (drone, UGV, ground vehicle) → a donor with no animated sub-parts.** 
+
+Two hard requirements for a donor when your model has **no** matching moving part:
+1. **No animated skinned sub-parts** (no rotor, no spinning propeller — so avoid helicopters *and* propeller planes).
+2. **A complete animation set** — idle + move + stop. A **cruise-missile** donor is rotor-free but *fire-and-forget*: it
+   lacks an idle/end-of-move animation and looks broken standing still. (This is why the Zeppelin-on-missile works only
+   because a zeppelin is "always travelling" in feel.)
+
+**Best non-rotorcraft donors:** a **land vehicle** (APC/IFV/recon) — rigid or near-rigid, and it has the full ground
+animation set, so the unit never looks frozen. Add a small **Z position offset** at bake to float the model just above the
+ground so a "flying" drone reads as hovering low rather than sitting in the dirt. (Watch for animated wheels/tracks as
+separate sub-parts — but even if present they're small and low, nowhere near as glaring as a rotor; the sub-mesh log tells
+you before you commit.) Fixed-wing **jets/bombers** are also rotor-free, but confirm they have a sane hovering/idle
+animation for a stationary air unit.
+
+**Donor-picking checklist:** (1) does my model have a moving part? → pick a donor that animates the same part and borrow
+it. (2) otherwise → pick a donor with **no** animated sub-parts **and** a full idle/move animation set; check the sub-mesh
+log shows `1 skinned sub-mesh`.
