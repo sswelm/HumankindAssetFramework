@@ -962,8 +962,9 @@ propellers spin. The runtime chain (all in `UniversalInject`):
    models leave it `[0,0,0,0]`).
 2. **Play it per pawn.** Harmony **postfix on `PawnManager.AddPawnEntry(ref PawnEntry)`** — the game writes
    `pawnEntries[pawnCount-1]` once per pawn per frame. If that entry's `SkeletonId` matches our animated skeleton, we set
-   **`Pose0.AnimationId` = our clip id, `Pose0.Weight` = 1, `Pose0.Time` = `Time.time`** (advancing ⇒ it plays), and
-   **zero `Pose1..8`**. This overrides the donor's animation with ours.
+   **`Pose0.AnimationId` = our clip id, `Pose0.Weight` = 1, `Pose0.Time` = `Time.time / clipDuration`** (advancing ⇒ it
+   plays; the divide is essential — see "Playback speed + loop stall" below), and **zero `Pose1..8`**. This overrides the
+   donor's animation with ours.
 
 **The one non-obvious trap (cost an invisible drone):** `GetLocalBoneTRS` divides the blended pose by `sumWeight`
 (line ~1148). **Zeroing *all* pose weights ⇒ divide-by-zero ⇒ NaN ⇒ the whole mesh vanishes.** There is no "rest pose by
@@ -1007,3 +1008,46 @@ came up on a **vanilla skeleton (id 33)**, so our mesh got skinned by the wrong 
 
 Takeaway for animated injection: don't key the pawn-pose hook on `SkeletonId` alone (the game may put your unit on a
 different skeleton per instance) — key on the **descriptor**, and normalize the skeleton id yourself.
+
+### Playback speed + loop stall — `Pose.Time` is normalized, and clip length must be clean (2026-07-03)
+
+Two follow-up bugs surfaced once the props were spinning. Both are about *time*, and both are easy to miss because the
+animation still "works" — just wrong.
+
+**1. Play at real speed: `Pose.Time` is NORMALIZED, not seconds.** The GPU sampler does
+`frame = (FrameCount-1) * Mathf.Repeat(Pose.Time, 1f)` — i.e. **`Time` in `[0,1)` = one full loop.** The engine's own
+`PawnManager.ApplyTime` confirms the intended formula: `Time += deltaTime / GetAnimationDuration(animId); Time -= floor(Time)`.
+Feeding raw `UnityEngine.Time.time` (seconds) makes `frac(Time.time)` cycle the whole clip **every 1 second** → the clip
+plays `duration×` too fast (a 10.4 s clip in 1 s ≈ 10×), and at 60 fps the game samples only ~60 points across ~250
+frames, so **most frames are skipped** (looks stuttery / "not playing all frames"). **Fix:** capture the clip length once
+via `GetAnimationDuration(animId)` (stored on the model entry when we resolve the id) and set
+**`Pose0.Time = Time.time / animDuration`**. Now one loop takes the real duration and every frame is hit.
+
+**2. The ~1 s stall per loop: a frozen tail from `bake_anim`.** After the speed fix the props still froze for ~1 s at the
+loop boundary. Cause: **Blender's `export_scene.fbx(bake_anim=True)` bakes over the SCENE frame range, which defaults to
+`1..250`** — but the source `hover` action is only **0..212**. So the FBX got **~37 static padding frames** on the end
+(props at rest), the ClipCollection baked them (`FrameCount 250`, duration 10.4 s), and the runtime dutifully played
+through the dead tail every loop. Verify by sampling the exported FBX's spinner bone per frame: a clean clip spins
+~180°/frame end-to-end; a padded one reads `0.0` for the last N frames. **Fix:** before exporting, clamp the scene range
+to the action's real range —
+```python
+_fs, _fe = [int(round(v)) for v in hover.frame_range]
+bpy.context.scene.frame_start = _fs
+bpy.context.scene.frame_end   = _fe
+```
+Re-bake → `FrameCount 213`, duration 8.83 s, constant velocity, seamless loop. (The source itself already loops: last
+frame ≡ frame 0, seam 0.0°.)
+
+**3. After ANY clip re-bake you MUST rebuild the mod.** The re-import updates the asset *inside the Unity project*, but the
+game loads the baked **AssetBundle** — and the pose bytes are bundled (the build log lists
+`Assets/Resources/ReconDrone/camera_base.114CollectionPoseData.bytes`). So the loop to fix an animation is: regenerate FBX
+→ re-import Skeleton + ClipCollection → **rebuild/export the mod** → launch. Skip the rebuild and the game keeps playing
+the old clip.
+
+**Re-baking the two Amplitude assets after regenerating the FBX** (the FBX guid is unchanged, so nothing in the registry
+moves): both `Skeleton` and `ClipCollection` expose a parameterless **`Reimport()`** method (same as the Factory uses for
+`Skeleton`). A one-click editor helper (`ReconDroneRebake.cs`, mirrored in `baker/`) force-imports the FBX, then calls
+`Reimport()` on `ReconDrone_Skeleton.asset` and `camera_base.114Collection.asset` — no hunting for inspector buttons.
+Note the **rendered** skeleton is the one the registry `skel` guid points at *and* the one the ClipCollection's `Skeleton`
+field references (here `ReconDrone_Model_Skeleton`); the clip only fixes timing, so re-importing a sibling skeleton is
+harmless, but re-import the one the registry actually renders if you also changed the mesh.
