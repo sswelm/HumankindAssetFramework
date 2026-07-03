@@ -1,19 +1,26 @@
 # ENC Access Proof — Universal custom-3D-model injection for Humankind
 
-Inject **any** custom 3D model onto **any** live Humankind unit — correct geometry, correct texture, no executable
-patching, and **zero per-model code**. Bake a model in the Unity editor tool; a data-driven BepInEx plugin renders it
-in-game, driven entirely by a JSON registry. What started as a single procedural zeppelin is now the **Universal Model
-Factory**.
+Inject **any** custom 3D model onto **any** live Humankind unit — correct geometry, correct texture, **its own
+animation**, no executable patching, and **zero per-model code**. Bake a model in the Unity editor tool; a data-driven
+BepInEx plugin renders it in-game, driven entirely by a JSON registry. What started as a single procedural zeppelin is
+now the **Universal Model Factory** — and, as of the ReconDrone, the first **runtime-injected *animated* model** in
+Humankind.
 
 ## What works (proven in-game)
-- **Multiple models live**, each added with no new code: a **Zeppelin**, an **LCAC Hovercraft**, a fully-textured
-  **USS Zumwalt stealth cruiser** (first textured naval-combat unit), and a **77-material quadcopter drone** — correct
-  orientation, correct skin, sitting at the waterline (or flying).
+- **Animated custom models — a first.** A **quadcopter drone** injected onto a land-vehicle unit renders full-size and
+  textured **and spins its own propellers from its own baked animation** — no engine mod, no GPU-skinning hang. The
+  model's armature + clip are baked into an Amplitude `Skeleton` + `ClipCollection` (via the SDK's own tooling), the clip
+  is registered at runtime, and a `PawnManager.AddPawnEntry` hook drives the pawn's pose onto it. Works for **any number
+  of instances**. Full recipe + the traps in [docs §12](docs/Scaling-ManyModels-And-Scoping.md).
+- **Multiple static models live**, each added with no new code: a **Zeppelin**, an **LCAC Hovercraft**, and a
+  fully-textured **USS Zumwalt stealth cruiser** (first textured naval-combat unit) — correct orientation, correct skin,
+  sitting at the waterline.
 - **Match the donor to your model.** A model rides a donor unit's skeleton + animation, so pick a donor whose *moving
   parts* match yours: a custom **helicopter** body (modelled rotor-less) borrows the donor's spinning rotor for free; a
   drone/ground model wants a donor with **no animated sub-parts and a full idle/move animation set** (a land vehicle is
-  ideal). The one thing injection **can't** do: remove a donor's *animated* sub-part (a rotor, spinning wheels) — those
-  are baked into the pawn at spawn, before our hook. Choose the donor accordingly. See the drone case study in the docs.
+  ideal). The one thing injection **can't** do: *remove* a donor's *animated* sub-part (a rotor, spinning wheels) — those
+  are baked into the pawn at spawn. But it **can** give your model **its own** animation (see the animated-model bullet
+  above), which overrides the donor's. Choose the donor accordingly; see the drone case study in the docs.
 - **Any number of materials.** A model with N materials (the Zeppelin has 4) is packed into one atlas and each
   sub-mesh's UVs are remapped into its rect — no per-model code, no material cap. Near-black UV dead-zones are filled
   neutral so unused texture regions never render as black patches.
@@ -52,17 +59,23 @@ the proven vehicle rig; `ModelRegistry` writes `enc_models.json` into the auto-d
 
 **Runtime — `UniversalInject`** (`Patches/`): one patch, any number of models. Reads the registry, registers each baked
 skeleton, and on `AddOn.Load` repoints the matching pawn onto it by **self-discovery** (reads the host's body-mesh name,
-renames ours to match). The unit keeps its real bones + animation; our skin rides on the private layer clone.
+renames ours to match). Our skin rides on a private layer clone. For **animated** models it also injects the model's
+`ClipCollection` into the animation manager and, via a `PawnManager.AddPawnEntry` hook, drives the pawn's pose onto our
+clip — matched by **pawn descriptor** and normalizing the skeleton id, so every instance plays it.
 
-*Founding insight (credit: CalmBreakfast): never inject a custom skeleton — it hangs the GPU skinning. Keep the unit's
-real skeleton and swap only the mesh it draws.*
+*Founding insight (credit: CalmBreakfast): for a static swap, keep the unit's real skeleton and swap only the mesh it
+draws — injecting a mismatched skeleton hangs the GPU skinning. The animated-model work later showed the corollary: a
+**properly baked** custom `Skeleton` + `ClipCollection` (built through the SDK's own tooling) can be injected and played
+**without** the hang — the danger was malformed skeletons, not custom ones per se.*
 
 ## Models & licenses
 Model files aren't committed — download each per its license into `Assets/Resources/<name>/` and bake. Authors +
 licenses in [**CREDITS.md**](CREDITS.md) (CC-BY requires attribution).
 
 ## Config
-- **Registry:** `<Humankind>\BepInEx\config\enc_models.json` — the Factory auto-detects this path (Settings panel to
+- **Registry:** `<Humankind>\BepInEx\config\enc_models.json` — one entry per model (pawn description, skeleton + atlas
+  GUIDs, transform, reducer/shading flags). Animated models add a **`"clip": [a,b,c,d]`** field (the baked
+  `ClipCollection` GUID); static models leave it `[0,0,0,0]`. The Factory auto-detects the path (Settings panel to
   override); the plugin reads it at launch.
 - **Plugin cfg:** `…\community.humankind.encaccessproof.cfg` — F8 opens an in-game scan/feedback window.
 
