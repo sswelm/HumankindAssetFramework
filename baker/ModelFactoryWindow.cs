@@ -19,11 +19,17 @@ public class ModelFactoryWindow : EditorWindow
     Vector2 scroll;
     bool showSettings;
 
+    // Cheap animation probe (no Blender), cached per model-file path. State: 0 = unknown (allow), 1 = animation
+    // detected (allow + hint), 2 = definitely none (disable the Animated toggle). Keeps the checkbox from being ticked
+    // on a static model. Runs once when the path changes, not every OnGUI frame.
+    string animProbeFile = "";   // sentinel != any real path so the first real path always probes
+    int animProbeState;
+
     [MenuItem("Tools/Universal Model Factory")]
     static void Open()
     {
         var w = GetWindow<ModelFactoryWindow>(false, "Universal Model Factory");
-        w.minSize = new Vector2(480, 470);
+        w.minSize = new Vector2(500, 470);
         w.RefreshList();
     }
 
@@ -40,6 +46,9 @@ public class ModelFactoryWindow : EditorWindow
     void OnGUI()
     {
         scroll = EditorGUILayout.BeginScrollView(scroll);
+        // Widen the label column so the longer labels ("Position offset (Z = waterline)", "Double-sided (single-sided/CAD)",
+        // "Animated (own rig + clip)") aren't clipped. Scales with window width so fields still get room when widened.
+        EditorGUIUtility.labelWidth = Mathf.Clamp(position.width * 0.42f, 210f, 320f);
         GUILayout.Space(10f);
         EditorGUILayout.LabelField("Universal Model Factory", EditorStyles.boldLabel);
         EditorGUILayout.Space();
@@ -98,6 +107,44 @@ public class ModelFactoryWindow : EditorWindow
             EditorGUILayout.HelpBox(".blend import needs Blender installed (auto-detected). Install it, or set EditorPrefs 'ENC.blenderPath' to blender.exe.", MessageType.Warning);
 
         EditorGUILayout.Space();
+        EditorGUILayout.LabelField("Animation", EditorStyles.miniBoldLabel);
+        EnsureAnimProbe(cur.modelFile);
+        bool noAnim = animProbeState == 2;
+        if (noAnim) cur.animated = false;   // a static model can't drive the animated path
+        using (new EditorGUI.DisabledScope(noAnim))
+            cur.animated = EditorGUILayout.Toggle(new GUIContent("Animated (own rig + clip)",
+            "Bake from the model's OWN armature + animation clip so it plays its own motion in-game (e.g. a drone's " +
+            "propellers spin) — instead of the static single-bone vehicle rig. The model MUST be rigged with a skeletal " +
+            "animation (glb/fbx/blend). Blender slims it (join + decimate, keep the armature + first clip), Unity bakes an " +
+            "Amplitude Skeleton + ClipCollection, and the plugin drives the pawn's pose onto it. Needs Blender (auto-detected)."), cur.animated);
+        using (new EditorGUI.DisabledScope(!cur.animated))
+            cur.animClip = EditorGUILayout.TextField(new GUIContent("Clip name",
+                "Which animation to bake when the model has several clips — e.g. 'hover' (the drone also ships " +
+                "'exploded_view' and 'step_by_step', which you do NOT want). Case-sensitive, must match the clip's name in " +
+                "the source model. Leave EMPTY to use the model's assigned/first clip."), cur.animClip ?? "");
+        using (new EditorGUI.DisabledScope(!cur.animated))
+            cur.animateBones = EditorGUILayout.TextField(new GUIContent("Animate only bones",
+                "Optional. Comma-separated bone-name PREFIXES to keep animation on — e.g. 'prop,rotor' keeps only the " +
+                "spinning parts and strips camera / body-bob curves that make the model wobble ('unbalanced flywheel'). " +
+                "Leave EMPTY to keep the whole clip (for a fully-animated model). The clip's frame range is always " +
+                "auto-clamped to kill the ~1s per-loop stall from padded tail frames."), cur.animateBones ?? "");
+        // Blender is a HARD dependency for the animated path (rig-slim + clip bake); glbconv can't emit a rigged FBX.
+        // Warn as soon as an animated model is detected — not only after ticking — so a Blender-less adopter knows upfront.
+        // (Detection itself needs no Blender, so the checkbox stays usable; only Bake will fail until Blender is present.)
+        if ((cur.animated || animProbeState == 1) && !UniversalBaker.BlenderAvailable())
+            EditorGUILayout.HelpBox("The Animated path needs Blender (to slim the rig + bake the clip) — it wasn't found. " +
+                "Install Blender (auto-detected under Program Files) or set EditorPrefs 'ENC.blenderPath' to blender.exe. " +
+                "Detection above works without Blender, but Bake will fail until it's installed.", MessageType.Warning);
+        if (cur.animated)
+            EditorGUILayout.HelpBox("Animated mode uses Size + Reduce-to-tris; the static Mesh/shading options below " +
+                "(normals, winding, double-sided, height UVs, convert grid) don't apply.", MessageType.None);
+        else if (noAnim)
+            EditorGUILayout.HelpBox("No animation found in this model — the Animated option is disabled. Pick a rigged " +
+                "glb / gltf / fbx (with a skeletal clip) to enable it, or use the static bake.", MessageType.None);
+        else if (animProbeState == 1)
+            EditorGUILayout.HelpBox("Animation detected in this model — tick 'Animated' to bake its own rig + clip.", MessageType.None);
+
+        EditorGUILayout.Space();
         EditorGUILayout.LabelField("Transform", EditorStyles.miniBoldLabel);
         cur.rotation = EditorGUILayout.Vector3Field("Rotation offset (XYZ)", cur.rotation);
         cur.position = EditorGUILayout.Vector3Field("Position offset (Z = waterline)", cur.position);
@@ -132,6 +179,10 @@ public class ModelFactoryWindow : EditorWindow
             "upscaled). Toggling Double-sided automatically HALVES the effective target (it doubles the baked geometry), so " +
             "you set this once and just flip Double-sided on/off. Preserves thin parts (per-object). 0 = no reduction. " +
             "Needs Blender (auto-detected)."), cur.targetTris);
+        if (cur.targetTris > 0 && !UniversalBaker.BlenderAvailable())
+            EditorGUILayout.HelpBox("Reduce-to-tris uses Blender (quadric decimation) — Blender wasn't found, so Bake will " +
+                "fail. Either set this to 0, use 'Convert grid' below (Blender-free GLB decimation), or install Blender / " +
+                "set its path in Settings above.", MessageType.Warning);
         cur.hideMeshes = EditorGUILayout.TextField(new GUIContent("Hide donor meshes",
             "RUNTIME, not baked. Comma-separated name substrings of the DONOR unit's extra parts to hide on this unit — " +
             "e.g. 'Rotor' to remove the attack-helicopter rotor from a drone. Leave EMPTY to keep them (a custom " +
@@ -185,7 +236,10 @@ public class ModelFactoryWindow : EditorWindow
     {
         string resolved = ModelRegistry.ConfigDir;
         bool exists = System.IO.Directory.Exists(resolved);
-        showSettings = EditorGUILayout.Foldout(showSettings, "Settings — game path" + (exists ? "" : "  ⚠ not found"), true);
+        bool blenderOk = UniversalBaker.BlenderAvailable();
+        // Header shows a marker even when collapsed, so a missing game path OR missing Blender is always visible.
+        string mark = (!exists ? "  ⚠ game path" : "") + (!blenderOk ? (exists ? "  ⚠ Blender not detected" : " & Blender") : "");
+        showSettings = EditorGUILayout.Foldout(showSettings, "Settings — game & Blender path" + mark, true);
         if (!showSettings) return;
         using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
         {
@@ -207,6 +261,31 @@ public class ModelFactoryWindow : EditorWindow
                 (exists ? "" : "\n(folder doesn't exist yet — created on Bake; check the path if this looks wrong)"),
                 exists ? MessageType.None : MessageType.Warning);
         }
+
+        // --- Blender: needed for animated import, .blend import, and Reduce-to-tris. Show status + an in-UI override. ---
+        EditorGUILayout.Space();
+        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+        {
+            string found = UniversalBaker.FindBlender();
+            EditorGUILayout.LabelField("Blender", blenderOk ? found : "⚠ not detected", EditorStyles.wordWrappedMiniLabel);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                string bov = EditorPrefs.GetString("ENC.blenderPath", "");
+                string nb = EditorGUILayout.TextField(new GUIContent("Override (blender.exe)", "Leave empty to auto-detect the newest install under Program Files. Set this if Blender is elsewhere or only on PATH."), bov);
+                if (nb != bov) EditorPrefs.SetString("ENC.blenderPath", nb ?? "");
+                if (GUILayout.Button("Browse", GUILayout.Width(70)))
+                {
+                    string p = EditorUtility.OpenFilePanel("Select blender.exe", "", "exe");
+                    if (!string.IsNullOrEmpty(p)) { EditorPrefs.SetString("ENC.blenderPath", p); GUI.FocusControl(null); }
+                }
+                using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(EditorPrefs.GetString("ENC.blenderPath", ""))))
+                    if (GUILayout.Button("Clear", GUILayout.Width(56))) { EditorPrefs.SetString("ENC.blenderPath", ""); GUI.FocusControl(null); }
+            }
+            EditorGUILayout.HelpBox(blenderOk
+                ? "Used for animated import, .blend import, and Reduce-to-tris. GLB/OBJ/FBX static bakes work without it."
+                : "Not found — animated import, .blend import, and Reduce-to-tris will fail. Install Blender or point the override at blender.exe. Static GLB/OBJ/FBX bakes still work (glbconv), and 'Convert grid' decimates without Blender.",
+                blenderOk ? MessageType.None : MessageType.Warning);
+        }
     }
 
     void OnSelectResource()
@@ -216,6 +295,74 @@ public class ModelFactoryWindow : EditorWindow
         if (e == null) return;
         cur = JsonUtility.FromJson<ModelDef>(JsonUtility.ToJson(e));   // clone so edits don't mutate the stored copy
         status = "Loaded '" + e.resourceName + "'. Edit + Bake; leave Model file empty to re-bake with new settings.";
+    }
+
+    // Re-probe only when the model-file path changes (OnGUI runs every frame; file I/O must not).
+    void EnsureAnimProbe(string file)
+    {
+        file = file ?? "";
+        if (file == animProbeFile) return;
+        animProbeFile = file;
+        animProbeState = ProbeAnimation(file);
+    }
+
+    // Does the model file contain a skeletal animation? 0 = unknown (can't tell cheaply → allow), 1 = yes, 2 = no.
+    // Deliberately conservative: only returns 2 ("none") when we're confident (OBJ, or a glTF with no animations), so we
+    // never wrongly BLOCK a rigged model; ambiguous formats (.blend) and a token-less FBX stay "unknown" (allowed).
+    static int ProbeAnimation(string file)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(file) || !System.IO.File.Exists(file)) return 0;
+            switch (System.IO.Path.GetExtension(file).ToLowerInvariant())
+            {
+                case ".obj": return 2;                                   // OBJ can't carry animation
+                case ".glb": return ProbeGlb(file);
+                case ".gltf": return HasGltfAnim(System.IO.File.ReadAllText(file)) ? 1 : 2;
+                case ".fbx": return ProbeFbx(file) ? 1 : 0;              // token found = yes; absent = unknown (don't block)
+                default: return 0;                                       // .blend etc — needs Blender to know
+            }
+        }
+        catch { return 0; }
+    }
+
+    // Read a binary glTF's JSON chunk and check for a non-empty "animations" array.
+    static int ProbeGlb(string file)
+    {
+        using (var fs = System.IO.File.OpenRead(file))
+        using (var br = new System.IO.BinaryReader(fs))
+        {
+            if (fs.Length < 20 || br.ReadUInt32() != 0x46546C67u) return 0;   // "glTF" magic
+            br.ReadUInt32(); br.ReadUInt32();                                  // version, total length
+            uint clen = br.ReadUInt32(); uint ctype = br.ReadUInt32();         // first chunk = JSON
+            if (ctype != 0x4E4F534Au) return 0;                               // "JSON"
+            var bytes = br.ReadBytes((int)System.Math.Min(clen, 16u * 1024 * 1024));
+            return HasGltfAnim(System.Text.Encoding.UTF8.GetString(bytes)) ? 1 : 2;
+        }
+    }
+
+    // "animations":[ … ] present AND non-empty (next non-space char after '[' isn't ']').
+    static bool HasGltfAnim(string json)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(json ?? "", "\"animations\"\\s*:\\s*\\[");
+        if (!m.Success) return false;
+        int i = m.Index + m.Length;
+        while (i < json.Length && char.IsWhiteSpace(json[i])) i++;
+        return i < json.Length && json[i] != ']';
+    }
+
+    // FBX (binary or ASCII) names its animation via AnimStack / AnimCurveNode object records. Scan up to a cap.
+    static bool ProbeFbx(string file)
+    {
+        try
+        {
+            var data = System.IO.File.ReadAllBytes(file);
+            int n = System.Math.Min(data.Length, 48 * 1024 * 1024);
+            string hay = System.Text.Encoding.ASCII.GetString(data, 0, n);
+            return hay.IndexOf("AnimStack", System.StringComparison.Ordinal) >= 0
+                || hay.IndexOf("AnimCurveNode", System.StringComparison.Ordinal) >= 0;
+        }
+        catch { return false; }
     }
 
     static string[] pawnCache;
@@ -252,16 +399,20 @@ public class ModelFactoryWindow : EditorWindow
             resourceName = cur.resourceName.Trim(), modelFile = (cur.modelFile ?? "").Trim(), pawnDescription = cur.pawnDescription.Trim(),
             rotationEuler = cur.rotation, positionOffset = cur.position, size = cur.size,
             normals = (NormalsMode)cur.normalsMode, smoothingAngle = cur.smoothingAngle, convertGrid = cur.convertGrid,
-            reuseExtracted = cur.reuseExtracted, doubleSided = cur.doubleSided, windingFix = cur.windingFix, heightUV = cur.heightUV, targetTris = cur.targetTris
+            reuseExtracted = cur.reuseExtracted, doubleSided = cur.doubleSided, windingFix = cur.windingFix, heightUV = cur.heightUV, targetTris = cur.targetTris,
+            animated = cur.animated, animClip = (cur.animClip ?? "").Trim(), animateBones = (cur.animateBones ?? "").Trim()
         };
-        var r = UniversalBaker.Build(cfg);
+        var r = cfg.animated ? UniversalBaker.BuildAnimated(cfg) : UniversalBaker.Build(cfg);
         if (!r.ok) { status = "Bake FAILED: " + r.error; return; }
         cur.skel = ModelRegistry.ParseGuid(r.skeletonGuid);
         cur.atlas = ModelRegistry.ParseGuid(r.atlasGuid);
+        cur.clip = cfg.animated ? ModelRegistry.ParseGuid(r.clipGuid) : new int[4];   // static models carry {0,0,0,0}
         ModelRegistry.Upsert(cur);
         RefreshList();
         selected = System.Array.IndexOf(existing, cur.resourceName); if (selected < 0) selected = 0;
-        status = $"Baked '{cur.resourceName}' -> '{cur.pawnDescription}'  (raw bbox {r.bbox})\nskeleton {r.skeletonGuid}\nNow rebuild the mod + relaunch.";
+        status = cfg.animated
+            ? $"Baked ANIMATED '{cur.resourceName}' -> '{cur.pawnDescription}'\nskeleton {r.skeletonGuid}\nclip {r.clipGuid}\nNow rebuild the mod + relaunch."
+            : $"Baked '{cur.resourceName}' -> '{cur.pawnDescription}'  (raw bbox {r.bbox})\nskeleton {r.skeletonGuid}\nNow rebuild the mod + relaunch.";
         Debug.Log("[Factory] " + status);
     }
 }
