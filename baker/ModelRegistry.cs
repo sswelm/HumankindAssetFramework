@@ -136,6 +136,18 @@ public static class ModelRegistry
         Save(list);
     }
 
+    // Remove a model from the registry by resource name. Returns true if something was removed. The baked skeleton/atlas
+    // assets are left in the project (harmless); this just stops the plugin injecting that model.
+    public static bool Remove(string resourceName)
+    {
+        var list = Load();
+        int before = list.Count;
+        list.RemoveAll(m => m.resourceName == resourceName);
+        if (list.Count == before) return false;
+        Save(list);
+        return true;
+    }
+
     public static int[] ParseGuid(string csv)
     {
         var p = (csv ?? "").Split(',');

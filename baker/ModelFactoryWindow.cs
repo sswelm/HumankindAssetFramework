@@ -51,6 +51,21 @@ public class ModelFactoryWindow : EditorWindow
         {
             int sel = EditorGUILayout.Popup("3D resource", selected, existing);
             if (GUILayout.Button("Refresh", GUILayout.Width(70))) RefreshList();
+            // Remove the selected registry entry (disabled on <New>). Prompts, then drops it from enc_models.json.
+            using (new EditorGUI.DisabledScope(selected <= 0))
+                if (GUILayout.Button("Remove", GUILayout.Width(70)))
+                {
+                    var name = cur.resourceName;
+                    if (!string.IsNullOrEmpty(name) &&
+                        EditorUtility.DisplayDialog("Remove model",
+                            $"Remove '{name}' from the registry? The plugin will stop injecting it on next launch. " +
+                            "(The baked skeleton/atlas assets stay in the project.)", "Remove", "Cancel"))
+                    {
+                        ModelRegistry.Remove(name);
+                        selected = 0; cur = new ModelDef(); RefreshList(); GUI.FocusControl(null);
+                        status = $"Removed '{name}' from the registry.";
+                    }
+                }
             if (sel != selected) { selected = sel; OnSelectResource(); GUI.FocusControl(null); }
         }
         EditorGUILayout.Space();
