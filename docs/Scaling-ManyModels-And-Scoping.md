@@ -843,13 +843,15 @@ animation for a stationary air unit.
 it. (2) otherwise → pick a donor with **no** animated sub-parts **and** a full idle/move animation set; check the sub-mesh
 log shows `1 skinned sub-mesh`.
 
-## 12. Animated custom models — proven feasible; the editor pipeline works (2026-07-03)
+## 12. Animated custom models — ✅ DONE: a model plays its own animation in-game (2026-07-03)
 
-**The big one: a custom model's own skeletal animation CAN be baked into Amplitude's format and bound to an injected
-model.** Prompted by the ReconDrone — the Sketchfab drone GLB ships a real **`hover`** skeletal animation (spinning
-props). Static injection can't spin props (see §11's articulation ceiling), but the animation *exists in the file*, so
-the question became: can we feed it through Amplitude's own tooling? **Answer: yes** — Phases 1–2 below are proven; Phase
-3 (runtime playback) is planned but not yet built.
+**The big one, achieved end-to-end: a custom model's own skeletal animation is baked into Amplitude's format, injected,
+and played in-game — the ReconDrone spins its own propellers.** First runtime-injected *animated* model in Humankind.
+This section is a running log of the journey (feasibility → editor bake → runtime playback → polish → multi-instance),
+so the phase markers below are historical; **the net result is complete and shipping.** Prompted by the drone GLB
+shipping a real **`hover`** skeletal clip: static injection can't spin props (§11's articulation ceiling), but the
+animation *exists in the file*, so we fed it through Amplitude's own tooling and drove the pawn onto it. Skip to
+**"Phase 3 COMPLETE"** and **"Multi-instance fix"** for the final working recipe; the earlier phases show how we got there.
 
 ### What the model must have
 Inspect the source with Blender: it needs an **armature + a skeletal AnimationClip** (bone animation, not object/turntable).
@@ -883,8 +885,8 @@ A `ClipCollection` is a **pre-baked** format (`skeleton` GUID + `poseDataAsset` 
 "control 2's position…" `ArgumentException` + a null-ref in `ModuleEditor.OnModuleBuildGUI` — a repaint-vs-layout glitch
 in the build window, NOT a bake failure. Close/reopen the window to clear it.)*
 
-### Phase 3 — runtime playback ⏳ PLANNED (not yet built)
-The remaining integration, with one real unknown:
+### Phase 3 — runtime playback (the plan, since realized — see "Phase 3 COMPLETE" below)
+This was the integration plan at the time; it worked out as written. Kept for the reasoning:
 1. **Register the ClipCollection** so the engine assigns `hover` an `animationId`. Clip collections load from an
    **`AnimationManagerContent`** asset — the mod already has one (`ENC_ModAnimationContent`, currently empty
    `MeshCollections`/`AnimationClipCollections`). Two routes: add the skeleton+clip to that asset (data, loads at startup),
