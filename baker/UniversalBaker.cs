@@ -30,6 +30,7 @@ public struct BakeConfig
     public bool    windingFix;      // true = rewind faces outward from the origin (documented CAD winding fix) so single-sided meshes render, no geometry doubling
     public bool    heightUV;        // true = override UVs with U=length, V=height so a vertical-gradient albedo maps by height (black skirt low, grey hull high)
     public int     targetTris;      // >0 = quadric-decimate the source to ~this many triangles (Blender) before baking, to fit the engine's shared vertex/index buffer
+    public string  stripParts;      // bake-time (Blender): comma-separated object-name substrings to DELETE from the source before baking (e.g. a helicopter's own rotor so the donor's spinning rotor shows through). Empty = keep everything.
     public bool    animated;        // true = ANIMATED path: bake from the model's OWN armature + clip (Skeleton + ClipCollection), not the procedural vehicle rig
     public string  animClip;        // ANIMATED only: name of the clip to bake when the model has several (e.g. "hover"); empty = the assigned/first action
     public string  animateBones;    // ANIMATED only: comma-separated bone-name prefixes to keep animation on (e.g. "prop,rotor"); empty = keep the whole clip
@@ -264,6 +265,16 @@ public static class UniversalBaker
         if (!string.IsNullOrEmpty(cfg.modelFile) && (!cfg.reuseExtracted || !haveObj))
         {
             string srcFile = cfg.modelFile;
+            // Optional PART STRIP: delete named objects (+ children) from the source via Blender before anything else,
+            // producing a cleaned GLB the rest of the pipeline bakes — e.g. a helicopter's own rotor so the donor's
+            // spinning rotor shows through. Runs first so the reducer/converter only ever see the kept geometry.
+            if (!string.IsNullOrWhiteSpace(cfg.stripParts))
+            {
+                if (!BlenderAvailable()) return Fail("'Strip parts' needs Blender installed (auto-detected, or set EditorPrefs 'ENC.blenderPath').");
+                string stripped = Path.Combine(Path.GetTempPath(), name + "_stripped.glb");
+                if (!StripPartsViaBlender(srcFile, stripped, cfg.stripParts)) return Fail("part stripping failed (see console)");
+                srcFile = stripped;
+            }
             // Optional VERTEX REDUCER: quadric-decimate a heavy model via Blender (per-object, so thin parts survive)
             // down to ~targetTris, producing a reduced GLB the normal path then bakes — no offline tooling needed.
             // targetTris is a CEILING, not a quota: a model already under it passes through unchanged (decimate ratio
@@ -760,6 +771,34 @@ public static class UniversalBaker
     }
 
     // Reduce any Blender-importable model (glb/gltf/obj/fbx) to ~targetTris via headless Blender + the bundled
+    // strip_parts.py: delete named objects (+ their children) from the source, exporting a cleaned GLB the Factory bakes.
+    static bool StripPartsViaBlender(string src, string outGlb, string substrings)
+    {
+        if (!File.Exists(src)) { Debug.LogError("[Factory] strip: model file not found: " + src); return false; }
+        string proj = Directory.GetParent(Application.dataPath).FullName;
+        string script = Path.Combine(proj, "Tools", "strip_parts.py");
+        if (!File.Exists(script)) { Debug.LogError("[Factory] bundled strip_parts.py missing: " + script); return false; }
+        string blender = FindBlender();
+        var psi = new System.Diagnostics.ProcessStartInfo(blender, $"--background --python \"{script}\" -- \"{src}\" \"{outGlb}\" \"{substrings}\"")
+        { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        try
+        {
+            if (File.Exists(outGlb)) File.Delete(outGlb);
+            using (var p = System.Diagnostics.Process.Start(psi))
+            {
+                var errTask = System.Threading.Tasks.Task.Run(() => p.StandardError.ReadToEnd());   // drain stderr off-thread (deadlock-safe)
+                string o = p.StandardOutput.ReadToEnd();
+                p.WaitForExit();
+                string e = errTask.GetAwaiter().GetResult();
+                if (!string.IsNullOrWhiteSpace(o)) Debug.Log("[strip] " + o.Trim());
+                if (!string.IsNullOrWhiteSpace(e)) Debug.LogWarning("[strip] " + e.Trim());
+                if (p.ExitCode != 0 || !File.Exists(outGlb)) { Debug.LogError("[Factory] Blender strip produced no GLB (exit " + p.ExitCode + ")."); return false; }
+                return true;
+            }
+        }
+        catch (Exception ex) { Debug.LogError("[Factory] could not run Blender strip ('" + blender + "'): " + ex.Message); return false; }
+    }
+
     // mesh_reduce.py (per-object quadric decimation), exporting a reduced GLB the Factory then bakes.
     static bool ReduceViaBlender(string src, string outGlb, int targetTris)
     {

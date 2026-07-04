@@ -252,6 +252,18 @@ public class ModelFactoryWindow : EditorWindow
             EditorGUILayout.HelpBox("Reduce-to-tris uses Blender (quadric decimation) — Blender wasn't found, so Bake will " +
                 "fail. Either set this to 0, use 'Convert grid' below (Blender-free GLB decimation), or install Blender / " +
                 "set its path in Settings above.", MessageType.Warning);
+        // Strip parts — BAKE-TIME (Blender). Deletes objects from YOUR model before baking (mirror of Hide donor meshes,
+        // which acts on the DONOR at runtime). Use it to drop your model's own rotor so the donor's spinning rotor shows
+        // through, or to remove a crew figure / weapon pod. Comma-separated object-name substrings (case-insensitive).
+        cur.stripParts = EditorGUILayout.TextField(new GUIContent("Strip parts (names)",
+            "BAKE-TIME: comma-separated object-name substrings to DELETE from your model before baking (each match takes " +
+            "its children too). Use it to remove parts you don't want baked in — e.g. a helicopter's OWN rotor (so the " +
+            "donor's animated rotor spins through), a crew figure, or a weapon pod. Case-insensitive substring match on the " +
+            "source object names. This is the mirror of 'Hide donor meshes' (which hides the DONOR's parts at runtime) — " +
+            "this edits YOUR model at bake time. Needs Blender. Empty = keep everything."), cur.stripParts ?? "");
+        if (!string.IsNullOrWhiteSpace(cur.stripParts) && !UniversalBaker.BlenderAvailable())
+            EditorGUILayout.HelpBox("Strip parts uses Blender — it wasn't found, so Bake will fail. Clear the field or set " +
+                "Blender's path in Settings above.", MessageType.Warning);
         // Hide donor meshes — runtime field. The donor's fragment names only exist at runtime, so Pick reads them back
         // from the BepInEx log (the plugin dumps "[Uni] <name> donor fragment[i] mesh='...'" once per launch).
         using (new EditorGUILayout.HorizontalScope())
@@ -619,6 +631,7 @@ public class ModelFactoryWindow : EditorWindow
             rotationEuler = cur.rotation, positionOffset = cur.position, size = cur.size,
             normals = (NormalsMode)cur.normalsMode, smoothingAngle = cur.smoothingAngle, convertGrid = cur.convertGrid,
             reuseExtracted = cur.reuseExtracted, doubleSided = cur.doubleSided, windingFix = cur.windingFix, heightUV = cur.heightUV, targetTris = cur.targetTris,
+            stripParts = (cur.stripParts ?? "").Trim(),
             animated = cur.animated, animClip = (cur.animClip ?? "").Trim(), animateBones = (cur.animateBones ?? "").Trim()
         };
         var r = cfg.animated ? UniversalBaker.BuildAnimated(cfg) : UniversalBaker.Build(cfg);
