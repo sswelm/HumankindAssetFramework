@@ -8,7 +8,9 @@ you're changing the plugin.
 Needs the **.NET SDK**. Put a `References\` folder next to the `.csproj` containing:
 
 - `BepInEx.dll` + `0Harmony.dll` — from `<Humankind>\BepInEx\core\`
-- `UnityEngine*.dll` + `Amplitude.Mercury.Animation.dll` — from `<Humankind>\Humankind_Data\Managed\`
+- `UnityEngine*.dll` + `Amplitude.Mercury.Animation.dll` + `Newtonsoft.Json.dll` — from `<Humankind>\Humankind_Data\Managed\`
+  (Newtonsoft is provided by the game at runtime — used for robust registry parsing, since `UnityEngine.JsonUtility`
+  silently returns empty in the game's Mono runtime; `Private=false`, so it's not copied into the built plugin)
 
 Then:
 

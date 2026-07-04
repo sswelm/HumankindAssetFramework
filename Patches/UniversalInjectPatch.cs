@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using BepInEx;
 using HarmonyLib;
+using Newtonsoft.Json.Linq;             // provided by the game (mod.io); robust registry parse where JsonUtility no-ops in the game runtime
 
 namespace ENCAccessProof
 {
@@ -34,19 +35,6 @@ namespace ENCAccessProof
         public bool repointed;
     }
 
-    // JSON shapes matching the editor's ModelDef (JsonUtility binds by field name; extra fields are ignored).
-    // Full mirror of the editor's ModelDef so JsonUtility maps every field cleanly (it can return models=null if the
-    // JSON has nested objects like rotation/position that the target class doesn't declare).
-    [Serializable] internal class JsonModel
-    {
-        public string resourceName, pawnDescription, modelFile, hideMeshes;
-        public UnityEngine.Vector3 rotation, position;
-        public float size, smoothingAngle;
-        public int normalsMode, convertGrid;
-        public int[] skel, atlas;
-    }
-    [Serializable] internal class JsonModelList { public List<JsonModel> models; }
-
     internal static class UniversalInject
     {
         const BindingFlags BF = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
@@ -64,8 +52,37 @@ namespace ENCAccessProof
                 if (!File.Exists(path)) { Plugin.Log.LogInfo("[Uni] no registry at " + path); return; }
                 var text = File.ReadAllText(path);
 
-                // direct parse of the known fields (JsonUtility returns models=null on this nested structure). Each model
-                // has exactly one of each field in document order, so the i-th match of each belongs to model i.
+                // PRIMARY: Newtonsoft (the game's own copy) parses each model as an OBJECT, so fields stay with their
+                // model — robust to a missing/reordered field on any single model, unlike the index-aligned regex below.
+                // UnityEngine.JsonUtility silently returns empty in the game's Mono runtime (works only in the editor),
+                // so it's not usable here; Newtonsoft works in-process. Regex is kept as a last-resort fallback.
+                try
+                {
+                    var models = JObject.Parse(text)["models"] as JArray;
+                    if (models != null && models.Count > 0)
+                    {
+                        int A(JToken arr, int k) => (arr is JArray a && k < a.Count) ? (int)a[k] : 0;
+                        float Fp(JToken o, string k) => o?[k] != null ? (float)o[k] : 0f;
+                        foreach (var m in models)
+                        {
+                            var s = m["skel"]; var t = m["atlas"]; var c = m["clip"]; var p = m["position"];
+                            entries.Add(new ModelEntry
+                            {
+                                resourceName = (string)m["resourceName"] ?? "", pawnDescription = (string)m["pawnDescription"] ?? "", hideMeshes = (string)m["hideMeshes"] ?? "",
+                                sa = A(s, 0), sb = A(s, 1), sc = A(s, 2), sd = A(s, 3),
+                                ta = A(t, 0), tb = A(t, 1), tc = A(t, 2), td = A(t, 3),
+                                ca = A(c, 0), cb = A(c, 1), cc = A(c, 2), cd = A(c, 3),
+                                position = new UnityEngine.Vector3(Fp(p, "x"), Fp(p, "y"), Fp(p, "z")),
+                            });
+                        }
+                        Plugin.Log.LogInfo($"[Uni] parsed {entries.Count} entr(ies) via Newtonsoft [" + string.Join(", ", entries.Select(e => e.resourceName + "->" + e.pawnDescription)) + "]");
+                        return;
+                    }
+                }
+                catch (Exception ex) { Plugin.Log.LogWarning("[Uni] Newtonsoft parse failed (" + ex.Message + "); using regex fallback"); entries.Clear(); }
+
+                // FALLBACK: field-by-field regex. Each model has exactly one of each field in document order, so the i-th
+                // match of each belongs to model i (fragile only if a MIDDLE model omits a field — the object parse above avoids that).
                 const string i4 = @"\[\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\]";
                 var rn = Regex.Matches(text, "\"resourceName\"\\s*:\\s*\"([^\"]*)\"");
                 var pd = Regex.Matches(text, "\"pawnDescription\"\\s*:\\s*\"([^\"]*)\"");
