@@ -53,12 +53,20 @@ Built to work on a stranger's machine, not just the author's:
   its own runtime — adopters don't need a .NET SDK or runtime.
 - **One injection path.** A single `UniversalInject` drives every model from the registry (the old per-unit and
   content-merge patches are retired), so there's one code path to understand and one to trust.
+- **Guided, not guessy.** Clip / bone / hide-donor fields are Pick-driven (read from the model + the plugin log); a
+  Settings panel shows the detected Blender path with an in-UI override; and every feature that needs Blender warns
+  *before* a failed bake. A cheap no-Blender probe greys out **Animated** for models that carry no animation.
 
 ## How it works
 **Editor — the Universal Model Factory** (`baker/`, *Tools ▸ Universal Model Factory*): pick a target unit + a model
-file, set rotation / position / size / normals, **Bake**. `UniversalBaker` imports it (copying sibling textures so
-multi-material albedos resolve), packs one atlas across all materials, remaps UVs, and bakes an Amplitude `Skeleton` on
-the proven vehicle rig; `ModelRegistry` writes `enc_models.json` into the auto-detected `BepInEx/config`.
+file, set rotation / position / size / normals, **Bake**. For a **static** model, `UniversalBaker` imports it (copying
+sibling textures so multi-material albedos resolve), packs one atlas across all materials, remaps UVs, and bakes an
+Amplitude `Skeleton` on the proven single-bone vehicle rig. Tick **Animated** and `UniversalBaker.BuildAnimated` takes a
+parallel path that keeps the model's **own armature + clip**: Blender slims the rig (`Tools/rig_anim.py`), then it bakes a
+`Skeleton` + `ClipCollection` + atlas (Scale Factor auto-computed from *Size*, frame range clamped, and the FBX isolated
+in a per-model `anim/` subfolder so exactly one clip is collected). The **Clip / Animate-only-bones / Hide-donor-meshes**
+fields are Pick-driven — read from the model's glTF and the plugin's runtime log, so you never type a bone or clip name.
+Either way, `ModelRegistry` writes `enc_models.json` into the auto-detected `BepInEx/config`.
 
 **Runtime — `UniversalInject`** (`Patches/`): one patch, any number of models. Reads the registry, registers each baked
 skeleton, and on `AddOn.Load` repoints the matching pawn onto it by **self-discovery** (reads the host's body-mesh name,
@@ -78,8 +86,8 @@ licenses in [**CREDITS.md**](CREDITS.md) (CC-BY requires attribution).
 ## Config
 - **Registry:** `<Humankind>\BepInEx\config\enc_models.json` — one entry per model (pawn description, skeleton + atlas
   GUIDs, transform, reducer/shading flags). Animated models add a **`"clip": [a,b,c,d]`** field (the baked
-  `ClipCollection` GUID); static models leave it `[0,0,0,0]`. The Factory auto-detects the path (Settings panel to
-  override); the plugin reads it at launch.
+  `ClipCollection` GUID) plus `animated` / `animClip` / `animateBones`; static models leave `clip` `[0,0,0,0]`. The Factory
+  auto-detects the path (Settings panel to override); the plugin reads it at launch.
 - **Plugin cfg:** `…\community.humankind.encaccessproof.cfg` — F8 opens an in-game scan/feedback window.
 
 ## Known issues
@@ -97,14 +105,17 @@ cause). Also: [FBX-to-Humankind-Pipeline.md](docs/FBX-to-Humankind-Pipeline.md),
 
 ## Toward a Unity package
 Goal: ship the Factory as a distributable Unity package. **Done:** zero-config path auto-detection, self-contained
-converter (no .NET dependency), one consolidated injection path, and full multi-material support. **Remaining:** neutral
-naming (drop "ENC" → `HumankindModelFactory`), package scaffolding (`package.json` / asmdef / LICENSE), single-DLL plugin
-packaging, an install guide + quickstart, and (optional) multi-material GLB. Editor scripts are mirrored in `baker/`
-(the ENCReload mod repo tracks only its `Databases`).
+converter (no .NET dependency), one consolidated injection path, full multi-material support, and **one-click animated
+import** (own rig + clip, Pick-driven fields). **Remaining:** neutral naming (drop "ENC" → `HumankindModelFactory`),
+package scaffolding (`package.json` / asmdef / LICENSE), single-DLL plugin packaging, an install guide + quickstart, and
+(optional) multi-material GLB. Editor scripts are mirrored in `baker/` (the ENCReload mod repo tracks only its
+`Databases`).
 
 ## Build (plugin)
 Needs the .NET SDK. Put a `References\` folder next to the `.csproj` with `BepInEx.dll` + `0Harmony.dll` (from
 `BepInEx\core\`) and `UnityEngine*.dll` + `Amplitude.Mercury.Animation.dll` (from `Humankind_Data\Managed\`), then
 `dotnet build -c Release` and copy `bin\Release\ENCAccessProof.dll` → `<Humankind>\BepInEx\plugins\`. **Blender** is
-only needed for `.blend` import (auto-detected). The GLB path uses the **self-contained** `Tools/glbconv/glbconv.exe`
-(no .NET install required); a `dotnet glbconv.dll` fallback exists for local dev.
+needed for `.blend` import, **animated-model import**, and Reduce-to-tris decimation — auto-detected under Program Files,
+or point the Settings override / `EditorPrefs 'ENC.blenderPath'` at `blender.exe`. Static GLB / OBJ / FBX bakes need no
+Blender: the GLB path uses the **self-contained** `Tools/glbconv/glbconv.exe` (no .NET install required, and its
+`Convert grid` option decimates without Blender); a `dotnet glbconv.dll` fallback exists for local dev.
