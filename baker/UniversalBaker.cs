@@ -227,8 +227,15 @@ public static class UniversalBaker
             if (File.Exists(outFbx)) File.Delete(outFbx);
             using (var p = System.Diagnostics.Process.Start(psi))
             {
-                string o = p.StandardOutput.ReadToEnd(), e = p.StandardError.ReadToEnd();
+                // Drain stderr on a pool thread while THIS thread reads stdout. Reading stdout-then-stderr sequentially
+                // deadlocks: Blender is verbose on stderr, so its ~4KB stderr pipe buffer fills, the child blocks writing
+                // it, never exits, stdout never EOFs, and we hang forever on the stdout read -> frozen Unity UI thread.
+                // Task.Run (not ReadToEndAsync().Result) so the read runs on a pool thread with no SynchronizationContext
+                // capture -- blocking the main thread on GetResult() can't deadlock against a captured continuation.
+                var errTask = System.Threading.Tasks.Task.Run(() => p.StandardError.ReadToEnd());
+                string o = p.StandardOutput.ReadToEnd();
                 p.WaitForExit();
+                string e = errTask.GetAwaiter().GetResult();
                 if (!string.IsNullOrWhiteSpace(o)) Debug.Log("[rig_anim] " + o.Trim());
                 if (!string.IsNullOrWhiteSpace(e)) Debug.LogWarning("[rig_anim] " + e.Trim());
                 if (p.ExitCode != 0 || !File.Exists(outFbx)) { Debug.LogError("[Factory] rig_anim produced no FBX (exit " + p.ExitCode + ")."); return false; }
@@ -712,8 +719,15 @@ public static class UniversalBaker
         {
             using (var p = System.Diagnostics.Process.Start(psi))
             {
-                string o = p.StandardOutput.ReadToEnd(), e = p.StandardError.ReadToEnd();
+                // Drain stderr on a pool thread while THIS thread reads stdout. Reading stdout-then-stderr sequentially
+                // deadlocks: Blender is verbose on stderr, so its ~4KB stderr pipe buffer fills, the child blocks writing
+                // it, never exits, stdout never EOFs, and we hang forever on the stdout read -> frozen Unity UI thread.
+                // Task.Run (not ReadToEndAsync().Result) so the read runs on a pool thread with no SynchronizationContext
+                // capture -- blocking the main thread on GetResult() can't deadlock against a captured continuation.
+                var errTask = System.Threading.Tasks.Task.Run(() => p.StandardError.ReadToEnd());
+                string o = p.StandardOutput.ReadToEnd();
                 p.WaitForExit();
+                string e = errTask.GetAwaiter().GetResult();
                 if (!string.IsNullOrWhiteSpace(o)) Debug.Log("[glbconv] " + o.Trim());
                 if (!string.IsNullOrWhiteSpace(e)) Debug.LogWarning("[glbconv] " + e.Trim());
                 return p.ExitCode == 0;
@@ -760,8 +774,15 @@ public static class UniversalBaker
             if (File.Exists(outGlb)) File.Delete(outGlb);
             using (var p = System.Diagnostics.Process.Start(psi))
             {
-                string o = p.StandardOutput.ReadToEnd(), e = p.StandardError.ReadToEnd();
+                // Drain stderr on a pool thread while THIS thread reads stdout. Reading stdout-then-stderr sequentially
+                // deadlocks: Blender is verbose on stderr, so its ~4KB stderr pipe buffer fills, the child blocks writing
+                // it, never exits, stdout never EOFs, and we hang forever on the stdout read -> frozen Unity UI thread.
+                // Task.Run (not ReadToEndAsync().Result) so the read runs on a pool thread with no SynchronizationContext
+                // capture -- blocking the main thread on GetResult() can't deadlock against a captured continuation.
+                var errTask = System.Threading.Tasks.Task.Run(() => p.StandardError.ReadToEnd());
+                string o = p.StandardOutput.ReadToEnd();
                 p.WaitForExit();
+                string e = errTask.GetAwaiter().GetResult();
                 if (!string.IsNullOrWhiteSpace(o)) Debug.Log("[reduce] " + o.Trim());
                 if (!string.IsNullOrWhiteSpace(e)) Debug.LogWarning("[reduce] " + e.Trim());
                 if (p.ExitCode != 0 || !File.Exists(outGlb)) { Debug.LogError("[Factory] Blender reduce produced no GLB (exit " + p.ExitCode + ")."); return false; }
@@ -785,8 +806,15 @@ public static class UniversalBaker
             if (File.Exists(outGlb)) File.Delete(outGlb);
             using (var p = System.Diagnostics.Process.Start(psi))
             {
-                string o = p.StandardOutput.ReadToEnd(), e = p.StandardError.ReadToEnd();
+                // Drain stderr on a pool thread while THIS thread reads stdout. Reading stdout-then-stderr sequentially
+                // deadlocks: Blender is verbose on stderr, so its ~4KB stderr pipe buffer fills, the child blocks writing
+                // it, never exits, stdout never EOFs, and we hang forever on the stdout read -> frozen Unity UI thread.
+                // Task.Run (not ReadToEndAsync().Result) so the read runs on a pool thread with no SynchronizationContext
+                // capture -- blocking the main thread on GetResult() can't deadlock against a captured continuation.
+                var errTask = System.Threading.Tasks.Task.Run(() => p.StandardError.ReadToEnd());
+                string o = p.StandardOutput.ReadToEnd();
                 p.WaitForExit();
+                string e = errTask.GetAwaiter().GetResult();
                 if (!string.IsNullOrWhiteSpace(o)) Debug.Log("[blender] " + o.Trim());
                 if (!string.IsNullOrWhiteSpace(e)) Debug.LogWarning("[blender] " + e.Trim());
                 if (p.ExitCode != 0 || !File.Exists(outGlb)) { Debug.LogError("[Factory] Blender produced no GLB (exit " + p.ExitCode + ")."); return false; }
