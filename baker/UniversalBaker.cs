@@ -889,4 +889,34 @@ public static class UniversalBaker
         return true;
     }
     static Type[] SafeTypes(Assembly a) { try { return a.GetTypes(); } catch (ReflectionTypeLoadException e) { return e.Types.Where(t => t != null).ToArray(); } catch { return Array.Empty<Type>(); } }
+
+    [Serializable] class GltfNameNode { public string name; }
+    [Serializable] class GltfNameDoc { public GltfNameNode[] nodes; }
+    // Object/node names in a GLB/glTF model, for the Strip-parts Pick. Editor-side, so UnityEngine.JsonUtility is fine
+    // (its empty-result quirk is only the GAME's Mono runtime). Other formats -> empty (type names by hand). Drops the
+    // glTF "Object_NN" import wrappers and dedupes, so the Pick list is the meaningful part names.
+    public static string[] ListModelObjectNames(string modelFile)
+    {
+        if (string.IsNullOrWhiteSpace(modelFile) || !File.Exists(modelFile)) return new string[0];
+        string ext = Path.GetExtension(modelFile).ToLowerInvariant();
+        try
+        {
+            string json;
+            if (ext == ".glb")
+            {
+                var b = File.ReadAllBytes(modelFile);
+                if (b.Length < 20) return new string[0];
+                int jsonLen = BitConverter.ToInt32(b, 12);
+                json = System.Text.Encoding.UTF8.GetString(b, 20, Mathf.Min(jsonLen, b.Length - 20));
+            }
+            else if (ext == ".gltf") json = File.ReadAllText(modelFile);
+            else return new string[0];
+            var doc = JsonUtility.FromJson<GltfNameDoc>(json);
+            if (doc == null || doc.nodes == null) return new string[0];
+            return doc.nodes.Where(n => n != null && !string.IsNullOrEmpty(n.name)
+                                        && !n.name.StartsWith("Object_", StringComparison.OrdinalIgnoreCase))
+                            .Select(n => n.name).Distinct().OrderBy(s => s).ToArray();
+        }
+        catch (Exception e) { Debug.LogWarning("[Factory] list object names: " + e.Message); return new string[0]; }
+    }
 }

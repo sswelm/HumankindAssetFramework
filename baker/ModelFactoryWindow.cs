@@ -255,12 +255,34 @@ public class ModelFactoryWindow : EditorWindow
         // Strip parts — BAKE-TIME (Blender). Deletes objects from YOUR model before baking (mirror of Hide donor meshes,
         // which acts on the DONOR at runtime). Use it to drop your model's own rotor so the donor's spinning rotor shows
         // through, or to remove a crew figure / weapon pod. Comma-separated object-name substrings (case-insensitive).
-        cur.stripParts = EditorGUILayout.TextField(new GUIContent("Strip parts (names)",
-            "BAKE-TIME: comma-separated object-name substrings to DELETE from your model before baking (each match takes " +
-            "its children too). Use it to remove parts you don't want baked in — e.g. a helicopter's OWN rotor (so the " +
-            "donor's animated rotor spins through), a crew figure, or a weapon pod. Case-insensitive substring match on the " +
-            "source object names. This is the mirror of 'Hide donor meshes' (which hides the DONOR's parts at runtime) — " +
-            "this edits YOUR model at bake time. Needs Blender. Empty = keep everything."), cur.stripParts ?? "");
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            cur.stripParts = EditorGUILayout.TextField(new GUIContent("Strip parts (names)",
+                "BAKE-TIME: comma-separated object-name substrings to DELETE from your model before baking (each match takes " +
+                "its children too). Use it to remove parts you don't want baked in — e.g. a helicopter's OWN rotor (so the " +
+                "donor's animated rotor spins through), a crew figure, or a weapon pod. Case-insensitive substring match on the " +
+                "source object names. This is the mirror of 'Hide donor meshes' (which hides the DONOR's parts at runtime) — " +
+                "this edits YOUR model at bake time. Needs Blender. Empty = keep everything."), cur.stripParts ?? "");
+            if (GUILayout.Button(new GUIContent("Pick", "List the object names in the Model file so you can choose which to strip (reads GLB/glTF directly)."), GUILayout.Width(70)))
+            {
+                var r = GUILayoutUtility.GetLastRect();
+                var names = UniversalBaker.ListModelObjectNames((cur.modelFile ?? "").Trim());
+                if (names.Length == 0)
+                    EditorUtility.DisplayDialog("Strip parts",
+                        "Couldn't read object names from the Model file.\n\n" +
+                        "Pick reads names directly from GLB / glTF — make sure the Model file above points at a .glb/.gltf. " +
+                        "For FBX / OBJ / .blend, open the model in Blender to see the object names and type the substrings by " +
+                        "hand (each match strips that object + its children).", "OK");
+                else
+                    new StringDropdown(new AdvancedDropdownState(), names, names, "Model objects", m =>
+                    {
+                        var set = (cur.stripParts ?? "").Split(',').Select(s => s.Trim()).Where(s => s.Length > 0).ToList();
+                        if (!set.Contains(m)) set.Add(m);
+                        cur.stripParts = string.Join(",", set);
+                        Repaint();
+                    }).Show(r);
+            }
+        }
         if (!string.IsNullOrWhiteSpace(cur.stripParts) && !UniversalBaker.BlenderAvailable())
             EditorGUILayout.HelpBox("Strip parts uses Blender — it wasn't found, so Bake will fail. Clear the field or set " +
                 "Blender's path in Settings above.", MessageType.Warning);
