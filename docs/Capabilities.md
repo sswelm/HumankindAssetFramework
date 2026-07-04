@@ -35,8 +35,10 @@ see the [Factory Manual](Factory-Manual.md); for *how they work* see [Scaling-Ma
   `FxComponentMeshContentManager`). Overflow is silently dropped (missing/see-through geometry); the reducer exists to
   stay under it, and double-sided counts twice.
 - **Any format in:** GLB / glTF / OBJ / FBX, and **`.blend`** (auto-converted via an auto-detected Blender install).
-- **Correct textures out of the box:** the GLB→OBJ converter flips V (glTF is V-top, OBJ/Unity V-bottom), so skins map
-  right — the bug that made the Zumwalt's markings land on the superstructure, now fixed for every model.
+- **Correct textures out of the box:** custom skins land right-side-up — the bug that put the Zumwalt's markings on the
+  superstructure (a glTF-V-top vs OBJ/Unity-V-bottom mismatch) is reconciled during OBJ import, so every model's texture
+  maps correctly. (Note: the `glbconv` converter itself writes UVs *raw* — it does **not** flip V; the convention is
+  handled by Unity's OBJ import.)
 - **Texture isolation:** each model gets a private `FxOutputLayer` clone, so its skin never bleeds onto the vanilla donor
   unit — proven on screen with a custom cruiser and its donor corvette side-by-side, each keeping its own skin.
 - **Add a model = bake it.** The Factory writes the registry; the plugin picks it up on next launch.

@@ -17,8 +17,9 @@ Humankind.
 - **Heavy / single-sided / multi-material meshes, handled** — a built-in vertex reducer, a winding fix + double-sided
   fallback for CAD "sketch" meshes, height-based UVs, and an N-material atlas packer. Formats: GLB / glTF / OBJ / FBX /
   `.blend`.
-- **Correct, isolated textures.** The GLB→OBJ converter fixes the glTF V-flip so skins map right, and each model gets a
-  private `FxOutputLayer` so its skin never bleeds onto the donor.
+- **Correct, isolated textures.** Custom skins map right-side-up out of the box (the glTF-V-top vs OBJ/Unity-V-bottom
+  convention is reconciled during OBJ import), and each model gets a private `FxOutputLayer` so its skin never bleeds
+  onto the donor.
 - **Add a model = bake it.** The Factory writes the JSON registry; the plugin picks it up on next launch — no per-model code.
 
 Full detail — the shared-buffer ceiling, texture flip, per-model isolation, limitations — in

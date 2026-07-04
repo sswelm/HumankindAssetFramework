@@ -171,8 +171,10 @@ constant, derive keys + filename from it, strip dead scaffolding. Do it as one d
 
 ---
 
-## Doc reconciliation TODO
+## Doc reconciliation — RESOLVED (2026-07-04)
 
-The README + `Capabilities.md` state the GLB→OBJ converter "flips V (glTF is V-top, OBJ/Unity V-bottom)". The code does
-**not** flip V (`glbconv/Program.cs.src` copies UVs raw). Since custom skins render correctly in-game, the V handling
-must actually happen at Unity's OBJ import — confirm where, then correct the claim so the docs match the code.
+The README + `Capabilities.md` stated the GLB→OBJ converter "flips V". Investigation confirmed the code does **not**:
+`glbconv/Program.cs.src` copies UVs raw (`:45`, `:104`) and has **never** flipped V (no such change in its git history),
+and the baker's only "flips" are winding (face-order), not UV. Since custom skins render right-side-up in-game, the
+glTF-V-top ↔ OBJ/Unity-V-bottom convention is reconciled by **Unity's OBJ import**, not by our converter. The README and
+Capabilities.md have been corrected to say so.
