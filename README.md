@@ -71,6 +71,8 @@ The plugin's own cfg (`…\community.humankind.encaccessproof.cfg`) — press **
 - **How it works:** [Scaling-ManyModels-And-Scoping.md](docs/Scaling-ManyModels-And-Scoping.md) — architecture, per-model
   recipes, texture scoping, and the full debugging log (UV V-flip root cause; animated pipeline in §12).
 - **Build it:** [Building.md](docs/Building.md) — plugin build steps + the Blender dependency.
+- **Review / roadmap:** [Framework-Review.md](docs/Framework-Review.md) — full code-review findings (prioritized,
+  verified), cross-cutting themes, strengths, and the hardening + package-readiness fix order.
 - Also: [FBX-to-Humankind-Pipeline.md](docs/FBX-to-Humankind-Pipeline.md), [Custom3DInjection-Spec.md](docs/Custom3DInjection-Spec.md)
   (decompiled pipeline), [Custom3DModels-Findings-Shareable.md](docs/Custom3DModels-Findings-Shareable.md), [UnitPreview-Findings.md](docs/UnitPreview-Findings.md).
 
