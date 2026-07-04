@@ -523,7 +523,7 @@ namespace ENCAccessProof
         }
 
         static bool? anyAnimated;        // cached early-out: skip the per-pawn hook if no model is animated
-        static bool poseHookLogged, rescueLogged, posLogged;
+        static bool poseHookLogged, rescueLogged, posLogged, poseErrLogged;
 
         static ModelEntry AnimEntryFor(int skeletonId)
         {
@@ -595,7 +595,8 @@ namespace ENCAccessProof
                 pawnEntries.SetValue(entry, idx);
                 if (!poseHookLogged) { poseHookLogged = true; Plugin.Log.LogInfo($"[Uni] pose hook: '{e.resourceName}' -> Pose0 anim {e.animId} (skelId {skelId} -> {e.skeletonId}, desc {descId})"); }
             }
-            catch { }
+            // one-shot log: a bare catch here hid member renames after a game update (models just stopped animating, no clue why).
+            catch (Exception ex) { if (!poseErrLogged) { poseErrLogged = true; Plugin.Log.LogError("[Uni] OnPawnAdded (pose hook disabled this pawn): " + ex); } }
         }
 
         static void TickOne(ModelEntry e)
@@ -650,10 +651,18 @@ namespace ENCAccessProof
             catch (Exception e) { Plugin.Log.LogError("[Uni] atlas: " + e); return null; }
         }
 
+        // Memoize the Property/Field resolution per (type,name). OnPawnAdded resolves ~a dozen members per pawn-add on the
+        // game's hot path; caching the lookup (null included) turns those from member scans into dict hits. Semantics are
+        // identical to the old inline AccessTools calls (property-first, CanWrite for writes, field fallback). Main-thread only.
+        static readonly Dictionary<(Type, string), PropertyInfo> propCache = new Dictionary<(Type, string), PropertyInfo>();
+        static readonly Dictionary<(Type, string), FieldInfo> fieldCache = new Dictionary<(Type, string), FieldInfo>();
+        static PropertyInfo CachedProp(Type t, string name) { var k = (t, name); if (!propCache.TryGetValue(k, out var p)) propCache[k] = p = AccessTools.Property(t, name); return p; }
+        static FieldInfo CachedField(Type t, string name) { var k = (t, name); if (!fieldCache.TryGetValue(k, out var f)) fieldCache[k] = f = AccessTools.Field(t, name); return f; }
+
         static void SetMember(object o, string name, object val)
-        { var t = o.GetType(); var p = AccessTools.Property(t, name); if (p != null && p.CanWrite) { try { p.SetValue(o, val); return; } catch { } } var f = AccessTools.Field(t, name); if (f != null) { try { f.SetValue(o, val); } catch { } } }
+        { var t = o.GetType(); var p = CachedProp(t, name); if (p != null && p.CanWrite) { try { p.SetValue(o, val); return; } catch { } } var f = CachedField(t, name); if (f != null) { try { f.SetValue(o, val); } catch { } } }
         static object GetMember(object o, string name)
-        { if (o == null) return null; var t = o.GetType(); var p = AccessTools.Property(t, name); if (p != null) { try { return p.GetValue(o); } catch { } } var f = AccessTools.Field(t, name); if (f != null) { try { return f.GetValue(o); } catch { } } return null; }
+        { if (o == null) return null; var t = o.GetType(); var p = CachedProp(t, name); if (p != null) { try { return p.GetValue(o); } catch { } } var f = CachedField(t, name); if (f != null) { try { return f.GetValue(o); } catch { } } return null; }
         static object MakeGuid(int a, int b, int c, int d)
         { var gt = AccessTools.TypeByName("Amplitude.Framework.Guid"); if (gt == null) return null; var g = Activator.CreateInstance(gt);
           gt.GetField("a", BF)?.SetValue(g, a); gt.GetField("b", BF)?.SetValue(g, b); gt.GetField("c", BF)?.SetValue(g, c); gt.GetField("d", BF)?.SetValue(g, d); return g; }
