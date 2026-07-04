@@ -53,9 +53,17 @@ namespace ENCAccessProof
                                   "Registry-driven universal model injector (the Model Factory). Reads the model registry JSON " +
                                   "from this config folder and repoints each listed pawn definition onto its baked skeleton.");
 
-            new Harmony(GUID).PatchAll();
-            Log.LogInfo($"Model Factory plugin loaded. Press {ToggleKey.Value} in-game for the diagnostic window. " +
-                        $"UniversalInject={UniversalInjectOn.Value}");
+            // Patch each hook independently so a single missing Amplitude target (a game update renaming one type) only
+            // disables THAT hook -- instead of a null TargetMethod throwing out of PatchAll and failing the whole plugin.
+            var harmony = new Harmony(GUID);
+            int patched = 0;
+            foreach (var t in new[] { typeof(UniRegisterHook), typeof(UniRepointHook), typeof(UniPawnPoseHook) })
+            {
+                try { harmony.CreateClassProcessor(t).Patch(); patched++; }
+                catch (System.Exception ex) { Log.LogError($"[Uni] hook '{t.Name}' failed to apply (Amplitude API changed?): {ex.Message}"); }
+            }
+            Log.LogInfo($"Model Factory plugin loaded ({patched}/3 hooks patched). Press {ToggleKey.Value} in-game for the " +
+                        $"diagnostic window. UniversalInject={UniversalInjectOn.Value}");
         }
 
         private void Update()
