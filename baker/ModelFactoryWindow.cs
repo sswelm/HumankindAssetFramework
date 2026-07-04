@@ -42,13 +42,23 @@ public class ModelFactoryWindow : EditorWindow
     void OnDisable() { if (previewEditor != null) { UnityEngine.Object.DestroyImmediate(previewEditor); previewEditor = null; } }
 
     // Load the baked prefab (animated <name>_Preview, else static <name>_Model) and build an interactive preview editor.
-    void LoadPreview(string name)
+    // forceReimport: after a bake, the static path overwrites the mesh/prefab IN PLACE, so Unity can serve the preview a
+    // stale cached copy until a manual reimport. Force a synchronous reimport of the mesh + prefab so the preview is current.
+    void LoadPreview(string name, bool forceReimport = false)
     {
         if (previewEditor != null) { UnityEngine.Object.DestroyImmediate(previewEditor); previewEditor = null; }
         previewFor = name ?? "";
         if (string.IsNullOrEmpty(name)) return;
-        var go = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Resources/" + name + "/" + name + "_Preview.prefab")   // animated
-              ?? AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Resources/" + name + "_Model.prefab");                  // static
+        string animPath = "Assets/Resources/" + name + "/" + name + "_Preview.prefab";
+        string staticPath = "Assets/Resources/" + name + "_Model.prefab";
+        string path = AssetDatabase.LoadMainAssetAtPath(animPath) != null ? animPath
+                    : AssetDatabase.LoadMainAssetAtPath(staticPath) != null ? staticPath : null;
+        if (path == null) return;
+        if (forceReimport)
+            foreach (var dep in new[] { "Assets/Resources/" + name + "_ModelMesh.asset", path })
+                if (AssetDatabase.LoadMainAssetAtPath(dep) != null)
+                    AssetDatabase.ImportAsset(dep, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+        var go = AssetDatabase.LoadAssetAtPath<GameObject>(path);
         if (go != null) previewEditor = UnityEditor.Editor.CreateEditor(go);
     }
 
@@ -623,7 +633,7 @@ public class ModelFactoryWindow : EditorWindow
             ? $"Baked ANIMATED '{cur.resourceName}' -> '{cur.pawnDescription}'\nskeleton {r.skeletonGuid}\nclip {r.clipGuid}\nNow rebuild the mod + relaunch."
             : $"Baked '{cur.resourceName}' -> '{cur.pawnDescription}'  (raw bbox {r.bbox})\nskeleton {r.skeletonGuid}\nNow rebuild the mod + relaunch.";
         Debug.Log("[Factory] " + status);
-        LoadPreview(cur.resourceName);   // show the baked model right in the window
+        LoadPreview(cur.resourceName, forceReimport: true);   // show the just-baked model (force reimport so it isn't stale)
     }
 }
 

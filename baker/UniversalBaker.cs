@@ -561,6 +561,11 @@ public static class UniversalBaker
         mesh.RecalculateBounds();
         if (cfg.normals == NormalsMode.Faceted || mesh.normals == null || mesh.normals.Length != mesh.vertexCount) mesh.RecalculateNormals();
         mesh.RecalculateTangents();
+        // Re-bake = clean slate: delete prior outputs so nothing is overwritten IN PLACE. In-place overwrite leaves Unity
+        // serving a stale cached mesh/prefab to the skeleton bake below -> the shipped skeleton lags a bake behind and the
+        // ship renders 90 deg off in-game even though the (force-reimported) preview looks right. Fresh assets == first bake.
+        foreach (var old in new[] { "_ModelMesh.asset", "_Mat.mat", "_Model.prefab", "_Skeleton.asset" })
+            AssetDatabase.DeleteAsset("Assets/Resources/" + name + old);
         AssetDatabase.CreateAsset(mesh, "Assets/Resources/" + name + "_ModelMesh.asset");
 
         var mat = new Material(Shader.Find("Standard")) { name = name + "_Mat", mainTexture = atlas };
@@ -577,6 +582,11 @@ public static class UniversalBaker
         PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
         UnityEngine.Object.DestroyImmediate(root);
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
+        // A re-bake overwrites the mesh/prefab IN PLACE, so LoadAssetAtPath below can return Unity's STALE cached copy --
+        // which makes the skeleton bake from last bake's geometry and ship a skeleton lagging a bake behind (wrong
+        // orientation in-game while the preview looks right). Force a synchronous reimport so the skeleton reads fresh.
+        AssetDatabase.ImportAsset("Assets/Resources/" + name + "_ModelMesh.asset", ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+        AssetDatabase.ImportAsset(prefabPath, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
         var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
 
         var skelType = AppDomain.CurrentDomain.GetAssemblies().SelectMany(SafeTypes)

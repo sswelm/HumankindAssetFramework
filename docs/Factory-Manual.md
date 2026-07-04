@@ -196,6 +196,7 @@ strategic map.
 | **Body wobbles / "unbalanced flywheel"** | The clip animates the whole body → set **Animate only bones** to just the spinning group (e.g. `prop`). |
 | **A donor part shows through** (rotor, extra mesh) | **Hide donor meshes → Pick** it (after one launch so it's logged). If it's an *animated* donor sub-part, it can't be hidden — pick a cleaner donor. |
 | **Bake fails: "needs Blender"** | Install Blender or set its path in **Settings**. For static decimation without Blender, use **Convert grid** instead of Reduce-to-tris. |
+| **Re-baked static model is 90° off / tipped up in-game** (preview looks fine) | An older Factory shipped a **stale skeleton** on re-bake (the static outputs were overwritten in place, so the skeleton baked from cached geometry). Fixed now — the static path deletes its outputs and force-reimports before baking the skeleton, so a re-bake matches a first bake. Just **re-bake → rebuild → relaunch**. |
 | **Texture looks stale in the editor** | A Unity texture-residency quirk after a multi-material bake — open the source textures in the Project view and back. The in-game result is correct. |
 | **Multi-material GLB loses its material split** | Use **FBX** for multi-material models; GLB is fine for single-material. |
 
