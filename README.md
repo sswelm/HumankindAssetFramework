@@ -98,10 +98,13 @@ licenses in [**CREDITS.md**](CREDITS.md) (CC-BY requires attribution).
   loses its per-material split. Use **FBX** for multi-material models (fully supported); GLB is fine for single-material.
 
 ## Docs
-Full write-ups in [`docs/`](docs/) — **start with [Scaling-ManyModels-And-Scoping.md](docs/Scaling-ManyModels-And-Scoping.md)**
-(architecture, per-model recipes, texture scoping, `.blend` import, and the full debugging log incl. the UV V-flip root
-cause). Also: [FBX-to-Humankind-Pipeline.md](docs/FBX-to-Humankind-Pipeline.md), [Custom3DInjection-Spec.md](docs/Custom3DInjection-Spec.md)
-(decompiled pipeline), [Custom3DModels-Findings-Shareable.md](docs/Custom3DModels-Findings-Shareable.md), [UnitPreview-Findings.md](docs/UnitPreview-Findings.md).
+- **Using the Factory:** [**Factory-Manual.md**](docs/Factory-Manual.md) — the step-by-step user guide (every field, the
+  static + animated workflows, and a troubleshooting table). Start here if you just want to add a model.
+- **How it works:** [Scaling-ManyModels-And-Scoping.md](docs/Scaling-ManyModels-And-Scoping.md) — architecture, per-model
+  recipes, texture scoping, `.blend` import, and the full debugging log (incl. the UV V-flip root cause and the animated
+  pipeline in §12).
+- Also: [FBX-to-Humankind-Pipeline.md](docs/FBX-to-Humankind-Pipeline.md), [Custom3DInjection-Spec.md](docs/Custom3DInjection-Spec.md)
+  (decompiled pipeline), [Custom3DModels-Findings-Shareable.md](docs/Custom3DModels-Findings-Shareable.md), [UnitPreview-Findings.md](docs/UnitPreview-Findings.md).
 
 ## Toward a Unity package
 Goal: ship the Factory as a distributable Unity package. **Done:** zero-config path auto-detection, self-contained
