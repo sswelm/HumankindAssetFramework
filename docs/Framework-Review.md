@@ -18,9 +18,12 @@ Fix these and most individual findings collapse.
 
 ### 1. Silent failure — "success" = "no exception thrown", not "the work happened"
 The single biggest systemic risk, spanning both repos:
-- **Baker** reflected `GetMethod(...)?.Invoke(...)` for `SetPrefab`/`Reimport`/`SetFromDirectory`: the `?.` swallows a
+- ~~**Baker** reflected `GetMethod(...)?.Invoke(...)` for `SetPrefab`/`Reimport`/`SetFromDirectory`: the `?.` swallows a
   null method, so a future Amplitude rename produces an **empty skeleton/clip asset that reports `ok=true`** with a valid
-  Unity GUID. `AmplitudeGuid` returns `""` on failure and the caller still returns success.
+  Unity GUID. `AmplitudeGuid` returns `""` on failure and the caller still returns success.~~ **RESOLVED:** the six
+  build invokes go through `InvokeReq` (resolve method → `return Fail(err)` if null, else invoke); **and** both paths now
+  `return Fail(...)` on an empty/`0,0,0,0` skeleton **or** clip GUID — so a no-op bake aborts loudly instead of writing a
+  dead registry entry.
 - ~~**Plugin** `LoadSkeleton`/`LoadAtlas`/`LoadClipCollection` (`:223-224`): `var g = load?.MakeGenericMethod(...)` then
   `g.GetParameters()` with **no null-check**, and `LoadSkeleton` (unlike `LoadClipCollection`) isn't in a try/catch — so
   one renamed `LoadAsset` throws and aborts *all* registration.~~ **RESOLVED:** all three loaders now `if (g == null) return null;`
@@ -77,7 +80,7 @@ constant, derive keys + filename from it, strip dead scaffolding. Do it as one d
 
 | Sev | Location | Issue → fix |
 |---|---|---|
-| **High** | `128/146/550` | `?.Invoke` no-ops on a null reflected method → silent empty bake reports `ok=true`. Capture the `MethodInfo`, `Fail` if null. |
+| ~~**High**~~ **RESOLVED** | `128/146/550` | `?.Invoke` no-ops on a null reflected method → silent empty bake reports `ok=true`. **Fixed:** six build invokes routed through `InvokeReq` (`Fail` if method null) **+** empty skeleton/clip GUID now `Fail`s both paths. |
 | **High** | `142 / ~749` | `GetAssetGUID`/`AmplitudeGuid` return `""` silently → static path returns `ok=true` with an empty skeleton GUID. Treat empty GUID as hard failure. |
 | **High** | `151-153` | empty/`0,0,0,0` GUID only *warns*; still `ok=true`. Promote to `Fail`. |
 | **High** | `191-192` (+`661/709/736`) | Blender shell-out reads stdout-then-stderr before `WaitForExit` → **pipe-buffer deadlock** (Blender is verbose on stderr) hangs the editor. Read one stream async (`ReadToEndAsync`). |

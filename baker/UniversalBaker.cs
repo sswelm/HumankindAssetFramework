@@ -125,8 +125,8 @@ public static class UniversalBaker
         AssetDatabase.DeleteAsset(skelPath);
         var skel = ScriptableObject.CreateInstance(skelType);
         AssetDatabase.CreateAsset(skel, skelPath);
-        skelType.GetMethod("SetPrefab", new[] { typeof(GameObject) })?.Invoke(skel, new object[] { fbxGo });
-        skelType.GetMethod("Reimport", Type.EmptyTypes)?.Invoke(skel, null);
+        if (!InvokeReq(skelType, "SetPrefab", new[] { typeof(GameObject) }, skel, new object[] { fbxGo }, out var err)) return Fail(err);
+        if (!InvokeReq(skelType, "Reimport", Type.EmptyTypes, skel, null, out err)) return Fail(err);
         EditorUtility.SetDirty(skel);
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
 
@@ -143,8 +143,8 @@ public static class UniversalBaker
         var skelField = clipType.GetField("skeleton", BindingFlags.NonPublic | BindingFlags.Instance);
         if (skelField == null || skelGuidObj == null) return Fail("could not bind ClipCollection.skeleton (field/guid missing)");
         skelField.SetValue(clipColl, skelGuidObj);
-        clipType.GetMethod("SetFromDirectory", new[] { typeof(string) })?.Invoke(clipColl, new object[] { animDir });   // isolated folder = only OUR fbx -> exactly one clip
-        clipType.GetMethod("Reimport", Type.EmptyTypes)?.Invoke(clipColl, null);                                       // bakes the pose data
+        if (!InvokeReq(clipType, "SetFromDirectory", new[] { typeof(string) }, clipColl, new object[] { animDir }, out err)) return Fail(err);   // isolated folder = only OUR fbx -> one clip
+        if (!InvokeReq(clipType, "Reimport", Type.EmptyTypes, clipColl, null, out err)) return Fail(err);                                       // bakes the pose data
         EditorUtility.SetDirty(clipColl);
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
 
@@ -154,8 +154,9 @@ public static class UniversalBaker
         GeneratePreviewPrefab(name, resDir, fbxRel, atlas, cfg.rotationEuler);
 
         string skelGuid = AmplitudeGuid(skel), atlasGuid = AmplitudeGuid(atlas), clipGuid = AmplitudeGuid(clipColl);
-        if (string.IsNullOrEmpty(clipGuid) || clipGuid == "0,0,0,0")
-            Debug.LogWarning($"[Factory] {name}: ClipCollection guid looks empty — check the model actually has a clip.");
+        // an empty GUID means the SDK skeleton/clip bake produced nothing — fail loudly rather than write a dead registry entry.
+        if (string.IsNullOrEmpty(skelGuid) || skelGuid == "0,0,0,0") return Fail($"{name}: skeleton bake produced an empty GUID (SetPrefab/Reimport did nothing).");
+        if (string.IsNullOrEmpty(clipGuid) || clipGuid == "0,0,0,0") return Fail($"{name}: ClipCollection GUID is empty — the model has no bakeable clip (check the Clip name / that it's actually animated).");
         Debug.Log($"[Factory] {name} ANIMATED DONE. skeleton={skelGuid} clip={clipGuid} atlas={atlasGuid}");
         return new BakeResult { ok = true, skeletonGuid = skelGuid, atlasGuid = atlasGuid, clipGuid = clipGuid, bbox = Vector3.zero };
     }
@@ -595,12 +596,14 @@ public static class UniversalBaker
         string skelPath = "Assets/Resources/" + name + "_Skeleton.asset";
         var skel = ScriptableObject.CreateInstance(skelType);
         AssetDatabase.CreateAsset(skel, skelPath);
-        skelType.GetMethod("SetPrefab", new[] { typeof(GameObject) })?.Invoke(skel, new object[] { prefab });
-        skelType.GetMethod("Reimport", Type.EmptyTypes)?.Invoke(skel, null);
+        if (!InvokeReq(skelType, "SetPrefab", new[] { typeof(GameObject) }, skel, new object[] { prefab }, out var err)) return Fail(err);
+        if (!InvokeReq(skelType, "Reimport", Type.EmptyTypes, skel, null, out err)) return Fail(err);
         EditorUtility.SetDirty(skel);
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
 
         string skelGuid = AmplitudeGuid(skel), atlasGuid = AmplitudeGuid(atlas);
+        // empty GUID = the SDK skeleton bake produced nothing -> fail loudly instead of writing a dead registry entry.
+        if (string.IsNullOrEmpty(skelGuid) || skelGuid == "0,0,0,0") return Fail($"{name}: skeleton bake produced an empty GUID (SetPrefab/Reimport did nothing).");
         Debug.Log($"[Factory] {name} DONE. skeleton={skelGuid} atlas={atlasGuid}");
         return new BakeResult { ok = true, skeletonGuid = skelGuid, atlasGuid = atlasGuid, bbox = dims };
     }
@@ -804,5 +807,16 @@ public static class UniversalBaker
     }
 
     static BakeResult Fail(string msg) { Debug.LogError("[Factory] " + msg); return new BakeResult { ok = false, error = msg }; }
+
+    // Invoke a required reflected SDK method, or report failure. A missing method (Amplitude API rename) must NOT silently
+    // no-op via `?.Invoke` and let the bake ship an empty asset with ok=true — the caller returns Fail(err) instead.
+    static bool InvokeReq(Type t, string name, Type[] sig, object target, object[] args, out string err)
+    {
+        var m = t?.GetMethod(name, sig);
+        if (m == null) { err = $"reflected SDK method not found: {(t == null ? "?" : t.Name)}.{name} — Amplitude API changed? Bake aborted (nothing written)."; return false; }
+        m.Invoke(target, args);
+        err = null;
+        return true;
+    }
     static Type[] SafeTypes(Assembly a) { try { return a.GetTypes(); } catch (ReflectionTypeLoadException e) { return e.Types.Where(t => t != null).ToArray(); } catch { return Array.Empty<Type>(); } }
 }
