@@ -18,8 +18,12 @@ Severity key: 🔴 fix before distributing · 🟡 worth hardening · 🟢 clean
 
 ## 🔴 Fix before distributing
 
-### 1. Registry write can silently wipe a modder's whole registry
+### 1. Registry write can silently wipe a modder's whole registry — ✅ FIXED (2026-07-05)
 `baker/ModelRegistry.cs` (`Save` ~130-135, `Load` ~118-128) — **confirmed.**
+> **Fixed:** `Save` now writes to `.tmp` and atomically `File.Replace`s it in (no truncated file on an
+> interrupted write). `Load` flags an unparseable file, copies it to `.corrupt.json`, and `Save` refuses to
+> run while that flag is set — so a corrupt/half-edited registry is preserved and never overwritten. The
+> original finding is kept below for the record.
 `Save` does a non-atomic `File.WriteAllText` (truncate-then-write). `Load` swallows a parse error and
 returns an **empty** list. `Upsert` then Loads → empty → adds one → Saves, **overwriting all prior
 models**. A crash/lock mid-write, or one hand-edit typo in the JSON, and every previously baked model
@@ -89,10 +93,10 @@ range, so no early-return leak) but there's no `try/finally` around `root`, so a
 
 ## 🟢 Cleanup / package-readiness
 
-- **`Patches/LoadHookPatch.cs` is dead code** — **confirmed:** `Plugin.Awake` patches only the three
-  `Uni*` hooks via `CreateClassProcessor` (no `PatchAll`), so `AnimationManager_Load_Hook` is never
-  applied. Remove the file. (Side effect: `Prober.AnimMgr` is never auto-set, so the F8 window's
-  AnimMgr-dependent scans rely on another path.)
+- **`Patches/LoadHookPatch.cs` was dead code** — ✅ **removed (2026-07-05).** It was never applied
+  (`Plugin.Awake` patches only the three `Uni*` hooks, no `PatchAll`). Deleting it also un-broke the F8
+  window: `Prober.AnimMgr` is now set from `UniRegisterHook` (which *is* applied), so the AnimMgr-dependent
+  scans work again.
 - **ENC branding is hardcoded** — the `enc_models.json` filename, the `ENC.*` EditorPrefs keys
   (`ENC.bepinexConfig`, `ENC.blenderPath`), and the `C:\Program Files (x86)` fallback const. For a
   neutral package, derive all of these from one namespace constant (and coordinate the JSON filename
@@ -111,8 +115,12 @@ range, so no early-return leak) but there's no `try/finally` around `root`, so a
   `respawnAfterLoad`) by exact name via Newtonsoft, ignoring the bake-only fields. Verified.
 
 ## Recommended fix order
-1. **#1 registry atomicity** + **#2 process timeouts** + **#3 Blender discovery** — the three that
-   either destroy a modder's work or prevent the tool from running on their machine.
+1. ~~**#1 registry atomicity**~~ ✅ done · **#2 process timeouts** + **#3 Blender discovery** — the last
+   two matter only for distributing to strangers (the author's own machine has Blender and doesn't hang).
 2. **#8 rig-block `try/finally`**, **#5 `anyAnimated`**, **#7 model-file check** — cheap correctness.
 3. **#4 `registered` reset**, **#6 `TryLoadAsset`** — resilience to a future game update.
-4. Cleanup: delete `LoadHookPatch.cs`, neutralize ENC branding.
+4. Cleanup: ~~delete `LoadHookPatch.cs`~~ ✅ done · neutralize ENC branding.
+
+> **Status (2026-07-05):** #1 (the only finding that could destroy the author's own work — a hand-edit
+> typo wiping the registry) and the dead-code cleanup are fixed. The rest are documented as
+> distribute-to-strangers hardening / future-game-update resilience, deliberately deferred.

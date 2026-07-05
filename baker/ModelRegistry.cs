@@ -116,21 +116,48 @@ public static class ModelRegistry
         return null;
     }
 
+    // Set when the last Load() found a registry file it couldn't parse. Save() refuses to run while it's
+    // set, so a corrupt / half-edited registry is never silently overwritten with a fresh (empty) list —
+    // which would wipe every baked model's settings.
+    static bool lastLoadCorrupt;
+
     public static List<ModelDef> Load()
     {
         try
         {
-            if (!File.Exists(RegistryPath)) return new List<ModelDef>();
+            if (!File.Exists(RegistryPath)) { lastLoadCorrupt = false; return new List<ModelDef>(); }
             var data = JsonUtility.FromJson<ModelDefList>(File.ReadAllText(RegistryPath));
+            lastLoadCorrupt = false;
             return data?.models ?? new List<ModelDef>();
         }
-        catch (Exception e) { Debug.LogError("[Factory] registry load: " + e); return new List<ModelDef>(); }
+        catch (Exception e)
+        {
+            // The file exists but won't parse (a hand-edit typo, a half-written file). Preserve it and flag
+            // it so Save() won't clobber it and lose everything.
+            lastLoadCorrupt = true;
+            try { File.Copy(RegistryPath, RegistryPath + ".corrupt.json", true); } catch { }
+            Debug.LogError($"[Factory] registry '{RegistryPath}' is unreadable ({e.Message}) — backed up to " +
+                           $"'{Path.GetFileName(RegistryPath)}.corrupt.json'. Fix or delete it (then press Refresh); " +
+                           "baking won't save until then, to avoid wiping your models.");
+            return new List<ModelDef>();
+        }
     }
 
     public static void Save(List<ModelDef> models)
     {
+        if (lastLoadCorrupt)
+        {
+            Debug.LogError("[Factory] not saving: the existing registry was unreadable (see the .corrupt.json backup). " +
+                           "Fix or delete it and press Refresh first — refusing to overwrite it and lose your models.");
+            return;
+        }
         Directory.CreateDirectory(ConfigDir);
-        File.WriteAllText(RegistryPath, JsonUtility.ToJson(new ModelDefList { models = models }, true));
+        // Atomic write: fill a temp file, then swap it in. An interrupted or locked write can never leave a
+        // truncated registry — the file is always either the old content or the complete new content.
+        var tmp = RegistryPath + ".tmp";
+        File.WriteAllText(tmp, JsonUtility.ToJson(new ModelDefList { models = models }, true));
+        if (File.Exists(RegistryPath)) File.Replace(tmp, RegistryPath, null);
+        else File.Move(tmp, RegistryPath);
         AssetDatabase.Refresh();
     }
 

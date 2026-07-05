@@ -741,7 +741,7 @@ namespace ENCAccessProof
             return t != null ? AccessTools.Method(t, "AnimationLoad") : null;
         }
         static bool hookLogged;
-        static void Postfix(object __instance) { if (!hookLogged) { hookLogged = true; Plugin.Log.LogInfo("[Uni] UniRegisterHook POSTFIX fired"); } UniversalInject.EnsureRegistered(__instance); }
+        static void Postfix(object __instance) { if (!hookLogged) { hookLogged = true; Plugin.Log.LogInfo("[Uni] UniRegisterHook POSTFIX fired"); } Prober.AnimMgr = __instance; UniversalInject.EnsureRegistered(__instance); }
     }
 
     [HarmonyPatch]
