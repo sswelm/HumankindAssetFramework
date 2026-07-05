@@ -121,11 +121,33 @@ public static class ModelRegistry
     // which would wipe every baked model's settings.
     static bool lastLoadCorrupt;
 
+    // A VERSIONED shadow copy of the registry, written into the mod repo on every Save (Assets/Databases is
+    // git-tracked). It survives a game reinstall / Steam "verify files" wiping BepInEx/config, gives version
+    // history in git, and Load() auto-restores from it if the game registry ever goes missing.
+    public static string ProjectBackupPath => Path.Combine(Application.dataPath, "Databases", "enc_models.backup.json");
+
     public static List<ModelDef> Load()
     {
         try
         {
-            if (!File.Exists(RegistryPath)) { lastLoadCorrupt = false; return new List<ModelDef>(); }
+            if (!File.Exists(RegistryPath))
+            {
+                lastLoadCorrupt = false;
+                // Game registry gone (fresh/reinstalled game, verified files). Recover from the versioned project
+                // backup and write it back to the game target, so nothing is lost.
+                if (File.Exists(ProjectBackupPath))
+                {
+                    var backupJson = File.ReadAllText(ProjectBackupPath);
+                    var b = JsonUtility.FromJson<ModelDefList>(backupJson);
+                    if (b?.models != null && b.models.Count > 0)
+                    {
+                        try { Directory.CreateDirectory(ConfigDir); File.WriteAllText(RegistryPath, backupJson); } catch { }
+                        Debug.Log($"[Factory] game registry was missing — restored {b.models.Count} model(s) from the project backup ({ProjectBackupPath}).");
+                        return b.models;
+                    }
+                }
+                return new List<ModelDef>();
+            }
             var data = JsonUtility.FromJson<ModelDefList>(File.ReadAllText(RegistryPath));
             lastLoadCorrupt = false;
             return data?.models ?? new List<ModelDef>();
@@ -138,7 +160,7 @@ public static class ModelRegistry
             try { File.Copy(RegistryPath, RegistryPath + ".corrupt.json", true); } catch { }
             Debug.LogError($"[Factory] registry '{RegistryPath}' is unreadable ({e.Message}) — backed up to " +
                            $"'{Path.GetFileName(RegistryPath)}.corrupt.json'. Fix or delete it (then press Refresh); " +
-                           "baking won't save until then, to avoid wiping your models.");
+                           $"a versioned copy is also at '{ProjectBackupPath}'. Baking won't save until then, to avoid wiping your models.");
             return new List<ModelDef>();
         }
     }
@@ -151,13 +173,16 @@ public static class ModelRegistry
                            "Fix or delete it and press Refresh first — refusing to overwrite it and lose your models.");
             return;
         }
+        var json = JsonUtility.ToJson(new ModelDefList { models = models }, true);
+        // 1) Atomic write to the live game target (what the plugin reads): fill a temp file, then swap it in, so
+        //    an interrupted or locked write can never leave a truncated registry.
         Directory.CreateDirectory(ConfigDir);
-        // Atomic write: fill a temp file, then swap it in. An interrupted or locked write can never leave a
-        // truncated registry — the file is always either the old content or the complete new content.
         var tmp = RegistryPath + ".tmp";
-        File.WriteAllText(tmp, JsonUtility.ToJson(new ModelDefList { models = models }, true));
+        File.WriteAllText(tmp, json);
         if (File.Exists(RegistryPath)) File.Replace(tmp, RegistryPath, null);
         else File.Move(tmp, RegistryPath);
+        // 2) Versioned shadow copy inside the mod repo (git-tracked; survives a game reinstall). Best-effort.
+        try { File.WriteAllText(ProjectBackupPath, json); } catch (Exception e) { Debug.LogWarning("[Factory] project backup write failed: " + e.Message); }
         AssetDatabase.Refresh();
     }
 
