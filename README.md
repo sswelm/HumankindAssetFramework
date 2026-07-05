@@ -83,6 +83,8 @@ The plugin's own cfg (`…\community.humankind.encaccessproof.cfg`) — press **
   workflows, a troubleshooting table). Start here if you just want to add a model.
 - **Everything it does:** [Capabilities.md](docs/Capabilities.md) — the full capability list + known limitations.
 - **Build it:** [Building.md](docs/Building.md) — plugin build steps + the Blender dependency.
+- **Review / roadmap:** [Framework-Review.md](docs/Framework-Review.md) — verified code-review findings
+  (prioritized) and the hardening order toward package-readiness.
 
 ## Toward a Unity package
 Goal: ship the Factory as a distributable Unity package. **Done:** zero-config path auto-detection, self-contained
