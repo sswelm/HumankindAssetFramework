@@ -33,6 +33,7 @@ namespace ENCAccessProof
         public int descId = -1;          // runtime PawnDescriptorId of our unit (learned from the correctly-skinned pawn), to spot the wrong-skeleton twin the game spawns for the same unit
         public bool fragsLogged;         // one-shot: dump the donor's fragment mesh names once, so the modder can find hide targets
         public bool repointed;
+        public bool respawnAfterLoad;    // FIX for the save-load first-instance rotor race: when true, the plugin re-runs the game's own PresentationUnit.UpdatePawns (ReleasePawns+InstantiatePawns) on this model's units ~3s after load, so the first instance's borrowed donor rotor is rebuilt correctly. Set ONLY for models that borrow a donor's animated sub-part (e.g. the helicopter's rotor); harmless-but-pointless flicker otherwise, so default off.
     }
 
     internal static class UniversalInject
@@ -73,6 +74,7 @@ namespace ENCAccessProof
                                 ta = A(t, 0), tb = A(t, 1), tc = A(t, 2), td = A(t, 3),
                                 ca = A(c, 0), cb = A(c, 1), cc = A(c, 2), cd = A(c, 3),
                                 position = new UnityEngine.Vector3(Fp(p, "x"), Fp(p, "y"), Fp(p, "z")),
+                                respawnAfterLoad = (bool?)m["respawnAfterLoad"] ?? false,
                             });
                         }
                         Plugin.Log.LogInfo($"[Uni] parsed {entries.Count} entr(ies) via Newtonsoft [" + string.Join(", ", entries.Select(e => e.resourceName + "->" + e.pawnDescription)) + "]");
@@ -597,6 +599,54 @@ namespace ENCAccessProof
             }
             // one-shot log: a bare catch here hid member renames after a game update (models just stopped animating, no clue why).
             catch (Exception ex) { if (!poseErrLogged) { poseErrLogged = true; Plugin.Log.LogError("[Uni] OnPawnAdded (pose hook disabled this pawn): " + ex); } }
+        }
+
+        // ---- POST-LOAD RE-SPAWN: fix the save-load first-instance rotor race ----
+        // The FIRST custom pawn that borrows a donor's animated sub-part (e.g. a helicopter rotor), built during the load
+        // sequence, renders that part ~1 unit low; anything (re)built AFTER load is correct. So a few frames after load we
+        // re-run the game's OWN pawn rebuild (PresentationUnit.UpdatePawns = ReleasePawns + InstantiatePawns) on units of
+        // models that opted in via respawnAfterLoad — a presentation-only refresh, no simulation touched, no unit lost.
+        // Called from Plugin.Update (per-frame, a SAFE point OUTSIDE the AddPawnEntry loop — calling UpdatePawns inside
+        // that loop hangs). One-shot.
+        static bool respawnDone;
+        static int respawnTick;
+        // Strip a pawn description's trailing variant suffix ("Era6_Common_StealthHelicopters_01" -> "Era6_Common_StealthHelicopters")
+        // so it matches the unit-definition name ("LandUnit_Era6_Common_StealthHelicopters").
+        static string CoreDesc(string pd) => System.Text.RegularExpressions.Regex.Replace(pd ?? "", "_[0-9]+$", "");
+        internal static void MaybeRespawnPostLoad()
+        {
+            if (respawnDone || entries == null || !Plugin.UniversalInjectOn.Value) return;
+            if (!entries.Any(x => x.respawnAfterLoad)) { respawnDone = true; return; }   // no model opted in — nothing to do
+            if (++respawnTick < 180) return;                        // ~3s -> load settled, all armies spawned + repointed
+            respawnDone = true;
+            try
+            {
+                var presType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.Presentation");
+                var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
+                if (factory == null) { Plugin.Log.LogWarning("[Uni][RESPAWN] factory not reachable"); return; }
+                var armies = GetMember(factory, "PresentationArmyEntities") as Array;
+                if (armies == null) { Plugin.Log.LogWarning("[Uni][RESPAWN] no army array"); return; }
+                int refreshed = 0, seen = 0;
+                foreach (var army in armies)
+                {
+                    if (army == null) continue;
+                    var unit = GetMember(army, "PresentationUnit");
+                    if (unit == null) continue;
+                    seen++;
+                    bool loaded = true; try { loaded = Convert.ToBoolean(GetMember(unit, "IsLoaded")); } catch { }
+                    if (!loaded) continue;
+                    string uname = GetMember(GetMember(unit, "UnitDefinition"), "Name")?.ToString() ?? "";
+                    // Refresh ONLY units of models that opted in via respawnAfterLoad, matched by unit-definition name
+                    // (minus the entry's trailing _NN suffix). Every other unit is untouched — no needless flicker.
+                    if (uname.Length == 0 || !entries.Any(x => x.respawnAfterLoad && x.pawnDescription.Length > 0
+                            && uname.IndexOf(CoreDesc(x.pawnDescription), StringComparison.OrdinalIgnoreCase) >= 0)) continue;
+                    bool naval = false; try { naval = Convert.ToBoolean(GetMember(unit, "IsNaval")); } catch { }
+                    AccessTools.Method(unit.GetType(), "UpdatePawns", new[] { typeof(bool) })?.Invoke(unit, new object[] { naval });
+                    refreshed++;
+                }
+                Plugin.Log.LogInfo($"[Uni][RESPAWN] post-load refresh: re-spawned {refreshed} injected-unit pawn(s) of {seen} units (clears the first-instance render race)");
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Uni][RESPAWN] " + ex); }
         }
 
         static void TickOne(ModelEntry e)
