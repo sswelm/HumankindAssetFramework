@@ -7,6 +7,7 @@ of the mod** — CC-BY requires the author be credited.
 | Resource (registry) | Model | Author | Source | License | Notes |
 |---|---|---|---|---|---|
 | `StealthCruiser` | USS Zumwalt (DDG-1000) | Yakudami | Sketchfab | CC Attribution (CC-BY) | Free; commercial use allowed **with credit**. Low-poly (Cities Skylines) asset; albedo hand-cleaned (stray yellow fill removed). |
+| `AttackHelicopter` | AH-1 Cobra | manilov.ap | Sketchfab | CC Attribution (CC-BY) | Free; commercial use allowed **with credit**. Multi-material GLB (52 materials); own main + tail rotor stripped so the donor's spin through. First model to exercise the converter's multi-material path. |
 | `Hovercraft` | LCAC hovercraft | _TODO_ | _TODO_ | _TODO_ | Fill in source + license before distribution. |
 | `Zeppelin` | Airship / zeppelin | _TODO_ | _TODO_ | _TODO_ | Fill in source + license before distribution. |
 

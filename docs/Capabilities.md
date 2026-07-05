@@ -19,9 +19,11 @@ see the [Factory Manual](Factory-Manual.md).
   ideal). The one thing injection **can't** do: *remove* a donor's *animated* sub-part (a rotor, spinning wheels) — those
   are baked into the pawn at spawn. But it **can** give your model **its own** animation (see the animated bullet above),
   which overrides the donor's. Choose the donor accordingly; see the drone case study in the docs.
-- **Any number of materials.** A model with N materials (the Zeppelin has 4) is packed into one atlas and each
-  sub-mesh's UVs are remapped into its rect — no per-model code, no material cap. Near-black UV dead-zones are filled
-  neutral so unused texture regions never render as black patches.
+- **Any number of materials — GLB *and* FBX.** A model with N materials (the Zeppelin has 4; the AH-1 Cobra has **52**)
+  is packed into one atlas and each sub-mesh's UVs are remapped into its rect — no per-model code, no material cap. The
+  `glbconv` converter emits per-material `usemtl` groups + a `.mtl` (and an 8×8 solid-colour swatch for any flat,
+  textureless material) so a **multi-material GLB keeps its per-material split**, just like FBX. Near-black UV dead-zones
+  are filled neutral so unused texture regions never render as black patches.
 - **Heavy or single-sided/CAD meshes, handled.** A built-in **vertex reducer** (Blender quadric decimation, per-object
   so thin parts survive) shrinks oversized models to fit the engine's shared mesh buffer. A **winding fix** rewinds
   faces outward so single-sided / CAD "sketch" meshes render single-sided instead of culling to invisible (e.g. a
@@ -46,5 +48,7 @@ see the [Factory Manual](Factory-Manual.md).
 - **Editor-only texture preview:** right after a multi-material bake, Unity may show the baked atlas stale until the
   source textures are touched (open them in the Project view, return to the model). The shipped/in-game result is
   correct — a Unity editor texture-residency quirk, not a bake defect.
-- **Multi-material GLB:** the GLB→OBJ converter currently flattens materials into one group, so multi-material *GLB*
-  loses its per-material split. Use **FBX** for multi-material models (fully supported); GLB is fine for single-material.
+- **Resource-name folder casing (cosmetic):** the source folder `Assets/Resources/<name>/` is case-insensitively matched
+  by Windows/Unity — if a differently-cased asset with that name already exists (e.g. a vanilla `attackHelicopter512.png`
+  portrait), a new `AttackHelicopter/` folder inherits the existing lowercase spelling. Bake-time only; the baked assets,
+  the registry, and in-game loading (by GUID) are all correctly cased. Pick a non-colliding `resourceName` if it bothers you.

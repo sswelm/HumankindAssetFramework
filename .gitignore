@@ -1,6 +1,7 @@
 # build output
 bin/
 obj/
+publish/
 
 # local game DLLs (Unity + Amplitude — not redistributable; copy them in per README)
 References/

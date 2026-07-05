@@ -214,7 +214,8 @@ strategic map.
 | **Bake fails: "needs Blender"** | Install Blender or set its path in **Settings**. For static decimation without Blender, use **Convert grid** instead of Reduce-to-tris. |
 | **Re-baked static model is 90° off / tipped up in-game** (preview looks fine) | An older Factory shipped a **stale skeleton** on re-bake (the static outputs were overwritten in place, so the skeleton baked from cached geometry). Fixed now — the static path deletes its outputs and force-reimports before baking the skeleton, so a re-bake matches a first bake. Just **re-bake → rebuild → relaunch**. |
 | **Texture looks stale in the editor** | A Unity texture-residency quirk after a multi-material bake — open the source textures in the Project view and back. The in-game result is correct. |
-| **Multi-material GLB loses its material split** | Use **FBX** for multi-material models; GLB is fine for single-material. |
+| **Multi-material GLB comes out untextured / grey** | Fixed — `glbconv` now emits `usemtl` groups + a `.mtl` (and solid-colour swatches for flat parts), so a multi-material GLB atlases like FBX. **Re-bake** an older GLB model to pick this up (it was baked before the converter preserved materials). Keep **Convert grid = 0** (faithful mode; material grouping only runs there). |
+| **Source folder created with the wrong case** (e.g. `attackHelicopter/` not `AttackHelicopter/`) | Cosmetic, bake-time only. Windows/Unity is case-insensitive + case-preserving, so the folder inherits the spelling of any pre-existing differently-cased asset of that name (e.g. a vanilla `attackHelicopter512.png`). Baked assets, registry, and in-game loading are all correctly cased. Use a non-colliding `resourceName` (e.g. `AH1Cobra`) if you want the folder capitalised. |
 
 ---
 
