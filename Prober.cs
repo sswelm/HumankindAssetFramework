@@ -101,62 +101,6 @@ namespace ENCAccessProof
             return list?.Count ?? -1;
         }
 
-        // REPOINT (milestone 3c): copy a vanilla aircraft's visual presentation onto the zeppelin's pawn
-        // definition, so its bombardment shows that aircraft instead of cruise missiles. Vanilla target =
-        // registered + internally consistent (skeleton + animations match) => no bone mismatch. Runtime-only,
-        // resets on reload, so it's safe to experiment.
-        // returns true once the repoint has actually been applied (source + target found and copied)
-        internal static bool Repoint()
-        {
-            Report.Clear();
-            void Add(string s) { Report.Add(s); Plugin.Log.LogInfo("[ENCProof] " + s); }
-
-            string source = Plugin.SourcePawn.Value, filter = Plugin.TargetFilter.Value;
-            Add($"--- repoint: '{source}'  <-  '{filter}' ---");
-            try
-            {
-                var db = ResolveDatabase("Amplitude.Mercury.Data.World.PresentationPawnDefinition");
-                if (db == null) { Add("pawn-def DB not ready yet — will retry."); return false; }
-
-                object src = null, tgt = null;
-                foreach (var el in db)
-                {
-                    var name = (el as UnityEngine.Object)?.name;
-                    if (name == source) src = el;
-                    else if (tgt == null && !string.IsNullOrEmpty(name) && name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0) tgt = el;
-                }
-                if (src == null) { Add($"source '{source}' not found yet — will retry."); return false; }
-                if (tgt == null) { Add($"no target matching '{filter}' found."); return false; }
-                Add($"source = {(src as UnityEngine.Object).name}");
-                Add($"target = {(tgt as UnityEngine.Object).name}");
-
-                var t = src.GetType();
-                // config-driven so we can dial in the copy set (e.g. drop Attachements to kill a doubled model)
-                var visualFields = Plugin.CopyFields.Value.Split(',');
-                for (int i = 0; i < visualFields.Length; i++) visualFields[i] = visualFields[i].Trim();
-                int copied = 0;
-                foreach (var fn in visualFields)
-                {
-                    var f = AccessTools.Field(t, fn);
-                    if (f == null) continue;
-                    try { f.SetValue(src, f.GetValue(tgt)); copied++; Add("   copied: " + fn); }
-                    catch (Exception ex) { Add("   skip " + fn + ": " + ex.Message); }
-                }
-                // optionally null out fields that cause duplicate geometry (e.g. SubPawnDefinitions)
-                foreach (var fn in Plugin.ClearFields.Value.Split(','))
-                {
-                    var name = fn.Trim();
-                    if (name.Length == 0) continue;
-                    var f = AccessTools.Field(t, name);
-                    if (f == null) continue;
-                    try { f.SetValue(src, null); Add("   cleared: " + name); } catch (Exception ex) { Add("   clear skip " + name + ": " + ex.Message); }
-                }
-                Add($">>> repoint applied ({copied} fields). Order a bombardment to see it. <<<");
-                return copied > 0;
-            }
-            catch (Exception e) { Add("repoint error: " + e.Message); return false; }
-        }
-
         // DISCOVERY: list the registered skeletons (repoint targets) and flag any airship-like model.
         // Decides milestone 3: repoint to an existing model (easy) vs bake a custom one.
         private static readonly string[] AirshipTerms = { "zeppelin", "airship", "balloon", "blimp", "dirigible", "aerostat" };
@@ -213,54 +157,6 @@ namespace ENCAccessProof
                 }
             }
             catch (Exception e) { Add("description scan error: " + e.Message); }
-        }
-
-        // DIAGNOSTIC: dump the structure (Attachements / SubPawnDefinitions) of the source + target pawn defs,
-        // so we can see what's instantiating a second plane.
-        internal static void DumpStructure()
-        {
-            Report.Clear();
-            void Add(string s) { Report.Add(s); Plugin.Log.LogInfo("[ENCProof] " + s); }
-            Add("--- pawn structure dump ---");
-            try
-            {
-                var db = ResolveDatabase("Amplitude.Mercury.Data.World.PresentationPawnDefinition");
-                if (db == null) { Add("DB not ready."); return; }
-                bool dumpedTgt = false;
-                foreach (var el in db)
-                {
-                    var name = (el as UnityEngine.Object)?.name;
-                    bool isSrc = name == Plugin.SourcePawn.Value;
-                    bool isTgt = !dumpedTgt && !string.IsNullOrEmpty(name) && name.IndexOf(Plugin.TargetFilter.Value, StringComparison.OrdinalIgnoreCase) >= 0;
-                    if (!isSrc && !isTgt) continue;
-                    if (isTgt) dumpedTgt = true;
-                    DumpOne(el, name, Add);
-                }
-            }
-            catch (Exception e) { Add("dump error: " + e.Message); }
-        }
-
-        private static void DumpOne(object pawn, string name, Action<string> Add)
-        {
-            Add($"=== {name} ({(pawn == null ? "null" : "ok")}) ===");
-            var t = pawn.GetType();
-            var att = AccessTools.Field(t, "Attachements")?.GetValue(pawn) as Array;
-            Add($"  Attachements: {(att?.Length.ToString() ?? "n/a")}");
-            if (att != null)
-                foreach (var a in att)
-                {
-                    var an = AccessTools.Field(a.GetType(), "Name")?.GetValue(a);
-                    var frag = AccessTools.Field(a.GetType(), "Fragment")?.GetValue(a);
-                    Add($"     - Name={an}  Fragment={(frag != null ? "set" : "null")}");
-                }
-            var sub = AccessTools.Field(t, "SubPawnDefinitions")?.GetValue(pawn) as Array;
-            Add($"  SubPawnDefinitions: {(sub?.Length.ToString() ?? "n/a")}");
-            if (sub != null)
-                foreach (var s in sub)
-                {
-                    var def = AccessTools.Field(s.GetType(), "Definition")?.GetValue(s);
-                    Add("     - sub: " + ((def as UnityEngine.Object)?.name ?? def?.GetType().Name ?? "null"));
-                }
         }
 
         // DIAGNOSTIC: dump the formation/count fields of the unit's PresentationUnitDefinition,

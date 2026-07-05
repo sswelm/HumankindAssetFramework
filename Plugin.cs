@@ -17,10 +17,6 @@ namespace ENCAccessProof
         internal static ConfigEntry<string> TargetMod;       // which mod's assets to access
         internal static ConfigEntry<string> AssetNameFilter; // substring that identifies that mod's assets
         internal static ConfigEntry<KeyCode> ToggleKey;      // open/close the feedback window
-        internal static ConfigEntry<string> SourcePawn;      // pawn def to repoint (the zeppelin)
-        internal static ConfigEntry<string> TargetFilter;    // pawn def to copy visuals FROM (substring)
-        internal static ConfigEntry<string> CopyFields;      // which pawn-def fields to copy
-        internal static ConfigEntry<string> ClearFields;     // pawn-def fields to null out (kill duplicates)
         internal static ConfigEntry<bool>   UniversalInjectOn; // registry-driven universal injector (Model Factory)
         internal static ConfigEntry<int>    RespawnDelayFrames; // frames to wait after a borrowed-rotor unit renders before re-spawning it (first-instance rotor fix)
 
@@ -39,17 +35,6 @@ namespace ENCAccessProof
                                   "Substring used to find that mod's assets in the loaded databases (proof of access).");
             ToggleKey       = Config.Bind("General", "ToggleWindowKey", KeyCode.F8,
                                   "Key to toggle the in-game feedback window.");
-            SourcePawn      = Config.Bind("Repoint", "SourcePawn", "Era5_Common_Zeppelins_01",
-                                  "The pawn definition to repoint (the zeppelin).");
-            TargetFilter    = Config.Bind("Repoint", "TargetFilter", "StrategicBomber",
-                                  "Substring of the pawn definition to copy the visual from (e.g. StrategicBomber, Biplanes).");
-            CopyFields      = Config.Bind("Repoint", "CopyFields", "Description,AnimatorOverrideController",
-                                  "Comma-separated pawn-def fields to copy from target to source. Try dropping/adding " +
-                                  "Attachements if you get a doubled model. Options: Description, Attachements, " +
-                                  "AnimatorOverrideController, AnimationCapabilityProfile, MaxHeight, CharacterPalette.");
-            ClearFields     = Config.Bind("Repoint", "ClearFields", "",
-                                  "Comma-separated pawn-def fields to null out after copying (e.g. SubPawnDefinitions) " +
-                                  "to remove duplicate/overlapping geometry.");
             UniversalInjectOn = Config.Bind("Factory", "UniversalInject", true,
                                   "Registry-driven universal model injector (the Model Factory). Reads the model registry JSON " +
                                   "from this config folder and repoints each listed pawn definition onto its baked skeleton.");
@@ -99,8 +84,6 @@ namespace ENCAccessProof
             }
             using (new GUILayout.HorizontalScope())
             {
-                if (GUILayout.Button($"Repoint zeppelin -> {TargetFilter.Value}")) Prober.Repoint();
-                if (GUILayout.Button("Dump Struct")) Prober.DumpStructure();
                 if (GUILayout.Button("Dump UnitDef")) Prober.DumpUnitDef();
                 if (GUILayout.Button("Dump Formation")) Prober.DumpFormation();
             }
