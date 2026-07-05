@@ -638,6 +638,10 @@ namespace ENCAccessProof
             try
             {
                 int refreshed = 0, seen = 0;
+                // Only the FIRST unit of each opted-in model needs the fix: the bug hits the first pawn of that model BUILT
+                // during load, and the game builds armies in slot-index order, so iterating PresentationArmyEntities in order
+                // reaches that first-built (buggy) unit first. Re-spawn just it and skip the rest — so only ONE unit flickers.
+                var done = new HashSet<string>();
                 foreach (var army in armies)
                 {
                     if (army == null) continue;
@@ -647,15 +651,17 @@ namespace ENCAccessProof
                     bool loaded = true; try { loaded = Convert.ToBoolean(GetMember(unit, "IsLoaded")); } catch { }
                     if (!loaded) continue;
                     string uname = GetMember(GetMember(unit, "UnitDefinition"), "Name")?.ToString() ?? "";
-                    // Refresh ONLY units of models that opted in via respawnAfterLoad, matched by unit-definition name
-                    // (minus the entry's trailing _NN suffix). Every other unit is untouched — no needless flicker.
-                    if (uname.Length == 0 || !entries.Any(x => x.respawnAfterLoad && x.pawnDescription.Length > 0
-                            && uname.IndexOf(CoreDesc(x.pawnDescription), StringComparison.OrdinalIgnoreCase) >= 0)) continue;
+                    if (uname.Length == 0) continue;
+                    // Which opted-in model does this unit belong to? (name match, minus the entry's trailing _NN suffix)
+                    var match = entries.FirstOrDefault(x => x.respawnAfterLoad && x.pawnDescription.Length > 0
+                            && uname.IndexOf(CoreDesc(x.pawnDescription), StringComparison.OrdinalIgnoreCase) >= 0);
+                    if (match == null) continue;
+                    if (!done.Add(match.pawnDescription)) continue;   // already fixed the FIRST (buggy) one of this model — leave the rest
                     bool naval = false; try { naval = Convert.ToBoolean(GetMember(unit, "IsNaval")); } catch { }
                     AccessTools.Method(unit.GetType(), "UpdatePawns", new[] { typeof(bool) })?.Invoke(unit, new object[] { naval });
                     refreshed++;
                 }
-                Plugin.Log.LogInfo($"[Uni][RESPAWN] post-load refresh: re-spawned {refreshed} injected-unit pawn(s) of {seen} units (clears the first-instance render race)");
+                Plugin.Log.LogInfo($"[Uni][RESPAWN] post-load refresh: re-spawned {refreshed} first-instance unit(s) of {seen} units (only the first-built pawn of each opted-in model)");
             }
             catch (Exception ex) { Plugin.Log.LogError("[Uni][RESPAWN] " + ex); }
         }
