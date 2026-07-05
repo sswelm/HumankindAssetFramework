@@ -56,6 +56,14 @@ strip-parts / reduce-to-tris / animated bakes are refused up front for a large s
 
 ---
 
+### 1b. Factory form fields silently reset mid-edit — ✅ FIXED (2026-07-05, found in use)
+`ModelFactoryWindow.cs:16-17` — the window's `cur` (every field value) and `selected` were plain fields,
+not `[SerializeField]`. Unity **wipes non-serialized `EditorWindow` fields on every domain reload** (any
+script recompile, entering/exiting Play mode), so the form blanked itself mid-edit — "the fields went
+empty on their own," forcing the modder to remember and re-type every value.
+> **Fixed:** marked `cur` and `selected` `[SerializeField]`; `ModelDef` is `[Serializable]`, so the whole
+> edited entry now round-trips across domain reloads.
+
 ## 🟡 Worth hardening
 
 ### 4. `registered` static never reset across a session

@@ -13,8 +13,11 @@ using UnityEngine;
 
 public class ModelFactoryWindow : EditorWindow
 {
-    ModelDef cur = new ModelDef();
-    int selected;                       // 0 = <New>, else index into `existing`
+    // [SerializeField] so Unity preserves the form across a DOMAIN RELOAD (any script recompile, entering/exiting Play
+    // mode, etc.). Without it these are wiped back to defaults mid-edit — the "fields went empty on their own" bug.
+    // (ModelDef is [Serializable], so the whole edited entry round-trips.)
+    [SerializeField] ModelDef cur = new ModelDef();
+    [SerializeField] int selected;      // 0 = <New>, else index into `existing`
     string[] existing = { "<New>" };
     string status = "";
     Vector2 scroll;
