@@ -1,7 +1,7 @@
 # Capabilities — what the Factory does (proven in-game)
 
 The full, detailed capability list. The README carries the highlights; this is the reference. For *how to use* these
-see the [Factory Manual](Factory-Manual.md); for *how they work* see [Scaling-ManyModels-And-Scoping.md](Scaling-ManyModels-And-Scoping.md).
+see the [Factory Manual](Factory-Manual.md).
 
 - **Animated custom models — a first, now one-click.** A **quadcopter drone** injected onto a land-vehicle unit renders
   full-size and textured **and spins its own propellers from its own baked animation** — no engine mod, no GPU-skinning
@@ -9,9 +9,7 @@ see the [Factory Manual](Factory-Manual.md); for *how they work* see [Scaling-Ma
   chosen clip, strip to the spinning bones, auto-clamp the frame range), then it bakes an Amplitude `Skeleton` +
   `ClipCollection` + atlas and writes the registry; at runtime the clip is registered and a `PawnManager.AddPawnEntry`
   hook drives the pawn's pose onto it — normalized by clip duration so it plays at real speed. Works for **any number of
-  instances**. Clip/bone/hide-donor fields are **Pick-driven** (read from the model's glTF + the plugin log). Full recipe
-  + the traps (incl. isolating the clip source so `SetFromDirectory` bakes exactly one clip) in
-  [Scaling-ManyModels-And-Scoping.md §12](Scaling-ManyModels-And-Scoping.md).
+  instances**. Clip/bone/hide-donor fields are **Pick-driven** (read from the model's glTF + the plugin log).
 - **Multiple static models live**, each added with no new code: a **Zeppelin**, an **LCAC Hovercraft**, and a
   fully-textured **USS Zumwalt stealth cruiser** (first textured naval-combat unit) — correct orientation, correct skin,
   sitting at the waterline.

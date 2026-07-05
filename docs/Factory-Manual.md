@@ -1,7 +1,6 @@
 # Universal Model Factory — User Manual
 
-How to put your own 3D model onto a Humankind unit, step by step. This is the practical guide; for the *why* and the
-engine internals see [Scaling-ManyModels-And-Scoping.md](Scaling-ManyModels-And-Scoping.md).
+How to put your own 3D model onto a Humankind unit, step by step. This is the practical guide.
 
 The Factory is a Unity editor window (**Tools ▸ Universal Model Factory**). You give it a model file and a target unit, set
 a few options, press **Bake**, then rebuild the mod. The in-game plugin reads what you baked and renders it.
