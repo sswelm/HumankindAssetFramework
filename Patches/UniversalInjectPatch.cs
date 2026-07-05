@@ -601,18 +601,18 @@ namespace ENCAccessProof
             catch (Exception ex) { if (!poseErrLogged) { poseErrLogged = true; Plugin.Log.LogError("[Uni] OnPawnAdded (pose hook disabled this pawn): " + ex); } }
         }
 
-        // ---- POST-LOAD RE-SPAWN: fix the save-load first-instance rotor race ----
-        // The FIRST custom pawn that borrows a donor's animated sub-part (e.g. a helicopter rotor), built during the load
-        // sequence, renders that part ~1 unit low; anything (re)built AFTER load is correct. So a few frames after load we
-        // re-run the game's OWN pawn rebuild (PresentationUnit.UpdatePawns = ReleasePawns + InstantiatePawns) on units of
-        // models that opted in via respawnAfterLoad — a presentation-only refresh, no simulation touched, no unit lost.
-        // Called from Plugin.Update (per-frame, a SAFE point OUTSIDE the AddPawnEntry loop — calling UpdatePawns inside
-        // that loop hangs). Fires once PER LOAD: these statics live for the whole game process (they don't reset between
-        // save-loads), so we re-arm on the rising edge below — otherwise the fix would run only on the first load of a
-        // session and every later reload would keep the buggy first-instance rotor.
-        static bool respawnDone;
-        static int respawnTick;
-        static bool presenceHigh;      // were on-map armies present last frame? a save-load empties then repopulates them
+        // ---- RE-SPAWN NEWLY-CREATED INJECTED UNITS: fix the first-instance rotor race ----
+        // A custom pawn that borrows a donor's animated sub-part (e.g. a helicopter rotor) can render that part ~1 unit low
+        // when it is first CREATED — the first of a batch on a save-load, a lone unit built in a city, or one spawned via
+        // dev tools. Re-creating its pawns fixes it. So we watch the presentation each frame and, ~5s after ANY unit of an
+        // opted-in model first appears, re-run the game's own pawn rebuild (PresentationUnit.UpdatePawns = ReleasePawns +
+        // InstantiatePawns) on it — a presentation-only refresh, no simulation touched, no unit lost. Deliberately applied
+        // to EVERY such unit (one brief flicker each): better to re-spawn one too many than miss a buggy one. Called from
+        // Plugin.Update (per-frame, a SAFE point OUTSIDE the AddPawnEntry loop — calling UpdatePawns inside that loop hangs).
+        static int respawnFrame;
+        const int RespawnDelayFrames = 300;    // ~5s at 60fps: the unit shows briefly, then rebuilds correct
+        static readonly Dictionary<object, int> respawnDue = new Dictionary<object, int>();   // opted-in unit -> frame to re-spawn it
+        static readonly HashSet<object> respawnHandled = new HashSet<object>();               // units already re-spawned (don't repeat)
         // Strip a pawn description's trailing variant suffix ("Era6_Common_StealthHelicopters_01" -> "Era6_Common_StealthHelicopters")
         // so it matches the unit-definition name ("LandUnit_Era6_Common_StealthHelicopters").
         static string CoreDesc(string pd) => System.Text.RegularExpressions.Regex.Replace(pd ?? "", "_[0-9]+$", "");
@@ -620,48 +620,39 @@ namespace ENCAccessProof
         {
             if (entries == null || !Plugin.UniversalInjectOn.Value) return;
             if (!entries.Any(x => x.respawnAfterLoad)) return;      // no model opted in — nothing to do
-
-            // Observe the presentation every frame (cheap null-scan). A save-load tears the army set down (all entries
-            // null / loading screen) and rebuilds it; the empty->populated RISING EDGE means a fresh load -> re-arm the
-            // one-shot so the fix applies to every load, not just the first of the session.
-            var presType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.Presentation");
-            var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
-            var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
-            int nonNull = 0;
-            if (armies != null) foreach (var a in armies) if (a != null) nonNull++;
-            if (nonNull > 0 && !presenceHigh) { respawnDone = false; respawnTick = 0; }   // rising edge: fresh presentation
-            presenceHigh = nonNull > 0;
-
-            if (respawnDone || nonNull == 0) return;
-            if (++respawnTick < 180) return;                        // ~3s -> load settled, all armies spawned + repointed
-            respawnDone = true;
+            if (++respawnFrame % 5 != 0) return;                    // throttle the scan to ~12x/s (frame counter still advances every frame)
             try
             {
-                int refreshed = 0, seen = 0;
-                // Only the FIRST unit of each opted-in model needs the fix: the bug hits the first pawn of that model BUILT
-                // during load, and the game builds armies in slot-index order, so iterating PresentationArmyEntities in order
-                // reaches that first-built (buggy) unit first. Re-spawn just it and skip the rest — so only ONE unit flickers.
-                var done = new HashSet<string>();
+                var presType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.Presentation");
+                var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
+                var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
+                if (armies == null) return;
+
+                var present = new HashSet<object>();
                 foreach (var army in armies)
                 {
                     if (army == null) continue;
                     var unit = GetMember(army, "PresentationUnit");
                     if (unit == null) continue;
-                    seen++;
-                    bool loaded = true; try { loaded = Convert.ToBoolean(GetMember(unit, "IsLoaded")); } catch { }
-                    if (!loaded) continue;
                     string uname = GetMember(GetMember(unit, "UnitDefinition"), "Name")?.ToString() ?? "";
                     if (uname.Length == 0) continue;
-                    // Which opted-in model does this unit belong to? (name match, minus the entry's trailing _NN suffix)
-                    var match = entries.FirstOrDefault(x => x.respawnAfterLoad && x.pawnDescription.Length > 0
-                            && uname.IndexOf(CoreDesc(x.pawnDescription), StringComparison.OrdinalIgnoreCase) >= 0);
-                    if (match == null) continue;
-                    if (!done.Add(match.pawnDescription)) continue;   // already fixed the FIRST (buggy) one of this model — leave the rest
+                    // Is this unit one of our opted-in models? (name match, minus the entry's trailing _NN suffix)
+                    if (!entries.Any(x => x.respawnAfterLoad && x.pawnDescription.Length > 0
+                            && uname.IndexOf(CoreDesc(x.pawnDescription), StringComparison.OrdinalIgnoreCase) >= 0)) continue;
+                    present.Add(unit);
+                    if (respawnHandled.Contains(unit)) continue;
+                    if (!respawnDue.TryGetValue(unit, out int due)) { respawnDue[unit] = respawnFrame + RespawnDelayFrames; continue; }  // just appeared -> schedule
+                    bool loaded = true; try { loaded = Convert.ToBoolean(GetMember(unit, "IsLoaded")); } catch { }
+                    if (!loaded || respawnFrame < due) continue;
+                    respawnHandled.Add(unit); respawnDue.Remove(unit);   // mark first so a throwing unit isn't retried forever
                     bool naval = false; try { naval = Convert.ToBoolean(GetMember(unit, "IsNaval")); } catch { }
                     AccessTools.Method(unit.GetType(), "UpdatePawns", new[] { typeof(bool) })?.Invoke(unit, new object[] { naval });
-                    refreshed++;
+                    Plugin.Log.LogInfo($"[Uni][RESPAWN] re-spawned newly-created '{uname}' ~5s after it appeared (clears the first-instance rotor race)");
                 }
-                Plugin.Log.LogInfo($"[Uni][RESPAWN] post-load refresh: re-spawned {refreshed} first-instance unit(s) of {seen} units (only the first-built pawn of each opted-in model)");
+                // Drop bookkeeping for units that are gone (destroyed, or the previous game's units after a reload) so the
+                // sets don't grow and a genuinely new instance (a new object) is detected + fixed again.
+                if (respawnDue.Count > 0) foreach (var k in respawnDue.Keys.Where(k => !present.Contains(k)).ToList()) respawnDue.Remove(k);
+                if (respawnHandled.Count > 0) respawnHandled.RemoveWhere(u => !present.Contains(u));
             }
             catch (Exception ex) { Plugin.Log.LogError("[Uni][RESPAWN] " + ex); }
         }
