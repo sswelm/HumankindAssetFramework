@@ -21,6 +21,8 @@ public class ModelFactoryWindow : EditorWindow
     string[] existing = { "<New>" };
     string status = "";
     Vector2 scroll;
+    Vector2 stripScroll;                // scroll position of the multi-line Strip-parts text area
+    GUIStyle wrapArea;                  // cached word-wrapping text-area style (lazy-init in OnGUI; EditorStyles isn't ready earlier)
     bool showSettings;
     UnityEditor.Editor previewEditor;   // embedded interactive 3D preview of the baked model (its _Preview/_Model prefab)
     string previewFor = "";
@@ -224,49 +226,31 @@ public class ModelFactoryWindow : EditorWindow
         }
 
         EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Mesh / shading", EditorStyles.miniBoldLabel);
-        cur.normalsMode = (int)(NormalsMode)EditorGUILayout.EnumPopup("Normals", (NormalsMode)cur.normalsMode);
-        using (new EditorGUI.DisabledScope(cur.normalsMode != (int)NormalsMode.Recalculate))
-            cur.smoothingAngle = EditorGUILayout.Slider("Smoothing angle", cur.smoothingAngle, 0f, 180f);
-        cur.heightUV = EditorGUILayout.Toggle(new GUIContent("Height-based UVs",
-            "Override UVs with V = normalized height, so a vertical-gradient albedo maps by height regardless of the " +
-            "model's own UVs — e.g. a black skirt low + grey hull high (put a bottom-black / top-grey PNG named " +
-            "'*albedo*.png' in the resource folder). For untextured CAD models that need a simple gradient skin."), cur.heightUV);
-        cur.windingFix = EditorGUILayout.Toggle(new GUIContent("Winding fix (CAD/convex)",
-            "Rewind faces outward so single-sided / CAD 'sketch' meshes render single-sided instead of culling to invisible " +
-            "(e.g. a hovercraft skirt). Lighter than double-sided (no extra geometry). Assumes a roughly convex hull — " +
-            "true for vehicles/ships. Preferred for CAD hulls; use Double-sided for genuinely non-convex thin shells."), cur.windingFix);
-        cur.doubleSided = EditorGUILayout.Toggle(new GUIContent("Double-sided (single-sided/CAD)",
-            "Add a back face to every surface so single-sided or CAD 'sketch' meshes don't render invisible in-game (the " +
-            "engine culls backfaces). Enable for models with missing / see-through parts — e.g. a hovercraft skirt. " +
-            "Doubles the triangle count."), cur.doubleSided);
-        // IntSlider (not a bare field) for consistency with Smoothing angle + to show where you sit vs the ~25k per-model
-        // ceiling. Range 0..50000: 0 = off, default 24000 ≈ mid, and the max is generous headroom (values much above the
-        // ceiling overflow the shared buffer anyway). The slider keeps an editable number box, so exact values still work.
-        cur.targetTris = EditorGUILayout.IntSlider(new GUIContent("Reduce to ~tris (0 = off)",
-            "Quadric-decimate a heavy model to about this many triangles (via Blender) before baking, to fit the engine's " +
-            "SHARED buffer (one budget across ALL injected models + the game's own fx meshes). Default 24000 (halves to " +
-            "12000 under double-sided — the confirmed best LCAC bake, just under the ~25k per-model ceiling). It's a " +
-            "CEILING, not a quota: a model already under it passes through untouched (never " +
-            "upscaled). Toggling Double-sided automatically HALVES the effective target (it doubles the baked geometry), so " +
-            "you set this once and just flip Double-sided on/off. Preserves thin parts (per-object). 0 = no reduction. " +
-            "Needs Blender (auto-detected)."), cur.targetTris, 0, 50000);
-        if (cur.targetTris > 0 && !UniversalBaker.BlenderAvailable())
-            EditorGUILayout.HelpBox("Reduce-to-tris uses Blender (quadric decimation) — Blender wasn't found, so Bake will " +
-                "fail. Either set this to 0, use 'Convert grid' below (Blender-free GLB decimation), or install Blender / " +
-                "set its path in Settings above.", MessageType.Warning);
+        EditorGUILayout.LabelField("Source geometry — pre-bake (Blender)", EditorStyles.miniBoldLabel);
+        // Sequential transforms on YOUR model BEFORE the bake, in the order the baker runs them: strip → reduce → convert.
         // Strip parts — BAKE-TIME (Blender). Deletes objects from YOUR model before baking (mirror of Hide donor meshes,
         // which acts on the DONOR at runtime). Use it to drop your model's own rotor so the donor's spinning rotor shows
         // through, or to remove a crew figure / weapon pod. Comma-separated object-name substrings (case-insensitive).
+        if (wrapArea == null) wrapArea = new GUIStyle(EditorStyles.textArea) { wordWrap = true };
         using (new EditorGUILayout.HorizontalScope())
         {
-            cur.stripParts = EditorGUILayout.TextField(new GUIContent("Strip parts (names)",
+            // Label + a fixed-height (~3-line) scroll view holding a word-wrapping text area, so a long list (a rotor's
+            // hub + blades + tail + their doubled -FACES copies) stays readable and scrolls instead of running off-screen.
+            GUILayout.Label(new GUIContent("Strip parts (names)",
                 "BAKE-TIME: comma-separated object-name substrings to DELETE from your model before baking (each match takes " +
                 "its children too). Use it to remove parts you don't want baked in — e.g. a helicopter's OWN rotor (so the " +
                 "donor's animated rotor spins through), a crew figure, or a weapon pod. Case-insensitive substring match on the " +
                 "source object names. This is the mirror of 'Hide donor meshes' (which hides the DONOR's parts at runtime) — " +
-                "this edits YOUR model at bake time. Needs Blender. Empty = keep everything."), cur.stripParts ?? "");
-            if (GUILayout.Button(new GUIContent("Pick", "List the object names in the Model file so you can choose which to strip (reads GLB/glTF directly)."), GUILayout.Width(70)))
+                "this edits YOUR model at bake time. Needs Blender. Empty = keep everything."),
+                GUILayout.Width(EditorGUIUtility.labelWidth));
+            using (var sv = new EditorGUILayout.ScrollViewScope(stripScroll, GUILayout.Height(74f)))
+            {
+                stripScroll = sv.scrollPosition;
+                // ExpandHeight so the editable box FILLS the 74px (3-line) viewport even when it's near-empty — without it
+                // the text area only grows to the content, so you'd see 1-2 lines. It still grows past 3 lines (scrollbar).
+                cur.stripParts = EditorGUILayout.TextArea(cur.stripParts ?? "", wrapArea, GUILayout.ExpandHeight(true));
+            }
+            if (GUILayout.Button(new GUIContent("Pick", "List the object names in the Model file so you can choose which to strip (reads GLB/glTF directly)."), GUILayout.Width(70), GUILayout.Height(74f)))
             {
                 var r = GUILayoutUtility.GetLastRect();
                 var names = UniversalBaker.ListModelObjectNames((cur.modelFile ?? "").Trim());
@@ -289,6 +273,55 @@ public class ModelFactoryWindow : EditorWindow
         if (!string.IsNullOrWhiteSpace(cur.stripParts) && !UniversalBaker.BlenderAvailable())
             EditorGUILayout.HelpBox("Strip parts uses Blender — it wasn't found, so Bake will fail. Clear the field or set " +
                 "Blender's path in Settings above.", MessageType.Warning);
+        // Reduce-to-tris — runs AFTER strip (so the tri budget is spent only on the geometry you keep, not on a rotor
+        // you're about to delete). IntSlider (not a bare field) to show where you sit vs the ~25k per-model ceiling.
+        // Range 0..50000: 0 = off, default 24000 ≈ mid, and the max is generous headroom (values much above the ceiling
+        // overflow the shared buffer anyway). The slider keeps an editable number box.
+        cur.targetTris = EditorGUILayout.IntSlider(new GUIContent("Reduce to ~tris (0 = off)",
+            "Quadric-decimate a heavy model to about this many triangles (via Blender) before baking, to fit the engine's " +
+            "SHARED buffer (one budget across ALL injected models + the game's own fx meshes). Runs AFTER 'Strip parts', so " +
+            "the budget covers only the geometry you keep. Default 24000 (halves to " +
+            "12000 under double-sided — the confirmed best LCAC bake, just under the ~25k per-model ceiling). It's a " +
+            "CEILING, not a quota: a model already under it passes through untouched (never " +
+            "upscaled). Toggling Double-sided automatically HALVES the effective target (it doubles the baked geometry), so " +
+            "you set this once and just flip Double-sided on/off. Preserves thin parts (per-object). 0 = no reduction. " +
+            "Needs Blender (auto-detected)."), cur.targetTris, 0, 50000);
+        if (cur.targetTris > 0 && !UniversalBaker.BlenderAvailable())
+            EditorGUILayout.HelpBox("Reduce-to-tris uses Blender (quadric decimation) — Blender wasn't found, so Bake will " +
+                "fail. Either set this to 0, use 'Convert grid' below (Blender-free GLB decimation), or install Blender / " +
+                "set its path in Settings above.", MessageType.Warning);
+        // Convert grid — the GLB/glTF/.blend -> OBJ conversion (runs after strip + reduce). Also a geometry step, so it
+        // lives with its siblings here rather than up among the shading knobs.
+        cur.convertGrid = EditorGUILayout.IntField(new GUIContent("Convert grid",
+            "GLB / glTF / .blend only — controls how the source mesh is converted to OBJ.\n\n" +
+            "0 = faithful: keep every vertex and UV exactly (preserves texture seams). Use this for " +
+            "textured models — any decimation averages UVs across seams and scrambles the skin.\n\n" +
+            ">0 = decimate to a vertex-cluster grid of this resolution along the longest axis " +
+            "(higher = more detail/vertices). Use only for heavy UNtextured meshes that need simplifying.\n\n" +
+            "Ignored for OBJ/FBX (already meshes)."), cur.convertGrid);
+
+        EditorGUILayout.Space();
+        EditorGUILayout.LabelField("Shading / normals — bake-time", EditorStyles.miniBoldLabel);
+        // Parameters read when the final mesh is built (import/bake) — NOT sequential steps, so order among them is
+        // irrelevant to the result. Grouped apart from the geometry transforms above for that reason.
+        cur.normalsMode = (int)(NormalsMode)EditorGUILayout.EnumPopup("Normals", (NormalsMode)cur.normalsMode);
+        using (new EditorGUI.DisabledScope(cur.normalsMode != (int)NormalsMode.Recalculate))
+            cur.smoothingAngle = EditorGUILayout.Slider("Smoothing angle", cur.smoothingAngle, 0f, 180f);
+        cur.heightUV = EditorGUILayout.Toggle(new GUIContent("Height-based UVs",
+            "Override UVs with V = normalized height, so a vertical-gradient albedo maps by height regardless of the " +
+            "model's own UVs — e.g. a black skirt low + grey hull high (put a bottom-black / top-grey PNG named " +
+            "'*albedo*.png' in the resource folder). For untextured CAD models that need a simple gradient skin."), cur.heightUV);
+        cur.windingFix = EditorGUILayout.Toggle(new GUIContent("Winding fix (CAD/convex)",
+            "Rewind faces outward so single-sided / CAD 'sketch' meshes render single-sided instead of culling to invisible " +
+            "(e.g. a hovercraft skirt). Lighter than double-sided (no extra geometry). Assumes a roughly convex hull — " +
+            "true for vehicles/ships. Preferred for CAD hulls; use Double-sided for genuinely non-convex thin shells."), cur.windingFix);
+        cur.doubleSided = EditorGUILayout.Toggle(new GUIContent("Double-sided (single-sided/CAD)",
+            "Add a back face to every surface so single-sided or CAD 'sketch' meshes don't render invisible in-game (the " +
+            "engine culls backfaces). Enable for models with missing / see-through parts — e.g. a hovercraft skirt. " +
+            "Doubles the triangle count."), cur.doubleSided);
+
+        EditorGUILayout.Space();
+        EditorGUILayout.LabelField("Runtime — applied on load, no re-bake", EditorStyles.miniBoldLabel);
         // Hide donor meshes — runtime field. The donor's fragment names only exist at runtime, so Pick reads them back
         // from the BepInEx log (the plugin dumps "[Uni] <name> donor fragment[i] mesh='...'" once per launch).
         using (new EditorGUILayout.HorizontalScope())
@@ -323,13 +356,6 @@ public class ModelFactoryWindow : EditorWindow
                 }
             }
         }
-        cur.convertGrid = EditorGUILayout.IntField(new GUIContent("Convert grid",
-            "GLB / glTF / .blend only — controls how the source mesh is converted to OBJ.\n\n" +
-            "0 = faithful: keep every vertex and UV exactly (preserves texture seams). Use this for " +
-            "textured models — any decimation averages UVs across seams and scrambles the skin.\n\n" +
-            ">0 = decimate to a vertex-cluster grid of this resolution along the longest axis " +
-            "(higher = more detail/vertices). Use only for heavy UNtextured meshes that need simplifying.\n\n" +
-            "Ignored for OBJ/FBX (already meshes)."), cur.convertGrid);
         cur.respawnAfterLoad = EditorGUILayout.Toggle(new GUIContent("Re-spawn after load (borrowed rotor fix)",
             "FIX for the save-load first-instance rotor bug: on a save-load the engine draws the FIRST custom-helicopter " +
             "pawn with its borrowed donor rotor ~1 unit low; anything (re)built after load is correct. Tick this and the " +
@@ -345,7 +371,15 @@ public class ModelFactoryWindow : EditorWindow
         // A brand-new resource (<New>) has nothing to re-bake, so it also needs a model file; an existing one may leave
         // Model file empty to re-bake with new settings. Missing either target field greys Bake out with a reason.
         bool isNew = selected <= 0;
+        // The resource name becomes a folder name, a filename prefix, and a converter argument — a space or other
+        // path-hostile char breaks the bake (a space made glbconv parse the next word as the grid int). Require a
+        // single token so the modder is told BEFORE baking, not by a cryptic shell-out error after.
+        char badChar = '\0';
+        foreach (char c in cur.resourceName ?? "")
+            if (!(char.IsLetterOrDigit(c) || c == '_' || c == '-')) { badChar = c; break; }
+        bool nameValid = badChar == '\0';
         bool canBake = !string.IsNullOrWhiteSpace(cur.resourceName)
+                    && nameValid
                     && !string.IsNullOrWhiteSpace(cur.pawnDescription)
                     && (!isNew || !string.IsNullOrWhiteSpace(cur.modelFile));
         using (new EditorGUILayout.HorizontalScope())
@@ -356,8 +390,10 @@ public class ModelFactoryWindow : EditorWindow
         }
         if (!canBake)
             EditorGUILayout.HelpBox(
-                isNew ? "New resource: set Resource name, Pawn description and a Model file to bake."
-                      : "Set Resource name and Pawn description to bake.", MessageType.Warning);
+                !nameValid && !string.IsNullOrWhiteSpace(cur.resourceName)
+                    ? $"Resource name can't contain '{(badChar == ' ' ? "space" : badChar.ToString())}'. Use letters, digits, '_' or '-' only — e.g. 'AttackHelicopter'."
+                : isNew ? "New resource: set Resource name, Pawn description and a Model file to bake."
+                        : "Set Resource name and Pawn description to bake.", MessageType.Warning);
 
         if (!string.IsNullOrEmpty(status)) EditorGUILayout.HelpBox(status, MessageType.Info);
         DrawPreview();

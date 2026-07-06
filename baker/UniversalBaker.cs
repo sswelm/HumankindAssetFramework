@@ -242,6 +242,14 @@ public static class UniversalBaker
     static BakeResult BuildInner(BakeConfig cfg)
     {
         if (string.IsNullOrEmpty(cfg.resourceName)) return Fail("resourceName is required");
+        // The resource name is used as a folder name, a filename prefix, AND an unquoted-friendly converter argument.
+        // A space (or other path-hostile char) breaks the glbconv arg split — "Attack Helicopter" made glbconv parse
+        // "Helicopter" as the grid int (FormatException). Reject it up front with a clear message instead of failing
+        // cryptically deep in a shell-out. Convention: single token, e.g. "StealthHelicopter" (matches every model).
+        foreach (char c in cfg.resourceName)
+            if (!(char.IsLetterOrDigit(c) || c == '_' || c == '-'))
+                return Fail($"resource name '{cfg.resourceName}' contains an invalid character ('{c}'). " +
+                            "Use letters, digits, '_' or '-' only — no spaces (e.g. 'AttackHelicopter').");
         string name = cfg.resourceName;
         float size = cfg.size > 0f ? cfg.size : 5f;
         float smoothing = cfg.smoothingAngle > 0f ? cfg.smoothingAngle : 20f;
@@ -258,31 +266,26 @@ public static class UniversalBaker
         if (!string.IsNullOrEmpty(cfg.modelFile) && (!cfg.reuseExtracted || !haveObj))
         {
             string srcFile = cfg.modelFile;
-            // Optional PART STRIP: delete named objects (+ children) from the source via Blender before anything else,
-            // producing a cleaned GLB the rest of the pipeline bakes — e.g. a helicopter's own rotor so the donor's
-            // spinning rotor shows through. Runs first so the reducer/converter only ever see the kept geometry.
-            if (!string.IsNullOrWhiteSpace(cfg.stripParts))
+            // Optional PRE-BAKE PREP (strip + reduce) in ONE Blender session: import once, delete named objects (+ their
+            // children) so the donor's rotor shows through, then per-object quadric-decimate to ~targetTris (thin parts
+            // survive), and export one GLB the rest of the pipeline bakes. Running both in a single Blender process — vs
+            // the old two — saves a Blender startup + an intermediate GLB export/import round-trip (~24% off the heavy
+            // AH-1's Blender time). Either step is skipped when unset (empty Strip parts / targetTris 0); the survivor
+            // runs alone. targetTris is a CEILING, not a quota (a model already under it passes through unchanged);
+            // double-sided doubles the baked geometry, so we HALVE the target then (default 24000 -> 12000), keeping the
+            // field a single "budget" the user sets once, just under the ~25k per-model vertex ceiling.
+            bool wantStrip = !string.IsNullOrWhiteSpace(cfg.stripParts);
+            bool wantReduce = cfg.targetTris > 0;
+            if (wantStrip || wantReduce)
             {
-                if (!BlenderAvailable()) return Fail("'Strip parts' needs Blender installed (auto-detected, or set EditorPrefs 'ENC.blenderPath').");
-                string stripped = Path.Combine(Path.GetTempPath(), name + "_stripped.glb");
-                if (!StripPartsViaBlender(srcFile, stripped, cfg.stripParts)) return Fail("part stripping failed (see console)");
-                srcFile = stripped;
-            }
-            // Optional VERTEX REDUCER: quadric-decimate a heavy model via Blender (per-object, so thin parts survive)
-            // down to ~targetTris, producing a reduced GLB the normal path then bakes — no offline tooling needed.
-            // targetTris is a CEILING, not a quota: a model already under it passes through unchanged (decimate ratio
-            // clamps to 1.0 — never adds geometry). Double-sided doubles the baked geometry, so we HALVE the reduce
-            // target when it's on — that way the field is a single "budget" the user sets once (default 24000, which
-            // halves to 12000 under double-sided: the confirmed best-looking LCAC bake, just under the ~25k per-model
-            // vertex ceiling) and toggling double-sided keeps the baked result under that budget.
-            if (cfg.targetTris > 0)
-            {
-                if (!BlenderAvailable()) return Fail("'Reduce to tris' needs Blender installed (auto-detected, or set EditorPrefs 'ENC.blenderPath').");
+                if (!BlenderAvailable()) return Fail((wantStrip ? "'Strip parts'" : "'Reduce to tris'") +
+                    " needs Blender installed (auto-detected, or set EditorPrefs 'ENC.blenderPath').");
                 int effTarget = cfg.doubleSided ? Mathf.Max(1, cfg.targetTris / 2) : cfg.targetTris;
-                if (cfg.doubleSided) Debug.Log($"[Factory] reduce target {cfg.targetTris} -> {effTarget} tris (double-sided halves it; it doubles the baked geometry)");
-                string reduced = Path.Combine(Path.GetTempPath(), name + "_reduced.glb");
-                if (!ReduceViaBlender(srcFile, reduced, effTarget)) return Fail("mesh reduction failed (see console)");
-                srcFile = reduced;
+                if (wantReduce && cfg.doubleSided) Debug.Log($"[Factory] reduce target {cfg.targetTris} -> {effTarget} tris (double-sided halves it; it doubles the baked geometry)");
+                string prepped = Path.Combine(Path.GetTempPath(), name + "_prepped.glb");
+                if (!PrepViaBlender(srcFile, prepped, wantStrip ? cfg.stripParts : "", wantReduce ? effTarget : 0))
+                    return Fail("model prep (strip / reduce) failed (see console)");
+                srcFile = prepped;
             }
             string ext = Path.GetExtension(srcFile).ToLowerInvariant();
             if (ext == ".blend")
@@ -630,7 +633,11 @@ public static class UniversalBaker
         string png = null;
         if (Directory.Exists(fsDir) && !string.IsNullOrEmpty(texName))
         {
-            var pngs = Directory.GetFiles(fsDir, "*.png")
+            // Match png/jpg/jpeg (all decodable by Texture2D.LoadImage). glbconv emits jpgs for models whose GLB embeds
+            // JPEG (e.g. the AH-1's per-part albedos); a solid-colour swatch is a .tga, which LoadImage can't decode, so
+            // those are deliberately left to the mat.mainTexture fallback below.
+            var pngs = Directory.GetFiles(fsDir)
+                .Where(p => { var e = Path.GetExtension(p).ToLowerInvariant(); return e == ".png" || e == ".jpg" || e == ".jpeg"; })
                 .Where(p => { var f = Path.GetFileNameWithoutExtension(p).ToLowerInvariant(); return !f.Contains("backup") && !f.Contains("orig"); }).ToArray();
             png = pngs.FirstOrDefault(p => Path.GetFileNameWithoutExtension(p).Equals(texName, StringComparison.OrdinalIgnoreCase))
                ?? pngs.FirstOrDefault(p => Path.GetFileNameWithoutExtension(p).IndexOf(texName, StringComparison.OrdinalIgnoreCase) >= 0)
@@ -672,7 +679,8 @@ public static class UniversalBaker
         // prefer the shortest matching name so "<mat>_albedo.png" wins over "<mat>_albedo-backup.png" regardless of
         // directory order — a stray backup used to sort first ('-' < '.') and silently get baked instead.
         string albedo = Directory.Exists(fsDir)
-            ? Directory.GetFiles(fsDir, "*.png")
+            ? Directory.GetFiles(fsDir)
+                .Where(p => { var e = Path.GetExtension(p).ToLowerInvariant(); return e == ".png" || e == ".jpg" || e == ".jpeg"; })
                 .Where(p => { var f = Path.GetFileNameWithoutExtension(p).ToLowerInvariant(); return f.Contains("albedo") && !f.Contains("backup") && !f.Contains("orig"); })
                 .OrderBy(p => Path.GetFileName(p).Length)
                 .FirstOrDefault()
@@ -704,7 +712,7 @@ public static class UniversalBaker
         string tools = Path.Combine(proj, "Tools", "glbconv");
         string exe = Path.Combine(tools, "glbconv.exe");
         string dll = Path.Combine(tools, "glbconv.dll");
-        string args = $"\"{glb}\" \"{outDir}\" {name} {Mathf.Max(0, grid)}";
+        string args = $"\"{glb}\" \"{outDir}\" \"{name}\" {Mathf.Max(0, grid)}";
 
         System.Diagnostics.ProcessStartInfo psi;
         if (File.Exists(exe))
@@ -776,16 +784,19 @@ public static class UniversalBaker
         return b != "blender" || File.Exists(b);   // an absolute hit, or assume PATH has it
     }
 
-    // Reduce any Blender-importable model (glb/gltf/obj/fbx) to ~targetTris via headless Blender + the bundled
-    // strip_parts.py: delete named objects (+ their children) from the source, exporting a cleaned GLB the Factory bakes.
-    static bool StripPartsViaBlender(string src, string outGlb, string substrings)
+    // prep_model.py — strip named objects (+ their children) AND/OR per-object quadric-decimate to ~targetTris, all in
+    // ONE headless Blender session, exporting a single GLB the Factory then bakes. This replaces the old two-pass
+    // strip-then-reduce (two Blender startups + an intermediate GLB round-trip) with one, cutting ~24% off a heavy
+    // model's Blender time. substrings "" = skip strip; targetTris <= 0 = skip reduce (so either step can run alone).
+    static bool PrepViaBlender(string src, string outGlb, string substrings, int targetTris)
     {
-        if (!File.Exists(src)) { Debug.LogError("[Factory] strip: model file not found: " + src); return false; }
+        if (!File.Exists(src)) { Debug.LogError("[Factory] prep: model file not found: " + src); return false; }
         string proj = Directory.GetParent(Application.dataPath).FullName;
-        string script = Path.Combine(proj, "Tools", "strip_parts.py");
-        if (!File.Exists(script)) { Debug.LogError("[Factory] bundled strip_parts.py missing: " + script); return false; }
+        string script = Path.Combine(proj, "Tools", "prep_model.py");
+        if (!File.Exists(script)) { Debug.LogError("[Factory] bundled prep_model.py missing: " + script); return false; }
         string blender = FindBlender();
-        var psi = new System.Diagnostics.ProcessStartInfo(blender, $"--background --python \"{script}\" -- \"{src}\" \"{outGlb}\" \"{substrings}\"")
+        var psi = new System.Diagnostics.ProcessStartInfo(blender,
+            $"--background --python \"{script}\" -- \"{src}\" \"{outGlb}\" \"{substrings ?? ""}\" {Mathf.Max(0, targetTris)}")
         { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         try
         {
@@ -793,39 +804,14 @@ public static class UniversalBaker
             using (var p = System.Diagnostics.Process.Start(psi))
             {
                 if (!RunBounded(p, ProcTimeoutMs, out string o, out string e))
-                { Debug.LogError($"[Factory] strip timed out (~{ProcTimeoutMs / 1000}s) and was killed (stuck process or over-heavy model)."); return false; }
-                if (!string.IsNullOrWhiteSpace(o)) Debug.Log("[strip] " + o.Trim());
-                if (!string.IsNullOrWhiteSpace(e)) Debug.LogWarning("[strip] " + e.Trim());
-                if (p.ExitCode != 0 || !File.Exists(outGlb)) { Debug.LogError("[Factory] Blender strip produced no GLB (exit " + p.ExitCode + ")."); return false; }
+                { Debug.LogError($"[Factory] model prep timed out (~{ProcTimeoutMs / 1000}s) and was killed (stuck process or over-heavy model)."); return false; }
+                if (!string.IsNullOrWhiteSpace(o)) Debug.Log("[prep] " + o.Trim());
+                if (!string.IsNullOrWhiteSpace(e)) Debug.LogWarning("[prep] " + e.Trim());
+                if (p.ExitCode != 0 || !File.Exists(outGlb)) { Debug.LogError("[Factory] Blender prep produced no GLB (exit " + p.ExitCode + ")."); return false; }
                 return true;
             }
         }
-        catch (Exception ex) { Debug.LogError("[Factory] could not run Blender strip ('" + blender + "'): " + ex.Message); return false; }
-    }
-
-    // mesh_reduce.py (per-object quadric decimation), exporting a reduced GLB the Factory then bakes.
-    static bool ReduceViaBlender(string src, string outGlb, int targetTris)
-    {
-        string proj = Directory.GetParent(Application.dataPath).FullName;
-        string script = Path.Combine(proj, "Tools", "mesh_reduce.py");
-        if (!File.Exists(script)) { Debug.LogError("[Factory] bundled reducer missing: " + script); return false; }
-        string blender = FindBlender();
-        var psi = new System.Diagnostics.ProcessStartInfo(blender, $"--background --python \"{script}\" -- \"{src}\" \"{outGlb}\" {Mathf.Max(1, targetTris)}")
-        { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        try
-        {
-            if (File.Exists(outGlb)) File.Delete(outGlb);
-            using (var p = System.Diagnostics.Process.Start(psi))
-            {
-                if (!RunBounded(p, ProcTimeoutMs, out string o, out string e))
-                { Debug.LogError($"[Factory] a bake sub-process timed out (~{ProcTimeoutMs / 1000}s) and was killed (stuck process or over-heavy model)."); return false; }
-                if (!string.IsNullOrWhiteSpace(o)) Debug.Log("[reduce] " + o.Trim());
-                if (!string.IsNullOrWhiteSpace(e)) Debug.LogWarning("[reduce] " + e.Trim());
-                if (p.ExitCode != 0 || !File.Exists(outGlb)) { Debug.LogError("[Factory] Blender reduce produced no GLB (exit " + p.ExitCode + ")."); return false; }
-                return true;
-            }
-        }
-        catch (Exception ex) { Debug.LogError("[Factory] could not run Blender reduce ('" + blender + "'): " + ex.Message); return false; }
+        catch (Exception ex) { Debug.LogError("[Factory] could not run Blender prep ('" + blender + "'): " + ex.Message); return false; }
     }
 
     // Convert a .blend to GLB via headless Blender + the bundled export script, so the normal GLB path can take over.
