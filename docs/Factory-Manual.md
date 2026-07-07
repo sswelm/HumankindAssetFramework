@@ -217,6 +217,7 @@ strategic map.
 | **Multi-material GLB comes out untextured / grey** | Fixed — `glbconv` now emits `usemtl` groups + a `.mtl` (and solid-colour swatches for flat parts), so a multi-material GLB atlases like FBX. **Re-bake** an older GLB model to pick this up (it was baked before the converter preserved materials). Keep **Convert grid = 0** (faithful mode; material grouping only runs there). |
 | **A part is missing in-game but present in the Factory preview** (a mast, antenna — typically small parts, no error anywhere) | **Shared vertex-buffer overflow.** All injected models + the game's own fx meshes share one ~100k-vertex GPU buffer; overflow is **silently truncated from the tail of the last-registered model's mesh** — so late-order parts of your newest model vanish while its body renders fine. The preview is immune (it renders the mesh asset directly). Diagnosed live: a 48k-vert bake lost its rotor mast; visible again after **Reduce to ~tris** brought it down. Watch the bake log's `verts=` line — stay well under ~25k verts per model (UV-seam splitting means verts ≈ 2× tris on textured models, so a 12000-tri target ≈ 24k verts). |
 | **Re-bake has no effect in-game** (still the old shape/orientation; preview shows the new one) | You re-baked but didn't **rebuild the mod**. A re-bake keeps the **same skeleton GUID**, so the registry doesn't change and the game silently keeps rendering the old geometry from the previously built bundle — no error, nothing to see in the log. Every geometry change needs bake → **rebuild mod** → relaunch. (Quick sanity test: bake with a wild rotation offset — if the game doesn't tilt, your build isn't reaching it.) |
+| **Registry gone after a game reinstall / "verify files"** | Open the Factory window — it auto-restores from the git-tracked backup and writes it back to `BepInEx\config` (console: `restored N model(s) from the project backup`). See §10 "Registry safety net". |
 | **Source folder created with the wrong case** (e.g. `attackHelicopter/` not `AttackHelicopter/`) | Cosmetic, bake-time only. Windows/Unity is case-insensitive + case-preserving, so the folder inherits the spelling of any pre-existing differently-cased asset of that name (e.g. a vanilla `attackHelicopter512.png`). Baked assets, registry, and in-game loading are all correctly cased. Use a non-colliding `resourceName` (e.g. `AH1Cobra`) if you want the folder capitalised. |
 
 ---
@@ -228,5 +229,26 @@ strategic map.
   `Assets/Resources/<name>/`.
 - **Registry:** `<Humankind>\BepInEx\config\enc_models.json` — one entry per model (pawn description, `skel`/`atlas` GUIDs,
   transform, flags; animated adds `clip` + `animated`/`animClip`/`animateBones`).
+- **Registry backup (versioned):** `Assets/Databases/enc_models.backup.json` — a git-tracked shadow copy, rewritten on
+  every Save/bake. See "Registry safety net" below.
 - **Runtime log:** `<Humankind>\BepInEx\LogOutput.log` — `[Uni] …` lines show what was injected (and the donor fragment
   names the Hide-donor Pick reads).
+
+## 10. Registry safety net
+
+The registry is the one Factory artifact that lives in the *game* folder, so it's the one a game reinstall or a Steam
+"verify files" can wipe. Three layers protect it — all automatic, nothing to configure:
+
+- **Atomic writes.** Every Save fills a `.tmp` file and swaps it in (`File.Replace`). An interrupted or locked write can
+  never leave a truncated registry. If the swap itself fails (antivirus / indexer / the running game holding the file),
+  the bake status says **"Baked, but REGISTRY SAVE FAILED"** — the asset is baked; close the lock and re-bake to write
+  the entry.
+- **Corrupt-file guard.** If the registry exists but won't parse (a hand-edit typo, a half-written file), it is copied
+  aside to `enc_models.json.corrupt.json` and **Save refuses to run** until you fix or delete the original — so a bake
+  can never overwrite your unreadable-but-recoverable registry with a fresh empty list.
+- **Versioned backup + auto-restore.** Every Save also writes `Assets/Databases/enc_models.backup.json` inside the mod
+  repo (git-tracked → full history, survives anything that happens to the game folder). If the game registry is
+  **missing** — fresh install, verified files — the next `Load()` restores it from this backup and writes it back to
+  `BepInEx\config` automatically. Just **opening the Factory window** triggers this (the console logs
+  `restored N model(s) from the project backup`); no re-bake needed. The restore covers the registry only — BepInEx,
+  the plugin DLL, and the built mod (which carries the baked assets) come from your normal install/build steps.

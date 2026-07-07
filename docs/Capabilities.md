@@ -45,6 +45,10 @@ see the [Factory Manual](Factory-Manual.md).
 - **Texture isolation:** each model gets a private `FxOutputLayer` clone, so its skin never bleeds onto the vanilla donor
   unit — proven on screen with a custom cruiser and its donor corvette side-by-side, each keeping its own skin.
 - **Add a model = bake it.** The Factory writes the registry; the plugin picks it up on next launch.
+- **The registry can't be lost.** Atomic writes (no truncation on an interrupted save), a corrupt-file guard (an
+  unparseable registry is copied aside and never overwritten), and a **git-tracked versioned backup with
+  auto-restore** — after a game reinstall or "verify files", just opening the Factory restores the registry into
+  `BepInEx\config` automatically.
 
 ## Known limitations
 
