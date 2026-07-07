@@ -98,12 +98,15 @@ class as the known rig-block GameObject leak, larger per occurrence.
 
 ### Tools — Blender scripts + glbconv (key items verified on Blender 5.1.2)
 
-#### T1 🔴 `prep_model.py` reduce hard-fails on instanced (multi-user mesh) models — **verified**
+#### T1 🔴 `prep_model.py` reduce hard-fails on instanced (multi-user mesh) models — ✅ FIXED (2026-07-07)
 `modifier_apply` on linked-duplicate data raises `RuntimeError: Modifiers cannot be applied to multi-user
 data` (reproduced on 5.1.2). glTF/FBX importers create linked duplicates whenever nodes share a mesh —
-common in Sketchfab models (wheels, missiles, rotor blades). Any such model with Reduce on fails the whole
-bake, and the surfaced error is the misleading "Blender prep produced no GLB (exit 0)".
-- **Fix:** `if o.data.users > 1: o.data = o.data.copy()` before applying (also the *correct* semantics — applying through each user would re-decimate the shared datablock).
+common in Sketchfab models (wheels, missiles, rotor blades). Any such model with Reduce on failed the whole
+bake, and the surfaced error was the misleading "Blender prep produced no GLB (exit 0)".
+> **Fixed:** each object gets `o.data = o.data.copy()` when its data is multi-user, before the decimate
+> modifier is applied — also the *correct* semantics (applying through each user would re-decimate the
+> shared datablock). Verified end-to-end: a GLB whose import produces two objects sharing one mesh
+> (`users=2`) now reduces cleanly.
 
 #### T2 🟡 Reduce ratio counts polygons, but COLLAPSE ratio operates on triangles — **verified**
 A quad-heavy model under-reduces by up to 2×: 20k quads (40k tris) with target 24000 computes ratio 1.0 →
@@ -172,9 +175,8 @@ defensively guarded throughout).
 
 ## Recommended fix order
 
-1. ~~**E1**~~ ✅ done · **T1 + T2** (two small `prep_model.py` edits, both verified; T1 breaks real
-   models today, T2 defeats the budget the engine ceiling depends on — a budget whose importance the
-   AH-1 mast incident just proved).
+1. ~~**E1**~~ ✅ done · ~~**T1**~~ ✅ done · **T2** (small `prep_model.py` edit, verified; it defeats the
+   tri budget the engine ceiling depends on — a budget whose importance the AH-1 mast incident just proved).
 2. **E2** (Remove key + honest status) · **E4** (bound the pipe drain — completes the 07-05 timeout work).
 3. **T3 / T4 / T5** — the silent-corruption class (wrong albedo, lost skinning, inside-out mirror halves).
 4. **E3, E5, T6** — honest failures for empty/destroyed outputs.

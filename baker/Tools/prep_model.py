@@ -59,6 +59,12 @@ if target > 0:
     before = after = 0
     for o in meshes:
         before += len(o.data.polygons)
+        # Instanced (multi-user) mesh data: modifier_apply refuses it ("Modifiers cannot be applied to multi-user
+        # data" — verified on Blender 5.1.2), which aborted the whole bake; and applying through each user would
+        # decimate the shared datablock once per user anyway. Give each object its own copy first. Linked duplicates
+        # are common in downloaded models (wheels, missiles, rotor blades instanced from one mesh).
+        if o.data.users > 1:
+            o.data = o.data.copy()
         bpy.ops.object.select_all(action='DESELECT')
         o.select_set(True)
         bpy.context.view_layer.objects.active = o
