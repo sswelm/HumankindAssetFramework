@@ -706,14 +706,25 @@ public class ModelFactoryWindow : EditorWindow
         // and SaveAsPrefabAsset's OnPostprocessAllAssets fires InstantiateForAnimatorPreview(null) -> ArgumentException. Destroying
         // it up front means nothing watches the prefab while it's deleted; we rebuild the preview after the bake.
         LoadPreview(null);
+        // Trim the text fields ON cur ITSELF, not just into the bake config: Upsert(cur) below persists cur, and a
+        // pasted trailing space in pawnDescription used to bake fine but write the untrimmed string to the registry —
+        // the plugin's substring match then never fired: "Baked ✓", model silently never injected (review finding E1).
+        // Trimming cur keeps what's baked and what's registered identical.
+        cur.resourceName = (cur.resourceName ?? "").Trim();
+        cur.pawnDescription = (cur.pawnDescription ?? "").Trim();
+        cur.modelFile = (cur.modelFile ?? "").Trim();
+        cur.stripParts = (cur.stripParts ?? "").Trim();
+        cur.hideMeshes = (cur.hideMeshes ?? "").Trim();
+        cur.animClip = (cur.animClip ?? "").Trim();
+        cur.animateBones = (cur.animateBones ?? "").Trim();
         var cfg = new BakeConfig
         {
-            resourceName = cur.resourceName.Trim(), modelFile = (cur.modelFile ?? "").Trim(), pawnDescription = cur.pawnDescription.Trim(),
+            resourceName = cur.resourceName, modelFile = cur.modelFile, pawnDescription = cur.pawnDescription,
             rotationEuler = cur.rotation, positionOffset = cur.position, size = cur.size,
             normals = (NormalsMode)cur.normalsMode, smoothingAngle = cur.smoothingAngle, convertGrid = cur.convertGrid,
             reuseExtracted = cur.reuseExtracted, doubleSided = cur.doubleSided, windingFix = cur.windingFix, heightUV = cur.heightUV, targetTris = cur.targetTris,
-            stripParts = (cur.stripParts ?? "").Trim(),
-            animated = cur.animated, animClip = (cur.animClip ?? "").Trim(), animateBones = (cur.animateBones ?? "").Trim()
+            stripParts = cur.stripParts,
+            animated = cur.animated, animClip = cur.animClip, animateBones = cur.animateBones
         };
         var r = cfg.animated ? UniversalBaker.BuildAnimated(cfg) : UniversalBaker.Build(cfg);
         if (!r.ok) { status = "Bake FAILED: " + r.error; return; }

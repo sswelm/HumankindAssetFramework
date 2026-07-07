@@ -44,12 +44,13 @@ Severity key: 🔴 fix soon (silent data loss / silent no-inject) · 🟡 worth 
 
 ### Editor pipeline (UniversalBaker / ModelFactoryWindow / ModelRegistry)
 
-#### E1 🔴 Bake uses trimmed fields, registry stores the untrimmed original — silent no-inject
-`ModelFactoryWindow.cs` `DoBake`: `cfg` gets `cur.pawnDescription.Trim()` but `Upsert(cur)` persists the
+#### E1 🔴 Bake uses trimmed fields, registry stores the untrimmed original — silent no-inject — ✅ FIXED (2026-07-07)
+`ModelFactoryWindow.cs` `DoBake`: `cfg` got `cur.pawnDescription.Trim()` but `Upsert(cur)` persisted the
 raw string. Paste a pawn description with a trailing space → bake succeeds, registry entry looks valid,
 but the plugin's substring match (`name.IndexOf(pawnDescription)`) never fires. "Baked ✓", model never
 appears, no error anywhere. (`hideMeshes` is safe — the plugin trims per-token; `pawnDescription` is not.)
-- **Fix:** trim the fields on `cur` itself before `Upsert` (one line).
+> **Fixed:** `DoBake` now trims every text field on `cur` itself before building the bake config, so what's
+> baked and what's registered are identical.
 
 #### E2 🟡 Remove button deletes by the *edited* name and always reports success
 `ModelFactoryWindow.cs:109-117`: removal key is the live `cur.resourceName` text field, not the selected
@@ -171,9 +172,9 @@ defensively guarded throughout).
 
 ## Recommended fix order
 
-1. **E1** (one-line trim — highest silent-failure risk per keystroke) · **T1 + T2** (two small
-   `prep_model.py` edits, both verified; T1 breaks real models today, T2 defeats the budget the engine
-   ceiling depends on).
+1. ~~**E1**~~ ✅ done · **T1 + T2** (two small `prep_model.py` edits, both verified; T1 breaks real
+   models today, T2 defeats the budget the engine ceiling depends on — a budget whose importance the
+   AH-1 mast incident just proved).
 2. **E2** (Remove key + honest status) · **E4** (bound the pipe drain — completes the 07-05 timeout work).
 3. **T3 / T4 / T5** — the silent-corruption class (wrong albedo, lost skinning, inside-out mirror halves).
 4. **E3, E5, T6** — honest failures for empty/destroyed outputs.
