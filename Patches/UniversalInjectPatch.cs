@@ -135,7 +135,10 @@ namespace ENCAccessProof
             if (animMgr == null) { Plugin.Log.LogWarning("[Uni] EnsureRegistered: animMgr null"); return; }
             Plugin.Log.LogInfo("[Uni] EnsureRegistered fired");
             LoadRegistry();
-            if (entries.Count == 0) { registered = true; return; }
+            // Latch on empty ONLY if the load actually succeeded (`loaded` — a genuinely empty/absent registry).
+            // While a transient load failure is still retrying (`loaded` false), leave `registered` unlatched too, or
+            // the retry would succeed later but registration would never run again — injection dead for the session.
+            if (entries.Count == 0) { registered = loaded; return; }
             try
             {
                 var reg = AccessTools.Method(animMgr.GetType(), "RegisterMeshCollection");

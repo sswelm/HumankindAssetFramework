@@ -1,137 +1,180 @@
 # Framework Review — Universal Model Factory
 
-Prioritized, **verified** findings from a code review of the runtime plugin, the bake pipeline, and
-the editor UI (2026-07-05). Each finding was checked against the actual code; two review claims were
-corrected (noted inline). This is a hardening roadmap toward shipping the Factory as a distributable
-package — it is not a list of things that are broken today for the author's own use.
+Living hardening roadmap. Three review passes so far, most recent first:
 
-**Overall:** the framework is solid where it counts. Verified strengths, all done right:
-per-model **and** per-hook failure isolation, `InvokeReq` for required SDK methods (fails loud on an
-Amplitude API rename instead of silently no-op'ing), empty-GUID validation, delete-first +
-force-synchronous reimport (defeats the stale-skeleton bug), pipe-buffer-deadlock avoidance on all
-shell-outs, one-shot error logging on the pose hot path, and correct boxed-struct mutate/write-back.
-The gaps below are mostly about *surviving a stranger's machine*.
+1. **2026-07-07 — full critical re-review** (this document's body): the runtime plugin read line-by-line,
+   the editor pipeline and all tools swept by independent reviewers, and the two headline Blender findings
+   **empirically verified on Blender 5.1.2** (the same install the pipeline auto-detects).
+2. **2026-07-07 — external review** (received by mail): five findings + three comment-drift items, all
+   verified against the code and fixed same day (see "Fixed to date").
+3. **2026-07-05 — self-review**: registry safety, process timeouts, dead code. Fixed or consciously deferred.
 
-Severity key: 🔴 fix before distributing · 🟡 worth hardening · 🟢 cleanup / package-readiness.
+**Overall verdict (unchanged and reinforced):** disciplined code for what it is — a reflection-heavy
+BepInEx mod poking at a closed engine. Verified strengths: per-hook and per-model failure isolation,
+fail-loud resolution of required SDK methods, empty-GUID validation, atomic registry writes with a
+versioned git-tracked backup, bounded shell-outs with dual-stream draining, one-shot error logging on hot
+paths, correct boxed-struct mutate/write-back in the pose hook. The gaps below are mostly *silent-failure
+edges* and *surviving-a-stranger's-machine* items, not broken-today bugs — everything the author uses
+daily works.
 
----
-
-## 🔴 Fix before distributing
-
-### 1. Registry write can silently wipe a modder's whole registry — ✅ FIXED (2026-07-05)
-`baker/ModelRegistry.cs` (`Save` ~130-135, `Load` ~118-128) — **confirmed.**
-> **Fixed:** `Save` now writes to `.tmp` and atomically `File.Replace`s it in (no truncated file on an
-> interrupted write). `Load` flags an unparseable file, copies it to `.corrupt.json`, and `Save` refuses to
-> run while that flag is set — so a corrupt/half-edited registry is preserved and never overwritten. The
-> original finding is kept below for the record.
-`Save` does a non-atomic `File.WriteAllText` (truncate-then-write). `Load` swallows a parse error and
-returns an **empty** list. `Upsert` then Loads → empty → adds one → Saves, **overwriting all prior
-models**. A crash/lock mid-write, or one hand-edit typo in the JSON, and every previously baked model
-vanishes from the registry with only a `Debug.LogError` the user may never see.
-- **Failure:** bake model #5, the write is interrupted (or the file was already corrupt) → the next
-  bake starts from an empty list → models #1-4 are gone.
-- **Fix:** write to `RegistryPath + ".tmp"` then `File.Replace`/atomic move; on parse failure, surface
-  a blocking error and rename the bad file to `enc_models.corrupt.json` — never let a subsequent Save
-  overwrite an unreadable-but-present file.
-
-### 2. No timeout on any external process — ✅ FIXED (2026-07-05)
-`baker/UniversalBaker.cs` — **confirmed** (5× `WaitForExit()` with no argument: ~238, 740, 791, 823, 855).
-> **Fixed:** added a `RunBounded(process, timeoutMs, out stdout, out stderr)` helper — both streams drain
-> on pool threads and the wait is bounded (`WaitForExit(ms)`; `Kill()` + fail on timeout). All five
-> shell-outs use it with a 3-min cap, so a stuck child fails the bake cleanly instead of freezing the editor.
-A hung Blender or glbconv (bad model, a modal dialog it shows despite `--background`, a driver stall,
-an infinite Python loop) wedges the Unity **main thread forever** — Task Manager is the only way out.
-The existing comments handle pipe-buffer deadlock, not a genuinely stuck child.
-- **Fix:** `p.WaitForExit(timeoutMs)`; on timeout `p.Kill()`, drain, and `return Fail(...)`. Applies to
-  all four shell-outs (glbconv, blend export, mesh reduce, rig anim).
-
-### 3. Blender discovery is Windows/Program-Files-only, and "available" never probes PATH
-`baker/UniversalBaker.cs` (~723 `glbconv`, ~756 `FindBlender`, ~767 `BlenderAvailable`) — **confirmed.**
-Blender search is limited to `C:\Program Files\Blender Foundation` / `(x86)`. A Steam / winget
-(`%LOCALAPPDATA%`) / portable / macOS / Linux install yields only the bare `"blender"` PATH fallback,
-and `BlenderAvailable()` returns **false** for a genuine PATH install (it never probes PATH) — so
-strip-parts / reduce-to-tris / animated bakes are refused up front for a large slice of adopters.
-- **Fix:** also search `%LOCALAPPDATA%\Programs\Blender*`, the Steam common path, `/Applications/Blender.app`,
-  `/usr/bin/blender`; confirm availability by launching `blender --version` once (short timeout) and cache it.
+Severity key: 🔴 fix soon (silent data loss / silent no-inject) · 🟡 worth hardening · 🟢 cleanup.
 
 ---
 
-### 1b. Factory form fields silently reset mid-edit — ✅ FIXED (2026-07-05, found in use)
-`ModelFactoryWindow.cs:16-17` — the window's `cur` (every field value) and `selected` were plain fields,
-not `[SerializeField]`. Unity **wipes non-serialized `EditorWindow` fields on every domain reload** (any
-script recompile, entering/exiting Play mode), so the form blanked itself mid-edit — "the fields went
-empty on their own," forcing the modder to remember and re-type every value.
-> **Fixed:** marked `cur` and `selected` `[SerializeField]`; `ModelDef` is `[Serializable]`, so the whole
-> edited entry now round-trips across domain reloads.
+## Fixed to date (condensed history)
 
-## 🟡 Worth hardening
-
-### 4. `registered` static never reset across a session
-`Patches/UniversalInjectPatch.cs:121` — **confirmed pattern, but not biting save-loads.**
-`EnsureRegistered` early-returns on `registered==true` and the flag is never reset. Save-load reloads
-work today (the skeletons persist across a save-load — verified all session), so the symptom does not
-appear there. The latent risk is a **main-menu → different-game** round-trip *if* the game rebuilds
-`AnimationManager` — the custom skeletons would not be in the new instance and models would vanish with
-no error.
-- **Fix (cheap insurance):** cache the `animMgr` instance; when a different instance is seen, reset
-  `registered`/`loaded` and re-register.
-
-### 5. `anyAnimated` can cache `false` permanently
-`Patches/UniversalInjectPatch.cs:544` — if `entries` is null the first time `OnPawnAdded` fires (pawn
-added before registration — not guaranteed impossible across a game update), `anyAnimated` (a `bool?`)
-caches `false` for the whole session and all animation is silently disabled.
-- **Fix:** don't cache `anyAnimated` until `entries != null` (or `LoadRegistry()` at the top of the hook).
-
-### 6. `TryLoadAsset` return-value trap
-`Patches/UniversalInjectPatch.cs` (`LoadSkeleton` / `LoadAtlas` / `LoadClipCollection`) — the loader
-picks `LoadAsset || TryLoadAsset` by first match and uses the **return value**. If a game update adds
-`TryLoadAsset` (returns `bool`, asset via `out`) and it sorts first, every load becomes a boxed `false`
-and downstream field lookups miss with confusing logs.
-- **Fix:** prefer `LoadAsset` explicitly; only fall back to `TryLoadAsset` and read the `out` arg.
-
-### 7. `canBake` doesn't check the model file exists
-`ModelFactoryWindow.cs:344` — a moved/typo'd path passes the gate and fails deep inside `Build` with a
-cryptic error.
-- **Fix:** in `canBake`, when `modelFile` is non-empty require `File.Exists`; show "Model file not found".
-
-### 8. GameObject leak on an exception in the rig block
-`baker/UniversalBaker.cs:573-605` — (correcting the review: there are **no** `return Fail` in this
-range, so no early-return leak) but there's no `try/finally` around `root`, so an exception from
-`SaveAsPrefabAsset` / `Shader.Find` leaves orphan GameObjects in the open scene.
-- **Fix:** wrap the rig build in `try/finally` that `DestroyImmediate(root)`s.
+| Date | Fix |
+|---|---|
+| 07-05 | Registry atomic write (`.tmp` + `File.Replace`), corrupt-file guard (`.corrupt.json`, Save refuses), versioned project backup + auto-restore |
+| 07-05 | `RunBounded` 3-min cap on all five shell-outs (but see **E4** below — one unbounded path remains) |
+| 07-05 | `[SerializeField]` form persistence; dead `LoadHookPatch` removed; F8 window un-broken |
+| 07-06 | Resource-name whitespace/char guard (window gate + baker `Fail`), quoted glbconv arg |
+| 07-06 | Multi-material GLB: glbconv emits `usemtl`/`.mtl`/solid swatches; baker matches `.jpg` albedos |
+| 07-07 | *(external #1)* `LoadRegistry` no longer latches `loaded=true` before the read — retries transient failures up to 3× |
+| 07-07 | *(external #2)* regex fallback parses `respawnAfterLoad` (parity with Newtonsoft path) |
+| 07-07 | *(external #3)* `ModelRegistry.Save` atomic swap guarded; `Save`/`Upsert`/`Remove` return bool; `DoBake` reports "Baked, but REGISTRY SAVE FAILED" instead of a false ✓ |
+| 07-07 | *(external #5)* `Prober.TestWrite` labelled: leaves an inert placeholder in the live registry until restart |
+| 07-07 | Comment drift: `enc_models.txt`→`.json`; ModelRegistry header no longer claims JsonUtility works at game runtime (it silently returns empty there — the plugin **must** keep Newtonsoft); `ReadDonorFragments` header matches its whole-log-scan body |
+| 07-07 | *(this review)* `EnsureRegistered` latched `registered=true` on empty entries, permanently defeating the new load-retry (retry would succeed, registration never ran again → injection silently dead for the session). Now latches only when the load actually succeeded. |
+| 07-07 | csproj: `DefaultItemExcludes baker\**` — glbconv's .NET 8 publish output was being swept in as candidate assemblies, making the net471 build fail with 271 phantom type errors |
 
 ---
 
-## 🟢 Cleanup / package-readiness
+## Open findings — 2026-07-07 critical review
 
-- **`Patches/LoadHookPatch.cs` was dead code** — ✅ **removed (2026-07-05).** It was never applied
-  (`Plugin.Awake` patches only the three `Uni*` hooks, no `PatchAll`). Deleting it also un-broke the F8
-  window: `Prober.AnimMgr` is now set from `UniRegisterHook` (which *is* applied), so the AnimMgr-dependent
-  scans work again.
-- **ENC branding is hardcoded** — the `enc_models.json` filename, the `ENC.*` EditorPrefs keys
-  (`ENC.bepinexConfig`, `ENC.blenderPath`), and the `C:\Program Files (x86)` fallback const. For a
-  neutral package, derive all of these from one namespace constant (and coordinate the JSON filename
-  rename between baker and plugin).
-- **`RespawnDelayFrames` effective granularity is 5 frames** — the `%5` scan throttle means config
-  values 1-5 behave identically. Minor; document it or compare in scan-ticks.
-- **Minor:** bake temp files (`*_stripped/_reduced/_fromblend.glb`) aren't cleaned up; `libraryfolders.vdf`
-  parsing only decodes the `\\` escape; no hard guard against the ~25k shared-vertex ceiling (a huge
-  model bakes an over-budget skeleton with only a `Debug.Log`).
+### Editor pipeline (UniversalBaker / ModelFactoryWindow / ModelRegistry)
+
+#### E1 🔴 Bake uses trimmed fields, registry stores the untrimmed original — silent no-inject
+`ModelFactoryWindow.cs` `DoBake`: `cfg` gets `cur.pawnDescription.Trim()` but `Upsert(cur)` persists the
+raw string. Paste a pawn description with a trailing space → bake succeeds, registry entry looks valid,
+but the plugin's substring match (`name.IndexOf(pawnDescription)`) never fires. "Baked ✓", model never
+appears, no error anywhere. (`hideMeshes` is safe — the plugin trims per-token; `pawnDescription` is not.)
+- **Fix:** trim the fields on `cur` itself before `Upsert` (one line).
+
+#### E2 🟡 Remove button deletes by the *edited* name and always reports success
+`ModelFactoryWindow.cs:109-117`: removal key is the live `cur.resourceName` text field, not the selected
+entry (`existing[selected]`), and `Remove()`'s bool is discarded. Edit the name field first and Remove
+deletes a *different* model — or nothing — while the status says "Removed".
+- **Fix:** key on `existing[selected]`; branch the status on the returned bool.
+
+#### E3 🟡 Static bake of a skinned-only model ships a 0-vertex (invisible) unit
+`UniversalBaker.cs` static combine iterates only `MeshFilter`; a rigged FBX that imports as pure
+`SkinnedMeshRenderer`s yields `cVerts.Count == 0`, yet the bake completes, the GUID check passes (the
+asset exists — it's just empty), and a registry entry for an invisible unit is written. Only trace:
+`verts=0` in a Debug.Log. (The animated path's `MeasureLongestAxis` handles skinned meshes; the static
+combine does not.)
+- **Fix:** `if (cVerts.Count == 0) return Fail(...)` after the combine (and/or harvest `SkinnedMeshRenderer.sharedMesh`).
+
+#### E4 🟡 `RunBounded` isn't fully bounded: unbounded pipe-drain after `WaitForExit`
+`UniversalBaker.cs:758-760`: if the child exits but a grandchild (Blender helper) inherited the stdout
+handle, `WaitForExit(timeout)` returns true and the `ReadToEnd` tasks never see EOF —
+`GetAwaiter().GetResult()` then hangs the editor main thread forever, the exact freeze the cap exists to
+prevent.
+- **Fix:** `Task.WaitAll(new[]{outTask, errTask}, remaining)` and bail with partial output on timeout.
+
+#### E5 🟡 Delete-first re-bake destroys the last-good assets with no rollback
+Static and animated paths delete `_Skeleton/_Atlas/_ModelMesh/_Mat/_Model.prefab` *before* the fallible
+steps run. If the re-bake then fails, the registry still points at now-deleted assets: "re-bake failed,
+old model still works" became "re-bake failed, old model destroyed". (Delete-first is the deliberate
+stale-skeleton fix — the gap is only the missing rollback.)
+- **Fix:** rename-aside + restore-on-failure, or delete only after the new skeleton passes the GUID check.
+
+#### E6 🟢 Corrupt project backup + missing registry = permanent Save lockout with a misleading error
+`ModelRegistry.Load`: the backup restore parses inside the same `try` whose catch sets `lastLoadCorrupt`
+and names `RegistryPath` — a file that *doesn't exist* in this scenario. Save then refuses forever with
+instructions that can't be followed.
+- **Fix:** parse the backup in its own try/catch; treat a corrupt backup as "no backup".
+
+#### E7 🟢 Stale `_Preview.prefab` shadows a static re-bake in the window preview
+Bake animated → re-bake static: the static delete-first list omits `<name>/<name>_Preview.prefab`, and
+`LoadPreview` prefers the anim path whenever it exists — the preview forever shows the old animated model
+while the game gets the new static one.
+
+#### E8 🟢 Texture leak per multi-material bake
+The per-material albedos loaded for `PackTextures` (up-to-4096² RGBA32 each) are never `DestroyImmediate`d;
+Unity objects don't GC. An iterating modder strands tens of MB per bake until the next domain reload. Same
+class as the known rig-block GameObject leak, larger per occurrence.
+
+### Tools — Blender scripts + glbconv (key items verified on Blender 5.1.2)
+
+#### T1 🔴 `prep_model.py` reduce hard-fails on instanced (multi-user mesh) models — **verified**
+`modifier_apply` on linked-duplicate data raises `RuntimeError: Modifiers cannot be applied to multi-user
+data` (reproduced on 5.1.2). glTF/FBX importers create linked duplicates whenever nodes share a mesh —
+common in Sketchfab models (wheels, missiles, rotor blades). Any such model with Reduce on fails the whole
+bake, and the surfaced error is the misleading "Blender prep produced no GLB (exit 0)".
+- **Fix:** `if o.data.users > 1: o.data = o.data.copy()` before applying (also the *correct* semantics — applying through each user would re-decimate the shared datablock).
+
+#### T2 🟡 Reduce ratio counts polygons, but COLLAPSE ratio operates on triangles — **verified**
+A quad-heavy model under-reduces by up to 2×: 20k quads (40k tris) with target 24000 computes ratio 1.0 →
+*no reduction at all* → 40k tris ship into the ~25k-ceiling engine buffer this feature exists to protect.
+GLB inputs are immune (glTF is triangle-only); OBJ/FBX/.blend sources are exposed. The post-reduce log
+also under-reports (counts polys, not tris).
+- **Fix:** count `sum(len(p.vertices) - 2 for p in polygons)` like `rig_anim.py` already does.
+
+#### T3 🟡 `rig_anim.py` albedo grab takes the *first* `TEX_IMAGE` node, not Base Color
+Node order is creation order; a PBR material with normal/roughness maps can hand the Factory a **normal
+map as the atlas albedo** — purple/garbled skin, no error.
+- **Fix:** trace the Principled BSDF's Base Color input link; fall back to any TEX_IMAGE only if unlinked.
+
+#### T4 🟡 `rig_anim.py` `join()` keeps only the active object's modifiers
+Active is `meshes[0]` (scene order). If that happens to be a bone-parented prop without an Armature
+modifier, the joined mesh exports with **no skin binding** — the whole model rigid/frozen, all green logs.
+- **Fix:** pick a mesh that has an `'ARMATURE'` modifier as the join target (or re-add one bound to the armature).
+
+#### T5 🟡 glbconv: negative-scale (mirrored) nodes don't flip triangle winding
+Mirroring half a symmetric vehicle via scale (-1,1,1) is routine; those halves come out inside-out —
+invisible under backface culling, silently "fixed" by users reaching for Double-sided without knowing why.
+- **Fix:** if `M.GetDeterminant() < 0`, emit `(A,C,B)`.
+
+#### T6 🟢 Silent-empty outcomes in the Blender scripts
+- `rig_anim.py`: a typo'd bone-prefix filter strips **all** fcurves → a frozen 1-frame clip bakes and
+  ships with exit 0. Should hard-fail on `kept == 0`.
+- `prep_model.py`: strip-only config with an over-broad substring exports an **empty** GLB "successfully"
+  (the no-meshes guard only runs when reduce is on). Failure surfaces later with no pointer to the strip list.
+
+#### T7 🟢 Tool lows (recorded, not urgent)
+glbconv: normals not inverse-transpose under non-uniform scale; the legacy single-material texture path
+can overwrite on duplicate material names (no `mat{i}` prefix); TGA descriptor byte omits alpha-depth bits
+(Unity tolerates); whole-OBJ built in memory (~2× peak); skinned GLBs double-transform through the static
+path. `prep_model.py`: comma-containing object names can't be targeted (CSV split). `blend_export.py`:
+texture recovery is by basename only (can rebind a same-named wrong texture) and guesses `.png` for
+extension-less images.
+
+**Verified clean** (checked and explicitly cleared): glbconv's `mat_none` handling, TriMat/outTri
+bookkeeping, MatName collision-proofing (`mat{i}_` prefix), the UV V-flip (including repeat-wrapped UVs),
+0-material/null-name paths, Sanitize's filename safety; `prep_model.py`'s victim-set materialization (no
+iterate-while-removing) and case handling; Blender 5.x slotted-action fallback in `rig_anim.py`; window
+probe caching, GLB chunk parsing, and log scanning; `Plugin.cs` wholesale; `Prober.cs` (diagnostics,
+defensively guarded throughout).
 
 ---
 
-## Closed during review
-- **Field consistency (baker `ModelDef` ↔ plugin reader): no mismatch.** The plugin reads the runtime
-  subset (`resourceName`, `pawnDescription`, `skel`, `atlas`, `clip`, `position`, `hideMeshes`,
-  `respawnAfterLoad`) by exact name via Newtonsoft, ignoring the bake-only fields. Verified.
+## Still deferred (from earlier passes — unchanged)
+
+- **#3 Blender discovery** is Program-Files-only and `BlenderAvailable()` never probes PATH — the biggest
+  real gap for adopters (winget/Steam/portable/macOS/Linux installs refused up front).
+- **#4 `registered` never reset across a session** — latent for a main-menu → different-game round-trip
+  *if* the game rebuilds AnimationManager. (Distinct from the empty-latch bug fixed 07-07.) Cheap
+  insurance: cache the animMgr instance, reset on change.
+- **#5 `anyAnimated` can cache `false` permanently** if the pawn hook fires before registration.
+- **#6 `TryLoadAsset` return-value trap** in the asset loaders (prefer `LoadAsset` explicitly).
+- **#7 `canBake` doesn't check the model file exists.**
+- **#8 rig-block GameObject leak** (no try/finally around the prefab build).
+- *(external #4)* **`OnPawnAdded` perf**: once any animated model is registered, the full hook body runs
+  for every pawn in the game; member caching makes it survivable, but cost scales with total unit
+  activity. Gate on a skeleton-id HashSet if it ever bites.
+- **ENC branding** hardcoded (`enc_models.json`, `ENC.*` EditorPrefs, fallback path) — package-readiness.
+- Minors: bake temp files not cleaned; `libraryfolders.vdf` parsing only decodes `\\`; no hard guard at
+  the ~25k shared-vertex ceiling; `RespawnDelayFrames` effective granularity is 5 frames (scan throttle).
+
+---
 
 ## Recommended fix order
-1. ~~**#1 registry atomicity**~~ ✅ done · ~~**#2 process timeouts**~~ ✅ done · **#3 Blender discovery** —
-   the last one matters only for distributing to strangers (the author's own machine already has Blender).
-2. **#8 rig-block `try/finally`**, **#5 `anyAnimated`**, **#7 model-file check** — cheap correctness.
-3. **#4 `registered` reset**, **#6 `TryLoadAsset`** — resilience to a future game update.
-4. Cleanup: ~~delete `LoadHookPatch.cs`~~ ✅ done · neutralize ENC branding.
 
-> **Status (2026-07-05):** #1 (the only finding that could destroy the author's own work — a hand-edit
-> typo wiping the registry) and the dead-code cleanup are fixed. The rest are documented as
-> distribute-to-strangers hardening / future-game-update resilience, deliberately deferred.
+1. **E1** (one-line trim — highest silent-failure risk per keystroke) · **T1 + T2** (two small
+   `prep_model.py` edits, both verified; T1 breaks real models today, T2 defeats the budget the engine
+   ceiling depends on).
+2. **E2** (Remove key + honest status) · **E4** (bound the pipe drain — completes the 07-05 timeout work).
+3. **T3 / T4 / T5** — the silent-corruption class (wrong albedo, lost skinning, inside-out mirror halves).
+4. **E3, E5, T6** — honest failures for empty/destroyed outputs.
+5. Deferred list + lows as the package push approaches (Blender PATH discovery first among them).
