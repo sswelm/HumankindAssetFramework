@@ -33,7 +33,10 @@ see the [Factory Manual](Factory-Manual.md).
 - **Know the ceiling.** Custom meshes share **one GPU buffer — ~100k vertices / ~250k indices (~83k triangles), 32-bit
   indices — across ALL injected models *and* the game's own fx meshes** (from the decompiled
   `FxComponentMeshContentManager`). Overflow is silently dropped (missing/see-through geometry); the reducer exists to
-  stay under it, and double-sided counts twice.
+  stay under it, and double-sided counts twice. **Proven symptom** (AH-1, 2026-07-07): the overflow truncates the
+  **tail of the last-registered model's mesh** — its body renders, its late-order small parts (rotor mast) silently
+  vanish, while the editor preview (no shared buffer) looks perfect. Watch the bake log's `verts=` line; UV-seam
+  splitting makes verts ≈ 2× tris on textured models, so budget tris accordingly (~12k tris ≈ ~24k verts).
 - **Any format in:** GLB / glTF / OBJ / FBX, and **`.blend`** (auto-converted via an auto-detected Blender install).
 - **Correct textures out of the box:** custom skins land right-side-up — the bug that put the Zumwalt's markings on the
   superstructure (a glTF-V-top vs OBJ/Unity-V-bottom mismatch) is reconciled during OBJ import, so every model's texture
