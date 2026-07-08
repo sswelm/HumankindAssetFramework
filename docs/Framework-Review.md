@@ -171,6 +171,12 @@ defensively guarded throughout).
   for every pawn in the game; member caching makes it survivable, but cost scales with total unit
   activity. Gate on a skeleton-id HashSet if it ever bites.
 - **ENC branding** hardcoded (`enc_models.json`, `ENC.*` EditorPrefs, fallback path) — package-readiness.
+- **Blender-free static pipeline** (package-readiness, pairs with #3): Strip could move into `glbconv`
+  (it already walks named GLB nodes — skip stripped nodes' triangles in C#), and Reduce could use an
+  in-process C# quadric simplifier (UnityMeshSimplifier-class, MIT) on the imported mesh. That removes the
+  Blender dependency for ALL static bakes *and* the process-startup + GLB round-trip cost (the bulk of a
+  ~33s prep pass). Blender then remains only for `.blend` inputs and the animated pipeline, shrinking the
+  audience exposed to Blender discovery (#3). Rationale documented in `Building.md`.
 - Minors: bake temp files not cleaned; `libraryfolders.vdf` parsing only decodes `\\`; no hard guard at
   the ~25k shared-vertex ceiling; `RespawnDelayFrames` effective granularity is 5 frames (scan throttle).
 
