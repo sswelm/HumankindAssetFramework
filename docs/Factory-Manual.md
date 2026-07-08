@@ -79,6 +79,13 @@ That's the whole loop. Everything below is detail and the animated workflow.
   invisible. Lightest fix; assumes a roughly convex hull (vehicles/ships).
 - **Double-sided (single-sided/CAD)** — add a back face to every surface (heavier fallback for genuinely non-convex thin
   shells). Doubles the triangle count — and **halves the effective Reduce-to-tris** automatically.
+- **Albedo brightness** / **Albedo saturation** — tone-correct the baked skin (both `1.0` = unchanged). The injection
+  path ships a **flat albedo** — the donor's PBR normal/metallic/roughness maps are neutralized so its camo can't bleed
+  onto your model — so a skin that relied on shiny metal, or a dark/washed-out texture, reads **muddy** in-game.
+  **Brightness** multiplies RGB (>1 lifts a dark skin); **saturation** scales colour around per-pixel luminance
+  (0 = greyscale, >1 = punchier). Baked into the atlas, so **re-bake to apply** (no re-import needed — quick to iterate).
+  Cheaper and repeatable vs hand-editing the extracted albedo. Note: the Factory preview is dim, so judge the final
+  amount **in-game** (brighter lighting) and dial back if over-warm.
 - **Reduce to ~tris (0 = off)** — quadric-decimate a heavy model to about this many triangles (via Blender) to fit the
   engine's shared mesh buffer (~25k per model is the practical ceiling). It's a **ceiling, not a quota**: a model already
   under it passes through untouched. No Blender? Use **Convert grid** instead (below).
@@ -202,6 +209,7 @@ strategic map.
 |---|---|
 | **Model invisible / see-through** | Single-sided/CAD mesh (backface-culled) → **Winding fix** or **Double-sided**. Or it overflowed the shared buffer → lower **Reduce to ~tris**. |
 | **Model tiny (a speck) or huge** | **Size** is the world length — set it to what looks right; the Console logs the scale. |
+| **Model looks dark / grey / washed-out in-game** | Expected for skins that relied on PBR shine or a dark texture — the injection path ships flat albedo (donor PBR neutralized). Raise **Albedo brightness** and/or **Albedo saturation** and re-bake. Judge the amount in-game, not in the dim preview. |
 | **Change didn't show in-game** | You didn't **rebuild the mod** (§6). Or **Reuse extracted** was on and skipped the re-slim after you changed Clip/bones/model — untick it. |
 | **Animated toggle greyed out** | The model has no animation the probe can see (OBJ, or a glTF with no `animations`). Use a rigged glb/fbx. FBX/.blend can't be probed cheaply, so the toggle stays enabled — type the clip/bones by hand. |
 | **"No clips readable from this model"** | Clip/Bone Pick works for glTF/GLB only. For FBX/.blend, type the clip name and bone prefixes manually. |

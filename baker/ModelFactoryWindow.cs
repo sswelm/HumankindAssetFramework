@@ -319,6 +319,16 @@ public class ModelFactoryWindow : EditorWindow
             "Add a back face to every surface so single-sided or CAD 'sketch' meshes don't render invisible in-game (the " +
             "engine culls backfaces). Enable for models with missing / see-through parts — e.g. a hovercraft skirt. " +
             "Doubles the triangle count."), cur.doubleSided);
+        // Albedo tone (baked into the atlas). The injection path ships a FLAT albedo — the donor's PBR normal/metallic/
+        // roughness maps are neutralized so its camo can't bleed onto our model — so a skin that relied on shiny metal,
+        // or a dark/washed-out texture, reads muddy in-game. These lift it at bake time (1.0 = unchanged). Slider ranges
+        // are generous headroom; the number box takes exact values. No re-import needed — tweak + re-bake to preview.
+        cur.albedoBrightness = EditorGUILayout.Slider(new GUIContent("Albedo brightness",
+            "Multiply the baked atlas RGB. 1 = unchanged; >1 lifts a dark skin (the in-game look is flat albedo with the " +
+            "donor's PBR neutralized, so shiny/dark models come out muddy). Baked into the atlas — re-bake to apply."), cur.albedoBrightness <= 0f ? 1f : cur.albedoBrightness, 0.5f, 2f);
+        cur.albedoSaturation = EditorGUILayout.Slider(new GUIContent("Albedo saturation",
+            "Colour vividness of the baked skin. 1 = unchanged, 0 = greyscale, >1 = punchier. Fixes a washed-out/" +
+            "desaturated albedo (the game's lighting can't add colour back). Baked into the atlas — re-bake to apply."), cur.albedoSaturation < 0f ? 1f : cur.albedoSaturation, 0f, 2f);
 
         EditorGUILayout.Space();
         EditorGUILayout.LabelField("Runtime — applied on load, no re-bake", EditorStyles.miniBoldLabel);
@@ -723,6 +733,7 @@ public class ModelFactoryWindow : EditorWindow
             rotationEuler = cur.rotation, positionOffset = cur.position, size = cur.size,
             normals = (NormalsMode)cur.normalsMode, smoothingAngle = cur.smoothingAngle, convertGrid = cur.convertGrid,
             reuseExtracted = cur.reuseExtracted, doubleSided = cur.doubleSided, windingFix = cur.windingFix, heightUV = cur.heightUV, targetTris = cur.targetTris,
+            albedoBrightness = cur.albedoBrightness, albedoSaturation = cur.albedoSaturation,
             stripParts = cur.stripParts,
             animated = cur.animated, animClip = cur.animClip, animateBones = cur.animateBones
         };

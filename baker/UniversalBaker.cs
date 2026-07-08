@@ -29,6 +29,8 @@ public struct BakeConfig
     public bool    doubleSided;     // true = add a reversed back face to every triangle (single-sided/CAD repair) so backface-culled parts render in-game
     public bool    windingFix;      // true = rewind faces outward from the origin (documented CAD winding fix) so single-sided meshes render, no geometry doubling
     public bool    heightUV;        // true = override UVs with U=length, V=height so a vertical-gradient albedo maps by height (black skirt low, grey hull high)
+    public float   albedoBrightness; // multiply the baked atlas RGB (1 = unchanged). >1 lifts a dark skin — the injection path ships FLAT albedo (donor PBR neutralized), so shiny/dark models read muddy in-game; this compensates at bake time
+    public float   albedoSaturation; // scale colour vividness around per-pixel luminance (1 = unchanged, 0 = greyscale, >1 = punchier). Fixes desaturated albedos (game lighting can't add colour back)
     public int     targetTris;      // >0 = quadric-decimate the source to ~this many triangles (Blender) before baking, to fit the engine's shared vertex/index buffer
     public string  stripParts;      // bake-time (Blender): comma-separated object-name substrings to DELETE from the source before baking (e.g. a helicopter's own rotor so the donor's spinning rotor shows through). Empty = keep everything.
     public bool    animated;        // true = ANIMATED path: bake from the model's OWN armature + clip (Skeleton + ClipCollection), not the procedural vehicle rig
@@ -388,6 +390,7 @@ public static class UniversalBaker
             // hull top samples), and (b) the gaps PackTextures leaves between packed islands. Faces whose UVs land on
             // either would render BLACK. The <32 threshold only catches near-pure-black, so real dark skins are safe.
             var apx = packedAtlas.GetPixels32();
+            AdjustAlbedo(apx, cfg.albedoBrightness, cfg.albedoSaturation);   // optional brightness/saturation lift (baked in)
             for (int i = 0; i < apx.Length; i++)
             {
                 apx[i].a = 255;
@@ -548,7 +551,7 @@ public static class UniversalBaker
         }
 
         // --- 4) atlas (multi-material: the packed atlas built above; single: pick the one extracted albedo) ---
-        var atlas = multiMat ? packedAtlas : BuildAtlas(resDir, name);
+        var atlas = multiMat ? packedAtlas : BuildAtlas(resDir, name, cfg.albedoBrightness, cfg.albedoSaturation);
         // delete-first like the animated path: CreateAsset over an existing _Atlas.asset can keep the STALE atlas (old
         // skin) on a re-bake -- the same in-place-overwrite trap the mesh/prefab/skeleton delete-first block below fixes.
         AssetDatabase.DeleteAsset("Assets/Resources/" + name + "_Atlas.asset");
@@ -670,7 +673,28 @@ public static class UniversalBaker
         return t;
     }
 
-    static Texture2D BuildAtlas(string resDir, string name)
+    // Bake-time albedo tone control. The injection path ships a FLAT albedo (the donor's PBR normal/metallic/roughness
+    // maps are neutralized so its camo can't bleed through), so a model that relied on shiny metal or lived in a dark
+    // texture reads muddy in-game. brightness multiplies RGB; saturation scales colour around per-pixel luminance
+    // (0 = greyscale, 1 = unchanged, >1 = punchier). Both default to 1 (no-op — existing bakes are byte-identical).
+    static void AdjustAlbedo(Color32[] px, float brightness, float saturation)
+    {
+        float b = brightness <= 0f ? 1f : brightness;   // guard bad/zero config
+        float s = saturation < 0f ? 1f : saturation;
+        if (Mathf.Approximately(b, 1f) && Mathf.Approximately(s, 1f)) return;
+        bool doS = !Mathf.Approximately(s, 1f), doB = !Mathf.Approximately(b, 1f);
+        for (int i = 0; i < px.Length; i++)
+        {
+            float r = px[i].r, g = px[i].g, bl = px[i].b;
+            if (doS) { float lum = r * 0.299f + g * 0.587f + bl * 0.114f; r = lum + (r - lum) * s; g = lum + (g - lum) * s; bl = lum + (bl - lum) * s; }
+            if (doB) { r *= b; g *= b; bl *= b; }
+            px[i].r = (byte)Mathf.Clamp(Mathf.RoundToInt(r), 0, 255);
+            px[i].g = (byte)Mathf.Clamp(Mathf.RoundToInt(g), 0, 255);
+            px[i].b = (byte)Mathf.Clamp(Mathf.RoundToInt(bl), 0, 255);
+        }
+    }
+
+    static Texture2D BuildAtlas(string resDir, string name, float brightness, float saturation)
     {
         // Read the extracted albedo straight off disk. With "Reuse extracted files" on, this is the modder's hand-edited
         // copy (e.g. a texture fix done in paint.net), so their edits flow into the atlas untouched.
@@ -690,9 +714,10 @@ public static class UniversalBaker
         {
             atlas = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = name + "_Atlas" };
             atlas.LoadImage(File.ReadAllBytes(albedo));
-            var px = atlas.GetPixels();
-            for (int i = 0; i < px.Length; i++) px[i].a = 1f;
-            atlas.SetPixels(px); atlas.Apply();
+            var px = atlas.GetPixels32();
+            AdjustAlbedo(px, brightness, saturation);   // optional brightness/saturation lift (baked in)
+            for (int i = 0; i < px.Length; i++) px[i].a = 255;
+            atlas.SetPixels32(px); atlas.Apply();
             Debug.Log($"[Factory] {name} albedo: {atlas.width}x{atlas.height} ({Path.GetFileName(albedo)})");
         }
         else
