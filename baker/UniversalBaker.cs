@@ -71,8 +71,14 @@ public static class UniversalBaker
         float size = cfg.size > 0f ? cfg.size : 5f;
 
         if (!AssetDatabase.IsValidFolder("Assets/Resources")) AssetDatabase.CreateFolder("Assets", "Resources");
-        string resDir = "Assets/Resources/" + name;
-        if (!AssetDatabase.IsValidFolder(resDir)) AssetDatabase.CreateFolder("Assets/Resources", name);
+        // Bake INPUTS (OBJ / albedos / preview prefab) go OUTSIDE Resources, into Assets/FactorySource. Unity force-
+        // includes EVERYTHING under a Resources folder in the build — even unreferenced source — which bloated the mod
+        // bundle (416MB) AND shipped the raw extractable source of licensed assets (a Fab-license breach). The baked
+        // OUTPUTS (_Skeleton/_Atlas/_ModelMesh/_Mat/_Model.prefab) stay in Resources ROOT: they're self-contained
+        // (reference only each other, never the source) and MUST ship + load by GUID. FactorySource is not shipped.
+        string resDir = "Assets/FactorySource/" + name;
+        if (!AssetDatabase.IsValidFolder("Assets/FactorySource")) AssetDatabase.CreateFolder("Assets", "FactorySource");
+        if (!AssetDatabase.IsValidFolder(resDir)) AssetDatabase.CreateFolder("Assets/FactorySource", name);
         // Bake the FBX into a DEDICATED subfolder that holds ONLY our clip. The ClipCollection's SetFromDirectory scans a
         // whole folder for animation FBX, so if we dropped it in resDir it would also pick up any OTHER fbx there (e.g. a
         // hand-made drone_rigged_slim.fbx) and bake a 2-clip collection — the runtime then resolves the wrong clip and the
@@ -80,7 +86,7 @@ public static class UniversalBaker
         string animDir = resDir + "/anim";
         if (!AssetDatabase.IsValidFolder(animDir)) AssetDatabase.CreateFolder(resDir, "anim");
         string projRoot = Directory.GetParent(Application.dataPath).FullName;
-        string fsDir = Path.Combine(Application.dataPath, "Resources", name);
+        string fsDir = Path.Combine(Application.dataPath, "FactorySource", name);
         Directory.CreateDirectory(fsDir);
 
         string fbxRel = animDir + "/" + name + "_anim.fbx";
@@ -258,8 +264,14 @@ public static class UniversalBaker
         float smoothing = cfg.smoothingAngle > 0f ? cfg.smoothingAngle : 20f;
 
         if (!AssetDatabase.IsValidFolder("Assets/Resources")) AssetDatabase.CreateFolder("Assets", "Resources");
-        string resDir = "Assets/Resources/" + name;
-        if (!AssetDatabase.IsValidFolder(resDir)) AssetDatabase.CreateFolder("Assets/Resources", name);
+        // Bake INPUTS (OBJ / albedos / preview prefab) go OUTSIDE Resources, into Assets/FactorySource. Unity force-
+        // includes EVERYTHING under a Resources folder in the build — even unreferenced source — which bloated the mod
+        // bundle (416MB) AND shipped the raw extractable source of licensed assets (a Fab-license breach). The baked
+        // OUTPUTS (_Skeleton/_Atlas/_ModelMesh/_Mat/_Model.prefab) stay in Resources ROOT: they're self-contained
+        // (reference only each other, never the source) and MUST ship + load by GUID. FactorySource is not shipped.
+        string resDir = "Assets/FactorySource/" + name;
+        if (!AssetDatabase.IsValidFolder("Assets/FactorySource")) AssetDatabase.CreateFolder("Assets", "FactorySource");
+        if (!AssetDatabase.IsValidFolder(resDir)) AssetDatabase.CreateFolder("Assets/FactorySource", name);
         string objPath = resDir + "/" + name + ".obj";
         string projRoot = Directory.GetParent(Application.dataPath).FullName;
         bool haveObj = File.Exists(Path.Combine(projRoot, objPath)) || File.Exists(Path.Combine(projRoot, resDir + "/" + name + ".fbx"));
@@ -298,13 +310,13 @@ public static class UniversalBaker
                 // is a normal Principled-BSDF setup; very old materials may export untextured (supply the albedo manually).
                 string tmpGlb = Path.Combine(Path.GetTempPath(), name + "_fromblend.glb");
                 if (!ConvertBlend(srcFile, tmpGlb)) return Fail("Blender .blend -> GLB conversion failed (see console)");
-                string fsDir = Path.Combine(Application.dataPath, "Resources", name);
+                string fsDir = Path.Combine(Application.dataPath, "FactorySource", name);
                 Directory.CreateDirectory(fsDir);
                 if (!ConvertGlb(tmpGlb, fsDir, name, cfg.convertGrid)) return Fail("GLB conversion failed (see console)");
             }
             else if (ext == ".glb" || ext == ".gltf")
             {
-                string fsDir = Path.Combine(Application.dataPath, "Resources", name);
+                string fsDir = Path.Combine(Application.dataPath, "FactorySource", name);
                 Directory.CreateDirectory(fsDir);
                 if (!ConvertGlb(srcFile, fsDir, name, cfg.convertGrid)) return Fail("GLB conversion failed (see console)");
             }
