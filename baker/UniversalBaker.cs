@@ -123,6 +123,7 @@ public static class UniversalBaker
 
         // --- 3) atlas from the exported albedo (same single-albedo path + Resources-root location as static) ---
         var atlas = BuildAtlas(resDir, name, cfg.albedoBrightness, cfg.albedoSaturation);
+        atlas = FinalizeAtlas(atlas, name);   // cap resolution + DXT1-compress (keeps the shipped _Atlas.asset small)
         string atlasPath = "Assets/Resources/" + name + "_Atlas.asset";
         AssetDatabase.DeleteAsset(atlasPath);
         AssetDatabase.CreateAsset(atlas, atlasPath);
@@ -397,7 +398,7 @@ public static class UniversalBaker
         {
             var albs = matList.Select(mm => LoadReadableAlbedo(fsResDir, mm)).ToArray();
             packedAtlas = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = name + "_Atlas" };
-            atlasRects = packedAtlas.PackTextures(albs, 2, 4096);
+            atlasRects = packedAtlas.PackTextures(albs, 2, AtlasMaxDim);   // cap packing at the final size (was 4096) — no need to pack huge then shrink
             // Force opaque AND (unless keepBlack) repaint near-black regions neutral grey. Two sources of near-black:
             // (a) unused UV "dead-zones" inside a source albedo (e.g. the zeppelin hull texture's black corner that the
             // hull top samples), and (b) the gaps PackTextures leaves between packed islands — faces whose UVs land on
@@ -566,6 +567,7 @@ public static class UniversalBaker
 
         // --- 4) atlas (multi-material: the packed atlas built above; single: pick the one extracted albedo) ---
         var atlas = multiMat ? packedAtlas : BuildAtlas(resDir, name, cfg.albedoBrightness, cfg.albedoSaturation);
+        atlas = FinalizeAtlas(atlas, name);   // cap resolution + DXT1-compress so the shipped _Atlas.asset isn't 100s of MB
         // delete-first like the animated path: CreateAsset over an existing _Atlas.asset can keep the STALE atlas (old
         // skin) on a re-bake -- the same in-place-overwrite trap the mesh/prefab/skeleton delete-first block below fixes.
         AssetDatabase.DeleteAsset("Assets/Resources/" + name + "_Atlas.asset");
@@ -706,6 +708,37 @@ public static class UniversalBaker
             px[i].g = (byte)Mathf.Clamp(Mathf.RoundToInt(g), 0, 255);
             px[i].b = (byte)Mathf.Clamp(Mathf.RoundToInt(bl), 0, 255);
         }
+    }
+
+    // Shrink + compress the baked atlas before it's saved. The runtime path builds the atlas UNCOMPRESSED (RGBA32) and
+    // packing can reach 4096x8192 -> a single _Atlas.asset hit 128MB, dominating the shipped bundle. A unit is ~80px at
+    // map zoom, so cap the longest side at AtlasMaxDim and block-compress (DXT1: 6:1; our atlas is opaque so no alpha is
+    // needed). UVs are fractional, so downscaling never disturbs them. Net: a 128MB atlas -> ~1MB, no visible loss.
+    const int AtlasMaxDim = 2048;
+    static Texture2D FinalizeAtlas(Texture2D atlas, string name)
+    {
+        if (atlas == null) return atlas;
+        int w = atlas.width, h = atlas.height, mx = Mathf.Max(w, h);
+        if (mx > AtlasMaxDim)
+        {
+            float s = AtlasMaxDim / (float)mx;
+            int nw = Mathf.Max(4, (Mathf.RoundToInt(w * s) / 4) * 4);   // multiple of 4 for block compression
+            int nh = Mathf.Max(4, (Mathf.RoundToInt(h * s) / 4) * 4);
+            var rt = RenderTexture.GetTemporary(nw, nh, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+            var prev = RenderTexture.active; Graphics.Blit(atlas, rt); RenderTexture.active = rt;
+            var scaled = new Texture2D(nw, nh, TextureFormat.RGBA32, false) { name = atlas.name };
+            scaled.ReadPixels(new Rect(0, 0, nw, nh), 0, 0); scaled.Apply();
+            RenderTexture.active = prev; RenderTexture.ReleaseTemporary(rt);
+            UnityEngine.Object.DestroyImmediate(atlas);
+            atlas = scaled; w = nw; h = nh;
+        }
+        if ((w % 4) == 0 && (h % 4) == 0)   // DXT1 needs multiple-of-4 dims; tiny odd atlases stay uncompressed
+        {
+            EditorUtility.CompressTexture(atlas, TextureFormat.DXT1, TextureCompressionQuality.Normal);
+            atlas.Apply(false, false);
+        }
+        Debug.Log($"[Factory] {name} atlas finalized -> {atlas.width}x{atlas.height} {atlas.format}");
+        return atlas;
     }
 
     static Texture2D BuildAtlas(string resDir, string name, float brightness, float saturation)
