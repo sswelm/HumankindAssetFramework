@@ -118,10 +118,21 @@ class Program
         sb.AppendLine("# " + Path.GetFileName(glbPath) + "  decimated grid=" + grid);
         if (groupByMat) sb.AppendLine("mtllib " + baseName + ".mtl");
         foreach (var v in outV) sb.AppendLine($"v {F(v.X)} {F(v.Y)} {F(v.Z)}");
+        // Tile shift: some models UV-map into a non-[0,1] tile (e.g. the whole Zeppelin envelope sits in V 1..2) and
+        // rely on texture WRAP to repeat the skin. The atlas baker packs each texture into a fixed rect and cannot
+        // wrap, so out-of-[0,1] UVs sample OUTSIDE the rect and the skin vanishes. Shift U and V by their integer
+        // tile offset so a single-tile island lands back in [0,1]. Integer shift preserves triangle continuity
+        // (unlike per-vertex frac(), which would tear any triangle that straddles a tile boundary).
+        float uOff = 0f, vOff = 0f;
+        {
+            float minU = float.MaxValue, minV = float.MaxValue; bool any = false;
+            foreach (var t in outU) { any = true; if (t.X < minU) minU = t.X; if (t.Y < minV) minV = t.Y; }
+            if (any) { uOff = MathF.Floor(minU); vOff = MathF.Floor(minV); }
+        }
         // Flip V: glTF/GLB store texture coords with V=0 at the TOP; OBJ (and Unity) use V=0 at the BOTTOM. Without
         // this, the skin maps upside-down in V and lands on the wrong faces in-engine (deck markings on the
         // superstructure). This was THE bug behind the Stealth Cruiser's scrambled texture.
-        foreach (var t in outU) sb.AppendLine($"vt {F(t.X)} {F(1f - t.Y)}");
+        foreach (var t in outU) sb.AppendLine($"vt {F(t.X - uOff)} {F(1f - (t.Y - vOff))}");
         foreach (var n in outN) sb.AppendLine($"vn {F(n.X)} {F(n.Y)} {F(n.Z)}");
         sb.AppendLine("g " + baseName);
         if (groupByMat)

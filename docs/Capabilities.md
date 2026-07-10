@@ -39,9 +39,12 @@ see the [Factory Manual](Factory-Manual.md).
   splitting makes verts ≈ 2× tris on textured models, so budget tris accordingly (~12k tris ≈ ~24k verts).
 - **Any format in:** GLB / glTF / OBJ / FBX, and **`.blend`** (auto-converted via an auto-detected Blender install).
 - **Correct textures out of the box:** custom skins land right-side-up — the bug that put the Zumwalt's markings on the
-  superstructure (a glTF-V-top vs OBJ/Unity-V-bottom mismatch) is reconciled during OBJ import, so every model's texture
-  maps correctly. (Note: the `glbconv` converter itself writes UVs *raw* — it does **not** flip V; the convention is
-  handled by Unity's OBJ import.)
+  superstructure (a glTF-V-top vs OBJ/Unity-V-bottom mismatch) is fixed in `glbconv` by flipping V (`1 - v`) on OBJ
+  write. `glbconv` also **normalizes non-[0,1] UV tiles**: a model that maps into a higher tile (e.g. the whole Zeppelin
+  hull sits in V 1→2, relying on texture *wrap* to repeat its skin) has its UVs **integer-shifted** back into [0,1]
+  before the flip — because the atlas packs each texture into a fixed rect and can't wrap, so un-shifted tiled UVs would
+  sample outside the rect and the skin would vanish (fine in Blender, blank in-engine). Integer shift, so tile-crossing
+  triangles never tear. Genuine *repeat*-tiling (a small texture spanning [0,N]) remains outside what an atlas can do.
 - **Texture isolation:** each model gets a private `FxOutputLayer` clone, so its skin never bleeds onto the vanilla donor
   unit — proven on screen with a custom cruiser and its donor corvette side-by-side, each keeping its own skin.
 - **Add a model = bake it.** The Factory writes the registry; the plugin picks it up on next launch.
