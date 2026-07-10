@@ -32,6 +32,7 @@ public struct BakeConfig
     public float   albedoBrightness; // multiply the baked atlas RGB (1 = unchanged). >1 lifts a dark skin — the injection path ships FLAT albedo (donor PBR neutralized), so shiny/dark models read muddy in-game; this compensates at bake time
     public float   albedoSaturation; // scale colour vividness around per-pixel luminance (1 = unchanged, 0 = greyscale, >1 = punchier). Fixes desaturated albedos (game lighting can't add colour back)
     public bool    keepBlack;        // MULTI-MATERIAL only: skip the near-black->grey remap so an intentionally black material (glossy canopy, dark cockpit) stays black. Default false = neutralize (hides UV dead-zones / packing gaps)
+    public int     atlasMaxDim;      // longest side of the baked atlas in px (512 / 1024 / 2048). Smaller = smaller shipped _Atlas.asset. A unit is ~80px at map zoom so 512-1024 is plenty; 0 = default (1024)
     public int     targetTris;      // >0 = quadric-decimate the source to ~this many triangles (Blender) before baking, to fit the engine's shared vertex/index buffer
     public string  stripParts;      // bake-time (Blender): comma-separated object-name substrings to DELETE from the source before baking (e.g. a helicopter's own rotor so the donor's spinning rotor shows through). Empty = keep everything.
     public bool    animated;        // true = ANIMATED path: bake from the model's OWN armature + clip (Skeleton + ClipCollection), not the procedural vehicle rig
@@ -123,7 +124,7 @@ public static class UniversalBaker
 
         // --- 3) atlas from the exported albedo (same single-albedo path + Resources-root location as static) ---
         var atlas = BuildAtlas(resDir, name, cfg.albedoBrightness, cfg.albedoSaturation);
-        atlas = FinalizeAtlas(atlas, name);   // cap resolution + DXT1-compress (keeps the shipped _Atlas.asset small)
+        atlas = FinalizeAtlas(atlas, name, cfg.atlasMaxDim);   // cap resolution + DXT1-compress (keeps the shipped _Atlas.asset small)
         string atlasPath = "Assets/Resources/" + name + "_Atlas.asset";
         AssetDatabase.DeleteAsset(atlasPath);
         AssetDatabase.CreateAsset(atlas, atlasPath);
@@ -398,7 +399,7 @@ public static class UniversalBaker
         {
             var albs = matList.Select(mm => LoadReadableAlbedo(fsResDir, mm)).ToArray();
             packedAtlas = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = name + "_Atlas" };
-            atlasRects = packedAtlas.PackTextures(albs, 2, AtlasMaxDim);   // cap packing at the final size (was 4096) — no need to pack huge then shrink
+            atlasRects = packedAtlas.PackTextures(albs, 2, cfg.atlasMaxDim > 0 ? cfg.atlasMaxDim : AtlasMaxDimDefault);   // cap packing at the final size (was 4096) — no need to pack huge then shrink
             // Force opaque AND (unless keepBlack) repaint near-black regions neutral grey. Two sources of near-black:
             // (a) unused UV "dead-zones" inside a source albedo (e.g. the zeppelin hull texture's black corner that the
             // hull top samples), and (b) the gaps PackTextures leaves between packed islands — faces whose UVs land on
@@ -567,7 +568,7 @@ public static class UniversalBaker
 
         // --- 4) atlas (multi-material: the packed atlas built above; single: pick the one extracted albedo) ---
         var atlas = multiMat ? packedAtlas : BuildAtlas(resDir, name, cfg.albedoBrightness, cfg.albedoSaturation);
-        atlas = FinalizeAtlas(atlas, name);   // cap resolution + DXT1-compress so the shipped _Atlas.asset isn't 100s of MB
+        atlas = FinalizeAtlas(atlas, name, cfg.atlasMaxDim);   // cap resolution + DXT1-compress so the shipped _Atlas.asset isn't 100s of MB
         // delete-first like the animated path: CreateAsset over an existing _Atlas.asset can keep the STALE atlas (old
         // skin) on a re-bake -- the same in-place-overwrite trap the mesh/prefab/skeleton delete-first block below fixes.
         AssetDatabase.DeleteAsset("Assets/Resources/" + name + "_Atlas.asset");
@@ -714,14 +715,15 @@ public static class UniversalBaker
     // packing can reach 4096x8192 -> a single _Atlas.asset hit 128MB, dominating the shipped bundle. A unit is ~80px at
     // map zoom, so cap the longest side at AtlasMaxDim and block-compress (DXT1: 6:1; our atlas is opaque so no alpha is
     // needed). UVs are fractional, so downscaling never disturbs them. Net: a 128MB atlas -> ~1MB, no visible loss.
-    const int AtlasMaxDim = 2048;
-    static Texture2D FinalizeAtlas(Texture2D atlas, string name)
+    const int AtlasMaxDimDefault = 1024;
+    static Texture2D FinalizeAtlas(Texture2D atlas, string name, int maxDim)
     {
         if (atlas == null) return atlas;
+        if (maxDim <= 0) maxDim = AtlasMaxDimDefault;   // guard unset/old-registry
         int w = atlas.width, h = atlas.height, mx = Mathf.Max(w, h);
-        if (mx > AtlasMaxDim)
+        if (mx > maxDim)
         {
-            float s = AtlasMaxDim / (float)mx;
+            float s = maxDim / (float)mx;
             int nw = Mathf.Max(4, (Mathf.RoundToInt(w * s) / 4) * 4);   // multiple of 4 for block compression
             int nh = Mathf.Max(4, (Mathf.RoundToInt(h * s) / 4) * 4);
             var rt = RenderTexture.GetTemporary(nw, nh, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
