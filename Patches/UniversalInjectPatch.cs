@@ -969,9 +969,12 @@ namespace ENCAccessProof
                         if (rawMoving) { if (!e.deployMovingSince.ContainsKey(guid)) e.deployMovingSince[guid] = now; }
                         else e.deployMovingSince.Remove(guid);
                         bool moving = e.deployMovingSince.TryGetValue(guid, out float ms) && (now - ms) >= FoldDebounce;
+                        // Clamp the deployed target just below 1.0: the pose sampler does Mathf.Repeat(Time,1), so a poseTime of
+                        // EXACTLY 1.0 wraps to 0.0 = frame 0 = the FOLDED pose. Holding at 0.999 lands on the last real frame instead.
+                        float target = UnityEngine.Mathf.Min(e.deployPoseTime, 0.999f);
                         float cur;
                         if (moving) cur = 0f;                                                          // sustained travel -> folded
-                        else cur = e.deployProgress.TryGetValue(guid, out float p) ? UnityEngine.Mathf.MoveTowards(p, e.deployPoseTime, step[e]) : e.deployPoseTime;   // rest -> ramp to / HOLD fully deployed
+                        else cur = e.deployProgress.TryGetValue(guid, out float p) ? UnityEngine.Mathf.MoveTowards(p, target, step[e]) : target;   // rest -> ramp to / HOLD fully deployed
                         e.deployProgress[guid] = cur;
                         seen[e].Add(guid);
                         if (deployMoveState == null) deployMoveState = new Dictionary<long, bool>();
