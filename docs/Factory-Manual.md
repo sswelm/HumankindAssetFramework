@@ -77,6 +77,12 @@ That's the whole loop. Everything below is detail and the animated workflow.
   playthrough. **Author the clip to start *and* end at rest** so the single pass looks clean. Leave **off** for a continuous
   loop (a drone's spinning prop). Animated models only; runtime flag (no re-bake to toggle — Bake just re-writes the
   registry). See §5 and [Firing-On-Attack.md](Firing-On-Attack.md).
+- **Deploy when stopped** *(+ **Deployed pose time**)* — hold the clip's **deployed** pose while the unit is idle and snap to
+  the **undeployed** pose (frame 0) the instant it moves — e.g. a howitzer that deploys when it stops and folds for travel.
+  **Author the clip** so frame 0 = travelling and the deployed pose sits at **Deployed pose time** (0..1; `1` = a real deploy
+  clip's end). It's a *held state*, per-unit and instant, driven by the unit's moving state — concurrency/AI-safe (only
+  visible, our-model units are polled). **Mutually exclusive with Fire on attack for now** (both use the model's single clip
+  slot; running deploy *and* fire together is the multi-clip TODO). Animated models only; runtime flag.
 
 ### Transform
 - **Rotation offset (XYZ)** — degrees, on top of the auto forward-alignment. Static models bake this into the mesh; for

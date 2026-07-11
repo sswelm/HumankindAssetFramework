@@ -40,6 +40,12 @@ namespace ENCAccessProof
         // PER-INSTANCE fire, so only the howitzer that actually bombarded animates (not every howitzer of the type):
         public readonly System.Collections.Concurrent.ConcurrentQueue<long> fireGuidQueue = new System.Collections.Concurrent.ConcurrentQueue<long>();  // SIM thread enqueues the firing unit's SimulationEntityGUID; Plugin.Update (main thread) drains it (no Unity access on the sim thread).
         public readonly List<FireInstance> activeFires = new List<FireInstance>();  // MAIN/render thread only (locked): each firing pawn's render position + start time; the pose hook plays the clip on the pawn nearest an active fire.
+        // DEPLOY-ON-STOP (a HELD state, not a one-shot): the clip rests at the DEPLOYED pose by default and snaps to the
+        // UNDEPLOYED pose while the unit is moving. Pure function of "is this pawn's unit moving right now" — no state machine,
+        // AI/concurrency-safe. Plugin.Update polls PresentationUnit.IsAnyPawnMoving and records the moving pawns' positions.
+        public bool deployOnStop;             // hold the deployed pose when idle, undeploy (frame 0) while moving
+        public float deployPoseTime = 1f;     // normalized clip time of the DEPLOYED pose (1 = a real deploy clip's end; 0.5 = the barrel-fire clip's raised plateau, used to prove the plumbing without a deploy clip)
+        public readonly List<UnityEngine.Vector3> movingPawnPositions = new List<UnityEngine.Vector3>();  // MAIN thread only (locked): render positions of THIS model's pawns whose unit is currently moving; the pose hook undeploys a pawn near one of these.
     }
 
     // One in-flight one-shot: the world position of a pawn that just fired + when it started. The pose hook matches a
@@ -89,6 +95,8 @@ namespace ENCAccessProof
                                 respawnAfterLoad = (bool?)m["respawnAfterLoad"] ?? false,
                                 freezeDonorAnim = (bool?)m["freezeDonorAnim"] ?? false,
                                 fireOnAttack = (bool?)m["fireOnAttack"] ?? false,
+                                deployOnStop = (bool?)m["deployOnStop"] ?? false,
+                                deployPoseTime = m["deployPoseTime"] != null ? (float)m["deployPoseTime"] : 1f,
                             });
                         }
                         Plugin.Log.LogInfo($"[Uni] parsed {entries.Count} entr(ies) via Newtonsoft [" + string.Join(", ", entries.Select(e => e.resourceName + "->" + e.pawnDescription)) + "]");
@@ -112,6 +120,8 @@ namespace ENCAccessProof
                 var ra = Regex.Matches(text, "\"respawnAfterLoad\"\\s*:\\s*(true|false)");   // parity with the Newtonsoft path (line ~77) — else the first-instance rotor fix silently defaults off here
                 var fz = Regex.Matches(text, "\"freezeDonorAnim\"\\s*:\\s*(true|false)");   // parity with the Newtonsoft path — else the donor-animation freeze silently defaults off here
                 var foa = Regex.Matches(text, "\"fireOnAttack\"\\s*:\\s*(true|false)");     // parity: play the clip once on attack vs loop
+                var dos = Regex.Matches(text, "\"deployOnStop\"\\s*:\\s*(true|false)");     // parity: hold deployed when idle, undeploy while moving
+                var dpt = Regex.Matches(text, "\"deployPoseTime\"\\s*:\\s*(-?[\\d.eE+]+)"); // parity: normalized clip time of the deployed pose (default 1)
                 var sc = Regex.Matches(text, "\"scale\"\\s*:\\s*(-?[\\d.eE+]+)");           // runtime ObjectSpace scale multiplier (default 1)
                 int G(Match m, int g) => int.TryParse(m.Groups[g].Value, out var r) ? r : 0;
                 float F(Match m, int g) => float.TryParse(m.Groups[g].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var r) ? r : 0f;
@@ -130,6 +140,8 @@ namespace ENCAccessProof
                         respawnAfterLoad = i < ra.Count && ra[i].Groups[1].Value == "true",
                         freezeDonorAnim = i < fz.Count && fz[i].Groups[1].Value == "true",
                         fireOnAttack = i < foa.Count && foa[i].Groups[1].Value == "true",
+                        deployOnStop = i < dos.Count && dos[i].Groups[1].Value == "true",
+                        deployPoseTime = i < dpt.Count && float.TryParse(dpt[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _dpt) ? _dpt : 1f,
                         scale = i < sc.Count && float.TryParse(sc[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _sc) ? _sc : 1f,
                     });
                 }
@@ -656,7 +668,20 @@ namespace ENCAccessProof
                 // duration so it plays at REAL speed and hits every frame; raw Time.time = duration× too fast + frame-skipping.
                 float dur = e.animDuration > 0.001f ? e.animDuration : 1f;
                 float poseTime;
-                if (e.fireOnAttack)
+                if (e.deployOnStop)
+                {
+                    // DEPLOY-ON-STOP (held state, instant snap): hold the DEPLOYED pose (deployPoseTime) by default; snap to
+                    // UNDEPLOYED (frame 0) while THIS pawn's unit is moving. Plugin.Update records the moving pawns' positions;
+                    // a pawn near one is moving. Pure per-pawn function of current moving-state — AI/concurrency-safe, no state.
+                    var osD = GetMember(entry, "ObjectSpace");
+                    UnityEngine.Vector3 dpos = (UnityEngine.Vector3)GetMember(osD, "Translation");
+                    bool moving = false;
+                    lock (e.movingPawnPositions)
+                        for (int i = 0; i < e.movingPawnPositions.Count; i++)
+                            if ((e.movingPawnPositions[i] - dpos).sqrMagnitude <= 3f * 3f) { moving = true; break; }
+                    poseTime = moving ? 0f : e.deployPoseTime;
+                }
+                else if (e.fireOnAttack)
                 {
                     // FIRE-ONCE, PER-INSTANCE: rest at frame 0 unless THIS pawn is the one that bombarded. The combat hook
                     // records the firing pawn's render position (via its PresentationUnit); we match this pawn to the nearest
@@ -858,6 +883,47 @@ namespace ENCAccessProof
                 }
             }
             catch (Exception ex) { Plugin.Log.LogError("[Fire] ProcessFireQueues: " + ex); }
+        }
+
+        // DEPLOY-ON-STOP poll (main thread — Plugin.Update). For each deployOnStop model, record the render positions of the
+        // pawns whose unit is currently MOVING (PresentationUnit.IsAnyPawnMoving). The pose hook then undeploys any pawn near
+        // one of those and holds the deployed pose for the rest — an instant, per-pawn moving→pose mapping (no state machine).
+        // Same presentation walk as MaybeRespawnPostLoad; scoped to VISIBLE our-model units, so AI/off-screen moves never reach it.
+        static int deployFrame;
+        internal static void ProcessDeployState()
+        {
+            if (entries == null || !Plugin.UniversalInjectOn.Value) return;
+            if (!entries.Any(x => x.deployOnStop)) return;
+            if (++deployFrame % 3 != 0) return;   // ~20x/s is plenty for an instant-feeling snap, and keeps the walk cheap
+            try
+            {
+                var fresh = new Dictionary<ModelEntry, List<UnityEngine.Vector3>>();
+                foreach (var e in entries) if (e.deployOnStop) fresh[e] = new List<UnityEngine.Vector3>();
+                var presType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.Presentation");
+                var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
+                var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
+                if (armies != null)
+                    foreach (var army in armies)
+                    {
+                        if (army == null) continue;
+                        var unit = GetMember(army, "PresentationUnit");
+                        if (unit == null) continue;
+                        string uname = GetMember(GetMember(unit, "UnitDefinition"), "Name")?.ToString() ?? "";
+                        if (uname.Length == 0) continue;
+                        var e = entries.FirstOrDefault(x => x.deployOnStop && x.pawnDescription.Length > 0
+                                    && uname.IndexOf(CoreDesc(x.pawnDescription), StringComparison.OrdinalIgnoreCase) >= 0);
+                        if (e == null) continue;
+                        bool moving = false;
+                        try { moving = Convert.ToBoolean(AccessTools.Method(unit.GetType(), "IsAnyPawnMoving", new[] { typeof(bool) })?.Invoke(unit, new object[] { false })); } catch { }
+                        if (!moving) continue;   // not moving -> its pawns stay deployed (default); only record the movers
+                        if (GetMember(unit, "Pawns") is System.Collections.IEnumerable pawns)
+                            foreach (var pawn in pawns)
+                                if (GetMember(pawn, "Transform") is UnityEngine.Transform tr) fresh[e].Add(tr.position);
+                    }
+                foreach (var kv in fresh)
+                    lock (kv.Key.movingPawnPositions) { kv.Key.movingPawnPositions.Clear(); kv.Key.movingPawnPositions.AddRange(kv.Value); }
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Deploy] ProcessDeployState: " + ex); }
         }
 
         static void TickOne(ModelEntry e)
