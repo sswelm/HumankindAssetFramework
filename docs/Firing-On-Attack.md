@@ -67,9 +67,14 @@ So on every bombard we get the **attacker's empire**, the **target tile**, and t
 
 The scary unknown ("is there a hookable attack event?") was **answered: yes**, and the feature is **built and shipping** (per-model **Fire on attack** toggle).
 
-### The 100× scale fix (animated bake)
+### The 100× scale toggle (animated bake)
 
-Getting the clip visible surfaced a scale bug worth recording. The animated FBX (`rig_anim.py` → FBX → Unity) carries an embedded **metre→centimetre unit scale** that the **SDK Skeleton bake requires** — with it off the baked skeleton renders **exactly 100× too big** (proven: same scale factor `2.5`, `useFileScale` off = giant, on = correct). But Unity's `useFileScale` also shrinks `sharedMesh.bounds` by the same ×0.01, so the size factor `size / longest` was computed against a mesh 100× smaller than the skeleton — forcing an old `Size ÷ 100` hack. **Fix (`UniversalBaker.BuildAnimated`):** measure the FBX with `useFileScale` **off** (true native size, matches glbconv), then bake with it **on**. The factor becomes `size / true_longest`, so **Size means in-game units** exactly like the static path — no magic constant, it self-adjusts to any FBX unit scale.
+Getting the clip visible surfaced a scale gotcha worth recording. Some rigged FBX exports embed a **metre→centimetre unit scale** that the SDK Skeleton bake over-applies, so the model bakes **~100× too big** and floats high (fine in the preview, wrong in-game). The howitzer's rig does this; **the drone's does not** — and the two need *opposite* handling, so there is **no single rule**. The fix is a **per-model toggle**, `ModelDef.animUnitFix` / the Factory's **Fix 100× oversize (FBX unit scale)** checkbox:
+
+- **On** (`UniversalBaker.BuildAnimated`): measure the FBX with `useFileScale` **off** (true native size, matches glbconv) then bake with it **on**, so the size factor is `size / true_longest` and **Size means in-game units**. The howitzer needs this.
+- **Off** (default): Unity's normal import — the drone bakes correctly this way.
+
+> ⚠️ **Cautionary tale:** this started as a "universal root fix" (always measure-off/bake-on). It fixed the howitzer but made the **drone vanish** — the drone's FBX measured a wild `native longest 25.365` where the howitzer's read a clean `2.0`, because their exporters embed different unit scales. One model is not a proof. The honest answer was a per-model switch, not a global constant.
 
 ---
 

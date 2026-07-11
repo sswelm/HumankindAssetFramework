@@ -95,7 +95,9 @@ see the [Factory Manual](Factory-Manual.md).
     **Normals mode** and forcing the surface fully matte (roughness 1.0) both left it unchanged, so it's the engine's render
     passes, not our material. Diagnosing further needs a live GPU frame capture (RenderDoc). Worst on ships (they sit in the
     reflective water); subtle on round/small models. Treated as a technique limitation rather than a bug.
-- *(resolved mid-2026)* **Animated bake 100× oversize** — the animated path hit a Blender-metres→FBX-centimetres unit
-  scale that made an animated model bake exactly 100× too big. **Fixed in the baker:** it now measures the FBX at its true
-  scale (`useFileScale` off) and bakes with the unit scale on, so **Size means in-game units like the static path** — no
-  more ÷100. Re-bake any old animated entry at its real Size (drop any `Size 0.05` / `"scale": 0.01` workaround).
+- **Animated bake unit scale (per-model toggle):** some rigged FBX exports embed a Blender-metres→centimetres unit scale
+  that makes the model bake ~100× too big and float high (fine in the Factory preview, wrong only in-game); others don't,
+  and the two need *opposite* handling. There is **no single rule** — so it's a per-model checkbox, **Fix 100× oversize
+  (FBX unit scale)**: tick it if a model bakes huge/floating (measures the FBX at its true scale, then bakes with the unit
+  scale on, so Size = in-game units); leave it off otherwise. If ticking it makes the model *vanish/shrink*, untick it. (The
+  drone bakes correct **off**; the howitzer needs it **on**.) The *static* path is unaffected either way.

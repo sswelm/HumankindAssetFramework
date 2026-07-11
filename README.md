@@ -100,7 +100,7 @@ The plugin's own cfg (`…\community.humankind.encaccessproof.cfg`) — press **
 - **Review / roadmap:** [Framework-Review.md](docs/Framework-Review.md) — verified code-review findings
   (prioritized) and the hardening order toward package-readiness.
 - **Fire-on-attack:** [Firing-On-Attack.md](docs/Firing-On-Attack.md) — how a model plays its clip on the unit's combat
-  action (Humankind's `SimulationEvent` bus), the one-shot pose trigger, and the animated-bake 100× scale fix. **Built.**
+  action (Humankind's `SimulationEvent` bus), the one-shot pose trigger, and the per-model animated-bake scale toggle. **Built.**
 
 ## Toward a Unity package
 Goal: ship the Factory as a distributable Unity package. **Done:** zero-config path auto-detection, self-contained
