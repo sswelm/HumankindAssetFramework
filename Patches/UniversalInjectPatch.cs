@@ -37,9 +37,14 @@ namespace ENCAccessProof
         public bool respawnAfterLoad;    // FIX for the save-load first-instance rotor race: when true, the plugin re-runs the game's own PresentationUnit.UpdatePawns (ReleasePawns+InstantiatePawns) on this model's units ~3s after load, so the first instance's borrowed donor rotor is rebuilt correctly. Set ONLY for models that borrow a donor's animated sub-part (e.g. the helicopter's rotor); harmless-but-pointless flicker otherwise, so default off.
         public bool freezeDonorAnim;     // FREEZE the donor's idle/move animation: a STATIC borrowed mesh inherits the donor's pose bob (e.g. a drone donor's hover wiggle looks wrong on a large airship). When true, the pose hook pins every pawn pose's Time to 0 each frame so the donor animation can't advance — the mesh holds rigid while the pawn still glides tile-to-tile. Static models only (animated models drive their own clip).
         public bool fireOnAttack;        // ANIMATED: play the clip ONCE when the unit attacks (ArtilleryStrikeStarted), resting at frame 0 otherwise — instead of the default continuous loop (a drone's spinning prop). Set for a howitzer's barrel-elevation-on-fire. See docs/Firing-On-Attack.md.
-        public volatile bool fireRequested;   // RUNTIME: set true by the combat hook when THIS model's unit bombards; the pose hook consumes it to (re)start the one-shot clip. volatile: written on the sim thread, read on the render thread.
-        public float fireStartTime = -1f;     // RUNTIME: Time.time when the current one-shot started; -1 = idle (rest). Cleared back to -1 when the clip finishes.
+        // PER-INSTANCE fire, so only the howitzer that actually bombarded animates (not every howitzer of the type):
+        public readonly System.Collections.Concurrent.ConcurrentQueue<long> fireGuidQueue = new System.Collections.Concurrent.ConcurrentQueue<long>();  // SIM thread enqueues the firing unit's SimulationEntityGUID; Plugin.Update (main thread) drains it (no Unity access on the sim thread).
+        public readonly List<FireInstance> activeFires = new List<FireInstance>();  // MAIN/render thread only (locked): each firing pawn's render position + start time; the pose hook plays the clip on the pawn nearest an active fire.
     }
+
+    // One in-flight one-shot: the world position of a pawn that just fired + when it started. The pose hook matches a
+    // pawn to the nearest active fire by ObjectSpace position (both are Unity render coords), so only the firer animates.
+    internal struct FireInstance { public UnityEngine.Vector3 pos; public float startTime; }
 
     internal static class UniversalInject
     {
@@ -653,16 +658,28 @@ namespace ENCAccessProof
                 float poseTime;
                 if (e.fireOnAttack)
                 {
-                    // FIRE-ONCE: rest at frame 0 until the combat hook flags a bombard, then play the clip exactly once and
-                    // return to rest. (The clip is authored to start AND end at rest, so one 0->1 pass elevates and lowers.)
-                    if (e.fireRequested) { e.fireStartTime = UnityEngine.Time.time; e.fireRequested = false; }
-                    if (e.fireStartTime >= 0f)
+                    // FIRE-ONCE, PER-INSTANCE: rest at frame 0 unless THIS pawn is the one that bombarded. The combat hook
+                    // records the firing pawn's render position (via its PresentationUnit); we match this pawn to the nearest
+                    // active fire by ObjectSpace position (both Unity render coords) and play one 0->1 pass from that fire's
+                    // start time. Only the firer animates — every other howitzer of the type stays at rest.
+                    poseTime = 0f;
+                    var osT = GetMember(entry, "ObjectSpace");
+                    UnityEngine.Vector3 tpos = (UnityEngine.Vector3)GetMember(osT, "Translation");
+                    float bestSq = float.MaxValue, bestStart = -1f;
+                    lock (e.activeFires)
                     {
-                        float elapsed = UnityEngine.Time.time - e.fireStartTime;
-                        if (elapsed >= dur) { e.fireStartTime = -1f; poseTime = 0f; }   // clip done -> hold at rest
-                        else poseTime = elapsed / dur;                                   // playing the single pass
+                        for (int i = 0; i < e.activeFires.Count; i++)
+                        {
+                            float d = (e.activeFires[i].pos - tpos).sqrMagnitude;
+                            if (d < bestSq) { bestSq = d; bestStart = e.activeFires[i].startTime; }
+                        }
                     }
-                    else poseTime = 0f;                                                  // idle -> rest (frame 0)
+                    const float matchRadiusSq = 4f * 4f;   // a pawn within 4u of a fire is the firer (tiles are spaced wider)
+                    if (bestStart >= 0f && bestSq <= matchRadiusSq)
+                    {
+                        float elapsed = UnityEngine.Time.time - bestStart;
+                        poseTime = elapsed >= dur ? 0f : elapsed / dur;   // one pass, then rest (Update prunes finished fires)
+                    }
                 }
                 else
                 {
@@ -776,6 +793,71 @@ namespace ENCAccessProof
                 if (respawnBase.Count > 0) foreach (var k in respawnBase.Keys.Where(k => !present.Contains(k)).ToList()) { respawnBase.Remove(k); respawnCount.Remove(k); }
             }
             catch (Exception ex) { Plugin.Log.LogError("[Uni][RESPAWN] " + ex); }
+        }
+
+        // PER-INSTANCE fire targeting (main thread — Plugin.Update). The combat hook enqueues the firing unit/army GUID on the
+        // sim thread; here we resolve the matching PresentationUnit and record each of its pawns' RENDER positions as active
+        // fires, and prune fires whose clip has finished. The pose hook then plays the one-shot only on the pawn nearest an
+        // active fire, so a single howitzer bombarding doesn't animate every howitzer of the type. Same presentation walk as
+        // MaybeRespawnPostLoad (Presentation.PresentationEntityFactoryController.PresentationArmyEntities -> PresentationUnit).
+        // Read a SimulationEntityGUID as a stable long. Convert.ToInt64/IConvertible.ToInt64 THROW InvalidCastException on
+        // this struct, but ToString() returns its underlying ulong as a decimal string — parse that. Both the combat hook
+        // (StrikerUnit/StrikerArmy.GUID) and ProcessFireQueues (PresentationUnit.GUID) use this so the values compare equal.
+        internal static long GuidToLong(object guidBox)
+            => guidBox != null && ulong.TryParse(guidBox.ToString(), out ulong g) ? unchecked((long)g) : 0L;
+
+        internal static void ProcessFireQueues()
+        {
+            if (entries == null || !Plugin.UniversalInjectOn.Value) return;
+            bool anyQueued = false;
+            foreach (var e in entries)
+            {
+                if (!e.fireOnAttack) continue;
+                float dur = e.animDuration > 0.001f ? e.animDuration : 1f;
+                lock (e.activeFires) e.activeFires.RemoveAll(f => UnityEngine.Time.time - f.startTime >= dur);   // drop finished one-shots
+                if (!e.fireGuidQueue.IsEmpty) anyQueued = true;
+            }
+            if (!anyQueued) return;
+            try
+            {
+                var presType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.Presentation");
+                var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
+                var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
+                if (armies == null) return;
+                foreach (var e in entries)
+                {
+                    if (!e.fireOnAttack || e.fireGuidQueue.IsEmpty) continue;
+                    var fired = new HashSet<long>();
+                    while (e.fireGuidQueue.TryDequeue(out long g)) fired.Add(g);
+                    if (fired.Count == 0) continue;
+                    bool matched = false;
+                    foreach (var army in armies)
+                    {
+                        if (army == null) continue;
+                        var unit = GetMember(army, "PresentationUnit");
+                        if (unit == null) continue;
+                        long uguid = GuidToLong(GetMember(unit, "GUID"));
+                        if (uguid == 0 || !fired.Contains(uguid)) continue;
+                        var pawns = GetMember(unit, "Pawns") as System.Collections.IEnumerable;
+                        if (pawns == null) continue;
+                        int n = 0; string posDump = "";
+                        lock (e.activeFires)
+                            foreach (var pawn in pawns)
+                            {
+                                var tr = GetMember(pawn, "Transform") as UnityEngine.Transform;
+                                if (tr == null) continue;
+                                e.activeFires.Add(new FireInstance { pos = tr.position, startTime = UnityEngine.Time.time });
+                                posDump += $" {tr.position.ToString("0.0")}"; n++;
+                            }
+                        matched = true;
+                        // Log the fire positions so they can be compared to the pose hook's 'ObjectSpace T=...' dump — if the
+                        // two are in different spaces the nearest-match (radius 4u) won't fire; this shows it at a glance.
+                        Plugin.Log.LogInfo($"[Fire] '{e.resourceName}' unit/army {uguid}: armed {n} pawn(s) at{posDump}");
+                    }
+                    if (!matched) Plugin.Log.LogWarning($"[Fire] '{e.resourceName}': fired GUID(s) [{string.Join(",", fired)}] matched no PresentationUnit — barrel won't animate (timing/GUID mismatch)");
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Fire] ProcessFireQueues: " + ex); }
         }
 
         static void TickOne(ModelEntry e)

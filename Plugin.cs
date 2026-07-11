@@ -67,6 +67,7 @@ namespace ENCAccessProof
             {
                 UniversalInject.TickTexture();          // keep registry-driven model atlases applied
                 UniversalInject.MaybeRespawnPostLoad(); // one-shot post-load re-spawn to clear the first-instance rotor race
+                UniversalInject.ProcessFireQueues();    // per-instance fire-on-attack: arm only the pawn that actually bombarded
             }
         }
 
