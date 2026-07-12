@@ -88,14 +88,21 @@ That's the whole loop. Everything below is detail and the animated workflow.
   speed (runtime; no re-bake to change). **Reality check:** the clip bake keeps **rotation only, not translation**, so a real
   sliding recoil can't be baked directly — `deploy_convert.py` fakes it with a far-pivot helper bone (FK-arc) that swings the tube
   through a near-straight arc. It reads as a backward kick with a slight swing; a perfectly straight glide isn't achievable.
+  - **Where the recoil is configured:** only **Recoil speed** is a Factory slider (it's a runtime value). The recoil's *shape* —
+    distance, timing, arc straightness — is **baked into the GLB by `deploy_convert.py`**, which you run by hand *before* baking.
+    The Factory does NOT run that script; it bakes the GLB you point it at. To change the shape: edit the command below, re-run it
+    to rebuild the GLB, then hit **Bake**.
   - **Rigid-part-animated source?** Many Maya/Sketchfab models animate *moving parts* (a turret, trail legs, landing gear) by
     node transforms, not skinning — the animated bake needs an armature. Run **`Tools/deploy_convert.py`** first:
-    `blender -b -P Tools/deploy_convert.py -- in.glb out.glb [start end] [stripCsv] [readyFrame] [legScale] [barrelScale] [recoilSrcStart recoilSrcEnd step mag]`
+    `blender -b -P Tools/deploy_convert.py -- in.glb out.glb [start end] [stripCsv] [readyFrame] [legScale] [barrelScale] [recoilSrcStart recoilSrcEnd step mag arcR]`
     — it builds a bone-per-part skinned armature carrying the same motion, trims to the deploy sub-range, strips crew/props,
     **binds at the rest frame** (so the mesh isn't baked pre-posed), and optionally retargets the barrel to a `readyFrame`
     elevation (`barrelScale` > 1 exaggerates past the source's max), scales the leg spread (`legScale`; 1 = full, 0 =
-    stay folded), and appends a **recoil-on-fire tail** (FK-arc kickback; `mag` scales the slide distance, 2 ≈ half the tube).
+    stay folded), and appends a **recoil-on-fire tail** (FK-arc kickback). Recoil-tail knobs: **`recoilSrcStart recoilSrcEnd`** =
+    the source clip's recoil frames (its timing), **`step`** = sampling step (default 2), **`mag`** = slide distance (default 1 =
+    source; 2 ≈ half the tube), **`arcR`** = arc pivot distance (default 400; larger = straighter/less swing, but more jitter-prone).
     Bake the result normally. Find the deploy sub-range + `readyFrame` (and the source recoil frames) by scrubbing the clip in Blender.
+    Example (the M114): `... m114_howitzer_in_action.glb m114_deploy.glb 0 180 "" 420 1 1 440 510 2 2 400`.
   - **The rest state holds deployed, folds instantly** — the runtime half (already built): the plugin detects travel by the
     unit's **render-position change** (not the game's `IsMoving`, whose wait-to-idle settle would drop the pose), so it folds
     the instant it moves and holds deployed at rest. Also bake **`deployPoseTime` ≤ 0.99** (never 1.0 — the pose sampler wraps

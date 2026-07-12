@@ -25,7 +25,8 @@ see the [Factory Manual](Factory-Manual.md).
   Maya/Sketchfab exports) into a bone-per-part skinned armature the bake can consume: strips soft-skinned crew (they collapse the
   bake), retargets the trail-leg spread (scale) and barrel elevation (amplify past the source's max), and — critically — **binds
   the mesh at the rest frame** so it isn't baked pre-posed and double-deformed. Args: `in out start end strip readyFrame legScale
-  barrelScale [recoilSrcStart recoilSrcEnd step mag]`. **Donor-aim override:** artillery donors aim their barrel via a procedural
+  barrelScale [recoilSrcStart recoilSrcEnd step mag arcR]` (all recoil-shape knobs are script args, not Factory sliders — only
+  **Recoil speed** is in the GUI). **Donor-aim override:** artillery donors aim their barrel via a procedural
   `PawnEntry.BoneRotation` layer that twisted the injected barrel; the pose hook zeros it so only our clip drives the skeleton.
   *(Known limitation: the Factory's static **preview** shows the folded bind pose, not the deployed pose — judge the result
   in-game.)* See [Firing-On-Attack.md](Firing-On-Attack.md).
