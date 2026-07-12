@@ -59,7 +59,7 @@ see the [Factory Manual](Factory-Manual.md).
   rigid airship on a hovering drone donor), the **Freeze donor animation** runtime flag pins the donor's pose so the mesh
   holds rigid while still gliding tile-to-tile — no re-bake. Choose the donor accordingly; see the drone case study in the docs.
 - **Any number of materials — GLB *and* FBX, STATIC and ANIMATED.** A model with N materials (the Zeppelin has 4; the
-  AH-1 Cobra has **52**; the M114 howitzer has 6) is packed into one atlas and each sub-mesh's UVs are remapped into its
+  AH-1 Cobra has **51**; the M114 howitzer has 6) is packed into one atlas and each sub-mesh's UVs are remapped into its
   rect — no per-model code, no material cap. The `glbconv` converter emits per-material `usemtl` groups + a `.mtl` (and an
   8×8 solid-colour swatch for any flat, textureless material) so a **multi-material GLB keeps its per-material split**,
   just like FBX. The **animated** path supports this too now (it was single-material only before — an open model like a
@@ -87,7 +87,12 @@ see the [Factory Manual](Factory-Manual.md).
   hull sits in V 1→2, relying on texture *wrap* to repeat its skin) has its UVs **integer-shifted** back into [0,1]
   before the flip — because the atlas packs each texture into a fixed rect and can't wrap, so un-shifted tiled UVs would
   sample outside the rect and the skin would vanish (fine in Blender, blank in-engine). Integer shift, so tile-crossing
-  triangles never tear. Genuine *repeat*-tiling (a small texture spanning [0,N]) remains outside what an atlas can do.
+  triangles never tear. `glbconv`'s shift is a single **global** offset (right when the whole model shares one tile), so
+  the **atlas remapper also folds per-vertex** (`u -= floor(u)`) as each sub-mesh's UVs are placed into its rect — this
+  catches a **multi-material** model whose materials each sit in a *different* tile, which no single global shift can
+  gather. Proven on the AH-1 Cobra: 51 materials spread across U 0→23 / V −11→0 (100% outside [0,1]) baked **black** until
+  the per-vertex fold; an island wholly in one tile subtracts a uniform integer (lossless), and only a triangle straddling
+  a tile edge smears. Genuine *repeat*-tiling (a small texture spanning [0,N]) remains outside what an atlas can do.
 - **Texture isolation:** each model gets a private `FxOutputLayer` clone, so its skin never bleeds onto the vanilla donor
   unit — proven on screen with a custom cruiser and its donor corvette side-by-side, each keeping its own skin.
 - **Skin controls at bake time.** The injection ships a *flat* albedo (donor PBR — normal/metallic/roughness —
