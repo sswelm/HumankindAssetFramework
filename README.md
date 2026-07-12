@@ -68,6 +68,18 @@ injecting a mismatched skeleton hangs the GPU skinning. The animated work showed
 custom `Skeleton` + `ClipCollection` (built through the SDK's own tooling) can be injected and played **without** the
 hang — the danger was malformed skeletons, not custom ones per se.*
 
+## Technology stack
+
+| Layer | Technology |
+|---|---|
+| Runtime plugin (this repo) | **BepInEx 5.4** plugin in C#, targeting **.NET Framework 4.7.1** (the game's Mono runtime); builds with just the .NET SDK (`dotnet build`, no Unity needed) |
+| Game patching | **Harmony** (`0Harmony`) runtime patches against the game's **`Amplitude.Mercury`** assemblies — no executable modification |
+| Registry parsing | **Newtonsoft.Json** (shipped with the game, via mod.io) — `UnityEngine.JsonUtility` silently returns empty objects under the game's Mono runtime |
+| Editor tooling ([ENCReload](https://github.com/sswelm/ENCReload)) | **Unity 2021.3.1f1** (Humankind's own engine version) + the **official Amplitude modding SDK**, which bakes the native `Skeleton` / `ClipCollection` / mesh / atlas assets; editor scripts mirrored here in `baker/` |
+| `glbconv` converter | Standalone C# console app on **.NET 8** (self-contained single-file exe — adopters need no .NET install), built on **SharpGLTF** |
+| Model-prep scripts | **Python** run headless inside **Blender** (`blender -b --python …`, `bpy` API) — rigging, decimation, clip extraction |
+| Editor ↔ runtime contract | A plain **JSON** registry (`enc_models.json`) — the only thing the two halves share |
+
 ## Zero-config adoption
 Built to work on a stranger's machine, not just the author's:
 - **Auto-detects the game.** No hardcoded paths — the Factory finds Humankind via Steam's library config (with a manual
