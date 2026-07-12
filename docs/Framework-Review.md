@@ -45,6 +45,7 @@ Severity key: 🔴 fix soon (silent data loss / silent no-inject) · 🟡 worth 
 | 07-12 | Registry kept **alphabetical** on load AND save (`ModelRegistry.SortByName`) — a stable Factory dropdown and no more meaningless reorder churn in the git-tracked backup on every bake |
 | 07-12 | **A3**: `check_schema_parity.sh` rewritten — Newtonsoft==regex read paths, read⊆written, and read-cast==declared-type; verified to fail on each drift type (Option A: verify, don't merge) |
 | 07-12 | **T3/T4** (`rig_anim.py`): albedo grab traces the Principled Base Color (not the first image node); join re-binds the armature modifier so a bone-parented-prop-first model can't export rigid. **T5** (glbconv mirrored-node winding): source + **exe rebuilt** (SharpGLTF pinned 1.0.6, verified geometry-identical across all 11 registry models); build now documented in `Tools/glbconv/BUILD.md` |
+| 07-12 | **E5**: `Build`/`BuildAnimated` snapshot the baked outputs (asset + .meta) before a re-bake and restore them on any failure — a partway-failed re-bake no longer destroys the last-good model. Fail-safe (restore runs only on failure); 12/12 smoke test |
 
 ---
 
@@ -81,12 +82,17 @@ handle, `WaitForExit(timeout)` returns true and the `ReadToEnd` tasks never see 
 prevent.
 - **Fix:** `Task.WaitAll(new[]{outTask, errTask}, remaining)` and bail with partial output on timeout.
 
-#### E5 🟡 Delete-first re-bake destroys the last-good assets with no rollback
+#### E5 🟡 Delete-first re-bake destroys the last-good assets with no rollback — ✅ FIXED (2026-07-12)
 Static and animated paths delete `_Skeleton/_Atlas/_ModelMesh/_Mat/_Model.prefab` *before* the fallible
-steps run. If the re-bake then fails, the registry still points at now-deleted assets: "re-bake failed,
+steps run. If the re-bake then failed, the registry still pointed at now-deleted assets: "re-bake failed,
 old model still works" became "re-bake failed, old model destroyed". (Delete-first is the deliberate
-stale-skeleton fix — the gap is only the missing rollback.)
-- **Fix:** rename-aside + restore-on-failure, or delete only after the new skeleton passes the GUID check.
+stale-skeleton fix — the gap was only the missing rollback.)
+> **Fixed:** `Build`/`BuildAnimated` now snapshot the existing outputs (each `.asset` + its `.meta`, so the
+> GUIDs survive) to a temp dir **outside** the project before the bake, and on any failure (exception or
+> `ok:false`) restore them — wiping any partial new outputs first. Fail-safe by construction: the success path
+> is unchanged (backup → bake → discard) and restore runs **only** on an already-failed bake, so it can't harm a
+> good bake. Backing up outside `Assets/` avoids a duplicate-GUID import. Verified: **12/12 bake smoke test**
+> after the change (success path); the restore path is code-reviewed and logs "restored the previous N asset(s)".
 
 #### E6 🟢 Corrupt project backup + missing registry = permanent Save lockout with a misleading error
 `ModelRegistry.Load`: the backup restore parses inside the same `try` whose catch sets `lastLoadCorrupt`
@@ -261,6 +267,6 @@ strangers." Overlaps the deferred list's ENC-branding, Blender-PATH-discovery, a
 
 1. ~~**E1**~~ ✅ done · ~~**T1**~~ ✅ done · ~~**T2**~~ ✅ done — tier 1 complete.
 2. **E2** (Remove key + honest status) · **E4** (bound the pipe drain — completes the 07-05 timeout work).
-3. **T3 / T4 / T5** — the silent-corruption class (wrong albedo, lost skinning, inside-out mirror halves).
-4. **E3, E5, T6** — honest failures for empty/destroyed outputs.
+3. ~~**T3 / T4 / T5**~~ ✅ done — the silent-corruption class (wrong albedo, lost skinning, inside-out mirror halves).
+4. ~~**E5**~~ ✅ done · **E3, T6** — honest failures for empty/destroyed outputs.
 5. Deferred list + lows as the package push approaches (Blender PATH discovery first among them).
