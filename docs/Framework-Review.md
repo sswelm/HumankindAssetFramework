@@ -50,6 +50,7 @@ Severity key: 🔴 fix soon (silent data loss / silent no-inject) · 🟡 worth 
 | 07-12 | **Bake Feature Test** (`Tools ▸ ENC ▸ Bake Feature Test`): new integration test proving each baker *feature knob* does what it claims — bakes a self-contained synthetic cube per-knob and asserts a feature-specific invariant (doubleSided 2× tris, Faceted unweld, atlasMaxDim cap, heightUV, size/position, brightness/saturation, …). Non-destructive; **Tier 1** 12/12 |
 | 07-12 | **Bake Feature Test — Tier 2** (`… Tier 2 — Blender + animated`): `targetTris` decimates a generated high-poly grid (5000→600), `stripParts` drops a generated named object (24→12 tris), and the animated pipeline (`BuildAnimated` → skeleton + clip) is exercised by borrowing ReconDrone + TowedGunHowitzers from the registry. **4/4** |
 | 07-12 | **A4**: `BuildMultiAtlasAndRemap` submesh→rect match now tries EXACT before the loose substring — an animated multi-material model with prefix-colliding material names (`Body`/`Body_Trim`) no longer maps the wrong texture. (`MeasureLongestAxis` half verified-and-dismissed: `rig_anim` joins to one mesh, so the per-node transform is moot.) |
+| 07-12 | **E6/E8** (🟢): backup restore parses in its own try/catch (a corrupt backup + missing registry no longer locks Save with a misleading error); both multi-material `PackTextures` sites free their source albedos so a bake no longer strands tens of MB until domain reload |
 
 ---
 
@@ -100,21 +101,25 @@ stale-skeleton fix — the gap was only the missing rollback.)
 > good bake. Backing up outside `Assets/` avoids a duplicate-GUID import. Verified: **12/12 bake smoke test**
 > after the change (success path); the restore path is code-reviewed and logs "restored the previous N asset(s)".
 
-#### E6 🟢 Corrupt project backup + missing registry = permanent Save lockout with a misleading error
-`ModelRegistry.Load`: the backup restore parses inside the same `try` whose catch sets `lastLoadCorrupt`
-and names `RegistryPath` — a file that *doesn't exist* in this scenario. Save then refuses forever with
-instructions that can't be followed.
-- **Fix:** parse the backup in its own try/catch; treat a corrupt backup as "no backup".
+#### E6 🟢 Corrupt project backup + missing registry = permanent Save lockout — ✅ FIXED (2026-07-12)
+`ModelRegistry.Load` parsed the backup restore inside the same `try` whose catch set `lastLoadCorrupt`
+and named `RegistryPath` — a file that *doesn't exist* in this scenario — so Save refused forever with
+instructions that couldn't be followed.
+> **Fixed:** the backup parse is now in its own try/catch; a corrupt backup is treated as "no backup" (a
+> warning that names the *backup* path, `lastLoadCorrupt` stays clear, Save is not locked — there's no live
+> registry to protect, and the next Save rewrites the backup).
 
 #### E7 🟢 Stale `_Preview.prefab` shadows a static re-bake in the window preview
 Bake animated → re-bake static: the static delete-first list omits `<name>/<name>_Preview.prefab`, and
 `LoadPreview` prefers the anim path whenever it exists — the preview forever shows the old animated model
 while the game gets the new static one.
 
-#### E8 🟢 Texture leak per multi-material bake
-The per-material albedos loaded for `PackTextures` (up-to-4096² RGBA32 each) are never `DestroyImmediate`d;
-Unity objects don't GC. An iterating modder strands tens of MB per bake until the next domain reload. Same
-class as the known rig-block GameObject leak, larger per occurrence.
+#### E8 🟢 Texture leak per multi-material bake — ✅ FIXED (2026-07-12)
+The per-material albedos loaded for `PackTextures` (up-to-4096² RGBA32 each) were never `DestroyImmediate`d;
+Unity objects don't GC, so an iterating modder stranded tens of MB per bake until the next domain reload.
+> **Fixed:** both `PackTextures` sites (static `BuildInner` + animated `BuildMultiAtlasAndRemap`) now
+> `DestroyImmediate` the source albedos right after packing (they're copied into the atlas; the animated path
+> keeps using only the `orderedAlb` *keys* afterward, not the textures).
 
 ### Tools — Blender scripts + glbconv (key items verified on Blender 5.1.2)
 
