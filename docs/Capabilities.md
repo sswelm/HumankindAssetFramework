@@ -58,11 +58,15 @@ see the [Factory Manual](Factory-Manual.md).
   which overrides the donor's. And for a **static** model that only suffers the donor's *whole-body* idle/move bob (e.g. a
   rigid airship on a hovering drone donor), the **Freeze donor animation** runtime flag pins the donor's pose so the mesh
   holds rigid while still gliding tile-to-tile — no re-bake. Choose the donor accordingly; see the drone case study in the docs.
-- **Any number of materials — GLB *and* FBX.** A model with N materials (the Zeppelin has 4; the AH-1 Cobra has **52**)
-  is packed into one atlas and each sub-mesh's UVs are remapped into its rect — no per-model code, no material cap. The
-  `glbconv` converter emits per-material `usemtl` groups + a `.mtl` (and an 8×8 solid-colour swatch for any flat,
-  textureless material) so a **multi-material GLB keeps its per-material split**, just like FBX. Near-black UV dead-zones
-  are filled neutral so unused texture regions never render as black patches.
+- **Any number of materials — GLB *and* FBX, STATIC and ANIMATED.** A model with N materials (the Zeppelin has 4; the
+  AH-1 Cobra has **52**; the M114 howitzer has 6) is packed into one atlas and each sub-mesh's UVs are remapped into its
+  rect — no per-model code, no material cap. The `glbconv` converter emits per-material `usemtl` groups + a `.mtl` (and an
+  8×8 solid-colour swatch for any flat, textureless material) so a **multi-material GLB keeps its per-material split**,
+  just like FBX. The **animated** path supports this too now (it was single-material only before — an open model like a
+  towed gun would texture its wheels/legs/barrel wrong): `rig_anim.py` keeps the material slots, the atlas packs them, the
+  skinned mesh's UVs are remapped per-submesh then merged to one draw. A **Material mode** (Auto/Single/Multi) control
+  forces or skips it. Near-black UV dead-zones are filled neutral so unused regions don't render black; tick **Keep black**
+  for a genuinely dark material (rubber tyre, glossy canopy) so it isn't lightened.
 - **Heavy or single-sided/CAD meshes, handled.** A built-in **vertex reducer** (Blender quadric decimation, per-object
   so thin parts survive) shrinks oversized models to fit the engine's shared mesh buffer. A **winding fix** rewinds
   faces outward so single-sided / CAD "sketch" meshes render single-sided instead of culling to invisible (e.g. a
