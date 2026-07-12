@@ -46,6 +46,7 @@ Severity key: 🔴 fix soon (silent data loss / silent no-inject) · 🟡 worth 
 | 07-12 | **A3**: `check_schema_parity.sh` rewritten — Newtonsoft==regex read paths, read⊆written, and read-cast==declared-type; verified to fail on each drift type (Option A: verify, don't merge) |
 | 07-12 | **T3/T4** (`rig_anim.py`): albedo grab traces the Principled Base Color (not the first image node); join re-binds the armature modifier so a bone-parented-prop-first model can't export rigid. **T5** (glbconv mirrored-node winding): source + **exe rebuilt** (SharpGLTF pinned 1.0.6, verified geometry-identical across all 11 registry models); build now documented in `Tools/glbconv/BUILD.md` |
 | 07-12 | **E5**: `Build`/`BuildAnimated` snapshot the baked outputs (asset + .meta) before a re-bake and restore them on any failure — a partway-failed re-bake no longer destroys the last-good model. Fail-safe (restore runs only on failure); 12/12 smoke test |
+| 07-12 | **E2/E3/E4** editor hardening: Remove keys on the selected entry + honest status; static bake fails loud on 0 vertices (no silent invisible unit); `RunBounded` bounds the pipe drain so a grandchild-held pipe can't hang the editor. 12/12 smoke test |
 
 ---
 
@@ -61,26 +62,28 @@ appears, no error anywhere. (`hideMeshes` is safe — the plugin trims per-token
 > **Fixed:** `DoBake` now trims every text field on `cur` itself before building the bake config, so what's
 > baked and what's registered are identical.
 
-#### E2 🟡 Remove button deletes by the *edited* name and always reports success
-`ModelFactoryWindow.cs:109-117`: removal key is the live `cur.resourceName` text field, not the selected
-entry (`existing[selected]`), and `Remove()`'s bool is discarded. Edit the name field first and Remove
-deletes a *different* model — or nothing — while the status says "Removed".
-- **Fix:** key on `existing[selected]`; branch the status on the returned bool.
+#### E2 🟡 Remove button deletes by the *edited* name and always reports success — ✅ FIXED (2026-07-12)
+`ModelFactoryWindow.cs`: removal keyed on the live `cur.resourceName` text field, not the selected entry
+(`existing[selected]`), and `Remove()`'s bool was discarded. Editing the name field then Remove deleted a
+*different* model — or nothing — while the status still said "Removed".
+> **Fixed:** keys on `existing[selected]` and branches the status on `Remove()`'s actual bool ("Removed '…'"
+> vs "'…' was not in the registry — nothing removed").
 
-#### E3 🟡 Static bake of a skinned-only model ships a 0-vertex (invisible) unit
+#### E3 🟡 Static bake of a skinned-only model ships a 0-vertex (invisible) unit — ✅ FIXED (2026-07-12)
 `UniversalBaker.cs` static combine iterates only `MeshFilter`; a rigged FBX that imports as pure
-`SkinnedMeshRenderer`s yields `cVerts.Count == 0`, yet the bake completes, the GUID check passes (the
-asset exists — it's just empty), and a registry entry for an invisible unit is written. Only trace:
-`verts=0` in a Debug.Log. (The animated path's `MeasureLongestAxis` handles skinned meshes; the static
-combine does not.)
-- **Fix:** `if (cVerts.Count == 0) return Fail(...)` after the combine (and/or harvest `SkinnedMeshRenderer.sharedMesh`).
+`SkinnedMeshRenderer`s yielded `cVerts.Count == 0`, yet the bake completed, the GUID check passed (the
+asset exists — it's just empty), and a registry entry for an invisible unit was written. Only trace:
+`verts=0` in a Debug.Log.
+> **Fixed:** a `cVerts.Count == 0` guard after the combine returns `Fail(...)`, pointing to the Animated path
+> (where skinned meshes belong). Verified it does NOT false-trigger on valid models: 12/12 bake smoke test.
 
-#### E4 🟡 `RunBounded` isn't fully bounded: unbounded pipe-drain after `WaitForExit`
-`UniversalBaker.cs:758-760`: if the child exits but a grandchild (Blender helper) inherited the stdout
-handle, `WaitForExit(timeout)` returns true and the `ReadToEnd` tasks never see EOF —
-`GetAwaiter().GetResult()` then hangs the editor main thread forever, the exact freeze the cap exists to
-prevent.
-- **Fix:** `Task.WaitAll(new[]{outTask, errTask}, remaining)` and bail with partial output on timeout.
+#### E4 🟡 `RunBounded` isn't fully bounded: unbounded pipe-drain after `WaitForExit` — ✅ FIXED (2026-07-12)
+If the child exited but a grandchild (Blender helper) inherited the stdout handle, `WaitForExit(timeout)`
+returned true and the `ReadToEnd` tasks never saw EOF — `GetAwaiter().GetResult()` then hung the editor main
+thread forever, the exact freeze the cap exists to prevent.
+> **Fixed:** the drain is bounded too — `Task.WaitAll(new[]{outTask, errTask}, remaining)`; on timeout it takes
+> whatever completed (`TaskStatus.RanToCompletion`), observes any late fault, logs a warning, and continues (the
+> process already exited cleanly). Normal bakes drain in ms — unchanged (12/12 smoke test).
 
 #### E5 🟡 Delete-first re-bake destroys the last-good assets with no rollback — ✅ FIXED (2026-07-12)
 Static and animated paths delete `_Skeleton/_Atlas/_ModelMesh/_Mat/_Model.prefab` *before* the fallible
@@ -266,7 +269,7 @@ strangers." Overlaps the deferred list's ENC-branding, Blender-PATH-discovery, a
 **Architectural (2026-07-12):** ~~**A1**~~ ✅ · ~~**A3**~~ ✅ (guard strengthened, Option A). Next: **A2** (`ModelEntry` config/state split) → **A4** (verify the two suspected baker bugs before fixing).
 
 1. ~~**E1**~~ ✅ done · ~~**T1**~~ ✅ done · ~~**T2**~~ ✅ done — tier 1 complete.
-2. **E2** (Remove key + honest status) · **E4** (bound the pipe drain — completes the 07-05 timeout work).
+2. ~~**E2**~~ ✅ · ~~**E4**~~ ✅ done (Remove key + honest status; bounded pipe drain).
 3. ~~**T3 / T4 / T5**~~ ✅ done — the silent-corruption class (wrong albedo, lost skinning, inside-out mirror halves).
-4. ~~**E5**~~ ✅ done · **E3, T6** — honest failures for empty/destroyed outputs.
+4. ~~**E5**~~ ✅ · ~~**E3**~~ ✅ done · **T6** — honest failures for empty/destroyed outputs.
 5. Deferred list + lows as the package push approaches (Blender PATH discovery first among them).
