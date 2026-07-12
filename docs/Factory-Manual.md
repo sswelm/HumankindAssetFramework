@@ -345,3 +345,24 @@ The registry is the one Factory artifact that lives in the *game* folder, so it'
   `BepInEx\config` automatically. Just **opening the Factory window** triggers this (the console logs
   `restored N model(s) from the project backup`); no re-bake needed. The restore covers the registry only — BepInEx,
   the plugin DLL, and the built mod (which carries the baked assets) come from your normal install/build steps.
+
+## 11. Regression guards (run before committing baker changes)
+
+Bakes are manual and the roster is growing, so a baker change can silently break a model you don't happen to re-bake
+until much later. Two guards catch that at the integration seam unit tests can't reach — run them after any change to the
+baker, `rig_anim.py`, `glbconv`, or the registry schema.
+
+- **Bake Smoke Test** — `Tools ▸ ENC ▸ Bake Smoke Test (one per path)` (or `(ALL models)`). Bakes one representative per
+  bake-path (`animated × material mode`) through the *same* config route as the Bake button and asserts each completes
+  without throwing and produces non-empty `_Skeleton`/`_Atlas` (+ `_ModelMesh` for static). **Non-destructive**: it bakes
+  `reuseExtracted=false` models under a throwaway `__smoketest__` name (your real assets + registry are untouched) and
+  validates existing assets for `reuseExtracted=true` models (forcing a fresh extraction you never run gives false
+  failures). It's SLOW (real Blender bakes) — a pre-commit check, not an every-save one. *This is not theoretical:* it
+  caught a same-day tangent-strip regression that had broken every animated bake. **Known fidelity limit:** a throwaway
+  bake can't regenerate an *animated multi-material* model's per-material albedos (they're keyed to the real name), so the
+  howitzer's throwaway bake exercises its skeleton path, not its texture packing — the multi-material atlas code is
+  covered instead by the *static* multi-material AttackHelicopter, whose albedos `glbconv` does regenerate.
+- **Schema parity** — `bash Tools/check_schema_parity.sh`. The registry is written by the baker (`ModelDef`, JsonUtility)
+  and read by the plugin (`ModelEntry`, Newtonsoft) in two separate repos, kept in sync by hand. This verifies every key
+  the plugin reads is a field the baker writes (plugin ⊆ ModelDef), with an allowlist for deliberate plugin-only
+  overrides (`scale`). Catches a silent rename/drop that would otherwise make a feature quietly default-off.
