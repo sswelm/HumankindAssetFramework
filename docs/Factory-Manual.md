@@ -138,6 +138,12 @@ That's the whole loop. Everything below is detail and the animated workflow.
   neutral grey, to hide UV dead-zones and packing gaps that would otherwise render as black patches. That also flattens
   an **intentionally black material** (a glossy canopy, a dark cockpit) to grey. Tick this to keep true black on such a
   model. Off by default (existing behaviour). Re-bake to apply.
+- **Material mode** (Auto / Single / Multi) — how a model with **more than one material** is textured. **Auto** packs a
+  multi-material atlas when the model has >1 material, else one texture (right for most). **Single** forces one texture —
+  correct for CLOSED models (tanks, planes) sharing a skin. **Multi** forces the multi-material atlas — needed for **OPEN
+  kit** (a towed gun's wheels/legs/barrel each on their own material) where otherwise every part samples the wrong region
+  (e.g. the wheel comes out scrambled). Costs atlas space. *(Works for both static and ANIMATED models now — the animated
+  path was single-material only before.)* If a dark part (rubber tyre) shows light patches, also tick **Keep black**. Re-bake to apply.
 - **Atlas size** (256 / 512 / 1024 / 2048) — longest side of the baked atlas. It's DXT1-compressed into the shipped
   `_Atlas.asset`, so **smaller = smaller mod bundle**. A unit is ~80 px at map zoom and its info card uses your 2D
   portrait (not the model), so **512–1024 is ample** (256 for very simple units); pick 2048 only for a unit you zoom in
