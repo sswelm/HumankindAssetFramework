@@ -23,6 +23,7 @@ namespace ENCAccessProof
         private bool show;
         private Rect winRect = new Rect(60, 60, 480, 420);
         private Vector2 scroll;
+        private string atlasFilter = "";   // Dump Atlases: only layers whose name contains this (blank = all)
 
         private void Awake()
         {
@@ -99,7 +100,12 @@ namespace ENCAccessProof
             {
                 if (GUILayout.Button("Dump UnitDef")) Prober.DumpUnitDef();
                 if (GUILayout.Button("Dump Formation")) Prober.DumpFormation();
-                if (GUILayout.Button("Dump Atlases")) UniversalInject.DumpOutputLayerAtlases();
+                if (GUILayout.Button("Dump Atlases")) UniversalInject.DumpOutputLayerAtlases(atlasFilter);
+            }
+            using (new GUILayout.HorizontalScope())
+            {
+                GUILayout.Label("Atlas-dump name filter (blank = all):", GUILayout.Width(220));
+                atlasFilter = GUILayout.TextField(atlasFilter);   // e.g. "Corvette" -> dumps only that unit's layer, not all 600+
             }
             GUILayout.Space(4);
             GUILayout.Label("GPU mesh buffer (live) — Shift+F8 also logs it:");

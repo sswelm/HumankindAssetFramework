@@ -1326,7 +1326,7 @@ namespace ENCAccessProof
         // (Content -> OutputLayerEntries -> OutputLayerInstance) and TickOne's material fields; the host atlas isn't
         // CPU-readable, so each is blitted through a RenderTexture first. One PNG per layer. Bound to the F8 window's
         // "Dump Atlases" button — load a game with the target units visible, then click.
-        internal static void DumpOutputLayerAtlases()
+        internal static void DumpOutputLayerAtlases(string filter = null)
         {
             try
             {
@@ -1345,6 +1345,7 @@ namespace ENCAccessProof
                     var ol = GetMember(entry, "OutputLayerInstance");
                     if (ol == null) continue;
                     string layer = (ol as UnityEngine.Object)?.name ?? "layer";
+                    if (!string.IsNullOrEmpty(filter) && layer.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;   // only this unit (e.g. "Corvette")
                     if (!seen.Add(layer)) continue;   // one dump per layer
                     UnityEngine.Texture tex = null;
                     if (GetMember(ol, "RenderOutputs") is Array ros)
@@ -1361,7 +1362,7 @@ namespace ENCAccessProof
                     n++;
                     Plugin.Log.LogInfo($"[AtlasDump] {layer} -> {SanitizeFile(layer)}.png ({tex.width}x{tex.height}, {tex.name})");
                 }
-                Plugin.Log.LogInfo($"[AtlasDump] wrote {n} atlas PNG(s) to {dir}");
+                Plugin.Log.LogInfo($"[AtlasDump] wrote {n} atlas PNG(s){(string.IsNullOrEmpty(filter) ? "" : $" matching '{filter}'")} to {dir}");
             }
             catch (Exception e) { Plugin.Log.LogError("[AtlasDump] " + e); }
         }
