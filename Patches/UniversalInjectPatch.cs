@@ -26,6 +26,7 @@ namespace ENCAccessProof
         public string hideMeshes = "";   // comma-separated donor-FRAGMENT name substrings to hide (works for fragment-based extras; a donor's animated skinned sub-parts, e.g. a helicopter rotor, are encoded at pawn-spawn and cannot be hidden this late — pick a rotor-free donor instead)
         public UnityEngine.Vector3 position;  // ANIMATED models: applied as a runtime world offset in the pose hook (z = height/up). Static models bake position into the mesh at Bake time instead, so this is only read for animated entries.
         public float scale = 1f;              // ANIMATED models: runtime multiplier on the pawn's ObjectSpace.Scale (default 1 = unchanged). Lets us fix an animated model baked at the wrong scale WITHOUT a re-bake (e.g. the howitzer's 100x FBX unit-conversion oversize -> set 0.01). Config-only field; absent = 1.
+        public float desaturate = 0f;         // TEXTURE-ONLY GREY variant: 0 = off. >0 = DON'T repoint the mesh; isolate this unit's output layer and paint a DESATURATED copy of its OWN atlas (1 = full grey) while the civ-colour tint is neutralised. Makes a Common copy read as a bland grey version of an emblematic unit; the original is untouched (they share the layer, so the isolation clone is essential). No bake / no custom model needed.
         public int ca, cb, cc, cd;       // ANIMATED models: our baked ClipCollection Amplitude guid (its own clip, e.g. a drone's spinning-prop 'hover'). 0,0,0,0 = static model (no pose override).
         public object clipColl;          // loaded ClipCollection asset
         public int animId = -1;          // resolved animation id of our clip (after it's registered in AnimationManager.Apply)
@@ -102,6 +103,7 @@ namespace ENCAccessProof
                                 ca = A(c, 0), cb = A(c, 1), cc = A(c, 2), cd = A(c, 3),
                                 position = new UnityEngine.Vector3(Fp(p, "x"), Fp(p, "y"), Fp(p, "z")),
                                 scale = m["scale"] != null ? (float)m["scale"] : 1f,
+                                desaturate = m["desaturate"] != null ? (float)m["desaturate"] : 0f,
                                 respawnAfterLoad = (bool?)m["respawnAfterLoad"] ?? false,
                                 freezeDonorAnim = (bool?)m["freezeDonorAnim"] ?? false,
                                 fireOnAttack = (bool?)m["fireOnAttack"] ?? false,
@@ -137,6 +139,7 @@ namespace ENCAccessProof
                 var dsp = Regex.Matches(text, "\"deploySpeed\"\\s*:\\s*(-?[\\d.eE+]+)");    // parity: gradual-deploy ramp speed multiplier (default 1)
                 var rsp = Regex.Matches(text, "\"recoilSpeed\"\\s*:\\s*(-?[\\d.eE+]+)");   // parity: recoil-on-fire playback speed multiplier (default 1)
                 var sc = Regex.Matches(text, "\"scale\"\\s*:\\s*(-?[\\d.eE+]+)");           // runtime ObjectSpace scale multiplier (default 1)
+                var des = Regex.Matches(text, "\"desaturate\"\\s*:\\s*(-?[\\d.eE+]+)");     // texture-only grey strength (default 0 = off)
                 int G(Match m, int g) => int.TryParse(m.Groups[g].Value, out var r) ? r : 0;
                 float F(Match m, int g) => float.TryParse(m.Groups[g].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var r) ? r : 0f;
                 int n = Math.Min(pd.Count, Math.Min(sk.Count, at.Count));
@@ -159,6 +162,7 @@ namespace ENCAccessProof
                         deploySpeed = i < dsp.Count && float.TryParse(dsp[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _dsp) ? _dsp : 1f,
                         recoilSpeed = i < rsp.Count && float.TryParse(rsp[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _rsp) ? _rsp : 1f,
                         scale = i < sc.Count && float.TryParse(sc[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _sc) ? _sc : 1f,
+                        desaturate = i < des.Count && float.TryParse(des[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _des) ? _des : 0f,
                     });
                 }
                 loaded = true;   // regex fallback also succeeded — latch so we don't re-parse every pawn
@@ -260,6 +264,11 @@ namespace ENCAccessProof
                 var e = entries.FirstOrDefault(x => x.pawnDescription.Length > 0 && name.IndexOf(x.pawnDescription, StringComparison.OrdinalIgnoreCase) >= 0);
                 if (e == null) return;
                 Plugin.Log.LogInfo($"[Uni] MATCH addon='{name}' -> {e.resourceName} (skel {e.sa},{e.sb},{e.sc},{e.sd})");
+
+                // TEXTURE-ONLY GREY variant: keep the vanilla mesh, just isolate this unit's output layer and paint a
+                // desaturated copy of its OWN atlas (see ApplyGrey). Returns before any skeleton repoint. The isolation
+                // is what leaves the emblematic original untouched — the Common copy and it share the same output layer.
+                if (e.desaturate > 0f) { ApplyGrey(addon, animMgr, e, name); return; }
 
                 // One-shot diagnostic (BEFORE we swap): dump the DONOR skeleton / mesh-collection sub-meshes, so we can
                 // find parts that aren't separate fragments (e.g. a helicopter rotor baked as its own skinned sub-mesh).
@@ -523,6 +532,105 @@ namespace ENCAccessProof
                 }
             }
             catch (Exception ex) { Plugin.Log.LogError("[Uni] texture: " + ex); }
+        }
+
+        // ---- TEXTURE-ONLY GREY variant (desaturate>0): keep the vanilla mesh, grey the isolated skin ----
+
+        static void ApplyGrey(object addon, object animMgr, ModelEntry e, string name)
+        {
+            try
+            {
+                var bodyName = DiscoverBodyMeshName(addon);
+                if (!string.IsNullOrEmpty(bodyName)) e.layerHint = bodyName;
+                GreyIsolate(addon, animMgr, e);   // clone the body fragment's output layer + build the desaturated atlas into e.tex
+                ApplyTexture(e, animMgr);          // paint e.tex on the isolated clone + neutralise the civ-colour/overlay maps (TickOne)
+                if (!e.repointed) { e.repointed = true; Plugin.Log.LogInfo($"[Grey] '{name}' -> {e.resourceName}: greyed (layer '{e.layerHint}', desaturate {e.desaturate:0.00}, atlas={(e.tex != null ? e.tex.width + "x" + e.tex.height : "NONE — will retry")})"); }
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Grey] " + ex); }
+        }
+
+        // Isolate the copy's body-fragment output layer (a private clone, so the shared emblematic original is untouched)
+        // and build a desaturated atlas from that layer's CURRENT skin into e.tex. Keeps the vanilla meshCollection
+        // (texture-only). Mirrors ReloadFragments' isolation, minus the mesh repoint.
+        static void GreyIsolate(object addon, object animMgr, ModelEntry e)
+        {
+            try
+            {
+                var frags = GetMember(addon, "FragmentEntries") as Array;
+                if (frags == null) return;
+                var renderer = GetMember(animMgr, "FxComponentRenderer");
+                var mcm = GetMember(animMgr, "FxComponentMeshContentManager");
+                var layerObj = GetMember(animMgr, "FXMeshLayerIndex");
+                int layer = layerObj is int li ? li : Convert.ToInt32(layerObj ?? 0);
+                var fragType = frags.GetType().GetElementType();
+                var mcField = AccessTools.Field(fragType, "meshCollection");
+                var mnField = AccessTools.Field(fragType, "meshName");
+                var folField = AccessTools.Field(fragType, "fxOutputLayer");
+                var load = AccessTools.Method(fragType, "Load");
+                if (folField == null) return;
+                for (int i = 0; i < frags.Length; i++)
+                {
+                    var item = frags.GetValue(i);
+                    if (item == null) continue;
+                    var mn = mnField?.GetValue(item) as string;
+                    if (string.IsNullOrEmpty(e.layerHint) || mn != e.layerHint) continue;   // only the body layer
+                    var host = folField.GetValue(item);
+                    if (e.tex == null && host != null) e.tex = BuildDesaturatedAtlas(host, e.desaturate, e.resourceName);   // grey the ORIGINAL skin, once
+                    if (e.isolatedLayer == null && host is UnityEngine.Object ho && ho != null)
+                    {
+                        var clone = UnityEngine.Object.Instantiate(ho); clone.name = e.resourceName + "_GreyLayer"; e.isolatedLayer = clone;
+                        Plugin.Log.LogInfo($"[Grey] cloned output layer for {e.resourceName} -> '{clone.name}'");
+                    }
+                    if (e.isolatedLayer != null) folField.SetValue(item, e.isolatedLayer);
+                    var mc = mcField?.GetValue(item);   // KEEP the vanilla meshCollection; re-Load so the clone gets its own GPU slot
+                    try { load?.Invoke(item, new object[] { mc, renderer, mcm, layer }); }
+                    catch (Exception ex) { Plugin.Log.LogWarning("[Grey] frag reload: " + (ex.InnerException ?? ex).Message); }
+                    frags.SetValue(item, i);
+                    break;
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Grey] isolate: " + ex); }
+        }
+
+        // Read the output layer's current _MainTex and return a desaturated copy: pull each pixel toward its luminance by
+        // `strength` (1 = full grey) + a slight darken for a "bland military" look. Blits through a RenderTexture first
+        // (the host atlas isn't CPU-readable). The civ-colour tint is killed separately by TickOne (_ColorMask -> black).
+        static UnityEngine.Texture2D BuildDesaturatedAtlas(object hostLayer, float strength, string tag)
+        {
+            try
+            {
+                UnityEngine.Texture src = null;
+                if (GetMember(hostLayer, "RenderOutputs") is Array ros)
+                    foreach (var ro in ros)
+                    {
+                        foreach (var fld in new[] { "currentRenderMaterial", "runTimeRenderMaterial" })
+                            if (GetMember(ro, fld) is UnityEngine.Material mat && mat.GetTexture("_MainTex") is UnityEngine.Texture mt) { src = mt; break; }
+                        if (src != null) break;
+                    }
+                if (src == null) { Plugin.Log.LogWarning($"[Grey] {tag}: no _MainTex on the output layer yet"); return null; }
+                int w = src.width, h = src.height;
+                var rt = UnityEngine.RenderTexture.GetTemporary(w, h, 0, UnityEngine.RenderTextureFormat.ARGB32, UnityEngine.RenderTextureReadWrite.sRGB);
+                var prev = UnityEngine.RenderTexture.active;
+                UnityEngine.Graphics.Blit(src, rt);
+                UnityEngine.RenderTexture.active = rt;
+                var t = new UnityEngine.Texture2D(w, h, UnityEngine.TextureFormat.RGBA32, false) { name = tag + "_Grey" };
+                t.ReadPixels(new UnityEngine.Rect(0, 0, w, h), 0, 0); t.Apply();
+                UnityEngine.RenderTexture.active = prev; UnityEngine.RenderTexture.ReleaseTemporary(rt);
+                var px = t.GetPixels32();
+                float s = UnityEngine.Mathf.Clamp01(strength);
+                float dark = 1f - 0.15f * s;
+                for (int i = 0; i < px.Length; i++)
+                {
+                    float lum = px[i].r * 0.299f + px[i].g * 0.587f + px[i].b * 0.114f;
+                    px[i].r = (byte)UnityEngine.Mathf.Clamp((px[i].r + (lum - px[i].r) * s) * dark, 0, 255);
+                    px[i].g = (byte)UnityEngine.Mathf.Clamp((px[i].g + (lum - px[i].g) * s) * dark, 0, 255);
+                    px[i].b = (byte)UnityEngine.Mathf.Clamp((px[i].b + (lum - px[i].b) * s) * dark, 0, 255);
+                }
+                t.SetPixels32(px); t.Apply();
+                Plugin.Log.LogInfo($"[Grey] {tag}: desaturated atlas {w}x{h} (strength {s:0.00})");
+                return t;
+            }
+            catch (Exception e) { Plugin.Log.LogError("[Grey] build atlas: " + e); return null; }
         }
 
         // ---- animated models: register our ClipCollection + override the pawn's pose to play it ----
@@ -1078,6 +1186,10 @@ namespace ENCAccessProof
 
         static void TickOne(ModelEntry e)
         {
+            // GREY retry: if the skin wasn't ready when ApplyGrey ran (build returned null), build it now from the
+            // isolated layer's still-original _MainTex. Runs at most until the first successful build (then e.tex latches).
+            if (e.desaturate > 0f && e.tex == null && e.isolatedLayer != null)
+                e.tex = BuildDesaturatedAtlas(e.isolatedLayer, e.desaturate, e.resourceName);
             if (e.hostOutputLayer == null || e.tex == null) return;
             try
             {
