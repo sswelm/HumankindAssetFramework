@@ -387,12 +387,16 @@ Retexture** — that reskins an existing unit **without baking a model**: the va
 paints your texture onto an **isolated clone** of the unit's output layer, so the original unit (and every other unit
 sharing that layer) is untouched.
 
-Two modes, both plain registry entries (no assets, no mod rebuild):
+Everything is a plain registry entry (no assets, no mod rebuild). Section 3 of the window is **Replace / adjust skin**:
 
-- **Custom skin** — `textureFile`: a PNG filename in `BepInEx\config\enc_skins\`. The plugin hot-loads it at runtime.
-- **Grey variant** — `desaturate` (0–1): no PNG at all; the plugin paints a desaturated copy of the unit's OWN atlas
-  and neutralises the civ-colour tint (1 = full grey). Proven on GreyStealthCorvette. If both are set, `textureFile`
-  wins.
+- **Replacement PNG** *(optional)* — `textureFile`: a PNG filename in `BepInEx\config\enc_skins\`. The plugin hot-loads
+  it at runtime. Leave it empty to adjust the unit's OWN atlas (or, when editing an entry, to keep its current skin).
+- **Adjustments** (applied on top of whichever skin above — the PNG *or* the own atlas):
+  - **Desaturate** (0–1) — pull each pixel toward its brightness; 1 = full grey. Also neutralises the civ-colour tint.
+  - **Red / Green / Blue** (−255…+255 each) — additive per-channel colour offset. Equal negatives = darken, equal
+    positives = brighten, one channel = tint (e.g. "Desaturate 1 + Blue +40" = a cool steel-grey). All 0 = no change.
+
+Proven on the grey corvette. (These sliders replace the earlier single grey/darken toggle.)
 
 Workflow:
 
@@ -414,3 +418,42 @@ texture. So unlike a **baked custom model** — which *does* add its own distinc
 variants without approaching the mesh ceiling. (Applying this to *custom* models — one baked mesh, many textured variants
 sharing it — is a natural extension: the plugin already dedups a shared skeleton's mesh on upload, but reusing one custom
 skeleton across *different* base units still needs work on the per-donor rename; not built yet.)
+
+## 13. Unit sounds — engine audio & the sound catalog
+
+Injected/retextured units are **silent on move** by default: the per-ship engine sound (`Play_UNIT_Vehicles_<Type>_Start`
+/`_Stop`) rides an audio-service path tied to the vanilla unit's move state, which our re-loaded units never trigger. (Full
+diagnosis in the `unit-movement-audio-investigation` memory — the emitter, its Wwise registration and its 3D position are
+all fine; only the *trigger* is missing.) The plugin restores the sound by firing it itself.
+
+**Enable it** — tick **Engine sound on move** in the Unit Retexture window (or set `engineSound: true` in the registry).
+The plugin then watches each of that unit's instances and, on a movement **start/stop** transition (render-position delta,
+like deploy-on-stop), posts the engine event onto the pawn's `AudioEmitter`: a rev on departure, a settle on stop.
+
+**Name the sound (works for the FIRST unit, no capture):** fill **Start event** / **Stop event** with Wwise event names.
+The plugin posts them **by name** (`AkSoundEngine.PostEvent(name, emitterGuid)`), so a named sound plays for the very first
+unit at load — no dependency on anything else having moved. Leave them blank and the plugin falls back to a handle
+**auto-captured** from any same-family vehicle that moved this session (fine mid-game, but the first unit stays quiet until
+then) — so **name the events for a shipping mod.**
+
+**Extract every sound — the catalog:** F8 window ▸ **Dump Sound Catalog** writes every Wwise event name in the game (~800+)
+to `BepInEx\config\enc_sound_catalog.txt`. Browse it, pick the right Start/Stop pair, paste them in. Examples:
+
+| Unit family | Start event | Stop event |
+|---|---|---|
+| Corvette | `Play_UNIT_Vehicles_StealthCorvette_Start` | `Play_UNIT_Vehicles_StealthCorvette_Stop` |
+| Carrier | `Play_UNIT_Vehicles_AircraftCarrier_Start` | `Play_UNIT_Vehicles_AircraftCarrier_Stop` |
+| Landing craft / hovercraft | `Play_UNIT_LandingCraft_Start` | `Play_UNIT_LandingCraft_Stop` |
+| Helicopter | `Play_UNIT_Helicopter_Move` | `Play_UNIT_Helicopter_Stop` |
+| AT gun / towed | `Play_UNIT_AntiTankGun_Move_Start` | `Play_UNIT_AntiTankGun_Move_Stop` |
+
+It posts *any* named event, so this isn't limited to engines — attach any sound in the catalog to a unit's movement.
+
+**Audio diagnostics (F8 window), kept for future sound work:** **Dump Audio** logs each unit's emitter (registration,
+position, idle/free-event state); **Audio Trace** toggles a live log of every sound the game posts (how the event names
+were discovered — it patches the service sink `AudioManager.PostEvent`); **Play Audio (test)** posts the captured engine
+handle onto the filtered units to confirm audibility.
+
+**v1 limits (honest):** Start/Stop accents only, no sustained loop between; and the auto-capture fallback uses the
+last-seen vehicle Start — so a **named** event is preferred for correctness, and a shipped registry with names Just Works
+from the first unit, every launch.

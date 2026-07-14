@@ -52,6 +52,7 @@ namespace ENCAccessProof
             var hooks = new[] {
                 typeof(UniRegisterHook), typeof(UniRepointHook), typeof(UniPawnPoseHook),
                 typeof(Hk_ArtilleryStrike),   // firing-on-attack: bombard -> play the model's clip once (docs/Firing-On-Attack.md)
+                typeof(Hk_AudioTrace),        // diagnostic: live-trace Wwise PostEvent (gated behind the F8 Audio Trace toggle)
             };
             foreach (var t in hooks)
             {
@@ -77,6 +78,7 @@ namespace ENCAccessProof
                 UniversalInject.MaybeRespawnPostLoad(); // one-shot post-load re-spawn to clear the first-instance rotor race
                 UniversalInject.ProcessFireQueues();    // per-instance fire-on-attack: arm only the pawn that actually bombarded
                 UniversalInject.ProcessDeployState();   // deploy-on-stop: record which of our pawns' units are currently moving
+                UniversalInject.ProcessEngineAudio();   // engine sound: fire the per-ship Start/Stop move sound on our units
             }
         }
 
@@ -101,11 +103,19 @@ namespace ENCAccessProof
                 if (GUILayout.Button("Dump UnitDef")) Prober.DumpUnitDef();
                 if (GUILayout.Button("Dump Formation")) Prober.DumpFormation();
                 if (GUILayout.Button("Dump Atlases")) UniversalInject.DumpOutputLayerAtlases(atlasFilter);
+                if (GUILayout.Button("Dump Audio")) UniversalInject.DumpAudioState(atlasFilter);
             }
             using (new GUILayout.HorizontalScope())
             {
-                GUILayout.Label("Atlas-dump name filter (blank = all):", GUILayout.Width(220));
+                GUILayout.Label("Dump name filter — atlas/audio (blank = all):", GUILayout.Width(220));
                 atlasFilter = GUILayout.TextField(atlasFilter);   // e.g. "Corvette" -> dumps only that unit's layer, not all 600+
+            }
+            using (new GUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button("Play Audio (test) on filtered units")) UniversalInject.PlayAudioTest(atlasFilter);
+                if (GUILayout.Button(UniversalInject.AudioTraceOn ? "Audio Trace: ON" : "Audio Trace: OFF"))
+                { UniversalInject.AudioTraceOn = !UniversalInject.AudioTraceOn; UniversalInject.AudioTraceFilter = atlasFilter; }
+                if (GUILayout.Button("Dump Sound Catalog")) UniversalInject.DumpSoundCatalog();
             }
             GUILayout.Space(4);
             GUILayout.Label("GPU mesh buffer (live) — Shift+F8 also logs it:");

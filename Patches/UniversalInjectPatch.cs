@@ -28,6 +28,9 @@ namespace ENCAccessProof
         public float scale = 1f;              // ANIMATED models: runtime multiplier on the pawn's ObjectSpace.Scale (default 1 = unchanged). Lets us fix an animated model baked at the wrong scale WITHOUT a re-bake (e.g. the howitzer's 100x FBX unit-conversion oversize -> set 0.01). Config-only field; absent = 1.
         public float desaturate = 0f;         // TEXTURE-ONLY GREY variant: 0 = off. >0 = DON'T repoint the mesh; isolate this unit's output layer and paint a DESATURATED copy of its OWN atlas (1 = full grey) while the civ-colour tint is neutralised. Makes a Common copy read as a bland grey version of an emblematic unit; the original is untouched (they share the layer, so the isolation clone is essential). No bake / no custom model needed.
         public string textureFile = "";       // TEXTURE-ONLY RETEXTURE: a PNG filename in BepInEx/config/enc_skins/. When set, the plugin loads that PNG and paints it onto the unit's ISOLATED output layer (same isolation as desaturate — original untouched, vanilla mesh kept). Hot-loaded at runtime, no bake/rebuild. Takes precedence over desaturate. Painted on a dump of the unit's own atlas (round-trips via PNG). Managed by the Unit Retexture editor window.
+        public float tintR = 0f;              // UNIVERSAL skin colour offset, red channel (-255..+255, 0 = none). Added AFTER desaturate to whatever skin this unit ends up with — the loaded textureFile PNG, OR a copy of its own atlas. Equal negative R/G/B = darken; equal positive = brighten; one channel tints.
+        public float tintG = 0f;              // ... green channel (-255..+255).
+        public float tintB = 0f;              // ... blue channel (-255..+255).
         public int ca, cb, cc, cd;       // ANIMATED models: our baked ClipCollection Amplitude guid (its own clip, e.g. a drone's spinning-prop 'hover'). 0,0,0,0 = static model (no pose override).
         public object clipColl;          // loaded ClipCollection asset
         public int animId = -1;          // resolved animation id of our clip (after it's registered in AnimationManager.Apply)
@@ -56,6 +59,15 @@ namespace ENCAccessProof
         public readonly Dictionary<long, UnityEngine.Vector3> deployLastPos = new Dictionary<long, UnityEngine.Vector3>();  // MAIN thread: unit GUID -> last render position; movement = the position actually changed (instant fold, settle-immune)
         public readonly List<DeploySample> deploySamples = new List<DeploySample>();             // MAIN thread only (locked): each pawn's render position + its unit's current (ramped) pose time; the pose hook holds that pose on the nearest pawn.
         public float deployLastPoll;          // Time.time of the last deploy poll, for a framerate-independent ramp step
+        // ENGINE AUDIO: our injected units never FIRE the per-ship move sound (Play_UNIT_Vehicles_<Type>_Start/_Stop) — it
+        // rides the service path tied to the vanilla unit's move state, which our re-loaded units don't trigger. When set,
+        // the plugin detects each instance starting/stopping (render-position delta, like deployOnStop) and posts the
+        // captured Start/Stop AudioEventHandle onto that pawn's AudioEmitter, restoring the missing engine sound.
+        public bool engineSound;
+        public string engineStartEvent = "";  // Wwise event NAME posted on move-START (e.g. Play_UNIT_Vehicles_StealthCorvette_Start). Set => posted BY NAME (works for the FIRST unit, no live capture); empty => fall back to the auto-captured handle.
+        public string engineStopEvent = "";   // ... move-STOP (..._Stop). Extract names via the F8 "Dump Sound Catalog"; assign per unit in the registry.
+        public readonly Dictionary<int, UnityEngine.Vector3> engineLastPos = new Dictionary<int, UnityEngine.Vector3>();  // sub-pawn instance id -> last render pos
+        public readonly Dictionary<int, bool> engineMoving = new Dictionary<int, bool>();                                  // sub-pawn instance id -> was moving last poll
     }
 
     // One in-flight one-shot: the world position of a pawn that just fired + when it started. The pose hook matches a
@@ -105,11 +117,17 @@ namespace ENCAccessProof
                                 position = new UnityEngine.Vector3(Fp(p, "x"), Fp(p, "y"), Fp(p, "z")),
                                 scale = m["scale"] != null ? (float)m["scale"] : 1f,
                                 desaturate = m["desaturate"] != null ? (float)m["desaturate"] : 0f,
+                                tintR = m["tintR"] != null ? (float)m["tintR"] : 0f,
+                                tintG = m["tintG"] != null ? (float)m["tintG"] : 0f,
+                                tintB = m["tintB"] != null ? (float)m["tintB"] : 0f,
                                 textureFile = (string)m["textureFile"] ?? "",
                                 respawnAfterLoad = (bool?)m["respawnAfterLoad"] ?? false,
                                 freezeDonorAnim = (bool?)m["freezeDonorAnim"] ?? false,
                                 fireOnAttack = (bool?)m["fireOnAttack"] ?? false,
                                 deployOnStop = (bool?)m["deployOnStop"] ?? false,
+                                engineSound = (bool?)m["engineSound"] ?? false,
+                                engineStartEvent = (string)m["engineStartEvent"] ?? "",
+                                engineStopEvent = (string)m["engineStopEvent"] ?? "",
                                 deployPoseTime = m["deployPoseTime"] != null ? (float)m["deployPoseTime"] : 1f,
                                 deploySpeed = m["deploySpeed"] != null ? (float)m["deploySpeed"] : 1f,
                                 recoilSpeed = m["recoilSpeed"] != null ? (float)m["recoilSpeed"] : 1f,
@@ -137,11 +155,17 @@ namespace ENCAccessProof
                 var fz = Regex.Matches(text, "\"freezeDonorAnim\"\\s*:\\s*(true|false)");   // parity with the Newtonsoft path — else the donor-animation freeze silently defaults off here
                 var foa = Regex.Matches(text, "\"fireOnAttack\"\\s*:\\s*(true|false)");     // parity: play the clip once on attack vs loop
                 var dos = Regex.Matches(text, "\"deployOnStop\"\\s*:\\s*(true|false)");     // parity: hold deployed when idle, undeploy while moving
+                var eng = Regex.Matches(text, "\"engineSound\"\\s*:\\s*(true|false)");      // parity: fire the per-ship engine move sound on our units
+                var esa = Regex.Matches(text, "\"engineStartEvent\"\\s*:\\s*\"([^\"]*)\"");  // parity: Wwise event name posted on move-start
+                var eso = Regex.Matches(text, "\"engineStopEvent\"\\s*:\\s*\"([^\"]*)\"");    // parity: Wwise event name posted on move-stop
                 var dpt = Regex.Matches(text, "\"deployPoseTime\"\\s*:\\s*(-?[\\d.eE+]+)"); // parity: normalized clip time of the deployed pose (default 1)
                 var dsp = Regex.Matches(text, "\"deploySpeed\"\\s*:\\s*(-?[\\d.eE+]+)");    // parity: gradual-deploy ramp speed multiplier (default 1)
                 var rsp = Regex.Matches(text, "\"recoilSpeed\"\\s*:\\s*(-?[\\d.eE+]+)");   // parity: recoil-on-fire playback speed multiplier (default 1)
                 var sc = Regex.Matches(text, "\"scale\"\\s*:\\s*(-?[\\d.eE+]+)");           // runtime ObjectSpace scale multiplier (default 1)
                 var des = Regex.Matches(text, "\"desaturate\"\\s*:\\s*(-?[\\d.eE+]+)");     // texture-only grey strength (default 0 = off)
+                var tR = Regex.Matches(text, "\"tintR\"\\s*:\\s*(-?[\\d.eE+]+)");           // universal skin colour offset R (-255..255)
+                var tG = Regex.Matches(text, "\"tintG\"\\s*:\\s*(-?[\\d.eE+]+)");           // ... G
+                var tB = Regex.Matches(text, "\"tintB\"\\s*:\\s*(-?[\\d.eE+]+)");           // ... B
                 var txf = Regex.Matches(text, "\"textureFile\"\\s*:\\s*\"([^\"]*)\"");      // texture-only retexture: PNG filename in enc_skins/
                 int G(Match m, int g) => int.TryParse(m.Groups[g].Value, out var r) ? r : 0;
                 float F(Match m, int g) => float.TryParse(m.Groups[g].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var r) ? r : 0f;
@@ -161,11 +185,17 @@ namespace ENCAccessProof
                         freezeDonorAnim = i < fz.Count && fz[i].Groups[1].Value == "true",
                         fireOnAttack = i < foa.Count && foa[i].Groups[1].Value == "true",
                         deployOnStop = i < dos.Count && dos[i].Groups[1].Value == "true",
+                        engineSound = i < eng.Count && eng[i].Groups[1].Value == "true",
+                        engineStartEvent = i < esa.Count ? esa[i].Groups[1].Value : "",
+                        engineStopEvent = i < eso.Count ? eso[i].Groups[1].Value : "",
                         deployPoseTime = i < dpt.Count && float.TryParse(dpt[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _dpt) ? _dpt : 1f,
                         deploySpeed = i < dsp.Count && float.TryParse(dsp[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _dsp) ? _dsp : 1f,
                         recoilSpeed = i < rsp.Count && float.TryParse(rsp[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _rsp) ? _rsp : 1f,
                         scale = i < sc.Count && float.TryParse(sc[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _sc) ? _sc : 1f,
                         desaturate = i < des.Count && float.TryParse(des[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _des) ? _des : 0f,
+                        tintR = i < tR.Count && float.TryParse(tR[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _tr) ? _tr : 0f,
+                        tintG = i < tG.Count && float.TryParse(tG[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _tg) ? _tg : 0f,
+                        tintB = i < tB.Count && float.TryParse(tB[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _tb) ? _tb : 0f,
                         textureFile = i < txf.Count ? txf[i].Groups[1].Value : "",
                     });
                 }
@@ -272,7 +302,7 @@ namespace ENCAccessProof
                 // TEXTURE-ONLY override: keep the vanilla mesh, just isolate this unit's output layer and repaint its skin
                 // — either a hot-loaded PNG (textureFile) or a desaturated copy of its own atlas (desaturate). Returns
                 // before any skeleton repoint. The isolation leaves the emblematic original untouched (shared layer).
-                if (e.desaturate > 0f || !string.IsNullOrEmpty(e.textureFile)) { ApplyTextureOnly(addon, animMgr, e, name); return; }
+                if (NeedsAdjust(e) || !string.IsNullOrEmpty(e.textureFile)) { ApplyTextureOnly(addon, animMgr, e, name); return; }
 
                 // One-shot diagnostic (BEFORE we swap): dump the DONOR skeleton / mesh-collection sub-meshes, so we can
                 // find parts that aren't separate fragments (e.g. a helicopter rotor baked as its own skinned sub-mesh).
@@ -547,7 +577,11 @@ namespace ENCAccessProof
                 var bodyName = DiscoverBodyMeshName(addon);
                 if (!string.IsNullOrEmpty(bodyName)) e.layerHint = bodyName;
                 // Custom skin PNG takes precedence; otherwise the desaturated original is built in GreyIsolate/TickOne.
-                if (!string.IsNullOrEmpty(e.textureFile) && e.tex == null) e.tex = LoadSkinPng(e.textureFile, e.resourceName);
+                if (!string.IsNullOrEmpty(e.textureFile) && e.tex == null)
+                {
+                    e.tex = LoadSkinPng(e.textureFile, e.resourceName);
+                    if (e.tex != null && NeedsAdjust(e)) AdjustSkin(e.tex, e.desaturate, e.tintR, e.tintG, e.tintB);   // desaturate/tint the loaded PNG too
+                }
                 GreyIsolate(addon, animMgr, e);    // clone the body fragment's output layer (+ build the desaturated atlas if desaturate>0)
                 ApplyTexture(e, animMgr);          // paint e.tex on the isolated clone + neutralise the civ-colour/overlay maps (TickOne)
                 if (!e.repointed) { e.repointed = true; Plugin.Log.LogInfo($"[Skin] '{name}' -> {e.resourceName}: {(string.IsNullOrEmpty(e.textureFile) ? $"greyed (desaturate {e.desaturate:0.00})" : $"retextured ('{e.textureFile}')")}, layer '{e.layerHint}', atlas={(e.tex != null ? e.tex.width + "x" + e.tex.height : "NONE — will retry")}"); }
@@ -596,7 +630,7 @@ namespace ENCAccessProof
                     var mn = mnField?.GetValue(item) as string;
                     if (string.IsNullOrEmpty(e.layerHint) || mn != e.layerHint) continue;   // only the body layer
                     var host = folField.GetValue(item);
-                    if (e.tex == null && host != null && e.desaturate > 0f) e.tex = BuildDesaturatedAtlas(host, e.desaturate, e.resourceName);   // grey the ORIGINAL skin, once (skipped when a custom PNG already set e.tex)
+                    if (e.tex == null && host != null && NeedsAdjust(e)) e.tex = BuildAdjustedAtlas(host, e.desaturate, e.tintR, e.tintG, e.tintB, e.resourceName);   // adjust the ORIGINAL skin, once (skipped when a custom PNG already set e.tex)
                     if (e.isolatedLayer == null && host is UnityEngine.Object ho && ho != null)
                     {
                         var clone = UnityEngine.Object.Instantiate(ho); clone.name = e.resourceName + "_GreyLayer"; e.isolatedLayer = clone;
@@ -613,10 +647,10 @@ namespace ENCAccessProof
             catch (Exception ex) { Plugin.Log.LogError("[Grey] isolate: " + ex); }
         }
 
-        // Read the output layer's current _MainTex and return a desaturated copy: pull each pixel toward its luminance by
-        // `strength` (1 = full grey) + a slight darken for a "bland military" look. Blits through a RenderTexture first
-        // (the host atlas isn't CPU-readable). The civ-colour tint is killed separately by TickOne (_ColorMask -> black).
-        static UnityEngine.Texture2D BuildDesaturatedAtlas(object hostLayer, float strength, string tag)
+        // Read the output layer's current _MainTex and return an ADJUSTED copy (AdjustSkin: desaturate toward luminance by
+        // `desat`, then add the R/G/B colour offset -255..+255). Blits through a RenderTexture first (the host atlas isn't
+        // CPU-readable). The civ-colour tint is killed separately by TickOne (_ColorMask -> black).
+        static UnityEngine.Texture2D BuildAdjustedAtlas(object hostLayer, float desat, float tR, float tG, float tB, string tag)
         {
             try
             {
@@ -637,22 +671,31 @@ namespace ENCAccessProof
                 var t = new UnityEngine.Texture2D(w, h, UnityEngine.TextureFormat.RGBA32, false) { name = tag + "_Grey" };
                 t.ReadPixels(new UnityEngine.Rect(0, 0, w, h), 0, 0); t.Apply();
                 UnityEngine.RenderTexture.active = prev; UnityEngine.RenderTexture.ReleaseTemporary(rt);
-                var px = t.GetPixels32();
-                float s = UnityEngine.Mathf.Clamp01(strength);
-                float dark = 1f - 0.15f * s;
-                for (int i = 0; i < px.Length; i++)
-                {
-                    float lum = px[i].r * 0.299f + px[i].g * 0.587f + px[i].b * 0.114f;
-                    px[i].r = (byte)UnityEngine.Mathf.Clamp((px[i].r + (lum - px[i].r) * s) * dark, 0, 255);
-                    px[i].g = (byte)UnityEngine.Mathf.Clamp((px[i].g + (lum - px[i].g) * s) * dark, 0, 255);
-                    px[i].b = (byte)UnityEngine.Mathf.Clamp((px[i].b + (lum - px[i].b) * s) * dark, 0, 255);
-                }
-                t.SetPixels32(px); t.Apply();
-                Plugin.Log.LogInfo($"[Grey] {tag}: desaturated atlas {w}x{h} (strength {s:0.00})");
+                AdjustSkin(t, desat, tR, tG, tB);
+                Plugin.Log.LogInfo($"[Grey] {tag}: adjusted atlas {w}x{h} (desat {UnityEngine.Mathf.Clamp01(desat):0.00}, rgb {tR:+0;-0;0}/{tG:+0;-0;0}/{tB:+0;-0;0})");
                 return t;
             }
             catch (Exception e) { Plugin.Log.LogError("[Grey] build atlas: " + e); return null; }
         }
+
+        // Apply the universal skin adjustments in place: pull each pixel toward its luminance by `desat` (1 = full grey),
+        // then add the per-channel colour offset tR/tG/tB (-255..+255). Shared by the own-atlas path and the PNG path.
+        static void AdjustSkin(UnityEngine.Texture2D t, float desat, float tR, float tG, float tB)
+        {
+            var px = t.GetPixels32();
+            float s = UnityEngine.Mathf.Clamp01(desat);
+            for (int i = 0; i < px.Length; i++)
+            {
+                float lum = px[i].r * 0.299f + px[i].g * 0.587f + px[i].b * 0.114f;
+                px[i].r = (byte)UnityEngine.Mathf.Clamp((px[i].r + (lum - px[i].r) * s) + tR, 0, 255);
+                px[i].g = (byte)UnityEngine.Mathf.Clamp((px[i].g + (lum - px[i].g) * s) + tG, 0, 255);
+                px[i].b = (byte)UnityEngine.Mathf.Clamp((px[i].b + (lum - px[i].b) * s) + tB, 0, 255);
+            }
+            t.SetPixels32(px); t.Apply();
+        }
+
+        // True if this entry carries any texture adjustment (desaturate or a non-zero colour offset).
+        static bool NeedsAdjust(ModelEntry e) => e.desaturate > 0f || e.tintR != 0f || e.tintG != 0f || e.tintB != 0f;
 
         // ---- animated models: register our ClipCollection + override the pawn's pose to play it ----
 
@@ -1209,8 +1252,8 @@ namespace ENCAccessProof
         {
             // GREY retry: if the skin wasn't ready when ApplyGrey ran (build returned null), build it now from the
             // isolated layer's still-original _MainTex. Runs at most until the first successful build (then e.tex latches).
-            if (e.desaturate > 0f && e.tex == null && e.isolatedLayer != null)
-                e.tex = BuildDesaturatedAtlas(e.isolatedLayer, e.desaturate, e.resourceName);
+            if (NeedsAdjust(e) && e.tex == null && e.isolatedLayer != null)
+                e.tex = BuildAdjustedAtlas(e.isolatedLayer, e.desaturate, e.tintR, e.tintG, e.tintB, e.resourceName);
             if (e.hostOutputLayer == null || e.tex == null) return;
             try
             {
@@ -1271,6 +1314,239 @@ namespace ENCAccessProof
 
         static void SetMember(object o, string name, object val)
         { var t = o.GetType(); var p = CachedProp(t, name); if (p != null && p.CanWrite) { try { p.SetValue(o, val); return; } catch { } } var f = CachedField(t, name); if (f != null) { try { f.SetValue(o, val); } catch { } } }
+        // ---- AUDIO PROBE (step 1 diagnostic) ----
+        // Walk every live PresentationSubPawn and log its audio wiring, so we can see WHY custom/retextured units are
+        // silent. The decompile says movement/engine sound is posted to an AudioEmitter component on the sub-pawn
+        // (NOT the material/mesh) from PresentationPawnDescription.IdleAudioEvent at spawn. This dumps, per sub-pawn:
+        // does the AudioEmitter exist? is it registered (EntityName/Name)? is an IdleAudioEvent actually set? — so we can
+        // compare a working unit (emblematic corvette: idleEvent SET) against a silent one (our copy: expected empty).
+        // Bound to the F8 window; reuses the atlas-dump name filter (e.g. "Corvette" shows both corvettes side by side).
+        public static void DumpAudioState(string filter = null)
+        {
+            try
+            {
+                var spType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PresentationSubPawn");
+                if (spType == null) { Plugin.Log.LogError("[Audio] PresentationSubPawn type not found (game update?)"); return; }
+                var holderType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PresentationUnitHolder");
+                var all = UnityEngine.Object.FindObjectsOfType(spType);
+                Plugin.Log.LogInfo($"[Audio] --- audio probe: {all.Length} sub-pawns in scene (filter='{filter}') ---");
+                int shown = 0;
+                foreach (var sp in all)
+                {
+                    var go = (sp as UnityEngine.Component) != null ? ((UnityEngine.Component)sp).gameObject : null;
+                    string goName = go != null ? go.name : "?";
+                    var desc = GetMember(sp, "PresentationPawnDescription");
+                    string descName = desc is UnityEngine.Object od && od != null ? od.name : "(null desc)";
+                    var emitter = GetMember(sp, "AudioEmitter");
+                    string entityName = emitter != null ? GetMember(emitter, "EntityName") as string : null;
+                    string regName = emitter != null ? GetMember(emitter, "Name") as string : null;
+                    string descAudioName = desc != null ? GetMember(desc, "AudioEntityName") as string : null;
+
+                    string hay = goName + " | " + descName + " | " + entityName;
+                    if (!string.IsNullOrEmpty(filter) && hay.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+                    // Is an IdleAudioEvent set? IdleAudioEvent is an AudioEventHandleReference struct; .Value resolves the
+                    // handle (null when the guid is zero / bank not loaded). This is the engine/idle loop source.
+                    string idle = "n/a";
+                    if (desc != null)
+                    {
+                        var idleRef = GetMember(desc, "IdleAudioEvent");
+                        if (idleRef == null) idle = "no-field";
+                        else { object v = null; try { v = GetMember(idleRef, "Value"); } catch { } idle = v != null ? "SET" : "empty"; }
+                    }
+
+                    // Layer C: movement free-event SFX readiness (walk/jog/run hashes populated from the animation).
+                    int freeCount = -1;
+                    var fh = GetMember(sp, "FreeEventHashes");
+                    if (fh != null && GetMember(fh, "Count") is int fc) freeCount = fc;
+
+                    // Is this sub-pawn's emitter actually REGISTERED with Wwise? A present component != registered; an
+                    // unregistered emitter silently no-ops every PostEvent. AudioEntityGUID.IsValid == registered.
+                    string reg = "n/a";
+                    if (emitter != null) { var g = GetMember(emitter, "AudioEntityGUID"); if (g != null && GetMember(g, "IsValid") is bool bv) reg = bv ? "REG" : "unreg"; }
+
+                    // Emitter 3D position vs the unit's actual position — a big gap = the emitter tracks a stale transform
+                    // (our re-load), so its sound plays away from the ship and is inaudible even when the right event posts.
+                    string pos = "?";
+                    if (emitter != null)
+                    {
+                        var ep = GetMember(emitter, "Position");
+                        var tr = GetMember(sp, "Transform") as UnityEngine.Transform;
+                        var tp = tr != null ? tr.position : UnityEngine.Vector3.zero;
+                        if (ep is UnityEngine.Vector3 epv) pos = $"emit({epv.x:0.0},{epv.z:0.0}) unit({tp.x:0.0},{tp.z:0.0}) d={(epv - tp).magnitude:0.0}";
+                    }
+
+                    int eid = emitter is UnityEngine.Object eo2 && eo2 != null ? eo2.GetInstanceID() : 0;
+                    // The game posts the engine to our emitters at the right position, yet silent — so check whether the
+                    // emitter component actually RUNS (its Update pushes position/speed to Wwise; disabled/inactive => the
+                    // sound stays parked at the origin, far from the listener = inaudible).
+                    string act = "?";
+                    if (emitter is UnityEngine.Behaviour beh)
+                        act = $"en={beh.enabled} actHier={(beh.gameObject != null && beh.gameObject.activeInHierarchy)} actSelf={(beh.gameObject != null && beh.gameObject.activeSelf)}";
+                    Plugin.Log.LogInfo($"[Audio] '{goName}' emitter={(emitter != null ? "YES" : "NULL")} id={eid} reg={reg} {act} " +
+                                       $"idleEvent={idle} freeEvents={freeCount} pos=[{pos}]");
+                    shown++;
+                }
+                // Layer B: the unit-holder move RUMBLE (generic, posted on move to the HOLDER's own emitter). Holders
+                // aren't transform-parents of sub-pawns, so sample them directly. Rumble config is generic, so a few
+                // samples tell us if Layer B is set up at all and whether holder emitters register.
+                if (holderType != null)
+                {
+                    var holders = UnityEngine.Object.FindObjectsOfType(holderType);
+                    int hi = 0;
+                    foreach (var h in holders)
+                    {
+                        var hemit = GetMember(h, "audioEmitter");
+                        string hreg = "n/a";
+                        if (hemit != null) { var g = GetMember(hemit, "AudioEntityGUID"); if (g != null && GetMember(g, "IsValid") is bool hb) hreg = hb ? "REG" : "unreg"; }
+                        object playV = null; var play = GetMember(h, "playRumbleAudioEvent");
+                        if (play != null) { try { playV = GetMember(play, "Value"); } catch { } }
+                        Plugin.Log.LogInfo($"[Audio] holder[{hi}] {h.GetType().Name} emitter={(hemit != null ? "YES" : "NULL")} reg={hreg} rumble={(playV != null ? "SET" : "empty")}");
+                        if (++hi >= 8) break;
+                    }
+                    Plugin.Log.LogInfo($"[Audio] total holders in scene: {holders.Length}");
+                }
+                Plugin.Log.LogInfo($"[Audio] --- probe done: {shown} shown of {all.Length} (emitter reg=REG/unreg, idle/free events, holder rumble) ---");
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Audio] DumpAudioState: " + ex); }
+        }
+
+        // ---- AUDIO: post a harvested engine/rumble event onto our units' emitters, so we can HEAR something ----
+        // Foundation for the from-scratch audio feature. Static config is byte-identical between the audible vanilla
+        // unit and our silent copies, so instead of un-breaking the vanilla move-trigger we DRIVE the sound ourselves:
+        // harvest one live, registered move-rumble AudioEventHandle (every holder carries one), and PostEvent it straight
+        // onto each matched sub-pawn's AudioEmitter (which is present + registered). If audible, we own unit audio and
+        // can wire play-on-move / stop-on-idle next. NOTE: rumble is a LOOP — each click stacks another until we add Stop.
+        // Live audio trace (Hk_AudioTrace patches Wwise PostEvent; gated here so it's free until toggled on in F8).
+        public static bool AudioTraceOn;
+        public static string AudioTraceFilter = "";
+        public static object StashedEngineHandle;   // live 'Play_UNIT_Vehicles_ModernBoat_Idle' AudioEventHandle, auto-captured by Hk_AudioTrace
+        public static object StashedLoudHandle;      // the per-ship engine MOVE-START handle (Play_UNIT_Vehicles_<Type>_Start), auto-captured
+        public static object StashedStopHandle;      // the matching MOVE-STOP handle (..._Stop), auto-captured
+        public static string StashedLoudName = "";
+        public static readonly System.Collections.Generic.HashSet<string> SeenEvents = new System.Collections.Generic.HashSet<string>();
+        public static string EmitterName(object emitter) =>
+            (GetMember(emitter, "EntityName") as string) ?? (GetMember(emitter, "Name") as string) ?? emitter?.GetType().Name ?? "?";
+
+        static System.Reflection.MethodInfo _postEvent;
+        public static void PlayAudioTest(string filter = null)
+        {
+            try
+            {
+                // Post the REAL vehicle engine-idle event (captured live by Hk_AudioTrace) onto each matched sub-pawn's
+                // emitter. This is what the trace proved the game itself posts to the audible boats.
+                var handle = StashedLoudHandle ?? StashedEngineHandle;
+                string which = StashedLoudHandle != null ? StashedLoudName : ((StashedEngineHandle as UnityEngine.Object)?.name ?? "engine");
+                if (handle == null) { Plugin.Log.LogError("[Audio] nothing captured — turn Audio Trace ON and give a unit a MOVE ORDER (captures a recognizable sound), then retry."); return; }
+
+                var spType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PresentationSubPawn");
+                int posted = 0;
+                foreach (var sp in UnityEngine.Object.FindObjectsOfType(spType))
+                {
+                    var desc = GetMember(sp, "PresentationPawnDescription");
+                    string nm = ((sp as UnityEngine.Component) != null ? ((UnityEngine.Component)sp).gameObject.name : "") +
+                                " " + (desc is UnityEngine.Object od && od != null ? od.name : "");
+                    if (!string.IsNullOrEmpty(filter) && nm.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    var emitter = GetMember(sp, "AudioEmitter");
+                    if (emitter == null) continue;
+                    if (_postEvent == null)
+                        _postEvent = emitter.GetType().GetMethods().FirstOrDefault(m => m.Name == "PostEvent"
+                            && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType.Name == "AudioEventHandle");
+                    if (_postEvent == null) { Plugin.Log.LogError("[Audio] PostEvent(AudioEventHandle) not found on emitter"); return; }
+                    try { _postEvent.Invoke(emitter, new[] { handle }); posted++; }
+                    catch (Exception ie) { Plugin.Log.LogWarning("[Audio] engine post: " + (ie.InnerException ?? ie).Message); }
+                }
+                Plugin.Log.LogInfo($"[Audio] posted '{which}' to {posted} matched sub-pawn emitter(s) (filter='{filter}'). LISTEN.");
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Audio] PlayAudioTest: " + ex); }
+        }
+
+        // ---- ENGINE AUDIO driver: fire the per-ship move Start/Stop sound on our units, which never trigger it themselves.
+        // Polls each of our engineSound units' sub-pawns; on a movement TRANSITION (render-position delta, like deployOnStop)
+        // it PostEvents the captured Start (begin) / Stop (end) AudioEventHandle onto that pawn's emitter. The Start/Stop
+        // handles are auto-captured from any vehicle move by Hk_AudioTrace, so they're ready once any boat has moved once.
+        static int engineFrame;
+        public static void ProcessEngineAudio()
+        {
+            if (entries == null || !Plugin.UniversalInjectOn.Value) return;
+            var on = entries.Where(x => x.engineSound && !string.IsNullOrEmpty(x.pawnDescription)).ToList();
+            if (on.Count == 0) return;
+            bool anyNamed = on.Any(x => !string.IsNullOrEmpty(x.engineStartEvent) || !string.IsNullOrEmpty(x.engineStopEvent));
+            if (!anyNamed && StashedLoudHandle == null && StashedStopHandle == null) return;   // nothing to play yet
+            if (++engineFrame % 6 != 0) return;   // ~10x/s
+            try
+            {
+                var spType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PresentationSubPawn");
+                if (spType == null) return;
+                foreach (var sp in UnityEngine.Object.FindObjectsOfType(spType))
+                {
+                    if (!(sp is UnityEngine.Component comp) || comp == null) continue;
+                    var e = on.FirstOrDefault(x => comp.gameObject.name.IndexOf(x.pawnDescription, StringComparison.OrdinalIgnoreCase) >= 0);
+                    if (e == null) continue;
+                    var emitter = GetMember(sp, "AudioEmitter");
+                    if (emitter == null) continue;
+                    int id = ((UnityEngine.Object)sp).GetInstanceID();
+                    var pos = (GetMember(sp, "Transform") as UnityEngine.Transform)?.position ?? comp.transform.position;
+                    bool moving = e.engineLastPos.TryGetValue(id, out var last) && (pos - last).sqrMagnitude > 0.1f * 0.1f;
+                    e.engineLastPos[id] = pos;
+                    bool wasMoving = e.engineMoving.TryGetValue(id, out var wm) && wm;
+                    if (moving == wasMoving) continue;   // fire only on a start/stop TRANSITION
+                    e.engineMoving[id] = moving;
+                    string evName = moving ? e.engineStartEvent : e.engineStopEvent;
+                    if (!string.IsNullOrEmpty(evName)) { PostEventByName(emitter, evName); continue; }   // BY NAME — first-unit-safe, no live capture
+                    // fallback: the auto-captured handle (needs a same-family vehicle to have moved this session)
+                    if (_postEvent == null)
+                        _postEvent = emitter.GetType().GetMethods().FirstOrDefault(m => m.Name == "PostEvent"
+                            && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType.Name == "AudioEventHandle");
+                    var handle = moving ? StashedLoudHandle : StashedStopHandle;
+                    if (_postEvent != null && handle != null)
+                        try { _postEvent.Invoke(emitter, new[] { handle }); } catch { }
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Audio] ProcessEngineAudio: " + ex); }
+        }
+
+        // Post a Wwise event BY NAME onto a unit emitter (AkSoundEngine.PostEvent(name, gameObjectID)). Needs no captured
+        // handle, so a named engine sound plays for the FIRST unit at load. The emitter's Wwise game-object id is its
+        // AudioEntityGUID (a ulong).
+        static System.Reflection.MethodInfo _postByName;
+        static void PostEventByName(object emitter, string eventName)
+        {
+            try
+            {
+                var g = GetMember(emitter, "AudioEntityGUID");
+                if (!(GetMember(g, "guid") is ulong gid)) return;
+                if (_postByName == null)
+                {
+                    var ak = AccessTools.TypeByName("Amplitude.Wwise.Interop.AkSoundEngine");
+                    _postByName = ak?.GetMethods().FirstOrDefault(m => m.Name == "PostEvent"
+                        && m.GetParameters().Length == 2
+                        && m.GetParameters()[0].ParameterType == typeof(string)
+                        && m.GetParameters()[1].ParameterType == typeof(ulong));
+                }
+                _postByName?.Invoke(null, new object[] { eventName, gid });
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Audio] postByName '" + eventName + "': " + ex.Message); }
+        }
+
+        // Runtime SOUND EXTRACTOR: write the full Wwise event-name catalog (every loaded AudioEventHandle) to a config
+        // file, so the modder can browse the names and assign the right engineStartEvent/engineStopEvent per unit.
+        public static void DumpSoundCatalog()
+        {
+            try
+            {
+                var t = AccessTools.TypeByName("Amplitude.Wwise.AudioEventHandle") ?? AccessTools.TypeByName("AudioEventHandle");
+                if (t == null) { Plugin.Log.LogError("[Audio] AudioEventHandle type not found"); return; }
+                var names = UnityEngine.Resources.FindObjectsOfTypeAll(t).OfType<UnityEngine.Object>()
+                    .Select(o => o.name).Where(n => !string.IsNullOrEmpty(n))
+                    .Distinct().OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+                var path = Path.Combine(Paths.ConfigPath, "enc_sound_catalog.txt");
+                File.WriteAllLines(path, names);
+                Plugin.Log.LogInfo($"[Audio] sound catalog: {names.Count} AudioEventHandle names -> {path}");
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Audio] DumpSoundCatalog: " + ex); }
+        }
+
         static object GetMember(object o, string name)
         { if (o == null) return null; var t = o.GetType(); var p = CachedProp(t, name); if (p != null) { try { return p.GetValue(o); } catch { } } var f = CachedField(t, name); if (f != null) { try { return f.GetValue(o); } catch { } } return null; }
         static object MakeGuid(int a, int b, int c, int d)
@@ -1432,5 +1708,40 @@ namespace ENCAccessProof
             return t != null ? AccessTools.Method(t, "AddPawnEntry") : null;
         }
         static void Postfix(object __instance) => UniversalInject.OnPawnAdded(__instance);
+    }
+
+    // Live trace of every Wwise PostEvent — see exactly what the game posts on the AUDIBLE vanilla unit's emitter vs
+    // ours during a move. Gated behind UniversalInject.AudioTraceOn (+ name filter), toggled from the F8 window, so it's
+    // free until enabled. The recipe extracted here is what we reproduce to give our units real movement sound.
+    [HarmonyPatch]
+    internal static class Hk_AudioTrace
+    {
+        // Patch the SERVICE-level sink AudioManager.PostEvent(AudioEventHandle, AudioEntityGUID): both emitter sounds AND
+        // service-direct sounds (the unit voice, etc.) funnel through here, so it enumerates the FULL sound palette a unit
+        // uses — including whatever path the audible engine actually takes (the emitter-level trace only saw the idle).
+        static MethodBase TargetMethod()
+        {
+            var t = AccessTools.TypeByName("Amplitude.Wwise.Audio.AudioManager");
+            return t?.GetMethods().FirstOrDefault(m => m.Name == "PostEvent"
+                && m.GetParameters().Length == 2
+                && m.GetParameters()[0].ParameterType.Name == "AudioEventHandle"
+                && m.GetParameters()[1].ParameterType.Name == "AudioEntityGUID");
+        }
+        static void Postfix(object __0)
+        {
+            if (!(__0 is UnityEngine.Object eo) || eo == null) return;
+            string en = eo.name;
+            // Auto-capture (free) the two engine sounds we replay: the idle loop, and the per-ship move-START one-shot
+            // (e.g. 'Play_UNIT_Vehicles_StealthCorvette_Start' — the distinct engine sound the audible boats fire on move,
+            // which our units never get because it takes the service path, not the emitter's PostEvent).
+            if (UniversalInject.StashedEngineHandle == null && en.IndexOf("ModernBoat_Idle", StringComparison.OrdinalIgnoreCase) >= 0)
+                UniversalInject.StashedEngineHandle = __0;
+            if (en.IndexOf("Vehicles", StringComparison.OrdinalIgnoreCase) >= 0 && en.IndexOf("_Start", StringComparison.OrdinalIgnoreCase) >= 0)
+            { UniversalInject.StashedLoudHandle = __0; UniversalInject.StashedLoudName = en; }
+            if (en.IndexOf("Vehicles", StringComparison.OrdinalIgnoreCase) >= 0 && en.IndexOf("_Stop", StringComparison.OrdinalIgnoreCase) >= 0)
+                UniversalInject.StashedStopHandle = __0;
+            if (!UniversalInject.AudioTraceOn) return;
+            if (UniversalInject.SeenEvents.Add(en)) Plugin.Log.LogInfo($"[AudioTrace] NEW event: '{en}'");
+        }
     }
 }
