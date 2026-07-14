@@ -441,13 +441,19 @@ to `BepInEx\config\enc_sound_catalog.txt`. Browse it, pick the right Start/Stop 
 
 | Unit family | Start event | Stop event |
 |---|---|---|
-| Corvette | `Play_UNIT_Vehicles_StealthCorvette_Start` | `Play_UNIT_Vehicles_StealthCorvette_Stop` |
-| Carrier | `Play_UNIT_Vehicles_AircraftCarrier_Start` | `Play_UNIT_Vehicles_AircraftCarrier_Stop` |
+| Modern warship (corvette, destroyer, stealth) | `Play_UNIT_Vehicles_StealthCorvette_Start` | `Play_UNIT_Vehicles_StealthCorvette_Stop` |
+| Aircraft carrier | `Play_UNIT_Vehicles_AircraftCarrier_Start` | `Play_UNIT_Vehicles_AircraftCarrier_Stop` |
+| Steam-era frigate | `Play_UNIT_Vehicles_SteamFrigate_Start` | `Play_UNIT_Vehicles_SteamFrigate_Stop` |
+| Submarine | `Play_UNIT_Vehicles_Submarine_Start_Modern` (or `_Old`) | `Play_UNIT_Vehicles_Submarine_Stop_Modern` (or `_Old`) |
 | Landing craft / hovercraft | `Play_UNIT_LandingCraft_Start` | `Play_UNIT_LandingCraft_Stop` |
 | Helicopter | `Play_UNIT_Helicopter_Move` | `Play_UNIT_Helicopter_Stop` |
-| AT gun / towed | `Play_UNIT_AntiTankGun_Move_Start` | `Play_UNIT_AntiTankGun_Move_Stop` |
+| Towed howitzer | `Play_UNIT_CanonObusier_Move_Start` | `Play_UNIT_CanonObusier_Move_Stop` |
+| Wheeled gun / mortar | `Play_UNIT_Vehicles_Mortar_Move_Start` | `Play_UNIT_Vehicles_Mortar_Move_Stop` |
+| AT gun | `Play_UNIT_AntiTankGun_Move_Start` | `Play_UNIT_AntiTankGun_Move_Stop` |
 
-It posts *any* named event, so this isn't limited to engines — attach any sound in the catalog to a unit's movement.
+**Air units** (planes, zeppelins, drones) have **no** engine-loop event in the game — only takeoff/shoot — so they can't be given a continuous move sound this way; leave `engineSound` off for them.
+
+It posts *any* named event, so this isn't limited to engines — attach any sound in the catalog to a unit's movement. (In the ENC mod, all the naval/ground/heli units are pre-configured with the events above; the three air units are left silent.)
 
 **Audio diagnostics (F8 window), kept for future sound work:** **Dump Audio** logs each unit's emitter (registration,
 position, idle/free-event state); **Audio Trace** toggles a live log of every sound the game posts (how the event names
