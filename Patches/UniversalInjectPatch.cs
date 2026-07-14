@@ -66,6 +66,16 @@ namespace ENCAccessProof
         public bool engineSound;
         public string engineStartEvent = "";  // Wwise event NAME posted on move-START (e.g. Play_UNIT_Vehicles_StealthCorvette_Start). Set => posted BY NAME (works for the FIRST unit, no live capture); empty => fall back to the auto-captured handle.
         public string engineStopEvent = "";   // ... move-STOP (..._Stop). Extract names via the F8 "Dump Sound Catalog"; assign per unit in the registry.
+        public string soundFile = "";          // CUSTOM audio, LOOP while moving: a WAV filename in BepInEx/config/enc_sounds/. Unity AudioSource, 3D. For units the game has NO sound for (drones, zeppelins) or a bespoke engine.
+        public string soundStartFile = "";     // CUSTOM one-shot on move-START (spool-up): a WAV in enc_sounds/.
+        public string soundStopFile = "";      // CUSTOM one-shot on move-STOP (spool-down): a WAV in enc_sounds/.
+        public float soundVolume = 1f;         // travel-loop volume
+        public float soundStartVolume = 1f;    // move-start one-shot volume
+        public float soundStopVolume = 1f;     // move-stop one-shot volume
+        public UnityEngine.AudioClip customClip, customStartClip, customStopClip;    // loaded once from the three files
+        public bool customClipTried;                                                 // don't retry a failed load every poll
+        public readonly Dictionary<int, UnityEngine.AudioSource> customSources = new Dictionary<int, UnityEngine.AudioSource>();  // sub-pawn instance id -> our looping AudioSource (played while moving)
+        public readonly Dictionary<int, float> loopHoldUntil = new Dictionary<int, float>();   // instance id -> Time.time to hold the travel loop off until (so the spool-up one-shot isn't masked)
         public readonly Dictionary<int, UnityEngine.Vector3> engineLastPos = new Dictionary<int, UnityEngine.Vector3>();  // sub-pawn instance id -> last render pos
         public readonly Dictionary<int, bool> engineMoving = new Dictionary<int, bool>();                                  // sub-pawn instance id -> was moving last poll
     }
@@ -128,6 +138,12 @@ namespace ENCAccessProof
                                 engineSound = (bool?)m["engineSound"] ?? false,
                                 engineStartEvent = (string)m["engineStartEvent"] ?? "",
                                 engineStopEvent = (string)m["engineStopEvent"] ?? "",
+                                soundFile = (string)m["soundFile"] ?? "",
+                                soundStartFile = (string)m["soundStartFile"] ?? "",
+                                soundStopFile = (string)m["soundStopFile"] ?? "",
+                                soundVolume = m["soundVolume"] != null ? (float)m["soundVolume"] : 1f,
+                                soundStartVolume = m["soundStartVolume"] != null ? (float)m["soundStartVolume"] : 1f,
+                                soundStopVolume = m["soundStopVolume"] != null ? (float)m["soundStopVolume"] : 1f,
                                 deployPoseTime = m["deployPoseTime"] != null ? (float)m["deployPoseTime"] : 1f,
                                 deploySpeed = m["deploySpeed"] != null ? (float)m["deploySpeed"] : 1f,
                                 recoilSpeed = m["recoilSpeed"] != null ? (float)m["recoilSpeed"] : 1f,
@@ -158,6 +174,12 @@ namespace ENCAccessProof
                 var eng = Regex.Matches(text, "\"engineSound\"\\s*:\\s*(true|false)");      // parity: fire the per-ship engine move sound on our units
                 var esa = Regex.Matches(text, "\"engineStartEvent\"\\s*:\\s*\"([^\"]*)\"");  // parity: Wwise event name posted on move-start
                 var eso = Regex.Matches(text, "\"engineStopEvent\"\\s*:\\s*\"([^\"]*)\"");    // parity: Wwise event name posted on move-stop
+                var sf = Regex.Matches(text, "\"soundFile\"\\s*:\\s*\"([^\"]*)\"");           // parity: custom WAV loop in enc_sounds/
+                var sfa = Regex.Matches(text, "\"soundStartFile\"\\s*:\\s*\"([^\"]*)\"");     // parity: custom WAV one-shot on move-start
+                var sfo = Regex.Matches(text, "\"soundStopFile\"\\s*:\\s*\"([^\"]*)\"");      // parity: custom WAV one-shot on move-stop
+                var svl = Regex.Matches(text, "\"soundVolume\"\\s*:\\s*(-?[\\d.eE+]+)");       // parity: travel-loop volume
+                var svs = Regex.Matches(text, "\"soundStartVolume\"\\s*:\\s*(-?[\\d.eE+]+)");  // parity: start one-shot volume
+                var svp = Regex.Matches(text, "\"soundStopVolume\"\\s*:\\s*(-?[\\d.eE+]+)");   // parity: stop one-shot volume
                 var dpt = Regex.Matches(text, "\"deployPoseTime\"\\s*:\\s*(-?[\\d.eE+]+)"); // parity: normalized clip time of the deployed pose (default 1)
                 var dsp = Regex.Matches(text, "\"deploySpeed\"\\s*:\\s*(-?[\\d.eE+]+)");    // parity: gradual-deploy ramp speed multiplier (default 1)
                 var rsp = Regex.Matches(text, "\"recoilSpeed\"\\s*:\\s*(-?[\\d.eE+]+)");   // parity: recoil-on-fire playback speed multiplier (default 1)
@@ -188,6 +210,12 @@ namespace ENCAccessProof
                         engineSound = i < eng.Count && eng[i].Groups[1].Value == "true",
                         engineStartEvent = i < esa.Count ? esa[i].Groups[1].Value : "",
                         engineStopEvent = i < eso.Count ? eso[i].Groups[1].Value : "",
+                        soundFile = i < sf.Count ? sf[i].Groups[1].Value : "",
+                        soundStartFile = i < sfa.Count ? sfa[i].Groups[1].Value : "",
+                        soundStopFile = i < sfo.Count ? sfo[i].Groups[1].Value : "",
+                        soundVolume = i < svl.Count && float.TryParse(svl[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _svl) ? _svl : 1f,
+                        soundStartVolume = i < svs.Count && float.TryParse(svs[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _svs) ? _svs : 1f,
+                        soundStopVolume = i < svp.Count && float.TryParse(svp[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _svp) ? _svp : 1f,
                         deployPoseTime = i < dpt.Count && float.TryParse(dpt[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _dpt) ? _dpt : 1f,
                         deploySpeed = i < dsp.Count && float.TryParse(dsp[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _dsp) ? _dsp : 1f,
                         recoilSpeed = i < rsp.Count && float.TryParse(rsp[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _rsp) ? _rsp : 1f,
@@ -1466,44 +1494,201 @@ namespace ENCAccessProof
         // it PostEvents the captured Start (begin) / Stop (end) AudioEventHandle onto that pawn's emitter. The Start/Stop
         // handles are auto-captured from any vehicle move by Hk_AudioTrace, so they're ready once any boat has moved once.
         static int engineFrame;
+        static bool _listenerChecked;
+        static List<KeyValuePair<UnityEngine.Object, ModelEntry>> _ourSubpawns;   // cached OUR-units' sub-pawns (refreshed ~every 2s)
+        static float _spCacheAt;
         public static void ProcessEngineAudio()
         {
             if (entries == null || !Plugin.UniversalInjectOn.Value) return;
-            var on = entries.Where(x => x.engineSound && !string.IsNullOrEmpty(x.pawnDescription)).ToList();
+            var on = entries.Where(x => (x.engineSound || !string.IsNullOrEmpty(x.soundFile) || !string.IsNullOrEmpty(x.soundStartFile) || !string.IsNullOrEmpty(x.soundStopFile)) && !string.IsNullOrEmpty(x.pawnDescription)).ToList();
             if (on.Count == 0) return;
-            bool anyNamed = on.Any(x => !string.IsNullOrEmpty(x.engineStartEvent) || !string.IsNullOrEmpty(x.engineStopEvent));
-            if (!anyNamed && StashedLoudHandle == null && StashedStopHandle == null) return;   // nothing to play yet
-            if (++engineFrame % 6 != 0) return;   // ~10x/s
+            if (++engineFrame % 6 != 0) return;   // ~10x/s (render-position delta = movement)
             try
             {
+                // Lazy-load custom WAV clips + make sure a Unity AudioListener exists (a Wwise game may have none, which
+                // would make our AudioSources silent).
+                bool anyCustom = false;
+                foreach (var e in on)
+                {
+                    if (string.IsNullOrEmpty(e.soundFile) && string.IsNullOrEmpty(e.soundStartFile) && string.IsNullOrEmpty(e.soundStopFile)) continue;
+                    anyCustom = true;
+                    if (!e.customClipTried)
+                    {
+                        e.customClipTried = true;
+                        e.customClip = LoadCustom(e.soundFile, e.resourceName);
+                        e.customStartClip = LoadCustom(e.soundStartFile, e.resourceName + "_start");
+                        e.customStopClip = LoadCustom(e.soundStopFile, e.resourceName + "_stop");
+                    }
+                }
+                if (anyCustom) EnsureAudioListener();
+
                 var spType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PresentationSubPawn");
                 if (spType == null) return;
-                foreach (var sp in UnityEngine.Object.FindObjectsOfType(spType))
+                // FindObjectsOfType is a FULL scene scan — running it every poll causes periodic frame spikes (bad 1% lows).
+                // Do it (and the name-match) only every ~2s, caching just OUR units' sub-pawns; each poll then touches only
+                // those few. New units appear within ~2s; destroyed ones read as Unity fake-null and are skipped.
+                float now = UnityEngine.Time.time;
+                if (_ourSubpawns == null || now - _spCacheAt > 2f)
                 {
-                    if (!(sp is UnityEngine.Component comp) || comp == null) continue;
-                    var e = on.FirstOrDefault(x => comp.gameObject.name.IndexOf(x.pawnDescription, StringComparison.OrdinalIgnoreCase) >= 0);
-                    if (e == null) continue;
-                    var emitter = GetMember(sp, "AudioEmitter");
-                    if (emitter == null) continue;
-                    int id = ((UnityEngine.Object)sp).GetInstanceID();
+                    _ourSubpawns = new List<KeyValuePair<UnityEngine.Object, ModelEntry>>();
+                    foreach (var o in UnityEngine.Object.FindObjectsOfType(spType))
+                    {
+                        if (!(o is UnityEngine.Component c) || c == null) continue;
+                        var m = on.FirstOrDefault(x => c.gameObject.name.IndexOf(x.pawnDescription, StringComparison.OrdinalIgnoreCase) >= 0);
+                        if (m != null) _ourSubpawns.Add(new KeyValuePair<UnityEngine.Object, ModelEntry>(o, m));
+                    }
+                    _spCacheAt = now;
+                }
+                foreach (var pair in _ourSubpawns)
+                {
+                    var sp = pair.Key; var e = pair.Value;
+                    if (sp == null) continue;   // destroyed since the last refresh
+                    var comp = sp as UnityEngine.Component;
+                    int id = sp.GetInstanceID();
                     var pos = (GetMember(sp, "Transform") as UnityEngine.Transform)?.position ?? comp.transform.position;
-                    bool moving = e.engineLastPos.TryGetValue(id, out var last) && (pos - last).sqrMagnitude > 0.1f * 0.1f;
+                    bool moving = e.engineLastPos.TryGetValue(id, out var last) && (pos - last).sqrMagnitude > 0.06f * 0.06f;
                     e.engineLastPos[id] = pos;
                     bool wasMoving = e.engineMoving.TryGetValue(id, out var wm) && wm;
-                    if (moving == wasMoving) continue;   // fire only on a start/stop TRANSITION
+
+                    // custom one-shots on a move-start / move-stop TRANSITION (spool-up / spool-down), 3D at the unit.
+                    if (moving != wasMoving)
+                    {
+                        var oneShot = moving ? e.customStartClip : e.customStopClip;
+                        if (oneShot != null)
+                        {
+                            UnityEngine.AudioSource.PlayClipAtPoint(oneShot, pos, moving ? e.soundStartVolume : e.soundStopVolume);
+                            if (moving) e.loopHoldUntil[id] = now + oneShot.length;   // hold the loop off so it doesn't mask the spool-up
+                        }
+                    }
+
+                    // (A) custom WAV: a Unity AudioSource looped WHILE MOVING, paused when stopped (and held off during any spool-up)
+                    if (e.customClip != null)
+                    {
+                        if (!e.customSources.TryGetValue(id, out var src) || src == null)
+                        {
+                            src = comp.gameObject.AddComponent<UnityEngine.AudioSource>();
+                            src.clip = e.customClip; src.loop = true; src.playOnAwake = false; src.spatialBlend = 1f;
+                            src.minDistance = 6f; src.maxDistance = 220f; src.rolloffMode = UnityEngine.AudioRolloffMode.Linear;
+                            e.customSources[id] = src;
+                        }
+                        src.volume = e.soundVolume;   // live-configurable travel-loop volume
+                        bool held = e.loopHoldUntil.TryGetValue(id, out var until) && now < until;
+                        if (moving && !held && !src.isPlaying) src.Play();
+                        else if (!moving && src.isPlaying) src.Pause();
+                    }
+
+                    // (B) Wwise engine event: post Start/Stop on a movement TRANSITION
+                    var emitter = GetMember(sp, "AudioEmitter");
+                    if (e.engineSound && emitter != null && moving != wasMoving)
+                    {
+                        string evName = moving ? e.engineStartEvent : e.engineStopEvent;
+                        if (!string.IsNullOrEmpty(evName)) PostEventByName(emitter, evName);   // BY NAME — first-unit-safe
+                        else
+                        {
+                            if (_postEvent == null)
+                                _postEvent = emitter.GetType().GetMethods().FirstOrDefault(m => m.Name == "PostEvent"
+                                    && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType.Name == "AudioEventHandle");
+                            var handle = moving ? StashedLoudHandle : StashedStopHandle;
+                            if (_postEvent != null && handle != null) try { _postEvent.Invoke(emitter, new[] { handle }); } catch { }
+                        }
+                    }
                     e.engineMoving[id] = moving;
-                    string evName = moving ? e.engineStartEvent : e.engineStopEvent;
-                    if (!string.IsNullOrEmpty(evName)) { PostEventByName(emitter, evName); continue; }   // BY NAME — first-unit-safe, no live capture
-                    // fallback: the auto-captured handle (needs a same-family vehicle to have moved this session)
-                    if (_postEvent == null)
-                        _postEvent = emitter.GetType().GetMethods().FirstOrDefault(m => m.Name == "PostEvent"
-                            && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType.Name == "AudioEventHandle");
-                    var handle = moving ? StashedLoudHandle : StashedStopHandle;
-                    if (_postEvent != null && handle != null)
-                        try { _postEvent.Invoke(emitter, new[] { handle }); } catch { }
                 }
             }
             catch (Exception ex) { Plugin.Log.LogError("[Audio] ProcessEngineAudio: " + ex); }
+        }
+
+        // On-demand test: play a loaded custom WAV as a 2D (non-positional) full-volume sound, and report the Unity
+        // AudioListener state. Isolates "can Unity play ANY sound in this Wwise game?" from the 3D/movement path. If this
+        // is silent while AudioListener.volume reads 0, the game has muted Unity's audio bus (Wwise-only) and we can't use
+        // AudioSource for custom files without forcing that back.
+        static UnityEngine.AudioSource _testSrc;
+        public static void PlaySoundTest()
+        {
+            try
+            {
+                var clip = entries?.FirstOrDefault(e => e.customClip != null)?.customClip;
+                if (clip == null)
+                {
+                    var p = Path.Combine(Paths.ConfigPath, "enc_sounds", "drone.wav");
+                    if (File.Exists(p)) clip = LoadWav(p, "test");
+                }
+                if (clip == null) { Plugin.Log.LogError("[Sound] test: no WAV loaded and no enc_sounds/drone.wav to fall back on"); return; }
+                EnsureAudioListener();
+                float ov = UnityEngine.AudioListener.volume; bool op = UnityEngine.AudioListener.pause;
+                UnityEngine.AudioListener.volume = 1f; UnityEngine.AudioListener.pause = false;   // force, in case the game muted Unity's bus
+                bool haveListener = UnityEngine.Object.FindObjectOfType<UnityEngine.AudioListener>() != null;
+                if (_testSrc == null)
+                {
+                    var go = new UnityEngine.GameObject("ENC_SoundTest");
+                    UnityEngine.Object.DontDestroyOnLoad(go);
+                    _testSrc = go.AddComponent<UnityEngine.AudioSource>();
+                    _testSrc.spatialBlend = 0f; _testSrc.volume = 1f; _testSrc.loop = false;
+                }
+                _testSrc.clip = clip; _testSrc.Play();
+                Plugin.Log.LogInfo($"[Sound] test: playing '{clip.name}' 2D @full volume. AudioListener: present={haveListener}, volume was {ov} (forced 1), pause was {op} (forced false).");
+            }
+            catch (Exception e) { Plugin.Log.LogError("[Sound] PlaySoundTest: " + e); }
+        }
+
+        // A Unity AudioListener is required for our AudioSources to be audible; a Wwise-driven game may ship without one.
+        static void EnsureAudioListener()
+        {
+            if (_listenerChecked) return; _listenerChecked = true;
+            try
+            {
+                if (UnityEngine.Object.FindObjectOfType<UnityEngine.AudioListener>() != null) return;
+                var cam = UnityEngine.Camera.main;
+                var go = cam != null ? cam.gameObject : new UnityEngine.GameObject("ENC_AudioListener");
+                go.AddComponent<UnityEngine.AudioListener>();
+                Plugin.Log.LogInfo("[Sound] no Unity AudioListener found — added one to '" + go.name + "'");
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[Sound] EnsureAudioListener: " + e.Message); }
+        }
+
+        // Load a custom WAV from enc_sounds/<file> (null if unset/missing).
+        static UnityEngine.AudioClip LoadCustom(string file, string tag)
+        {
+            if (string.IsNullOrEmpty(file)) return null;
+            var p = Path.Combine(Paths.ConfigPath, "enc_sounds", file);
+            if (!File.Exists(p)) { Plugin.Log.LogWarning($"[Sound] file not found: {p}"); return null; }
+            return LoadWav(p, tag);
+        }
+
+        // Load a PCM/float WAV file into an AudioClip (no Wwise, no coroutine). Handles 8/16/24/32-bit PCM + 32-bit float.
+        static UnityEngine.AudioClip LoadWav(string path, string tag)
+        {
+            try
+            {
+                var b = File.ReadAllBytes(path);
+                if (b.Length < 44 || b[0] != 'R' || b[1] != 'I' || b[2] != 'F' || b[3] != 'F') { Plugin.Log.LogWarning("[Sound] not a WAV (need PCM WAV, not mp3/ogg): " + path); return null; }
+                int channels = 1, rate = 44100, bits = 16, fmt = 1, dataOff = -1, dataLen = 0, p = 12;
+                while (p + 8 <= b.Length)
+                {
+                    string cid = System.Text.Encoding.ASCII.GetString(b, p, 4);
+                    int csz = BitConverter.ToInt32(b, p + 4);
+                    if (cid == "fmt ") { fmt = BitConverter.ToInt16(b, p + 8); channels = BitConverter.ToInt16(b, p + 10); rate = BitConverter.ToInt32(b, p + 12); bits = BitConverter.ToInt16(b, p + 22); }
+                    else if (cid == "data") { dataOff = p + 8; dataLen = Math.Min(csz, b.Length - (p + 8)); break; }
+                    p += 8 + csz + (csz & 1);
+                }
+                if (dataOff < 0 || channels < 1) { Plugin.Log.LogWarning("[Sound] no data/fmt chunk: " + path); return null; }
+                int bps = bits / 8, n = dataLen / bps;
+                var f = new float[n];
+                for (int i = 0; i < n; i++)
+                {
+                    int o = dataOff + i * bps;
+                    if (fmt == 3 && bits == 32) f[i] = BitConverter.ToSingle(b, o);
+                    else if (bits == 16) f[i] = BitConverter.ToInt16(b, o) / 32768f;
+                    else if (bits == 32) f[i] = BitConverter.ToInt32(b, o) / 2147483648f;
+                    else if (bits == 24) { int v = b[o] | (b[o + 1] << 8) | ((sbyte)b[o + 2] << 16); f[i] = v / 8388608f; }
+                    else if (bits == 8) f[i] = (b[o] - 128) / 128f;
+                }
+                var clip = UnityEngine.AudioClip.Create(tag, n / channels, channels, rate, false);
+                clip.SetData(f, 0);
+                Plugin.Log.LogInfo($"[Sound] loaded WAV '{tag}' ({channels}ch {rate}Hz {bits}bit, {(n / (float)channels / rate):0.0}s)");
+                return clip;
+            }
+            catch (Exception e) { Plugin.Log.LogError("[Sound] LoadWav '" + path + "': " + e); return null; }
         }
 
         // Post a Wwise event BY NAME onto a unit emitter (AkSoundEngine.PostEvent(name, gameObjectID)). Needs no captured
@@ -1729,6 +1914,10 @@ namespace ENCAccessProof
         }
         static void Postfix(object __0)
         {
+            // Hot path: this runs on EVERY sound the game posts. Once we're not tracing and the fallback handles are all
+            // captured, there is nothing to do — bail before any string work.
+            if (!UniversalInject.AudioTraceOn && UniversalInject.StashedEngineHandle != null
+                && UniversalInject.StashedLoudHandle != null && UniversalInject.StashedStopHandle != null) return;
             if (!(__0 is UnityEngine.Object eo) || eo == null) return;
             string en = eo.name;
             // Auto-capture (free) the two engine sounds we replay: the idle loop, and the per-ship move-START one-shot

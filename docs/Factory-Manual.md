@@ -460,6 +460,29 @@ position, idle/free-event state); **Audio Trace** toggles a live log of every so
 were discovered — it patches the service sink `AudioManager.PostEvent`); **Play Audio (test)** posts the captured engine
 handle onto the filtered units to confirm audibility.
 
-**v1 limits (honest):** Start/Stop accents only, no sustained loop between; and the auto-capture fallback uses the
-last-seen vehicle Start — so a **named** event is preferred for correctness, and a shipped registry with names Just Works
-from the first unit, every launch.
+**Limits (honest):** the Wwise-event path fires Start/Stop *accents* only (no sustained loop between) — for a continuous
+engine/hover loop, use the **custom WAV** path (§14). The auto-capture fallback uses the last-seen vehicle Start, so a
+**named** event is preferred; a shipped registry with names Just Works from the first unit, every launch.
+
+## 14. Custom sound files & per-clip volume — the Unit Sound window
+
+When the game has **no** suitable sound (drones, zeppelins) or you want a bespoke engine, drop in your own audio. **Tools ▸
+ENC ▸ Unit Sound** is a dedicated dialog: pick a pawn, then assign up to three WAVs, each with its own volume —
+
+- **Start** — a one-shot **spool-up** played on move-begin.
+- **Travel** — **looped** while the unit moves (held off until the Start one-shot finishes, so it isn't masked).
+- **Stop** — a one-shot **spool-down** played on move-end.
+
+These play through Unity's own `AudioSource` (not Wwise), so **any** WAV works — no soundbank needed. Requirements: **16-bit
+PCM WAV** (convert mp3/ogg first); **mono** for true 3-D positioning. Files are copied into `BepInEx\config\enc_sounds\` and
+referenced by the registry (`soundStartFile`/`soundFile`/`soundStopFile` + `soundStartVolume`/`soundVolume`/`soundStopVolume`).
+It writes onto the unit's *existing* registry entry, so a unit still has one entry. (A `Wwise engine event` option in the
+same window covers the §13 game-sound path.)
+
+**Volume is perceptual in the window** — the slider tracks *perceived loudness* (√ curve) and the `×N` label shows the real
+linear amplitude stored (hearing is logarithmic, so e.g. slider 0.4 ≈ amplitude 0.16). **Seamless loops:** if a raw Travel
+clip clicks at its wrap, crossfade a copy first (blend ~0.1–0.3 s of the tail into the head).
+
+**Performance note:** the runtime audio driver polls only *our* units' sub-pawns and refreshes its scene lookup on a ~2 s
+cache — never a per-frame `FindObjectsOfType` (an early version did, and it visibly cut FPS). If you extend it, keep any
+full scene scan off the hot path.

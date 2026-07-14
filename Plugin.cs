@@ -116,6 +116,7 @@ namespace ENCAccessProof
                 if (GUILayout.Button(UniversalInject.AudioTraceOn ? "Audio Trace: ON" : "Audio Trace: OFF"))
                 { UniversalInject.AudioTraceOn = !UniversalInject.AudioTraceOn; UniversalInject.AudioTraceFilter = atlasFilter; }
                 if (GUILayout.Button("Dump Sound Catalog")) UniversalInject.DumpSoundCatalog();
+                if (GUILayout.Button("Play Sound Test (WAV)")) UniversalInject.PlaySoundTest();
             }
             GUILayout.Space(4);
             GUILayout.Label("GPU mesh buffer (live) — Shift+F8 also logs it:");
