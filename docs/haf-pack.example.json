@@ -1,0 +1,16 @@
+{
+    "schemaVersion": 1,
+    "modId": "example",
+    "dependsOn": [],
+    "loadAfter": ["enc"],
+    "overrides": [],
+    "models": [
+        {
+            "resourceName": "ExampleRetexture",
+            "pawnDescription": "REPLACE_ME_with_a_real_pawnDescription",
+            "tintR": 0,
+            "tintG": -40,
+            "tintB": -40
+        }
+    ]
+}

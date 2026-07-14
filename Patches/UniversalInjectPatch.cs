@@ -94,16 +94,134 @@ namespace ENCAccessProof
         static int loadAttempts;   // failed-load counter: latch `loaded` only after a success or a few tries, so a TRANSIENT read/parse error (AV scan, sharing violation at startup) retries instead of disabling injection for the whole session
         static UnityEngine.Texture2D _flatN, _white, _black, _grey;   // neutral overlay maps (kill the host's detail/camo)
 
+        // A discovered mod PACK: one registry file's wrapper metadata + its models. HAF (Humankind Asset Framework)
+        // multi-mod support merges many packs into `entries`, so ENC is just one mod among many — any modder ships their
+        // own pack (config + assets) to join. The wrapper keys (modId/schemaVersion/dependsOn/loadAfter/overrides) sit
+        // BESIDE the existing "models" array, so a legacy bare { "models": [...] } file still parses — with default metadata.
+        class Pack
+        {
+            public string modId = "", file = "";
+            public int schemaVersion;
+            public List<string> dependsOn = new List<string>();
+            public List<string> loadAfter = new List<string>();
+            public bool hasOverrides;                 // RESERVED: parsed + echoed in the load report; ordering/override RESOLUTION is a later increment (a second real author will shape it)
+            public List<ModelEntry> models = new List<ModelEntry>();
+        }
+
         static void LoadRegistry()
         {
             if (loaded) return;
             entries = new List<ModelEntry>();
             try
             {
-                var path = Path.Combine(Paths.ConfigPath, "enc_models.json");
-                if (!File.Exists(path)) { Plugin.Log.LogInfo("[Uni] no registry at " + path); loaded = true; return; }
-                var text = File.ReadAllText(path);
+                // DISCOVERY: the ENC base registry (enc_models.json) + every *.json a third-party mod drops in haf_packs/.
+                // Each file is a PACK; a joining modder ships their own pack instead of editing ours. The base loads FIRST,
+                // so ENC's own models are protected from an accidental clash (first-loaded wins — see the merge below).
+                var basePath = Path.Combine(Paths.ConfigPath, "enc_models.json");
+                var files = new List<string>();
+                if (File.Exists(basePath)) files.Add(basePath);
+                var packDir = Path.Combine(Paths.ConfigPath, "haf_packs");
+                if (Directory.Exists(packDir))
+                    files.AddRange(Directory.GetFiles(packDir, "*.json").OrderBy(f => f, StringComparer.OrdinalIgnoreCase));
+                if (files.Count == 0) { Plugin.Log.LogInfo("[Uni] no registry at " + basePath + " and no haf_packs/*.json"); loaded = true; return; }
 
+                var packs = new List<Pack>();
+                foreach (var file in files)
+                {
+                    // One unreadable pack must not sink the others — skip it loudly and keep going.
+                    try { packs.Add(ParsePack(file, file == basePath)); }
+                    catch (Exception ex) { Plugin.Log.LogWarning($"[Uni] pack '{Path.GetFileName(file)}' failed to parse ({ex.Message}); skipped"); }
+                }
+                if (packs.Count == 0) throw new Exception("no packs could be read");   // transient (lock/AV) — retry, don't latch
+
+                // MERGE with explicit conflict detection. A model's identity is its pawnDescription (the physical pawn slot
+                // — two skins can't ride one pawn). v1 policy: FIRST-loaded wins on an undeclared clash, and it's logged LOUD
+                // (no silent overrides — the HAF conflict philosophy). dependsOn/loadAfter/overrides are parsed and echoed in
+                // the report but NOT yet enforced; that resolution lands when a second real author needs it.
+                var owner = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var conflicts = new List<string>();
+                foreach (var pk in packs)
+                    foreach (var e in pk.models)
+                    {
+                        if (!string.IsNullOrEmpty(e.pawnDescription) && owner.TryGetValue(e.pawnDescription, out var held))
+                        {
+                            conflicts.Add($"pawn={e.pawnDescription} kept={held} dropped={pk.modId}({e.resourceName})");
+                            Plugin.Log.LogWarning($"[Uni] CONFLICT: pack '{pk.modId}' targets pawn '{e.pawnDescription}' already claimed by '{held}' — keeping '{held}' (first-loaded wins).");
+                            continue;
+                        }
+                        if (!string.IsNullOrEmpty(e.pawnDescription)) owner[e.pawnDescription] = pk.modId;
+                        entries.Add(e);
+                    }
+
+                WriteLoadReport(packs, entries.Count, conflicts);
+                Plugin.Log.LogInfo($"[Uni] loaded {packs.Count} pack(s), {entries.Count} model(s), {conflicts.Count} conflict(s) [" + string.Join(", ", packs.Select(p => p.modId + "×" + p.models.Count)) + "]");
+                loaded = true;
+            }
+            catch (Exception e)
+            {
+                // Do NOT latch `loaded` on a failure — a transient hiccup (AV scan, sharing violation while the game is
+                // still flushing a file) would otherwise disable ALL injection for the session. Retry on the next few
+                // pawn loads; give up (latch) only after 3 tries so a genuinely broken file doesn't re-parse forever.
+                entries = new List<ModelEntry>();
+                if (++loadAttempts >= 3) { loaded = true; Plugin.Log.LogError("[Uni] registry load failed 3x, giving up for this session: " + e); }
+                else Plugin.Log.LogWarning($"[Uni] registry load failed (attempt {loadAttempts}/3), will retry on next pawn: " + e.Message);
+            }
+        }
+
+        // Parse one pack file into its wrapper metadata + models. The wrapper is OPTIONAL: a legacy bare { "models": [...] }
+        // yields default metadata (modId = "enc" for the base file, else the filename). Throws only if the file can't be read.
+        static Pack ParsePack(string file, bool isBase)
+        {
+            var text = File.ReadAllText(file);
+            var pk = new Pack { file = file, modId = isBase ? "enc" : Path.GetFileNameWithoutExtension(file) };
+            try
+            {
+                var root = JObject.Parse(text);
+                if (root["modId"] != null) pk.modId = (string)root["modId"];
+                if (root["schemaVersion"] != null) pk.schemaVersion = (int)root["schemaVersion"];
+                pk.dependsOn = StrList(root["dependsOn"]);
+                pk.loadAfter = StrList(root["loadAfter"]);
+                pk.hasOverrides = (root["overrides"] as JArray)?.Count > 0;
+            }
+            catch { }   // wrapper is best-effort; the models parse below has its own primary+fallback and is what matters
+            pk.models = ParseModels(text);
+            return pk;
+        }
+
+        static List<string> StrList(JToken t) =>
+            (t as JArray)?.Select(x => (string)x).Where(s => !string.IsNullOrEmpty(s)).ToList() ?? new List<string>();
+
+        // Write a human-readable load report next to the registry — packs discovered, model counts, reserved metadata, and
+        // any conflicts. This is what makes a multi-pack setup DEBUGGABLE (the early slice of HAF runtime diagnostics) and is
+        // the first thing a joining modder checks to confirm their pack was seen.
+        static void WriteLoadReport(List<Pack> packs, int total, List<string> conflicts)
+        {
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine("HAF load report  (regenerated every load)");
+                sb.AppendLine($"packs={packs.Count}  models={total}  conflicts={conflicts.Count}");
+                sb.AppendLine();
+                foreach (var p in packs)
+                {
+                    sb.AppendLine($"[{p.modId}]  schemaVersion={p.schemaVersion}  models={p.models.Count}  file={Path.GetFileName(p.file)}");
+                    if (p.dependsOn.Count > 0) sb.AppendLine("    dependsOn: " + string.Join(", ", p.dependsOn) + "   (reserved — not yet enforced)");
+                    if (p.loadAfter.Count > 0) sb.AppendLine("    loadAfter: " + string.Join(", ", p.loadAfter) + "   (reserved — not yet enforced)");
+                    if (p.hasOverrides) sb.AppendLine("    overrides: declared   (reserved — not yet enforced)");
+                }
+                if (conflicts.Count > 0) { sb.AppendLine(); sb.AppendLine("CONFLICTS (first-loaded kept):"); foreach (var c in conflicts) sb.AppendLine("  " + c); }
+                File.WriteAllText(Path.Combine(Paths.ConfigPath, "haf_load_report.txt"), sb.ToString());
+            }
+            catch { }
+        }
+
+        // Parse the "models" array from one registry file's text. PRIMARY: Newtonsoft (object-per-model, robust to a
+        // missing/reordered field). FALLBACK: field-by-field regex (index-aligned). Semantics identical to the original
+        // single-file loader; lifted into a helper so every pack shares it. The local `entries` intentionally shadows the
+        // field to keep the large per-field Add blocks below verbatim.
+        static List<ModelEntry> ParseModels(string text)
+        {
+            var entries = new List<ModelEntry>();
                 // PRIMARY: Newtonsoft (the game's own copy) parses each model as an OBJECT, so fields stay with their
                 // model — robust to a missing/reordered field on any single model, unlike the index-aligned regex below.
                 // UnityEngine.JsonUtility silently returns empty in the game's Mono runtime (works only in the editor),
@@ -149,9 +267,8 @@ namespace ENCAccessProof
                                 recoilSpeed = m["recoilSpeed"] != null ? (float)m["recoilSpeed"] : 1f,
                             });
                         }
-                        Plugin.Log.LogInfo($"[Uni] parsed {entries.Count} entr(ies) via Newtonsoft [" + string.Join(", ", entries.Select(e => e.resourceName + "->" + e.pawnDescription)) + "]");
-                        loaded = true;   // latch ONLY on a successful parse (not at the top) so a transient read/parse error retries
-                        return;
+                        Plugin.Log.LogInfo($"[Uni] parsed {entries.Count} model(s) via Newtonsoft [" + string.Join(", ", entries.Select(e => e.resourceName + "->" + e.pawnDescription)) + "]");
+                        return entries;
                     }
                 }
                 catch (Exception ex) { Plugin.Log.LogWarning("[Uni] Newtonsoft parse failed (" + ex.Message + "); using regex fallback"); entries.Clear(); }
@@ -227,18 +344,8 @@ namespace ENCAccessProof
                         textureFile = i < txf.Count ? txf[i].Groups[1].Value : "",
                     });
                 }
-                loaded = true;   // regex fallback also succeeded — latch so we don't re-parse every pawn
-                Plugin.Log.LogInfo($"[Uni] read {text.Length} chars; parsed {entries.Count} entr(ies) [" + string.Join(", ", entries.Select(e => e.resourceName + "->" + e.pawnDescription)) + "]");
-            }
-            catch (Exception e)
-            {
-                // Do NOT latch `loaded` on a failure — a transient hiccup (AV scan, sharing violation while the game is
-                // still flushing the file) would otherwise disable ALL injection for the session. Retry on the next few
-                // pawn loads; give up (latch) only after 3 tries so a genuinely broken file doesn't re-parse forever.
-                entries = new List<ModelEntry>();
-                if (++loadAttempts >= 3) { loaded = true; Plugin.Log.LogError("[Uni] registry load failed 3x, giving up for this session: " + e); }
-                else Plugin.Log.LogWarning($"[Uni] registry load failed (attempt {loadAttempts}/3), will retry on next pawn: " + e.Message);
-            }
+                Plugin.Log.LogInfo($"[Uni] read {text.Length} chars; parsed {entries.Count} model(s) via regex [" + string.Join(", ", entries.Select(e => e.resourceName + "->" + e.pawnDescription)) + "]");
+                return entries;
         }
 
         // FIRING-ON-ATTACK: match a firing unit's UnitDefinition text (e.g. "LandUnit_Era6_Common_TowedGunHowitzers …")

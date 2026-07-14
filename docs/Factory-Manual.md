@@ -5,6 +5,10 @@ How to put your own 3D model onto a Humankind unit, step by step. This is the pr
 The Factory is a Unity editor window (**Tools ▸ Universal Model Factory**). You give it a model file and a target unit, set
 a few options, press **Bake**, then rebuild the mod. The in-game plugin reads what you baked and renders it.
 
+> **Shipping a standalone pack?** The runtime is a multi-mod host — you can distribute your models as their own **pack**
+> (a config file + assets) that merges on top of ENC without editing it. See [**Multi-Mod.md**](Multi-Mod.md) for the pack
+> format and the `haf_packs/` drop folder.
+
 ---
 
 ## 1. Prerequisites

@@ -53,6 +53,11 @@ Humankind.
   volume, driven by a dedicated **Unit Sound** editor window (with in-editor ▶ preview). Runtime-only, no bake.
 - **Retexture / recolour without a bake.** A separate **Unit Retexture** window reskins an existing unit at runtime —
   a hot-loaded PNG or a live Desaturate + RGB adjust on its own atlas — isolated per unit, free on the vertex budget.
+- **Multi-mod — merge packs from many authors.** The runtime is a **Humankind Asset Framework** host, not just ENC's
+  loader: it merges ENC's base registry with any number of third-party **packs** dropped in `BepInEx/config/haf_packs/`,
+  so a modder augments their own units with a custom model / texture / sound by shipping just a config file + assets — **no
+  ENC edits, no code**. Same-pawn conflicts are detected (first-loaded wins, logged loud — no silent overrides), and every
+  load writes a `haf_load_report.txt` listing what was discovered. See [**Multi-Mod.md**](docs/Multi-Mod.md).
 
 Full detail — the shared-buffer ceiling, texture flip, per-model isolation, limitations — in
 [**Capabilities.md**](docs/Capabilities.md).
@@ -114,14 +119,19 @@ and must be copied from your own install), and any 3D model you bake (each stays
 [ENCReload](https://github.com/sswelm/ENCReload) repo and is all-rights-reserved there.
 
 ## Config
-The plugin reads one JSON file — `<Humankind>\BepInEx\config\enc_models.json` (one entry per model: pawn description,
-skeleton + atlas GUIDs, transform, shading flags; animated entries add `clip` + `animated`/`animClip`/`animateBones`). The
-Factory writes it and auto-detects the path; the field-by-field breakdown is in the [Factory Manual](docs/Factory-Manual.md).
+The plugin reads `<Humankind>\BepInEx\config\enc_models.json` — ENC's base **pack** (one entry per model: pawn description,
+skeleton + atlas GUIDs, transform, shading flags; animated entries add `clip` + `animated`/`animClip`/`animateBones`), now
+wrapped with pack metadata (`schemaVersion`/`modId`). It then merges any additional packs in `BepInEx/config/haf_packs/*.json`
+and writes a `haf_load_report.txt` of what loaded. The Factory writes ENC's registry and auto-detects the path; the
+field-by-field breakdown is in the [Factory Manual](docs/Factory-Manual.md) and the pack format in [Multi-Mod.md](docs/Multi-Mod.md).
 The plugin's own cfg (`…\community.humankind.encaccessproof.cfg`) — press **F8** in-game for a scan/feedback window.
 
 ## Docs
 - **Use it:** [**Factory-Manual.md**](docs/Factory-Manual.md) — step-by-step guide (every field, the static + animated
   workflows, a troubleshooting table). Start here if you just want to add a model.
+- **Ship your own pack:** [**Multi-Mod.md**](docs/Multi-Mod.md) — the HAF pack format, the `haf_packs/` drop folder,
+  how packs merge + conflict rules, and the load report. Read this to add assets without touching ENC. Template:
+  [haf-pack.example.json](docs/haf-pack.example.json).
 - **Everything it does:** [Capabilities.md](docs/Capabilities.md) — the full capability list + known limitations.
 - **Build it:** [Building.md](docs/Building.md) — plugin build steps + the Blender dependency.
 - **Review / roadmap:** [Framework-Review.md](docs/Framework-Review.md) — verified code-review findings
@@ -136,7 +146,8 @@ Goal: ship the Factory as a distributable Unity package. **Done:** zero-config p
 converter (no .NET dependency), one consolidated injection path, full multi-material GLB support, **one-click animated
 import** (own rig + clip, Pick-driven fields), bake-time skin controls (albedo brightness/saturation, keep-black),
 configurable atlas size + bundle slimming (source models kept out of the shipped mod, DXT1 atlases), a static-model
-**donor-animation freeze**, **fire-on-attack** (a model's clip triggered once by the unit's combat action), and an
-**MIT license** on all code. **Remaining:** neutral naming (drop "ENC" → `HumankindModelFactory`), package scaffolding
+**donor-animation freeze**, **fire-on-attack** (a model's clip triggered once by the unit's combat action), a
+**multi-mod pack loader** (the runtime merges packs from many authors out of `haf_packs/`, so ENC is just one mod of many),
+and an **MIT license** on all code. **Remaining:** neutral naming (drop "ENC" → `HumankindModelFactory`), package scaffolding
 (`package.json` / asmdef), single-DLL plugin packaging, and an install guide + quickstart. Editor scripts are
 mirrored in `baker/` (the ENCReload mod repo tracks only its `Databases`).
