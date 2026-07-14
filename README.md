@@ -1,13 +1,26 @@
-# Humankind Asset Framework (HAF) — universal custom-asset injection for Humankind
+# Humankind Asset Framework (HAF)
 
-> *Formerly **ENC Access Proof**.* The runtime is a **Humankind Asset Framework** host: it loads asset **packs** from many
-> mods (ENC is the reference pack), each adding a custom 3D model, texture, and sound to its units. See [Multi-Mod.md](docs/Multi-Mod.md).
+**Give any Humankind unit your own 3D model, texture, and sound — no executable patching, no per-model code.**
+*(Formerly **ENC Access Proof**.)*
 
-Inject **any** custom 3D model onto **any** live Humankind unit — correct geometry, correct texture, **its own
-animation**, no executable patching, and **zero per-model code**. Bake a model in the Unity editor tool; a data-driven
-BepInEx plugin renders it in-game, driven entirely by a JSON registry. What started as a single procedural zeppelin is
-now the **Universal Model Factory** — and, as of the ReconDrone, the first **runtime-injected *animated* model** in
-Humankind.
+HAF augments [Humankind](https://www.games2gether.com/amplitude-studios/humankind) with custom unit assets. You **bake**
+an ordinary model (`.glb` / `.fbx` / `.obj` / `.blend`) in a Unity editor tool — the **Universal Model Factory** — and a
+data-driven BepInEx plugin **injects** it onto a live unit in-game: correct geometry, correct texture, **its own
+animation**, and movement audio, all driven by a JSON registry. Adding a model is just baking it — there is no code to
+write per model.
+
+**It's multi-mod by design.** The runtime merges asset **packs** from many mods at once, so any modder ships their own
+config + assets and joins *without editing anyone else's files*. **ENC** is the reference pack (a set of modern-era
+units); a stranger's pack loads and merges right alongside it, with conflicts detected and reported. The aim is to make a
+custom Humankind unit something **anyone willing to take some effort** can build — and, with luck, spark a little
+renaissance in Humankind modding. See [**Multi-Mod.md**](docs/Multi-Mod.md).
+
+Custom units ride the game's own GPU-instanced renderer, so **instances are free** — the cost is the number of distinct
+model *types* loaded, not units on screen.
+
+> **Two halves, one contract.** An **editor Factory** (bake) and a **runtime plugin** (inject) that talk only through a
+> small JSON pack registry — so the tooling and the injector stay fully decoupled, and the registry is the public API
+> other mods build against.
 
 ## What works (proven in-game)
 - **Animated custom models — a first, one-click.** A quadcopter drone injected onto a land unit renders full-size,
