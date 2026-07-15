@@ -100,6 +100,24 @@ won't render a building; it just removes the vanilla one.
 
 ---
 
+## Why injection can't render it — the context-gated wall (2026-07-15)
+
+The selector's table (`pairs`, 139 entries for Industry) is keyed by **`BuildingVisualAffinity` = culture /
+civilization** (`_Common_American`, `_Era6_USSR`, `_Era1_Babylon`, …), each → a material GUID — and those point at
+*further nested* selectors, not leaf meshes. So a district's building is chosen by **which civ you play**, era, and
+level, at render time.
+
+Forcing one of those culture material GUIDs onto a district via `SetChannel` made the buildings **vanish, not render**
+— the same failure as every injected GUID. The reason: the mesh only draws when the game's *own* selector selects it and
+writes its per-instance GPU data (`FxLevelBuildSelectorGPUData` = culture/era/level context). A material arriving via
+`SetChannel` has no such context, so it loads but draws nothing.
+
+**This blocks every runtime injection path** — foreign-material `SetChannel` and the mesh-swap alike (the leaf drawer is
+nested culture→era→level deep and picked live). The data-driven affinity idea keeps the game's pipeline (so it would
+render a *vanilla* mapped building), but rendering a **custom** mesh still needs a selector-pipeline-compatible material
+authored the way Amplitude authors building materials — deep DCC/SDK work we cannot replicate from a mod. **Verdict:
+district building replacement is an architectural wall, much deeper than units. Banked as a research spike.**
+
 ## The remaining path (NOT built — the next deep chunk)
 
 Reach the selector's async-loaded sub-drawers and rewrite their mesh:

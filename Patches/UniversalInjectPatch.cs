@@ -1918,6 +1918,52 @@ namespace ENCAccessProof
             catch (Exception ex) { Plugin.Log.LogError("[DistrictMat] dump: " + ex); }
         }
 
+        static readonly HashSet<string> distSubDumped = new HashSet<string>();
+        // Diagnostic: the district's channel-0 material is an FxEvolverMaterialLevelBuildSelector that picks among a table
+        // of PLAIN building-variant drawers (its `pairs` NameToGuidPair[] + `defaultMaterial`). Dump those sub-material
+        // GUIDs — those are the plain drawers that actually render a mesh, and the clean thing to map an affinity at.
+        internal static void DistrictDumpSubMaterials(object district)
+        {
+            try
+            {
+                EnsureDistrictConfig();
+                if (!distOn) return;
+                var name = GetMember(district, "ConstructibleDefinitionName")?.ToString() ?? "<null>";
+                if (name != distName) return;                       // only the targeted district, to avoid spam
+                if (!distSubDumped.Add(name)) return;
+                var plbc = AccessTools.Field(district.GetType(), "presentationLevelBuildComponent")?.GetValue(district);
+                if (plbc == null) return;
+                if (!(AccessTools.Field(plbc.GetType(), "channels")?.GetValue(plbc) is Array channels) || channels.Length == 0) return;
+                var box = channels.GetValue(0);
+                var sel = AccessTools.Field(box.GetType(), "evolverMaterial")?.GetValue(box);
+                if (sel == null) { Plugin.Log.LogInfo($"[DistrictSub] {name}: channel 0 material not loaded yet."); return; }
+                Plugin.Log.LogInfo($"[DistrictSub] {name}: channel-0 material type = {sel.GetType().Name}");
+                // defaultMaterial / deferredName / deferredTable give context
+                foreach (var fn in new[] { "defaultMaterial", "invalidNameMaterial", "deferredTable" })
+                {
+                    var g = AccessTools.Field(sel.GetType(), fn)?.GetValue(sel);
+                    if (g != null) { var gt = g.GetType(); Plugin.Log.LogInfo($"[DistrictSub]   {fn} = {gt.GetField("a", BF)?.GetValue(g)},{gt.GetField("b", BF)?.GetValue(g)},{gt.GetField("c", BF)?.GetValue(g)},{gt.GetField("d", BF)?.GetValue(g)}"); }
+                }
+                var dn = AccessTools.Field(sel.GetType(), "deferredName")?.GetValue(sel) as string;
+                if (!string.IsNullOrEmpty(dn)) Plugin.Log.LogInfo($"[DistrictSub]   deferredName = '{dn}'");
+                if (AccessTools.Field(sel.GetType(), "pairs")?.GetValue(sel) is Array pairs)
+                {
+                    Plugin.Log.LogInfo($"[DistrictSub]   pairs ({pairs.Length} building variants):");
+                    foreach (var pr in pairs)
+                    {
+                        if (pr == null) continue;
+                        var pt = pr.GetType();
+                        var pn = pt.GetField("Name", BF)?.GetValue(pr) ?? pt.GetProperty("Name", BF)?.GetValue(pr);
+                        var pg = pt.GetField("Guid", BF)?.GetValue(pr) ?? pt.GetField("Value", BF)?.GetValue(pr) ?? pt.GetField("guid", BF)?.GetValue(pr);
+                        if (pg != null) { var gt = pg.GetType(); Plugin.Log.LogInfo($"[DistrictSub]     '{pn}' -> {gt.GetField("a", BF)?.GetValue(pg)},{gt.GetField("b", BF)?.GetValue(pg)},{gt.GetField("c", BF)?.GetValue(pg)},{gt.GetField("d", BF)?.GetValue(pg)}"); }
+                        else Plugin.Log.LogInfo($"[DistrictSub]     '{pn}' -> (guid field not found on {pt.Name})");
+                    }
+                }
+                else Plugin.Log.LogInfo($"[DistrictSub]   no 'pairs' field (uses a deferred table?).");
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[DistrictSub] dump: " + ex); }
+        }
+
         static bool DistrictMatches(object district, out object plbc)
         {
             plbc = null;
@@ -2213,6 +2259,6 @@ namespace ENCAccessProof
         // Prefix runs before the request is built, so the affinity swap feeds FillRequest.
         static void Prefix(object __instance) { UniversalInject.DistrictDiag(__instance); UniversalInject.DistrictAffinitySwap(__instance); }
         // Postfix runs after SetChannel loaded the vanilla material, so our GUID override wins.
-        static void Postfix(object __instance) { UniversalInject.DistrictDumpMaterial(__instance); UniversalInject.DistrictMeshSwap(__instance); UniversalInject.DistrictGuidOverride(__instance); }
+        static void Postfix(object __instance) { UniversalInject.DistrictDumpMaterial(__instance); UniversalInject.DistrictDumpSubMaterials(__instance); UniversalInject.DistrictMeshSwap(__instance); UniversalInject.DistrictGuidOverride(__instance); }
     }
 }
