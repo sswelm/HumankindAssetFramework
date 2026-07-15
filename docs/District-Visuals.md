@@ -86,6 +86,27 @@ offset (static meshes bake position in).
 Note the **zero-bake affinity-swap proof does re-sculpt the tile** (the sculpting request also reads
 `visualAffinityName`), so it is not representative of the final look; the GUID override path leaves sculpting intact.
 
+## Baking a custom district model (the workflow)
+
+The runtime half is built (`Hk_DistrictRepoint`, `DistrictEvolverGuid` mode → the game's public
+`SetChannel(int, Guid, …)`). Producing the two assets it needs is a Factory step (`DistrictBaker.cs`, in the ENCReload
+editor project), split to match where the uncertainty lives — finding a donor material is a browse-the-SDK task, so it
+stays in the modder's hands in Unity:
+
+1. **Static-bake the model normally** (the usual Factory static bake) to get `<name>_ModelMesh.asset`, already
+   oriented/scaled. Keep it lean — district geometry may land in a nearly-full mesh layer (see Vertex-Budget.md).
+2. **`Tools ▸ ENC ▸ District ▸ 1. Bake District FxMesh`** with that mesh selected → writes `<name>_FxMesh.asset` and
+   logs its GUID. An `FxMesh` is just a `ScriptableObject` wrapping the `UnityEngine.Mesh`.
+3. **`Tools ▸ ENC ▸ District ▸ 2. Clone District Material`** with a vanilla `FxEvolverMaterialDrawer` asset *and* our
+   `_FxMesh` selected → clones the donor material (inheriting its shader/output-layer wiring) with its mesh repointed at
+   our FxMesh, and logs the **material GUID**. Cloning (vs authoring from scratch) avoids guessing the output-layer setup.
+4. Put that material GUID into the plugin config: `[District] DistrictEvolverGuid = a,b,c,d`, set `DistrictName` to the
+   target district, `DistrictRepoint = true`, and launch. The hook calls `SetChannel` so the district draws our mesh.
+
+Open in-Unity unknowns being resolved empirically: whether a vanilla `FxEvolverMaterialDrawer` asset is browseable to
+select as the donor, and whether an `Instantiate`+`CreateAsset` clone loads correctly in-game (the plugin logs
+`FxEvolverMaterial.TryLoad` success/failure via `[District]` lines).
+
 ## Smallest-first experiment (in progress)
 
 Prove the runtime half before touching the baker: a `SetChannel`/`UpdateLevelBuild` prefix matched on the
