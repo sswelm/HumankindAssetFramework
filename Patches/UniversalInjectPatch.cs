@@ -1997,6 +1997,101 @@ namespace ENCAccessProof
         // MODE 3 (best render odds): keep the district's OWN loaded material (which already renders correctly in this
         // context) and swap only its mesh GUID to our baked FxMesh. Avoids the "foreign material doesn't render here"
         // problem — our model draws through the exact material/shader/output-layer the vanilla building already uses.
+        static object distSwapMaterial;   // cached channel-0 material of the target district, re-swapped each frame
+        // Recursively rewrite the `mesh` GUID of every LEAF drawer reachable from a material: a plain drawer has a `mesh`
+        // Guid field (swap it); a SELECTOR/EMITTER holds its loaded sub-materials in `fxMaterialCacheEntries.Entries[].FxMaterial`
+        // (+ InvalidNameEntry) — recurse into those. Reuses the game's OWN loaded drawers, so they keep the selector's context.
+        static MethodInfo fxTryLoad;
+        static object TryLoadMaterial(object guid)
+        {
+            try
+            {
+                if (fxTryLoad == null)
+                {
+                    var fmType = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxEvolverMaterial");
+                    // prefer the SYNCHRONOUS overload TryLoad(Guid, bool synchrone) so we get the material now, not async-null.
+                    fxTryLoad = fmType?.GetMethods(BindingFlags.Static | BindingFlags.Public)
+                        .FirstOrDefault(m => m.Name == "TryLoad" && m.GetParameters().Length == 2
+                            && m.GetParameters()[0].ParameterType.Name == "Guid" && m.GetParameters()[1].ParameterType == typeof(bool));
+                }
+                return fxTryLoad?.Invoke(null, new object[] { guid, true });
+            }
+            catch { return null; }
+        }
+        static bool GuidIsNull(object g) { if (g == null) return true; var t = g.GetType(); return (int)(t.GetField("a", BF)?.GetValue(g) ?? 0) == 0 && (int)(t.GetField("b", BF)?.GetValue(g) ?? 0) == 0 && (int)(t.GetField("c", BF)?.GetValue(g) ?? 0) == 0 && (int)(t.GetField("d", BF)?.GetValue(g) ?? 0) == 0; }
+        static object PairGuid(object pair) { var pt = pair.GetType(); return pt.GetField("Guid", BF)?.GetValue(pair) ?? pt.GetField("Value", BF)?.GetValue(pair) ?? pt.GetField("guid", BF)?.GetValue(pair); }
+
+        // The leaf that holds geometry is FxEvolverMaterialLevelBuildElement with an `fxMesh` Guid field. Reached via:
+        //   Selector.pairs[culture] -> Emitter.levelBuildItems[].loadedEvolverMaterial -> Element(.fxMesh)  (Emitters nest).
+        static readonly List<object> distLeaves = new List<object>();   // collected leaf Elements to re-point each frame
+        static FieldInfo GF(Type t, string n) => t.GetField(n, BF);      // no AccessTools warning-on-miss (probing spams the log)
+        static void CollectLeaves(object mat, int depth, HashSet<object> visited)
+        {
+            if (mat == null || depth > 8 || !visited.Add(mat)) return;
+            var t = mat.GetType();
+            // a leaf: has an fxMesh (or mesh) Guid field
+            var lf = GF(t, "fxMesh") ?? GF(t, "mesh");
+            if (lf != null && lf.FieldType.Name == "Guid") { distLeaves.Add(mat); return; }
+            // emitter: levelBuildItems[].loadedEvolverMaterial
+            if (AccessTools.Field(t, "levelBuildItems")?.GetValue(mat) is Array items)
+                foreach (var it in items) if (it != null) CollectLeaves(AccessTools.Field(it.GetType(), "loadedEvolverMaterial")?.GetValue(it), depth + 1, visited);
+            // selector: loaded cache entries + the pairs variant table (load each distinct GUID)
+            var cache = AccessTools.Field(t, "fxMaterialCacheEntries")?.GetValue(mat);
+            if (cache != null && AccessTools.Field(cache.GetType(), "Entries")?.GetValue(cache) is Array entries)
+                foreach (var e in entries) if (e != null) CollectLeaves(AccessTools.Field(e.GetType(), "FxMaterial")?.GetValue(e), depth + 1, visited);
+            var seen = new HashSet<string>();
+            void tryGuid(object g)
+            {
+                if (GuidIsNull(g)) return; var gt = g.GetType();
+                if (!seen.Add($"{gt.GetField("a", BF)?.GetValue(g)},{gt.GetField("b", BF)?.GetValue(g)},{gt.GetField("c", BF)?.GetValue(g)},{gt.GetField("d", BF)?.GetValue(g)}")) return;
+                CollectLeaves(TryLoadMaterial(g), depth + 1, visited);
+            }
+            if (AccessTools.Field(t, "pairs")?.GetValue(mat) is Array pairs)
+                foreach (var pr in pairs) if (pr != null) tryGuid(PairGuid(pr));
+            foreach (var fn in new[] { "defaultMaterial", "invalidNameMaterial" })
+            { var g = AccessTools.Field(t, fn)?.GetValue(mat); if (g != null) tryGuid(g); }
+        }
+        static object distFxManager; static MethodInfo fxNextDoublon;
+        // Re-point every collected leaf's fxMesh at our FxMesh. On the first pass, also call the leaf's own Load() so it
+        // RE-RESOLVES meshIndex from our GUID (the render reads meshIndex, not fxMesh; uint.MaxValue is 'unresolved').
+        static int ApplyLeaves(object fxGuid, bool resolve)
+        {
+            int n = 0, resolved = 0;
+            foreach (var leaf in distLeaves)
+            {
+                var t = leaf.GetType();
+                var lf = GF(t, "fxMesh") ?? GF(t, "mesh");
+                if (lf == null) continue;
+                lf.SetValue(leaf, fxGuid);   // persists our GUID so any game re-Load also uses ours
+                n++;
+                if (resolve && distFxManager != null)
+                {
+                    try
+                    {
+                        var load = t.GetMethod("Load", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                        if (load != null && load.GetParameters().Length == 2)
+                        {
+                            if (fxNextDoublon == null)
+                                fxNextDoublon = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxEvolverMaterial")?.GetMethod("NextDoublonAvoidanceIndex", BindingFlags.Static | BindingFlags.Public);
+                            uint doublon = fxNextDoublon != null ? (uint)fxNextDoublon.Invoke(null, null) : 0u;
+                            load.Invoke(leaf, new object[] { distFxManager, doublon });
+                            resolved++;
+                            if (resolved <= 4)   // peek the resolved meshIndex: uint.MaxValue = GetMeshIndex FAILED to find our FxMesh
+                            {
+                                var mi = AccessTools.Field(t, "meshIndex")?.GetValue(leaf);
+                                var oli = AccessTools.Field(t, "outputLayerIndex")?.GetValue(leaf);
+                                Plugin.Log.LogInfo($"[District]   leaf '{GetMember(leaf, "Name")}' after Load: meshIndex={mi} outputLayerIndex={oli}");
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            if (resolve) Plugin.Log.LogInfo($"[District] '{distName}': re-pointed {n} leaves, re-resolved {resolved} via Load().");
+            return n;
+        }
+
+        // MODE 3 — cache the target district's channel material so the per-frame Tick can swap its leaf meshes as they load.
         internal static void DistrictMeshSwap(object district)
         {
             try
@@ -2007,18 +2102,157 @@ namespace ENCAccessProof
                 var lf = district.GetType().GetField("mainLevelBuildComponantLayer", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.FlattenHierarchy);
                 if (lf?.GetValue(null) is int li) layer = li;
                 if (!(AccessTools.Field(plbc.GetType(), "channels")?.GetValue(plbc) is Array channels) || layer >= channels.Length) return;
-                var box = channels.GetValue(layer);
-                // evolverMaterial is a reference type, so the copy from the boxed struct IS the live drawer — mutating it sticks.
-                var drawer = AccessTools.Field(box.GetType(), "evolverMaterial")?.GetValue(box);
-                if (drawer == null) { if (!distMeshLogged) { distMeshLogged = true; Plugin.Log.LogWarning($"[District] '{distName}': channel {layer} has no loaded material yet to mesh-swap."); } return; }
-                var mf = AccessTools.Field(drawer.GetType(), "mesh");
-                if (mf == null) { if (!distMeshLogged) { distMeshLogged = true; Plugin.Log.LogError($"[District] drawer '{drawer.GetType().Name}' has no 'mesh' field (not a drawer material?)."); } return; }
-                mf.SetValue(drawer, distFxMeshGuid);
-                // reset the cached mesh index so the drawer re-resolves our GUID on its next render (AsynchEnsureMeshLoaded).
-                AccessTools.Field(drawer.GetType(), "meshIndex")?.SetValue(drawer, (uint)0);
-                if (!distMeshLogged) { distMeshLogged = true; Plugin.Log.LogInfo($"[District] '{distName}' mesh-swap: drawer '{drawer.GetType().Name}' mesh -> our FxMesh (layer {layer})"); }
+                distSwapMaterial = AccessTools.Field(channels.GetValue(layer).GetType(), "evolverMaterial")?.GetValue(channels.GetValue(layer));
+                distFxManager = GetMember(plbc, "FxManager");   // needed to re-resolve each leaf's mesh via its Load()
             }
-            catch (Exception ex) { Plugin.Log.LogError("[District] mesh swap: " + ex); }
+            catch (Exception ex) { Plugin.Log.LogError("[District] mesh swap (cache): " + ex); }
+        }
+
+        // Per-frame (Plugin.Update): re-run the recursive leaf-swap on the cached material. Sub-materials load ASYNC after
+        // UpdateLevelBuild returns, and the selector re-picks as density changes — so re-applying every frame catches them.
+        static bool distFxMeshDumped;
+        static void DumpOurFxMesh()
+        {
+            try
+            {
+                var fxMeshType = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxMesh");
+                var adb = AccessTools.TypeByName("Amplitude.Framework.Asset.AssetDatabase");
+                if (fxMeshType == null || adb == null || distFxMeshGuid == null) return;
+                var load = adb.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                    .FirstOrDefault(m => (m.Name == "LoadAsset" || m.Name == "TryLoadAsset") && m.IsGenericMethodDefinition && m.GetParameters().Length >= 1);
+                var g = load?.MakeGenericMethod(fxMeshType);
+                if (g == null) return;
+                var fx = g.Invoke(null, g.GetParameters().Length == 1 ? new[] { distFxMeshGuid } : new[] { distFxMeshGuid, null });
+                if (fx == null) { Plugin.Log.LogError("[District] our FxMesh loaded NULL by GUID — not shipped in the bundle or wrong GUID."); return; }
+                var meshObj = fxMeshType.GetProperty("Mesh", BF)?.GetValue(fx) ?? AccessTools.Field(fxMeshType, "mesh")?.GetValue(fx);
+                var um = meshObj as UnityEngine.Mesh;
+                var ia = AccessTools.Field(fxMeshType, "importAngles")?.GetValue(fx);
+                Plugin.Log.LogInfo($"[District] our FxMesh '{(fx as UnityEngine.Object)?.name}': Mesh={(um == null ? "NULL — the mesh reference didn't ship" : um.vertexCount + " verts, bounds=" + um.bounds.size)} importAngles={ia}");
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[District] FxMesh dump: " + ex); }
+        }
+
+        // Full district diagnostic for the F8 window: our FxMesh, the collected leaves, their resolved meshIndex, and the
+        // DISTRICT mesh manager's per-layer buffer FILL (verts used / buffer size) — so we can SEE if our mesh doesn't fit.
+        internal static List<string> DumpDistrictState()
+        {
+            var lines = new List<string>();
+            try
+            {
+                lines.Add($"district='{distName}' fxMeshGuid={(distFxMeshGuid != null ? "set" : "none")} leaves={distLeaves.Count}");
+                // our FxMesh geometry
+                var fxMeshType = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxMesh");
+                var adb = AccessTools.TypeByName("Amplitude.Framework.Asset.AssetDatabase");
+                if (fxMeshType != null && adb != null && distFxMeshGuid != null)
+                {
+                    var load = adb.GetMethods(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(m => (m.Name == "LoadAsset" || m.Name == "TryLoadAsset") && m.IsGenericMethodDefinition && m.GetParameters().Length >= 1)?.MakeGenericMethod(fxMeshType);
+                    var fx = load?.Invoke(null, load.GetParameters().Length == 1 ? new[] { distFxMeshGuid } : new[] { distFxMeshGuid, null });
+                    var um = (fxMeshType.GetProperty("Mesh", BF)?.GetValue(fx) ?? GF(fxMeshType, "mesh")?.GetValue(fx)) as UnityEngine.Mesh;
+                    lines.Add($"our FxMesh: {(fx == null ? "NULL by GUID" : um == null ? "Mesh NULL" : um.vertexCount + " verts, bounds " + um.bounds.size)}");
+                }
+                if (distLeaves.Count > 0)
+                {
+                    var leaf = distLeaves[0];
+                    var mi = GF(leaf.GetType(), "meshIndex")?.GetValue(leaf);
+                    lines.Add($"leaf[0] meshIndex={mi}");
+                    // walk to the district mesh content manager and dump each layer's fill
+                    var desc = GetMember(leaf, "FxEvolverDescriptor");
+                    var mgr = desc != null ? GetMember(desc, "AssetContentManagerMesh") : null;
+                    if (mgr != null && GetMember(mgr, "Layers") is Array layers)
+                    {
+                        lines.Add($"mesh manager: {layers.Length} layer(s)");
+                        for (int i = 0; i < layers.Length; i++)
+                        {
+                            var L = layers.GetValue(i); if (L == null) continue;
+                            var nm = GetMember(L, "Name") ?? GetMember(L, "name");
+                            var cv = GetMember(L, "currentVertexIndex");
+                            var vb = GetMember(L, "vertexBuffer"); var vbSize = vb != null ? GetMember(vb, "Size") : null;
+                            var cm = GetMember(L, "currentMeshAddedCount");
+                            lines.Add($"  layer {i} '{nm}': verts {cv}/{vbSize}, meshes {cm}");
+                        }
+                    }
+                    else lines.Add("mesh manager / Layers not reachable from leaf descriptor.");
+                }
+            }
+            catch (Exception ex) { lines.Add("dump error: " + ex.Message); }
+            foreach (var l in lines) Plugin.Log.LogInfo("[DistrictState] " + l);
+            return lines;
+        }
+
+        static bool distLeavesCollected;
+        internal static void TickDistrictMeshSwap()
+        {
+            if (distFxMeshGuid == null || distSwapMaterial == null) return;
+            try
+            {
+                if (!distFxMeshDumped) { distFxMeshDumped = true; DumpOurFxMesh(); }
+                if (!distLeavesCollected)
+                {
+                    distLeaves.Clear();
+                    CollectLeaves(distSwapMaterial, 0, new HashSet<object>());
+                    if (distLeaves.Count > 0)
+                    {
+                        distLeavesCollected = true;
+                        Plugin.Log.LogInfo($"[District] '{distName}': collected {distLeaves.Count} leaf Element(s) to re-point at our FxMesh.");
+                        ApplyLeaves(distFxMeshGuid, resolve: true);   // first pass: set fxMesh + re-resolve via Load()
+                    }
+                    // if still 0, the material's sub-materials haven't loaded yet — retry next frame (leave uncollected).
+                }
+                else ApplyLeaves(distFxMeshGuid, resolve: false);     // keep our GUID set (cheap) in case the game re-Loads
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[District] mesh swap (tick): " + ex); }
+        }
+
+        // Diagnostic: log a material's instance fields — flagging any that hold an FxEvolverMaterial (a loaded sub-material),
+        // an array, or a Guid — and recurse into loaded sub-materials, so we can map where the leaf drawer's mesh actually is.
+        static void DumpMaterialTree(object mat, int depth)
+        {
+            if (mat == null || depth > 4) return;
+            var t = mat.GetType();
+            string pad = new string(' ', depth * 2);
+            Plugin.Log.LogInfo($"[DistrictTree]{pad}{t.Name}  hasMeshField={(AccessTools.Field(t, "mesh") != null)}");
+            var fmType = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxEvolverMaterial");
+            foreach (var f in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                object v; try { v = f.GetValue(mat); } catch { continue; }
+                if (v == null) continue;
+                var ft = v.GetType();
+                if (fmType != null && fmType.IsInstanceOfType(v))
+                { Plugin.Log.LogInfo($"[DistrictTree]{pad}  .{f.Name} = FxEvolverMaterial({ft.Name}) -> recurse"); DumpMaterialTree(v, depth + 1); }
+                else if (v is Array arr && arr.Length > 0)
+                {
+                    Plugin.Log.LogInfo($"[DistrictTree]{pad}  .{f.Name} = {ft.Name}[{arr.Length}]");
+                    // peek the first few elements for nested FxMaterial fields (struct entries like FxMaterialCacheEntry)
+                    for (int i = 0; i < Math.Min(arr.Length, 3); i++)
+                    {
+                        var el = arr.GetValue(i); if (el == null) continue;
+                        foreach (var ef in el.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                        {
+                            object ev; try { ev = ef.GetValue(el); } catch { continue; }
+                            if (ev != null && fmType != null && fmType.IsInstanceOfType(ev))
+                            { Plugin.Log.LogInfo($"[DistrictTree]{pad}    [{i}].{ef.Name} = FxEvolverMaterial({ev.GetType().Name}) -> recurse"); DumpMaterialTree(ev, depth + 2); }
+                        }
+                    }
+                }
+                else if (ft.Name == "Guid")
+                { var g = v; var gt = g.GetType(); Plugin.Log.LogInfo($"[DistrictTree]{pad}  .{f.Name} = Guid {gt.GetField("a", BF)?.GetValue(g)},{gt.GetField("b", BF)?.GetValue(g)},{gt.GetField("c", BF)?.GetValue(g)},{gt.GetField("d", BF)?.GetValue(g)}"); }
+            }
+            // if it's a selector, LOAD its distinct pairs sub-materials (synchronously) and show what they are — this is
+            // where the mesh-bearing leaf drawer should surface.
+            if (AccessTools.Field(t, "pairs")?.GetValue(mat) is Array prs)
+            {
+                var seen = new HashSet<string>(); int shown = 0;
+                foreach (var pr in prs)
+                {
+                    if (pr == null || shown >= 6) continue;
+                    var g = PairGuid(pr); if (GuidIsNull(g)) continue;
+                    var gt = g.GetType(); string key = $"{gt.GetField("a", BF)?.GetValue(g)},{gt.GetField("b", BF)?.GetValue(g)},{gt.GetField("c", BF)?.GetValue(g)},{gt.GetField("d", BF)?.GetValue(g)}";
+                    if (!seen.Add(key)) continue; shown++;
+                    var sub = TryLoadMaterial(g);
+                    Plugin.Log.LogInfo($"[DistrictTree]{pad}  pair[{key}] -> {(sub == null ? "TryLoad returned NULL" : sub.GetType().Name + " hasMesh=" + (AccessTools.Field(sub.GetType(), "mesh") != null))}");
+                    if (sub != null && depth < 2) DumpMaterialTree(sub, depth + 2);
+                }
+            }
         }
 
         // MODE 2 (custom model): after UpdateLevelBuild loaded the vanilla material, override the main mesh channel with our
@@ -2258,6 +2492,38 @@ namespace ENCAccessProof
         }
         // Prefix runs before the request is built, so the affinity swap feeds FillRequest.
         static void Prefix(object __instance) { UniversalInject.DistrictDiag(__instance); UniversalInject.DistrictAffinitySwap(__instance); }
+    }
+
+    // EXPERIMENTAL (opt-in) — enlarge the shared 'Visual' GPU mesh buffer so custom district meshes fit even in a full
+    // late-game city. ContentLayer.LoadEncodingVertexAndBuffer() creates the vertex buffer from baseVertexBufferSize; we
+    // bump that field for the BIG layer (only, to avoid touching the tiny Emitter/default layers) by DistrictBufferHeadroom.
+    [HarmonyPatch]
+    internal static class Hk_DistrictBufferHeadroom
+    {
+        static MethodBase TargetMethod()
+        {
+            var layer = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxComponentMeshContentManager+ContentLayer");
+            return layer?.GetMethod("LoadEncodingVertexAndBuffer", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+        }
+        static void Prefix(object __instance)
+        {
+            try
+            {
+                int extra = Plugin.DistrictBufferHeadroom != null ? Plugin.DistrictBufferHeadroom.Value : 0;
+                if (extra <= 0) return;
+                var f = __instance.GetType().GetField("baseVertexBufferSize", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                if (f == null || f.FieldType != typeof(int)) return;
+                // Only enlarge the building 'Visual' layer (where district meshes go). Skip the pawn
+                // (MeshWithSkeleton, units already have headroom) and Emitter layers so we don't waste VRAM.
+                var nm = (__instance.GetType().GetProperty("Name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(__instance)
+                          ?? __instance.GetType().GetField("name", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)?.GetValue(__instance)) as string ?? "";
+                if (nm.IndexOf("Visual", StringComparison.OrdinalIgnoreCase) < 0) return;
+                int cur = (int)f.GetValue(__instance);
+                f.SetValue(__instance, cur + extra);
+                Plugin.Log.LogInfo($"[District] enlarged '{nm}' mesh buffer: {cur} -> {cur + extra} verts (+{extra} headroom).");
+            }
+            catch (System.Exception ex) { Plugin.Log.LogError("[District] buffer headroom: " + ex); }
+        }
         // Postfix runs after SetChannel loaded the vanilla material, so our GUID override wins.
         static void Postfix(object __instance) { UniversalInject.DistrictDumpMaterial(__instance); UniversalInject.DistrictDumpSubMaterials(__instance); UniversalInject.DistrictMeshSwap(__instance); UniversalInject.DistrictGuidOverride(__instance); }
     }

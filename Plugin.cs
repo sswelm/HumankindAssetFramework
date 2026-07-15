@@ -25,6 +25,7 @@ namespace ENCAccessProof
         internal static ConfigEntry<string> DistrictAffinity;    // ZERO-BAKE proof: swap the district's visualAffinity to another vanilla one (renders an existing building; no custom asset needed)
         internal static ConfigEntry<string> DistrictEvolverGuid; // CUSTOM MODEL: an FxEvolverMaterial GUID (our baked quarry) as 4 ints "a,b,c,d"; SetChannel points the district's mesh channel at it
         internal static ConfigEntry<string> DistrictFxMeshGuid;  // MESH-SWAP: our baked FxMesh GUID; keep the district's own working material, swap only its mesh to ours (best render odds)
+        internal static ConfigEntry<int>    DistrictBufferHeadroom; // extra vertices to add to the big (Visual) GPU mesh buffer at init, so custom district meshes fit even in a full late-game city. 0 = off (leave the buffer as the game sizes it).
 
         private bool show;
         private Rect winRect = new Rect(60, 60, 480, 420);
@@ -70,6 +71,10 @@ namespace ENCAccessProof
                                   "foreign material, the hook keeps the district's OWN working material and swaps just its mesh to ours — so our model " +
                                   "renders in the context that already works. Only needs an FxMesh (District step 1), no cloned material. " +
                                   "Takes precedence over the other two modes. Blank = off.");
+            DistrictBufferHeadroom = Config.Bind("District", "DistrictBufferHeadroom", 0,
+                                  "Extra VERTICES to add to the game's big 'Visual' GPU mesh buffer (the shared building buffer, ~3,000,000 by default) " +
+                                  "at startup, so custom district meshes fit even when a built-up late-game city has nearly filled it. 0 = off. " +
+                                  "e.g. 1000000 = +~48MB VRAM. Applied once at buffer creation; takes effect on the next launch.");
 
             // Patch each hook independently so a single missing Amplitude target (a game update renaming one type) only
             // disables THAT hook -- instead of a null TargetMethod throwing out of PatchAll and failing the whole plugin.
@@ -80,6 +85,7 @@ namespace ENCAccessProof
                 typeof(Hk_ArtilleryStrike),   // firing-on-attack: bombard -> play the model's clip once (docs/Firing-On-Attack.md)
                 typeof(Hk_AudioTrace),        // diagnostic: live-trace Wwise PostEvent (gated behind the F8 Audio Trace toggle)
                 typeof(Hk_DistrictRepoint),   // EXPERIMENTAL: replace one district's on-map visual (docs/District-Visuals.md)
+                typeof(Hk_DistrictBufferHeadroom), // EXPERIMENTAL: enlarge the shared 'Visual' mesh buffer so custom district meshes fit (opt-in)
             };
             foreach (var t in hooks)
             {
@@ -106,6 +112,7 @@ namespace ENCAccessProof
                 UniversalInject.ProcessFireQueues();    // per-instance fire-on-attack: arm only the pawn that actually bombarded
                 UniversalInject.ProcessDeployState();   // deploy-on-stop: record which of our pawns' units are currently moving
                 UniversalInject.ProcessEngineAudio();   // engine sound: fire the per-ship Start/Stop move sound on our units
+                UniversalInject.TickDistrictMeshSwap(); // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
             }
         }
 
@@ -131,6 +138,7 @@ namespace ENCAccessProof
                 if (GUILayout.Button("Dump Formation")) Prober.DumpFormation();
                 if (GUILayout.Button("Dump Atlases")) UniversalInject.DumpOutputLayerAtlases(atlasFilter);
                 if (GUILayout.Button("Dump Audio")) UniversalInject.DumpAudioState(atlasFilter);
+                if (GUILayout.Button("Dump District")) { Prober.Report.Clear(); foreach (var l in UniversalInject.DumpDistrictState()) Prober.Report.Add(l); }
             }
             using (new GUILayout.HorizontalScope())
             {

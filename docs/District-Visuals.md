@@ -1,196 +1,109 @@
 # District Visuals — replacing a district's on-map model
 
-**Status: research spike, PAUSED 2026-07-15.** The whole pipeline is decompiled, the Harmony hook + diagnostics
-are built and proven in-game, and the FxMesh baker works — but a custom model does **not** yet render on a district.
-The blocker is not the hook; it is *how the building mesh is chosen* (a state-driven selector, see below). This page
-documents what works, everything we tried, why each attempt failed, and the remaining (deep) path — so a future run
-starts from knowledge.
+**Status: SOLVED (2026-07-16) — a custom 3D model renders on a district tile in-game.** This was long thought
+impossible (see the history at the end); it is not. This page documents the working recipe, the mechanism, the
+constraints, and the refinements still open. Branch: `district-model-injection` (experimental; not on `master` yet).
 
-This is the second injection axis, alongside units. Goal: let a pack replace a **district's** on-map building with a
-custom static 3D model. Units all work cleanly; districts are a much harder surface.
+The second injection axis, alongside units. Goal: let a pack replace a **district's** on-map building with a custom
+static 3D model. It is far deeper than the unit path, but it works.
 
 ---
 
-## TL;DR of the blocker
+## The winning recipe (end-to-end)
 
-A district's building is **not a single mesh you can point at.** It is drawn by an
-`FxEvolverMaterialLevelBuildSelector` — a *selector* that keeps a table of building-variant sub-materials,
-**loads them asynchronously**, and **picks one at render time** from the district's era / level / health / faction.
-The mesh lives inside whichever sub-material the selector chooses, whenever it finishes loading it. There is no stable
-mesh address to overwrite. Everything we tried failed on this one fact.
+Three parts — a data edit, a runtime mesh-swap, and a lean bone-free bake:
 
----
+**1. Data (in the ENCReload Unity project):** on the target district definition, set
+`ConstructibleVisualAffinity` to a *renderable* affinity (e.g. `DistrictVisualAffinity_MissileSilo`) **and clear its
+`Additional Visual Levels`.** The visual-levels list drives the district's `DistrictState`, which is a *criterion* in
+the building lookup — a mismatched state resolves to no building (`material 0,0,0,0` → empty tile). Clearing it falls
+back to the default state, which resolves. (This — not the district *class* — is why foreign affinities kept coming up
+empty.)
 
-## Which districts even have a replaceable building
-
-Discovered empirically (via the `[District] saw district` + `[DistrictMat]` diagnostics). **This matters — most
-districts are the wrong target:**
-
-| District kind | Example | Has a replaceable building? |
-|---|---|---|
-| **Base city quarter** | `Extension_Base_Industry` (Makers), `_Food`, `_Science`, `_Military` | **Yes** — the prominent quarter building is on the level-build channel we hook. Overriding `Extension_Base_Industry` made *all factory buildings vanish*, proving reachability. |
-| City extension | `Extension_Base_BreederReactor` | No — only a tiny/near-empty on-tile element. The visible city buildings around it are placed **procedurally** (borough system), not on this channel. |
-| Villages / exploitation | `Villages_StoneQuarry` | No — **invisible by design**; the mountain *is* the quarry. `Villages_Logging_Encampment`, `_Farming_Village` share a generic material. |
-
-So: **target base quarters** (`Extension_Base_Industry` etc.). We wasted several iterations on the Breeder Reactor
-(an extension) and the Stone Quarry (invisible) before this was clear.
-
----
-
-## The runtime pipeline (decompiled)
+**2. Runtime (the plugin, mode `DistrictFxMeshGuid`):** the rendered mesh lives deep inside the resolved material:
 
 ```
-district def ConstructibleVisualAffinity  (e.g. "DistrictVisualAffinity_Base_Industry")
-  → PresentationDistrict.UpdateLevelBuild()            builds an AssetReferenceRepositoryRequest
-                                                       (affinity + era + DistrictState/level + health + pollution)
-  → PresentationLevelBuildComponent.SetChannel(0, req) GetGuid(request) → a material GUID, loaded onto channel 0
-  → the loaded material is an FxEvolverMaterialLevelBuildSelector  ← THE SELECTOR (not a plain drawer)
-       ├─ pairs[]              name → GUID table of building-variant sub-materials
-       ├─ fxMaterialCacheEntries.Entries[]   { Guid, FxMaterial }  ← async-loaded sub-drawers
-       ├─ defaultMaterial / invalidNameMaterial   fallback GUIDs
-       └─ selects one sub-material per render by renderContext / era / level / deferredName
-  → the SELECTED sub-material is an FxEvolverMaterialDrawer whose `mesh` (a [FakeAssetReference(FxMesh)] Guid)
-  → AsynchEnsureMeshLoaded(mesh) → Amplitude.Graphics.Fx.FxComponentMeshContentManager → GPU-instanced draw
+channel-0 material = FxEvolverMaterialLevelBuildSelector   (picks by CULTURE)
+  → pairs[culture] = GUID  → FxEvolverMaterialLevelBuildEmitter   (emits a SET of parts; may nest)
+     → levelBuildItems[].loadedEvolverMaterial → FxEvolverMaterialLevelBuildElement   ← THE LEAF
+          .fxMesh   (Guid)   ← the mesh handle (field is `fxMesh`, not `mesh`)
+          .meshIndex (uint)  ← the RESOLVED GPU slot (sentinel uint.MaxValue), set in the leaf's Load()
 ```
 
-`FxComponentMeshContentManager` is the **same GPU mesh manager the unit path uses** ([Vertex-Budget.md](Vertex-Budget.md)),
-and the building channel is separate from **terrain feedback** (faction tint / ground material / hex sculpting, via
-`IWorldMapFeedbackProvider.AddDistrict` / `UpdateHexagonSculpting` / `UpdateGroundMaterial`). So a mesh swap does not
-touch terrain. The selector lives in `Amplitude.Mercury.Terrain.Fx` (Amplitude.Mercury.Terrain.dll);
-`FxMesh` / `FxEvolverMaterialDrawer` / the mesh manager in `Amplitude.Graphics.Fx`.
+The plugin (`Hk_DistrictRepoint` → `TickDistrictMeshSwap`) walks this: loads each `pairs` sub-material with
+`FxEvolverMaterial.TryLoad(guid, synchrone:true)`, recurses `levelBuildItems[].loadedEvolverMaterial` to the leaf
+Elements, sets each leaf's `fxMesh` to our FxMesh GUID, then calls the leaf's `Load(fxManager, doublonIndex)` so it
+**re-resolves `meshIndex` from our GUID**. Because we reuse the game's *own* leaf (with its selector context/GPU data),
+our mesh draws — where a foreign material handed in via `SetChannel` had no context and drew nothing.
+
+**3. Bake (the Factory, `DistrictBaker.cs`):** two hard requirements on the FxMesh —
+- **Bone-free:** a unit static-bake rigs the mesh (boneWeights/bindposes) for its Skeleton; the district's *static*
+  shader can't read a skinned vertex format, so it uploads but draws nothing. "District ▸ 1. Bake District FxMesh" now
+  writes a bone-free `_DistrictMesh` copy and wraps that.
+- **Lean:** district building parts are tiny (hundreds of verts) and share the GPU buffer (below). Bake the model at a
+  low tri count (~2000 tris ≈ ~1,500 verts).
+
+Put the FxMesh GUID in `[District] DistrictFxMeshGuid`, set `DistrictName`, `DistrictRepoint = true`, rebuild the mod,
+launch. The reactor renders.
 
 ---
 
-## What is BUILT and PROVEN (all verified in-game)
+## The GPU vertex-buffer constraint (and the lever for it)
 
-- **The Harmony hook** — `Hk_DistrictRepoint` on `PresentationDistrict.UpdateLevelBuild`, scoped to one district by
-  `ConstructibleDefinitionName`. Fires correctly; correctly scoped (only the named district changes).
-- **Reaching the presentation state** — reflect targets confirmed: `ConstructibleDefinitionName` (scoping key),
-  base-class `presentationLevelBuildComponent`, `RenderMode`, static `mainLevelBuildComponantLayer` = 0, private
-  `channels[]` (`PerChannelData` struct) with public `EvolverMaterialGuid`. The public seam
-  `PresentationLevelBuildComponent.SetChannel(int, Guid, RenderMode, bool)` works.
-- **Diagnostics** — `[District] saw district '<name>'` dumps every district's `ConstructibleDefinitionName`;
-  `[DistrictMat] <name> -> material a,b,c,d` dumps each district's resolved channel-0 material GUID;
-  `[DistrictSub]` dumps the selector's `pairs` table (the culture→material map) + `defaultMaterial`/`deferredName`.
-  All three were essential to mapping the mechanism.
-- **The FxMesh baker** — `DistrictBaker.cs` "Bake District FxMesh" wraps a static-baked `_ModelMesh` into an
-  `Amplitude.Graphics.Fx.FxMesh` ScriptableObject and logs its GUID. **Works** (baked an 18,984-vert reactor FxMesh).
-- **The material swaps** — pointing a district's channel at a different material GUID demonstrably changes what it
-  draws (color/ground changed; buildings vanished). The plumbing is sound.
+District building meshes upload into a shared GPU mesh buffer — layer **'Visual'**, sized **3,000,000 verts**, drawn by
+`FxComponentMeshContentManager.ContentLayer` (`GetFxMeshStructIndex` → `Register` → `FillMeshVertexAndBufferContent`).
+In a built-up late-game city it runs ~99.85% full (measured: 2,995,550 / 3,000,000). An oversized mesh gets a slot but
+**silently overflows the vertex buffer and is dropped** — the exact "assigned index 4606, renders nothing" symptom.
 
----
+Two levers:
+- **Lean bake** (above) so the mesh fits the free space.
+- **`DistrictBufferHeadroom`** (config, opt-in, default 0): a Harmony prefix on `ContentLayer.LoadEncodingVertexAndBuffer`
+  enlarges the **Visual** layer's `baseVertexBufferSize` at creation. Setting `2000000` grows it 3M → 5M
+  (~+96 MB VRAM); the shader reads the buffer size dynamically so it's transparent. Verified in-game
+  (`[District] enlarged 'Visual' mesh buffer: 3000000 -> 5000000`).
 
-## What we tried and why each FAILED
-
-Chronological, all tested in-game:
-
-1. **Affinity-swap** (prefix rewrites `visualAffinityName` to another vanilla affinity). Fires cleanly, scoped
-   correctly — but: (a) the *sculpting* request also reads `visualAffinityName`, so it **re-sculpts the tile**; and
-   (b) the building only resolves for **registered `(constructible + affinity + era)` combos**, so a foreign affinity
-   returns nothing. `LuxuryExtractor` on the reactor → spawned the quarry's **worker pawns** + flattened terrain, no
-   building. `Science` → empty tile.
-2. **`SetChannel(guid)` with a foreign material GUID** (Train Station, City Center). Loads fine — but the loaded
-   material is itself a *selector*, which picks nothing valid in the new district's context → a small gray box / a
-   wasteland ground plane, never a real building.
-3. **Mesh-swap** (set the loaded material's `mesh` field to our FxMesh, keeping its working context). **Failed**: the
-   channel material is the **selector**, which `has no 'mesh' field` (logged: `FxEvolverMaterialLevelBuildSelector … name mesh`).
-   The mesh is on the selector's chosen *sub-material*, not the selector.
-
-Key negative result from step 2/3: overriding `Extension_Base_Industry`'s material made **every Makers Quarter building
-disappear** — which *confirmed the building is reachable on this channel*, but also showed a foreign/edited material
-won't render a building; it just removes the vanilla one.
+Diagnostics: **F8 window ▸ "Dump District"** shows our FxMesh verts + bounds, the collected leaf count, the resolved
+`meshIndex`, and each mesh-manager layer's fill (`verts used / size`).
 
 ---
 
-## Why injection can't render it — the context-gated wall (2026-07-15)
-
-The selector's table (`pairs`, 139 entries for Industry) is keyed by **`BuildingVisualAffinity` = culture /
-civilization** (`_Common_American`, `_Era6_USSR`, `_Era1_Babylon`, …), each → a material GUID — and those point at
-*further nested* selectors, not leaf meshes. So a district's building is chosen by **which civ you play**, era, and
-level, at render time.
-
-Forcing one of those culture material GUIDs onto a district via `SetChannel` made the buildings **vanish, not render**
-— the same failure as every injected GUID. The reason: the mesh only draws when the game's *own* selector selects it and
-writes its per-instance GPU data (`FxLevelBuildSelectorGPUData` = culture/era/level context). A material arriving via
-`SetChannel` has no such context, so it loads but draws nothing.
-
-**What this rules out (proven):** every path that hands the game a *foreign material* — `SetChannel(guid)` with a
-selector, a culture material, or an authored material of our own. Without the selector's own GPU context, it draws
-nothing. So the "author/clone a material + `SetChannel` to it" approaches (modes 1–2, and the data-driven affinity idea
-for a *custom* mesh) are dead: a mod cannot reproduce the selector-pipeline material authoring Amplitude does.
-
-**What is NOT ruled out (untested — the one remaining candidate):** *reusing the game's own live sub-drawer and swapping
-only its mesh GUID.* That drawer already has the selector's context/GPU data, so replacing the mesh it points at should
-draw our mesh *with* that context. We never actually reached it — mode 3 hit the top-level selector (no `mesh` field) and
-we spent the budget mapping the structure. The concrete next attempt is in "The remaining path" below.
-
-**Every material type is a context-gated composite.** We checked all three: culture **selectors** (quarters),
-**emitters** (National Projects — `FxEvolverMaterialLevelBuildEmitter`, which emits a *set* of sub-materials), and the
-shared **wonder scaffolding**. None is a standalone plain drawer you can point at or clone; all derive from
-`FxGenericEvolverMaterial<…GPUData>` and only draw with their own selector/emitter GPU context.
-
-**The data-affinity path also fails — the lookup is combo-keyed.** Changing a district's `ConstructibleVisualAffinity`
-in the data (e.g. Breeder Reactor → `NationalProject_SpaceLaunch`) resolves to **material `0,0,0,0` (null)** → empty
-tile. The affinity→material lookup keys on `(district + affinity + era + state)` *together*, not the affinity alone —
-`NationalProject_SpaceLaunch` yields the rocket only when the district actually *is* the SpaceRace project. Registering a
-new `(our district + our affinity → our material)` entry needs an `AssetReferenceDatabaseContent` datatable element,
-for which **no mod precedent exists** (the visual asset-reference DBs appear game-core). A mod *can* add affinity **name**
-elements (ENC ships `NationalProject_NuclearTest`), but a name is inert without the game-core mapping.
-
-**Verdict:** every reachable path is a wall — inject-material (no GPU context), swap-affinity runtime or data
-(combo-keyed → null), no standalone material to clone, and the mapping table appears un-moddable. **District building
-replacement is not achievable from a BepInEx + data mod with available techniques.** Two un-attempted theoretical
-options remain, both large/uncertain: (1) per-frame swap of the game's *own* live leaf drawer's mesh (keeps context —
-real engine surgery); (2) confirm whether `AssetReferenceDatabaseContent` can be mod-registered. **Banked as a research
-spike.**
-
-## The remaining path (NOT built — the next deep chunk)
-
-Reuse the game's own selected drawer (which HAS the context) and rewrite only its mesh — the one approach the
-context-gated wall does *not* rule out:
-
-1. On the target district's channel-0 material (the selector), recurse to the **leaf** `FxEvolverMaterialDrawer` the
-   game actually selected. Note the nesting is deep: the top selector's `pairs`/`fxMaterialCacheEntries` are keyed by
-   **culture** (`BuildingVisualAffinity_*`), and each entry points at *another* selector (by era/level), so the leaf may
-   be 2–3 levels down. `DistrictDumpSubMaterials` (`[DistrictSub]`) dumps the first level; a future pass must follow the
-   live selection (`fxMaterialCacheEntries` + the selected index / `deferredName`) to the actual leaf drawer.
-2. On that leaf drawer (an `FxEvolverMaterialDrawer` with the `mesh` field), set `mesh` → our FxMesh GUID and reset
-   `meshIndex` = 0. Because it is the game's own drawer, it keeps the selector's GPU context — so our mesh should draw.
-3. Do this **continuously (per-frame, from `Plugin.Update`)**, not just in the `UpdateLevelBuild` postfix — the
-   sub-materials load *asynchronously after* the hook returns, and the selector's `Refresh` re-resolves them.
-
-Caveats that make this genuine engine-surgery, not a quick fix:
-- **Shared sub-drawers** — a variant material may be shared across districts, so mutating it affects others. Isolating
-  (Instantiate a private copy and swap the cache entry's `FxMaterial` reference) is more correct but more fragile.
-- **The selector re-picks/re-loads**, so a one-shot swap gets overwritten; hence the per-frame reapply, or hook the
-  selector's own resolve / `WriteToGPUData`.
-- **Orientation / seating** — never observed in-game (nothing rendered), so the district up-axis vs the unit-bake
-  up-axis is still unknown. Expect to tune Rotation / FxMesh `importAngles` once something draws.
-- **Budget** — district meshes share the GPU mesh manager; measure with Shift+F8 before shipping many.
-
-The tempting alternative — author/clone a **plain** `FxEvolverMaterialDrawer` referencing our FxMesh and
-`SetChannel(ourDrawerGuid)` — is **ruled out by the context-gated wall above**: a drawer handed to the channel from
-outside draws nothing without the selector's GPU context. `DistrictBaker.cs` "Clone District Material" was built for
-this route; it is kept but is not expected to render on its own (no donor drawer asset was locatable in-project either).
-The live-sub-drawer mesh swap is the only remaining candidate because it *keeps* the game's context.
-
----
-
-## Config + diagnostics reference
-
-Plugin config section `[District]` (all off by default):
+## Config reference — `[District]`
 
 | Key | Meaning |
 |---|---|
 | `DistrictRepoint` | master enable |
-| `DistrictName` | target `ConstructibleDefinitionName` (use a base quarter, e.g. `Extension_Base_Industry`) |
-| `DistrictAffinityOverride` | mode 1 — swap `visualAffinityName` (re-sculpts; combo-sensitive; proof-only) |
-| `DistrictEvolverGuid` | mode 2 — `SetChannel(guid)` to a material GUID `a,b,c,d` |
-| `DistrictFxMeshGuid` | mode 3 — mesh-swap our FxMesh (blocked by the selector; the enhancement above targets this) |
+| `DistrictName` | target `ConstructibleDefinitionName` (e.g. `Extension_Base_BreederReactor`) |
+| `DistrictFxMeshGuid` | **the working mode** — our baked FxMesh GUID `a,b,c,d`; swaps the leaf meshes |
+| `DistrictBufferHeadroom` | extra verts for the Visual buffer at init (0 = off; 2000000 = +~96 MB VRAM) |
+| `DistrictAffinityOverride` / `DistrictEvolverGuid` | earlier proof/experiment modes (superseded) |
 
-**Gotcha:** these keys only appear in the `.cfg` after the *new* build has run once; adding a key by hand must go
-**inside** the `[District]` section or the plugin reads the default. The FxMesh baked into the project only ships to the
-game after a **mod rebuild/export**. The Factory static bake requires a dummy `pawnDescription`, so a district bake
-leaves a throwaway unit registry entry to remove.
+**Gotcha:** a new config key only appears in the `.cfg` after the new build runs once; adding it by hand must go
+**inside** the `[District]` section. The FxMesh ships only after a **mod rebuild/export**.
 
-Decompiled reference: `C:\tmp\reactor\Selector.cs` (the selector), `FxMesh.cs`, `PLBC.cs`, `FxEvolverMaterialDrawer.cs`.
+---
+
+## Remaining refinements (not blockers — the hard problem is solved)
+
+1. **Scope to one tile.** The leaf Elements are *shared across every district of a culture*, so swapping them makes
+   **every** matching building on the map our mesh (a whole map of reactors — spectacular, but not what you want). Fix:
+   isolate a per-instance copy for the target district, or swap only the exact leaf it renders.
+2. **Scale + orientation.** The mesh bakes at unit orientation/size; tune Rotation / FxMesh `importAngles` / bake size
+   so it seats on the tile.
+3. **Texture (optional).** It rides the vanilla shader untextured → flat-dark; a baked atlas would color it.
+
+---
+
+## History (for the record)
+
+This was chased from ~8 angles that all *looked* like a wall before the recipe above cracked it:
+- Inject a material via `SetChannel` → **vanishes** (no selector GPU context).
+- Swap the affinity (runtime or data) → **null** unless the visual-levels/DistrictState also matches (the key insight).
+- Every district material type (culture **selector**, National-Project **emitter**, wonder scaffolding) is a
+  context-gated composite — there is no standalone plain drawer to point at.
+- Adding an affinity→material mapping (`AssetReferenceDatabaseContent`) has no mod precedent (game-core).
+
+The unlock was: don't hand the game a material — **reuse its own leaf Element and swap only the `fxMesh`**, with a
+bone-free lean mesh that fits (or grow) the shared buffer.
+
+Decompiled reference: `C:\tmp\reactor\` — `Selector.cs`, `Emitter.cs`, `Element.cs`, `DescElem.cs`, `GenDesc.cs`,
+`MeshMgr.cs`, `FxMesh.cs`.
