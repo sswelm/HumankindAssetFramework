@@ -69,6 +69,23 @@ intact for every other district that borrows it.
    it's the one thing to measure live (Shift+F8) before committing — silent overflow drops geometry (the
    vanished-mesh class of bug; see [Vertex-Budget.md](Vertex-Budget.md)).
 
+## Placement on sculpted terrain (e.g. mountains)
+
+Some districts always sit on specific terrain — ENC's Stone Quarry is always built on a **mountain**. The district
+does not drop onto raw slope: `PresentationDistrict` runs `UpdateHexagonSculpting` (a `*/District/HexagonSculpting`
+asset) and `UpdateGroundMaterial` on placement, carving a pad/terracing into the tile, and anchors the building at
+terrain height (`WorldMapProvider.MapHeight`). The vanilla building is authored to sit on that carved pad.
+
+Crucially, **the custom-model override (`SetChannel` on the mesh channel) does not touch the sculpting** — hexagon
+sculpting and ground material are separate channels set from `UpdateFromDistrictInfo`, not `UpdateLevelBuild`. So a
+custom mesh attaches at the same anchor + carved pad the vanilla building uses; it is not buried any deeper than the
+vanilla building. The real risk is a model whose flat footprint / ground slab is larger than the pad and clips the
+slope. Bake-time levers: drop any ground slab (the tile has its own), scale to the pad, and bake a vertical seat
+offset (static meshes bake position in).
+
+Note the **zero-bake affinity-swap proof does re-sculpt the tile** (the sculpting request also reads
+`visualAffinityName`), so it is not representative of the final look; the GUID override path leaves sculpting intact.
+
 ## Smallest-first experiment (in progress)
 
 Prove the runtime half before touching the baker: a `SetChannel`/`UpdateLevelBuild` prefix matched on the
