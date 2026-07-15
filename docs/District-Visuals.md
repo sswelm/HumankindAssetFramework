@@ -124,8 +124,25 @@ only its mesh GUID.* That drawer already has the selector's context/GPU data, so
 draw our mesh *with* that context. We never actually reached it — mode 3 hit the top-level selector (no `mesh` field) and
 we spent the budget mapping the structure. The concrete next attempt is in "The remaining path" below.
 
-**Verdict:** foreign-material injection is a hard wall; district building replacement is far deeper than units. **Banked
-as a research spike** pending the one untested live-sub-drawer path — not proven impossible, but real engine surgery.
+**Every material type is a context-gated composite.** We checked all three: culture **selectors** (quarters),
+**emitters** (National Projects — `FxEvolverMaterialLevelBuildEmitter`, which emits a *set* of sub-materials), and the
+shared **wonder scaffolding**. None is a standalone plain drawer you can point at or clone; all derive from
+`FxGenericEvolverMaterial<…GPUData>` and only draw with their own selector/emitter GPU context.
+
+**The data-affinity path also fails — the lookup is combo-keyed.** Changing a district's `ConstructibleVisualAffinity`
+in the data (e.g. Breeder Reactor → `NationalProject_SpaceLaunch`) resolves to **material `0,0,0,0` (null)** → empty
+tile. The affinity→material lookup keys on `(district + affinity + era + state)` *together*, not the affinity alone —
+`NationalProject_SpaceLaunch` yields the rocket only when the district actually *is* the SpaceRace project. Registering a
+new `(our district + our affinity → our material)` entry needs an `AssetReferenceDatabaseContent` datatable element,
+for which **no mod precedent exists** (the visual asset-reference DBs appear game-core). A mod *can* add affinity **name**
+elements (ENC ships `NationalProject_NuclearTest`), but a name is inert without the game-core mapping.
+
+**Verdict:** every reachable path is a wall — inject-material (no GPU context), swap-affinity runtime or data
+(combo-keyed → null), no standalone material to clone, and the mapping table appears un-moddable. **District building
+replacement is not achievable from a BepInEx + data mod with available techniques.** Two un-attempted theoretical
+options remain, both large/uncertain: (1) per-frame swap of the game's *own* live leaf drawer's mesh (keeps context —
+real engine surgery); (2) confirm whether `AssetReferenceDatabaseContent` can be mod-registered. **Banked as a research
+spike.**
 
 ## The remaining path (NOT built — the next deep chunk)
 
