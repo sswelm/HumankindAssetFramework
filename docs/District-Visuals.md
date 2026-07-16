@@ -21,7 +21,8 @@ the building lookup — a mismatched state resolves to no building (`material 0,
 back to the default state, which resolves. (This — not the district *class* — is why foreign affinities kept coming up
 empty.)
 
-**2. Runtime (the plugin, mode `DistrictFxMeshGuid`):** the rendered mesh lives deep inside the resolved material:
+**2. Runtime (the plugin, driven by the `enc_districts.json` registry — below):** the rendered mesh lives deep inside
+the resolved material:
 
 ```
 channel-0 material = FxEvolverMaterialLevelBuildSelector   (picks by CULTURE)
@@ -37,15 +38,37 @@ Elements, sets each leaf's `fxMesh` to our FxMesh GUID, then calls the leaf's `L
 **re-resolves `meshIndex` from our GUID**. Because we reuse the game's *own* leaf (with its selector context/GPU data),
 our mesh draws — where a foreign material handed in via `SetChannel` had no context and drew nothing.
 
-**3. Bake (the Factory, `DistrictBaker.cs`):** two hard requirements on the FxMesh —
+**3. Bake (the District Factory window — `DistrictFactoryWindow.cs`):** **Tools ▸ ENC ▸ District Factory** does the
+whole editor side in one Bake: pick the District (searchable dropdown over the project's district definitions), Browse a
+model file, set Size / Rotation / Target-tris / Isolate, press **Bake**. It runs the same static bake core as the unit
+Factory (`UniversalBaker.Build` — **no dummy pawn needed**; `pawnDescription` is registry-only there), wraps the result
+as a district FxMesh via `DistrictBaker.BakeFxMesh`, and writes the registry entry. Two hard requirements the bake
+handles for you —
 - **Bone-free:** a unit static-bake rigs the mesh (boneWeights/bindposes) for its Skeleton; the district's *static*
-  shader can't read a skinned vertex format, so it uploads but draws nothing. "District ▸ 1. Bake District FxMesh" now
-  writes a bone-free `_DistrictMesh` copy and wraps that.
-- **Lean:** district building parts are tiny (hundreds of verts) and share the GPU buffer (below). Bake the model at a
-  low tri count (~2000 tris ≈ ~1,500 verts).
+  shader can't read a skinned vertex format, so it uploads but draws nothing. The bake writes a bone-free
+  `_DistrictMesh` copy and wraps that.
+- **Lean:** district building parts are tiny (hundreds of verts) and share the GPU buffer (below). Keep Target-tris
+  modest, or set `DistrictBufferHeadroom`.
 
-Put the FxMesh GUID in `[District] DistrictFxMeshGuid`, set `DistrictName`, `DistrictRepoint = true`, rebuild the mod,
-launch. The reactor renders.
+Then rebuild the mod (ships the FxMesh) and launch. The reactor renders.
+
+## The district registry — `enc_districts.json`
+
+The runtime side is data-driven: `BepInEx/config/enc_districts.json` (written by the District Factory window, mirrored
+to the git-tracked `Assets/Databases/enc_districts.backup.json`) holds any number of district models at once:
+
+```json
+{ "districts": [
+    { "district": "Extension_Base_BreederReactor",
+      "fxMeshGuid": "1457749632,1176062388,715769744,1624515593",
+      "isolate": true }
+] }
+```
+
+The plugin reads only `district` / `fxMeshGuid` / `isolate` per entry (Newtonsoft — extra fields are bake-time state for
+the window and are ignored). Each entry gets its own leaf collection / private-leaf machinery, so several districts can
+carry custom models simultaneously. The old single-model `[District]` keys (`DistrictName` + `DistrictFxMeshGuid`)
+still work as a fallback **only when the registry has no entries**. `DistrictRepoint = true` remains the master enable.
 
 ---
 
@@ -63,8 +86,8 @@ Two levers:
   (~+96 MB VRAM); the shader reads the buffer size dynamically so it's transparent. Verified in-game
   (`[District] enlarged 'Visual' mesh buffer: 3000000 -> 5000000`).
 
-Diagnostics: **F8 window ▸ "Dump District"** shows our FxMesh verts + bounds, the collected leaf count, the resolved
-`meshIndex`, and each mesh-manager layer's fill (`verts used / size`).
+Diagnostics: **F8 window ▸ "Dump District"** lists every registry entry (matched? leaf built? resolved `meshIndex`, our
+FxMesh verts + bounds) and each mesh-manager layer's fill (`verts used / size`).
 
 ---
 
@@ -72,11 +95,11 @@ Diagnostics: **F8 window ▸ "Dump District"** shows our FxMesh verts + bounds, 
 
 | Key | Meaning |
 |---|---|
-| `DistrictRepoint` | master enable |
-| `DistrictName` | target `ConstructibleDefinitionName` (e.g. `Extension_Base_BreederReactor`) |
-| `DistrictFxMeshGuid` | **the working mode** — our baked FxMesh GUID `a,b,c,d`; swaps the leaf meshes |
-| `DistrictIsolate` | **scope to one tile** — build a private per-instance leaf so only `DistrictName` changes (else the swap is global). On by default recommended. |
+| `DistrictRepoint` | master enable (for the registry AND the legacy keys) |
 | `DistrictBufferHeadroom` | extra verts for the Visual buffer at init (0 = off; 2000000 = +~96 MB VRAM) |
+| `DistrictName` | LEGACY fallback — target `ConstructibleDefinitionName`; used only when `enc_districts.json` has no entries |
+| `DistrictFxMeshGuid` | LEGACY fallback — the baked FxMesh GUID `a,b,c,d` for `DistrictName` |
+| `DistrictIsolate` | LEGACY fallback — scope the legacy entry to its own tiles (registry entries carry their own `isolate`) |
 | `DistrictAffinityOverride` / `DistrictEvolverGuid` | earlier proof/experiment modes (superseded) |
 
 **Gotcha:** a new config key only appears in the `.cfg` after the new build runs once; adding it by hand must go

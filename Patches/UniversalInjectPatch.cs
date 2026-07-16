@@ -1847,6 +1847,21 @@ namespace ENCAccessProof
 
         // ---- EXPERIMENTAL district-visual repoint (docs/District-Visuals.md) ----
         // Parsed once from config: the target district name + the two override modes. dGuid is a boxed Amplitude Guid or null.
+        // One custom district model, from the enc_districts.json registry (written by the District Factory window).
+        // Runtime state lives here too, so any number of districts can carry custom models simultaneously.
+        internal class DistrictModel
+        {
+            public string district = "";     // ConstructibleDefinitionName to match
+            public object fxMeshGuid;        // parsed Amplitude Guid of the baked FxMesh
+            public bool isolate = true;      // true = private per-instance leaf (this tile only); false = global shared-leaf swap
+            // runtime
+            public object plbc; public int layer;
+            public object privateLeaf;                                   // isolate mode: the Instantiated leaf
+            public readonly List<object> leaves = new List<object>();    // global mode: collected shared leaves
+            public bool collected, matchLogged, pointedLogged; public int wait;
+        }
+        internal static readonly List<DistrictModel> distModels = new List<DistrictModel>();
+
         static bool distParsed, distOn; static string distName, distAffinity; static object distGuid, distFxMeshGuid;
         static bool distSwapLogged, distGuidLogged, distMeshLogged;
         static object ParseGuidCsv(string gs)
@@ -1869,6 +1884,33 @@ namespace ENCAccessProof
                 distGuid = ParseGuidCsv(Plugin.DistrictEvolverGuid?.Value?.Trim() ?? "");
                 distFxMeshGuid = ParseGuidCsv(Plugin.DistrictFxMeshGuid?.Value?.Trim() ?? "");
                 if (distOn) Plugin.Log.LogInfo($"[District] repoint ACTIVE: name='{distName}' affinity='{distAffinity}' evolverGuid={(distGuid != null ? "set" : "none")} fxMeshGuid={(distFxMeshGuid != null ? "set" : "none")}");
+
+                // The district REGISTRY (written by the District Factory window): any number of district models at once.
+                distModels.Clear();
+                var regPath = Path.Combine(Paths.ConfigPath, "enc_districts.json");
+                if (File.Exists(regPath))
+                {
+                    try
+                    {
+                        var root = JObject.Parse(File.ReadAllText(regPath));
+                        foreach (var d in (root["districts"] as JArray) ?? new JArray())
+                        {
+                            var e = new DistrictModel
+                            {
+                                district = (string)d["district"] ?? "",
+                                fxMeshGuid = ParseGuidCsv((string)d["fxMeshGuid"] ?? ""),
+                                isolate = (bool?)d["isolate"] ?? true,
+                            };
+                            if (e.district.Length > 0 && e.fxMeshGuid != null) distModels.Add(e);
+                            else Plugin.Log.LogWarning($"[District] registry entry skipped (district='{e.district}', bad fxMeshGuid?)");
+                        }
+                        Plugin.Log.LogInfo($"[District] registry: {distModels.Count} district model(s) from enc_districts.json");
+                    }
+                    catch (Exception rex) { Plugin.Log.LogError("[District] enc_districts.json parse: " + rex); }
+                }
+                // legacy single-model config keeps working: synthesize an entry when the registry has none
+                if (distModels.Count == 0 && !string.IsNullOrEmpty(distName) && distFxMeshGuid != null)
+                    distModels.Add(new DistrictModel { district = distName, fxMeshGuid = distFxMeshGuid, isolate = Plugin.DistrictIsolate == null || Plugin.DistrictIsolate.Value });
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] config parse: " + ex); }
         }
@@ -2023,28 +2065,28 @@ namespace ENCAccessProof
 
         // The leaf that holds geometry is FxEvolverMaterialLevelBuildElement with an `fxMesh` Guid field. Reached via:
         //   Selector.pairs[culture] -> Emitter.levelBuildItems[].loadedEvolverMaterial -> Element(.fxMesh)  (Emitters nest).
-        static readonly List<object> distLeaves = new List<object>();   // collected leaf Elements to re-point each frame
+        static readonly List<object> distLeaves = new List<object>();   // legacy shared list (single-model path)
         static FieldInfo GF(Type t, string n) => t.GetField(n, BF);      // no AccessTools warning-on-miss (probing spams the log)
-        static void CollectLeaves(object mat, int depth, HashSet<object> visited)
+        static void CollectLeaves(object mat, List<object> outLeaves, int depth, HashSet<object> visited)
         {
             if (mat == null || depth > 8 || !visited.Add(mat)) return;
             var t = mat.GetType();
             // a leaf: has an fxMesh (or mesh) Guid field
             var lf = GF(t, "fxMesh") ?? GF(t, "mesh");
-            if (lf != null && lf.FieldType.Name == "Guid") { distLeaves.Add(mat); return; }
+            if (lf != null && lf.FieldType.Name == "Guid") { outLeaves.Add(mat); return; }
             // emitter: levelBuildItems[].loadedEvolverMaterial
             if (AccessTools.Field(t, "levelBuildItems")?.GetValue(mat) is Array items)
-                foreach (var it in items) if (it != null) CollectLeaves(AccessTools.Field(it.GetType(), "loadedEvolverMaterial")?.GetValue(it), depth + 1, visited);
+                foreach (var it in items) if (it != null) CollectLeaves(AccessTools.Field(it.GetType(), "loadedEvolverMaterial")?.GetValue(it), outLeaves, depth + 1, visited);
             // selector: loaded cache entries + the pairs variant table (load each distinct GUID)
             var cache = AccessTools.Field(t, "fxMaterialCacheEntries")?.GetValue(mat);
             if (cache != null && AccessTools.Field(cache.GetType(), "Entries")?.GetValue(cache) is Array entries)
-                foreach (var e in entries) if (e != null) CollectLeaves(AccessTools.Field(e.GetType(), "FxMaterial")?.GetValue(e), depth + 1, visited);
+                foreach (var e in entries) if (e != null) CollectLeaves(AccessTools.Field(e.GetType(), "FxMaterial")?.GetValue(e), outLeaves, depth + 1, visited);
             var seen = new HashSet<string>();
             void tryGuid(object g)
             {
                 if (GuidIsNull(g)) return; var gt = g.GetType();
                 if (!seen.Add($"{gt.GetField("a", BF)?.GetValue(g)},{gt.GetField("b", BF)?.GetValue(g)},{gt.GetField("c", BF)?.GetValue(g)},{gt.GetField("d", BF)?.GetValue(g)}")) return;
-                CollectLeaves(TryLoadMaterial(g), depth + 1, visited);
+                CollectLeaves(TryLoadMaterial(g), outLeaves, depth + 1, visited);
             }
             if (AccessTools.Field(t, "pairs")?.GetValue(mat) is Array pairs)
                 foreach (var pr in pairs) if (pr != null) tryGuid(PairGuid(pr));
@@ -2054,10 +2096,10 @@ namespace ENCAccessProof
         static object distFxManager; static MethodInfo fxNextDoublon;
         // Re-point every collected leaf's fxMesh at our FxMesh. On the first pass, also call the leaf's own Load() so it
         // RE-RESOLVES meshIndex from our GUID (the render reads meshIndex, not fxMesh; uint.MaxValue is 'unresolved').
-        static int ApplyLeaves(object fxGuid, bool resolve)
+        static int ApplyLeaves(List<object> leaves, object fxGuid, bool resolve)
         {
             int n = 0, resolved = 0;
-            foreach (var leaf in distLeaves)
+            foreach (var leaf in leaves)
             {
                 var t = leaf.GetType();
                 var lf = GF(t, "fxMesh") ?? GF(t, "mesh");
@@ -2091,27 +2133,7 @@ namespace ENCAccessProof
             return n;
         }
 
-        // MODE 3 — cache the target district's channel material so the per-frame Tick can swap its leaf meshes as they load.
-        internal static void DistrictMeshSwap(object district)
-        {
-            try
-            {
-                if (distFxMeshGuid == null) return;                       // cheap bail when mesh-swap mode is off
-                if (Plugin.DistrictIsolate != null && Plugin.DistrictIsolate.Value) return;   // isolate mode handles it per-tile
-                if (!DistrictMatches(district, out var plbc) || plbc == null) return;
-                int layer = 0;
-                var lf = district.GetType().GetField("mainLevelBuildComponantLayer", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.FlattenHierarchy);
-                if (lf?.GetValue(null) is int li) layer = li;
-                if (!(AccessTools.Field(plbc.GetType(), "channels")?.GetValue(plbc) is Array channels) || layer >= channels.Length) return;
-                distSwapMaterial = AccessTools.Field(channels.GetValue(layer).GetType(), "evolverMaterial")?.GetValue(channels.GetValue(layer));
-                distFxManager = GetMember(plbc, "FxManager");   // needed to re-resolve each leaf's mesh via its Load()
-            }
-            catch (Exception ex) { Plugin.Log.LogError("[District] mesh swap (cache): " + ex); }
-        }
-
-        // Per-frame (Plugin.Update): re-run the recursive leaf-swap on the cached material. Sub-materials load ASYNC after
-        // UpdateLevelBuild returns, and the selector re-picks as density changes — so re-applying every frame catches them.
-        static bool distFxMeshDumped;
+        // (The old single-district MODE 3 cache was replaced by the registry-driven DistrictApplyEntries/Tick below.)
         static void DumpOurFxMesh()
         {
             try
@@ -2140,24 +2162,31 @@ namespace ENCAccessProof
             var lines = new List<string>();
             try
             {
-                lines.Add($"district='{distName}' fxMeshGuid={(distFxMeshGuid != null ? "set" : "none")} leaves={distLeaves.Count}");
-                // our FxMesh geometry
+                EnsureDistrictConfig();
+                lines.Add($"district registry: {distModels.Count} model(s)");
                 var fxMeshType = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxMesh");
                 var adb = AccessTools.TypeByName("Amplitude.Framework.Asset.AssetDatabase");
-                if (fxMeshType != null && adb != null && distFxMeshGuid != null)
+                var load = adb?.GetMethods(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(m => (m.Name == "LoadAsset" || m.Name == "TryLoadAsset") && m.IsGenericMethodDefinition && m.GetParameters().Length >= 1);
+                var loadFx = fxMeshType != null && load != null ? load.MakeGenericMethod(fxMeshType) : null;
+                object anyLeaf = null;
+                foreach (var e in distModels)
                 {
-                    var load = adb.GetMethods(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(m => (m.Name == "LoadAsset" || m.Name == "TryLoadAsset") && m.IsGenericMethodDefinition && m.GetParameters().Length >= 1)?.MakeGenericMethod(fxMeshType);
-                    var fx = load?.Invoke(null, load.GetParameters().Length == 1 ? new[] { distFxMeshGuid } : new[] { distFxMeshGuid, null });
-                    var um = (fxMeshType.GetProperty("Mesh", BF)?.GetValue(fx) ?? GF(fxMeshType, "mesh")?.GetValue(fx)) as UnityEngine.Mesh;
-                    lines.Add($"our FxMesh: {(fx == null ? "NULL by GUID" : um == null ? "Mesh NULL" : um.vertexCount + " verts, bounds " + um.bounds.size)}");
+                    string meshInfo = "?";
+                    if (loadFx != null && e.fxMeshGuid != null)
+                    {
+                        var fx = loadFx.Invoke(null, loadFx.GetParameters().Length == 1 ? new[] { e.fxMeshGuid } : new[] { e.fxMeshGuid, null });
+                        var um = fx != null ? (fxMeshType.GetProperty("Mesh", BF)?.GetValue(fx) ?? GF(fxMeshType, "mesh")?.GetValue(fx)) as UnityEngine.Mesh : null;
+                        meshInfo = fx == null ? "FxMesh NULL by GUID" : um == null ? "Mesh NULL" : um.vertexCount + " verts, bounds " + um.bounds.size;
+                    }
+                    var leaf = e.privateLeaf ?? (e.leaves.Count > 0 ? e.leaves[0] : null);
+                    var mi = leaf != null ? GF(leaf.GetType(), "meshIndex")?.GetValue(leaf) : null;
+                    lines.Add($"  '{e.district}' isolate={e.isolate} matched={(e.plbc != null)} leaf={(leaf != null ? "meshIndex=" + mi : "not built")} | {meshInfo}");
+                    anyLeaf = anyLeaf ?? leaf;
                 }
-                if (distLeaves.Count > 0)
+                // walk to the district mesh content manager and dump each layer's fill
+                if (anyLeaf != null)
                 {
-                    var leaf = distLeaves[0];
-                    var mi = GF(leaf.GetType(), "meshIndex")?.GetValue(leaf);
-                    lines.Add($"leaf[0] meshIndex={mi}");
-                    // walk to the district mesh content manager and dump each layer's fill
-                    var desc = GetMember(leaf, "FxEvolverDescriptor");
+                    var desc = GetMember(anyLeaf, "FxEvolverDescriptor");
                     var mgr = desc != null ? GetMember(desc, "AssetContentManagerMesh") : null;
                     if (mgr != null && GetMember(mgr, "Layers") is Array layers)
                     {
@@ -2172,7 +2201,6 @@ namespace ENCAccessProof
                             lines.Add($"  layer {i} '{nm}': verts {cv}/{vbSize}, meshes {cm}");
                         }
                     }
-                    else lines.Add("mesh manager / Layers not reachable from leaf descriptor.");
                 }
             }
             catch (Exception ex) { lines.Add("dump error: " + ex.Message); }
@@ -2183,18 +2211,17 @@ namespace ENCAccessProof
         // ISOLATION: instead of mutating the shared building leaves globally, give ONLY the target district a PRIVATE leaf.
         // Each PresentationLevelBuildComponent has its own channel + Shuriken particle, so pointing just this district's
         // channel at a private (Instantiated) leaf — and re-spawning its particle — scopes our mesh to this tile alone.
-        static object distPrivateLeaf, distIsoPlbc; static int distIsoLayer; static bool distIsoLogged;
-        static object BuildPrivateLeaf(object channelSelector)
+        static object BuildPrivateLeaf(object channelSelector, object fxGuid)
         {
             try
             {
-                distLeaves.Clear();
-                CollectLeaves(channelSelector, 0, new HashSet<object>());
-                if (distLeaves.Count == 0) return null;
-                if (!(distLeaves[0] is UnityEngine.Object src) || src == null) return null;
+                var found = new List<object>();
+                CollectLeaves(channelSelector, found, 0, new HashSet<object>());
+                if (found.Count == 0) return null;
+                if (!(found[0] is UnityEngine.Object src) || src == null) return null;
                 var clone = UnityEngine.Object.Instantiate(src);   // a private copy — mutating it won't touch the shared leaf
                 var t = clone.GetType();
-                (GF(t, "fxMesh") ?? GF(t, "mesh"))?.SetValue(clone, distFxMeshGuid);
+                (GF(t, "fxMesh") ?? GF(t, "mesh"))?.SetValue(clone, fxGuid);
                 // reset load state so LoadIFN actually re-runs and resolves our mesh + assigns a MaterialIndex
                 foreach (var ls in new[] { "loadingStatus" }) { var f = GF(t, ls); if (f != null) f.SetValue(clone, System.Enum.ToObject(f.FieldType, 0)); }
                 var loadIFN = t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
@@ -2215,84 +2242,94 @@ namespace ENCAccessProof
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] build private leaf: " + ex); return null; }
         }
-        // Point the district's channel-0 at the private leaf + refresh its particle. Re-applied each frame (the game reloads
-        // the shared selector into the channel on UpdateLevelBuild, so we must re-assert our private leaf).
-        static int distIsoWaitLogged, distIsoTrace;
-        static void PointChannelAtPrivateLeaf()
+        // ISOLATE mode, per entry: keep this district's channel pointed at ITS private leaf + re-spawned particle.
+        // Re-applied each frame (the game reloads the shared selector into the channel on UpdateLevelBuild).
+        static void PointEntryAtPrivateLeaf(DistrictModel e)
         {
             try
             {
-                bool trace = distIsoTrace++ % 300 == 0;
-                if (distIsoPlbc == null) { if (trace) Plugin.Log.LogInfo("[District] iso tick: distIsoPlbc NULL (apply never cached it)"); return; }
-                if (!(AccessTools.Field(distIsoPlbc.GetType(), "channels")?.GetValue(distIsoPlbc) is Array channels) || distIsoLayer >= channels.Length) { if (trace) Plugin.Log.LogInfo("[District] iso tick: channels null/short"); return; }
-                var box = channels.GetValue(distIsoLayer);
+                if (e.plbc == null) return;
+                if (!(AccessTools.Field(e.plbc.GetType(), "channels")?.GetValue(e.plbc) is Array channels) || e.layer >= channels.Length) return;
+                var box = channels.GetValue(e.layer);
                 var evf = GF(box.GetType(), "evolverMaterial");
-                if (evf == null) { if (trace) Plugin.Log.LogInfo("[District] iso tick: evolverMaterial field null"); return; }
-                if (trace) Plugin.Log.LogInfo($"[District] iso tick: plbc set, channelMat={(evf.GetValue(box)?.GetType().Name ?? "NULL")}, privateLeaf={(distPrivateLeaf != null)}");
+                if (evf == null) return;
                 // build the private leaf lazily — the selector's sub-materials load async, so retry until they're ready.
-                if (distPrivateLeaf == null)
+                if (e.privateLeaf == null)
                 {
                     var sel = evf.GetValue(box);
-                    if (sel == null || ReferenceEquals(sel, distPrivateLeaf)) return;
-                    distPrivateLeaf = BuildPrivateLeaf(sel);
-                    if (distPrivateLeaf == null) { if (distIsoWaitLogged++ % 120 == 0) Plugin.Log.LogInfo($"[District] isolate: waiting for '{distName}' leaves to load..."); return; }
+                    if (sel == null) return;
+                    e.privateLeaf = BuildPrivateLeaf(sel, e.fxMeshGuid);
+                    if (e.privateLeaf == null) { if (e.wait++ % 300 == 0) Plugin.Log.LogInfo($"[District] '{e.district}': waiting for leaves to load..."); return; }
                 }
-                if (ReferenceEquals(evf.GetValue(box), distPrivateLeaf)) return;   // already ours this frame
-                evf.SetValue(box, distPrivateLeaf);
-                channels.SetValue(box, distIsoLayer);   // write the mutated struct back into the array
-                // re-spawn the particle so PatchParticle picks up our private leaf's MaterialIndex
-                var refresh = distIsoPlbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                if (ReferenceEquals(evf.GetValue(box), e.privateLeaf)) return;   // already ours this frame
+                evf.SetValue(box, e.privateLeaf);
+                channels.SetValue(box, e.layer);   // write the mutated struct back into the array
+                // re-spawn the particle so PatchParticle picks up the private leaf's MaterialIndex
+                var refresh = e.plbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
                     .FirstOrDefault(m => m.Name == "RefreshChannel" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
-                if (refresh != null) refresh.Invoke(distIsoPlbc, new object[] { distIsoLayer, System.Enum.ToObject(refresh.GetParameters()[1].ParameterType, 0) });
-                if (!distIsoLogged) { distIsoLogged = true; Plugin.Log.LogInfo($"[District] '{distName}' ISOLATED: channel {distIsoLayer} -> our private leaf (this tile only)."); }
+                if (refresh != null) refresh.Invoke(e.plbc, new object[] { e.layer, System.Enum.ToObject(refresh.GetParameters()[1].ParameterType, 0) });
+                if (!e.pointedLogged) { e.pointedLogged = true; Plugin.Log.LogInfo($"[District] '{e.district}' ISOLATED: channel {e.layer} -> its private leaf (this tile only)."); }
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] point channel: " + ex); }
         }
-        static bool distIsoApplyLogged, distIsoTopLogged;
-        internal static void DistrictIsolateApply(object district)
+
+        // GLOBAL mode, per entry: collect the shared leaves once and re-point them all (affects every district sharing them).
+        static void GlobalSwapEntry(DistrictModel e)
         {
             try
             {
-                if (!distIsoTopLogged && GetMember(district, "ConstructibleDefinitionName")?.ToString() == "Extension_Base_BreederReactor")
-                { distIsoTopLogged = true; Plugin.Log.LogInfo($"[District] isolate apply TOP for reactor: isolate={Plugin.DistrictIsolate?.Value}, fxMeshGuid={(distFxMeshGuid != null)}, distName='{distName}'"); }
-                if (Plugin.DistrictIsolate == null || !Plugin.DistrictIsolate.Value || distFxMeshGuid == null) return;
-                if (!DistrictMatches(district, out var plbc)) return;
-                if (!distIsoApplyLogged) { distIsoApplyLogged = true; Plugin.Log.LogInfo($"[District] isolate apply: reactor MATCHED, plbc={(plbc == null ? "NULL" : plbc.GetType().Name)}, distFxManager={(distFxManager != null)}"); }
-                if (plbc == null) return;
-                distFxManager = distFxManager ?? GetMember(plbc, "FxManager");
-                int layer = 0;
-                var lf = district.GetType().GetField("mainLevelBuildComponantLayer", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.FlattenHierarchy);
-                if (lf?.GetValue(null) is int li) layer = li;
-                distIsoPlbc = plbc; distIsoLayer = layer;   // cache; the per-frame Tick builds (retry) + points at the private leaf
-                PointChannelAtPrivateLeaf();
+                if (e.plbc == null) return;
+                if (!e.collected)
+                {
+                    if (!(AccessTools.Field(e.plbc.GetType(), "channels")?.GetValue(e.plbc) is Array channels) || e.layer >= channels.Length) return;
+                    var mat = GF(channels.GetValue(e.layer).GetType(), "evolverMaterial")?.GetValue(channels.GetValue(e.layer));
+                    if (mat == null) return;
+                    e.leaves.Clear();
+                    CollectLeaves(mat, e.leaves, 0, new HashSet<object>());
+                    if (e.leaves.Count == 0) return;   // async load — retry next frame
+                    e.collected = true;
+                    Plugin.Log.LogInfo($"[District] '{e.district}': collected {e.leaves.Count} shared leaf Element(s) (GLOBAL swap).");
+                    ApplyLeaves(e.leaves, e.fxMeshGuid, resolve: true);
+                }
+                else ApplyLeaves(e.leaves, e.fxMeshGuid, resolve: false);   // keep our GUID set in case the game re-Loads
             }
-            catch (Exception ex) { Plugin.Log.LogError("[District] isolate apply: " + ex); }
+            catch (Exception ex) { Plugin.Log.LogError("[District] global swap: " + ex); }
         }
 
-        static bool distLeavesCollected;
-        internal static void TickDistrictMeshSwap()
+        // Postfix (per district UpdateLevelBuild): match against the registry and cache each entry's component + layer.
+        internal static void DistrictApplyEntries(object district)
         {
-            if (distFxMeshGuid == null) return;
-            if (Plugin.DistrictIsolate != null && Plugin.DistrictIsolate.Value) { PointChannelAtPrivateLeaf(); return; }   // isolate: re-assert our private leaf each frame
-            if (distSwapMaterial == null) return;
             try
             {
-                if (!distFxMeshDumped) { distFxMeshDumped = true; DumpOurFxMesh(); }
-                if (!distLeavesCollected)
+                EnsureDistrictConfig();
+                if (!distOn || distModels.Count == 0) return;
+                var name = GetMember(district, "ConstructibleDefinitionName")?.ToString();
+                if (string.IsNullOrEmpty(name)) return;
+                foreach (var e in distModels)
                 {
-                    distLeaves.Clear();
-                    CollectLeaves(distSwapMaterial, 0, new HashSet<object>());
-                    if (distLeaves.Count > 0)
-                    {
-                        distLeavesCollected = true;
-                        Plugin.Log.LogInfo($"[District] '{distName}': collected {distLeaves.Count} leaf Element(s) to re-point at our FxMesh.");
-                        ApplyLeaves(distFxMeshGuid, resolve: true);   // first pass: set fxMesh + re-resolve via Load()
-                    }
-                    // if still 0, the material's sub-materials haven't loaded yet — retry next frame (leave uncollected).
+                    if (e.district != name || e.fxMeshGuid == null) continue;
+                    var plbc = AccessTools.Field(district.GetType(), "presentationLevelBuildComponent")?.GetValue(district);
+                    if (plbc == null) continue;
+                    distFxManager = distFxManager ?? GetMember(plbc, "FxManager");
+                    int layer = 0;
+                    var lf = district.GetType().GetField("mainLevelBuildComponantLayer", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.FlattenHierarchy);
+                    if (lf?.GetValue(null) is int li) layer = li;
+                    e.plbc = plbc; e.layer = layer;
+                    if (!e.matchLogged) { e.matchLogged = true; Plugin.Log.LogInfo($"[District] registry matched '{e.district}' (isolate={e.isolate})."); }
                 }
-                else ApplyLeaves(distFxMeshGuid, resolve: false);     // keep our GUID set (cheap) in case the game re-Loads
             }
-            catch (Exception ex) { Plugin.Log.LogError("[District] mesh swap (tick): " + ex); }
+            catch (Exception ex) { Plugin.Log.LogError("[District] apply entries: " + ex); }
+        }
+
+        // Per-frame (Plugin.Update): drive every registry entry.
+        internal static void TickDistrictMeshSwap()
+        {
+            if (distModels.Count == 0) return;
+            foreach (var e in distModels)
+            {
+                if (e.isolate) PointEntryAtPrivateLeaf(e);
+                else GlobalSwapEntry(e);
+            }
         }
 
         // Diagnostic: log a material's instance fields — flagging any that hold an FxEvolverMaterial (a loaded sub-material),
@@ -2584,8 +2621,8 @@ namespace ENCAccessProof
         }
         // Prefix runs before the request is built, so the affinity swap feeds FillRequest.
         static void Prefix(object __instance) { UniversalInject.DistrictDiag(__instance); UniversalInject.DistrictAffinitySwap(__instance); }
-        // Postfix: after UpdateLevelBuild built the request/material — our dumps + isolate/swap act here.
-        static void Postfix(object __instance) { UniversalInject.DistrictDumpMaterial(__instance); UniversalInject.DistrictDumpSubMaterials(__instance); UniversalInject.DistrictIsolateApply(__instance); UniversalInject.DistrictMeshSwap(__instance); UniversalInject.DistrictGuidOverride(__instance); }
+        // Postfix: after UpdateLevelBuild built the request/material — dumps + the registry-driven apply act here.
+        static void Postfix(object __instance) { UniversalInject.DistrictDumpMaterial(__instance); UniversalInject.DistrictDumpSubMaterials(__instance); UniversalInject.DistrictApplyEntries(__instance); UniversalInject.DistrictGuidOverride(__instance); }
     }
 
     // EXPERIMENTAL (opt-in) — enlarge the shared 'Visual' GPU mesh buffer so custom district meshes fit even in a full

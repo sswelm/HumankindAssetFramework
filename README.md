@@ -155,7 +155,9 @@ The plugin's own cfg (`…\community.humankind.encaccessproof.cfg`) — press **
 - **Fire-on-attack:** [Firing-On-Attack.md](docs/Firing-On-Attack.md) — how a model plays its clip on the unit's combat
   action (Humankind's `SimulationEvent` bus), the one-shot pose trigger, and the per-model animated-bake scale toggle. **Built.**
 - **District visuals:** [District-Visuals.md](docs/District-Visuals.md) — the second injection axis: a custom static
-  model on a **single district tile** (render + fit-the-GPU-buffer + scope-to-one-tile). **Working (experimental).**
+  model on a **single district tile** (render + fit-the-GPU-buffer + scope-to-one-tile). **Working, with its own
+  pipeline**: the District Factory window (Tools ▸ ENC ▸ District Factory) bakes model → bone-free FxMesh → an
+  `enc_districts.json` registry entry the plugin reads (any number of districts at once).
 - **Learn from others:** [Ecosystem-Survey.md](docs/Ecosystem-Survey.md) — every Humankind BepInEx plugin on GitHub, what
   problem each solves, and the techniques worth borrowing (lifecycle anchors, order-bus sequencing, save extensions, …).
 
