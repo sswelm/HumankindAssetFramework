@@ -1,8 +1,9 @@
 # District Visuals — replacing a district's on-map model
 
-**Status: SOLVED (2026-07-16) — a custom 3D model renders on a district tile in-game.** This was long thought
-impossible (see the history at the end); it is not. This page documents the working recipe, the mechanism, the
-constraints, and the refinements still open. Branch: `district-model-injection` (experimental; not on `master` yet).
+**Status: SOLVED (2026-07-16) — a custom 3D model renders on a *single* district tile in-game.** Render, fit, and
+scope are all working: the reactor mesh sits on the reactor tile and the rest of the city is untouched. This was long
+thought impossible (see the history at the end); it is not. This page documents the working recipe, the mechanism, and
+the constraints. Only cosmetic tuning (scale/orientation/texture) remains.
 
 The second injection axis, alongside units. Goal: let a pack replace a **district's** on-map building with a custom
 static 3D model. It is far deeper than the unit path, but it works.
@@ -74,6 +75,7 @@ Diagnostics: **F8 window ▸ "Dump District"** shows our FxMesh verts + bounds, 
 | `DistrictRepoint` | master enable |
 | `DistrictName` | target `ConstructibleDefinitionName` (e.g. `Extension_Base_BreederReactor`) |
 | `DistrictFxMeshGuid` | **the working mode** — our baked FxMesh GUID `a,b,c,d`; swaps the leaf meshes |
+| `DistrictIsolate` | **scope to one tile** — build a private per-instance leaf so only `DistrictName` changes (else the swap is global). On by default recommended. |
 | `DistrictBufferHeadroom` | extra verts for the Visual buffer at init (0 = off; 2000000 = +~96 MB VRAM) |
 | `DistrictAffinityOverride` / `DistrictEvolverGuid` | earlier proof/experiment modes (superseded) |
 
@@ -82,14 +84,29 @@ Diagnostics: **F8 window ▸ "Dump District"** shows our FxMesh verts + bounds, 
 
 ---
 
-## Remaining refinements (not blockers — the hard problem is solved)
+## Scoping to one tile — SOLVED (`DistrictIsolate`)
 
-1. **Scope to one tile.** The leaf Elements are *shared across every district of a culture*, so swapping them makes
-   **every** matching building on the map our mesh (a whole map of reactors — spectacular, but not what you want). Fix:
-   isolate a per-instance copy for the target district, or swap only the exact leaf it renders.
-2. **Scale + orientation.** The mesh bakes at unit orientation/size; tune Rotation / FxMesh `importAngles` / bake size
+The leaf Elements are *shared across every district of a culture*, so the raw swap turns **every** matching building on
+the map into our mesh. `DistrictIsolate` fixes that by giving only the target district a **private** leaf:
+
+1. On the target district's channel-0 selector, `CollectLeaves` to a source leaf; `UnityEngine.Object.Instantiate` it
+   (a private copy — mutating it can't touch the shared leaf).
+2. Set the clone's `fxMesh` to our GUID, reset its `loadingStatus`, and call `LoadIFN(fxManager)` + `Load(fxManager,
+   doublon)` so it gets a valid `MaterialIndex` and re-resolves `meshIndex` from our mesh.
+3. Per-frame: set that district's `channels[layer].evolverMaterial` = the private leaf (**write the boxed struct back**
+   into the array) and call the public `RefreshChannel(int, EventNameEnum)` so the Shuriken particle re-spawns and
+   `PatchParticle` picks up the private leaf's `MaterialIndex`.
+
+Because each `PresentationLevelBuildComponent` has its **own** channel + particle, this scopes the mesh to that one
+tile. Build lazily (sub-materials load async → retry) and re-apply every frame (the game reloads the shared selector
+into the channel on each `UpdateLevelBuild`). **Verified in-game: the reactor tile shows our mesh, the rest of the city
+is untouched.**
+
+## Remaining refinements (cosmetic only)
+
+1. **Scale + orientation.** The mesh bakes at unit orientation/size; tune Rotation / FxMesh `importAngles` / bake size
    so it seats on the tile.
-3. **Texture (optional).** It rides the vanilla shader untextured → flat-dark; a baked atlas would color it.
+2. **Texture (optional).** It rides the vanilla shader untextured → flat-dark; a baked atlas would color it.
 
 ---
 
