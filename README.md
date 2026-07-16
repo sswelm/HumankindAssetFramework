@@ -158,6 +158,9 @@ The plugin's own cfg (`…\community.humankind.encaccessproof.cfg`) — press **
   model on a **single district tile** (render + fit-the-GPU-buffer + scope-to-one-tile). **Working, with its own
   pipeline**: the District Factory window (Tools ▸ ENC ▸ District Factory) bakes model → bone-free FxMesh → an
   `enc_districts.json` registry entry the plugin reads (any number of districts at once).
+- **Pawn props:** [Pawn-Props.md](docs/Pawn-Props.md) — the third injection axis: custom **weapons & gear on pawn
+  attachment slots** (Slingers finally carry a sling). The Prop Lab window (Tools ▸ ENC ▸ Prop Lab) bakes model →
+  fragment + MeshCollection; the plugin registers the collection at `AnimationLoad`. **Working (experimental).**
 - **Learn from others:** [Ecosystem-Survey.md](docs/Ecosystem-Survey.md) — every Humankind BepInEx plugin on GitHub, what
   problem each solves, and the techniques worth borrowing (lifecycle anchors, order-bus sequencing, save extensions, …).
 

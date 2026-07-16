@@ -37,6 +37,7 @@
     <Reference Include="UnityEngine.JSONSerializeModule"><HintPath>References\UnityEngine.JSONSerializeModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.ImageConversionModule"><HintPath>References\UnityEngine.ImageConversionModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.AudioModule">          <HintPath>References\UnityEngine.AudioModule.dll</HintPath>          <Private>false</Private></Reference>
+    <Reference Include="UnityEngine.AssetBundleModule">    <HintPath>References\UnityEngine.AssetBundleModule.dll</HintPath>    <Private>false</Private></Reference>
     <Reference Include="Amplitude.Mercury.Animation">  <HintPath>References\Amplitude.Mercury.Animation.dll</HintPath>   <Private>false</Private></Reference>
     <!-- Provided by the game at runtime (Humankind_Data/Managed, used by mod.io). Not copied into our DLL. Robust
          registry parsing in the game's Mono runtime, where UnityEngine.JsonUtility silently returns empty. -->

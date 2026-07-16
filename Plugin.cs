@@ -27,6 +27,10 @@ namespace ENCAccessProof
         internal static ConfigEntry<string> DistrictFxMeshGuid;  // MESH-SWAP: our baked FxMesh GUID; keep the district's own working material, swap only its mesh to ours (best render odds)
         internal static ConfigEntry<int>    DistrictBufferHeadroom; // extra vertices to add to the big (Visual) GPU mesh buffer at init, so custom district meshes fit even in a full late-game city. 0 = off (leave the buffer as the game sizes it).
         internal static ConfigEntry<bool>   DistrictIsolate;         // scope the mesh-swap to only the target district's own tile (private per-instance leaf) instead of the shared-global swap
+        // --- EXPERIMENTAL: pawn prop/attachment axis (custom weapons & gear; see the sling experiment) ---
+        internal static ConfigEntry<bool>   PropRegisterOn;      // register our baked MeshCollections with the AnimationManager (the fragment render gate)
+        internal static ConfigEntry<string> PropCollectionGuids; // semicolon-separated "a,b,c,d" GUIDs of MeshCollection/Skeleton assets to register
+        internal static ConfigEntry<string> PropCollectionNames; // semicolon-separated asset NAMES (same order as the GUIDs) — fallback loader when the Amplitude catalog misses the GUID
 
         private bool show;
         private Rect winRect = new Rect(60, 60, 480, 420);
@@ -81,6 +85,21 @@ namespace ENCAccessProof
                                   "at startup, so custom district meshes fit even when a built-up late-game city has nearly filled it. 0 = off. " +
                                   "e.g. 1000000 = +~48MB VRAM. Applied once at buffer creation; takes effect on the next launch.");
 
+            // --- EXPERIMENTAL pawn PROP/attachment axis (custom weapons & gear on pawn attachment slots). A
+            //     PresentationPawnFragmentMesh (the EQ_* asset a pawn's Attachements slot references) hard-gates on its
+            //     ModelPrefab's MeshCollection being REGISTERED with the AnimationManager; this registers ours. ---
+            PropRegisterOn      = Config.Bind("Props", "PropRegister", false,
+                                  "EXPERIMENTAL: register our baked MeshCollection assets with the game's AnimationManager so a custom " +
+                                  "PresentationPawnFragmentMesh (a pawn attachment: weapon/gear, e.g. a sling) can reference our mesh. " +
+                                  "Without this the fragment logs 'was not registered to AnimationManager' and draws nothing.");
+            PropCollectionGuids = Config.Bind("Props", "PropCollectionGuids", "",
+                                  "Semicolon-separated Amplitude GUIDs (each four ints \"a,b,c,d\") of MeshCollection/Skeleton assets from our " +
+                                  "mod bundle to register at load. Blank = none.");
+            PropCollectionNames = Config.Bind("Props", "PropCollectionNames", "",
+                                  "Semicolon-separated asset NAMES matching PropCollectionGuids in order (e.g. Sling_Collection). Used as a " +
+                                  "fallback loader: Amplitude's asset catalog misses mod-bundle MeshCollections by GUID, so the plugin pulls " +
+                                  "the asset by name from the game's already-loaded Unity bundles instead.");
+
             // Patch each hook independently so a single missing Amplitude target (a game update renaming one type) only
             // disables THAT hook -- instead of a null TargetMethod throwing out of PatchAll and failing the whole plugin.
             var harmony = new Harmony(GUID);
@@ -91,6 +110,7 @@ namespace ENCAccessProof
                 typeof(Hk_AudioTrace),        // diagnostic: live-trace Wwise PostEvent (gated behind the F8 Audio Trace toggle)
                 typeof(Hk_DistrictRepoint),   // EXPERIMENTAL: replace one district's on-map visual (docs/District-Visuals.md)
                 typeof(Hk_DistrictBufferHeadroom), // EXPERIMENTAL: enlarge the shared 'Visual' mesh buffer so custom district meshes fit (opt-in)
+                typeof(Hk_PropRegister),           // EXPERIMENTAL: register our prop MeshCollections at AnimationLoad, before pawn resolution (opt-in)
             };
             foreach (var t in hooks)
             {
@@ -119,6 +139,8 @@ namespace ENCAccessProof
                 UniversalInject.ProcessEngineAudio();   // engine sound: fire the per-ship Start/Stop move sound on our units
                 UniversalInject.TickDistrictMeshSwap(); // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
             }
+            if (PropRegisterOn.Value)
+                UniversalInject.TickPropRegister();     // EXPERIMENTAL props: register our MeshCollections once the AnimationManager exists
         }
 
         private void OnGUI()

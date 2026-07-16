@@ -2332,6 +2332,100 @@ namespace ENCAccessProof
             }
         }
 
+        // ---- EXPERIMENTAL pawn PROP/attachment axis (custom weapons & gear on attachment slots; the sling experiment) ----
+        // A pawn's Attachements[] slot references a PresentationPawnFragmentMesh (the EQ_* assets) = {ModelPrefab, ModelName,
+        // MaterialRef}: a RIGID mesh glued to the slot's bone, GPU-encoded at spawn. The loader hard-gates on
+        // AnimationManager.GetMeshCollection(ModelPrefab.Guid) finding a REGISTERED collection ("was not registered ...
+        // please add it to AnimationManagerContent" -> draws nothing). AnimationManager.RegisterMeshCollection is PUBLIC and
+        // also uploads the collection's meshes to the GPU content manager (LoadIFN) — so one call crosses the gate. Skeleton
+        // DERIVES from MeshCollection, so our baked Skeleton assets qualify directly. Retry per-frame: the manager instance
+        // and its internal list only exist once the presentation loads, and our bundle assets load async.
+        // TIMING is the crux: pawn definitions resolve their fragments INSIDE the game's loading chunk, so an Update-tick
+        // registration loses the race by construction — the pawn definition then fails its Load, never registers a pawn
+        // id, and its units draw as pawn definition 0 (the MAMMOTH — observed). The real seam is Hk_PropRegister below:
+        // a postfix on AnimationManager.AnimationLoad, which rebuilds the manager's collection list and registers the
+        // game's own collections; we append ours right there, before any pawn resolves. The Update tick stays as a
+        // late-repair safety net only.
+        static readonly List<object> propPending = new List<object>();   // parsed GUIDs not yet registered (per-session)
+        static bool propParsed; static int propWait;
+        internal static void RearmPropRegistration() { propParsed = false; propPending.Clear(); }   // AnimationLoad cleared the manager's list — register ours again
+        static void ParsePropGuidsIFN()
+        {
+            if (propParsed) return;
+            propParsed = true;
+            foreach (var part in (Plugin.PropCollectionGuids?.Value ?? "").Split(';'))
+            {
+                var g = ParseGuidCsv(part.Trim());
+                if (g != null) propPending.Add(g);
+            }
+            if (propPending.Count > 0) Plugin.Log.LogInfo($"[Props] {propPending.Count} mesh collection(s) to register");
+        }
+
+        // Called from Hk_PropRegister's postfix (loud: this is THE moment it must work) and from the Update tick (quiet).
+        internal static void RegisterPropCollections(object animationManager, bool loud)
+        {
+            ParsePropGuidsIFN();
+            if (propPending.Count == 0 || animationManager == null) return;
+            var amType = animationManager.GetType();
+            var mcType = AccessTools.TypeByName("Amplitude.Mercury.Animation.MeshCollection");
+            var adb = AccessTools.TypeByName("Amplitude.Framework.Asset.AssetDatabase");
+            var load = adb?.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .FirstOrDefault(m => (m.Name == "TryLoadAsset" || m.Name == "LoadAsset") && m.IsGenericMethodDefinition && m.GetParameters().Length == 1)?.MakeGenericMethod(mcType);
+            var reg = amType.GetMethod("RegisterMeshCollection", BindingFlags.Public | BindingFlags.Instance);
+            if (load == null || reg == null) { Plugin.Log.LogError("[Props] reflection targets missing (LoadAsset / RegisterMeshCollection) — axis disabled this session."); propPending.Clear(); return; }
+            for (int i = propPending.Count - 1; i >= 0; i--)
+            {
+                var mc = load.Invoke(null, new[] { propPending[i] });
+                if (mc == null || (mc is UnityEngine.Object uo && !uo))
+                    mc = LoadCollectionFromLoadedBundles(mcType, i);   // Amplitude's catalog misses our MeshCollection (type-specific) — pull it from the mounted Unity bundle by name instead
+                if (mc == null || (mc is UnityEngine.Object uo2 && !uo2))
+                {
+                    if (loud) Plugin.Log.LogError("[Props] mesh collection NOT loadable at AnimationLoad time (GUID catalog miss AND no loaded bundle carries it by name).");
+                    else if (++propWait % 600 == 0) Plugin.Log.LogWarning("[Props] a mesh collection isn't loadable yet — retrying.");
+                    continue;
+                }
+                reg.Invoke(animationManager, new[] { mc });   // dedupes internally; also LoadIFNs the meshes into the GPU content manager
+                Plugin.Log.LogInfo($"[Props] registered mesh collection '{(mc as UnityEngine.Object)?.name}'" + (loud ? " (at AnimationLoad — before pawn resolution)" : " (late tick)"));
+                propPending.RemoveAt(i);
+            }
+        }
+
+        // FALLBACK loader: Amplitude's AssetDatabase resolves our FxMesh/Skeleton GUIDs from the community bundle fine,
+        // but NOT a MeshCollection (type-specific catalog gap). The bundle itself is a plain Unity AssetBundle the game
+        // has already mounted, so load the asset object BY NAME from the loaded bundles — RegisterMeshCollection takes
+        // the object, and the collection's internal FxMesh GUID still resolves through the game's own (working) path.
+        static object LoadCollectionFromLoadedBundles(Type mcType, int pendingIndex)
+        {
+            try
+            {
+                var names = (Plugin.PropCollectionNames?.Value ?? "").Split(';');
+                string name = pendingIndex < names.Length ? names[pendingIndex].Trim() : "";
+                if (name.Length == 0) return null;
+                foreach (var b in UnityEngine.AssetBundle.GetAllLoadedAssetBundles())
+                {
+                    var a = b.LoadAsset(name);                 // short-name lookup; unique within our bundle
+                    if (a != null && mcType.IsInstanceOfType(a)) return a;
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Props] bundle-name fallback: " + ex.Message); }
+            return null;
+        }
+
+        internal static void TickPropRegister()   // safety net: late registration/repair only
+        {
+            try
+            {
+                ParsePropGuidsIFN();
+                if (propPending.Count == 0) return;
+                var amType = AccessTools.TypeByName("Amplitude.Mercury.Animation.AnimationManager");
+                var inst = amType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
+                           ?? GF(amType, "Instance")?.GetValue(null);
+                if (inst != null) RegisterPropCollections(inst, loud: false);
+            }
+            // The manager exists but its internals aren't built yet (Register throws before its Load) — retry next frame.
+            catch (Exception ex) { if (++propWait % 600 == 0) Plugin.Log.LogWarning("[Props] tick (retrying): " + ex.Message); }
+        }
+
         // Diagnostic: log a material's instance fields — flagging any that hold an FxEvolverMaterial (a loaded sub-material),
         // an array, or a Guid — and recurse into loaded sub-materials, so we can map where the leaf drawer's mesh actually is.
         static void DumpMaterialTree(object mat, int depth)
@@ -2654,6 +2748,31 @@ namespace ENCAccessProof
                 Plugin.Log.LogInfo($"[District] enlarged '{nm}' mesh buffer: {cur} -> {cur + extra} verts (+{extra} headroom).");
             }
             catch (System.Exception ex) { Plugin.Log.LogError("[District] buffer headroom: " + ex); }
+        }
+    }
+
+    // EXPERIMENTAL (opt-in, [Props]) — pawn PROP/attachment axis. Postfix on AnimationManager.AnimationLoad: the exact
+    // moment the game rebuilds its collection list and registers its OWN MeshCollections — we append ours right after,
+    // BEFORE any pawn definition resolves its fragments. (An Update-tick registration loses that race: the pawn def then
+    // fails its Load, never gets a pawn id, and its units draw as pawn definition 0 — a herd of mammoths, memorably.)
+    // AnimationLoad runs per game-session and clears the list, so we re-arm the pending set each time it fires.
+    [HarmonyPatch]
+    internal static class Hk_PropRegister
+    {
+        static MethodBase TargetMethod()
+        {
+            var am = AccessTools.TypeByName("Amplitude.Mercury.Animation.AnimationManager");
+            return am?.GetMethod("AnimationLoad", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+        }
+        static void Postfix(object __instance)
+        {
+            try
+            {
+                if (Plugin.PropRegisterOn == null || !Plugin.PropRegisterOn.Value) return;
+                UniversalInject.RearmPropRegistration();                     // fresh session list -> register everything again
+                UniversalInject.RegisterPropCollections(__instance, loud: true);
+            }
+            catch (System.Exception ex) { Plugin.Log.LogError("[Props] AnimationLoad postfix: " + ex); }
         }
     }
 }
