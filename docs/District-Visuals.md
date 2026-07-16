@@ -104,9 +104,15 @@ is untouched.**
 
 ## Remaining refinements (cosmetic only)
 
-1. **Scale + orientation.** The mesh bakes at unit orientation/size; tune Rotation / FxMesh `importAngles` / bake size
-   so it seats on the tile.
-2. **Texture (optional).** It rides the vanilla shader untextured → flat-dark; a baked atlas would color it.
+1. **Scale + orientation.** The mesh bakes at unit orientation/size, and the unit static-bake auto-aligns the *longest*
+   axis — which tips a near-cubic model (like the reactor's 34×30×38 box) onto its side on a district tile. Fix with the
+   bake **Rotation offset** (bakes into the mesh — cleanest) or the FxMesh **`importAngles`** (`-90,0,0` is the vanilla
+   upright default). The correction is **not always the obvious X axis** — the align can tip the model around any axis,
+   so expect to combine axes (the reactor needed **Rotation `Y=180, Z=90`**). **Workflow tip:** the
+   `<name>_FxMesh` **Inspector preview predicts the in-game orientation** — tune rotation/importAngles there and rebuild
+   the mod only once it looks upright, instead of a rebuild+relaunch round-trip per guess.
+2. **Scale.** Baked-in (the `Size` knob), so shrinking needs a re-bake — e.g. Size ~2.5 for tile-sized vs ~5 imposing.
+3. **Texture (optional).** It rides the vanilla shader untextured → flat-dark; a baked atlas would color it.
 
 ---
 
