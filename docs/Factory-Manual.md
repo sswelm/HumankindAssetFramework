@@ -75,8 +75,13 @@ their settings and work together**:
 - **Rotation offset (XYZ)** — degrees, on top of the auto forward-alignment. Static models bake this into the mesh; for
   animated models the orientation comes from the model's own rig, so export it facing correctly.
 - **Position offset (x, y, z = height)** — Static models bake it in (z = waterline; negative sinks a ship). For
-  **animated** models it's applied as a **runtime world offset** — **z raises altitude** — so you can change it and just
-  **relaunch, no re-bake**. This decouples altitude from Size (keep a small drone but fly it high).
+  **animated** models it's applied at **runtime, in the pawn's own frame** (2026-07-18): x = sideways, y = fore/aft,
+  z = altitude (world-up). The planar part is rotated by the unit's facing each frame, so the nudge **turns with the
+  unit** — same semantic as the static bake. (Before this it was added on fixed world axes, so the offset drifted
+  around the model as the unit turned.) Use y to push the model clear of its crew pawns — the clearance now holds in
+  every facing; the *sign* of "forward" depends on the rig, so if +y moves it the wrong way, flip it. Runtime =
+  change it, **Save (no bake)** in the Animation Lab (or re-bake here), and just **relaunch** — no mod rebuild.
+  This also decouples altitude from Size (keep a small drone but fly it high).
 - **Size (units)** — the world length of the model's longest axis. This is what you tune to make the model the right
   size next to other units. The Factory computes the scale for you; the Console logs it.
 

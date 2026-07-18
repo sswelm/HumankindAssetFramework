@@ -1131,18 +1131,39 @@ namespace ENCAccessProof
             }
         }
 
-        // Runtime position offset. Static models bake position into the mesh; the animated path can't, so apply it to the
-        // pawn's world ObjectSpace here. z = height -> world up (Y); x/y -> world plane. Re-applied each frame on the game's
-        // fresh world position, so it never accumulates. Logged once to confirm the axis.
+        // Runtime position offset. Static models bake position into the mesh — i.e. in the MODEL'S OWN FRAME, so it
+        // turns with the unit. The animated path can't bake it, so it must match that semantic here: rotate the
+        // planar (x = sideways, y = fore/aft) part by the pawn's FACING before adding. The old code added constant
+        // WORLD axes, which pointed a fixed compass direction — the offset visibly drifted around the model as the
+        // unit turned ("works for static, inconsistent in all directions when moving" bug). z (height) stays world-up
+        // (Y). Re-applied each frame on the game's fresh world position, so it never accumulates. Logged once.
         static void ApplyPositionOffset(ModelEntry e, object entry)
         {
             if (e.position == UnityEngine.Vector3.zero) return;
             var os = GetMember(entry, "ObjectSpace");                  // boxed TRS
             var tr = (UnityEngine.Vector3)GetMember(os, "Translation");
-            if (!posLogged) { posLogged = true; Plugin.Log.LogInfo($"[Uni] {e.resourceName} pawn world pos {tr} + registry position {e.position} (z->up Y)"); }
-            tr.x += e.position.x; tr.y += e.position.z; tr.z += e.position.y;   // registry z (height) -> world Y (up)
+            var planar = new UnityEngine.Vector3(e.position.x, 0f, e.position.y);   // registry y (fore/aft) -> local Z
+            bool rotated = TryQuaternion(GetMember(os, "Rotation"), out var rot);
+            if (rotated) planar = rot * planar;                        // pawn frame; else fall back to world axes
+            tr += planar; tr.y += e.position.z;                        // registry z (height) -> world Y (up)
+            if (!posLogged) { posLogged = true; Plugin.Log.LogInfo($"[Uni] {e.resourceName} position offset {e.position} applied in {(rotated ? "PAWN frame (turns with the unit)" : "world axes (Rotation unreadable)")}, z->up Y"); }
             SetMember(os, "Translation", tr);
             SetMember(entry, "ObjectSpace", os);
+        }
+
+        // ObjectSpace.Rotation as a UnityEngine.Quaternion: it may BE one, or an Amplitude quaternion type with the
+        // same x/y/z/w layout — read the components reflectively in that case. False (identity) if unreadable.
+        static bool TryQuaternion(object o, out UnityEngine.Quaternion q)
+        {
+            if (o is UnityEngine.Quaternion uq) { q = uq; return true; }
+            try
+            {
+                q = new UnityEngine.Quaternion(
+                    Convert.ToSingle(GetMember(o, "x")), Convert.ToSingle(GetMember(o, "y")),
+                    Convert.ToSingle(GetMember(o, "z")), Convert.ToSingle(GetMember(o, "w")));
+                return true;
+            }
+            catch { q = UnityEngine.Quaternion.identity; return false; }
         }
 
         // Runtime scale multiplier: fix an animated model baked at the wrong scale WITHOUT a re-bake (the howitzer's 100x FBX
