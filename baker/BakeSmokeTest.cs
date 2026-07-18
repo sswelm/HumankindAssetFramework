@@ -60,6 +60,17 @@ public static class BakeSmokeTest
                 string tag = (src.animated ? (src.rotation != Vector3.zero ? "animated-conv" : "animated-legacy") : "static") + "/" + src.materialMode;
                 string result;
 
+                // TEXTURE-ONLY overrides (Unit Retexture entries, e.g. "Retex_<pawn>"): no model file and no extracted
+                // source — there is nothing to bake, by design. Skipping is correct, not a failure.
+                bool textureOnly = string.IsNullOrWhiteSpace(src.modelFile)
+                    && !Directory.Exists(Path.Combine(Application.dataPath, "FactorySource", src.resourceName));
+                if (textureOnly)
+                {
+                    sb.AppendLine($"[{tag}] {src.resourceName}: SKIP (texture-only override — nothing to bake)");
+                    pass++;
+                    continue;
+                }
+
                 if (src.reuseExtracted)
                 {
                     // The model is deliberately cached (reuseExtracted) — forcing a fresh extraction here would bake it a
