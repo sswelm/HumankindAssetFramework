@@ -170,6 +170,10 @@ The plugin's own cfg (`…\community.humankind.encaccessproof.cfg`) — press **
   how packs merge + conflict rules, and the load report. Read this to add assets without touching ENC. Template:
   [haf-pack.example.json](docs/haf-pack.example.json).
 - **Everything it does:** [Capabilities.md](docs/Capabilities.md) — the full capability list + known limitations.
+- **How animation actually runs:** [Animated-Runtime.md](docs/Animated-Runtime.md) — the decompiled runtime
+  architecture: clip registration, the per-frame pose hook, the GPU pose math and its encoding formats, the
+  engine contracts (rotation-only, scale-1, name-ordered bones), multi-instance handling, and the verification
+  toolkit. The runtime companion to Factory-Manual §16.
 - **Build it:** [Building.md](docs/Building.md) — plugin build steps + the Blender dependency.
 - **Review / roadmap:** [Framework-Review.md](docs/Framework-Review.md) — verified code-review findings
   (prioritized) and the hardening order toward package-readiness.

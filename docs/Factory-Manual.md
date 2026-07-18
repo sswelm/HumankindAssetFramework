@@ -569,7 +569,8 @@ attack). The temporary `[Uni][facing]` periodic log can be removed on the next p
 
 Everything learned getting the first humanoid (a raw Sketchfab ValveBiped) fully working in-game, distilled into the
 practical guide. The Factory does the conversion **automatically** — this section explains what it does, how to drive
-it, and how to read the safeguards.
+it, and how to read the safeguards. *(For the other half — how the game consumes the baked result every frame — see
+[**Animated-Runtime.md**](Animated-Runtime.md).)*
 
 ### 16.1 What Amplitude's animation system can actually play
 
