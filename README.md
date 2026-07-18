@@ -163,7 +163,9 @@ The plugin's own cfg (`…\community.humankind.encaccessproof.cfg`) — press **
 
 ## Docs
 - **Use it:** [**Factory-Manual.md**](docs/Factory-Manual.md) — step-by-step guide (every field, the static + animated
-  workflows, a troubleshooting table). Start here if you just want to add a model.
+  workflows, a troubleshooting table). Start here if you just want to add a model. §16 is the dedicated
+  **animated-model conversion guide**: what Amplitude's animation system can play, the automatic raw-rig conversion
+  (rest normalization, rotation-only rebake, bone ordering, unit-clean export), and the symptom→cause map.
 - **Ship your own pack:** [**Multi-Mod.md**](docs/Multi-Mod.md) — the HAF pack format, the `haf_packs/` drop folder,
   how packs merge + conflict rules, and the load report. Read this to add assets without touching ENC. Template:
   [haf-pack.example.json](docs/haf-pack.example.json).

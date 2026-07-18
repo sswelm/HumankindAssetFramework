@@ -198,6 +198,10 @@ lowest triangle count with no visible loss: drop the count → Bake → watch th
 Your model must be **rigged with a skeletal animation** (an armature + at least one clip). glTF/GLB is easiest (the clip
 and bone pickers read it directly).
 
+> **Raw / auto-rigged download (Sketchfab etc.)?** Read **§16 — Converting an animated model** first: it explains the
+> engine's hard constraints (rotation-only clips, scale-1 skeletons, name-ordered bones), the automatic conversion the
+> Factory performs, and the troubleshooting map for floating heads, smearing parts, and wrong orientations.
+
 1. **In the Factory: Pawn description** — choose a donor with **no animated sub-parts** and a full idle/move set (a land
    vehicle is ideal; an attack-helicopter donor forces its rotor onto your model). Resource name.
 2. **Model file** — the rigged `.glb`/`.fbx`. When detection finds animation you'll see *"Animation detected"* with an
@@ -555,3 +559,95 @@ pipeline; the soldier ships with exactly that). `0,0,0` remains the byte-identic
 soldier's rig was properly converted — the corrupted skeleton state was evidently disrupting the attack presentation
 too (mechanism not separately traced; if it regresses, the designed fix was a Pose0 pass-through window during the
 attack). The temporary `[Uni][facing]` periodic log can be removed on the next plugin change.
+
+---
+
+## 16. Converting an animated model — from raw rig to Amplitude-ready
+
+Everything learned getting the first humanoid (a raw Sketchfab ValveBiped) fully working in-game, distilled into the
+practical guide. The Factory does the conversion **automatically** — this section explains what it does, how to drive
+it, and how to read the safeguards.
+
+### 16.1 What Amplitude's animation system can actually play
+
+These are hard engine constraints (established by decompiling the bake — `ClipEntry.Reimport`,
+`Skeleton.Reimport` — and the runtime — `AnimationManager.GetBoneTRS/ApplyPose/GetPoseTRS`):
+
+| Constraint | Consequence for your model |
+|---|---|
+| **Clips are rotation-only** (translations are dropped or mis-scaled) | Any rig whose animation *moves* bones (location keys) must be converted |
+| **Uniform scale, and effectively scale 1** | The skeleton must bake with every `BindPose`/`Local` scale = 1 — no unit-conversion "sandwiches" on nodes |
+| **Bones are sorted ALPHABETICALLY, parents must sort before children** | Rigs whose names don't sort topologically (e.g. `_014` < `_02`) get scrambled chains |
+| **Bounded chain depth** (CPU cap 15) | Pass-through root bones waste depth budget |
+| **One clip per ClipCollection folder** | The bake isolates your FBX in `anim/` automatically |
+
+Amplitude's own art pipeline satisfies all of these silently, by convention. Raw downloaded rigs usually violate
+several at once — and the failures MASK each other, which is what makes hand-debugging brutal (it took five stacked
+defects to get one soldier standing).
+
+### 16.2 The three kinds of source rig
+
+1. **Clean, authored rig** (our drone; anything from `deploy_convert.py`) — rotation-driven animation, sane rest
+   pose. Bake with **Rotation `0,0,0`** = the untouched legacy path. If it works, never touch it.
+2. **Clean rig, wrong orientation** — rotation-driven but bakes lying down/facing wrong. Set a **Rotation** (probe
+   one axis at a time in 90° steps, judge IN-GAME) — this triggers the conversion path below, which is fine.
+3. **Auto-rigged / "assembled-by-animation" rig** (the Combine soldier; typical of Sketchfab auto-rigs) — the REST
+   POSE IS NOT THE BODY: the clip's location keys assemble the model every frame. Diagnostic tell: lots of
+   `pose.bones[...].location` curves, and body parts that float/detach in-game while Unity's own preview plays the
+   FBX perfectly (Unity supports location keys; Amplitude doesn't). These NEED the conversion path — set any
+   non-zero Rotation; if the model needs no net rotation, use **`360,0,0`** (identity — quirk until the trigger is
+   refactored onto its own switch).
+
+### 16.3 What the conversion path does (automatic, in this order)
+
+Everything below runs inside the Bake's Blender step (`Tools/rig_anim.py`) whenever Rotation ≠ 0:
+
+1. **Rest normalization + visual rebake** *(the key step for type-3 rigs)* — snapshots every bone's visual matrix on
+   every frame, applies the armature modifier at frame 0 (the assembled body becomes the bind mesh), applies the
+   frame-0 pose as the new rest, re-binds, then re-derives the ENTIRE clip as pure rotations against the new rest.
+   Console proof: `RIGANIM rest-normalized + rebaked N frames x M bones ... frame-0 residual = 0.0001…` — the
+   residual must be ~0.
+2. **Location-curve strip** — whatever translations remain are removed (Amplitude can't play them anyway).
+3. **No-op root collapse** — unanimated, unweighted, single-child root bones (`_rootJoint`) are deleted for depth.
+4. **Topological bone rename** — every bone prefixed `b###_` in hierarchy order, so alphabetical = topological.
+5. **Rotation + scale folded into the data** — your Rotation value and all node scales are baked into vertices +
+   bone rests; nodes export as identity.
+6. **Unit-clean export** — `global_scale=0.01` cancels the FBX exporter's m→cm ×100 root scaling, so the file carries
+   no scale annotations (`UnitScaleFactor 1.0`, all bind clusters 1.0).
+
+The Unity side then imports with `useFileScale` off (non-Fix-100× path), so the baked skeleton reads **`Scale: 1` on
+every bone** — verify with a text editor on `Assets/Resources/<name>_Skeleton.asset` if in doubt.
+
+### 16.4 The workflow, start to finish
+
+1. **Factory**: pick the target pawn, Browse the model, set Size. **Animation Lab** (auto-opens via the jump button):
+   pick the Clip. Bake once with Rotation `0,0,0` — maybe you have a type-1 rig and you're done.
+2. Rebuild the mod, look in-game (**the game is the only honest judge — the previews' orientation is meaningless for
+   animated models**).
+3. Wrong orientation or floating parts → set Rotation (start `90,0,0`, probe one axis; `360,0,0` for
+   identity-with-conversion) → Bake → check the console for the conversion lines and the **residual ≈ 0** → rebuild →
+   judge in-game. Two or three probes typically suffice.
+4. Watch the Console safeguards on every bake: the `RIGANIM` lines tell you exactly which steps ran, and the bake
+   fails loudly rather than shipping a broken skeleton.
+
+### 16.5 Troubleshooting map (symptoms → cause)
+
+| In-game symptom | Cause | Fix |
+|---|---|---|
+| Model lies down / faces wrong, plays fine otherwise | Orientation (type 2) | Rotation probe, one axis at a time |
+| A body part (head, hands) floats rigidly detached; Unity preview plays the FBX fine | Type-3 rig: structural location keys, scrambled rest | The conversion path (non-zero Rotation) does it all |
+| Parts smear/stretch, "movement looks exaggerated" | Translation keys playing unscaled | Same — conversion path |
+| Whole model 100× too big | FBX unit scale | Fix-100× toggle (per-model; the conversion path usually makes it unnecessary) |
+| Deep chains (fingers, head) scrambled, shallow parts fine | Bone-name sort order | Automatic (topological rename) on the conversion path |
+| Model won't turn with movement | The plugin was clearing the game's facing layer | Fixed globally — cleared only for artillery models now |
+| "Is it my model or the pipeline?" | — | Bake `Tools/make_litmus.py`'s chain-of-cubes rig; if it renders straight in-game, the pipeline is fine — it's the model |
+
+### 16.6 Inspection tools (when you need to see for yourself)
+
+- `Tools/fbx_binddump.py` — raw-parses an FBX: unit scale factor + every bind cluster's scale.
+- `Tools/fbx_lclscale.py` — raw-parses an FBX: non-identity node scales (the ×100 root tell).
+- `Tools/make_litmus.py` — generates the diagnostic chain rig.
+- The baked assets are plain YAML: grep `<name>_Skeleton.asset` for `Scale:` values and parent ordering,
+  `<name>_Clips.asset` for per-bone `EncodingFormat` (1 = rotation-only, the target).
+
+Run any of them with `blender -b --python <script> -- <args>`.
