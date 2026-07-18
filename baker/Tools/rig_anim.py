@@ -13,7 +13,7 @@
 # Usage: blender -b --python rig_anim.py -- <input> <output.fbx> <targetTris> [bonePrefixesCSV] [clipName] [albedoOut.png] [keepMats] [rotXdeg,rotYdeg,rotZdeg]
 import bpy, bmesh, sys, os
 from math import radians
-from mathutils import Matrix
+from mathutils import Matrix, Vector
 
 argv = sys.argv[sys.argv.index("--") + 1:]
 inp, outp, target = argv[0], argv[1], int(argv[2])
@@ -109,6 +109,48 @@ if prefixes:
     if kept == 0:
         print("RIGANIM ERROR: bone-filter %s matched no animated bone — every fcurve was stripped, the clip would be frozen. Animated bones: %s" % (prefixes, avail))
         sys.exit(1)
+
+# FOLD FRAME-0 BONE LOCATIONS INTO THE REST POSE — auto-rigged models (the Combine soldier) often park a bone's REST
+# somewhere else and hold it in place with a constant corrective location key in every clip. Amplitude can't play
+# location keys (see the strip below), so without this fold the correction is lost and the part sits rigidly displaced
+# (the soldier's head). Fix: evaluate each location-keyed bone at the clip's first frame, convert that offset to
+# armature space via the bone's rest orientation, and move the bone's REST (head+tail, whole subtree — pose location
+# shifts descendants too, and offsets from nested keyed bones compose additively since they're pure translations).
+# After the fold, frame-0 pose == rest, and the rotation-only clip plays around the corrected pivots.
+try:
+    _loc0 = {}
+    for _coll, _fc in all_fcurve_owners(act):
+        _dp = _fc.data_path
+        if _dp.startswith("pose.bones") and _dp.endswith(".location"):
+            _b = _dp.split('["', 1)[1].split('"]', 1)[0]
+            _loc0.setdefault(_b, [0.0, 0.0, 0.0])[_fc.array_index] = _fc.evaluate(act.frame_range[0])
+    if _loc0:
+        _rest3 = {b.name: b.matrix_local.to_3x3() for b in arm.data.bones}
+        _kids = {b.name: [c.name for c in b.children] for b in arm.data.bones}
+        bpy.ops.object.select_all(action='DESELECT')
+        arm.select_set(True)
+        bpy.context.view_layer.objects.active = arm
+        bpy.ops.object.mode_set(mode='EDIT')
+        _eb = arm.data.edit_bones
+        _moved = 0
+        for _bname, _l in _loc0.items():
+            if _bname not in _eb or _bname not in _rest3: continue
+            _off = _rest3[_bname] @ Vector(_l)     # bone-local frame-0 offset -> armature space
+            if _off.length < 1e-9: continue
+            _stack = [_bname]
+            while _stack:
+                _n = _stack.pop()
+                if _n in _eb:
+                    _eb[_n].head += _off; _eb[_n].tail += _off
+                _stack.extend(_kids.get(_n, []))
+            _moved += 1
+        bpy.ops.object.mode_set(mode='OBJECT')
+        if _moved:
+            print("RIGANIM folded frame-0 locations into RESTS for %d bones (corrective offsets preserved)" % _moved)
+except Exception as _e:
+    try: bpy.ops.object.mode_set(mode='OBJECT')
+    except Exception: pass
+    print("RIGANIM WARN: rest-fold failed (%s) — location keys will just be stripped" % _e)
 
 # STRIP BONE-TRANSLATION CURVES — Amplitude clips are effectively ROTATION-ONLY: its clip bake reads translation keys
 # at the FBX's NATIVE scale, bypassing the importer's unit conversion, so on a Fix-100x rig a 2 cm neck bob becomes
