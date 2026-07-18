@@ -176,6 +176,13 @@ public class AnimationLabWindow : EditorWindow
             "in the sky). PER-MODEL: if the model bakes huge/floating, tick it; if ticking makes it vanish, untick (the " +
             "drone bakes right OFF; the howitzer needs it ON). Re-bake after changing."),
             cur.animUnitFix);
+        cur.convertRig = EditorGUILayout.Toggle(new GUIContent("Convert raw rig (auto-rigged models)",
+            "Bake-time PIPELINE switch. ON = the raw-rig conversion: rest-normalize + visual rebake (for rigs whose clips " +
+            "assemble the body with location keys), no-op root collapse, topological bone rename, clean-unit export — what " +
+            "made the Combine soldier work. OFF = the byte-identical legacy pipeline for purpose-made rigs (drone, howitzer). " +
+            "Tick it when a rig plays fine in the preview but tears apart / displaces in-game; usually paired with " +
+            "Fix 100× OFF. Re-bake after changing."),
+            cur.convertRig);
         if (!UniversalBaker.BlenderAvailable())
             EditorGUILayout.HelpBox("The animated bake needs Blender (to slim the rig + bake the clip) — it wasn't found. " +
                 "Install Blender or set EditorPrefs 'ENC.blenderPath' to blender.exe.", MessageType.Warning);
@@ -246,6 +253,7 @@ public class AnimationLabWindow : EditorWindow
         cur = JsonUtility.FromJson<ModelDef>(JsonUtility.ToJson(reg));
         cur.animated = true;
         cur.animClip = mine.animClip; cur.animateBones = mine.animateBones; cur.animUnitFix = mine.animUnitFix;
+        cur.convertRig = mine.convertRig;
         cur.fireOnAttack = mine.fireOnAttack; cur.deployOnStop = mine.deployOnStop;
         cur.deployPoseTime = mine.deployPoseTime; cur.deploySpeed = mine.deploySpeed; cur.recoilSpeed = mine.recoilSpeed;
     }

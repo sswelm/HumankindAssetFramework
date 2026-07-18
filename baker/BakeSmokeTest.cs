@@ -30,12 +30,13 @@ public static class BakeSmokeTest
     {
         var defs = ModelRegistry.Load();
         if (defs == null || defs.Count == 0) { EditorUtility.DisplayDialog("Bake Smoke Test", "No models in the registry.", "OK"); return; }
-        // The path key includes the CONVERSION dimension (2026-07-19): an animated model with rotation != 0 goes
-        // through the raw-rig conversion (rest normalization, rename, scale fold, unit-clean export) while rotation
-        // 0,0,0 is the byte-identical legacy pipeline — two genuinely different code paths that each need a
-        // representative (before this, whichever sorted first shadowed the other).
+        // The path key includes the CONVERSION dimension (2026-07-19): an animated model with convertRig set goes
+        // through the raw-rig conversion (rest normalization, rename, scale fold, unit-clean export) while the flag
+        // off is the byte-identical legacy pipeline — two genuinely different code paths that each need a
+        // representative (before this, whichever sorted first shadowed the other). (The trigger used to be
+        // 'rotation != 0'; the explicit convertRig flag replaced it on 2026-07-18.)
         var reps = defs.Where(d => !d.resourceName.StartsWith(PREFIX))
-                       .GroupBy(d => (d.animated, d.materialMode, converted: d.animated && d.rotation != Vector3.zero))
+                       .GroupBy(d => (d.animated, d.materialMode, converted: d.animated && d.convertRig))
                        .Select(g => g.First()).ToList();
         Run(reps, "one per bake-path");
     }
@@ -57,7 +58,7 @@ public static class BakeSmokeTest
             for (int i = 0; i < models.Count; i++)
             {
                 var src = models[i];
-                string tag = (src.animated ? (src.rotation != Vector3.zero ? "animated-conv" : "animated-legacy") : "static") + "/" + src.materialMode;
+                string tag = (src.animated ? (src.convertRig ? "animated-conv" : "animated-legacy") : "static") + "/" + src.materialMode;
                 string result;
 
                 // TEXTURE-ONLY overrides (Unit Retexture entries, e.g. "Retex_<pawn>"): no model file and no extracted

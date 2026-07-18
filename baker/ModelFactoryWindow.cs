@@ -191,6 +191,7 @@ public class ModelFactoryWindow : EditorWindow
             var beh = new List<string>();
             if (!string.IsNullOrWhiteSpace(cur.animClip)) beh.Add("clip '" + cur.animClip + "'");
             if (!string.IsNullOrWhiteSpace(cur.animateBones)) beh.Add("bones '" + cur.animateBones + "'");
+            if (cur.convertRig) beh.Add("raw-rig conversion");
             if (cur.fireOnAttack) beh.Add("fire-on-attack");
             if (cur.deployOnStop) beh.Add($"deploy-on-stop (pose {cur.deployPoseTime:0.##}, speed {cur.deploySpeed:0.##})");
             if (cur.fireOnAttack && cur.deployOnStop) beh.Add($"recoil (speed {cur.recoilSpeed:0.##})");
@@ -520,7 +521,7 @@ public class ModelFactoryWindow : EditorWindow
     // the flag so a stale unticked checkbox can't silently downgrade a working animated unit to a static bake
     // (the "howitzers on their side" incident).
     internal static bool LooksAnimated(ModelDef d) =>
-        !string.IsNullOrWhiteSpace(d.animClip) || d.fireOnAttack || d.deployOnStop ||
+        !string.IsNullOrWhiteSpace(d.animClip) || d.fireOnAttack || d.deployOnStop || d.convertRig ||
         !string.IsNullOrWhiteSpace(d.animateBones) ||
         (d.clip != null && d.clip.Length == 4 && !(d.clip[0] == 0 && d.clip[1] == 0 && d.clip[2] == 0 && d.clip[3] == 0));
 
@@ -822,6 +823,7 @@ public class ModelFactoryWindow : EditorWindow
             || (cur.animClip ?? "") != (e.animClip ?? "")
             || (cur.animateBones ?? "") != (e.animateBones ?? "")
             || cur.materialMode != e.materialMode
+            || cur.convertRig != e.convertRig
             || (cur.modelFile ?? "") != (e.modelFile ?? "");
     }
 
@@ -836,7 +838,7 @@ public class ModelFactoryWindow : EditorWindow
         albedoBrightness = cur.albedoBrightness, albedoSaturation = cur.albedoSaturation, keepBlack = cur.keepBlack, materialMode = cur.materialMode,
         atlasMaxDim = cur.atlasMaxDim <= 0 ? 512 : cur.atlasMaxDim,
         stripParts = cur.stripParts,
-        animated = cur.animated, animClip = (cur.animClip ?? "").Trim(), animateBones = (cur.animateBones ?? "").Trim(), animUnitFix = cur.animUnitFix,
+        animated = cur.animated, animClip = (cur.animClip ?? "").Trim(), animateBones = (cur.animateBones ?? "").Trim(), animUnitFix = cur.animUnitFix, convertRig = cur.convertRig,
         keepTexture = cur.reuseExtracted   // on the ANIMATED path the checkbox's ONLY meaning is 'protect the hand-edited extracted texture'
     };
 
@@ -867,6 +869,7 @@ public class ModelFactoryWindow : EditorWindow
             if (regE != null)
             {
                 cur.animClip = regE.animClip; cur.animateBones = regE.animateBones; cur.animUnitFix = regE.animUnitFix;
+                cur.convertRig = regE.convertRig;
                 cur.fireOnAttack = regE.fireOnAttack; cur.deployOnStop = regE.deployOnStop;
                 cur.deployPoseTime = regE.deployPoseTime; cur.deploySpeed = regE.deploySpeed; cur.recoilSpeed = regE.recoilSpeed;
                 if (regE.animated) cur.animated = true;

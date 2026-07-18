@@ -9,9 +9,9 @@
 // Two fixtures, two menu items:
 //   (litmus)            — the deterministic synthetic 12-deep chain (Tools/make_litmus.py, built via Blender on
 //                         demand). Fast-ish, always available, covers the mechanics.
-//   (registry converted models) — THE REAL RIGS: every registry model on the conversion path (animated + rotation
-//                         set, e.g. the Combine soldier's location-keyed auto-rig — 62 bones, 342 frames, the
-//                         full rest-normalization) baked under a throwaway name. The strongest net; needs the
+//   (registry converted models) — THE REAL RIGS: every registry model on the conversion path (animated +
+//                         convertRig, e.g. the Combine soldier's location-keyed auto-rig — 62 bones, 342 frames,
+//                         the full rest-normalization) baked under a throwaway name. The strongest net; needs the
 //                         source model files on disk.
 // Both bake through the SAME ConfigFor route as the Bake button and clean up after themselves; the registry is
 // never touched. Slow (real Blender bakes) — pre-commit checks after touching rig_anim.py / UniversalBaker.
@@ -45,7 +45,7 @@ public static class ConversionGateTest
         var def = new ModelDef
         {
             resourceName = "litmus", pawnDescription = "__convgate_dummy__", modelFile = litmus.Replace('\\', '/'),
-            animated = true, animClip = "", rotation = new Vector3(90f, 0f, 0f), size = 2f,
+            animated = true, convertRig = true, animClip = "", rotation = new Vector3(90f, 0f, 0f), size = 2f,
             targetTris = 5000, atlasMaxDim = 256, materialMode = MaterialMode.Auto
         };
         int fails = BakeAndAssert(def);
@@ -59,9 +59,9 @@ public static class ConversionGateTest
     {
         // The REAL adversarial fixtures: every registry model on the conversion path (the Combine soldier's
         // location-keyed ValveBiped being the canonical one). Skips models whose source file is gone.
-        var defs = ModelRegistry.Load().Where(d => d.animated && d.rotation != Vector3.zero
+        var defs = ModelRegistry.Load().Where(d => d.animated && d.convertRig
                                                && !d.resourceName.StartsWith(PREFIX)).ToList();
-        if (defs.Count == 0) { Debug.LogWarning("[ConvGate] no converted models in the registry (animated + rotation set) — nothing to test."); return; }
+        if (defs.Count == 0) { Debug.LogWarning("[ConvGate] no converted models in the registry (animated + 'Convert raw rig') — nothing to test."); return; }
         int total = 0, tested = 0;
         foreach (var src in defs)
         {

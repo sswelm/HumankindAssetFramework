@@ -159,13 +159,15 @@ see the [Factory Manual](Factory-Manual.md).
   extent × node scale): metre-scale → on, tiny-authored (e.g. a 0.0025u drone with a 0.01 root node scale) → off. Best-effort
   and overridable; for FBX/.blend/OBJ (unreadable cheaply) it makes no guess and you set it by hand. On = measure the FBX at
   true scale then bake with the unit scale on, so Size = in-game units; off = normal import. The *static* path is unaffected.
-  **Note (2026-07-19):** models going through the **raw-rig conversion** (any non-zero Rotation) export unit-clean — for
-  those, leave Fix-100× **off** (a live file-scale would re-poison the skeleton with a 0.01-bindpose/×100-root sandwich
-  that displaces deep bone chains; the toggle now matters mainly for legacy rigs at Rotation `0,0,0`, like the howitzer).
+  **Note (2026-07-19):** models going through the **raw-rig conversion** (the "Convert raw rig" checkbox in the
+  Animation Lab) export unit-clean — for those, leave Fix-100× **off** (a live file-scale would re-poison the skeleton
+  with a 0.01-bindpose/×100-root sandwich that displaces deep bone chains; the toggle now matters mainly for legacy
+  rigs with the conversion off, like the howitzer).
 - **Amplitude clips are ROTATION-ONLY** (engine constraint, decompiled): bone translation keys are dropped/mis-scaled at
   runtime. Rigs that animate positions can't play as-is — the automatic conversion (Factory-Manual §16) re-expresses
   them as rotations (rest normalization + visual rebake). Genuine translation *motion* (a sliding recoil) still needs
   the far-pivot rotation trick (`deploy_convert.py`).
 - **Preview orientation ≠ game orientation for animated models:** the embedded preview applies fixed display flips —
-  judge orientation IN-GAME only, probing Rotation one axis at a time. Quirk: a rig that needs the conversion but no net
-  rotation uses Rotation `360,0,0` (identity that still triggers the conversion path; gate refactor pending).
+  judge orientation IN-GAME only, probing Rotation one axis at a time. The conversion path is selected by the explicit
+  **"Convert raw rig"** checkbox (2026-07-18 gate refactor — it used to trigger on any non-zero Rotation, forcing a
+  `360,0,0` identity trick for no-net-rotation conversions; Rotation is just a rotation again).

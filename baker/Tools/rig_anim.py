@@ -10,7 +10,7 @@
 #   5. export the first material's base-colour image as the albedo PNG (for the Factory's atlas)
 #   6. join to 1 mesh + 1 material + quadric-decimate to ~target tris (KEEPING the armature + weights)
 #   7. export a slim FBX with baked animation
-# Usage: blender -b --python rig_anim.py -- <input> <output.fbx> <targetTris> [bonePrefixesCSV] [clipName] [albedoOut.png] [keepMats] [rotXdeg,rotYdeg,rotZdeg]
+# Usage: blender -b --python rig_anim.py -- <input> <output.fbx> <targetTris> [bonePrefixesCSV] [clipName] [albedoOut.png] [keepMats] [rotXdeg,rotYdeg,rotZdeg] [convertRig]
 import bpy, bmesh, sys, os
 from math import radians
 from mathutils import Matrix, Vector
@@ -30,6 +30,16 @@ if len(argv) > 7 and argv[7].strip():
         rig_rot = [float(v) for v in argv[7].split(",")][:3] + [0.0] * max(0, 3 - len(argv[7].split(",")))
     except Exception:
         print("RIGANIM WARN: bad rotation arg '%s' — ignoring" % argv[7])
+# EXPLICIT conversion switch (argv[8], "1"/"0"). Selects the RAW-RIG CONVERSION path: no-op root collapse, topological
+# bone rename, rotation/scale fold into the data, clean-unit export (global_scale 0.01). It used to be inferred from
+# rotation != 0 (the soldier shipped with a 360,0,0 identity trick; a rotation edit on a legacy model silently
+# rerouted its bake) — the flag makes rotation just a rotation again. Absent arg = the old inference, so old callers
+# keep their exact behavior.
+if len(argv) > 8 and argv[8].strip() in ("0", "1"):
+    convert_rig = argv[8].strip() == "1"
+else:
+    convert_rig = any(abs(v) > 1e-4 for v in rig_rot)
+print("RIGANIM conversion path: %s" % ("ON (raw-rig convert)" if convert_rig else "off (legacy byte-identical)"))
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
 ext = os.path.splitext(inp)[1].lower()
@@ -339,7 +349,7 @@ if not any(md.type == 'ARMATURE' for md in joined.modifiers):
 # the GPU pass suspected lower): a raw rig's pass-through roots (the soldier's `_rootJoint`: no animation channels,
 # no vertex weights, single child) burn depth for nothing and push the head/hand chains over the working range.
 # Deleting them re-roots their child; Amplitude adds the armature object as one more level on top regardless.
-if any(abs(v) > 1e-4 for v in rig_rot):
+if convert_rig:
     _animated_bones = set()
     for _c2, _fc2 in all_fcurve_owners(act):
         if _fc2.data_path.startswith('pose.bones['):
@@ -373,8 +383,8 @@ if any(abs(v) > 1e-4 for v in rig_rot):
 # ('..._014' sorts before '..._02'), so the head/neck and forearm chains read their parents' garbage transforms and
 # hang displaced in-game. Prefixing every bone with its breadth-first index makes alphabetical == topological.
 # Blender auto-syncs vertex groups + fcurve paths on rename; the bone-filter above already ran on the ORIGINAL names.
-# Gated to the rotation-set path: 0,0,0 stays the byte-identical legacy pipeline.
-if any(abs(v) > 1e-4 for v in rig_rot):
+# Gated to the CONVERSION path: legacy stays the byte-identical pipeline.
+if convert_rig:
     _order = []
     def _walkb(b):
         _order.append(b.name)
@@ -386,14 +396,15 @@ if any(abs(v) > 1e-4 for v in rig_rot):
         arm.data.bones[_bname].name = "b%03d_%s" % (_i, _bname)
     print("RIGANIM bones renamed with topological prefixes (%d bones) — parents now sort before children" % len(_order))
 
-# RIG ROTATION — ONLY when a rotation is requested (rotation 0,0,0 = the EXACT legacy pipeline, byte-for-byte: no
-# object fiddling, no fold — models that were correct before stay correct; the fold is world-preserving for Unity's
-# mesh import but NOT for Amplitude's skeleton bake, so folding unconditionally flipped the previously-good howitzer
-# upside-down in-game). When a rotation IS set: rotate the parent-less objects in world space, strip OBJECT-level
-# animation fcurves (a glTF often keys the armature NODE itself — they block transform_apply and re-assert the old
-# orientation each frame), then transform_apply INTO THE DATA (vertices + bone rests, identity nodes) — object-level
-# rotation alone is dropped downstream (proven in-game on the Combine soldier, which needs 90,0,0 to stand).
-if any(abs(v) > 1e-4 for v in rig_rot):
+# RIG ROTATION + TRANSFORM FOLD — CONVERSION path only (legacy = the EXACT old pipeline, byte-for-byte: no object
+# fiddling, no fold — models that were correct before stay correct; the fold is world-preserving for Unity's mesh
+# import but NOT for Amplitude's skeleton bake, so folding unconditionally flipped the previously-good howitzer
+# upside-down in-game). On the conversion path: rotate the parent-less objects in world space (identity when rotation
+# is 0,0,0 — the fold/strip still run, they are what makes the clean-unit export sound), strip OBJECT-level animation
+# fcurves (a glTF often keys the armature NODE itself — they block transform_apply and re-assert the old orientation
+# each frame), then transform_apply INTO THE DATA (vertices + bone rests, identity nodes) — object-level rotation
+# alone is dropped downstream (proven in-game on the Combine soldier).
+if convert_rig:
     rot = (Matrix.Rotation(radians(rig_rot[1]), 4, 'Z') @
            Matrix.Rotation(radians(rig_rot[0]), 4, 'X') @
            Matrix.Rotation(radians(rig_rot[2]), 4, 'Y'))
@@ -426,10 +437,10 @@ bpy.ops.object.select_all(action='SELECT')
 # a x100 root — a sandwich Amplitude's uniform-scale TRS composition mangles on deep bone chains (the Combine
 # soldier's head rode off his shoulders). The proven ReconDrone file has NO node scaling only by luck: its glTF's
 # tiny-authored 0.01 object scale exactly cancels the exporter's x100.
-# - ROTATION/FOLD path (rotation set): transform_apply normalized objects to scale 1, so pre-divide with
+# - CONVERSION path: transform_apply normalized objects to scale 1, so pre-divide with
 #   global_scale=0.01 -> net node scale 1, UnitScaleFactor 1, bind clusters 1 — the clean drone profile, by design.
-# - LEGACY path (rotation 0,0,0): keep the exporter untouched, byte-identical output (the working models' contract).
-gscale = 0.01 if any(abs(v) > 1e-4 for v in rig_rot) else 1.0
+# - LEGACY path: keep the exporter untouched, byte-identical output (the working models' contract).
+gscale = 0.01 if convert_rig else 1.0
 if gscale != 1.0:
     print("RIGANIM export global_scale=0.01 (cancels the exporter's m->cm x100 root scaling)")
 bpy.ops.export_scene.fbx(filepath=outp, use_selection=False, add_leaf_bones=False, global_scale=gscale,

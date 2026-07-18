@@ -40,6 +40,7 @@ public struct BakeConfig
     public string  animClip;        // ANIMATED only: name of the clip to bake when the model has several (e.g. "hover"); empty = the assigned/first action
     public string  animateBones;    // ANIMATED only: comma-separated bone-name prefixes to keep animation on (e.g. "prop,rotor"); empty = keep the whole clip
     public bool    animUnitFix;     // ANIMATED only: if the model bakes ~100x too big & floats (a metre->cm FBX unit scale), tick this — the baker measures the FBX at its true scale (useFileScale off) then bakes with the unit scale on, so Size = in-game units. Per-model because different rig exports embed different unit scales (some need it, some break with it).
+    public bool    convertRig;      // ANIMATED only: route the Blender step through the RAW-RIG CONVERSION (rest-normalize + rebake, root collapse, topological rename, rotation/scale fold, clean-unit export). THE pipeline switch — rotationEuler is just a rotation again (applied only on this path; the legacy path stays byte-identical).
     public bool    keepTexture;     // ANIMATED only: when the Blender step re-runs, DON'T regenerate the extracted albedo (protects hand-edited textures). This is the 'Reuse extracted files' checkbox's ONLY effect on the animated path — geometry caching is automatic (the windows re-slim exactly when a Blender-step setting changed).
 }
 
@@ -178,7 +179,7 @@ public static class UniversalBaker
             if (cfg.keepTexture && File.Exists(albedoOut))
             { Debug.Log($"[Factory] {name}: keeping the existing extracted albedo (hand-edit protection)."); albedoOut = ""; }
             bool keepMats = cfg.materialMode != MaterialMode.Single;   // Auto/Multi keep the material slots so the atlas step can pack them (Single collapses to 1, the old default)
-            if (!RigAnimViaBlender(cfg.modelFile, fbxFull, target, cfg.animateBones ?? "", cfg.animClip ?? "", albedoOut, keepMats, cfg.rotationEuler))
+            if (!RigAnimViaBlender(cfg.modelFile, fbxFull, target, cfg.animateBones ?? "", cfg.animClip ?? "", albedoOut, keepMats, cfg.rotationEuler, cfg.convertRig))
                 return Fail("Blender animated slim failed (see console). Is the model rigged with the named animation clip?");
         }
         if (!File.Exists(fbxFull)) return Fail("no slim FBX at " + fbxRel + " — bake with a Model file first (Reuse extracted needs an existing one).");
@@ -208,10 +209,13 @@ public static class UniversalBaker
         imp.importTangents = ModelImporterTangents.CalculateMikk;   // ALWAYS keep tangents on the ANIMATED path: its skeleton bake (Amplitude MeshCollection.ImportMeshes on a real skinned mesh) reads them, and stripping them throws IndexOutOfRange (broke the single-material ReconDrone — "worked last night", i.e. before the strip). The tangent-size optimization is safe ONLY on the static path below.
         imp.globalScale = 1f;
         // "Fix 100x oversize (FBX unit scale)" — PER-MODEL toggle, because different rig exports embed different unit scales.
-        // OFF (default): measure with Unity's default useFileScale (the drone bakes correctly this way). ON: some FBX exports
-        // carry a metre->cm scale that makes the model bake ~100x too big; measure at the TRUE scale (useFileScale off) then
-        // bake with the unit scale on (the howitzer needs this). There is NO single rule that fits both — hence the toggle.
-        if (cfg.animUnitFix) imp.useFileScale = false;
+        // OFF: measure at the file's TRUE scale AND bake with useFileScale OFF — everything folds into globalScale, so
+        //   the baked skeleton's BindPose/Local scales are all 1 (like the proven ReconDrone). A live file-scale would
+        //   materialize as a 0.01-per-bindpose + x100-root sandwich that Amplitude's uniform-scale TRS composition
+        //   mangles on deep bone chains (the Combine soldier's head, depth 8-9, rode ~0.7u off the shoulders).
+        // ON: measure at TRUE scale then bake with the unit scale ON (the howitzer needs this; its shallow rig
+        //   tolerates the sandwich). No single rule fits both — hence the toggle stays per-model.
+        imp.useFileScale = false;   // ALWAYS measure raw; the bake either keeps this (OFF) or re-enables it (ON, below)
         imp.SaveAndReimport();
         var fbxGo = AssetDatabase.LoadAssetAtPath<GameObject>(fbxRel);
         float longest = MeasureLongestAxis(fbxGo);
@@ -366,7 +370,9 @@ public static class UniversalBaker
     // Blender: slim a rigged/animated model into a decimated FBX that keeps its armature + one clip (Tools/rig_anim.py).
     // `rotation` (degrees; x = pitch/stand-up, y = heading, z = roll) is baked INTO THE RIG — the game orients animated
     // units by the rig, so a rig that round-trips lying down (the Combine soldier) can only be fixed here, at bake time.
-    static bool RigAnimViaBlender(string src, string outFbx, int targetTris, string bonePrefixes, string clipName, string albedoOut, bool keepMaterials, Vector3 rotation)
+    // `convertRig` is the EXPLICIT pipeline switch: true routes through the raw-rig conversion (rest-normalize, rename,
+    // scale fold, clean-unit export) — it used to be inferred from rotation != 0, which made Rotation a landmine.
+    static bool RigAnimViaBlender(string src, string outFbx, int targetTris, string bonePrefixes, string clipName, string albedoOut, bool keepMaterials, Vector3 rotation, bool convertRig)
     {
         string proj = Directory.GetParent(Application.dataPath).FullName;
         string script = Path.Combine(proj, "Tools", "rig_anim.py");
@@ -374,7 +380,7 @@ public static class UniversalBaker
         string blender = FindBlender();
         var inv = System.Globalization.CultureInfo.InvariantCulture;   // never the OS locale — a Dutch comma-decimal would corrupt the arg
         string rotArg = string.Format(inv, "{0:0.###},{1:0.###},{2:0.###}", rotation.x, rotation.y, rotation.z);
-        string args = $"--background --python \"{script}\" -- \"{src}\" \"{outFbx}\" {Mathf.Max(1, targetTris)} \"{bonePrefixes ?? ""}\" \"{clipName ?? ""}\" \"{albedoOut ?? ""}\" {(keepMaterials ? "1" : "0")} \"{rotArg}\"";
+        string args = $"--background --python \"{script}\" -- \"{src}\" \"{outFbx}\" {Mathf.Max(1, targetTris)} \"{bonePrefixes ?? ""}\" \"{clipName ?? ""}\" \"{albedoOut ?? ""}\" {(keepMaterials ? "1" : "0")} \"{rotArg}\" {(convertRig ? "1" : "0")}";
         var psi = new System.Diagnostics.ProcessStartInfo(blender, args)
         { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         try

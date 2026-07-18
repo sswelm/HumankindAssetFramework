@@ -514,6 +514,12 @@ so it does not matter where you press Bake.
 - **Fix 100× oversize (FBX unit scale)** — some rigged exports embed a metre→centimetre unit scale that makes the model
   bake ~100× too big and float high. Per-model: huge/floating → tick; vanishes when ticked → untick. (Drone off,
   howitzer on.) Auto-prefilled on the Factory's Browse for GLB/glTF.
+- **Convert raw rig (auto-rigged models)** — the explicit PIPELINE switch (registry `convertRig`). ON = the raw-rig
+  conversion of §16 (rest-normalize + visual rebake, root collapse, topological rename, clean-unit export — what made
+  the Combine soldier work; usually paired with Fix-100× OFF). OFF = the byte-identical legacy pipeline for
+  purpose-made rigs (drone, howitzer) — with it off, Rotation and every other setting bake exactly as they always
+  did, so re-baking a working legacy model is safe. Old registries that used the rotation-triggered conversion
+  (the `360,0,0` identity trick) migrate to the flag automatically on load.
 
 ### Behavior (runtime — **Save (no bake)** + game relaunch applies them, no re-bake, no mod rebuild)
 - **Fire on attack (play once)** — play the baked clip **once when the unit attacks** instead of looping; rests at
@@ -560,7 +566,7 @@ behaviors** (fire-on-attack / deploy-on-stop); everything else keeps the game's 
 model can ship a **scrambled rest pose that the clip's location keys ASSEMBLE into the body every frame** (the Combine
 soldier's frame-0 posed bones sat up to 91 units from their rests on a 73-unit rig — 129 location curves were
 structural, not decorative). Amplitude plays rotation-only clips, so such a rig can never work as-is. `rig_anim.py`
-now performs, on the rotation-set path: **(a) REST NORMALIZATION** — snapshot every bone's visual matrix on every
+now performs, on the conversion path: **(a) REST NORMALIZATION** — snapshot every bone's visual matrix on every
 frame, apply the armature modifier at frame 0 (the assembled body becomes the bind mesh), Apply-Pose-As-Rest (the
 assembled pose becomes the rest), re-bind, then **re-derive the whole clip as pure rotations** against the new rest
 (verified in-bake: `frame-0 residual = 0.000167`); **(b)** strip residual location curves; **(c)** collapse no-op root
@@ -568,9 +574,12 @@ bones; **(d)** topological bone rename (Amplitude sorts alphabetically, parents 
 rotation+scale into the data and export unit-clean (`global_scale=0.01`, no ×100 root `Lcl Scaling`, skeleton bakes
 all-Scale-1). Verified end-to-end with a **litmus rig** (`Tools/make_litmus.py`: a 12-deep bone chain of colored
 cubes — renders straight in-game, exonerating the runtime for clean rigs). Raw-FBX inspectors used for the diagnosis:
-`Tools/fbx_binddump.py`, `Tools/fbx_lclscale.py`. Quirk until the gates are refactored: the conversion triggers on a
-NON-ZERO Rotation — for a rig needing conversion but no net rotation, enter **360,0,0** (identity, keeps the
-pipeline; the soldier ships with exactly that). `0,0,0` remains the byte-identical legacy path.
+`Tools/fbx_binddump.py`, `Tools/fbx_lclscale.py`. **Gate refactor (2026-07-18):** the conversion is now selected by
+the explicit **"Convert raw rig"** checkbox in the Animation Lab (registry field `convertRig`) — it originally
+triggered on a non-zero Rotation, which made the Rotation field a hidden pipeline switch (the soldier shipped with a
+`360,0,0` identity trick; a rotation edit on a legacy model silently rerouted its bake). Rotation is just a rotation
+again (applied only on the conversion path); flag OFF remains the byte-identical legacy pipeline, and old registries
+migrate automatically on load.
 
 **RESOLVED with the clean rig (2026-07-19):** the "drone projectile invisible on attack" symptom disappeared once the
 soldier's rig was properly converted — the corrupted skeleton state was evidently disrupting the attack presentation
@@ -606,19 +615,20 @@ defects to get one soldier standing).
 ### 16.2 The three kinds of source rig
 
 1. **Clean, authored rig** (our drone; anything from `deploy_convert.py`) — rotation-driven animation, sane rest
-   pose. Bake with **Rotation `0,0,0`** = the untouched legacy path. If it works, never touch it.
-2. **Clean rig, wrong orientation** — rotation-driven but bakes lying down/facing wrong. Set a **Rotation** (probe
-   one axis at a time in 90° steps, judge IN-GAME) — this triggers the conversion path below, which is fine.
+   pose. Bake with **"Convert raw rig" OFF** = the untouched legacy path. If it works, never touch it.
+2. **Clean rig, wrong orientation** — rotation-driven but bakes lying down/facing wrong. Tick **"Convert raw rig"**
+   and set a **Rotation** (probe one axis at a time in 90° steps, judge IN-GAME) — rotation is only applied on the
+   conversion path.
 3. **Auto-rigged / "assembled-by-animation" rig** (the Combine soldier; typical of Sketchfab auto-rigs) — the REST
    POSE IS NOT THE BODY: the clip's location keys assemble the model every frame. Diagnostic tell: lots of
    `pose.bones[...].location` curves, and body parts that float/detach in-game while Unity's own preview plays the
-   FBX perfectly (Unity supports location keys; Amplitude doesn't). These NEED the conversion path — set any
-   non-zero Rotation; if the model needs no net rotation, use **`360,0,0`** (identity — quirk until the trigger is
-   refactored onto its own switch).
+   FBX perfectly (Unity supports location keys; Amplitude doesn't). These NEED the conversion path — tick
+   **"Convert raw rig"** in the Animation Lab (add a Rotation only if the converted bake comes out mis-oriented).
 
 ### 16.3 What the conversion path does (automatic, in this order)
 
-Everything below runs inside the Bake's Blender step (`Tools/rig_anim.py`) whenever Rotation ≠ 0:
+Everything below runs inside the Bake's Blender step (`Tools/rig_anim.py`) whenever **"Convert raw rig"** is ticked
+in the Animation Lab:
 
 1. **Rest normalization + visual rebake** *(the key step for type-3 rigs)* — snapshots every bone's visual matrix on
    every frame, applies the armature modifier at frame 0 (the assembled body becomes the bind mesh), applies the
@@ -639,12 +649,12 @@ every bone** — verify with a text editor on `Assets/Resources/<name>_Skeleton.
 ### 16.4 The workflow, start to finish
 
 1. **Factory**: pick the target pawn, Browse the model, set Size. **Animation Lab** (auto-opens via the jump button):
-   pick the Clip. Bake once with Rotation `0,0,0` — maybe you have a type-1 rig and you're done.
+   pick the Clip. Bake once with "Convert raw rig" OFF — maybe you have a type-1 rig and you're done.
 2. Rebuild the mod, look in-game (**the game is the only honest judge — the previews' orientation is meaningless for
    animated models**).
-3. Wrong orientation or floating parts → set Rotation (start `90,0,0`, probe one axis; `360,0,0` for
-   identity-with-conversion) → Bake → check the console for the conversion lines and the **residual ≈ 0** → rebuild →
-   judge in-game. Two or three probes typically suffice.
+3. Wrong orientation or floating parts → tick **"Convert raw rig"** (+ a Rotation probe if it's an orientation
+   problem: start `90,0,0`, one axis at a time) → Bake → check the console for the conversion lines and the
+   **residual ≈ 0** → rebuild → judge in-game. Two or three probes typically suffice.
 4. Watch the Console safeguards on every bake: the `RIGANIM` lines tell you exactly which steps ran, and the bake
    fails loudly rather than shipping a broken skeleton.
 
@@ -652,8 +662,8 @@ every bone** — verify with a text editor on `Assets/Resources/<name>_Skeleton.
 
 | In-game symptom | Cause | Fix |
 |---|---|---|
-| Model lies down / faces wrong, plays fine otherwise | Orientation (type 2) | Rotation probe, one axis at a time |
-| A body part (head, hands) floats rigidly detached; Unity preview plays the FBX fine | Type-3 rig: structural location keys, scrambled rest | The conversion path (non-zero Rotation) does it all |
+| Model lies down / faces wrong, plays fine otherwise | Orientation (type 2) | Tick "Convert raw rig" + Rotation probe, one axis at a time |
+| A body part (head, hands) floats rigidly detached; Unity preview plays the FBX fine | Type-3 rig: structural location keys, scrambled rest | The conversion path (tick "Convert raw rig") does it all |
 | Parts smear/stretch, "movement looks exaggerated" | Translation keys playing unscaled | Same — conversion path |
 | Whole model 100× too big | FBX unit scale | Fix-100× toggle (per-model; the conversion path usually makes it unnecessary) |
 | Deep chains (fingers, head) scrambled, shallow parts fine | Bone-name sort order | Automatic (topological rename) on the conversion path |
