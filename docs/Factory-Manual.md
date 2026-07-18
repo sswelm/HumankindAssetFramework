@@ -72,15 +72,17 @@ their settings and work together**:
   rigged model **without** any animation config asks for confirmation before producing a static bake.
 
 ### Transform
-- **Rotation offset (XYZ)** — degrees. Static models bake this into the mesh. For **animated** models (2026-07-18) it
-  is now **baked into the rig itself** in the Blender step — vertices + bone rest matrices, folded to identity nodes —
-  so it's REAL in-game (before, it was preview-only and a rig that round-tripped lying down was unfixable; the raw
-  Sketchfab Combine soldier ships a -90°X armature node and needed `90, 0, 0`). Semantics: **x ≈ stand-up pitch,
-  y ≈ heading, z ≈ roll** — but the mapping crosses two axis conversions, so don't reason it out: **probe one axis at
-  a time in 90° steps** (x first until upright, then y for heading). Requires a real re-slim: **Model file set +
-  Reuse extracted UNticked**, then Bake. ⚠ The embedded preview's orientation is NOT the game's (it adds fixed
-  stand-up flips) — a preview-tuned rotation can still lie flat in-game; final judge is the game. Rigs prepared by
-  `deploy_convert.py` (the howitzer) rebuild the armature clean and generally need `0,0,0`.
+- **Rotation offset (XYZ)** — degrees. Static models bake this into the mesh. For **animated** models (2026-07-18)
+  the contract is: **`0,0,0` = the exact legacy pipeline** (no rig manipulation whatsoever — a model that renders
+  correctly stays correct on every re-bake); **any non-zero value = the rotation is baked into the rig** in the
+  Blender step (rotate + `transform_apply` into vertices + bone rests, object-level anim fcurves stripped) — the fix
+  for raw glTF rigs that round-trip lying down (the Sketchfab Combine soldier ships a -90°X armature node and needs
+  `90, 0, 0`). Nominal semantics: x ≈ stand-up pitch, y ≈ heading, z ≈ roll — but the mapping crosses multiple axis
+  conversions, so **probe one axis at a time in 90° steps and judge IN-GAME ONLY**: ⚠ the embedded preview's
+  orientation is meaningless for animated models (fixed display flips; it happened to match the soldier and
+  contradicted the howitzer — chasing it re-baked a working gun onto its side, twice). Rotation changes require a
+  real re-slim: **Model file set + Reuse extracted UNticked**. `deploy_convert.py`-prepared rigs (the howitzer) are
+  correct at `0,0,0` — never give them a rotation.
 - **Position offset (x, y, z = height)** — Static models bake it in (z = waterline; negative sinks a ship). For
   **animated** models it's applied at **runtime, in the pawn's own frame** (2026-07-18): x = sideways, y = fore/aft,
   z = altitude (world-up). The planar part is rotated by the unit's facing each frame, so the nudge **turns with the

@@ -226,6 +226,13 @@ if not any(md.type == 'ARMATURE' for md in joined.modifiers):
 # lying-on-its-back rig upright), y -> Blender world Z (heading), z -> Blender world Y (roll). Applying the SAME
 # world rotation to armature rest bones AND mesh vertices keeps the skin binding aligned; bone-local animation
 # curves are relative to the (now-rotated) rest pose, so the clip plays identically.
+# RIG ROTATION — ONLY when a rotation is requested (rotation 0,0,0 = the EXACT legacy pipeline, byte-for-byte: no
+# object fiddling, no fold — models that were correct before stay correct; the fold is world-preserving for Unity's
+# mesh import but NOT for Amplitude's skeleton bake, so folding unconditionally flipped the previously-good howitzer
+# upside-down in-game). When a rotation IS set: rotate the parent-less objects in world space, strip OBJECT-level
+# animation fcurves (a glTF often keys the armature NODE itself — they block transform_apply and re-assert the old
+# orientation each frame), then transform_apply INTO THE DATA (vertices + bone rests, identity nodes) — object-level
+# rotation alone is dropped downstream (proven in-game on the Combine soldier, which needs 90,0,0 to stand).
 if any(abs(v) > 1e-4 for v in rig_rot):
     rot = (Matrix.Rotation(radians(rig_rot[1]), 4, 'Z') @
            Matrix.Rotation(radians(rig_rot[0]), 4, 'X') @
@@ -234,25 +241,19 @@ if any(abs(v) > 1e-4 for v in rig_rot):
         if o.parent is None:
             o.matrix_world = rot @ o.matrix_world
     print("RIGANIM rig rotation: x=%s y=%s z=%s (deg, registry semantics)" % tuple(rig_rot))
-# ALWAYS fold rotations into the DATA (vertices + bone rests) — with or without a user rotation. The glTF->FBX round
-# trip otherwise leaves a compensating rotation on the armature NODE (the soldier ships a -90°X there), and every
-# downstream reader treats node rotations differently (Unity bakes them into the mesh, Amplitude's skeleton bake has
-# its own ideas) — folding to identity nodes removes that variable entirely: what's in the data is all there is.
-# Strip OBJECT-level animation channels first (paths not under pose.bones): a glTF often keys the armature NODE
-# itself, which both blocks transform_apply AND re-asserts the original orientation every frame at runtime.
-if arm.animation_data and arm.animation_data.action:
-    _rm = 0
-    for coll, fc in all_fcurve_owners(arm.animation_data.action):
-        if not fc.data_path.startswith("pose.bones"):
-            coll.remove(fc); _rm += 1
-    if _rm: print("RIGANIM stripped %d OBJECT-level fcurves (non-bone) so the rig orientation can bake" % _rm)
-bpy.ops.object.select_all(action='SELECT')
-bpy.context.view_layer.objects.active = arm
-try:
-    bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
-    print("RIGANIM transforms folded into data (identity nodes)")
-except Exception as e:
-    print("RIGANIM WARN: transform_apply failed (%s) — node rotations left in place" % e)
+    if arm.animation_data and arm.animation_data.action:
+        _rm = 0
+        for coll, fc in all_fcurve_owners(arm.animation_data.action):
+            if not fc.data_path.startswith("pose.bones"):
+                coll.remove(fc); _rm += 1
+        if _rm: print("RIGANIM stripped %d OBJECT-level fcurves (non-bone) so the rig orientation can bake" % _rm)
+    bpy.ops.object.select_all(action='SELECT')
+    bpy.context.view_layer.objects.active = arm
+    try:
+        bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
+        print("RIGANIM rig rotation APPLIED TO DATA (identity nodes)")
+    except Exception as e:
+        print("RIGANIM WARN: transform_apply failed (%s) — rotation left object-level (may not survive the bake)" % e)
 
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.export_scene.fbx(filepath=outp, use_selection=False, add_leaf_bones=False,
