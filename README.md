@@ -26,6 +26,22 @@ model *types* loaded, not units on screen.
 - **Animated custom models — a first, one-click.** A quadcopter drone injected onto a land unit renders full-size,
   textured, and **spins its own propellers from its own baked animation** — for any number of instances. Tick
   **Animated**, press Bake.
+- **A HUMANOID character — a full 62-bone rigged soldier (2026-07-18).** The Combine soldier replaces a vehicle unit:
+  right-sized, standing, **turning with its movement**, breathing through its own baked idle clip — the first true
+  *character* through the pipeline (props and machines came first). Two systemic features shipped with him:
+  a **bake-time rig rotation** for raw glTF rigs that round-trip lying down (folded into vertices + bone rests;
+  `0,0,0` = the untouched legacy path, so working models can never regress), and the discovery that the game turns
+  pawns through a procedural **bone-rotation layer** — the plugin now clears it only for artillery models and
+  sanitizes junk "phantom wheel-spin" slots on vehicle donors. *(Known issues on the soldier, one subsystem, under
+  investigation: a head/neck deformation and the unit's fired-drone visual — see Factory-Manual §"Cross-window
+  safety" open items.)*
+- **The Animation Lab — animation authoring in its own dialog (2026-07-18).** `Tools ▸ ENC ▸ Animation Lab` docks as
+  a tab beside the Factory: the Factory owns the *model* (file, transform, size, shading), the Lab owns the
+  *animation* (clip + bone-filter pickers, fire-on-attack, deploy-on-stop + recoil, and **Save (no bake)** for
+  runtime flags). Settings are mutually exclusive between the windows and **enforced at bake time** — each window
+  rebases on the freshest registry entry and writes only its own fields, so stale copies can't clobber each other.
+  Geometry re-processing is **automatic** (the Blender step re-runs exactly when one of its inputs changed); the old
+  "Reuse extracted" checkbox is now purely **"Keep extracted texture (hand-edits)"**.
 - **Fire-on-attack — a model that animates when the unit *fires*.** Tick **Fire on attack** and the baked clip plays
   **once, on the combat action**, not on a loop: the model rests, then plays a single pass the moment the unit attacks and
   returns to rest. Proven with a **howitzer whose barrel elevates only when it bombards** — the plugin hooks Humankind's

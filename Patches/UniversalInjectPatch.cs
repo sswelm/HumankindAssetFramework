@@ -1030,10 +1030,13 @@ namespace ENCAccessProof
                 SetMember(entry, "Pose" + i, pose);
             }
             // The AIM layer is cleared only for the ARTILLERY behaviors (it twists the howitzer's barrel as the game
-            // aims). For other animated models the game's procedural bone-rotation layers are left alone — clearing
-            // them is suspected of pinning the Combine soldier to one fixed compass facing (the game may turn pawns
-            // through that layer). Diagnostics below record what the layer + pawn rotation actually do while moving.
+            // aims). For other animated models the game's bone-rotation layer stays — it carries the pawn's FACING
+            // (clearing it froze the soldier to one compass direction) — but on some donors it arrives with an
+            // INVALID bone index (0xFFFFFFFF) and RUNAWAY angles (1558°…): those magnitudes deform the rig (the
+            // soldier's ripped-off head). SanitizeAimLayer wraps such angles into 0..360 — same orientation, sane
+            // magnitude — instead of zeroing (which would kill facing).
             if (e.fireOnAttack || e.deployOnStop) ClearAimLayer(entry);
+            else SanitizeAimLayer(entry);
             ApplyPositionOffset(e, entry);
             ApplyScale(e, entry);
             ctx.pawnEntries.SetValue(entry, ctx.idx);
@@ -1145,6 +1148,37 @@ namespace ENCAccessProof
         // Clear the procedural AIM layer (PawnEntry.BoneRotation0-3 = SkeletonBoneIndex/AxisIndex/Angle): the game aims an
         // artillery barrel by layering a bone rotation ON TOP of the pose, which twists our barrel (most visible while moving,
         // as the aim swings). Zero the angles so ONLY our baked clip drives the skeleton. No-op for un-aimed models.
+        // SANITIZE the bone-rotation layer without killing it: on slots whose SkeletonBoneIndex is INVALID (the
+        // 0xFFFFFFFF sentinel some donors emit), wrap the runaway accumulated Angle (1558°…) into 0..360 — the same
+        // orientation, but a sane magnitude, so whatever downstream math consumes the raw value stops tearing the rig
+        // apart (the Combine soldier's head). Slots with REAL bone indices are left untouched (genuine game layers).
+        static bool sanitizeLogged;
+        static void SanitizeAimLayer(object entry)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                var br = GetMember(entry, "BoneRotation" + i);
+                if (br == null) continue;
+                long boneIdx;
+                try { boneIdx = Convert.ToInt64(GetMember(br, "SkeletonBoneIndex")); } catch { continue; }
+                if (boneIdx >= 0 && boneIdx < 100000) continue;        // a real bone — the game's own layer, keep it
+                // Invalid-bone slots, by axis (observed on the Humvee donor): axis=1 (up) ≈ the HEADING channel — keep
+                // it, it turns the pawn. axis=0 (roll) = the donor's WHEEL SPIN, accumulating as the unit travels —
+                // on a humanoid rig those land on head/neck bones and wind them up (the ripped-off head). Zero them:
+                // our model has no wheels to roll. (Magnitude-wrapping alone was tried first and didn't help — even a
+                // sane 250° on the wrong bone tears the rig.)
+                long axis;
+                try { axis = Convert.ToInt64(GetMember(br, "AxisIndex")); } catch { continue; }
+                if (axis == 1) continue;                                // heading — leave alone
+                float a;
+                try { a = Convert.ToSingle(GetMember(br, "Angle")); } catch { continue; }
+                if (a == 0f) continue;
+                SetMember(br, "Angle", 0f);
+                SetMember(entry, "BoneRotation" + i, br);
+                if (!sanitizeLogged) { sanitizeLogged = true; Plugin.Log.LogInfo($"[Uni] aim-layer sanitize: slot {i} bone={boneIdx} axis={axis} angle {a:0.#} -> 0 (donor wheel-spin on an invalid bone)"); }
+            }
+        }
+
         static void ClearAimLayer(object entry)
         {
             for (int i = 0; i < 4; i++)

@@ -540,8 +540,10 @@ behaviors** (fire-on-attack / deploy-on-stop); everything else keeps the game's 
    resolves (sim kill + audio) but the kamikaze-drone projectile no longer displays. The `FireProjectile` spawn rides
    the pawn's throw ANIMATION, and our pose hook stomps `Pose0` every frame. Designed fix: read what the game wrote to
    Pose0 before overriding; when it isn't the ordinary idle/move clip, pass the game's pose through (attack window).
-2. **Hood/head stretch after turning** — diagnosed via the `[Uni][facing]` log: on this donor all four BoneRotation
-   slots carry an INVALID bone index (`0xFFFFFFFF`) with junk angles (1558°, 977°, …); left alive they deform the rig
-   (head), but zeroing them freezes facing. The slot semantics (what bone -1 targets, where facing really lives) need
-   a decompile of the layer's writer before a precise fix (sanitize junk slots, keep real ones).
+2. **Soldier's head/neck torn** — three mechanisms tested and RULED OUT via the `[Uni][facing]` diagnostic: (a) full
+   layer clear (froze facing), (b) wrapping the runaway angles into 0..360 (no change), (c) zeroing the axis-0
+   "wheel-spin" slots while keeping the axis-1 heading slot (facing kept — this sanitize STAYS in as correct hygiene —
+   but head still torn **with the entire layer flat**). Conclusion: the tear is NOT the BoneRotation layer; it's in
+   the baked skeleton/clip or our Pose0 playback (the earliest upright bake looked intact — suspect one of the later
+   rotation re-bakes or the clip's head-bone curves). Next: decompile the pose/skinning consumer.
 3. The temporary `[Uni][facing]` periodic log stays in until (1)+(2) are resolved.
