@@ -162,10 +162,11 @@ The plugin's own cfg (`…\community.humankind.encaccessproof.cfg`) — press **
   attachment slots** (Slingers finally carry a sling). The Prop Lab window (Tools ▸ ENC ▸ Prop Lab) bakes model →
   fragment + MeshCollection; the plugin registers the collection at `AnimationLoad`. **Working (experimental).**
 - **Projectiles:** [Projectiles.md](docs/Projectiles.md) — the fourth injection axis: a custom model as a unit's
-  **fired munition** (the Anti Tank FPV throws a kamikaze drone). The Projectile Lab window (Tools ▸ ENC ▸ Projectile
-  Lab) clones a mesh-donor projectile's trail drawer with our FxMesh swapped in (+ an optional explosive *impact
-  donor*); wired via the unit's `Projectile` field (data), no plugin needed. **Partial success** — flies + explodes,
-  but the skin is the donor's brown (no cheap recolor; custom-atlas route shelved).
+  **fired munition** (a Humvee launches a kamikaze drone). The Projectile Lab window (Tools ▸ ENC ▸ Projectile Lab)
+  clones a mesh-donor projectile's trail drawer with our FxMesh swapped in (+ an optional explosive *impact donor*);
+  wired via the unit's `Projectile` field (data), no plugin needed. **Working** — one clean drone per launch from a
+  single-pawn (vehicle) base; the firing-count "wave" mechanic (`ceil(defendersToKill / pawns)`) is fully decompiled.
+  Skin colour is model/UV-dependent (swap the model to reroll it); launch audio is the one open item.
 - **Learn from others:** [Ecosystem-Survey.md](docs/Ecosystem-Survey.md) — every Humankind BepInEx plugin on GitHub, what
   problem each solves, and the techniques worth borrowing (lifecycle anchors, order-bus sequencing, save extensions, …).
 

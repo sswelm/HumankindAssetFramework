@@ -1,12 +1,14 @@
 # Projectiles — a custom model as a unit's fired munition
 
-**Status: PARTIAL SUCCESS (2026-07-17) — a custom mesh flies as a unit's projectile in-game.** The fourth injection
-axis, after units, districts, and pawn props. Proven end-to-end: Humankind's Era-6 **Anti Tank FPV** now fires an FPV
-**kamikaze drone** (a free Sketchfab model) instead of a cruise missile — it cruises nose-first, rolls upright, and
-nose-dives onto the target.
+**Status: WORKING (2026-07-17, refined 2026-07-18) — a custom mesh flies as a unit's projectile in-game.** The fourth
+injection axis, after units, districts, and pawn props. Proven end-to-end: a Humankind unit now fires a custom **FPV
+kamikaze drone** (a free Sketchfab model) instead of its vanilla projectile — it cruises level with rotors up and
+nose-dives onto the target. 2026-07-18 landed the big pieces: the **firing-count / wave mechanic** (fully decompiled), the
+**single-pawn-vehicle** fix that gives *one clean drone per launch*, and the finding that the **skin colour is model/UV
+dependent** (not a fixed "brown curse"). One open item: the **launch audio** plays a gunshot (see *Limits & open items*).
 
-"Partial" because the **skin is limited to the donor's** (a spear-brown, not the drone's own olive), and there is no
-cheap recolor — see *Limits* below. Usable, not yet pretty.
+The skin still can't show the mesh's *own* texture (it wears whichever atlas region its UVs sample), but that's a
+choose-the-model / choose-the-orientation knob, not a hard limit — see below.
 
 Like pawn props, this rides the game's **own data path**: a unit's presentation pawn definition already names a
 `Projectile` asset, and that field is ordinary moddable data. No plugin is required to wire it (a plugin fallback exists
@@ -117,16 +119,66 @@ that one pawn def (only that unit changes).
 
 ---
 
-## Limits (the "partial")
+## Firing count — the "wave" mechanic (2026-07-18, decompiled)
 
-- **Skin = the donor's brown.** The drawer draws the mesh through its output-layer **atlas**, not the mesh's own
-  texture (`KamikazeDrone_Atlas` ships but is unused). All mesh donors share one brown atlas, so brown is the only
-  option. A uniform **tint won't recolor it** (shader ignores particle color for textured meshes). The *only* real
-  recolor is building a **custom FX output-layer + atlas** holding our texture and pointing the drawer's `visualOutput`
-  at it — a genuine investigation like the district-material work, **not done** (not worth it for a ~2s projectile).
-- **No black.** Follows from the above.
-- **Small-on-screen legibility.** A detailed 10k-vert drone reads muddy when miniaturized in flight. **Next step:** a
-  simpler, chunkier model (or the older low-poly drone) would silhouette better at projectile scale.
+When the projectile is a **slow, big MESH** (a drone) instead of a fast vanilla **sprite**, the game's normal multi-fire
+becomes *visible* as a wall/swarm. The count is **combat-driven**, and it is NOT the animator, formation, or projectile:
+
+- **One projectile per firing pawn**, gated by `pawnDef.Projectile != null` (Assembly-CSharp ~74410). A pawn whose def
+  has `Projectile = None` fires nothing.
+- **Waves = `ceil(defendersToKill / attackerPawnCount)`** (`UnitActionRangedFightSequence.StartUnitAction`). A wave = every
+  soldier throws once; if the unit's damage kills more enemies than it has soldiers, it **loops** (`while(num2>0)`) and
+  throws again until the kill count is met. So a 3-soldier squad that kills ~9 → **3 waves of 3** = the wall; a 9-soldier
+  (or low-kill Era-1 spear thrower) → **1 wave**. Total drones ≈ `defendersToKill`.
+- **Ruled out** (hours of it): the **Animator Override Controller** changes only the throw motion/sound (Rifle = semi-auto
+  burst, Crossbow/Thrown = single throw, Long_Gun = *no drone*, Boomerang = wiggle, horseback = floating ghost-mounts);
+  **Same Row Attack** is pawn↔target pairing (on for the spear thrower too); **formation rows** and **Prepared Attack
+  Loop** don't touch it either. Soldiers *require* an override to fire (base humanoid animator has no attack clip); vehicles
+  fire via their own animator (why a tank works with `Animator = None`).
+- **`Force Ranged Multi Kill`** (pawn-def flag) collapses to ONE wave (`if(flag) return` skips the extra-wave loop) BUT the
+  multi-kill path is an *instant kill* that **skips `FireProjectile` → no drone spawns**. So **no data combo gives one-wave +
+  visible drone** — that split would need a plugin cap (patch out the `while(num2>0)` loop). *Designed, not built.*
+
+**THE FIX THAT SHIPPED: use a SINGLE-PAWN (vehicle) unit as the base.** A car/tank/Humvee is 1 pawn with low kills →
+`ceil(1/1) = 1` wave → **one clean drone**. Proven in-game (a Humvee launches a single kamikaze drone). Reskinning that
+vehicle to a soldier model is then a pure Model Factory swap (the vehicle fire-logic launches the drone, so no throw
+animation is needed).
+
+Related data levers on the unit: `SpawnWeight` (default 10, `0` = never) = weighted-random which pawn def fills each
+formation slot when several are listed — the lever to **mix** firing (`Projectile` set) + non-firing (`Projectile = None`)
+pawns in one squad. Formation `Dummies[]` = soldier count (`Formation_Wedge_3` = 3 rows). Visual Affinity =
+the empire's cultural art style, selecting which pawn set (`PawnDefinitionsPerVisualAffinities`) renders — appearance only,
+no effect on the count.
+
+---
+
+## Limits & open items
+
+- **Skin is NOT "cursed brown."** The drawer draws the mesh through its output-layer **atlas** (not the mesh's own
+  texture), but the **colour = which atlas REGION the model's UVs sample**, and it further **shifts with orientation**
+  (different faces get lit). The fpv drone's UVs rolled brown; `drone_clean.glb` rolled a grey/metallic region (tan at some
+  angles). So **reroll the skin by swapping the model** (or nudging its UVs) — no custom atlas needed. A uniform **tint
+  still does nothing** (shader ignores particle colour for textured meshes). A *chosen* colour would still need a custom FX
+  atlas (not done).
+- **Orientation follows the trajectory.** The drawer welds mesh-Z to velocity, so the drone's **pitch tracks the arc** —
+  level at apex, **nose-down diving onto the target** (correct kamikaze behaviour, not a bug). ImportAngles only control
+  **roll** (rotors up/down). Final for `drone_clean.glb` as a projectile: **`(0, 0, 180)`** (natural frame + one Z-roll).
+  Avoid `X = ±90` (gimbal pole → surprise flips). Model legibility improved by swapping to the leaner `drone_clean.glb` at
+  `size ~1`.
+- **OPEN — launch audio:** the shot plays the *launching unit's weapon-fire sound* (a Humvee gunshot), not a drone whoosh.
+  Fix path: check/clear the ProjectileAsset's `Muzzle`, else trace the Wwise event with the plugin's F8 **Audio Trace** and
+  repoint it (there's a `drone-fly` wav to use). Not yet done.
+
+## Projectile Lab additions (2026-07-18)
+
+- **Dump prints a VERDICT** — `✓ USABLE MESH DONOR` (trail is a drawer with a non-null mesh) vs `✗ SPRITE DONOR` (our mesh
+  would be invisible) — so you never waste a bake on a sprite donor. A successful dump **auto-fills the donor field**.
+- **Impact donor** (`ProjectileOverrides` unrelated) — optional field copies `defaultImpact` + `materialToImpact` (+muzzle)
+  from a *second* projectile, so a mesh donor (visible) can borrow an explosive sprite donor's boom (e.g. Mortar).
+- **`WriteAssetKeepingGuid`** — re-bakes preserve the ProjectileAsset's GUID so the unit's Projectile reference never
+  silently blanks.
+- **Window persistence** — Projectile Lab and Prop Lab now `[SerializeField]` their form so they survive a domain reload
+  (matching the Model Factory / Unit Retexture windows) instead of closing on every recompile.
 
 Verdict: a working, reusable 4th axis (any model → any editable unit's projectile, with a real explosion), shipped brown
 and legibility-limited. Good enough to ship as a proof; the skin is the open frontier.
