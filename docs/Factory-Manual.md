@@ -564,7 +564,15 @@ one clip per role folder, and the game loads the resulting ClipCollections by GU
   *Save (no bake)* + rebuild the mod is enough — no re-bake.
 - **Clip slicing** — every clip field (the primary Clip/Idle included) accepts `clipName[start..end]`: the range is
   cut from the source clip at bake time, `start>end` plays it REVERSED, a single frame becomes a held stance
-  (auto-padded). See the artillery worked recipe in [Animated-Models.md](Animated-Models.md).
+  (auto-padded). A **speed step** `clipName[start..end/N]` keeps every Nth frame — the slice plays N× faster
+  (`deploy[179..0/12]` folds in ~0.6 s; pacing is BAKED, the runtime has no speed knobs). Always lands exactly on
+  the end frame. See the artillery worked recipe in [Animated-Models.md](Animated-Models.md) and the traps in
+  [Animation-Pitfalls.md](Animation-Pitfalls.md).
+- **Idle stance (override)** *(2026-07-19)* — a held STANCE played while standing instead of the reference clip
+  (e.g. `deploy[179..180]`). **Required for stance idles**: the primary Clip defines the skeleton's reference
+  pose, so a stance baked as the primary encodes ~identity and renders as the TRAVEL pose in-game (Pitfalls
+  Law 2). With State-driven ON the primary field is labelled **Idle / reference clip** — keep the FULL source
+  motion there, put the pose here. Empty = idle plays the primary (characters with a real idle loop).
 - **Clear aim layer (artillery)** — runtime-only toggle: clears the game's procedural bone-rotation layer for this
   model. Artillery donors stream aim/wheel junk that twists the rig (the legacy Fire/Deploy behaviors cleared it
   implicitly); characters must leave it OFF — the layer carries their facing.

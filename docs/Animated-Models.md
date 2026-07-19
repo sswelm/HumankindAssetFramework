@@ -78,6 +78,13 @@ once per attack, so at face value that's a blip. The **Attack repeats** slider r
 (window = N × clip duration; 18 ≈ 3 s of sustained fire) and is **runtime-only**: change it, *Save (no bake)*,
 rebuild the mod — no re-bake.
 
+**Stance idles & pacing (artillery — 2026-07-19):** two rules make a deploy-style unit work, both data-only.
+(1) The primary clip is the **reference** — keep the FULL motion there and put the deployed hold in
+**Idle stance (override)** (`deploy[179..180]`); a stance baked as the primary renders as the travel pose in-game.
+(2) Pacing is a **slice speed step** — `deploy[179..0/12]` folds at 12× (~0.6 s); an *empty* Pre-movement clip is
+the legacy instant snap. The full worked recipe and every trap behind these rules:
+[Animation-Pitfalls.md](Animation-Pitfalls.md).
+
 All clips come from the same model file and bake against **one shared skeleton** in a single pass — pick, bake,
 done. This is what makes a humanoid read as a *unit* instead of a statue gliding across the map.
 
