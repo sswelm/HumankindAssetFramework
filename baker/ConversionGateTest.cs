@@ -26,7 +26,7 @@ public static class ConversionGateTest
 {
     const string PREFIX = "__convgate__";
 
-    [MenuItem("Tools/ENC/Tests/Bake Conversion Gate Test (litmus)")]
+    [MenuItem("Tools/HAF/Tests/Bake Conversion Gate Test (litmus)")]
     public static void RunLitmus()
     {
         // --- fixture: synthesize the litmus rig if it isn't cached ---
@@ -54,7 +54,7 @@ public static class ConversionGateTest
             : $"[ConvGate] LITMUS: {fails} FAILURE(S) — the conversion pipeline regressed; see errors above.");
     }
 
-    [MenuItem("Tools/ENC/Tests/Bake Conversion Gate Test (registry converted models)")]
+    [MenuItem("Tools/HAF/Tests/Bake Conversion Gate Test (registry converted models)")]
     public static void RunRegistryConverted()
     {
         // The REAL adversarial fixtures: every registry model on the conversion path (the Combine soldier's

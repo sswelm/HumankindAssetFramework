@@ -2,8 +2,10 @@
 
   <PropertyGroup>
     <TargetFramework>net471</TargetFramework>
-    <AssemblyName>ENCAccessProof</AssemblyName>
-    <Product>ENC Access Proof</Product>
+    <!-- Neutral framework identity (2026-07-19): the assembly/DLL is HAF-branded; the csproj FILE keeps its name so
+         local clones, build docs, and the CLI compile-check keep working unchanged. -->
+    <AssemblyName>HumankindAssetFramework</AssemblyName>
+    <Product>Humankind Asset Framework</Product>
     <Version>0.1.0</Version>
     <LangVersion>latest</LangVersion>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>

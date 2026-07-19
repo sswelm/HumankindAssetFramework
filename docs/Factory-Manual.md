@@ -297,7 +297,7 @@ strategic map.
 | **Registry gone after a game reinstall / "verify files"** | Open the Factory window — it auto-restores from the git-tracked backup and writes it back to `BepInEx\config` (console: `restored N model(s) from the project backup`). See §10 "Registry safety net". |
 | **Source folder created with the wrong case** (e.g. `attackHelicopter/` not `AttackHelicopter/`) | Cosmetic, bake-time only. Windows/Unity is case-insensitive + case-preserving, so the folder inherits the spelling of any pre-existing differently-cased asset of that name (e.g. a vanilla `attackHelicopter512.png`). Baked assets, registry, and in-game loading are all correctly cased. Use a non-colliding `resourceName` (e.g. `AH1Cobra`) if you want the folder capitalised. |
 
-> **Diagnostic tip — trust the atlas, not the preview.** The Factory preview lights the mesh with a Standard (PBR) shader, so a smooth hull reads dark/glossy even when the baked skin is light and correct — don't judge textures from it. To see the *actual* baked skin, select the `<name>_Atlas.asset` in the Project view and run **Tools ▸ ENC ▸ Export selected atlas to PNG** (writes to `C:/tmp` and logs the average RGB). For UV problems, `awk` the extracted OBJ's `vt` lines for the U/V range. Both beat staring at the preview.
+> **Diagnostic tip — trust the atlas, not the preview.** The Factory preview lights the mesh with a Standard (PBR) shader, so a smooth hull reads dark/glossy even when the baked skin is light and correct — don't judge textures from it. To see the *actual* baked skin, select the `<name>_Atlas.asset` in the Project view and run **Tools ▸ HAF ▸ Export selected atlas to PNG** (writes to `C:/tmp` and logs the average RGB). For UV problems, `awk` the extracted OBJ's `vt` lines for the U/V range. Both beat staring at the preview.
 
 ---
 
@@ -339,7 +339,7 @@ Bakes are manual and the roster is growing, so a baker change can silently break
 until much later. Three guards catch that at the integration seam unit tests can't reach — run them after any change to the
 baker, `rig_anim.py`, `glbconv`, or the registry schema.
 
-- **Bake Smoke Test** — `Tools ▸ ENC ▸ Tests ▸ Bake Smoke Test (one per path)` (or `(ALL models)`). Bakes one representative per
+- **Bake Smoke Test** — `Tools ▸ HAF ▸ Tests ▸ Bake Smoke Test (one per path)` (or `(ALL models)`). Bakes one representative per
   bake-path (`animated × material mode`) through the *same* config route as the Bake button and asserts each completes
   without throwing and produces non-empty `_Skeleton`/`_Atlas` (+ `_ModelMesh` for static). **Non-destructive**: it bakes
   `reuseExtracted=false` models under a throwaway `__smoketest__` name (your real assets + registry are untouched) and
@@ -350,7 +350,7 @@ baker, `rig_anim.py`, `glbconv`, or the registry schema.
   howitzer's throwaway bake exercises its skeleton path, not its texture packing — the multi-material atlas code is
   covered instead by the *static* multi-material AttackHelicopter, whose albedos `glbconv` does regenerate. Texture-only
   entries (Unit Retexture `Retex_*`: no model file, nothing to bake by design) report `SKIP`, not a failure.
-- **Bake Feature Test** — `Tools ▸ ENC ▸ Tests ▸ Bake Feature Test` (**Tier 1**) and `… (Tier 2 — Blender + animated)`. Complements
+- **Bake Feature Test** — `Tools ▸ HAF ▸ Tests ▸ Bake Feature Test` (**Tier 1**) and `… (Tier 2 — Blender + animated)`. Complements
   the smoke test: where that proves models *bake*, this proves each baker *feature knob* does what it claims, by baking a
   fixture with one knob toggled at a time and asserting a feature-specific invariant on the baked mesh/atlas.
   **Tier 1** (fast, self-contained synthetic cube): `doubleSided` doubles the triangle count, Faceted unwelds
@@ -364,7 +364,7 @@ baker, `rig_anim.py`, `glbconv`, or the registry schema.
   (throwaway `__feat_*` names, cleaned up). Benign console noise during Tier 2: `ImportFBX Warnings: Can't import
   normals, because mesh 'default' doesn't have any` — the synthetic OBJ fixtures carry no normals and Unity
   recalculates them; shading is irrelevant to what these fixtures assert.
-- **Conversion Gate Test** — `Tools ▸ ENC ▸ Tests ▸ Bake Conversion Gate Test (litmus)` and `… (registry converted models)`
+- **Conversion Gate Test** — `Tools ▸ HAF ▸ Tests ▸ Bake Conversion Gate Test (litmus)` and `… (registry converted models)`
   (2026-07-19). Asserts the raw-rig CONVERSION invariants the animated runtime silently requires — each was once
   violated and each cost hours of blind in-game debugging (the Combine-soldier campaign): every baked bone's
   **BindPose/Local scale == 1** (the file-scale sandwich), every bone's **ParentIndex < its own index**
@@ -391,7 +391,7 @@ baker, `rig_anim.py`, `glbconv`, or the registry schema.
 ## 12. Texture-only reskins — the Unit Retexture window (no bake)
 
 Sometimes the vanilla model is fine and only the *skin* is wrong — a Common copy that should look distinct from its
-emblematic original, a colour test, a themed variant. For that there's a separate window — **Tools ▸ ENC ▸ Unit
+emblematic original, a colour test, a themed variant. For that there's a separate window — **Tools ▸ HAF ▸ Unit
 Retexture** — that reskins an existing unit **without baking a model**: the vanilla mesh is kept, and the runtime plugin
 paints your texture onto an **isolated clone** of the unit's output layer, so the original unit (and every other unit
 sharing that layer) is untouched.
@@ -504,7 +504,7 @@ full scene scan off the hot path.
 
 ## 15. The Animation Lab window — a model's animation, in one place
 
-**Tools ▸ ENC ▸ Animation Lab** (2026-07-18). Docks as a **tab next to the Universal Model Factory**, so the pair
+**Tools ▸ HAF ▸ Animation Lab** (2026-07-18). Docks as a **tab next to the Universal Model Factory**, so the pair
 presents as one tabbed dialog. The design rule: **the Factory owns the MODEL** (identity, pawn, model file, transform,
 size, geometry/shading, static runtime flags), **the Lab owns the ANIMATION** — every setting lives in exactly one of
 the two windows, and jump buttons hand context across ("Edit in Animation Lab" in the Factory loads the entry here).

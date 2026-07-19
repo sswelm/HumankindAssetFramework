@@ -38,7 +38,7 @@ Elements, sets each leaf's `fxMesh` to our FxMesh GUID, then calls the leaf's `L
 **re-resolves `meshIndex` from our GUID**. Because we reuse the game's *own* leaf (with its selector context/GPU data),
 our mesh draws — where a foreign material handed in via `SetChannel` had no context and drew nothing.
 
-**3. Bake (the District Factory window — `DistrictFactoryWindow.cs`):** **Tools ▸ ENC ▸ District Factory** does the
+**3. Bake (the District Factory window — `DistrictFactoryWindow.cs`):** **Tools ▸ HAF ▸ District Factory** does the
 whole editor side in one Bake: pick the District (searchable dropdown over the project's district definitions), Browse a
 model file, set Size / Rotation / Target-tris / Isolate, press **Bake**. It runs the same static bake core as the unit
 Factory (`UniversalBaker.Build` — **no dummy pawn needed**; `pawnDescription` is registry-only there), wraps the result

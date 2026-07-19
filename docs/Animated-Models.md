@@ -68,7 +68,7 @@ motion can be expressed (or re-expressed) as bone rotations.
 
 ## "Is it my model or the pipeline?"
 
-Run `Tools ▸ ENC ▸ Tests ▸ Bake Conversion Gate Test (litmus)`: it synthesizes a known-good rig, bakes it through
+Run `Tools ▸ HAF ▸ Tests ▸ Bake Conversion Gate Test (litmus)`: it synthesizes a known-good rig, bakes it through
 the full pipeline, and verifies every engine invariant. If the litmus passes, the pipeline is fine — the problem is
 in your model, and the symptom table in [Factory-Manual.md §16.5](Factory-Manual.md) maps what you see in-game to
 what's wrong with the rig.

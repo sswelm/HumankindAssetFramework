@@ -35,7 +35,7 @@ public class ModelFactoryWindow : EditorWindow
     List<string> animClips = new List<string>();                                   // clip names read from the model (Clip picker)
     List<KeyValuePair<string, int>> animBonePrefixes = new List<KeyValuePair<string, int>>();  // bone-name prefix -> count (Bones picker)
 
-    [MenuItem("Tools/Universal Model Factory")]
+    [MenuItem("Tools/HAF/Universal Model Factory")]
     static void Open()
     {
         var w = GetWindow<ModelFactoryWindow>(false, "Universal Model Factory");

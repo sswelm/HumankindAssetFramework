@@ -34,7 +34,7 @@ fields fill themselves at `GetMeshIndex` time, so authoring only needs the FxMes
 
 ## The editor side — Prop Lab (`PropBaker.cs`)
 
-**Tools ▸ ENC ▸ Prop Lab** authors the whole chain from a model file:
+**Tools ▸ HAF ▸ Prop Lab** authors the whole chain from a model file:
 
 1. **Dump** (the authoring template): paste any vanilla fragment's GUID — the Asset Picker's info panel shows it in
    32-hex form, accepted directly (nibble-swap each byte, then four little-endian int32 = Amplitude `{a,b,c,d}`; the

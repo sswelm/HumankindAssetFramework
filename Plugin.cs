@@ -11,7 +11,9 @@ namespace ENCAccessProof
     [BepInPlugin(GUID, "Humankind Asset Framework", "0.1.0")]
     public class Plugin : BaseUnityPlugin
     {
-        public const string GUID = "community.humankind.encaccessproof";
+        // Neutral framework identity (2026-07-19; pre-adoption, so no compat shim needed — the old
+        // community.humankind.encaccessproof cfg was copied to the new name once, by hand, on this machine).
+        public const string GUID = "community.humankind.haf";
 
         internal static ManualLogSource Log;
         internal static ConfigEntry<string> TargetMod;       // which mod's assets to access

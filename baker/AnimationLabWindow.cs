@@ -26,7 +26,7 @@ public class AnimationLabWindow : EditorWindow
     List<KeyValuePair<string, int>> animBonePrefixes = new List<KeyValuePair<string, int>>();  // bone-name prefix -> count (Bones picker)
     string clipProbeFile = "\0";                    // sentinel != any real path so the first real path always inspects
 
-    [MenuItem("Tools/ENC/Animation Lab")]
+    [MenuItem("Tools/HAF/Animation Lab")]
     static void Open()
     {
         // Dock as a TAB next to the Universal Model Factory (desiredDockNextTo) so the two authoring tools present as

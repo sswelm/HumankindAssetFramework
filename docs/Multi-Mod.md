@@ -38,9 +38,8 @@ A copy-ready starting point is [`haf-pack.example.json`](haf-pack.example.json).
 > **Naming — framework vs packs (deliberate):** everything FRAMEWORK-level is `haf_*` (`haf_packs/`,
 > `haf_load_report.txt`); everything `enc_*` (`enc_models.json`, `enc_sounds/`, `enc_skins/`) belongs to **ENC the
 > pack** — the reference pack, branded like any pack should be. Your pack's files carry *your* name (your folder,
-> your modId); you never touch an `enc_*` path. The one remaining ENC-branded framework piece is the plugin
-> DLL/config identity, whose neutral rename (`HumankindAssetFramework.dll`, GUID `community.humankind.haf`, with a
-> config-migration compat period) is queued for the package release.
+> your modId); you never touch an `enc_*` path. The framework identity is fully neutral since 2026-07-19:
+> `HumankindAssetFramework.dll`, GUID `community.humankind.haf`, menu root `Tools ▸ HAF`.
 
 ## Where it goes
 

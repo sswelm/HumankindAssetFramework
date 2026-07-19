@@ -22,8 +22,7 @@ model *types* loaded, not units on screen.
 > **Two halves, one contract.** The **HAF Authoring Tools** (bake, in the Unity editor) and a **runtime plugin**
 > (inject, in the game) talk only through a small JSON pack registry — so the tooling and the injector stay fully
 > decoupled, and the registry is the public API other mods build against. *("Universal Model Factory" names one
-> window of the suite — the historical first one; in-editor the whole suite currently lives under `Tools ▸ ENC`,
-> a menu root scheduled to become `Tools ▸ HAF` at the package release.)*
+> window of the suite — the historical first one; in-editor the whole suite lives under `Tools ▸ HAF`.)*
 
 ## The four injection axes
 
@@ -57,7 +56,7 @@ runtime-hot-loaded skin or tint ([Capabilities.md](docs/Capabilities.md)) — al
   pawns through a procedural **bone-rotation layer** — the plugin clears it only for artillery models and ignores
   vehicle donors' phantom wheel-spin slots. *(With the clean rig, the unit's fired-drone
   projectile also displays again during attacks — the fully working unit: stand, turn, idle, launch.)*
-- **The Animation Lab — animation authoring in its own dialog (2026-07-18).** `Tools ▸ ENC ▸ Animation Lab` docks as
+- **The Animation Lab — animation authoring in its own dialog (2026-07-18).** `Tools ▸ HAF ▸ Animation Lab` docks as
   a tab beside the Factory: the Factory owns the *model* (file, transform, size, shading), the Lab owns the
   *animation* (clip + bone-filter pickers, fire-on-attack, deploy-on-stop + recoil, and **Save (no bake)** for
   runtime flags). Settings are mutually exclusive between the windows and **enforced at bake time** — each window
@@ -180,7 +179,7 @@ skeleton + atlas GUIDs, transform, shading flags; animated entries add `clip` + 
 wrapped with pack metadata (`schemaVersion`/`modId`). It then merges any additional packs in `BepInEx/config/haf_packs/*.json`
 and writes a `haf_load_report.txt` of what loaded. The Factory writes ENC's registry and auto-detects the path; the
 field-by-field breakdown is in the [Factory Manual](docs/Factory-Manual.md) and the pack format in [Multi-Mod.md](docs/Multi-Mod.md).
-The plugin's own cfg (`…\community.humankind.encaccessproof.cfg`) — press **F8** in-game for a scan/feedback window.
+The plugin's own cfg (`…\community.humankind.haf.cfg`) — press **F8** in-game for a scan/feedback window.
 
 ## Docs
 - **Can HAF import my model?** [**Animated-Models.md**](docs/Animated-Models.md) — the plain-language answer, in
@@ -205,13 +204,13 @@ The plugin's own cfg (`…\community.humankind.encaccessproof.cfg`) — press **
   action (Humankind's `SimulationEvent` bus), the one-shot pose trigger, and the per-model animated-bake scale toggle. **Built.**
 - **District visuals:** [District-Visuals.md](docs/District-Visuals.md) — the second injection axis: a custom static
   model on a **single district tile** (render + fit-the-GPU-buffer + scope-to-one-tile). **Working, with its own
-  pipeline**: the District Factory window (Tools ▸ ENC ▸ District Factory) bakes model → bone-free FxMesh → an
+  pipeline**: the District Factory window (Tools ▸ HAF ▸ District Factory) bakes model → bone-free FxMesh → an
   `enc_districts.json` registry entry the plugin reads (any number of districts at once).
 - **Pawn props:** [Pawn-Props.md](docs/Pawn-Props.md) — the third injection axis: custom **weapons & gear on pawn
-  attachment slots** (Slingers finally carry a sling). The Prop Lab window (Tools ▸ ENC ▸ Prop Lab) bakes model →
+  attachment slots** (Slingers finally carry a sling). The Prop Lab window (Tools ▸ HAF ▸ Prop Lab) bakes model →
   fragment + MeshCollection; the plugin registers the collection at `AnimationLoad`. **Working (experimental).**
 - **Projectiles:** [Projectiles.md](docs/Projectiles.md) — the fourth injection axis: a custom model as a unit's
-  **fired munition** (a Humvee launches a kamikaze drone). The Projectile Lab window (Tools ▸ ENC ▸ Projectile Lab)
+  **fired munition** (a Humvee launches a kamikaze drone). The Projectile Lab window (Tools ▸ HAF ▸ Projectile Lab)
   clones a mesh-donor projectile's trail drawer with our FxMesh swapped in (+ an optional explosive *impact donor*);
   wired via the unit's `Projectile` field (data), no plugin needed. **Working** — one clean drone per launch from a
   single-pawn (vehicle) base; the firing-count "wave" mechanic (`ceil(defendersToKill / pawns)`) is fully decompiled.

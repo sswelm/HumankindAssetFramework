@@ -1,11 +1,12 @@
 # Building the plugin
 
-For adopters who just want to *use* the Factory, no build is needed — grab a released `ENCAccessProof.dll`. Build only if
+For adopters who just want to *use* the Factory, no build is needed — grab a released `HumankindAssetFramework.dll`. Build only if
 you're changing the plugin.
 
-## Plugin (`ENCAccessProof.dll`)
+## Plugin (`HumankindAssetFramework.dll`)
 
-Needs the **.NET SDK**. Put a `References\` folder next to the `.csproj` containing:
+Needs the **.NET SDK**. The project file is still named `ENCAccessProof.csproj` (historical; the ASSEMBLY it builds
+is HAF-branded). Put a `References\` folder next to the `.csproj` containing:
 
 - `BepInEx.dll` + `0Harmony.dll` — from `<Humankind>\BepInEx\core\`
 - `UnityEngine*.dll` + `Amplitude.Mercury.Animation.dll` + `Newtonsoft.Json.dll` — from `<Humankind>\Humankind_Data\Managed\`
@@ -18,7 +19,7 @@ Then:
 dotnet build -c Release
 ```
 
-and copy `bin\Release\ENCAccessProof.dll` → `<Humankind>\BepInEx\plugins\`.
+and copy `bin\Release\HumankindAssetFramework.dll` → `<Humankind>\BepInEx\plugins\`.
 
 ## Blender (optional dependency)
 

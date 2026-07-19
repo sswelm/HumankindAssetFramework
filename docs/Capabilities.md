@@ -5,7 +5,7 @@ see the [Factory Manual](Factory-Manual.md).
 
 - **Animated custom models — a first, now one-click.** A **quadcopter drone** injected onto a land-vehicle unit renders
   full-size and textured **and spins its own propellers from its own baked animation** — no engine mod, no GPU-skinning
-  hang. Authored in the **Animation Lab** (Tools ▸ ENC ▸ Animation Lab, docked beside the Factory — the Factory owns the
+  hang. Authored in the **Animation Lab** (Tools ▸ HAF ▸ Animation Lab, docked beside the Factory — the Factory owns the
   model, the Lab owns the animation) and a single Bake does it all: Blender slims the rigged model (keep armature +
   chosen clip, strip to the chosen bones, auto-clamp the frame range), then it bakes an Amplitude `Skeleton` +
   `ClipCollection` + atlas and writes the registry; at runtime the clip is registered and a `PawnManager.AddPawnEntry`

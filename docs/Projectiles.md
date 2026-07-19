@@ -82,7 +82,7 @@ brown drone that **explodes** (instead of a spear-thunk).
 
 ## The editor side — Projectile Lab (`ProjectileBaker.cs`)
 
-**Tools ▸ ENC ▸ Projectile Lab** authors the whole chain from a model file:
+**Tools ▸ HAF ▸ Projectile Lab** authors the whole chain from a model file:
 
 1. **Dump** a donor by GUID (accepts the Asset Picker's 32-hex form) — prints the VERDICT + the FX graph, and
    **auto-fills the donor field** on success.
