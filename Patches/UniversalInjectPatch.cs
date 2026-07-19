@@ -1010,18 +1010,69 @@ namespace ENCAccessProof
                 // CRITICAL: the GPU pawn DESCRIPTOR (per definition: StartFragment + FragmentCount into the fragment
                 // buffer) is snapshotted from FragmentEntries at RegisterPawnDefinition time — an append after that
                 // snapshot exists in the array but the renderer still draws the OLD fragment count (the M60 was
-                // "glued" yet invisible). UpdateDescriptorBufferContent is the game's own full rebuild: it re-packs
-                // every definition's fragments contiguously and flags the buffer dirty (uploaded next computation).
+                // "glued" yet invisible). Do NOT call UpdateDescriptorBufferContent: that full re-pack SKIPS any
+                // definition whose LoadingStatus isn't Loaded yet (common mid-session-load) WITHOUT advancing the
+                // descriptor slot, shifting every later pawn type onto the wrong fragments — in the field this drew
+                // the recon drones as scattered parts. Instead patch ONLY OUR definition, alignment-safe: copy its
+                // existing fragment slots to the tail of the persistent fragment array, append ours there, and
+                // repoint just descriptor[defId] at the new contiguous block (its old slots go dead, harmless).
                 try
                 {
                     var pmType = AccessTools.TypeByName("Amplitude.Mercury.Animation.PawnManager");
                     var pm = pmType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
                              ?? AccessTools.Field(pmType, "Instance")?.GetValue(null);
-                    if (pm != null) AccessTools.Method(pmType, "UpdateDescriptorBufferContent")?.Invoke(pm, null);
-                    else Plugin.Log.LogWarning("[Props] PawnManager.Instance not found — descriptor not refreshed (prop may stay invisible)");
+                    int defId = -1;
+                    try { defId = Convert.ToInt32(GetMember(addon, "PawnDefinitionId")); } catch { }
+                    if (pm == null || defId < 0)
+                    {
+                        // Not registered yet: RegisterPawnDefinition's own Add() snapshots the appended array — nothing to patch.
+                        Plugin.Log.LogInfo($"[Props] '{e.resourceName}' hand prop appended pre-registration — the registration snapshot carries it");
+                    }
+                    else
+                    {
+                        var descF = AccessTools.Field(pmType, "gpuPawnDescriptorEntries");
+                        var fragF = AccessTools.Field(pmType, "gpuPawnDescriptorFragmentEntries");
+                        var cntF = AccessTools.Field(pmType, "persistentFragmentEntryCount");
+                        var dirtyF = AccessTools.Field(pmType, "descriptorBufferDirty");
+                        var descs = descF?.GetValue(pm) as Array;
+                        var gfrags = fragF?.GetValue(pm) as Array;
+                        if (descs == null || gfrags == null || cntF == null || defId >= descs.Length)
+                        { Plugin.Log.LogWarning($"[Props] '{e.resourceName}' hand prop: descriptor arrays unreadable (defId {defId}) — prop stays invisible"); }
+                        else
+                        {
+                            var dEntry = descs.GetValue(defId);
+                            var dT = dEntry.GetType();
+                            uint start = (uint)dT.GetField("StartFragment").GetValue(dEntry);
+                            uint count = (uint)dT.GetField("FragmentCount").GetValue(dEntry);
+                            int tail = Convert.ToInt32(cntF.GetValue(pm));
+                            int need = tail + (int)count + 1;
+                            if (gfrags.Length < need)
+                            {
+                                var grown = Array.CreateInstance(gfrags.GetType().GetElementType(), need + 100);
+                                Array.Copy(gfrags, grown, gfrags.Length);
+                                fragF.SetValue(pm, grown); gfrags = grown;
+                            }
+                            for (int k = 0; k < count; k++) gfrags.SetValue(gfrags.GetValue((int)start + k), tail + k);
+                            var feType = gfrags.GetType().GetElementType();
+                            var ge = Activator.CreateInstance(feType);
+                            feType.GetField("SkinnedMeshIndex").SetValue(ge, 0u);
+                            feType.GetField("EncodedMeshAndVisualParticleCountFxMeshIndex").SetValue(ge, enc);
+                            feType.GetField("BoneIndex").SetValue(ge, bidx);
+                            uint folIdx = 0;
+                            try { folIdx = (uint)Convert.ToInt32(GetMember(fol, "LayerIndex")); } catch { }
+                            feType.GetField("FxOutputLayerIndex").SetValue(ge, folIdx);
+                            gfrags.SetValue(ge, tail + (int)count);
+                            dT.GetField("StartFragment").SetValue(dEntry, (uint)tail);
+                            dT.GetField("FragmentCount").SetValue(dEntry, count + 1);
+                            descs.SetValue(dEntry, defId);
+                            cntF.SetValue(pm, tail + (int)count + 1);
+                            dirtyF?.SetValue(pm, true);
+                            Plugin.Log.LogInfo($"[Props] descriptor[{defId}] repointed: fragments {start}+{count} -> {tail}+{count + 1} (surgical, layer {folIdx})");
+                        }
+                    }
                 }
-                catch (Exception ex) { Plugin.Log.LogWarning("[Props] descriptor refresh: " + ex.Message); }
-                Plugin.Log.LogInfo($"[Props] '{e.resourceName}' hand prop '{meshName}' glued to bone '{boneName}' (boneIndex {bidx}, encoded {enc}) + descriptor refreshed");
+                catch (Exception ex) { Plugin.Log.LogWarning("[Props] descriptor patch: " + ex.Message); }
+                Plugin.Log.LogInfo($"[Props] '{e.resourceName}' hand prop '{meshName}' glued to bone '{boneName}' (boneIndex {bidx}, encoded {enc})");
             }
             catch (Exception ex) { Plugin.Log.LogError("[Props] InjectHandProp: " + ex); }
         }
