@@ -2292,11 +2292,26 @@ namespace ENCAccessProof
             try
             {
                 if (!(GetMember(layer, "RenderOutputs") is Array ros)) return;
-                int painted = 0;
+                int painted = 0; bool dumped = false;
                 foreach (var ro in ros)
                     foreach (var fld in RenderMatFields)
                         if (GetMember(ro, fld) is UnityEngine.Material mat)
                         {
+                            // TEMP diagnostic: the EQ weapon layer may sample differently than the (proven) unit
+                            // layers — dump the shader + every texture slot once so the paint targets the real one.
+                            if (!dumped)
+                            {
+                                dumped = true;
+                                try
+                                {
+                                    var names = mat.GetTexturePropertyNames();
+                                    var parts = new List<string>();
+                                    foreach (var n in names)
+                                    { var t = mat.GetTexture(n); parts.Add($"{n}={(t == null ? "null" : $"{t.name}({t.width}x{t.height})")}"); }
+                                    Plugin.Log.LogInfo($"[Props][matdump] '{tag}' shader='{mat.shader?.name}' | " + string.Join(" | ", parts));
+                                }
+                                catch (Exception dx) { Plugin.Log.LogWarning("[Props][matdump] " + dx.Message); }
+                            }
                             if (ReferenceEquals(mat.GetTexture("_MainTex"), tex)) continue;
                             if (_flatN == null) { _flatN = Solid(0.5f, 0.5f, 1f); _white = Solid(1f, 1f, 1f); _black = Solid(0f, 0f, 0f); _grey = Solid(0.5f, 0.5f, 0.5f); }
                             mat.SetTexture("_MainTex", tex);
