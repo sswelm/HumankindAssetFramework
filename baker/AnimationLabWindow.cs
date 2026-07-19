@@ -306,6 +306,7 @@ public class AnimationLabWindow : EditorWindow
     // capture the baked GUIDs onto the entry -> Upsert to the registry.
     void DoBake()
     {
+        ModelFactoryWindow.ReleasePreviews();   // the bake rewrites the preview prefab — a live Factory preview watching it throws from Unity internals
         RebaseOnRegistry();   // bake with the freshest model-owned fields (rotation/size/…) — only animation fields are ours
         cur.animated = true;
         cur.resourceName = (cur.resourceName ?? "").Trim();
@@ -329,8 +330,9 @@ public class AnimationLabWindow : EditorWindow
         cur.clipAfter = cur.animStateDriven && !string.IsNullOrEmpty(r.clipAfterGuid) ? ModelRegistry.ParseGuid(r.clipAfterGuid) : new int[4];
         bool saved = ModelRegistry.Upsert(cur);
         RefreshList();
+        ModelFactoryWindow.ReloadPreviews();   // give the Factory tab its preview back (fresh from this bake)
         status = saved
-            ? $"Baked ANIMATED '{cur.resourceName}' -> '{cur.pawnDescription}'\nskeleton {r.skeletonGuid}\nclip {r.clipGuid}\nRebuild the mod + relaunch."
+            ? $"Baked ANIMATED '{cur.resourceName}' -> '{cur.pawnDescription}'\nskeleton {r.skeletonGuid}\nclip {r.clipGuid}{(cur.animStateDriven ? $"\nmove clip {r.clipMoveGuid}{(string.IsNullOrEmpty(r.clipAfterGuid) ? "" : $"  after clip {r.clipAfterGuid}")}" : "")}\nRebuild the mod + relaunch."
             : $"Baked '{cur.resourceName}', but the REGISTRY SAVE FAILED (see Console). Close whatever's locking enc_models.json and re-bake.";
         Debug.Log("[AnimLab] " + status);
     }

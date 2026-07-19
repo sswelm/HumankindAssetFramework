@@ -61,6 +61,19 @@ public class ModelFactoryWindow : EditorWindow
         DestroyPreview();
     }
 
+    // ANY window that re-bakes (the Animation Lab included) must release the Factory's live preview first: the bake
+    // rewrites the preview prefab, and a GameObjectInspector still watching it throws
+    // "InstantiateForAnimatorPreview(null)" from Unity internals mid-bake (seen on the first Lab state-bake).
+    internal static void ReleasePreviews()
+    {
+        foreach (var w in Resources.FindObjectsOfTypeAll<ModelFactoryWindow>()) w.LoadPreview(null);
+    }
+    internal static void ReloadPreviews()
+    {
+        foreach (var w in Resources.FindObjectsOfTypeAll<ModelFactoryWindow>())
+        { w.LoadPreview(w.cur != null ? w.cur.resourceName : null, forceReimport: true); w.Repaint(); }
+    }
+
     // Destroy the interactive preview editor safely. The try/catch covers a plain window close where Unity's
     // GameObjectInspector teardown can still throw for reasons of its own; the domain-reload variant of that
     // failure is prevented at the source by the beforeAssemblyReload hook above.
