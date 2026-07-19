@@ -90,7 +90,7 @@ namespace ENCAccessProof
     {
         const BindingFlags BF = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
         static List<ModelEntry> entries;
-        static bool loaded, registered, repointActiveLogged, stLogged;
+        static bool loaded, registered, repointActiveLogged, stLogged, greyWaitLogged;
         static int loadAttempts;   // failed-load counter: latch `loaded` only after a success or a few tries, so a TRANSIENT read/parse error (AV scan, sharing violation at startup) retries instead of disabling injection for the whole session
         static UnityEngine.Texture2D _flatN, _white, _black, _grey;   // neutral overlay maps (kill the host's detail/camo)
 
@@ -843,11 +843,13 @@ namespace ENCAccessProof
                 if (GetMember(hostLayer, "RenderOutputs") is Array ros)
                     foreach (var ro in ros)
                     {
-                        foreach (var fld in new[] { "currentRenderMaterial", "runTimeRenderMaterial" })
+                        foreach (var fld in RenderMatFields)
                             if (GetMember(ro, fld) is UnityEngine.Material mat && mat.GetTexture("_MainTex") is UnityEngine.Texture mt) { src = mt; break; }
                         if (src != null) break;
                     }
-                if (src == null) { Plugin.Log.LogWarning($"[Grey] {tag}: no _MainTex on the output layer yet"); return null; }
+                // log the wait ONCE — TickOne retries this every frame until the layer's atlas loads, and a slow load
+                // used to flood the BepInEx log with one warning per frame (perf pass 2026-07-19)
+                if (src == null) { if (!greyWaitLogged) { greyWaitLogged = true; Plugin.Log.LogWarning($"[Grey] {tag}: no _MainTex on the output layer yet (will keep retrying silently)"); } return null; }
                 int w = src.width, h = src.height;
                 var rt = UnityEngine.RenderTexture.GetTemporary(w, h, 0, UnityEngine.RenderTextureFormat.ARGB32, UnityEngine.RenderTextureReadWrite.sRGB);
                 var prev = UnityEngine.RenderTexture.active;
@@ -977,6 +979,11 @@ namespace ENCAccessProof
             return null;
         }
 
+        // Precomputed member names (perf pass 2026-07-19): "Pose" + i / "BoneRotation" + i built fresh STRINGS per
+        // pawn per FRAME on the game's hottest loop — thousands of small allocations a second at scale, pure GC churn.
+        static readonly string[] PoseNames = { "Pose0", "Pose1", "Pose2", "Pose3", "Pose4", "Pose5", "Pose6", "Pose7", "Pose8" };
+        static readonly string[] BoneRotationNames = { "BoneRotation0", "BoneRotation1", "BoneRotation2", "BoneRotation3" };
+
         // Per-pawn state read once at the top of the hook and threaded through the behavior handlers. `entry` is the boxed
         // PawnEntry struct — every SetMember mutates that one box, and the handler writes it back via pawnEntries.SetValue.
         struct PawnCtx { public Array pawnEntries; public int idx; public object entry; public int skelId; public int descId; }
@@ -999,7 +1006,15 @@ namespace ENCAccessProof
                 // handled and the rest slip through (animating / rocking on the donor's rig).
                 var e = HookedEntryFor(ctx.skelId);
                 if (e != null) e.descId = ctx.descId;                  // learn our unit's descriptor from the correct pawn
-                else if (ctx.descId >= 0) e = entries.FirstOrDefault(x => Hooked(x) && x.descId >= 0 && x.descId == ctx.descId);
+                else if (ctx.descId >= 0)
+                {
+                    // plain loop, NOT FirstOrDefault: the lambda captured ctx into a fresh closure allocation for
+                    // EVERY pawn the game adds — including every vanilla pawn (perf pass 2026-07-19)
+                    var list = entries;
+                    if (list != null)
+                        for (int i = 0; i < list.Count; i++)
+                        { var x = list[i]; if (Hooked(x) && x.descId >= 0 && x.descId == ctx.descId) { e = x; break; } }
+                }
                 if (e == null) return;
 
                 ForceOurSkeleton(ctx, e);
@@ -1048,10 +1063,10 @@ namespace ENCAccessProof
         {
             for (int i = 0; i < 9; i++)
             {
-                var pose = GetMember(ctx.entry, "Pose" + i);
+                var pose = GetMember(ctx.entry, PoseNames[i]);
                 if (pose == null) continue;
                 SetMember(pose, "Time", 0f);
-                SetMember(ctx.entry, "Pose" + i, pose);
+                SetMember(ctx.entry, PoseNames[i], pose);
             }
             ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
             if (freezeLogSkels == null) freezeLogSkels = new HashSet<int>();
@@ -1074,10 +1089,10 @@ namespace ENCAccessProof
             SetMember(entry, "Pose0", pose0);
             for (int i = 1; i < 9; i++)
             {
-                var pose = GetMember(entry, "Pose" + i);
+                var pose = GetMember(entry, PoseNames[i]);
                 if (pose == null) continue;
                 SetMember(pose, "Weight", 0f);
-                SetMember(entry, "Pose" + i, pose);
+                SetMember(entry, PoseNames[i], pose);
             }
             // The AIM layer is cleared only for the ARTILLERY behaviors (it twists the howitzer's barrel as the game
             // aims). For other animated models the game's bone-rotation layer stays — it carries the pawn's FACING
@@ -1186,7 +1201,7 @@ namespace ENCAccessProof
         {
             for (int i = 0; i < 4; i++)
             {
-                var br = GetMember(entry, "BoneRotation" + i);
+                var br = GetMember(entry, BoneRotationNames[i]);
                 if (br == null) continue;
                 long boneIdx;
                 try { boneIdx = Convert.ToInt64(GetMember(br, "SkeletonBoneIndex")); } catch { continue; }
@@ -1203,7 +1218,7 @@ namespace ENCAccessProof
                 try { a = Convert.ToSingle(GetMember(br, "Angle")); } catch { continue; }
                 if (a == 0f) continue;
                 SetMember(br, "Angle", 0f);
-                SetMember(entry, "BoneRotation" + i, br);
+                SetMember(entry, BoneRotationNames[i], br);
                 if (!sanitizeLogged) { sanitizeLogged = true; Plugin.Log.LogInfo($"[Uni] aim-layer sanitize: slot {i} bone={boneIdx} axis={axis} angle {a:0.#} -> 0 (donor wheel-spin on an invalid bone)"); }
             }
         }
@@ -1212,10 +1227,10 @@ namespace ENCAccessProof
         {
             for (int i = 0; i < 4; i++)
             {
-                var br = GetMember(entry, "BoneRotation" + i);
+                var br = GetMember(entry, BoneRotationNames[i]);
                 if (br == null) continue;
                 SetMember(br, "Angle", 0f);
-                SetMember(entry, "BoneRotation" + i, br);
+                SetMember(entry, BoneRotationNames[i], br);
             }
         }
 
@@ -1360,7 +1375,11 @@ namespace ENCAccessProof
             {
                 if (!e.fireOnAttack) continue;
                 float dur = e.animDuration > 0.001f ? e.animDuration : 1f;
-                lock (e.activeFires) e.activeFires.RemoveAll(f => UnityEngine.Time.time - f.startTime >= dur);   // drop finished one-shots
+                // reverse for-loop, NOT RemoveAll: the dur-capturing lambda allocated a closure per entry per FRAME,
+                // even with zero active fires (perf pass 2026-07-19)
+                lock (e.activeFires)
+                    for (int i = e.activeFires.Count - 1; i >= 0; i--)
+                        if (UnityEngine.Time.time - e.activeFires[i].startTime >= dur) e.activeFires.RemoveAt(i);   // drop finished one-shots
                 if (!e.fireGuidQueue.IsEmpty) anyQueued = true;
             }
             if (!anyQueued) return;
@@ -1493,6 +1512,7 @@ namespace ENCAccessProof
             catch (Exception ex) { Plugin.Log.LogError("[Deploy] ProcessDeployState: " + ex); }
         }
 
+        static readonly string[] RenderMatFields = { "currentRenderMaterial", "runTimeRenderMaterial" };   // hoisted — was a new[] per RenderOutput per FRAME
         static void TickOne(ModelEntry e)
         {
             // GREY retry: if the skin wasn't ready when ApplyGrey ran (build returned null), build it now from the
@@ -1504,9 +1524,13 @@ namespace ENCAccessProof
             {
                 if (GetMember(e.hostOutputLayer, "RenderOutputs") is Array ros)
                     foreach (var ro in ros)
-                        foreach (var fld in new[] { "currentRenderMaterial", "runTimeRenderMaterial" })
+                        foreach (var fld in RenderMatFields)
                             if (GetMember(ro, fld) is UnityEngine.Material mat)
                             {
+                                // Already ours -> skip the 7 texture sets. The re-set stays as the RECOVERY path (the
+                                // game can recreate/reset the material, which this check detects by reference), but it
+                                // no longer runs redundantly every frame on a stable material (perf pass 2026-07-19).
+                                if (ReferenceEquals(mat.GetTexture("_MainTex"), e.tex)) continue;
                                 if (_flatN == null) { _flatN = Solid(0.5f, 0.5f, 1f); _white = Solid(1f, 1f, 1f); _black = Solid(0f, 0f, 0f); _grey = Solid(0.5f, 0.5f, 0.5f); }
                                 if (!stLogged) { stLogged = true; Plugin.Log.LogInfo($"[Uni] {e.resourceName} host _MainTex_ST scale={mat.GetTextureScale("_MainTex")} offset={mat.GetTextureOffset("_MainTex")}"); }
                                 mat.SetTexture("_MainTex", e.tex);
@@ -1714,12 +1738,25 @@ namespace ENCAccessProof
         static bool _listenerChecked;
         static List<KeyValuePair<UnityEngine.Object, ModelEntry>> _ourSubpawns;   // cached OUR-units' sub-pawns (refreshed ~every 2s)
         static float _spCacheAt;
+        static List<ModelEntry> _audioOn;      // cached audio-enabled subset — the fields it filters on are set once at registry load
+        static List<ModelEntry> _audioOnSrc;   // the entries list the cache was built from (rebuilt when the registry republishes)
         public static void ProcessEngineAudio()
         {
-            if (entries == null || !Plugin.UniversalInjectOn.Value) return;
-            var on = entries.Where(x => (x.engineSound || !string.IsNullOrEmpty(x.soundFile) || !string.IsNullOrEmpty(x.soundStartFile) || !string.IsNullOrEmpty(x.soundStopFile)) && !string.IsNullOrEmpty(x.pawnDescription)).ToList();
-            if (on.Count == 0) return;
+            var list = entries;
+            if (list == null || !Plugin.UniversalInjectOn.Value) return;
+            // Throttle FIRST, and cache the filtered subset: the Where().ToList() used to run — and allocate — on
+            // EVERY Plugin.Update call, 60x/s for the whole session, before the frame throttle (perf pass 2026-07-19).
             if (++engineFrame % 6 != 0) return;   // ~10x/s (render-position delta = movement)
+            if (!ReferenceEquals(_audioOnSrc, list))
+            {
+                var built = new List<ModelEntry>();
+                foreach (var x in list)
+                    if ((x.engineSound || !string.IsNullOrEmpty(x.soundFile) || !string.IsNullOrEmpty(x.soundStartFile) || !string.IsNullOrEmpty(x.soundStopFile)) && !string.IsNullOrEmpty(x.pawnDescription))
+                        built.Add(x);
+                _audioOn = built; _audioOnSrc = list;
+            }
+            var on = _audioOn;
+            if (on.Count == 0) return;
             try
             {
                 // Lazy-load custom WAV clips + make sure a Unity AudioListener exists (a Wwise game may have none, which
@@ -2809,21 +2846,27 @@ namespace ENCAccessProof
         {
             // Hot path: this runs on EVERY sound the game posts. Once we're not tracing and the fallback handles are all
             // captured, there is nothing to do — bail before any string work.
-            if (!UniversalInject.AudioTraceOn && UniversalInject.StashedEngineHandle != null
-                && UniversalInject.StashedLoudHandle != null && UniversalInject.StashedStopHandle != null) return;
-            if (!(__0 is UnityEngine.Object eo) || eo == null) return;
-            string en = eo.name;
-            // Auto-capture (free) the two engine sounds we replay: the idle loop, and the per-ship move-START one-shot
-            // (e.g. 'Play_UNIT_Vehicles_StealthCorvette_Start' — the distinct engine sound the audible boats fire on move,
-            // which our units never get because it takes the service path, not the emitter's PostEvent).
-            if (UniversalInject.StashedEngineHandle == null && en.IndexOf("ModernBoat_Idle", StringComparison.OrdinalIgnoreCase) >= 0)
-                UniversalInject.StashedEngineHandle = __0;
-            if (en.IndexOf("Vehicles", StringComparison.OrdinalIgnoreCase) >= 0 && en.IndexOf("_Start", StringComparison.OrdinalIgnoreCase) >= 0)
-            { UniversalInject.StashedLoudHandle = __0; UniversalInject.StashedLoudName = en; }
-            if (en.IndexOf("Vehicles", StringComparison.OrdinalIgnoreCase) >= 0 && en.IndexOf("_Stop", StringComparison.OrdinalIgnoreCase) >= 0)
-                UniversalInject.StashedStopHandle = __0;
-            if (!UniversalInject.AudioTraceOn) return;
-            if (UniversalInject.SeenEvents.Add(en)) Plugin.Log.LogInfo($"[AudioTrace] NEW event: '{en}'");
+            try
+            {
+                if (!UniversalInject.AudioTraceOn && UniversalInject.StashedEngineHandle != null
+                    && UniversalInject.StashedLoudHandle != null && UniversalInject.StashedStopHandle != null) return;
+                if (!(__0 is UnityEngine.Object eo) || eo == null) return;
+                string en = eo.name;
+                // Auto-capture (free) the two engine sounds we replay: the idle loop, and the per-ship move-START one-shot
+                // (e.g. 'Play_UNIT_Vehicles_StealthCorvette_Start' — the distinct engine sound the audible boats fire on move,
+                // which our units never get because it takes the service path, not the emitter's PostEvent).
+                if (UniversalInject.StashedEngineHandle == null && en.IndexOf("ModernBoat_Idle", StringComparison.OrdinalIgnoreCase) >= 0)
+                    UniversalInject.StashedEngineHandle = __0;
+                if (en.IndexOf("Vehicles", StringComparison.OrdinalIgnoreCase) >= 0 && en.IndexOf("_Start", StringComparison.OrdinalIgnoreCase) >= 0)
+                { UniversalInject.StashedLoudHandle = __0; UniversalInject.StashedLoudName = en; }
+                if (en.IndexOf("Vehicles", StringComparison.OrdinalIgnoreCase) >= 0 && en.IndexOf("_Stop", StringComparison.OrdinalIgnoreCase) >= 0)
+                    UniversalInject.StashedStopHandle = __0;
+                if (!UniversalInject.AudioTraceOn) return;
+                if (UniversalInject.SeenEvents.Add(en)) Plugin.Log.LogInfo($"[AudioTrace] NEW event: '{en}'");
+            }
+            // This was the ONLY unguarded patch body in the plugin, sitting inside the game's own audio call path — a
+            // destroyed handle whose .name throws must never break AudioManager.PostEvent (review 2026-07-19).
+            catch { }
         }
     }
 

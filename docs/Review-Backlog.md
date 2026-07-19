@@ -34,11 +34,17 @@ by when they'll bite.
 - ~~**District axis has no session re-arm**~~ — FIXED 2026-07-19: `RearmModelRegistration` now nulls `distFxManager`
   and every entry's `plbc`/`privateLeaf`/`leaves`/`collected`; `DistrictApplyEntries` re-derives them as the new
   session loads. Verify alongside the model-axis second-session test.
-- **Plugin perf pass (late-game GC stutter):** per-pawn hook allocates closures/strings for every pawn incl. vanilla
-  (`"Pose"+i`, ctx-capturing lambda, GetMember boxing); `ProcessEngineAudio` LINQ + `ProcessFireQueues` closures run
-  per-frame before their throttles/early-outs; `TickOne` allocates an array + re-sets 7 material textures every frame.
-  Needs deliberate hot-path work with in-game verification — do NOT rush. *(In-session growth of the engine-audio
-  maps is part of this pass; their cross-session staleness is already fixed via the re-arm clears.)*
+- ~~**Plugin perf pass (late-game GC stutter)**~~ — DONE 2026-07-19 (allocation-elimination scope, behavior
+  untouched): precomputed `PoseNames`/`BoneRotationNames` (was `"Pose"+i` strings per pawn per frame); the pose hook's
+  descId fallback is a plain loop (was a ctx-capturing lambda per pawn add); `ProcessFireQueues` prunes with a reverse
+  for-loop (was a dur-capturing `RemoveAll` closure per entry per frame); `ProcessEngineAudio` throttles FIRST and
+  caches its filtered subset keyed on the entries reference (was `Where().ToList()` 60×/s); `TickOne` hoists the
+  field-name array and skips the 7 texture re-sets when `_MainTex` is already ours (re-set kept as the recovery path
+  when the game recreates the material); the `[Grey] no _MainTex` retry warns once; the audio-trace postfix gained
+  the try/catch every other patch body has. NOT done (deliberately): GetMember boxing elimination — it needs typed
+  delegates over reflected structs, high risk for marginal gain; revisit only if profiling shows it matters.
+  **Verify in-game**: soldier idles/turns, howitzer deploys/fires, drone loops, retexture units stay skinned, engine
+  sounds fire — then watch a big battle for stutter.
 - ~~**Plugin unbounded per-instance dictionaries**~~ — FIXED 2026-07-19 (cross-session): all per-instance maps
   (`deployProgress`/`deployLastPos`/`customSources`/`loopHoldUntil`/`engineLastPos`/`engineMoving`, plus static
   `deployMoveState` and `respawnBase`/`respawnCount`) clear on session re-arm, and `deployLastPos` joined the
