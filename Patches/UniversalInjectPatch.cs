@@ -1849,12 +1849,25 @@ namespace ENCAccessProof
             }
         }
 
+        static float lastAimLog;
         static void ClearAimLayer(object entry)
         {
             for (int i = 0; i < 4; i++)
             {
                 var br = GetMember(entry, BoneRotationNames[i]);
                 if (br == null) continue;
+                // DIAGNOSTIC (bombard face-plant, 2026-07-19): log what the game streamed into the aim layer BEFORE
+                // we flatten it — angle + which of OUR bones the donor-meant index lands on. Throttled to 1/s.
+                try
+                {
+                    float ang = Convert.ToSingle(GetMember(br, "Angle"));
+                    if (ang != 0f && UnityEngine.Time.time - lastAimLog > 1f)
+                    {
+                        lastAimLog = UnityEngine.Time.time;
+                        Plugin.Log.LogInfo($"[Aim] streamed slot{i}: Angle={ang:0.0} BoneIndex={GetMember(br, "BoneIndex")} Axis={GetMember(br, "Axis")} (cleared)");
+                    }
+                }
+                catch { }
                 SetMember(br, "Angle", 0f);
                 SetMember(entry, BoneRotationNames[i], br);
             }
