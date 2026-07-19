@@ -33,7 +33,7 @@ in-game with a shipped example:
 |---|---|---|---|
 | **Units** | A unit's whole 3D model — static or **animated**, with per-model runtime behaviors | Ships, aircraft, a folding/firing howitzer, a **62-bone humanoid soldier that idles standing and RUNS while moving** | [Factory-Manual.md](docs/Factory-Manual.md) · [Animated-Models.md](docs/Animated-Models.md) |
 | **Districts** | A district's on-map building, scoped to **one tile** | A nuclear-plant Breeder Reactor | [District-Visuals.md](docs/District-Visuals.md) |
-| **Pawn props** | Weapons & gear on a pawn's **attachment slots** — no whole-model replacement | Slingers carrying an actual sling | [Pawn-Props.md](docs/Pawn-Props.md) |
+| **Pawn props** | Weapons & gear on a pawn's **attachment slots** — no whole-model replacement | Slingers carrying an actual sling; the custom soldier carrying a **textured M60 on his own hand bone** | [Pawn-Props.md](docs/Pawn-Props.md) |
 | **Projectiles** | The **munition mesh** a unit fires | An anti-tank unit launching a kamikaze FPV drone | [Projectiles.md](docs/Projectiles.md) |
 
 **Animation, audio, and retexturing are cross-cutting features** that ride these axes: a unit model can carry its own
@@ -41,6 +41,14 @@ baked animation ([Animated-Models.md](docs/Animated-Models.md)), engine or custo
 runtime-hot-loaded skin or tint ([Capabilities.md](docs/Capabilities.md)) — all from the same JSON registry, no code.
 
 ## What works (proven in-game, in detail)
+- **HAND PROPS — a weapon on a custom skeleton (2026-07-19).** The Combine soldier **carries a textured M60**,
+  gripped correctly through idle, run, combat stance, and sustained fire. The donor (a vehicle) has no weapon
+  slots, so the plugin constructs the pawn fragment itself and glues the Prop-Lab mesh to the injected skeleton's
+  hand bone — with a surgical GPU-descriptor patch (the naive full rebuild scrambled other units), a per-tick
+  repaint of the prop's own atlas on a private layer clone (Amplitude streams weapon textures and resets the
+  material), and an always-stamped import-angle override (the baked angle field doesn't survive the mod bundle —
+  the engine's `-90°X` class default silently tipped every prop until neutralized). Authoring: bake in the Prop
+  Lab (now with per-prop saved recipes), pick it in the Animation Lab's **Hand prop** combobox, done.
 - **STATE-DRIVEN characters — idle / run / after-move / combat stance / attack fire (2026-07-19).** The Combine
   soldier **idles standing, RUNS while moving, holds a weapon-raised COMBAT STANCE while its army is locked in a
   battle, and fires its ATTACK animation when it actually shoots** — five clips per model, switched live by the
