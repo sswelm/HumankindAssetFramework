@@ -85,12 +85,16 @@ by when they'll bite.
 
 ## Queued for the package release (not review findings — branding/packaging debt)
 
-- **Umbrella naming (external doc review, 2026-07-19):** the editor suite's documented name is now **HAF Authoring
-  Tools** with the Model Factory as one module (README updated). The invasive half is deferred to the package push:
-  rename the in-editor menu root `Tools ▸ ENC` → `Tools ▸ HAF`, sweep window titles, and update every
-  `Tools ▸ ENC ▸ …` reference across the docs in the same commit. Deferred deliberately — it breaks daily muscle
-  memory and dozens of doc references, so it should land once, atomically, at the release boundary (alongside the
-  other known package-push items: path decoupling, package scaffolding).
+- **Framework identity migration (plan adopted 2026-07-19 from the external doc review — compat period, not a
+  big bang):** the remaining ENC-branded FRAMEWORK identity is the plugin assembly (`ENCAccessProof.dll`), the
+  BepInEx GUID + cfg (`community.humankind.encaccessproof.cfg`), and the editor menu root (`Tools ▸ ENC`). Migration
+  recipe: new `HumankindAssetFramework.dll` with GUID `community.humankind.haf` (**must ship with removal of the old
+  DLL** — BepInEx would load both and double-patch), migrate/copy the old cfg values on first run + log a migration
+  warning, rename the menu root to `Tools ▸ HAF` and sweep window titles + every `Tools ▸ ENC ▸` doc reference in
+  the same commit. **Deliberately NOT migrating** (framework/pack split, decided 07-14 and reaffirmed 07-19):
+  `enc_models.json` / `enc_sounds` / `enc_skins` are ENC-the-PACK's files — packs are branded, only the framework is
+  neutral, and a third-party pack never touches an `enc_*` path (per-pack assets + `haf_packs/` shipped). Renaming
+  them `haf_*` would blur the very line the multi-mod design draws.
 
 ## Verified clean (don't re-litigate without new evidence)
 

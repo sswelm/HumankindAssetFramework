@@ -35,6 +35,13 @@ A copy-ready starting point is [`haf-pack.example.json`](haf-pack.example.json).
 **Backward compatible:** a legacy bare `{ "models": [...] }` with no wrapper still loads — it just gets default metadata
 (`modId` = the filename, `schemaVersion` = 0). ENC's own `enc_models.json` is treated as the base pack `enc`.
 
+> **Naming — framework vs packs (deliberate):** everything FRAMEWORK-level is `haf_*` (`haf_packs/`,
+> `haf_load_report.txt`); everything `enc_*` (`enc_models.json`, `enc_sounds/`, `enc_skins/`) belongs to **ENC the
+> pack** — the reference pack, branded like any pack should be. Your pack's files carry *your* name (your folder,
+> your modId); you never touch an `enc_*` path. The one remaining ENC-branded framework piece is the plugin
+> DLL/config identity, whose neutral rename (`HumankindAssetFramework.dll`, GUID `community.humankind.haf`, with a
+> config-migration compat period) is queued for the package release.
+
 ## Where it goes
 
 - **ENC's base registry:** `BepInEx/config/enc_models.json` (loaded first, as `modId` `enc`).
