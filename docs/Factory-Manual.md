@@ -542,7 +542,8 @@ reproduces from the entry alone:
 | **Barrel elevation scale** | `>1` exaggerates past the source's max (empty = 1) |
 | **Recoil frames (a..b)** | the kickback SLAM's source range (slam ONLY — post-slam source frames are usually reload choreography; e.g. `445..451` on the M114), remapped onto the deployed pose as the `recoil` clip. Set the **Attack clip** to plain `recoil`. Empty = none |
 | **Return slow** | the palindrome return: the slam played BACKWARD at this multiple of its duration, gliding the tube home (empty = 4 = quarter speed; 0 = hold + snap) |
-| **Recoil step / Slide scale / Arc R** | arc sampling fineness, slam distance scale, arc pivot distance. NOTE Law 5 ([Animation-Pitfalls.md](Animation-Pitfalls.md)): the arc renders in-game as a tube PITCH of `slam × slide ÷ R` degrees-ish, not a slide — so **Arc R is effectively the kick-strength dial, inverted**: 400 ≈ 6° dip (the legacy look), 200 ≈ 12°, 100 ≈ 23°. Never 0 (division by zero, fails loudly). Judge at map zoom |
+| **Slam (deg)** | the kick's slam pitch **in degrees** — what you type is what renders (the converter derives the arc from the measured slide peak; Law 5 in [Animation-Pitfalls.md](Animation-Pitfalls.md) makes the arc a tube pitch). **0/empty = no kick.** ~5 = the subtle legacy dip, 8–12 = clearly visible, 20+ = dramatic. Judge at map zoom |
+| **Recoil step / Slide scale** | arc sampling fineness; slam distance scale (feeds the slide profile the pitch follows). The old raw `Arc R` is honored for legacy recipes but superseded by Slam (deg) |
 
 The conversion **generates the state clips** — `deployed`, `folded`, `unfold`, `fold`, `recoil` — from those frame
 numbers; the Pick dropdowns and the ▶ picker inspect the *converted* file once it exists, so you just assign the
