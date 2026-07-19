@@ -86,6 +86,23 @@ public class AnimationLabWindow : EditorWindow
         (animClips, animBonePrefixes) = ModelFactoryWindow.InspectModel(f);
     }
 
+    // One clip text field + Pick dropdown — shared by the single-clip field and the three state-role fields, so
+    // every role gets the same pick-from-model UX.
+    void ClipRow(string label, string tooltip, Func<string> get, Action<string> set)
+    {
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            set(EditorGUILayout.TextField(new GUIContent(label, tooltip), get()));
+            using (new EditorGUI.DisabledScope(animClips.Count == 0))
+                if (GUILayout.Button(new GUIContent("Pick", animClips.Count == 0 ? "No clips readable (glb/gltf only) — type the name" : null), GUILayout.Width(70)))
+                {
+                    var r = GUILayoutUtility.GetLastRect();
+                    var arr = animClips.ToArray();
+                    new StringDropdown(new AdvancedDropdownState(), arr, arr, "Clips", n => { set(n); Repaint(); }).Show(r);
+                }
+        }
+    }
+
     void OnSelectResource()
     {
         if (selected <= 0) { cur = new ModelDef { animated = true }; status = ""; return; }
@@ -133,21 +150,31 @@ public class AnimationLabWindow : EditorWindow
         }
         EnsureClips();
 
-        // --- Clip ---
+        // --- Clip(s) ---
         EditorGUILayout.Space();
         EditorGUILayout.LabelField("Clip", EditorStyles.miniBoldLabel);
-        using (new EditorGUILayout.HorizontalScope())
+        cur.animStateDriven = EditorGUILayout.Toggle(new GUIContent("State-driven (idle / move / after)",
+            "OFF = today's single-clip modes: one clip, played as a continuous loop or via the Behavior flags below " +
+            "(the drone, the howitzer). ON = a STATE MACHINE for characters: the IDLE clip plays standing, the " +
+            "MOVEMENT clip plays while the unit moves (fixes the idle-slide), and the optional AFTER-MOVEMENT clip " +
+            "plays once on stopping before settling into Idle. All clips come from the same model file and bake " +
+            "against ONE shared skeleton. Mutually exclusive with Fire-on-attack / Deploy-when-stopped. Re-Bake after changing."),
+            cur.animStateDriven);
+        ClipRow(cur.animStateDriven ? "Idle clip" : "Clip name",
+            cur.animStateDriven
+                ? "Plays while the unit stands still (also the rest/reference clip — its first frame defines the shared rest pose on the conversion path)."
+                : "Which animation to bake when the model has several clips. Use Pick to choose from the clips found in the " +
+                  "model. Leave EMPTY to use the model's assigned/first clip. Changing the clip needs a re-Bake.",
+            () => cur.animClip ?? "", v => cur.animClip = v);
+        if (cur.animStateDriven)
         {
-            cur.animClip = EditorGUILayout.TextField(new GUIContent("Clip name",
-                "Which animation to bake when the model has several clips. Use Pick to choose from the clips found in the " +
-                "model. Leave EMPTY to use the model's assigned/first clip. Changing the clip needs a re-Bake."), cur.animClip ?? "");
-            using (new EditorGUI.DisabledScope(animClips.Count == 0))
-                if (GUILayout.Button(new GUIContent("Pick", animClips.Count == 0 ? "No clips readable (glb/gltf only) — type the name" : null), GUILayout.Width(70)))
-                {
-                    var r = GUILayoutUtility.GetLastRect();
-                    var arr = animClips.ToArray();
-                    new StringDropdown(new AdvancedDropdownState(), arr, arr, "Clips", n => { cur.animClip = n; Repaint(); }).Show(r);
-                }
+            ClipRow("Movement clip", "REQUIRED. Plays in a loop while the unit moves (e.g. a run cycle like 'a_RunN').",
+                () => cur.animClipMove ?? "", v => cur.animClipMove = v);
+            ClipRow("After-movement clip", "Optional. Played ONCE when the unit stops (a settle/plant motion), then Idle. Empty = stop straight into Idle.",
+                () => cur.animClipAfter ?? "", v => cur.animClipAfter = v);
+            if (cur.fireOnAttack || cur.deployOnStop)
+                EditorGUILayout.HelpBox("State-driven is mutually exclusive with Fire-on-attack / Deploy-when-stopped — " +
+                    "those flags are ignored while State-driven is ON.", MessageType.Warning);
         }
         // Animate only bones — free text + a Pick that appends a bone-name prefix (grouped, with counts) from the model.
         using (new EditorGUILayout.HorizontalScope())
@@ -254,6 +281,7 @@ public class AnimationLabWindow : EditorWindow
         cur.animated = true;
         cur.animClip = mine.animClip; cur.animateBones = mine.animateBones; cur.animUnitFix = mine.animUnitFix;
         cur.convertRig = mine.convertRig;
+        cur.animStateDriven = mine.animStateDriven; cur.animClipMove = mine.animClipMove; cur.animClipAfter = mine.animClipAfter;
         cur.fireOnAttack = mine.fireOnAttack; cur.deployOnStop = mine.deployOnStop;
         cur.deployPoseTime = mine.deployPoseTime; cur.deploySpeed = mine.deploySpeed; cur.recoilSpeed = mine.recoilSpeed;
     }
@@ -285,6 +313,8 @@ public class AnimationLabWindow : EditorWindow
         cur.modelFile = (cur.modelFile ?? "").Trim();
         cur.animClip = (cur.animClip ?? "").Trim();
         cur.animateBones = (cur.animateBones ?? "").Trim();
+        cur.animClipMove = (cur.animClipMove ?? "").Trim();
+        cur.animClipAfter = (cur.animClipAfter ?? "").Trim();
         var cfg = ModelFactoryWindow.ConfigFor(cur);
         // Geometry caching is AUTOMATIC (mirror of the Factory's DoBake): re-slim exactly when a Blender-step input
         // changed; the 'Reuse extracted' checkbox only protects the hand-edited extracted texture (cfg.keepTexture).
@@ -295,6 +325,8 @@ public class AnimationLabWindow : EditorWindow
         cur.skel = ModelRegistry.ParseGuid(r.skeletonGuid);
         cur.atlas = ModelRegistry.ParseGuid(r.atlasGuid);
         cur.clip = ModelRegistry.ParseGuid(r.clipGuid);
+        cur.clipMove = cur.animStateDriven ? ModelRegistry.ParseGuid(r.clipMoveGuid) : new int[4];
+        cur.clipAfter = cur.animStateDriven && !string.IsNullOrEmpty(r.clipAfterGuid) ? ModelRegistry.ParseGuid(r.clipAfterGuid) : new int[4];
         bool saved = ModelRegistry.Upsert(cur);
         RefreshList();
         status = saved

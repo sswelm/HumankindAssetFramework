@@ -203,7 +203,8 @@ public class ModelFactoryWindow : EditorWindow
         if (cur.animated)
         {
             var beh = new List<string>();
-            if (!string.IsNullOrWhiteSpace(cur.animClip)) beh.Add("clip '" + cur.animClip + "'");
+            if (cur.animStateDriven) beh.Add($"STATE-DRIVEN (idle '{cur.animClip}', move '{cur.animClipMove}'{(string.IsNullOrWhiteSpace(cur.animClipAfter) ? "" : $", after '{cur.animClipAfter}'")})");
+            else if (!string.IsNullOrWhiteSpace(cur.animClip)) beh.Add("clip '" + cur.animClip + "'");
             if (!string.IsNullOrWhiteSpace(cur.animateBones)) beh.Add("bones '" + cur.animateBones + "'");
             if (cur.convertRig) beh.Add("raw-rig conversion");
             if (cur.fireOnAttack) beh.Add("fire-on-attack");
@@ -535,7 +536,7 @@ public class ModelFactoryWindow : EditorWindow
     // the flag so a stale unticked checkbox can't silently downgrade a working animated unit to a static bake
     // (the "howitzers on their side" incident).
     internal static bool LooksAnimated(ModelDef d) =>
-        !string.IsNullOrWhiteSpace(d.animClip) || d.fireOnAttack || d.deployOnStop || d.convertRig ||
+        !string.IsNullOrWhiteSpace(d.animClip) || d.fireOnAttack || d.deployOnStop || d.convertRig || d.animStateDriven ||
         !string.IsNullOrWhiteSpace(d.animateBones) ||
         (d.clip != null && d.clip.Length == 4 && !(d.clip[0] == 0 && d.clip[1] == 0 && d.clip[2] == 0 && d.clip[3] == 0));
 
@@ -838,6 +839,9 @@ public class ModelFactoryWindow : EditorWindow
             || (cur.animateBones ?? "") != (e.animateBones ?? "")
             || cur.materialMode != e.materialMode
             || cur.convertRig != e.convertRig
+            || cur.animStateDriven != e.animStateDriven
+            || (cur.animClipMove ?? "") != (e.animClipMove ?? "")
+            || (cur.animClipAfter ?? "") != (e.animClipAfter ?? "")
             || (cur.modelFile ?? "") != (e.modelFile ?? "");
     }
 
@@ -853,6 +857,7 @@ public class ModelFactoryWindow : EditorWindow
         atlasMaxDim = cur.atlasMaxDim <= 0 ? 512 : cur.atlasMaxDim,
         stripParts = cur.stripParts,
         animated = cur.animated, animClip = (cur.animClip ?? "").Trim(), animateBones = (cur.animateBones ?? "").Trim(), animUnitFix = cur.animUnitFix, convertRig = cur.convertRig,
+        animStateDriven = cur.animStateDriven, animClipMove = (cur.animClipMove ?? "").Trim(), animClipAfter = (cur.animClipAfter ?? "").Trim(),
         keepTexture = cur.reuseExtracted   // on the ANIMATED path the checkbox's ONLY meaning is 'protect the hand-edited extracted texture'
     };
 
@@ -884,6 +889,8 @@ public class ModelFactoryWindow : EditorWindow
             {
                 cur.animClip = regE.animClip; cur.animateBones = regE.animateBones; cur.animUnitFix = regE.animUnitFix;
                 cur.convertRig = regE.convertRig;
+                cur.animStateDriven = regE.animStateDriven; cur.animClipMove = regE.animClipMove; cur.animClipAfter = regE.animClipAfter;
+                cur.clipMove = regE.clipMove; cur.clipAfter = regE.clipAfter;
                 cur.fireOnAttack = regE.fireOnAttack; cur.deployOnStop = regE.deployOnStop;
                 cur.deployPoseTime = regE.deployPoseTime; cur.deploySpeed = regE.deploySpeed; cur.recoilSpeed = regE.recoilSpeed;
                 // Unit Retexture / Unit Sound ownership — same rule as the Lab fields: this window can't even display
@@ -929,6 +936,8 @@ public class ModelFactoryWindow : EditorWindow
         cur.skel = ModelRegistry.ParseGuid(r.skeletonGuid);
         cur.atlas = ModelRegistry.ParseGuid(r.atlasGuid);
         cur.clip = cfg.animated ? ModelRegistry.ParseGuid(r.clipGuid) : new int[4];   // static models carry {0,0,0,0}
+        cur.clipMove = cfg.animated && cfg.animStateDriven ? ModelRegistry.ParseGuid(r.clipMoveGuid) : new int[4];
+        cur.clipAfter = cfg.animated && cfg.animStateDriven && !string.IsNullOrEmpty(r.clipAfterGuid) ? ModelRegistry.ParseGuid(r.clipAfterGuid) : new int[4];
         bool saved = ModelRegistry.Upsert(cur);
         RefreshList();
         selected = System.Array.IndexOf(existing, cur.resourceName); if (selected < 0) selected = 0;

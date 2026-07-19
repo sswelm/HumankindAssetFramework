@@ -40,6 +40,22 @@ if len(argv) > 8 and argv[8].strip() in ("0", "1"):
 else:
     convert_rig = any(abs(v) > 1e-4 for v in rig_rot)
 print("RIGANIM conversion path: %s" % ("ON (raw-rig convert)" if convert_rig else "off (legacy byte-identical)"))
+# STATE-DRIVEN roles (argv[9], optional; Phase 2 2026-07-19): "role=clipName;role=clipName" (e.g.
+# "move=Skel|a_RunN;after=Skel|Settle"). Each role exports the SAME prepared rig with that role's clip to a sibling
+# folder anim_<role>/ next to the primary output — one FBX per folder, so each ClipCollection scan sees exactly one
+# clip. CRITICAL for the conversion path: every role's clip must be rebaked against ONE shared rest (the PRIMARY
+# clip's frame-0 pose) — converting roles in separate Blender runs would derive a DIFFERENT rest per clip and the
+# non-primary clips would play rigidly displaced on the primary-baked skeleton (the torn-head failure, reborn).
+role_specs = []   # ordered [(role, clipName)]
+if len(argv) > 9 and argv[9].strip():
+    for _pair in argv[9].split(";"):
+        _pair = _pair.strip()
+        if _pair and "=" in _pair:
+            _r, _cn = _pair.split("=", 1)
+            if _r.strip() and _cn.strip():
+                role_specs.append((_r.strip(), _cn.strip()))
+if role_specs:
+    print("RIGANIM state roles: %s" % ", ".join("%s='%s'" % rc for rc in role_specs))
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
 ext = os.path.splitext(inp)[1].lower()
@@ -75,17 +91,29 @@ if act is None:
     sys.exit(1)
 if not arm.animation_data:
     arm.animation_data_create()
-arm.animation_data.action = act
-try:
-    if getattr(act, "slots", None):
-        arm.animation_data.action_slot = act.slots[0]   # Blender 5.x slotted actions
-except Exception as e:
-    print("RIGANIM slot warn:", e)
+def assign_action(a):
+    arm.animation_data.action = a
+    try:
+        if getattr(a, "slots", None):
+            arm.animation_data.action_slot = a.slots[0]   # Blender 5.x slotted actions
+    except Exception as e:
+        print("RIGANIM slot warn:", e)
+assign_action(act)
+# resolve the state-role clips BEFORE pruning actions (a role may share the primary clip, e.g. after = idle)
+role_acts = {}   # role -> action
+for _r, _cn in role_specs:
+    _a = bpy.data.actions.get(_cn)
+    if _a is None:
+        print("RIGANIM ERROR: state clip '%s' (role '%s') not found. Available: %s" % (_cn, _r, [a.name for a in bpy.data.actions]))
+        sys.exit(1)
+    role_acts[_r] = _a
+keep_names = set([act.name] + [a.name for a in role_acts.values()])
 for a in list(bpy.data.actions):
-    if a is not act:
+    if a.name not in keep_names:
         try: bpy.data.actions.remove(a)
         except Exception: pass
-print("RIGANIM action '%s'" % act.name)
+all_acts = [act] + [a for a in dict.fromkeys(role_acts.values()) if a is not act]   # unique, primary first
+print("RIGANIM action '%s'%s" % (act.name, (" + %d state clip(s)" % (len(all_acts) - 1)) if len(all_acts) > 1 else ""))
 
 # all f-curves across the (Blender 5.x slotted) action, with their owning collection so we can remove them
 def all_fcurve_owners(action):
@@ -99,26 +127,28 @@ def all_fcurve_owners(action):
                     out.append((cb.fcurves, fc))
     return out
 
-# OPTIONAL: keep animation only on bones matching a prefix (strip camera pans / root-bob that cause wobble)
+# OPTIONAL: keep animation only on bones matching a prefix (strip camera pans / root-bob that cause wobble).
+# Applied to EVERY exported clip (primary + state roles) so no role can smuggle back a stripped bone.
 if prefixes:
     def bone_of(dp):
         if 'pose.bones[' not in dp: return None
         return dp.split('["', 1)[1].split('"]', 1)[0]
-    owners = all_fcurve_owners(act)   # snapshot: safe to remove from the owning collections while iterating this list
-    avail = sorted({bone_of(fc.data_path) for _, fc in owners if bone_of(fc.data_path) is not None})
-    kept = rem = 0
-    for coll, fc in owners:
-        b = bone_of(fc.data_path)
-        if b is not None and any(b.startswith(p) for p in prefixes):
-            kept += 1
-        else:
-            coll.remove(fc); rem += 1
-    print("RIGANIM bone-filter %s: kept %d fcurves, removed %d" % (prefixes, kept, rem))
-    # T6: if the prefix matched NOTHING, every fcurve was stripped -> a frozen 1-frame clip would bake and ship with
-    # exit 0 (silent). Hard-fail instead, listing the animated bones so the prefix can be corrected.
-    if kept == 0:
-        print("RIGANIM ERROR: bone-filter %s matched no animated bone — every fcurve was stripped, the clip would be frozen. Animated bones: %s" % (prefixes, avail))
-        sys.exit(1)
+    for _fa in all_acts:
+        owners = all_fcurve_owners(_fa)   # snapshot: safe to remove from the owning collections while iterating this list
+        avail = sorted({bone_of(fc.data_path) for _, fc in owners if bone_of(fc.data_path) is not None})
+        kept = rem = 0
+        for coll, fc in owners:
+            b = bone_of(fc.data_path)
+            if b is not None and any(b.startswith(p) for p in prefixes):
+                kept += 1
+            else:
+                coll.remove(fc); rem += 1
+        print("RIGANIM bone-filter %s on '%s': kept %d fcurves, removed %d" % (prefixes, _fa.name, kept, rem))
+        # T6: if the prefix matched NOTHING, every fcurve was stripped -> a frozen 1-frame clip would bake and ship
+        # with exit 0 (silent). Hard-fail instead, listing the animated bones so the prefix can be corrected.
+        if kept == 0:
+            print("RIGANIM ERROR: bone-filter %s matched no animated bone in '%s' — every fcurve was stripped, the clip would be frozen. Animated bones: %s" % (prefixes, _fa.name, avail))
+            sys.exit(1)
 
 # FOLD FRAME-0 BONE LOCATIONS INTO THE REST POSE — auto-rigged models (the Combine soldier) often park a bone's REST
 # somewhere else and hold it in place with a constant corrective location key in every clip. Amplitude can't play
@@ -155,13 +185,21 @@ try:
         #   4. re-bake the action with VISUAL KEYING (curves re-derived relative to the new rest — translations
         #      collapse to ~0, rotations stay true), then the location-strip below removes the residue.
         _fs0 = int(act.frame_range[0]); _fe0 = int(act.frame_range[1])
-        # SNAPSHOT the true visual pose of every bone on every frame FIRST (original rig + original action) —
-        # everything after this destroys the old reference frame.
-        _snap = {}
-        for _f in range(_fs0, _fe0 + 1):
-            bpy.context.scene.frame_set(_f)
-            bpy.context.view_layer.update()
-            _snap[_f] = {pb.name: pb.matrix.copy() for pb in arm.pose.bones}
+        # SNAPSHOT the true visual pose of every bone on every frame of EVERY exported clip FIRST (original rig +
+        # original actions) — everything after this destroys the old reference frame. All clips share ONE canonical
+        # rest (the PRIMARY clip's frame 0): a per-clip rest would displace every non-primary clip on the shared
+        # skeleton (Phase 2, 2026-07-19).
+        _snaps = {}   # action -> {frame -> {bone -> world matrix}}
+        for _sa in all_acts:
+            assign_action(_sa)
+            _sfs = int(_sa.frame_range[0]); _sfe = int(_sa.frame_range[1])
+            _snaps[_sa] = {}
+            for _f in range(_sfs, _sfe + 1):
+                bpy.context.scene.frame_set(_f)
+                bpy.context.view_layer.update()
+                _snaps[_sa][_f] = {pb.name: pb.matrix.copy() for pb in arm.pose.bones}
+        _snap = _snaps[act]   # the primary clip's snapshots (rest source + residual check)
+        assign_action(act)
         bpy.context.scene.frame_set(_fs0)
         bpy.context.view_layer.update()
         _rebind = []
@@ -196,13 +234,10 @@ try:
         # double-applied on the new rest). New local basis per frame, pure matrix math:
         #   local_f(bone)  = parentWorld_f^-1 @ world_f          (armature-space snapshots)
         #   basis_f(bone)  = newRestLocal^-1 @ local_f           (Blender: poseLocal = restLocal @ basis)
-        # Only the ROTATION of basis_f is written (Amplitude is rotation-only; frame-0 basis == identity by
-        # construction, so the rest IS the first frame).
-        _old_act = act
-        _new_act = bpy.data.actions.new(_old_act.name + "_rebaked")
-        arm.animation_data.action = _new_act
-        try: arm.animation_data.action_slot = _new_act.slots.new(id_type='OBJECT', name=arm.name)
-        except Exception: pass
+        # Only the ROTATION of basis_f is written (Amplitude is rotation-only; the primary's frame-0 basis ==
+        # identity by construction, so the rest IS the primary's first frame). EVERY clip (primary + state roles)
+        # is rebaked against the SAME rest here — that shared reference is what lets all role ClipCollections play
+        # on one baked skeleton.
         _parent_of = {b.name: (b.parent.name if b.parent else None) for b in arm.data.bones}
         _rest_local = {}
         for _b3 in arm.data.bones:
@@ -210,24 +245,34 @@ try:
             else: _rest_local[_b3.name] = _b3.matrix_local.copy()
         for pb in arm.pose.bones:
             pb.rotation_mode = 'QUATERNION'
-        _frames = sorted(_snap.keys())
-        for _f in _frames:
-            _world = _snap[_f]
-            for pb in arm.pose.bones:
-                _pn = _parent_of[pb.name]
-                _localf = (_world[_pn].inverted() @ _world[pb.name]) if _pn else _world[pb.name]
-                _basis = _rest_local[pb.name].inverted() @ _localf
-                pb.rotation_quaternion = _basis.to_quaternion()
-                pb.keyframe_insert("rotation_quaternion", frame=_f)
-        act = _new_act
-        # VERIFY: at frame 0 the evaluated pose must coincide with the rest
+        _rebaked = {}   # old action -> rebaked action
+        for _oa in all_acts:
+            _na = bpy.data.actions.new(_oa.name + "_rebaked")
+            arm.animation_data.action = _na
+            try: arm.animation_data.action_slot = _na.slots.new(id_type='OBJECT', name=arm.name)
+            except Exception: pass
+            _frames = sorted(_snaps[_oa].keys())
+            for _f in _frames:
+                _world = _snaps[_oa][_f]
+                for pb in arm.pose.bones:
+                    _pn = _parent_of[pb.name]
+                    _localf = (_world[_pn].inverted() @ _world[pb.name]) if _pn else _world[pb.name]
+                    _basis = _rest_local[pb.name].inverted() @ _localf
+                    pb.rotation_quaternion = _basis.to_quaternion()
+                    pb.keyframe_insert("rotation_quaternion", frame=_f)
+            _rebaked[_oa] = _na
+        act = _rebaked[all_acts[0]]
+        role_acts = {r: _rebaked[a] for r, a in role_acts.items()}
+        all_acts = [act] + [a for a in dict.fromkeys(role_acts.values()) if a is not act]
+        assign_action(act)
+        # VERIFY: at frame 0 the evaluated PRIMARY pose must coincide with the rest
         bpy.context.scene.frame_set(_fs0)
         bpy.context.view_layer.update()
         _worst = 0.0
         for pb in arm.pose.bones:
             _d = (pb.matrix.translation - arm.data.bones[pb.name].matrix_local.translation).length
             if _d > _worst: _worst = _d
-        print("RIGANIM rest-normalized + rebaked %d frames x %d bones (%d meshes re-bound); frame-0 residual = %.6f (should be ~0)" % (len(_frames), len(arm.pose.bones), len(_rebind), _worst))
+        print("RIGANIM rest-normalized + rebaked %d clip(s) x %d bones (%d meshes re-bound); primary frame-0 residual = %.6f (should be ~0)" % (len(all_acts), len(arm.pose.bones), len(_rebind), _worst))
 except Exception as _e:
     try: bpy.ops.object.mode_set(mode='OBJECT')
     except Exception: pass
@@ -248,11 +293,12 @@ except Exception as _e:
 # bake went through it, and Amplitude can't play the keys anyway (the 2026-07-19 gating decision moved only the
 # destructive rest-fold above behind the convert flag).
 _locs = 0
-for coll, fc in all_fcurve_owners(act):
-    if fc.data_path.startswith("pose.bones") and fc.data_path.endswith(".location"):
-        coll.remove(fc); _locs += 1
+for _sa in all_acts:
+    for coll, fc in all_fcurve_owners(_sa):
+        if fc.data_path.startswith("pose.bones") and fc.data_path.endswith(".location"):
+            coll.remove(fc); _locs += 1
 if _locs:
-    print("RIGANIM stripped %d bone-LOCATION fcurves (Amplitude clips are rotation-only; translations bake unscaled)" % _locs)
+    print("RIGANIM stripped %d bone-LOCATION fcurves across %d clip(s) (Amplitude clips are rotation-only; translations bake unscaled)" % (_locs, len(all_acts)))
 
 # clamp scene frame range to the action's real range (else bake_anim pads a frozen tail -> ~1s stall per loop)
 fs, fe = [int(round(v)) for v in act.frame_range]
@@ -468,7 +514,22 @@ bpy.ops.object.select_all(action='SELECT')
 gscale = 0.01 if convert_rig else 1.0
 if gscale != 1.0:
     print("RIGANIM export global_scale=0.01 (cancels the exporter's m->cm x100 root scaling)")
-bpy.ops.export_scene.fbx(filepath=outp, use_selection=False, add_leaf_bones=False, global_scale=gscale,
-                         bake_anim=True, bake_anim_use_all_actions=False,
-                         bake_anim_use_nla_strips=False, object_types={'ARMATURE', 'MESH'})
-print("RIGANIM wrote", outp)
+# EXPORT — the primary clip to outp, then each STATE ROLE'S clip to a sibling anim_<role>/ folder (same prepared
+# rig/mesh, only the assigned action + frame range differ; bake_anim_use_all_actions=False bakes the ACTIVE action
+# only, so each FBX carries exactly one take and each ClipCollection folder scan sees exactly one clip).
+def _export_one(_a, _o):
+    assign_action(_a)
+    _fs, _fe = [int(round(v)) for v in _a.frame_range]
+    bpy.context.scene.frame_start = _fs
+    bpy.context.scene.frame_end = _fe
+    _d = os.path.dirname(_o)
+    if _d and not os.path.isdir(_d):
+        os.makedirs(_d)
+    bpy.ops.export_scene.fbx(filepath=_o, use_selection=False, add_leaf_bones=False, global_scale=gscale,
+                             bake_anim=True, bake_anim_use_all_actions=False,
+                             bake_anim_use_nla_strips=False, object_types={'ARMATURE', 'MESH'})
+    print("RIGANIM wrote %s ('%s', frames %d..%d)" % (_o, _a.name, _fs, _fe))
+_export_one(act, outp)
+for _r, _cn in role_specs:
+    _ro = os.path.join(os.path.dirname(os.path.dirname(outp)), "anim_" + _r, os.path.basename(outp))
+    _export_one(role_acts[_r], _ro)

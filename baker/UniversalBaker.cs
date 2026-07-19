@@ -41,12 +41,16 @@ public struct BakeConfig
     public string  animateBones;    // ANIMATED only: comma-separated bone-name prefixes to keep animation on (e.g. "prop,rotor"); empty = keep the whole clip
     public bool    animUnitFix;     // ANIMATED only: if the model bakes ~100x too big & floats (a metre->cm FBX unit scale), tick this — the baker measures the FBX at its true scale (useFileScale off) then bakes with the unit scale on, so Size = in-game units. Per-model because different rig exports embed different unit scales (some need it, some break with it).
     public bool    convertRig;      // ANIMATED only: route the Blender step through the RAW-RIG CONVERSION (rest-normalize + rebake, root collapse, topological rename, rotation/scale fold, clean-unit export). THE pipeline switch — rotationEuler is just a rotation again (applied only on this path; the legacy path stays byte-identical).
+    public bool    animStateDriven; // ANIMATED only (Phase 2): bake one ClipCollection PER ROLE (idle = animClip, move = animClipMove, optional after = animClipAfter), all sharing the ONE baked skeleton — the runtime picks per state.
+    public string  animClipMove;    // STATE-DRIVEN only: the MOVEMENT clip name (required when animStateDriven)
+    public string  animClipAfter;   // STATE-DRIVEN only: the optional AFTER-MOVEMENT one-shot clip name ("" = none)
     public bool    keepTexture;     // ANIMATED only: when the Blender step re-runs, DON'T regenerate the extracted albedo (protects hand-edited textures). This is the 'Reuse extracted files' checkbox's ONLY effect on the animated path — geometry caching is automatic (the windows re-slim exactly when a Blender-step setting changed).
 }
 
 public struct BakeResult
 {
     public bool ok; public string error; public string skeletonGuid, atlasGuid, clipGuid; public Vector3 bbox;
+    public string clipMoveGuid, clipAfterGuid;   // STATE-DRIVEN only: the per-role ClipCollection GUIDs ("" when not baked)
 }
 
 public static class UniversalBaker
@@ -88,7 +92,8 @@ public static class UniversalBaker
     // The FULL union of both paths' shipped outputs. Used by the E5 backup/rollback AND the cross-path sweep below —
     // "_ClipsPoseData.bytes" (the clip's baked pose stream, written by ClipCollection.Reimport next to _Clips) was
     // missing from this list, so a failed animated re-bake could restore an OLD _Clips next to NEW pose bytes.
-    static readonly string[] OutputSuffixes = { "_ModelMesh.asset", "_Atlas.asset", "_Mat.mat", "_Model.prefab", "_Skeleton.asset", "_Clips.asset", "_ClipsPoseData.bytes" };
+    static readonly string[] OutputSuffixes = { "_ModelMesh.asset", "_Atlas.asset", "_Mat.mat", "_Model.prefab", "_Skeleton.asset", "_Clips.asset", "_ClipsPoseData.bytes",
+                                                "_ClipsMove.asset", "_ClipsMovePoseData.bytes", "_ClipsAfter.asset", "_ClipsAfterPoseData.bytes" };   // state-driven role collections
 
     // CROSS-PATH SWEEP: each bake path deletes-then-recreates only its OWN assets, so re-baking a model on the OTHER
     // path (animated <-> static) used to orphan the previous path's outputs in shipped Resources — Unity force-ships
@@ -189,9 +194,18 @@ public static class UniversalBaker
 
         string fbxRel = animDir + "/" + name + "_anim.fbx";
         string fbxFull = Path.Combine(projRoot, fbxRel);
+        // STATE-DRIVEN role outputs (Phase 2): rig_anim exports each role's clip to a sibling anim_<role>/ folder —
+        // one FBX per folder, so each ClipCollection folder-scan sees exactly one clip.
+        if (cfg.animStateDriven && string.IsNullOrWhiteSpace(cfg.animClipMove))
+            return Fail("state-driven: the MOVEMENT clip is required (pick it in the Animation Lab).");
+        string moveFbxRel = resDir + "/anim_move/" + name + "_anim.fbx";
+        string afterFbxRel = resDir + "/anim_after/" + name + "_anim.fbx";
+        bool wantAfter = cfg.animStateDriven && !string.IsNullOrWhiteSpace(cfg.animClipAfter);
+        bool roleFbxMissing = cfg.animStateDriven &&
+            (!File.Exists(Path.Combine(projRoot, moveFbxRel)) || (wantAfter && !File.Exists(Path.Combine(projRoot, afterFbxRel))));
 
         // --- 1) Blender: slim the rigged model (keep armature + clip, clamp frame range, optional bone strip, albedo) ---
-        if (!string.IsNullOrEmpty(cfg.modelFile) && (!cfg.reuseExtracted || !File.Exists(fbxFull)))
+        if (!string.IsNullOrEmpty(cfg.modelFile) && (!cfg.reuseExtracted || !File.Exists(fbxFull) || roleFbxMissing))
         {
             int target = cfg.targetTris > 0 ? cfg.targetTris : 12000;   // animated skins want to stay well under the shared buffer
             string albedoOut = Path.Combine(fsDir, name + "_albedo.png");
@@ -200,11 +214,29 @@ public static class UniversalBaker
             if (cfg.keepTexture && File.Exists(albedoOut))
             { Debug.Log($"[Factory] {name}: keeping the existing extracted albedo (hand-edit protection)."); albedoOut = ""; }
             bool keepMats = cfg.materialMode != MaterialMode.Single;   // Auto/Multi keep the material slots so the atlas step can pack them (Single collapses to 1, the old default)
-            if (!RigAnimViaBlender(cfg.modelFile, fbxFull, target, cfg.animateBones ?? "", cfg.animClip ?? "", albedoOut, keepMats, cfg.rotationEuler, cfg.convertRig))
-                return Fail("Blender animated slim failed (see console). Is the model rigged with the named animation clip?");
+            // state roles for rig_anim's argv[9]: "move=<clip>[;after=<clip>]" — one shared rest, one FBX per role
+            string stateRoles = "";
+            if (cfg.animStateDriven)
+            {
+                stateRoles = "move=" + cfg.animClipMove.Trim();
+                if (wantAfter) stateRoles += ";after=" + cfg.animClipAfter.Trim();
+            }
+            if (!RigAnimViaBlender(cfg.modelFile, fbxFull, target, cfg.animateBones ?? "", cfg.animClip ?? "", albedoOut, keepMats, cfg.rotationEuler, cfg.convertRig, stateRoles))
+                return Fail("Blender animated slim failed (see console). Is the model rigged with the named animation clip(s)?");
+            AssetDatabase.Refresh();   // the role folders are new on disk — let Unity discover them before importing
         }
         if (!File.Exists(fbxFull)) return Fail("no slim FBX at " + fbxRel + " — bake with a Model file first (Reuse extracted needs an existing one).");
         AssetDatabase.ImportAsset(fbxRel, ImportAssetOptions.ForceUpdate);
+        if (cfg.animStateDriven)
+        {
+            if (!File.Exists(Path.Combine(projRoot, moveFbxRel))) return Fail("state-driven: the Blender step produced no Movement FBX (" + moveFbxRel + ") — check the Movement clip name.");
+            AssetDatabase.ImportAsset(moveFbxRel, ImportAssetOptions.ForceUpdate);
+            if (wantAfter)
+            {
+                if (!File.Exists(Path.Combine(projRoot, afterFbxRel))) return Fail("state-driven: the Blender step produced no After FBX (" + afterFbxRel + ") — check the After clip name.");
+                AssetDatabase.ImportAsset(afterFbxRel, ImportAssetOptions.ForceUpdate);
+            }
+        }
 
         // Decide multi-material EARLY (from the MTL on disk) — a multi-material bake rebuilds/merges the skinned mesh
         // (BuildMultiAtlasAndRemap below) and Amplitude's skeleton importer rejects that rebuilt mesh if tangents were
@@ -250,6 +282,22 @@ public static class UniversalBaker
         }
         else if (cfg.animUnitFix) { imp.SaveAndReimport(); fbxGo = AssetDatabase.LoadAssetAtPath<GameObject>(fbxRel); }   // apply useFileScale-on even if too small to rescale
         if (fbxGo == null) return Fail("imported FBX has no GameObject");
+        if (cfg.animStateDriven)
+        {
+            // Mirror the PRIMARY FBX's final import settings onto every role FBX (same rig, different clip): the
+            // clip bake samples the imported scene, so scale/rig settings must match the skeleton's source exactly.
+            foreach (var roleRel in wantAfter ? new[] { moveFbxRel, afterFbxRel } : new[] { moveFbxRel })
+            {
+                var rimp = AssetImporter.GetAtPath(roleRel) as ModelImporter;
+                if (rimp == null) return Fail("could not get ModelImporter for " + roleRel);
+                rimp.animationType = ModelImporterAnimationType.Generic;
+                rimp.importAnimation = true;
+                rimp.importTangents = ModelImporterTangents.CalculateMikk;
+                rimp.useFileScale = imp.useFileScale;
+                rimp.globalScale = imp.globalScale;
+                rimp.SaveAndReimport();
+            }
+        }
 
         // --- 3) atlas: SINGLE albedo, or (for a multi-material OPEN model like a towed gun) a PACKED atlas with the skinned
         //        mesh UVs remapped per-submesh. MaterialMode gates it: Single = one texture; Multi = force packing; Auto =
@@ -293,19 +341,41 @@ public static class UniversalBaker
         // --- 5) bake ClipCollection: set its skeleton guid, SetFromDirectory (populate clips), Reimport (bake poseData) ---
         var clipType = FindAmpType("Amplitude.Mercury.Animation.ClipCollection");
         if (clipType == null) return Fail("Amplitude ClipCollection type not found");
-        string clipPath = "Assets/Resources/" + name + "_Clips.asset";
-        AssetDatabase.DeleteAsset(clipPath);
-        var clipColl = ScriptableObject.CreateInstance(clipType);
-        AssetDatabase.CreateAsset(clipColl, clipPath);
-        // the ClipCollection references its skeleton by Amplitude guid — set the private serialized field directly
+        // the ClipCollection references its skeleton by Amplitude guid — set the private serialized field directly.
+        // STATE-DRIVEN models bake one collection PER ROLE (idle = anim/, move = anim_move/, after = anim_after/) —
+        // every collection binds the SAME skeleton guid, and every folder holds exactly one FBX (rig_anim exported
+        // them from ONE shared rest), so the runtime's index-0 clip resolution stays valid for each role.
         var adbType = FindAmpType("Amplitude.Framework.Asset.AssetDatabase");
         var skelGuidObj = adbType?.GetMethod("GetAssetGUID", new[] { typeof(UnityEngine.Object) })?.Invoke(null, new object[] { skel });
         var skelField = clipType.GetField("skeleton", BindingFlags.NonPublic | BindingFlags.Instance);
         if (skelField == null || skelGuidObj == null) return Fail("could not bind ClipCollection.skeleton (field/guid missing)");
-        skelField.SetValue(clipColl, skelGuidObj);
-        if (!InvokeReq(clipType, "SetFromDirectory", new[] { typeof(string) }, clipColl, new object[] { animDir }, out err)) return Fail(err);   // isolated folder = only OUR fbx -> one clip
-        if (!InvokeReq(clipType, "Reimport", Type.EmptyTypes, clipColl, null, out err)) return Fail(err);                                       // bakes the pose data
-        EditorUtility.SetDirty(clipColl);
+        string BakeClipCollection(string dir, string suffix, out UnityEngine.Object collOut)
+        {
+            collOut = null;
+            string p = "Assets/Resources/" + name + suffix + ".asset";
+            AssetDatabase.DeleteAsset(p);
+            var cc = ScriptableObject.CreateInstance(clipType);
+            AssetDatabase.CreateAsset(cc, p);
+            skelField.SetValue(cc, skelGuidObj);
+            if (!InvokeReq(clipType, "SetFromDirectory", new[] { typeof(string) }, cc, new object[] { dir }, out var e2)) return e2;   // isolated folder = only that role's fbx -> one clip
+            if (!InvokeReq(clipType, "Reimport", Type.EmptyTypes, cc, null, out e2)) return e2;                                        // bakes the pose data
+            EditorUtility.SetDirty(cc);
+            collOut = cc;
+            return null;
+        }
+        string cerr = BakeClipCollection(animDir, "_Clips", out var clipColl);
+        if (cerr != null) return Fail(cerr);
+        UnityEngine.Object clipMoveColl = null, clipAfterColl = null;
+        if (cfg.animStateDriven)
+        {
+            cerr = BakeClipCollection(resDir + "/anim_move", "_ClipsMove", out clipMoveColl);
+            if (cerr != null) return Fail("Movement clip collection: " + cerr);
+            if (wantAfter)
+            {
+                cerr = BakeClipCollection(resDir + "/anim_after", "_ClipsAfter", out clipAfterColl);
+                if (cerr != null) return Fail("After clip collection: " + cerr);
+            }
+        }
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
 
         // --- 6) preview aid: a STATIC textured prefab (the baked mesh + the atlas skin) you can select to inspect in
@@ -319,8 +389,21 @@ public static class UniversalBaker
         // an empty GUID means the SDK skeleton/clip bake produced nothing — fail loudly rather than write a dead registry entry.
         if (string.IsNullOrEmpty(skelGuid) || skelGuid == "0,0,0,0") return Fail($"{name}: skeleton bake produced an empty GUID (SetPrefab/Reimport did nothing).");
         if (string.IsNullOrEmpty(clipGuid) || clipGuid == "0,0,0,0") return Fail($"{name}: ClipCollection GUID is empty — the model has no bakeable clip (check the Clip name / that it's actually animated).");
-        Debug.Log($"[Factory] {name} ANIMATED DONE. skeleton={skelGuid} clip={clipGuid} atlas={atlasGuid}");
-        return new BakeResult { ok = true, skeletonGuid = skelGuid, atlasGuid = atlasGuid, clipGuid = clipGuid, bbox = Vector3.zero };
+        string clipMoveGuid = "", clipAfterGuid = "";
+        if (cfg.animStateDriven)
+        {
+            clipMoveGuid = AmplitudeGuid(clipMoveColl);
+            if (string.IsNullOrEmpty(clipMoveGuid) || clipMoveGuid == "0,0,0,0") return Fail($"{name}: MOVEMENT ClipCollection GUID is empty — check the Movement clip name.");
+            if (wantAfter)
+            {
+                clipAfterGuid = AmplitudeGuid(clipAfterColl);
+                if (string.IsNullOrEmpty(clipAfterGuid) || clipAfterGuid == "0,0,0,0") return Fail($"{name}: AFTER ClipCollection GUID is empty — check the After clip name.");
+            }
+        }
+        Debug.Log($"[Factory] {name} ANIMATED DONE. skeleton={skelGuid} clip={clipGuid} atlas={atlasGuid}" +
+                  (cfg.animStateDriven ? $" [state-driven: move={clipMoveGuid}{(wantAfter ? " after=" + clipAfterGuid : "")}]" : ""));
+        return new BakeResult { ok = true, skeletonGuid = skelGuid, atlasGuid = atlasGuid, clipGuid = clipGuid, bbox = Vector3.zero,
+                                clipMoveGuid = clipMoveGuid, clipAfterGuid = clipAfterGuid };
     }
 
     // Longest axis of the FBX's combined mesh bounds (native scale), so we can compute the Scale Factor that hits `size`.
@@ -393,7 +476,7 @@ public static class UniversalBaker
     // units by the rig, so a rig that round-trips lying down (the Combine soldier) can only be fixed here, at bake time.
     // `convertRig` is the EXPLICIT pipeline switch: true routes through the raw-rig conversion (rest-normalize, rename,
     // scale fold, clean-unit export) — it used to be inferred from rotation != 0, which made Rotation a landmine.
-    static bool RigAnimViaBlender(string src, string outFbx, int targetTris, string bonePrefixes, string clipName, string albedoOut, bool keepMaterials, Vector3 rotation, bool convertRig)
+    static bool RigAnimViaBlender(string src, string outFbx, int targetTris, string bonePrefixes, string clipName, string albedoOut, bool keepMaterials, Vector3 rotation, bool convertRig, string stateRoles = "")
     {
         string proj = Directory.GetParent(Application.dataPath).FullName;
         string script = Path.Combine(proj, "Tools", "rig_anim.py");
@@ -401,7 +484,7 @@ public static class UniversalBaker
         string blender = FindBlender();
         var inv = System.Globalization.CultureInfo.InvariantCulture;   // never the OS locale — a Dutch comma-decimal would corrupt the arg
         string rotArg = string.Format(inv, "{0:0.###},{1:0.###},{2:0.###}", rotation.x, rotation.y, rotation.z);
-        string args = $"--background --python \"{script}\" -- \"{src}\" \"{outFbx}\" {Mathf.Max(1, targetTris)} \"{bonePrefixes ?? ""}\" \"{clipName ?? ""}\" \"{albedoOut ?? ""}\" {(keepMaterials ? "1" : "0")} \"{rotArg}\" {(convertRig ? "1" : "0")}";
+        string args = $"--background --python \"{script}\" -- \"{src}\" \"{outFbx}\" {Mathf.Max(1, targetTris)} \"{bonePrefixes ?? ""}\" \"{clipName ?? ""}\" \"{albedoOut ?? ""}\" {(keepMaterials ? "1" : "0")} \"{rotArg}\" {(convertRig ? "1" : "0")} \"{stateRoles ?? ""}\"";
         var psi = new System.Diagnostics.ProcessStartInfo(blender, args)
         { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         try
