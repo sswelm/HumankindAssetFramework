@@ -65,4 +65,26 @@ namespace ENCAccessProof
             catch (Exception e) { Plugin.Log.LogError("[Fire] artillery postfix: " + e); }
         }
     }
+
+    // STATE-DRIVEN ATTACK trigger (Phase 2). Every pawn ranged shot funnels through
+    // PawnRangedFightSequence.InitializeCommon(shooter, ...) — all five constructors call it (decompiled,
+    // Assembly-CSharp) — so one postfix covers battle volleys, unit-target shots, and district bombards. The
+    // sequence is built on the presentation/main thread, so the handler reads the shooter's Transform directly.
+    [HarmonyPatch] internal static class Hk_PawnRangedFight
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PawnRangedFightSequence");
+            var m = t != null ? AccessTools.Method(t, "InitializeCommon") : null;
+            if (m != null) Plugin.Log.LogInfo("[Fire] hooked PawnRangedFightSequence (state-driven attack)");
+            else Plugin.Log.LogWarning("[Fire] NOT found: PawnRangedFightSequence.InitializeCommon — state-driven attack clips won't trigger");
+            return m;
+        }
+        // InitializeCommon(PresentationPawn shooter, bool dies, bool delay, bool miss, float projectileSpread)
+        static void Postfix(object __0)
+        {
+            try { UniversalInject.OnPawnRangedShot(__0); }
+            catch (Exception e) { Plugin.Log.LogError("[Fire] ranged-fight postfix: " + e); }
+        }
+    }
 }
