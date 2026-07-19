@@ -49,6 +49,13 @@ namespace ENCAccessProof
         public int moveAnimId = -1, afterAnimId = -1, attackAnimId = -1, combatAnimId = -1;
         public float moveDur = 1f, afterDur = 1f, attackDur = 1f, combatDur = 1f;
         public int attackRepeats = 1;    // how many times the ATTACK clip replays per trigger (the fire window = repeats x clip duration; the GPU sampler's Repeat(Time,1) wraps each pass). For short recoil-pop source clips (shootAR2s = 0.17s) that should read as sustained fire. Runtime-only knob — no re-bake.
+        // HAND PROP (weapon axis, 2026-07-19): a rigid Prop-Lab mesh glued to a bone of OUR skeleton — the soldier's
+        // gun. The donor (an APC) has no weapon slots, so the plugin CONSTRUCTS the FragmentEntry itself at repoint
+        // time instead of riding the vanilla slot path. All four are runtime-only registry strings.
+        public string handPropName = "";  // the Prop Lab resource name (assets <name>_Collection / mesh <name>_DistrictMesh)
+        public string handPropGuid = "";  // the <name>_Collection Amplitude guid "a,b,c,d" (Prop Lab prints + clipboards it)
+        public string handPropMat = "";   // borrowed material guid "a,b,c,d"; "" = the shared EQ_DLC04_Weapons material
+        public string handPropBone = "";  // bone-name SUBSTRING on OUR skeleton (bones are renamed b###_<orig>); "" = "R_Hand"
         public readonly Dictionary<long, UnityEngine.Vector3> stateLastPos = new Dictionary<long, UnityEngine.Vector3>();  // MAIN thread poll: unit GUID -> last render pos
         public readonly Dictionary<long, bool> stateMoving = new Dictionary<long, bool>();                                 // unit GUID -> was moving last poll (detects the moving->stopped flip)
         public readonly Dictionary<long, float> stateStoppedAt = new Dictionary<long, float>();                            // unit GUID -> Time.time the unit stopped moving
@@ -406,6 +413,10 @@ namespace ENCAccessProof
                                 tintG = m["tintG"] != null ? (float)m["tintG"] : 0f,
                                 tintB = m["tintB"] != null ? (float)m["tintB"] : 0f,
                                 textureFile = (string)m["textureFile"] ?? "",
+                                handPropName = (string)m["handPropName"] ?? "",
+                                handPropGuid = (string)m["handPropGuid"] ?? "",
+                                handPropMat = (string)m["handPropMat"] ?? "",
+                                handPropBone = (string)m["handPropBone"] ?? "",
                                 respawnAfterLoad = (bool?)m["respawnAfterLoad"] ?? false,
                                 freezeDonorAnim = (bool?)m["freezeDonorAnim"] ?? false,
                                 fireOnAttack = (bool?)m["fireOnAttack"] ?? false,
@@ -470,6 +481,10 @@ namespace ENCAccessProof
                 var tG = Regex.Matches(text, "\"tintG\"\\s*:\\s*(-?[\\d.eE+]+)");           // ... G
                 var tB = Regex.Matches(text, "\"tintB\"\\s*:\\s*(-?[\\d.eE+]+)");           // ... B
                 var txf = Regex.Matches(text, "\"textureFile\"\\s*:\\s*\"([^\"]*)\"");      // texture-only retexture: PNG filename in enc_skins/
+                var hpn = Regex.Matches(text, "\"handPropName\"\\s*:\\s*\"([^\"]*)\"");     // parity: hand-prop resource name
+                var hpg = Regex.Matches(text, "\"handPropGuid\"\\s*:\\s*\"([^\"]*)\"");     // parity: hand-prop collection guid csv
+                var hpm = Regex.Matches(text, "\"handPropMat\"\\s*:\\s*\"([^\"]*)\"");      // parity: hand-prop borrowed material guid csv
+                var hpb = Regex.Matches(text, "\"handPropBone\"\\s*:\\s*\"([^\"]*)\"");     // parity: hand-prop bone-name substring
                 int G(Match m, int g) => int.TryParse(m.Groups[g].Value, out var r) ? r : 0;
                 float F(Match m, int g) => float.TryParse(m.Groups[g].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var r) ? r : 0f;
                 int n = Math.Min(pd.Count, Math.Min(sk.Count, at.Count));
@@ -512,6 +527,10 @@ namespace ENCAccessProof
                         tintG = i < tG.Count && float.TryParse(tG[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _tg) ? _tg : 0f,
                         tintB = i < tB.Count && float.TryParse(tB[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _tb) ? _tb : 0f,
                         textureFile = i < txf.Count ? txf[i].Groups[1].Value : "",
+                        handPropName = i < hpn.Count ? hpn[i].Groups[1].Value : "",
+                        handPropGuid = i < hpg.Count ? hpg[i].Groups[1].Value : "",
+                        handPropMat = i < hpm.Count ? hpm[i].Groups[1].Value : "",
+                        handPropBone = i < hpb.Count ? hpb[i].Groups[1].Value : "",
                     });
                 }
                 Plugin.Log.LogInfo($"[Uni] read {text.Length} chars; parsed {entries.Count} model(s) via regex [" + string.Join(", ", entries.Select(e => e.resourceName + "->" + e.pawnDescription)) + "]");
@@ -681,6 +700,7 @@ namespace ENCAccessProof
                 SetMember(addon, "Skeleton", e.skeleton);
                 SetMember(addon, "MeshCollection", e.skeleton);
                 ReloadFragments(addon, animMgr, e.skeleton, e);
+                InjectHandProp(addon, animMgr, e.skeleton, e);
                 ApplyTexture(e, animMgr);
                 if (!e.repointed) { e.repointed = true; Plugin.Log.LogInfo($"[Uni] repointed '{name}' -> {e.resourceName} (mesh '{bodyName}', layer '{e.layerHint}')"); }
             }
@@ -898,6 +918,98 @@ namespace ENCAccessProof
                 if (e != null) e.fragsLogged = true;   // dumped the donor fragment names once; don't spam on every load
             }
             catch (Exception ex) { Plugin.Log.LogError("[Uni] ReloadFragments: " + ex); }
+        }
+
+        // HAND PROP (weapon axis, 2026-07-19): append ONE rigid fragment — a Prop-Lab weapon glued to a bone of OUR
+        // skeleton — to the addon's FragmentEntries. The soldier's donor (an APC) has no weapon slots, and the vanilla
+        // path needs a matching slot in the pawn DESCRIPTION (GetSlotIndex -1 silently drops the attachment), so the
+        // plugin constructs the FragmentEntry directly: our MeshCollection + mesh, a borrowed weapon output layer, and
+        // boneName resolved by SUBSTRING against our renamed (b###_<orig>) bones. FragmentEntry.Load() then computes
+        // BoneIndex = skeleton.GetBoneIndex(boneName) against OUR skeleton and GPU-encodes the mesh — the same call
+        // the vanilla loader makes. Runs right after ReloadFragments in the AddOn.Load window; re-entrant (skips if
+        // our mesh name is already in the array). Parse failures / missing assets log a warning and change nothing.
+        static void InjectHandProp(object addon, object animMgr, object skel, ModelEntry e)
+        {
+            if (e == null || string.IsNullOrEmpty(e.handPropGuid)) return;
+            try
+            {
+                int[] Csv(string s)
+                {
+                    var parts = (s ?? "").Split(','); if (parts.Length != 4) return null;
+                    var r = new int[4];
+                    for (int i = 0; i < 4; i++) if (!int.TryParse(parts[i].Trim(), out r[i])) return null;
+                    return r;
+                }
+                var cg = Csv(e.handPropGuid);
+                if (cg == null) { Plugin.Log.LogWarning($"[Props] '{e.resourceName}' hand prop: bad collection guid '{e.handPropGuid}' (want \"a,b,c,d\")"); return; }
+                string propName = string.IsNullOrEmpty(e.handPropName) ? e.resourceName + "Prop" : e.handPropName;
+                string meshName = propName + "_DistrictMesh";   // the Prop Lab's fixed mesh name inside the collection
+                var frags = GetMember(addon, "FragmentEntries") as Array;
+                if (frags == null) return;
+                var fragType = frags.GetType().GetElementType();
+                var mnField = AccessTools.Field(fragType, "meshName");
+                for (int i = 0; i < frags.Length; i++)
+                    if (mnField?.GetValue(frags.GetValue(i)) as string == meshName) return;   // already injected on this addon
+                // 1) the MeshCollection: already-registered lookup -> Amplitude catalog -> mounted-bundle name fallback
+                //    (the catalog misses mod-bundle MeshCollections by GUID — Pawn-Props trap 3); register after a raw load
+                //    (RegisterMeshCollection dedupes internally and LoadIFNs the meshes into the GPU content manager).
+                var mcType = AccessTools.TypeByName("Amplitude.Mercury.Animation.MeshCollection");
+                var guid = MakeGuid(cg[0], cg[1], cg[2], cg[3]);
+                if (mcType == null || guid == null) return;
+                object mc = null;
+                var getMc = animMgr.GetType().GetMethods(BF).FirstOrDefault(m2 => m2.Name == "GetMeshCollection" && m2.GetParameters().Length == 1 && m2.GetParameters()[0].ParameterType == guid.GetType());
+                try { mc = getMc?.Invoke(animMgr, new[] { guid }); } catch { }
+                bool Dead(object o) => o == null || (o is UnityEngine.Object uo && !uo);
+                if (Dead(mc))
+                {
+                    var adb = AccessTools.TypeByName("Amplitude.Framework.Asset.AssetDatabase");
+                    var loadA = adb?.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                        .FirstOrDefault(m2 => (m2.Name == "TryLoadAsset" || m2.Name == "LoadAsset") && m2.IsGenericMethodDefinition && m2.GetParameters().Length == 1)?.MakeGenericMethod(mcType);
+                    try { mc = loadA?.Invoke(null, new[] { guid }); } catch { }
+                    if (Dead(mc))
+                        foreach (var b in UnityEngine.AssetBundle.GetAllLoadedAssetBundles())
+                        { var a = b.LoadAsset(propName + "_Collection"); if (a != null && mcType.IsInstanceOfType(a)) { mc = a; break; } }
+                    if (Dead(mc)) { Plugin.Log.LogWarning($"[Props] '{e.resourceName}' hand prop: collection not loadable (guid {e.handPropGuid}, name '{propName}_Collection') — no weapon this session"); return; }
+                    try { animMgr.GetType().GetMethod("RegisterMeshCollection", BindingFlags.Public | BindingFlags.Instance)?.Invoke(animMgr, new[] { mc }); } catch { }
+                }
+                // 2) the output layer from the borrowed material ("" = the shared EQ_DLC04_Weapons, sling-verified)
+                var mg = Csv(string.IsNullOrEmpty(e.handPropMat) ? "1356489961,1316891353,-864888678,1241300466" : e.handPropMat);
+                if (mg == null) { Plugin.Log.LogWarning($"[Props] '{e.resourceName}' hand prop: bad material guid '{e.handPropMat}'"); return; }
+                var content = GetMember(animMgr, "Content");
+                object fol = null;
+                var folM = content?.GetType().GetMethods(BF).FirstOrDefault(m2 => m2.Name == "OutputLayerFromMaterialGuid" && m2.GetParameters().Length == 1);
+                try { fol = folM?.Invoke(content, new[] { MakeGuid(mg[0], mg[1], mg[2], mg[3]) }); } catch { }
+                if (Dead(fol)) { Plugin.Log.LogWarning($"[Props] '{e.resourceName}' hand prop: no output layer for the borrowed material — no weapon"); return; }
+                // 3) OUR bone, by substring (case-insensitive; first match wins)
+                string boneSub = string.IsNullOrEmpty(e.handPropBone) ? "R_Hand" : e.handPropBone;
+                string boneName = null;
+                if (GetMember(skel, "BoneInfos") is Array bones)
+                    foreach (var b in bones)
+                    {
+                        var n = GetMember(b, "Name")?.ToString() ?? "";
+                        if (n.IndexOf(boneSub, StringComparison.OrdinalIgnoreCase) >= 0) { boneName = n; break; }
+                    }
+                if (boneName == null) { Plugin.Log.LogWarning($"[Props] '{e.resourceName}' hand prop: no bone matches '{boneSub}' on our skeleton — no weapon"); return; }
+                // 4) construct, Load (encodes the mesh + resolves BoneIndex), append
+                var ctor5 = fragType.GetConstructors(BF).FirstOrDefault(c => c.GetParameters().Length == 5);
+                if (ctor5 == null) { Plugin.Log.LogWarning("[Props] FragmentEntry ctor not found (game update?)"); return; }
+                var item = ctor5.Invoke(new object[] { 0, mc, meshName, fol, boneName });
+                var renderer = GetMember(animMgr, "FxComponentRenderer");
+                var mcm = GetMember(animMgr, "FxComponentMeshContentManager");
+                var layerObj = GetMember(animMgr, "FXMeshLayerIndex");
+                int layer = layerObj is int li2 ? li2 : Convert.ToInt32(layerObj ?? 0);
+                try { AccessTools.Method(fragType, "Load")?.Invoke(item, new object[] { skel, renderer, mcm, layer }); }
+                catch (Exception ex) { Plugin.Log.LogWarning("[Props] hand prop Load: " + (ex.InnerException ?? ex).Message); return; }
+                uint enc = 0, bidx = 0;
+                try { enc = (uint)AccessTools.Field(fragType, "EncodedMeshAndVisualParticleCount").GetValue(item); bidx = (uint)AccessTools.Field(fragType, "BoneIndex").GetValue(item); } catch { }
+                if (enc == 0) { Plugin.Log.LogWarning($"[Props] '{e.resourceName}' hand prop: mesh '{meshName}' encoded to 0 (name not in the collection?) — not appended"); return; }
+                var narr = Array.CreateInstance(fragType, frags.Length + 1);
+                Array.Copy(frags, narr, frags.Length);
+                narr.SetValue(item, frags.Length);
+                SetMember(addon, "FragmentEntries", narr);
+                Plugin.Log.LogInfo($"[Props] '{e.resourceName}' hand prop '{meshName}' glued to bone '{boneName}' (boneIndex {bidx}, encoded {enc})");
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Props] InjectHandProp: " + ex); }
         }
 
         static void ApplyTexture(ModelEntry e, object mgr)
