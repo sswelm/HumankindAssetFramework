@@ -396,7 +396,21 @@ namespace ENCAccessProof
                     // content manager re-injects dead objects. Cheap to re-derive; destroy the texture we created.
                     e.isolatedLayer = null; e.hostOutputLayer = null;
                     if (e.tex != null) { try { UnityEngine.Object.Destroy(e.tex); } catch { } e.tex = null; }
+                    // Per-instance state keyed by session-scoped ids (unit GUIDs / sub-pawn instance ids): a new game
+                    // can REUSE those ids, so stale entries would feed the first poll wrong moving/deploy decisions,
+                    // and the maps otherwise only ever grow. The AudioSources rode session-1 pawn objects (destroyed
+                    // with them) — dropping the references is enough.
+                    e.deployProgress.Clear(); e.deployLastPos.Clear();
+                    e.customSources.Clear(); e.loopHoldUntil.Clear(); e.engineLastPos.Clear(); e.engineMoving.Clear();
                 }
+            deployMoveState = null;                                  // diagnostic map, unit GUIDs are session-scoped
+            respawnBase.Clear(); respawnCount.Clear();               // keyed by session-1 unit objects
+            // DISTRICT axis session state (same bug class): the FxManager and each entry's leaves/private clone were
+            // captured from session-1 presentation objects — reusing them in a second game points at torn-down GPU
+            // state. Null everything; DistrictApplyEntries re-derives per district instance as the new session loads.
+            distFxManager = null;
+            foreach (var d in distModels)
+            { d.plbc = null; d.privateLeaf = null; d.leaves.Clear(); d.collected = false; d.wait = 0; d.matchLogged = false; d.pointedLogged = false; }
         }
 
         // register every skeleton before Apply() builds GPU buffers (AnimationLoad postfix)
@@ -1473,6 +1487,7 @@ namespace ENCAccessProof
                 {
                     lock (e.deploySamples) { e.deploySamples.Clear(); e.deploySamples.AddRange(fresh[e]); }
                     foreach (var g in e.deployProgress.Keys.Where(k => !seen[e].Contains(k)).ToList()) e.deployProgress.Remove(g);   // drop gone units
+                    foreach (var g in e.deployLastPos.Keys.Where(k => !seen[e].Contains(k)).ToList()) e.deployLastPos.Remove(g);    // ...and their last-pos entries (this map used to grow forever)
                 }
             }
             catch (Exception ex) { Plugin.Log.LogError("[Deploy] ProcessDeployState: " + ex); }

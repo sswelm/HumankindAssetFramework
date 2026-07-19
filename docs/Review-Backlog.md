@@ -27,34 +27,37 @@ by when they'll bite.
 - ~~**Feature Test Tier-2 bypasses `ConfigFor`**~~ — FIXED 2026-07-19: the animated fixtures now clone the registry
   entry and route through `ModelFactoryWindow.ConfigFor` like the smoke test, so `convertRig`/rotation/keep-flags all
   carry and the soldier is exercised on the conversion pipeline it actually ships on.
-- **Unify the delete-first suffix lists across bake paths** — re-baking a model on the *other* path (animated↔static)
-  orphans the previous path's outputs in shipped Resources (`_Clips`/`_ClipsPoseData` or `_ModelMesh`/`_Mat`/prefab):
-  bundle bloat + a stale ClipCollection referencing a dead skeleton GUID.
-- **District axis has no session re-arm** — `distFxManager`/private leaves cached from session 1 are reused in a second
-  game of the same app run (same class of bug as the fixed model-axis latch). Needs its own careful pass on the
-  leaf/manager lifecycle.
+- ~~**Unify the delete-first suffix lists across bake paths**~~ — FIXED 2026-07-19: `SweepAllOutputs` (the full
+  OutputSuffixes union, now incl. `_ClipsPoseData.bytes`) runs at the start of BOTH paths, so an animated↔static flip
+  leaves no orphans in shipped Resources; the E5 rollback and the Feature-Test cleanup cover the pose bytes too, and
+  the animated path gained the static path's up-front resource-name validation.
+- ~~**District axis has no session re-arm**~~ — FIXED 2026-07-19: `RearmModelRegistration` now nulls `distFxManager`
+  and every entry's `plbc`/`privateLeaf`/`leaves`/`collected`; `DistrictApplyEntries` re-derives them as the new
+  session loads. Verify alongside the model-axis second-session test.
 - **Plugin perf pass (late-game GC stutter):** per-pawn hook allocates closures/strings for every pawn incl. vanilla
   (`"Pose"+i`, ctx-capturing lambda, GetMember boxing); `ProcessEngineAudio` LINQ + `ProcessFireQueues` closures run
   per-frame before their throttles/early-outs; `TickOne` allocates an array + re-sets 7 material textures every frame.
-  Needs deliberate hot-path work with in-game verification — do NOT rush.
-- **Plugin unbounded per-instance dictionaries** — `engineLastPos`/`engineMoving`/`loopHoldUntil`/`customSources`/
-  `deployLastPos`/`deployMoveState` never pruned: slow leak + stale first-poll reads when a new game reuses ids.
+  Needs deliberate hot-path work with in-game verification — do NOT rush. *(In-session growth of the engine-audio
+  maps is part of this pass; their cross-session staleness is already fixed via the re-arm clears.)*
+- ~~**Plugin unbounded per-instance dictionaries**~~ — FIXED 2026-07-19 (cross-session): all per-instance maps
+  (`deployProgress`/`deployLastPos`/`customSources`/`loopHoldUntil`/`engineLastPos`/`engineMoving`, plus static
+  `deployMoveState` and `respawnBase`/`respawnCount`) clear on session re-arm, and `deployLastPos` joined the
+  in-session deploy prune. Remaining in-session growth of the engine-audio maps folds into the perf pass above.
 
 ## Quality-of-life / lower risk
 
-- **RetextureWindow Apply-without-Edit** writes engineSound/tints unconditionally from the form while preserving
-  unbrowsed files — typing a name without pressing Edit silently resets that entry's sound/tint. Also Apply can create
-  a duplicate `Retex_` entry for a pawn that already has a model entry (two entries, same pawn, undefined winner).
-- **TechTreeWindow**: `_pending.Clear()` after a partial save discards skipped edits; `_pending` not serialized —
-  every domain reload silently drops staged, unsaved edits; stale `_dragNode` after releasing outside the canvas
-  teleports the node on the next drag.
-- **ProjectileBaker**: bakes sprite donors (null mesh → invisible munition) with a success message, and Dump auto-fills
-  the donor field even on a ✗ verdict; invalid impact-donor GUID silently ignored; muzzle swapped beyond the tooltip's
-  documented scope; `ApplyTint` wipes the clipboard (kills the bake→tint→paste-GUID workflow).
-- **PropBaker**: `FindType` full-AppDomain scan per repaint (editor sluggish while open — cache it); unchecked
-  Amplitude GUIDs can write zero-GUIDs into the MeshCollection/fragment (silent "mammoth fallback" — guard like
-  ProjectileBaker line ~294 does).
-- **DatabaseBrowser**: the embedded-inspector catch swallows `ExitGUIException` — rethrow it (object pickers break).
+- **RetextureWindow Apply-without-Edit** — MOSTLY FIXED 2026-07-19: Apply onto an existing entry the form wasn't
+  loaded from now asks first (Edit pre-loads and skips the dialog). Still open: Apply can create a duplicate `Retex_`
+  entry for a pawn that already has a model entry (two entries, same pawn, undefined winner).
+- **TechTreeWindow** — PARTLY FIXED 2026-07-19: skipped edits now survive a partial save (only fully-written entries
+  leave the overlay), and a MouseUp outside the canvas ends the drag (no more phantom teleport). Still open:
+  `_pending` isn't serialized — a domain reload drops staged, unsaved edits.
+- **ProjectileBaker** — MOSTLY FIXED 2026-07-19: sprite donors (null mesh) now refuse to bake with the verdict's
+  guidance; Dump only auto-fills the donor field on a ✓ verdict; `ApplyTint` no longer wipes the clipboard. Still
+  open: invalid impact-donor GUID silently ignored; muzzle swapped beyond the tooltip's documented scope.
+- ~~**PropBaker**~~ — FIXED 2026-07-19: `FindType` is cached (the per-repaint full-AppDomain scan is gone) and null
+  Amplitude GUIDs now fail the bake with the rebuild-then-re-bake guidance instead of writing zero-GUIDs.
+- ~~**DatabaseBrowser**~~ — FIXED 2026-07-19: `ExitGUIException` is rethrown before the generic catch.
 - **Animated multi-material albedos**: `LoadOrderedAlbedos` drops no-`map_Kd` materials (index shift → wrong rects) and
   can't load `.tga` (red placeholder) — the static path handles both.
 - **Regex-fallback parser drift** (plugin): overrides-array objects parsed as models when `models` is empty; count
@@ -62,11 +65,11 @@ by when they'll bite.
 - **Misc small:** registry Save wipes hand-edited pack wrapper metadata (matters when a second pack author exists);
   Lab bakes a brand-new never-baked entry with default model fields (Factory→Lab handoff carries only name/file/pawn);
   Browse's auto-set `animUnitFix` announcement is discarded by the ownership merge for existing entries; case-sensitive
-  Upsert/Remove matching (case-only rename → twin entries); `atlasGuid` never validated; `_ClipsPoseData.bytes` missing
-  from the E5 rollback + Feature-Test cleanup lists; ConversionGateTest litmus synthesis sequential `ReadToEnd`
-  pipe-deadlock pattern; texture leaks on bake failure paths; corrupt-registry error-spam from per-OnGUI `Load()` in
-  Retexture/Sound windows; SoundWindow `ParseWav` (editor twin of the fixed plugin `LoadWav`) still lacks the negative
-  chunk-size guard; parity script false-PASS shapes (empty N/R sets; awk section extraction); no-op root collapse is
+  Upsert/Remove matching (case-only rename → twin entries); `atlasGuid` never validated; ~~`_ClipsPoseData.bytes`
+  missing from the E5 rollback + Feature-Test cleanup lists~~ (fixed 07-19); ConversionGateTest litmus synthesis
+  sequential `ReadToEnd` pipe-deadlock pattern; texture leaks on bake failure paths; corrupt-registry error-spam from
+  per-OnGUI `Load()` in Retexture/Sound windows; ~~SoundWindow `ParseWav` negative chunk-size guard~~ (fixed 07-19);
+  parity script false-PASS shapes (empty N/R sets; awk section extraction); no-op root collapse is
   dead code post-rebake (every bone gets keyed by the visual rebake); multi-armature sources mis-convert silently;
   `blend_export.py` repoints packed images it shouldn't; prep_model strip matches object names only (not mesh-data
   names, unlike deploy_convert); AtlasDebug likely double-converts in a Linear-color-space project; RefreshList comment

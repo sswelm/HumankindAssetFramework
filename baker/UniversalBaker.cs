@@ -85,7 +85,21 @@ public static class UniversalBaker
     // outputs (each .asset AND its .meta, so the GUIDs survive) to a temp dir OUTSIDE the project before the bake, and
     // restore them on failure. The delete-first stale-cache fix is untouched — this only wraps it.
     // OUTSIDE Assets/ is essential: a copy under Assets/ would import as a DUPLICATE-GUID asset and corrupt the original.
-    static readonly string[] OutputSuffixes = { "_ModelMesh.asset", "_Atlas.asset", "_Mat.mat", "_Model.prefab", "_Skeleton.asset", "_Clips.asset" };
+    // The FULL union of both paths' shipped outputs. Used by the E5 backup/rollback AND the cross-path sweep below —
+    // "_ClipsPoseData.bytes" (the clip's baked pose stream, written by ClipCollection.Reimport next to _Clips) was
+    // missing from this list, so a failed animated re-bake could restore an OLD _Clips next to NEW pose bytes.
+    static readonly string[] OutputSuffixes = { "_ModelMesh.asset", "_Atlas.asset", "_Mat.mat", "_Model.prefab", "_Skeleton.asset", "_Clips.asset", "_ClipsPoseData.bytes" };
+
+    // CROSS-PATH SWEEP: each bake path deletes-then-recreates only its OWN assets, so re-baking a model on the OTHER
+    // path (animated <-> static) used to orphan the previous path's outputs in shipped Resources — Unity force-ships
+    // everything there (multi-MB bundle bloat), and a stale ClipCollection kept referencing a dead skeleton GUID.
+    // Sweeping the full union up front makes a path flip clean; the E5 backup (taken before this) still restores
+    // everything on a failed bake.
+    static void SweepAllOutputs(string name)
+    {
+        foreach (var s in OutputSuffixes)
+            AssetDatabase.DeleteAsset("Assets/Resources/" + name + s);
+    }
 
     class OutputBackup { public string name = ""; public string dir = ""; public readonly List<string> files = new List<string>(); }
 
@@ -143,11 +157,18 @@ public static class UniversalBaker
     static BakeResult BuildAnimatedInner(BakeConfig cfg)
     {
         if (string.IsNullOrEmpty(cfg.resourceName)) return Fail("resourceName is required");
+        // Same up-front name validation as the static path (it was missing here): the name is a folder name, a
+        // filename prefix, and a quoted Blender argument — a space/quote fails cryptically deep in a shell-out.
+        foreach (char c in cfg.resourceName)
+            if (!(char.IsLetterOrDigit(c) || c == '_' || c == '-'))
+                return Fail($"resource name '{cfg.resourceName}' contains an invalid character ('{c}'). " +
+                            "Use letters, digits, '_' or '-' only — no spaces (e.g. 'AttackHelicopter').");
         if (!BlenderAvailable()) return Fail("Animated import needs Blender installed (auto-detected, or set EditorPrefs 'ENC.blenderPath').");
         string name = cfg.resourceName;
         float size = cfg.size > 0f ? cfg.size : 5f;
 
         if (!AssetDatabase.IsValidFolder("Assets/Resources")) AssetDatabase.CreateFolder("Assets", "Resources");
+        SweepAllOutputs(name);   // cross-path sweep: a previous STATIC bake's mesh/prefab must not ship alongside
         // Bake INPUTS (OBJ / albedos / preview prefab) go OUTSIDE Resources, into Assets/FactorySource. Unity force-
         // includes EVERYTHING under a Resources folder in the build — even unreferenced source — which bloated the mod
         // bundle (416MB) AND shipped the raw extractable source of licensed assets (a Fab-license breach). The baked
@@ -415,6 +436,7 @@ public static class UniversalBaker
         float smoothing = cfg.smoothingAngle > 0f ? cfg.smoothingAngle : 20f;
 
         if (!AssetDatabase.IsValidFolder("Assets/Resources")) AssetDatabase.CreateFolder("Assets", "Resources");
+        SweepAllOutputs(name);   // cross-path sweep: a previous ANIMATED bake's _Clips/_ClipsPoseData must not ship alongside
         // Bake INPUTS (OBJ / albedos / preview prefab) go OUTSIDE Resources, into Assets/FactorySource. Unity force-
         // includes EVERYTHING under a Resources folder in the build — even unreferenced source — which bloated the mod
         // bundle (416MB) AND shipped the raw extractable source of licensed assets (a Fab-license breach). The baked
