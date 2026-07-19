@@ -513,7 +513,12 @@ so it does not matter where you press Bake.
 
 **Edit existing** lists the **animated** entries only. The model identity (Resource / Target pawn) shows
 **read-only** — change those in the Factory; the Model file row has a **Browse…** button (2026-07-19) for
-repointing an entry at a new source. **After every compile/domain reload the window RE-LOADS the selected entry
+repointing an entry at a new source, and a **▶ Play clip** button — THE recipe-authoring workflow: it plays the
+RAW model file's **entire source animation** (every take, full length, no conversion, no slicing) with
+play/scrub, **single-frame stepping** (|◄ ►| buttons, ←/→ keys, Shift = ±10 frames), and *set current* frame
+capture. This is where every frame number in a recipe comes from — deploy start/end, barrel ready-frame, recoil
+range: step through the source, note the frames, type them into the fields. Confirm copies the picked `a..b`
+range to the clipboard; Cancel just closes. **After every compile/domain reload the window RE-LOADS the selected entry
 from the registry** (2026-07-19) — the file is the single source of truth; unsaved form edits from before a compile
 are deliberately dropped (*Save (no bake)* first if you want to keep them). The **↻ Reload** button does the same
 explicitly — the escape hatch from any stale window copy (re-selecting the *same* entry in the dropdown does
