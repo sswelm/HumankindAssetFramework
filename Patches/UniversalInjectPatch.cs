@@ -58,6 +58,7 @@ namespace ENCAccessProof
         public string handPropBone = "";  // bone-name SUBSTRING on OUR skeleton (bones are renamed b###_<orig>); "" = "R_Hand"
         public string handPropAngles = "";// draw-time rotation "x,y,z" (deg) stamped onto the collection's FxMeshContent.ImportAngles BEFORE encoding — the ONLY angles the pawn-fragment path reads. "" = keep the baked value. Runtime-only: change + relaunch, no bake/rebuild.
         public object handPropLayer;      // session-scoped: our PRIVATE clone of the borrowed weapon output layer, painted with the prop's own atlas (<prop>_Atlas)
+        public UnityEngine.Texture2D propAtlasTex;   // session-scoped: the prop atlas — repainted EVERY TICK like the unit retexture (the game resets the material; a one-shot paint flip-flopped between sessions)
         public bool propProbe;            // TEMP diagnostic: one-shot GPU-descriptor dump for the hand-prop investigation
         public readonly Dictionary<long, UnityEngine.Vector3> stateLastPos = new Dictionary<long, UnityEngine.Vector3>();  // MAIN thread poll: unit GUID -> last render pos
         public readonly Dictionary<long, bool> stateMoving = new Dictionary<long, bool>();                                 // unit GUID -> was moving last poll (detects the moving->stopped flip)
@@ -584,7 +585,7 @@ namespace ENCAccessProof
                     // Retexture/isolation state is session-scoped too: the isolated layer is a clone of a SESSION-1
                     // output layer and the adjusted atlas was dumped from it — handing either to the new session's
                     // content manager re-injects dead objects. Cheap to re-derive; destroy the texture we created.
-                    e.isolatedLayer = null; e.hostOutputLayer = null; e.handPropLayer = null;
+                    e.isolatedLayer = null; e.hostOutputLayer = null; e.handPropLayer = null; e.propAtlasTex = null;
                     if (e.tex != null) { try { UnityEngine.Object.Destroy(e.tex); } catch { } e.tex = null; }
                     // Per-instance state keyed by session-scoped ids (unit GUIDs / sub-pawn instance ids): a new game
                     // can REUSE those ids, so stale entries would feed the first poll wrong moving/deploy decisions,
@@ -716,7 +717,14 @@ namespace ENCAccessProof
         internal static void TickTexture()
         {
             if (entries == null) return;
-            foreach (var e in entries) TickOne(e);
+            foreach (var e in entries)
+            {
+                TickOne(e);
+                // prop-skin recovery: same reason as TickOne's re-set path — the game can recreate/reset the weapon
+                // material, reverting _MainTex to the EQ proxy. Steady state is a few ReferenceEquals checks.
+                if (e.handPropLayer != null && e.propAtlasTex != null)
+                    PaintLayer(e.handPropLayer, e.propAtlasTex, e.resourceName);
+            }
         }
 
         // ---- helpers (per-entry generalizations of StealthCruiserInject) ----
@@ -1081,9 +1089,14 @@ namespace ENCAccessProof
                 uint enc = 0, bidx = 0;
                 try { enc = (uint)AccessTools.Field(fragType, "EncodedMeshAndVisualParticleCount").GetValue(item); bidx = (uint)AccessTools.Field(fragType, "BoneIndex").GetValue(item); } catch { }
                 if (enc == 0) { Plugin.Log.LogWarning($"[Props] '{e.resourceName}' hand prop: mesh '{meshName}' encoded to 0 (name not in the collection?) — not appended"); return; }
-                // paint OUR atlas onto the private layer clone (post-Load: the clone now owns a registered GPU slot)
+                // paint OUR atlas onto the private layer clone (post-Load: the clone now owns a registered GPU slot);
+                // cached on the entry — TickTexture REPAINTS every frame (cheap ReferenceEquals skip when stable),
+                // because the game can reset/recreate the material and a one-shot paint flip-flopped across sessions.
                 if (propAtlas != null && e.handPropLayer != null)
+                {
+                    e.propAtlasTex = propAtlas;
                     PaintLayer(e.handPropLayer, propAtlas, propName);
+                }
                 var narr = Array.CreateInstance(fragType, frags.Length + 1);
                 Array.Copy(frags, narr, frags.Length);
                 narr.SetValue(item, frags.Length);
@@ -2292,16 +2305,15 @@ namespace ENCAccessProof
             try
             {
                 if (!(GetMember(layer, "RenderOutputs") is Array ros)) return;
-                int painted = 0; bool dumped = false;
+                int painted = 0;
                 foreach (var ro in ros)
                     foreach (var fld in RenderMatFields)
                         if (GetMember(ro, fld) is UnityEngine.Material mat)
                         {
-                            // TEMP diagnostic: the EQ weapon layer may sample differently than the (proven) unit
-                            // layers — dump the shader + every texture slot once so the paint targets the real one.
-                            if (!dumped)
+                            // TEMP diagnostic (once per session — this now runs per tick): shader + texture slots.
+                            if (!_propMatDumped)
                             {
-                                dumped = true;
+                                _propMatDumped = true;
                                 try
                                 {
                                     var names = mat.GetTexturePropertyNames();
@@ -2324,10 +2336,12 @@ namespace ENCAccessProof
                             mat.SetTexture("_MetallicMap", _black);
                             painted++;
                         }
-                Plugin.Log.LogInfo($"[Props] '{tag}' prop layer painted ({painted} material(s), atlas {tex.width}x{tex.height})");
+                if (painted > 0)   // silent when stable (per-tick recovery path) — logs only actual (re)paints
+                    Plugin.Log.LogInfo($"[Props] '{tag}' prop layer painted ({painted} material(s), atlas {tex.width}x{tex.height})");
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[Props] PaintLayer: " + ex.Message); }
         }
+        static bool _propMatDumped;
 
         static UnityEngine.Texture2D LoadAtlas(int a, int b, int c, int d, string tag)
         {
