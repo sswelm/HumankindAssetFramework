@@ -1711,16 +1711,20 @@ namespace ENCAccessProof
                 { e.lastStateAnim = -3; Plugin.Log.LogInfo($"[State] pose '{e.resourceName}': NO sample match (samples={sampleCount}, nearest={(nearest < float.MaxValue ? UnityEngine.Mathf.Sqrt(nearest).ToString("0.0") : "-")}u, pawn T={pos.ToString("0.0")}) — idling"); }
                 return;
             }
+            // deploySpeed scales BOTH state one-shots (its legacy meaning, carried to the state machine 2026-07-19):
+            // a full-length authored fold (the M114's is 7.5 s of clip) outlasts a one-tile map move — the unit
+            // spent EVERY trip inside PRE-MOVE's early frames and visibly "forgot to fold". Speed 3 folds in 2.5 s.
+            float spd = e.deploySpeed > 0.01f ? e.deploySpeed : 1f;
             if (!moving && e.afterAnimId >= 0 && stoppedAt > 0f)
             {
-                float ad = e.afterDur > 0.001f ? e.afterDur : 1f;
+                float ad = (e.afterDur > 0.001f ? e.afterDur : 1f) / spd;
                 float dt = UnityEngine.Time.time - stoppedAt;
                 if (dt >= 0f && dt < ad) { inAfter = true; afterT = UnityEngine.Mathf.Min(dt / ad, 0.999f); }   // one pass, hold the last frame until it elapses
             }
             // PRE-MOVEMENT one-shot: just STARTED moving (e.g. a howitzer folding its legs) — plays once, then the Move loop
             if (moving && e.preMoveAnimId >= 0 && moveStartedAt > 0f)
             {
-                float pd = e.preMoveDur > 0.001f ? e.preMoveDur : 1f;
+                float pd = (e.preMoveDur > 0.001f ? e.preMoveDur : 1f) / spd;
                 float dtp = UnityEngine.Time.time - moveStartedAt;
                 if (dtp >= 0f && dtp < pd) { inPreMove = true; preMoveT = UnityEngine.Mathf.Min(dtp / pd, 0.999f); }
             }
