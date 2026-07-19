@@ -453,8 +453,8 @@ if convert_rig:
 # BEFORE CHILDREN. Amplitude's own rigs satisfy that by naming convention; a raw rig like the ValveBiped does NOT
 # ('..._014' sorts before '..._02'), so the head/neck and forearm chains read their parents' garbage transforms and
 # hang displaced in-game. Prefixing every bone with its breadth-first index makes alphabetical == topological.
-# Blender auto-syncs vertex groups + fcurve paths on rename; the bone-filter above already ran on the ORIGINAL names.
-# Gated to the CONVERSION path: legacy stays the byte-identical pipeline.
+# Blender auto-syncs vertex groups + THE ASSIGNED action's fcurve paths on rename; the bone-filter above already ran
+# on the ORIGINAL names. Gated to the CONVERSION path: legacy stays the byte-identical pipeline.
 if convert_rig:
     _order = []
     def _walkb(b):
@@ -466,6 +466,23 @@ if convert_rig:
     for _i, _bname in enumerate(_order):
         arm.data.bones[_bname].name = "b%03d_%s" % (_i, _bname)
     print("RIGANIM bones renamed with topological prefixes (%d bones) — parents now sort before children" % len(_order))
+    # THE FROZEN-RUNNER FIX (2026-07-19): Blender's rename syncs fcurve data_paths ONLY for the action ASSIGNED at
+    # rename time — every DORMANT state-role action kept its OLD bone names, its curves then targeted nonexistent
+    # bones, evaluated to NOTHING at export, and the role FBX baked an 18-frame CONSTANT clip (in-game: the soldier
+    # frozen mid-stride while moving; pose-data byte analysis showed all 63 curves constant). Patch every kept
+    # action's paths explicitly — idempotent: only OLD names are in the map, already-synced paths pass through.
+    _newname = {n: "b%03d_%s" % (i, n) for i, n in enumerate(_order)}
+    _patched = 0
+    for _pa in all_acts:
+        for _coll2, _fc2 in all_fcurve_owners(_pa):
+            _dp2 = _fc2.data_path
+            if 'pose.bones["' in _dp2:
+                _bn2 = _dp2.split('["', 1)[1].split('"]', 1)[0]
+                if _bn2 in _newname:
+                    _fc2.data_path = _dp2.replace('pose.bones["%s"]' % _bn2, 'pose.bones["%s"]' % _newname[_bn2])
+                    _patched += 1
+    if _patched:
+        print("RIGANIM patched %d dormant fcurve path(s) onto the renamed bones (state-role clips)" % _patched)
 
 # RIG ROTATION + TRANSFORM FOLD — CONVERSION path only (legacy = the EXACT old pipeline, byte-for-byte: no object
 # fiddling, no fold — models that were correct before stay correct; the fold is world-preserving for Unity's mesh

@@ -50,6 +50,7 @@ namespace ENCAccessProof
         public readonly Dictionary<long, bool> stateMoving = new Dictionary<long, bool>();                                 // unit GUID -> was moving last poll (detects the moving->stopped flip)
         public readonly Dictionary<long, float> stateStoppedAt = new Dictionary<long, float>();                            // unit GUID -> Time.time the unit stopped moving
         public readonly List<StateSample> stateSamples = new List<StateSample>();   // published for the pose hook (lock on it); pos = pawn render position
+        public int lastStateAnim = -2;   // diagnostic: last anim the state pose picked (log only on change)
         public float animDuration = 1f;  // clip duration (s); PawnEntryPose.Time is NORMALIZED (Mathf.Repeat(Time,1) = one loop), so Time = seconds/duration plays it at real speed with every frame
         public int skeletonId = -1;      // runtime AnimationManager skeleton index of our registered skeleton (to match PawnManager.PawnEntry.SkeletonId)
         public int descId = -1;          // runtime PawnDescriptorId of our unit (learned from the correctly-skinned pawn), to spot the wrong-skeleton twin the game spawns for the same unit
@@ -1261,26 +1262,73 @@ namespace ENCAccessProof
             var pose0 = GetMember(entry, "Pose0");                     // boxed PawnEntryPose (struct)
             // PawnEntryPose.Time is NORMALIZED (sampler does Mathf.Repeat(Time,1) = one loop). ComputePoseTime divides by the
             // clip duration so it plays at REAL speed and hits every frame; raw Time.time = duration× too fast + frame-skipping.
-            int useAnim; float useTime;
+            int zeroFrom = 1;
             if (e.animStateDriven && e.moveAnimId >= 0)
-                StatePose(e, entry, out useAnim, out useTime);         // STATE-DRIVEN: idle / move / after by movement state
+            {
+                // WEIGHT-DRIVEN STATES (the in-game diagnostic proved per-frame ANIMATIONID switching is a no-op: the
+                // hook selected the run anim, the pawn kept idling — the id is latched when the pawn entry is built,
+                // while Time/Weight are consumed per frame, exactly what the deploy hold/ramp already demonstrated).
+                // So every state OWNS a pose slot with a CONSTANT id and the machine switches WEIGHTS — the same
+                // mechanism the game's own crossfades use. Pose0=idle, Pose1=move, Pose2=after (when configured).
+                StatePose(e, entry, out bool moving, out bool inAfter, out float afterT);
+                float idleDur = e.animDuration > 0.001f ? e.animDuration : 1f;
+                float moveDur = e.moveDur > 0.001f ? e.moveDur : 1f;
+                if (Plugin.StateProbePose0Move != null && Plugin.StateProbePose0Move.Value)
+                {
+                    // TEMP DIAGNOSTIC (cfg [Factory] StateProbePose0Move): play the MOVE clip on Pose0, weight 1,
+                    // ALWAYS. Separates the two suspects for "invisible while moving": if he runs in place standing
+                    // still, the move clip + Pose0 are fine and the Pose1 SLOT is the problem; if he's invisible
+                    // here too, the move clip's GPU bake is bad despite the healthy asset.
+                    SetMember(pose0, "AnimationId", (uint)e.moveAnimId);
+                    SetMember(pose0, "Weight", 1f);
+                    SetMember(pose0, "Time", UnityEngine.Time.time / moveDur);
+                    SetMember(entry, "Pose0", pose0);
+                    for (int pi = 1; pi < 9; pi++)
+                    { var pz = GetMember(entry, PoseNames[pi]); if (pz == null) continue; SetMember(pz, "Weight", 0f); SetMember(entry, PoseNames[pi], pz); }
+                    goto stateTail;
+                }
+                SetMember(pose0, "AnimationId", (uint)e.animId);
+                SetMember(pose0, "Weight", (!moving && !inAfter) ? 1f : 0f);
+                SetMember(pose0, "Time", UnityEngine.Time.time / idleDur);
+                SetMember(entry, "Pose0", pose0);
+                var pose1 = GetMember(entry, "Pose1");
+                if (pose1 != null)
+                {
+                    SetMember(pose1, "AnimationId", (uint)e.moveAnimId);
+                    SetMember(pose1, "Weight", moving ? 1f : 0f);
+                    SetMember(pose1, "Time", UnityEngine.Time.time / moveDur);
+                    SetMember(entry, "Pose1", pose1);
+                }
+                zeroFrom = 2;
+                if (e.afterAnimId >= 0)
+                {
+                    var pose2 = GetMember(entry, "Pose2");
+                    if (pose2 != null)
+                    {
+                        SetMember(pose2, "AnimationId", (uint)e.afterAnimId);
+                        SetMember(pose2, "Weight", inAfter ? 1f : 0f);
+                        SetMember(pose2, "Time", afterT);
+                        SetMember(entry, "Pose2", pose2);
+                    }
+                    zeroFrom = 3;
+                }
+            }
             else
             {
-                useAnim = e.animId;
                 float dur = e.animDuration > 0.001f ? e.animDuration : 1f;
-                useTime = ComputePoseTime(e, entry, dur);
+                SetMember(pose0, "AnimationId", (uint)e.animId);
+                SetMember(pose0, "Weight", 1f);
+                SetMember(pose0, "Time", ComputePoseTime(e, entry, dur));
+                SetMember(entry, "Pose0", pose0);
             }
-            SetMember(pose0, "AnimationId", (uint)useAnim);
-            SetMember(pose0, "Weight", 1f);
-            SetMember(pose0, "Time", useTime);
-            SetMember(entry, "Pose0", pose0);
-            for (int i = 1; i < 9; i++)
+            for (int i = zeroFrom; i < 9; i++)
             {
                 var pose = GetMember(entry, PoseNames[i]);
                 if (pose == null) continue;
                 SetMember(pose, "Weight", 0f);
                 SetMember(entry, PoseNames[i], pose);
             }
+            stateTail:
             // The AIM layer is cleared only for the ARTILLERY behaviors (it twists the howitzer's barrel as the game
             // aims). For other animated models the game's bone-rotation layer stays — it carries the pawn's FACING
             // (clearing it froze the soldier to one compass direction) — but on some donors it arrives with an
@@ -1304,49 +1352,47 @@ namespace ENCAccessProof
             return UnityEngine.Time.time / dur;                        // default: continuous loop (a drone's spinning prop)
         }
 
-        // STATE-DRIVEN (Phase 2): pick this pawn's clip from the unit movement state ProcessAnimStates published,
-        // matched by nearest sample position (the deploy poll's proven approximation). MOVING -> the MOVE loop;
-        // recently stopped + an AFTER clip -> one 0->1 pass of AFTER (clamped below 1.0 — Repeat(1.0)=frame 0 would
-        // snap back to the start); otherwise -> the IDLE loop. An unmatched pawn idles.
-        static void StatePose(ModelEntry e, object entry, out int animId, out float time)
+        // STATE-DRIVEN (Phase 2): resolve this pawn's movement state from the samples ProcessAnimStates published,
+        // matched by nearest sample position (the deploy poll's proven approximation). The caller drives the pose
+        // WEIGHTS from it — moving -> the MOVE slot; recently stopped + an AFTER clip -> one 0->1 AFTER pass
+        // (clamped below 1.0: Repeat(1.0)=frame 0 would snap back); otherwise IDLE. An unmatched pawn idles.
+        static void StatePose(ModelEntry e, object entry, out bool moving, out bool inAfter, out float afterT)
         {
-            animId = e.animId;
-            float idleDur = e.animDuration > 0.001f ? e.animDuration : 1f;
-            time = UnityEngine.Time.time / idleDur;
+            moving = false; inAfter = false; afterT = 0f;
             var os = GetMember(entry, "ObjectSpace");
             if (os == null) return;
             UnityEngine.Vector3 pos;
             try { pos = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return; }
-            bool moving = false; float stoppedAt = -1f; bool matched = false;
+            float stoppedAt = -1f; bool matched = false;
+            float nearest = float.MaxValue; int sampleCount;   // diagnostic: nearest sample distance even when unmatched
             lock (e.stateSamples)
             {
+                sampleCount = e.stateSamples.Count;
                 float best = 4f * 4f;   // same 4u match radius class as the fire/deploy hooks
                 for (int i = 0; i < e.stateSamples.Count; i++)
                 {
                     var s = e.stateSamples[i];
                     float d = (s.pos - pos).sqrMagnitude;
+                    if (d < nearest) nearest = d;
                     if (d < best) { best = d; moving = s.moving; stoppedAt = s.stoppedAt; matched = true; }
                 }
             }
-            if (!matched) return;
-            if (moving)
+            if (!matched)
             {
-                float md = e.moveDur > 0.001f ? e.moveDur : 1f;
-                animId = e.moveAnimId;
-                time = UnityEngine.Time.time / md;
+                moving = false;
+                if (e.lastStateAnim != -3)   // log the miss once per streak (this is the link that decides run vs idle)
+                { e.lastStateAnim = -3; Plugin.Log.LogInfo($"[State] pose '{e.resourceName}': NO sample match (samples={sampleCount}, nearest={(nearest < float.MaxValue ? UnityEngine.Mathf.Sqrt(nearest).ToString("0.0") : "-")}u, pawn T={pos.ToString("0.0")}) — idling"); }
                 return;
             }
-            if (e.afterAnimId >= 0 && stoppedAt > 0f)
+            if (!moving && e.afterAnimId >= 0 && stoppedAt > 0f)
             {
                 float ad = e.afterDur > 0.001f ? e.afterDur : 1f;
                 float dt = UnityEngine.Time.time - stoppedAt;
-                if (dt >= 0f && dt < ad)
-                {
-                    animId = e.afterAnimId;
-                    time = UnityEngine.Mathf.Min(dt / ad, 0.999f);   // one pass, hold the last frame until it elapses
-                    return;
-                }
+                if (dt >= 0f && dt < ad) { inAfter = true; afterT = UnityEngine.Mathf.Min(dt / ad, 0.999f); }   // one pass, hold the last frame until it elapses
             }
+            int chosen = moving ? e.moveAnimId : inAfter ? e.afterAnimId : e.animId;
+            if (chosen != e.lastStateAnim)   // diagnostic: which state the pose weights select (transitions only)
+            { e.lastStateAnim = chosen; Plugin.Log.LogInfo($"[State] pose '{e.resourceName}': matched, moving={moving} -> {(moving ? "MOVE" : inAfter ? "AFTER" : "IDLE")} (weights)"); }
         }
 
         // DEPLOY-ON-STOP (gradual): hold the pose time Plugin.Update ramped for THIS pawn's unit — the deploy clip plays

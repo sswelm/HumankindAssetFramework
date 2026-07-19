@@ -20,6 +20,7 @@ namespace ENCAccessProof
         internal static ConfigEntry<string> AssetNameFilter; // substring that identifies that mod's assets
         internal static ConfigEntry<KeyCode> ToggleKey;      // open/close the feedback window (Shift+ToggleKey = dump GPU mesh-buffer usage)
         internal static ConfigEntry<bool>   UniversalInjectOn; // registry-driven universal injector (Model Factory)
+        internal static ConfigEntry<bool>   StateProbePose0Move; // TEMP diagnostic: play a state-driven model's MOVE clip on Pose0, weight 1, always (isolates move-clip vs Pose1-slot failures)
         internal static ConfigEntry<int>    RespawnDelayFrames; // frames to wait after a borrowed-rotor unit renders before re-spawning it (first-instance rotor fix)
         // --- EXPERIMENTAL: district visual repoint (the second injection axis; see docs/District-Visuals.md) ---
         internal static ConfigEntry<bool>   DistrictRepointOn;   // master enable for the district-visual repoint hook
@@ -59,6 +60,10 @@ namespace ENCAccessProof
             UniversalInjectOn = Config.Bind("Factory", "UniversalInject", true,
                                   "Registry-driven universal model injector (the Model Factory). Reads the model registry JSON " +
                                   "from this config folder and repoints each listed pawn definition onto its baked skeleton.");
+            StateProbePose0Move = Config.Bind("Factory", "StateProbePose0Move", false,
+                                  "TEMP diagnostic for state-driven models: play the MOVEMENT clip on Pose0, weight 1, ALWAYS " +
+                                  "(ignores the state machine). If the model runs in place standing still, the move clip is fine " +
+                                  "and the Pose1 slot is the problem; if it's invisible, the move clip's GPU bake is bad.");
             RespawnDelayFrames = Config.Bind("Factory", "RespawnDelayFrames", 1,
                                   "Frames to wait after a borrowed-rotor unit (a model with respawnAfterLoad set) renders before " +
                                   "the plugin re-spawns it to clear the first-instance low-rotor bug. 1 = near-instant (default). " +
