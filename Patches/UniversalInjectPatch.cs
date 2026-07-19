@@ -57,6 +57,7 @@ namespace ENCAccessProof
         public string handPropMat = "";   // borrowed material guid "a,b,c,d"; "" = the shared EQ_DLC04_Weapons material
         public string handPropBone = "";  // bone-name SUBSTRING on OUR skeleton (bones are renamed b###_<orig>); "" = "R_Hand"
         public string handPropAngles = "";// draw-time rotation "x,y,z" (deg) stamped onto the collection's FxMeshContent.ImportAngles BEFORE encoding — the ONLY angles the pawn-fragment path reads. "" = keep the baked value. Runtime-only: change + relaunch, no bake/rebuild.
+        public object handPropLayer;      // session-scoped: our PRIVATE clone of the borrowed weapon output layer, painted with the prop's own atlas (<prop>_Atlas)
         public bool propProbe;            // TEMP diagnostic: one-shot GPU-descriptor dump for the hand-prop investigation
         public readonly Dictionary<long, UnityEngine.Vector3> stateLastPos = new Dictionary<long, UnityEngine.Vector3>();  // MAIN thread poll: unit GUID -> last render pos
         public readonly Dictionary<long, bool> stateMoving = new Dictionary<long, bool>();                                 // unit GUID -> was moving last poll (detects the moving->stopped flip)
@@ -583,7 +584,7 @@ namespace ENCAccessProof
                     // Retexture/isolation state is session-scoped too: the isolated layer is a clone of a SESSION-1
                     // output layer and the adjusted atlas was dumped from it — handing either to the new session's
                     // content manager re-injects dead objects. Cheap to re-derive; destroy the texture we created.
-                    e.isolatedLayer = null; e.hostOutputLayer = null;
+                    e.isolatedLayer = null; e.hostOutputLayer = null; e.handPropLayer = null;
                     if (e.tex != null) { try { UnityEngine.Object.Destroy(e.tex); } catch { } e.tex = null; }
                     // Per-instance state keyed by session-scoped ids (unit GUIDs / sub-pawn instance ids): a new game
                     // can REUSE those ids, so stale entries would feed the first poll wrong moving/deploy decisions,
@@ -1040,6 +1041,23 @@ namespace ENCAccessProof
                 var folM = content?.GetType().GetMethods(BF).FirstOrDefault(m2 => m2.Name == "OutputLayerFromMaterialGuid" && m2.GetParameters().Length == 1);
                 try { fol = folM?.Invoke(content, new[] { MakeGuid(mg[0], mg[1], mg[2], mg[3]) }); } catch { }
                 if (Dead(fol)) { Plugin.Log.LogWarning($"[Props] '{e.resourceName}' hand prop: no output layer for the borrowed material — no weapon"); return; }
+                // 2b) PROP SKIN: give the fragment a PRIVATE CLONE of the borrowed layer, painted with the prop's OWN
+                //     baked atlas (<prop>_Atlas, by name from the mounted mod bundles — the mesh's UVs were remapped to
+                //     it at bake). Without this the mesh samples the EQ weapon atlas (the M60 rendered leather-tan).
+                //     Clone-first mirrors the unit-retexture isolation: the shared EQ layer (real DLC weapons) is never
+                //     touched; FragmentEntry.Load below registers the clone via GetLayerIndexAddItIFN = a fresh GPU slot.
+                UnityEngine.Texture2D propAtlas = null;
+                foreach (var b in UnityEngine.AssetBundle.GetAllLoadedAssetBundles())
+                { var a2 = b.LoadAsset(propName + "_Atlas"); if (a2 is UnityEngine.Texture2D t2) { propAtlas = t2; break; } }
+                if (propAtlas != null && fol is UnityEngine.Object folObj)
+                {
+                    var clone = UnityEngine.Object.Instantiate(folObj);
+                    clone.name = propName + "_PropLayer";
+                    e.handPropLayer = clone;
+                    fol = clone;
+                }
+                else if (propAtlas == null)
+                    Plugin.Log.LogInfo($"[Props] '{e.resourceName}' hand prop: no '{propName}_Atlas' in the mounted bundles — keeping the borrowed layer's skin");
                 // 3) OUR bone, by substring (case-insensitive; first match wins)
                 string boneSub = string.IsNullOrEmpty(e.handPropBone) ? "R_Hand" : e.handPropBone;
                 string boneName = null;
@@ -1063,6 +1081,9 @@ namespace ENCAccessProof
                 uint enc = 0, bidx = 0;
                 try { enc = (uint)AccessTools.Field(fragType, "EncodedMeshAndVisualParticleCount").GetValue(item); bidx = (uint)AccessTools.Field(fragType, "BoneIndex").GetValue(item); } catch { }
                 if (enc == 0) { Plugin.Log.LogWarning($"[Props] '{e.resourceName}' hand prop: mesh '{meshName}' encoded to 0 (name not in the collection?) — not appended"); return; }
+                // paint OUR atlas onto the private layer clone (post-Load: the clone now owns a registered GPU slot)
+                if (propAtlas != null && e.handPropLayer != null)
+                    PaintLayer(e.handPropLayer, propAtlas, propName);
                 var narr = Array.CreateInstance(fragType, frags.Length + 1);
                 Array.Copy(frags, narr, frags.Length);
                 narr.SetValue(item, frags.Length);
@@ -2262,6 +2283,36 @@ namespace ENCAccessProof
 
         static UnityEngine.Texture2D Solid(float r, float g, float b)
         { var t = new UnityEngine.Texture2D(1, 1); t.SetPixel(0, 0, new UnityEngine.Color(r, g, b, 1f)); t.Apply(); return t; }
+
+        // Paint an atlas onto a (cloned) output layer's render materials — the TickOne recipe generalized for props:
+        // _MainTex swapped, the atlas UV transform reset to 1:1 (the host cropped a slice of a SHARED atlas), and the
+        // host's overlay maps neutralized so only our albedo shows.
+        static void PaintLayer(object layer, UnityEngine.Texture2D tex, string tag)
+        {
+            try
+            {
+                if (!(GetMember(layer, "RenderOutputs") is Array ros)) return;
+                int painted = 0;
+                foreach (var ro in ros)
+                    foreach (var fld in RenderMatFields)
+                        if (GetMember(ro, fld) is UnityEngine.Material mat)
+                        {
+                            if (ReferenceEquals(mat.GetTexture("_MainTex"), tex)) continue;
+                            if (_flatN == null) { _flatN = Solid(0.5f, 0.5f, 1f); _white = Solid(1f, 1f, 1f); _black = Solid(0f, 0f, 0f); _grey = Solid(0.5f, 0.5f, 0.5f); }
+                            mat.SetTexture("_MainTex", tex);
+                            mat.SetTextureScale("_MainTex", UnityEngine.Vector2.one);
+                            mat.SetTextureOffset("_MainTex", UnityEngine.Vector2.zero);
+                            mat.SetTexture("_NormalMap", _flatN);
+                            mat.SetTexture("_AmbiantOcclusionMap", _white);
+                            mat.SetTexture("_ColorMask", _black);
+                            mat.SetTexture("_RoughnessMap", _grey);
+                            mat.SetTexture("_MetallicMap", _black);
+                            painted++;
+                        }
+                Plugin.Log.LogInfo($"[Props] '{tag}' prop layer painted ({painted} material(s), atlas {tex.width}x{tex.height})");
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Props] PaintLayer: " + ex.Message); }
+        }
 
         static UnityEngine.Texture2D LoadAtlas(int a, int b, int c, int d, string tag)
         {
