@@ -46,9 +46,10 @@ namespace ENCAccessProof
         public int ata, atb, atc, atd;   // ATTACK ClipCollection Amplitude guid (0,0,0,0 = none) — played once when the pawn ranged-attacks
         public int cba, cbb, cbc, cbd;   // COMBAT-IDLE ClipCollection Amplitude guid (0,0,0,0 = none) — replaces IDLE while the army is locked in a battle
         public int pva, pvb, pvc, pvd;   // PRE-MOVEMENT ClipCollection Amplitude guid (0,0,0,0 = none) — played ONCE when the unit STARTS moving (e.g. a howitzer folding), then the Movement loop
-        public object moveClipColl, afterClipColl, attackClipColl, combatClipColl, preMoveClipColl;
-        public int moveAnimId = -1, afterAnimId = -1, attackAnimId = -1, combatAnimId = -1, preMoveAnimId = -1;
-        public float moveDur = 1f, afterDur = 1f, attackDur = 1f, combatDur = 1f, preMoveDur = 1f;
+        public int iea, ieb, iec, ied;   // IDLE-OVERRIDE ClipCollection Amplitude guid (0,0,0,0 = none) — a STANCE baked as a ROLE (real deltas vs the full primary clip's reference pose); the stance-as-PRIMARY trap encodes ~identity and renders as REST (the howitzer's "forgot to deploy")
+        public object moveClipColl, afterClipColl, attackClipColl, combatClipColl, preMoveClipColl, idleClipColl;
+        public int moveAnimId = -1, afterAnimId = -1, attackAnimId = -1, combatAnimId = -1, preMoveAnimId = -1, idleAnimId = -1;
+        public float moveDur = 1f, afterDur = 1f, attackDur = 1f, combatDur = 1f, preMoveDur = 1f, idleDur = 1f;
         public int attackRepeats = 1;    // how many times the ATTACK clip replays per trigger (the fire window = repeats x clip duration; the GPU sampler's Repeat(Time,1) wraps each pass). For short recoil-pop source clips (shootAR2s = 0.17s) that should read as sustained fire. Runtime-only knob — no re-bake.
         // HAND PROP (weapon axis, 2026-07-19): a rigid Prop-Lab mesh glued to a bone of OUR skeleton — the soldier's
         // gun. The donor (an APC) has no weapon slots, so the plugin CONSTRUCTS the FragmentEntry itself at repoint
@@ -400,7 +401,7 @@ namespace ENCAccessProof
                         foreach (var m in models)
                         {
                             var s = m["skel"]; var t = m["atlas"]; var c = m["clip"]; var p = m["position"];
-                            var cmv = m["clipMove"]; var cfa = m["clipAfter"]; var cat = m["clipAttack"]; var ccb = m["clipCombat"]; var cpv = m["clipPreMove"];
+                            var cmv = m["clipMove"]; var cfa = m["clipAfter"]; var cat = m["clipAttack"]; var ccb = m["clipCombat"]; var cpv = m["clipPreMove"]; var cid = m["clipIdle"];
                             entries.Add(new ModelEntry
                             {
                                 resourceName = (string)m["resourceName"] ?? "", pawnDescription = (string)m["pawnDescription"] ?? "", hideMeshes = (string)m["hideMeshes"] ?? "",
@@ -413,6 +414,7 @@ namespace ENCAccessProof
                                 ata = A(cat, 0), atb = A(cat, 1), atc = A(cat, 2), atd = A(cat, 3),
                                 cba = A(ccb, 0), cbb = A(ccb, 1), cbc = A(ccb, 2), cbd = A(ccb, 3),
                                 pva = A(cpv, 0), pvb = A(cpv, 1), pvc = A(cpv, 2), pvd = A(cpv, 3),
+                                iea = A(cid, 0), ieb = A(cid, 1), iec = A(cid, 2), ied = A(cid, 3),
                                 position = new UnityEngine.Vector3(Fp(p, "x"), Fp(p, "y"), Fp(p, "z")),
                                 scale = m["scale"] != null ? (float)m["scale"] : 1f,
                                 desaturate = m["desaturate"] != null ? (float)m["desaturate"] : 0f,
@@ -465,6 +467,7 @@ namespace ENCAccessProof
                 var catR = Regex.Matches(text, "\"clipAttack\"\\s*:\\s*" + i4);  // parity: STATE-DRIVEN attack ClipCollection guid
                 var ccbR = Regex.Matches(text, "\"clipCombat\"\\s*:\\s*" + i4);  // parity: STATE-DRIVEN combat-idle ClipCollection guid
                 var cpvR = Regex.Matches(text, "\"clipPreMove\"\\s*:\\s*" + i4); // parity: STATE-DRIVEN pre-movement ClipCollection guid
+                var cidR = Regex.Matches(text, "\"clipIdle\"\\s*:\\s*" + i4);   // parity: STATE-DRIVEN idle-override ClipCollection guid
                 var asd = Regex.Matches(text, "\"animStateDriven\"\\s*:\\s*(true|false)");   // parity: state-driven mode flag
                 // position object {x,y,z} — JsonUtility writes Vector3 in x,y,z order. Applied as a runtime world offset for animated models.
                 var po = Regex.Matches(text, "\"position\"\\s*:\\s*\\{\\s*\"x\"\\s*:\\s*(-?[\\d.eE+]+)\\s*,\\s*\"y\"\\s*:\\s*(-?[\\d.eE+]+)\\s*,\\s*\"z\"\\s*:\\s*(-?[\\d.eE+]+)");
@@ -516,6 +519,7 @@ namespace ENCAccessProof
                         ata = i < catR.Count ? G(catR[i], 1) : 0, atb = i < catR.Count ? G(catR[i], 2) : 0, atc = i < catR.Count ? G(catR[i], 3) : 0, atd = i < catR.Count ? G(catR[i], 4) : 0,
                         cba = i < ccbR.Count ? G(ccbR[i], 1) : 0, cbb = i < ccbR.Count ? G(ccbR[i], 2) : 0, cbc = i < ccbR.Count ? G(ccbR[i], 3) : 0, cbd = i < ccbR.Count ? G(ccbR[i], 4) : 0,
                         pva = i < cpvR.Count ? G(cpvR[i], 1) : 0, pvb = i < cpvR.Count ? G(cpvR[i], 2) : 0, pvc = i < cpvR.Count ? G(cpvR[i], 3) : 0, pvd = i < cpvR.Count ? G(cpvR[i], 4) : 0,
+                        iea = i < cidR.Count ? G(cidR[i], 1) : 0, ieb = i < cidR.Count ? G(cidR[i], 2) : 0, iec = i < cidR.Count ? G(cidR[i], 3) : 0, ied = i < cidR.Count ? G(cidR[i], 4) : 0,
                         position = i < po.Count ? new UnityEngine.Vector3(F(po[i], 1), F(po[i], 2), F(po[i], 3)) : UnityEngine.Vector3.zero,
                         respawnAfterLoad = i < ra.Count && ra[i].Groups[1].Value == "true",
                         freezeDonorAnim = i < fz.Count && fz[i].Groups[1].Value == "true",
@@ -586,7 +590,7 @@ namespace ENCAccessProof
                 foreach (var e in list)
                 {
                     e.skeletonId = -1; e.animId = -1; e.descId = -1; e.repointed = false;   // session-scoped ids re-learn
-                    e.moveAnimId = -1; e.afterAnimId = -1; e.attackAnimId = -1; e.combatAnimId = -1; e.preMoveAnimId = -1;   // state-role ids re-resolve
+                    e.moveAnimId = -1; e.afterAnimId = -1; e.attackAnimId = -1; e.combatAnimId = -1; e.preMoveAnimId = -1; e.idleAnimId = -1;   // state-role ids re-resolve
                     e.stateLastPos.Clear(); e.stateMoving.Clear(); e.stateStoppedAt.Clear(); e.stateMoveStartedAt.Clear();
                     lock (e.stateSamples) e.stateSamples.Clear();
                     lock (e.activeFires) e.activeFires.Clear();                              // session-1 fire windows (positions + Time.time) are meaningless in the new session
@@ -664,6 +668,7 @@ namespace ENCAccessProof
                     if (e.attackClipColl != null) e.attackAnimId = ResolveCollAnimId(animMgr, e.attackClipColl, e.resourceName + ":attack", out e.attackDur);
                     if (e.combatClipColl != null) e.combatAnimId = ResolveCollAnimId(animMgr, e.combatClipColl, e.resourceName + ":combat", out e.combatDur);
                     if (e.preMoveClipColl != null) e.preMoveAnimId = ResolveCollAnimId(animMgr, e.preMoveClipColl, e.resourceName + ":premove", out e.preMoveDur);
+                    if (e.idleClipColl != null) e.idleAnimId = ResolveCollAnimId(animMgr, e.idleClipColl, e.resourceName + ":idle", out e.idleDur);
                 }
                 registered = true;
                 Plugin.Log.LogInfo($"[Uni] registered {n} skeleton(s) + re-Apply'd; " + string.Join(", ", entries.Select(x => $"{x.resourceName}(skel {x.skeletonId}, anim {x.animId})")));
@@ -1399,6 +1404,7 @@ namespace ENCAccessProof
                         e.attackClipColl = InjectOne(e.attackClipColl, e.ata, e.atb, e.atc, e.atd, e.resourceName + ":attack");
                         e.combatClipColl = InjectOne(e.combatClipColl, e.cba, e.cbb, e.cbc, e.cbd, e.resourceName + ":combat");
                         e.preMoveClipColl = InjectOne(e.preMoveClipColl, e.pva, e.pvb, e.pvc, e.pvd, e.resourceName + ":premove");
+                        e.idleClipColl = InjectOne(e.idleClipColl, e.iea, e.ieb, e.iec, e.ied, e.resourceName + ":idle");
                     }
                 }
             }
@@ -1604,18 +1610,22 @@ namespace ENCAccessProof
                     SetMember(pose0, "AnimationId", (uint)e.combatAnimId);
                     SetMember(pose0, "Time", UnityEngine.Time.time / cd);
                 }
+                else if (e.idleAnimId >= 0)
+                {
+                    // IDLE OVERRIDE role (bake-only stance fix, 2026-07-19): a stance baked as the PRIMARY clip
+                    // encodes ~identity against the skeleton's reference pose (the primary defines that reference)
+                    // and renders as REST in-game — the "forgot to deploy" trap. The stance therefore bakes as a
+                    // ROLE (real deltas against the full primary clip's reference) and idle plays it here; the
+                    // primary (e.animId) stays the full reference clip and is what plays when no override is set.
+                    float idleDur = e.idleDur > 0.001f ? e.idleDur : 1f;
+                    SetMember(pose0, "AnimationId", (uint)e.idleAnimId);
+                    SetMember(pose0, "Time", UnityEngine.Time.time / idleDur);
+                }
                 else
                 {
                     float idleDur = e.animDuration > 0.001f ? e.animDuration : 1f;
                     SetMember(pose0, "AnimationId", (uint)e.animId);
-                    // STATE-DRIVEN IDLE HOLD (howitzer lesson, 2026-07-19): a deployed STANCE baked as its own 1-2
-                    // frame clip encodes ~identity against the skeleton's reference pose and renders as REST (the
-                    // travel pose) in-game — the legacy howitzer's deployed idle was NEVER a baked stance, it was
-                    // the FULL deploy clip HELD near its end at runtime (deployPoseTime 0.999). Same recipe on the
-                    // state path: idle = the full clip, held at deployPoseTime when < 1 (kept just under 1.0 —
-                    // Repeat(1.0) wraps to frame 0, the folded pose). Characters leave deployPoseTime at 1 = loop.
-                    float t = (e.deployPoseTime > 0f && e.deployPoseTime < 1f) ? e.deployPoseTime : UnityEngine.Time.time / idleDur;
-                    SetMember(pose0, "Time", t);
+                    SetMember(pose0, "Time", UnityEngine.Time.time / idleDur);
                 }
                 SetMember(pose0, "Weight", 1f);
                 SetMember(entry, "Pose0", pose0);
@@ -1711,20 +1721,19 @@ namespace ENCAccessProof
                 { e.lastStateAnim = -3; Plugin.Log.LogInfo($"[State] pose '{e.resourceName}': NO sample match (samples={sampleCount}, nearest={(nearest < float.MaxValue ? UnityEngine.Mathf.Sqrt(nearest).ToString("0.0") : "-")}u, pawn T={pos.ToString("0.0")}) — idling"); }
                 return;
             }
-            // deploySpeed scales BOTH state one-shots (its legacy meaning, carried to the state machine 2026-07-19):
-            // a full-length authored fold (the M114's is 7.5 s of clip) outlasts a one-tile map move — the unit
-            // spent EVERY trip inside PRE-MOVE's early frames and visibly "forgot to fold". Speed 3 folds in 2.5 s.
-            float spd = e.deploySpeed > 0.01f ? e.deploySpeed : 1f;
+            // BAKE-ONLY pacing (user decision 2026-07-19): the runtime plays every clip at its authored length —
+            // pacing belongs in the DATA. A fold that outlasts a map move is authored shorter via a slice STEP
+            // (deploy[179..0/3] = every 3rd frame = 3x faster), not scaled here.
             if (!moving && e.afterAnimId >= 0 && stoppedAt > 0f)
             {
-                float ad = (e.afterDur > 0.001f ? e.afterDur : 1f) / spd;
+                float ad = e.afterDur > 0.001f ? e.afterDur : 1f;
                 float dt = UnityEngine.Time.time - stoppedAt;
                 if (dt >= 0f && dt < ad) { inAfter = true; afterT = UnityEngine.Mathf.Min(dt / ad, 0.999f); }   // one pass, hold the last frame until it elapses
             }
             // PRE-MOVEMENT one-shot: just STARTED moving (e.g. a howitzer folding its legs) — plays once, then the Move loop
             if (moving && e.preMoveAnimId >= 0 && moveStartedAt > 0f)
             {
-                float pd = (e.preMoveDur > 0.001f ? e.preMoveDur : 1f) / spd;
+                float pd = e.preMoveDur > 0.001f ? e.preMoveDur : 1f;
                 float dtp = UnityEngine.Time.time - moveStartedAt;
                 if (dtp >= 0f && dtp < pd) { inPreMove = true; preMoveT = UnityEngine.Mathf.Min(dtp / pd, 0.999f); }
             }
