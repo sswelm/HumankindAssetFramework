@@ -22,9 +22,9 @@ by when they'll bite.
   (b) the RecoilArm "identity hold" keys are back-solved at `deploy_end`, so they're only identity if the tube's parent
   chain is static during the deploy — a tilting carriage displaces the tube through the whole deploy; (c) empty
   `ordered` (no bone matches barrel/cannon) crashes `max()` with no message; (d) dead `key_bone` helper misleads.
-- **Feature Test Tier-2 bypasses `ConfigFor`** — hand-built BakeConfig drops `convertRig`/`rotationEuler`/keepTexture/
-  keepBlack, so the animated fixtures (incl. the soldier) bake through the WRONG pipeline. Route through
-  `ModelFactoryWindow.ConfigFor` like the smoke test does.
+- ~~**Feature Test Tier-2 bypasses `ConfigFor`**~~ — FIXED 2026-07-19: the animated fixtures now clone the registry
+  entry and route through `ModelFactoryWindow.ConfigFor` like the smoke test, so `convertRig`/rotation/keep-flags all
+  carry and the soldier is exercised on the conversion pipeline it actually ships on.
 - **Unify the delete-first suffix lists across bake paths** — re-baking a model on the *other* path (animated↔static)
   orphans the previous path's outputs in shipped Resources (`_Clips`/`_ClipsPoseData` or `_ModelMesh`/`_Mat`/prefab):
   bundle bloat + a stale ClipCollection referencing a dead skeleton GUID.
