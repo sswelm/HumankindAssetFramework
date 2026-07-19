@@ -16,7 +16,7 @@ namespace ENCAccessProof
     // rename ours to match, resolve, skin via <bodyMesh>_OutputLayer). One patch handles any number of models.
     // One pawn's published movement state (STATE-DRIVEN models, Phase 2): written by the main-thread poll
     // (ProcessAnimStates), read by the per-frame pose hook via nearest-position match (the deploy poll's approximation).
-    internal struct StateSample { public UnityEngine.Vector3 pos; public bool moving; public float stoppedAt; }
+    internal struct StateSample { public UnityEngine.Vector3 pos; public bool moving; public float stoppedAt; public bool combat; }
 
     internal class ModelEntry
     {
@@ -44,9 +44,10 @@ namespace ENCAccessProof
         public int mca, mcb, mcc, mcd;   // MOVEMENT ClipCollection Amplitude guid
         public int aca, acb, acc, acd;   // AFTER-MOVEMENT ClipCollection Amplitude guid (0,0,0,0 = none)
         public int ata, atb, atc, atd;   // ATTACK ClipCollection Amplitude guid (0,0,0,0 = none) — played once when the pawn ranged-attacks
-        public object moveClipColl, afterClipColl, attackClipColl;
-        public int moveAnimId = -1, afterAnimId = -1, attackAnimId = -1;
-        public float moveDur = 1f, afterDur = 1f, attackDur = 1f;
+        public int cba, cbb, cbc, cbd;   // COMBAT-IDLE ClipCollection Amplitude guid (0,0,0,0 = none) — replaces IDLE while the army is locked in a battle
+        public object moveClipColl, afterClipColl, attackClipColl, combatClipColl;
+        public int moveAnimId = -1, afterAnimId = -1, attackAnimId = -1, combatAnimId = -1;
+        public float moveDur = 1f, afterDur = 1f, attackDur = 1f, combatDur = 1f;
         public readonly Dictionary<long, UnityEngine.Vector3> stateLastPos = new Dictionary<long, UnityEngine.Vector3>();  // MAIN thread poll: unit GUID -> last render pos
         public readonly Dictionary<long, bool> stateMoving = new Dictionary<long, bool>();                                 // unit GUID -> was moving last poll (detects the moving->stopped flip)
         public readonly Dictionary<long, float> stateStoppedAt = new Dictionary<long, float>();                            // unit GUID -> Time.time the unit stopped moving
@@ -385,7 +386,7 @@ namespace ENCAccessProof
                         foreach (var m in models)
                         {
                             var s = m["skel"]; var t = m["atlas"]; var c = m["clip"]; var p = m["position"];
-                            var cmv = m["clipMove"]; var cfa = m["clipAfter"]; var cat = m["clipAttack"];
+                            var cmv = m["clipMove"]; var cfa = m["clipAfter"]; var cat = m["clipAttack"]; var ccb = m["clipCombat"];
                             entries.Add(new ModelEntry
                             {
                                 resourceName = (string)m["resourceName"] ?? "", pawnDescription = (string)m["pawnDescription"] ?? "", hideMeshes = (string)m["hideMeshes"] ?? "",
@@ -396,6 +397,7 @@ namespace ENCAccessProof
                                 mca = A(cmv, 0), mcb = A(cmv, 1), mcc = A(cmv, 2), mcd = A(cmv, 3),
                                 aca = A(cfa, 0), acb = A(cfa, 1), acc = A(cfa, 2), acd = A(cfa, 3),
                                 ata = A(cat, 0), atb = A(cat, 1), atc = A(cat, 2), atd = A(cat, 3),
+                                cba = A(ccb, 0), cbb = A(ccb, 1), cbc = A(ccb, 2), cbd = A(ccb, 3),
                                 position = new UnityEngine.Vector3(Fp(p, "x"), Fp(p, "y"), Fp(p, "z")),
                                 scale = m["scale"] != null ? (float)m["scale"] : 1f,
                                 desaturate = m["desaturate"] != null ? (float)m["desaturate"] : 0f,
@@ -439,6 +441,7 @@ namespace ENCAccessProof
                 var cmvR = Regex.Matches(text, "\"clipMove\"\\s*:\\s*" + i4);    // parity: STATE-DRIVEN movement ClipCollection guid
                 var cfaR = Regex.Matches(text, "\"clipAfter\"\\s*:\\s*" + i4);   // parity: STATE-DRIVEN after-movement ClipCollection guid
                 var catR = Regex.Matches(text, "\"clipAttack\"\\s*:\\s*" + i4);  // parity: STATE-DRIVEN attack ClipCollection guid
+                var ccbR = Regex.Matches(text, "\"clipCombat\"\\s*:\\s*" + i4);  // parity: STATE-DRIVEN combat-idle ClipCollection guid
                 var asd = Regex.Matches(text, "\"animStateDriven\"\\s*:\\s*(true|false)");   // parity: state-driven mode flag
                 // position object {x,y,z} — JsonUtility writes Vector3 in x,y,z order. Applied as a runtime world offset for animated models.
                 var po = Regex.Matches(text, "\"position\"\\s*:\\s*\\{\\s*\"x\"\\s*:\\s*(-?[\\d.eE+]+)\\s*,\\s*\"y\"\\s*:\\s*(-?[\\d.eE+]+)\\s*,\\s*\"z\"\\s*:\\s*(-?[\\d.eE+]+)");
@@ -481,6 +484,7 @@ namespace ENCAccessProof
                         mca = i < cmvR.Count ? G(cmvR[i], 1) : 0, mcb = i < cmvR.Count ? G(cmvR[i], 2) : 0, mcc = i < cmvR.Count ? G(cmvR[i], 3) : 0, mcd = i < cmvR.Count ? G(cmvR[i], 4) : 0,
                         aca = i < cfaR.Count ? G(cfaR[i], 1) : 0, acb = i < cfaR.Count ? G(cfaR[i], 2) : 0, acc = i < cfaR.Count ? G(cfaR[i], 3) : 0, acd = i < cfaR.Count ? G(cfaR[i], 4) : 0,
                         ata = i < catR.Count ? G(catR[i], 1) : 0, atb = i < catR.Count ? G(catR[i], 2) : 0, atc = i < catR.Count ? G(catR[i], 3) : 0, atd = i < catR.Count ? G(catR[i], 4) : 0,
+                        cba = i < ccbR.Count ? G(ccbR[i], 1) : 0, cbb = i < ccbR.Count ? G(ccbR[i], 2) : 0, cbc = i < ccbR.Count ? G(ccbR[i], 3) : 0, cbd = i < ccbR.Count ? G(ccbR[i], 4) : 0,
                         position = i < po.Count ? new UnityEngine.Vector3(F(po[i], 1), F(po[i], 2), F(po[i], 3)) : UnityEngine.Vector3.zero,
                         respawnAfterLoad = i < ra.Count && ra[i].Groups[1].Value == "true",
                         freezeDonorAnim = i < fz.Count && fz[i].Groups[1].Value == "true",
@@ -544,7 +548,7 @@ namespace ENCAccessProof
                 foreach (var e in list)
                 {
                     e.skeletonId = -1; e.animId = -1; e.descId = -1; e.repointed = false;   // session-scoped ids re-learn
-                    e.moveAnimId = -1; e.afterAnimId = -1; e.attackAnimId = -1;             // state-role ids re-resolve
+                    e.moveAnimId = -1; e.afterAnimId = -1; e.attackAnimId = -1; e.combatAnimId = -1;   // state-role ids re-resolve
                     e.stateLastPos.Clear(); e.stateMoving.Clear(); e.stateStoppedAt.Clear();
                     lock (e.stateSamples) e.stateSamples.Clear();
                     lock (e.activeFires) e.activeFires.Clear();                              // session-1 fire windows (positions + Time.time) are meaningless in the new session
@@ -620,6 +624,7 @@ namespace ENCAccessProof
                     if (e.moveClipColl != null) e.moveAnimId = ResolveCollAnimId(animMgr, e.moveClipColl, e.resourceName + ":move", out e.moveDur);
                     if (e.afterClipColl != null) e.afterAnimId = ResolveCollAnimId(animMgr, e.afterClipColl, e.resourceName + ":after", out e.afterDur);
                     if (e.attackClipColl != null) e.attackAnimId = ResolveCollAnimId(animMgr, e.attackClipColl, e.resourceName + ":attack", out e.attackDur);
+                    if (e.combatClipColl != null) e.combatAnimId = ResolveCollAnimId(animMgr, e.combatClipColl, e.resourceName + ":combat", out e.combatDur);
                 }
                 registered = true;
                 Plugin.Log.LogInfo($"[Uni] registered {n} skeleton(s) + re-Apply'd; " + string.Join(", ", entries.Select(x => $"{x.resourceName}(skel {x.skeletonId}, anim {x.animId})")));
@@ -1107,6 +1112,7 @@ namespace ENCAccessProof
                         e.moveClipColl = InjectOne(e.moveClipColl, e.mca, e.mcb, e.mcc, e.mcd, e.resourceName + ":move");
                         e.afterClipColl = InjectOne(e.afterClipColl, e.aca, e.acb, e.acc, e.acd, e.resourceName + ":after");
                         e.attackClipColl = InjectOne(e.attackClipColl, e.ata, e.atb, e.atc, e.atd, e.resourceName + ":attack");
+                        e.combatClipColl = InjectOne(e.combatClipColl, e.cba, e.cbb, e.cbc, e.cbd, e.resourceName + ":combat");
                     }
                 }
             }
@@ -1278,7 +1284,7 @@ namespace ENCAccessProof
             // uses only the battle-tested Pose0.)
             if (e.animStateDriven && e.moveAnimId >= 0)
             {
-                StatePose(e, entry, out bool moving, out bool inAfter, out float afterT, out bool inAttack, out float attackT);
+                StatePose(e, entry, out bool moving, out bool inAfter, out float afterT, out bool inAttack, out float attackT, out bool inCombat);
                 if (inAttack)
                 {
                     // ATTACK wins over every other state: the pawn just fired (ranged-fight hook armed a window at
@@ -1296,6 +1302,14 @@ namespace ENCAccessProof
                 {
                     SetMember(pose0, "AnimationId", (uint)e.afterAnimId);
                     SetMember(pose0, "Time", afterT);
+                }
+                else if (inCombat && e.combatAnimId >= 0)
+                {
+                    // COMBAT-IDLE: the army is locked in a battle — hold the combat stance instead of the relaxed idle.
+                    // (A single-frame stance clip renders fine: FrameCount 1 pins the sampler to frame 0 at any Time.)
+                    float cd = e.combatDur > 0.001f ? e.combatDur : 1f;
+                    SetMember(pose0, "AnimationId", (uint)e.combatAnimId);
+                    SetMember(pose0, "Time", UnityEngine.Time.time / cd);
                 }
                 else
                 {
@@ -1351,9 +1365,9 @@ namespace ENCAccessProof
         // ATTACK (highest priority, independent of the movement samples): the ranged-fight hook (Hk_PawnRangedFight)
         // arms a FireInstance at the shooter's render position; the pawn nearest an unexpired one plays the attack
         // clip once — same position-match approximation the fire/deploy behaviors use.
-        static void StatePose(ModelEntry e, object entry, out bool moving, out bool inAfter, out float afterT, out bool inAttack, out float attackT)
+        static void StatePose(ModelEntry e, object entry, out bool moving, out bool inAfter, out float afterT, out bool inAttack, out float attackT, out bool inCombat)
         {
-            moving = false; inAfter = false; afterT = 0f; inAttack = false; attackT = 0f;
+            moving = false; inAfter = false; afterT = 0f; inAttack = false; attackT = 0f; inCombat = false;
             var os = GetMember(entry, "ObjectSpace");
             if (os == null) return;
             UnityEngine.Vector3 pos;
@@ -1382,7 +1396,7 @@ namespace ENCAccessProof
                     var s = e.stateSamples[i];
                     float d = (s.pos - pos).sqrMagnitude;
                     if (d < nearest) nearest = d;
-                    if (d < best) { best = d; moving = s.moving; stoppedAt = s.stoppedAt; matched = true; }
+                    if (d < best) { best = d; moving = s.moving; stoppedAt = s.stoppedAt; inCombat = s.combat; matched = true; }
                 }
             }
             if (!matched)
@@ -1398,9 +1412,10 @@ namespace ENCAccessProof
                 float dt = UnityEngine.Time.time - stoppedAt;
                 if (dt >= 0f && dt < ad) { inAfter = true; afterT = UnityEngine.Mathf.Min(dt / ad, 0.999f); }   // one pass, hold the last frame until it elapses
             }
-            int chosen = inAttack ? e.attackAnimId : moving ? e.moveAnimId : inAfter ? e.afterAnimId : e.animId;
+            bool combatIdle = inCombat && e.combatAnimId >= 0 && !moving && !inAfter && !inAttack;
+            int chosen = inAttack ? e.attackAnimId : moving ? e.moveAnimId : inAfter ? e.afterAnimId : combatIdle ? e.combatAnimId : e.animId;
             if (chosen != e.lastStateAnim)   // diagnostic: which state the pose weights select (transitions only)
-            { e.lastStateAnim = chosen; Plugin.Log.LogInfo($"[State] pose '{e.resourceName}': matched, moving={moving} -> {(inAttack ? "ATTACK" : moving ? "MOVE" : inAfter ? "AFTER" : "IDLE")} (weights)"); }
+            { e.lastStateAnim = chosen; Plugin.Log.LogInfo($"[State] pose '{e.resourceName}': matched, moving={moving} -> {(inAttack ? "ATTACK" : moving ? "MOVE" : inAfter ? "AFTER" : combatIdle ? "COMBAT-IDLE" : "IDLE")} (weights)"); }
         }
 
         // DEPLOY-ON-STOP (gradual): hold the pose time Plugin.Update ramped for THIS pawn's unit — the deploy clip plays
@@ -1801,11 +1816,16 @@ namespace ENCAccessProof
                     }
                     e.stateMoving[guid] = moving;
                     float stoppedAt = e.stateStoppedAt.TryGetValue(guid, out var sAt) ? sAt : -1f;
+                    // COMBAT stance: PresentationArmy.IsLockedByBattle (public bool on exactly the objects this walk
+                    // iterates) is true from battle deployment until resolution — the pose hook swaps IDLE for the
+                    // combat-idle clip while it holds. Reflection-safe: a missing member just reads false.
+                    bool combat = false;
+                    try { combat = GetMember(army, "IsLockedByBattle") is bool b && b; } catch { }
                     seen[e].Add(guid);
                     if (pawnList != null)
                         foreach (var pawn in pawnList)
                             if (GetMember(pawn, "Transform") is UnityEngine.Transform tr)
-                                fresh[e].Add(new StateSample { pos = tr.position, moving = moving, stoppedAt = stoppedAt });
+                                fresh[e].Add(new StateSample { pos = tr.position, moving = moving, stoppedAt = stoppedAt, combat = combat });
                 }
                 foreach (var e in fresh.Keys)
                 {
