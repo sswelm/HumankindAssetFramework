@@ -1655,6 +1655,10 @@ namespace ENCAccessProof
             else SanitizeAimLayer(entry);
             ApplyPositionOffset(e, entry);
             ApplyScale(e, entry);
+            // PROVEN 2026-07-19 (temp probe, removed): PawnDescriptorId is a per-pawn WRITABLE mesh selector the
+            // GPU honors — AssaultInfantry pawns rendered another entry's mesh from a one-int write. This is the
+            // foundation for the vanilla-in-combat feature: keep the donor's descriptor alive alongside ours and
+            // flip each pawn by combat state.
             ctx.pawnEntries.SetValue(entry, ctx.idx);
             LogPoseHookOnce(ctx, e, pose0);
         }
