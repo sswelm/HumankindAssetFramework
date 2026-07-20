@@ -87,4 +87,57 @@ namespace ENCAccessProof
             catch (Exception e) { Plugin.Log.LogError("[Fire] ranged-fight postfix: " + e); }
         }
     }
+
+    // ---- ADJACENT-ATTACK ROTATION DIAGNOSTIC (2026-07-21): which facing actions run for OUR units, and does the
+    // rotation FSM ever start? A custom unit turns to a ranged target but not an adjacent one — these three postfixes
+    // localize where the adjacent path drops the turn. Quiet outside fights; filtered to registry units. ----
+    [HarmonyPatch] internal static class Hk_RotDiag_FaceEnemy
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = AccessTools.TypeByName("Amplitude.Mercury.Presentation.UnitActionFaceEnemy");
+            var m = t != null ? AccessTools.Method(t, "StartUnitAction") : null;
+            if (m == null) Plugin.Log.LogWarning("[Rot] NOT found: UnitActionFaceEnemy.StartUnitAction (diagnostic off)");
+            return m;
+        }
+        static void Postfix(object __instance)
+        {
+            try { UniversalInject.OnUnitActionDiag(__instance, "FaceEnemy.Start"); } catch { }
+        }
+    }
+
+    [HarmonyPatch] internal static class Hk_RotDiag_LookAt
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = AccessTools.TypeByName("Amplitude.Mercury.Presentation.UnitActionLookAt");
+            var m = t != null ? AccessTools.Method(t, "StartUnitAction") : null;
+            if (m == null) Plugin.Log.LogWarning("[Rot] NOT found: UnitActionLookAt.StartUnitAction (diagnostic off)");
+            return m;
+        }
+        static void Postfix(object __instance)
+        {
+            try { UniversalInject.OnUnitActionDiag(__instance, "LookAt.Start"); } catch { }
+        }
+    }
+
+    // Both StartDirectionToLook overloads (Vector3 direction — the LookAt/adjacent path — and the float-angle one
+    // StartRotate forwards to, if present) so range and adjacent report through the same line.
+    [HarmonyPatch] internal static class Hk_RotDiag_FsmStart
+    {
+        static System.Collections.Generic.IEnumerable<MethodBase> TargetMethods()
+        {
+            var t = AccessTools.TypeByName("Amplitude.Mercury.Presentation.RotationPawnStateMachine");
+            int n = 0;
+            if (t != null)
+                foreach (var m in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                    if (m.Name == "StartDirectionToLook") { n++; yield return m; }
+            if (n == 0) Plugin.Log.LogWarning("[Rot] NOT found: RotationPawnStateMachine.StartDirectionToLook (diagnostic off)");
+            else Plugin.Log.LogInfo($"[Rot] rotation diagnostic hooked ({n} FSM overload(s))");
+        }
+        static void Postfix(object __instance, int __result)
+        {
+            try { UniversalInject.OnRotationStartDiag(__instance, __result); } catch { }
+        }
+    }
 }

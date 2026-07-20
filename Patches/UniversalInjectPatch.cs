@@ -2146,6 +2146,46 @@ namespace ENCAccessProof
             catch (Exception ex) { Plugin.Log.LogError("[State] OnPawnRangedShot: " + ex); }
         }
 
+        // ---- ADJACENT-ATTACK ROTATION DIAGNOSTIC (2026-07-21) ----
+        // Symptom: a custom unit turns toward a RANGED target but not an ADJACENT one. Range facing and adjacent
+        // facing run different choreography actions (UnitActionFaceEnemy vs UnitActionLookAt, asym vs symmetrical
+        // prepare), all funnelling into RotationFSM.StartDirectionToLook. These logs show, per fight, WHICH actions
+        // start for OUR units and whether the rotation FSM was asked to turn at all — separating "action never
+        // created" (a choreography gate) from "FSM started but nothing visibly turned" (animation-driven yaw or
+        // aim-layer masking). Fires only during fights; filtered to our units, so it stays quiet.
+        internal static void OnUnitActionDiag(object action, string kind)
+        {
+            try
+            {
+                if (entries == null) return;
+                string au = GetMember(GetMember(GetMember(action, "AttackerBattleUnit"), "PresentationUnit"), "UnitDefinition")?.ToString() ?? "";
+                string du = GetMember(GetMember(GetMember(action, "DefenderBattleUnit"), "PresentationUnit"), "UnitDefinition")?.ToString() ?? "";
+                var ea = FindEntryForUnitDefinition(au); var ed = FindEntryForUnitDefinition(du);
+                if (ea == null && ed == null) return;
+                string scope = GetMember(action, "actionScope")?.ToString() ?? "?";
+                Plugin.Log.LogInfo($"[Rot] {kind} scope={scope} attacker={(ea != null ? "OURS:" + ea.resourceName : Tail(au))} defender={(ed != null ? "OURS:" + ed.resourceName : Tail(du))}");
+            }
+            catch { }
+        }
+
+        internal static void OnRotationStartDiag(object fsm, int result)
+        {
+            try
+            {
+                if (entries == null) return;
+                var pawn = GetMember(fsm, "ownerPawn");
+                string ud = GetMember(GetMember(pawn, "PresentationUnit"), "UnitDefinition")?.ToString() ?? "";
+                var e = FindEntryForUnitDefinition(ud);
+                if (e == null) return;
+                var tr = GetMember(pawn, "Transform") as UnityEngine.Transform;
+                string dir = GetMember(fsm, "rotationLookDirection") is UnityEngine.Vector3 d ? d.ToString("0.00") : "?";
+                Plugin.Log.LogInfo($"[Rot] '{e.resourceName}' StartDirectionToLook -> steps={result} lookDir={dir} yawNow={(tr != null ? tr.eulerAngles.y.ToString("0") : "?")}");
+            }
+            catch { }
+        }
+
+        static string Tail(string s) => string.IsNullOrEmpty(s) ? "(none)" : (s.Length > 60 ? s.Substring(0, 60) : s);
+
         // STATE-DRIVEN poll (main thread — Plugin.Update; Phase 2, 2026-07-19). For each animStateDriven model: per
         // unit, MOVEMENT = the render position actually changed since the last poll — the deploy poll's proven
         // settle-immune signal (wait-to-idle / turn-in-place after stopping does NOT move the tile position, so a
