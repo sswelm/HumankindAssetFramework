@@ -112,7 +112,10 @@ see the [Factory Manual](Factory-Manual.md).
   bland grey Common copy of an emblematic unit — proven on GreyStealthCorvette), and **`textureFile`** hot-loads a
   hand-painted PNG from `BepInEx\config\enc_skins\` (paint over the unit's own atlas dump from the in-game F8 ▸ Dump
   Atlases tool). Managed by the **Unit Retexture** editor window; no bake, no mod rebuild, original unit untouched.
-  See the manual's §12.
+  **(2026-07-20)** `textureFile` + adjustments work on **custom (baked) model entries** too — the plugin hot-loads the
+  PNG *in place of the baked atlas*, so a custom model is recoloured without a re-bake (adjust-only needs a PNG: the
+  baked atlas isn't CPU-readable) — and the window gained a **live preview** of the exact skin it will inject (same
+  pixel math as the plugin's `AdjustSkin`). See the manual's §12.
 - **Skin controls at bake time.** The injection ships a *flat* albedo (donor PBR — normal/metallic/roughness —
   neutralized so the donor's camo can't bleed through), which reads muddy for a source that leaned on shine or a dark
   texture. **Albedo brightness** and **Albedo saturation** sliders correct that into the baked atlas; a **Keep black**

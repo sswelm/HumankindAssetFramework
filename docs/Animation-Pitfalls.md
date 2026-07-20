@@ -98,6 +98,9 @@ What finally broke the debugging loop was not a cleverer theory — it was a **m
 | Whole gun pitches/dives when firing (close zoom) | Law 5: the arc kick IS a pitch; it reads as a dive only nose-to-the-glass | judge at map zoom; tune via recoil range/Return slow |
 | Attack plays stale/old animation after a recipe edit (historical) | Blender exits 0 even when the conversion script CRASHES — the baker reused the old converted GLB and recorded the bad args as success | fixed: success = the script's own final marker; reversed recoil ranges rejected with a clear error |
 | Aim-layer suspicion during fire | the donor streams runaway angles (5000°+) — but at the INVALID bone index sentinel (0xFFFFFFFF): applied to nothing | exonerated; a throttled `[Aim]` log in ClearAimLayer shows what streams |
+| Model collapses flat onto the root, limbs flung (mech) | rig has NO skin weights — parts rigidly bone-parented; the join drops the binding, all verts fall to bone #0 (Unity warns) | fixed: conversion path converts bone-parenting to full-weight vertex groups (`rig_anim.py`) |
+| Skeleton ~100× off the mesh, rigid parts become a "wing" | wrapper empty with non-identity scale (mech: 0.010) survives export; Amplitude reads bind poses without it | fixed: conversion path flattens wrapper empties before `transform_apply` |
+| Huge stretch spikes in-game, Blender preview fine (detailed rig) | over Amplitude's 256-bone GPU skinning cap (mech: 332 bones) — verts on bone index >255 get garbage | fixed: zero-weight leaf bones removed to ≤240 (weighted bones untouched) |
 
 ## What the legacy howitzer really was (calibrate your expectations)
 

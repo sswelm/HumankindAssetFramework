@@ -407,6 +407,24 @@ Everything is a plain registry entry (no assets, no mod rebuild). Section 3 of t
 
 Proven on the grey corvette. (These sliders replace the earlier single grey/darken toggle.)
 
+- **Live preview (2026-07-20)** — the window renders the skin it will inject: the browsed Replacement PNG (or, when
+  editing a saved entry, its current skin) with your Desaturate/RGB applied by the **plugin's exact pixel math**
+  (`AdjustSkin` — luminance pull + per-channel offset), rebuilt live as you drag the sliders. It previews the **atlas
+  image**, not a posed 3D unit — units are GPU crowd-rendered with no editor-side GameObject, so there is nothing to
+  pose (see §10 / the native "Open in Editor" preview for the mesh itself).
+
+**Custom models too (2026-07-20).** A `textureFile` + adjustments on a **baked model entry** now recolour *that model*:
+the plugin hot-loads the PNG **in place of the baked atlas** (falling back to the atlas if the PNG is missing) and
+applies the Desaturate/RGB to it — so a custom model gets a new skin **without a re-bake**. Paint over the model's own
+atlas dump exactly as with a vanilla unit. One caveat: the baked atlas itself isn't CPU-readable at runtime, so an
+adjust-*only* recolour (sliders with no PNG) does nothing on a model entry — always route a custom-model recolour
+through a PNG (dump → repaint → assign). Previously a `textureFile` on a model entry silently diverted the entry down
+the vanilla texture-only path — painting the *donor's* layer and never even swapping the mesh in.
+
+**Sound moved out of this window.** Engine events and custom WAVs are configured exclusively in the dedicated **Unit
+Sound** window (§13–§14, with per-clip volume and ▶ preview); this window is skins only. Apply here never touches an
+entry's sound fields — whatever audio the entry already carries is preserved.
+
 Workflow:
 
 1. **Pawn** — pick the pawn descriptor (use the `_Common_..._01` copy, **not** the emblematic original — the isolation
@@ -424,9 +442,9 @@ hot-loads from the game's config folder, iterating is repaint → overwrite the 
 indices, or meshes** to the GPU pawn-layer buffer — that buffer is budgeted per distinct mesh *type* (instances are free;
 see `Vertex-Budget.md`), and a reskin introduces no new type. It costs only an output-layer clone (a render slot) and one
 texture. So unlike a **baked custom model** — which *does* add its own distinct mesh's verts — you can stack many reskinned
-variants without approaching the mesh ceiling. (Applying this to *custom* models — one baked mesh, many textured variants
-sharing it — is a natural extension: the plugin already dedups a shared skeleton's mesh on upload, but reusing one custom
-skeleton across *different* base units still needs work on the per-donor rename; not built yet.)
+variants without approaching the mesh ceiling. (Recolouring a single custom model without a re-bake **is built** — see
+above. The remaining extension is one baked mesh shared across *different* base units as textured variants: the plugin
+already dedups a shared skeleton's mesh on upload, but that still needs work on the per-donor rename; not built yet.)
 
 ## 13. Unit sounds — engine audio & the sound catalog
 
@@ -435,7 +453,8 @@ Injected/retextured units are **silent on move** by default: the per-ship engine
 diagnosis in the `unit-movement-audio-investigation` memory — the emitter, its Wwise registration and its 3D position are
 all fine; only the *trigger* is missing.) The plugin restores the sound by firing it itself.
 
-**Enable it** — tick **Engine sound on move** in the Unit Retexture window (or set `engineSound: true` in the registry).
+**Enable it** — tick the **Wwise engine event** option in the **Unit Sound** window (§14; or set `engineSound: true` in
+the registry — sound config used to live in the Unit Retexture window, but is owned by the Sound window now).
 The plugin then watches each of that unit's instances and, on a movement **start/stop** transition (render-position delta,
 like deploy-on-stop), posts the engine event onto the pawn's `AudioEmitter`: a rev on departure, a settle on stop.
 
@@ -710,7 +729,30 @@ defects to get one soldier standing).
 ### 16.3 What the conversion path does (automatic, in this order)
 
 Everything below runs inside the Bake's Blender step (`Tools/rig_anim.py`) whenever **"Convert raw rig"** is ticked
-in the Animation Lab:
+in the Animation Lab.
+
+**Three rig repairs run first (mech findings, 2026-07-20) — each a no-op for a rig that doesn't need it:**
+
+- **Bone-parenting → skin weights** *(conversion path)*. Many downloaded mech/vehicle rigs never *skin* their meshes:
+  each part is rigidly **bone-parented** (often through intermediate empties/parent meshes). Blender animates that
+  fine, but the pipeline joins everything into ONE skinned mesh and rebinds via **vertex weights** — bone-parenting
+  carries none, so every vert falls to bone #0 (Unity warns `N verts with no weight -> assigned to bone #0`) and the
+  model collapses onto the root in-game. The script walks each part's parent chain to its governing bone and converts
+  the parenting into a **full-weight vertex group** on that bone (bound at rest, so the pose isn't double-applied).
+  Console proof: `RIGANIM bone-parent->skin: bound N rigidly-hung mesh(es)…`.
+- **Wrapper-empty flatten** *(conversion path)*. glTF/FBX sources often wrap the rig in a parent empty carrying a
+  non-identity scale (the Light Assault Mech's was 0.010). `transform_apply` only bakes an object's OWN transform, so
+  the wrapper survived to export as a scaled root node — Unity folds it into the mesh but Amplitude reads bind poses
+  *without* it, leaving the skeleton ~100× off the mesh (rigid verts fling into a "wing"). The rig is un-parented with
+  the transform kept and the empties deleted, so export nodes are identity.
+- **Bone cap ≤ 240** *(both paths; only fires over the limit)*. Amplitude's GPU crowd-skinning caps at **256 bones**;
+  verts weighted to a higher bone index get garbage transforms (huge stretch spikes in-game, invisible in Blender —
+  the mech had 332 bones, 4084 verts flung). Zero-weight **leaf** bones (IK targets, `_end` markers, detail nodes) are
+  removed iteratively until under budget — removing an unweighted bone never moves a vertex, and weighted limb/gun
+  bones are never leaves, so the animation is untouched. Proven rigs under the limit (soldier 62, howitzer ~27) stay
+  byte-identical.
+
+Then the conversion proper:
 
 1. **Rest normalization + visual rebake** *(the key step for type-3 rigs; conversion-path ONLY since 2026-07-19)* —
    snapshots every bone's visual matrix on every frame, applies the armature modifier at frame 0 (the assembled body
@@ -753,6 +795,9 @@ every bone** — verify with a text editor on `Assets/Resources/<name>_Skeleton.
 | Parts smear/stretch, "movement looks exaggerated" | Translation keys playing unscaled | Same — conversion path |
 | Whole model 100× too big | FBX unit scale | Fix-100× toggle (per-model; the conversion path usually makes it unnecessary) |
 | Deep chains (fingers, head) scrambled, shallow parts fine | Bone-name sort order | Automatic (topological rename) on the conversion path |
+| Model collapses flat onto one point, limbs flung; Unity console warns "verts with no weight → bone #0" | Rig has NO skin weights — parts rigidly bone-parented (common downloaded mech/vehicle rigs) | Automatic on the conversion path (bone-parenting → full-weight groups) |
+| Skeleton ~100× off the mesh; rigid parts fling into a "wing" | Wrapper empty with non-identity scale survives to export | Automatic on the conversion path (wrapper-empty flatten) |
+| Huge stretch spikes on a detailed rig (fine in Blender's preview) | Over Amplitude's 256-bone GPU skinning cap | Automatic (zero-weight leaf bones removed to ≤240) |
 | Model won't turn with movement | The plugin was clearing the game's facing layer | Fixed globally — cleared only for artillery models now |
 | "Is it my model or the pipeline?" | — | Bake `Tools/make_litmus.py`'s chain-of-cubes rig; if it renders straight in-game, the pipeline is fine — it's the model |
 

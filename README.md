@@ -128,6 +128,8 @@ runtime-hot-loaded skin or tint ([Capabilities.md](docs/Capabilities.md)) — al
   volume, driven by a dedicated **Unit Sound** editor window (with in-editor ▶ preview). Runtime-only, no bake.
 - **Retexture / recolour without a bake.** A separate **Unit Retexture** window reskins an existing unit at runtime —
   a hot-loaded PNG or a live Desaturate + RGB adjust on its own atlas — isolated per unit, free on the vertex budget.
+  Works on **baked custom models** too (the PNG replaces the baked atlas — recolour without a re-bake), with a live
+  in-editor preview of the exact skin that will be injected.
 - **Multi-mod — merge packs from many authors.** The runtime is a **Humankind Asset Framework** host, not just ENC's
   loader: it merges ENC's base registry with any number of third-party **packs** dropped in `BepInEx/config/haf_packs/`,
   so a modder augments their own units with a custom model / texture / sound by shipping just a config file + assets — **no
