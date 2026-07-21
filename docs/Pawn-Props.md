@@ -60,11 +60,13 @@ relaunch).
 |---|---|
 | `PropRegister` | master enable |
 | `PropCollectionGuids` | semicolon-separated `a,b,c,d` GUIDs of our MeshCollections |
-| `PropCollectionNames` | matching asset names (fallback loader — see trap 3) |
+| `PropCollectionNames` | matching asset names (vestigial — see trap 3's correction) |
 
 `Hk_PropRegister` (Harmony postfix on `AnimationManager.AnimationLoad`) registers our collections via the **public**
 `RegisterMeshCollection` right after the game registers its own — before any pawn definition resolves its fragments —
-and re-arms per session. An Update-tick registration survives as a late-repair safety net only.
+and re-arms per session. An Update-tick registration survives as a late-repair safety net only — since 2026-07-21 it
+is **armed by that first `AnimationLoad`** (before the mod bundle mounts, every catalog request is a guaranteed miss
+that LogErrors into the Amplitude diagnostics — it used to paint 64+ red lines per boot) and paced to ~1 attempt/s.
 
 ---
 
@@ -75,9 +77,13 @@ and re-arms per session. An Update-tick registration survives as a late-repair s
    mammoths means "collection not registered", nothing else.
 2. **Registration timing.** Pawn definitions resolve fragments inside the loading chunk — an Update-tick loses that
    race *by construction*. Hence the `AnimationLoad` postfix.
-3. **Amplitude's asset catalog misses mod-bundle MeshCollections by GUID** (type-specific: the same bundle's FxMesh
-   GUIDs resolve fine). Fallback: the plugin loads the object **by name** from the game's already-mounted Unity
-   bundles (`PropCollectionNames`). Needs `UnityEngine.AssetBundleModule.dll` referenced in the plugin.
+3. ~~**Amplitude's asset catalog misses mod-bundle MeshCollections by GUID**~~ ⚠ MISDIAGNOSIS, corrected 2026-07-21:
+   the catalog resolves mod-bundle MeshCollections by GUID **fine** once the bundle is mounted. The "gap" was our own
+   `ParseGuidCsv` splitting on `'-'` and silently stripping the sign off **negative** GUID components — the catalog
+   was always being asked for a corrupted GUID. The by-name fallback (`PropCollectionNames`, via
+   `AssetBundle.GetAllLoadedAssetBundles`) never actually worked either — Amplitude mounts community bundles through
+   its own asset provider, invisible to Unity's loaded-bundle list — and survives only as dead weight (removal
+   candidate). Lesson: when a workaround's comment claims an engine gap, re-verify the *input* before believing it.
 4. **The pawn-fragment GPU encoder draws only submesh 0.** A multi-material bake splits submeshes — the two-material
    sling rendered cords but no pouch. `BakeFxMesh(mergeSubMeshes: true)` flattens them (safe: the packed atlas already
    unified the UVs).
@@ -85,7 +91,8 @@ and re-arms per session. An Update-tick registration survives as a late-repair s
    entirely). Props are small; check the Prop Lab preview after each bake.
 6. **Re-bake GUID drift.** Unity usually recycles the GUID for delete+recreate at the same path *within a session*,
    but not across editor restarts — re-pick the fragment on the pawn slot after a re-bake (a stale slot GUID = trap 1).
-   The stale cfg collection GUID is harmless (the name fallback covers it).
+   ⚠ A stale `PropCollectionGuids` cfg entry is NOT harmless (corrected 2026-07-21: the name fallback never worked) —
+   update the cfg GUID after any re-bake that changed it, or the collection silently fails to register (= trap 1).
 7. **Orientation/position iteration.** ⚠ CORRECTED 2026-07-19: editing the `<name>_FxMesh` asset's Import Angles
    does NOT work — the baked angle field doesn't survive the mod bundle (in-game the class default `(-90,0,0)`
    applies; see §Hand props). Author orientation with the Prop Lab's **Rotation offset** (baked into vertices,
