@@ -2124,26 +2124,29 @@ namespace ENCAccessProof
         // target, district bombard — funnels through PawnRangedFightSequence.InitializeCommon(shooter, ...), and the
         // sequence is built PRESENTATION-side (main thread), so unlike the artillery sim-thread hook we can read the
         // shooter's Transform directly and arm the fire window right here: no GUID queue, no Update-drain roundtrip.
-        internal static void OnPawnRangedShot(object shooter)
+        // Arm the state-driven ATTACK clip for a pawn that just attacked — RANGED or MELEE. Not ranged-specific: it reads
+        // the attacker pawn's unit def + world position and, if it's one of our state-attack models, records a FireInstance
+        // the pose hook plays the attack clip from. `how` is just for the log ("ranged shot" / "melee attack").
+        internal static void OnPawnAttack(object attacker, string how)
         {
             try
             {
-                if (shooter == null || !Plugin.UniversalInjectOn.Value) return;
+                if (attacker == null || !Plugin.UniversalInjectOn.Value) return;
                 var list = entries;
                 if (list == null) return;
                 bool any = false;
                 foreach (var x in list) if (x.animStateDriven && x.attackAnimId >= 0) { any = true; break; }
                 if (!any) return;   // no state-attack model registered — skip the reflection walk entirely
-                var unit = GetMember(shooter, "PresentationUnit");
+                var unit = GetMember(attacker, "PresentationUnit");
                 string unitDef = GetMember(unit, "UnitDefinition")?.ToString() ?? "";
                 var e = FindEntryForUnitDefinition(unitDef);
                 if (e == null || !e.animStateDriven || e.attackAnimId < 0) return;
-                if (!(GetMember(shooter, "Transform") is UnityEngine.Transform tr)) return;
+                if (!(GetMember(attacker, "Transform") is UnityEngine.Transform tr)) return;
                 lock (e.activeFires)
                     e.activeFires.Add(new FireInstance { pos = tr.position, startTime = UnityEngine.Time.time });
-                Plugin.Log.LogInfo($"[State] '{e.resourceName}' ranged shot at {tr.position.ToString("0.0")} — attack clip armed");
+                Plugin.Log.LogInfo($"[State] '{e.resourceName}' {how} at {tr.position.ToString("0.0")} — attack clip armed");
             }
-            catch (Exception ex) { Plugin.Log.LogError("[State] OnPawnRangedShot: " + ex); }
+            catch (Exception ex) { Plugin.Log.LogError("[State] OnPawnAttack: " + ex); }
         }
 
         // ---- ADJACENT-ATTACK ROTATION DIAGNOSTIC (2026-07-21) ----

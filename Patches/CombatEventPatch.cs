@@ -83,8 +83,38 @@ namespace ENCAccessProof
         // InitializeCommon(PresentationPawn shooter, bool dies, bool delay, bool miss, float projectileSpread)
         static void Postfix(object __0)
         {
-            try { UniversalInject.OnPawnRangedShot(__0); }
+            try { UniversalInject.OnPawnAttack(__0, "ranged shot"); }
             catch (Exception e) { Plugin.Log.LogError("[Fire] ranged-fight postfix: " + e); }
+        }
+    }
+
+    // STATE-DRIVEN MELEE ATTACK trigger (2026-07-22): close-combat units (e.g. the Abomination animal) never fire a
+    // ranged shot, so PawnRangedFightSequence never runs and their attack clip stays silent — movement plays and the
+    // donor's maul/scratch SOUND plays, but no attack animation (observed in-game). Melee attacks funnel through
+    // PawnMeleeFightSequence's constructor, which takes a PawnPair (attacker + defender). Postfix the constructor, pull
+    // Pair.AttackerPawn (the attacking PresentationPawn), and arm the attack clip via the same OnPawnAttack path.
+    [HarmonyPatch] internal static class Hk_PawnMeleeFight
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PawnMeleeFightSequence");
+            MethodBase m = null;
+            if (t != null)
+                foreach (var c in t.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                    if (c.GetParameters().Length >= 1 && c.GetParameters()[0].ParameterType.Name == "PawnPair") { m = c; break; }
+            if (m != null) Plugin.Log.LogInfo("[Fire] hooked PawnMeleeFightSequence (state-driven melee attack)");
+            else Plugin.Log.LogWarning("[Fire] NOT found: PawnMeleeFightSequence(PawnPair,...) — melee attack clips won't trigger");
+            return m;
+        }
+        // ctor(PawnPair pair, bool attackerDies, bool defenderDies, bool isMoveAndAttack, bool defenderDoesNotRetaliate, PresentationUnitsFightData fightData)
+        static void Postfix(object __0)
+        {
+            try
+            {
+                var attacker = FireProbe.Member(__0, "AttackerPawn");   // __0 = the PawnPair
+                if (attacker != null) UniversalInject.OnPawnAttack(attacker, "melee attack");
+            }
+            catch (Exception e) { Plugin.Log.LogError("[Fire] melee-fight postfix: " + e); }
         }
     }
 
