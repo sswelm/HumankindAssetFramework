@@ -1,8 +1,8 @@
-// SoundWindow.cs — a SEPARATE editor window (Tools ▸ ENC ▸ Unit Sound) for configuring a unit's MOVEMENT audio, apart
-// from the skin (Unit Retexture) window. Pick a pawn, then set custom WAVs for Start (spool-up), Travel (loop while
-// moving) and Stop (spool-down), each with its own volume; or point it at a game (Wwise) engine event. The runtime plugin
-// (ENCAccessProof) detects each instance's move start/stop and plays these — no bake. Writes the sound fields onto the
-// SAME registry entry the Factory/Retexture use (matched by pawn), so a unit has one entry.
+// SoundWindow.cs — "Sound Studio" (Tools ▸ HAF ▸ Sound Studio): one place to configure a unit's whole audio profile,
+// apart from the skin (Unit Retexture) window. Foldout sections: Silence an inherited donor sound; add an Idle growl
+// (occasional, one-voice-per-unit), an Attack roar (on strike), Movement WAVs (start/travel/stop), or a Wwise engine
+// event. The runtime plugin (ENCAccessProof) drives all of it — no bake. Writes onto the SAME registry entry the
+// Factory/Retexture use (matched by pawn), so a unit keeps ONE entry.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -13,8 +13,8 @@ using UnityEngine;
 
 public class SoundWindow : EditorWindow
 {
-    [MenuItem("Tools/HAF/Unit Sound")]
-    static void Open() => GetWindow<SoundWindow>("Unit Sound");
+    [MenuItem("Tools/HAF/Sound Studio")]
+    static void Open() => GetWindow<SoundWindow>("Sound Studio");
 
     string pawn = "";
     string resourceName = "";
@@ -23,8 +23,10 @@ public class SoundWindow : EditorWindow
     string stopFile = "", stopPath = "";  float stopVol = 1f;     // Stop spool-down
     bool engineSound = false; string engineStart = "", engineStop = "";   // game (Wwise) engine event alternative
     bool silenceDonor = false;   // suppress the borrowed donor's inherited Wwise sound (idle growl + combat maul)
-    string idleFile = "", idlePath = ""; float idleVol = 1f, idleInterval = 11f;   // occasional idle growl (one-shot on a timer)
+    string idleFile = "", idlePath = ""; float idleVol = 1f, idleInterval = 11f, idleGroupRadius = 10f;   // occasional idle growl (one-shot on a timer) + one-voice-per-unit radius
     string attackFile = "", attackPath = ""; float attackVol = 1f;   // violent one-shot on each attack
+    // foldout section state (creature-voice trio open by default; movement/wwise collapsed)
+    bool foldSilence = true, foldIdle = true, foldAttack = true, foldMove = false, foldWwise = false;
     Vector2 scroll; string status = "";
 
     static string SoundsDir => Path.Combine(ModelRegistry.ConfigDir, "enc_sounds");
@@ -32,11 +34,9 @@ public class SoundWindow : EditorWindow
     void OnGUI()
     {
         EditorGUILayout.HelpBox(
-            "Configure a unit's MOVEMENT audio (separate from its skin).\n" +
-            "• Custom WAVs — Start (spool-up, one-shot) → Travel (loops while moving) → Stop (spool-down, one-shot). " +
-            "Great for units the game has no sound for (drones, zeppelins). 16-bit WAV; mono = 3D-positional.\n" +
-            "• Or a Wwise engine event — the game's own per-ship sound, posted on move start/stop (get names from the " +
-            "in-game F8 ▸ Dump Sound Catalog).\nRelaunch / reload a save to hear changes.", MessageType.Info);
+            "Sound Studio — a unit's whole audio profile in one place. Silence an inherited donor sound, and add your own " +
+            "idle growl, attack roar, and movement sounds (or a Wwise engine event). Custom WAVs: 16-bit PCM; mono = 3D. " +
+            "Relaunch / reload a save to hear changes.", MessageType.Info);
 
         var all = ModelRegistry.Load();
 
@@ -53,38 +53,45 @@ public class SoundWindow : EditorWindow
             if (sel > 0) { LoadForPawn(pawns[sel - 1], all); GUIUtility.ExitGUI(); }
         }
 
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Custom WAV files (Unity — 16-bit; mono for 3D)", EditorStyles.boldLabel);
-        WavVolRow("Start (spool-up)", startFile, ref startPath, ref startVol);
-        WavVolRow("Travel (loop)", loopFile, ref loopPath, ref loopVol);
-        WavVolRow("Stop (spool-down)", stopFile, ref stopPath, ref stopVol);
-
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("…or a game (Wwise) engine sound", EditorStyles.boldLabel);
-        engineSound = EditorGUILayout.ToggleLeft(new GUIContent("Use a Wwise engine event (posted on move start/stop)",
-            "The game's own per-ship sound. Get names from F8 ▸ Dump Sound Catalog (enc_sound_catalog.txt)."), engineSound);
-        if (engineSound)
+        // ── Silence inherited donor sound ──
+        if (Section(ref foldSilence, "Silence inherited donor sound"))
         {
-            engineStart = EditorGUILayout.TextField(new GUIContent("  Start event", "e.g. Play_UNIT_Vehicles_StealthCorvette_Start"), engineStart);
-            engineStop = EditorGUILayout.TextField(new GUIContent("  Stop event", "e.g. Play_UNIT_Vehicles_StealthCorvette_Stop"), engineStop);
-        }
+            silenceDonor = EditorGUILayout.ToggleLeft(new GUIContent("Silence the borrowed donor's Wwise sound (idle growl + combat maul)",
+                "For a custom creature that reuses a donor (e.g. the Abomination borrows a BEAR): the donor's idle growl and " +
+                "attack maul/scratch ride in on the reused animator and can't be nulled in data. This drops them at runtime. " +
+                "Only silences the game's (Wwise) sound — your custom WAVs below still play, so use both to REPLACE the sound."), silenceDonor);        }
 
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Idle growl (occasional, while standing)", EditorStyles.boldLabel);
-        WavVolRow("Idle growl", idleFile, ref idlePath, ref idleVol);
-        idleInterval = EditorGUILayout.Slider(new GUIContent("  avg interval (s)",
-            "Average seconds between idle growls; jittered 0.6–1.4× per unit so a pack doesn't growl in unison. 0 = off."), idleInterval, 0f, 40f);
+        // ── Idle growl ──
+        if (Section(ref foldIdle, "Idle growl (occasional, while standing)"))
+        {
+            WavVolRow("Idle growl", idleFile, ref idlePath, ref idleVol);
+            idleInterval = EditorGUILayout.Slider(new GUIContent("  avg interval (s)",
+                "Average seconds between idle growls; jittered 0.6–1.4× per unit so a pack doesn't growl in unison. 0 = off."), idleInterval, 0f, 40f);
+            idleGroupRadius = EditorGUILayout.Slider(new GUIContent("  one-voice radius",
+                "Within this world-distance, only ONE pawn of a clustered unit growls per interval (so a 5-stack doesn't snarl in unison). 0 = every pawn growls."), idleGroupRadius, 0f, 30f);        }
 
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Attack sound (violent, on each strike)", EditorStyles.boldLabel);
-        WavVolRow("Attack", attackFile, ref attackPath, ref attackVol);
+        // ── Attack sound ──
+        if (Section(ref foldAttack, "Attack sound (violent, on strike)"))
+        {
+            WavVolRow("Attack", attackFile, ref attackPath, ref attackVol);        }
 
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Suppress inherited donor sound", EditorStyles.boldLabel);
-        silenceDonor = EditorGUILayout.ToggleLeft(new GUIContent("Silence the borrowed donor's Wwise sound (idle growl + combat maul)",
-            "For a custom creature that reuses a donor (e.g. the Abomination borrows a BEAR): the donor's idle growl and " +
-            "attack maul/scratch ride in on the reused animator and can't be nulled in data. This drops them at runtime. " +
-            "Only silences the game's (Wwise) sound — your custom WAVs above still play, so use both to REPLACE the sound."), silenceDonor);
+        // ── Movement (start / travel / stop) ──
+        if (Section(ref foldMove, "Movement (start / travel / stop)"))
+        {
+            WavVolRow("Start (spool-up)", startFile, ref startPath, ref startVol);
+            WavVolRow("Travel (loop)", loopFile, ref loopPath, ref loopVol);
+            WavVolRow("Stop (spool-down)", stopFile, ref stopPath, ref stopVol);        }
+
+        // ── Wwise engine event (game's own per-ship sound) ──
+        if (Section(ref foldWwise, "Wwise engine event (game's own sound)"))
+        {
+            engineSound = EditorGUILayout.ToggleLeft(new GUIContent("Use a Wwise engine event (posted on move start/stop)",
+                "The game's own per-ship sound. Get names from F8 ▸ Dump Sound Catalog (enc_sound_catalog.txt)."), engineSound);
+            if (engineSound)
+            {
+                engineStart = EditorGUILayout.TextField(new GUIContent("  Start event", "e.g. Play_UNIT_Vehicles_StealthCorvette_Start"), engineStart);
+                engineStop = EditorGUILayout.TextField(new GUIContent("  Stop event", "e.g. Play_UNIT_Vehicles_StealthCorvette_Stop"), engineStop);
+            }        }
 
         EditorGUILayout.Space();
         using (new EditorGUILayout.HorizontalScope())
@@ -115,6 +122,14 @@ public class SoundWindow : EditorWindow
         EditorGUILayout.EndScrollView();
     }
 
+    // A collapsible section header. Uses Foldout (not BeginFoldoutHeaderGroup) so there's no strict End pairing to balance.
+    static bool Section(ref bool state, string title)
+    {
+        EditorGUILayout.Space(4);
+        state = EditorGUILayout.Foldout(state, title, true, EditorStyles.foldoutHeader);
+        return state;
+    }
+
     void LoadForPawn(string p, List<ModelDef> all)
     {
         pawn = p;
@@ -126,7 +141,7 @@ public class SoundWindow : EditorWindow
             startVol = m.soundStartVolume; loopVol = m.soundVolume; stopVol = m.soundStopVolume;
             engineSound = m.engineSound; engineStart = m.engineStartEvent; engineStop = m.engineStopEvent;
             silenceDonor = m.silenceDonorAudio;
-            idleFile = m.soundIdleFile; idleVol = m.soundIdleVolume; idleInterval = m.soundIdleInterval;
+            idleFile = m.soundIdleFile; idleVol = m.soundIdleVolume; idleInterval = m.soundIdleInterval; idleGroupRadius = m.soundIdleGroupRadius;
             attackFile = m.soundAttackFile; attackVol = m.soundAttackVolume;
         }
         else
@@ -134,7 +149,7 @@ public class SoundWindow : EditorWindow
             resourceName = "Sound_" + Sanitize(p);
             startFile = loopFile = stopFile = ""; startVol = loopVol = stopVol = 1f;
             engineSound = false; engineStart = engineStop = ""; silenceDonor = false;
-            idleFile = ""; idleVol = 1f; idleInterval = 11f;
+            idleFile = ""; idleVol = 1f; idleInterval = 11f; idleGroupRadius = 10f;
             attackFile = ""; attackVol = 1f;
         }
         idlePath = attackPath = "";
@@ -198,7 +213,7 @@ public class SoundWindow : EditorWindow
             if (!CopyWav(idlePath, def.resourceName + "_idle", ref def.soundIdleFile)) return;
             if (!CopyWav(attackPath, def.resourceName + "_attack", ref def.soundAttackFile)) return;
             def.soundStartVolume = startVol; def.soundVolume = loopVol; def.soundStopVolume = stopVol;
-            def.soundIdleVolume = idleVol; def.soundIdleInterval = idleInterval;
+            def.soundIdleVolume = idleVol; def.soundIdleInterval = idleInterval; def.soundIdleGroupRadius = idleGroupRadius;
             def.soundAttackVolume = attackVol;
             def.engineSound = engineSound;
             def.engineStartEvent = engineSound ? (engineStart ?? "").Trim() : "";

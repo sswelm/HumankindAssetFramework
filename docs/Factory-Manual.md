@@ -497,10 +497,15 @@ handle onto the filtered units to confirm audibility.
 engine/hover loop, use the **custom WAV** path (§14). The auto-capture fallback uses the last-seen vehicle Start, so a
 **named** event is preferred; a shipped registry with names Just Works from the first unit, every launch.
 
-## 14. Custom sound files & per-clip volume — the Unit Sound window
+## 14. Custom sound files & per-clip volume — the Sound Studio window
+
+**Tools ▸ HAF ▸ Sound Studio** collects a unit's whole audio profile into one dialog with collapsible sections — **Silence
+inherited donor sound**, **Idle growl** (file, volume, interval, one-voice radius), **Attack sound**, **Movement**
+(start/travel/stop), and **Wwise engine event**. Pick a pawn (or **Edit** one from the "Units with audio" list) and every
+knob round-trips; each WAV row has a ▶ preview. Everything below is one of those sections.
 
 When the game has **no** suitable sound (drones, zeppelins) or you want a bespoke engine, drop in your own audio. **Tools ▸
-ENC ▸ Unit Sound** is a dedicated dialog: pick a pawn, then assign up to three WAVs, each with its own volume —
+HAF ▸ Sound Studio** — the **Movement** section — assigns up to three WAVs, each with its own volume —
 
 - **Start** — a one-shot **spool-up** played on move-begin.
 - **Travel** — **looped** while the unit moves (held off until the Start one-shot finishes, so it isn't masked).
@@ -532,7 +537,7 @@ the idle loop is `PresentationPawnDescription.IdleAudioEvent` posted at spawn, a
 animator's **MecanimEventData** (resolved by animator GUID). Both, however, funnel through the **same** chokepoint —
 `AudioEmitter.PostEvent` on the pawn's Wwise emitter.
 
-Tick **"Silence the borrowed donor's Wwise sound"** in the Unit Sound window (or set `silenceDonorAudio: true` in the
+Tick **"Silence the borrowed donor's Wwise sound"** in the Sound Studio window (or set `silenceDonorAudio: true` in the
 registry). At runtime the plugin registers each of the unit's pawn emitters and **drops every Wwise post on them** (a
 Harmony prefix on `AudioEmitter.PostEvent`), plus a one-time `StopAll` to cut an idle loop already running since spawn. It
 silences **only Wwise** — your own custom WAVs (below) go through Unity's `AudioSource`, so they still play. Confirm it
@@ -541,7 +546,7 @@ any unit stuck with an unwanted inherited sound (e.g. a borrowed-rotor helicopte
 
 ### 14b. Occasional idle growl (`soundIdleFile`)
 
-Pair the silence above with your own **idle vocalisation**: the **Idle growl** row in the Unit Sound window assigns a WAV
+Pair the silence above with your own **idle vocalisation**: the **Idle growl** row in the Sound Studio window assigns a WAV
 played as a **one-shot occasionally while the unit stands still** (not moving). The plugin fires it on a per-pawn timer at
 **`soundIdleInterval`** seconds (default 11), **jittered 0.6–1.4×** so a pack doesn't growl in unison, and **suppressed
 while moving** (the cadence reschedules when it stops). This mirrors how the game's own idle vocalisations play — periodic,
@@ -572,7 +577,7 @@ A **distinct, violent** one-shot for when the unit strikes — separate from the
   ambience). Verified in-game 2026-07-23.
 
 So the full "replace a creature's voice" recipe is: `silenceDonorAudio: true` + a `soundIdleFile` growl (interval + group
-radius to taste) + a `soundAttackFile` roar. All three are set per-unit in the Unit Sound window (§14) and persist in the
+radius to taste) + a `soundAttackFile` roar. All three are set per-unit in the Sound Studio window (§14) and persist in the
 registry. The Abomination ships all three: bear silenced, an occasional bear/croc snarl at idle, a beam-roar on the strike.
 
 ---
