@@ -48,9 +48,15 @@ namespace ENCAccessProof
         public int cba, cbb, cbc, cbd;   // COMBAT-IDLE ClipCollection Amplitude guid (0,0,0,0 = none) — replaces IDLE while the army is locked in a battle
         public int pva, pvb, pvc, pvd;   // PRE-MOVEMENT ClipCollection Amplitude guid (0,0,0,0 = none) — played ONCE when the unit STARTS moving (e.g. a howitzer folding), then the Movement loop
         public int iea, ieb, iec, ied;   // IDLE-OVERRIDE ClipCollection Amplitude guid (0,0,0,0 = none) — a STANCE baked as a ROLE (real deltas vs the full primary clip's reference pose); the stance-as-PRIMARY trap encodes ~identity and renders as REST (the howitzer's "forgot to deploy")
-        public object moveClipColl, afterClipColl, attackClipColl, combatClipColl, preMoveClipColl, idleClipColl;
-        public int moveAnimId = -1, afterAnimId = -1, attackAnimId = -1, combatAnimId = -1, preMoveAnimId = -1, idleAnimId = -1;
-        public float moveDur = 1f, afterDur = 1f, attackDur = 1f, combatDur = 1f, preMoveDur = 1f, idleDur = 1f;
+        public int ala, alb, alc, ald;   // IDLE-ALT ClipCollection Amplitude guid (0,0,0,0 = none) — an OCCASIONAL flavor one-shot while plain-idle (the tiger's howl), played on the jittered idleAltInterval cadence; one pawn per unit type per firing
+        public int a2a, a2b, a2c, a2d;   // IDLE-ALT 2 ClipCollection Amplitude guid (0,0,0,0 = none) — optional second flavor clip (eat/groom); each firing picks randomly between the two
+        public object moveClipColl, afterClipColl, attackClipColl, combatClipColl, preMoveClipColl, idleClipColl, idleAltClipColl, idleAlt2ClipColl;
+        public int moveAnimId = -1, afterAnimId = -1, attackAnimId = -1, combatAnimId = -1, preMoveAnimId = -1, idleAnimId = -1, idleAltAnimId = -1, idleAlt2AnimId = -1;
+        public float moveDur = 1f, afterDur = 1f, attackDur = 1f, combatDur = 1f, preMoveDur = 1f, idleDur = 1f, idleAltDur = 1f, idleAlt2Dur = 1f;
+        public float idleAltInterval = 0f;   // avg SECONDS between idle-alt one-shots (jittered 0.6-1.4x, like the idle growl); <=0 disables even when clips are baked
+        public float idleAltNextAt, idleAltStart = -1f, idleAltChosenDur = 1f;   // session cadence state (per entry = one voice per unit type)
+        public int idleAltChosenId = -1;
+        public UnityEngine.Vector3 idleAltPos;   // which pawn is performing this firing (nearest-match, same 4u radius class)
         public int attackRepeats = 1;    // how many times the ATTACK clip replays per trigger (the fire window = repeats x clip duration; the GPU sampler's Repeat(Time,1) wraps each pass). For short recoil-pop source clips (shootAR2s = 0.17s) that should read as sustained fire. Runtime-only knob — no re-bake.
         // HAND PROP (weapon axis, 2026-07-19): a rigid Prop-Lab mesh glued to a bone of OUR skeleton — the soldier's
         // gun. The donor (an APC) has no weapon slots, so the plugin CONSTRUCTS the FragmentEntry itself at repoint
@@ -420,7 +426,7 @@ namespace ENCAccessProof
                         foreach (var m in models)
                         {
                             var s = m["skel"]; var t = m["atlas"]; var c = m["clip"]; var p = m["position"];
-                            var cmv = m["clipMove"]; var cfa = m["clipAfter"]; var cat = m["clipAttack"]; var ccb = m["clipCombat"]; var cpv = m["clipPreMove"]; var cid = m["clipIdle"];
+                            var cmv = m["clipMove"]; var cfa = m["clipAfter"]; var cat = m["clipAttack"]; var ccb = m["clipCombat"]; var cpv = m["clipPreMove"]; var cid = m["clipIdle"]; var cAlt = m["clipIdleAlt"]; var ca2 = m["clipIdleAlt2"];
                             entries.Add(new ModelEntry
                             {
                                 resourceName = (string)m["resourceName"] ?? "", pawnDescription = (string)m["pawnDescription"] ?? "", hideMeshes = (string)m["hideMeshes"] ?? "",
@@ -434,6 +440,9 @@ namespace ENCAccessProof
                                 cba = A(ccb, 0), cbb = A(ccb, 1), cbc = A(ccb, 2), cbd = A(ccb, 3),
                                 pva = A(cpv, 0), pvb = A(cpv, 1), pvc = A(cpv, 2), pvd = A(cpv, 3),
                                 iea = A(cid, 0), ieb = A(cid, 1), iec = A(cid, 2), ied = A(cid, 3),
+                                ala = A(cAlt, 0), alb = A(cAlt, 1), alc = A(cAlt, 2), ald = A(cAlt, 3),
+                                a2a = A(ca2, 0), a2b = A(ca2, 1), a2c = A(ca2, 2), a2d = A(ca2, 3),
+                                idleAltInterval = m["idleAltInterval"] != null ? (float)m["idleAltInterval"] : 0f,
                                 position = new UnityEngine.Vector3(Fp(p, "x"), Fp(p, "y"), Fp(p, "z")),
                                 scale = m["scale"] != null ? (float)m["scale"] : 1f,
                                 brightness = m["brightness"] != null ? (float)m["brightness"] : 1f,
@@ -502,6 +511,9 @@ namespace ENCAccessProof
                 var ccbR = Regex.Matches(text, "\"clipCombat\"\\s*:\\s*" + i4);  // parity: STATE-DRIVEN combat-idle ClipCollection guid
                 var cpvR = Regex.Matches(text, "\"clipPreMove\"\\s*:\\s*" + i4); // parity: STATE-DRIVEN pre-movement ClipCollection guid
                 var cidR = Regex.Matches(text, "\"clipIdle\"\\s*:\\s*" + i4);   // parity: STATE-DRIVEN idle-override ClipCollection guid
+                var calR = Regex.Matches(text, "\"clipIdleAlt\"\\s*:\\s*" + i4);   // parity: idle-alt flavor one-shot ClipCollection guid
+                var ca2R = Regex.Matches(text, "\"clipIdleAlt2\"\\s*:\\s*" + i4);  // parity: second idle-alt flavor ClipCollection guid
+                var iai = Regex.Matches(text, "\"idleAltInterval\"\\s*:\\s*(-?[\\d.eE+]+)");   // parity: avg seconds between idle-alt one-shots
                 var asd = Regex.Matches(text, "\"animStateDriven\"\\s*:\\s*(true|false)");   // parity: state-driven mode flag
                 // position object {x,y,z} — JsonUtility writes Vector3 in x,y,z order. Applied as a runtime world offset for animated models.
                 var po = Regex.Matches(text, "\"position\"\\s*:\\s*\\{\\s*\"x\"\\s*:\\s*(-?[\\d.eE+]+)\\s*,\\s*\"y\"\\s*:\\s*(-?[\\d.eE+]+)\\s*,\\s*\"z\"\\s*:\\s*(-?[\\d.eE+]+)");
@@ -569,6 +581,9 @@ namespace ENCAccessProof
                         cba = i < ccbR.Count ? G(ccbR[i], 1) : 0, cbb = i < ccbR.Count ? G(ccbR[i], 2) : 0, cbc = i < ccbR.Count ? G(ccbR[i], 3) : 0, cbd = i < ccbR.Count ? G(ccbR[i], 4) : 0,
                         pva = i < cpvR.Count ? G(cpvR[i], 1) : 0, pvb = i < cpvR.Count ? G(cpvR[i], 2) : 0, pvc = i < cpvR.Count ? G(cpvR[i], 3) : 0, pvd = i < cpvR.Count ? G(cpvR[i], 4) : 0,
                         iea = i < cidR.Count ? G(cidR[i], 1) : 0, ieb = i < cidR.Count ? G(cidR[i], 2) : 0, iec = i < cidR.Count ? G(cidR[i], 3) : 0, ied = i < cidR.Count ? G(cidR[i], 4) : 0,
+                        ala = i < calR.Count ? G(calR[i], 1) : 0, alb = i < calR.Count ? G(calR[i], 2) : 0, alc = i < calR.Count ? G(calR[i], 3) : 0, ald = i < calR.Count ? G(calR[i], 4) : 0,
+                        a2a = i < ca2R.Count ? G(ca2R[i], 1) : 0, a2b = i < ca2R.Count ? G(ca2R[i], 2) : 0, a2c = i < ca2R.Count ? G(ca2R[i], 3) : 0, a2d = i < ca2R.Count ? G(ca2R[i], 4) : 0,
+                        idleAltInterval = i < iai.Count && float.TryParse(iai[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _iai) ? _iai : 0f,
                         position = i < po.Count ? new UnityEngine.Vector3(F(po[i], 1), F(po[i], 2), F(po[i], 3)) : UnityEngine.Vector3.zero,
                         respawnAfterLoad = i < ra.Count && ra[i].Groups[1].Value == "true",
                         freezeDonorAnim = i < fz.Count && fz[i].Groups[1].Value == "true",
@@ -654,7 +669,8 @@ namespace ENCAccessProof
                 foreach (var e in list)
                 {
                     e.skeletonId = -1; e.animId = -1; e.descId = -1; e.repointed = false;   // session-scoped ids re-learn
-                    e.moveAnimId = -1; e.afterAnimId = -1; e.attackAnimId = -1; e.combatAnimId = -1; e.preMoveAnimId = -1; e.idleAnimId = -1;   // state-role ids re-resolve
+                    e.moveAnimId = -1; e.afterAnimId = -1; e.attackAnimId = -1; e.combatAnimId = -1; e.preMoveAnimId = -1; e.idleAnimId = -1; e.idleAltAnimId = -1; e.idleAlt2AnimId = -1;   // state-role ids re-resolve
+                    e.idleAltNextAt = 0f; e.idleAltStart = -1f; e.idleAltChosenId = -1;   // idle-alt cadence is session-scoped (Time.time resets)
                     e.stateLastPos.Clear(); e.stateMoving.Clear(); e.stateStoppedAt.Clear(); e.stateMoveStartedAt.Clear();
                     lock (e.stateSamples) e.stateSamples.Clear();
                     lock (e.activeFires) e.activeFires.Clear();                              // session-1 fire windows (positions + Time.time) are meaningless in the new session
@@ -733,6 +749,8 @@ namespace ENCAccessProof
                     if (e.combatClipColl != null) e.combatAnimId = ResolveCollAnimId(animMgr, e.combatClipColl, e.resourceName + ":combat", out e.combatDur);
                     if (e.preMoveClipColl != null) e.preMoveAnimId = ResolveCollAnimId(animMgr, e.preMoveClipColl, e.resourceName + ":premove", out e.preMoveDur);
                     if (e.idleClipColl != null) e.idleAnimId = ResolveCollAnimId(animMgr, e.idleClipColl, e.resourceName + ":idle", out e.idleDur);
+                    if (e.idleAltClipColl != null) e.idleAltAnimId = ResolveCollAnimId(animMgr, e.idleAltClipColl, e.resourceName + ":idlealt", out e.idleAltDur);
+                    if (e.idleAlt2ClipColl != null) e.idleAlt2AnimId = ResolveCollAnimId(animMgr, e.idleAlt2ClipColl, e.resourceName + ":idlealt2", out e.idleAlt2Dur);
                 }
                 registered = true;
                 Plugin.Log.LogInfo($"[Uni] registered {n} skeleton(s) + re-Apply'd; " + string.Join(", ", entries.Select(x => $"{x.resourceName}(skel {x.skeletonId}, anim {x.animId})")));
@@ -1505,6 +1523,8 @@ namespace ENCAccessProof
                         e.combatClipColl = InjectOne(e.combatClipColl, e.cba, e.cbb, e.cbc, e.cbd, e.resourceName + ":combat");
                         e.preMoveClipColl = InjectOne(e.preMoveClipColl, e.pva, e.pvb, e.pvc, e.pvd, e.resourceName + ":premove");
                         e.idleClipColl = InjectOne(e.idleClipColl, e.iea, e.ieb, e.iec, e.ied, e.resourceName + ":idle");
+                        e.idleAltClipColl = InjectOne(e.idleAltClipColl, e.ala, e.alb, e.alc, e.ald, e.resourceName + ":idlealt");
+                        e.idleAlt2ClipColl = InjectOne(e.idleAlt2ClipColl, e.a2a, e.a2b, e.a2c, e.a2d, e.resourceName + ":idlealt2");
                     }
                 }
             }
@@ -1676,7 +1696,7 @@ namespace ENCAccessProof
             // uses only the battle-tested Pose0.)
             if (e.animStateDriven && e.moveAnimId >= 0)
             {
-                StatePose(e, entry, out bool moving, out bool inAfter, out float afterT, out bool inAttack, out float attackT, out bool inCombat, out bool inPreMove, out float preMoveT);
+                StatePose(e, entry, out bool moving, out bool inAfter, out float afterT, out bool inAttack, out float attackT, out bool inCombat, out bool inPreMove, out float preMoveT, out bool inIdleAlt, out float idleAltT, out int idleAltId);
                 if (inAttack)
                 {
                     // ATTACK wins over every other state: the pawn just fired (ranged-fight hook armed a window at
@@ -1709,6 +1729,13 @@ namespace ENCAccessProof
                     float cd = e.combatDur > 0.001f ? e.combatDur : 1f;
                     SetMember(pose0, "AnimationId", (uint)e.combatAnimId);
                     SetMember(pose0, "Time", UnityEngine.Time.time / cd);
+                }
+                else if (inIdleAlt && idleAltId >= 0)
+                {
+                    // IDLE-ALT: the occasional flavor one-shot (howl/eat) — one clamped 0->1 pass at the performer
+                    // pawn, then back to the normal idle. Never fires outside plain idle (StatePose gates it).
+                    SetMember(pose0, "AnimationId", (uint)idleAltId);
+                    SetMember(pose0, "Time", idleAltT);
                 }
                 else if (e.idleAnimId >= 0)
                 {
@@ -1779,9 +1806,9 @@ namespace ENCAccessProof
         // ATTACK (highest priority, independent of the movement samples): the ranged-fight hook (Hk_PawnRangedFight)
         // arms a FireInstance at the shooter's render position; the pawn nearest an unexpired one plays the attack
         // clip once — same position-match approximation the fire/deploy behaviors use.
-        static void StatePose(ModelEntry e, object entry, out bool moving, out bool inAfter, out float afterT, out bool inAttack, out float attackT, out bool inCombat, out bool inPreMove, out float preMoveT)
+        static void StatePose(ModelEntry e, object entry, out bool moving, out bool inAfter, out float afterT, out bool inAttack, out float attackT, out bool inCombat, out bool inPreMove, out float preMoveT, out bool inIdleAlt, out float idleAltT, out int idleAltId)
         {
-            moving = false; inAfter = false; afterT = 0f; inAttack = false; attackT = 0f; inCombat = false; inPreMove = false; preMoveT = 0f;
+            moving = false; inAfter = false; afterT = 0f; inAttack = false; attackT = 0f; inCombat = false; inPreMove = false; preMoveT = 0f; inIdleAlt = false; idleAltT = 0f; idleAltId = -1;
             var os = GetMember(entry, "ObjectSpace");
             if (os == null) return;
             UnityEngine.Vector3 pos;
@@ -1842,9 +1869,38 @@ namespace ENCAccessProof
                 if (dtp >= 0f && dtp < pd) { inPreMove = true; preMoveT = UnityEngine.Mathf.Min(dtp / pd, 0.999f); }
             }
             bool combatIdle = inCombat && e.combatAnimId >= 0 && !moving && !inAfter && !inAttack;
-            int chosen = inAttack ? e.attackAnimId : inPreMove ? e.preMoveAnimId : moving ? e.moveAnimId : inAfter ? e.afterAnimId : combatIdle ? e.combatAnimId : e.animId;
+            // IDLE-ALT (2026-07-23, the tiger's howl): an OCCASIONAL flavor one-shot while PLAIN idle — never during
+            // move/attack/after/combat. One cadence per ENTRY (unit type): the pawn evaluated at due time becomes the
+            // performer (its position is pinned; packmates keep idling — the animation twin of the growl's one-voice
+            // radius). With BOTH alt clips baked, each firing picks randomly (howl now, eat later). Cadence = the
+            // registry idleAltInterval, jittered 0.6-1.4x like the growl so it never reads as a metronome.
+            if (!moving && !inAfter && !inAttack && !combatIdle && e.idleAltInterval > 0.01f && (e.idleAltAnimId >= 0 || e.idleAlt2AnimId >= 0))
+            {
+                float nowA = UnityEngine.Time.time;
+                if (e.idleAltStart >= 0f)   // a firing is running — is THIS pawn the performer, and is it still inside the window?
+                {
+                    float dtA = nowA - e.idleAltStart;
+                    if (dtA >= e.idleAltChosenDur) e.idleAltStart = -1f;
+                    else if ((e.idleAltPos - pos).sqrMagnitude < 4f * 4f)
+                    { inIdleAlt = true; idleAltT = UnityEngine.Mathf.Min(dtA / e.idleAltChosenDur, 0.999f); idleAltId = e.idleAltChosenId; }
+                }
+                else if (e.idleAltNextAt <= 0f)
+                    e.idleAltNextAt = nowA + e.idleAltInterval * UnityEngine.Random.Range(0.6f, 1.4f);
+                else if (nowA >= e.idleAltNextAt)
+                {
+                    bool both = e.idleAltAnimId >= 0 && e.idleAlt2AnimId >= 0;
+                    bool second = e.idleAltAnimId < 0 || (both && UnityEngine.Random.value < 0.5f);
+                    e.idleAltChosenId = second ? e.idleAlt2AnimId : e.idleAltAnimId;
+                    float d = second ? e.idleAlt2Dur : e.idleAltDur;
+                    e.idleAltChosenDur = d > 0.001f ? d : 1f;
+                    e.idleAltStart = nowA; e.idleAltPos = pos;
+                    e.idleAltNextAt = nowA + e.idleAltInterval * UnityEngine.Random.Range(0.6f, 1.4f);
+                    inIdleAlt = true; idleAltT = 0f; idleAltId = e.idleAltChosenId;
+                }
+            }
+            int chosen = inAttack ? e.attackAnimId : inPreMove ? e.preMoveAnimId : moving ? e.moveAnimId : inAfter ? e.afterAnimId : combatIdle ? e.combatAnimId : inIdleAlt ? idleAltId : e.animId;
             if (chosen != e.lastStateAnim)   // diagnostic: which state the pose weights select (transitions only)
-            { e.lastStateAnim = chosen; Plugin.Log.LogInfo($"[State] pose '{e.resourceName}': matched, moving={moving} -> {(inAttack ? "ATTACK" : inPreMove ? "PRE-MOVE" : moving ? "MOVE" : inAfter ? "AFTER" : combatIdle ? "COMBAT-IDLE" : "IDLE")} (weights)"); }
+            { e.lastStateAnim = chosen; Plugin.Log.LogInfo($"[State] pose '{e.resourceName}': matched, moving={moving} -> {(inAttack ? "ATTACK" : inPreMove ? "PRE-MOVE" : moving ? "MOVE" : inAfter ? "AFTER" : combatIdle ? "COMBAT-IDLE" : inIdleAlt ? "IDLE-ALT" : "IDLE")} (weights)"); }
         }
 
         // DEPLOY-ON-STOP (gradual): hold the pose time Plugin.Update ramped for THIS pawn's unit — the deploy clip plays

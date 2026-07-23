@@ -681,6 +681,13 @@ one clip per role folder, and the game loads the resulting ClipCollections by GU
   (`deploy[179..0/12]` folds in ~0.6 s; pacing is BAKED, the runtime has no speed knobs). Always lands exactly on
   the end frame. See the artillery worked recipe in [Animated-Models.md](Animated-Models.md) and the traps in
   [Animation-Pitfalls.md](Animation-Pitfalls.md).
+- **Idle-alt (occasional flavor one-shots, 2026-07-23)** — up to TWO extra clips (`animClipIdleAlt`/`animClipIdleAlt2` →
+  `clipIdleAlt`/`clipIdleAlt2`) played **occasionally while plain-idle**: every ~`idleAltInterval` seconds (jittered
+  0.6–1.4×, the idle-growl cadence) ONE pawn of the unit performs one clamped pass — the tiger stands, then *howls*,
+  then stands again; with both clips set each firing **picks randomly** (howl now, eat later), so the unit never
+  metronomes. Never fires during move/attack/after/combat. The interval is **runtime-only** (Save + rebuild retunes it;
+  0 disables without unbaking); the clips themselves bake as roles like any other. Pairs naturally with the idle-growl
+  *sound* for a full ambient presence.
 - **Idle stance (override)** *(2026-07-19)* — a held STANCE played while standing instead of the reference clip
   (e.g. `deploy[179..180]`). **Required for stance idles**: the primary Clip defines the skeleton's reference
   pose, so a stance baked as the primary encodes ~identity and renders as the TRAVEL pose in-game (Pitfalls

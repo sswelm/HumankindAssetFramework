@@ -537,6 +537,18 @@ public class AnimationLabWindow : EditorWindow
                 "as the reference clip itself encodes as its own rest and renders as the TRAVEL pose in-game (the " +
                 "\"forgot to deploy\" trap). Empty = idle plays the reference clip (characters with a real idle loop).",
                 () => cur.animClipIdle ?? "", v => cur.animClipIdle = v);
+            ClipRow("Idle-alt clip (occasional)", "Optional. An OCCASIONAL flavor one-shot while plain-idle — the tiger's howl. " +
+                "Plays once every ~'Idle-alt interval' seconds (jittered), one pawn of the unit per firing, then back to Idle. " +
+                "Never during move/attack/combat. Empty = none.",
+                () => cur.animClipIdleAlt ?? "", v => cur.animClipIdleAlt = v);
+            ClipRow("Idle-alt clip 2 (mixed in)", "Optional. A SECOND flavor one-shot (eat/groom) — each firing picks randomly " +
+                "between the two idle-alts, so the unit doesn't repeat the same trick. Empty = only the first plays.",
+                () => cur.animClipIdleAlt2 ?? "", v => cur.animClipIdleAlt2 = v);
+            if (!string.IsNullOrWhiteSpace(cur.animClipIdleAlt) || !string.IsNullOrWhiteSpace(cur.animClipIdleAlt2))
+                cur.idleAltInterval = EditorGUILayout.Slider(new GUIContent("Idle-alt interval (s)",
+                    "Average seconds between idle-alt one-shots, jittered 0.6-1.4x (like the idle growl's cadence). " +
+                    "RUNTIME-ONLY: Save (no bake) + rebuild is enough to retune. 0 disables without unbaking the clips."),
+                    cur.idleAltInterval, 0f, 120f);
             ClipRow("Movement clip", "REQUIRED. Plays in a loop while the unit moves (e.g. a run cycle like 'a_RunN'). " +
                 "Slices support a SPEED step: 'deploy[0..179/3]' = every 3rd frame = 3× faster (pacing is baked, never a runtime knob).",
                 () => cur.animClipMove ?? "", v => cur.animClipMove = v);
@@ -757,7 +769,7 @@ public class AnimationLabWindow : EditorWindow
         cur.deployConvert = mine.deployConvert; cur.deployStart = mine.deployStart; cur.deployEnd = mine.deployEnd;
         cur.deployStrip = mine.deployStrip; cur.deployReadyFrame = mine.deployReadyFrame; cur.deployLegScale = mine.deployLegScale; cur.deployBarrelScale = mine.deployBarrelScale;
         cur.deployRecoil = mine.deployRecoil; cur.deployRecoilStep = mine.deployRecoilStep; cur.deployRecoilMag = mine.deployRecoilMag; cur.deployArcR = mine.deployArcR; cur.deployRecoilReturn = mine.deployRecoilReturn; cur.deploySlamDeg = mine.deploySlamDeg; cur.deploySlamSettle = mine.deploySlamSettle;
-        cur.animStateDriven = mine.animStateDriven; cur.animClipMove = mine.animClipMove; cur.animClipAfter = mine.animClipAfter; cur.animClipAttack = mine.animClipAttack; cur.animClipCombat = mine.animClipCombat; cur.animClipPreMove = mine.animClipPreMove; cur.animClipIdle = mine.animClipIdle; cur.attackRepeats = mine.attackRepeats; cur.clearAimLayer = mine.clearAimLayer;
+        cur.animStateDriven = mine.animStateDriven; cur.animClipMove = mine.animClipMove; cur.animClipAfter = mine.animClipAfter; cur.animClipAttack = mine.animClipAttack; cur.animClipCombat = mine.animClipCombat; cur.animClipPreMove = mine.animClipPreMove; cur.animClipIdle = mine.animClipIdle; cur.animClipIdleAlt = mine.animClipIdleAlt; cur.animClipIdleAlt2 = mine.animClipIdleAlt2; cur.idleAltInterval = mine.idleAltInterval; cur.attackRepeats = mine.attackRepeats; cur.clearAimLayer = mine.clearAimLayer;
         cur.handPropName = mine.handPropName; cur.handPropGuid = mine.handPropGuid; cur.handPropMat = mine.handPropMat; cur.handPropBone = mine.handPropBone;
         cur.handPropAngles = mine.handPropAngles;   // Lab-owned again since the LIVE fit knob edits it ('Save rotation to game')
         cur.fireOnAttack = mine.fireOnAttack; cur.deployOnStop = mine.deployOnStop;
@@ -800,6 +812,8 @@ public class AnimationLabWindow : EditorWindow
         cur.animClipCombat = (cur.animClipCombat ?? "").Trim();
         cur.animClipPreMove = (cur.animClipPreMove ?? "").Trim();
         cur.animClipIdle = (cur.animClipIdle ?? "").Trim();
+        cur.animClipIdleAlt = (cur.animClipIdleAlt ?? "").Trim();
+        cur.animClipIdleAlt2 = (cur.animClipIdleAlt2 ?? "").Trim();
         var cfg = ModelFactoryWindow.ConfigFor(cur);
         // Geometry caching is AUTOMATIC (mirror of the Factory's DoBake): re-slim exactly when a Blender-step input
         // changed; the 'Reuse extracted' checkbox only protects the hand-edited extracted texture (cfg.keepTexture).
@@ -816,6 +830,8 @@ public class AnimationLabWindow : EditorWindow
         cur.clipCombat = cur.animStateDriven && !string.IsNullOrEmpty(r.clipCombatGuid) ? ModelRegistry.ParseGuid(r.clipCombatGuid) : new int[4];
         cur.clipPreMove = cur.animStateDriven && !string.IsNullOrEmpty(r.clipPreMoveGuid) ? ModelRegistry.ParseGuid(r.clipPreMoveGuid) : new int[4];
         cur.clipIdle = cur.animStateDriven && !string.IsNullOrEmpty(r.clipIdleGuid) ? ModelRegistry.ParseGuid(r.clipIdleGuid) : new int[4];
+        cur.clipIdleAlt = cur.animStateDriven && !string.IsNullOrEmpty(r.clipIdleAltGuid) ? ModelRegistry.ParseGuid(r.clipIdleAltGuid) : new int[4];
+        cur.clipIdleAlt2 = cur.animStateDriven && !string.IsNullOrEmpty(r.clipIdleAlt2Guid) ? ModelRegistry.ParseGuid(r.clipIdleAlt2Guid) : new int[4];
         bool saved = ModelRegistry.Upsert(cur);
         if (saved) formDiffersFromRegistry = false;   // form is now the saved truth
         RefreshList();

@@ -51,13 +51,15 @@ public struct BakeConfig
     public string  animClipCombat;  // STATE-DRIVEN only: the optional COMBAT-IDLE stance clip name ("" = none) — replaces Idle while the army is in a battle
     public string  animClipPreMove; // STATE-DRIVEN only: the optional PRE-MOVEMENT one-shot clip name ("" = none) — played once when the unit starts moving
     public string  animClipIdle;    // STATE-DRIVEN only: the optional IDLE-OVERRIDE clip ("" = idle plays animClip). For stance idles — the primary stays the FULL reference clip; see ModelRegistry.animClipIdle.
+    public string  animClipIdleAlt; // STATE-DRIVEN only: optional IDLE-ALT flavor one-shot (the tiger's howl) — played occasionally while plain-idle on the idleAltInterval cadence ("" = none).
+    public string  animClipIdleAlt2;// STATE-DRIVEN only: optional SECOND idle-alt flavor clip (eat/groom); each firing picks randomly between the two ("" = none).
     public bool    keepTexture;     // ANIMATED only: when the Blender step re-runs, DON'T regenerate the extracted albedo (protects hand-edited textures). This is the 'Reuse extracted files' checkbox's ONLY effect on the animated path — geometry caching is automatic (the windows re-slim exactly when a Blender-step setting changed).
 }
 
 public struct BakeResult
 {
     public bool ok; public string error; public string skeletonGuid, atlasGuid, clipGuid; public Vector3 bbox;
-    public string clipMoveGuid, clipAfterGuid, clipAttackGuid, clipCombatGuid, clipPreMoveGuid, clipIdleGuid;   // STATE-DRIVEN only: the per-role ClipCollection GUIDs ("" when not baked)
+    public string clipMoveGuid, clipAfterGuid, clipAttackGuid, clipCombatGuid, clipPreMoveGuid, clipIdleGuid, clipIdleAltGuid, clipIdleAlt2Guid;   // STATE-DRIVEN only: the per-role ClipCollection GUIDs ("" when not baked)
 }
 
 public static class UniversalBaker
@@ -103,7 +105,9 @@ public static class UniversalBaker
                                                 "_ClipsMove.asset", "_ClipsMovePoseData.bytes", "_ClipsAfter.asset", "_ClipsAfterPoseData.bytes",
                                                 "_ClipsAttack.asset", "_ClipsAttackPoseData.bytes",
                                                 "_ClipsCombat.asset", "_ClipsCombatPoseData.bytes",
-                                                "_ClipsPreMove.asset", "_ClipsPreMovePoseData.bytes" };   // state-driven role collections
+                                                "_ClipsPreMove.asset", "_ClipsPreMovePoseData.bytes",
+                                                "_ClipsIdleAlt.asset", "_ClipsIdleAltPoseData.bytes",
+                                                "_ClipsIdleAlt2.asset", "_ClipsIdleAlt2PoseData.bytes" };   // state-driven role collections
 
     // CROSS-PATH SWEEP: each bake path deletes-then-recreates only its OWN assets, so re-baking a model on the OTHER
     // path (animated <-> static) used to orphan the previous path's outputs in shipped Resources — Unity force-ships
@@ -294,17 +298,23 @@ public static class UniversalBaker
         string combatFbxRel = resDir + "/anim_combat/" + name + "_anim.fbx";
         string preMoveFbxRel = resDir + "/anim_premove/" + name + "_anim.fbx";
         string idleFbxRel = resDir + "/anim_idle/" + name + "_anim.fbx";
+        string idleAltFbxRel = resDir + "/anim_idlealt/" + name + "_anim.fbx";
+        string idleAlt2FbxRel = resDir + "/anim_idlealt2/" + name + "_anim.fbx";
         bool wantAfter = cfg.animStateDriven && !string.IsNullOrWhiteSpace(cfg.animClipAfter);
         bool wantAttack = cfg.animStateDriven && !string.IsNullOrWhiteSpace(cfg.animClipAttack);
         bool wantCombat = cfg.animStateDriven && !string.IsNullOrWhiteSpace(cfg.animClipCombat);
         bool wantPreMove = cfg.animStateDriven && !string.IsNullOrWhiteSpace(cfg.animClipPreMove);
         bool wantIdle = cfg.animStateDriven && !string.IsNullOrWhiteSpace(cfg.animClipIdle);
+        bool wantIdleAlt = cfg.animStateDriven && !string.IsNullOrWhiteSpace(cfg.animClipIdleAlt);
+        bool wantIdleAlt2 = cfg.animStateDriven && !string.IsNullOrWhiteSpace(cfg.animClipIdleAlt2);
         bool roleFbxMissing = cfg.animStateDriven &&
             (!File.Exists(Path.Combine(projRoot, moveFbxRel)) || (wantAfter && !File.Exists(Path.Combine(projRoot, afterFbxRel)))
                                                               || (wantAttack && !File.Exists(Path.Combine(projRoot, attackFbxRel)))
                                                               || (wantCombat && !File.Exists(Path.Combine(projRoot, combatFbxRel)))
                                                               || (wantPreMove && !File.Exists(Path.Combine(projRoot, preMoveFbxRel)))
-                                                              || (wantIdle && !File.Exists(Path.Combine(projRoot, idleFbxRel))));
+                                                              || (wantIdle && !File.Exists(Path.Combine(projRoot, idleFbxRel)))
+                                                              || (wantIdleAlt && !File.Exists(Path.Combine(projRoot, idleAltFbxRel)))
+                                                              || (wantIdleAlt2 && !File.Exists(Path.Combine(projRoot, idleAlt2FbxRel))));
         // TOOL-VERSION CACHE-BUSTER (2026-07-19): a cached slim FBX older than rig_anim.py itself is stale — a
         // pipeline fix would otherwise be silently skipped by the reuse path and re-wrap the old (possibly broken)
         // FBX (exactly how the frozen-runner fix got bypassed on its first bake).
@@ -340,6 +350,8 @@ public static class UniversalBaker
                 if (wantCombat) stateRoles += ";combat=" + cfg.animClipCombat.Trim();
                 if (wantPreMove) stateRoles += ";premove=" + cfg.animClipPreMove.Trim();
                 if (wantIdle) stateRoles += ";idle=" + cfg.animClipIdle.Trim();
+                if (wantIdleAlt) stateRoles += ";idlealt=" + cfg.animClipIdleAlt.Trim();
+                if (wantIdleAlt2) stateRoles += ";idlealt2=" + cfg.animClipIdleAlt2.Trim();
             }
             if (!RigAnimViaBlender(cfg.modelFile, fbxFull, target, cfg.animateBones ?? "", cfg.animClip ?? "", albedoOut, keepMats, cfg.rotationEuler, cfg.convertRig, stateRoles))
                 return Fail("Blender animated slim failed (see console). Is the model rigged with the named animation clip(s)?");
@@ -375,6 +387,16 @@ public static class UniversalBaker
             {
                 if (!File.Exists(Path.Combine(projRoot, idleFbxRel))) return Fail("state-driven: the Blender step produced no Idle-override FBX (" + idleFbxRel + ") — check the Idle clip name.");
                 AssetDatabase.ImportAsset(idleFbxRel, ImportAssetOptions.ForceUpdate);
+            }
+            if (wantIdleAlt)
+            {
+                if (!File.Exists(Path.Combine(projRoot, idleAltFbxRel))) return Fail("state-driven: the Blender step produced no Idle-alt FBX (" + idleAltFbxRel + ") — check the Idle-alt clip name.");
+                AssetDatabase.ImportAsset(idleAltFbxRel, ImportAssetOptions.ForceUpdate);
+            }
+            if (wantIdleAlt2)
+            {
+                if (!File.Exists(Path.Combine(projRoot, idleAlt2FbxRel))) return Fail("state-driven: the Blender step produced no Idle-alt-2 FBX (" + idleAlt2FbxRel + ") — check the Idle-alt 2 clip name.");
+                AssetDatabase.ImportAsset(idleAlt2FbxRel, ImportAssetOptions.ForceUpdate);
             }
         }
 
@@ -451,6 +473,8 @@ public static class UniversalBaker
             if (wantCombat) roleRels.Add(combatFbxRel);
             if (wantPreMove) roleRels.Add(preMoveFbxRel);
             if (wantIdle) roleRels.Add(idleFbxRel);
+            if (wantIdleAlt) roleRels.Add(idleAltFbxRel);
+            if (wantIdleAlt2) roleRels.Add(idleAlt2FbxRel);
             foreach (var roleRel in roleRels)
             {
                 var rimp = AssetImporter.GetAtPath(roleRel) as ModelImporter;
@@ -530,7 +554,7 @@ public static class UniversalBaker
         }
         string cerr = BakeClipCollection(animDir, "_Clips", out var clipColl);
         if (cerr != null) return Fail(cerr);
-        UnityEngine.Object clipMoveColl = null, clipAfterColl = null, clipAttackColl = null, clipCombatColl = null, clipPreMoveColl = null, clipIdleColl = null;
+        UnityEngine.Object clipMoveColl = null, clipAfterColl = null, clipAttackColl = null, clipCombatColl = null, clipPreMoveColl = null, clipIdleColl = null, clipIdleAltColl = null, clipIdleAlt2Coll = null;
         if (cfg.animStateDriven)
         {
             cerr = BakeClipCollection(resDir + "/anim_move", "_ClipsMove", out clipMoveColl);
@@ -560,6 +584,16 @@ public static class UniversalBaker
                 cerr = BakeClipCollection(resDir + "/anim_idle", "_ClipsIdle", out clipIdleColl);
                 if (cerr != null) return Fail("Idle-override clip collection: " + cerr);
             }
+            if (wantIdleAlt)
+            {
+                cerr = BakeClipCollection(resDir + "/anim_idlealt", "_ClipsIdleAlt", out clipIdleAltColl);
+                if (cerr != null) return Fail("Idle-alt clip collection: " + cerr);
+            }
+            if (wantIdleAlt2)
+            {
+                cerr = BakeClipCollection(resDir + "/anim_idlealt2", "_ClipsIdleAlt2", out clipIdleAlt2Coll);
+                if (cerr != null) return Fail("Idle-alt-2 clip collection: " + cerr);
+            }
         }
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
 
@@ -574,7 +608,7 @@ public static class UniversalBaker
         // an empty GUID means the SDK skeleton/clip bake produced nothing — fail loudly rather than write a dead registry entry.
         if (string.IsNullOrEmpty(skelGuid) || skelGuid == "0,0,0,0") return Fail($"{name}: skeleton bake produced an empty GUID (SetPrefab/Reimport did nothing).");
         if (string.IsNullOrEmpty(clipGuid) || clipGuid == "0,0,0,0") return Fail($"{name}: ClipCollection GUID is empty — the model has no bakeable clip (check the Clip name / that it's actually animated).");
-        string clipMoveGuid = "", clipAfterGuid = "", clipAttackGuid = "", clipCombatGuid = "", clipPreMoveGuid = "", clipIdleGuid = "";
+        string clipMoveGuid = "", clipAfterGuid = "", clipAttackGuid = "", clipCombatGuid = "", clipPreMoveGuid = "", clipIdleGuid = "", clipIdleAltGuid = "", clipIdleAlt2Guid = "";
         if (cfg.animStateDriven)
         {
             clipMoveGuid = AmplitudeGuid(clipMoveColl);
@@ -604,11 +638,21 @@ public static class UniversalBaker
                 clipIdleGuid = AmplitudeGuid(clipIdleColl);
                 if (string.IsNullOrEmpty(clipIdleGuid) || clipIdleGuid == "0,0,0,0") return Fail($"{name}: IDLE-OVERRIDE ClipCollection GUID is empty — check the Idle clip name.");
             }
+            if (wantIdleAlt)
+            {
+                clipIdleAltGuid = AmplitudeGuid(clipIdleAltColl);
+                if (string.IsNullOrEmpty(clipIdleAltGuid) || clipIdleAltGuid == "0,0,0,0") return Fail($"{name}: IDLE-ALT ClipCollection GUID is empty — check the Idle-alt clip name.");
+            }
+            if (wantIdleAlt2)
+            {
+                clipIdleAlt2Guid = AmplitudeGuid(clipIdleAlt2Coll);
+                if (string.IsNullOrEmpty(clipIdleAlt2Guid) || clipIdleAlt2Guid == "0,0,0,0") return Fail($"{name}: IDLE-ALT-2 ClipCollection GUID is empty — check the Idle-alt 2 clip name.");
+            }
         }
         Debug.Log($"[Factory] {name} ANIMATED DONE. skeleton={skelGuid} clip={clipGuid} atlas={atlasGuid}" +
-                  (cfg.animStateDriven ? $" [state-driven: move={clipMoveGuid}{(wantAfter ? " after=" + clipAfterGuid : "")}{(wantAttack ? " attack=" + clipAttackGuid : "")}{(wantCombat ? " combat=" + clipCombatGuid : "")}{(wantPreMove ? " premove=" + clipPreMoveGuid : "")}{(wantIdle ? " idle=" + clipIdleGuid : "")}]" : ""));
+                  (cfg.animStateDriven ? $" [state-driven: move={clipMoveGuid}{(wantAfter ? " after=" + clipAfterGuid : "")}{(wantAttack ? " attack=" + clipAttackGuid : "")}{(wantCombat ? " combat=" + clipCombatGuid : "")}{(wantPreMove ? " premove=" + clipPreMoveGuid : "")}{(wantIdle ? " idle=" + clipIdleGuid : "")}{(wantIdleAlt ? " idlealt=" + clipIdleAltGuid : "")}{(wantIdleAlt2 ? " idlealt2=" + clipIdleAlt2Guid : "")}]" : ""));
         return new BakeResult { ok = true, skeletonGuid = skelGuid, atlasGuid = atlasGuid, clipGuid = clipGuid, bbox = Vector3.zero,
-                                clipMoveGuid = clipMoveGuid, clipAfterGuid = clipAfterGuid, clipAttackGuid = clipAttackGuid, clipCombatGuid = clipCombatGuid, clipPreMoveGuid = clipPreMoveGuid, clipIdleGuid = clipIdleGuid };
+                                clipMoveGuid = clipMoveGuid, clipAfterGuid = clipAfterGuid, clipAttackGuid = clipAttackGuid, clipCombatGuid = clipCombatGuid, clipPreMoveGuid = clipPreMoveGuid, clipIdleGuid = clipIdleGuid, clipIdleAltGuid = clipIdleAltGuid, clipIdleAlt2Guid = clipIdleAlt2Guid };
     }
 
     // Longest axis of the FBX's combined mesh bounds (native scale), so we can compute the Scale Factor that hits `size`.
