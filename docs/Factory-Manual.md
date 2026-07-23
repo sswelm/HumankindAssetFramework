@@ -500,7 +500,8 @@ engine/hover loop, use the **custom WAV** path (§14). The auto-capture fallback
 ## 14. Custom sound files & per-clip volume — the Sound Studio window
 
 **Tools ▸ HAF ▸ Sound Studio** collects a unit's whole audio profile into one dialog with collapsible sections — **Silence
-inherited donor sound**, **Idle growl** (file, volume, interval, one-voice radius), **Attack sound**, **Movement**
+inherited donor sound**, **Idle growl** (file, volume, interval, one-voice radius), **Attack sound** (file, volume,
+start offset), **Movement**
 (start/travel/stop), and **Wwise engine event**. Pick a pawn (or **Edit** one from the "Units with audio" list) and every
 knob round-trips; each WAV row has a ▶ preview. Everything below is one of those sections.
 
@@ -564,7 +565,7 @@ periodic snarl.
 ### 14c. Attack sound (`soundAttackFile`)
 
 A **distinct, violent** one-shot for when the unit strikes — separate from the idle growl. `soundAttackFile` /
-`soundAttackVolume` (a WAV in `enc_sounds/`). Two things make it land right:
+`soundAttackVolume` / `soundAttackOffset` (a WAV in `enc_sounds/`). Three things make it land right:
 
 - **Timing — fired at attack *commit*, not mid-swing.** The trigger is `UnitActionFaceEnemy.StartUnitAction` — the moment
   the attacker turns to face its target, *before* the strike choreography. (Earlier attempts fired per-swing, which landed
@@ -575,6 +576,10 @@ A **distinct, violent** one-shot for when the unit strikes — separate from the
   to silence at battle-camera distance — the log showed it firing but you couldn't hear it. The attack cue instead plays at
   `spatialBlend 0.35` with a 60-unit minDistance, so it reads loud and clear at any zoom (it's a dramatic focal moment, not
   ambience). Verified in-game 2026-07-23.
+- **Start offset (2026-07-23) — skip the WAV's lead-in.** Found sounds often open with silence or a slow windup, which
+  delays the impact past the swing. **`soundAttackOffset`** (the **start offset (s)** slider in the window, attack sound
+  only) starts playback that many seconds *into* the WAV — clamped inside the clip; the per-attacker min-gap keys off what
+  actually plays. The window's **▶ preview honors the offset**, so trim it by ear before ever launching the game.
 
 So the full "replace a creature's voice" recipe is: `silenceDonorAudio: true` + a `soundIdleFile` growl (interval + group
 radius to taste) + a `soundAttackFile` roar. All three are set per-unit in the Sound Studio window (§14) and persist in the

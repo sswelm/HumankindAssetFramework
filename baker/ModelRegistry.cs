@@ -111,6 +111,7 @@ public class ModelDef
     public float soundIdleGroupRadius = 10f; // RUNTIME (not baked): GROUP de-dup radius. A unit is many pawns; without this every pawn of a formation growls at once (a "cut-up" wall). Growls within this radius of another recent growl are suppressed, so a clustered unit snarls with ONE voice per interval. <=0 = per-pawn (no de-dup).
     public string soundAttackFile = "";  // RUNTIME (not baked): CUSTOM one-shot played ON ATTACK (each swing/shot) — a WAV in enc_sounds/. A DISTINCT, more VIOLENT sound than the idle growl; the plugin fires it from the attack hook with a per-pawn min-gap so rapid multi-swing fights don't machine-gun it.
     public float soundAttackVolume = 1f; // RUNTIME (not baked): attack one-shot volume (0..2).
+    public float soundAttackOffset = 0f; // RUNTIME (not baked): seconds INTO the attack WAV where playback starts — skip a silent/windup lead-in so the impact lands on the swing. 0 = from the top.
 }
 
 // An explicit override of another pack's asset: "this pack intentionally replaces <modId>'s skin on <pawnDescription>."

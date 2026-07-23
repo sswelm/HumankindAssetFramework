@@ -125,7 +125,13 @@ runtime-hot-loaded skin or tint ([Capabilities.md](docs/Capabilities.md)) — al
   engine sound rides an audio-service path our re-loaded units never fire). The plugin restores it — playing the game's own
   sound **by name** (works from the *first* unit, no capture; F8 **Dump Sound Catalog** lists all ~845 event names) — or
   **any custom WAV you drop in**, as a **Start (spool-up) → Travel (loop) → Stop (spool-down)** sequence with per-clip
-  volume, driven by a dedicated **Unit Sound** editor window (with in-editor ▶ preview). Runtime-only, no bake.
+  volume, driven by the dedicated **Sound Studio** editor window (with in-editor ▶ preview). Runtime-only, no bake.
+- **Creature voices — silence the donor, add your own growl and attack roar.** A borrowed animal donor drags its Wwise
+  voice along (the Abomination's bear donor growled and mauled through every re-skin); `silenceDonorAudio` drops it at
+  runtime. In its place: an **Idle growl** WAV on a jittered interval with a **one-voice radius** (a 5-stack snarls one
+  pawn at a time, not in unison), and an **Attack sound** fired at attack *commit* — camera-anchored so it stays audible
+  at battle zoom, with a **start offset** that skips a WAV's silent windup so the impact lands on the swing. All in the
+  Sound Studio window, every knob ▶ previewable (the preview honors offset and volume). Verified in-game 2026-07-23.
 - **Retexture / recolour without a bake.** A separate **Unit Retexture** window reskins an existing unit at runtime —
   a hot-loaded PNG or a live Desaturate + RGB adjust on its own atlas — isolated per unit, free on the vertex budget.
   Works on **baked custom models** too (the PNG replaces the baked atlas — recolour without a re-bake), with a live
