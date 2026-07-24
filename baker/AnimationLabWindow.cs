@@ -183,12 +183,20 @@ public class AnimationLabWindow : EditorWindow
             fitPRU.lights[0].transform.rotation = Quaternion.Euler(45f, 45f, 0f);
             if (fitPRU.lights.Length > 1) fitPRU.lights[1].intensity = 0.6f;
             fitPRU.ambientColor = new Color(0.3f, 0.3f, 0.3f);
+            bool anyDead = false;
             foreach (var (mesh, mats, mtx) in fitDraws)
+            {
+                // A cached mesh can be DESTROYED under us (the slim FBX deleted/reimported outside the window —
+                // e.g. a forced cache clear); Unity fake-null catches it. Drop the stale cache instead of spamming
+                // MissingReferenceException on every repaint; the next Refresh/Bake rebuilds it.
+                if (mesh == null) { anyDead = true; continue; }
                 for (int s = 0; s < mesh.subMeshCount; s++)
                 {
                     var mat = mats != null && mats.Length > 0 ? (mats[Mathf.Min(s, mats.Length - 1)] ?? fitFallbackMat) : fitFallbackMat;
                     fitPRU.DrawMesh(mesh, mtx, mat, s);
                 }
+            }
+            if (anyDead) fitDraws.Clear();
             cam.Render();
         }
         finally { fitTex = fitPRU.EndPreview(); }
@@ -647,6 +655,14 @@ public class AnimationLabWindow : EditorWindow
                 "head (dial the barrel tip). Socketed models bake with the 'A###_' bone prefix (alphabetical topology). " +
                 "Needs a re-BAKE; makes the runtime Muzzle-bone redirect unnecessary for this model."),
                 cur.socketBones ?? "");
+            // Muzzle offset — the runtime world-space dial that finished the ArmouredCar: iterate value -> relaunch,
+            // no bake, no mod rebuild (the plugin reads the pack registry directly at launch).
+            cur.muzzleOffset = EditorGUILayout.TextField(new GUIContent("Muzzle offset (x,y,z)",
+                "RUNTIME dial: world-units added to the pinned fire origin (muzzle flash + tracer start). The fix when a " +
+                "rig's gun-bone head sits somewhere unhelpful (the Ehrhardt's is at the model base -> '0,2.6,0' lifted the " +
+                "flash onto the turret gun). Judge from the [Muzzle] pin log's T= height vs pawnWorld. Empty = none. " +
+                "Save (no bake) + relaunch per iteration — no re-bake, no mod rebuild."),
+                cur.muzzleOffset ?? "");
         }
 
         // --- Hand prop (runtime-only: Save (no bake) + rebuild the mod) ---
@@ -853,7 +869,7 @@ public class AnimationLabWindow : EditorWindow
         cur.deployConvert = mine.deployConvert; cur.deployStart = mine.deployStart; cur.deployEnd = mine.deployEnd;
         cur.deployStrip = mine.deployStrip; cur.deployReadyFrame = mine.deployReadyFrame; cur.deployLegScale = mine.deployLegScale; cur.deployBarrelScale = mine.deployBarrelScale;
         cur.deployRecoil = mine.deployRecoil; cur.deployRecoilStep = mine.deployRecoilStep; cur.deployRecoilMag = mine.deployRecoilMag; cur.deployArcR = mine.deployArcR; cur.deployRecoilReturn = mine.deployRecoilReturn; cur.deploySlamDeg = mine.deploySlamDeg; cur.deploySlamSettle = mine.deploySlamSettle;
-        cur.animStateDriven = mine.animStateDriven; cur.animClipMove = mine.animClipMove; cur.animClipAfter = mine.animClipAfter; cur.animClipAttack = mine.animClipAttack; cur.animClipCombat = mine.animClipCombat; cur.animClipPreMove = mine.animClipPreMove; cur.animClipIdle = mine.animClipIdle; cur.animClipIdleAlt = mine.animClipIdleAlt; cur.animClipIdleAlt2 = mine.animClipIdleAlt2; cur.idleAltInterval = mine.idleAltInterval; cur.attackRepeats = mine.attackRepeats; cur.clearAimLayer = mine.clearAimLayer; cur.turretBone = mine.turretBone; cur.turretAxis = mine.turretAxis; cur.muzzleBone = mine.muzzleBone; cur.socketBones = mine.socketBones; cur.disabled = mine.disabled;
+        cur.animStateDriven = mine.animStateDriven; cur.animClipMove = mine.animClipMove; cur.animClipAfter = mine.animClipAfter; cur.animClipAttack = mine.animClipAttack; cur.animClipCombat = mine.animClipCombat; cur.animClipPreMove = mine.animClipPreMove; cur.animClipIdle = mine.animClipIdle; cur.animClipIdleAlt = mine.animClipIdleAlt; cur.animClipIdleAlt2 = mine.animClipIdleAlt2; cur.idleAltInterval = mine.idleAltInterval; cur.attackRepeats = mine.attackRepeats; cur.clearAimLayer = mine.clearAimLayer; cur.turretBone = mine.turretBone; cur.turretAxis = mine.turretAxis; cur.muzzleBone = mine.muzzleBone; cur.muzzleOffset = mine.muzzleOffset; cur.socketBones = mine.socketBones; cur.disabled = mine.disabled;
         cur.handPropName = mine.handPropName; cur.handPropGuid = mine.handPropGuid; cur.handPropMat = mine.handPropMat; cur.handPropBone = mine.handPropBone;
         cur.handPropAngles = mine.handPropAngles;   // Lab-owned again since the LIVE fit knob edits it ('Save rotation to game')
         cur.fireOnAttack = mine.fireOnAttack; cur.deployOnStop = mine.deployOnStop;

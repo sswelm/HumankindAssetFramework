@@ -1058,7 +1058,7 @@ public class ModelFactoryWindow : EditorWindow
                 cur.animStateDriven = regE.animStateDriven; cur.animClipMove = regE.animClipMove; cur.animClipAfter = regE.animClipAfter; cur.animClipAttack = regE.animClipAttack; cur.animClipCombat = regE.animClipCombat; cur.animClipPreMove = regE.animClipPreMove; cur.animClipIdle = regE.animClipIdle; cur.animClipIdleAlt = regE.animClipIdleAlt; cur.animClipIdleAlt2 = regE.animClipIdleAlt2;
                 cur.clipMove = regE.clipMove; cur.clipAfter = regE.clipAfter; cur.clipAttack = regE.clipAttack; cur.clipCombat = regE.clipCombat; cur.clipPreMove = regE.clipPreMove; cur.clipIdle = regE.clipIdle; cur.clipIdleAlt = regE.clipIdleAlt; cur.clipIdleAlt2 = regE.clipIdleAlt2; cur.idleAltInterval = regE.idleAltInterval;
                 cur.attackRepeats = regE.attackRepeats; cur.clearAimLayer = regE.clearAimLayer;
-                cur.turretBone = regE.turretBone; cur.turretAxis = regE.turretAxis; cur.muzzleBone = regE.muzzleBone; cur.socketBones = regE.socketBones;
+                cur.turretBone = regE.turretBone; cur.turretAxis = regE.turretAxis; cur.muzzleBone = regE.muzzleBone; cur.muzzleOffset = regE.muzzleOffset; cur.socketBones = regE.socketBones;
                 cur.handPropName = regE.handPropName; cur.handPropGuid = regE.handPropGuid; cur.handPropMat = regE.handPropMat; cur.handPropBone = regE.handPropBone; cur.handPropAngles = regE.handPropAngles;
                 cur.fireOnAttack = regE.fireOnAttack; cur.deployOnStop = regE.deployOnStop;
                 cur.deployPoseTime = regE.deployPoseTime; cur.deploySpeed = regE.deploySpeed; cur.recoilSpeed = regE.recoilSpeed;
