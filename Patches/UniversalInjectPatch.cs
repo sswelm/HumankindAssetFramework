@@ -2092,6 +2092,18 @@ namespace ENCAccessProof
         // so a reference match is exact and only our repointed pawns qualify.
         static ModelEntry MuzzleEntryForSubPawn(object subPawn)
         {
+            // NAME MATCH first — proven live by the [Muzzle] diagnostic: the fire path asked for the donor socket
+            // ('Canon_Up_left') on sub-pawn "'64727-32-0'- Era5_Common_ArmouredCar_01" with entry=none — the AddOn
+            // skeleton reference walk below does NOT round-trip for the firing sub-pawn, but its GameObject name
+            // carries the pawn description (the same match the audio poll relies on).
+            string goName = (subPawn as UnityEngine.Component)?.gameObject?.name;
+            if (!string.IsNullOrEmpty(goName))
+                for (int i = 0; i < entries.Count; i++)
+                {
+                    var en = entries[i];
+                    if (!string.IsNullOrEmpty(en.muzzleBone) && !string.IsNullOrEmpty(en.pawnDescription)
+                        && goName.IndexOf(en.pawnDescription, StringComparison.OrdinalIgnoreCase) >= 0) return en;
+                }
             var pawnDef = GetMember(subPawn, "PresentationPawnDefinition");
             if (pawnDef == null) return null;
             if (!gocaResolved)
