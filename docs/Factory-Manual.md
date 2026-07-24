@@ -903,3 +903,51 @@ every bone** — verify with a text editor on `Assets/Resources/<name>_Skeleton.
   `<name>_Clips.asset` for per-bone `EncodingFormat` (1 = rotation-only, the target).
 
 Run any of them with `blender -b --python <script> -- <args>`.
+
+## 17. Turrets & fire effects — target tracking, muzzle flash, smoke, tracers (verified 2026-07-24)
+
+A vehicle model injected onto a weapon-carrying donor inherits the donor's FIRE PRESENTATION — and every piece of it
+anchors to the DONOR's rig: the aim rotation streams at donor bone indices, and the muzzle flash / launch smoke /
+projectile origin all resolve donor SOCKET NAMES that don't exist on your renamed skeleton (the lookups fall back to
+the pawn root + the donor's socket-local offset — the classic "flash in a corner"). This section is the complete,
+in-game-verified system that puts all of it back on YOUR model. Reference implementation: the ENC ArmouredCar
+(Ehrhardt) on the AntiAirGuns donor — tracking turret, flash, smoke and tracers all on the gun.
+
+### 17.1 The knobs (all per-model registry fields)
+
+| Knob | When | What it does |
+|---|---|---|
+| `turretBone` + `turretAxis` | runtime | TARGET TRACKING: the game's streamed aim rotation is remapped onto YOUR bone (substring), around the given local axis (0/1/2 = X/Y/Z; a turret wants its YAW axis, an artillery barrel its PITCH; -1 = the stream's own axis). Save + relaunch. |
+| `socketBones` | **bake** | DONOR SOCKETS: `"DonorName=OurBoneSubstr[@x,y,z];..."` — bakes zero-weight bones with the EXACT names the donor's fire events look up, parented to your bone, so flash/smoke/tracer origin resolve NATIVELY and follow it (a tracking turret). Socketed models rename bones `A###_` instead of `b###_` (donor names are capitalized; Amplitude sorts alphabetically and needs parents first). Re-BAKE to apply. |
+| `muzzleOffset` | runtime | WORLD-SPACE DIAL `"x,y,z"` added to the pinned fire origin — the empirical fix when a rig's gun-bone HEAD sits somewhere unhelpful (the Ehrhardt's is at the model base). Iterate value → relaunch; no bake, no rebuild. |
+| `muzzleBone` | runtime | LEGACY REDIRECT (pre-socket): reroute a MISSING socket lookup to your bone. Superseded by `socketBones` for re-baked models, but keep it set — it gates the donor-offset compensation below. |
+| `silenceDonorVfx` | runtime | SUPPRESS instead: drop the donor's animation-driven VFX entirely (Factory checkbox). Sounds untouched. The fallback when relocation isn't wanted. |
+
+### 17.2 The recipe (what actually shipped on the ArmouredCar)
+
+1. **Discover the donor's socket names.** Fire the unit once and read the `[Muzzle] GetBoneTRS('...')` log lines —
+   the AA-gun donor asks for `Canon_Up_left` and `Move_bloc`. **The names LIE about their roles**: decode them from
+   the per-shot pin log — `Move_bloc` turned out to be the fire POSITION anchor (its events carry offsets reaching
+   from a base block up to each gun) and `Canon_Up_left` the ROTATION/direction socket.
+2. **Bake the sockets onto the gun**: `socketBones: "Canon_Up_left=MW_T;Move_bloc=MW_T"` — BOTH on the weapon bone,
+   so position and direction ride the tracking turret. Watch the bake console for the `RIGANIM socket ...` lines and
+   the `A###_` prefix note; the skeleton grows by the socket count (14 → 16 bones here).
+3. **Dial the height**: `muzzleOffset: "0,2.6,0"`. Why needed at all: the Ehrhardt's `MW_T` bone head sits at the
+   model BASE (the gun *mesh* is skinned to it, but the bone origin is low) — and, an OPEN engine question, the
+   socket's provably-correct bind height did not reach the runtime pose either. The dial closes the gap
+   empirically: value → relaunch → look; two iterations converged (1.3 = halfway, 2.6 = on the gun).
+4. The plugin does the rest at runtime: on a fire event it detects the native socket hit and **pre-compensates the
+   donor's socket-local offset** (the AA gun's barrel-length displacement would otherwise fling flash AND tracer
+   start off the gun — they share one startPosition), then adds your dial.
+
+### 17.3 Traps (each cost a test cycle — don't repeat them)
+
+- **A registry edit made OUTSIDE the editor does not re-slim.** The Blender-step cache compares the form vs the
+  saved file; edit the file externally (script/hand) + ↻ Reload = "no change" = your socket edit silently NOT baked.
+  Force it: delete `Assets/FactorySource/<res>/anim*/​*_anim.fbx`, then Bake.
+- **The project asset is not the game.** Bake updates `Assets/Resources/...`; the GAME loads the BUILT mod — no
+  rebuild = you test the old skeleton. Verify from the pin log's `T=` height, not from vibes.
+- **Judge socket placement by the log, not the name.** `T=` vs `pawnWorld` in the `[Muzzle]` pin line tells you
+  where the engine actually put the origin (ground = 7.3 vs gun = +2.6 in the field case).
+- (Internal, for hook authors: the fire path re-enters `GetBoneTRS` — any prefix that invokes it with the SAME name
+  must guard reentrancy or the game stack-overflows to desktop. Guarded in `MuzzleRedirect` since 2026-07-24.)
