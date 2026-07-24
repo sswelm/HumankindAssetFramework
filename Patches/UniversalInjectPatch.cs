@@ -2127,10 +2127,12 @@ namespace ENCAccessProof
 
         // Hook body: if this GetBoneTRS(boneName) is a donor socket missing on our rig, answer with OUR muzzle bone's TRS.
         // Returns true if handled (result set, caller skips the original); false to run the original untouched.
+        static bool muzzleReentry;   // the native-socket branch re-invokes GetBoneTRS with the SAME name — without this the prefix re-enters itself forever (stack overflow, hard crash to desktop; 2026-07-24 field incident)
         internal static bool MuzzleRedirect(object subPawn, string boneName, MethodBase getBoneTRS, ref object result)
         {
             try
             {
+                if (muzzleReentry) return false;   // inner call from our own branch below — run the original untouched
                 if (string.IsNullOrEmpty(boneName) || entries == null || entries.Count == 0) return false;
                 bool anyMuzzle = false;                                   // cheap early-out for the hot path (most units have no muzzleBone)
                 for (int i = 0; i < entries.Count; i++) if (!string.IsNullOrEmpty(entries[i].muzzleBone)) { anyMuzzle = true; break; }
@@ -2153,14 +2155,18 @@ namespace ENCAccessProof
                     // socketed models that knob doubles as the compensation enable.
                     if (pendingMuzzleActive && boneName == pendingMuzzlePosName)
                     {
-                        result = getBoneTRS.Invoke(subPawn, new object[] { boneName });
+                        muzzleReentry = true;
+                        try { result = getBoneTRS.Invoke(subPawn, new object[] { boneName }); }
+                        finally { muzzleReentry = false; }
                         if (result != null) { CompensateDonorOffset(result, e, boneName, subPawn); return true; }
                     }
                     return false;      // any other real-bone lookup — genuine, leave it
                 }
                 var mn = ResolveMuzzleBoneName(e);
                 if (mn == null) return false;
-                result = getBoneTRS.Invoke(subPawn, new object[] { mn }); // reentrant, but mn is found -> the real TRS, no re-redirect
+                muzzleReentry = true;   // belt-and-braces: the mn lookup exits via the found-bone branch today, but that branch is no longer a plain pass-through
+                try { result = getBoneTRS.Invoke(subPawn, new object[] { mn }); }
+                finally { muzzleReentry = false; }
                 // Inside AlterationFireProjectile.StartEvent and this is the POSITION socket: pre-compensate the donor
                 // offset on the boxed TRS so the caller's own Transform(offset) lands back on our muzzle bone (v3 above).
                 if (pendingMuzzleActive && boneName == pendingMuzzlePosName && result != null)
