@@ -148,6 +148,7 @@ namespace ENCAccessProof
                 typeof(Hk_SilenceAudio),      // silenceDonorAudio: drop the borrowed donor's Wwise posts (idle growl + combat maul) on opted-in pawns (2026-07-23)
                 typeof(Hk_RotDiag_FaceEnemy), typeof(Hk_RotDiag_LookAt), typeof(Hk_RotDiag_FsmStart),   // adjacent-attack rotation diagnostic (2026-07-21): who asks our pawns to turn, and does the FSM start
                 typeof(Hk_PawnDeath),         // death cue: one-shot as a pawn of ours starts dying (2026-07-23)
+                typeof(Hk_SilenceVfx),        // donor VFX suppression: drop misplaced donor muzzle flashes, sounds untouched (2026-07-24)
                 typeof(Hk_BattleStarted),     // battle-start war cry: sim-thread match -> main-thread camera-anchored one-shot (2026-07-23)
                 typeof(Hk_AudioTrace),        // diagnostic: live-trace Wwise PostEvent (gated behind the F8 Audio Trace toggle)
                 typeof(Hk_DistrictRepoint),   // EXPERIMENTAL: replace one district's on-map visual (docs/District-Visuals.md)

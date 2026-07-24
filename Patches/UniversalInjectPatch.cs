@@ -67,6 +67,8 @@ namespace ENCAccessProof
         public string handPropBone = "";  // bone-name SUBSTRING on OUR skeleton (bones are renamed b###_<orig>); "" = "R_Hand"
         public string handPropAngles = "";// draw-time rotation "x,y,z" (deg) stamped onto the FxMesh asset BEFORE encoding; "" stamps ZERO (neutralizes the engine's -90X class default — baked angle values don't survive the bundle). Hand-edited escape hatch: change + relaunch, no bake/rebuild.
         public bool disabled;             // DEBUG toggle: skip this override entirely so the ORIGINAL vanilla unit renders (compare against the custom model, observe the donor's own animation). Runtime-only — Save (no bake) + relaunch. The entry is dropped at load, so it doesn't even claim its pawn.
+        public bool silenceDonorVfx;      // suppress the donor's MecanimEvent VFX (muzzle flashes, animator-driven puffs) for THIS unit. The donor's flash anchors are DONOR bone names (ParentNameToLaunchVFXPosition) that don't exist on our replaced skeleton, so inherited flashes render misplaced — this drops them at the StartVFXEvent chokepoint (the audio-silence pattern). Runtime-only.
+        public bool vfxSilencedLogged;    // session flag: log the first suppressed event once per entry
         public bool clearAimLayer;        // clear the game's procedural BoneRotation layer for THIS model (artillery: the donor streams aim/wheel junk that twists the rig). Replaces the old blanket fire/deploy rule for STATE-DRIVEN artillery — characters need the layer (facing), a migrated howitzer needs it cleared. Runtime-only.
         public string turretBone = "";    // TURRETIZE (2026-07-24): bone-name SUBSTRING (renamed b###_<orig>) of a turret to aim at the target. The game already streams its aim/heading angle into a BoneRotation slot on an INVALID bone index — we retarget that slot's SkeletonBoneIndex to THIS bone so the engine's own aim yaws our turret. "" = no turret aim. Runtime-only (no re-bake).
         public int turretBoneIdx = -2;    // cached bone index for turretBone (-2 = not resolved yet, -1 = not found). Resolved once from e.skeleton.BoneInfos.
@@ -467,6 +469,7 @@ namespace ENCAccessProof
                                 freezeDonorAnim = (bool?)m["freezeDonorAnim"] ?? false,
                                 disabled = (bool?)m["disabled"] ?? false,
                                 clearAimLayer = (bool?)m["clearAimLayer"] ?? false,
+                                silenceDonorVfx = (bool?)m["silenceDonorVfx"] ?? false,
                                 turretBone = (string)m["turretBone"] ?? "",
                                 turretAxis = (int?)m["turretAxis"] ?? -1,
                                 muzzleBone = (string)m["muzzleBone"] ?? "",
@@ -536,6 +539,7 @@ namespace ENCAccessProof
                 var dos = Regex.Matches(text, "\"deployOnStop\"\\s*:\\s*(true|false)");     // parity: hold deployed when idle, undeploy while moving
                 var eng = Regex.Matches(text, "\"engineSound\"\\s*:\\s*(true|false)");      // parity: fire the per-ship engine move sound on our units
                 var sda = Regex.Matches(text, "\"silenceDonorAudio\"\\s*:\\s*(true|false)"); // parity: suppress the borrowed donor's Wwise sound (idle + combat)
+                var svx = Regex.Matches(text, "\"silenceDonorVfx\"\\s*:\\s*(true|false)");   // parity: suppress the donor's MecanimEvent VFX (misplaced muzzle flashes)
                 var esa = Regex.Matches(text, "\"engineStartEvent\"\\s*:\\s*\"([^\"]*)\"");  // parity: Wwise event name posted on move-start
                 var eso = Regex.Matches(text, "\"engineStopEvent\"\\s*:\\s*\"([^\"]*)\"");    // parity: Wwise event name posted on move-stop
                 var sf = Regex.Matches(text, "\"soundFile\"\\s*:\\s*\"([^\"]*)\"");           // parity: custom WAV loop in enc_sounds/
@@ -608,6 +612,7 @@ namespace ENCAccessProof
                         deployOnStop = i < dos.Count && dos[i].Groups[1].Value == "true",
                         engineSound = i < eng.Count && eng[i].Groups[1].Value == "true",
                         silenceDonorAudio = i < sda.Count && sda[i].Groups[1].Value == "true",
+                        silenceDonorVfx = i < svx.Count && svx[i].Groups[1].Value == "true",
                         engineStartEvent = i < esa.Count ? esa[i].Groups[1].Value : "",
                         engineStopEvent = i < eso.Count ? eso[i].Groups[1].Value : "",
                         soundFile = i < sf.Count ? sf[i].Groups[1].Value : "",
@@ -2527,6 +2532,36 @@ namespace ENCAccessProof
         }
 
         static string Tail(string s) => string.IsNullOrEmpty(s) ? "(none)" : (s.Length > 60 ? s.Substring(0, 60) : s);
+
+        // ---- DONOR VFX SUPPRESSION (2026-07-24, the AA-gun flashes): MecanimEvent VFX (muzzle flashes, animator
+        // puffs) anchor to DONOR bone names that don't exist on our replaced skeleton, so inherited flashes render
+        // misplaced. This is the audio-silence pattern at the VISUAL chokepoint (MecanimEventInterpreter.StartVFXEvent):
+        // a prefix skips the launch for opted-in units. VFX-only — the donor's SOUNDS (StartSFXEvent/Wwise) are NOT
+        // touched; silenceDonorAudio remains the separate knob for those. Unit match = sub-pawn GameObject name contains
+        // the entry's pawnDescription (the proven audio-poll match); VFX events are rare, so the walk is cheap. ----
+        internal static bool SuppressVfxFor(object interp)
+        {
+            var list = entries;
+            if (list == null) return false;
+            bool any = false;
+            foreach (var x in list) if (x.silenceDonorVfx) { any = true; break; }
+            if (!any) return false;
+            try
+            {
+                string n = (interp as UnityEngine.Component)?.gameObject?.name;
+                if (string.IsNullOrEmpty(n))
+                    n = (GetMember(interp, "presentationSubPawn") as UnityEngine.Component)?.gameObject?.name;
+                if (string.IsNullOrEmpty(n)) return false;
+                foreach (var e in list)
+                    if (e.silenceDonorVfx && !string.IsNullOrEmpty(e.pawnDescription) && n.IndexOf(e.pawnDescription, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        if (!e.vfxSilencedLogged) { e.vfxSilencedLogged = true; Plugin.Log.LogInfo($"[Vfx] '{e.resourceName}' donor VFX suppressed (first event on '{n}'; sounds untouched)"); }
+                        return true;
+                    }
+            }
+            catch { }
+            return false;
+        }
 
         // ---- DEATH CUE (2026-07-23): a one-shot when a pawn of ours starts dying. Seam: PresentationPawn.TriggerDeath —
         // presentation-side, fired exactly once per dying pawn as its death FSM starts (IsDead is set inside it). A wiped

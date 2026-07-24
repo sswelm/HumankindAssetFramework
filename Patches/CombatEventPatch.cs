@@ -226,6 +226,25 @@ namespace ENCAccessProof
         }
     }
 
+    // ---- DONOR VFX SUPPRESSION (2026-07-24): drop the donor's MecanimEvent VFX (misplaced muzzle flashes) for
+    // opted-in units at the launch chokepoint. VFX only — StartSFXEvent/Wwise sounds are deliberately untouched. ----
+    [HarmonyPatch] internal static class Hk_SilenceVfx
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = AccessTools.TypeByName("Amplitude.Mercury.Animation.MecanimEventInterpreter");
+            var m = t != null ? AccessTools.Method(t, "StartVFXEvent") : null;
+            if (m != null) Plugin.Log.LogInfo("[Vfx] hooked MecanimEventInterpreter.StartVFXEvent (donor VFX suppression)");
+            else Plugin.Log.LogWarning("[Vfx] NOT found: MecanimEventInterpreter.StartVFXEvent — silenceDonorVfx won't work");
+            return m;
+        }
+        static bool Prefix(object __instance)
+        {
+            try { return !UniversalInject.SuppressVfxFor(__instance); }
+            catch { return true; }
+        }
+    }
+
     // ---- BATTLE-START WAR CRY (2026-07-23): SimulationEvent_BattleStarted.Raise(sender, battle) on the SIM thread.
     // The handler only does managed reads (walk the battle's groups for our unit definitions) and queues; the cry
     // plays on the main thread via UniversalInject.ProcessBattleCries. ----
