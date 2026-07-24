@@ -99,6 +99,13 @@ by when they'll bite.
 
 ## Future feature seams (mapped, not built — the discovery is done, only the build remains)
 
+- **Normal-map (and ORM) atlas support (shelved 2026-07-24).** Today the bake produces a SINGLE albedo atlas and the
+  runtime injection NEUTRALIZES the donor's PBR (flat albedo). To render surface detail (normals/roughness/metallic), the
+  Factory would need to bake a matching **normal atlas** repacked to the combined-atlas UVs, and the injector would wire it
+  into the pawn material's normal slot instead of clearing it. Low priority: at map zoom (~80px units) the payoff is
+  marginal, which is why flat-albedo was chosen. TEST CANDIDATE READY: the **Ehrhardt armored car** has its `_Normal`
+  (+ `_ORM`) maps exported alongside the albedo, so it's a drop-in test bed if/when this is built.
+
 - **Aim-layer REMAP — vanilla-style turret/head target tracking (requested 2026-07-24).** Vanilla units aim by a
   procedural bone-rotation layer: the sim streams the aim angle, the presentation writes it onto specific bones on
   top of the playing animation. **The layer still streams for our injected units** — but addressed to the DONOR's
