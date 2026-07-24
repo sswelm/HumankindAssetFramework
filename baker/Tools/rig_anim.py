@@ -57,6 +57,35 @@ if len(argv) > 9 and argv[9].strip():
 if role_specs:
     print("RIGANIM state roles: %s" % ", ".join("%s='%s'" % rc for rc in role_specs))
 
+# DONOR SOCKETS (argv[11], 2026-07-24): "DonorName=ParentSubstr[@x,y,z];..." — create EXACT-NAMED zero-weight leaf
+# bones on our rig so the DONOR's fire/VFX events resolve NATIVELY (GetBoneTRS('Canon_Up_left') just FINDS the bone):
+# muzzle flash, launch smoke and projectile origin all anchor correct-by-construction, following the parent bone
+# (e.g. a tracking turret). This obsoletes the runtime interception chain (muzzleBone redirect/offset compensation)
+# for re-baked models. The offset "@x,y,z" is in armature/model space, added to the parent bone's head.
+# WHY THE PREFIX CHANGES: Amplitude sorts bones alphabetically and requires parents-first; a donor name (capital
+# 'C'anon...) would sort BEFORE a 'b###_' parent — so socketed models rename with 'A###_' instead ('A' < any donor
+# initial), keeping alphabetical == topological. A socket that still sorts before its parent fails the bake loudly.
+socket_specs = []   # ordered [(donorName, parentSubstr, (x,y,z))]
+if len(argv) > 11 and argv[11].strip():
+    for _pair in argv[11].split(";"):
+        _pair = _pair.strip()
+        if not _pair or "=" not in _pair:
+            continue
+        _dn, _rest = _pair.split("=", 1)
+        _off = (0.0, 0.0, 0.0)
+        if "@" in _rest:
+            _ps, _os = _rest.split("@", 1)
+            try:
+                _off = tuple(([float(v) for v in _os.split(",")] + [0.0, 0.0, 0.0])[:3])
+            except Exception:
+                print("RIGANIM WARN: bad socket offset '%s' — using 0,0,0" % _os)
+        else:
+            _ps = _rest
+        if _dn.strip() and _ps.strip():
+            socket_specs.append((_dn.strip(), _ps.strip(), _off))
+if socket_specs:
+    print("RIGANIM donor sockets requested: %s" % ", ".join("%s->%s" % (d, p) for d, p, _ in socket_specs))
+
 bpy.ops.wm.read_factory_settings(use_empty=True)
 ext = os.path.splitext(inp)[1].lower()
 if ext == ".fbx":
@@ -631,15 +660,16 @@ if convert_rig:
             _walkb(c)
     for _root in [b for b in arm.data.bones if b.parent is None]:
         _walkb(_root)
+    _bprefix = "A" if socket_specs else "b"   # sockets keep DONOR names ('C'anon...) — 'A###_' sorts every real bone first
     for _i, _bname in enumerate(_order):
-        arm.data.bones[_bname].name = "b%03d_%s" % (_i, _bname)
-    print("RIGANIM bones renamed with topological prefixes (%d bones) — parents now sort before children" % len(_order))
+        arm.data.bones[_bname].name = "%s%03d_%s" % (_bprefix, _i, _bname)
+    print("RIGANIM bones renamed with topological prefixes (%d bones, prefix %s###_) — parents now sort before children" % (len(_order), _bprefix))
     # THE FROZEN-RUNNER FIX (2026-07-19): Blender's rename syncs fcurve data_paths ONLY for the action ASSIGNED at
     # rename time — every DORMANT state-role action kept its OLD bone names, its curves then targeted nonexistent
     # bones, evaluated to NOTHING at export, and the role FBX baked an 18-frame CONSTANT clip (in-game: the soldier
     # frozen mid-stride while moving; pose-data byte analysis showed all 63 curves constant). Patch every kept
     # action's paths explicitly — idempotent: only OLD names are in the map, already-synced paths pass through.
-    _newname = {n: "b%03d_%s" % (i, n) for i, n in enumerate(_order)}
+    _newname = {n: "%s%03d_%s" % (_bprefix, i, n) for i, n in enumerate(_order)}
     _patched = 0
     for _pa in all_acts:
         for _coll2, _fc2 in all_fcurve_owners(_pa):
@@ -651,6 +681,43 @@ if convert_rig:
                     _patched += 1
     if _patched:
         print("RIGANIM patched %d dormant fcurve path(s) onto the renamed bones (state-role clips)" % _patched)
+
+# DONOR SOCKET CREATION (after the rename so parent substrings match final names; before the fold so sockets share
+# the same rotation/scale treatment as their parents). Zero-weight leaves: no vertex moves, no animation, pure
+# anchors for the donor's GetBoneTRS lookups. Orientation inherits the parent bone (tail direction + roll) — the
+# donor's Forward/Up launch vectors are expressed in this frame; if fire DIRECTION comes out wrong, orientation
+# control is the next knob to add here.
+if socket_specs and arm is not None:
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode='EDIT')
+    from mathutils import Vector as _SockV
+    _made = 0
+    for _dn, _ps, _off in socket_specs:
+        _parent = None
+        for _eb in arm.data.edit_bones:
+            if _ps.lower() in _eb.name.lower():
+                _parent = _eb; break
+        if _parent is None:
+            _names = [b.name for b in arm.data.edit_bones]
+            bpy.ops.object.mode_set(mode='OBJECT')
+            print("RIGANIM ERROR: socket '%s': parent substring '%s' matches no bone. Bones: %s" % (_dn, _ps, _names[:40]))
+            sys.exit(1)
+        if not (_dn > _parent.name):
+            bpy.ops.object.mode_set(mode='OBJECT')
+            print("RIGANIM ERROR: socket '%s' would sort BEFORE its parent '%s' — Amplitude needs parents-first alphabetically; this donor-name/parent pair cannot satisfy it" % (_dn, _parent.name))
+            sys.exit(1)
+        _sb = arm.data.edit_bones.get(_dn) or arm.data.edit_bones.new(_dn)
+        _dirv = _parent.tail - _parent.head
+        _dirv = _dirv.normalized() * max(0.02, _dirv.length * 0.25) if _dirv.length > 1e-6 else _SockV((0.0, 0.05, 0.0))
+        _sb.head = _parent.head + _SockV(_off)
+        _sb.tail = _sb.head + _dirv
+        _sb.roll = _parent.roll
+        _sb.parent = _parent
+        _sb.use_deform = False
+        _made += 1
+        print("RIGANIM socket '%s' -> parent '%s' head=(%.3f, %.3f, %.3f)" % (_dn, _parent.name, _sb.head.x, _sb.head.y, _sb.head.z))
+    bpy.ops.object.mode_set(mode='OBJECT')
+    print("RIGANIM donor sockets: %d created" % _made)
 
 # RIG ROTATION + TRANSFORM FOLD — CONVERSION path only (legacy = the EXACT old pipeline, byte-for-byte: no object
 # fiddling, no fold — models that were correct before stay correct; the fold is world-preserving for Unity's mesh
@@ -686,6 +753,27 @@ if convert_rig:
         print("RIGANIM rig rotation+scale APPLIED TO DATA (identity nodes)")
     except Exception as e:
         print("RIGANIM WARN: transform_apply failed (%s) — rotation left object-level (may not survive the bake)" % e)
+
+# AUTO-GROUND (argv[10] == "1"): sit a rigged VEHICLE on the terrain with NO manual Position-offset dial — the
+# animated path has no keel->z=0 like the static path. Robust measure: drop the model's LOWEST point (the tyre
+# contact) to the skeleton origin — shift the whole rig up by -minZ. SELF-CORRECTING: a raw file lifts by its full
+# sink, an already-grounded file lifts by ~0, so it can NEVER double-apply (the earlier "wheels-on minus wheels-off"
+# protrusion measure did — a fixed lift that floated a pre-grounded file). Verts + bone rests move together (skin +
+# rotation-only clips untouched). Runs after the convert fold, so Z is world-vertical. OPT-IN: only sensible for a
+# vehicle whose lowest point IS its ground contact (a flyer/hover model would get pinned to the terrain).
+if len(argv) > 10 and argv[10].strip() == "1" and arm is not None and me.vertices:
+    _all_min = min(v.co.z for v in me.vertices)
+    _off = -_all_min
+    if abs(_off) > 1e-3:
+        for v in me.vertices: v.co.z += _off
+        me.update()
+        bpy.context.view_layer.objects.active = arm
+        bpy.ops.object.mode_set(mode='EDIT')
+        for _eb in arm.data.edit_bones: _eb.head.z += _off; _eb.tail.z += _off
+        bpy.ops.object.mode_set(mode='OBJECT')
+        print("RIGANIM auto-ground: lowest point %.4f -> origin (lifted %.4f)" % (_all_min, _off))
+    else:
+        print("RIGANIM auto-ground: already grounded (minZ %.4f)" % _all_min)
 
 bpy.ops.object.select_all(action='SELECT')
 # EXPORT SCALE (raw-FBX-parse evidence, fbx_lclscale/fbx_binddump): Blender's exporter writes meters->cm by scaling

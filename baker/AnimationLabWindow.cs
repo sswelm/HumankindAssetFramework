@@ -51,6 +51,7 @@ public class AnimationLabWindow : EditorWindow
     void OnEnable()
     {
         RefreshList();
+        clipProbeFile = "\0";   // a domain reload wipes the cached clip/bone lists; reset the probe sentinel so the NEXT OnGUI re-reads the model ONCE (populates the Clip/Turret/Bone Pick without a manual Reload). ONE probe, no per-frame thrash.
         // DOMAIN-RELOAD RECONCILIATION (v2 — the v1 auto-resync silently DISCARDED unsaved form edits on every
         // compile, destroying user work mid-authoring; the opposite policy silently kept a stale form that clobbered
         // registry edits at the next Save. Neither silence is acceptable.) The form's serialized state SURVIVES the
@@ -460,6 +461,16 @@ public class AnimationLabWindow : EditorWindow
                 EditorGUILayout.HelpBox("Model file not found on disk:\n" + cur.modelFile +
                     "\nThe source was moved or renamed. Fix it with Browse… (or press ⟳ Reload if the registry was already corrected outside this window).", MessageType.Warning);
         }
+        // --- Disable override (debug: fall back to the original vanilla unit) ---
+        EditorGUILayout.Space();
+        bool wasDisabled = cur.disabled;
+        cur.disabled = EditorGUILayout.ToggleLeft(new GUIContent("● Disable override — show the ORIGINAL unit",
+            "DEBUG: when ticked, this model override is skipped entirely and the game's ORIGINAL vanilla unit renders — " +
+            "to compare against your custom model or watch the donor's own animation. RUNTIME-ONLY: Save (no bake) + relaunch."),
+            cur.disabled);
+        if (cur.disabled != wasDisabled) formDiffersFromRegistry = true;
+        if (cur.disabled) EditorGUILayout.HelpBox("Override DISABLED — this entry is ignored at load; the original unit shows in-game. Untick + Save (no bake) + relaunch to restore your model.", MessageType.Warning);
+
         // --- Deploy conversion (raw rigid-parts source → bone-per-part rig, part of the recipe) ---
         EditorGUILayout.Space();
         cur.deployConvert = EditorGUILayout.Toggle(new GUIContent("Deploy conversion (rigid-parts source)",
@@ -583,6 +594,59 @@ public class AnimationLabWindow : EditorWindow
                 "streams aim/wheel junk that twists the rig — the legacy Fire/Deploy behaviors cleared it " +
                 "implicitly); CHARACTERS need it OFF (the layer carries their facing). RUNTIME-ONLY — Save (no " +
                 "bake) + relaunch."), cur.clearAimLayer);
+            // Turret bone — free text + a Pick that lists the model's actual bones (you can't guess the internal name).
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                cur.turretBone = EditorGUILayout.TextField(new GUIContent("Turret bone (aims at target)",
+                    "TURRETIZE: bone-name SUBSTRING of a VEHICLE turret to aim at the target — use Pick, or type e.g. " +
+                    "'Turret'. The plugin retargets the game's own aim/heading angle onto this bone, so the turret tracks " +
+                    "the enemy (no per-frame math). Empty = no turret aim. RUNTIME-ONLY — Save (no bake) + relaunch."),
+                    cur.turretBone ?? "");
+                using (new EditorGUI.DisabledScope(animBonePrefixes.Count == 0))
+                    if (GUILayout.Button(new GUIContent("Pick", animBonePrefixes.Count == 0 ? "No bones readable from this model (glb/gltf only) — type the name" : null), GUILayout.Width(70)))
+                    {
+                        var r = GUILayoutUtility.GetLastRect();
+                        var labels = animBonePrefixes.Select(kv => $"{kv.Key}  ({kv.Value} part{(kv.Value == 1 ? "" : "s")})").ToArray();
+                        var values = animBonePrefixes.Select(kv => kv.Key).ToArray();
+                        new StringDropdown(new AdvancedDropdownState(), labels, values, "Turret bone", p => { cur.turretBone = p; Repaint(); }).Show(r);
+                    }
+            }
+            cur.turretAxis = EditorGUILayout.IntPopup(new GUIContent("Turret aim axis",
+                "Which local axis the aim angle rotates the turret bone around. 'Default' = the game's axis (usually reads " +
+                "as PITCH — turns up). A vehicle TURRET wants its YAW axis (turns around); a mechanized HOWITZER/ARTILLERY " +
+                "barrel wants its PITCH axis (elevates). Try each to find it — RUNTIME-ONLY, Save (no bake) + relaunch."),
+                cur.turretAxis,
+                new[] { new GUIContent("Default (game aim)"), new GUIContent("Axis 0 (X)"), new GUIContent("Axis 1 (Y)"), new GUIContent("Axis 2 (Z)") },
+                new[] { -1, 0, 1, 2 });
+            // Muzzle bone — the donor's fire clip fires the muzzle-flash from ITS weapon socket, which is absent on our
+            // renamed rig, so the flash lands off-side. Redirect it to a bone of OURS (e.g. the turret/gun). Free text + Pick.
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                cur.muzzleBone = EditorGUILayout.TextField(new GUIContent("Muzzle bone (flash fires from)",
+                    "MUZZLE-RELOCATE: bone-name SUBSTRING the weapon muzzle-flash should fire FROM — use Pick, or type e.g. " +
+                    "'Turret'. The donor's fire clip names ITS own weapon socket (an AA gun's 'Canon'), which our renamed rig " +
+                    "lacks, so the flash lands off-side; the plugin redirects it to THIS bone. Empty = leave vanilla. " +
+                    "RUNTIME-ONLY — Save (no bake) + relaunch."),
+                    cur.muzzleBone ?? "");
+                using (new EditorGUI.DisabledScope(animBonePrefixes.Count == 0))
+                    if (GUILayout.Button(new GUIContent("Pick", animBonePrefixes.Count == 0 ? "No bones readable from this model (glb/gltf only) — type the name" : null), GUILayout.Width(70)))
+                    {
+                        var r = GUILayoutUtility.GetLastRect();
+                        var labels = animBonePrefixes.Select(kv => $"{kv.Key}  ({kv.Value} part{(kv.Value == 1 ? "" : "s")})").ToArray();
+                        var values = animBonePrefixes.Select(kv => kv.Key).ToArray();
+                        new StringDropdown(new AdvancedDropdownState(), labels, values, "Muzzle bone", p => { cur.muzzleBone = p; Repaint(); }).Show(r);
+                    }
+            }
+            // Donor sockets — the BAKE-TIME endgame for donor-anchored fire effects: bake EXACT-NAMED donor socket
+            // bones onto our rig so the game's own lookups (flash, launch smoke, projectile origin) resolve natively.
+            cur.socketBones = EditorGUILayout.TextField(new GUIContent("Donor sockets (bake)",
+                "BAKE-TIME donor-socket bones: \"DonorName=OurBoneSubstr[@x,y,z];...\" — creates zero-weight bones with " +
+                "the EXACT names the donor's fire events ask for (find them via the [Muzzle] GetBoneTRS log lines, e.g. " +
+                "'Canon_Up_left=MW_T;Move_bloc=Root'), parented to your bone so flash, smoke AND projectile origin all " +
+                "anchor natively and follow it (a tracking turret). Optional @x,y,z = model-space offset from the parent's " +
+                "head (dial the barrel tip). Socketed models bake with the 'A###_' bone prefix (alphabetical topology). " +
+                "Needs a re-BAKE; makes the runtime Muzzle-bone redirect unnecessary for this model."),
+                cur.socketBones ?? "");
         }
 
         // --- Hand prop (runtime-only: Save (no bake) + rebuild the mod) ---
@@ -687,6 +751,12 @@ public class AnimationLabWindow : EditorWindow
             "Tick it when a rig plays fine in the preview but tears apart / displaces in-game; usually paired with " +
             "Fix 100× OFF. Re-bake after changing."),
             cur.convertRig);
+        cur.autoGroundWheels = EditorGUILayout.Toggle(new GUIContent("Auto-ground (sit on terrain)",
+            "Sit a rigged VEHICLE on the terrain automatically — no manual Position-offset dial. The bake drops the " +
+            "model's LOWEST point (the tyre contact) to the skeleton origin (the same keel→ground the static bake does). " +
+            "Self-correcting, so re-baking never floats it. Tick it for a car/tank. Leave OFF for a flyer/hover model " +
+            "(it would be pinned to the ground). Re-bake after changing."),
+            cur.autoGroundWheels);
         if (!UniversalBaker.BlenderAvailable())
             EditorGUILayout.HelpBox("The animated bake needs Blender (to slim the rig + bake the clip) — it wasn't found. " +
                 "Install Blender or set EditorPrefs 'ENC.blenderPath' to blender.exe.", MessageType.Warning);
@@ -773,12 +843,17 @@ public class AnimationLabWindow : EditorWindow
         var mine = cur;
         cur = JsonUtility.FromJson<ModelDef>(JsonUtility.ToJson(reg));
         cur.animated = true;
+        // The Lab has its OWN Model-file Browse (to repoint a moved file, or to swap a static export for the rigged one).
+        // Without preserving it here, RebaseOnRegistry silently reverts modelFile to the registry's value at bake time —
+        // so Browsing to the animated GLB looked like it worked (the clip picker reads the live field) but the bake fed
+        // Blender the OLD file and failed with "no clip". Keep the Lab's chosen file so Browse actually sticks.
+        if (!string.IsNullOrWhiteSpace(mine.modelFile)) cur.modelFile = mine.modelFile;
         cur.animClip = mine.animClip; cur.animateBones = mine.animateBones; cur.animUnitFix = mine.animUnitFix;
-        cur.convertRig = mine.convertRig;
+        cur.convertRig = mine.convertRig; cur.autoGroundWheels = mine.autoGroundWheels;
         cur.deployConvert = mine.deployConvert; cur.deployStart = mine.deployStart; cur.deployEnd = mine.deployEnd;
         cur.deployStrip = mine.deployStrip; cur.deployReadyFrame = mine.deployReadyFrame; cur.deployLegScale = mine.deployLegScale; cur.deployBarrelScale = mine.deployBarrelScale;
         cur.deployRecoil = mine.deployRecoil; cur.deployRecoilStep = mine.deployRecoilStep; cur.deployRecoilMag = mine.deployRecoilMag; cur.deployArcR = mine.deployArcR; cur.deployRecoilReturn = mine.deployRecoilReturn; cur.deploySlamDeg = mine.deploySlamDeg; cur.deploySlamSettle = mine.deploySlamSettle;
-        cur.animStateDriven = mine.animStateDriven; cur.animClipMove = mine.animClipMove; cur.animClipAfter = mine.animClipAfter; cur.animClipAttack = mine.animClipAttack; cur.animClipCombat = mine.animClipCombat; cur.animClipPreMove = mine.animClipPreMove; cur.animClipIdle = mine.animClipIdle; cur.animClipIdleAlt = mine.animClipIdleAlt; cur.animClipIdleAlt2 = mine.animClipIdleAlt2; cur.idleAltInterval = mine.idleAltInterval; cur.attackRepeats = mine.attackRepeats; cur.clearAimLayer = mine.clearAimLayer;
+        cur.animStateDriven = mine.animStateDriven; cur.animClipMove = mine.animClipMove; cur.animClipAfter = mine.animClipAfter; cur.animClipAttack = mine.animClipAttack; cur.animClipCombat = mine.animClipCombat; cur.animClipPreMove = mine.animClipPreMove; cur.animClipIdle = mine.animClipIdle; cur.animClipIdleAlt = mine.animClipIdleAlt; cur.animClipIdleAlt2 = mine.animClipIdleAlt2; cur.idleAltInterval = mine.idleAltInterval; cur.attackRepeats = mine.attackRepeats; cur.clearAimLayer = mine.clearAimLayer; cur.turretBone = mine.turretBone; cur.turretAxis = mine.turretAxis; cur.muzzleBone = mine.muzzleBone; cur.socketBones = mine.socketBones; cur.disabled = mine.disabled;
         cur.handPropName = mine.handPropName; cur.handPropGuid = mine.handPropGuid; cur.handPropMat = mine.handPropMat; cur.handPropBone = mine.handPropBone;
         cur.handPropAngles = mine.handPropAngles;   // Lab-owned again since the LIVE fit knob edits it ('Save rotation to game')
         cur.fireOnAttack = mine.fireOnAttack; cur.deployOnStop = mine.deployOnStop;

@@ -181,7 +181,13 @@ by when they'll bite.
   the few that fire MULTIPLE times (AA burst) so the flash repeats. General lesson recorded: **a donor's effect = its
   skeleton + weapon sockets** (already half-logged: `donor.Skeleton` / `BoneInfos` / `donor fragment[N]`). The new
   **Disable override** flag (`ModelDef.disabled`, runtime) A/B's our model vs the raw donor for exactly this kind of probe.
-- **DONOR SOCKETS at bake time (`socketBones`, agreed 2026-07-24 — the muzzle endgame).** The interception chain
+- **DONOR SOCKETS at bake time (`socketBones`) — BUILT 2026-07-24 late, awaiting the verification bake.** Wired
+  end-to-end: rig_anim argv[11] (exact-named zero-weight leaf bones after the rename, before the fold; `A###_`
+  prefix on socketed models; loud failures for unmatched parents and sort-order violations), BakeConfig/ConfigFor/
+  slim-cache diff, Lab "Donor sockets (bake)" field, ModelDef.socketBones (bake-time; guard PASS). The ArmouredCar
+  entry is pre-configured (`Canon_Up_left=MW_T; Move_bloc=Root`) — next session: Unity recompile → re-Bake →
+  rebuild → fire: flash, smoke AND tracer origin should all sit on the (tracking) turret gun natively. Original
+  design rationale below. The interception chain
   (GetBoneTRS redirect → StartVFXEvent pin → offset compensation) moved/killed the FLASH but smoke + tracer origin
   still read the donor socket, and the compensated TRS raised a space question (flash vanished off-screen). The
   correct architecture: bake EXACT-NAMED donor socket bones onto our rig (`socketBones: "Canon_Up_left=MW_T;..."`,

@@ -24,7 +24,16 @@ public class ModelFactoryWindow : EditorWindow
     Vector2 stripScroll;                // scroll position of the multi-line Strip-parts text area
     GUIStyle wrapArea;                  // cached word-wrapping text-area style (lazy-init in OnGUI; EditorStyles isn't ready earlier)
     bool showSettings;
-    UnityEditor.Editor previewEditor;   // embedded interactive 3D preview of the baked model (its _Preview/_Model prefab)
+    // Custom PreviewRenderUtility renderer (ported from the Animation Lab): Unity's built-in GameObject preview has NO
+    // scroll-zoom AND the window's outer scroll view steals the wheel, so "scroll to zoom" never worked. Owning the
+    // camera gives real orbit + zoom. The non-serializable PRU is lazily created and cleaned before every domain reload.
+    PreviewRenderUtility previewPRU;
+    List<(Mesh mesh, Material[] mats, Matrix4x4 mtx)> previewDraws;   // flattened draw list from the baked prefab
+    Bounds previewBounds;
+    [SerializeField] Vector2 previewOrbit = new Vector2(135f, -20f);  // yaw/pitch (deg); survives domain reload
+    [SerializeField] float previewZoom = 1.4f;                        // camera distance factor (scroll wheel)
+    [SerializeField] Vector2 previewPan;                              // camera-plane pan offset (middle/right-drag), in radius units
+    static Material previewFallbackMat;
     string previewFor = "";
 
     // Cheap animation probe (no Blender), cached per model-file path. State: 0 = unknown (allow), 1 = animation
@@ -47,11 +56,9 @@ public class ModelFactoryWindow : EditorWindow
     {
         titleContent = new GUIContent("Model Factory");   // rename any pre-existing docked instance: Unity caches the tab title in the window's serialized state, so the GetWindow title alone never reaches already-open windows
         RefreshList(); LoadPreview(cur.resourceName);
-        // Tear the preview editor down BEFORE the domain unloads (and before editor quit). Destroying it from
-        // OnDisable DURING a reload is too late: Unity's GameObjectInspector.OnDisable then runs against an
-        // already-Disposed SerializedObject and logs "NullReferenceException: SerializedObject of SerializedProperty
-        // has been Disposed" — logged INSIDE DestroyImmediate by Unity itself, so our try/catch never sees it.
-        // Destroying at beforeAssemblyReload, while everything is still alive, is clean; OnDisable then no-ops.
+        // Clean the PreviewRenderUtility BEFORE the domain unloads (and before editor quit): a PRU that survives a
+        // domain reload leaks its camera/scene and spams errors. Cleaning at beforeAssemblyReload, while everything is
+        // still alive, is clean; OnDisable also cleans for a plain window close.
         AssemblyReloadEvents.beforeAssemblyReload += DestroyPreview;
         EditorApplication.quitting += DestroyPreview;
     }
@@ -75,14 +82,14 @@ public class ModelFactoryWindow : EditorWindow
         { w.LoadPreview(w.cur != null ? w.cur.resourceName : null, forceReimport: true); w.Repaint(); }
     }
 
-    // Destroy the interactive preview editor safely. The try/catch covers a plain window close where Unity's
-    // GameObjectInspector teardown can still throw for reasons of its own; the domain-reload variant of that
-    // failure is prevented at the source by the beforeAssemblyReload hook above.
+    // Release the preview: drop the draw list and clean the PreviewRenderUtility (safe if already null). Called on
+    // selection change (draw list only, via LoadPreview) and on window close / domain reload / quit (full clean).
     void DestroyPreview()
     {
-        if (previewEditor == null) return;
-        try { UnityEngine.Object.DestroyImmediate(previewEditor); } catch { }
-        previewEditor = null;
+        previewDraws = null;
+        if (previewPRU == null) return;
+        try { previewPRU.Cleanup(); } catch { }
+        previewPRU = null;
     }
 
     // Load the baked prefab (animated <name>_Preview, else static <name>_Model) and build an interactive preview editor.
@@ -90,7 +97,7 @@ public class ModelFactoryWindow : EditorWindow
     // stale cached copy until a manual reimport. Force a synchronous reimport of the mesh + prefab so the preview is current.
     void LoadPreview(string name, bool forceReimport = false)
     {
-        DestroyPreview();
+        previewDraws = null;   // drop the old draw list; keep the PRU alive for reuse (it's cleaned on reload/close)
         previewFor = name ?? "";
         if (string.IsNullOrEmpty(name)) return;
         // The animated preview companion lives in FactorySource (bake INPUT, not shipped), NOT Resources — see
@@ -106,17 +113,102 @@ public class ModelFactoryWindow : EditorWindow
                 if (AssetDatabase.LoadMainAssetAtPath(dep) != null)
                     AssetDatabase.ImportAsset(dep, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
         var go = AssetDatabase.LoadAssetAtPath<GameObject>(path);
-        if (go != null) previewEditor = UnityEditor.Editor.CreateEditor(go);
+        if (go != null) BuildDrawList(go);
+    }
+
+    // Flatten the baked prefab's renderers into a draw list + combined bounds for the PreviewRenderUtility (same
+    // approach as the Animation Lab fit preview). The prefab's shared materials already carry the baked atlas.
+    void BuildDrawList(GameObject go)
+    {
+        previewDraws = new List<(Mesh, Material[], Matrix4x4)>();
+        bool first = true;
+        foreach (var rr in go.GetComponentsInChildren<Renderer>(true))
+        {
+            Mesh m = rr is SkinnedMeshRenderer smr ? smr.sharedMesh : rr.GetComponent<MeshFilter>()?.sharedMesh;
+            if (m == null) continue;
+            var mtx = rr.transform.localToWorldMatrix;
+            previewDraws.Add((m, rr.sharedMaterials, mtx));
+            var wb = TransformBounds(mtx, m.bounds);
+            if (first) { previewBounds = wb; first = false; } else previewBounds.Encapsulate(wb);
+        }
+        if (previewDraws.Count == 0) previewDraws = null;
+    }
+
+    static Bounds TransformBounds(Matrix4x4 m, Bounds b)
+    {
+        var c = m.MultiplyPoint3x4(b.center);
+        var e = b.extents;
+        var ne = new Vector3(
+            Mathf.Abs(m.m00) * e.x + Mathf.Abs(m.m01) * e.y + Mathf.Abs(m.m02) * e.z,
+            Mathf.Abs(m.m10) * e.x + Mathf.Abs(m.m11) * e.y + Mathf.Abs(m.m12) * e.z,
+            Mathf.Abs(m.m20) * e.x + Mathf.Abs(m.m21) * e.y + Mathf.Abs(m.m22) * e.z);
+        return new Bounds(c, ne * 2f);
     }
 
     // Interactive 3D preview embedded in the window, so a bake's result shows immediately (no hunting in the Project view).
     void DrawPreview()
     {
-        if (previewEditor == null || !previewEditor.HasPreviewGUI()) return;
+        if (previewDraws == null) return;
         EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Preview — " + previewFor + "   (drag to orbit, scroll to zoom)", EditorStyles.miniBoldLabel);
+        EditorGUILayout.LabelField("Preview — " + previewFor + "   (drag = orbit · middle-drag = pan · scroll = zoom)", EditorStyles.miniBoldLabel);
         var r = GUILayoutUtility.GetRect(200, 260, GUILayout.ExpandWidth(true));
-        previewEditor.OnInteractivePreviewGUI(r, EditorStyles.helpBox);
+        var e = Event.current;
+        if (r.Contains(e.mousePosition))
+        {
+            if (e.type == EventType.ScrollWheel)
+            {
+                // Consume the wheel HERE so the window's outer scroll view never sees it — THIS is the zoom. (The
+                // built-in GameObject preview had no zoom at all, and the scroll view ate the wheel — the old bug.)
+                previewZoom = Mathf.Clamp(previewZoom * Mathf.Pow(1.12f, e.delta.y > 0 ? 1f : -1f), 0.2f, 5f);
+                e.Use(); Repaint();
+            }
+            else if (e.type == EventType.MouseDrag && e.button == 0)
+            {
+                previewOrbit += new Vector2(e.delta.x, -e.delta.y) * 0.7f;
+                previewOrbit.y = Mathf.Clamp(previewOrbit.y, -89f, 89f);
+                e.Use(); Repaint();
+            }
+            else if (e.type == EventType.MouseDrag && (e.button == 1 || e.button == 2))
+            {
+                // middle- or right-drag pans in the camera plane; scaled by radius (below) so it tracks the cursor at any zoom
+                previewPan += new Vector2(-e.delta.x, e.delta.y) * 0.0035f;
+                e.Use(); Repaint();
+            }
+        }
+        if (e.type != EventType.Repaint) return;
+        if (previewPRU == null) previewPRU = new PreviewRenderUtility();
+        if (previewFallbackMat == null) previewFallbackMat = new Material(Shader.Find("Standard"));
+        previewPRU.BeginPreview(r, GUIStyle.none);
+        // try/finally so a throw in DrawMesh/Render can never skip EndPreview — an unclosed PRU errors and renders
+        // garbage on EVERY later frame (the "BeginPreview not closed" cascade).
+        Texture tex = null;
+        try
+        {
+            var cam = previewPRU.camera;
+            float radius = Mathf.Max(previewBounds.extents.magnitude, 0.1f);
+            float dist = radius * 2.0f * previewZoom;
+            var rot = Quaternion.Euler(-previewOrbit.y, previewOrbit.x, 0f);
+            // pan shifts the look target along the camera's right/up axes (× radius so it feels consistent at any size)
+            var center = previewBounds.center + rot * new Vector3(previewPan.x * radius, previewPan.y * radius, 0f);
+            cam.transform.position = center + rot * (Vector3.back * dist);
+            cam.transform.rotation = Quaternion.LookRotation(center - cam.transform.position);
+            cam.nearClipPlane = 0.01f;
+            cam.farClipPlane = dist + radius * 4f;
+            cam.fieldOfView = 30f;
+            previewPRU.lights[0].intensity = 1.3f;
+            previewPRU.lights[0].transform.rotation = Quaternion.Euler(45f, 45f, 0f);
+            if (previewPRU.lights.Length > 1) previewPRU.lights[1].intensity = 0.6f;
+            previewPRU.ambientColor = new Color(0.3f, 0.3f, 0.3f);
+            foreach (var (mesh, mats, mtx) in previewDraws)
+                for (int s = 0; s < mesh.subMeshCount; s++)
+                {
+                    var mat = mats != null && mats.Length > 0 ? (mats[Mathf.Min(s, mats.Length - 1)] ?? previewFallbackMat) : previewFallbackMat;
+                    previewPRU.DrawMesh(mesh, mtx, mat, s);
+                }
+            cam.Render();
+        }
+        finally { tex = previewPRU.EndPreview(); }
+        if (tex != null) GUI.DrawTexture(r, tex, ScaleMode.StretchToFill, false);
     }
 
     void RefreshList()
@@ -383,8 +475,9 @@ public class ModelFactoryWindow : EditorWindow
         cur.atlasMaxDim = EditorGUILayout.IntPopup(new GUIContent("Atlas size",
             "Longest side of the baked atlas, in pixels. The atlas is DXT1-compressed and saved to the shipped _Atlas.asset, " +
             "so SMALLER = smaller mod bundle. A unit is ~80px at map zoom (and its info card uses your 2D portrait, not the " +
-            "model), so 512-1024 is plenty; pick 2048 only for a unit you zoom in on closely. Re-bake to apply."),
-            cur.atlasMaxDim, new[] { new GUIContent("256"), new GUIContent("512"), new GUIContent("1024"), new GUIContent("2048") }, new[] { 256, 512, 1024, 2048 });
+            "model), so 512-1024 is plenty; pick 2048 for a unit you zoom in on closely, and 4096 only when the source " +
+            "texture is that large AND you really want to read fine detail (heaviest bundle + VRAM). Re-bake to apply."),
+            cur.atlasMaxDim, new[] { new GUIContent("256"), new GUIContent("512"), new GUIContent("1024"), new GUIContent("2048"), new GUIContent("4096") }, new[] { 256, 512, 1024, 2048, 4096 });
         cur.materialMode = (MaterialMode)EditorGUILayout.EnumPopup(new GUIContent("Material mode",
             "How the bake handles a model with MORE THAN ONE material. Auto = pack a multi-material atlas when the model has >1 " +
             "material, else a single texture (right for most). Single = force one texture — correct for CLOSED models (tanks, " +
@@ -441,6 +534,13 @@ public class ModelFactoryWindow : EditorWindow
             "pose's time to frame 0 each frame, holding the mesh rigid — it still glides tile-to-tile (that's transform-driven, " +
             "not animation). Static models only; animated models play their own baked clip. No re-bake, just rebuild the mod."),
             cur.freezeDonorAnim);
+
+        cur.silenceDonorVfx = EditorGUILayout.Toggle(new GUIContent("Silence donor VFX (flashes)",
+            "Suppress the DONOR's animation-driven VFX on this unit — muzzle flashes, animator smoke puffs. Those effects " +
+            "anchor to DONOR bone names that don't exist on your injected skeleton, so they render misplaced (the AA-gun " +
+            "flash floating in mid-air). VFX only: the donor's SOUNDS are untouched (use 'Silence donor sound' in the Sound " +
+            "Studio for those). Runtime-only — no re-bake, just rebuild the mod."),
+            cur.silenceDonorVfx);
 
         EditorGUILayout.Space();
         EditorGUILayout.LabelField("Texture / import", EditorStyles.miniBoldLabel);
@@ -890,6 +990,8 @@ public class ModelFactoryWindow : EditorWindow
             || (cur.animateBones ?? "") != (e.animateBones ?? "")
             || cur.materialMode != e.materialMode
             || cur.convertRig != e.convertRig
+            || cur.autoGroundWheels != e.autoGroundWheels
+            || (cur.socketBones ?? "") != (e.socketBones ?? "")
             || cur.animStateDriven != e.animStateDriven
             || (cur.animClipMove ?? "") != (e.animClipMove ?? "")
             || (cur.animClipAfter ?? "") != (e.animClipAfter ?? "")
@@ -913,7 +1015,7 @@ public class ModelFactoryWindow : EditorWindow
         albedoBrightness = cur.albedoBrightness, albedoSaturation = cur.albedoSaturation, keepBlack = cur.keepBlack, materialMode = cur.materialMode,
         atlasMaxDim = cur.atlasMaxDim <= 0 ? 512 : cur.atlasMaxDim,
         stripParts = cur.stripParts,
-        animated = cur.animated, animClip = (cur.animClip ?? "").Trim(), animateBones = (cur.animateBones ?? "").Trim(), animUnitFix = cur.animUnitFix, convertRig = cur.convertRig,
+        animated = cur.animated, animClip = (cur.animClip ?? "").Trim(), animateBones = (cur.animateBones ?? "").Trim(), animUnitFix = cur.animUnitFix, convertRig = cur.convertRig, autoGroundWheels = cur.autoGroundWheels, socketBones = (cur.socketBones ?? "").Trim(),
         deployConvert = cur.deployConvert, deployStart = cur.deployStart, deployEnd = cur.deployEnd,
         deployStrip = (cur.deployStrip ?? "").Trim(), deployReadyFrame = (cur.deployReadyFrame ?? "").Trim(), deployLegScale = (cur.deployLegScale ?? "").Trim(), deployBarrelScale = (cur.deployBarrelScale ?? "").Trim(),
         deployRecoil = (cur.deployRecoil ?? "").Trim(), deployRecoilStep = (cur.deployRecoilStep ?? "").Trim(), deployRecoilMag = (cur.deployRecoilMag ?? "").Trim(), deployArcR = (cur.deployArcR ?? "").Trim(), deployRecoilReturn = (cur.deployRecoilReturn ?? "").Trim(), deploySlamDeg = (cur.deploySlamDeg ?? "").Trim(), deploySlamSettle = (cur.deploySlamSettle ?? "").Trim(),
@@ -949,13 +1051,14 @@ public class ModelFactoryWindow : EditorWindow
             if (regE != null)
             {
                 cur.animClip = regE.animClip; cur.animateBones = regE.animateBones; cur.animUnitFix = regE.animUnitFix;
-                cur.convertRig = regE.convertRig;
+                cur.convertRig = regE.convertRig; cur.autoGroundWheels = regE.autoGroundWheels;
                 cur.deployConvert = regE.deployConvert; cur.deployStart = regE.deployStart; cur.deployEnd = regE.deployEnd;
                 cur.deployStrip = regE.deployStrip; cur.deployReadyFrame = regE.deployReadyFrame; cur.deployLegScale = regE.deployLegScale; cur.deployBarrelScale = regE.deployBarrelScale;
                 cur.deployRecoil = regE.deployRecoil; cur.deployRecoilStep = regE.deployRecoilStep; cur.deployRecoilMag = regE.deployRecoilMag; cur.deployArcR = regE.deployArcR; cur.deployRecoilReturn = regE.deployRecoilReturn; cur.deploySlamDeg = regE.deploySlamDeg; cur.deploySlamSettle = regE.deploySlamSettle;
                 cur.animStateDriven = regE.animStateDriven; cur.animClipMove = regE.animClipMove; cur.animClipAfter = regE.animClipAfter; cur.animClipAttack = regE.animClipAttack; cur.animClipCombat = regE.animClipCombat; cur.animClipPreMove = regE.animClipPreMove; cur.animClipIdle = regE.animClipIdle; cur.animClipIdleAlt = regE.animClipIdleAlt; cur.animClipIdleAlt2 = regE.animClipIdleAlt2;
                 cur.clipMove = regE.clipMove; cur.clipAfter = regE.clipAfter; cur.clipAttack = regE.clipAttack; cur.clipCombat = regE.clipCombat; cur.clipPreMove = regE.clipPreMove; cur.clipIdle = regE.clipIdle; cur.clipIdleAlt = regE.clipIdleAlt; cur.clipIdleAlt2 = regE.clipIdleAlt2; cur.idleAltInterval = regE.idleAltInterval;
                 cur.attackRepeats = regE.attackRepeats; cur.clearAimLayer = regE.clearAimLayer;
+                cur.turretBone = regE.turretBone; cur.turretAxis = regE.turretAxis; cur.muzzleBone = regE.muzzleBone; cur.socketBones = regE.socketBones;
                 cur.handPropName = regE.handPropName; cur.handPropGuid = regE.handPropGuid; cur.handPropMat = regE.handPropMat; cur.handPropBone = regE.handPropBone; cur.handPropAngles = regE.handPropAngles;
                 cur.fireOnAttack = regE.fireOnAttack; cur.deployOnStop = regE.deployOnStop;
                 cur.deployPoseTime = regE.deployPoseTime; cur.deploySpeed = regE.deploySpeed; cur.recoilSpeed = regE.recoilSpeed;

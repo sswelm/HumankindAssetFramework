@@ -48,6 +48,7 @@ public class ModelDef
     public string animateBones = "";    // ANIMATED only: comma-separated bone-name prefixes to keep animation on (e.g. "prop,rotor"); empty = keep the whole clip
     public bool animUnitFix = false;    // ANIMATED only (BAKE-TIME, not runtime): tick if the model bakes ~100x too big & floats (a metre->cm FBX unit scale). The baker then measures the FBX at true scale (useFileScale off) + bakes with the unit scale on, so Size = in-game units. Per-model: some rig exports need it, others break with it (the drone bakes correct OFF, the howitzer needs it ON).
     public bool convertRig = false;     // ANIMATED only (BAKE-TIME, not runtime): route the bake through the RAW-RIG CONVERSION (rest-normalize + visual rebake, no-op root collapse, topological bone rename, rotation/scale fold, clean-unit export). Needed for auto-rigged/location-keyed rigs (the Combine soldier); leave OFF for purpose-made rigs (drone, howitzer) — off = the byte-identical legacy pipeline. This flag — not the Rotation field — is the pipeline switch (it used to be 'rotation != 0', which made Rotation a landmine on legacy models).
+    public bool autoGroundWheels = false; // ANIMATED only (BAKE-TIME): sit a rigged VEHICLE on the terrain automatically — the bake drops the model's LOWEST point (tyre contact) to the skeleton origin (lift by −minZ, the same keel→z=0 the static path does), so you never dial the Position offset by hand. SELF-CORRECTING (raw file lifts fully, an already-grounded one lifts ~0 → never double-lifts). Opt-in: only for a vehicle whose lowest point is its ground contact (a flyer/hover model would be pinned down).
     public bool deployConvert = false;  // ANIMATED only (BAKE-TIME): run Tools/deploy_convert.py on the model file FIRST — turns a RIGID-MOVING-PARTS source (Sketchfab howitzer/crane/landing-gear: node transforms, no skinning) into a bone-per-part skinned rig the animated bake can consume. The model file should be the RAW original; the baker converts into FactorySource/<res>/deploy_converted.glb (cached on args+source) and bakes THAT. Every knob below is part of the entry — nothing hand-run, fully reproducible. The converted file also carries ready-made role clips (deployed/folded/unfold/fold/recoil).
     public int deployStart = 0;         // deployConvert: source frame where the DEPLOY motion starts (usually 0).
     public int deployEnd = 0;           // deployConvert: source frame where the deploy motion ENDS (fully deployed). REQUIRED (>0) when deployConvert — scrub the raw file in the ▶ picker to find it.
@@ -71,7 +72,12 @@ public class ModelDef
     public string animClipIdleAlt = ""; // STATE-DRIVEN only: optional IDLE-ALT flavor one-shot clip (the tiger's howl) — occasional, on the idleAltInterval cadence, only while plain-idle. "" = none.
     public string animClipIdleAlt2 = "";// STATE-DRIVEN only: optional SECOND idle-alt flavor clip (eat/groom); each firing picks randomly between the two. "" = none.
     public string animClipIdle = "";    // STATE-DRIVEN only: optional IDLE-OVERRIDE clip. When set, the primary Clip (animClip) is only the REFERENCE clip (defines the skeleton's reference pose — use the FULL source motion) and idle plays THIS role instead. REQUIRED for stance idles (a howitzer's deployed hold, e.g. "deploy[179..180]"): a stance baked as the PRIMARY encodes ~identity against its own reference and renders as REST in-game (the "forgot to deploy" trap). Empty = idle plays animClip (characters: a real idle loop like Idle1 is its own valid reference).
+    public bool disabled = false;       // DEBUG (RUNTIME-ONLY): skip this override entirely so the ORIGINAL vanilla unit renders — to compare against the custom model or observe the donor's own animation. Save (no bake) + relaunch.
     public bool clearAimLayer = false;  // RUNTIME-ONLY: clear the game's procedural BoneRotation layer for this model (artillery — the donor streams aim/wheel junk that twists the rig). Needed by STATE-DRIVEN artillery (the legacy fire/deploy rule cleared it implicitly); characters must leave it OFF (it carries their facing).
+    public string turretBone = "";      // RUNTIME-ONLY (TURRETIZE): bone-name SUBSTRING (renamed b###_<orig>) of a turret to aim at the target. The plugin retargets the game's aim/heading angle onto this bone so the turret tracks the enemy. "" = no turret aim. No re-bake — set it, Save (no bake), relaunch.
+    public int turretAxis = -1;         // RUNTIME-ONLY: aim-axis override for the turret bone. -1 = keep the game's axis (reads as PITCH on most bones); 0/1/2 = force local X/Y/Z. A vehicle turret wants its YAW axis; a mechanized artillery barrel wants its PITCH axis. Dial 0/1/2 to find it — Save (no bake) + relaunch, no rebuild.
+    public string socketBones = "";     // BAKE-TIME (DONOR SOCKETS, 2026-07-24): "DonorName=OurBoneSubstr[@x,y,z];..." — bake EXACT-NAMED zero-weight socket bones (the names the donor's fire events ask for, e.g. "Canon_Up_left=MW_T") so flash/smoke/projectile origin resolve NATIVELY on our rig and follow the parent bone. Socketed models rename with 'A###_' (not 'b###_') so Amplitude's alphabetical sort stays topological. Obsoletes muzzleBone for re-baked models. Re-BAKE to apply.
+    public string muzzleBone = "";      // RUNTIME-ONLY (MUZZLE-RELOCATE): bone-name SUBSTRING (renamed b###_<orig>) the weapon muzzle-flash fires FROM. The donor's fire clip names ITS own weapon socket (an AA gun's "Canon"), absent on our renamed rig, so the flash lands off-side; the plugin redirects the lookup to THIS bone (e.g. the turret/gun) so the flash anchors on our unit. "" = leave vanilla. No re-bake — set it, Save (no bake), relaunch.
     public int attackRepeats = 1;       // STATE-DRIVEN only: how many times the ATTACK clip replays per trigger (window = repeats × clip duration). For short recoil-pop clips (shootAR2s = 0.17s). RUNTIME-ONLY — Save (no bake) is enough.
     public string handPropName = "";    // HAND PROP: the Prop Lab resource name of a weapon glued to a bone of OUR skeleton (assets <name>_Collection / <name>_DistrictMesh). RUNTIME-ONLY.
     public string handPropGuid = "";    // HAND PROP: the <name>_Collection Amplitude guid "a,b,c,d" (printed + clipboarded by the Prop Lab bake). "" = no hand prop.
@@ -100,6 +106,7 @@ public class ModelDef
     public float tintG = 0f;            // RUNTIME (not baked): universal skin colour offset, green (-255..+255).
     public float tintB = 0f;            // RUNTIME (not baked): universal skin colour offset, blue (-255..+255).
     public string textureFile = "";     // RUNTIME (not baked): TEXTURE-ONLY RETEXTURE. A PNG filename in the game's BepInEx/config/enc_skins/. When set, the plugin hot-loads that PNG onto the unit's ISOLATED output layer (vanilla mesh kept, original untouched) — no bake/rebuild. Takes precedence over desaturate. Managed by the Unit Retexture window (Tools ▸ ENC ▸ Unit Retexture): paint on a dump of the unit's own atlas, drop it in enc_skins/.
+    public bool silenceDonorVfx = false; // RUNTIME (not baked): SUPPRESS the donor's MecanimEvent VFX (muzzle flashes, animator smoke) on this unit — those effects anchor to DONOR bone names that don't exist on the injected skeleton, so they render misplaced (the AA-gun's floating flash). VFX ONLY: donor sounds are untouched (that's silenceDonorAudio). Factory checkbox "Silence donor VFX (flashes)".
     public bool silenceDonorAudio = false; // RUNTIME (not baked): SUPPRESS all of the borrowed donor's Wwise sound on this unit's pawns. A custom creature that reuses a donor (e.g. the Abomination borrows a BEAR) inherits the donor's IDLE growl and combat MAUL/SCRATCH — they ride in on the reused animator/pawn-description, not on any nullable data field. The plugin drops every AudioEmitter.PostEvent on our opted-in pawns (the one chokepoint both sounds use) and StopAll's the idle loop once. Only silences Wwise; our own custom WAVs (soundFile etc., Unity AudioSource) still play, so it composes with a replacement sound. Reusable on any unit with an unwanted inherited sound.
     public bool engineSound = false;    // RUNTIME (not baked): fire the per-ship engine MOVE sound (Play_UNIT_Vehicles_<Type>_Start/_Stop) on this unit's instances. Our injected/retextured units never trigger it themselves (it rides the audio-service path tied to the vanilla unit's move state), so they're silent on move. The plugin detects each instance's move-start/stop (render-position delta) and posts the engine event onto the pawn's AudioEmitter. Naval units proven; land/air TBD.
     public string engineStartEvent = ""; // RUNTIME (not baked): Wwise event NAME posted on move-START (e.g. Play_UNIT_Vehicles_StealthCorvette_Start). Set => posted BY NAME so it works for the FIRST unit at load (no live capture). Empty => the plugin falls back to a handle auto-captured from any same-family vehicle that moved this session. Extract names via the F8 "Dump Sound Catalog" (writes enc_sound_catalog.txt).
@@ -166,7 +173,13 @@ public static class ModelRegistry
         get => EditorPrefs.GetString("ENC.bepinexConfig", "");
         set => EditorPrefs.SetString("ENC.bepinexConfig", value ?? "");
     }
-    public static string RegistryPath => Path.Combine(ConfigDir, "enc_models.json");
+    // ENC is now a self-contained HAF SUBDIR PACK (2026-07-24): it ships as ONE directory (pack.json + sounds/ + skins/)
+    // so its registry AND file-assets are publishable, instead of loose in the shared BepInEx/config. PackLiveDir = what
+    // the running game reads (deployed under haf_packs/); PackRepoDir = the git-tracked source of truth in this project.
+    // The editor dual-writes both, exactly as it used to dual-write the live registry + the project backup.
+    public static string PackLiveDir => Path.Combine(ConfigDir, "haf_packs", "ENCReload");
+    public static string PackRepoDir => Path.Combine(Application.dataPath, "Pack", "ENCReload");
+    public static string RegistryPath => Path.Combine(PackLiveDir, "pack.json");
 
     // ---- zero-config game-path discovery (mirrors the Blender/glbconv self-location) ----
 
@@ -224,10 +237,11 @@ public static class ModelRegistry
     // which would wipe every baked model's settings.
     static bool lastLoadCorrupt;
 
-    // A VERSIONED shadow copy of the registry, written into the mod repo on every Save (Assets/Databases is
-    // git-tracked). It survives a game reinstall / Steam "verify files" wiping BepInEx/config, gives version
-    // history in git, and Load() auto-restores from it if the game registry ever goes missing.
-    public static string ProjectBackupPath => Path.Combine(Application.dataPath, "Databases", "enc_models.backup.json");
+    // The git-tracked SOURCE OF TRUTH: the pack's pack.json in the repo (Assets/Pack/ENCReload). Written on every Save,
+    // it survives a game reinstall / Steam "verify files" wiping BepInEx/config, gives version history in git, and Load()
+    // auto-restores the live pack from it if the game copy ever goes missing. (Was Assets/Databases/enc_models.backup.json
+    // when ENC was the loose base pack — now the whole pack ships as one directory.)
+    public static string ProjectBackupPath => Path.Combine(PackRepoDir, "pack.json");
 
     // Keep the registry in a STABLE alphabetical order (by resourceName, case-insensitive) everywhere it's read or
     // written, so the Factory dropdown AND both config files (the live enc_models.json + the git-tracked backup) list
