@@ -193,7 +193,12 @@ public class ModelFactoryWindow : EditorWindow
             cur.modelFile = EditorGUILayout.TextField("Model file", cur.modelFile);
             if (GUILayout.Button("Browse", GUILayout.Width(70)))
             {
-                var p = EditorUtility.OpenFilePanel("Select 3D model", "", "glb,gltf,obj,fbx,blend");
+                // Start at the current model file's folder (walking up to the nearest existing ancestor if it was
+                // renamed/moved), so Browse opens near the source instead of the project root.
+                string start = string.IsNullOrWhiteSpace(cur.modelFile) ? "" : System.IO.Path.GetDirectoryName(cur.modelFile);
+                while (!string.IsNullOrEmpty(start) && !System.IO.Directory.Exists(start))
+                    start = System.IO.Path.GetDirectoryName(start);
+                var p = EditorUtility.OpenFilePanel("Select 3D model", start ?? "", "glb,gltf,obj,fbx,blend");
                 if (!string.IsNullOrEmpty(p))
                 {
                     cur.modelFile = p;

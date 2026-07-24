@@ -446,7 +446,11 @@ public class AnimationLabWindow : EditorWindow
                 if (GUILayout.Button("Browse…", GUILayout.Width(70)))
                 {
                     string start = string.IsNullOrWhiteSpace(cur.modelFile) ? "" : System.IO.Path.GetDirectoryName(cur.modelFile);
-                    string picked = EditorUtility.OpenFilePanel("Model file", start, "glb,gltf,fbx,blend,obj");
+                    // If that folder no longer exists (e.g. the source folder was renamed/moved), walk up to the nearest
+                    // existing ancestor so Browse opens somewhere useful instead of falling back to the project root.
+                    while (!string.IsNullOrEmpty(start) && !System.IO.Directory.Exists(start))
+                        start = System.IO.Path.GetDirectoryName(start);
+                    string picked = EditorUtility.OpenFilePanel("Model file", start ?? "", "glb,gltf,fbx,blend,obj");
                     if (!string.IsNullOrEmpty(picked)) cur.modelFile = picked.Replace('\\', '/');
                 }
             }
