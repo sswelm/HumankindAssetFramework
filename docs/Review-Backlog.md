@@ -204,6 +204,13 @@ by when they'll bite.
   name (gated; existing bakes byte-identical). Obsoletes muzzleBone for rebaked models; the runtime knobs stay for
   quick fixes. Donor socket names discovered via the [Muzzle] GetBoneTRS diagnostic (armoured car donor asks for
   `Canon_Up_left` + `Move_bloc`).
+- **Fire-effect refinements on the verified muzzle system (spotted 2026-07-24, unbuilt).** The pin log showed the
+  AA-gun donor's multiple barrels as VARYING per-event offsets (`donorOff=` 0.80/0.85/1.20) from the single
+  `Move_bloc` anchor; the compensation currently flattens all onto one point. (1) **Barrel variation** — subtract
+  the MEAN donor offset instead of each event's own: flashes scatter slightly around the muzzle like the donor's
+  real barrels, essentially free. (2) **Multi-mount fire** — rotate successive fire events across several of the
+  model's own gun bones (the Ehrhardt has four rigged MG mounts, `MW_B/F/L/T`) — needs per-event socket selection
+  state; bigger. Both are polish on a verified base, not fixes.
 - **Death clip role (`clipDeath`)** — play the model's own death animation on `PresentationPawn.TriggerDeath` (the
   hook already fires for the death SOUND; arming a one-shot clip window from the same seam is the pattern the
   attack clip proved). Proving model: the gray wolf's `idle injured to dead reaction lft/rgt` (private test rig).

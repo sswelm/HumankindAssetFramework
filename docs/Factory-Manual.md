@@ -940,6 +940,15 @@ in-game-verified system that puts all of it back on YOUR model. Reference implem
    donor's socket-local offset** (the AA gun's barrel-length displacement would otherwise fling flash AND tracer
    start off the gun — they share one startPosition), then adds your dial.
 
+**Reading the offsets — a multi-barrel donor shows itself here.** The pin log's `donorOff=` values varied per shot
+(`0.80`, `0.85`, `1.20`): that's the AA gun's MULTIPLE BARRELS, expressed not as separate sockets but as different
+per-event displacements from the one `Move_bloc` anchor. The compensation flattens them all onto your single muzzle
+point — correct and verified, but it means every flash shares one spot. (Also don't confuse the two quads: the
+Muzzle-bone Pick dropdown's `MW (4 parts)` is *your model's* four MG-mount bones grouped by name prefix —
+`MW_B/F/L/T` on the Ehrhardt — not the donor's barrels.) Two unbuilt refinements ride this observation — see the
+Review-Backlog: *barrel variation* (subtract the MEAN donor offset instead of each event's own, so flashes scatter
+naturally around the muzzle) and *multi-mount fire* (rotate successive fire events across several of your gun bones).
+
 ### 17.3 Traps (each cost a test cycle — don't repeat them)
 
 - **A registry edit made OUTSIDE the editor does not re-slim.** The Blender-step cache compares the form vs the
