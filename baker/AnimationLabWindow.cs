@@ -656,13 +656,18 @@ public class AnimationLabWindow : EditorWindow
                 "Needs a re-BAKE; makes the runtime Muzzle-bone redirect unnecessary for this model."),
                 cur.socketBones ?? "");
             // Muzzle offset — the runtime world-space dial that finished the ArmouredCar: iterate value -> relaunch,
-            // no bake, no mod rebuild (the plugin reads the pack registry directly at launch).
-            cur.muzzleOffset = EditorGUILayout.TextField(new GUIContent("Muzzle offset (x,y,z)",
+            // no bake, no mod rebuild (the plugin reads the pack registry directly at launch). Three separate float
+            // fields in the UI; the registry keeps the plugin's "x,y,z" string (empty when all zero).
+            var muzzleOff = ParseCsvVec3(cur.muzzleOffset);
+            var muzzleOffNew = EditorGUILayout.Vector3Field(new GUIContent("Muzzle offset (world)",
                 "RUNTIME dial: world-units added to the pinned fire origin (muzzle flash + tracer start). The fix when a " +
-                "rig's gun-bone head sits somewhere unhelpful (the Ehrhardt's is at the model base -> '0,2.6,0' lifted the " +
-                "flash onto the turret gun). Judge from the [Muzzle] pin log's T= height vs pawnWorld. Empty = none. " +
+                "rig's gun-bone head sits somewhere unhelpful (the Ehrhardt's is at the model base -> Y 2.6 lifted the " +
+                "flash onto the turret gun). Y = up. Judge from the [Muzzle] pin log's T= height vs pawnWorld. All zero = off. " +
                 "Save (no bake) + relaunch per iteration — no re-bake, no mod rebuild."),
-                cur.muzzleOffset ?? "");
+                muzzleOff);
+            if (muzzleOffNew != muzzleOff)
+                cur.muzzleOffset = muzzleOffNew == Vector3.zero ? ""
+                    : string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0.###},{1:0.###},{2:0.###}", muzzleOffNew.x, muzzleOffNew.y, muzzleOffNew.z);
         }
 
         // --- Hand prop (runtime-only: Save (no bake) + rebuild the mod) ---
@@ -941,5 +946,18 @@ public class AnimationLabWindow : EditorWindow
             ? $"Baked ANIMATED '{cur.resourceName}' -> '{cur.pawnDescription}'\nskeleton {r.skeletonGuid}\nclip {r.clipGuid}{(cur.animStateDriven ? $"\nmove clip {r.clipMoveGuid}{(string.IsNullOrEmpty(r.clipAfterGuid) ? "" : $"  after clip {r.clipAfterGuid}")}{(string.IsNullOrEmpty(r.clipAttackGuid) ? "" : $"  attack clip {r.clipAttackGuid}")}{(string.IsNullOrEmpty(r.clipCombatGuid) ? "" : $"  combat clip {r.clipCombatGuid}")}" : "")}\nRebuild the mod + relaunch."
             : $"Baked '{cur.resourceName}', but the REGISTRY SAVE FAILED (see Console). Close whatever's locking enc_models.json and re-bake.";
         Debug.Log("[AnimLab] " + status);
+    }
+
+    // Parse a registry "x,y,z" CSV (invariant culture) into a Vector3; anything malformed = zero. Used by the
+    // muzzle-offset triple-field UI, which stores back the same CSV so the plugin's reader is untouched.
+    static Vector3 ParseCsvVec3(string s)
+    {
+        var p = (s ?? "").Split(',');
+        if (p.Length != 3) return Vector3.zero;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        return float.TryParse(p[0], System.Globalization.NumberStyles.Float, inv, out var x)
+            && float.TryParse(p[1], System.Globalization.NumberStyles.Float, inv, out var y)
+            && float.TryParse(p[2], System.Globalization.NumberStyles.Float, inv, out var z)
+            ? new Vector3(x, y, z) : Vector3.zero;
     }
 }
