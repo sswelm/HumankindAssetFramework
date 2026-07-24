@@ -181,6 +181,16 @@ by when they'll bite.
   the few that fire MULTIPLE times (AA burst) so the flash repeats. General lesson recorded: **a donor's effect = its
   skeleton + weapon sockets** (already half-logged: `donor.Skeleton` / `BoneInfos` / `donor fragment[N]`). The new
   **Disable override** flag (`ModelDef.disabled`, runtime) A/B's our model vs the raw donor for exactly this kind of probe.
+- **DONOR SOCKETS at bake time (`socketBones`, agreed 2026-07-24 — the muzzle endgame).** The interception chain
+  (GetBoneTRS redirect → StartVFXEvent pin → offset compensation) moved/killed the FLASH but smoke + tracer origin
+  still read the donor socket, and the compensated TRS raised a space question (flash vanished off-screen). The
+  correct architecture: bake EXACT-NAMED donor socket bones onto our rig (`socketBones: "Canon_Up_left=MW_T;..."`,
+  zero-weight leaves, optional tip offset) so the game's own lookups resolve NATIVELY — flash, smoke, and bullet
+  origin all correct-by-construction and turret-following. Wrinkle: Amplitude sorts bones alphabetically requiring
+  parents-first — socketed models switch the rename prefix `b###_`→`A###_` so every real bone precedes any donor
+  name (gated; existing bakes byte-identical). Obsoletes muzzleBone for rebaked models; the runtime knobs stay for
+  quick fixes. Donor socket names discovered via the [Muzzle] GetBoneTRS diagnostic (armoured car donor asks for
+  `Canon_Up_left` + `Move_bloc`).
 - **Death clip role (`clipDeath`)** — play the model's own death animation on `PresentationPawn.TriggerDeath` (the
   hook already fires for the death SOUND; arming a one-shot clip window from the same seam is the pattern the
   attack clip proved). Proving model: the gray wolf's `idle injured to dead reaction lft/rgt` (private test rig).
