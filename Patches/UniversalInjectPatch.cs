@@ -75,6 +75,7 @@ namespace ENCAccessProof
         public int turretAxis = -1;       // aim-axis override for the turret bone: -1 = keep the game's streamed axis (1 = "up" in ITS frame, which on a bone pointing along its own length reads as PITCH); 0/1/2 = force the bone's local X/Y/Z. A vehicle TURRET needs its YAW axis; a mechanized HOWITZER/ARTILLERY barrel needs its PITCH axis — hence per-model.
         public string muzzleBone = "";    // MUZZLE-RELOCATE (2026-07-24): bone-name SUBSTRING (renamed b###_<orig>) that the weapon muzzle-flash should fire FROM. The donor's fire clip names ITS weapon socket (e.g. an AA gun's "Canon") in the FireProjectile mecanim event; that name is absent on our renamed rig, so AlterationFireProjectile falls back to the pawn's ROOT + the donor's socket-local offset -> the flash lands off-side. We hook PresentationSubPawn.GetBoneTRS and, when the requested bone isn't on our skeleton, redirect the lookup to THIS bone (e.g. the turret/gun) so the flash anchors on our unit. "" = leave the vanilla behavior. Runtime-only (no re-bake).
         public string muzzleBoneName;     // cached FULL bone name resolved from muzzleBone (null = not resolved yet, "" = not found on our skeleton).
+        public bool muzzlePinLogged;      // session flag: log the first StartVFXEvent pin once per entry
         public object handPropLayer;      // session-scoped: our PRIVATE clone of the borrowed weapon output layer, painted with the prop's own atlas (<prop>_Atlas)
         public UnityEngine.Texture2D propAtlasTex;   // session-scoped: the prop atlas — repainted EVERY TICK like the unit retexture (the game resets the material; a one-shot paint flip-flopped between sessions)
         public readonly Dictionary<long, UnityEngine.Vector3> stateLastPos = new Dictionary<long, UnityEngine.Vector3>();  // MAIN thread poll: unit GUID -> last render pos
@@ -2579,6 +2580,47 @@ namespace ENCAccessProof
             }
             catch { }
             return false;
+        }
+
+        // ---- MUZZLE PIN v2 (2026-07-24): the GetBoneTRS redirect (v1) verifiably lands the right BONE, but the
+        // flash still spawned off it — the donor's baked local offset (PositionToLaunchVFX, the AA gun's barrel-length
+        // displacement) is added ON TOP of the returned TRS and dominates. This runs in the StartVFXEvent prefix
+        // (which has the offset as an argument): for a unit with muzzleBone, pin BOTH dest transforms to our muzzle
+        // bone's TRS and ZERO the donor offset — the VFX spawns exactly at the bone. Applies to all of the unit's
+        // mecanim VFX (the observed sockets are the canon + Move_bloc); if a movement effect visibly pins to the gun,
+        // the refinement is a donor-socket name filter. ----
+        static MethodBase subPawnBoneTRS; static bool subPawnBoneTRSResolved;
+        internal static void MuzzlePin(object interp, ref object destPos, ref object destRot, ref UnityEngine.Vector3 localPosition)
+        {
+            try
+            {
+                var list = entries;
+                if (list == null) return;
+                bool anyMuzzle = false;
+                for (int i = 0; i < list.Count; i++) if (!string.IsNullOrEmpty(list[i].muzzleBone)) { anyMuzzle = true; break; }
+                if (!anyMuzzle) return;
+                var subPawn = GetMember(interp, "presentationSubPawn");
+                string n = (subPawn as UnityEngine.Component)?.gameObject?.name;
+                if (string.IsNullOrEmpty(n)) return;
+                ModelEntry e = null;
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var x = list[i];
+                    if (!string.IsNullOrEmpty(x.muzzleBone) && !string.IsNullOrEmpty(x.pawnDescription)
+                        && n.IndexOf(x.pawnDescription, StringComparison.OrdinalIgnoreCase) >= 0) { e = x; break; }
+                }
+                if (e == null) return;
+                var mn = ResolveMuzzleBoneName(e);
+                if (mn == null) return;
+                if (!subPawnBoneTRSResolved)
+                { subPawnBoneTRSResolved = true; subPawnBoneTRS = subPawn != null ? AccessTools.Method(subPawn.GetType(), "GetBoneTRS", new[] { typeof(string) }) : null; }
+                if (subPawnBoneTRS == null) return;
+                var trs = subPawnBoneTRS.Invoke(subPawn, new object[] { mn });
+                if (trs == null) return;
+                destPos = trs; destRot = trs; localPosition = UnityEngine.Vector3.zero;
+                if (!e.muzzlePinLogged) { e.muzzlePinLogged = true; Plugin.Log.LogInfo($"[Muzzle] '{e.resourceName}' VFX pinned to '{mn}' (donor offset zeroed)"); }
+            }
+            catch (Exception ex) { if (!muzzleErrLogged) { muzzleErrLogged = true; Plugin.Log.LogError("[Muzzle] pin failed (disabled): " + ex); } }
         }
 
         // ---- DEATH CUE (2026-07-23): a one-shot when a pawn of ours starts dying. Seam: PresentationPawn.TriggerDeath —

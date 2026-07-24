@@ -242,10 +242,18 @@ namespace ENCAccessProof
             if (n == 0) Plugin.Log.LogWarning("[Vfx] NOT found: MecanimEventInterpreter.StartVFXEvent — silenceDonorVfx won't work");
             else Plugin.Log.LogInfo($"[Vfx] hooked MecanimEventInterpreter.StartVFXEvent ({n} overload(s), donor VFX suppression)");
         }
-        static bool Prefix(object __instance)
+        // destTransformForPosition/destTransformForRotation are Amplitude TRS structs — injected as object (boxed);
+        // localPosition is the donor's baked socket-local offset. Suppress wins; otherwise the muzzle pin retargets
+        // the VFX to our muzzle bone and zeroes the offset (see UniversalInject.MuzzlePin).
+        static bool Prefix(object __instance, ref object destTransformForPosition, ref object destTransformForRotation, ref UnityEngine.Vector3 localPosition)
         {
-            try { return !UniversalInject.SuppressVfxFor(__instance); }
-            catch { return true; }
+            try
+            {
+                if (UniversalInject.SuppressVfxFor(__instance)) return false;
+                UniversalInject.MuzzlePin(__instance, ref destTransformForPosition, ref destTransformForRotation, ref localPosition);
+            }
+            catch { }
+            return true;
         }
     }
 
