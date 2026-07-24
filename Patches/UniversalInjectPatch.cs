@@ -2060,6 +2060,7 @@ namespace ENCAccessProof
         // and the entry carries a muzzleBone, hand back OUR muzzle bone's TRS instead (found -> the real path, no re-redirect).
         static MethodBase gocaMethod;   // PresentationPawnDefinitionAddOn.GetOrCreateAddOn(PresentationPawnDefinition)
         static bool gocaResolved, muzzleErrLogged;
+        static readonly HashSet<string> muzzleSeen = new HashSet<string>();   // diagnostic: first distinct bone names through the hook
         static readonly Dictionary<Type, MethodBase> boneIdxMethods = new Dictionary<Type, MethodBase>();
 
         // Full bone name for e.muzzleBone (substring) against OUR skeleton, cached in e.muzzleBoneName. null = unset / not found.
@@ -2122,6 +2123,11 @@ namespace ENCAccessProof
                 for (int i = 0; i < entries.Count; i++) if (!string.IsNullOrEmpty(entries[i].muzzleBone)) { anyMuzzle = true; break; }
                 if (!anyMuzzle) return false;
                 var e = MuzzleEntryForSubPawn(subPawn);
+                // DIAGNOSTIC (temporary, first 12 distinct names): what does the fire path actually ask GetBoneTRS for,
+                // and does the sub-pawn->entry match work? Zero [Muzzle] lines while flashes stay off-side = the redirect
+                // never engages; this shows whether the CALL is missing or the MATCH is failing.
+                if (muzzleSeen.Count < 12 && muzzleSeen.Add(boneName))
+                    Plugin.Log.LogInfo($"[Muzzle] GetBoneTRS('{boneName}') subPawn='{(subPawn as UnityEngine.Component)?.gameObject?.name ?? "?"}' entry={(e?.resourceName ?? "none")}");
                 if (e == null) return false;
                 if (SkelHasBone(e.skeleton, boneName)) return false;      // the bone IS on our rig — a genuine lookup, leave it
                 var mn = ResolveMuzzleBoneName(e);

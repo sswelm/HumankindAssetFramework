@@ -230,13 +230,17 @@ namespace ENCAccessProof
     // opted-in units at the launch chokepoint. VFX only — StartSFXEvent/Wwise sounds are deliberately untouched. ----
     [HarmonyPatch] internal static class Hk_SilenceVfx
     {
-        static MethodBase TargetMethod()
+        // StartVFXEvent has MULTIPLE overloads (AccessTools.Method by name threw AmbiguousMatchException — the
+        // silent 18/19 failure); enumerate and patch them all.
+        static System.Collections.Generic.IEnumerable<MethodBase> TargetMethods()
         {
             var t = AccessTools.TypeByName("Amplitude.Mercury.Animation.MecanimEventInterpreter");
-            var m = t != null ? AccessTools.Method(t, "StartVFXEvent") : null;
-            if (m != null) Plugin.Log.LogInfo("[Vfx] hooked MecanimEventInterpreter.StartVFXEvent (donor VFX suppression)");
-            else Plugin.Log.LogWarning("[Vfx] NOT found: MecanimEventInterpreter.StartVFXEvent — silenceDonorVfx won't work");
-            return m;
+            int n = 0;
+            if (t != null)
+                foreach (var m in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                    if (m.Name == "StartVFXEvent") { n++; yield return m; }
+            if (n == 0) Plugin.Log.LogWarning("[Vfx] NOT found: MecanimEventInterpreter.StartVFXEvent — silenceDonorVfx won't work");
+            else Plugin.Log.LogInfo($"[Vfx] hooked MecanimEventInterpreter.StartVFXEvent ({n} overload(s), donor VFX suppression)");
         }
         static bool Prefix(object __instance)
         {
