@@ -2142,36 +2142,51 @@ namespace ENCAccessProof
                 if (muzzleSeen.Count < 12 && muzzleSeen.Add(boneName))
                     Plugin.Log.LogInfo($"[Muzzle] GetBoneTRS('{boneName}') subPawn='{(subPawn as UnityEngine.Component)?.gameObject?.name ?? "?"}' entry={(e?.resourceName ?? "none")}");
                 if (e == null) return false;
-                if (SkelHasBone(e.skeleton, boneName)) return false;      // the bone IS on our rig — a genuine lookup, leave it
+                if (SkelHasBone(e.skeleton, boneName))
+                {
+                    // NATIVE SOCKET HIT (post-socketBones rebake): the donor's socket name now EXISTS on our rig, so
+                    // the lookup succeeds natively — but AlterationFireProjectile still adds the donor's barrel-length
+                    // offset ON TOP, flinging flash AND tracer start off the gun (field result: the smoke [small
+                    // offsets] sat on the turret while flash+tracers [the canon offset] flew to the corner /
+                    // vanished). Inside StartEvent, hand back the REAL socket TRS pre-compensated so the caller's
+                    // own "+offset" lands exactly on the socket. Gated on the entry carrying muzzleBone — on
+                    // socketed models that knob doubles as the compensation enable.
+                    if (pendingMuzzleActive && boneName == pendingMuzzlePosName)
+                    {
+                        result = getBoneTRS.Invoke(subPawn, new object[] { boneName });
+                        if (result != null) { CompensateDonorOffset(result, e, boneName, subPawn); return true; }
+                    }
+                    return false;      // any other real-bone lookup — genuine, leave it
+                }
                 var mn = ResolveMuzzleBoneName(e);
                 if (mn == null) return false;
                 result = getBoneTRS.Invoke(subPawn, new object[] { mn }); // reentrant, but mn is found -> the real TRS, no re-redirect
                 // Inside AlterationFireProjectile.StartEvent and this is the POSITION socket: pre-compensate the donor
                 // offset on the boxed TRS so the caller's own Transform(offset) lands back on our muzzle bone (v3 above).
                 if (pendingMuzzleActive && boneName == pendingMuzzlePosName && result != null)
-                {
-                    if (!trsFieldsResolved)
-                    {
-                        trsFieldsResolved = true;
-                        var tt = result.GetType();
-                        trsTranslation = tt.GetField("Translation"); trsRotation = tt.GetField("Rotation"); trsScale = tt.GetField("Scale");
-                    }
-                    if (trsTranslation != null && trsRotation != null && trsScale != null)
-                    {
-                        var tr = (UnityEngine.Vector3)trsTranslation.GetValue(result);
-                        var rot = (UnityEngine.Quaternion)trsRotation.GetValue(result);
-                        float sc = Convert.ToSingle(trsScale.GetValue(result));
-                        trsTranslation.SetValue(result, tr - rot * (pendingMuzzleOffset * sc));
-                        // DIAGNOSTIC: compare OUR bone's raw translation with the pawn's actual render position — a large
-                        // mismatch means the TRS spaces differ (our bone pawn-local vs the donor's world-placed) and the
-                        // "vanished" flash actually spawned off-screen. Logged every shot while we calibrate.
-                        var pawnTr = (subPawn as UnityEngine.Component)?.transform;
-                        Plugin.Log.LogInfo($"[Muzzle] '{e.resourceName}' pin: bone '{mn}' T={tr.ToString("0.0")} scale={sc:0.###} offset={pendingMuzzleOffset.ToString("0.00")} pawnWorld={(pawnTr != null ? pawnTr.position.ToString("0.0") : "?")}");
-                    }
-                }
+                    CompensateDonorOffset(result, e, mn, subPawn);
                 return true;
             }
             catch (Exception ex) { if (!muzzleErrLogged) { muzzleErrLogged = true; Plugin.Log.LogError("[Muzzle] redirect failed (disabled): " + ex); } return false; }
+        }
+
+        // Subtract the donor's socket-local offset from a boxed TRS (Translation -= Rotation * (offset * Scale)) so the
+        // caller's own Transform(offset) returns to the bone. Per-shot diagnostic log stays on while this calibrates.
+        static void CompensateDonorOffset(object trs, ModelEntry e, string boneLabel, object subPawn)
+        {
+            if (!trsFieldsResolved)
+            {
+                trsFieldsResolved = true;
+                var tt = trs.GetType();
+                trsTranslation = tt.GetField("Translation"); trsRotation = tt.GetField("Rotation"); trsScale = tt.GetField("Scale");
+            }
+            if (trsTranslation == null || trsRotation == null || trsScale == null) return;
+            var tr = (UnityEngine.Vector3)trsTranslation.GetValue(trs);
+            var rot = (UnityEngine.Quaternion)trsRotation.GetValue(trs);
+            float sc = Convert.ToSingle(trsScale.GetValue(trs));
+            trsTranslation.SetValue(trs, tr - rot * (pendingMuzzleOffset * sc));
+            var pawnTr = (subPawn as UnityEngine.Component)?.transform;
+            Plugin.Log.LogInfo($"[Muzzle] '{e.resourceName}' fire origin pinned to '{boneLabel}' T={tr.ToString("0.0")} scale={sc:0.###} offset={pendingMuzzleOffset.ToString("0.00")} pawnWorld={(pawnTr != null ? pawnTr.position.ToString("0.0") : "?")}");
         }
 
         // Clear the procedural AIM layer (PawnEntry.BoneRotation0-3 = SkeletonBoneIndex/AxisIndex/Angle): the game aims an
