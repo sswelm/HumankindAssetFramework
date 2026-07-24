@@ -37,8 +37,23 @@ public class SoundWindow : EditorWindow
     {
         EditorGUILayout.HelpBox(
             "Sound Studio — a unit's whole audio profile in one place. Silence an inherited donor sound, and add your own " +
-            "idle growl, attack roar, and movement sounds (or a Wwise engine event). Custom WAVs: 16-bit PCM; mono = 3D. " +
-            "Relaunch / reload a save to hear changes.", MessageType.Info);
+            "idle growl, attack roar, and movement sounds (or a Wwise engine event). Custom WAVs: 16-bit PCM; mono = 3D.\n" +
+            "Replace… picks a WAV from ANYWHERE on disk; Apply then COPIES it into the game's enc_sounds/ folder (renamed per " +
+            "unit) — that's why a row shows enc_sounds/… but Replace opens wherever you last browsed. Relaunch to hear changes.",
+            MessageType.Info);
+
+        // Where the WAVs actually live (the folder the plugin reads). Button reveals it; the path is shown so "where is it?"
+        // is answerable at a glance.
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            if (GUILayout.Button(new GUIContent("Open enc_sounds folder",
+                "The game's BepInEx/config/enc_sounds/ — where Apply copies your WAVs and the plugin reads them at runtime."), GUILayout.Width(160), GUILayout.Height(20)))
+            {
+                Directory.CreateDirectory(SoundsDir);
+                EditorUtility.RevealInFinder(SoundsDir + Path.DirectorySeparatorChar);
+            }
+            EditorGUILayout.SelectableLabel(SoundsDir, EditorStyles.miniLabel, GUILayout.Height(EditorGUIUtility.singleLineHeight));
+        }
 
         var all = ModelRegistry.Load();
 
