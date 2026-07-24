@@ -2162,7 +2162,11 @@ namespace ENCAccessProof
                         var rot = (UnityEngine.Quaternion)trsRotation.GetValue(result);
                         float sc = Convert.ToSingle(trsScale.GetValue(result));
                         trsTranslation.SetValue(result, tr - rot * (pendingMuzzleOffset * sc));
-                        if (!e.muzzlePinLogged) { e.muzzlePinLogged = true; Plugin.Log.LogInfo($"[Muzzle] '{e.resourceName}' fire flash pinned to '{mn}' (donor offset {pendingMuzzleOffset.ToString("0.00")} compensated)"); }
+                        // DIAGNOSTIC: compare OUR bone's raw translation with the pawn's actual render position — a large
+                        // mismatch means the TRS spaces differ (our bone pawn-local vs the donor's world-placed) and the
+                        // "vanished" flash actually spawned off-screen. Logged every shot while we calibrate.
+                        var pawnTr = (subPawn as UnityEngine.Component)?.transform;
+                        Plugin.Log.LogInfo($"[Muzzle] '{e.resourceName}' pin: bone '{mn}' T={tr.ToString("0.0")} scale={sc:0.###} offset={pendingMuzzleOffset.ToString("0.00")} pawnWorld={(pawnTr != null ? pawnTr.position.ToString("0.0") : "?")}");
                     }
                 }
                 return true;
