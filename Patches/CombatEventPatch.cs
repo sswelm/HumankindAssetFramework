@@ -242,18 +242,35 @@ namespace ENCAccessProof
             if (n == 0) Plugin.Log.LogWarning("[Vfx] NOT found: MecanimEventInterpreter.StartVFXEvent — silenceDonorVfx won't work");
             else Plugin.Log.LogInfo($"[Vfx] hooked MecanimEventInterpreter.StartVFXEvent ({n} overload(s), donor VFX suppression)");
         }
-        // destTransformForPosition/destTransformForRotation are Amplitude TRS structs — injected as object (boxed);
-        // localPosition is the donor's baked socket-local offset. Suppress wins; otherwise the muzzle pin retargets
-        // the VFX to our muzzle bone and zeroes the offset (see UniversalInject.MuzzlePin).
-        static bool Prefix(object __instance, ref object destTransformForPosition, ref object destTransformForRotation, ref UnityEngine.Vector3 localPosition)
+        // Suppress-only (no argument injection): a ref-object TRS prefix IL-failed on the Vector3-only overload
+        // (the 18/19 incident) — muzzle repositioning lives in the GetBoneTRS redirect + offset compensation instead.
+        static bool Prefix(object __instance)
         {
-            try
-            {
-                if (UniversalInject.SuppressVfxFor(__instance)) return false;
-                UniversalInject.MuzzlePin(__instance, ref destTransformForPosition, ref destTransformForRotation, ref localPosition);
-            }
-            catch { }
-            return true;
+            try { return !UniversalInject.SuppressVfxFor(__instance); }
+            catch { return true; }
+        }
+    }
+
+    // ---- MUZZLE OFFSET STASH (2026-07-24): while AlterationFireProjectile.StartEvent runs, record the donor's
+    // socket-local offset + position-socket name so the GetBoneTRS redirect can return a pre-compensated TRS
+    // (see UniversalInject.OnFireProjectileStart). Prefix/Postfix bracket the call; main-thread only. ----
+    [HarmonyPatch] internal static class Hk_FireProjStash
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = AccessTools.TypeByName("Amplitude.Mercury.Animation.AlterationFireProjectile");
+            var m = t != null ? AccessTools.Method(t, "StartEvent") : null;
+            if (m != null) Plugin.Log.LogInfo("[Muzzle] hooked AlterationFireProjectile.StartEvent (offset stash)");
+            else Plugin.Log.LogWarning("[Muzzle] NOT found: AlterationFireProjectile.StartEvent — muzzle offset compensation off");
+            return m;
+        }
+        static void Prefix(object mecanimEvent)
+        {
+            try { UniversalInject.OnFireProjectileStart(mecanimEvent); } catch { }
+        }
+        static void Postfix()
+        {
+            try { UniversalInject.OnFireProjectileEnd(); } catch { }
         }
     }
 

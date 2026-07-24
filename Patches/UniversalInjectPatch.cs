@@ -2146,6 +2146,25 @@ namespace ENCAccessProof
                 var mn = ResolveMuzzleBoneName(e);
                 if (mn == null) return false;
                 result = getBoneTRS.Invoke(subPawn, new object[] { mn }); // reentrant, but mn is found -> the real TRS, no re-redirect
+                // Inside AlterationFireProjectile.StartEvent and this is the POSITION socket: pre-compensate the donor
+                // offset on the boxed TRS so the caller's own Transform(offset) lands back on our muzzle bone (v3 above).
+                if (pendingMuzzleActive && boneName == pendingMuzzlePosName && result != null)
+                {
+                    if (!trsFieldsResolved)
+                    {
+                        trsFieldsResolved = true;
+                        var tt = result.GetType();
+                        trsTranslation = tt.GetField("Translation"); trsRotation = tt.GetField("Rotation"); trsScale = tt.GetField("Scale");
+                    }
+                    if (trsTranslation != null && trsRotation != null && trsScale != null)
+                    {
+                        var tr = (UnityEngine.Vector3)trsTranslation.GetValue(result);
+                        var rot = (UnityEngine.Quaternion)trsRotation.GetValue(result);
+                        float sc = Convert.ToSingle(trsScale.GetValue(result));
+                        trsTranslation.SetValue(result, tr - rot * (pendingMuzzleOffset * sc));
+                        if (!e.muzzlePinLogged) { e.muzzlePinLogged = true; Plugin.Log.LogInfo($"[Muzzle] '{e.resourceName}' fire flash pinned to '{mn}' (donor offset {pendingMuzzleOffset.ToString("0.00")} compensated)"); }
+                    }
+                }
                 return true;
             }
             catch (Exception ex) { if (!muzzleErrLogged) { muzzleErrLogged = true; Plugin.Log.LogError("[Muzzle] redirect failed (disabled): " + ex); } return false; }
@@ -2582,46 +2601,34 @@ namespace ENCAccessProof
             return false;
         }
 
-        // ---- MUZZLE PIN v2 (2026-07-24): the GetBoneTRS redirect (v1) verifiably lands the right BONE, but the
-        // flash still spawned off it — the donor's baked local offset (PositionToLaunchVFX, the AA gun's barrel-length
-        // displacement) is added ON TOP of the returned TRS and dominates. This runs in the StartVFXEvent prefix
-        // (which has the offset as an argument): for a unit with muzzleBone, pin BOTH dest transforms to our muzzle
-        // bone's TRS and ZERO the donor offset — the VFX spawns exactly at the bone. Applies to all of the unit's
-        // mecanim VFX (the observed sockets are the canon + Move_bloc); if a movement effect visibly pins to the gun,
-        // the refinement is a donor-socket name filter. ----
-        static MethodBase subPawnBoneTRS; static bool subPawnBoneTRSResolved;
-        internal static void MuzzlePin(object interp, ref object destPos, ref object destRot, ref UnityEngine.Vector3 localPosition)
+        // ---- MUZZLE OFFSET COMPENSATION (2026-07-24, v3). v1's GetBoneTRS redirect verifiably lands the right BONE
+        // (log-proven), but AlterationFireProjectile.StartEvent then computes
+        //     startPosition = boneTRS.Transform(PositionToLaunchVFX)
+        // — the donor's barrel-length offset is added ON TOP of whatever TRS we return, and it dominates (why
+        // "Turret" and "MW_T" looked identical, and why pinning the interpreter's StartVFXEvent changed nothing:
+        // the VISIBLE flash rides the projectile-launch path, a different consumer of the same bone lookup).
+        // The mecanim event is SHARED donor data (zeroing its field would corrupt the donor unit), so instead:
+        // a stash prefix on StartEvent records the offset + position-socket name for the duration of the call, and
+        // the v1 redirect returns a PRE-COMPENSATED TRS — Translation -= Rotation * (offset * Scale) — so the
+        // caller's own "+ offset" lands exactly back on our muzzle bone. Only the POSITION socket is compensated
+        // (matched by name); the rotation socket keeps the true bone TRS for the launch direction. Vanilla pawns
+        // never reach the redirect, so they are untouched. ----
+        static UnityEngine.Vector3 pendingMuzzleOffset;
+        static string pendingMuzzlePosName;
+        static bool pendingMuzzleActive;
+        static System.Reflection.FieldInfo trsTranslation, trsRotation, trsScale;
+        static bool trsFieldsResolved;
+        internal static void OnFireProjectileStart(object mecanimEvent)
         {
             try
             {
-                var list = entries;
-                if (list == null) return;
-                bool anyMuzzle = false;
-                for (int i = 0; i < list.Count; i++) if (!string.IsNullOrEmpty(list[i].muzzleBone)) { anyMuzzle = true; break; }
-                if (!anyMuzzle) return;
-                var subPawn = GetMember(interp, "presentationSubPawn");
-                string n = (subPawn as UnityEngine.Component)?.gameObject?.name;
-                if (string.IsNullOrEmpty(n)) return;
-                ModelEntry e = null;
-                for (int i = 0; i < list.Count; i++)
-                {
-                    var x = list[i];
-                    if (!string.IsNullOrEmpty(x.muzzleBone) && !string.IsNullOrEmpty(x.pawnDescription)
-                        && n.IndexOf(x.pawnDescription, StringComparison.OrdinalIgnoreCase) >= 0) { e = x; break; }
-                }
-                if (e == null) return;
-                var mn = ResolveMuzzleBoneName(e);
-                if (mn == null) return;
-                if (!subPawnBoneTRSResolved)
-                { subPawnBoneTRSResolved = true; subPawnBoneTRS = subPawn != null ? AccessTools.Method(subPawn.GetType(), "GetBoneTRS", new[] { typeof(string) }) : null; }
-                if (subPawnBoneTRS == null) return;
-                var trs = subPawnBoneTRS.Invoke(subPawn, new object[] { mn });
-                if (trs == null) return;
-                destPos = trs; destRot = trs; localPosition = UnityEngine.Vector3.zero;
-                if (!e.muzzlePinLogged) { e.muzzlePinLogged = true; Plugin.Log.LogInfo($"[Muzzle] '{e.resourceName}' VFX pinned to '{mn}' (donor offset zeroed)"); }
+                pendingMuzzlePosName = GetMember(mecanimEvent, "ParentNameToLaunchVFXPosition")?.ToString();
+                pendingMuzzleOffset = GetMember(mecanimEvent, "PositionToLaunchVFX") is UnityEngine.Vector3 v ? v : UnityEngine.Vector3.zero;
+                pendingMuzzleActive = !string.IsNullOrEmpty(pendingMuzzlePosName);
             }
-            catch (Exception ex) { if (!muzzleErrLogged) { muzzleErrLogged = true; Plugin.Log.LogError("[Muzzle] pin failed (disabled): " + ex); } }
+            catch { pendingMuzzleActive = false; }
         }
+        internal static void OnFireProjectileEnd() { pendingMuzzleActive = false; }
 
         // ---- DEATH CUE (2026-07-23): a one-shot when a pawn of ours starts dying. Seam: PresentationPawn.TriggerDeath —
         // presentation-side, fired exactly once per dying pawn as its death FSM starts (IsDead is set inside it). A wiped
