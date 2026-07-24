@@ -181,7 +181,14 @@ by when they'll bite.
   the few that fire MULTIPLE times (AA burst) so the flash repeats. General lesson recorded: **a donor's effect = its
   skeleton + weapon sockets** (already half-logged: `donor.Skeleton` / `BoneInfos` / `donor fragment[N]`). The new
   **Disable override** flag (`ModelDef.disabled`, runtime) A/B's our model vs the raw donor for exactly this kind of probe.
-- **DONOR SOCKETS at bake time (`socketBones`) — BUILT 2026-07-24 late, awaiting the verification bake.** Wired
+- **DONOR SOCKETS (`socketBones`) — ✅ VERIFIED IN-GAME 2026-07-24 night (ArmouredCar): flash, smoke AND tracers
+  all on the tracking turret.** The winning recipe: `socketBones: "Canon_Up_left=MW_T;Move_bloc=MW_T"` (socket
+  ROLES decoded from the pin log: `Move_bloc` = fire POSITION anchor, `Canon_Up_left` = rotation/direction — not
+  what the names suggest) + runtime donor-offset compensation on native socket hits + the **`muzzleOffset` world
+  dial** (`"0,2.6,0"` — the rig's gun-bone head sits at the model base, and the socket's correct BIND height
+  provably does not reach the runtime pose; open engine question, the dial closes it empirically, no re-bake per
+  step). War-story hazards now guarded: prefix reentrancy (stack-overflow crash), the external-registry-edit slim
+  cache trap, per-shot log throttled to once-per-entry after calibration. Wired
   end-to-end: rig_anim argv[11] (exact-named zero-weight leaf bones after the rename, before the fold; `A###_`
   prefix on socketed models; loud failures for unmatched parents and sort-order violations), BakeConfig/ConfigFor/
   slim-cache diff, Lab "Donor sockets (bake)" field, ModelDef.socketBones (bake-time; guard PASS). The ArmouredCar

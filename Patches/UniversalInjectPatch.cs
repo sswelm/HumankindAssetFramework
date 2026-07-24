@@ -2208,8 +2208,14 @@ namespace ENCAccessProof
                     e.muzzleOffsetV = new UnityEngine.Vector3(ox, oy, oz);
             }
             trsTranslation.SetValue(trs, tr - rot * (pendingMuzzleOffset * sc) + e.muzzleOffsetV);
-            var pawnTr = (subPawn as UnityEngine.Component)?.transform;
-            Plugin.Log.LogInfo($"[Muzzle] '{e.resourceName}' fire origin pinned to '{boneLabel}' T={tr.ToString("0.0")} +dial={e.muzzleOffsetV.ToString("0.00")} scale={sc:0.###} donorOff={pendingMuzzleOffset.ToString("0.00")} pawnWorld={(pawnTr != null ? pawnTr.position.ToString("0.0") : "?")}");
+            // Verified recipe (ArmouredCar 2026-07-24): sockets Move_bloc/Canon_Up_left on the gun + dial 0,2.6,0 —
+            // flash, smoke and tracer all on the tracking turret. Log ONCE per entry (was per-shot while calibrating).
+            if (!e.muzzlePinLogged)
+            {
+                e.muzzlePinLogged = true;
+                var pawnTr = (subPawn as UnityEngine.Component)?.transform;
+                Plugin.Log.LogInfo($"[Muzzle] '{e.resourceName}' fire origin pinned to '{boneLabel}' T={tr.ToString("0.0")} +dial={e.muzzleOffsetV.ToString("0.00")} scale={sc:0.###} donorOff={pendingMuzzleOffset.ToString("0.00")} pawnWorld={(pawnTr != null ? pawnTr.position.ToString("0.0") : "?")}");
+            }
         }
 
         // Clear the procedural AIM layer (PawnEntry.BoneRotation0-3 = SkeletonBoneIndex/AxisIndex/Angle): the game aims an
