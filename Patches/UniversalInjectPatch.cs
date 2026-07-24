@@ -75,6 +75,8 @@ namespace ENCAccessProof
         public int turretAxis = -1;       // aim-axis override for the turret bone: -1 = keep the game's streamed axis (1 = "up" in ITS frame, which on a bone pointing along its own length reads as PITCH); 0/1/2 = force the bone's local X/Y/Z. A vehicle TURRET needs its YAW axis; a mechanized HOWITZER/ARTILLERY barrel needs its PITCH axis — hence per-model.
         public string muzzleBone = "";    // MUZZLE-RELOCATE (2026-07-24): bone-name SUBSTRING (renamed b###_<orig>) that the weapon muzzle-flash should fire FROM. The donor's fire clip names ITS weapon socket (e.g. an AA gun's "Canon") in the FireProjectile mecanim event; that name is absent on our renamed rig, so AlterationFireProjectile falls back to the pawn's ROOT + the donor's socket-local offset -> the flash lands off-side. We hook PresentationSubPawn.GetBoneTRS and, when the requested bone isn't on our skeleton, redirect the lookup to THIS bone (e.g. the turret/gun) so the flash anchors on our unit. "" = leave the vanilla behavior. Runtime-only (no re-bake).
         public string muzzleBoneName;     // cached FULL bone name resolved from muzzleBone (null = not resolved yet, "" = not found on our skeleton).
+        public string muzzleOffset = "";  // RUNTIME dial: "x,y,z" WORLD-units added to the pinned fire origin (flash + tracer start). The empirical fix for a rig whose gun-bone head sits at the base (the Ehrhardt): raise the origin without re-baking. "" = none.
+        public UnityEngine.Vector3 muzzleOffsetV; public bool muzzleOffsetParsed;   // parsed once per session
         public bool muzzlePinLogged;      // session flag: log the first StartVFXEvent pin once per entry
         public object handPropLayer;      // session-scoped: our PRIVATE clone of the borrowed weapon output layer, painted with the prop's own atlas (<prop>_Atlas)
         public UnityEngine.Texture2D propAtlasTex;   // session-scoped: the prop atlas — repainted EVERY TICK like the unit retexture (the game resets the material; a one-shot paint flip-flopped between sessions)
@@ -474,6 +476,7 @@ namespace ENCAccessProof
                                 turretBone = (string)m["turretBone"] ?? "",
                                 turretAxis = (int?)m["turretAxis"] ?? -1,
                                 muzzleBone = (string)m["muzzleBone"] ?? "",
+                                muzzleOffset = (string)m["muzzleOffset"] ?? "",
                                 fireOnAttack = (bool?)m["fireOnAttack"] ?? false,
                                 deployOnStop = (bool?)m["deployOnStop"] ?? false,
                                 engineSound = (bool?)m["engineSound"] ?? false,
@@ -580,6 +583,7 @@ namespace ENCAccessProof
                 var tbn = Regex.Matches(text, "\"turretBone\"\\s*:\\s*\"([^\"]*)\"");       // parity: turret aim bone-name substring
                 var tax = Regex.Matches(text, "\"turretAxis\"\\s*:\\s*(-?\\d+)");           // parity: turret aim-axis override
                 var mzb = Regex.Matches(text, "\"muzzleBone\"\\s*:\\s*\"([^\"]*)\"");       // parity: muzzle-flash bone-name substring
+                var mzo = Regex.Matches(text, "\"muzzleOffset\"\\s*:\\s*\"([^\"]*)\"");     // parity: world-units offset dial on the pinned fire origin
                 var hpa = Regex.Matches(text, "\"handPropAngles\"\\s*:\\s*\"([^\"]*)\"");   // parity: hand-prop draw-time import angles csv
                 int G(Match m, int g) => int.TryParse(m.Groups[g].Value, out var r) ? r : 0;
                 float F(Match m, int g) => float.TryParse(m.Groups[g].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var r) ? r : 0f;
@@ -653,6 +657,7 @@ namespace ENCAccessProof
                         turretBone = i < tbn.Count ? tbn[i].Groups[1].Value : "",
                         turretAxis = i < tax.Count && int.TryParse(tax[i].Groups[1].Value, out var _tax) ? _tax : -1,
                         muzzleBone = i < mzb.Count ? mzb[i].Groups[1].Value : "",
+                        muzzleOffset = i < mzo.Count ? mzo[i].Groups[1].Value : "",
                         handPropAngles = i < hpa.Count ? hpa[i].Groups[1].Value : "",
                     });
                 }
@@ -2190,9 +2195,21 @@ namespace ENCAccessProof
             var tr = (UnityEngine.Vector3)trsTranslation.GetValue(trs);
             var rot = (UnityEngine.Quaternion)trsRotation.GetValue(trs);
             float sc = Convert.ToSingle(trsScale.GetValue(trs));
-            trsTranslation.SetValue(trs, tr - rot * (pendingMuzzleOffset * sc));
+            // RUNTIME DIAL muzzleOffset "x,y,z" (world units): the empirical fix for a rig whose gun-bone head sits
+            // at the base — the pinned origin (flash + tracer) is shifted without any re-bake. Save + relaunch to dial.
+            if (!e.muzzleOffsetParsed)
+            {
+                e.muzzleOffsetParsed = true;
+                var p = (e.muzzleOffset ?? "").Split(',');
+                if (p.Length == 3
+                    && float.TryParse(p[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ox)
+                    && float.TryParse(p[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var oy)
+                    && float.TryParse(p[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var oz))
+                    e.muzzleOffsetV = new UnityEngine.Vector3(ox, oy, oz);
+            }
+            trsTranslation.SetValue(trs, tr - rot * (pendingMuzzleOffset * sc) + e.muzzleOffsetV);
             var pawnTr = (subPawn as UnityEngine.Component)?.transform;
-            Plugin.Log.LogInfo($"[Muzzle] '{e.resourceName}' fire origin pinned to '{boneLabel}' T={tr.ToString("0.0")} scale={sc:0.###} offset={pendingMuzzleOffset.ToString("0.00")} pawnWorld={(pawnTr != null ? pawnTr.position.ToString("0.0") : "?")}");
+            Plugin.Log.LogInfo($"[Muzzle] '{e.resourceName}' fire origin pinned to '{boneLabel}' T={tr.ToString("0.0")} +dial={e.muzzleOffsetV.ToString("0.00")} scale={sc:0.###} donorOff={pendingMuzzleOffset.ToString("0.00")} pawnWorld={(pawnTr != null ? pawnTr.position.ToString("0.0") : "?")}");
         }
 
         // Clear the procedural AIM layer (PawnEntry.BoneRotation0-3 = SkeletonBoneIndex/AxisIndex/Angle): the game aims an
