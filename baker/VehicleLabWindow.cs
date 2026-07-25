@@ -191,7 +191,9 @@ public class VehicleLabWindow : EditorWindow
         // turntable preview (the real imported preview FBX playing its Spin clip)
         if (inst != null)
         {
-            var rect = GUILayoutUtility.GetRect(200, 260, GUILayout.ExpandWidth(true));
+            // min 400 tall and greedy: the inspection view claims all leftover window height (was fixed 260,
+            // leaving dead grey space below in a tall window).
+            var rect = GUILayoutUtility.GetRect(200f, 4000f, 400f, 4000f, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
             HandlePreviewInput(rect);
             if (Event.current.type == EventType.Repaint) RenderPreview(rect);
         }
