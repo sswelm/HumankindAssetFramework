@@ -86,7 +86,7 @@ public class VehicleLabWindow : EditorWindow
             var shown = parts.Where(x => x.verts >= minVerts).ToList();
             int hidden = parts.Count - shown.Count;
             EditorGUILayout.LabelField($"Parts ({shown.Count} shown{(hidden > 0 ? $", {hidden} tiny fragments auto-collapsed into Body" : "")}) — mark the wheels & turret:", EditorStyles.boldLabel);
-            partsScroll = EditorGUILayout.BeginScrollView(partsScroll, GUILayout.ExpandHeight(true), GUILayout.MinHeight(120));
+            partsScroll = EditorGUILayout.BeginScrollView(partsScroll, GUILayout.ExpandHeight(true), GUILayout.MinHeight(280));   // roomy by default (user request: double the original 120)
             foreach (var p in shown)
                 using (new EditorGUILayout.HorizontalScope())
                 {
