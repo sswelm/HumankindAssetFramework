@@ -75,7 +75,7 @@ public class SoundWindow : EditorWindow
         }
 
         // ── Silence inherited donor sound ──
-        if (Section(ref foldSilence, "Silence inherited donor sound"))
+        if (Section(ref foldSilence, "Silence inherited donor sound", silenceDonor ? "silenced" : null))
         {
             silenceDonor = EditorGUILayout.ToggleLeft(new GUIContent("Silence the borrowed donor's inherited sounds",
                 "For a custom unit that reuses a donor: the donor's own sounds (idle vocalisations, combat SFX, engine loops, etc.) " +
@@ -83,7 +83,7 @@ public class SoundWindow : EditorWindow
                 "Only silences the game's (Wwise) sound — your custom WAVs below still play, so use both to REPLACE the sound."), silenceDonor);        }
 
         // ── Idle growl ──
-        if (Section(ref foldIdle, "Idle growl (occasional, while standing)"))
+        if (Section(ref foldIdle, "Idle growl (occasional, while standing)", string.IsNullOrEmpty(idleFile) ? null : $"{idleFile}  ~{idleInterval:0}s"))
         {
             WavVolRow("Idle growl", idleFile, ref idlePath, ref idleVol);
             idleInterval = EditorGUILayout.Slider(new GUIContent("  avg interval (s)",
@@ -92,7 +92,7 @@ public class SoundWindow : EditorWindow
                 "Within this world-distance, only ONE pawn of a clustered unit growls per interval (so a 5-stack doesn't snarl in unison). 0 = every pawn growls."), idleGroupRadius, 0f, 30f);        }
 
         // ── Attack sound ──
-        if (Section(ref foldAttack, "Attack sound (violent, on strike)"))
+        if (Section(ref foldAttack, "Attack sound (violent, on strike)", string.IsNullOrEmpty(attackFile) ? null : attackFile + (attackOffset > 0f ? $" +{attackOffset:0.##}s" : "")))
         {
             WavVolRow("Attack", attackFile, ref attackPath, ref attackVol, attackOffset);
             attackOffset = EditorGUILayout.Slider(new GUIContent("  start offset (s)",
@@ -100,7 +100,7 @@ public class SoundWindow : EditorWindow
                 "0 = play from the top. The ▶ preview honors it, so you can dial it in by ear."), attackOffset, 0f, 5f);        }
 
         // ── Death sound ──
-        if (Section(ref foldDeath, "Death sound (rattle/scream, when a pawn dies)"))
+        if (Section(ref foldDeath, "Death sound (rattle/scream, when a pawn dies)", string.IsNullOrEmpty(deathFile) ? null : deathFile + (deathOffset > 0f ? $" +{deathOffset:0.##}s" : "")))
         {
             WavVolRow("Death", deathFile, ref deathPath, ref deathVol, deathOffset);
             deathOffset = EditorGUILayout.Slider(new GUIContent("  start offset (s)",
@@ -108,7 +108,7 @@ public class SoundWindow : EditorWindow
                 "pawn-by-pawn — the runtime spaces the rattles out instead of playing five at once."), deathOffset, 0f, 5f);        }
 
         // ── Battle-start war cry ──
-        if (Section(ref foldBattle, "Battle start (war cry, once when a battle begins)"))
+        if (Section(ref foldBattle, "Battle start (war cry, once when a battle begins)", string.IsNullOrEmpty(battleFile) ? null : battleFile + (battleOffset > 0f ? $" +{battleOffset:0.##}s" : "")))
         {
             WavVolRow("War cry", battleFile, ref battlePath, ref battleVol, battleOffset);
             battleOffset = EditorGUILayout.Slider(new GUIContent("  start offset (s)",
@@ -116,14 +116,14 @@ public class SoundWindow : EditorWindow
                 "when this unit is on either side — camera-anchored so it opens the battle audibly at any zoom."), battleOffset, 0f, 5f);        }
 
         // ── Movement (start / travel / stop) ──
-        if (Section(ref foldMove, "Movement (start / travel / stop)"))
+        if (Section(ref foldMove, "Movement (start / travel / stop)", MoveSummary()))
         {
             WavVolRow("Start (spool-up)", startFile, ref startPath, ref startVol);
             WavVolRow("Travel (loop)", loopFile, ref loopPath, ref loopVol);
             WavVolRow("Stop (spool-down)", stopFile, ref stopPath, ref stopVol);        }
 
         // ── Wwise engine event (game's own per-ship sound) ──
-        if (Section(ref foldWwise, "Wwise engine event (game's own sound)"))
+        if (Section(ref foldWwise, "Wwise engine event (game's own sound)", engineSound ? ShortEvent(engineStart) : null))
         {
             engineSound = EditorGUILayout.ToggleLeft(new GUIContent("Use a Wwise engine event (posted on move start/stop)",
                 "The game's own per-ship sound. Get names from F8 ▸ Dump Sound Catalog (enc_sound_catalog.txt)."), engineSound);
@@ -176,11 +176,34 @@ public class SoundWindow : EditorWindow
     }
 
     // A collapsible section header. Uses Foldout (not BeginFoldoutHeaderGroup) so there's no strict End pairing to balance.
-    static bool Section(ref bool state, string title)
+    // Foldout header with a RIGHT-ALIGNED grey summary of what's configured inside — visible only WHILE FOLDED
+    // (expanded sections show their own fields), so a fully-collapsed window still tells you at a glance which
+    // sections carry a configuration and which are empty.
+    static GUIStyle sectionSummaryStyle;
+    static bool Section(ref bool state, string title, string summary = null)
     {
         EditorGUILayout.Space(4);
-        state = EditorGUILayout.Foldout(state, title, true, EditorStyles.foldoutHeader);
+        var rect = GUILayoutUtility.GetRect(1, EditorGUIUtility.singleLineHeight, GUILayout.ExpandWidth(true));
+        state = EditorGUI.Foldout(rect, state, title, true, EditorStyles.foldoutHeader);
+        if (!state && !string.IsNullOrEmpty(summary))
+        {
+            if (sectionSummaryStyle == null)
+                sectionSummaryStyle = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleRight, normal = { textColor = new Color(0.55f, 0.75f, 0.55f) } };
+            var r2 = rect; r2.xMin = rect.xMin + rect.width * 0.35f;   // right 65% of the row
+            GUI.Label(r2, summary, sectionSummaryStyle);
+        }
         return state;
+    }
+
+    // Compact event name for summaries: "Play_UNIT_Vehicle_AntiAirGun_Movement_Start" -> "Vehicle_AntiAirGun_Movement"
+    static string ShortEvent(string e) =>
+        string.IsNullOrEmpty(e) ? "(auto-capture)" : e.Replace("Play_UNIT_", "").Replace("_Start", "");
+
+    // Folded-header summary for the Movement section: the configured WAV names, start / travel / stop order.
+    string MoveSummary()
+    {
+        var parts = new[] { startFile, loopFile, stopFile }.Where(s => !string.IsNullOrEmpty(s)).ToArray();
+        return parts.Length == 0 ? null : string.Join(" / ", parts);
     }
 
     void LoadForPawn(string p, List<ModelDef> all)
