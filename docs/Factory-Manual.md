@@ -670,10 +670,17 @@ reproduces from the entry alone:
 | **Barrel ready frame** | source frame of the fully-elevated barrel; re-keys barrel/cannon parts to rise over the deploy's back half (empty = leave as authored) |
 | **Leg spread scale** | empty = source leg curves verbatim; a number re-keys `*leg*` parts as pure travel→spread rotation (`1` = full width). **Required for legs that slide — see the rotation-only law in [Animated-Models.md](Animated-Models.md)** |
 | **Barrel elevation scale** | `>1` exaggerates past the source's max (empty = 1) |
-| **Recoil frames (a..b)** | the kickback SLAM's source range (slam ONLY — post-slam source frames are usually reload choreography; e.g. `445..451` on the M114), remapped onto the deployed pose as the `recoil` clip. Set the **Attack clip** to plain `recoil`. Empty = none |
-| **Return slow** | the palindrome return: the slam played BACKWARD at this multiple of its duration, gliding the tube home (empty = 4 = quarter speed; 0 = hold + snap) |
-| **Slam (deg)** | the kick’s slam pitch **in degrees** — what you type is what renders (the converter derives the arc from the measured slide peak; Law 5 in [Animation-Pitfalls.md](Animation-Pitfalls.md) makes the arc a tube pitch). **0/empty = no kick; POSITIVE = muzzle-down dip, NEGATIVE = muzzle-up jump (mirrored).** ~5 = the subtle legacy dip, 8–12 = clearly visible, 20+ = dramatic. Judge at map zoom |
+| **Recoil frames (a..b)** | the fire cycle's source range, remapped onto the deployed pose as the `recoil` clip. **MULTI-SEGMENT (2026-07-26):** comma-separate extra windows appended PRISTINE as epilogue, each with an optional `/N` speed step (every Nth frame = N× faster) — the M114's shipped recipe is **`442..530,305..441/2`**: the full fire+kick+reload window, then the source's own *aiming raise* (which only exists before the fire) replayed at double speed to bring the barrel back up. Segment 1 alone drives the slide/slam analysis. Set the **Attack clip** to plain `recoil`. Empty = none |
+| **Return slow** | the SYNTHESIZED palindrome return: the window replayed backward at this multiple (empty = 4; **0 = none**). **With `Keep bone translations` the source's own run-out plays — set 0, or the kick fires twice** (the rotation-only era needed the synthesis; the translation era doesn't) |
+| **Slam (deg)** | the ROTATION-FAKED kick pitch in degrees (the arc trick from the rotation-only era — see the revised Laws in [Animation-Pitfalls.md](Animation-Pitfalls.md)). **With `Keep bone translations` set 0: the real translation slide replaces the fake** (they stack if you want both). POSITIVE = muzzle-down dip, NEGATIVE = muzzle-up |
 | **Recoil step** | arc sampling fineness. (Slide scale and raw Arc R are hidden from the UI: the former self-cancels under Slam-degrees, the latter is superseded — both registry fields survive for legacy recipes) |
+
+> **THE REAL KICKBACK (2026-07-26, verified on the M114):** tick **`Keep bone translations`** (Animation Lab,
+> under Auto-ground) and the source's authored recoil SLIDE bakes and plays as true translation — the tube slams
+> back and glides home exactly as animated. Recipe: Recoil frames `442..530,305..441/2`, **Return slow 0, Slam 0**,
+> Keep ✓. Translations are kept ONLY in the attack clip (deploy/stance stay rotation-only — keeping them there
+> displaced the assembly) and are delta-rebased (pure motion, no pose offsets) + ×100 sandwich-compensated on the
+> legacy path. The old Slam arc remains for models whose source has no real slide.
 
 The conversion **generates the state clips** — `deployed`, `folded`, `unfold`, `fold`, `recoil` — from those frame
 numbers; the Pick dropdowns and the ▶ picker inspect the *converted* file once it exists, so you just assign the

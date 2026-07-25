@@ -21,6 +21,16 @@ These are engine-level facts. They are not bugs, they cannot be patched away, an
 > CORRECT amplitude; the clean-unit conversion export sidesteps the native-scale trap that motivated the
 > strip). Laws 1/5 below remain the DEFAULT behavior and stay true for every model that doesn't opt in; the
 > re-express-as-rotation recipes remain valid and battle-tested.
+>
+> **Worked example — the M114's REAL kickback (2026-07-26, in-game verified):** `keepTranslations` +
+> Recoil frames `442..530,305..441/2` + Return slow 0 + Slam 0 plays the source's authored fire cycle complete:
+> translation slam, slide home, reload, aiming raise (multi-segment epilogue). Implementation notes that matter:
+> translations are kept ONLY in the attack-role clip (kept elsewhere they double-render pose offsets rotations
+> already cover — the hovering-gun symptom), delta-rebased to zero at the clip's first frame (pure motion), and
+> ×100-compensated on the legacy path (the m→cm sandwich folds 0.01 into bindposes, which Amplitude carries into
+> translation curves while rotations pass scale-free — the exact mechanism behind the original Law-1 evidence).
+> Also fixed en route: the slam-0 sentinel placed the RecoilArm pivot at 1e9, collapsing bone chains via float32
+> cancellation — the source of every NaN/garbage-import symptom this pipeline ever showed.
 
 ### Law 1 — The clip bake is ROTATION-ONLY *(default — see the 2026-07-25 revision above)*
 The engine's baked clips keep per-bone **rotation** and **discard translation** (`GetPoseTRS` forces

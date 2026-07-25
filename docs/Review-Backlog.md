@@ -204,6 +204,15 @@ by when they'll bite.
   name (gated; existing bakes byte-identical). Obsoletes muzzleBone for rebaked models; the runtime knobs stay for
   quick fixes. Donor socket names discovered via the [Muzzle] GetBoneTRS diagnostic (armoured car donor asks for
   `Canon_Up_left` + `Move_bloc`).
+- **TRANSLATION UNLOCK — SHIPPED & VERIFIED (2026-07-25/26).** The engine plays `RotationTranslation` clips
+  (decompiled: vanilla tank treads/shuttle bones; `GetPoseTRS` zeroes translation only for Rotation-encoded
+  curves) — Laws 1/5 were OUR bake's strip. Built: per-model `keepTranslations` (registry + Lab toggle), kept
+  curves scoped to the attack clip, delta-rebased, ×100 sandwich-compensated on the legacy path; multi-segment
+  recoil windows with `/N` speed steps. Verified end-to-end twice: a sliding test bone, then **the M114's real
+  kickback** (recipe `442..530,305..441/2`, Return 0, Slam 0). Root-caused en route: the slam-0 R=1e9 sentinel
+  put the RecoilArm pivot at a billion units → float32 chain collapse → every historical NaN import warning.
+  OPENS: **treadize** (tank tread shuttle bones — design ready, Jagdpanzer waiting), real deploy translations,
+  whole-carriage recoil, soldier run-bob restoration.
 - **Fire-effect refinements on the verified muzzle system (spotted 2026-07-24, unbuilt).** The pin log showed the
   AA-gun donor's multiple barrels as VARYING per-event offsets (`donorOff=` 0.80/0.85/1.20) from the single
   `Move_bloc` anchor; the compensation currently flattens all onto one point. (1) **Barrel variation** — subtract

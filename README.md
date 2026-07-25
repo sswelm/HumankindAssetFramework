@@ -98,6 +98,14 @@ runtime-hot-loaded skin or tint ([Capabilities.md](docs/Capabilities.md)) — al
   `Turret` bone. Rips that ship **already rigged** (`SKM_`) get a **fast path**: the probe detects the skinned
   artist skeleton and the Lab marks *bones* instead of shards — Spin authored straight onto the source rig,
   weapon/socket bones preserved (it inherits the artist's weighting; the shard flow stays the quality reference).
+- **The rotation-only barrier is DEAD — true bone TRANSLATION plays in-game (2026-07-25/26).** Decompiling the
+  runtime proved the clip format supports `RotationTranslation` (vanilla tank treads use it); the "rotation-only
+  law" was our own bake's strip. The opt-in **`Keep bone translations`** flag carries authored slides through the
+  bake — first verified on a sliding test bone, then shipped as **the M114 howitzer's REAL kickback**: fire, the
+  tube slams back and glides home, barrel lowers, shell loads, aiming raise — the animator's complete cycle,
+  finally rendered (multi-segment recoil windows with per-segment speed steps: `442..530,305..441/2`). En route,
+  a decade-class root cause fell: a sentinel value placed a helper bone at 10⁹ units, collapsing bone chains via
+  float32 cancellation — the origin of every NaN import warning this pipeline ever produced.
 - **A turret that AIMS at the target (turretize, 2026-07-24).** The armored car's turret now yaws to track the
   enemy — by hijacking the game's OWN aim: the engine streams a heading angle into a `PawnEntry.BoneRotation` slot
   that lands on an invalid bone index for injected models, so we retarget that slot to the turret bone and the
