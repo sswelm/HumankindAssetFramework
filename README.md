@@ -88,6 +88,14 @@ runtime-hot-loaded skin or tint ([Capabilities.md](docs/Capabilities.md)) — al
   **Auto-ground (sit on terrain)** bake toggle — drops the tyres to the skeleton origin, self-correcting and
   **size-proof** (no manual height dial, stays grounded across Size changes). Extracted from an Unreal "Game
   Template" (Fab).
+- **The Vehicle Lab — any static vehicle model becomes that unit, no Blender knowledge (2026-07-25).** A dedicated
+  window "vehicleizes" a raw model: headless-probe its parts (a 3,350-shard game rip included), mark wheels &
+  turret with a keyboard-driven review UI (zoom-highlight preview, classification filters, height-slab sliders,
+  save/load **recipes**, a clustering-accurate **Verify** report), and it builds the rigged, LINEAR-`Spin` GLB the
+  animated path consumes — wheel shards **clustered per hub** so spokes revolve around the axle, one mesh per bone,
+  the rip's stowaway skeleton stripped. **Verified in-game the same day: the shipped ArmouredCar now runs a
+  Lab-generated rig** — grounded, turret aiming (axis Y on generated rigs), muzzle flash re-anchored on the
+  `Turret` bone.
 - **A turret that AIMS at the target (turretize, 2026-07-24).** The armored car's turret now yaws to track the
   enemy — by hijacking the game's OWN aim: the engine streams a heading angle into a `PawnEntry.BoneRotation` slot
   that lands on an invalid bone index for injected models, so we retarget that slot to the turret bone and the

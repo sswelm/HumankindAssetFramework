@@ -211,10 +211,18 @@ by when they'll bite.
   real barrels, essentially free. (2) **Multi-mount fire** — rotate successive fire events across several of the
   model's own gun bones (the Ehrhardt has four rigged MG mounts, `MW_B/F/L/T`) — needs per-event socket selection
   state; bigger. Both are polish on a verified base, not fixes.
-- **"Vehicleize" — BUILT 2026-07-25 (Vehicle Lab window + Tools/vehicle_rig.py), awaiting first real-model
-  verification.** Probe (part list, loose-split, name-guessed roles) → role assignment UI → rig (Root + per-wheel
-  bones, geometric axle inference per wheel, rigid skinning, LINEAR Spin action frame-0-rest) → `<name>_Spin.glb`
-  + turntable preview playing the spin. Original spec below.** The Ehrhardt's
+- **"Vehicleize" — VERIFIED IN-GAME 2026-07-25: the shipped ArmouredCar now runs a Lab-generated rig** (grounded,
+  turret aiming, muzzle flash calibrated). The first real-model run (3,350-shard Ehrhardt rip) drove a day of
+  hardening, all field-verified: per-hub wheel **clustering** (per-part bones shred wheels — off-axis spokes
+  pinwheel about their own bbox centers), per-bone **join** (3,350 objects timed out the bake's 180 s Blender
+  step; 6 meshes take ~11 s), **stowaway-skeleton strip** (`SKM_` rips carry their own armature — two skeletons
+  in one GLB), `@file` part lists (the ~32 k Windows command-line limit), Blender 5.x `Action.fcurves` removal
+  (curves live in `layers→strips→channelbags`), spin-sign rule (+360 = forward for a +X nose), review UI
+  (6 roles incl. Edgecase, keyboard marking, classification filter, 4 hide sliders), JSON recipes, and a
+  clustering-accurate **Verify** report. Generated-rig calibration: turret axis **Y**, sockets/muzzle bone →
+  `Turret`, offset re-dialed from the dome center. **NEW SEAM — SKM fast path:** the Ehrhardt rip was already
+  FULLY skinned (wheels/turret/4 MG mounts); detect skeleton+weights and reuse them (artist pivots + socket
+  bones free), skipping the marking flow entirely. Original spec below. The Ehrhardt's
   `_Spin.glb` was hand-made in Blender (now documented step-by-step in Animated-Models.md); the tool version is the
   missing sibling of turretize and the biggest lever on the "huge pool of static vehicle models" thesis: a headless
   Blender script that (1) detects wheel parts — name pattern `wheel|tyre|tire` first, geometric fallback (cylindrical,

@@ -61,12 +61,43 @@ legs, landing gear, a crane, turrets. Very common for Sketchfab vehicles.
 
 #### Authoring the spin rig — the Vehicle Lab (automatic) or by hand
 
-**Automatic (2026-07-25): `Tools ▸ HAF ▸ Vehicle Lab`.** Browse the static model → **Probe parts** (headless
-Blender lists the mesh parts; a single combined mesh is split into loose parts; roles auto-guessed from names) →
-mark the **Wheels** (and Turret) → **Vehicleize**: the tool builds Root + per-wheel bones (axle inferred as each
-wheel's thinnest bbox extent, overridable), rigid-skins every part, authors the LINEAR `Spin` action (frame 0 =
-rest), and exports `<name>_Spin.glb` — with a live turntable preview playing the spin so you see the wheels turn
-before ever opening the Factory. The GLB path lands on your clipboard; bake settings are printed on success.
+**Automatic: `Tools ▸ HAF ▸ Vehicle Lab` — VERIFIED end-to-end 2026-07-25; the shipped ArmouredCar now runs a
+Lab-generated rig.** Browse the static model → **Probe parts** (headless Blender lists the mesh parts; a single
+combined mesh is split into loose parts; roles auto-guessed from names) → mark the **Wheels** (and Turret) →
+**Vehicleize**. The GLB path lands on your clipboard; bake settings are printed on success. The review scales to
+real game-rips (the Ehrhardt probes into 3,350 shards):
+
+- **Review UI** — click a row to zoom + yellow-highlight that part in the turntable; **↑/↓** walk the list;
+  **W/T/B/I** mark Wheel/Turret/Body/Ignore, **D** = Default (undecided), **E** = Edgecase ("not sure, revisit
+  later" — rigs static like Body and stays visible in the undecided filter). Four hide sliders (min verts, min
+  size, height-below, height-above — the height pair brackets a horizontal slab: turret-only or chassis-only
+  views) plus a **Show only** classification filter with auto-advance (marking a part out of the active filter
+  steps straight to the next row).
+- **Recipes** — Save/Load the whole configuration (source, output, per-part roles, knobs) as JSON; all window
+  state also survives domain reloads, so a recompile can never eat a marking session, and a saved recipe
+  reproduces the rig exactly.
+- **Verify** — a non-blocking report that previews the *exact* wheel bones a Vehicleize would build (same
+  clustering as the rig script) and flags stray clusters, axle disagreement, unpaired wheels, turret outliers
+  and undecided leftovers; every flagged part has a **Show** button that jumps both preview and list to it.
+- **The generated rig** — wheel parts **cluster per hub**: the biggest part (the tire) anchors each wheel — its
+  bbox center is the axle point, its thinnest extent the axle direction — and every member shard (spokes, rim,
+  bolts) skins to that ONE bone, so off-center wheel furniture is safe to mark Wheel *by design*. All Turret
+  parts share a single `Turret` bone. Shards are then **joined to one mesh per bone** (a 3,350-object GLB times
+  out the bake's Blender step; 6 meshes fly), the source file's own stowaway skeleton/helpers are stripped
+  (`SKM_` rips carry one), and the LINEAR `Spin` action exports as `<name>_Spin.glb` with a turntable preview
+  playing the spin. Part lists pass via `@file` (hundreds of names overflow the Windows command line).
+
+**Generated-rig conventions (they differ from a hand rig):** bones are `Root`, `Wheel_00…`, `Turret`. The **spin
+sign depends on the nose direction** — +360 = forward for a +X-nosed model; check the preview and negate if the
+wheels roll backward. At bake/runtime: **turret aim axis = Y** (the bone is built tail-up), `socketBones` /
+`muzzleBone` must reference `Turret` (a config naming a missing bone fails the bake loudly, listing the rig's
+bones), and the muzzle offset is re-dialed from the turret's center — registry-only, so each iteration is
+Save (no bake) + relaunch.
+
+**If the rip is already rigged** (`SKM_` prefix — skeleton + full vertex weights; the Ehrhardt shipped with
+wheels, turret AND four MG mounts fully skinned): the marking flow is redundant in principle, and a planned fast
+path will reuse the source skeleton directly (artist-placed pivots, socket bones for free). Until it exists the
+Lab treats every input as static.
 
 **By hand** — the recipe the tool automates (still worth knowing when a model needs judgment):
 

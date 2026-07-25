@@ -205,6 +205,11 @@ and bone pickers read it directly).
 > engine's hard constraints (rotation-only clips, scale-1 skeletons, name-ordered bones), the automatic conversion the
 > Factory performs, and the troubleshooting map for floating heads, smearing parts, and wrong orientations.
 
+> **Only a STATIC vehicle model (no rig at all)?** `Tools ▸ HAF ▸ Vehicle Lab` builds the rigged Spin GLB for you —
+> probe the parts, mark wheels & turret (keyboard review, recipes, a Verify report), press **Vehicleize**, and the
+> output feeds this exact workflow. Full guide: [Animated-Models.md](Animated-Models.md) → *"Authoring the spin
+> rig"*. Verified in-game: the shipped ArmouredCar runs a Lab-generated rig.
+
 1. **In the Factory: Pawn description** — choose a donor with **no animated sub-parts** and a full idle/move set (a land
    vehicle is ideal; an attack-helicopter donor forces its rotor onto your model). Resource name.
 2. **Model file** — the rigged `.glb`/`.fbx`. When detection finds animation you'll see *"Animation detected"* with an
@@ -944,6 +949,14 @@ in-game-verified system that puts all of it back on YOUR model. Reference implem
 | `silenceDonorVfx` | runtime | SUPPRESS instead: drop the donor's animation-driven VFX entirely (Factory checkbox). Sounds untouched. The fallback when relocation isn't wanted. |
 
 ### 17.2 The recipe (what actually shipped on the ArmouredCar)
+
+> **Update 2026-07-25 — the shipped ArmouredCar now runs a Vehicle-Lab-GENERATED rig** (bones `Root`/`Wheel_00…`/
+> `Turret`; the hand rig's `MW_*` bones no longer exist in it). Its live calibration: `socketBones:
+> "Canon_Up_left=Turret;Move_bloc=Turret"`, `muzzleBone: "Turret"`, `muzzleOffset: "0.5,1,0"` (dialed from the
+> turret's CENTER — the generated bone sits there, not at the gun), **turret aim axis = 1 (Y)** — generated rigs
+> always yaw on Y because the bone is built tail-up. A `socketBones` naming a missing bone now fails the bake
+> LOUDLY with the rig's bone list (it used to hide behind "produced no FBX"). The `MW_T` recipe below remains the
+> reference for hand/ripped rigs that carry weapon bones.
 
 0. **Or skip the string entirely (2026-07-25): the Lab's `Edit…` button** on the Donor-sockets row opens the guided
    mapping dialog — it harvests the hardpoint names from the `[Muzzle]` log for this unit automatically, offers your
