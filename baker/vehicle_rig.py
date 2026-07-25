@@ -131,6 +131,7 @@ def namelist(arg):
 wheel_names = namelist(argv[4])
 turret_names = namelist(argv[5])
 ignore_names = set(namelist(argv[9])) if len(argv) > 9 and argv[9].strip() else set()   # parts to DELETE (unused option meshes etc.)
+track_names = namelist(argv[10]) if len(argv) > 10 and argv[10].strip() else []          # tread loops: static, but each on its OWN bone
 axis_arg = argv[6].upper()
 frames = max(2, int(argv[7]))
 degrees = float(argv[8])
@@ -302,9 +303,20 @@ if turret_names:
     eb.parent = eb_root
     for tn in turret_names:
         bone_of[tn] = "Turret"
+# Track bones: a tread loop rigs STATIC (no animation) but on its OWN bone, so the per-bone join keeps it a
+# SEPARATE mesh — never welded into the hull. That preserved identity is what future tread-motion mechanisms
+# (mesh flipbook / texture scroll) will target. Named by side for readability: Track_00_L / Track_01_R.
+for i, tn in enumerate(track_names):
+    o = find(tn)
+    c, s = world_bbox(o)
+    eb = arm_data.edit_bones.new("Track_%02d_%s" % (i, "L" if c.y >= 0 else "R"))
+    eb.head = c
+    eb.tail = c + Vector((0, 0, max(0.05, max(s) * 0.25)))
+    eb.parent = eb_root
+    bone_of[tn] = eb.name
 bpy.ops.object.mode_set(mode='OBJECT')
 
-# rigid skinning: each part full-weight on its bone (wheels/turret) or Root (body)
+# rigid skinning: each part full-weight on its bone (wheels/turret/tracks) or Root (body)
 for o in objs:
     bname = bone_of.get(o.name, "Root")
     for g in list(o.vertex_groups):
@@ -381,5 +393,5 @@ for o in list(bpy.data.objects):   # bpy.data, not scene.objects — helpers can
 bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
 if preview_fbx:
     bpy.ops.export_scene.fbx(filepath=preview_fbx, add_leaf_bones=False, bake_anim=True)
-print("VEHICLE RIG DONE: %d wheel part(s) clustered into %d wheel(s) %s, %d turret part(s) on one Turret bone, Spin 0..%d %.0f deg -> %s"
-      % (len(wheel_names), len(clusters), {b: wheel_axes[b] for b in cluster_bones}, len(turret_names), frames, degrees, out_glb))
+print("VEHICLE RIG DONE: %d wheel part(s) clustered into %d wheel(s) %s, %d turret part(s) on one Turret bone, %d track loop(s) on own static bones, Spin 0..%d %.0f deg -> %s"
+      % (len(wheel_names), len(clusters), {b: wheel_axes[b] for b in cluster_bones}, len(turret_names), len(track_names), frames, degrees, out_glb))

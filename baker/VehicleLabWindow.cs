@@ -31,7 +31,10 @@ public class VehicleLabWindow : EditorWindow
     // Edgecase = "not sure yet, don't let me forget": rig-wise identical to Default (skins to Root), stays in
     // the only-unreviewed filter, exists purely as a parking flag during a review sweep. Appended (order matters
     // for saved-recipe ints).
-    enum Role { Body, Wheel, Turret, Ignore, Default, Edgecase }
+    // Track = a tread loop: rigs STATIC like Body but gets its OWN bone (Track_NN_L/R) and therefore its own
+    // mesh through the per-bone join — never welded into the hull, so future tread-motion tricks (flipbook /
+    // texture scroll) can target it. Appended (saved-recipe ints must keep meaning).
+    enum Role { Body, Wheel, Turret, Ignore, Default, Edgecase, Caterpillar }
     [Serializable] class Part { public string name; public int verts; public Vector3 center, size; public Role role; }
 
     // Everything an assignment session builds is [SerializeField]: a DOMAIN RELOAD (any recompile) must never eat
@@ -53,14 +56,15 @@ public class VehicleLabWindow : EditorWindow
     static float MaxDim(Part p) => Mathf.Max(p.size.x, Mathf.Max(p.size.y, p.size.z));
     bool VisiblePart(Part x) => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.center.z >= minHeight && x.center.z <= maxHeight;
     [SerializeField] int partFilter;      // list filter: 0 = all; see FilterOptions (Unreviewed = Default + Edgecase)
-    static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase" };
+    static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase", "Caterpillar" };
     bool MatchesFilter(Role r) => partFilter == 1 ? (r == Role.Default || r == Role.Edgecase)
                                 : partFilter == 2 ? r == Role.Default
                                 : partFilter == 3 ? r == Role.Wheel
                                 : partFilter == 4 ? r == Role.Turret
                                 : partFilter == 5 ? r == Role.Body
                                 : partFilter == 6 ? r == Role.Ignore
-                                : partFilter == 7 ? r == Role.Edgecase : true;
+                                : partFilter == 7 ? r == Role.Edgecase
+                                : partFilter == 8 ? r == Role.Caterpillar : true;
     Vector2 partsScroll;
 
     // ── Recipes: the whole vehicleize configuration as a JSON file — reload it after a restart, keep one per model,
@@ -166,7 +170,7 @@ public class VehicleLabWindow : EditorWindow
             int unreviewed = list.Count(x => VisiblePart(x) && x.role == Role.Default);
             int edgecases = list.Count(x => VisiblePart(x) && x.role == Role.Edgecase);
             EditorGUILayout.LabelField($"{(useSourceRig && boneParts.Count > 0 ? "Source BONES" : "Parts")} ({shown.Count} shown{(hidden > 0 ? $", {hidden} hidden by the sliders" : "")}{(unreviewed > 0 ? $", {unreviewed} undecided" : ", all decided")}{(edgecases > 0 ? $", {edgecases} edge-case" : "")}) — mark {(useSourceRig && boneParts.Count > 0 ? "the bones that SPIN (Wheel)" : "the wheels & turret")}:", EditorStyles.boldLabel);
-            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part (zooms + highlights it below)   ·   W/T/B = Wheel/Turret/Body   ·   I = Ignore (DELETED from the output — unused option meshes)   ·   D = Default(unreviewed)   ·   E = Edgecase (unsure, revisit later; rigs like Default)", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   W/T/B = Wheel/Turret/Body   ·   K = Track (tread loop: static, own bone — future tread animation)   ·   I = Ignore (DELETED from output)   ·   D = Default   ·   E = Edgecase", EditorStyles.miniLabel);
             // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
             // part's role — the whole list can be reviewed without mousing between rows and dropdowns.
             var ev = Event.current;
@@ -181,13 +185,14 @@ public class VehicleLabWindow : EditorWindow
                     GUIUtility.keyboardControl = 0;                    // a focused slider/popup must not swallow the arrows
                     ev.Use(); Repaint();
                 }
-                else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I || ev.keyCode == KeyCode.D || ev.keyCode == KeyCode.E))
+                else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I || ev.keyCode == KeyCode.D || ev.keyCode == KeyCode.E || ev.keyCode == KeyCode.C))
                 {
                     shown[idx].role = ev.keyCode == KeyCode.W ? Role.Wheel
                                     : ev.keyCode == KeyCode.T ? Role.Turret
                                     : ev.keyCode == KeyCode.I ? Role.Ignore
                                     : ev.keyCode == KeyCode.D ? Role.Default
-                                    : ev.keyCode == KeyCode.E ? Role.Edgecase : Role.Body;
+                                    : ev.keyCode == KeyCode.E ? Role.Edgecase
+                                    : ev.keyCode == KeyCode.C ? Role.Caterpillar : Role.Body;
                     // If the new role falls outside the active filter, the part leaves the list — advance to the
                     // next one so the sweep continues instead of the selection dying with the removed row.
                     if (partFilter != 0 && !MatchesFilter(shown[idx].role))
@@ -511,9 +516,11 @@ public class VehicleLabWindow : EditorWindow
         File.WriteAllLines(turretsFile, src.Where(p => p.role == Role.Turret).Select(p => p.name).ToArray());
         // Ignore = DELETED from the output (static path; unused Sketchfab option meshes). Fast path: bones can't be "deleted" — unused.
         File.WriteAllLines(ignoreFile, src.Where(p => p.role == Role.Ignore).Select(p => p.name).ToArray());
+        string tracksFile = Path.Combine(projRoot, prevDir, baseName + "_tracks.txt").Replace('\\', '/');
+        File.WriteAllLines(tracksFile, src.Where(p => p.role == Role.Caterpillar).Select(p => p.name).ToArray());
         string axis = axisChoice == 0 ? "AUTO" : AxisOptions[axisChoice];
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {degrees.ToString("0.#", inv)} \"@{ignoreFile}\"", out string stdout)) return;
+        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {degrees.ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\"", out string stdout)) return;
         // SUCCESS = THE SCRIPT'S OWN FINAL MARKER (the documented Blender trap: it exits 0 even when the python
         // script crashes mid-way — without this gate a half-run printed a fake "DONE" with no file on disk).
         string done = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE RIG DONE"));
