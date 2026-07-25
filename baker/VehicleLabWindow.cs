@@ -39,6 +39,12 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] string srcFile = "";
     [SerializeField] string outGlb = "";   // explicit output path — never silently derived at write time (overwrite guard in Vehicleize)
     [SerializeField] List<Part> parts = new List<Part>();
+    // ── SKM fast path: a rip that ships FULLY skinned (probe prints RIGBONE rows) can reuse its ARTIST skeleton —
+    // mark which BONES spin instead of marking shards; Vehicleize then authors Spin on the source rig (pivots,
+    // weights and weapon bones untouched). boneParts mirrors `parts` row-for-row, holding bones.
+    [SerializeField] List<Part> boneParts = new List<Part>();
+    [SerializeField] bool useSourceRig;
+    List<Part> ActiveParts => useSourceRig && boneParts.Count > 0 ? boneParts : parts;
     [SerializeField] int frames = 15; [SerializeField] float degrees = -360f; [SerializeField] int axisChoice = 0;   // 0 = Auto (per wheel), 1..3 = X/Y/Z
     [SerializeField] int minVerts = 50;   // parts below this are COLLAPSED into Body (a triangle-soup FBX probes into thousands of shards)
     [SerializeField] float minPartSize = 0f;  // hide parts whose LARGEST bbox dimension is below this — drop minVerts + raise this to surface big-but-low-poly parts (flat discs, plates)
@@ -59,7 +65,7 @@ public class VehicleLabWindow : EditorWindow
 
     // ── Recipes: the whole vehicleize configuration as a JSON file — reload it after a restart, keep one per model,
     // ship it next to the model so a collaborator reproduces the exact rig. ──
-    [Serializable] class Recipe { public string srcFile, outGlb; public int frames, axisChoice, minVerts; public float degrees; public List<Part> parts; }
+    [Serializable] class Recipe { public string srcFile, outGlb; public int frames, axisChoice, minVerts; public float degrees; public List<Part> parts; public List<Part> boneParts; public bool useSourceRig; }
     const string RecipesDir = "Assets/FactorySource/VehicleLab/Recipes";
     static readonly string[] AxisOptions = { "Auto (thinnest extent = axle, per wheel)", "X", "Y", "Z" };
     string status = "";
@@ -125,18 +131,22 @@ public class VehicleLabWindow : EditorWindow
             using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(srcFile) || !File.Exists(srcFile)))
                 if (GUILayout.Button(new GUIContent("Probe parts", "Headless Blender lists the model's mesh parts (a single combined mesh is split into loose parts). Roles are auto-guessed from names."), GUILayout.Height(24)))
                     Probe();
-            using (new EditorGUI.DisabledScope(parts.Count == 0))
+            using (new EditorGUI.DisabledScope(parts.Count == 0 && boneParts.Count == 0))
                 if (GUILayout.Button(new GUIContent("Save recipe", "Save the whole configuration (source, output, roles, knobs) as JSON — reload it any time with Load."), GUILayout.Width(90), GUILayout.Height(24)))
                     SaveRecipe();
             if (GUILayout.Button(new GUIContent("Load recipe…", "Restore a saved configuration."), GUILayout.Width(100), GUILayout.Height(24)))
                 LoadRecipe();
-            using (new EditorGUI.DisabledScope(parts.Count == 0))
+            using (new EditorGUI.DisabledScope(parts.Count == 0 && boneParts.Count == 0))
                 if (GUILayout.Button(new GUIContent("Verify", "Sanity-check the classification: shows the wheel bones Vehicleize would build (clustering preview) and flags stray clusters, axle disagreement, unpaired wheels, turret outliers and undecided leftovers."), GUILayout.Width(56), GUILayout.Height(24)))
                     VerifySelection();
         }
 
-        if (parts.Count > 0)
+        if (parts.Count > 0 || boneParts.Count > 0)
         {
+            if (boneParts.Count > 0)
+                useSourceRig = EditorGUILayout.ToggleLeft(new GUIContent($"Use source skeleton (fast path) — the model ships fully rigged ({boneParts.Count} bones)",
+                    "The probe found an artist skeleton with full vertex weights. ON: mark which BONES spin and Vehicleize reuses that skeleton unchanged (artist axle pivots, weapon/socket bones kept). OFF: the static shard-marking flow."), useSourceRig);
+            var list = ActiveParts;
             // Tiny-fragment collapse: a triangle-soup FBX probes into THOUSANDS of 3-4-vert shards — they all belong
             // to Body anyway (anything not marked wheel/turret skins to Root). Only substantial parts are listed.
             minVerts = EditorGUILayout.IntSlider(new GUIContent("Hide parts under (verts)",
@@ -144,18 +154,18 @@ public class VehicleLabWindow : EditorWindow
             minPartSize = EditorGUILayout.Slider(new GUIContent("Hide parts under (size)",
                 "Parts whose largest bbox dimension is below this are hidden (they stay on the hull, like the verts filter). Drop the verts slider and raise this to find LARGE parts with only a few vertices — flat discs and plates."), minPartSize, 0f, 2f);
             // Height filter: slider range auto-fits the model's actual vertical span (probe center heights, Z-up).
-            float zLo = parts.Min(x => x.center.z), zHi = parts.Max(x => x.center.z);
+            float zLo = list.Min(x => x.center.z), zHi = list.Max(x => x.center.z);
             minHeight = EditorGUILayout.Slider(new GUIContent("Hide parts below (height)",
                 "Parts whose center height is below this are hidden. Slide up past the hull deck to isolate turret-level parts."), Mathf.Clamp(minHeight, zLo, zHi), zLo, zHi);
             maxHeight = EditorGUILayout.Slider(new GUIContent("Hide parts above (height)",
                 "Parts whose center height is above this are hidden. Slide down to strip the superstructure and isolate wheel/chassis-level parts."), Mathf.Clamp(maxHeight, zLo, zHi), zLo, zHi);
             partFilter = EditorGUILayout.Popup(new GUIContent("Show only",
                 "Filter the list to one classification. Marking a part out of the current filter removes it from the list and auto-advances to the next."), partFilter, FilterOptions);
-            var shown = parts.Where(x => VisiblePart(x) && MatchesFilter(x.role)).ToList();
-            int hidden = parts.Count(x => !VisiblePart(x));
-            int unreviewed = parts.Count(x => VisiblePart(x) && x.role == Role.Default);
-            int edgecases = parts.Count(x => VisiblePart(x) && x.role == Role.Edgecase);
-            EditorGUILayout.LabelField($"Parts ({shown.Count} shown{(hidden > 0 ? $", {hidden} hidden by the sliders" : "")}{(unreviewed > 0 ? $", {unreviewed} undecided" : ", all decided")}{(edgecases > 0 ? $", {edgecases} edge-case" : "")}) — mark the wheels & turret:", EditorStyles.boldLabel);
+            var shown = list.Where(x => VisiblePart(x) && MatchesFilter(x.role)).ToList();
+            int hidden = list.Count(x => !VisiblePart(x));
+            int unreviewed = list.Count(x => VisiblePart(x) && x.role == Role.Default);
+            int edgecases = list.Count(x => VisiblePart(x) && x.role == Role.Edgecase);
+            EditorGUILayout.LabelField($"{(useSourceRig && boneParts.Count > 0 ? "Source BONES" : "Parts")} ({shown.Count} shown{(hidden > 0 ? $", {hidden} hidden by the sliders" : "")}{(unreviewed > 0 ? $", {unreviewed} undecided" : ", all decided")}{(edgecases > 0 ? $", {edgecases} edge-case" : "")}) — mark {(useSourceRig && boneParts.Count > 0 ? "the bones that SPIN (Wheel)" : "the wheels & turret")}:", EditorStyles.boldLabel);
             EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part (zooms + highlights it below)   ·   W/T/B/I = Wheel/Turret/Body/Ignore   ·   D = Default(unreviewed)   ·   E = Edgecase (unsure, revisit later; rigs like Default)", EditorStyles.miniLabel);
             // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
             // part's role — the whole list can be reviewed without mousing between rows and dropdowns.
@@ -208,10 +218,10 @@ public class VehicleLabWindow : EditorWindow
             frames = EditorGUILayout.IntSlider(new GUIContent("Spin frames", "Length of the generated Spin action. Apparent speed is tuned later with slice steps (Spin[1..N/2]) — this just needs to be a smooth loop."), frames, 5, 60);
             degrees = EditorGUILayout.Slider(new GUIContent("Spin degrees", "Wheel rotation over the clip (one full turn = 360). Which SIGN rolls forward depends on the model's nose direction — check the preview and negate if the wheels roll backward. For a +X-facing model (like the Ehrhardt), +360 is forward."), degrees, -720f, 720f);
 
-            int wheels = parts.Count(x => x.role == Role.Wheel);
+            int wheels = list.Count(x => x.role == Role.Wheel);
             using (new EditorGUI.DisabledScope(wheels == 0 || string.IsNullOrEmpty(outGlb)))
-                if (GUILayout.Button(new GUIContent($"Vehicleize  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
-                        wheels == 0 ? "Mark at least one part as Wheel." : "Runs Blender: rig + Spin action + GLB export + preview."), GUILayout.Height(28)))
+                if (GUILayout.Button(new GUIContent($"Vehicleize{(useSourceRig && boneParts.Count > 0 ? " (fast path)" : "")}  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
+                        wheels == 0 ? "Mark at least one entry as Wheel." : "Runs Blender: rig + Spin action + GLB export + preview."), GUILayout.Height(28)))
                     Vehicleize();
         }
 
@@ -235,7 +245,10 @@ public class VehicleLabWindow : EditorWindow
         // every unmarked part around the kept markings.
         var kept = new Dictionary<string, Role>();
         foreach (var p0 in parts) if (p0.role != Role.Default) kept[p0.name] = p0.role;   // explicit Body verdicts survive too
-        parts.Clear(); DestroyPreview();
+        var keptBones = new Dictionary<string, Role>();
+        foreach (var b0 in boneParts) if (b0.role != Role.Default) keptBones[b0.name] = b0.role;
+        bool hadBones = boneParts.Count > 0;
+        parts.Clear(); boneParts.Clear(); DestroyPreview();
         // probe also exports a preview FBX of the SPLIT model, so part rows can zoom/highlight in the turntable
         string projRoot = Directory.GetParent(Application.dataPath).FullName;
         string prevDir = "Assets/FactorySource/VehicleLab";
@@ -249,7 +262,7 @@ public class VehicleLabWindow : EditorWindow
         foreach (var line in stdout.Split('\n'))
         {
             var t = line.Trim().Split('|');
-            if (t.Length != 5 || t[0] != "PART") continue;
+            if (t.Length != 5 || (t[0] != "PART" && t[0] != "RIGBONE")) continue;
             var c = t[3].Split(','); var s = t[4].Split(',');
             if (c.Length != 3 || s.Length != 3) continue;
             var p = new Part
@@ -260,11 +273,13 @@ public class VehicleLabWindow : EditorWindow
                 size = new Vector3(F(s[0]), F(s[1]), F(s[2])),
             };
             var low = p.name.ToLowerInvariant();
-            p.role = kept.TryGetValue(p.name, out var kr) ? kr
+            var keptMap = t[0] == "RIGBONE" ? keptBones : kept;
+            p.role = keptMap.TryGetValue(p.name, out var kr) ? kr
                    : low.Contains("wheel") || low.Contains("tyre") || low.Contains("tire") ? Role.Wheel
                    : low.Contains("turret") ? Role.Turret : Role.Default;
-            parts.Add(p);
+            (t[0] == "RIGBONE" ? boneParts : parts).Add(p);
         }
+        if (boneParts.Count > 0 && !hadBones) useSourceRig = true;   // first detection: default to the fast path
         if (File.Exists(prevFull))
         {
             AssetDatabase.ImportAsset(prevRel, ImportAssetOptions.ForceUpdate);
@@ -272,7 +287,11 @@ public class VehicleLabWindow : EditorWindow
         }
         status = parts.Count == 0
             ? "Probe found no mesh parts — is this a mesh model? (See the Console for Blender output.)"
-            : $"Probed {parts.Count} part(s); {parts.Count(x => x.role == Role.Wheel)} wheel(s), {parts.Count(x => x.role == Role.Turret)} turret(s)" +
+            : (boneParts.Count > 0
+                ? $"SOURCE IS RIGGED: {boneParts.Count} skinned bones found ({boneParts.Count(x => x.role == Role.Wheel)} auto-guessed as wheels) — fast path ON: mark the bones that spin and Vehicleize. " +
+                  "Toggle it off for the static shard flow. "
+                : "") +
+              $"Probed {parts.Count} part(s); {parts.Count(x => x.role == Role.Wheel)} wheel(s), {parts.Count(x => x.role == Role.Turret)} turret(s)" +
               (kept.Count > 0 ? $" ({parts.Count(x => kept.ContainsKey(x.name) && x.role == kept[x.name])} of {kept.Count} earlier markings kept)" : " (auto-guessed)") +
               ". Click a row to see WHICH part it is (zoom + yellow highlight), assign roles, then Vehicleize.";
     }
@@ -283,8 +302,9 @@ public class VehicleLabWindow : EditorWindow
     {
         var report = new List<(string text, string part)>();
         bool warn = false;
-        var wheels = parts.Where(p => p.role == Role.Wheel).ToList();
-        var turrets = parts.Where(p => p.role == Role.Turret).ToList();
+        var vlist = ActiveParts;   // fast path verifies the BONE marking (each wheel bone = its own cluster)
+        var wheels = vlist.Where(p => p.role == Role.Wheel).ToList();
+        var turrets = vlist.Where(p => p.role == Role.Turret).ToList();
 
         if (wheels.Count == 0) { report.Add(("✗ No parts marked Wheel — nothing will spin.", null)); warn = true; }
         else
@@ -316,7 +336,7 @@ public class VehicleLabWindow : EditorWindow
                 { report.Add(($"  ⚠ wheel at ({c.anchor.center.x:0.00}, {c.anchor.center.y:0.00}) has no mirrored partner — missed the other side?", c.anchor.name)); warn = true; }
             // center-in-sphere is a coarse test: a mudguard ARCS over the wheel and its bbox center lands near the
             // hub. Anything as big as the wheel itself can't be "inside" it — size-gate to parts under 0.9×.
-            var insideParts = parts.Where(p => p.role != Role.Wheel &&
+            var insideParts = vlist.Where(p => p.role != Role.Wheel &&
                     clusters.Any(c => MaxDim(p) < 0.9f * MaxDim(c.anchor) &&
                                       (p.center - c.anchor.center).magnitude <= 0.5f * MaxDim(c.anchor)))
                 .OrderByDescending(MaxDim).ToList();
@@ -344,8 +364,8 @@ public class VehicleLabWindow : EditorWindow
             }
         }
 
-        int undecided = parts.Count(p => p.role == Role.Default);
-        int edge = parts.Count(p => p.role == Role.Edgecase);
+        int undecided = vlist.Count(p => p.role == Role.Default);
+        int edge = vlist.Count(p => p.role == Role.Edgecase);
         if (undecided > 0) { report.Add(($"⚠ {undecided} part(s) still undecided (Default).", null)); warn = true; }
         if (edge > 0) report.Add(($"• {edge} Edgecase part(s) — rig static (like Body), safe.", null));
         if (!warn) report.Add(("Looks sane — ready to Vehicleize.", null));
@@ -360,7 +380,7 @@ public class VehicleLabWindow : EditorWindow
     // relaxed just enough for its row to exist. Non-modal by design: the report stays readable while working.
     internal void FocusPart(string name)
     {
-        var p = parts.FirstOrDefault(x => x.name == name);
+        var p = ActiveParts.FirstOrDefault(x => x.name == name);
         if (p != null)
         {
             if (p.verts < minVerts) minVerts = Mathf.Max(1, p.verts);
@@ -368,7 +388,7 @@ public class VehicleLabWindow : EditorWindow
             if (p.center.z < minHeight) minHeight = p.center.z;
             if (p.center.z > maxHeight) maxHeight = p.center.z;
             if (!MatchesFilter(p.role)) partFilter = 0;
-            int idx = parts.Where(x => VisiblePart(x) && MatchesFilter(x.role)).ToList().FindIndex(x => x.name == name);
+            int idx = ActiveParts.Where(x => VisiblePart(x) && MatchesFilter(x.role)).ToList().FindIndex(x => x.name == name);
             if (idx >= 0) partsScroll.y = Mathf.Max(0f, idx * 20f - 120f);
         }
         SelectPart(name);
@@ -413,7 +433,7 @@ public class VehicleLabWindow : EditorWindow
         string def = Path.GetFileNameWithoutExtension(string.IsNullOrEmpty(srcFile) ? "vehicle" : srcFile);
         string p = EditorUtility.SaveFilePanel("Save vehicleize recipe", Path.Combine(projRoot, RecipesDir), def, "json");
         if (string.IsNullOrEmpty(p)) return;
-        var r = new Recipe { srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees, parts = parts };
+        var r = new Recipe { srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees, parts = parts, boneParts = boneParts, useSourceRig = useSourceRig };
         File.WriteAllText(p, JsonUtility.ToJson(r, true));
         AssetDatabase.Refresh();
         status = "Recipe saved: " + p;
@@ -432,7 +452,9 @@ public class VehicleLabWindow : EditorWindow
             DestroyPreview();
             srcFile = r.srcFile; outGlb = r.outGlb; frames = r.frames; axisChoice = r.axisChoice; minVerts = r.minVerts; degrees = r.degrees;
             parts = r.parts;
-            status = $"Recipe loaded ({parts.Count} parts, {parts.Count(x => x.role == Role.Wheel)} wheels). " +
+            boneParts = r.boneParts ?? new List<Part>();   // pre-fast-path recipes have no bone list
+            useSourceRig = r.useSourceRig && boneParts.Count > 0;
+            status = $"Recipe loaded ({parts.Count} parts{(boneParts.Count > 0 ? $", {boneParts.Count} source bones, fast path {(useSourceRig ? "ON" : "off")}" : "")}, {ActiveParts.Count(x => x.role == Role.Wheel)} wheels). " +
                      "Vehicleize directly — or press Probe to list ALL parts for review (your marked roles are kept, plus the preview returns for click-to-highlight).";
         }
         catch (Exception e) { status = "Recipe load failed: " + e.Message; }
@@ -482,11 +504,13 @@ public class VehicleLabWindow : EditorWindow
         // the ~32k Windows command-line limit that an inline ;-joined string would hit.
         string wheelsFile = Path.Combine(projRoot, prevDir, baseName + "_wheels.txt").Replace('\\', '/');
         string turretsFile = Path.Combine(projRoot, prevDir, baseName + "_turrets.txt").Replace('\\', '/');
-        File.WriteAllLines(wheelsFile, parts.Where(p => p.role == Role.Wheel).Select(p => p.name).ToArray());
-        File.WriteAllLines(turretsFile, parts.Where(p => p.role == Role.Turret).Select(p => p.name).ToArray());
+        bool fast = useSourceRig && boneParts.Count > 0;   // fast path: spin the marked SOURCE BONES, reuse the artist skeleton
+        var src = fast ? boneParts : parts;
+        File.WriteAllLines(wheelsFile, src.Where(p => p.role == Role.Wheel).Select(p => p.name).ToArray());
+        File.WriteAllLines(turretsFile, src.Where(p => p.role == Role.Turret).Select(p => p.name).ToArray());
         string axis = axisChoice == 0 ? "AUTO" : AxisOptions[axisChoice];
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        if (!RunBlender($"rig \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {degrees.ToString("0.#", inv)}", out string stdout)) return;
+        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {degrees.ToString("0.#", inv)}", out string stdout)) return;
         // SUCCESS = THE SCRIPT'S OWN FINAL MARKER (the documented Blender trap: it exits 0 even when the python
         // script crashes mid-way — without this gate a half-run printed a fake "DONE" with no file on disk).
         string done = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE RIG DONE"));

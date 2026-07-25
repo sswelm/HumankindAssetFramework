@@ -44,7 +44,49 @@ def world_bbox(o):
 
 imp(inp)
 
+# ---- rigged-source detection (the SKM fast path's foundation) ----
+# A game-rip often ships FULLY skinned (SKM_ prefix): its artist skeleton has perfect axle pivots and extra
+# weapon bones. Report each DEFORM bone with its weighted-vert count + bbox so the caller can offer bone-level
+# marking instead of the shard flow. Computed on the ORIGINAL meshes, before any loose-split.
+def rig_report():
+    arms = [o for o in bpy.context.scene.objects if o.type == 'ARMATURE']
+    if not arms:
+        return
+    arm0 = arms[0]
+    bone_names = {b.name for b in arm0.data.bones}
+    stats = {}   # bone -> [count, min Vector, max Vector]
+    total = weighted = 0
+    for o in mesh_objects():
+        gidx = {g.index: g.name for g in o.vertex_groups if g.name in bone_names}
+        if not gidx:
+            continue
+        mw = o.matrix_world
+        for v in o.data.vertices:
+            total += 1
+            best = None
+            for g in v.groups:
+                if g.group in gidx and g.weight > 0.5:
+                    best = gidx[g.group]; break
+            if best is None:
+                continue
+            weighted += 1
+            p = mw @ v.co
+            st = stats.get(best)
+            if st is None:
+                stats[best] = [1, p.copy(), p.copy()]
+            else:
+                st[0] += 1
+                st[1].x = min(st[1].x, p.x); st[1].y = min(st[1].y, p.y); st[1].z = min(st[1].z, p.z)
+                st[2].x = max(st[2].x, p.x); st[2].y = max(st[2].y, p.y); st[2].z = max(st[2].z, p.z)
+    if not stats or total == 0 or weighted < total * 0.9:
+        return   # partially/un-skinned: not fast-path material
+    print("VEHICLE rigged source: armature '%s', %d bones carry weights, %d/%d verts weighted" % (arm0.name, len(stats), weighted, total))
+    for bn, (cnt, mn, mx) in stats.items():
+        c = (mn + mx) / 2.0; s = mx - mn
+        print("RIGBONE|%s|%d|%.4f,%.4f,%.4f|%.4f,%.4f,%.4f" % (bn, cnt, c.x, c.y, c.z, s.x, s.y, s.z))
+
 if mode == "probe":
+    rig_report()
     objs = mesh_objects()
     if len(objs) == 1:
         # a single combined mesh can't be role-assigned — try splitting into loose parts for the caller
@@ -91,6 +133,75 @@ turret_names = namelist(argv[5])
 axis_arg = argv[6].upper()
 frames = max(2, int(argv[7]))
 degrees = float(argv[8])
+
+# ---- rigfast mode: the SKM fast path ----
+# The source already carries an artist skeleton with full weights (see rig_report) — REUSE it: author the Spin
+# action directly on the named source bones and keep skinning/pivots/weapon bones untouched. Per bone, the spin
+# axis is the LOCAL basis axis closest to the world axle direction, SIGNED so every wheel turns the same world
+# way (artist rigs mirror left/right bones — an unsigned shared channel would counter-rotate one side).
+if mode == "rigfast":
+    def _fast():
+        global objs
+        arms = [o for o in bpy.context.scene.objects if o.type == 'ARMATURE']
+        if not arms:
+            print("VEHICLE ERROR: rigfast requested but the source has no armature"); sys.exit(1)
+        arm = arms[0]
+        objs = mesh_objects()
+        ref = {"X": Vector((1, 0, 0)), "Y": Vector((0, 1, 0)), "Z": Vector((0, 0, 1))}.get(axis_arg, Vector((0, 1, 0)))
+        arm.animation_data_create()
+        act = bpy.data.actions.new("Spin")
+        arm.animation_data.action = act
+        try:
+            if getattr(act, "slots", None):
+                arm.animation_data.action_slot = act.slots[0]
+        except Exception:
+            pass
+        bpy.context.scene.frame_start = 0
+        bpy.context.scene.frame_end = frames
+        spun = {}
+        for bn in wheel_names:
+            db, pb = arm.data.bones.get(bn), arm.pose.bones.get(bn)
+            if db is None or pb is None:
+                print("VEHICLE ERROR: spin bone '%s' not found. Bones: %s" % (bn, [b.name for b in arm.data.bones])); sys.exit(1)
+            m3 = (arm.matrix_world @ db.matrix_local).to_3x3()
+            best_i, best_d = 0, 0.0
+            for i in range(3):
+                v = Vector((0.0, 0.0, 0.0)); v[i] = 1.0
+                d = (m3 @ v).normalized().dot(ref)
+                if abs(d) > abs(best_d):
+                    best_i, best_d = i, d
+            sign = 1.0 if best_d >= 0 else -1.0
+            pb.rotation_mode = 'XYZ'
+            bpy.context.scene.frame_set(0)
+            pb.rotation_euler = (0, 0, 0)
+            pb.keyframe_insert("rotation_euler", frame=0)
+            eul = [0.0, 0.0, 0.0]; eul[best_i] = math.radians(degrees) * sign
+            bpy.context.scene.frame_set(frames)
+            pb.rotation_euler = tuple(eul)
+            pb.keyframe_insert("rotation_euler", frame=frames)
+            spun[bn] = ("+" if sign > 0 else "-") + "XYZ"[best_i]
+        try:
+            fcs = list(act.fcurves)
+        except AttributeError:
+            fcs = [fc for layer in act.layers for strip in layer.strips for cb in strip.channelbags for fc in cb.fcurves]
+        for fc in fcs:
+            for kp in fc.keyframe_points:
+                kp.interpolation = 'LINEAR'
+        # strip helper objects (empties etc.); a kept child of a removed parent must keep its WORLD transform
+        keep = set(objs); keep.add(arm)
+        for o in keep:
+            if o.parent is not None and o.parent not in keep:
+                mw = o.matrix_world.copy(); o.parent = None; o.matrix_world = mw
+        for o in list(bpy.data.objects):
+            if o not in keep:
+                bpy.data.objects.remove(o, do_unlink=True)
+        bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
+        if preview_fbx:
+            bpy.ops.export_scene.fbx(filepath=preview_fbx, add_leaf_bones=False, bake_anim=True)
+        print("VEHICLE RIG DONE: FAST PATH — %d source bone(s) spun %s on the artist skeleton (%d bones, weights untouched), Spin 0..%d %.0f deg -> %s"
+              % (len(wheel_names), spun, len(arm.data.bones), frames, degrees, out_glb))
+    _guard(_fast)
+    sys.exit(0)
 
 objs = mesh_objects()
 if len(objs) == 1 and (wheel_names or turret_names):
