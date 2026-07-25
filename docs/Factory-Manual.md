@@ -515,7 +515,10 @@ engine/hover loop, use the **custom WAV** path (§14). The auto-capture fallback
 inherited donor sound**, **Idle growl** (file, volume, interval, one-voice radius), **Attack sound**, **Death sound**,
 **Battle start war cry** (each: file, volume, start offset), **Movement**
 (start/travel/stop), and **Wwise engine event** (with the searchable event **Pick** dropdowns and the one-click
-**Use donor engine sound** button — §13). Pick a pawn (or **Edit** one from the "Units with audio" list, which fills
+**Use donor engine sound** button — §13). The Pawn-description field has its own **Pick** (2026-07-25): a searchable
+dropdown over EVERY pawn descriptor in the loaded databases — ENC and mounted vanilla alike (first open scans the
+assets once per session) — and picking loads that pawn's existing audio config. Pick a pawn (or **Edit** one from the
+"Units with audio" list, which fills
 the window's remaining height) and every knob round-trips; each WAV row has a ▶ preview. **Folded headers summarize
 their configuration** (2026-07-25): while a section is collapsed, its configured WAV/event shows right-aligned in
 green on the header row — growl file + interval, one-shots with their start offsets, the movement trio, the

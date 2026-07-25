@@ -63,7 +63,21 @@ public class SoundWindow : EditorWindow
 
         // --- pawn ---
         EditorGUILayout.LabelField("Pawn", EditorStyles.boldLabel);
-        pawn = EditorGUILayout.TextField(new GUIContent("Pawn description", "A unique substring of the unit's pawn descriptor, e.g. Era6_Common_ReconDrones_01."), pawn);
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            pawn = EditorGUILayout.TextField(new GUIContent("Pawn description", "A unique substring of the unit's pawn descriptor, e.g. Era6_Common_ReconDrones_01. Pick browses every pawn in the databases (ENC + vanilla)."), pawn);
+            if (GUILayout.Button(new GUIContent("Pick", "Browse ALL pawn descriptors in the loaded databases (ENC + mounted vanilla, searchable). First open scans the assets once."), GUILayout.Width(50)))
+            {
+                var cat = LoadPawnCatalog();
+                if (cat.Length == 0) status = "No pawn descriptors found in the loaded databases.";
+                else
+                {
+                    var r = GUILayoutUtility.GetLastRect();
+                    new StringDropdown(new AdvancedDropdownState(), cat, cat, "Pawn descriptor",
+                        s => { LoadForPawn(s, ModelRegistry.Load()); Repaint(); }).Show(r);
+                }
+            }
+        }
         var pawns = all.Select(m => m.pawnDescription).Where(s => !string.IsNullOrEmpty(s)).Distinct().OrderBy(s => s).ToArray();
         if (pawns.Length > 0)
         {
@@ -198,6 +212,31 @@ public class SoundWindow : EditorWindow
     // Compact event name for summaries: "Play_UNIT_Vehicle_AntiAirGun_Movement_Start" -> "Vehicle_AntiAirGun_Movement"
     static string ShortEvent(string e) =>
         string.IsNullOrEmpty(e) ? "(auto-capture)" : e.Replace("Play_UNIT_", "").Replace("_Start", "");
+
+    // ── Pawn-descriptor catalog: every pawn in the loaded databases (ENC + the mounted vanilla scenario), for the
+    // Pick dropdown — no more typing descriptor strings from memory. Scans only the PresentationPawnDefinition
+    // container assets (name match, then their sub-assets), once per editor session (domain reload clears it).
+    static string[] pawnDescCatalog;
+    static string[] LoadPawnCatalog()
+    {
+        if (pawnDescCatalog != null) return pawnDescCatalog;
+        var names = new HashSet<string>();
+        try
+        {
+            var guids = AssetDatabase.FindAssets("PresentationPawnDefinition");
+            for (int i = 0; i < guids.Length; i++)
+            {
+                if (i % 8 == 0) EditorUtility.DisplayProgressBar("Pawn catalog", "Scanning pawn definitions…", i / (float)guids.Length);
+                foreach (var obj in AssetDatabase.LoadAllAssetsAtPath(AssetDatabase.GUIDToAssetPath(guids[i])))
+                    if (obj != null && obj.GetType().Name.Contains("PresentationPawn") && !string.IsNullOrEmpty(obj.name))
+                        names.Add(obj.name);
+            }
+        }
+        catch { }
+        finally { EditorUtility.ClearProgressBar(); }
+        pawnDescCatalog = names.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToArray();
+        return pawnDescCatalog;
+    }
 
     // Folded-header summary for the Movement section: the configured WAV names, start / travel / stop order.
     string MoveSummary()
