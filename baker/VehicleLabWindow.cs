@@ -314,8 +314,11 @@ public class VehicleLabWindow : EditorWindow
                     !clusters.Any(o => o.anchor != c.anchor && Mathf.Abs(o.anchor.center.x - c.anchor.center.x) < 0.2f
                                                             && Mathf.Abs(o.anchor.center.y + c.anchor.center.y) < 0.2f))
                 { report.Add(($"  ⚠ wheel at ({c.anchor.center.x:0.00}, {c.anchor.center.y:0.00}) has no mirrored partner — missed the other side?", c.anchor.name)); warn = true; }
+            // center-in-sphere is a coarse test: a mudguard ARCS over the wheel and its bbox center lands near the
+            // hub. Anything as big as the wheel itself can't be "inside" it — size-gate to parts under 0.9×.
             var insideParts = parts.Where(p => p.role != Role.Wheel &&
-                    clusters.Any(c => (p.center - c.anchor.center).magnitude <= 0.5f * MaxDim(c.anchor)))
+                    clusters.Any(c => MaxDim(p) < 0.9f * MaxDim(c.anchor) &&
+                                      (p.center - c.anchor.center).magnitude <= 0.5f * MaxDim(c.anchor)))
                 .OrderByDescending(MaxDim).ToList();
             if (insideParts.Count > 0)
             {
