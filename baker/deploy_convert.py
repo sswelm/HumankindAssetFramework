@@ -574,6 +574,22 @@ if len(argv) >= 4:
     scene.frame_start, scene.frame_end = int(argv[2]), trim_end
     print("DEPLOY trim to frames %d..%d" % (scene.frame_start, scene.frame_end))
 bpy.ops.object.select_all(action='SELECT')
+# PURGE SOURCE SCAFFOLDING (2026-07-25, the export-garbage riddle SOLVED): after binding, the scene still
+# carried ~39 leftover source objects (the .fbx root empty, lights, cameras, locators, group empties — the
+# COMPENSATED-SCALE chain among them). The glTF export wrote them as nodes; re-import folded same-named nodes
+# into the bone hierarchy as garbage joints/curves (rest heads ~1e10, curves ~1e11) while the actual BONES were
+# clean all along (probe-verified: barrel1's real recoil slide lives as sane location keys post-bake). The
+# output needs exactly the armature + its bound meshes (all re-parented to the armature at bind); delete
+# everything else.
+_keepset = set(o for o in bpy.data.objects if o.type == 'MESH')
+_keepset.add(arm)
+_purged = 0
+for _o in list(bpy.data.objects):
+    if _o not in _keepset:
+        bpy.data.objects.remove(_o, do_unlink=True); _purged += 1
+if _purged:
+    print("DEPLOY purged %d leftover source object(s) (empties/lights/cameras/locators/groups)" % _purged)
+
 # SANITIZE BEFORE EXPORT (2026-07-25, found via the howitzer kickback work): degenerate SOURCE nodes (zero-scale
 # ancestors — the m114's door/handle/barrel1 chain) decompose into garbage keys (locations ~1e11, scales 0..5e14,
 # NaN) that ride into the GLB, NaN the Unity import and explode skinned bounds. Any bone with a non-finite or
