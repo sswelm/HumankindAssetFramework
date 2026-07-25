@@ -25,7 +25,10 @@ public class VehicleLabWindow : EditorWindow
         w.minSize = new Vector2(680, 560);   // wide enough for the info text; tall enough for list + knobs + preview
     }
 
-    enum Role { Body, Wheel, Turret, Ignore }
+    // Default = NOT YET REVIEWED (the probe's initial state); Body is an explicit "looked at it, it's hull" verdict.
+    // Both skin to Root in the rig — the split only exists so review progress is visible. Default is APPENDED so
+    // the ints in saved recipes stay valid (Body=0, Wheel=1, Turret=2, Ignore=3).
+    enum Role { Body, Wheel, Turret, Ignore, Default }
     [Serializable] class Part { public string name; public int verts; public Vector3 center, size; public Role role; }
 
     // Everything an assignment session builds is [SerializeField]: a DOMAIN RELOAD (any recompile) must never eat
@@ -119,7 +122,8 @@ public class VehicleLabWindow : EditorWindow
                 "Parts smaller than this are collapsed into Body automatically (they skin to Root). Raise it if the list is still noisy; lower it if a small wheel is missing."), minVerts, 1, 2000);
             var shown = parts.Where(x => x.verts >= minVerts).ToList();
             int hidden = parts.Count - shown.Count;
-            EditorGUILayout.LabelField($"Parts ({shown.Count} shown{(hidden > 0 ? $", {hidden} tiny fragments auto-collapsed into Body" : "")}) — mark the wheels & turret:", EditorStyles.boldLabel);
+            int unreviewed = shown.Count(x => x.role == Role.Default);
+            EditorGUILayout.LabelField($"Parts ({shown.Count} shown{(hidden > 0 ? $", {hidden} tiny fragments auto-collapsed" : "")}{(unreviewed > 0 ? $", {unreviewed} unreviewed" : ", all reviewed")}) — mark the wheels & turret:", EditorStyles.boldLabel);
             // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
             // part's role — the whole list can be reviewed without mousing between rows and dropdowns.
             var ev = Event.current;
@@ -134,11 +138,12 @@ public class VehicleLabWindow : EditorWindow
                     GUIUtility.keyboardControl = 0;                    // a focused slider/popup must not swallow the arrows
                     ev.Use(); Repaint();
                 }
-                else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I))
+                else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I || ev.keyCode == KeyCode.D))
                 {
                     shown[idx].role = ev.keyCode == KeyCode.W ? Role.Wheel
                                     : ev.keyCode == KeyCode.T ? Role.Turret
-                                    : ev.keyCode == KeyCode.I ? Role.Ignore : Role.Body;
+                                    : ev.keyCode == KeyCode.I ? Role.Ignore
+                                    : ev.keyCode == KeyCode.D ? Role.Default : Role.Body;
                     ev.Use(); Repaint();
                 }
             }
@@ -157,7 +162,7 @@ public class VehicleLabWindow : EditorWindow
             if (inst == null)
                 EditorGUILayout.LabelField("  (probe preview unavailable — part focus needs the probe's preview FBX; re-Probe after recompiling)", EditorStyles.miniLabel);
             else
-                EditorGUILayout.LabelField("  Click a row (or ↑/↓) to zoom + highlight it below; click again for the full view. W/T/B/I = mark selected as Wheel/Turret/Body/Ignore.", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("  Click a row (or ↑/↓) to zoom + highlight it below; click again for the full view. W/T/B/I/D = Wheel/Turret/Body/Ignore/Default(unreviewed).", EditorStyles.miniLabel);
             axisChoice = EditorGUILayout.Popup(new GUIContent("Axle axis", "Auto infers each wheel's axle as its thinnest bbox extent — right for normal wheels; override only if a wheel spins the wrong way around."), axisChoice, AxisOptions);
             frames = EditorGUILayout.IntSlider(new GUIContent("Spin frames", "Length of the generated Spin action. Apparent speed is tuned later with slice steps (Spin[1..N/2]) — this just needs to be a smooth loop."), frames, 5, 60);
             degrees = EditorGUILayout.Slider(new GUIContent("Spin degrees", "Wheel rotation over the clip. -360 = one full forward turn (negate if wheels roll backward in the preview)."), degrees, -720f, 720f);
@@ -186,7 +191,7 @@ public class VehicleLabWindow : EditorWindow
         // part name. This is also how a minimal recipe expands for review — Load recipe, then Probe to surface
         // every unmarked part around the kept markings.
         var kept = new Dictionary<string, Role>();
-        foreach (var p0 in parts) if (p0.role != Role.Body) kept[p0.name] = p0.role;
+        foreach (var p0 in parts) if (p0.role != Role.Default) kept[p0.name] = p0.role;   // explicit Body verdicts survive too
         parts.Clear(); DestroyPreview();
         // probe also exports a preview FBX of the SPLIT model, so part rows can zoom/highlight in the turntable
         string projRoot = Directory.GetParent(Application.dataPath).FullName;
@@ -214,7 +219,7 @@ public class VehicleLabWindow : EditorWindow
             var low = p.name.ToLowerInvariant();
             p.role = kept.TryGetValue(p.name, out var kr) ? kr
                    : low.Contains("wheel") || low.Contains("tyre") || low.Contains("tire") ? Role.Wheel
-                   : low.Contains("turret") ? Role.Turret : Role.Body;
+                   : low.Contains("turret") ? Role.Turret : Role.Default;
             parts.Add(p);
         }
         if (File.Exists(prevFull))
