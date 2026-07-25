@@ -193,6 +193,31 @@ for o in objs:
     md = o.modifiers.new("Armature", 'ARMATURE'); md.object = arm
     o.parent = arm
 
+# ---- join shards per bone ----
+# 3,350 tiny objects make every downstream step crawl (the animated bake's Blender sub-process TIMED OUT on
+# the un-joined file). Rigid skinning is per-part anyway, so after weights are assigned the rig needs at most
+# ONE mesh per bone: hull -> one, each wheel -> one, turret -> one. Vertex groups merge by name on join, the
+# active object's armature modifier and parenting survive.
+def _join_per_bone():
+    global objs
+    groups = {}
+    for o in objs:
+        groups.setdefault(bone_of.get(o.name, "Root"), []).append(o)
+    joined = []
+    for bname, members in groups.items():
+        bpy.ops.object.select_all(action='DESELECT')
+        for m in members:
+            m.select_set(True)
+        bpy.context.view_layer.objects.active = members[0]
+        if len(members) > 1:
+            bpy.ops.object.join()
+        m0 = bpy.context.view_layer.objects.active
+        m0.name = "Mesh_" + bname
+        joined.append(m0)
+    objs = joined
+    print("VEHICLE join: %d mesh(es), one per bone" % len(objs))
+_guard(_join_per_bone)
+
 # the LINEAR "Spin" action: frame 0 = rest identity, frame N = <degrees> about each wheel's local Y (the axle)
 arm.animation_data_create()
 act = bpy.data.actions.new("Spin")
