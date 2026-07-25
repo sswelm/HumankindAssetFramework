@@ -183,19 +183,29 @@ print("DEPLOY baked %d bones" % len(bone_of))
 # reload, then the source's own aiming RAISE re-used to bring the barrel back up — the raise doesn't exist
 # after the load in the source, but it exists before the fire).
 _seg_starts = [int(s) for s in argv[8].split(",") if s.strip()] if len(argv) > 8 and argv[8].strip() else []
-_seg_ends = [int(s) for s in argv[9].split(",") if s.strip()] if len(argv) > 9 and argv[9].strip() else []
-_segments = list(zip(_seg_starts, _seg_ends))
+_seg_ends = []
+_seg_steps = []   # per-segment /N speed step (every Nth frame = N x faster); applied to EPILOGUE segments
+for _tok in (argv[9].split(",") if len(argv) > 9 and argv[9].strip() else []):
+    _tok = _tok.strip()
+    if not _tok:
+        continue
+    if "/" in _tok:
+        _e, _st = _tok.split("/", 1)
+        _seg_ends.append(int(_e)); _seg_steps.append(max(1, int(_st)))
+    else:
+        _seg_ends.append(int(_tok)); _seg_steps.append(1)
+_segments = list(zip(_seg_starts, _seg_ends, _seg_steps))
 _fire_snap = {}
 if _segments:
     for pb in arm.pose.bones:
         pb.rotation_mode = 'QUATERNION'
-    for _ss, _se in _segments:
+    for _ss, _se, _st in _segments:
         for f in range(_ss, _se + 1):
             scene.frame_set(f)
             bpy.context.view_layer.update()
             _fire_snap[f] = {pb.name: (pb.location.copy(), pb.rotation_quaternion.copy()) for pb in arm.pose.bones}
     print("DEPLOY fire-window snapshot: %d frames (%s) captured PRISTINE (pre-retarget)"
-          % (len(_fire_snap), ", ".join("%d..%d" % s for s in _segments)))
+          % (len(_fire_snap), ", ".join("%d..%d/%d" % s for s in _segments)))
 
 # --- 5b. optional: RETARGET the barrel to its fully-elevated 'ready' pose by the deploy's end (argv[5] = readyFrame) ---
 # The rest/deployed pose should be combat-ready (barrel up). In the source the barrel pauses at the aiming angle for a
@@ -270,7 +280,7 @@ recoil_out_end = None
 if len(argv) > 8 and argv[8].strip():
     from mathutils import Matrix, Quaternion
     deploy_end = int(argv[3])
-    rs, re = _segments[0]                                      # SEGMENT 1 only — the actual fire window drives slide/arc
+    rs, re = _segments[0][0], _segments[0][1]                  # SEGMENT 1 only — the actual fire window drives slide/arc
     step = int(argv[10]) if len(argv) > 10 and argv[10].strip() else 2
     recoil_bones = [bn for bn in bone_of.values() if any(k in bn.lower() for k in ("barrel", "cannon"))]
     bone_to_src = {bone_of[p.name]: p for p in parts if p.name in bone_of}   # bone -> its source node (still animated 0..fmax)
@@ -548,13 +558,19 @@ if arm_action:
         # on the RecoilArm (theta from 5d's slam-derived arc, interpolated per source frame; identity outside the
         # kick). The palindrome return (argv[13], default 4) plays the whole thing backward slowed, raising the
         # barrel back to battery and gliding the kick home; 0 = no return (ends as the source ends).
-        rs2, re2 = _segments[0]
+        rs2, re2 = _segments[0][0], _segments[0][1]
         ret2 = int(argv[13]) if len(argv) > 13 and argv[13].strip() else 4
         fwd = list(range(rs2, re2 + 1))
         frames2 = list(fwd) + (list(reversed(fwd[:-1])) if ret2 > 0 else [])
         # EPILOGUE SEGMENTS (multi-range recoil): appended pristine after the fire cycle (+return), arm identity —
-        # e.g. the M114's aiming-raise window replayed to bring the barrel back up after the reload.
-        _epilogue = [f for _ss, _se in _segments[1:] for f in range(_ss, _se + 1)]
+        # e.g. the M114's aiming-raise window replayed to bring the barrel back up after the reload. The /N step
+        # plays a segment every Nth frame = N x faster (always landing on the end frame).
+        _epilogue = []
+        for _ss, _se, _st in _segments[1:]:
+            _fr = list(range(_ss, _se + 1, _st))
+            if _fr and _fr[-1] != _se:
+                _fr.append(_se)
+            _epilogue += _fr
         frames2 += _epilogue
         # per-entry arm quaternion: linear-interpolate theta between 5d's sampled arc keys (dict on source frames)
         def theta_at(t):

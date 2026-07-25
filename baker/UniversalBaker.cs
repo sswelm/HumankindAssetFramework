@@ -212,11 +212,14 @@ public static class UniversalBaker
             var starts = new List<string>(); var ends = new List<string>();
             foreach (var seg in recoil.Split(','))
             {
-                var m = System.Text.RegularExpressions.Regex.Match(seg.Trim(), @"^(\d+)\s*\.\.\s*(\d+)$");
-                if (!m.Success) { error = "deploy conversion: recoil range must look like 440..510 (or several: 443..530,330..440), got '" + seg.Trim() + "'."; return null; }
+                // optional /N speed step per segment (slice convention: every Nth frame = N x faster) — e.g.
+                // "443..530,305..441/2" plays the epilogue raise at double speed.
+                var m = System.Text.RegularExpressions.Regex.Match(seg.Trim(), @"^(\d+)\s*\.\.\s*(\d+)(?:\s*/\s*(\d+))?$");
+                if (!m.Success) { error = "deploy conversion: recoil range must look like 440..510 (or several with speed: 443..530,305..441/2), got '" + seg.Trim() + "'."; return null; }
                 if (int.Parse(m.Groups[1].Value) >= int.Parse(m.Groups[2].Value))
                 { error = $"deploy conversion: recoil range start must be BEFORE end — got {seg.Trim()} (reversed). Each window runs forward in source frames."; return null; }
-                starts.Add(m.Groups[1].Value); ends.Add(m.Groups[2].Value);
+                starts.Add(m.Groups[1].Value);
+                ends.Add(m.Groups[2].Value + (m.Groups[3].Success ? "/" + m.Groups[3].Value : ""));
             }
             rs = string.Join(",", starts); re = string.Join(",", ends);
         }
