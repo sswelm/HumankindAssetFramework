@@ -211,6 +211,17 @@ by when they'll bite.
   real barrels, essentially free. (2) **Multi-mount fire** — rotate successive fire events across several of the
   model's own gun bones (the Ehrhardt has four rigged MG mounts, `MW_B/F/L/T`) — needs per-event socket selection
   state; bigger. Both are polish on a verified base, not fixes.
+- **"Vehicleize" — auto-rig a STATIC vehicle with spinning wheels (spotted 2026-07-25, unbuilt).** The Ehrhardt's
+  `_Spin.glb` was hand-made in Blender (now documented step-by-step in Animated-Models.md); the tool version is the
+  missing sibling of turretize and the biggest lever on the "huge pool of static vehicle models" thesis: a headless
+  Blender script that (1) detects wheel parts — name pattern `wheel|tyre|tire` first, geometric fallback (cylindrical,
+  near-ground, mirrored pairs — the organ-gun classifier's approach), (2) creates Root + a bone per wheel at each
+  part's centroid (+ a Turret bone for a `turret`-named part), rigid full-weight skinning, (3) generates the LINEAR
+  `Spin` action (frame 0 = rest), (4) exports `<name>_Spin.glb`. Factory affordance: a "Prepare static vehicle…"
+  button that runs it and repoints the Model file. Output feeds the EXISTING verified path (Spin[0..0] idle +
+  Spin slice movement + convertRig + auto-ground + turretize/sockets). Risks: wheel detection on messy meshes
+  (single-mesh models need loose-part separation), axle-axis inference (mirrored left/right wheels spin opposite
+  if the axis flips — normalize to model-space).
 - **Death clip role (`clipDeath`)** — play the model's own death animation on `PresentationPawn.TriggerDeath` (the
   hook already fires for the death SOUND; arming a one-shot clip window from the same seam is the pattern the
   attack clip proved). Proving model: the gray wolf's `idle injured to dead reaction lft/rgt` (private test rig).

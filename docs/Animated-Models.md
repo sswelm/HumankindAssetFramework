@@ -59,6 +59,36 @@ legs, landing gear, a crane, turrets. Very common for Sketchfab vehicles.
   skeleton origin, self-correcting and **size-proof** (no manual Position-offset dial, and it stays grounded if you
   change Size). Verified end-to-end on the Ehrhardt.
 
+#### Authoring the spin rig yourself (the Ehrhardt recipe, step by step)
+
+`Ehrhardt_Spin.glb` was hand-made; until the auto-rig tool exists (Review-Backlog: "vehicleize"), this is the
+Blender recipe for turning a STATIC vehicle model into that file. ~20 minutes the first time, ~5 after:
+
+1. **Import** the static model (`File ▸ Import`). Delete junk (stray spheres, ground planes).
+2. **Add an armature** (`Add ▸ Armature`), enter Edit Mode on it, and create one bone per moving part:
+   a **Root** at the origin, one bone per **wheel** (head at the wheel's CENTER — snap the 3D cursor to the wheel
+   mesh: select it, `Shift+S ▸ Cursor to Selected`, then in the armature `Shift+A` a bone there), and a **Turret**
+   bone at the turret ring if there is one. Parent wheels/turret bones to Root (in Edit Mode: select child, then
+   Root, `Ctrl+P ▸ Keep Offset`).
+3. **Name the bones** what you'll reference later: `Root`, `Wheel_F_L`, `Wheel_F_R`, `Wheel_R_L`, `Wheel_R_R`,
+   `Turret`, `MW_T`… (these names are what `turretBone`/`muzzleBone`/`socketBones` substring-match).
+4. **Skin rigidly** — no weight painting: select a wheel MESH, then the armature, `Ctrl+P ▸ Armature Deform`
+   (empty groups), then in the mesh's Vertex Groups panel add ALL its vertices to its wheel-bone's group at
+   weight 1. Repeat per part; everything that doesn't move gets full weight on `Root`. (Separate loose parts
+   first if the model is one mesh: Edit Mode, hover a wheel, `L` to select linked, `P ▸ Selection`.)
+5. **Author the `Spin` action**: Animation tab, new Action named `Spin`. Frame 0: keyframe every wheel bone's
+   rotation at 0 (`I ▸ Rotation`). Frame 15: rotate each wheel bone **about its axle axis** (usually local X —
+   `R X X` then the angle) by e.g. `-360°` and keyframe. Set ALL keyframe interpolation to **LINEAR**
+   (select keys in the Dope Sheet, `T ▸ Linear`) — constant speed = a seamless loop when sliced.
+   Frame 0 is deliberately the rest pose: `Spin[0..0]` becomes the motionless Idle.
+6. **Export GLB** (`File ▸ Export ▸ glTF 2.0`), include the animation.
+7. **Factory/Lab**: Animated + State-driven, Idle/reference `Spin[0..0]`, Movement `Spin[5..15]` (or any slice —
+   the speed step controls apparent speed), **Convert raw rig ON + Fix 100× OFF** (the rotating-bone fling trap,
+   see Pitfalls), **Auto-ground ON**. Bake.
+
+The wheel-spin *rate* never needs to be physically right in the source — slice steps (`/N`) tune it at bake, and
+the wheels only play while moving anyway.
+
 ### Level 3 — Full character rigs, including messy auto-rigs *(the breakthrough)*
 
 Humanoids and creatures with real skeletons — including **auto-rigged downloads whose rest pose is scrambled** and
