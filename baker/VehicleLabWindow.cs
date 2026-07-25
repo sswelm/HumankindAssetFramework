@@ -41,6 +41,10 @@ public class VehicleLabWindow : EditorWindow
     GameObject inst; PreviewRenderUtility pru; AnimationClip spinClip;
     Bounds bounds; bool boundsValid; float spinT; double lastTick;
     Vector2 orbit = new Vector2(140f, -18f); float zoom = 1.5f;
+    // part focus/highlight: clicking a row zooms onto that part and tints it — the "which shard is the wheel?" x-ray
+    string selectedPart = "";
+    Renderer highlightedRenderer; Material[] highlightedOriginals;
+    static Material highlightMat;
 
     void OnEnable() { EditorApplication.update += Tick; lastTick = EditorApplication.timeSinceStartup; }
     void OnDisable()
@@ -91,9 +95,17 @@ public class VehicleLabWindow : EditorWindow
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     p.role = (Role)EditorGUILayout.EnumPopup(p.role, GUILayout.Width(70));
-                    EditorGUILayout.LabelField($"{p.name}   ({p.verts} verts, size {p.size.x:0.00}×{p.size.y:0.00}×{p.size.z:0.00})", EditorStyles.miniLabel);
+                    // the row label is a BUTTON: click = zoom the preview onto this part and tint it yellow
+                    bool isSel = selectedPart == p.name;
+                    var st = isSel ? EditorStyles.whiteMiniLabel : EditorStyles.miniLabel;
+                    if (GUILayout.Button($"{(isSel ? "◉ " : "")}{p.name}   ({p.verts} verts, size {p.size.x:0.00}×{p.size.y:0.00}×{p.size.z:0.00})", st))
+                        SelectPart(isSel ? "" : p.name);   // click again = back to full view
                 }
             EditorGUILayout.EndScrollView();
+            if (inst == null)
+                EditorGUILayout.LabelField("  (probe preview unavailable — part focus needs the probe's preview FBX; re-Probe after recompiling)", EditorStyles.miniLabel);
+            else
+                EditorGUILayout.LabelField("  Click a part row to zoom + highlight it in the preview below; click again for the full view.", EditorStyles.miniLabel);
             axisChoice = EditorGUILayout.Popup(new GUIContent("Axle axis", "Auto infers each wheel's axle as its thinnest bbox extent — right for normal wheels; override only if a wheel spins the wrong way around."), axisChoice, AxisOptions);
             frames = EditorGUILayout.IntSlider(new GUIContent("Spin frames", "Length of the generated Spin action. Apparent speed is tuned later with slice steps (Spin[1..N/2]) — this just needs to be a smooth loop."), frames, 5, 60);
             degrees = EditorGUILayout.Slider(new GUIContent("Spin degrees", "Wheel rotation over the clip. -360 = one full forward turn (negate if wheels roll backward in the preview)."), degrees, -720f, 720f);
@@ -118,7 +130,13 @@ public class VehicleLabWindow : EditorWindow
     void Probe()
     {
         parts.Clear(); DestroyPreview();
-        if (!RunBlender($"probe \"{srcFile}\"", out string stdout)) return;
+        // probe also exports a preview FBX of the SPLIT model, so part rows can zoom/highlight in the turntable
+        string projRoot = Directory.GetParent(Application.dataPath).FullName;
+        string prevDir = "Assets/FactorySource/VehicleLab";
+        Directory.CreateDirectory(Path.Combine(projRoot, prevDir));
+        string prevRel = prevDir + "/" + Path.GetFileNameWithoutExtension(srcFile) + "_probe.fbx";
+        string prevFull = Path.Combine(projRoot, prevRel).Replace('\\', '/');
+        if (!RunBlender($"probe \"{srcFile}\" \"{prevFull}\"", out string stdout)) return;
         // Lenient float parse: degenerate shards can emit "nan" (python lowercase — .NET rejects it) — such a value
         // becomes 0 instead of killing the whole probe on one bad line out of thousands.
         float F(string s2) => float.TryParse(s2, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var f) ? f : 0f;
@@ -140,9 +158,39 @@ public class VehicleLabWindow : EditorWindow
                    : low.Contains("turret") ? Role.Turret : Role.Body;
             parts.Add(p);
         }
+        if (File.Exists(prevFull))
+        {
+            AssetDatabase.ImportAsset(prevRel, ImportAssetOptions.ForceUpdate);
+            BuildPreview(prevRel);   // no Spin clip yet — a static turntable for part inspection
+        }
         status = parts.Count == 0
             ? "Probe found no mesh parts — is this a mesh model? (See the Console for Blender output.)"
-            : $"Probed {parts.Count} part(s); {parts.Count(x => x.role == Role.Wheel)} auto-marked as wheels. Adjust roles and Vehicleize.";
+            : $"Probed {parts.Count} part(s); {parts.Count(x => x.role == Role.Wheel)} auto-marked as wheels. " +
+              "Click a row to see WHICH part it is (zoom + yellow highlight), assign roles, then Vehicleize.";
+    }
+
+    // Zoom the preview onto one part and tint it — restores the previous part's materials first. "" = full view.
+    void SelectPart(string name)
+    {
+        if (highlightedRenderer != null && highlightedOriginals != null)
+        { try { highlightedRenderer.sharedMaterials = highlightedOriginals; } catch { } }
+        highlightedRenderer = null; highlightedOriginals = null;
+        selectedPart = name;
+        boundsValid = false;   // re-derive (full model or the part) on next render
+        if (inst == null || string.IsNullOrEmpty(name)) return;
+        var r = inst.GetComponentsInChildren<Renderer>()
+                    .FirstOrDefault(x => x != null && (x.gameObject.name == name || x.gameObject.name.StartsWith(name)));
+        if (r == null) return;
+        if (highlightMat == null)
+        {
+            var sh = Shader.Find("Unlit/Color") ?? Shader.Find("Standard");
+            highlightMat = new Material(sh) { color = new Color(1f, 0.85f, 0.1f) };
+            highlightMat.hideFlags = HideFlags.HideAndDontSave;
+        }
+        highlightedRenderer = r;
+        highlightedOriginals = r.sharedMaterials;
+        r.sharedMaterials = Enumerable.Repeat(highlightMat, r.sharedMaterials.Length).ToArray();
+        bounds = r.bounds; bounds.Expand(bounds.size.magnitude * 0.6f + 0.1f); boundsValid = true;   // frame the part with context
     }
 
     void Vehicleize()
@@ -215,6 +263,7 @@ public class VehicleLabWindow : EditorWindow
     {
         if (inst != null) { DestroyImmediate(inst); inst = null; }
         spinClip = null; boundsValid = false;
+        selectedPart = ""; highlightedRenderer = null; highlightedOriginals = null;
     }
     void HandlePreviewInput(Rect rect)
     {

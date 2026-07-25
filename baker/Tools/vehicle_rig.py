@@ -57,6 +57,10 @@ if mode == "probe":
     for o in objs:
         c, s = world_bbox(o)
         print("PART|%s|%d|%.4f,%.4f,%.4f|%.4f,%.4f,%.4f" % (o.name, len(o.data.vertices), c.x, c.y, c.z, s.x, s.y, s.z))
+    # optional argv[2]: export the SPLIT scene as a preview FBX so the Lab can show/zoom/highlight each part by name
+    if len(argv) > 2 and argv[2].strip():
+        bpy.ops.export_scene.fbx(filepath=argv[2], add_leaf_bones=False, bake_anim=False)
+        print("VEHICLE probe preview: %s" % argv[2])
     sys.exit(0)
 
 # ---- rig mode ----
