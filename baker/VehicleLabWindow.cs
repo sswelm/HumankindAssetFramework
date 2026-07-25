@@ -380,7 +380,9 @@ public class VehicleLabWindow : EditorWindow
     {
         var e = Event.current;
         if (!rect.Contains(e.mousePosition)) return;
-        if (e.type == EventType.ScrollWheel) { zoom = Mathf.Clamp(zoom * Mathf.Pow(1.12f, e.delta.y > 0 ? 1f : -1f), 0.2f, 5f); e.Use(); }
+        // zoom-out ceiling 50 (was 5): with a TINY part focused, distance scales off its bounds — seeing the part
+        // in the context of the whole vehicle needs an order of magnitude more headroom.
+        if (e.type == EventType.ScrollWheel) { zoom = Mathf.Clamp(zoom * Mathf.Pow(1.12f, e.delta.y > 0 ? 1f : -1f), 0.2f, 50f); e.Use(); }
         else if (e.type == EventType.MouseDrag && e.button == 0) { orbit += new Vector2(e.delta.x, -e.delta.y) * 0.7f; orbit.y = Mathf.Clamp(orbit.y, -89f, 89f); e.Use(); }
     }
     void RenderPreview(Rect rect)
