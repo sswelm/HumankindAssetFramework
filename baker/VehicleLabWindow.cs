@@ -38,6 +38,7 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] List<Part> parts = new List<Part>();
     [SerializeField] int frames = 15; [SerializeField] float degrees = -360f; [SerializeField] int axisChoice = 0;   // 0 = Auto (per wheel), 1..3 = X/Y/Z
     [SerializeField] int minVerts = 50;   // parts below this are COLLAPSED into Body (a triangle-soup FBX probes into thousands of shards)
+    [SerializeField] bool onlyUnreviewed; // filter the list to Default parts — the "what's left to classify" sweep
     Vector2 partsScroll;
 
     // ── Recipes: the whole vehicleize configuration as a JSON file — reload it after a restart, keep one per model,
@@ -121,8 +122,10 @@ public class VehicleLabWindow : EditorWindow
             // to Body anyway (anything not marked wheel/turret skins to Root). Only substantial parts are listed.
             minVerts = EditorGUILayout.IntSlider(new GUIContent("Hide parts under (verts)",
                 "Parts smaller than this are collapsed into Body automatically (they skin to Root). Raise it if the list is still noisy; lower it if a small wheel is missing."), minVerts, 1, 2000);
-            var shown = parts.Where(x => x.verts >= minVerts).ToList();
-            int hidden = parts.Count - shown.Count;
+            onlyUnreviewed = EditorGUILayout.ToggleLeft(new GUIContent("Show only unreviewed (Default) parts",
+                "Filter the list to parts still classified Default. Marking one (W/T/B/I) removes it from the list and auto-advances to the next."), onlyUnreviewed);
+            var shown = parts.Where(x => x.verts >= minVerts && (!onlyUnreviewed || x.role == Role.Default)).ToList();
+            int hidden = parts.Count(x => x.verts < minVerts);
             int unreviewed = shown.Count(x => x.role == Role.Default);
             EditorGUILayout.LabelField($"Parts ({shown.Count} shown{(hidden > 0 ? $", {hidden} tiny fragments auto-collapsed" : "")}{(unreviewed > 0 ? $", {unreviewed} unreviewed" : ", all reviewed")}) — mark the wheels & turret:", EditorStyles.boldLabel);
             EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part (zooms + highlights it below)   ·   W/T/B/I/D = mark selected as Wheel/Turret/Body/Ignore/Default(unreviewed)", EditorStyles.miniLabel);
@@ -146,6 +149,13 @@ public class VehicleLabWindow : EditorWindow
                                     : ev.keyCode == KeyCode.T ? Role.Turret
                                     : ev.keyCode == KeyCode.I ? Role.Ignore
                                     : ev.keyCode == KeyCode.D ? Role.Default : Role.Body;
+                    // With the unreviewed filter on, the marked part leaves the list — advance to the next one so
+                    // the sweep continues instead of the selection dying with the removed row.
+                    if (onlyUnreviewed && shown[idx].role != Role.Default)
+                    {
+                        SelectPart(idx + 1 < shown.Count ? shown[idx + 1].name : idx > 0 ? shown[idx - 1].name : "");
+                        partsScroll.y = Mathf.Max(0f, idx * 20f - 120f);
+                    }
                     ev.Use(); Repaint();
                 }
             }
