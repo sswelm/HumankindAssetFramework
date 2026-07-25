@@ -350,7 +350,13 @@ if len(argv) > 8 and argv[8].strip():
         print("DEPLOY slam 0 — no kick pitch (arm stays identity)")
     radius = A.cross(d).normalized()
     tube_head = m_home[tube_root].translation.copy()
-    pivot = tube_head - radius * R                             # place the pivot R away, perpendicular to the slide
+    # PIVOT DISTANCE CLAMP (2026-07-25, the collapsed-chain bug): slam 0 uses the R=1e9 sentinel — placing the
+    # arm's HEAD a billion units out. A bone at 1e9 destroys its whole subtree via float32 catastrophic
+    # cancellation (the barrel chain's ~5-unit offsets vanish against 1e9; all rests collapse onto one point,
+    # and the glTF export manufactures degenerate joints from the coincident chain). The pivot only needs to be
+    # far ENOUGH: theta uses the true R, so a 1000-unit cap renders identically (theta~1e-8 -> ~1e-5 displacement)
+    # while every bone stays in clean float range. Slam>0 recipes (R ~ tens-hundreds) are untouched by the cap.
+    pivot = tube_head - radius * min(R, 1000.0)                # place the pivot R away (capped), perpendicular to the slide
 
     # insert a RecoilArm bone (head=pivot) between the tube and its parent
     bpy.ops.object.mode_set(mode='EDIT')
