@@ -44,13 +44,14 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] float minPartSize = 0f;  // hide parts whose LARGEST bbox dimension is below this — drop minVerts + raise this to surface big-but-low-poly parts (flat discs, plates)
     static float MaxDim(Part p) => Mathf.Max(p.size.x, Mathf.Max(p.size.y, p.size.z));
     [SerializeField] int partFilter;      // list filter: 0 = all; see FilterOptions (Unreviewed = Default + Edgecase)
-    static readonly string[] FilterOptions = { "None (all parts)", "Unreviewed (Default + Edgecase)", "Wheel", "Turret", "Body", "Ignore", "Edgecase" };
+    static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase" };
     bool MatchesFilter(Role r) => partFilter == 1 ? (r == Role.Default || r == Role.Edgecase)
-                                : partFilter == 2 ? r == Role.Wheel
-                                : partFilter == 3 ? r == Role.Turret
-                                : partFilter == 4 ? r == Role.Body
-                                : partFilter == 5 ? r == Role.Ignore
-                                : partFilter == 6 ? r == Role.Edgecase : true;
+                                : partFilter == 2 ? r == Role.Default
+                                : partFilter == 3 ? r == Role.Wheel
+                                : partFilter == 4 ? r == Role.Turret
+                                : partFilter == 5 ? r == Role.Body
+                                : partFilter == 6 ? r == Role.Ignore
+                                : partFilter == 7 ? r == Role.Edgecase : true;
     Vector2 partsScroll;
 
     // ── Recipes: the whole vehicleize configuration as a JSON file — reload it after a restart, keep one per model,
@@ -142,7 +143,7 @@ public class VehicleLabWindow : EditorWindow
             int hidden = parts.Count(x => x.verts < minVerts || MaxDim(x) < minPartSize);
             int unreviewed = parts.Count(x => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.role == Role.Default);
             int edgecases = parts.Count(x => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.role == Role.Edgecase);
-            EditorGUILayout.LabelField($"Parts ({shown.Count} shown{(hidden > 0 ? $", {hidden} tiny fragments auto-collapsed" : "")}{(unreviewed > 0 ? $", {unreviewed} unreviewed" : ", all reviewed")}{(edgecases > 0 ? $", {edgecases} edge-case" : "")}) — mark the wheels & turret:", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField($"Parts ({shown.Count} shown{(hidden > 0 ? $", {hidden} tiny fragments auto-collapsed" : "")}{(unreviewed > 0 ? $", {unreviewed} undecided" : ", all decided")}{(edgecases > 0 ? $", {edgecases} edge-case" : "")}) — mark the wheels & turret:", EditorStyles.boldLabel);
             EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part (zooms + highlights it below)   ·   W/T/B/I = Wheel/Turret/Body/Ignore   ·   D = Default(unreviewed)   ·   E = Edgecase (unsure, revisit later; rigs like Default)", EditorStyles.miniLabel);
             // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
             // part's role — the whole list can be reviewed without mousing between rows and dropdowns.
