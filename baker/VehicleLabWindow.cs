@@ -120,6 +120,28 @@ public class VehicleLabWindow : EditorWindow
             var shown = parts.Where(x => x.verts >= minVerts).ToList();
             int hidden = parts.Count - shown.Count;
             EditorGUILayout.LabelField($"Parts ({shown.Count} shown{(hidden > 0 ? $", {hidden} tiny fragments auto-collapsed into Body" : "")}) — mark the wheels & turret:", EditorStyles.boldLabel);
+            // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
+            // part's role — the whole list can be reviewed without mousing between rows and dropdowns.
+            var ev = Event.current;
+            if (ev.type == EventType.KeyDown && shown.Count > 0 && !EditorGUIUtility.editingTextField)
+            {
+                int idx = shown.FindIndex(x => x.name == selectedPart);
+                if (ev.keyCode == KeyCode.UpArrow || ev.keyCode == KeyCode.DownArrow)
+                {
+                    idx = ev.keyCode == KeyCode.DownArrow ? Mathf.Min(idx + 1, shown.Count - 1) : Mathf.Max(idx - 1, 0);
+                    SelectPart(shown[idx].name);
+                    partsScroll.y = Mathf.Max(0f, idx * 20f - 120f);   // keep the selected row in view (~20px rows)
+                    GUIUtility.keyboardControl = 0;                    // a focused slider/popup must not swallow the arrows
+                    ev.Use(); Repaint();
+                }
+                else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I))
+                {
+                    shown[idx].role = ev.keyCode == KeyCode.W ? Role.Wheel
+                                    : ev.keyCode == KeyCode.T ? Role.Turret
+                                    : ev.keyCode == KeyCode.I ? Role.Ignore : Role.Body;
+                    ev.Use(); Repaint();
+                }
+            }
             partsScroll = EditorGUILayout.BeginScrollView(partsScroll, GUILayout.ExpandHeight(true), GUILayout.MinHeight(280));   // roomy by default (user request: double the original 120)
             foreach (var p in shown)
                 using (new EditorGUILayout.HorizontalScope())
@@ -135,7 +157,7 @@ public class VehicleLabWindow : EditorWindow
             if (inst == null)
                 EditorGUILayout.LabelField("  (probe preview unavailable — part focus needs the probe's preview FBX; re-Probe after recompiling)", EditorStyles.miniLabel);
             else
-                EditorGUILayout.LabelField("  Click a part row to zoom + highlight it in the preview below; click again for the full view.", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("  Click a row (or ↑/↓) to zoom + highlight it below; click again for the full view. W/T/B/I = mark selected as Wheel/Turret/Body/Ignore.", EditorStyles.miniLabel);
             axisChoice = EditorGUILayout.Popup(new GUIContent("Axle axis", "Auto infers each wheel's axle as its thinnest bbox extent — right for normal wheels; override only if a wheel spins the wrong way around."), axisChoice, AxisOptions);
             frames = EditorGUILayout.IntSlider(new GUIContent("Spin frames", "Length of the generated Spin action. Apparent speed is tuned later with slice steps (Spin[1..N/2]) — this just needs to be a smooth loop."), frames, 5, 60);
             degrees = EditorGUILayout.Slider(new GUIContent("Spin degrees", "Wheel rotation over the clip. -360 = one full forward turn (negate if wheels roll backward in the preview)."), degrees, -720f, 720f);
