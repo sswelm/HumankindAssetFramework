@@ -11,7 +11,18 @@ renderers were rewritten, and the actual causes turned out to be four engine con
 
 These are engine-level facts. They are not bugs, they cannot be patched away, and every recipe must respect them.
 
-### Law 1 — The clip bake is ROTATION-ONLY
+> **REVISION 2026-07-25 — Laws 1 and 5 are OUR PIPELINE'S defaults, not engine walls.** The caterpillar
+> investigation decompiled the runtime: the clip format has `RotationTranslation`(+Scale) encodings, vanilla
+> tank clips use them liberally (tread shuttle bones, gun recoil), and `GetPoseTRS` zeroes translation ONLY for
+> Rotation-encoded curves. Our bake historically (a) keyed rotations only in the conversion rebake and (b)
+> stripped every location fcurve. Both now have an opt-out: the per-model **`keepTranslations`** flag
+> (Animation Lab ▸ "Keep bone translations", conversion path only) keeps genuinely translation-animated bones —
+> **verified end-to-end in-game** (a translating test bone baked as `RotationTranslation` and played with
+> CORRECT amplitude; the clean-unit conversion export sidesteps the native-scale trap that motivated the
+> strip). Laws 1/5 below remain the DEFAULT behavior and stay true for every model that doesn't opt in; the
+> re-express-as-rotation recipes remain valid and battle-tested.
+
+### Law 1 — The clip bake is ROTATION-ONLY *(default — see the 2026-07-25 revision above)*
 The engine's baked clips keep per-bone **rotation** and **discard translation** (`GetPoseTRS` forces
 translation 0, scale 1). Any part whose source motion *slides* plays pivoting about the wrong point in-game.
 - **Symptom:** a part sweeps through/into the model in-game (the M114's trail legs crossed inward) while every
@@ -38,7 +49,7 @@ move — the unit spends the whole trip in the fold's first frames ("it forgets 
   **empty** Pre-movement clip is a true instant snap (which is all the legacy howitzer ever did — its
   "instant fold" was the *absence* of a fold animation).
 
-### Law 5 — Bone POSITIONS are pinned at the bind pose; only ROTATIONS animate
+### Law 5 — Bone POSITIONS are pinned at the bind pose; only ROTATIONS animate *(default — see the revision above)*
 Stricter than Law 1, discovered by experiment (Arc-R scaling test): the engine keeps every bone at its
 bind-pose position and plays only orientations through the hierarchy. Consequences:
 - a whole-body lurch (the M114's carriage recoiling backward) cannot be expressed in a clip at all;
