@@ -160,6 +160,11 @@ public class VehicleLabWindow : EditorWindow
 
     void Probe()
     {
+        // Re-probing MERGES, never wipes: roles already assigned (by hand or a loaded recipe) are re-applied by
+        // part name. This is also how a minimal recipe expands for review — Load recipe, then Probe to surface
+        // every unmarked part around the kept markings.
+        var kept = new Dictionary<string, Role>();
+        foreach (var p0 in parts) if (p0.role != Role.Body) kept[p0.name] = p0.role;
         parts.Clear(); DestroyPreview();
         // probe also exports a preview FBX of the SPLIT model, so part rows can zoom/highlight in the turntable
         string projRoot = Directory.GetParent(Application.dataPath).FullName;
@@ -185,7 +190,8 @@ public class VehicleLabWindow : EditorWindow
                 size = new Vector3(F(s[0]), F(s[1]), F(s[2])),
             };
             var low = p.name.ToLowerInvariant();
-            p.role = low.Contains("wheel") || low.Contains("tyre") || low.Contains("tire") ? Role.Wheel
+            p.role = kept.TryGetValue(p.name, out var kr) ? kr
+                   : low.Contains("wheel") || low.Contains("tyre") || low.Contains("tire") ? Role.Wheel
                    : low.Contains("turret") ? Role.Turret : Role.Body;
             parts.Add(p);
         }
@@ -196,8 +202,9 @@ public class VehicleLabWindow : EditorWindow
         }
         status = parts.Count == 0
             ? "Probe found no mesh parts — is this a mesh model? (See the Console for Blender output.)"
-            : $"Probed {parts.Count} part(s); {parts.Count(x => x.role == Role.Wheel)} auto-marked as wheels. " +
-              "Click a row to see WHICH part it is (zoom + yellow highlight), assign roles, then Vehicleize.";
+            : $"Probed {parts.Count} part(s); {parts.Count(x => x.role == Role.Wheel)} wheel(s), {parts.Count(x => x.role == Role.Turret)} turret(s)" +
+              (kept.Count > 0 ? $" ({parts.Count(x => kept.ContainsKey(x.name) && x.role == kept[x.name])} of {kept.Count} earlier markings kept)" : " (auto-guessed)") +
+              ". Click a row to see WHICH part it is (zoom + yellow highlight), assign roles, then Vehicleize.";
     }
 
     void SaveRecipe()
@@ -227,7 +234,7 @@ public class VehicleLabWindow : EditorWindow
             srcFile = r.srcFile; outGlb = r.outGlb; frames = r.frames; axisChoice = r.axisChoice; minVerts = r.minVerts; degrees = r.degrees;
             parts = r.parts;
             status = $"Recipe loaded ({parts.Count} parts, {parts.Count(x => x.role == Role.Wheel)} wheels). " +
-                     "Re-Probe only if the SOURCE model changed (roles are matched by part name); otherwise Vehicleize directly.";
+                     "Vehicleize directly — or press Probe to list ALL parts for review (your marked roles are kept, plus the preview returns for click-to-highlight).";
         }
         catch (Exception e) { status = "Recipe load failed: " + e.Message; }
     }
