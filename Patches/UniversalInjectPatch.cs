@@ -932,9 +932,60 @@ namespace ENCAccessProof
                             }
                         }
                 }
+                DumpClipCollections(sk, name);
                 Plugin.Log.LogInfo($"[RigDump] ================ END '{name}' ================");
             }
             catch (Exception ex) { Plugin.Log.LogError("[RigDump] " + ex); }
+        }
+
+        // The GPU clip data: every loaded ClipCollection belonging to this pawn's family — per-clip entries and
+        // per-curve encoding. THE caterpillar question in one table: do vanilla clips carry TRANSLATION curves
+        // (EncodingFormat RotationTranslation/RotationTranslationScale), and on which bones?
+        static void DumpClipCollections(object sk, string name)
+        {
+            try
+            {
+                var ccType = AccessTools.TypeByName("Amplitude.Mercury.Animation.ClipCollection");
+                if (ccType == null) { Plugin.Log.LogInfo("[RigDump] ClipCollection type not found"); return; }
+                // bone index -> name from the skeleton's BoneInfos
+                var boneNames = new List<string>();
+                var bi = sk == null ? null : AccessTools.Field(sk.GetType(), "BoneInfos")?.GetValue(sk) as Array;
+                if (bi != null) for (int i = 0; i < bi.Length; i++) boneNames.Add(GetMember(bi.GetValue(i), "Name") as string ?? ("#" + i));
+                string family = ((sk as UnityEngine.Object)?.name ?? name).Replace("_Skeleton", "");
+                foreach (var cc in UnityEngine.Resources.FindObjectsOfTypeAll(ccType))
+                {
+                    string ccName = (cc as UnityEngine.Object)?.name ?? "";
+                    if (ccName.IndexOf(family, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    var entries = AccessTools.Field(ccType, "animationClipEntries")?.GetValue(cc) as Array;
+                    var curves = AccessTools.Field(ccType, "animationClipCurveEntries")?.GetValue(cc) as Array;
+                    Plugin.Log.LogInfo($"[RigDump] ClipCollection '{ccName}': {entries?.Length ?? 0} clip(s), {curves?.Length ?? 0} curve(s)");
+                    if (entries == null || curves == null) continue;
+                    for (int e = 0; e < entries.Length; e++)
+                    {
+                        var en = entries.GetValue(e);
+                        string cn = GetMember(en, "Name") as string ?? "?";
+                        int frames = GetMember(en, "FrameCount") is int fc ? fc : -1;
+                        int bones = GetMember(en, "BonesCount") is int bc ? bc : -1;
+                        uint ci = GetMember(en, "CurveIndex") is uint cu ? cu : 0;
+                        bool loop = GetMember(en, "Looping") is bool lo && lo;
+                        var perBone = new List<string>();
+                        var formats = new Dictionary<string, int>();
+                        for (int k = 0; k < bones && ci + k < curves.Length; k++)
+                        {
+                            var cv = curves.GetValue((int)ci + k);
+                            int bIdx = GetMember(cv, "BoneIndex") is int b ? b : -1;
+                            string fmt = GetMember(cv, "EncodingFormat")?.ToString() ?? "?";
+                            formats[fmt] = formats.TryGetValue(fmt, out var n0) ? n0 + 1 : 1;
+                            if (fmt != "Fixe")   // the interesting curves: anything that MOVES
+                                perBone.Add($"{(bIdx >= 0 && bIdx < boneNames.Count ? boneNames[bIdx] : "#" + bIdx)}={fmt}");
+                        }
+                        Plugin.Log.LogInfo($"[RigDump]   clip '{cn}' frames={frames} bones={bones} loop={loop} formats={{{string.Join(", ", formats.Select(kv => kv.Key + ":" + kv.Value))}}}");
+                        if (perBone.Count > 0)
+                            Plugin.Log.LogInfo($"[RigDump]     moving: {string.Join(", ", perBone)}");
+                    }
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[RigDump] clip collections: " + ex.Message); }
         }
 
         // Every array field whose elements carry a name-ish member, printed as a full name list (bone tables,
