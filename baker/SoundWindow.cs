@@ -65,7 +65,10 @@ public class SoundWindow : EditorWindow
         EditorGUILayout.LabelField("Pawn", EditorStyles.boldLabel);
         using (new EditorGUILayout.HorizontalScope())
         {
-            pawn = EditorGUILayout.TextField(new GUIContent("Pawn description", "A unique substring of the unit's pawn descriptor, e.g. Era6_Common_ReconDrones_01. Pick browses every pawn in the databases (ENC + vanilla)."), pawn);
+            // READ-ONLY by design: a pawn descriptor only means something when it names a REAL pawn, so the value
+            // arrives exclusively via Pick or the registry dropdown; the field itself is selectable text for copying.
+            EditorGUILayout.PrefixLabel(new GUIContent("Pawn description", "The unit's pawn descriptor. Read-only — choose it with Pick (all pawns, ENC + vanilla) or the registry dropdown below; select the text to copy it."));
+            EditorGUILayout.SelectableLabel(string.IsNullOrEmpty(pawn) ? "(none — use Pick)" : pawn, EditorStyles.textField, GUILayout.Height(EditorGUIUtility.singleLineHeight));
             if (GUILayout.Button(new GUIContent("Pick", "Browse ALL pawn descriptors in the loaded databases (ENC + mounted vanilla, searchable). First open scans the assets once."), GUILayout.Width(50)))
             {
                 var cat = LoadPawnCatalog();
