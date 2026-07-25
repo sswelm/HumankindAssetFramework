@@ -42,6 +42,7 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] int frames = 15; [SerializeField] float degrees = -360f; [SerializeField] int axisChoice = 0;   // 0 = Auto (per wheel), 1..3 = X/Y/Z
     [SerializeField] int minVerts = 50;   // parts below this are COLLAPSED into Body (a triangle-soup FBX probes into thousands of shards)
     [SerializeField] float minPartSize = 0f;  // hide parts whose LARGEST bbox dimension is below this — drop minVerts + raise this to surface big-but-low-poly parts (flat discs, plates)
+    [SerializeField] float minHeight = -999f; // hide parts whose CENTER height is below this (clamped to the model's span, so the default means "off") — slide up to isolate turret-level parts
     static float MaxDim(Part p) => Mathf.Max(p.size.x, Mathf.Max(p.size.y, p.size.z));
     [SerializeField] int partFilter;      // list filter: 0 = all; see FilterOptions (Unreviewed = Default + Edgecase)
     static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase" };
@@ -137,13 +138,18 @@ public class VehicleLabWindow : EditorWindow
                 "Parts smaller than this are collapsed into Body automatically (they skin to Root). Raise it if the list is still noisy; lower it if a small wheel is missing."), minVerts, 1, 2000);
             minPartSize = EditorGUILayout.Slider(new GUIContent("Hide parts under (size)",
                 "Parts whose largest bbox dimension is below this are hidden (they stay on the hull, like the verts filter). Drop the verts slider and raise this to find LARGE parts with only a few vertices — flat discs and plates."), minPartSize, 0f, 2f);
+            // Height filter: slider range auto-fits the model's actual vertical span (probe center heights, Z-up).
+            float zLo = parts.Min(x => x.center.z), zHi = parts.Max(x => x.center.z);
+            minHeight = EditorGUILayout.Slider(new GUIContent("Hide parts below (height)",
+                "Parts whose center height is below this are hidden. Slide up past the hull deck to isolate turret-level parts."), Mathf.Clamp(minHeight, zLo, zHi), zLo, zHi);
+            bool Visible(Part x) => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.center.z >= minHeight;
             partFilter = EditorGUILayout.Popup(new GUIContent("Show only",
                 "Filter the list to one classification. Marking a part out of the current filter removes it from the list and auto-advances to the next."), partFilter, FilterOptions);
-            var shown = parts.Where(x => x.verts >= minVerts && MaxDim(x) >= minPartSize && MatchesFilter(x.role)).ToList();
-            int hidden = parts.Count(x => x.verts < minVerts || MaxDim(x) < minPartSize);
-            int unreviewed = parts.Count(x => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.role == Role.Default);
-            int edgecases = parts.Count(x => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.role == Role.Edgecase);
-            EditorGUILayout.LabelField($"Parts ({shown.Count} shown{(hidden > 0 ? $", {hidden} tiny fragments auto-collapsed" : "")}{(unreviewed > 0 ? $", {unreviewed} undecided" : ", all decided")}{(edgecases > 0 ? $", {edgecases} edge-case" : "")}) — mark the wheels & turret:", EditorStyles.boldLabel);
+            var shown = parts.Where(x => Visible(x) && MatchesFilter(x.role)).ToList();
+            int hidden = parts.Count(x => !Visible(x));
+            int unreviewed = parts.Count(x => Visible(x) && x.role == Role.Default);
+            int edgecases = parts.Count(x => Visible(x) && x.role == Role.Edgecase);
+            EditorGUILayout.LabelField($"Parts ({shown.Count} shown{(hidden > 0 ? $", {hidden} hidden by the sliders" : "")}{(unreviewed > 0 ? $", {unreviewed} undecided" : ", all decided")}{(edgecases > 0 ? $", {edgecases} edge-case" : "")}) — mark the wheels & turret:", EditorStyles.boldLabel);
             EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part (zooms + highlights it below)   ·   W/T/B/I = Wheel/Turret/Body/Ignore   ·   D = Default(unreviewed)   ·   E = Edgecase (unsure, revisit later; rigs like Default)", EditorStyles.miniLabel);
             // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
             // part's role — the whole list can be reviewed without mousing between rows and dropdowns.
