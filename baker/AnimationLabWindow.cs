@@ -657,7 +657,7 @@ public class AnimationLabWindow : EditorWindow
                     "(harvests the hardpoint names from the [Muzzle] log; picks bones from the model). Socketed models bake " +
                     "with the 'A###_' bone prefix (alphabetical topology). Needs a re-BAKE."),
                     cur.socketBones ?? "");
-                if (GUILayout.Button(new GUIContent("Edit…", "Guided mapping: link the donor's logged hardpoints to your model's bones (with optional offsets) instead of hand-writing the spec."), GUILayout.Width(52)))
+                if (GUILayout.Button(new GUIContent("Edit…", "Guided mapping: link the donor's logged hardpoints to your model's bones (with optional offsets) instead of hand-writing the spec."), GUILayout.Width(70)))
                     SocketBonesDialog.Open(cur.socketBones, cur.pawnDescription, animBoneNames, s => { cur.socketBones = s; Repaint(); });
             }
             // Muzzle offset — the runtime world-space dial that finished the ArmouredCar: iterate value -> relaunch,
