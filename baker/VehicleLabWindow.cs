@@ -51,6 +51,7 @@ public class VehicleLabWindow : EditorWindow
     // turntable preview state
     GameObject inst; PreviewRenderUtility pru; AnimationClip spinClip;
     Bounds bounds; bool boundsValid; float spinT; double lastTick;
+    float fullRadius;   // whole-model radius — far-plane margin must NOT shrink to a focused part's bounds
     Vector2 orbit = new Vector2(140f, -18f); float zoom = 1.5f;
     // part focus/highlight: clicking a row zooms onto that part and tints it — the "which shard is the wheel?" x-ray
     string selectedPart = "";
@@ -396,6 +397,7 @@ public class VehicleLabWindow : EditorWindow
             foreach (var r in inst.GetComponentsInChildren<Renderer>())
             { if (r == null) continue; if (first) { bounds = r.bounds; first = false; } else bounds.Encapsulate(r.bounds); }
             boundsValid = !first;
+            if (boundsValid) fullRadius = bounds.extents.magnitude;
         }
         if (!boundsValid) return;
         pru.BeginPreview(rect, GUIStyle.none);
@@ -405,7 +407,9 @@ public class VehicleLabWindow : EditorWindow
         var rot = Quaternion.Euler(-orbit.y, orbit.x, 0f);
         cam.transform.position = bounds.center + rot * (Vector3.back * dist);
         cam.transform.rotation = Quaternion.LookRotation(bounds.center - cam.transform.position);
-        cam.nearClipPlane = 0.01f; cam.farClipPlane = dist + radius * 4f; cam.fieldOfView = 30f;
+        // far-plane margin uses the WHOLE model's radius: with a tiny part focused, `radius` is that part's — a
+        // part-scaled margin put the far plane just behind the shard and visibly carved the vehicle away on zoom-out.
+        cam.nearClipPlane = 0.01f; cam.farClipPlane = dist + Mathf.Max(radius, fullRadius) * 4f; cam.fieldOfView = 30f;
         pru.lights[0].intensity = 1.3f;
         pru.lights[0].transform.rotation = Quaternion.Euler(45f, 45f, 0f);
         if (pru.lights.Length > 1) pru.lights[1].intensity = 0.6f;
