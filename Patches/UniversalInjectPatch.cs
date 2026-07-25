@@ -899,13 +899,12 @@ namespace ENCAccessProof
         // project). Config DumpPawnRig = pawn-name substring; when that addon loads we log the skeleton's name
         // tables (bone lists), skinned meshes and every clip-flavoured field — the data that decides how vanilla
         // tank treads roll (many Track/Link bones = clip mechanism; none = shader scroll).
-        static bool rigDumpDone;
+        static readonly HashSet<string> rigDumped = new HashSet<string>();   // once per pawn NAME (a broad filter can match several)
         internal static void MaybeDumpPawnRig(object addon, string name)
         {
             string want;
             try { want = Plugin.DumpPawnRig?.Value ?? ""; } catch { return; }
-            if (rigDumpDone || want.Length == 0 || name.IndexOf(want, StringComparison.OrdinalIgnoreCase) < 0) return;
-            rigDumpDone = true;
+            if (want.Length == 0 || name.IndexOf(want, StringComparison.OrdinalIgnoreCase) < 0 || !rigDumped.Add(name)) return;
             try
             {
                 Plugin.Log.LogInfo($"[RigDump] ================ VANILLA PAWN RIG: '{name}' ================");
