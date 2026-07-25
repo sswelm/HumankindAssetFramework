@@ -601,7 +601,7 @@ if arm_action:
         make_role("recoil", frames2, snaps=_fire_snap, arm_override=(ra_name, arm_quats))
         print("DEPLOY recoil role: PRISTINE fire cycle %d..%d (barrel choreography intact) + Slam layer%s%s" %
               (rs2, re2, (" + palindrome return x%d" % ret2) if ret2 > 0 else " (no return)",
-               (" + epilogue %s (%d frames)" % (", ".join("%d..%d" % s for s in _segments[1:]), len(_epilogue))) if _epilogue else ""))
+               (" + epilogue %s (%d frames)" % (", ".join("%d..%d/%d" % (s[0], s[1], s[2]) for s in _segments[1:]), len(_epilogue))) if _epilogue else ""))
     arm.animation_data.action = arm_action       # the legacy action stays active (legacy bakes untouched)
     print("DEPLOY role clips: unfold/fold/folded/deployed%s (+ legacy 'deploy')" % ("/recoil" if has_recoil else ""))
 
