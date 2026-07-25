@@ -795,12 +795,13 @@ namespace ENCAccessProof
             if (!repointActiveLogged) { repointActiveLogged = true; Plugin.Log.LogInfo($"[Uni] repoint-hook ACTIVE (UniversalInject={Plugin.UniversalInjectOn.Value}, entries={(entries == null ? -1 : entries.Count)})"); }
             if (!Plugin.UniversalInjectOn.Value) return;
             LoadRegistry();
-            if (entries.Count == 0) return;
             try
             {
                 var def = GetMember(addon, "Definition");
                 var name = (def as UnityEngine.Object)?.name ?? "";
                 if (name.Length == 0) return;
+                MaybeDumpPawnRig(addon, name);   // caterpillar investigation: vanilla rig dump, BEFORE any registry matching
+                if (entries.Count == 0) return;
                 var e = entries.FirstOrDefault(x => x.pawnDescription.Length > 0 && name.IndexOf(x.pawnDescription, StringComparison.OrdinalIgnoreCase) >= 0);
                 if (e == null) return;
                 Plugin.Log.LogInfo($"[Uni] MATCH addon='{name}' -> {e.resourceName} (skel {e.sa},{e.sb},{e.sc},{e.sd})");
@@ -891,6 +892,81 @@ namespace ENCAccessProof
                 AccessTools.Method(e.skeleton.GetType(), "LoadIFN")?.Invoke(e.skeleton, new object[] { fxMgr, layerIdx, slot });
             }
             catch (Exception ex) { Plugin.Log.LogError("[Uni] upload: " + ex); }
+        }
+
+        // ---- caterpillar investigation (2026-07-25): one-shot dump of a VANILLA pawn's rig ----
+        // Runtime is the ONLY place the vanilla rig exists (bundle-side assets; nothing loadable in the SDK
+        // project). Config DumpPawnRig = pawn-name substring; when that addon loads we log the skeleton's name
+        // tables (bone lists), skinned meshes and every clip-flavoured field — the data that decides how vanilla
+        // tank treads roll (many Track/Link bones = clip mechanism; none = shader scroll).
+        static bool rigDumpDone;
+        internal static void MaybeDumpPawnRig(object addon, string name)
+        {
+            string want;
+            try { want = Plugin.DumpPawnRig?.Value ?? ""; } catch { return; }
+            if (rigDumpDone || want.Length == 0 || name.IndexOf(want, StringComparison.OrdinalIgnoreCase) < 0) return;
+            rigDumpDone = true;
+            try
+            {
+                Plugin.Log.LogInfo($"[RigDump] ================ VANILLA PAWN RIG: '{name}' ================");
+                var sk = GetMember(addon, "Skeleton"); var mc = GetMember(addon, "MeshCollection");
+                DumpSkinned(sk, name + ".Skeleton");
+                if (mc != null && !ReferenceEquals(mc, sk)) DumpSkinned(mc, name + ".MeshCollection");
+                DumpFields(addon, name + ".addon");
+                DumpFields(sk, name + ".skeleton");
+                DumpNameTables(sk, name + ".skeleton");
+                // chase clip-flavoured objects one hop from the addon and the skeleton
+                foreach (var host in new[] { addon, sk })
+                {
+                    if (host == null) continue;
+                    for (var bt = host.GetType(); bt != null && bt != typeof(object); bt = bt.BaseType)
+                        foreach (var f in bt.GetFields(BF | BindingFlags.DeclaredOnly))
+                        {
+                            object v = null; try { v = f.GetValue(host); } catch { }
+                            if (v == null) continue;
+                            string tn = v.GetType().Name;
+                            if (tn.IndexOf("Clip", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                tn.IndexOf("Anim", StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                DumpFields(v, name + "." + f.Name);
+                                DumpNameTables(v, name + "." + f.Name);
+                            }
+                        }
+                }
+                Plugin.Log.LogInfo($"[RigDump] ================ END '{name}' ================");
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[RigDump] " + ex); }
+        }
+
+        // Every array field whose elements carry a name-ish member, printed as a full name list (bone tables,
+        // clip lists, mesh tables) — capped at 400 entries per table.
+        static void DumpNameTables(object o, string label)
+        {
+            if (o == null) return;
+            try
+            {
+                for (var bt = o.GetType(); bt != null && bt != typeof(object); bt = bt.BaseType)
+                    foreach (var f in bt.GetFields(BF | BindingFlags.DeclaredOnly))
+                    {
+                        object v = null; try { v = f.GetValue(o); } catch { }
+                        if (!(v is Array a) || a.Length == 0) continue;
+                        var first = a.GetValue(0);
+                        if (first == null) continue;
+                        string Probe(object it) =>
+                            it as string
+                            ?? (it is UnityEngine.Object uo ? uo.name : null)
+                            ?? GetMember(it, "Name") as string
+                            ?? GetMember(it, "BoneName") as string
+                            ?? GetMember(it, "MeshName") as string;
+                        if (first is string || first is UnityEngine.Object || Probe(first) != null)
+                        {
+                            var names = new List<string>();
+                            for (int i = 0; i < a.Length && i < 400; i++) names.Add(Probe(a.GetValue(i)) ?? "?");
+                            Plugin.Log.LogInfo($"[RigDump] {label}.{f.Name}[{a.Length}]: {string.Join(", ", names)}");
+                        }
+                    }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning($"[RigDump] name tables {label}: " + ex.Message); }
         }
 
         // Diagnostic: list a MeshCollection/Skeleton's skinned sub-meshes (names + fx mesh index), to spot baked-in

@@ -21,6 +21,7 @@ namespace ENCAccessProof
         internal static ConfigEntry<KeyCode> ToggleKey;      // open/close the feedback window (Shift+ToggleKey = dump GPU mesh-buffer usage)
         internal static ConfigEntry<bool>   UniversalInjectOn; // registry-driven universal injector (Model Factory)
         internal static ConfigEntry<bool>   StateProbePose0Move; // TEMP diagnostic: play a state-driven model's MOVE clip on Pose0, weight 1, always (isolates move-clip vs Pose1-slot failures)
+        internal static ConfigEntry<string> DumpPawnRig;      // CATERPILLAR investigation: pawn-name substring (e.g. "MediumTanks"); when that VANILLA addon loads, dump its skeleton bone tables + clip fields once (how do vanilla tank treads roll?). "" = off.
         internal static ConfigEntry<int>    RespawnDelayFrames; // frames to wait after a borrowed-rotor unit renders before re-spawning it (first-instance rotor fix)
         // --- EXPERIMENTAL: district visual repoint (the second injection axis; see docs/District-Visuals.md) ---
         internal static ConfigEntry<bool>   DistrictRepointOn;   // master enable for the district-visual repoint hook
@@ -64,6 +65,10 @@ namespace ENCAccessProof
                                   "TEMP diagnostic for state-driven models: play the MOVEMENT clip on Pose0, weight 1, ALWAYS " +
                                   "(ignores the state machine). If the model runs in place standing still, the move clip is fine " +
                                   "and the Pose1 slot is the problem; if it's invisible, the move clip's GPU bake is bad.");
+            DumpPawnRig = Config.Bind("Factory", "DumpPawnRig", "",
+                                  "CATERPILLAR investigation: pawn-name substring (e.g. MediumTanks). When a matching VANILLA " +
+                                  "pawn addon loads, dump its skeleton bone tables, mesh info and clip-related fields to the log " +
+                                  "ONCE — the data that decides how vanilla tank treads roll (track bones vs shader scroll). Empty = off.");
             RespawnDelayFrames = Config.Bind("Factory", "RespawnDelayFrames", 1,
                                   "Frames to wait after a borrowed-rotor unit (a model with respawnAfterLoad set) renders before " +
                                   "the plugin re-spawns it to clear the first-instance low-rotor bug. 1 = near-instant (default). " +
