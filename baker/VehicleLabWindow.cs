@@ -26,14 +26,21 @@ public class VehicleLabWindow : EditorWindow
     }
 
     enum Role { Body, Wheel, Turret, Ignore }
-    class Part { public string name; public int verts; public Vector3 center, size; public Role role; }
+    [Serializable] class Part { public string name; public int verts; public Vector3 center, size; public Role role; }
 
+    // Everything an assignment session builds is [SerializeField]: a DOMAIN RELOAD (any recompile) must never eat
+    // the marked roles again — the field incident that motivated recipes in the first place.
     [SerializeField] string srcFile = "";
     [SerializeField] string outGlb = "";   // explicit output path — never silently derived at write time (overwrite guard in Vehicleize)
-    List<Part> parts = new List<Part>();
-    int frames = 15; float degrees = -360f; int axisChoice = 0;   // 0 = Auto (per wheel), 1..3 = X/Y/Z
-    int minVerts = 50;            // parts below this are COLLAPSED into Body (a triangle-soup FBX probes into thousands of shards)
+    [SerializeField] List<Part> parts = new List<Part>();
+    [SerializeField] int frames = 15; [SerializeField] float degrees = -360f; [SerializeField] int axisChoice = 0;   // 0 = Auto (per wheel), 1..3 = X/Y/Z
+    [SerializeField] int minVerts = 50;   // parts below this are COLLAPSED into Body (a triangle-soup FBX probes into thousands of shards)
     Vector2 partsScroll;
+
+    // ── Recipes: the whole vehicleize configuration as a JSON file — reload it after a restart, keep one per model,
+    // ship it next to the model so a collaborator reproduces the exact rig. ──
+    [Serializable] class Recipe { public string srcFile, outGlb; public int frames, axisChoice, minVerts; public float degrees; public List<Part> parts; }
+    const string RecipesDir = "Assets/FactorySource/VehicleLab/Recipes";
     static readonly string[] AxisOptions = { "Auto (thinnest extent = axle, per wheel)", "X", "Y", "Z" };
     string status = "";
     string lastOutGlb = "";
@@ -92,9 +99,17 @@ public class VehicleLabWindow : EditorWindow
             }
         }
 
-        using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(srcFile) || !File.Exists(srcFile)))
-            if (GUILayout.Button(new GUIContent("Probe parts", "Headless Blender lists the model's mesh parts (a single combined mesh is split into loose parts). Roles are auto-guessed from names."), GUILayout.Height(24)))
-                Probe();
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(srcFile) || !File.Exists(srcFile)))
+                if (GUILayout.Button(new GUIContent("Probe parts", "Headless Blender lists the model's mesh parts (a single combined mesh is split into loose parts). Roles are auto-guessed from names."), GUILayout.Height(24)))
+                    Probe();
+            using (new EditorGUI.DisabledScope(parts.Count == 0))
+                if (GUILayout.Button(new GUIContent("Save recipe", "Save the whole configuration (source, output, roles, knobs) as JSON — reload it any time with Load."), GUILayout.Width(90), GUILayout.Height(24)))
+                    SaveRecipe();
+            if (GUILayout.Button(new GUIContent("Load recipe…", "Restore a saved configuration."), GUILayout.Width(100), GUILayout.Height(24)))
+                LoadRecipe();
+        }
 
         if (parts.Count > 0)
         {
@@ -183,6 +198,38 @@ public class VehicleLabWindow : EditorWindow
             ? "Probe found no mesh parts — is this a mesh model? (See the Console for Blender output.)"
             : $"Probed {parts.Count} part(s); {parts.Count(x => x.role == Role.Wheel)} auto-marked as wheels. " +
               "Click a row to see WHICH part it is (zoom + yellow highlight), assign roles, then Vehicleize.";
+    }
+
+    void SaveRecipe()
+    {
+        string projRoot = Directory.GetParent(Application.dataPath).FullName;
+        Directory.CreateDirectory(Path.Combine(projRoot, RecipesDir));
+        string def = Path.GetFileNameWithoutExtension(string.IsNullOrEmpty(srcFile) ? "vehicle" : srcFile);
+        string p = EditorUtility.SaveFilePanel("Save vehicleize recipe", Path.Combine(projRoot, RecipesDir), def, "json");
+        if (string.IsNullOrEmpty(p)) return;
+        var r = new Recipe { srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees, parts = parts };
+        File.WriteAllText(p, JsonUtility.ToJson(r, true));
+        AssetDatabase.Refresh();
+        status = "Recipe saved: " + p;
+    }
+
+    void LoadRecipe()
+    {
+        string projRoot = Directory.GetParent(Application.dataPath).FullName;
+        string dir = Path.Combine(projRoot, RecipesDir);
+        string p = EditorUtility.OpenFilePanel("Load vehicleize recipe", Directory.Exists(dir) ? dir : projRoot, "json");
+        if (string.IsNullOrEmpty(p) || !File.Exists(p)) return;
+        try
+        {
+            var r = JsonUtility.FromJson<Recipe>(File.ReadAllText(p));
+            if (r == null || r.parts == null) { status = "Not a vehicleize recipe: " + p; return; }
+            DestroyPreview();
+            srcFile = r.srcFile; outGlb = r.outGlb; frames = r.frames; axisChoice = r.axisChoice; minVerts = r.minVerts; degrees = r.degrees;
+            parts = r.parts;
+            status = $"Recipe loaded ({parts.Count} parts, {parts.Count(x => x.role == Role.Wheel)} wheels). " +
+                     "Re-Probe only if the SOURCE model changed (roles are matched by part name); otherwise Vehicleize directly.";
+        }
+        catch (Exception e) { status = "Recipe load failed: " + e.Message; }
     }
 
     // Zoom the preview onto one part and tint it — restores the previous part's materials first. "" = full view.
