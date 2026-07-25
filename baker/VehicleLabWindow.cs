@@ -41,6 +41,8 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] List<Part> parts = new List<Part>();
     [SerializeField] int frames = 15; [SerializeField] float degrees = -360f; [SerializeField] int axisChoice = 0;   // 0 = Auto (per wheel), 1..3 = X/Y/Z
     [SerializeField] int minVerts = 50;   // parts below this are COLLAPSED into Body (a triangle-soup FBX probes into thousands of shards)
+    [SerializeField] float minSize = 0f;  // hide parts whose LARGEST bbox dimension is below this — drop minVerts + raise this to surface big-but-low-poly parts (flat discs, plates)
+    static float MaxDim(Part p) => Mathf.Max(p.size.x, Mathf.Max(p.size.y, p.size.z));
     [SerializeField] int partFilter;      // list filter: 0 = all; see FilterOptions (Unreviewed = Default + Edgecase)
     static readonly string[] FilterOptions = { "None (all parts)", "Unreviewed (Default + Edgecase)", "Wheel", "Turret", "Body", "Ignore", "Edgecase" };
     bool MatchesFilter(Role r) => partFilter == 1 ? (r == Role.Default || r == Role.Edgecase)
@@ -132,12 +134,14 @@ public class VehicleLabWindow : EditorWindow
             // to Body anyway (anything not marked wheel/turret skins to Root). Only substantial parts are listed.
             minVerts = EditorGUILayout.IntSlider(new GUIContent("Hide parts under (verts)",
                 "Parts smaller than this are collapsed into Body automatically (they skin to Root). Raise it if the list is still noisy; lower it if a small wheel is missing."), minVerts, 1, 2000);
+            minSize = EditorGUILayout.Slider(new GUIContent("Hide parts under (size)",
+                "Parts whose largest bbox dimension is below this are hidden (they stay on the hull, like the verts filter). Drop the verts slider and raise this to find LARGE parts with only a few vertices — flat discs and plates."), minSize, 0f, 2f);
             partFilter = EditorGUILayout.Popup(new GUIContent("Show only",
                 "Filter the list to one classification. Marking a part out of the current filter removes it from the list and auto-advances to the next."), partFilter, FilterOptions);
-            var shown = parts.Where(x => x.verts >= minVerts && MatchesFilter(x.role)).ToList();
-            int hidden = parts.Count(x => x.verts < minVerts);
-            int unreviewed = parts.Count(x => x.verts >= minVerts && x.role == Role.Default);
-            int edgecases = parts.Count(x => x.verts >= minVerts && x.role == Role.Edgecase);
+            var shown = parts.Where(x => x.verts >= minVerts && MaxDim(x) >= minSize && MatchesFilter(x.role)).ToList();
+            int hidden = parts.Count(x => x.verts < minVerts || MaxDim(x) < minSize);
+            int unreviewed = parts.Count(x => x.verts >= minVerts && MaxDim(x) >= minSize && x.role == Role.Default);
+            int edgecases = parts.Count(x => x.verts >= minVerts && MaxDim(x) >= minSize && x.role == Role.Edgecase);
             EditorGUILayout.LabelField($"Parts ({shown.Count} shown{(hidden > 0 ? $", {hidden} tiny fragments auto-collapsed" : "")}{(unreviewed > 0 ? $", {unreviewed} unreviewed" : ", all reviewed")}{(edgecases > 0 ? $", {edgecases} edge-case" : "")}) — mark the wheels & turret:", EditorStyles.boldLabel);
             EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part (zooms + highlights it below)   ·   W/T/B/I = Wheel/Turret/Body/Ignore   ·   D = Default(unreviewed)   ·   E = Edgecase (unsure, revisit later; rigs like Default)", EditorStyles.miniLabel);
             // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
