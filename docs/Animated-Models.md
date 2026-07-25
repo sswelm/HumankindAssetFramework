@@ -94,10 +94,17 @@ wheels roll backward. At bake/runtime: **turret aim axis = Y** (the bone is buil
 bones), and the muzzle offset is re-dialed from the turret's center — registry-only, so each iteration is
 Save (no bake) + relaunch.
 
-**If the rip is already rigged** (`SKM_` prefix — skeleton + full vertex weights; the Ehrhardt shipped with
-wheels, turret AND four MG mounts fully skinned): the marking flow is redundant in principle, and a planned fast
-path will reuse the source skeleton directly (artist-placed pivots, socket bones for free). Until it exists the
-Lab treats every input as static.
+**If the rip is already rigged — the SKM fast path (built 2026-07-25):** the probe detects an armature with
+≥90% of vertices weighted (`SKM_` prefix is the tell) and the Lab flips into **bone-marking mode** (a toggle;
+on by default when detected): the list shows the source skeleton's deform bones with their weighted-vert counts
+and bounds, wheel-named bones pre-marked, and **Vehicleize (fast path)** authors the Spin action directly on the
+marked bones — per bone the local axis closest to the world axle, signed so mirrored left/right bones turn the
+same world way — shipping the artist skeleton unchanged (pivots, weights, weapon/socket bones like the
+Ehrhardt's four `MW_*` mounts all kept, so the hand-rig-era fire-effect calibration applies verbatim). The
+honest trade: the fast path **inherits the artist's weighting, good and sloppy** — on the Ehrhardt the original
+artist weighted the front steering knuckles to the wheel bones, so they visibly rotate with the wheel ("bumping"
+axle). When that matters, toggle the fast path off: the shard flow lets you decide every part's fate, which is
+why the shipped ArmouredCar runs the shard-path rig.
 
 **By hand** — the recipe the tool automates (still worth knowing when a model needs judgment):
 

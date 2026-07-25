@@ -95,7 +95,9 @@ runtime-hot-loaded skin or tint ([Capabilities.md](docs/Capabilities.md)) — al
   animated path consumes — wheel shards **clustered per hub** so spokes revolve around the axle, one mesh per bone,
   the rip's stowaway skeleton stripped. **Verified in-game the same day: the shipped ArmouredCar now runs a
   Lab-generated rig** — grounded, turret aiming (axis Y on generated rigs), muzzle flash re-anchored on the
-  `Turret` bone.
+  `Turret` bone. Rips that ship **already rigged** (`SKM_`) get a **fast path**: the probe detects the skinned
+  artist skeleton and the Lab marks *bones* instead of shards — Spin authored straight onto the source rig,
+  weapon/socket bones preserved (it inherits the artist's weighting; the shard flow stays the quality reference).
 - **A turret that AIMS at the target (turretize, 2026-07-24).** The armored car's turret now yaws to track the
   enemy — by hijacking the game's OWN aim: the engine streams a heading angle into a `PawnEntry.BoneRotation` slot
   that lands on an invalid bone index for injected models, so we retarget that slot to the turret bone and the

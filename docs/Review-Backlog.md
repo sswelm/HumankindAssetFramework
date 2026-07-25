@@ -220,9 +220,12 @@ by when they'll bite.
   (curves live in `layers→strips→channelbags`), spin-sign rule (+360 = forward for a +X nose), review UI
   (6 roles incl. Edgecase, keyboard marking, classification filter, 4 hide sliders), JSON recipes, and a
   clustering-accurate **Verify** report. Generated-rig calibration: turret axis **Y**, sockets/muzzle bone →
-  `Turret`, offset re-dialed from the dome center. **NEW SEAM — SKM fast path:** the Ehrhardt rip was already
-  FULLY skinned (wheels/turret/4 MG mounts); detect skeleton+weights and reuse them (artist pivots + socket
-  bones free), skipping the marking flow entirely. Original spec below. The Ehrhardt's
+  `Turret`, offset re-dialed from the dome center. **SKM fast path — BUILT same day, preview-verified:**
+  probe detects skeleton + ≥90% weights → bone-marking mode → `rigfast` spins the SOURCE bones (local axle axis,
+  signed for mirrored rigs), artist skeleton shipped unchanged (pivots + `MW_*` socket bones free). Field
+  finding: it inherits the artist's weighting — the Ehrhardt's front steering knuckles are weighted to the wheel
+  bones and rotate with them, so the shard path stays the quality reference (the shipped unit uses it); the fast
+  path is the four-checkbox route for clean-weighted rips. Original spec below. The Ehrhardt's
   `_Spin.glb` was hand-made in Blender (now documented step-by-step in Animated-Models.md); the tool version is the
   missing sibling of turretize and the biggest lever on the "huge pool of static vehicle models" thesis: a headless
   Blender script that (1) detects wheel parts — name pattern `wheel|tyre|tire` first, geometric fallback (cylindrical,
