@@ -43,6 +43,7 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] int minVerts = 50;   // parts below this are COLLAPSED into Body (a triangle-soup FBX probes into thousands of shards)
     [SerializeField] float minPartSize = 0f;  // hide parts whose LARGEST bbox dimension is below this — drop minVerts + raise this to surface big-but-low-poly parts (flat discs, plates)
     [SerializeField] float minHeight = -999f; // hide parts whose CENTER height is below this (clamped to the model's span, so the default means "off") — slide up to isolate turret-level parts
+    [SerializeField] float maxHeight = 999f;  // the reverse: hide parts whose CENTER height is ABOVE this — slide down to strip the superstructure and isolate wheel/chassis level
     static float MaxDim(Part p) => Mathf.Max(p.size.x, Mathf.Max(p.size.y, p.size.z));
     [SerializeField] int partFilter;      // list filter: 0 = all; see FilterOptions (Unreviewed = Default + Edgecase)
     static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase" };
@@ -142,7 +143,9 @@ public class VehicleLabWindow : EditorWindow
             float zLo = parts.Min(x => x.center.z), zHi = parts.Max(x => x.center.z);
             minHeight = EditorGUILayout.Slider(new GUIContent("Hide parts below (height)",
                 "Parts whose center height is below this are hidden. Slide up past the hull deck to isolate turret-level parts."), Mathf.Clamp(minHeight, zLo, zHi), zLo, zHi);
-            bool Visible(Part x) => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.center.z >= minHeight;
+            maxHeight = EditorGUILayout.Slider(new GUIContent("Hide parts above (height)",
+                "Parts whose center height is above this are hidden. Slide down to strip the superstructure and isolate wheel/chassis-level parts."), Mathf.Clamp(maxHeight, zLo, zHi), zLo, zHi);
+            bool Visible(Part x) => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.center.z >= minHeight && x.center.z <= maxHeight;
             partFilter = EditorGUILayout.Popup(new GUIContent("Show only",
                 "Filter the list to one classification. Marking a part out of the current filter removes it from the list and auto-advances to the next."), partFilter, FilterOptions);
             var shown = parts.Where(x => Visible(x) && MatchesFilter(x.role)).ToList();
