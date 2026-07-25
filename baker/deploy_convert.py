@@ -78,6 +78,45 @@ print("DEPLOY animated parts: %d, meshes: %d" % (len(parts), len(meshes)))
 for p in parts:
     print("   part: %-40s parent=%s" % (p.name, p.parent.name if p.parent else None))
 
+# --- CULL DEGENERATE PARTS (2026-07-25, the howitzer-kickback finding) ---
+# Zero-scale ancestor chains give some source nodes GARBAGE world matrices (the m114's door/handle/Object_56/
+# barrel1: heads ~1e10, NaN anim keys, 1e28 mesh bounds). Bones built on them were inert under rotation-only
+# clips, but any POSITION curve makes Amplitude's quantizer do math with the garbage rests and abort the whole
+# clip bake (BonesCount 0). These nodes could never render sanely — delete the whole subtree outright.
+def _mat_bad(m):
+    t = m.translation; s = m.to_scale()
+    for v in (t.x, t.y, t.z):
+        if v != v or abs(v) > 1e6: return True
+    for v in (s.x, s.y, s.z):
+        if v != v or abs(v) > 1e4 or abs(v) < 1e-6: return True
+    return False
+# THE GARBAGE IS LOCAL, NOT WORLD (the night's key finding): the m114's broken chain carries HUGE local
+# translations (~1e11) compensated by a tiny ancestor scale (~1e-11) — matrix_world looks perfectly sane at
+# every frame while matrix_basis/local is astronomical. Everything that works in LOCAL/JOINT space (glTF
+# joint rests, pose curves, Amplitude's quantizer) inherits the madness. Cull by LOCAL values, full range.
+_bad_names = set()
+for _f in list(range(fmin, fmax + 1, 7)) + [fmax]:
+    scene.frame_set(_f)
+    for p in parts:
+        if p.name in _bad_names:
+            continue
+        if _mat_bad(p.matrix_basis) or _mat_bad(p.matrix_local) or _mat_bad(p.matrix_world):
+            _bad_names.add(p.name)
+scene.frame_set(fmin)   # restore the bind-pose frame
+if _bad_names:
+    def _anc_chain(o):
+        out = []
+        q = o
+        while q is not None:
+            out.append(q.name); q = q.parent
+        return out
+    _victims = [o for o in bpy.data.objects if any(n in _bad_names for n in _anc_chain(o))]
+    print("DEPLOY culled %d degenerate part(s) (garbage world matrix): %s  (+%d descendant object(s))"
+          % (len(_bad_names), sorted(_bad_names), max(0, len(_victims) - len(_bad_names))))
+    parts = [p for p in parts if not any(n in _bad_names for n in _anc_chain(p))]   # BEFORE removal — dead references
+    for _o in _victims:
+        bpy.data.objects.remove(_o, do_unlink=True)
+
 # --- 4. armature: one bone per animated part at its current (fmin) world pos, hierarchy mirrored ---
 arm_data = bpy.data.armatures.new("DeployArm")
 arm = bpy.data.objects.new("DeployArm", arm_data)
