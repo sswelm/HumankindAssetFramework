@@ -378,10 +378,11 @@ public class VehicleLabWindow : EditorWindow
     class VerifyReportWindow : EditorWindow
     {
         VehicleLabWindow lab; List<(string text, string part)> rows; Vector2 scroll;
+        string activePart;   // the row whose Show was pressed last — highlighted, so the reading position is never lost
         public static void Open(VehicleLabWindow lab, List<(string text, string part)> rows, bool warn)
         {
             var w = GetWindow<VerifyReportWindow>(utility: true, title: warn ? "Verify — warnings" : "Verify — looks sane", focus: true);
-            w.lab = lab; w.rows = rows;
+            w.lab = lab; w.rows = rows; w.activePart = null;
             w.minSize = new Vector2(520, 220);
         }
         void OnGUI()
@@ -389,13 +390,18 @@ public class VehicleLabWindow : EditorWindow
             if (rows == null) { Close(); return; }   // stale after a domain reload — just re-run Verify
             scroll = EditorGUILayout.BeginScrollView(scroll);
             var wrap = new GUIStyle(EditorStyles.label) { wordWrap = true };
+            var wrapActive = new GUIStyle(wrap) { fontStyle = FontStyle.Bold };
+            wrapActive.normal.textColor = new Color(1f, 0.85f, 0.1f);   // matches the preview highlight tint
             foreach (var r in rows)
+            {
+                bool active = r.part != null && r.part == activePart;
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    EditorGUILayout.LabelField(r.text, wrap);
+                    EditorGUILayout.LabelField((active ? "▶ " : "") + r.text, active ? wrapActive : wrap);
                     if (r.part != null && lab != null && GUILayout.Button("Show", GUILayout.Width(48)))
-                        lab.FocusPart(r.part);
+                    { activePart = r.part; lab.FocusPart(r.part); }
                 }
+            }
             EditorGUILayout.EndScrollView();
         }
     }
