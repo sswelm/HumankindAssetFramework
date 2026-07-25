@@ -356,7 +356,9 @@ public static class UniversalBaker
                 if (wantIdleAlt2) stateRoles += ";idlealt2=" + cfg.animClipIdleAlt2.Trim();
             }
             if (!RigAnimViaBlender(cfg.modelFile, fbxFull, target, cfg.animateBones ?? "", cfg.animClip ?? "", albedoOut, keepMats, cfg.rotationEuler, cfg.convertRig, stateRoles, cfg.autoGroundWheels, cfg.socketBones))
-                return Fail("Blender animated slim failed (see console). Is the model rigged with the named animation clip(s)?");
+                return Fail(LastRigAnimError.Length > 0
+                    ? "Blender animated slim failed: " + LastRigAnimError
+                    : "Blender animated slim failed (see console). Is the model rigged with the named animation clip(s)?");
             AssetDatabase.Refresh();   // the role folders are new on disk — let Unity discover them before importing
         }
         if (!File.Exists(fbxFull)) return Fail("no slim FBX at " + fbxRel + " — bake with a Model file first (Reuse extracted needs an existing one).");
@@ -727,6 +729,8 @@ public static class UniversalBaker
     // units by the rig, so a rig that round-trips lying down (the Combine soldier) can only be fixed here, at bake time.
     // `convertRig` is the EXPLICIT pipeline switch: true routes through the raw-rig conversion (rest-normalize, rename,
     // scale fold, clean-unit export) — it used to be inferred from rotation != 0, which made Rotation a landmine.
+    static string LastRigAnimError = "";   // the last RIGANIM ERROR line — so failure summaries can name the real cause
+
     static bool RigAnimViaBlender(string src, string outFbx, int targetTris, string bonePrefixes, string clipName, string albedoOut, bool keepMaterials, Vector3 rotation, bool convertRig, string stateRoles = "", bool autoGround = false, string socketBones = "")
     {
         string proj = Directory.GetParent(Application.dataPath).FullName;
@@ -747,7 +751,19 @@ public static class UniversalBaker
                 { Debug.LogError($"[Factory] a bake sub-process timed out (~{ProcTimeoutMs / 1000}s) and was killed (stuck process or over-heavy model)."); return false; }
                 if (!string.IsNullOrWhiteSpace(o)) Debug.Log("[rig_anim] " + o.Trim());
                 if (!string.IsNullOrWhiteSpace(e)) Debug.LogWarning("[rig_anim] " + e.Trim());
-                if (p.ExitCode != 0 || !File.Exists(outFbx)) { Debug.LogError("[Factory] rig_anim produced no FBX (exit " + p.ExitCode + ")."); return false; }
+                if (p.ExitCode != 0 || !File.Exists(outFbx))
+                {
+                    // Surface the ACTUAL reason in the error itself — the RIGANIM ERROR line was buried in the
+                    // info-level [rig_anim] dump while the error said only "no FBX" (a socket-bone mismatch
+                    // looked like "is the model rigged?").
+                    LastRigAnimError = o?.Split('\n').LastOrDefault(l => l.Contains("RIGANIM ERROR"))?.Trim()
+                                     ?? o?.Split('\n').LastOrDefault(l => l.TrimStart().StartsWith("Error:"))?.Trim()
+                                     ?? "";
+                    Debug.LogError("[Factory] rig_anim produced no FBX (exit " + p.ExitCode + ")." +
+                        (LastRigAnimError.Length > 0 ? "\nREASON: " + LastRigAnimError : " See the [rig_anim] log above for Blender's output."));
+                    return false;
+                }
+                LastRigAnimError = "";
                 return true;
             }
         }
