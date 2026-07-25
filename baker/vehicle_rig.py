@@ -130,6 +130,7 @@ def namelist(arg):
     return [n for n in arg.split(";") if n.strip()]
 wheel_names = namelist(argv[4])
 turret_names = namelist(argv[5])
+ignore_names = set(namelist(argv[9])) if len(argv) > 9 and argv[9].strip() else set()   # parts to DELETE (unused option meshes etc.)
 axis_arg = argv[6].upper()
 frames = max(2, int(argv[7]))
 degrees = float(argv[8])
@@ -210,6 +211,15 @@ if len(objs) == 1 and (wheel_names or turret_names):
     bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
     bpy.ops.mesh.separate(type='LOOSE'); bpy.ops.object.mode_set(mode='OBJECT')
     objs = mesh_objects()
+
+# Ignore-marked parts are DELETED from the output — Sketchfab "options" models stack alternative versions of
+# the same part (four skirt sets on the Jagdpanzer); rendering them all is z-fighting soup.
+if ignore_names:
+    _rem = [o for o in objs if o.name in ignore_names]
+    objs = [o for o in objs if o.name not in ignore_names]   # filter BEFORE removing — removed objects are dead references
+    for _o in _rem:
+        bpy.data.objects.remove(_o, do_unlink=True)
+    print("VEHICLE ignored: %d part(s) deleted from the output" % len(_rem))
 
 # clean object transforms so bbox centers/axes are honest model-space.
 # transform_apply REFUSES multi-user mesh data (instanced shards are common in game-rip FBX) — make every mesh

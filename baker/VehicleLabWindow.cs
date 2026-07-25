@@ -166,7 +166,7 @@ public class VehicleLabWindow : EditorWindow
             int unreviewed = list.Count(x => VisiblePart(x) && x.role == Role.Default);
             int edgecases = list.Count(x => VisiblePart(x) && x.role == Role.Edgecase);
             EditorGUILayout.LabelField($"{(useSourceRig && boneParts.Count > 0 ? "Source BONES" : "Parts")} ({shown.Count} shown{(hidden > 0 ? $", {hidden} hidden by the sliders" : "")}{(unreviewed > 0 ? $", {unreviewed} undecided" : ", all decided")}{(edgecases > 0 ? $", {edgecases} edge-case" : "")}) — mark {(useSourceRig && boneParts.Count > 0 ? "the bones that SPIN (Wheel)" : "the wheels & turret")}:", EditorStyles.boldLabel);
-            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part (zooms + highlights it below)   ·   W/T/B/I = Wheel/Turret/Body/Ignore   ·   D = Default(unreviewed)   ·   E = Edgecase (unsure, revisit later; rigs like Default)", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part (zooms + highlights it below)   ·   W/T/B = Wheel/Turret/Body   ·   I = Ignore (DELETED from the output — unused option meshes)   ·   D = Default(unreviewed)   ·   E = Edgecase (unsure, revisit later; rigs like Default)", EditorStyles.miniLabel);
             // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
             // part's role — the whole list can be reviewed without mousing between rows and dropdowns.
             var ev = Event.current;
@@ -506,11 +506,14 @@ public class VehicleLabWindow : EditorWindow
         string turretsFile = Path.Combine(projRoot, prevDir, baseName + "_turrets.txt").Replace('\\', '/');
         bool fast = useSourceRig && boneParts.Count > 0;   // fast path: spin the marked SOURCE BONES, reuse the artist skeleton
         var src = fast ? boneParts : parts;
+        string ignoreFile = Path.Combine(projRoot, prevDir, baseName + "_ignore.txt").Replace('\\', '/');
         File.WriteAllLines(wheelsFile, src.Where(p => p.role == Role.Wheel).Select(p => p.name).ToArray());
         File.WriteAllLines(turretsFile, src.Where(p => p.role == Role.Turret).Select(p => p.name).ToArray());
+        // Ignore = DELETED from the output (static path; unused Sketchfab option meshes). Fast path: bones can't be "deleted" — unused.
+        File.WriteAllLines(ignoreFile, src.Where(p => p.role == Role.Ignore).Select(p => p.name).ToArray());
         string axis = axisChoice == 0 ? "AUTO" : AxisOptions[axisChoice];
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {degrees.ToString("0.#", inv)}", out string stdout)) return;
+        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {degrees.ToString("0.#", inv)} \"@{ignoreFile}\"", out string stdout)) return;
         // SUCCESS = THE SCRIPT'S OWN FINAL MARKER (the documented Blender trap: it exits 0 even when the python
         // script crashes mid-way — without this gate a half-run printed a fake "DONE" with no file on disk).
         string done = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE RIG DONE"));
