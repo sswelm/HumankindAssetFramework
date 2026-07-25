@@ -64,6 +64,20 @@ if mode == "probe":
     sys.exit(0)
 
 # ---- rig mode ----
+# The whole rig path runs inside a guard: Blender EXITS 0 even when a python script crashes (the documented baker
+# trap), so an unhandled traceback must become a loud VEHICLE ERROR line the Lab can detect — the Lab additionally
+# requires the final "VEHICLE RIG DONE" marker before believing anything.
+import traceback as _tb
+def _guard(fn):
+    try:
+        fn()
+    except SystemExit:
+        raise
+    except Exception:
+        print("VEHICLE ERROR: rig step crashed:")
+        _tb.print_exc()
+        sys.exit(1)
+
 out_glb, preview_fbx = argv[2], argv[3]
 wheel_names = [n for n in argv[4].split(";") if n.strip()]
 turret_names = [n for n in argv[5].split(";") if n.strip()]
@@ -79,11 +93,17 @@ if len(objs) == 1 and (wheel_names or turret_names):
     bpy.ops.mesh.separate(type='LOOSE'); bpy.ops.object.mode_set(mode='OBJECT')
     objs = mesh_objects()
 
-# clean object transforms so bbox centers/axes are honest model-space
-for o in objs:
-    o.select_set(True)
-bpy.context.view_layer.objects.active = objs[0]
-bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+# clean object transforms so bbox centers/axes are honest model-space.
+# transform_apply REFUSES multi-user mesh data (instanced shards are common in game-rip FBX) — make every mesh
+# single-user first, or the operator raises and (Blender exiting 0 regardless) the whole rig silently dies.
+def _apply_transforms():
+    for o in objs:
+        if o.data.users > 1:
+            o.data = o.data.copy()
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = objs[0]
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+_guard(_apply_transforms)
 
 def find(name):
     for o in objs:

@@ -230,7 +230,15 @@ public class VehicleLabWindow : EditorWindow
         string axis = axisChoice == 0 ? "AUTO" : AxisOptions[axisChoice];
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         if (!RunBlender($"rig \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"{wheels}\" \"{turrets}\" {axis} {frames} {degrees.ToString("0.#", inv)}", out string stdout)) return;
+        // SUCCESS = THE SCRIPT'S OWN FINAL MARKER (the documented Blender trap: it exits 0 even when the python
+        // script crashes mid-way — without this gate a half-run printed a fake "DONE" with no file on disk).
         string done = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE RIG DONE"));
+        if (done == null || !File.Exists(lastOutGlb))
+        {
+            status = "Vehicleize FAILED — Blender crashed mid-run (no completion marker" + (File.Exists(lastOutGlb) ? "" : ", no output file") + "). Full Blender output in the Console.";
+            Debug.LogError("[VehicleLab] rig run did not complete. Full output:\n" + stdout);
+            return;
+        }
         AssetDatabase.ImportAsset(prevRel, ImportAssetOptions.ForceUpdate);
         var imp = AssetImporter.GetAtPath(prevRel) as ModelImporter;
         if (imp != null && (imp.animationType != ModelImporterAnimationType.Generic || !imp.importAnimation))
@@ -257,9 +265,9 @@ public class VehicleLabWindow : EditorWindow
             p.StartInfo.UseShellExecute = false; p.StartInfo.CreateNoWindow = true;
             p.StartInfo.RedirectStandardOutput = true; p.StartInfo.RedirectStandardError = true;
             p.Start();
-            if (!UniversalBaker.RunBounded(p, 180000, out stdout, out string _)) { status = "Blender timed out (3 min)."; return false; }
+            if (!UniversalBaker.RunBounded(p, 300000, out stdout, out string stderr)) { status = "Blender timed out (5 min)."; return false; }
             if (stdout.Contains("VEHICLE ERROR"))
-            { status = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE ERROR")) ?? "Blender step failed."; Debug.LogError("[VehicleLab]\n" + stdout); return false; }
+            { status = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE ERROR")) ?? "Blender step failed."; Debug.LogError("[VehicleLab]\n" + stdout + "\n--- stderr ---\n" + stderr); return false; }
             Debug.Log("[VehicleLab]\n" + string.Join("\n", stdout.Split('\n').Where(l => l.StartsWith("PART|") || l.StartsWith("VEHICLE"))));
             return true;
         }
