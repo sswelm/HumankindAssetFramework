@@ -206,11 +206,19 @@ public static class UniversalBaker
         string recoil = (cfg.deployRecoil ?? "").Trim();
         if (recoil.Length > 0)
         {
-            var m = System.Text.RegularExpressions.Regex.Match(recoil, @"^(\d+)\s*\.\.\s*(\d+)$");
-            if (!m.Success) { error = "deploy conversion: recoil range must look like 440..510 (source frames), got '" + recoil + "'."; return null; }
-            rs = m.Groups[1].Value; re = m.Groups[2].Value;
-            if (int.Parse(rs) >= int.Parse(re))
-            { error = $"deploy conversion: recoil range start must be BEFORE end — got {recoil} (reversed). The fire window runs forward in source frames (e.g. 443..543)."; return null; }
+            // MULTI-SEGMENT (2026-07-26): "443..530,330..440" — segment 1 is THE fire window (slide/slam derive
+            // from it); further segments append PRISTINE as epilogue choreography (the M114 re-uses its aiming
+            // RAISE to bring the barrel back up after the reload). Passed to deploy_convert as CSV starts/ends.
+            var starts = new List<string>(); var ends = new List<string>();
+            foreach (var seg in recoil.Split(','))
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(seg.Trim(), @"^(\d+)\s*\.\.\s*(\d+)$");
+                if (!m.Success) { error = "deploy conversion: recoil range must look like 440..510 (or several: 443..530,330..440), got '" + seg.Trim() + "'."; return null; }
+                if (int.Parse(m.Groups[1].Value) >= int.Parse(m.Groups[2].Value))
+                { error = $"deploy conversion: recoil range start must be BEFORE end — got {seg.Trim()} (reversed). Each window runs forward in source frames."; return null; }
+                starts.Add(m.Groups[1].Value); ends.Add(m.Groups[2].Value);
+            }
+            rs = string.Join(",", starts); re = string.Join(",", ends);
         }
         string key = string.Join("|", cfg.modelFile, File.GetLastWriteTimeUtc(cfg.modelFile).Ticks.ToString(),
             File.GetLastWriteTimeUtc(script).Ticks.ToString(), cfg.deployStart.ToString(), cfg.deployEnd.ToString(),

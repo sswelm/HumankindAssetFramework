@@ -177,15 +177,25 @@ print("DEPLOY baked %d bones" % len(bone_of))
 #         the barrel/leg channels — the source's own fire choreography (the barrel LOWERING to reload and any other
 #         rotational content) lives in these frames and the retarget would erase it. The 'recoil' role clip (7c) is
 #         built from THIS snapshot, with the Slam arc layered on the (later-born) RecoilArm on top. ---
+# MULTI-SEGMENT recoil (2026-07-26, user-designed): argv[8]/argv[9] are CSV lists of starts/ends. Segment 1
+# is THE fire window (slide profile, slam arc, kept translations all derive from it); further segments are
+# EPILOGUE choreography appended pristine to the recoil role clip (the M114: "443..530,330..440" = fire+kick+
+# reload, then the source's own aiming RAISE re-used to bring the barrel back up — the raise doesn't exist
+# after the load in the source, but it exists before the fire).
+_seg_starts = [int(s) for s in argv[8].split(",") if s.strip()] if len(argv) > 8 and argv[8].strip() else []
+_seg_ends = [int(s) for s in argv[9].split(",") if s.strip()] if len(argv) > 9 and argv[9].strip() else []
+_segments = list(zip(_seg_starts, _seg_ends))
 _fire_snap = {}
-if len(argv) > 8 and argv[8].strip():
+if _segments:
     for pb in arm.pose.bones:
         pb.rotation_mode = 'QUATERNION'
-    for f in range(int(argv[8]), int(argv[9]) + 1):
-        scene.frame_set(f)
-        bpy.context.view_layer.update()
-        _fire_snap[f] = {pb.name: (pb.location.copy(), pb.rotation_quaternion.copy()) for pb in arm.pose.bones}
-    print("DEPLOY fire-window snapshot: %d frames (%s..%s) captured PRISTINE (pre-retarget)" % (len(_fire_snap), argv[8], argv[9]))
+    for _ss, _se in _segments:
+        for f in range(_ss, _se + 1):
+            scene.frame_set(f)
+            bpy.context.view_layer.update()
+            _fire_snap[f] = {pb.name: (pb.location.copy(), pb.rotation_quaternion.copy()) for pb in arm.pose.bones}
+    print("DEPLOY fire-window snapshot: %d frames (%s) captured PRISTINE (pre-retarget)"
+          % (len(_fire_snap), ", ".join("%d..%d" % s for s in _segments)))
 
 # --- 5b. optional: RETARGET the barrel to its fully-elevated 'ready' pose by the deploy's end (argv[5] = readyFrame) ---
 # The rest/deployed pose should be combat-ready (barrel up). In the source the barrel pauses at the aiming angle for a
@@ -260,7 +270,7 @@ recoil_out_end = None
 if len(argv) > 8 and argv[8].strip():
     from mathutils import Matrix, Quaternion
     deploy_end = int(argv[3])
-    rs = int(argv[8]); re = int(argv[9])                       # recoil sub-range IN THE SOURCE clip
+    rs, re = _segments[0]                                      # SEGMENT 1 only — the actual fire window drives slide/arc
     step = int(argv[10]) if len(argv) > 10 and argv[10].strip() else 2
     recoil_bones = [bn for bn in bone_of.values() if any(k in bn.lower() for k in ("barrel", "cannon"))]
     bone_to_src = {bone_of[p.name]: p for p in parts if p.name in bone_of}   # bone -> its source node (still animated 0..fmax)
@@ -538,10 +548,14 @@ if arm_action:
         # on the RecoilArm (theta from 5d's slam-derived arc, interpolated per source frame; identity outside the
         # kick). The palindrome return (argv[13], default 4) plays the whole thing backward slowed, raising the
         # barrel back to battery and gliding the kick home; 0 = no return (ends as the source ends).
-        rs2, re2 = int(argv[8]), int(argv[9])
+        rs2, re2 = _segments[0]
         ret2 = int(argv[13]) if len(argv) > 13 and argv[13].strip() else 4
         fwd = list(range(rs2, re2 + 1))
         frames2 = list(fwd) + (list(reversed(fwd[:-1])) if ret2 > 0 else [])
+        # EPILOGUE SEGMENTS (multi-range recoil): appended pristine after the fire cycle (+return), arm identity —
+        # e.g. the M114's aiming-raise window replayed to bring the barrel back up after the reload.
+        _epilogue = [f for _ss, _se in _segments[1:] for f in range(_ss, _se + 1)]
+        frames2 += _epilogue
         # per-entry arm quaternion: linear-interpolate theta between 5d's sampled arc keys (dict on source frames)
         def theta_at(t):
             if not _arc_by_src: return 0.0
@@ -569,8 +583,9 @@ if arm_action:
         arm_quats = [Quaternion(_arc_axis, slam_theta(t)) if (_arc_by_src and i < len(fwd)) else Quaternion((1.0, 0.0, 0.0, 0.0))
                      for i, t in enumerate(frames2)]
         make_role("recoil", frames2, snaps=_fire_snap, arm_override=(ra_name, arm_quats))
-        print("DEPLOY recoil role: PRISTINE fire cycle %d..%d (barrel choreography intact) + Slam layer%s" %
-              (rs2, re2, (" + palindrome return x%d" % ret2) if ret2 > 0 else " (no return)"))
+        print("DEPLOY recoil role: PRISTINE fire cycle %d..%d (barrel choreography intact) + Slam layer%s%s" %
+              (rs2, re2, (" + palindrome return x%d" % ret2) if ret2 > 0 else " (no return)",
+               (" + epilogue %s (%d frames)" % (", ".join("%d..%d" % s for s in _segments[1:]), len(_epilogue))) if _epilogue else ""))
     arm.animation_data.action = arm_action       # the legacy action stays active (legacy bakes untouched)
     print("DEPLOY role clips: unfold/fold/folded/deployed%s (+ legacy 'deploy')" % ("/recoil" if has_recoil else ""))
 
