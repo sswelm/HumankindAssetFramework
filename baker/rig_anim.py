@@ -523,6 +523,22 @@ except Exception as _e:
 # stripped to rotation-only 'prop' curves by hand.) DELIBERATELY UNGATED — runs on BOTH paths: every verified legacy
 # bake went through it, and Amplitude can't play the keys anyway (the 2026-07-19 gating decision moved only the
 # destructive rest-fold above behind the convert flag).
+# LEGACY-PATH keepTranslations (the howitzer's real kickback): the conversion rebake fills _KEEP_LOC_PATHS
+# itself; on the legacy path (deploy_convert output etc.) scan the final clips directly — any pose-bone
+# location channel that VARIES (>1e-4) is a genuine authored slide (deploy_convert's Phase B keys the tube's
+# true recoil translation; only this strip ever removed it).
+if keep_translations and not convert_rig:
+    for _sa in all_acts:
+        for coll, fc in all_fcurve_owners(_sa):
+            _dp = fc.data_path
+            if _dp.startswith("pose.bones") and _dp.endswith(".location") and len(fc.keyframe_points) > 0:
+                _vals = [kp.co[1] for kp in fc.keyframe_points]
+                if max(_vals) - min(_vals) > 1e-4:
+                    _KEEP_LOC_PATHS.add(_dp)
+    if _KEEP_LOC_PATHS:
+        print("RIGANIM legacy keepTranslations: %d varying location path(s) kept: %s"
+              % (len(_KEEP_LOC_PATHS), sorted({p.split('"')[1] for p in _KEEP_LOC_PATHS if '"' in p})))
+
 _locs = 0; _kept = 0
 for _sa in all_acts:
     for coll, fc in all_fcurve_owners(_sa):
