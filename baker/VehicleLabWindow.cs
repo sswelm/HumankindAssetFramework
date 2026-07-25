@@ -314,9 +314,16 @@ public class VehicleLabWindow : EditorWindow
                     !clusters.Any(o => o.anchor != c.anchor && Mathf.Abs(o.anchor.center.x - c.anchor.center.x) < 0.2f
                                                             && Mathf.Abs(o.anchor.center.y + c.anchor.center.y) < 0.2f))
                 { report.Add(($"  ⚠ wheel at ({c.anchor.center.x:0.00}, {c.anchor.center.y:0.00}) has no mirrored partner — missed the other side?", c.anchor.name)); warn = true; }
-            int inside = parts.Count(p => p.role != Role.Wheel &&
-                clusters.Any(c => (p.center - c.anchor.center).magnitude <= 0.5f * MaxDim(c.anchor)));
-            if (inside > 0) report.Add(($"• {inside} unmarked part(s) sit inside wheel volumes — fine if deliberate (static hub rings), else check them.", null));
+            var insideParts = parts.Where(p => p.role != Role.Wheel &&
+                    clusters.Any(c => (p.center - c.anchor.center).magnitude <= 0.5f * MaxDim(c.anchor)))
+                .OrderByDescending(MaxDim).ToList();
+            if (insideParts.Count > 0)
+            {
+                report.Add(($"• {insideParts.Count} unmarked part(s) sit inside wheel volumes — fine if deliberate (static hub rings), else check them (largest first):", null));
+                foreach (var p in insideParts.Take(150))
+                    report.Add(($"      {p.name}  [{p.role}]  ⌀{MaxDim(p):0.00} at ({p.center.x:0.00}, {p.center.y:0.00}, {p.center.z:0.00})", p.name));
+                if (insideParts.Count > 150) report.Add(($"      … and {insideParts.Count - 150} more (tiny)", null));
+            }
         }
 
         if (turrets.Count > 0)
