@@ -127,6 +127,7 @@ public class SoundWindow : EditorWindow
         {
             engineSound = EditorGUILayout.ToggleLeft(new GUIContent("Use a Wwise engine event (posted on move start/stop)",
                 "The game's own per-ship sound. Get names from F8 ▸ Dump Sound Catalog (enc_sound_catalog.txt)."), engineSound);
+            UseDonorSoundButton();
             if (engineSound)
             {
                 WwiseEventRow("  Start event", "e.g. Play_UNIT_Vehicle_AntiAirGun_Movement_Start — Pick browses the game's full event catalog (searchable).",
@@ -230,6 +231,82 @@ public class SoundWindow : EditorWindow
             return soundCatalog;
         }
         catch { return soundCatalog; }
+    }
+
+    // ── "Use donor engine sound": fully automatic. Resolves this unit's DONOR from the plugin's load log (it prints
+    // "<res> donor Skeleton='Unit_..._Skeleton'" each session), extracts the family word, and fuzzy-matches it against
+    // the Wwise catalog for a Movement Start/Stop pair (prefers Move/Movement events, shortest name wins; the Stop is
+    // the _Start->_Stop sibling when present). One click replaces the dump-search-copy loop. Falls back to the pawn's
+    // OWN family for vanilla units (no donor line, e.g. a reskin). Clear status when anything is missing.
+    void UseDonorSoundButton()
+    {
+        var cat = LoadSoundCatalog();
+        using (new EditorGUI.DisabledScope(cat == null || cat.Length == 0 || string.IsNullOrEmpty(pawn)))
+            if (GUILayout.Button(new GUIContent("  Use donor engine sound", cat == null
+                    ? "Dump the sound catalog first: in-game F8 window ▸ Dump Sound Catalog."
+                    : "Reads this unit's donor from the plugin's log (launch the game once with the unit loaded), then finds the donor's Movement Start/Stop events in the catalog and fills the fields."), GUILayout.Width(190)))
+            {
+                var fam = DonorFamilyForPawn(pawn, out string how);
+                if (string.IsNullOrEmpty(fam)) { status = "Donor lookup failed (" + how + ") — Pick manually."; return; }
+                var (st, sp) = GuessEngineEvents(fam);
+                if (st == null) { status = $"No catalog event matched family '{fam}' ({how}) — Pick manually."; return; }
+                engineSound = true; engineStart = st; engineStop = sp ?? "";
+                status = $"Engine sound from {how}: family '{fam}'\n{st}" + (sp != null ? "\n" + sp : "\n(no Stop match — set it manually)") + "\nApply + relaunch to hear it.";
+            }
+    }
+
+    // The donor's family word for a pawn: prefer the plugin log's donor line for the registry entry owning this pawn
+    // ("Unit_Era6_Common_AntiAirGuns_01_Skeleton" -> "AntiAirGuns"); fall back to the pawn description's own family
+    // ("Era5_Common_ArmouredCar_01" -> "ArmouredCar") for vanilla units or before the first logged session.
+    static string DonorFamilyForPawn(string pawnDesc, out string how)
+    {
+        how = "";
+        try
+        {
+            string donor = null;
+            var entry = ModelRegistry.Load().FirstOrDefault(m => m.pawnDescription == pawnDesc && !string.IsNullOrEmpty(m.resourceName));
+            var logPath = Path.Combine(Directory.GetParent(ModelRegistry.ConfigDir).FullName, "LogOutput.log");
+            if (entry != null && File.Exists(logPath))
+                foreach (var line in File.ReadLines(logPath))
+                {
+                    var m2 = System.Text.RegularExpressions.Regex.Match(line, System.Text.RegularExpressions.Regex.Escape(entry.resourceName) + @" donor Skeleton='([^']+)'");
+                    if (m2.Success) donor = m2.Groups[1].Value;   // last occurrence wins (latest session)
+                }
+            string source = donor ?? pawnDesc;
+            how = donor != null ? "the log's donor line" : "the pawn's own family (no donor line in the log)";
+            string fam = null;
+            foreach (var t in source.Split('_'))
+            {
+                if (t.Length == 0 || t == "Unit" || t == "Common" || t == "Skeleton" || t.StartsWith("Era")) continue;
+                if (t.All(char.IsDigit)) continue;
+                fam = t;   // the family word sits after Unit_/EraN_/Common_ — last qualifying token wins
+            }
+            return fam;
+        }
+        catch (Exception e) { how = e.Message; return null; }
+    }
+
+    // Fuzzy-match a family word against the catalog: contains-match (case-insensitive, plural 's' trimmed as a
+    // second try), require "start", prefer Move/Movement events, shortest name wins. Stop = the _Start->_Stop
+    // sibling when it exists, else the same query with "stop".
+    static (string, string) GuessEngineEvents(string family)
+    {
+        var cat = LoadSoundCatalog();
+        if (cat == null) return (null, null);
+        var variants = new List<string> { family.ToLowerInvariant() };
+        if (variants[0].EndsWith("s")) variants.Add(variants[0].Substring(0, variants[0].Length - 1));
+        foreach (var v in variants)
+        {
+            var starts = cat.Where(c => c.ToLowerInvariant().Contains(v) && c.ToLowerInvariant().Contains("start")).ToList();
+            if (starts.Count == 0) continue;
+            var best = starts.OrderByDescending(c => c.ToLowerInvariant().Contains("movement") || c.ToLowerInvariant().Contains("move"))
+                             .ThenBy(c => c.Length).First();
+            var sibling = best.Replace("_Start", "_Stop");
+            string stop = Array.IndexOf(cat, sibling) >= 0 ? sibling
+                : cat.FirstOrDefault(c => c.ToLowerInvariant().Contains(v) && c.ToLowerInvariant().Contains("stop"));
+            return (best, stop);
+        }
+        return (null, null);
     }
 
     void WwiseEventRow(string label, string tooltip, string current, Action<string> set)
