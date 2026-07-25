@@ -19,7 +19,11 @@ using UnityEngine;
 public class VehicleLabWindow : EditorWindow
 {
     [MenuItem("Tools/HAF/Vehicle Lab")]
-    static void Open() => GetWindow<VehicleLabWindow>("Vehicle Lab");
+    static void Open()
+    {
+        var w = GetWindow<VehicleLabWindow>("Vehicle Lab");
+        w.minSize = new Vector2(680, 560);   // wide enough for the info text; tall enough for list + knobs + preview
+    }
 
     enum Role { Body, Wheel, Turret, Ignore }
     class Part { public string name; public int verts; public Vector3 center, size; public Role role; }
@@ -27,6 +31,8 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] string srcFile = "";
     List<Part> parts = new List<Part>();
     int frames = 15; float degrees = -360f; int axisChoice = 0;   // 0 = Auto (per wheel), 1..3 = X/Y/Z
+    int minVerts = 50;            // parts below this are COLLAPSED into Body (a triangle-soup FBX probes into thousands of shards)
+    Vector2 partsScroll;
     static readonly string[] AxisOptions = { "Auto (thinnest extent = axle, per wheel)", "X", "Y", "Z" };
     string status = "";
     string lastOutGlb = "";
@@ -73,13 +79,21 @@ public class VehicleLabWindow : EditorWindow
 
         if (parts.Count > 0)
         {
-            EditorGUILayout.LabelField($"Parts ({parts.Count}) — mark the wheels & turret:", EditorStyles.boldLabel);
-            foreach (var p in parts)
+            // Tiny-fragment collapse: a triangle-soup FBX probes into THOUSANDS of 3-4-vert shards — they all belong
+            // to Body anyway (anything not marked wheel/turret skins to Root). Only substantial parts are listed.
+            minVerts = EditorGUILayout.IntSlider(new GUIContent("Hide parts under (verts)",
+                "Parts smaller than this are collapsed into Body automatically (they skin to Root). Raise it if the list is still noisy; lower it if a small wheel is missing."), minVerts, 1, 2000);
+            var shown = parts.Where(x => x.verts >= minVerts).ToList();
+            int hidden = parts.Count - shown.Count;
+            EditorGUILayout.LabelField($"Parts ({shown.Count} shown{(hidden > 0 ? $", {hidden} tiny fragments auto-collapsed into Body" : "")}) — mark the wheels & turret:", EditorStyles.boldLabel);
+            partsScroll = EditorGUILayout.BeginScrollView(partsScroll, GUILayout.ExpandHeight(true), GUILayout.MinHeight(120));
+            foreach (var p in shown)
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     p.role = (Role)EditorGUILayout.EnumPopup(p.role, GUILayout.Width(70));
                     EditorGUILayout.LabelField($"{p.name}   ({p.verts} verts, size {p.size.x:0.00}×{p.size.y:0.00}×{p.size.z:0.00})", EditorStyles.miniLabel);
                 }
+            EditorGUILayout.EndScrollView();
             axisChoice = EditorGUILayout.Popup(new GUIContent("Axle axis", "Auto infers each wheel's axle as its thinnest bbox extent — right for normal wheels; override only if a wheel spins the wrong way around."), axisChoice, AxisOptions);
             frames = EditorGUILayout.IntSlider(new GUIContent("Spin frames", "Length of the generated Spin action. Apparent speed is tuned later with slice steps (Spin[1..N/2]) — this just needs to be a smooth loop."), frames, 5, 60);
             degrees = EditorGUILayout.Slider(new GUIContent("Spin degrees", "Wheel rotation over the clip. -360 = one full forward turn (negate if wheels roll backward in the preview)."), degrees, -720f, 720f);
@@ -105,18 +119,21 @@ public class VehicleLabWindow : EditorWindow
     {
         parts.Clear(); DestroyPreview();
         if (!RunBlender($"probe \"{srcFile}\"", out string stdout)) return;
+        // Lenient float parse: degenerate shards can emit "nan" (python lowercase — .NET rejects it) — such a value
+        // becomes 0 instead of killing the whole probe on one bad line out of thousands.
+        float F(string s2) => float.TryParse(s2, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var f) ? f : 0f;
         foreach (var line in stdout.Split('\n'))
         {
             var t = line.Trim().Split('|');
             if (t.Length != 5 || t[0] != "PART") continue;
             var c = t[3].Split(','); var s = t[4].Split(',');
-            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            if (c.Length != 3 || s.Length != 3) continue;
             var p = new Part
             {
                 name = t[1],
                 verts = int.TryParse(t[2], out var v) ? v : 0,
-                center = new Vector3(float.Parse(c[0], inv), float.Parse(c[1], inv), float.Parse(c[2], inv)),
-                size = new Vector3(float.Parse(s[0], inv), float.Parse(s[1], inv), float.Parse(s[2], inv)),
+                center = new Vector3(F(c[0]), F(c[1]), F(c[2])),
+                size = new Vector3(F(s[0]), F(s[1]), F(s[2])),
             };
             var low = p.name.ToLowerInvariant();
             p.role = low.Contains("wheel") || low.Contains("tyre") || low.Contains("tire") ? Role.Wheel
