@@ -281,12 +281,12 @@ public class VehicleLabWindow : EditorWindow
     // shown here are exactly the bones Vehicleize will build.
     void VerifySelection()
     {
-        var report = new List<string>();
+        var report = new List<(string text, string part)>();
         bool warn = false;
         var wheels = parts.Where(p => p.role == Role.Wheel).ToList();
         var turrets = parts.Where(p => p.role == Role.Turret).ToList();
 
-        if (wheels.Count == 0) { report.Add("✗ No parts marked Wheel — nothing will spin."); warn = true; }
+        if (wheels.Count == 0) { report.Add(("✗ No parts marked Wheel — nothing will spin.", null)); warn = true; }
         else
         {
             var clusters = new List<(Part anchor, List<Part> members)>();
@@ -296,48 +296,82 @@ public class VehicleLabWindow : EditorWindow
                 if (home.anchor == null) clusters.Add((p, new List<Part> { p }));
                 else home.members.Add(p);
             }
-            report.Add($"• {wheels.Count} wheel part(s) → {clusters.Count} wheel bone(s):");
+            report.Add(($"• {wheels.Count} wheel part(s) → {clusters.Count} wheel bone(s):", null));
             float biggest = clusters.Max(c => MaxDim(c.anchor));
             int AxleIdx(Part a) => a.size.x <= a.size.y && a.size.x <= a.size.z ? 0 : a.size.y <= a.size.z ? 1 : 2;
-            foreach (var c in clusters.Take(10))
+            foreach (var c in clusters.Take(12))
             {
-                string note = "";
-                if (MaxDim(c.anchor) < 0.5f * biggest)
-                { note = "   ⚠ small anchor — stray shard far from every wheel? (becomes its own bone)"; warn = true; }
-                report.Add($"    ⌀{MaxDim(c.anchor):0.00} at ({c.anchor.center.x:0.00}, {c.anchor.center.y:0.00}, {c.anchor.center.z:0.00}) — {c.members.Count} part(s){note}");
+                bool stray = MaxDim(c.anchor) < 0.5f * biggest;
+                if (stray) warn = true;
+                report.Add(($"    ⌀{MaxDim(c.anchor):0.00} at ({c.anchor.center.x:0.00}, {c.anchor.center.y:0.00}, {c.anchor.center.z:0.00}) — {c.members.Count} part(s)" +
+                            (stray ? "  ⚠ small anchor — stray shard far from every wheel? (becomes its own bone)" : ""), c.anchor.name));
             }
-            if (clusters.Count > 10) report.Add($"    … and {clusters.Count - 10} more");
+            if (clusters.Count > 12) report.Add(($"    … and {clusters.Count - 12} more", null));
             if (clusters.Select(c => AxleIdx(c.anchor)).Distinct().Count() > 1)
-            { report.Add("  ⚠ wheel anchors disagree on the axle axis — a stray cluster, or set the Axle axis override."); warn = true; }
+            { report.Add(("  ⚠ wheel anchors disagree on the axle axis — a stray cluster, or set the Axle axis override.", null)); warn = true; }
             foreach (var c in clusters)
                 if (Mathf.Abs(c.anchor.center.y) > 0.15f &&
                     !clusters.Any(o => o.anchor != c.anchor && Mathf.Abs(o.anchor.center.x - c.anchor.center.x) < 0.2f
                                                             && Mathf.Abs(o.anchor.center.y + c.anchor.center.y) < 0.2f))
-                { report.Add($"  ⚠ wheel at ({c.anchor.center.x:0.00}, {c.anchor.center.y:0.00}) has no mirrored partner — missed the other side?"); warn = true; }
+                { report.Add(($"  ⚠ wheel at ({c.anchor.center.x:0.00}, {c.anchor.center.y:0.00}) has no mirrored partner — missed the other side?", c.anchor.name)); warn = true; }
             int inside = parts.Count(p => p.role != Role.Wheel &&
                 clusters.Any(c => (p.center - c.anchor.center).magnitude <= 0.5f * MaxDim(c.anchor)));
-            if (inside > 0) report.Add($"• {inside} unmarked part(s) sit inside wheel volumes — fine if deliberate (static hub rings), else check them.");
+            if (inside > 0) report.Add(($"• {inside} unmarked part(s) sit inside wheel volumes — fine if deliberate (static hub rings), else check them.", null));
         }
 
         if (turrets.Count > 0)
         {
             var cen = turrets.Aggregate(Vector3.zero, (a, p) => a + p.center) / turrets.Count;
-            report.Add($"• {turrets.Count} turret part(s) on one Turret bone at ({cen.x:0.00}, {cen.y:0.00}, {cen.z:0.00}).");
+            report.Add(($"• {turrets.Count} turret part(s) on one Turret bone at ({cen.x:0.00}, {cen.y:0.00}, {cen.z:0.00}).", null));
             var far = turrets.Where(p => (p.center - cen).magnitude > 1.5f).ToList();
             if (far.Count > 0)
-            { report.Add($"  ⚠ {far.Count} turret part(s) far from the turret centroid (first: {far[0].name} at ({far[0].center.x:0.00}, {far[0].center.y:0.00}, {far[0].center.z:0.00})) — accidental marks?"); warn = true; }
+            {
+                warn = true;
+                report.Add(($"  ⚠ {far.Count} turret part(s) far from the turret centroid — accidental marks?", null));
+                foreach (var p in far.Take(8))
+                    report.Add(($"      {p.name} at ({p.center.x:0.00}, {p.center.y:0.00}, {p.center.z:0.00})", p.name));
+                if (far.Count > 8) report.Add(($"      … and {far.Count - 8} more", null));
+            }
         }
 
         int undecided = parts.Count(p => p.role == Role.Default);
         int edge = parts.Count(p => p.role == Role.Edgecase);
-        if (undecided > 0) { report.Add($"⚠ {undecided} part(s) still undecided (Default)."); warn = true; }
-        if (edge > 0) report.Add($"• {edge} Edgecase part(s) — rig static (like Body), safe.");
-        if (!warn) report.Add("Looks sane — ready to Vehicleize.");
+        if (undecided > 0) { report.Add(($"⚠ {undecided} part(s) still undecided (Default).", null)); warn = true; }
+        if (edge > 0) report.Add(($"• {edge} Edgecase part(s) — rig static (like Body), safe.", null));
+        if (!warn) report.Add(("Looks sane — ready to Vehicleize.", null));
 
-        string text = string.Join("\n", report);
-        Debug.Log("[VehicleLab] Verify:\n" + text);
-        EditorUtility.DisplayDialog(warn ? "Verify — warnings" : "Verify — looks sane", text, "OK");
-        status = (warn ? "Verify: warnings (see dialog / Console). " : "Verify: looks sane. ") + report[0];
+        Debug.Log("[VehicleLab] Verify:\n" + string.Join("\n", report.Select(r => r.text)));
+        VerifyReportWindow.Open(this, report, warn);
+        status = (warn ? "Verify: warnings (report window / Console). " : "Verify: looks sane. ") + report[0].text;
+    }
+
+    // "Show" in the report jumps the Lab's preview to the part — the report must not block the Lab (utility
+    // window, NOT a modal dialog), so flagged parts can be looked up while reading it.
+    internal void FocusPart(string name) { SelectPart(name); Repaint(); }
+
+    class VerifyReportWindow : EditorWindow
+    {
+        VehicleLabWindow lab; List<(string text, string part)> rows; Vector2 scroll;
+        public static void Open(VehicleLabWindow lab, List<(string text, string part)> rows, bool warn)
+        {
+            var w = GetWindow<VerifyReportWindow>(utility: true, title: warn ? "Verify — warnings" : "Verify — looks sane", focus: true);
+            w.lab = lab; w.rows = rows;
+            w.minSize = new Vector2(520, 220);
+        }
+        void OnGUI()
+        {
+            if (rows == null) { Close(); return; }   // stale after a domain reload — just re-run Verify
+            scroll = EditorGUILayout.BeginScrollView(scroll);
+            var wrap = new GUIStyle(EditorStyles.label) { wordWrap = true };
+            foreach (var r in rows)
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(r.text, wrap);
+                    if (r.part != null && lab != null && GUILayout.Button("Show", GUILayout.Width(48)))
+                        lab.FocusPart(r.part);
+                }
+            EditorGUILayout.EndScrollView();
+        }
     }
 
     void SaveRecipe()
