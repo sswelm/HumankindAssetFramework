@@ -137,14 +137,20 @@ for i, wn in enumerate(wheel_names):
     eb.parent = eb_root
     bone_of[wn] = eb.name
     wheel_axes[wn] = tuple(ax)
-for i, tn in enumerate(turret_names):
-    o = find(tn)
-    c, s = world_bbox(o)
-    eb = arm_data.edit_bones.new("Turret" if i == 0 else "Turret_%02d_%s" % (i, tn[:20]))
-    eb.head = c
-    eb.tail = c + Vector((0, 0, max(0.05, max(s) * 0.25)))
+# ONE Turret bone shared by every turret part (dome plates, gun shield, barrel...) so the whole assembly is a
+# single unit — for future rotation and as the muzzle-socket anchor — placed at the parts' combined bbox center.
+if turret_names:
+    tos = [find(tn) for tn in turret_names]
+    boxes = [world_bbox(o) for o in tos]
+    mn = Vector(tuple(min(c[i] - s[i] / 2 for c, s in boxes) for i in range(3)))
+    mx = Vector(tuple(max(c[i] + s[i] / 2 for c, s in boxes) for i in range(3)))
+    tc, ts = (mn + mx) / 2.0, mx - mn
+    eb = arm_data.edit_bones.new("Turret")
+    eb.head = tc
+    eb.tail = tc + Vector((0, 0, max(0.05, max(ts) * 0.25)))
     eb.parent = eb_root
-    bone_of[tn] = eb.name
+    for tn in turret_names:
+        bone_of[tn] = "Turret"
 bpy.ops.object.mode_set(mode='OBJECT')
 
 # rigid skinning: each part full-weight on its bone (wheels/turret) or Root (body)
@@ -190,5 +196,5 @@ for fc in _fcs:
 bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
 if preview_fbx:
     bpy.ops.export_scene.fbx(filepath=preview_fbx, add_leaf_bones=False, bake_anim=True)
-print("VEHICLE RIG DONE: %d wheel(s) %s, %d turret bone(s), Spin 0..%d %.0f deg -> %s"
+print("VEHICLE RIG DONE: %d wheel(s) %s, %d turret part(s) on one Turret bone, Spin 0..%d %.0f deg -> %s"
       % (len(wheel_names), {w: wheel_axes[w] for w in wheel_names}, len(turret_names), frames, degrees, out_glb))
