@@ -28,7 +28,10 @@ public class VehicleLabWindow : EditorWindow
     // Default = NOT YET REVIEWED (the probe's initial state); Body is an explicit "looked at it, it's hull" verdict.
     // Both skin to Root in the rig — the split only exists so review progress is visible. Default is APPENDED so
     // the ints in saved recipes stay valid (Body=0, Wheel=1, Turret=2, Ignore=3).
-    enum Role { Body, Wheel, Turret, Ignore, Default }
+    // Edgecase = "not sure yet, don't let me forget": rig-wise identical to Default (skins to Root), stays in
+    // the only-unreviewed filter, exists purely as a parking flag during a review sweep. Appended (order matters
+    // for saved-recipe ints).
+    enum Role { Body, Wheel, Turret, Ignore, Default, Edgecase }
     [Serializable] class Part { public string name; public int verts; public Vector3 center, size; public Role role; }
 
     // Everything an assignment session builds is [SerializeField]: a DOMAIN RELOAD (any recompile) must never eat
@@ -124,11 +127,12 @@ public class VehicleLabWindow : EditorWindow
                 "Parts smaller than this are collapsed into Body automatically (they skin to Root). Raise it if the list is still noisy; lower it if a small wheel is missing."), minVerts, 1, 2000);
             onlyUnreviewed = EditorGUILayout.ToggleLeft(new GUIContent("Show only unreviewed (Default) parts",
                 "Filter the list to parts still classified Default. Marking one (W/T/B/I) removes it from the list and auto-advances to the next."), onlyUnreviewed);
-            var shown = parts.Where(x => x.verts >= minVerts && (!onlyUnreviewed || x.role == Role.Default)).ToList();
+            var shown = parts.Where(x => x.verts >= minVerts && (!onlyUnreviewed || x.role == Role.Default || x.role == Role.Edgecase)).ToList();
             int hidden = parts.Count(x => x.verts < minVerts);
             int unreviewed = shown.Count(x => x.role == Role.Default);
-            EditorGUILayout.LabelField($"Parts ({shown.Count} shown{(hidden > 0 ? $", {hidden} tiny fragments auto-collapsed" : "")}{(unreviewed > 0 ? $", {unreviewed} unreviewed" : ", all reviewed")}) — mark the wheels & turret:", EditorStyles.boldLabel);
-            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part (zooms + highlights it below)   ·   W/T/B/I/D = mark selected as Wheel/Turret/Body/Ignore/Default(unreviewed)", EditorStyles.miniLabel);
+            int edgecases = parts.Count(x => x.verts >= minVerts && x.role == Role.Edgecase);
+            EditorGUILayout.LabelField($"Parts ({shown.Count} shown{(hidden > 0 ? $", {hidden} tiny fragments auto-collapsed" : "")}{(unreviewed > 0 ? $", {unreviewed} unreviewed" : ", all reviewed")}{(edgecases > 0 ? $", {edgecases} edge-case" : "")}) — mark the wheels & turret:", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part (zooms + highlights it below)   ·   W/T/B/I = Wheel/Turret/Body/Ignore   ·   D = Default(unreviewed)   ·   E = Edgecase (unsure, revisit later; rigs like Default)", EditorStyles.miniLabel);
             // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
             // part's role — the whole list can be reviewed without mousing between rows and dropdowns.
             var ev = Event.current;
@@ -143,15 +147,17 @@ public class VehicleLabWindow : EditorWindow
                     GUIUtility.keyboardControl = 0;                    // a focused slider/popup must not swallow the arrows
                     ev.Use(); Repaint();
                 }
-                else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I || ev.keyCode == KeyCode.D))
+                else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I || ev.keyCode == KeyCode.D || ev.keyCode == KeyCode.E))
                 {
                     shown[idx].role = ev.keyCode == KeyCode.W ? Role.Wheel
                                     : ev.keyCode == KeyCode.T ? Role.Turret
                                     : ev.keyCode == KeyCode.I ? Role.Ignore
-                                    : ev.keyCode == KeyCode.D ? Role.Default : Role.Body;
+                                    : ev.keyCode == KeyCode.D ? Role.Default
+                                    : ev.keyCode == KeyCode.E ? Role.Edgecase : Role.Body;
                     // With the unreviewed filter on, the marked part leaves the list — advance to the next one so
-                    // the sweep continues instead of the selection dying with the removed row.
-                    if (onlyUnreviewed && shown[idx].role != Role.Default)
+                    // the sweep continues instead of the selection dying with the removed row. (Default and
+                    // Edgecase stay in the filtered list, so no advance — step on with ↓ when ready.)
+                    if (onlyUnreviewed && shown[idx].role != Role.Default && shown[idx].role != Role.Edgecase)
                     {
                         SelectPart(idx + 1 < shown.Count ? shown[idx + 1].name : idx > 0 ? shown[idx - 1].name : "");
                         partsScroll.y = Mathf.Max(0f, idx * 20f - 120f);
