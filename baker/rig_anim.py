@@ -528,13 +528,24 @@ except Exception as _e:
 # location channel that VARIES (>1e-4) is a genuine authored slide (deploy_convert's Phase B keys the tube's
 # true recoil translation; only this strip ever removed it).
 if keep_translations and not convert_rig:
+    _poison = set()   # any channel with NaN/absurd values poisons the whole bone path — decomposition garbage
     for _sa in all_acts:
         for coll, fc in all_fcurve_owners(_sa):
             _dp = fc.data_path
-            if _dp.startswith("pose.bones") and _dp.endswith(".location") and len(fc.keyframe_points) > 0:
-                _vals = [kp.co[1] for kp in fc.keyframe_points]
-                if max(_vals) - min(_vals) > 1e-4:
-                    _KEEP_LOC_PATHS.add(_dp)
+            if not (_dp.startswith("pose.bones") and _dp.endswith(".location")) or len(fc.keyframe_points) == 0:
+                continue
+            _vals = [kp.co[1] for kp in fc.keyframe_points]
+            # SANITY GATE: matrix-decomposition against near-zero-scale parents leaves NaN / astronomically
+            # large location keys on some bones (the documented "latent mid-deploy contamination") — keeping
+            # those explodes mesh bounds (1e28) and NaNs the import. Only finite, model-scale slides pass.
+            if any(v != v or abs(v) > 1e5 for v in _vals):
+                _poison.add(_dp); continue
+            if 1e-4 < (max(_vals) - min(_vals)) < 1e4:
+                _KEEP_LOC_PATHS.add(_dp)
+    _KEEP_LOC_PATHS -= _poison
+    if _poison:
+        print("RIGANIM legacy keepTranslations: %d path(s) REJECTED as decomposition garbage (NaN/huge): %s"
+              % (len(_poison), sorted({p.split('"')[1] for p in _poison if '"' in p})))
     if _KEEP_LOC_PATHS:
         print("RIGANIM legacy keepTranslations: %d varying location path(s) kept: %s"
               % (len(_KEEP_LOC_PATHS), sorted({p.split('"')[1] for p in _KEEP_LOC_PATHS if '"' in p})))
