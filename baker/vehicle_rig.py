@@ -223,6 +223,15 @@ for fc in _fcs:
     for kp in fc.keyframe_points:
         kp.interpolation = 'LINEAR'
 
+# Strip source-file leftovers before export: a game-rip FBX (SKM_ prefix = skeletal mesh) carries its OWN
+# skeleton and helper objects (icospheres etc.). They ride into the export, spam weightless-vertex warnings
+# on import, and a second armature can confuse the animated bake's rig conversion. Keep only our rig + the
+# meshes we skinned.
+keep = set(objs); keep.add(arm)
+for o in list(bpy.data.objects):   # bpy.data, not scene.objects — helpers can lurk outside the scene collection
+    if o not in keep:
+        bpy.data.objects.remove(o, do_unlink=True)
+
 bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
 if preview_fbx:
     bpy.ops.export_scene.fbx(filepath=preview_fbx, add_leaf_bones=False, bake_anim=True)
