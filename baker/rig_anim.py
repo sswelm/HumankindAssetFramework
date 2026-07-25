@@ -561,6 +561,24 @@ if _locs or _kept:
     print("RIGANIM stripped %d bone-LOCATION fcurves across %d clip(s)%s" % (_locs, len(all_acts),
           (", KEPT %d translation curve(s) (keepTranslations)" % _kept) if _kept else " (rotation-only; translations bake unscaled)"))
 
+# LEGACY SANDWICH COMPENSATION (2026-07-25, the invisible-kickback finding): the legacy FBX ships the m->cm
+# x100 root sandwich; Unity folds 0.01 into every bindpose, and Amplitude's clip import carries that 0.01 into
+# TRANSLATION curves (rotations are scale-free — that's why only slides vanish). A kept slide therefore renders
+# at 1/100 amplitude (the howitzer's ~10-unit slam baked to a 0.0115 bbox). Pre-amplify the kept location keys
+# x100 so the baked curve lands at render scale. Conversion-path exports (global_scale 0.01, net scale 1) need
+# no compensation — the translation-test cube rendered at correct amplitude there.
+if keep_translations and not convert_rig and _KEEP_LOC_PATHS:
+    _scaled = 0
+    for _sa in all_acts:
+        for coll, fc in all_fcurve_owners(_sa):
+            if fc.data_path in _KEEP_LOC_PATHS and fc.data_path.endswith(".location"):
+                for kp in fc.keyframe_points:
+                    kp.co[1] *= 100.0
+                    kp.handle_left[1] *= 100.0
+                    kp.handle_right[1] *= 100.0
+                _scaled += 1
+    print("RIGANIM legacy keepTranslations: pre-amplified %d kept location curve(s) x100 (bindpose-sandwich compensation)" % _scaled)
+
 # clamp scene frame range to the action's real range (else bake_anim pads a frozen tail -> ~1s stall per loop)
 fs, fe = [int(round(v)) for v in act.frame_range]
 bpy.context.scene.frame_start = fs
