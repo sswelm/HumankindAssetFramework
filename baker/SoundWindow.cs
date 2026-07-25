@@ -68,7 +68,7 @@ public class SoundWindow : EditorWindow
             // READ-ONLY by design: a pawn descriptor only means something when it names a REAL pawn, so the value
             // arrives exclusively via Pick or the registry dropdown; the field itself is selectable text for copying.
             EditorGUILayout.PrefixLabel(new GUIContent("Pawn description", "The unit's pawn descriptor. Read-only — choose it with Pick (all pawns, ENC + vanilla) or the registry dropdown below; select the text to copy it."));
-            EditorGUILayout.SelectableLabel(string.IsNullOrEmpty(pawn) ? "(none — use Pick)" : pawn, EditorStyles.textField, GUILayout.Height(EditorGUIUtility.singleLineHeight));
+            EditorGUILayout.SelectableLabel(string.IsNullOrEmpty(pawn) ? "(none — use Pick)" : pawn, ReadOnlyFieldStyle(), GUILayout.Height(EditorGUIUtility.singleLineHeight));
             if (GUILayout.Button(new GUIContent("Pick", "Browse ALL pawn descriptors in the loaded databases (ENC + mounted vanilla, searchable). First open scans the assets once."), GUILayout.Width(50)))
             {
                 var cat = LoadPawnCatalog();
@@ -210,6 +210,23 @@ public class SoundWindow : EditorWindow
             GUI.Label(r2, summary, sectionSummaryStyle);
         }
         return state;
+    }
+
+    // Read-only field look: a textfield with a distinctly DARKER background + dimmed text, so "you can't type here"
+    // is visible before you try (selection/copy still work — it's a SelectableLabel underneath).
+    static GUIStyle roFieldStyle; static Texture2D roFieldBg;
+    static GUIStyle ReadOnlyFieldStyle()
+    {
+        if (roFieldStyle == null || roFieldBg == null)
+        {
+            roFieldBg = new Texture2D(1, 1) { hideFlags = HideFlags.HideAndDontSave };
+            roFieldBg.SetPixel(0, 0, new Color(0.12f, 0.12f, 0.12f));
+            roFieldBg.Apply();
+            roFieldStyle = new GUIStyle(EditorStyles.textField);
+            roFieldStyle.normal.background = roFieldStyle.hover.background = roFieldStyle.focused.background = roFieldBg;
+            roFieldStyle.normal.textColor = roFieldStyle.hover.textColor = roFieldStyle.focused.textColor = new Color(0.72f, 0.72f, 0.72f);
+        }
+        return roFieldStyle;
     }
 
     // Compact event name for summaries: "Play_UNIT_Vehicle_AntiAirGun_Movement_Start" -> "Vehicle_AntiAirGun_Movement"
