@@ -45,6 +45,7 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] float minHeight = -999f; // hide parts whose CENTER height is below this (clamped to the model's span, so the default means "off") — slide up to isolate turret-level parts
     [SerializeField] float maxHeight = 999f;  // the reverse: hide parts whose CENTER height is ABOVE this — slide down to strip the superstructure and isolate wheel/chassis level
     static float MaxDim(Part p) => Mathf.Max(p.size.x, Mathf.Max(p.size.y, p.size.z));
+    bool VisiblePart(Part x) => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.center.z >= minHeight && x.center.z <= maxHeight;
     [SerializeField] int partFilter;      // list filter: 0 = all; see FilterOptions (Unreviewed = Default + Edgecase)
     static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase" };
     bool MatchesFilter(Role r) => partFilter == 1 ? (r == Role.Default || r == Role.Edgecase)
@@ -148,13 +149,12 @@ public class VehicleLabWindow : EditorWindow
                 "Parts whose center height is below this are hidden. Slide up past the hull deck to isolate turret-level parts."), Mathf.Clamp(minHeight, zLo, zHi), zLo, zHi);
             maxHeight = EditorGUILayout.Slider(new GUIContent("Hide parts above (height)",
                 "Parts whose center height is above this are hidden. Slide down to strip the superstructure and isolate wheel/chassis-level parts."), Mathf.Clamp(maxHeight, zLo, zHi), zLo, zHi);
-            bool Visible(Part x) => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.center.z >= minHeight && x.center.z <= maxHeight;
             partFilter = EditorGUILayout.Popup(new GUIContent("Show only",
                 "Filter the list to one classification. Marking a part out of the current filter removes it from the list and auto-advances to the next."), partFilter, FilterOptions);
-            var shown = parts.Where(x => Visible(x) && MatchesFilter(x.role)).ToList();
-            int hidden = parts.Count(x => !Visible(x));
-            int unreviewed = parts.Count(x => Visible(x) && x.role == Role.Default);
-            int edgecases = parts.Count(x => Visible(x) && x.role == Role.Edgecase);
+            var shown = parts.Where(x => VisiblePart(x) && MatchesFilter(x.role)).ToList();
+            int hidden = parts.Count(x => !VisiblePart(x));
+            int unreviewed = parts.Count(x => VisiblePart(x) && x.role == Role.Default);
+            int edgecases = parts.Count(x => VisiblePart(x) && x.role == Role.Edgecase);
             EditorGUILayout.LabelField($"Parts ({shown.Count} shown{(hidden > 0 ? $", {hidden} hidden by the sliders" : "")}{(unreviewed > 0 ? $", {unreviewed} undecided" : ", all decided")}{(edgecases > 0 ? $", {edgecases} edge-case" : "")}) — mark the wheels & turret:", EditorStyles.boldLabel);
             EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part (zooms + highlights it below)   ·   W/T/B/I = Wheel/Turret/Body/Ignore   ·   D = Default(unreviewed)   ·   E = Edgecase (unsure, revisit later; rigs like Default)", EditorStyles.miniLabel);
             // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
@@ -345,9 +345,25 @@ public class VehicleLabWindow : EditorWindow
         status = (warn ? "Verify: warnings (report window / Console). " : "Verify: looks sane. ") + report[0].text;
     }
 
-    // "Show" in the report jumps the Lab's preview to the part — the report must not block the Lab (utility
-    // window, NOT a modal dialog), so flagged parts can be looked up while reading it.
-    internal void FocusPart(string name) { SelectPart(name); Repaint(); }
+    // "Show" in the report jumps the Lab to the part — preview highlight AND the list row (selected + scrolled
+    // into view), so it can be reclassified on the spot. If the current sliders/filter hide the part, they are
+    // relaxed just enough for its row to exist. Non-modal by design: the report stays readable while working.
+    internal void FocusPart(string name)
+    {
+        var p = parts.FirstOrDefault(x => x.name == name);
+        if (p != null)
+        {
+            if (p.verts < minVerts) minVerts = Mathf.Max(1, p.verts);
+            if (MaxDim(p) < minPartSize) minPartSize = 0f;
+            if (p.center.z < minHeight) minHeight = p.center.z;
+            if (p.center.z > maxHeight) maxHeight = p.center.z;
+            if (!MatchesFilter(p.role)) partFilter = 0;
+            int idx = parts.Where(x => VisiblePart(x) && MatchesFilter(x.role)).ToList().FindIndex(x => x.name == name);
+            if (idx >= 0) partsScroll.y = Mathf.Max(0f, idx * 20f - 120f);
+        }
+        SelectPart(name);
+        Repaint();
+    }
 
     class VerifyReportWindow : EditorWindow
     {
