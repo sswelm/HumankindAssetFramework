@@ -132,6 +132,7 @@ wheel_names = namelist(argv[4])
 turret_names = namelist(argv[5])
 ignore_names = set(namelist(argv[9])) if len(argv) > 9 and argv[9].strip() else set()   # parts to DELETE (unused option meshes etc.)
 track_names = namelist(argv[10]) if len(argv) > 10 and argv[10].strip() else []          # tread loops: static, but each on its OWN bone
+gun_names = namelist(argv[11]) if len(argv) > 11 and argv[11].strip() else []            # gun assembly: ONE Gun bone (muzzle/socket anchor), rides the Turret if present
 axis_arg = argv[6].upper()
 frames = max(2, int(argv[7]))
 degrees = float(argv[8])
@@ -291,18 +292,33 @@ for i, cl in enumerate(clusters):
         bone_of[wn] = eb.name
 # ONE Turret bone shared by every turret part (dome plates, gun shield, barrel...) so the whole assembly is a
 # single unit — for future rotation and as the muzzle-socket anchor — placed at the parts' combined bbox center.
-if turret_names:
-    tos = [find(tn) for tn in turret_names]
-    boxes = [world_bbox(o) for o in tos]
+def _combined_bbox(names):
+    boxes = [world_bbox(find(n)) for n in names]
     mn = Vector(tuple(min(c[i] - s[i] / 2 for c, s in boxes) for i in range(3)))
     mx = Vector(tuple(max(c[i] + s[i] / 2 for c, s in boxes) for i in range(3)))
-    tc, ts = (mn + mx) / 2.0, mx - mn
+    return (mn + mx) / 2.0, mx - mn
+eb_turret = None
+if turret_names:
+    tc, ts = _combined_bbox(turret_names)
     eb = arm_data.edit_bones.new("Turret")
     eb.head = tc
     eb.tail = tc + Vector((0, 0, max(0.05, max(ts) * 0.25)))
     eb.parent = eb_root
+    eb_turret = eb
     for tn in turret_names:
         bone_of[tn] = "Turret"
+
+# ONE Gun bone for the whole gun assembly (barrel, mantlet, mount) — the natural muzzleBone/socket anchor.
+# Parented to the Turret when there is one (the gun must ride the aiming turret); casemate guns (Jagdpanzer)
+# hang off Root.
+if gun_names:
+    gc, gs = _combined_bbox(gun_names)
+    eb = arm_data.edit_bones.new("Gun")
+    eb.head = gc
+    eb.tail = gc + Vector((0, 0, max(0.05, max(gs) * 0.25)))
+    eb.parent = eb_turret if eb_turret is not None else eb_root
+    for gn in gun_names:
+        bone_of[gn] = "Gun"
 # Track bones: a tread loop rigs STATIC (no animation) but on its OWN bone, so the per-bone join keeps it a
 # SEPARATE mesh — never welded into the hull. That preserved identity is what future tread-motion mechanisms
 # (mesh flipbook / texture scroll) will target. Named by side for readability: Track_00_L / Track_01_R.
@@ -393,5 +409,6 @@ for o in list(bpy.data.objects):   # bpy.data, not scene.objects — helpers can
 bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
 if preview_fbx:
     bpy.ops.export_scene.fbx(filepath=preview_fbx, add_leaf_bones=False, bake_anim=True)
-print("VEHICLE RIG DONE: %d wheel part(s) clustered into %d wheel(s) %s, %d turret part(s) on one Turret bone, %d track loop(s) on own static bones, Spin 0..%d %.0f deg -> %s"
-      % (len(wheel_names), len(clusters), {b: wheel_axes[b] for b in cluster_bones}, len(turret_names), len(track_names), frames, degrees, out_glb))
+print("VEHICLE RIG DONE: %d wheel part(s) clustered into %d wheel(s) %s, %d turret part(s) on one Turret bone, %d gun part(s) on one Gun bone%s, %d track loop(s) on own static bones, Spin 0..%d %.0f deg -> %s"
+      % (len(wheel_names), len(clusters), {b: wheel_axes[b] for b in cluster_bones}, len(turret_names),
+         len(gun_names), " (child of Turret)" if (gun_names and turret_names) else "", len(track_names), frames, degrees, out_glb))
