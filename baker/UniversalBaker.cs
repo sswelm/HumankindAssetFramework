@@ -42,6 +42,7 @@ public struct BakeConfig
     public bool    animUnitFix;     // ANIMATED only: if the model bakes ~100x too big & floats (a metre->cm FBX unit scale), tick this — the baker measures the FBX at its true scale (useFileScale off) then bakes with the unit scale on, so Size = in-game units. Per-model because different rig exports embed different unit scales (some need it, some break with it).
     public bool    convertRig;      // ANIMATED only: route the Blender step through the RAW-RIG CONVERSION (rest-normalize + rebake, root collapse, topological rename, rotation/scale fold, clean-unit export). THE pipeline switch — rotationEuler is just a rotation again (applied only on this path; the legacy path stays byte-identical).
     public bool    autoGroundWheels;// ANIMATED only: auto-sit a rigged VEHICLE on the terrain — drop the model's lowest point (tyre contact) to the skeleton origin (keel→z=0), so no manual Position-offset dial. Self-correcting; opt-in (a flyer/hover model would be pinned down).
+    public bool    keepTranslations;// ANIMATED only (conversion path): keep genuinely translation-animated bone location curves (caterpillar shuttle bones etc.) — otherwise the historical rotation-only strip applies.
     public string  socketBones;     // DONOR SOCKETS: "DonorName=OurBoneSubstr[@x,y,z];..." — bake exact-named zero-weight socket bones so the donor's fire/VFX lookups resolve natively (rig_anim argv[11]; switches the rename prefix to A###_).
     public bool    deployConvert;   // ANIMATED only: run Tools/deploy_convert.py on modelFile first (rigid-parts source -> bone-per-part rig) and bake the converted GLB. All knobs below mirror ModelDef.deploy* (see ModelRegistry.cs for semantics).
     public int     deployStart, deployEnd;
@@ -355,7 +356,7 @@ public static class UniversalBaker
                 if (wantIdleAlt) stateRoles += ";idlealt=" + cfg.animClipIdleAlt.Trim();
                 if (wantIdleAlt2) stateRoles += ";idlealt2=" + cfg.animClipIdleAlt2.Trim();
             }
-            if (!RigAnimViaBlender(cfg.modelFile, fbxFull, target, cfg.animateBones ?? "", cfg.animClip ?? "", albedoOut, keepMats, cfg.rotationEuler, cfg.convertRig, stateRoles, cfg.autoGroundWheels, cfg.socketBones))
+            if (!RigAnimViaBlender(cfg.modelFile, fbxFull, target, cfg.animateBones ?? "", cfg.animClip ?? "", albedoOut, keepMats, cfg.rotationEuler, cfg.convertRig, stateRoles, cfg.autoGroundWheels, cfg.socketBones, cfg.keepTranslations))
                 return Fail(LastRigAnimError.Length > 0
                     ? "Blender animated slim failed: " + LastRigAnimError
                     : "Blender animated slim failed (see console). Is the model rigged with the named animation clip(s)?");
@@ -731,7 +732,7 @@ public static class UniversalBaker
     // scale fold, clean-unit export) — it used to be inferred from rotation != 0, which made Rotation a landmine.
     static string LastRigAnimError = "";   // the last RIGANIM ERROR line — so failure summaries can name the real cause
 
-    static bool RigAnimViaBlender(string src, string outFbx, int targetTris, string bonePrefixes, string clipName, string albedoOut, bool keepMaterials, Vector3 rotation, bool convertRig, string stateRoles = "", bool autoGround = false, string socketBones = "")
+    static bool RigAnimViaBlender(string src, string outFbx, int targetTris, string bonePrefixes, string clipName, string albedoOut, bool keepMaterials, Vector3 rotation, bool convertRig, string stateRoles = "", bool autoGround = false, string socketBones = "", bool keepTranslations = false)
     {
         string proj = Directory.GetParent(Application.dataPath).FullName;
         string script = Path.Combine(proj, "Tools", "rig_anim.py");
@@ -739,7 +740,7 @@ public static class UniversalBaker
         string blender = FindBlender();
         var inv = System.Globalization.CultureInfo.InvariantCulture;   // never the OS locale — a Dutch comma-decimal would corrupt the arg
         string rotArg = string.Format(inv, "{0:0.###},{1:0.###},{2:0.###}", rotation.x, rotation.y, rotation.z);
-        string args = $"--background --python \"{script}\" -- \"{src}\" \"{outFbx}\" {Mathf.Max(1, targetTris)} \"{bonePrefixes ?? ""}\" \"{clipName ?? ""}\" \"{albedoOut ?? ""}\" {(keepMaterials ? "1" : "0")} \"{rotArg}\" {(convertRig ? "1" : "0")} \"{stateRoles ?? ""}\" {(autoGround ? "1" : "0")} \"{socketBones ?? ""}\"";   // argv[10]: auto-ground; argv[11]: donor sockets
+        string args = $"--background --python \"{script}\" -- \"{src}\" \"{outFbx}\" {Mathf.Max(1, targetTris)} \"{bonePrefixes ?? ""}\" \"{clipName ?? ""}\" \"{albedoOut ?? ""}\" {(keepMaterials ? "1" : "0")} \"{rotArg}\" {(convertRig ? "1" : "0")} \"{stateRoles ?? ""}\" {(autoGround ? "1" : "0")} \"{socketBones ?? ""}\" {(keepTranslations ? "1" : "0")}";   // argv[10]: auto-ground; argv[11]: donor sockets; argv[12]: keep translations
         var psi = new System.Diagnostics.ProcessStartInfo(blender, args)
         { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         try

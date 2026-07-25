@@ -783,6 +783,12 @@ public class AnimationLabWindow : EditorWindow
             "Self-correcting, so re-baking never floats it. Tick it for a car/tank. Leave OFF for a flyer/hover model " +
             "(it would be pinned to the ground). Re-bake after changing."),
             cur.autoGroundWheels);
+        cur.keepTranslations = EditorGUILayout.Toggle(new GUIContent("Keep bone translations",
+            "CONVERSION path only: keep genuinely TRANSLATION-animated bone location curves through the bake — " +
+            "the engine plays them (vanilla tank tread shuttle bones are translation-driven). Historically all " +
+            "location keys were stripped (rotation-only); that stays the default. Tick only for models authored " +
+            "with deliberate translating bones (tread shuttles, sliding parts). Re-bake after changing."),
+            cur.keepTranslations);
         if (!UniversalBaker.BlenderAvailable())
             EditorGUILayout.HelpBox("The animated bake needs Blender (to slim the rig + bake the clip) — it wasn't found. " +
                 "Install Blender or set EditorPrefs 'ENC.blenderPath' to blender.exe.", MessageType.Warning);
@@ -875,7 +881,7 @@ public class AnimationLabWindow : EditorWindow
         // Blender the OLD file and failed with "no clip". Keep the Lab's chosen file so Browse actually sticks.
         if (!string.IsNullOrWhiteSpace(mine.modelFile)) cur.modelFile = mine.modelFile;
         cur.animClip = mine.animClip; cur.animateBones = mine.animateBones; cur.animUnitFix = mine.animUnitFix;
-        cur.convertRig = mine.convertRig; cur.autoGroundWheels = mine.autoGroundWheels;
+        cur.convertRig = mine.convertRig; cur.autoGroundWheels = mine.autoGroundWheels; cur.keepTranslations = mine.keepTranslations;
         cur.deployConvert = mine.deployConvert; cur.deployStart = mine.deployStart; cur.deployEnd = mine.deployEnd;
         cur.deployStrip = mine.deployStrip; cur.deployReadyFrame = mine.deployReadyFrame; cur.deployLegScale = mine.deployLegScale; cur.deployBarrelScale = mine.deployBarrelScale;
         cur.deployRecoil = mine.deployRecoil; cur.deployRecoilStep = mine.deployRecoilStep; cur.deployRecoilMag = mine.deployRecoilMag; cur.deployArcR = mine.deployArcR; cur.deployRecoilReturn = mine.deployRecoilReturn; cur.deploySlamDeg = mine.deploySlamDeg; cur.deploySlamSettle = mine.deploySlamSettle;
