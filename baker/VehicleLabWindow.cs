@@ -516,6 +516,7 @@ public class VehicleLabWindow : EditorWindow
         try
         {
             EditorUtility.DisplayProgressBar("Vehicle Lab", "Running Blender…", 0.4f);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             var p = new System.Diagnostics.Process();
             p.StartInfo.FileName = UniversalBaker.FindBlender();
             p.StartInfo.Arguments = $"--background --python \"{script}\" -- {args}";
@@ -525,7 +526,14 @@ public class VehicleLabWindow : EditorWindow
             if (!UniversalBaker.RunBounded(p, 300000, out stdout, out string stderr)) { status = "Blender timed out (5 min)."; return false; }
             if (stdout.Contains("VEHICLE ERROR"))
             { status = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE ERROR")) ?? "Blender step failed."; Debug.LogError("[VehicleLab]\n" + stdout + "\n--- stderr ---\n" + stderr); return false; }
-            Debug.Log("[VehicleLab]\n" + string.Join("\n", stdout.Split('\n').Where(l => l.StartsWith("PART|") || l.StartsWith("VEHICLE"))));
+            sw.Stop();
+            // console headline = the OUTCOME (collapsed console shows the first line; the old raw dump buried the
+            // DONE line and spammed thousands of PART rows)
+            var lines = stdout.Split('\n').Where(l => l.StartsWith("VEHICLE")).Select(l => l.TrimEnd()).ToList();
+            int partCount = stdout.Split('\n').Count(l => l.StartsWith("PART|"));
+            string headline = lines.LastOrDefault(l => l.Contains("RIG DONE"))
+                            ?? (partCount > 0 ? $"probe: {partCount} part(s) found" : lines.LastOrDefault() ?? "run complete");
+            Debug.Log($"[VehicleLab] {headline}   ({sw.Elapsed.TotalSeconds:0.0}s)\n" + string.Join("\n", lines));
             return true;
         }
         catch (Exception e) { status = "Blender run failed: " + e.Message; return false; }
