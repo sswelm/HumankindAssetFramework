@@ -757,14 +757,23 @@ public class ModelFactoryWindow : EditorWindow
 
     internal static (List<string>, List<KeyValuePair<string, int>>) InspectModel(string file)
     {
+        var (c, p, _) = InspectModelFull(file);
+        return (c, p);
+    }
+
+    // Full variant: also returns the individual bone NAMES (the prefixes lose per-bone precision — a donor-socket
+    // parent must name ONE bone, "MW_T" not "MW"). Used by the Donor-sockets mapping dialog.
+    internal static (List<string>, List<KeyValuePair<string, int>>, List<string>) InspectModelFull(string file)
+    {
         var clips = new List<string>();
         var prefixes = new List<KeyValuePair<string, int>>();
+        var allBones = new List<string>();
         try
         {
-            if (string.IsNullOrWhiteSpace(file) || !System.IO.File.Exists(file)) return (clips, prefixes);
+            if (string.IsNullOrWhiteSpace(file) || !System.IO.File.Exists(file)) return (clips, prefixes, allBones);
             string ext = System.IO.Path.GetExtension(file).ToLowerInvariant();
             string json = ext == ".glb" ? ReadGlbJson(file) : (ext == ".gltf" ? System.IO.File.ReadAllText(file) : null);
-            if (json == null) return (clips, prefixes);
+            if (json == null) return (clips, prefixes, allBones);
             List<string> boneNames;
             try
             {
@@ -812,9 +821,10 @@ public class ModelFactoryWindow : EditorWindow
                 .Where(gr => !string.IsNullOrEmpty(gr.Key))
                 .Select(gr => new KeyValuePair<string, int>(gr.Key, gr.Count()))
                 .OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key).ToList();
+            allBones = boneNames.Where(n => !string.IsNullOrEmpty(n)).Distinct().OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
         }
         catch { }
-        return (clips, prefixes);
+        return (clips, prefixes, allBones);
     }
 
     // Collect every "name":"…" inside the JSON array opened by `openRegex` (matched through its '['), by tracking bracket

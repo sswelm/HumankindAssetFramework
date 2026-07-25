@@ -945,6 +945,11 @@ in-game-verified system that puts all of it back on YOUR model. Reference implem
 
 ### 17.2 The recipe (what actually shipped on the ArmouredCar)
 
+0. **Or skip the string entirely (2026-07-25): the Lab's `Edit…` button** on the Donor-sockets row opens the guided
+   mapping dialog — it harvests the hardpoint names from the `[Muzzle]` log for this unit automatically, offers your
+   model's full bone list in searchable pickers (per-bone precision), takes optional offsets, and has a one-click
+   *"Map ALL hardpoints to one bone…"* for the common everything-on-the-gun recipe. Steps 1–2 below describe what it
+   automates.
 1. **Discover the donor's socket names.** Fire the unit once and read the `[Muzzle] GetBoneTRS('...')` log lines —
    the AA-gun donor asks for `Canon_Up_left` and `Move_bloc`. **The names LIE about their roles**: decode them from
    the per-shot pin log — `Move_bloc` turned out to be the fire POSITION anchor (its events carry offsets reaching

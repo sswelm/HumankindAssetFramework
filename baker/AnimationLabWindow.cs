@@ -24,6 +24,7 @@ public class AnimationLabWindow : EditorWindow
     string status = "";
     List<string> animClips = new List<string>();   // clip names read from the model (Clip picker)
     List<KeyValuePair<string, int>> animBonePrefixes = new List<KeyValuePair<string, int>>();  // bone-name prefix -> count (Bones picker)
+    List<string> animBoneNames = new List<string>();   // FULL bone names (per-bone precision — the Donor-sockets dialog)
     string clipProbeFile = "\0";                    // sentinel != any real path so the first real path always inspects
     // FIT PREVIEW (model + hand prop combined) — custom PreviewRenderUtility renderer: Unity's built-in prefab
     // preview has no zoom and the window's scroll view steals the wheel; owning the camera gives real orbit + zoom.
@@ -344,7 +345,7 @@ public class AnimationLabWindow : EditorWindow
         string f = EffectiveModelFile(false) ?? "";
         if (f == clipProbeFile) return;
         clipProbeFile = f;
-        (animClips, animBonePrefixes) = ModelFactoryWindow.InspectModel(f);
+        (animClips, animBonePrefixes, animBoneNames) = ModelFactoryWindow.InspectModelFull(f);
     }
 
     // One clip text field + Pick dropdown — shared by the single-clip field and the three state-role fields, so
@@ -647,14 +648,18 @@ public class AnimationLabWindow : EditorWindow
             }
             // Donor sockets — the BAKE-TIME endgame for donor-anchored fire effects: bake EXACT-NAMED donor socket
             // bones onto our rig so the game's own lookups (flash, launch smoke, projectile origin) resolve natively.
-            cur.socketBones = EditorGUILayout.TextField(new GUIContent("Donor sockets (bake)",
-                "BAKE-TIME donor-socket bones: \"DonorName=OurBoneSubstr[@x,y,z];...\" — creates zero-weight bones with " +
-                "the EXACT names the donor's fire events ask for (find them via the [Muzzle] GetBoneTRS log lines, e.g. " +
-                "'Canon_Up_left=MW_T;Move_bloc=Root'), parented to your bone so flash, smoke AND projectile origin all " +
-                "anchor natively and follow it (a tracking turret). Optional @x,y,z = model-space offset from the parent's " +
-                "head (dial the barrel tip). Socketed models bake with the 'A###_' bone prefix (alphabetical topology). " +
-                "Needs a re-BAKE; makes the runtime Muzzle-bone redirect unnecessary for this model."),
-                cur.socketBones ?? "");
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                cur.socketBones = EditorGUILayout.TextField(new GUIContent("Donor sockets (bake)",
+                    "BAKE-TIME donor-socket bones: \"DonorName=OurBoneSubstr[@x,y,z];...\" — creates zero-weight bones with " +
+                    "the EXACT names the donor's fire events ask for, parented to your bone so flash, smoke AND projectile " +
+                    "origin all anchor natively and follow it (a tracking turret). Use Edit… for the guided mapping dialog " +
+                    "(harvests the hardpoint names from the [Muzzle] log; picks bones from the model). Socketed models bake " +
+                    "with the 'A###_' bone prefix (alphabetical topology). Needs a re-BAKE."),
+                    cur.socketBones ?? "");
+                if (GUILayout.Button(new GUIContent("Edit…", "Guided mapping: link the donor's logged hardpoints to your model's bones (with optional offsets) instead of hand-writing the spec."), GUILayout.Width(52)))
+                    SocketBonesDialog.Open(cur.socketBones, cur.pawnDescription, animBoneNames, s => { cur.socketBones = s; Repaint(); });
+            }
             // Muzzle offset — the runtime world-space dial that finished the ArmouredCar: iterate value -> relaunch,
             // no bake, no mod rebuild (the plugin reads the pack registry directly at launch). Three separate float
             // fields in the UI; the registry keeps the plugin's "x,y,z" string (empty when all zero).
