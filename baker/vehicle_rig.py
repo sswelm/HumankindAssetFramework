@@ -79,8 +79,15 @@ def _guard(fn):
         sys.exit(1)
 
 out_glb, preview_fbx = argv[2], argv[3]
-wheel_names = [n for n in argv[4].split(";") if n.strip()]
-turret_names = [n for n in argv[5].split(";") if n.strip()]
+def namelist(arg):
+    # "@<path>" = read names from a file (one per line): a thorough marking session is hundreds of shards,
+    # far past the ~32k Windows command-line limit.
+    if arg.startswith("@"):
+        with open(arg[1:], "r", encoding="utf-8") as f:
+            return [l.strip() for l in f if l.strip()]
+    return [n for n in arg.split(";") if n.strip()]
+wheel_names = namelist(argv[4])
+turret_names = namelist(argv[5])
 axis_arg = argv[6].upper()
 frames = max(2, int(argv[7]))
 degrees = float(argv[8])
@@ -111,13 +118,35 @@ def find(name):
             return o
     print("VEHICLE ERROR: part '%s' not found. Parts: %s" % (name, [o.name for o in objs])); sys.exit(1)
 
-def axle_axis(o):
+def axle_axis(s):
     if axis_arg in ("X", "Y", "Z"):
         return {"X": Vector((1, 0, 0)), "Y": Vector((0, 1, 0)), "Z": Vector((0, 0, 1))}[axis_arg]
-    _, s = world_bbox(o)   # AUTO: a wheel is THIN along its axle -> smallest extent
+    # AUTO: a wheel is THIN along its axle -> smallest extent
     return [Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1))][min(range(3), key=lambda i: s[i])]
 
-# armature: Root at origin + one bone per wheel (tail along the axle => local Y IS the axle) + turret bones
+# ---- wheel clustering ----
+# A wheel is usually MANY shards (tire, rim, spokes, bolts...). Bones must NOT be per-shard: a spoke spinning
+# about its own bbox center pinwheels in place and the wheel shreds. Cluster the wheel parts by proximity —
+# the BIGGEST part of each cluster (the tire) anchors the hub: its bbox center is the axle point, its
+# thinnest extent the axle direction — and every member shard skins to that ONE bone, so spokes revolve
+# around the hub like spokes. (Off-center shards are safe to mark Wheel because of this.)
+wheel_info = []
+for wn in wheel_names:
+    c, s = world_bbox(find(wn))
+    wheel_info.append((max(s), c, s, wn))
+wheel_info.sort(key=lambda t: -t[0])   # biggest first, so anchors are tires, not bolts
+clusters = []
+for m, c, s, wn in wheel_info:
+    home = None
+    for cl in clusters:
+        if (c - cl["c"]).length <= 0.75 * cl["m"]:   # within 3/4 of the anchor's diameter = same hub
+            home = cl; break
+    if home is None:
+        clusters.append({"m": m, "c": c, "s": s, "names": [wn]})
+    else:
+        home["names"].append(wn)
+
+# armature: Root at origin + ONE bone per wheel cluster (tail along the axle => local Y IS the axle) + Turret
 arm_data = bpy.data.armatures.new("VehicleRig")
 arm = bpy.data.objects.new("VehicleRig", arm_data)
 bpy.context.scene.collection.objects.link(arm)
@@ -127,16 +156,17 @@ eb_root = arm_data.edit_bones.new("Root")
 eb_root.head = (0, 0, 0); eb_root.tail = (0, 0.25, 0)
 bone_of = {}
 wheel_axes = {}
-for i, wn in enumerate(wheel_names):
-    o = find(wn)
-    c, s = world_bbox(o)
-    ax = axle_axis(o)
-    eb = arm_data.edit_bones.new("Wheel_%02d_%s" % (i, wn[:20]))
-    eb.head = c
-    eb.tail = c + ax * max(0.05, max(s) * 0.25)
+cluster_bones = []
+for i, cl in enumerate(clusters):
+    ax = axle_axis(cl["s"])
+    eb = arm_data.edit_bones.new("Wheel_%02d" % i)
+    eb.head = cl["c"]
+    eb.tail = cl["c"] + ax * max(0.05, max(cl["s"]) * 0.25)
     eb.parent = eb_root
-    bone_of[wn] = eb.name
-    wheel_axes[wn] = tuple(ax)
+    cluster_bones.append(eb.name)
+    wheel_axes[eb.name] = tuple(ax)
+    for wn in cl["names"]:
+        bone_of[wn] = eb.name
 # ONE Turret bone shared by every turret part (dome plates, gun shield, barrel...) so the whole assembly is a
 # single unit — for future rotation and as the muzzle-socket anchor — placed at the parts' combined bbox center.
 if turret_names:
@@ -174,8 +204,8 @@ except Exception:
     pass
 bpy.context.scene.frame_start = 0
 bpy.context.scene.frame_end = frames
-for wn in wheel_names:
-    pb = arm.pose.bones[bone_of[wn]]
+for bname in cluster_bones:
+    pb = arm.pose.bones[bname]
     pb.rotation_mode = 'XYZ'
     bpy.context.scene.frame_set(0)
     pb.rotation_euler = (0, 0, 0)
@@ -196,5 +226,5 @@ for fc in _fcs:
 bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
 if preview_fbx:
     bpy.ops.export_scene.fbx(filepath=preview_fbx, add_leaf_bones=False, bake_anim=True)
-print("VEHICLE RIG DONE: %d wheel(s) %s, %d turret part(s) on one Turret bone, Spin 0..%d %.0f deg -> %s"
-      % (len(wheel_names), {w: wheel_axes[w] for w in wheel_names}, len(turret_names), frames, degrees, out_glb))
+print("VEHICLE RIG DONE: %d wheel part(s) clustered into %d wheel(s) %s, %d turret part(s) on one Turret bone, Spin 0..%d %.0f deg -> %s"
+      % (len(wheel_names), len(clusters), {b: wheel_axes[b] for b in cluster_bones}, len(turret_names), frames, degrees, out_glb))

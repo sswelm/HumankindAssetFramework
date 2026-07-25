@@ -346,11 +346,15 @@ public class VehicleLabWindow : EditorWindow
         Directory.CreateDirectory(Path.Combine(projRoot, prevDir));
         string prevRel = prevDir + "/" + baseName + "_preview.fbx";
         string prevFull = Path.Combine(projRoot, prevRel).Replace('\\', '/');
-        string wheels = string.Join(";", parts.Where(p => p.role == Role.Wheel).Select(p => p.name));
-        string turrets = string.Join(";", parts.Where(p => p.role == Role.Turret).Select(p => p.name));
+        // Part lists travel via FILE (@path): a thorough marking session is hundreds of shard names — far past
+        // the ~32k Windows command-line limit that an inline ;-joined string would hit.
+        string wheelsFile = Path.Combine(projRoot, prevDir, baseName + "_wheels.txt").Replace('\\', '/');
+        string turretsFile = Path.Combine(projRoot, prevDir, baseName + "_turrets.txt").Replace('\\', '/');
+        File.WriteAllLines(wheelsFile, parts.Where(p => p.role == Role.Wheel).Select(p => p.name).ToArray());
+        File.WriteAllLines(turretsFile, parts.Where(p => p.role == Role.Turret).Select(p => p.name).ToArray());
         string axis = axisChoice == 0 ? "AUTO" : AxisOptions[axisChoice];
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        if (!RunBlender($"rig \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"{wheels}\" \"{turrets}\" {axis} {frames} {degrees.ToString("0.#", inv)}", out string stdout)) return;
+        if (!RunBlender($"rig \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {degrees.ToString("0.#", inv)}", out string stdout)) return;
         // SUCCESS = THE SCRIPT'S OWN FINAL MARKER (the documented Blender trap: it exits 0 even when the python
         // script crashes mid-way — without this gate a half-run printed a fake "DONE" with no file on disk).
         string done = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE RIG DONE"));
