@@ -413,13 +413,27 @@ if len(argv) > 8 and argv[8].strip():
 # --- 6. bind each mesh 100% to the bone of its nearest animated ancestor (rigid) ---
 def anim_ancestor(o):
     while o:
-        if o.name in bone_of:
-            return o.name
-        o = o.parent
+        try:
+            nm = o.name
+        except ReferenceError:
+            return None   # chain runs into a CULLED (deleted) object — treat as no animated ancestor
+        if nm in bone_of:
+            return nm
+        try:
+            o = o.parent
+        except ReferenceError:
+            return None
     return None
 
 scene.frame_set(fmin)   # CRITICAL: bind at the rest frame (matches the armature rest), NOT wherever a retarget left the
                         # scene — else the mesh is baked in a posed (spread) position and the animation deforms it AGAIN.
+_live_meshes = []
+for m in meshes:
+    try:
+        m.name; _live_meshes.append(m)
+    except ReferenceError:
+        pass   # deleted by the degenerate-part cull
+meshes = _live_meshes
 bound = 0
 for m in meshes:
     bname = anim_ancestor(m)
