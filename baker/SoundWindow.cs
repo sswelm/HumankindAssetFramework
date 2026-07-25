@@ -158,7 +158,7 @@ public class SoundWindow : EditorWindow
         // --- units with audio ---
         EditorGUILayout.Space();
         EditorGUILayout.LabelField("Units with audio", EditorStyles.boldLabel);
-        scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(150));
+        scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.ExpandHeight(true));   // fill the window's remaining space (was a fixed 150px strip with its own scrollbar)
         var withAudio = all.Where(HasAudio).ToList();
         if (withAudio.Count == 0) EditorGUILayout.LabelField("  (none yet)", EditorStyles.miniLabel);
         foreach (var m in withAudio)
