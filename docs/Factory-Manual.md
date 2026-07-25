@@ -463,6 +463,17 @@ the registry — sound config used to live in the Unit Retexture window, but is 
 The plugin then watches each of that unit's instances and, on a movement **start/stop** transition (render-position delta,
 like deploy-on-stop), posts the engine event onto the pawn's `AudioEmitter`: a rev on departure, a settle on stop.
 
+**The one-click path (2026-07-25): "Use donor engine sound".** The Sound Studio's Wwise section has a button that does
+the whole job: it reads the unit's DONOR from the plugin's load log (the `donor Skeleton='Unit_…'` line — so launch the
+game once with the unit loaded), extracts the family word (`AntiAirGuns`), fuzzy-matches the catalog for its Movement
+pair (plural-trimmed contains, prefers Move/Movement, Stop = the `_Start→_Stop` sibling) and fills both fields — e.g.
+the ArmouredCar → `Play_UNIT_Vehicle_AntiAirGun_Movement_Start/Stop`. Vanilla units (no donor line) fall back to their
+own family name. Every miss reports in the status bar; the fields below remain the manual path.
+
+**Manual path — searchable Pick (2026-07-25):** both event fields have a **Pick** button opening a searchable dropdown
+over the full dumped catalog (no more hand-copying from the text file); picking a `*_Start` auto-fills the matching
+`*_Stop` when it exists. The button is disabled with a how-to tooltip until the catalog has been dumped once.
+
 **Name the sound (works for the FIRST unit, no capture):** fill **Start event** / **Stop event** with Wwise event names.
 The plugin posts them **by name** (`AkSoundEngine.PostEvent(name, emitterGuid)`), so a named sound plays for the very first
 unit at load — no dependency on anything else having moved. Leave them blank and the plugin falls back to a handle
@@ -470,7 +481,8 @@ unit at load — no dependency on anything else having moved. Leave them blank a
 then) — so **name the events for a shipping mod.**
 
 **Extract every sound — the catalog:** F8 window ▸ **Dump Sound Catalog** writes every Wwise event name in the game (~800+)
-to `BepInEx\config\enc_sound_catalog.txt`. Browse it, pick the right Start/Stop pair, paste them in. Examples:
+to `BepInEx\config\enc_sound_catalog.txt` — this file also FEEDS the Pick dropdowns and the donor auto-button above,
+so dump it once per machine and the UI takes over. Examples:
 
 | Unit family | Start event | Stop event |
 |---|---|---|
@@ -502,8 +514,10 @@ engine/hover loop, use the **custom WAV** path (§14). The auto-capture fallback
 **Tools ▸ HAF ▸ Sound Studio** collects a unit's whole audio profile into one dialog with collapsible sections — **Silence
 inherited donor sound**, **Idle growl** (file, volume, interval, one-voice radius), **Attack sound**, **Death sound**,
 **Battle start war cry** (each: file, volume, start offset), **Movement**
-(start/travel/stop), and **Wwise engine event**. Pick a pawn (or **Edit** one from the "Units with audio" list) and every
-knob round-trips; each WAV row has a ▶ preview. Everything below is one of those sections.
+(start/travel/stop), and **Wwise engine event** (with the searchable event **Pick** dropdowns and the one-click
+**Use donor engine sound** button — §13). Pick a pawn (or **Edit** one from the "Units with audio" list, which fills
+the window's remaining height) and every knob round-trips; each WAV row has a ▶ preview. Everything below is one of
+those sections.
 
 When the game has **no** suitable sound (drones, zeppelins) or you want a bespoke engine, drop in your own audio. **Tools ▸
 HAF ▸ Sound Studio** — the **Movement** section — assigns up to three WAVs, each with its own volume —
