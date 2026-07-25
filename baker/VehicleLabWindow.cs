@@ -206,7 +206,7 @@ public class VehicleLabWindow : EditorWindow
                 EditorGUILayout.LabelField("  Click a row to zoom + highlight it in the preview below; click again for the full view.", EditorStyles.miniLabel);
             axisChoice = EditorGUILayout.Popup(new GUIContent("Axle axis", "Auto infers each wheel's axle as its thinnest bbox extent — right for normal wheels; override only if a wheel spins the wrong way around."), axisChoice, AxisOptions);
             frames = EditorGUILayout.IntSlider(new GUIContent("Spin frames", "Length of the generated Spin action. Apparent speed is tuned later with slice steps (Spin[1..N/2]) — this just needs to be a smooth loop."), frames, 5, 60);
-            degrees = EditorGUILayout.Slider(new GUIContent("Spin degrees", "Wheel rotation over the clip. -360 = one full forward turn (negate if wheels roll backward in the preview)."), degrees, -720f, 720f);
+            degrees = EditorGUILayout.Slider(new GUIContent("Spin degrees", "Wheel rotation over the clip (one full turn = 360). Which SIGN rolls forward depends on the model's nose direction — check the preview and negate if the wheels roll backward. For a +X-facing model (like the Ehrhardt), +360 is forward."), degrees, -720f, 720f);
 
             int wheels = parts.Count(x => x.role == Role.Wheel);
             using (new EditorGUI.DisabledScope(wheels == 0 || string.IsNullOrEmpty(outGlb)))
