@@ -29,6 +29,7 @@ public class VehicleLabWindow : EditorWindow
     class Part { public string name; public int verts; public Vector3 center, size; public Role role; }
 
     [SerializeField] string srcFile = "";
+    [SerializeField] string outGlb = "";   // explicit output path — never silently derived at write time (overwrite guard in Vehicleize)
     List<Part> parts = new List<Part>();
     int frames = 15; float degrees = -360f; int axisChoice = 0;   // 0 = Auto (per wheel), 1..3 = X/Y/Z
     int minVerts = 50;            // parts below this are COLLAPSED into Body (a triangle-soup FBX probes into thousands of shards)
@@ -73,7 +74,21 @@ public class VehicleLabWindow : EditorWindow
             if (GUILayout.Button("Browse…", GUILayout.Width(70)))
             {
                 var p = EditorUtility.OpenFilePanel("Pick the static vehicle model", Path.GetDirectoryName(string.IsNullOrEmpty(srcFile) ? "D:/3DModels" : srcFile), "glb,gltf,fbx,obj,blend");
-                if (!string.IsNullOrEmpty(p)) { srcFile = p; parts.Clear(); status = ""; }
+                if (!string.IsNullOrEmpty(p))
+                {
+                    srcFile = p; parts.Clear(); status = "";
+                    outGlb = Path.Combine(Path.GetDirectoryName(p), Path.GetFileNameWithoutExtension(p) + "_Spin.glb").Replace('\\', '/');   // suggestion only — fully editable below
+                }
+            }
+        }
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            outGlb = EditorGUILayout.TextField(new GUIContent("Output GLB", "Where the rigged Spin GLB is written. Defaults to <source>_Spin.glb next to the source, but fully yours — an existing file asks before being overwritten (protect hand-made rigs!)."), outGlb);
+            if (GUILayout.Button("…", GUILayout.Width(28)))
+            {
+                var p = EditorUtility.SaveFilePanel("Output GLB", Path.GetDirectoryName(string.IsNullOrEmpty(outGlb) ? srcFile : outGlb),
+                    Path.GetFileNameWithoutExtension(string.IsNullOrEmpty(outGlb) ? srcFile + "_Spin" : outGlb), "glb");
+                if (!string.IsNullOrEmpty(p)) outGlb = p.Replace('\\', '/');
             }
         }
 
@@ -111,8 +126,9 @@ public class VehicleLabWindow : EditorWindow
             degrees = EditorGUILayout.Slider(new GUIContent("Spin degrees", "Wheel rotation over the clip. -360 = one full forward turn (negate if wheels roll backward in the preview)."), degrees, -720f, 720f);
 
             int wheels = parts.Count(x => x.role == Role.Wheel);
-            using (new EditorGUI.DisabledScope(wheels == 0))
-                if (GUILayout.Button(new GUIContent($"Vehicleize  →  {Path.GetFileNameWithoutExtension(srcFile)}_Spin.glb", wheels == 0 ? "Mark at least one part as Wheel." : "Runs Blender: rig + Spin action + GLB export + preview."), GUILayout.Height(28)))
+            using (new EditorGUI.DisabledScope(wheels == 0 || string.IsNullOrEmpty(outGlb)))
+                if (GUILayout.Button(new GUIContent($"Vehicleize  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
+                        wheels == 0 ? "Mark at least one part as Wheel." : "Runs Blender: rig + Spin action + GLB export + preview."), GUILayout.Height(28)))
                     Vehicleize();
         }
 
@@ -195,10 +211,15 @@ public class VehicleLabWindow : EditorWindow
 
     void Vehicleize()
     {
+        // OVERWRITE GUARD: the output path is explicit and user-owned — an existing file (e.g. a HAND-MADE rig like
+        // the original Ehrhardt_Spin.glb) is never clobbered without an explicit yes.
+        if (File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?",
+                $"'{outGlb}' already exists.\n\nOverwrite it? (If this is a hand-made rig, pick a different output path instead.)",
+                "Overwrite", "Cancel"))
+        { status = "Cancelled — pick a different Output GLB path."; return; }
         DestroyPreview();
-        string dir = Path.GetDirectoryName(srcFile);
-        string baseName = Path.GetFileNameWithoutExtension(srcFile);
-        lastOutGlb = Path.Combine(dir, baseName + "_Spin.glb").Replace('\\', '/');
+        string baseName = Path.GetFileNameWithoutExtension(outGlb);
+        lastOutGlb = outGlb.Replace('\\', '/');
         string projRoot = Directory.GetParent(Application.dataPath).FullName;
         string prevDir = "Assets/FactorySource/VehicleLab";
         Directory.CreateDirectory(Path.Combine(projRoot, prevDir));
