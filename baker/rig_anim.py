@@ -528,8 +528,15 @@ except Exception as _e:
 # location channel that VARIES (>1e-4) is a genuine authored slide (deploy_convert's Phase B keys the tube's
 # true recoil translation; only this strip ever removed it).
 if keep_translations and not convert_rig:
+    # SCOPE: translations are kept ONLY in the ATTACK-role clip (the recoil). The deploy/stance/move clips
+    # rendered correctly rotation-only for weeks — keeping their translations displaced the assembly (the
+    # hovering-gun incident): deployed-pose basis offsets that rotations already cover got double-rendered.
+    _attack_names = {cn.split('[')[0].strip() for r, cn in role_specs if r == 'attack' and cn.strip()}
+    _keep_acts = [a for a in all_acts if a.name.split('_rebaked')[0] in _attack_names or a.name in _attack_names]
+    if not _keep_acts:
+        print("RIGANIM legacy keepTranslations: no attack-role clip found — nothing kept (translations live in the fire cycle)")
     _poison = set()   # any channel with NaN/absurd values poisons the whole bone path — decomposition garbage
-    for _sa in all_acts:
+    for _sa in _keep_acts:
         for coll, fc in all_fcurve_owners(_sa):
             _dp = fc.data_path
             if not (_dp.startswith("pose.bones") and _dp.endswith(".location")) or len(fc.keyframe_points) == 0:
@@ -568,16 +575,24 @@ if _locs or _kept:
 # x100 so the baked curve lands at render scale. Conversion-path exports (global_scale 0.01, net scale 1) need
 # no compensation — the translation-test cube rendered at correct amplitude there.
 if keep_translations and not convert_rig and _KEEP_LOC_PATHS:
+    # DELTA-REBASE + AMPLIFY: each kept curve is rebased to ZERO at its first frame before the x100 — the clip
+    # carries pure MOTION (the slam's full travel), never constant pose offsets. Tiny basis residues (a 3.5 cm
+    # rest mismatch) otherwise amplify into multi-unit displacements (the reared-up-gun incident): pose HOLDING
+    # stays rotation-only exactly like the proven baseline, translation adds only the kick delta on top.
     _scaled = 0
-    for _sa in all_acts:
+    for _sa in _keep_acts:
         for coll, fc in all_fcurve_owners(_sa):
             if fc.data_path in _KEEP_LOC_PATHS and fc.data_path.endswith(".location"):
+                _kps = sorted(fc.keyframe_points, key=lambda k: k.co[0])
+                if not _kps:
+                    continue
+                _v0 = _kps[0].co[1]
                 for kp in fc.keyframe_points:
-                    kp.co[1] *= 100.0
-                    kp.handle_left[1] *= 100.0
-                    kp.handle_right[1] *= 100.0
+                    kp.co[1] = (kp.co[1] - _v0) * 100.0
+                    kp.handle_left[1] = (kp.handle_left[1] - _v0) * 100.0
+                    kp.handle_right[1] = (kp.handle_right[1] - _v0) * 100.0
                 _scaled += 1
-    print("RIGANIM legacy keepTranslations: pre-amplified %d kept location curve(s) x100 (bindpose-sandwich compensation)" % _scaled)
+    print("RIGANIM legacy keepTranslations: %d kept curve(s) delta-rebased + amplified x100 (attack clip only)" % _scaled)
 
 # clamp scene frame range to the action's real range (else bake_anim pads a frozen tail -> ~1s stall per loop)
 fs, fe = [int(round(v)) for v in act.frame_range]
