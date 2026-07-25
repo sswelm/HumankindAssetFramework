@@ -211,7 +211,10 @@ by when they'll bite.
   real barrels, essentially free. (2) **Multi-mount fire** — rotate successive fire events across several of the
   model's own gun bones (the Ehrhardt has four rigged MG mounts, `MW_B/F/L/T`) — needs per-event socket selection
   state; bigger. Both are polish on a verified base, not fixes.
-- **"Vehicleize" — auto-rig a STATIC vehicle with spinning wheels (spotted 2026-07-25, unbuilt).** The Ehrhardt's
+- **"Vehicleize" — BUILT 2026-07-25 (Vehicle Lab window + Tools/vehicle_rig.py), awaiting first real-model
+  verification.** Probe (part list, loose-split, name-guessed roles) → role assignment UI → rig (Root + per-wheel
+  bones, geometric axle inference per wheel, rigid skinning, LINEAR Spin action frame-0-rest) → `<name>_Spin.glb`
+  + turntable preview playing the spin. Original spec below.** The Ehrhardt's
   `_Spin.glb` was hand-made in Blender (now documented step-by-step in Animated-Models.md); the tool version is the
   missing sibling of turretize and the biggest lever on the "huge pool of static vehicle models" thesis: a headless
   Blender script that (1) detects wheel parts — name pattern `wheel|tyre|tire` first, geometric fallback (cylindrical,

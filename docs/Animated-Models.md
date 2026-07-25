@@ -59,10 +59,16 @@ legs, landing gear, a crane, turrets. Very common for Sketchfab vehicles.
   skeleton origin, self-correcting and **size-proof** (no manual Position-offset dial, and it stays grounded if you
   change Size). Verified end-to-end on the Ehrhardt.
 
-#### Authoring the spin rig yourself (the Ehrhardt recipe, step by step)
+#### Authoring the spin rig — the Vehicle Lab (automatic) or by hand
 
-`Ehrhardt_Spin.glb` was hand-made; until the auto-rig tool exists (Review-Backlog: "vehicleize"), this is the
-Blender recipe for turning a STATIC vehicle model into that file. ~20 minutes the first time, ~5 after:
+**Automatic (2026-07-25): `Tools ▸ HAF ▸ Vehicle Lab`.** Browse the static model → **Probe parts** (headless
+Blender lists the mesh parts; a single combined mesh is split into loose parts; roles auto-guessed from names) →
+mark the **Wheels** (and Turret) → **Vehicleize**: the tool builds Root + per-wheel bones (axle inferred as each
+wheel's thinnest bbox extent, overridable), rigid-skins every part, authors the LINEAR `Spin` action (frame 0 =
+rest), and exports `<name>_Spin.glb` — with a live turntable preview playing the spin so you see the wheels turn
+before ever opening the Factory. The GLB path lands on your clipboard; bake settings are printed on success.
+
+**By hand** — the recipe the tool automates (still worth knowing when a model needs judgment):
 
 1. **Import** the static model (`File ▸ Import`). Delete junk (stray spheres, ground planes).
 2. **Add an armature** (`Add ▸ Armature`), enter Edit Mode on it, and create one bone per moving part:
