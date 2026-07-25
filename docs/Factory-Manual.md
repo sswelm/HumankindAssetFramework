@@ -516,8 +516,11 @@ inherited donor sound**, **Idle growl** (file, volume, interval, one-voice radiu
 **Battle start war cry** (each: file, volume, start offset), **Movement**
 (start/travel/stop), and **Wwise engine event** (with the searchable event **Pick** dropdowns and the one-click
 **Use donor engine sound** button — §13). Pick a pawn (or **Edit** one from the "Units with audio" list, which fills
-the window's remaining height) and every knob round-trips; each WAV row has a ▶ preview. Everything below is one of
-those sections.
+the window's remaining height) and every knob round-trips; each WAV row has a ▶ preview. **Folded headers summarize
+their configuration** (2026-07-25): while a section is collapsed, its configured WAV/event shows right-aligned in
+green on the header row — growl file + interval, one-shots with their start offsets, the movement trio, the
+shortened Wwise event, "silenced" — so a fully-collapsed window reads as the unit's complete audio dossier and
+configured-vs-empty is visible at a glance. Everything below is one of those sections.
 
 When the game has **no** suitable sound (drones, zeppelins) or you want a bespoke engine, drop in your own audio. **Tools ▸
 HAF ▸ Sound Studio** — the **Movement** section — assigns up to three WAVs, each with its own volume —
