@@ -761,6 +761,7 @@ namespace ENCAccessProof
                 // inject our ClipCollections (animated models) into loadedAnimationClipCollections BEFORE Apply, so
                 // Apply's builder bakes their pose data + assigns each clip an animation id.
                 InjectClipCollections(animMgr);
+                animMgrRef = animMgr;   // captured for the one-shot [AnimDiag] GPU-record dump (T-62 rest-pose hunt)
                 if (n > 0 || entries.Any(x => x.clipColl != null))
                 {
                     var apply = AccessTools.Method(animMgr.GetType(), "Apply", Type.EmptyTypes)
@@ -1801,6 +1802,78 @@ namespace ENCAccessProof
             catch (Exception ex) { Plugin.Log.LogWarning($"[Uni] ResolveAnimId '{tag}': " + ex.Message); return -1; }
         }
 
+        static object animMgrRef;             // AnimationManager instance, captured at registration ([AnimDiag])
+        static HashSet<string> animDiagDone;  // entries already dumped by the one-shot [AnimDiag]
+
+        // ONE-SHOT GPU-record diagnostic (2026-07-26, the T-62 renders-REST hunt): dump the engine's live
+        // per-bone GPUAnimationEntry records (FrameCount/Format/StartPoseData/BBox) for an entry's primary and
+        // idle clips, plus the engine's OWN decode of frames 0/1 via its private GetPoseTRS, plus the skeleton's
+        // Local rest TRS. Separates "registration wrote garbage records" from "pose data decodes to identity"
+        // from "records fine, data fine -> the defect is in pose application".
+        static void DumpAnimEntries(ModelEntry e)
+        {
+            if (animMgrRef == null || e.animId < 0) return;
+            if (animDiagDone == null) animDiagDone = new HashSet<string>();
+            if (!animDiagDone.Add(e.resourceName)) return;
+            try
+            {
+                var am = animMgrRef;
+                Array Content(string name)
+                {
+                    var buf = AccessTools.Field(am.GetType(), name)?.GetValue(am);
+                    return buf == null ? null : GetMember(buf, "WriteContent") as Array;
+                }
+                var animBuf = Content("gpuAnimationEntryBuffer");
+                var skelBuf = Content("gpuSkeletonEntriesBuffer");
+                var boneBuf = Content("gpuSkeletonBoneEntiesBuffer");
+                if (animBuf == null) { Plugin.Log.LogWarning("[AnimDiag] gpuAnimationEntryBuffer not readable"); return; }
+                uint startBone = 0;
+                if (skelBuf != null && e.skeletonId >= 0 && e.skeletonId < skelBuf.Length)
+                    startBone = Convert.ToUInt32(GetMember(skelBuf.GetValue(e.skeletonId), "StartSkeletonBoneEntry"));
+                var getPose = AccessTools.Method(am.GetType(), "GetPoseTRS");
+                foreach (var pair in new[] { ("primary", e.animId), ("idle", e.idleAnimId) })
+                {
+                    if (pair.Item2 < 0) continue;
+                    foreach (int b in new[] { 0, 1, 5, 130 })
+                    {
+                        int idx = pair.Item2 + b;
+                        if (idx >= animBuf.Length) { Plugin.Log.LogWarning($"[AnimDiag] {e.resourceName}:{pair.Item1}+{b} = {idx} beyond buffer {animBuf.Length}"); break; }
+                        var ae = animBuf.GetValue(idx);
+                        var fc = GetMember(ae, "FrameCount"); var fmt = GetMember(ae, "Format");
+                        var spd = GetMember(ae, "StartPoseData");
+                        var bmin = GetMember(ae, "BBoxMin"); var bmax = GetMember(ae, "BBoxMax");
+                        string decoded = "", local = "";
+                        try
+                        {
+                            if (getPose != null)
+                            {
+                                var p0 = getPose.Invoke(am, new object[] { spd, fmt, (uint)0, bmin, bmax });
+                                decoded = $" | f0 T={GetMember(p0, "Translation")} R={GetMember(p0, "Rotation")} S={GetMember(p0, "Scale")}";
+                                uint fcv = Convert.ToUInt32(fc);
+                                if (fcv > 2)   // mid-clip frame — f0 is identity by contract and can't discriminate
+                                {
+                                    var pm = getPose.Invoke(am, new object[] { spd, fmt, fcv / 2, bmin, bmax });
+                                    decoded += $" | f{fcv / 2} T={GetMember(pm, "Translation")} R={GetMember(pm, "Rotation")}";
+                                }
+                            }
+                        }
+                        catch (Exception px) { decoded = " | decode FAILED: " + px.Message; }
+                        try
+                        {
+                            if (boneBuf != null && startBone + b < boneBuf.Length)
+                            {
+                                var lb = GetMember(boneBuf.GetValue((int)(startBone + (uint)b)), "Local");
+                                local = $" | rest T={GetMember(lb, "Translation")} R={GetMember(lb, "Rotation")} S={GetMember(lb, "Scale")}";
+                            }
+                        }
+                        catch { }
+                        Plugin.Log.LogInfo($"[AnimDiag] {e.resourceName}:{pair.Item1} bone{b}: frames={fc} fmt={fmt} start={spd} bbox={bmin}..{bmax}{local}{decoded}");
+                    }
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[AnimDiag] " + ex); }
+        }
+
         static bool? anyAnimated;        // cached early-out: skip the per-pawn hook if no model is animated
         static bool? anyFreeze;          // cached early-out: skip the per-pawn hook if no model wants its donor animation frozen
         static bool rescueLogged, posLogged, poseErrLogged, scaleLogged;
@@ -1916,9 +1989,45 @@ namespace ENCAccessProof
 
         // ANIMATED: play OUR clip on Pose0 (weight 1, advancing time); zero the others (never all-zero => NaN => invisible),
         // clear the aim layer, and apply the runtime position/scale. The pose Time comes from the model's behavior below.
+        static readonly Dictionary<string, float> pawnLiveLast = new Dictionary<string, float>();
+
+        // [PawnLive] throttled live-pawn dump (2026-07-26, T-62 hunt): read the entry AS THE GAME LEFT IT
+        // (before our writes this frame) — Pose slots + BoneRotation layer. Our own log lines only ever showed
+        // what WE wrote; this shows what survived the engine's update.
+        static void DumpPawnLive(PawnCtx ctx, ModelEntry e)
+        {
+            float last;
+            pawnLiveLast.TryGetValue(e.resourceName, out last);
+            if (UnityEngine.Time.time - last < 5f) return;
+            pawnLiveLast[e.resourceName] = UnityEngine.Time.time;
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.Append($"[PawnLive] {e.resourceName} desc={ctx.descId} skel={ctx.skelId}");
+                for (int i = 0; i < 3; i++)
+                {
+                    var p = GetMember(ctx.entry, PoseNames[i]);
+                    if (p == null) continue;
+                    sb.Append($" | {PoseNames[i]} id={GetMember(p, "AnimationId")} w={GetMember(p, "Weight")} t={Convert.ToSingle(GetMember(p, "Time")):0.###}");
+                }
+                for (int i = 0; i < 4; i++)
+                {
+                    var br = GetMember(ctx.entry, BoneRotationNames[i]);
+                    if (br == null) continue;
+                    long bi = -1, ax = -1; float an = 0f;
+                    try { bi = Convert.ToInt64(GetMember(br, "SkeletonBoneIndex")); ax = Convert.ToInt64(GetMember(br, "AxisIndex")); an = Convert.ToSingle(GetMember(br, "Angle")); } catch { }
+                    sb.Append($" | BR{i} bone={bi} axis={ax} ang={an:0.#}");
+                }
+                Plugin.Log.LogInfo(sb.ToString());
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[PawnLive] " + ex.Message); }
+        }
+
         static void ApplyAnimatedPose(PawnCtx ctx, ModelEntry e)
         {
             var entry = ctx.entry;
+            DumpAnimEntries(e);                                        // one-shot [AnimDiag] per entry (no-op after first)
+            DumpPawnLive(ctx, e);                                      // throttled [PawnLive] engine-state dump
             var pose0 = GetMember(entry, "Pose0");                     // boxed PawnEntryPose (struct)
             // PawnEntryPose.Time is NORMALIZED (sampler does Mathf.Repeat(Time,1) = one loop). ComputePoseTime divides by the
             // clip duration so it plays at REAL speed and hits every frame; raw Time.time = duration× too fast + frame-skipping.
