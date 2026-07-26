@@ -18,6 +18,21 @@ by when they'll bite.
 
 ## Worth fixing before the next model of the affected kind
 
+- **ENTRY-STATE COHERENCE (user verdict 2026-07-26, tread-saga fallout: "this seems like a serious configuration
+  bug")** — an entry's config lives in FOUR places (Factory window memory, Animation Lab memory, the DEPLOYED
+  pack.json the editor reads as its registry, the project dual-write copy) and the reconciliation rules ambushed
+  the user repeatedly in one afternoon: (a) a stale Factory Model-file field silently baked the WRONG MODEL (the
+  translation-test cube overwrote a good Jagdpanzer bake); (b) animated→static downgrade is IMPOSSIBLE without
+  Remove — the bake-time ownership rebase resurrects the saved animation config even after Reset, and the animated
+  pipeline then hard-fails on an unrigged file; (c) "Reduce to ~tris (0 = off)" silently substituted 12,000 on the
+  animated path for years (FIXED same day); (d) external registry edits are detected by the Lab (yellow banner)
+  but not by the Factory. Proposed fixes, in impact order: (1) Factory gets the Lab's outside-change banner +
+  a bake-time confirm when its Model file differs from the registry's; (2) a real animated→static path: when the
+  file has no armature, offer "strip animation config and bake static" instead of failing; (3) document (or
+  collapse) the two-pack.json design — the DEPLOYED copy being the editor's source of truth surprises every
+  external tool; (4) audit remaining "label lies" like the tris slider (grep defaults substituted behind explicit
+  user values).
+
 - ~~**`deploy_convert.py` recoil block**~~ — FIXED 2026-07-19: (a) the tube's parent is now sampled into `src_w` when
   its name isn't barrel/cannon (was a guaranteed `KeyError` on non-M114 naming); (b) the RecoilArm holds now key an
   IDENTITY BASIS (true pass-through at any parent pose) and the arc targets build on a parent-aware pass-through
