@@ -34,6 +34,7 @@ namespace ENCAccessProof
         internal static ConfigEntry<bool>   DistrictDebug;           // investigation diagnostics ([District] saw / [DistrictMat] / [DistrictSub] dumps) — off in normal play, they reflect on every district update
         // --- EXPERIMENTAL: generic GPU mesh-buffer overrides (units, districts, any content layer) ---
         internal static ConfigEntry<string> BufferOverrides;     // per-layer overrides "<nameSubstr>:verts=+N,idx=+N,meshes=+N,maxtris=N;..." applied at layer creation
+        internal static ConfigEntry<int>    SkeletonBoneBudget;  // shared per-frame animated-bone pool size (vanilla 65,535; high-bone customs overflow it -> spike plague)
         // --- EXPERIMENTAL: pawn prop/attachment axis (custom weapons & gear; see the sling experiment) ---
         internal static ConfigEntry<bool>   PropRegisterOn;      // register our baked MeshCollections with the AnimationManager (the fragment render gate)
         internal static ConfigEntry<string> PropCollectionGuids; // semicolon-separated "a,b,c,d" GUIDs of MeshCollection/Skeleton assets to register
@@ -106,6 +107,13 @@ namespace ENCAccessProof
                                   "at startup, so custom district meshes fit even when a built-up late-game city has nearly filled it. 0 = off. " +
                                   "e.g. 1000000 = +~48MB VRAM. Applied once at buffer creation; takes effect on the next launch.");
 
+            SkeletonBoneBudget  = Config.Bind("Buffers", "SkeletonBoneBudget", 262144,
+                                  "Size of the game's shared per-frame ANIMATED-BONE pool (PawnManager's animatedSkeletonEntry buffers; " +
+                                  "vanilla = 65,535 entries shared by EVERY pawn on screen). High-bone custom skeletons (tank-destroyer " +
+                                  "treads = 242 bones/instance, mech = 240) overflow it on dense late-game maps — overflowing pawns read " +
+                                  "other pawns' matrices and stretch into spikes / twitch (INCLUDING vanilla units). Applied at pawn-system " +
+                                  "creation; ~4x vanilla costs a few MB of VRAM. 0 = leave the vanilla size.");
+
             // --- EXPERIMENTAL: generic GPU mesh-buffer overrides. Every mesh family (pawns, districts, effects) uploads
             //     into per-layer GPU buffers created with serialized sizes AND a per-mesh triangle cap that silently
             //     TRUNCATES any mesh above it (holes in the model, no log). This lifts any of them, per layer. ---
@@ -159,6 +167,7 @@ namespace ENCAccessProof
                 typeof(Hk_AudioTrace),        // diagnostic: live-trace Wwise PostEvent (gated behind the F8 Audio Trace toggle)
                 typeof(Hk_DistrictRepoint),   // EXPERIMENTAL: replace one district's on-map visual (docs/District-Visuals.md)
                 typeof(Hk_DistrictBufferHeadroom), // EXPERIMENTAL: enlarge the shared 'Visual' mesh buffer so custom district meshes fit (opt-in)
+                typeof(Hk_AnimatedBonePoolHeadroom), // enlarge the shared per-frame animated-bone pool (65,535 vanilla) — the spike-plague fix
                 typeof(Hk_PropRegister),           // EXPERIMENTAL: register our prop MeshCollections at AnimationLoad, before pawn resolution (opt-in)
                 typeof(Hk_ProjectileOverride),     // EXPERIMENTAL: re-point a unit's Projectile at our baked ProjectileAsset (kamikaze drone) at AnimationLoad (opt-in)
                 typeof(Hk_MuzzleRelocate),         // muzzleBone: redirect the muzzle-flash bone lookup (donor weapon socket missing on our renamed rig) to OUR bone (2026-07-24)

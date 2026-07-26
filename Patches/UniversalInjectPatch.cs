@@ -4600,6 +4600,41 @@ namespace ENCAccessProof
         static void Postfix(object __instance) { UniversalInject.DistrictDumpMaterial(__instance); UniversalInject.DistrictDumpSubMaterials(__instance); UniversalInject.DistrictApplyEntries(__instance); UniversalInject.DistrictGuidOverride(__instance); }
     }
 
+    // THE SPIKE PLAGUE (2026-07-26, first seen the day the 242-bone tank-destroyer shipped): every VISIBLE pawn
+    // gets a per-frame slice of ONE shared animated-bone pool (PawnManager.animatedSkeletonEntry buffers, sized
+    // from AnimationManager.skeletonBufferSize = 65,535 entries). High-bone custom skeletons (tread links: 242
+    // bones/instance; mech: 240) x instances on a dense late-game map overflow the pool — slices past the end
+    // read OTHER pawns' matrices, so random pawns (including VANILLA infantry) stretch into spikes, different
+    // ones each frame ("twitching"). Bump the field BEFORE PawnManager.Load() creates the buffers from it; the
+    // shader-side bound is set from the buffer's actual size, so both stay consistent.
+    [HarmonyPatch]
+    internal static class Hk_AnimatedBonePoolHeadroom
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = AccessTools.TypeByName("Amplitude.Mercury.Animation.PawnManager");
+            return t?.GetMethod("Load", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+        }
+        static void Prefix()
+        {
+            try
+            {
+                int target = Plugin.SkeletonBoneBudget != null ? Plugin.SkeletonBoneBudget.Value : 0;
+                if (target <= 0) return;
+                var am = AccessTools.TypeByName("Amplitude.Mercury.Animation.AnimationManager");
+                var inst = AccessTools.Property(am, "Instance")?.GetValue(null);
+                if (inst == null) { Plugin.Log.LogWarning("[Bones] AnimationManager.Instance not ready — pool not enlarged."); return; }
+                var f = AccessTools.Field(am, "skeletonBufferSize");
+                if (f == null || f.FieldType != typeof(int)) { Plugin.Log.LogWarning("[Bones] skeletonBufferSize field not found."); return; }
+                int cur = (int)f.GetValue(inst);
+                if (cur >= target) return;
+                f.SetValue(inst, target);
+                Plugin.Log.LogInfo($"[Bones] shared animated-bone pool: {cur} -> {target} entries (per-frame skinning budget for ALL pawns).");
+            }
+            catch (System.Exception ex) { Plugin.Log.LogError("[Bones] pool headroom: " + ex); }
+        }
+    }
+
     // EXPERIMENTAL (opt-in) — enlarge the shared 'Visual' GPU mesh buffer so custom district meshes fit even in a full
     // late-game city. ContentLayer.LoadEncodingVertexAndBuffer() creates the vertex buffer from baseVertexBufferSize; we
     // bump that field for the BIG layer (only, to avoid touching the tiny Emitter/default layers) by DistrictBufferHeadroom.
