@@ -379,28 +379,42 @@ for o in objs:
         _tread_dirs[_tn] = (_fdir, _rdir, _rtdir)
         _names = {_botb, _topb, _rampfb, _ramprb, _ramprtb, _sprb, _idlb}
         _vgs = {n: o.vertex_groups.new(name=n) for n in _names}
-        _spr_c, _spr_r = (_fcl["c"], _fcl["m"] * 0.5 * 1.25) if _fcl else (Vector((1e9,) * 3), 0.0)
-        _idl_c, _idl_r = (_rcl["c"], _rcl["m"] * 0.5 * 1.25) if _rcl else (Vector((1e9,) * 3), 0.0)
-        _byg = {}
+        _spr_c, _spr_r = (_fcl["c"], _fcl["m"] * 0.5) if _fcl else (Vector((1e9,) * 3), 0.0)
+        _idl_c, _idl_r = (_rcl["c"], _rcl["m"] * 0.5) if _rcl else (Vector((1e9,) * 3), 0.0)
+
+        def _shuttle_region(_p):
+            if _roadF is not None and _p.x > _roadF["c"].x and _p.z > _roadF["c"].z:
+                return _rampfb
+            if _roadR is not None and _p.x < _roadR["c"].x and _rcl is not None and _p.z > _rcl["c"].z:
+                return _ramprtb   # upper-rear slope: above the IDLER's center — flows forward with the top run
+            if _roadR is not None and _p.x < _roadR["c"].x and _p.z > _roadR["c"].z:
+                return _ramprb
+            return _topb if _p.z > _tc.z else _botb
+
+        # BLENDED boundaries (field finding: the rear kinked where wrap met ramp): inside the wheel radius =
+        # full wheel; an annulus out to 1.6 r fades wheel -> shuttle linearly, so the wrap-to-run transition
+        # interpolates smoothly instead of folding at a hard cut (real-rig smooth skinning, minimal form).
+        _stats = {}
         for _v in o.data.vertices:   # transforms were applied — local == world
             _p = Vector(_v.co)
-            if (_p - _spr_c).length <= _spr_r:
-                _g = _sprb
-            elif (_p - _idl_c).length <= _idl_r:
-                _g = _idlb
-            elif _roadF is not None and _p.x > _roadF["c"].x and _p.z > _roadF["c"].z:
-                _g = _rampfb
-            elif _roadR is not None and _p.x < _roadR["c"].x and _rcl is not None and _p.z > _rcl["c"].z:
-                _g = _ramprtb   # upper-rear slope: above the IDLER's center — flows forward with the top run
-            elif _roadR is not None and _p.x < _roadR["c"].x and _p.z > _roadR["c"].z:
-                _g = _ramprb
-            elif _p.z > _tc.z:
-                _g = _topb
-            else:
-                _g = _botb
-            _byg.setdefault(_g, []).append(_v.index)
-        for _gn, _idxs in _byg.items():
-            _vgs[_gn].add(_idxs, 1.0, 'REPLACE')
+            _pairs = None
+            for _d0, _r0, _wb in (((_p - _spr_c).length, _spr_r, _sprb), ((_p - _idl_c).length, _idl_r, _idlb)):
+                if _r0 <= 0.0:
+                    continue
+                if _d0 <= _r0:
+                    _pairs = [(_wb, 1.0)]
+                    break
+                if _d0 <= _r0 * 1.6:
+                    _t = (_d0 - _r0) / (0.6 * _r0)
+                    _pairs = [(_wb, 1.0 - _t), (_shuttle_region(_p), _t)]
+                    break
+            if _pairs is None:
+                _pairs = [(_shuttle_region(_p), 1.0)]
+            for _gn, _w in _pairs:
+                if _w > 0.001:
+                    _vgs[_gn].add([_v.index], _w, 'REPLACE')
+                    _stats[_gn] = _stats.get(_gn, 0) + 1
+        _byg = {k: [0] * v for k, v in _stats.items()}   # counts only, for the report line
         md = o.modifiers.new("Armature", 'ARMATURE'); md.object = arm
         o.parent = arm
         print("VEHICLE tread '%s' skinned: %s" % (o.name, ", ".join("%s=%d" % (g, len(ix)) for g, ix in sorted(_byg.items()))))
