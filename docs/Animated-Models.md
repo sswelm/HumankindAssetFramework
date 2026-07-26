@@ -122,9 +122,9 @@ casemate guns like the Jagdpanzer hang off Root). Vehicleize then builds the tre
    the tread-band radius measured at each wrap wheel (sprocket, idler, ramp-end road wheels, return rollers)
    joined by external tangents and wrap arcs. Exact straights, exact arcs, immune to concave loops — every
    approximation tried first (θ-around-centroid, radius smoothing) failed on the raised idler's concavity.
-4. **The loop is cut into HALF-LINK cells** along the path, at the cut phase crossed by the fewest mesh edges
-   (so hinges land in the cleat gaps, not through cleats). **Every cell gets its own bone** — no skin blending
-   anywhere; each molded link piece is 100 % one bone and moves rigidly.
+4. **The loop is cut into QUARTER-LINK cells** along the path, at the cut phase crossed by the fewest mesh
+   edges (so hinges land in the cleat gaps where possible). **Every cell gets its own bone** — no skin
+   blending anywhere; each piece is 100 % one bone and moves rigidly (wrap facets ≈ 15°).
 5. **Every link bone is keyed riding the path** (location + rotation per frame). Advance = two cells = **one
    full link per loop**, so the loop restart maps link-onto-link (invisible) and the tread surface speed
    roughly matches the sprocket's — no visible tooth slip.
@@ -140,8 +140,10 @@ LARGEST wheel (drive sprocket) keeps the user's spin degrees (pick one matching 
 a six-spoke — so its restart is invisible); every other wheel gets **rolling-contact speed** (angular speed ∝
 1/diameter — small road wheels genuinely spin faster), snapped to the nearest multiple of its OWN spoke
 symmetry (detected per wheel by angular autocorrelation of its rim verts) so all restarts stay invisible.
-Bone budget: half-link cells put the Jagdpanzer at ~156 bones; a further halving would break Amplitude's
-256-bone cap.
+Bone budget: quarter-link cells put the Jagdpanzer at **248 bones** — link mode deletes the unused legacy
+tread bones to fit. The 256 wall is Amplitude's GPU crowd-skinning vertex format (per-vertex bone indices
+break past 255 — proven on the 332-bone mech) and is engine-side, not stretchable; a further cell halving is
+off the table.
 
 **Status:** preview-verified through headless renders + a per-link displacement probe (all 54 links move
 identically — zero outliers); the TankDestroyers bake and in-game check are the next step.
