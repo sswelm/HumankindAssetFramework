@@ -1831,7 +1831,7 @@ namespace ENCAccessProof
                 if (skelBuf != null && e.skeletonId >= 0 && e.skeletonId < skelBuf.Length)
                     startBone = Convert.ToUInt32(GetMember(skelBuf.GetValue(e.skeletonId), "StartSkeletonBoneEntry"));
                 var getPose = AccessTools.Method(am.GetType(), "GetPoseTRS");
-                foreach (var pair in new[] { ("primary", e.animId), ("idle", e.idleAnimId) })
+                foreach (var pair in new[] { ("primary", e.animId), ("idle", e.idleAnimId), ("move", e.moveAnimId) })
                 {
                     if (pair.Item2 < 0) continue;
                     foreach (int b in new[] { 0, 1, 5, 130 })
