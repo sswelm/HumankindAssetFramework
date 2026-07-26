@@ -125,9 +125,13 @@ casemate guns like the Jagdpanzer hang off Root). Vehicleize then builds the tre
 4. **The loop is cut into QUARTER-LINK cells** along the path, at the cut phase crossed by the fewest mesh
    edges (so hinges land in the cleat gaps where possible). **Every cell gets its own bone** — no skin
    blending anywhere; each piece is 100 % one bone and moves rigidly (wrap facets ≈ 15°).
-5. **Every link bone is keyed riding the path** (location + rotation per frame). Advance = two cells = **one
-   full link per loop**, so the loop restart maps link-onto-link (invisible) and the tread surface speed
-   roughly matches the sprocket's — no visible tooth slip.
+5. **Every link bone is keyed riding the path** (location + rotation per frame). The advance is the
+   **Tread speed (cells/loop)** slider in the Lab (saved in the recipe): 4 cells = one full link, exact
+   sprocket sync; **3 (default) runs slightly slower, near-syncing the eight road wheels** — whose
+   spoke-symmetry snap puts them below true rolling speed — which the eye prefers. Restarts stay invisible
+   at any setting (the pattern maps onto the cleat sub-grid). The path itself is the belt **plus the
+   wide-smoothed deviation of the mesh's own centerline** — sag and standoffs from the artist's line
+   survive, cleat noise cancels.
 
 **Why rigid links:** a continuous-band skinning (blended carrier bones) was driven through eleven refinement
 rounds — measured tears fell 0.43 → 0.03 — and *still* read as a loose rubber hose, because molded links
