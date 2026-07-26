@@ -135,10 +135,13 @@ visibly bending IS what the eye calls slack. Real tracks (and the vanilla pair/i
 articulating at pins; only instancing reproduces that.
 
 **Bake requirements:** `Keep bone translations` **✓** (the links are translation curves — without it the tread
-freezes), Convert rig ON, Fix 100× OFF, Auto-ground ON, Idle `Spin[0..0]`, Movement `Spin[1..15]`. The wheels
-keep the user's spin degrees (pick one matching the sprocket's spoke symmetry — 60° for a six-spoke — so the
-wheel restart is invisible too). Bone budget: half-link cells put the Jagdpanzer at ~156 bones; a further
-halving would break Amplitude's 256-bone cap.
+freezes), Convert rig ON, Fix 100× OFF, Auto-ground ON, Idle `Spin[0..0]`, Movement `Spin[1..15]`. The
+LARGEST wheel (drive sprocket) keeps the user's spin degrees (pick one matching its spoke symmetry — 60° for
+a six-spoke — so its restart is invisible); every other wheel gets **rolling-contact speed** (angular speed ∝
+1/diameter — small road wheels genuinely spin faster), snapped to the nearest multiple of its OWN spoke
+symmetry (detected per wheel by angular autocorrelation of its rim verts) so all restarts stay invisible.
+Bone budget: half-link cells put the Jagdpanzer at ~156 bones; a further halving would break Amplitude's
+256-bone cap.
 
 **Status:** preview-verified through headless renders + a per-link displacement probe (all 54 links move
 identically — zero outliers); the TankDestroyers bake and in-game check are the next step.
