@@ -337,43 +337,60 @@ for i, tn in enumerate(track_names):
     front_cl = max(side_cls, key=lambda cl: cl["c"].x) if side_cls else None
     rear_cl = min(side_cls, key=lambda cl: cl["c"].x) if side_cls else None
     names = []
-    for suffix in ("Bot", "Top"):
+    for suffix in ("Bot", "Top", "RampF", "RampR"):
         eb = arm_data.edit_bones.new("Track_%02d_%s_%s" % (i, side, suffix))
         eb.head = c
         eb.tail = c + Vector((0, 0, max(0.05, max(s) * 0.25)))
         eb.parent = eb_root
         names.append(eb.name)
-    track_infos.append((tn, names[0], names[1], front_cl, rear_cl, c.copy()))
+    track_infos.append((tn, names, front_cl, rear_cl, c.copy()))
 bpy.ops.object.mode_set(mode='OBJECT')
 
 # rigid skinning: each part full-weight on its bone (wheels/turret) or Root (body). TREAD parts skin
 # PER-VERTEX into four regions: beyond the sprocket/idler centers -> that WHEEL's bone (the wrap arcs rotate
 # with the wheel — no spoke penetration, wrapping for free), else top half -> Top bone, bottom half -> Bot bone.
 _track_by_name = {t[0]: t for t in track_infos}
+_tread_dirs = {}   # part -> (frontRampFlowDir, rearRampFlowDir) for degrees>0, filled at skinning
 for o in objs:
     if o.name in _track_by_name:
-        _tn, _botb, _topb, _fcl, _rcl, _tc = _track_by_name[o.name]
+        _tn, _tnames, _fcl, _rcl, _tc = _track_by_name[o.name]
+        _botb, _topb, _rampfb, _ramprb = _tnames
         for g in list(o.vertex_groups):
             o.vertex_groups.remove(g)
-        # v3 (field finding: transitions at the first/last road wheels): EVERY side wheel is a local carrier —
-        # a vert within ~1.2 radii of a wheel rides THAT wheel's rotating bone (wrap + transitions all natural);
-        # only the remaining straight stretches shuttle (top forward, bottom backward). At ~30°/loop the
-        # arc-vs-straight error on wheel-carried verts is microscopic.
+        # v4 (field-tuned): SIX regions with boundaries at the wheel TANGENT points, where surface velocities
+        # naturally match — sprocket/idler wraps rotate with those wheels; the DIAGONAL RAMPS between them and
+        # the first/last ROAD wheel slide along their own slope; top/bottom straights shuttle horizontally.
+        # (v3's every-wheel carriers created shear boundaries mid-run — reverted.)
         _side_cls = [cl for cl in clusters if (cl["c"].y >= 0) == (_tc.y >= 0)] or clusters
-        _carriers = [(cl["c"], cl["m"] * 0.5 * 1.2, cluster_bones[clusters.index(cl)]) for cl in _side_cls]
-        _names = {_botb, _topb} | {b for _c0, _r0, b in _carriers}
+        _sprb = cluster_bones[clusters.index(_fcl)] if _fcl is not None else _botb
+        _idlb = cluster_bones[clusters.index(_rcl)] if _rcl is not None else _botb
+        _low_cls = [cl for cl in _side_cls if cl["c"].z <= _tc.z and cl is not _fcl and cl is not _rcl]
+        _roadF = max(_low_cls, key=lambda cl: cl["c"].x) if _low_cls else _fcl
+        _roadR = min(_low_cls, key=lambda cl: cl["c"].x) if _low_cls else _rcl
+        # flow directions for degrees>0 (bottom runs backward): front ramp = sprocket -> first road wheel,
+        # rear ramp = last road wheel -> idler (continuing the backward+up circulation)
+        _fdir = ((_roadF["c"] - _fcl["c"]).normalized() if (_fcl and _roadF and _roadF is not _fcl) else Vector((-1, 0, 0)))
+        _rdir = ((_rcl["c"] - _roadR["c"]).normalized() if (_rcl and _roadR and _roadR is not _rcl) else Vector((-1, 0, 0)))
+        _tread_dirs[_tn] = (_fdir, _rdir)
+        _names = {_botb, _topb, _rampfb, _ramprb, _sprb, _idlb}
         _vgs = {n: o.vertex_groups.new(name=n) for n in _names}
+        _spr_c, _spr_r = (_fcl["c"], _fcl["m"] * 0.5 * 1.25) if _fcl else (Vector((1e9,) * 3), 0.0)
+        _idl_c, _idl_r = (_rcl["c"], _rcl["m"] * 0.5 * 1.25) if _rcl else (Vector((1e9,) * 3), 0.0)
         _byg = {}
         for _v in o.data.vertices:   # transforms were applied — local == world
-            _p = _v.co
-            _g = None
-            _best = 1e9
-            for _c0, _r0, _b0 in _carriers:
-                _d0 = (Vector((_p.x, _p.y, _p.z)) - _c0).length
-                if _d0 <= _r0 and _d0 < _best:
-                    _best = _d0; _g = _b0
-            if _g is None:
-                _g = _topb if _p.z > _tc.z else _botb
+            _p = Vector(_v.co)
+            if (_p - _spr_c).length <= _spr_r:
+                _g = _sprb
+            elif (_p - _idl_c).length <= _idl_r:
+                _g = _idlb
+            elif _roadF is not None and _p.x > _roadF["c"].x and _p.z > _roadF["c"].z:
+                _g = _rampfb
+            elif _roadR is not None and _p.x < _roadR["c"].x and _p.z > _roadR["c"].z:
+                _g = _ramprb
+            elif _p.z > _tc.z:
+                _g = _topb
+            else:
+                _g = _botb
             _byg.setdefault(_g, []).append(_v.index)
         for _gn, _idxs in _byg.items():
             _vgs[_gn].add(_idxs, 1.0, 'REPLACE')
@@ -443,12 +460,18 @@ for bname in cluster_bones:
 if track_infos and clusters:
     _drive_d = max(cl["m"] for cl in clusters)                     # largest wheel = drive sprocket diameter
     _advance = math.pi * _drive_d * (abs(degrees) / 360.0)
-    _sgn = -1.0 if degrees >= 0 else 1.0                           # bottom runs opposite the nose-ward roll
-    for _tn, _botb, _topb, _fcl, _rcl, _tc in track_infos:
-        for _bname, _dsgn in ((_botb, _sgn), (_topb, -_sgn)):
+    _flow = 1.0 if degrees >= 0 else -1.0                          # circulation sense follows the roll direction
+    for _tn, _tnames, _fcl, _rcl, _tc in track_infos:
+        _botb, _topb, _rampfb, _ramprb = _tnames
+        _fdir, _rdir = _tread_dirs.get(_tn, (Vector((-1, 0, 0)), Vector((-1, 0, 0))))
+        _moves = ((_botb, Vector((-1.0, 0.0, 0.0)) * _flow),       # bottom runs backward
+                  (_topb, Vector((1.0, 0.0, 0.0)) * _flow),        # top runs forward
+                  (_rampfb, _fdir * _flow),                        # front ramp: sprocket -> first road wheel
+                  (_ramprb, _rdir * _flow))                        # rear ramp: last road wheel -> idler
+        for _bname, _dir in _moves:
             pb = arm.pose.bones[_bname]
             db = arm.data.bones[_bname]
-            _local = ((arm.matrix_world @ db.matrix_local).to_3x3().inverted() @ Vector((_dsgn, 0.0, 0.0))).normalized() * _advance
+            _local = ((arm.matrix_world @ db.matrix_local).to_3x3().inverted() @ _dir).normalized() * _advance
             pb.rotation_mode = 'XYZ'
             bpy.context.scene.frame_set(0)
             pb.location = (0.0, 0.0, 0.0)
@@ -456,7 +479,7 @@ if track_infos and clusters:
             bpy.context.scene.frame_set(frames)
             pb.location = _local
             pb.keyframe_insert("location", frame=frames)
-    print("VEHICLE tread conveyor v2: %d tread(s), bot/top advance %.3f/loop (drive d=%.2f), wrap arcs ride the wheels"
+    print("VEHICLE tread conveyor v4: %d tread(s), advance %.3f/loop (drive d=%.2f): wraps ride wheels, ramps slide their slope, straights shuttle"
           % (len(track_infos), _advance, _drive_d))
 # Blender 5.x REMOVED Action.fcurves (slotted/layered actions): curves live under layers->strips->channelbags.
 try:
