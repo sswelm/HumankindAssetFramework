@@ -319,26 +319,61 @@ if gun_names:
     eb.parent = eb_turret if eb_turret is not None else eb_root
     for gn in gun_names:
         bone_of[gn] = "Gun"
-# Track bones — TREADIZE (2026-07-26, the caterpillar payoff): each tread loop gets its OWN bone, and the Spin
-# clip gives it a CONVEYOR TRANSLATION: slide backward (opposite the roll direction) by one drive-wheel
-# circumference per loop, LINEAR. The clip loop restart IS the conveyor snap — on a periodic tread the jump
-# lands every link where its neighbor was (the vanilla tank's pair/impair shuttle trick, collapsed to one bone;
-# perfect for skirted vehicles where only the bottom run + wrap arcs show). Requires the ANIMATED bake with
-# `Keep bone translations` ON (conversion path — plays at true amplitude).
-track_bones = []
+# Track bones — TREADIZE v2 (2026-07-26, user-designed surfaces): a tread loop is FOUR motion regions, each on
+# its own carrier: the FRONT/REAR wrap arcs skin to the SPROCKET/IDLER wheel bones (they rotate with the wheel —
+# wrapping is free and spokes never penetrate), the BOTTOM run rides a bone translating backward and the TOP run
+# one translating forward. All four advance one link-pitch per Spin loop and snap together at the restart — the
+# vanilla pair/impair recipe in full. Use SMALL Spin degrees (~one sprocket tooth, 30°) so the advance ≈ one
+# link pitch. Requires the animated bake with `Keep bone translations` ON (conversion path).
+track_infos = []   # (partName, sideBotBone, sideTopBone, frontCluster, rearCluster)
 for i, tn in enumerate(track_names):
     o = find(tn)
     c, s = world_bbox(o)
-    eb = arm_data.edit_bones.new("Track_%02d_%s" % (i, "L" if c.y >= 0 else "R"))
-    eb.head = c
-    eb.tail = c + Vector((0, 0, max(0.05, max(s) * 0.25)))
-    eb.parent = eb_root
-    bone_of[tn] = eb.name
-    track_bones.append(eb.name)
+    side = "L" if c.y >= 0 else "R"
+    # this side's wheel clusters -> frontmost = sprocket, rearmost = idler (wrap carriers)
+    side_cls = [cl for cl in clusters if (cl["c"].y >= 0) == (c.y >= 0)]
+    if not side_cls:
+        side_cls = clusters
+    front_cl = max(side_cls, key=lambda cl: cl["c"].x) if side_cls else None
+    rear_cl = min(side_cls, key=lambda cl: cl["c"].x) if side_cls else None
+    names = []
+    for suffix in ("Bot", "Top"):
+        eb = arm_data.edit_bones.new("Track_%02d_%s_%s" % (i, side, suffix))
+        eb.head = c
+        eb.tail = c + Vector((0, 0, max(0.05, max(s) * 0.25)))
+        eb.parent = eb_root
+        names.append(eb.name)
+    track_infos.append((tn, names[0], names[1], front_cl, rear_cl, c.copy()))
 bpy.ops.object.mode_set(mode='OBJECT')
 
-# rigid skinning: each part full-weight on its bone (wheels/turret/tracks) or Root (body)
+# rigid skinning: each part full-weight on its bone (wheels/turret) or Root (body). TREAD parts skin
+# PER-VERTEX into four regions: beyond the sprocket/idler centers -> that WHEEL's bone (the wrap arcs rotate
+# with the wheel — no spoke penetration, wrapping for free), else top half -> Top bone, bottom half -> Bot bone.
+_track_by_name = {t[0]: t for t in track_infos}
 for o in objs:
+    if o.name in _track_by_name:
+        _tn, _botb, _topb, _fcl, _rcl, _tc = _track_by_name[o.name]
+        for g in list(o.vertex_groups):
+            o.vertex_groups.remove(g)
+        _frontb = cluster_bones[clusters.index(_fcl)] if _fcl is not None else _botb
+        _rearb = cluster_bones[clusters.index(_rcl)] if _rcl is not None else _botb
+        _vgs = {n: o.vertex_groups.new(name=n) for n in {_botb, _topb, _frontb, _rearb}}
+        _fx = _fcl["c"].x if _fcl is not None else 1e9
+        _rx = _rcl["c"].x if _rcl is not None else -1e9
+        _byg = {}
+        for _v in o.data.vertices:   # transforms were applied — local == world
+            _p = _v.co
+            if _p.x > _fx: _g = _frontb
+            elif _p.x < _rx: _g = _rearb
+            elif _p.z > _tc.z: _g = _topb
+            else: _g = _botb
+            _byg.setdefault(_g, []).append(_v.index)
+        for _gn, _idxs in _byg.items():
+            _vgs[_gn].add(_idxs, 1.0, 'REPLACE')
+        md = o.modifiers.new("Armature", 'ARMATURE'); md.object = arm
+        o.parent = arm
+        print("VEHICLE tread '%s' skinned: %s" % (o.name, ", ".join("%s=%d" % (g, len(ix)) for g, ix in sorted(_byg.items()))))
+        continue
     bname = bone_of.get(o.name, "Root")
     for g in list(o.vertex_groups):
         o.vertex_groups.remove(g)
@@ -356,7 +391,9 @@ def _join_per_bone():
     global objs
     groups = {}
     for o in objs:
-        groups.setdefault(bone_of.get(o.name, "Root"), []).append(o)
+        # tread parts are multi-bone-skinned (four regions) — each stays its OWN mesh, never merged
+        _k = ("__track__" + o.name) if o.name in _track_by_name else bone_of.get(o.name, "Root")
+        groups.setdefault(_k, []).append(o)
     joined = []
     for bname, members in groups.items():
         bpy.ops.object.select_all(action='DESELECT')
@@ -393,26 +430,27 @@ for bname in cluster_bones:
     pb.rotation_euler = (0, math.radians(degrees), 0)   # local Y = the axle (bone tail direction)
     pb.keyframe_insert("rotation_euler", frame=frames)
 
-# TREAD CONVEYOR: per Spin loop the tread advances one DRIVE-WHEEL surface distance (circumference x turns),
-# in the direction opposite the roll — with +degrees = forward for a +X nose, the visible bottom run slides -X,
-# exactly like ground contact demands. Linear 0 -> -advance; the loop restart snaps one tread-period forward.
-if track_bones and clusters:
+# TREAD CONVEYOR v2: bottom run slides opposite the roll, top run WITH it, both by one drive-wheel surface
+# distance per loop (the wrap arcs need no keys — they're skinned to the rotating sprocket/idler bones). Use
+# small Spin degrees (~one sprocket tooth, 30°) so the advance ≈ one link pitch and the loop snap is invisible.
+if track_infos and clusters:
     _drive_d = max(cl["m"] for cl in clusters)                     # largest wheel = drive sprocket diameter
     _advance = math.pi * _drive_d * (abs(degrees) / 360.0)
-    _tread_dir = Vector((-1.0, 0.0, 0.0)) if degrees >= 0 else Vector((1.0, 0.0, 0.0))
-    for bname in track_bones:
-        pb = arm.pose.bones[bname]
-        db = arm.data.bones[bname]
-        _local = ((arm.matrix_world @ db.matrix_local).to_3x3().inverted() @ _tread_dir).normalized() * _advance
-        pb.rotation_mode = 'XYZ'
-        bpy.context.scene.frame_set(0)
-        pb.location = (0.0, 0.0, 0.0)
-        pb.keyframe_insert("location", frame=0)
-        bpy.context.scene.frame_set(frames)
-        pb.location = _local
-        pb.keyframe_insert("location", frame=frames)
-    print("VEHICLE tread conveyor: %d track bone(s) advance %.3f/loop (drive wheel d=%.2f) opposite the roll"
-          % (len(track_bones), _advance, _drive_d))
+    _sgn = -1.0 if degrees >= 0 else 1.0                           # bottom runs opposite the nose-ward roll
+    for _tn, _botb, _topb, _fcl, _rcl, _tc in track_infos:
+        for _bname, _dsgn in ((_botb, _sgn), (_topb, -_sgn)):
+            pb = arm.pose.bones[_bname]
+            db = arm.data.bones[_bname]
+            _local = ((arm.matrix_world @ db.matrix_local).to_3x3().inverted() @ Vector((_dsgn, 0.0, 0.0))).normalized() * _advance
+            pb.rotation_mode = 'XYZ'
+            bpy.context.scene.frame_set(0)
+            pb.location = (0.0, 0.0, 0.0)
+            pb.keyframe_insert("location", frame=0)
+            bpy.context.scene.frame_set(frames)
+            pb.location = _local
+            pb.keyframe_insert("location", frame=frames)
+    print("VEHICLE tread conveyor v2: %d tread(s), bot/top advance %.3f/loop (drive d=%.2f), wrap arcs ride the wheels"
+          % (len(track_infos), _advance, _drive_d))
 # Blender 5.x REMOVED Action.fcurves (slotted/layered actions): curves live under layers->strips->channelbags.
 try:
     _fcs = list(act.fcurves)
