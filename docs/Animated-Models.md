@@ -68,8 +68,10 @@ combined mesh is split into loose parts; roles auto-guessed from names) → mark
 real game-rips (the Ehrhardt probes into 3,350 shards):
 
 - **Review UI** — click a row to zoom + yellow-highlight that part in the turntable; **↑/↓** walk the list;
-  **W/T/B/I** mark Wheel/Turret/Body/Ignore, **D** = Default (undecided), **E** = Edgecase ("not sure, revisit
-  later" — rigs static like Body and stays visible in the undecided filter). Four hide sliders (min verts, min
+  **W/T/B/I** mark Wheel/Turret/Body/Ignore, **C** = Caterpillar (tread loop — see the treadize section below),
+  **G** = Gun (one bone for the barrel assembly, rides the Turret when there is one), **D** = Default
+  (undecided), **E** = Edgecase ("not sure, revisit later" — rigs static like Body and stays visible in the
+  undecided filter). Four hide sliders (min verts, min
   size, height-below, height-above — the height pair brackets a horizontal slab: turret-only or chassis-only
   views) plus a **Show only** classification filter with auto-advance (marking a part out of the active filter
   steps straight to the next row).
@@ -105,6 +107,41 @@ honest trade: the fast path **inherits the artist's weighting, good and sloppy**
 artist weighted the front steering knuckles to the wheel bones, so they visibly rotate with the wheel ("bumping"
 axle). When that matters, toggle the fast path off: the shard flow lets you decide every part's fate, which is
 why the shipped ArmouredCar runs the shard-path rig.
+
+#### Caterpillar tracks — treadize (path-instanced rigid links, 2026-07-26)
+
+Tanks and halftracks add a part no wheel bone can carry: the **tread loop**. Mark it **C (Caterpillar)** in the
+review (the gun barrel gets **G (Gun)** — one bone, parented to `Turret` when there is one, else `Root`;
+casemate guns like the Jagdpanzer hang off Root). Vehicleize then builds the tread the way the industry's
+"curve/path-based instancing" recipe does, translated to bakeable skeletal form:
+
+1. **Link pitch is measured from the mesh** — circular autocorrelation of the cleat x-positions along the
+   bottom run finds the physical link length (Jagdpanzer: 0.498) and its strong sub-grids.
+2. **Long tread edges are subdivided** (shape-preserving midpoint cuts) so the low-poly band can articulate.
+3. **The loop path is constructed analytically** — the classic *belt around pulleys*: the wheel centers plus
+   the tread-band radius measured at each wrap wheel (sprocket, idler, ramp-end road wheels, return rollers)
+   joined by external tangents and wrap arcs. Exact straights, exact arcs, immune to concave loops — every
+   approximation tried first (θ-around-centroid, radius smoothing) failed on the raised idler's concavity.
+4. **The loop is cut into HALF-LINK cells** along the path, at the cut phase crossed by the fewest mesh edges
+   (so hinges land in the cleat gaps, not through cleats). **Every cell gets its own bone** — no skin blending
+   anywhere; each molded link piece is 100 % one bone and moves rigidly.
+5. **Every link bone is keyed riding the path** (location + rotation per frame). Advance = two cells = **one
+   full link per loop**, so the loop restart maps link-onto-link (invisible) and the tread surface speed
+   roughly matches the sprocket's — no visible tooth slip.
+
+**Why rigid links:** a continuous-band skinning (blended carrier bones) was driven through eleven refinement
+rounds — measured tears fell 0.43 → 0.03 — and *still* read as a loose rubber hose, because molded links
+visibly bending IS what the eye calls slack. Real tracks (and the vanilla pair/impair treads) are rigid links
+articulating at pins; only instancing reproduces that.
+
+**Bake requirements:** `Keep bone translations` **✓** (the links are translation curves — without it the tread
+freezes), Convert rig ON, Fix 100× OFF, Auto-ground ON, Idle `Spin[0..0]`, Movement `Spin[1..15]`. The wheels
+keep the user's spin degrees (pick one matching the sprocket's spoke symmetry — 60° for a six-spoke — so the
+wheel restart is invisible too). Bone budget: half-link cells put the Jagdpanzer at ~156 bones; a further
+halving would break Amplitude's 256-bone cap.
+
+**Status:** preview-verified through headless renders + a per-link displacement probe (all 54 links move
+identically — zero outliers); the TankDestroyers bake and in-game check are the next step.
 
 **By hand** — the recipe the tool automates (still worth knowing when a model needs judgment):
 

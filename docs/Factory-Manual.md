@@ -208,7 +208,9 @@ and bone pickers read it directly).
 > **Only a STATIC vehicle model (no rig at all)?** `Tools ▸ HAF ▸ Vehicle Lab` builds the rigged Spin GLB for you —
 > probe the parts, mark wheels & turret (keyboard review, recipes, a Verify report), press **Vehicleize**, and the
 > output feeds this exact workflow. Full guide: [Animated-Models.md](Animated-Models.md) → *"Authoring the spin
-> rig"*. Verified in-game: the shipped ArmouredCar runs a Lab-generated rig.
+> rig"*. Verified in-game: the shipped ArmouredCar runs a Lab-generated rig. **Tanks:** mark the tread loop
+> **C (Caterpillar)** and the barrel **G (Gun)** — the Lab instances the track as rigid links riding a measured
+> belt path (see *"Caterpillar tracks — treadize"* there; bake with **Keep bone translations ✓**).
 
 1. **In the Factory: Pawn description** — choose a donor with **no animated sub-parts** and a full idle/move set (a land
    vehicle is ideal; an attack-helicopter donor forces its rotor onto your model). Resource name.

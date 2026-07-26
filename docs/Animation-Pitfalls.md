@@ -183,6 +183,33 @@ own aim math rotates it — no per-frame trig.
 - **Yaw for a turret, PITCH for a barrel — same feature.** The axis that's "wrong" (tilts) for a turret is exactly
   what a mechanized howitzer / artillery barrel needs to ELEVATE at range. One knob, two unit types.
 
+## Caterpillar treads — the loose-track saga (2026-07-26)
+
+Making the Jagdpanzer's tread move took seventeen rig revisions; these are the lessons that survived, so nobody
+walks the dead ends again (the working system is documented in Animated-Models.md → treadize):
+
+- **Continuous-band skinning cannot look tight.** Blended carrier bones (wheel wraps + sliding runs) were
+  refined until measured edge-tears fell 0.43 → 0.03 — and the user still called it loose, correctly: molded
+  links visibly *bending* is what the eye reads as slack, no matter how small the numbers get. Rigid
+  per-link instancing was the only cure. Corollary: metrics saturate — thin side-faces flip 180° for any
+  seam mismatch bigger than the tread's thickness, so past a point only *renders* tell the truth.
+- **Diagnose with tools, not eyes.** Three tiny headless scripts broke every impasse: a **tear finder** (edge
+  length change between frames, ranked, with each endpoint's bone weights — names the exact seam), a **fold
+  finder** (dihedral-angle change — catches what tears can't), and a **per-link displacement probe** (every
+  link should move the same distance; outliers = parameterization bugs). Plus Workbench renders from the
+  user's own camera angle *before* asking them to look.
+- **θ-around-a-centroid is not a loop parameter.** Any concavity (a raised idler's rear ramp) makes a radial
+  ray cross the band twice — two distant path sections merge, links teleport. The **belt-around-pulleys**
+  construction (wheel centers + measured band radii, external tangents + wrap arcs) is exact, and all the
+  inputs are measurable from the mesh.
+- **Wheels and tread want different quanta.** Spoke symmetry pins the wheel spin (60° for six spokes); the
+  tread restart pins the advance (integer links per loop). Decouple them — the tread system rides its own
+  bones; never let tread geometry borrow the visible wheel bones (their rim radius isn't the band radius:
+  rim-based rotation ran wraps 20–60 % fast).
+- **Fades must be flow-aware.** A positional fade lets the animation carry a still-weighted vert PAST its
+  exit tangent (tread drooping below the ground line at the road wheel). Exits hand off one advance-length
+  upstream; entries don't care. (Moot under rigid links, still true for any blended carrier setup.)
+
 ## What the legacy howitzer really was (calibrate your expectations)
 
 The "old functionality" everyone remembers was **one clip + two runtime tricks**: hold the full deploy clip at

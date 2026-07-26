@@ -106,6 +106,15 @@ runtime-hot-loaded skin or tint ([Capabilities.md](docs/Capabilities.md)) — al
   finally rendered (multi-segment recoil windows with per-segment speed steps: `442..530,305..441/2`). En route,
   a decade-class root cause fell: a sentinel value placed a helper bone at 10⁹ units, collapsing bone chains via
   float32 cancellation — the origin of every NaN import warning this pipeline ever produced.
+- **Moving caterpillar tracks — path-instanced rigid links (treadize, 2026-07-26).** Mark a tank's tread loop
+  **C (Caterpillar)** (+ barrel **G**) in the Vehicle Lab and it becomes a real rolling track: the link pitch is
+  measured off the cleats (autocorrelation), the loop path is built as the classic *belt around pulleys* from the
+  wheel centers + measured band radii, the mesh is cut into **half-link cells at the cleat gaps — one bone each,
+  no skin blending** — and every link rides the path with advance = exactly one link per loop (invisible restart,
+  tread ≈ sprocket surface speed). Seventeen revisions of blended-skin approaches lost to the eye's verdict —
+  "molded links bending = slack" — before rigid instancing won; the full post-mortem lives in
+  [Animation-Pitfalls](docs/Animation-Pitfalls.md). Preview-verified (renders + a per-link displacement probe);
+  in-game bake next.
 - **A turret that AIMS at the target (turretize, 2026-07-24).** The armored car's turret now yaws to track the
   enemy — by hijacking the game's OWN aim: the engine streams a heading angle into a `PawnEntry.BoneRotation` slot
   that lands on an invalid bone index for injected models, so we retarget that slot to the turret bone and the
