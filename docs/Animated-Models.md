@@ -32,6 +32,12 @@ Models animated by **moving separate parts** (nodes) rather than a skinned skele
 legs, landing gear, a crane, turrets. Very common for Sketchfab vehicles.
 
 - **Examples shipped:** the TowedGunHowitzers — folds for travel, deploys when it stops, recoils when it bombards.
+  And since 2026-07-26, the **T-62** — a full tracked vehicle (spinning wheels, crawling track links) straight
+  from a Sketchfab object-baked drive animation, zero rigging: `deploy_convert` now enforces the decoded engine
+  contract end-to-end (bind == frame 0, delta-form clips, unit normalization + recentering, root-motion
+  anchoring for sources that drive across their scene, bone slimming, the 128-bone-index budget). A source with
+  BAKED animation is now the *cheapest* kind of vehicle to bring in — full recipe + every law learned the hard
+  way in `Animation-Pitfalls.md` ▸ "The engine contract".
 - **What you do (2026-07-19, fully recipe-driven):** point the entry's Model file at the **raw original** and tick
   **"Deploy conversion (rigid-parts source)"** in the Animation Lab. The bake then runs the converter automatically
   (cached; re-runs only when a knob, the source, or the tool changed) and generates **ready-made state clips** —

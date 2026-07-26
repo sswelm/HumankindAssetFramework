@@ -263,3 +263,60 @@ equivalent that ends up matching it, entirely in data:
 | Pre-movement | `deploy[179..0/12]` (or empty) | fast fold (empty = legacy instant snap) |
 | After-movement | `deploy[0..179/3]` | the unfold |
 | Attack | `deploy[180..250]` | the source's own recoil kick |
+
+## The engine contract — decoded from the live engine (2026-07-26, the T-62 marathon)
+
+One evening, one Sketchfab T-62 with object-baked animation, and seven consecutive in-game failure modes —
+each one a real engine constraint nobody had written down. The instruments that ended the guessing are now
+permanent plugin residents: **`[AnimDiag]`** (one-shot per entry: the engine's live per-bone GPUAnimationEntry
+records — FrameCount/Format/StartPoseData/BBox — plus the engine's OWN `GetPoseTRS` decode at frame 0 and
+mid-clip, plus the skeleton rest TRS) and **`[PawnLive]`** (throttled: the pawn entry AS THE GAME LEAVES IT —
+pose slot ids/weights/times, BoneRotation records). Read both from BepInEx `LogOutput.log`; read the editor
+side from Unity's `Editor.log` instead of squinting at the console.
+
+**The contract itself.** Amplitude's clip encoder normalizes every clip against the skeleton's BIND rest and
+**discards any constant frame-0 offset**. Every working unit shows the same shape in `[AnimDiag]`: skeleton
+rest carries the full pose, clips decode to ~identity deltas at frame 0. Therefore **BIND must equal animation
+frame 0** — a model whose bind differs from f0 renders its bind, forever, no matter what plays. The m114
+satisfied this *by accident* (raw local verts + node transforms carried each part's rotation into the
+bindposes); the clean-unit rework broke it, and the fix is structural, in `deploy_convert`: verts folded to
+their full frame-0 world state, translation-only axis-aligned bones (safe through Blender→FBX bone-axis
+conversion), pose-scale fcurves stripped (a cm-source's constant 0.01 lands in pose scale keys the engine
+mishandles — the AW101 missing-fuselage class), and every bone's keys **delta-form rebased**
+(`basis_f' = basis_f @ basis_0⁻¹`, hemisphere-continuous — identity at f0 by construction).
+
+**The 128-bone-index GPU wall.** Per-vertex bone indices break past **127** — not 256. Bones 128+ render
+collapsed/invisible (the T-62's turret and wheels, bones 128–140, vanished while links 1–120 animated). This
+retroactively closes two cold cases: the Jagdpanzer's 241-bone spike ceiling and the mech's broken wings at
+222 bones. `deploy_convert` clamps to 126 total by **pair-merging instanced link chains** (a dropped link
+binds to its numeric neighbor's bone and rides it rigidly). Merges MUST be spread evenly across all chains —
+clustered merges put every rider on one half of one track and that half fails together in-game; distributed,
+each rider only mis-swings during its own brief wrap transit (~2 links visible at cinematic zoom, invisible at
+gameplay zoom).
+
+**Three smaller laws from the same night.**
+- *1-frame stances wrap the sampler:* Unity's constant-curve dedupe collapses two identical padded frames back
+  to FrameCount 1, and the engine's `Clamp(f, 0, FrameCount-2)` returns −1 → uint-wraps → a constant garbage
+  pose-pool read (a STABLE wrong pose, not flicker — it looks like a broken bind). The slicer now nudges the
+  pad frame by ~0.03° on one bone so the second frame survives import.
+- *The ×100 translation amplify is legacy-only:* the FBX exporter's `global_scale` never scales ANIMATION
+  curves, so on clean-unit exports the amplify made link crawls bake with ~300-unit bboxes (links crawling 300
+  units off-map). Clean-unit sources skip it; raw-legacy sources still need it.
+- *Per-role translation floors:* the move role keeps only LARGE slides (track links crawl ~6 u) and drops
+  small ones (suspension bob 0.02–0.04 u — the source rode bumpy terrain; replayed on flat game ground the
+  wheels wiggle in the air). The attack role keeps its historic 1e-4 floor (the m114's recoil slide is ~0.1 u
+  raw). The two populations sit two orders of magnitude apart; the 0.5 floor splits them with margin.
+
+**The from-source tracked-vehicle recipe** (what all of the above buys): any model whose animation is baked as
+rigid-part object motion — no armature needed — becomes a fully animated vehicle with NO rigging work:
+Deploy conversion ✓ + frame range, Idle/reference = full clip, Idle stance = `clip[0..0]`, Movement = full
+clip (slice later for pacing), Keep bone translations ✓, Clear aim layer ✓ (artillery-family donors stream
+aim junk onto arbitrary bones), Fix 100× OFF, Convert raw rig OFF. `deploy_convert` handles unit
+normalization, recentering, root-motion anchoring (a source that drives across its scene bakes hull-relative,
+in-place), bone slimming (bones only for binding targets — 1033-node wrapper rigs collapse to ~139) and the
+128-wall budget automatically. "Has baked animation" is now a BONUS when sourcing models, not a complication.
+
+**Meta-lesson (the trap that burned three bakes):** the Factory and Animation Lab windows hold separate
+in-memory copies of shared entry state; baking from one silently reverts fields edited via the other (or via
+the registry file directly) — `keepTranslations` was lost three times this way. Until the root cause is fixed:
+after ANY field change, Reload in the window you'll bake from and eyeball the checkbox before pressing Bake.
