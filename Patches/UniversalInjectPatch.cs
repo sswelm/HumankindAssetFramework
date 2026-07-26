@@ -2238,7 +2238,21 @@ namespace ENCAccessProof
                 long axis, boneIdx;
                 try { axis = Convert.ToInt64(GetMember(br, "AxisIndex")); boneIdx = Convert.ToInt64(GetMember(br, "SkeletonBoneIndex")); } catch { continue; }
                 bool invalid = boneIdx < 0 || boneIdx >= 100000;           // the 0xFFFFFFFF sentinel (aim meant for us)
-                if (!invalid) continue;                                    // a real game bone — leave it
+                if (!invalid)
+                {
+                    // DONOR-INDEXED JUNK (user diagnosis 2026-07-26: "the engine applies extra modifiers"): a
+                    // VALID index here was computed for the DONOR skeleton (wheel-spin/aim channels on donor
+                    // wheel bones 0..33) — on OUR replaced skeleton that index lands on an arbitrary bone
+                    // (a tread link! a shuttle!) and the streamed angle continuously rotates it: the band
+                    // pushed off the wheels, the idle micro-twitch, and the phantom "bone ceiling" (rig size
+                    // shifts which bone is the victim). Unless it happens to BE our turret, zero it.
+                    if (boneIdx != e.turretBoneIdx)
+                    {
+                        float aj; try { aj = Convert.ToSingle(GetMember(br, "Angle")); } catch { continue; }
+                        if (aj != 0f) { SetMember(br, "Angle", 0f); SetMember(entry, BoneRotationNames[i], br); }
+                    }
+                    continue;
+                }
                 if (axis == 1)                                             // HEADING channel -> aim our turret
                 {
                     SetMember(br, "SkeletonBoneIndex", (uint)e.turretBoneIdx);
@@ -4677,6 +4691,44 @@ namespace ENCAccessProof
         static void Prefix(object __instance) { UniversalInject.DistrictDiag(__instance); UniversalInject.DistrictAffinitySwap(__instance); }
         // Postfix: after UpdateLevelBuild built the request/material — dumps + the registry-driven apply act here.
         static void Postfix(object __instance) { UniversalInject.DistrictDumpMaterial(__instance); UniversalInject.DistrictDumpSubMaterials(__instance); UniversalInject.DistrictApplyEntries(__instance); UniversalInject.DistrictGuidOverride(__instance); }
+    }
+
+    // SPIKE-PLAGUE DIAGNOSTIC (2026-07-26): dump, once per unique (SkeletonId, PawnDescriptorId), what every
+    // LIVE pawn actually carries — the descriptor's BonesCount/fragments as the GPU sees them at AddPawnEntry
+    // time. Three blind fixes in (pool size, fragment hide, descriptor sync) the treads still spike; this ends
+    // the guessing by reading the ground truth of the live path.
+    [HarmonyPatch]
+    internal static class Hk_PawnEntryDiag
+    {
+        static readonly System.Collections.Generic.HashSet<ulong> seen = new System.Collections.Generic.HashSet<ulong>();
+        static MethodBase TargetMethod()
+        {
+            var t = AccessTools.TypeByName("Amplitude.Mercury.Animation.PawnManager");
+            return t?.GetMethod("AddPawnEntry", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        }
+        static void Prefix(object __instance, object entry)
+        {
+            try
+            {
+                var eT = entry.GetType();
+                uint skelId = 0, descId = 0;
+                try { skelId = (uint)Convert.ToInt64(eT.GetField("SkeletonId").GetValue(entry)); } catch { }
+                try { descId = (uint)Convert.ToInt64(eT.GetField("PawnDescriptorId").GetValue(entry)); } catch { }
+                ulong key = ((ulong)skelId << 32) | descId;
+                if (!seen.Add(key)) return;
+                var pmType = __instance.GetType();
+                var descs = AccessTools.Field(pmType, "gpuPawnDescriptorEntries")?.GetValue(__instance) as Array;
+                string dInfo = "?";
+                if (descs != null && descId < descs.Length)
+                {
+                    var d = descs.GetValue((int)descId);
+                    var dT = d.GetType();
+                    dInfo = $"bones={dT.GetField("BonesCount")?.GetValue(d)} frags={dT.GetField("FragmentCount")?.GetValue(d)} start={dT.GetField("StartFragment")?.GetValue(d)}";
+                }
+                Plugin.Log.LogInfo($"[PawnDiag] skel={skelId} desc={descId} {dInfo}");
+            }
+            catch { }
+        }
     }
 
     // THE SPIKE PLAGUE (2026-07-26, first seen the day the 242-bone tank-destroyer shipped): every VISIBLE pawn
