@@ -114,6 +114,15 @@ by when they'll bite.
 
 ## Future feature seams (mapped, not built — the discovery is done, only the build remains)
 
+- **TREADIZE v2 — hybrid link/shuttle rig (user's design, 2026-07-26).** On a straight run every link moves
+  identically → ONE translating shuttle bone can carry the whole run (pattern maps at restart); per-link
+  bones only on the WRAPS + RAMPS where links genuinely rotate. Bone math: Bradley ~23/track at full
+  per-link wrap detail vs 75 today — quarter-link wrap smoothness inside half the budget. Skirted vehicles:
+  the hidden top run can be fully STATIC (zero bones). The one risk is the two run↔wrap seams (static skin
+  weights can't switch carriers) — mitigated by everything v1 learned: seams AT the tangent points, where a
+  wrap link's velocity equals the run direction, speed-matched on the exact belt path. Prereq: none — build
+  whenever tread bone budgets start pinching again (or for the twitch-ceiling escape).
+
 - **Normal-map (and ORM) atlas support (shelved 2026-07-24).** Today the bake produces a SINGLE albedo atlas and the
   runtime injection NEUTRALIZES the donor's PBR (flat albedo). To render surface detail (normals/roughness/metallic), the
   Factory would need to bake a matching **normal atlas** repacked to the combined-atlas UVs, and the injector would wire it
