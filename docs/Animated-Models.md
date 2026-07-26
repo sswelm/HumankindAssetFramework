@@ -151,8 +151,17 @@ tread bones to fit. The 256 wall is Amplitude's GPU crowd-skinning vertex format
 break past 255 — proven on the 332-bone mech) and is engine-side, not stretchable; a further cell halving is
 off the table.
 
-**Status:** preview-verified through headless renders + a per-link displacement probe (all 54 links move
-identically — zero outliers); the TankDestroyers bake and in-game check are the next step.
+**Lab dials:** *Tread speed (cells/loop)* — belt advance; *Tread detail (cells/link)* — THE BONES dial
+(4 = quarter-link ≈ 108 bones/track, 1 = one bone per molded link ≈ 27); *Static tracks* — rig the loops
+rigid to the hull (no link bones/conveyor; wheels still spin) for debugging or a cheap LOD-style rig.
+**Reduce to ~tris must be 0** for link treads — decimation merges verts across rigid cells and tears the
+band (0 genuinely means off since 2026-07-26).
+
+**Status (2026-07-26):** IN-GAME: the tread renders complete and the conveyor plays (the 211-translation-curve
+move clip verified in the shipped clip data and on the map) after the five-layer spike-plague fix chain — see
+Animation-Pitfalls → "The spike plague". OPEN: a residual idle micro-twitch triggered by the link system
+(mesh/bones/state machine all eliminated by isolation launches); current suspect split: link bones vs
+RotationTranslation playback.
 
 **By hand** — the recipe the tool automates (still worth knowing when a model needs judgment):
 

@@ -210,6 +210,42 @@ walks the dead ends again (the working system is documented in Animated-Models.m
   exit tangent (tread drooping below the ground line at the road wheel). Exits hand off one advance-length
   upstream; entries don't care. (Moot under rigid links, still true for any blended carrier setup.)
 
+## The spike plague — engine-seam debugging, a field method (2026-07-26)
+
+The first in-game launch of the 242-bone translating tread skeleton exploded into map-spanning spike ribbons,
+missing tread geometry, and twitching that touched VANILLA units. One afternoon of one-change-per-launch
+debugging found FIVE independent real defects stacked on top of each other — worth recording because any
+high-bone custom unit can hit each of them again:
+
+1. **Decimation shreds link-cell skinning** (the biggest). The animated path's "Reduce to ~tris (0 = off)"
+   silently substituted 12,000 — and a decimator eats flat, dense geometry (the subdivided tread band) first,
+   merging verts ACROSS rigid-cell boundaries. Blended weights between distant link bones = vertices torn
+   across the map as links move. For link-cell treads decimation must be OFF (0 now honestly means off).
+2. **Zero-weight bones get silently dropped** between Blender and the baked assets — the side-skirt-hidden
+   tread stretch produced empty cells whose bones vanished, shifting every bone index above them. The rig now
+   creates bones ONLY for vert-owning cells; verify with the mesh line: `bones == bindposes`, no name gaps.
+3. **A two-fragment donor draws its own skinned tread submesh** over yours, skinned by donor bone indices
+   against YOUR skeleton (garbage). `hideMeshes` handles it — but only since the hide also patches…
+4. **…the GPU pawn descriptor SNAPSHOTS** (fragments AND BonesCount) taken at RegisterPawnDefinition, BEFORE
+   the plugin's swap. Both are now patched in place (the same surgical mechanism the hand-prop append uses).
+5. **The shared per-frame animated-bone pool** (65,535 entries for ALL pawns on screen) overflows once
+   high-bone customs multiply — overflowing pawns read other pawns' matrices (vanilla units spiking!).
+   `SkeletonBoneBudget` (plugin config) now sizes it (default 262,144).
+
+**The method that actually worked** — in order of leverage:
+- **Read the artifacts, not the preview** (Law 4's corollary): grep the baked assets. EncodingFormat census
+  of the clips, FrameCount calibrated against a known clip, bone-NAME gap scans of the skeleton, the SKMESH
+  console line (`verts/bones/bindposes/maxBoneIdxUsed`). Every defect above was visible in artifacts.
+- **One change per launch**, and verify the change actually landed (a slider that lies, a session that
+  predates the registry write, a Factory field that went stale — three launches were wasted on phantoms).
+- **Instrument the live path** when artifacts look clean: the `[PawnDiag]` dump (per-pawn descriptor
+  bones/fragments at AddPawnEntry) ended a three-fix guessing streak in one launch.
+- **Isolate with a static bake on a spare unit** (the statue test): the same GLB baked static renders
+  perfectly → everything mesh-side exonerated in one launch. Cheap, decisive, should have been first.
+- **Keep an elimination board.** By session's end: mesh ✓, bone count ✓ (84 still twitched), state machine ✓
+  (transition log steady), tread-system-off ✓ (twitch stops). OPEN: idle micro-twitch triggered by the link
+  system; next split = links with translations stripped (bones vs RotationTranslation playback).
+
 ## What the legacy howitzer really was (calibrate your expectations)
 
 The "old functionality" everyone remembers was **one clip + two runtime tricks**: hold the full deploy clip at
