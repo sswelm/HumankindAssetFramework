@@ -1195,47 +1195,76 @@ namespace ENCAccessProof
                 // exactly like the hand-prop append does; a zero packed mesh-count renders nothing. This is what
                 // finally hides a two-fragment donor's separate skinned tread submesh (MediumTanks_02_tracks),
                 // which otherwise skins by donor bone indices against OUR skeleton = giant spikes.
-                if (hiddenIdx.Count > 0)
+                try
                 {
-                    try
+                    var pmType = AccessTools.TypeByName("Amplitude.Mercury.Animation.PawnManager");
+                    var pm = pmType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
+                             ?? AccessTools.Field(pmType, "Instance")?.GetValue(null);
+                    int defId = -1;
+                    try { defId = Convert.ToInt32(GetMember(addon, "PawnDefinitionId")); } catch { }
+                    if (pm != null && defId >= 0)
                     {
-                        var pmType = AccessTools.TypeByName("Amplitude.Mercury.Animation.PawnManager");
-                        var pm = pmType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
-                                 ?? AccessTools.Field(pmType, "Instance")?.GetValue(null);
-                        int defId = -1;
-                        try { defId = Convert.ToInt32(GetMember(addon, "PawnDefinitionId")); } catch { }
-                        if (pm != null && defId >= 0)
+                        var descs = AccessTools.Field(pmType, "gpuPawnDescriptorEntries")?.GetValue(pm) as Array;
+                        var gfrags = AccessTools.Field(pmType, "gpuPawnDescriptorFragmentEntries")?.GetValue(pm) as Array;
+                        var dirtyF = AccessTools.Field(pmType, "descriptorBufferDirty");
+                        if (descs != null && gfrags != null && defId < descs.Length)
                         {
-                            var descs = AccessTools.Field(pmType, "gpuPawnDescriptorEntries")?.GetValue(pm) as Array;
-                            var gfrags = AccessTools.Field(pmType, "gpuPawnDescriptorFragmentEntries")?.GetValue(pm) as Array;
-                            var dirtyF = AccessTools.Field(pmType, "descriptorBufferDirty");
-                            if (descs != null && gfrags != null && defId < descs.Length)
-                            {
-                                var dEntry = descs.GetValue(defId);
-                                var dT = dEntry.GetType();
-                                uint start = (uint)dT.GetField("StartFragment").GetValue(dEntry);
-                                uint count = (uint)dT.GetField("FragmentCount").GetValue(dEntry);
-                                var feType = gfrags.GetType().GetElementType();
-                                var encGpuF = feType.GetField("EncodedMeshAndVisualParticleCountFxMeshIndex");
-                                int patched = 0;
-                                foreach (int hi in hiddenIdx)
-                                    if (hi < count && start + hi < gfrags.Length)
-                                    {
-                                        var ge = gfrags.GetValue((int)(start + hi));
-                                        encGpuF.SetValue(ge, 0u);
-                                        gfrags.SetValue(ge, (int)(start + hi));
-                                        patched++;
-                                    }
-                                if (patched > 0)
+                            var dEntry = descs.GetValue(defId);
+                            var dT = dEntry.GetType();
+                            bool changed = false;
+                            uint start = (uint)dT.GetField("StartFragment").GetValue(dEntry);
+                            uint count = (uint)dT.GetField("FragmentCount").GetValue(dEntry);
+                            var feType = gfrags.GetType().GetElementType();
+                            var encGpuF = feType.GetField("EncodedMeshAndVisualParticleCountFxMeshIndex");
+                            int patched = 0;
+                            foreach (int hi in hiddenIdx)
+                                if (hi < count && start + hi < gfrags.Length)
                                 {
-                                    dirtyF?.SetValue(pm, true);
-                                    Plugin.Log.LogInfo($"[Uni] {e?.resourceName}: descriptor[{defId}] hide patched IN PLACE ({patched} donor fragment(s) zeroed on the GPU snapshot)");
+                                    var ge = gfrags.GetValue((int)(start + hi));
+                                    encGpuF.SetValue(ge, 0u);
+                                    gfrags.SetValue(ge, (int)(start + hi));
+                                    patched++;
                                 }
+                            if (patched > 0)
+                            {
+                                changed = true;
+                                Plugin.Log.LogInfo($"[Uni] {e?.resourceName}: descriptor[{defId}] hide patched IN PLACE ({patched} donor fragment(s) zeroed on the GPU snapshot)");
+                            }
+                            // BONES-COUNT SYNC (the tread spike plague, part 3): RegisterPawnDefinition snapshots
+                            // BonesCount from the addon's Skeleton BEFORE our skeleton swap — the descriptor still
+                            // says the DONOR's count (MediumTanks: 34). Every vert weighted to a bone past that
+                            // reads OUTSIDE the pawn's per-frame slot in the shared pool: hull/wheels/gun (low
+                            // indices) rendered fine while all 216 tread-link bones skinned garbage = the spike
+                            // sheet. Sync count + bbox from OUR skeleton.
+                            try
+                            {
+                                uint ourBones = 0;
+                                try { ourBones = Convert.ToUInt32(GetMember(skel, "BonesCount")); } catch { }
+                                var bcF = dT.GetField("BonesCount");
+                                if (ourBones > 0 && bcF != null)
+                                {
+                                    uint dBones = (uint)bcF.GetValue(dEntry);
+                                    if (dBones != ourBones)
+                                    {
+                                        bcF.SetValue(dEntry, ourBones);
+                                        var bmin = GetMember(skel, "BBoxMin"); var bmax = GetMember(skel, "BBoxMax");
+                                        if (bmin != null) dT.GetField("BBoxMin")?.SetValue(dEntry, bmin);
+                                        if (bmax != null) dT.GetField("BBoxMax")?.SetValue(dEntry, bmax);
+                                        changed = true;
+                                        Plugin.Log.LogInfo($"[Uni] {e?.resourceName}: descriptor[{defId}] BonesCount {dBones} -> {ourBones} (donor snapshot starved the skeleton; bones past #{dBones - 1} skinned garbage)");
+                                    }
+                                }
+                            }
+                            catch (Exception bex) { Plugin.Log.LogWarning("[Uni] descriptor bones sync: " + bex.Message); }
+                            if (changed)
+                            {
+                                descs.SetValue(dEntry, defId);
+                                dirtyF?.SetValue(pm, true);
                             }
                         }
                     }
-                    catch (Exception ex) { Plugin.Log.LogWarning("[Uni] descriptor hide: " + ex.Message); }
                 }
+                catch (Exception ex) { Plugin.Log.LogWarning("[Uni] descriptor sync: " + ex.Message); }
                 if (e != null) e.fragsLogged = true;   // dumped the donor fragment names once; don't spam on every load
             }
             catch (Exception ex) { Plugin.Log.LogError("[Uni] ReloadFragments: " + ex); }
