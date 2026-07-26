@@ -401,11 +401,14 @@ for o in objs:
             for _d0, _r0, _wb in (((_p - _spr_c).length, _spr_r, _sprb), ((_p - _idl_c).length, _idl_r, _idlb)):
                 if _r0 <= 0.0:
                     continue
-                if _d0 <= _r0:
+                # the tread's wrap ARC lies just OUTSIDE the wheel surface (wheel + track thickness) — it must
+                # be FULL wheel weight or the rotating wheel penetrates it (the v6 regression). Full out to
+                # 1.25 r, fade 1.25 r -> 1.7 r into the shuttle region.
+                if _d0 <= _r0 * 1.25:
                     _pairs = [(_wb, 1.0)]
                     break
-                if _d0 <= _r0 * 1.6:
-                    _t = (_d0 - _r0) / (0.6 * _r0)
+                if _d0 <= _r0 * 1.7:
+                    _t = (_d0 - _r0 * 1.25) / (0.45 * _r0)
                     _pairs = [(_wb, 1.0 - _t), (_shuttle_region(_p), _t)]
                     break
             if _pairs is None:
