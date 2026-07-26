@@ -139,11 +139,13 @@ visibly bending IS what the eye calls slack. Real tracks (and the vanilla pair/i
 articulating at pins; only instancing reproduces that.
 
 **Bake requirements:** `Keep bone translations` **✓** (the links are translation curves — without it the tread
-freezes), Convert rig ON, Fix 100× OFF, Auto-ground ON, Idle `Spin[0..0]`, Movement `Spin[1..15]`. The
-LARGEST wheel (drive sprocket) keeps the user's spin degrees (pick one matching its spoke symmetry — 60° for
-a six-spoke — so its restart is invisible); every other wheel gets **rolling-contact speed** (angular speed ∝
-1/diameter — small road wheels genuinely spin faster), snapped to the nearest multiple of its OWN spoke
-symmetry (detected per wheel by angular autocorrelation of its rim verts) so all restarts stay invisible.
+freezes), Convert rig ON, Fix 100× OFF, Auto-ground ON, Idle `Spin[0..0]`, Movement `Spin[1..15]`. Wheel
+speeds are **fully automatic** (each proven with a manual dial first, then automated): the drive sprocket
+keeps the user's spin degrees (pick one matching its spoke symmetry — 60° for a six-spoke — so its restart
+is invisible); the rear idler targets the same speed but snaps to ITS OWN spoke-symmetry grid's nearest
+point (a wheel restarting mid-pattern pops visibly — Jagdpanzer: 14-fold, 60→51.4°); road wheels and return
+rollers get **belt-continuity speed** (rim surface = the belt's advance), each snapped to its own detected
+symmetry (angular autocorrelation of rim verts). Only *Spin degrees* and *Tread speed* are exposed.
 Bone budget: quarter-link cells put the Jagdpanzer at **248 bones** — link mode deletes the unused legacy
 tread bones to fit. The 256 wall is Amplitude's GPU crowd-skinning vertex format (per-vertex bone indices
 break past 255 — proven on the 332-bone mech) and is engine-side, not stretchable; a further cell halving is
