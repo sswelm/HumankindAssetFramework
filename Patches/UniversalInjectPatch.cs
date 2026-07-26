@@ -1147,6 +1147,7 @@ namespace ENCAccessProof
                 var encField = AccessTools.Field(fragType, "EncodedMeshAndVisualParticleCount"); // 0 => fragment renders nothing
                 var load = AccessTools.Method(fragType, "Load");
                 var hides = (e?.hideMeshes ?? "").Split(',').Select(s => s.Trim()).Where(s => s.Length > 0).ToArray();
+                var hiddenIdx = new System.Collections.Generic.List<int>();
                 for (int i = 0; i < frags.Length; i++)
                 {
                     var item = frags.GetValue(i);
@@ -1162,6 +1163,7 @@ namespace ENCAccessProof
                     {
                         encField?.SetValue(item, (uint)0);   // force EncodedMeshAndVisualParticleCount = 0 => invisible
                         frags.SetValue(item, i);
+                        hiddenIdx.Add(i);
                         if (e != null && !e.fragsLogged) Plugin.Log.LogInfo($"[Uni] {e.resourceName} HID donor fragment[{i}] mesh='{fragMesh}'");
                         continue;
                     }
@@ -1185,6 +1187,54 @@ namespace ENCAccessProof
                     try { load?.Invoke(item, new object[] { skel, renderer, mcm, layer }); }
                     catch (Exception ex) { Plugin.Log.LogWarning("[Uni] frag reload: " + (ex.InnerException ?? ex).Message); }
                     frags.SetValue(item, i);
+                }
+                // DESCRIPTOR-LEVEL HIDE (the tread spike plague, part 2 — 2026-07-26): the GPU pawn descriptor
+                // SNAPSHOTS FragmentEntries at RegisterPawnDefinition, which for persistent definitions happens
+                // BEFORE this hook — zeroing the addon array alone leaves the donor fragment drawing (the old
+                // "a rotor can't be hidden this late" wall). Patch the snapshot's fragment entries in place,
+                // exactly like the hand-prop append does; a zero packed mesh-count renders nothing. This is what
+                // finally hides a two-fragment donor's separate skinned tread submesh (MediumTanks_02_tracks),
+                // which otherwise skins by donor bone indices against OUR skeleton = giant spikes.
+                if (hiddenIdx.Count > 0)
+                {
+                    try
+                    {
+                        var pmType = AccessTools.TypeByName("Amplitude.Mercury.Animation.PawnManager");
+                        var pm = pmType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
+                                 ?? AccessTools.Field(pmType, "Instance")?.GetValue(null);
+                        int defId = -1;
+                        try { defId = Convert.ToInt32(GetMember(addon, "PawnDefinitionId")); } catch { }
+                        if (pm != null && defId >= 0)
+                        {
+                            var descs = AccessTools.Field(pmType, "gpuPawnDescriptorEntries")?.GetValue(pm) as Array;
+                            var gfrags = AccessTools.Field(pmType, "gpuPawnDescriptorFragmentEntries")?.GetValue(pm) as Array;
+                            var dirtyF = AccessTools.Field(pmType, "descriptorBufferDirty");
+                            if (descs != null && gfrags != null && defId < descs.Length)
+                            {
+                                var dEntry = descs.GetValue(defId);
+                                var dT = dEntry.GetType();
+                                uint start = (uint)dT.GetField("StartFragment").GetValue(dEntry);
+                                uint count = (uint)dT.GetField("FragmentCount").GetValue(dEntry);
+                                var feType = gfrags.GetType().GetElementType();
+                                var encGpuF = feType.GetField("EncodedMeshAndVisualParticleCountFxMeshIndex");
+                                int patched = 0;
+                                foreach (int hi in hiddenIdx)
+                                    if (hi < count && start + hi < gfrags.Length)
+                                    {
+                                        var ge = gfrags.GetValue((int)(start + hi));
+                                        encGpuF.SetValue(ge, 0u);
+                                        gfrags.SetValue(ge, (int)(start + hi));
+                                        patched++;
+                                    }
+                                if (patched > 0)
+                                {
+                                    dirtyF?.SetValue(pm, true);
+                                    Plugin.Log.LogInfo($"[Uni] {e?.resourceName}: descriptor[{defId}] hide patched IN PLACE ({patched} donor fragment(s) zeroed on the GPU snapshot)");
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex) { Plugin.Log.LogWarning("[Uni] descriptor hide: " + ex.Message); }
                 }
                 if (e != null) e.fragsLogged = true;   // dumped the donor fragment names once; don't spam on every load
             }
