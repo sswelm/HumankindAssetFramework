@@ -398,8 +398,13 @@ for o in objs:
         for _v in o.data.vertices:   # transforms were applied — local == world
             _p = Vector(_v.co)
             _pairs = None
-            for _d0, _r0, _wb in (((_p - _spr_c).length, _spr_r, _sprb), ((_p - _idl_c).length, _idl_r, _idlb)):
+            for _wc, _d0, _r0, _wb in ((_spr_c, (_p - _spr_c).length, _spr_r, _sprb), (_idl_c, (_p - _idl_c).length, _idl_r, _idlb)):
                 if _r0 <= 0.0:
+                    continue
+                # tread that merely PASSES UNDER a raised wrap wheel is straight-run material, not wrap — radial
+                # capture alone grabbed it (within 1.6 r by distance) and rotated it into a tear. A wheel only
+                # carries verts at wrap height: above its lower rim minus a small margin.
+                if _p.z < _wc.z - _r0 * 1.15:
                     continue
                 # the tread's wrap ARC lies just OUTSIDE the wheel surface (wheel + track thickness) — it must
                 # be FULL wheel weight or the rotating wheel penetrates it (the v6 regression). Full out to
@@ -407,8 +412,12 @@ for o in objs:
                 if _d0 <= _r0 * 1.25:
                     _pairs = [(_wb, 1.0)]
                     break
-                if _d0 <= _r0 * 1.7:
-                    _t = (_d0 - _r0 * 1.25) / (0.45 * _r0)
+                if _d0 <= _r0 * 1.6:
+                    # WHEEL-BIASED fade (v8: penetration at the bottom wrap): a linear rotation/translation blend
+                    # takes the CHORD and dips INSIDE the wheel rim — quadratic falloff keeps blend verts hugging
+                    # the arc longer (a slight outward bulge reads fine; an inward dip through the rim does not).
+                    _t = (_d0 - _r0 * 1.25) / (0.35 * _r0)
+                    _t = _t * _t
                     _pairs = [(_wb, 1.0 - _t), (_shuttle_region(_p), _t)]
                     break
             if _pairs is None:
