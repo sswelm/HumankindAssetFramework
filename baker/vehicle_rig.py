@@ -337,7 +337,7 @@ for i, tn in enumerate(track_names):
     front_cl = max(side_cls, key=lambda cl: cl["c"].x) if side_cls else None
     rear_cl = min(side_cls, key=lambda cl: cl["c"].x) if side_cls else None
     names = []
-    for suffix in ("Bot", "Top", "RampF", "RampR"):
+    for suffix in ("Bot", "Top", "RampF", "RampR", "RampRT"):
         eb = arm_data.edit_bones.new("Track_%02d_%s_%s" % (i, side, suffix))
         eb.head = c
         eb.tail = c + Vector((0, 0, max(0.05, max(s) * 0.25)))
@@ -354,7 +354,7 @@ _tread_dirs = {}   # part -> (frontRampFlowDir, rearRampFlowDir) for degrees>0, 
 for o in objs:
     if o.name in _track_by_name:
         _tn, _tnames, _fcl, _rcl, _tc = _track_by_name[o.name]
-        _botb, _topb, _rampfb, _ramprb = _tnames
+        _botb, _topb, _rampfb, _ramprb, _ramprtb = _tnames
         for g in list(o.vertex_groups):
             o.vertex_groups.remove(g)
         # v4 (field-tuned): SIX regions with boundaries at the wheel TANGENT points, where surface velocities
@@ -371,8 +371,13 @@ for o in objs:
         # rear ramp = last road wheel -> idler (continuing the backward+up circulation)
         _fdir = ((_roadF["c"] - _fcl["c"]).normalized() if (_fcl and _roadF and _roadF is not _fcl) else Vector((-1, 0, 0)))
         _rdir = ((_rcl["c"] - _roadR["c"]).normalized() if (_rcl and _roadR and _roadR is not _rcl) else Vector((-1, 0, 0)))
-        _tread_dirs[_tn] = (_fdir, _rdir)
-        _names = {_botb, _topb, _rampfb, _ramprb, _sprb, _idlb}
+        # UPPER-REAR slope (field finding: "the track runs off at the upper back"): from the idler UP-FORWARD to
+        # the rearmost return roller — part of the TOP circulation (flows forward), not the rear ramp's backward.
+        _high_cls = [cl for cl in _side_cls if cl["c"].z > _tc.z and cl is not _fcl and cl is not _rcl]
+        _rollR = min(_high_cls, key=lambda cl: cl["c"].x) if _high_cls else None
+        _rtdir = ((_rollR["c"] - _rcl["c"]).normalized() if (_rcl and _rollR) else Vector((1, 0, 0)))
+        _tread_dirs[_tn] = (_fdir, _rdir, _rtdir)
+        _names = {_botb, _topb, _rampfb, _ramprb, _ramprtb, _sprb, _idlb}
         _vgs = {n: o.vertex_groups.new(name=n) for n in _names}
         _spr_c, _spr_r = (_fcl["c"], _fcl["m"] * 0.5 * 1.25) if _fcl else (Vector((1e9,) * 3), 0.0)
         _idl_c, _idl_r = (_rcl["c"], _rcl["m"] * 0.5 * 1.25) if _rcl else (Vector((1e9,) * 3), 0.0)
@@ -385,6 +390,8 @@ for o in objs:
                 _g = _idlb
             elif _roadF is not None and _p.x > _roadF["c"].x and _p.z > _roadF["c"].z:
                 _g = _rampfb
+            elif _roadR is not None and _p.x < _roadR["c"].x and _rcl is not None and _p.z > _rcl["c"].z:
+                _g = _ramprtb   # upper-rear slope: above the IDLER's center — flows forward with the top run
             elif _roadR is not None and _p.x < _roadR["c"].x and _p.z > _roadR["c"].z:
                 _g = _ramprb
             elif _p.z > _tc.z:
@@ -462,12 +469,13 @@ if track_infos and clusters:
     _advance = math.pi * _drive_d * (abs(degrees) / 360.0)
     _flow = 1.0 if degrees >= 0 else -1.0                          # circulation sense follows the roll direction
     for _tn, _tnames, _fcl, _rcl, _tc in track_infos:
-        _botb, _topb, _rampfb, _ramprb = _tnames
-        _fdir, _rdir = _tread_dirs.get(_tn, (Vector((-1, 0, 0)), Vector((-1, 0, 0))))
+        _botb, _topb, _rampfb, _ramprb, _ramprtb = _tnames
+        _fdir, _rdir, _rtdir = _tread_dirs.get(_tn, (Vector((-1, 0, 0)), Vector((-1, 0, 0)), Vector((1, 0, 0))))
         _moves = ((_botb, Vector((-1.0, 0.0, 0.0)) * _flow),       # bottom runs backward
                   (_topb, Vector((1.0, 0.0, 0.0)) * _flow),        # top runs forward
                   (_rampfb, _fdir * _flow),                        # front ramp: sprocket -> first road wheel
-                  (_ramprb, _rdir * _flow))                        # rear ramp: last road wheel -> idler
+                  (_ramprb, _rdir * _flow),                        # rear ramp: last road wheel -> idler
+                  (_ramprtb, _rtdir * _flow))                      # upper-rear: idler -> rearmost roller (forward)
         for _bname, _dir in _moves:
             pb = arm.pose.bones[_bname]
             db = arm.data.bones[_bname]
