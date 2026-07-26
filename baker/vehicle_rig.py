@@ -355,18 +355,25 @@ for o in objs:
         _tn, _botb, _topb, _fcl, _rcl, _tc = _track_by_name[o.name]
         for g in list(o.vertex_groups):
             o.vertex_groups.remove(g)
-        _frontb = cluster_bones[clusters.index(_fcl)] if _fcl is not None else _botb
-        _rearb = cluster_bones[clusters.index(_rcl)] if _rcl is not None else _botb
-        _vgs = {n: o.vertex_groups.new(name=n) for n in {_botb, _topb, _frontb, _rearb}}
-        _fx = _fcl["c"].x if _fcl is not None else 1e9
-        _rx = _rcl["c"].x if _rcl is not None else -1e9
+        # v3 (field finding: transitions at the first/last road wheels): EVERY side wheel is a local carrier —
+        # a vert within ~1.2 radii of a wheel rides THAT wheel's rotating bone (wrap + transitions all natural);
+        # only the remaining straight stretches shuttle (top forward, bottom backward). At ~30°/loop the
+        # arc-vs-straight error on wheel-carried verts is microscopic.
+        _side_cls = [cl for cl in clusters if (cl["c"].y >= 0) == (_tc.y >= 0)] or clusters
+        _carriers = [(cl["c"], cl["m"] * 0.5 * 1.2, cluster_bones[clusters.index(cl)]) for cl in _side_cls]
+        _names = {_botb, _topb} | {b for _c0, _r0, b in _carriers}
+        _vgs = {n: o.vertex_groups.new(name=n) for n in _names}
         _byg = {}
         for _v in o.data.vertices:   # transforms were applied — local == world
             _p = _v.co
-            if _p.x > _fx: _g = _frontb
-            elif _p.x < _rx: _g = _rearb
-            elif _p.z > _tc.z: _g = _topb
-            else: _g = _botb
+            _g = None
+            _best = 1e9
+            for _c0, _r0, _b0 in _carriers:
+                _d0 = (Vector((_p.x, _p.y, _p.z)) - _c0).length
+                if _d0 <= _r0 and _d0 < _best:
+                    _best = _d0; _g = _b0
+            if _g is None:
+                _g = _topb if _p.z > _tc.z else _botb
             _byg.setdefault(_g, []).append(_v.index)
         for _gn, _idxs in _byg.items():
             _vgs[_gn].add(_idxs, 1.0, 'REPLACE')
