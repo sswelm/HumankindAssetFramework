@@ -319,9 +319,13 @@ if gun_names:
     eb.parent = eb_turret if eb_turret is not None else eb_root
     for gn in gun_names:
         bone_of[gn] = "Gun"
-# Track bones: a tread loop rigs STATIC (no animation) but on its OWN bone, so the per-bone join keeps it a
-# SEPARATE mesh — never welded into the hull. That preserved identity is what future tread-motion mechanisms
-# (mesh flipbook / texture scroll) will target. Named by side for readability: Track_00_L / Track_01_R.
+# Track bones — TREADIZE (2026-07-26, the caterpillar payoff): each tread loop gets its OWN bone, and the Spin
+# clip gives it a CONVEYOR TRANSLATION: slide backward (opposite the roll direction) by one drive-wheel
+# circumference per loop, LINEAR. The clip loop restart IS the conveyor snap — on a periodic tread the jump
+# lands every link where its neighbor was (the vanilla tank's pair/impair shuttle trick, collapsed to one bone;
+# perfect for skirted vehicles where only the bottom run + wrap arcs show). Requires the ANIMATED bake with
+# `Keep bone translations` ON (conversion path — plays at true amplitude).
+track_bones = []
 for i, tn in enumerate(track_names):
     o = find(tn)
     c, s = world_bbox(o)
@@ -330,6 +334,7 @@ for i, tn in enumerate(track_names):
     eb.tail = c + Vector((0, 0, max(0.05, max(s) * 0.25)))
     eb.parent = eb_root
     bone_of[tn] = eb.name
+    track_bones.append(eb.name)
 bpy.ops.object.mode_set(mode='OBJECT')
 
 # rigid skinning: each part full-weight on its bone (wheels/turret/tracks) or Root (body)
@@ -387,6 +392,27 @@ for bname in cluster_bones:
     bpy.context.scene.frame_set(frames)
     pb.rotation_euler = (0, math.radians(degrees), 0)   # local Y = the axle (bone tail direction)
     pb.keyframe_insert("rotation_euler", frame=frames)
+
+# TREAD CONVEYOR: per Spin loop the tread advances one DRIVE-WHEEL surface distance (circumference x turns),
+# in the direction opposite the roll — with +degrees = forward for a +X nose, the visible bottom run slides -X,
+# exactly like ground contact demands. Linear 0 -> -advance; the loop restart snaps one tread-period forward.
+if track_bones and clusters:
+    _drive_d = max(cl["m"] for cl in clusters)                     # largest wheel = drive sprocket diameter
+    _advance = math.pi * _drive_d * (abs(degrees) / 360.0)
+    _tread_dir = Vector((-1.0, 0.0, 0.0)) if degrees >= 0 else Vector((1.0, 0.0, 0.0))
+    for bname in track_bones:
+        pb = arm.pose.bones[bname]
+        db = arm.data.bones[bname]
+        _local = ((arm.matrix_world @ db.matrix_local).to_3x3().inverted() @ _tread_dir).normalized() * _advance
+        pb.rotation_mode = 'XYZ'
+        bpy.context.scene.frame_set(0)
+        pb.location = (0.0, 0.0, 0.0)
+        pb.keyframe_insert("location", frame=0)
+        bpy.context.scene.frame_set(frames)
+        pb.location = _local
+        pb.keyframe_insert("location", frame=frames)
+    print("VEHICLE tread conveyor: %d track bone(s) advance %.3f/loop (drive wheel d=%.2f) opposite the roll"
+          % (len(track_bones), _advance, _drive_d))
 # Blender 5.x REMOVED Action.fcurves (slotted/layered actions): curves live under layers->strips->channelbags.
 try:
     _fcs = list(act.fcurves)
