@@ -1007,3 +1007,30 @@ naturally around the muzzle) and *multi-mount fire* (rotate successive fire even
   where the engine actually put the origin (ground = 7.3 vs gun = +2.6 in the field case).
 - (Internal, for hook authors: the fire path re-enters `GetBoneTRS` — any prefix that invokes it with the SAME name
   must guard reentrancy or the game stack-overflows to desktop. Guarded in `MuzzleRedirect` since 2026-07-24.)
+
+## 15. Clone, Bake lock & entry-state coherence (2026-07-27)
+
+Three workflow tools born from the T-62 marathon's aftermath — the first two user-designed:
+
+**Clone (Factory, next to Refresh).** Duplicates the loaded entry's ENTIRE recipe into a NEW, unsaved form:
+blank Resource name (an unnamed clone can't Bake or Save, so the source can never be overwritten by accident),
+blank Pawn description (Pick the new target), baked GUIDs cleared (a clone owns no assets until its own bake),
+bake lock and disabled never travel. The fast path for re-pointing a proven recipe at another unit — the first
+production use built the **Universal Tank** in minutes: load AntiTankHalftrack → Clone → name `UniversalTanks`
+→ Pick the new pawn → Bake. The Factory→Lab handoff carries the full unsaved form, so "Edit in Animation Lab"
+on a fresh clone arrives with the complete animation recipe intact (deploy conversion, clips, flags — the whole
+point of cloning). The databases side (unit stats, tech unlock, UI card/portrait, presentation definitions) is
+authored separately as usual — Clone covers the MODEL side only.
+
+**Bake lock (Lab checkbox above Bake; the Factory respects it read-only).** While ticked, Bake is disabled in
+BOTH windows ("Bake (locked)"). Use it on entries whose baked assets are in-game VERIFIED and whose recipe the
+shared tooling has moved past — the m114 sits locked until its engine-contract migration, because a rebake
+would silently reconvert under rules its choreography machinery predates (proven divergent by headless
+comparison). Unlocking is a deliberate act: untick → bake → RE-VERIFY IN-GAME. Related defense: conversions
+self-identify their contract via the armature name (`DeployArmV2`), so rig_anim gives pre-rework cached
+conversions their exact legacy export even after an unlock.
+
+**Coherence fixes.** The Lab preview now follows the entry selection (it used to keep showing the previous
+model). And the long-hunted keepTranslations self-reverting trap is dead: the field was simply missing from
+`RebaseLabOwnedOnRegistry`, so every Factory bake overwrote the Lab's tick with its stale copy — if a checkbox
+ever "unticks itself" again, check that rebase list first.
