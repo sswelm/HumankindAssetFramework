@@ -66,7 +66,11 @@ reason); (2) if a preview got poisoned, moving the intruder out is NOT enough �
 regenerate the import. The game renders baked assets, not previews: when in doubt, the in-game look is truth.
 
 **Portraits/UI images** are a different system entirely — Amplitude references them by nibble-swapped
-{a,b,c,d} GUIDs. Out of scope here.
+{a,b,c,d} GUIDs, which makes their path irrelevant. Since 2026-07-28 they ALL live in
+`Assets/Resources/Images/` (portraits of every size, tech/constructible icons, event JPGs — in-game
+verified), keeping the Resources root a pure bake-output namespace. If a card ever renders magenta, the
+sprite reference broke: recover the file WITH its original .meta (same GUID) — a fresh import gets a new
+GUID and stays `<Missing>`.
 
 ## Runtime re-skins (no bake) — the Unit Retexture window
 

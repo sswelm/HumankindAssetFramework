@@ -310,6 +310,15 @@ strategic map.
 
 ## 9. Where things land
 
+> **Resources layout (reorganized 2026-07-28, in-game verified):** the `Assets/Resources` ROOT now contains
+> EXCLUSIVELY bake outputs of registered assets (`<name>_Skeleton/_Atlas/_Clips*/_Mat/_ModelMesh/_Model` +
+> district `_DistrictMesh/_FxMesh`, prop `_Collection`/`EQ_*_Fragment`, projectile `Projectile_*`/`_TrailDrawer`).
+> ALL UI images — unit-card portraits (every size), technology/constructible icons, narrative event JPGs —
+> live in **`Assets/Resources/Images/`**. They are referenced from the databases by (nibble-swapped) GUID, so
+> the path is free; keeping them out of the bake-output namespace exists because a prefix-wildcard cleanup
+> once deleted a unit's portrait (see the Remove flow's curated cleanup + Textures.md). Retired experiment
+> files go to `Assets/FactorySource/Attic/` (on disk, not shipped) — nothing is ever just deleted.
+
 - **Baked assets (shipped):** `Assets/Resources/<name>_Skeleton.asset`, `_Atlas.asset`, `_Mat.mat`, `_ModelMesh.asset`
   (static); animated adds `_Clips.asset` and a `<name>/anim/<name>_anim.fbx`.
 - **Bake inputs (NOT shipped):** the imported model + extracted OBJ/albedo sit in `Assets/FactorySource/<name>/`, kept out
