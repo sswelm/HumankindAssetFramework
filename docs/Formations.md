@@ -19,6 +19,10 @@ repoints the unit at load. Fully reversible: delete the link and the unit is van
   jitter, the unit's `CoordinationValues.DummyOffsetPosition`). The six per-orientation `CoordinatePerDirection`
   grids + the hidden `ColumnsCountPerRow0..5` arrays drive the logical row/column grid used for facing and
   attack targeting.
+- **Packing** — the random jitter makes formations read loose. The window's **Override packing jitter** toggle
+  (registry `dummyOffset`, runtime-only) lets you tighten it: `0` sits models perfectly on the dummy grid, a small
+  value (e.g. `0.05`) packs them tightly with a touch of variation, unticked (`-1`) keeps the vanilla scatter. On
+  repoint the plugin sets the unit's `DummyOffsetPosition` to that value — no rebuild.
 
 ## User workflow (no mod rebuild)
 
@@ -104,6 +108,7 @@ to keep whatever count a unit had when it first rendered.
 - `[Formation] replaced N prefab-bound dummy slot(s) …` — the origin-stranding fix ran (expected for any formation
   once the prefab is grown past vanilla).
 - `[Formation] re-instantiated '<unit>': pawns A -> B …` — the load-race catch-up fired.
+- `[Formation] '<unit>' dummy jitter -> V (tighter packing).` — the packing override was applied.
 - **Fewer models than expected, no "Invalid pawn count" error** → the unit isn't full health, or it's a different
   definition (e.g. `_Rogue`).
 - **A stray unit icon / models far away** → pre-fix origin stranding; make sure the plugin build has the
