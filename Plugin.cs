@@ -42,6 +42,9 @@ namespace ENCAccessProof
 
         internal static ConfigEntry<string> ProjectileOverrides;  // EXPERIMENTAL projectile axis: "<pawnDefGuid>=<projectileGuid>;..." — point a unit's fired projectile at our baked ProjectileAsset (the kamikaze drone)
 
+        internal static ConfigEntry<bool>   FormationOverrideOn;  // FORMATION axis: enc_formations.json (Formation Override window) — inject custom formations + repoint units (pawn count per unit)
+        internal static ConfigEntry<bool>   FormationReinstantiateOn; // FORMATION axis: after apply, re-instantiate already-spawned units of a repointed type so they reach the new pawn count (fixes the load-race undercount)
+
         private bool show;
         private Rect winRect = new Rect(60, 60, 480, 420);
         private Vector2 scroll;
@@ -149,6 +152,23 @@ namespace ENCAccessProof
                                   "with that GUID, set its Projectile to the ProjectileAsset with that GUID (both from Projectile Lab; the pawn " +
                                   "def GUID is the Guid line of the unit in the SDK Asset Picker). Applied at AnimationLoad. Blank = off.");
 
+            // --- FORMATION override (fifth data axis; ZERO baked assets — see Patches/FormationOverridePatch.cs).
+            //     Registry-driven and inert without enc_formations.json, so it defaults ON like UniversalInject. ---
+            FormationOverrideOn = Config.Bind("Formations", "FormationOverride", true,
+                                  "Registry-driven FORMATION override (the Formation Override editor window): reads enc_formations.json, " +
+                                  "rebuilds each custom PresentationFormationDefinition at runtime (dummy positions + the six per-orientation " +
+                                  "grids), adds it to the live formation database at load, and repoints each linked unit's formation " +
+                                  "reference — changing how MANY pawn models the unit displays (pawn count = ceil(health% x dummy count)). " +
+                                  "Also grows the Formation3D dummy pool when a custom formation is bigger than the vanilla prefab allows. " +
+                                  "No baked assets, fully reversible: remove the registry entry and the game is vanilla on next launch. " +
+                                  "Inert when the registry file is absent or empty.");
+            FormationReinstantiateOn = Config.Bind("Formations", "FormationReinstantiate", true,
+                                  "After the formation override applies, re-run the game's own UpdatePawns on any already-spawned unit of a " +
+                                  "repointed type so it rebuilds its pawn grid at the new dummy count. Fixes units (e.g. the player's starting " +
+                                  "units) that spawned DURING load, before the override + Formation3D-prefab growth landed, so they were stuck at " +
+                                  "the vanilla count. Costs a one-time visible pawn 're-form' pop on those units. Turn off to keep the count units " +
+                                  "had when they first rendered.");
+
             // Patch each hook independently so a single missing Amplitude target (a game update renaming one type) only
             // disables THAT hook -- instead of a null TargetMethod throwing out of PatchAll and failing the whole plugin.
             var harmony = new Harmony(GUID);
@@ -172,6 +192,9 @@ namespace ENCAccessProof
                 typeof(Hk_PropRegister),           // EXPERIMENTAL: register our prop MeshCollections at AnimationLoad, before pawn resolution (opt-in)
                 typeof(Hk_ProjectileOverride),     // EXPERIMENTAL: re-point a unit's Projectile at our baked ProjectileAsset (kamikaze drone) at AnimationLoad (opt-in)
                 typeof(Hk_MuzzleRelocate),         // muzzleBone: redirect the muzzle-flash bone lookup (donor weapon socket missing on our renamed rig) to OUR bone (2026-07-24)
+                typeof(Hk_FormationPrefabExtend),  // FORMATION axis: grow Formation3DPrefab's dummy pool before the pool clones it, so >9-pawn custom formations fit (2026-07-27)
+                typeof(Hk_FormationInstanceExtend),// FORMATION axis: top up a live pooled Formation3D when its definition outgrows it (belt-and-braces for the prefab surgery) (2026-07-27)
+                typeof(Hk_FormationSpawnDiag),     // FORMATION axis TEMP diagnostic: log dummies/pawns/health at InstantiatePawns for >9-dummy formations (2026-07-27)
             };
             foreach (var t in hooks)
             {
@@ -204,6 +227,8 @@ namespace ENCAccessProof
             }
             if (PropRegisterOn.Value)
                 UniversalInject.TickPropRegister();     // EXPERIMENTAL props: register our MeshCollections once the AnimationManager exists
+            if (FormationOverrideOn.Value)
+                FormationOverride.Tick();               // FORMATION axis: retry inject+repoint if the databases weren't up at AnimationLoad
         }
 
         private void OnGUI()
