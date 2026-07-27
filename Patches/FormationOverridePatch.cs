@@ -66,7 +66,7 @@ namespace ENCAccessProof
         // InstantiatePawns -> re-inits the formation via the grown prefab -> the full dummy count).
         static bool appliedAny;                                            // ≥1 entry applied this session — arm re-instantiation
         static int reformScanFrame;                                        // throttle counter for the live-unit scan
-        static readonly HashSet<object> reformed = new HashSet<object>();  // units already re-formed this session (once each)
+        static readonly HashSet<object> reformed = new HashSet<object>();  // units already re-formed (or logged) this session, once each
 
         // Called from UniRegisterHook's AnimationLoad postfix — once per game session, before pawn resolution.
         internal static void OnAnimationLoad()
@@ -249,13 +249,21 @@ namespace ENCAccessProof
                 present.Add(unit);
                 if (reformed.Contains(unit)) continue;               // already handled this session
                 bool loaded = true; try { loaded = Convert.ToBoolean(Mem(unit, "IsLoaded")); } catch { }
-                if (!loaded) continue;                                // nothing rendered yet — wait
+                if (!loaded) continue;                                // nothing rendered yet — wait for the next scan
+                // Per-matching-unit log (fires as each Warriors_Default appears, incl. manually-spawned ones after load):
+                // formation name + the two counts, so we see whether the repoint took and whether a re-form is needed.
+                var fo = Mem(unit, "Formation");
+                string fn = Mem(fo, "name")?.ToString() ?? Mem(Mem(fo, "PresentationFormationDefinition"), "name")?.ToString() ?? "?";
+                object dc = Mem(fo, "DummyCount");
                 int pawns = (Mem(unit, "Pawns") as ICollection)?.Count ?? -1;
-                if (pawns >= e.dummies.Count) { reformed.Add(unit); continue; }   // already full — spawned after the override
-                reformed.Add(unit);                                  // mark BEFORE the call so a throwing unit isn't retried forever
+                reformed.Add(unit);                                  // handle/log each unit once; mark BEFORE any call so a throw isn't retried forever
+                if (pawns >= e.dummies.Count)                        // already full — spawned after the override won the race
+                { Plugin.Log.LogInfo($"[Formation] '{pdn}' already {pawns}/{e.dummies.Count} (formation='{fn}' dummyCount={dc}) — no re-form needed"); continue; }
                 bool naval = false; try { naval = Convert.ToBoolean(Mem(unit, "IsNaval")); } catch { }
                 AccessTools.Method(unit.GetType(), "UpdatePawns", new[] { typeof(bool) })?.Invoke(unit, new object[] { naval });
-                Plugin.Log.LogInfo($"[Formation] re-instantiated '{pdn}' ({pawns} -> up to {e.dummies.Count} pawns) — it had spawned before the override applied.");
+                int after = (Mem(unit, "Pawns") as ICollection)?.Count ?? -1;
+                object dc2 = Mem(Mem(unit, "Formation"), "DummyCount");
+                Plugin.Log.LogInfo($"[Formation] re-instantiated '{pdn}': pawns {pawns} -> {after} (formation='{fn}', dummyCount {dc} -> {dc2}, target {e.dummies.Count}) — spawned before the override.");
             }
             reformed.RemoveWhere(u => !present.Contains(u));         // drop gone units so a genuinely new instance is handled again
         }
@@ -484,6 +492,45 @@ namespace ENCAccessProof
                 int have = ExtendDummies(f3d, need, out int grew);
                 if (grew > 0)
                     Plugin.Log.LogInfo($"[Formation] live Formation3D instance topped up {have - grew} -> {have} dummies for '{defName}'.");
+
+                // THE >9 FIX: replace any dummy that isn't parented under THIS instance. When the prefab is grown past the
+                // vanilla 9/10, the pooled clones carry a 12-entry Dummies array whose extra entries still REFERENCE the
+                // PREFAB's dummies (a runtime-added child isn't remapped on pool-clone the way native children are). Those
+                // prefab dummies live at world origin, so the game's `Dummies[i].Transform.localPosition = def.Position`
+                // moves a prefab dummy and the instance's pawn is stranded at (~0,0,0) — the "3 warriors lost in the east"
+                // (their dummyLocal is right, but the unit's world offset is never applied because the dummy isn't a child
+                // of the unit's formation). Fix: clone a genuine instance-child dummy as a fresh child and repoint the slot.
+                // Runs as a prefix, BEFORE the positioning loop. No-op when every slot is already a real instance child.
+                var arr2 = AccessTools.Field(f3d.GetType(), "Dummies")?.GetValue(f3d) as Array;
+                if (arr2 != null && arr2.Length > 0)
+                {
+                    var elemT = arr2.GetType().GetElementType();
+                    var fT = AccessTools.Field(elemT, "Transform");
+                    var fG = AccessTools.Field(elemT, "GameObject");
+                    var formTf = f3d.transform;
+                    Component tmpl = null;                               // a real instance-child dummy to clone from
+                    for (int i = 0; i < arr2.Length; i++)
+                    {
+                        var c = arr2.GetValue(i) as Component;
+                        if (c != null && c.transform.IsChildOf(formTf)) { tmpl = c; break; }
+                    }
+                    int fixedCount = 0;
+                    if (tmpl != null)
+                        for (int i = 0; i < arr2.Length; i++)
+                        {
+                            var comp = arr2.GetValue(i) as Component;
+                            if (comp != null && comp.transform.IsChildOf(formTf)) continue;   // genuine instance child — leave it
+                            var clone = UnityEngine.Object.Instantiate(tmpl.gameObject, tmpl.transform.parent);   // fresh child under the instance
+                            clone.name = $"Dummy [HAF-inst {i}]";
+                            var cc = clone.GetComponent(elemT) as Component;
+                            fT?.SetValue(cc, cc.transform);
+                            fG?.SetValue(cc, cc.gameObject);
+                            arr2.SetValue(cc, i);                        // repoint the slot at the instance-owned dummy
+                            fixedCount++;
+                        }
+                    if (fixedCount > 0)
+                        Plugin.Log.LogInfo($"[Formation] replaced {fixedCount} prefab-bound dummy slot(s) with fresh instance children for '{defName}' (fixes pawns stranded at world origin).");
+                }
             }
             catch (Exception ex) { Plugin.Log.LogError("[Formation] instance capacity: " + ex); }
         }
