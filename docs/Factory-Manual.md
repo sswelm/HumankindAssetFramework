@@ -1008,6 +1008,10 @@ naturally around the muzzle) and *multi-mount fire* (rotate successive fire even
 - (Internal, for hook authors: the fire path re-enters `GetBoneTRS` — any prefix that invokes it with the SAME name
   must guard reentrancy or the game stack-overflows to desktop. Guarded in `MuzzleRedirect` since 2026-07-24.)
 
+> **Textures have their own field guide now** — the atlas pipeline, every texture knob (Atlas size, Keep
+> black, Material mode, reuseExtracted…), the symptom-indexed failure catalog (pale wash, silver panels,
+> white parts, vanished skins), and the runtime re-skin system: [Textures.md](Textures.md).
+
 ## 15. Clone, Bake lock & entry-state coherence (2026-07-27)
 
 Three workflow tools born from the T-62 marathon's aftermath — the first two user-designed:

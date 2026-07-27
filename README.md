@@ -39,6 +39,8 @@ in-game with a shipped example:
 **Animation, audio, and retexturing are cross-cutting features** that ride these axes: a unit model can carry its own
 baked animation ([Animated-Models.md](docs/Animated-Models.md)), engine or custom WAV movement sound, and a
 runtime-hot-loaded skin or tint ([Capabilities.md](docs/Capabilities.md)) — all from the same JSON registry, no code.
+Everything texture — the atlas pipeline, every knob, the complete failure catalog, runtime re-skins — lives in
+[**Textures.md**](docs/Textures.md).
 
 ## What works (proven in-game, in detail)
 - **HAND PROPS — a weapon on a custom skeleton (2026-07-19).** The Combine soldier **carries a textured M60**,
