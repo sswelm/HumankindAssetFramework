@@ -46,6 +46,7 @@ namespace ENCAccessProof
             public string unit = "", formation = "", lowSpec = "";
             public readonly List<Dummy> dummies = new List<Dummy>();
             public readonly int[][] columns = new int[6][];
+            public float dummyOffset = -1f;   // RUNTIME override of the unit's random per-model jitter (CoordinationValues.DummyOffsetPosition). -1 = leave vanilla; >=0 sets BOTH axes (0 = perfectly on the dummy grid, small = tightly packed). Lets a custom formation read as a clean block instead of a loose scatter, no rebuild.
             public bool done;      // this session: injected (if data) + repointed, or dropped after a permanent error
         }
 
@@ -115,6 +116,7 @@ namespace ENCAccessProof
                         unit = ((string)l["unit"] ?? "").Trim(),
                         formation = ((string)l["formation"] ?? "").Trim(),
                         lowSpec = ((string)l["lowSpec"] ?? "").Trim(),
+                        dummyOffset = (float?)l["dummyOffset"] ?? -1f,
                     };
                     foreach (var d in (l["dummies"] as JArray) ?? new JArray())
                     {
@@ -314,6 +316,21 @@ namespace ENCAccessProof
             SetFreshElementReference(unitDef, "PresentationFormationDefinition", e.formation);
             Plugin.Log.LogInfo($"[Formation] '{e.unit}' now uses formation '{e.formation}'" +
                                (e.dummies.Count > 0 ? $" ({e.dummies.Count} pawns at full health)." : "."));
+
+            // Optional: tighten the packing by overriding the unit's random per-model jitter. DummyOffsetPosition lives in
+            // the CoordinationValues STRUCT on the unit def — box it, set the field, write the box back.
+            if (e.dummyOffset >= 0f)
+            {
+                var cvField = AccessTools.Field(unitDef.GetType(), "CoordinationValues");
+                object cv = cvField?.GetValue(unitDef);
+                var offField = cv != null ? AccessTools.Field(cv.GetType(), "DummyOffsetPosition") : null;
+                if (offField != null)
+                {
+                    offField.SetValue(cv, new Vector2(e.dummyOffset, e.dummyOffset));
+                    cvField.SetValue(unitDef, cv);   // struct: write the mutated box back onto the def
+                    Plugin.Log.LogInfo($"[Formation] '{e.unit}' dummy jitter -> {e.dummyOffset} (tighter packing).");
+                }
+            }
             e.done = true;
         }
 
