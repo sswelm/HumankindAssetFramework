@@ -116,6 +116,23 @@ to keep whatever count a unit had when it first rendered.
 - **"Mismatched mods" / crash at load** → inconsistent `ColumnsCountPerRow` vs dummy coords; the Formation Override
   window validates this before it lets you save, so re-save from the window.
 
+## R.E.D.-style: the count + scale pair
+
+This axis is one half of a **R.E.D.-style** rebalance (after the classic Civ 5 *R.E.D. Modpack* by Gedemon), which
+made map armies look proportionate and immersive by adjusting two things per unit:
+
+- **Model count** — how many figures a unit fields (infantry = a squad of many; artillery = a small crew). **This is
+  the formation axis, above.**
+- **Model scale** — the relative *size* of the figures (vanilla makes them cartoonishly large — a tank can end up
+  bigger than the plane above it). **Planned as a sibling "unit-size" axis** (feasibility confirmed): each pawn's
+  `ObjectSpace.Scale` is multiplied at runtime — the same lever the plugin already uses for custom models — matched
+  per unit by `PawnDescriptorId`. No baked assets, no rebuild. GPU-free (pawns are instanced).
+
+The eventual goal is an **optional "R.E.D. Patch" pack** — a curated set of formation + size overrides that rebalances
+the whole vanilla roster (smaller, more-numerous infantry; big-but-sparse tanks; tiny planes) across all eras, opt-in
+and fully reversible. Practical counts: a hero/showcase unit can go 30–50; a whole-roster rebalance wants ~12–20 per
+unit (cost scales with *total* on-screen pawns, not per-unit), so ~18 is a good roster default.
+
 ## Files
 
 - Editor: `Assets/Scripts/Editor/FormationOverrideWindow.cs`, `FormationRegistry.cs` → `enc_formations.json`.
