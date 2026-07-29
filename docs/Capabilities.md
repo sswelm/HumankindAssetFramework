@@ -139,7 +139,11 @@ see the [Factory Manual](Factory-Manual.md).
   shaders (`tools/ShaderDump`): the animation pass writes bone scale as a literal 1.0 and the draw shader applies
   scale only to bind-pose offsets, so **no transform can ever grow geometry**. Free on the vertex budget (it edits
   geometry already loaded, no clone). Human-presentation units are excluded by design. Per unit *type*, not per
-  instance. Full detail incl. the planned era-anchored sizing: [Unit-Size.md](Unit-Size.md).
+  instance. **Era-anchored:** the effective size is `rule.scale / current game era` (read from
+  `Sandbox.Timeline.GetGlobalEraIndex()` — the game-wide era across all empires), so ancient hulls shrink into
+  perspective as ages advance; scaling is applied as a *ratio* against what a mesh already carries, so an era change
+  resizes the unit live instead of compounding. Verified: a ×4 bireme rule rendered ×0.8 in era 5.
+  Full detail: [Unit-Size.md](Unit-Size.md).
 - **Add a model = bake it.** The Factory writes the registry; the plugin picks it up on next launch.
 - **The registry can't be lost.** Atomic writes (no truncation on an interrupted save), a corrupt-file guard (an
   unparseable registry is copied aside and never overwritten), and a **git-tracked versioned backup with
