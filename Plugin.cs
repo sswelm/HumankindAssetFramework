@@ -271,6 +271,11 @@ namespace ENCAccessProof
                 if (GUILayout.Button("Play Sound Test (WAV)")) UniversalInject.PlaySoundTest();
             }
             GUILayout.Space(4);
+            // Unit resize / era ageing (live): the global era drives the Global Era Lab grid, so seeing both the era
+            // and each ruled unit's composed size here is what makes an authoring pass verifiable without the log.
+            GUILayout.Label("Unit resize — Resize Lab rules x Global Era Lab grid:");
+            foreach (var l in UniversalInject.ResizeStatusLines()) GUILayout.Label(l);
+            GUILayout.Space(4);
             GUILayout.Label("GPU mesh buffer (live) — Shift+F8 also logs it:");
             foreach (var l in UniversalInject.MeshBudgetLines()) GUILayout.Label(l);
             GUILayout.Space(4);

@@ -310,9 +310,10 @@ The plugin's own cfg (`…\community.humankind.haf.cfg`) — press **F8** in-gam
   at runtime from a `unitScales` rule, authored in the Resize Lab. Works by scaling the unit's **vertex data** in the
   live Fx buffer plus its per-pawn placement — the only thing the GPU actually honours, established by disassembling
   the game's shaders ([tools/ShaderDump](tools/ShaderDump/README.md)). Free on the vertex budget. **Verified in-game**
-  (Bireme ×2/×4, correct assembly + animation). **Era-anchored too**: the size is divided by the current game era
-  (`Sandbox.Timeline.GetGlobalEraIndex()`), so a hull that looks epic in the Ancient era is a toy beside a modern
-  cruiser — and because the engine re-scales by ratios, a unit resizes *live* when the era turns.
+  (Bireme ×2/×4, correct assembly + animation). **Units also age**: the **Global Era Lab** authors a grid of
+  (unit era × world era) modifiers, so a hull that looks epic in the Ancient era reads as a toy beside a modern
+  cruiser — and because the engine re-scales by ratios, a unit resizes *live* when the era turns. Defaults are 1.0
+  and only units with a rule are touched.
 - **Learn from others:** [Ecosystem-Survey.md](docs/Ecosystem-Survey.md) — every Humankind BepInEx plugin on GitHub, what
   problem each solves, and the techniques worth borrowing (lifecycle anchors, order-bus sequencing, save extensions, …).
 

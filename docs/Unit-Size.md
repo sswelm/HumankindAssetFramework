@@ -6,8 +6,8 @@ edit, no mod rebuild. Delete the rule and the unit is vanilla next launch.
 
 > Status: **VERIFIED IN-GAME 2026-07-29** — an Era-1 Bireme scaled ×2 (and ×4) renders correctly assembled (hull,
 > oars, mast in proportion) and **animates normally**. Authored in the **Resize Lab** (Tools ▸ HAF ▸ Resize Lab).
-> **[Era anchoring](#era-anchoring-working) works too**: the same rule shrinks the ship as ages advance, so an
-> ancient hull is a toy beside a modern cruiser.
+> **Units also age**: the **[Global Era Lab](#era-ageing--the-global-era-lab)** grid says how much smaller a unit
+> reads as later eras arrive, so an ancient hull becomes a toy beside a modern cruiser.
 
 Together with [Formations.md](Formations.md) (how *many* models a unit fields) this covers both halves of
 R.E.D.-style unit rebalancing: **count** and **scale**.
@@ -55,15 +55,21 @@ type has been drawn yet.
 
 ```json
 "unitScales": [
-  { "match": "Era1_Common_Biremes_01", "scale": 2.0, "trueSize": 0.0, "note": "" }
+  { "match": "Era1_Common_Biremes_01", "scale": 4.0, "era": 0, "trueSize": 0.0, "note": "" }
+],
+"eraGrid": [
+  { "unitEra": 1, "scales": [1, 1, 0.75, 0.5, 0.333, 0.2, 0.15], "note": "" }
 ]
 ```
+
+`eraGrid` rows are indexed by **absolute era**, so `scales[5]` is the modifier while the world is in era 5.
 
 | Field | Meaning |
 |---|---|
 | `match` | Substring of the `PresentationPawnDefinition` name, case-insensitive. |
-| `scale` | Base multiplier. All matching rules multiply together, then the result is divided by the current era — see [Era anchoring](#era-anchoring-working). |
-| `trueSize` | Reserved (real-world size in metres) for the reference-table version of era anchoring — ignored today. |
+| `scale` | The unit's size **in its own era**. All matching rules multiply together, then the [Global Era Lab](#era-ageing--the-global-era-lab) grid ages the result. |
+| `era` | The unit's own era, i.e. its row in that grid. `0` = auto-detect from the name (`Era4_…` → 4); set it for definitions with no era token. |
+| `trueSize` | Reserved (real-world size in metres) for a future reference-size layer — ignored today. |
 | `note` | Free text for your own bookkeeping. |
 
 ## How it works
@@ -140,54 +146,65 @@ decompiled C# and the rendered result disagree.
   boxes deliberately err **large** — they only drive culling, and too big is invisible while too small pops units
   out at screen edges.
 
-## Era anchoring (working)
+## Era ageing — the Global Era Lab
 
 The founding use case: **ship sizes across ages never matched** — a Man O' War beside a Battleship is absurdly
-large. A unit sized generously for its own era should shrink into perspective as later ages arrive.
+large. A unit sized generously for its own age should recede into perspective as later ages arrive.
 
-**Working today (crude proof of concept):**
-
-```
-effective scale = rule.scale / era
-```
-
-The plugin reads `Sandbox.Timeline.GetGlobalEraIndex()` by reflection (the class is `internal`) every two seconds.
-That index is the **game-wide** era — Amplitude computes it from *every* major empire's research, not the local
-player's, which is the correct anchor because unit visuals are shared by everyone on the map.
-
-> **Verified in-game 2026-07-29.** A `Era1_Common_Biremes_01 ×4` rule in a game whose global era index was 5
-> rendered the bireme at **×0.8** — a toy beside a custom Stealth Cruiser, where the same rule showed an epic
-> full-size trireme back in era 1.
->
-> ```
-> [Resize] era anchoring live — global era index 5 (divisor 5)
-> [Resize] desc 74 -> x0.8 (era 5): 2 mesh(es), 3040 vert(s) re-scaled by 0.8x + per-pawn placement x0.8
-> ```
-
-**The index base:** era index 5 was observed during normal late-game play, consistent with `0 = Neolithic,
-1 = Ancient … 6 = Contemporary` — so the index equals the era number as players count them, and dividing by it
-directly is meaningful (Neolithic is guarded to divide by 1).
-
-**Mid-game era changes resize live.** The ratio machinery described [above](#how-it-works) means a new era simply
-sets a new target and the geometry is multiplied by the difference — the ship shrinks in place within the poll
-interval, no reload, no compounding. The plugin logs it:
+**Tools ▸ HAF ▸ Global Era Lab** authors that as a **grid**: rows are the era the *unit* belongs to, columns the era
+the *world* is in, and the cell multiplies that unit's Resize Lab scale.
 
 ```
-[Resize] ERA CHANGED 4 -> 5 — rescaling by 1.25x (units shrink as ages advance)
+effective scale = rule.scale × grid[unit era][world era]
 ```
 
-*(The formula and the live resize are both implemented; the live shrink has not yet been watched during an actual
-era transition — the verification above was a session that started in era 5.)*
+Why a grid rather than one modifier per era: how much a unit should shrink depends on **both** how old it is and how
+far the world has moved. In the Contemporary age an Ancient trireme and an Industrial battleship must age very
+differently — one curve cannot say that, a grid can.
 
-### Why this is still crude, and what the real version is
+| | 2 Cla | 3 Med | 4 Ear | 5 Ind | 6 Con |
+|---|---|---|---|---|---|
+| **1 Ancient** | 0.75 | 0.5 | 0.333 | 0.2 | 0.15 |
+| **2 Classical** | — | 0.666 | 0.45 | 0.3 | 0.2 |
+| **3 Medieval** | — | — | 1 | 1 | 1 |
 
-Dividing by the era index is monotonic but arbitrary: era 1 → 2 halves a unit, while 5 → 6 barely changes it. It
-proves the anchor moves; it does not express intent. The real design is already reserved in the registry:
+*(An example authoring pass, not a shipped default.)* With the first row, a Bireme ruled ×4 renders ×4 in the
+Ancient era, ×0.8 once industry arrives and ×0.6 in the Contemporary age.
 
-1. Each rule carries the unit's **real-world size** in metres (`trueSize`).
-2. A per-era **reference size** table says how many metres "reads as normal" in each age (a 30 m trireme is a big
-   ship in the Ancient era; a 270 m battleship is normal in the Industrial one).
-3. `scale = trueSize / reference(era)` — so each era's jump is authored, not an artifact of arithmetic, and units
-   can be entered by their real dimensions instead of by trial and error.
+**Rules that shape the grid:**
 
-Everything that made step 3 hard is already built: era detection, the ratio engine, and live re-scaling.
+- **Defaults are 1.0 everywhere.** The Lab ships neutral and the runtime invents no curve — every number that
+  changes a unit's size is authored by you. An untouched grid means units simply keep their Resize Lab size.
+- **Only units with a Resize Lab rule are affected.** The grid modifies opted-in units and can never resize
+  anything else.
+- **Ageing is relative to the unit's own era**, so a unit introduced in era 5 renders exactly as authored when it
+  appears rather than being shrunk by era 5's modifier. A unit at or before its own era is always 1.0 — which is
+  why the grid is 5×5 (rows 1–5, columns 2–6): an era-6 unit has no later age, and in era 1 nothing has aged.
+- **The unit's era is read from its name** (`Era4_Common_ManOWar_01` → 4). For definitions with no era token, set
+  the **Era** column on the rule in the Resize Lab.
+
+**The era itself** comes from `Sandbox.Timeline.GetGlobalEraIndex()` (reflection — the class is `internal`), polled
+every two seconds. That is the **game-wide** era, computed from *every* major empire's research, which is the
+correct anchor because unit visuals are shared by everyone on the map. The index equals the era number players see,
+with Neolithic at 0 — confirmed in-game by observing index 5 during Industrial-era play.
+
+**Era changes re-scale live.** Thanks to the ratio engine [above](#how-it-works), a new era just sets a new target
+and the geometry is multiplied by the difference — the ship changes size in place within the poll interval, no
+reload and no compounding:
+
+```
+[Resize] ERA CHANGED 4 -> 5 — scaled units re-anchor live (an era-1 unit now renders x0.2)
+```
+
+> **Verified in-game 2026-07-29** with the crude predecessor of this system (`scale / era`, before the grid): a
+> `Era1_Common_Biremes_01 ×4` rule rendered the bireme at **×0.8** in a global-era-5 game — a toy beside a custom
+> Stealth Cruiser, where the same rule showed an epic full-size trireme in era 1. The grid replaces the arithmetic
+> with authored numbers; the mechanism it drives is the one that produced that result. Watching a *live* shrink
+> during an actual era transition is still untested.
+
+### Possible refinement: enter real dimensions
+
+The registry reserves `trueSize` (metres) per rule for a further step: a per-era **reference size** ("what reads as
+normal in this age") would let the plugin compute `scale = trueSize / reference(era)`, so units could be entered by
+their real dimensions — a 30 m trireme, a 270 m battleship — instead of by factors. The grid is the more direct
+control and works today; this would be the convenience layer on top.

@@ -289,14 +289,47 @@ namespace ENCAccessProof
                             if (!mm.Success || !ms.Success) continue;
                             var key = mm.Groups[1].Value.Trim();
                             if (key.Length == 0) continue;
+                            var mr = Regex.Match(rm.Value, "\"era\"\\s*:\\s*(-?\\d+)");   // optional: the unit's own era (0/absent = read it off the name)
+                            int ruleEra = mr.Success && int.TryParse(mr.Groups[1].Value, out int re) && re > 0 ? re : 0;
                             if (float.TryParse(ms.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float sv) && sv > 0f)
-                                unitScaleRules.Add(new KeyValuePair<string, float>(key, sv));
+                                unitScaleRules.Add(new ScaleRule { match = key, scale = sv, era = ruleEra });
                         }
                     }
                     catch (Exception ex) { Plugin.Log.LogWarning("[Resize] unitScales parse in '" + Path.GetFileName(file) + "': " + ex.Message); }
                 }
                 if (unitScaleRules.Count > 0)
-                    Plugin.Log.LogInfo($"[Resize] {unitScaleRules.Count} unit-scale rule(s): " + string.Join(", ", unitScaleRules.Select(r => $"'{r.Key}'x{r.Value:0.###}")));
+                    Plugin.Log.LogInfo($"[Resize] {unitScaleRules.Count} unit-scale rule(s): " + string.Join(", ", unitScaleRules.Select(r => $"'{r.match}'x{r.scale:0.###}" + (r.era > 0 ? $"@era{r.era}" : ""))));
+
+                // GLOBAL ERA LAB (2026-07-29, user-designed): each pack may carry an "eraGrid" — one row per UNIT
+                // era holding that unit's rescale modifier for every CURRENT era, i.e. modifier[unitEra][nowEra].
+                // A grid, not a curve, because how much a unit should shrink depends on both how old it is and how
+                // far the world has moved: in the Contemporary age an Ancient trireme and an Industrial battleship
+                // must age differently. Scope is deliberately narrow (user rule): it multiplies units that ALREADY
+                // have a scale rule and never resizes anything else. Missing cells fall back to unitEra/nowEra.
+                eraGridRows.Clear();
+                foreach (var file in files)
+                {
+                    try
+                    {
+                        var text3 = File.ReadAllText(file);
+                        var arr = Regex.Match(text3, "\"eraGrid\"\\s*:\\s*\\[(.*)\\]", RegexOptions.Singleline);
+                        if (!arr.Success) continue;
+                        foreach (Match rm in Regex.Matches(arr.Groups[1].Value, "\\{[^{}]*\"scales\"\\s*:\\s*\\[[^\\]]*\\][^{}]*\\}", RegexOptions.Singleline))
+                        {
+                            var me = Regex.Match(rm.Value, "\"unitEra\"\\s*:\\s*(\\d+)");
+                            var sa = Regex.Match(rm.Value, "\"scales\"\\s*:\\s*\\[([^\\]]*)\\]", RegexOptions.Singleline);
+                            if (!me.Success || !sa.Success || !int.TryParse(me.Groups[1].Value, out int uEra)) continue;
+                            var cells = sa.Groups[1].Value.Split(',')
+                                .Select(t => float.TryParse(t.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float cv) ? cv : 1f)
+                                .ToArray();
+                            if (cells.Length > 0) eraGridRows[uEra] = cells;   // later packs win, same as the rest of the merge
+                        }
+                    }
+                    catch (Exception ex) { Plugin.Log.LogWarning("[Resize] eraGrid parse in '" + Path.GetFileName(file) + "': " + ex.Message); }
+                }
+                if (eraGridRows.Count > 0)
+                    Plugin.Log.LogInfo("[Resize] era grid: " + string.Join(" | ", eraGridRows.OrderBy(k => k.Key)
+                        .Select(k => $"unit era {k.Key} -> [" + string.Join(",", k.Value.Select(v => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)).ToArray()) + "]")));
                 entries = built;   // publish fully built — never mutated after this point
                 // Invalidate the pawn-hook early-out caches: if pawns spawned during a transient-failure retry window
                 // they latched anyAnimated/anyFreeze against the EMPTY list — without this, a recovered retry would
@@ -721,7 +754,7 @@ namespace ENCAccessProof
         {
             registered = false;
             anyAnimated = null; anyFreeze = null;                    // recomputed on the next pawn-add
-            unitScaleByDesc.Clear(); vanillaScaledLogged.Clear(); descApplied.Clear(); cachedEra = -1;   // descriptor ids + era are session-scoped (meshApplied deliberately KEPT: the Fx vertex buffers persist)
+            unitScaleByDesc.Clear(); unitScaleNameByDesc.Clear(); vanillaScaledLogged.Clear(); descApplied.Clear(); cachedEra = -1;   // descriptor ids + era are session-scoped (meshApplied deliberately KEPT: the Fx vertex buffers persist)
             _listenerChecked = false;                                // the AudioListener rode a session-scoped camera
             var list = entries;
             if (list != null)
@@ -836,8 +869,13 @@ namespace ENCAccessProof
                 if (unitScaleRules.Count > 0)
                 {
                     float prod = 1f;
+                    int ruleEraOverride = 0;
                     for (int ri = 0; ri < unitScaleRules.Count; ri++)
-                        if (name.IndexOf(unitScaleRules[ri].Key, StringComparison.OrdinalIgnoreCase) >= 0) prod *= unitScaleRules[ri].Value;
+                        if (name.IndexOf(unitScaleRules[ri].match, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            prod *= unitScaleRules[ri].scale;
+                            if (unitScaleRules[ri].era > 0) ruleEraOverride = unitScaleRules[ri].era;   // last explicit wins
+                        }
                     if (Math.Abs(prod - 1f) > 1e-4f)
                     {
                         // HUMAN-PRESENTATION EXCLUSION (user rule: "prevents disappointments"): scaled humans read
@@ -860,8 +898,17 @@ namespace ENCAccessProof
                             try { sdefId = Convert.ToInt32(GetMember(addon, "PawnDefinitionId")); } catch { }
                             if (sdefId >= 0)
                             {
-                                unitScaleByDesc[sdefId] = prod;
-                                if (unitScaleLogged.Add(name)) Plugin.Log.LogInfo($"[Resize] '{name}' -> desc {sdefId} scale x{prod:0.###} (profile {prof})");
+                                // THE UNIT'S OWN ERA (user: "the unit needs to register its era as well"): era
+                                // the grid ages a unit FROM ITS OWN ERA, so we need that era. Amplitude names its
+                                // definitions "Era4_Common_ManOWar_01", so it reads straight off the name; a rule
+                                // may override it for definitions that carry no era token (custom/modded units).
+                                int homeEra = 1;
+                                var em = Regex.Match(name, "Era(\\d+)", RegexOptions.IgnoreCase);
+                                if (em.Success && int.TryParse(em.Groups[1].Value, out int he) && he >= 0) homeEra = he;
+                                if (ruleEraOverride > 0) homeEra = ruleEraOverride;
+                                unitScaleByDesc[sdefId] = new UnitScaleInfo { scale = prod, homeEra = homeEra, domain = DomainFromProfile(prof) };
+                                unitScaleNameByDesc[sdefId] = name;
+                                if (unitScaleLogged.Add(name)) Plugin.Log.LogInfo($"[Resize] '{name}' -> desc {sdefId} scale x{prod:0.###} (profile {prof}, own era {homeEra}{(ruleEraOverride > 0 ? " from rule" : " from name")})");
                             }
                         }
                     }
@@ -1868,8 +1915,12 @@ namespace ENCAccessProof
 
         // RESIZE LAB (2026-07-28): pattern rules from the packs' "unitScales" arrays + the per-session
         // resolution to descriptor ids (session-scoped — descriptor indices change per load).
-        static readonly List<KeyValuePair<string, float>> unitScaleRules = new List<KeyValuePair<string, float>>();
-        static readonly Dictionary<int, float> unitScaleByDesc = new Dictionary<int, float>();
+        struct ScaleRule { public string match; public float scale; public int era; }            // era 0 = derive from the unit's name
+        static readonly List<ScaleRule> unitScaleRules = new List<ScaleRule>();
+        struct UnitScaleInfo { public float scale; public int homeEra; public int domain; }   // rule product, the unit's own era, and its domain (UnitSpawnType) for the frontier lookup
+        static readonly Dictionary<int, UnitScaleInfo> unitScaleByDesc = new Dictionary<int, UnitScaleInfo>();
+        static readonly Dictionary<int, string> unitScaleNameByDesc = new Dictionary<int, string>();   // F8 readout only
+        static readonly Dictionary<int, float[]> eraGridRows = new Dictionary<int, float[]>();  // Global Era Lab: unit era -> modifier per CURRENT era
         static HashSet<string> unitScaleLogged;
         static readonly HashSet<int> vanillaScaledLogged = new HashSet<int>();
 
@@ -1913,13 +1964,32 @@ namespace ENCAccessProof
         static readonly Dictionary<long, MeshScale> meshApplied = new Dictionary<long, MeshScale>();   // (layer<<32)|meshIndex
         static readonly Dictionary<int, float> descApplied = new Dictionary<int, float>();             // descriptor -> current target (session-scoped)
 
-        // ── ERA ANCHORING (2026-07-29, crude PoC per user request): effective = rule.scale / era ────────────────
-        // Sandbox.Timeline.GetGlobalEraIndex() is the GAME-WIDE era (computed from every major empire's research —
-        // the right anchor for a shared presentation, vs. one empire's own era). Internal class, so reflection.
-        // Polled rather than event-hooked: the index is derived, not a notification, and a few seconds of lag on an
-        // era change is invisible. When it moves, the per-frame pawn path picks up the new target and the ratio
-        // machinery above re-scales the geometry live — the ship shrinks in place, no reload.
-        static int cachedEra = -1;
+        // ── THE WORLD'S ERA (2026-07-29) ─────────────────────────────────────────────────────────────────────────
+        // We want "how advanced is the world", and the obvious API is the wrong one: Timeline.GetGlobalEraIndex()
+        // is a THRESHOLD computation over the SUM of all empires' researched techs, so it lags the frontier — a
+        // late game showed index 5 (Industrial) while empires were already fielding era-6 ships, which made an
+        // ancient hull look wrongly large next to them (user: "this is the end turn ... feels wrong").
+        //
+        // So the anchor is the MAX era across all major empires: DepartmentOfScience.GetTechnologicalEra() (which
+        // applies that empire's TechnologicalEraOffset and clamps), falling back to the public
+        // CurrentTechnologicalEraIndex field, and finally to the aggregate Timeline index if the empire walk fails
+        // (e.g. before the sandbox exists). Reflection throughout: Sandbox, MajorEmpire and DepartmentOfScience are
+        // all internal.
+        //
+        // Polled rather than event-hooked: the era is derived state, not a notification, and a couple of seconds of
+        // lag is invisible. When it moves, the per-frame pawn path picks up the new target and the ratio machinery
+        // re-scales the geometry live — the ship changes size in place, no reload.
+        // THE ANCHOR IS WHAT HAS BEEN BUILT, PER DOMAIN (user, after two false starts): Humankind advances eras by
+        // FAME, not research, so an empire can sit in the last era with no era-6 units to show — and the aggregate
+        // Timeline index lags the frontier the other way (a late game read 5 while era-6 ships were sailing). Both
+        // make an ancient hull the wrong size next to what is actually on the map. So: walk the live units, read each
+        // one's era straight off its definition NAME (user: "it always contains an era"), and take the MAX PER DOMAIN
+        // — the moment an era-6 battleship exists, ships are measured against era 6, while land units are unaffected.
+        // Comparing like with like is the whole point: a trireme should look small beside a battleship, not beside a
+        // tank. Falls back to the overall unit frontier, then to the empires' tech era, then to the Timeline index.
+        static int cachedEra = -1;                        // the world era for display / land default
+        static readonly int[] domainEra = new int[4];     // 0 Land, 1 Maritime, 2 Air, 3 Missile — max era BUILT
+        static int techEra = -1, aggregateEra = -1;       // research-based fallbacks, also shown for comparison
         static float lastEraPoll = -999f;
         static bool eraApiLogged;
 
@@ -1931,27 +2001,146 @@ namespace ENCAccessProof
             try
             {
                 var sbType = AccessTools.TypeByName("Amplitude.Mercury.Sandbox.Sandbox");
+                int count = 0;
+                try { count = Convert.ToInt32(AccessTools.Field(sbType, "NumberOfMajorEmpires")?.GetValue(null) ?? 0); } catch { }
+                var empires = AccessTools.Field(sbType, "MajorEmpires")?.GetValue(null) as Array;
+
+                for (int d = 0; d < domainEra.Length; d++) domainEra[d] = -1;
+                techEra = -1;
+
+                if (empires != null)
+                    for (int i = 0; i < count && i < empires.Length; i++)
+                    {
+                        var emp = empires.GetValue(i);
+
+                        // what this empire has BUILT (armies at sea/on land + air squadrons)
+                        foreach (var collName in new[] { "Armies", "Squadrons" })
+                        {
+                            var groups = GetMember(emp, collName) as System.Collections.IEnumerable;
+                            if (groups == null) continue;
+                            foreach (var group in groups)
+                            {
+                                var units = GetMember(group, "Units") as System.Collections.IEnumerable;
+                                if (units == null) continue;
+                                foreach (var unit in units)
+                                {
+                                    var def = GetMember(unit, "UnitDefinition");
+                                    if (def == null) continue;
+                                    int uEra = EraFromName(GetMember(def, "Name")?.ToString());
+                                    if (uEra < 0) continue;
+                                    int dom = 0;
+                                    try { dom = Convert.ToInt32(GetMember(def, "SpawnType")); } catch { }
+                                    if (dom >= 0 && dom < domainEra.Length && uEra > domainEra[dom]) domainEra[dom] = uEra;
+                                    if (uEra > era) era = uEra;
+                                }
+                            }
+                        }
+
+                        // research-based fallback: the most advanced empire's technological era
+                        var dos = GetMember(emp, "DepartmentOfScience");
+                        if (dos == null) continue;
+                        try
+                        {
+                            var m = AccessTools.Method(dos.GetType(), "GetTechnologicalEra");
+                            int t = m != null ? Convert.ToInt32(m.Invoke(dos, null))
+                                              : Convert.ToInt32(GetMember(dos, "CurrentTechnologicalEraIndex") ?? -1);
+                            if (t > techEra) techEra = t;
+                        }
+                        catch { }
+                    }
+
                 var timeline = AccessTools.Field(sbType, "Timeline")?.GetValue(null);
                 if (timeline != null)
-                    era = Convert.ToInt32(AccessTools.Method(timeline.GetType(), "GetGlobalEraIndex")?.Invoke(timeline, null) ?? -1);
+                    aggregateEra = Convert.ToInt32(AccessTools.Method(timeline.GetType(), "GetGlobalEraIndex")?.Invoke(timeline, null) ?? -1);
+                if (era < 0) era = techEra;
+                if (era < 0) era = aggregateEra;
             }
             catch (Exception ex) { if (!eraApiLogged) { eraApiLogged = true; Plugin.Log.LogWarning("[Resize] era read failed: " + ex.Message); } }
-            if (!eraApiLogged && era >= 0) { eraApiLogged = true; Plugin.Log.LogInfo($"[Resize] era anchoring live — global era index {era} (divisor {EraDivisor(era):0.###})"); }
+            if (!eraApiLogged && era >= 0)
+            {
+                eraApiLogged = true;
+                Plugin.Log.LogInfo($"[Resize] era anchoring live — built-unit frontier: land {domainEra[0]}, naval {domainEra[1]}, air {domainEra[2]} (tech era {techEra}, aggregate Timeline {aggregateEra}); {eraGridRows.Count} authored grid row(s)");
+            }
             if (era != cachedEra && cachedEra >= 0 && era >= 0)
-                Plugin.Log.LogInfo($"[Resize] ERA CHANGED {cachedEra} -> {era} — rescaling by {EraDivisor(cachedEra) / EraDivisor(era):0.###}x (units shrink as ages advance)");
+                Plugin.Log.LogInfo($"[Resize] ERA CHANGED {cachedEra} -> {era} — scaled units re-anchor live (an era-1 unit now renders x{EraAnchorFor(1, era):0.###})");
             cachedEra = era;
             return era;
         }
 
-        // Crude PoC divisor: the era index itself (index 0/unknown = no division). A real table would map each era
-        // to a reference SIZE in metres and divide trueSize by it — this just proves the anchor moves the size.
-        static float EraDivisor(int era) => era >= 1 ? era : 1f;
+        // THE GRID LOOKUP: modifier[unit's era][world's era]. A unit is authored once at its own era's size and only
+        // DRIFTS as the world moves past it, so anything at or before its own era is 1.0 (unchanged) — an era-5 ship
+        // appearing in era 5 renders exactly as authored, while an era-1 hull recedes by whatever the grid says.
+        // An un-authored cell is 1.0 — NO invented curve (user rule): every number that changes a unit's size comes
+        // from the Global Era Lab, so an empty grid means "sizes behave exactly as the Resize Lab rules say".
+        // Amplitude names every definition with its era ("Era1_Common_Biremes_01") — the cheapest reliable era source.
+        static int EraFromName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return -1;
+            var m = Regex.Match(name, "Era(\\d+)", RegexOptions.IgnoreCase);
+            return m.Success && int.TryParse(m.Groups[1].Value, out int e) ? e : -1;
+        }
 
-        static void ApplyVanillaScale(PawnCtx ctx, float baseScale)
+        // The era a unit is measured against: its OWN domain's built frontier (ships vs ships), then the overall
+        // frontier, so a naval rule is unaffected by land-only progress and vice versa.
+        static int WorldEraFor(int domain)
+        {
+            int now = CurrentEra();
+            if (domain >= 0 && domain < domainEra.Length && domainEra[domain] >= 1) return domainEra[domain];
+            return now;
+        }
+
+        // Presentation profile -> UnitSpawnType domain: Boat(7) = Maritime(1), Plane(14)/Missile(15) = Air(2)/Missile(3),
+        // everything else Land(0). The profile is what we already read when resolving the rule.
+        static int DomainFromProfile(int prof) => prof == 7 ? 1 : prof == 14 ? 2 : prof == 15 ? 3 : 0;
+
+        static float EraAnchor(UnitScaleInfo info) => EraAnchorFor(info.homeEra, WorldEraFor(info.domain));
+
+        static readonly string[] EraNames = { "Neolithic", "Ancient", "Classical", "Medieval", "Early Modern", "Industrial", "Contemporary" };
+        static string EraName(int era) => era >= 0 && era < EraNames.Length ? EraNames[era] : "?";
+
+        // LIVE READOUT for the F8 window: the global era plus, per scaled unit, how its size is being composed
+        // (rule x era-grid modifier = effective) and what the mesh buffer currently carries. Reading the same
+        // statics the runtime uses means the window can't drift from the behaviour it reports.
+        internal static IEnumerable<string> ResizeStatusLines()
+        {
+            var lines = new List<string>();
+            int era = CurrentEra();
+            string Front(int d) => domainEra[d] >= 0 ? $"{domainEra[d]} {EraName(domainEra[d])}" : "none";
+            lines.Add(era < 0
+                ? "World era: not in a game yet"
+                : $"Built-unit frontier — naval: {Front(1)} | land: {Front(0)} | air: {Front(2)}      (tech era {techEra}, aggregate {aggregateEra})");
+            lines.Add($"era-grid rows authored: {eraGridRows.Count}   |   scaled units: {unitScaleByDesc.Count}");
+            string[] domName = { "land", "naval", "air", "missile" };
+            foreach (var kv in unitScaleByDesc)
+            {
+                var info = kv.Value;
+                int worldEra = WorldEraFor(info.domain);
+                float mod = EraAnchorFor(info.homeEra, worldEra);
+                string name = unitScaleNameByDesc.TryGetValue(kv.Key, out var n) ? n : $"desc {kv.Key}";
+                string applied = descApplied.TryGetValue(kv.Key, out float a) ? $"applied x{a:0.###}" : "not drawn yet";
+                string dom = info.domain >= 0 && info.domain < domName.Length ? domName[info.domain] : "?";
+                lines.Add($"  {name}: rule x{info.scale:0.###} (own era {info.homeEra} {EraName(info.homeEra)}, {dom}) vs {dom} frontier {worldEra} {EraName(worldEra)} -> x{mod:0.###} = x{info.scale * mod:0.###}   [{applied}]");
+            }
+            if (unitScaleByDesc.Count == 0 && unitScaleRules.Count > 0)
+                lines.Add($"  {unitScaleRules.Count} rule(s) loaded, none matched a live unit yet");
+            return lines;
+        }
+
+        // Split from EraAnchor so the era POLL can log a sample without re-entering CurrentEra().
+        static float EraAnchorFor(int homeEra, int now)
+        {
+            if (now < 1) now = 1;                       // Neolithic (0) / unknown: treat as the first era
+            if (homeEra < 1) homeEra = 1;
+            if (now <= homeEra) return 1f;              // its own age or earlier — nothing has aged yet
+            if (eraGridRows.TryGetValue(homeEra, out var row) && now < row.Length && row[now] > 0f) return row[now];
+            return 1f;                                  // un-authored cell = leave the unit alone
+        }
+
+        static void ApplyVanillaScale(PawnCtx ctx, UnitScaleInfo info)
         {
             try
             {
-                float target = baseScale / EraDivisor(CurrentEra());
+                float target = info.scale * EraAnchor(info);
 
                 // PLACEMENT half — every frame (the game rebuilds pawnEntries[] from scratch each frame)
                 var oss = GetMember(ctx.entry, "ObjectSpace");
@@ -2185,8 +2374,8 @@ namespace ENCAccessProof
 
                 // RESIZE LAB: a vanilla pawn (no model entry) whose descriptor has a resolved scale rule gets its
                 // ObjectSpace.Scale multiplied ONCE at spawn — the same mechanism the per-entry `scale` field uses.
-                if (unitScaleByDesc.Count > 0 && unitScaleByDesc.TryGetValue(ctx.descId, out float vScale) && HookedEntryFor(ctx.skelId) == null)
-                    ApplyVanillaScale(ctx, vScale);   // MESH-SCALE engine v1: verts x s (once) + ObjectSpace.Scale (per frame)
+                if (unitScaleByDesc.Count > 0 && unitScaleByDesc.TryGetValue(ctx.descId, out var vInfo) && HookedEntryFor(ctx.skelId) == null)
+                    ApplyVanillaScale(ctx, vInfo);   // MESH-SCALE engine: verts x s (on change) + ObjectSpace.Scale (per frame)
 
                 // Match this pawn to one of our entries (animated OR freeze-static) by OUR baked skeleton id (the correctly
                 // skinned pawn), else by the descriptor learned from that first correct pawn. The game spawns a unit's LATER
