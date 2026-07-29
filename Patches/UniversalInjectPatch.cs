@@ -2338,8 +2338,11 @@ namespace ENCAccessProof
             else SanitizeAimLayer(entry);
             ApplyPositionOffset(e, entry);
             ApplyScale(e, entry);
-            // NOTE (2026-07-29): the per-entry runtime `scale` is DEAD — the GPU cannot scale geometry (see the
-            // Resize disable above). Custom models scale at BAKE time via the Factory's Size field.
+            // NOTE (2026-07-29, shader-proven): ApplyScale above writes ObjectSpace.Scale, which the GPU honours for
+            // PLACEMENT ONLY (bone world positions + bind offsets) — it can never grow a mesh. So the per-entry
+            // runtime `scale` spreads a multi-fragment model's parts apart without resizing them. Custom models
+            // should scale at BAKE time via the Factory's Size field; a full runtime resize needs the mesh-scale
+            // engine (ScaleDescriptorMeshes, currently driven by unitScales rules). See docs/Unit-Size.md.
             // PROVEN 2026-07-19 (temp probe, removed): PawnDescriptorId is a per-pawn WRITABLE mesh selector the
             // GPU honors — AssaultInfantry pawns rendered another entry's mesh from a one-int write. This is the
             // foundation for the vanilla-in-combat feature: keep the donor's descriptor alive alongside ours and

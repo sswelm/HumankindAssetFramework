@@ -75,6 +75,9 @@ the rest of the roster.
   possible. A roster unit that never loads in a given game costs nothing.
 - **Diversity is the cost, weighted by size.** A wide variety of *lean* units is cheap; a few *heavy*
   unique types can cost as much as many lean ones.
+- **Resizing a unit is free.** The [unit-size axis](Unit-Size.md) multiplies the vertex positions of a mesh the
+  layer already holds — no new mesh, no new vertices. (A future per-instance variant that needs a *second* size of
+  the same unit would have to clone the mesh, and that clone would cost its full vertex count.)
 
 ## The fill is roster-wide at load, not per-era
 

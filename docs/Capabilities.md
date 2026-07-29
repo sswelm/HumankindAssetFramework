@@ -131,6 +131,15 @@ see the [Factory Manual](Factory-Manual.md).
   idle/move bob. The **Freeze donor animation** runtime flag pins the donor's pose so the mesh holds still while the pawn
   still glides tile-to-tile — matched across every instance the same way animated models are (descriptor + forced
   skeleton), so it holds for the 2nd, 3rd… unit, not just the first. Static models only; no re-bake.
+- **RESIZE ANY UNIT — vanilla included, no bake (2026-07-29, verified in-game).** A `unitScales` rule (**Resize Lab**,
+  Tools ▸ HAF ▸ Resize Lab) names a pawn definition and a factor, and that unit renders at the new size with its
+  animation intact — an Era-1 Bireme at ×2 keeps hull, oars and mast in proportion and still rows. It works by
+  scaling the unit's **vertex data in the live Fx content buffer** (once per unit type) plus `ObjectSpace.Scale` per
+  pawn for part placement — the two things the GPU actually honours, established by disassembling the game's own
+  shaders (`tools/ShaderDump`): the animation pass writes bone scale as a literal 1.0 and the draw shader applies
+  scale only to bind-pose offsets, so **no transform can ever grow geometry**. Free on the vertex budget (it edits
+  geometry already loaded, no clone). Human-presentation units are excluded by design. Per unit *type*, not per
+  instance. Full detail incl. the planned era-anchored sizing: [Unit-Size.md](Unit-Size.md).
 - **Add a model = bake it.** The Factory writes the registry; the plugin picks it up on next launch.
 - **The registry can't be lost.** Atomic writes (no truncation on an interrupted save), a corrupt-file guard (an
   unparseable registry is copied aside and never overwritten), and a **git-tracked versioned backup with

@@ -36,6 +36,11 @@ in-game with a shipped example:
 | **Pawn props** | Weapons & gear on a pawn's **attachment slots** — no whole-model replacement | Slingers carrying an actual sling; the custom soldier carrying a **textured M60 on his own hand bone** | [Pawn-Props.md](docs/Pawn-Props.md) |
 | **Projectiles** | The **munition mesh** a unit fires | An anti-tank unit launching a kamikaze FPV drone | [Projectiles.md](docs/Projectiles.md) |
 
+**Two more axes need no assets at all** — they retune units the game already ships, from the same JSON registry:
+**formations** (how many models a unit fields and how they're arranged, [Formations.md](docs/Formations.md)) and
+**unit size** (how big any unit renders, vanilla included, [Unit-Size.md](docs/Unit-Size.md)). Together they cover
+both halves of R.E.D.-style rebalancing — count and scale — with no bake and nothing to undo but a deleted line.
+
 **Animation, audio, and retexturing are cross-cutting features** that ride these axes: a unit model can carry its own
 baked animation ([Animated-Models.md](docs/Animated-Models.md)), engine or custom WAV movement sound, and a
 runtime-hot-loaded skin or tint ([Capabilities.md](docs/Capabilities.md)) — all from the same JSON registry, no code.
@@ -298,6 +303,14 @@ The plugin's own cfg (`…\community.humankind.haf.cfg`) — press **F8** in-gam
   wired via the unit's `Projectile` field (data), no plugin needed. **Working** — one clean drone per launch from a
   single-pawn (vehicle) base; the firing-count "wave" mechanic (`ceil(defendersToKill / pawns)`) is fully decompiled.
   Skin colour is model/UV-dependent (swap the model to reroll it); launch audio is the one open item.
+- **Formations:** [Formations.md](docs/Formations.md) — the fifth axis, **data only**: how many models a unit fields
+  and how they're arranged (`enc_formations.json` + the Formation Override window). The vanilla 9/10-model ceiling is
+  gone — 12-, 16-, 19- and 32-model units render correctly. **Verified in-game.**
+- **Unit size:** [Unit-Size.md](docs/Unit-Size.md) — the sixth axis, **data only**: resize any unit (vanilla included)
+  at runtime from a `unitScales` rule, authored in the Resize Lab. Works by scaling the unit's **vertex data** in the
+  live Fx buffer plus its per-pawn placement — the only thing the GPU actually honours, established by disassembling
+  the game's shaders ([tools/ShaderDump](tools/ShaderDump/README.md)). Free on the vertex budget. **Verified in-game**
+  (Bireme ×2, correct assembly + animation); era-anchored sizing is the planned v2.
 - **Learn from others:** [Ecosystem-Survey.md](docs/Ecosystem-Survey.md) — every Humankind BepInEx plugin on GitHub, what
   problem each solves, and the techniques worth borrowing (lifecycle anchors, order-bus sequencing, save extensions, …).
 

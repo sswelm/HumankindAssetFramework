@@ -158,6 +158,13 @@ to keep whatever count a unit had when it first rendered.
 
 ## Model scale: two modes and their limits
 
+> **For non-human units, prefer the Resize Lab instead ([Unit-Size.md](Unit-Size.md)).** That axis scales the unit's
+> **vertex data** in the live Fx buffer plus its per-pawn placement — verified in-game, free on the vertex budget, and
+> immune to both failure modes below, because it never asks a transform to grow geometry (the shaders don't do that;
+> see Unit-Size § *Why it must be done this way*). The two modes here remain the way to scale **models and spacing
+> together as one formation**, and the `data` mode's engine notes stay valuable — but for "make this ship bigger",
+> use a `unitScales` rule.
+
 The formation link carries a per-unit **scale** (window: *Formation scale*, 0.2–2.0). By default it scales the
 models **and** the dummy spacing together; *Footprint override* (`layoutScale`) decouples the spacing. Two
 implementations exist, selectable per link (window dropdown, registry `scaleMode`) — a hard-won field campaign
