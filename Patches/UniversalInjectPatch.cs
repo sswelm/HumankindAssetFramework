@@ -1881,11 +1881,44 @@ namespace ENCAccessProof
         // per session (the buffer persists; repeating would compound). Skeletons can be shared across units, but
         // the human-presentation family (where sharing is rampant) is already excluded upstream.
         static readonly HashSet<int> scaledSkeletons = new HashSet<int>();
+        static float lastScaleProbe;
         static void ApplyVanillaScale(PawnCtx ctx, float s)
         {
             try
             {
-                if (ctx.skelId < 0 || !scaledSkeletons.Add(ctx.skelId)) return;
+                if (ctx.skelId < 0) return;
+                if (!scaledSkeletons.Add(ctx.skelId))
+                {
+                    // PERSISTENCE PROBE (2026-07-28, "did you actually log it?"): the write was logged — this
+                    // logs the READ-BACK. If the buffer's root scale shows 1 again, a rebuild wiped the patch.
+                    if (UnityEngine.Time.time - lastScaleProbe > 10f && animMgrRef != null)
+                    {
+                        lastScaleProbe = UnityEngine.Time.time;
+                        try
+                        {
+                            var am2 = animMgrRef;
+                            var sb = AccessTools.Field(am2.GetType(), "gpuSkeletonEntriesBuffer")?.GetValue(am2);
+                            var bb = AccessTools.Field(am2.GetType(), "gpuSkeletonBoneEntiesBuffer")?.GetValue(am2);
+                            var sa = sb == null ? null : GetMember(sb, "WriteContent") as Array;
+                            var ba = bb == null ? null : GetMember(bb, "WriteContent") as Array;
+                            if (sa != null && ba != null && ctx.skelId < sa.Length)
+                            {
+                                uint st = Convert.ToUInt32(GetMember(sa.GetValue(ctx.skelId), "StartSkeletonBoneEntry"));
+                                uint bc = Convert.ToUInt32(GetMember(sa.GetValue(ctx.skelId), "BoneCount"));
+                                for (uint b2 = 0; b2 < bc && st + b2 < ba.Length; b2++)
+                                {
+                                    var bn2 = ba.GetValue((int)(st + b2));
+                                    if (Convert.ToUInt32(GetMember(bn2, "ParentIndex")) < (uint)ba.Length) continue;
+                                    float cur2 = Convert.ToSingle(GetMember(GetMember(bn2, "Local"), "Scale"));
+                                    Plugin.Log.LogInfo($"[Resize] PROBE skeleton {ctx.skelId} buffer root Local.Scale = {cur2:0.###} (expected x{s:0.###})");
+                                    break;
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                    return;
+                }
                 var am = animMgrRef;
                 if (am == null) { scaledSkeletons.Remove(ctx.skelId); return; }   // registration pass not seen yet — retry on a later pawn
                 var skelBufObj = AccessTools.Field(am.GetType(), "gpuSkeletonEntriesBuffer")?.GetValue(am);
@@ -1909,11 +1942,39 @@ namespace ENCAccessProof
                     boneArr.SetValue(bone, (int)(start + b));
                     patched++;
                 }
-                if (patched > 0)
+                // ALSO patch the MANAGED skeleton's BoneInfos (2026-07-28, the bireme wipe): Apply() rebuilds the
+                // GPU buffer FROM Skeleton.BoneInfos — a rebuild after our buffer write erased the scale before it
+                // drew ("nope, same size"). With the managed data patched, every rebuild re-bakes it; the direct
+                // buffer write above covers the frames until the next rebuild.
+                int patchedManaged = 0;
+                try
+                {
+                    var sklist = AccessTools.Field(am.GetType(), "skeletons")?.GetValue(am) as System.Collections.IList;
+                    if (sklist != null && ctx.skelId < sklist.Count)
+                    {
+                        var skObj = sklist[ctx.skelId];
+                        var infos = GetMember(skObj, "BoneInfos") as Array;
+                        if (infos != null)
+                            for (int bi = 0; bi < infos.Length; bi++)
+                            {
+                                var info = infos.GetValue(bi);
+                                int par = -1; try { par = Convert.ToInt32(GetMember(info, "ParentIndex")); } catch { }
+                                if (par >= 0) continue;   // asset convention: root = ParentIndex < 0
+                                var loc = GetMember(info, "Local");
+                                float c2 = 1f; try { c2 = Convert.ToSingle(GetMember(loc, "Scale")); } catch { }
+                                SetMember(loc, "Scale", c2 * s);
+                                SetMember(info, "Local", loc);
+                                infos.SetValue(info, bi);
+                                patchedManaged++;
+                            }
+                    }
+                }
+                catch (Exception mx) { Plugin.Log.LogWarning("[Resize] managed skeleton patch: " + mx.Message); }
+                if (patched > 0 || patchedManaged > 0)
                 {
                     AccessTools.Method(boneBufObj.GetType(), "Apply", Type.EmptyTypes)?.Invoke(boneBufObj, null);   // re-upload writeContent to the GPU
                     if (vanillaScaledLogged.Add(ctx.descId))
-                        Plugin.Log.LogInfo($"[Resize] skeleton {ctx.skelId} scaled x{s:0.###} ({patched} root bone(s); desc {ctx.descId}) — skeleton-space, the proven render path");
+                        Plugin.Log.LogInfo($"[Resize] skeleton {ctx.skelId} scaled x{s:0.###} (buffer roots: {patched}, managed roots: {patchedManaged}; desc {ctx.descId})");
                 }
                 else { scaledSkeletons.Remove(ctx.skelId); }
             }
