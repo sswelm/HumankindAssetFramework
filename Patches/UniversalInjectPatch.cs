@@ -721,7 +721,7 @@ namespace ENCAccessProof
         {
             registered = false;
             anyAnimated = null; anyFreeze = null;                    // recomputed on the next pawn-add
-            unitScaleByDesc.Clear(); vanillaScaledLogged.Clear();   // descriptor ids are session-scoped — re-resolve
+            unitScaleByDesc.Clear(); vanillaScaledLogged.Clear(); scaledSkeletons.Clear();   // descriptor/skeleton ids are session-scoped — re-resolve
             _listenerChecked = false;                                // the AudioListener rode a session-scoped camera
             var list = entries;
             if (list != null)
@@ -1873,10 +1873,126 @@ namespace ENCAccessProof
         static HashSet<string> unitScaleLogged;
         static readonly HashSet<int> vanillaScaledLogged = new HashSet<int>();
 
-        // (2026-07-29) ApplyVanillaScale REMOVED: all runtime transform-scale levers falsified by the bireme
-        // truth-table (scale composes into bone TRANSLATIONS only — parts spread, geometry never grows).
-        // Render size lives in vertex data; the replacement design is a MESH-CLONE engine. Rules resolve and
-        // log-and-skip until it exists.
+        // RESIZE v3 (2026-07-29, "dig deeper" — the IBP re-opening): the earlier "truth-table" IBP leg was
+        // INVALID — the GPU bone buffer is rebuilt from the managed skeleton (InverseBindPose = BindPose.Inverse)
+        // and we had only patched the managed LOCAL, so a rebuild silently restored the IBP before drawing.
+        // The coherent model of the skinning shader (mirrors the CPU pawn path GetLocalBoneTRS):
+        //   - bone chains are RIGID: Local.Scale never enters the linear part, it only multiplies pose/child
+        //     TRANSLATIONS (the oars spreading = the proof it IS consumed there);
+        //   - the final vertex transform applies the InverseBindPose as a FULL TRS — scale included (the m114's
+        //     0.01 bindpose rendering cm-authored verts at world size is the field evidence).
+        // Therefore uniform resize = BOTH legs: root Local.Scale x s (part spacing) + IBP x s on Translation AND
+        // Scale (part growth; equals post-multiplying the original IBP by a uniform s). Managed side: BindPose
+        // .Scale /= s re-derives exactly that scaled IBP on every rebuild — wipe-proof by construction.
+        static readonly HashSet<int> scaledSkeletons = new HashSet<int>();
+        static float lastScaleProbe = -999f;
+
+        static void ApplyVanillaScale(PawnCtx ctx, float s)
+        {
+            try
+            {
+                if (ctx.skelId < 0) return;
+                var am = animMgrRef;
+                if (am == null) return;   // registration pass not seen yet — retry on a later pawn
+                var skelBufObj = AccessTools.Field(am.GetType(), "gpuSkeletonEntriesBuffer")?.GetValue(am);
+                var boneBufObj = AccessTools.Field(am.GetType(), "gpuSkeletonBoneEntiesBuffer")?.GetValue(am);
+                var skelArr = skelBufObj == null ? null : GetMember(skelBufObj, "WriteContent") as Array;
+                var boneArr = boneBufObj == null ? null : GetMember(boneBufObj, "WriteContent") as Array;
+                if (skelArr == null || boneArr == null || ctx.skelId >= skelArr.Length) return;
+                var skelEntry = skelArr.GetValue(ctx.skelId);
+                uint start = Convert.ToUInt32(GetMember(skelEntry, "StartSkeletonBoneEntry"));
+                uint boneCount = Convert.ToUInt32(GetMember(skelEntry, "BoneCount"));
+
+                if (!scaledSkeletons.Add(ctx.skelId))
+                {
+                    // READ-BACK PROBE ("did you actually log it?"): confirm the patched values are still in the
+                    // buffer while the user checks the render — separates "wiped" from "present but unconsumed".
+                    if (UnityEngine.Time.time - lastScaleProbe > 10f && start < boneArr.Length)
+                    {
+                        lastScaleProbe = UnityEngine.Time.time;
+                        try
+                        {
+                            var b0 = boneArr.GetValue((int)start);
+                            float ibpS = Convert.ToSingle(GetMember(GetMember(b0, "InverseBindPose"), "Scale"));
+                            float locS = Convert.ToSingle(GetMember(GetMember(b0, "Local"), "Scale"));
+                            Plugin.Log.LogInfo($"[Resize] PROBE skeleton {ctx.skelId} bone0: IBP.Scale={ibpS:0.###} Local.Scale={locS:0.###} (rule x{s:0.###})");
+                        }
+                        catch { }
+                    }
+                    return;
+                }
+
+                int patchedIbp = 0, patchedRoot = 0;
+                for (uint b = 0; b < boneCount && start + b < boneArr.Length; b++)
+                {
+                    var bone = boneArr.GetValue((int)(start + b));
+                    var ibp = GetMember(bone, "InverseBindPose");
+                    if (ibp != null)
+                    {
+                        // uniform post-scale of the bind-inverse: v -> s * (IBP o v) — BOTH T and S carry the s
+                        float ci = Convert.ToSingle(GetMember(ibp, "Scale"));
+                        var ct = (UnityEngine.Vector3)GetMember(ibp, "Translation");
+                        SetMember(ibp, "Scale", ci * s);
+                        SetMember(ibp, "Translation", ct * s);
+                        SetMember(bone, "InverseBindPose", ibp);
+                        patchedIbp++;
+                    }
+                    uint parent = Convert.ToUInt32(GetMember(bone, "ParentIndex"));
+                    if (parent >= (uint)boneArr.Length)   // ROOT (engine convention: parent index out of range)
+                    {
+                        var local = GetMember(bone, "Local");
+                        SetMember(local, "Scale", Convert.ToSingle(GetMember(local, "Scale")) * s);
+                        SetMember(bone, "Local", local);
+                        patchedRoot++;
+                    }
+                    boneArr.SetValue(bone, (int)(start + b));
+                }
+
+                // MANAGED skeleton (rebuild-proof leg): the buffer is rebuilt as IBP = BindPose.Inverse, and
+                // Inverse of (T,R,S/s) = s-uniform-scaled IBP — exactly the buffer patch above. Roots keep the
+                // Local.Scale mirror from the earlier hardening.
+                int managedBind = 0, managedRoot = 0;
+                try
+                {
+                    var sklist = AccessTools.Field(am.GetType(), "skeletons")?.GetValue(am) as System.Collections.IList;
+                    if (sklist != null && ctx.skelId < sklist.Count)
+                    {
+                        var infos = GetMember(sklist[ctx.skelId], "BoneInfos") as Array;
+                        if (infos != null)
+                            for (int bi = 0; bi < infos.Length; bi++)
+                            {
+                                var info = infos.GetValue(bi);
+                                var bind = GetMember(info, "BindPose");
+                                if (bind != null)
+                                {
+                                    SetMember(bind, "Scale", Convert.ToSingle(GetMember(bind, "Scale")) / s);
+                                    SetMember(info, "BindPose", bind);
+                                    managedBind++;
+                                }
+                                int par = -1; try { par = Convert.ToInt32(GetMember(info, "ParentIndex")); } catch { }
+                                if (par < 0)   // asset convention: root = ParentIndex < 0
+                                {
+                                    var loc = GetMember(info, "Local");
+                                    SetMember(loc, "Scale", Convert.ToSingle(GetMember(loc, "Scale")) * s);
+                                    SetMember(info, "Local", loc);
+                                    managedRoot++;
+                                }
+                                infos.SetValue(info, bi);
+                            }
+                    }
+                }
+                catch (Exception mx) { Plugin.Log.LogWarning("[Resize] managed skeleton patch: " + mx.Message); }
+
+                if (patchedIbp > 0 || patchedRoot > 0)
+                {
+                    AccessTools.Method(boneBufObj.GetType(), "Apply", Type.EmptyTypes)?.Invoke(boneBufObj, null);   // re-upload writeContent
+                    if (vanillaScaledLogged.Add(ctx.descId))
+                        Plugin.Log.LogInfo($"[Resize] skeleton {ctx.skelId} scaled x{s:0.###} — IBP bones: {patchedIbp}, roots: {patchedRoot}, managed bind: {managedBind}, managed roots: {managedRoot} (desc {ctx.descId})");
+                }
+                else scaledSkeletons.Remove(ctx.skelId);
+            }
+            catch (Exception ex) { if (!poseErrLogged) { poseErrLogged = true; Plugin.Log.LogError("[Resize] " + ex); } }
+        }
 
         static object animMgrRef;             // AnimationManager instance, captured at registration ([AnimDiag])
         static HashSet<string> animDiagDone;  // entries already dumped by the one-shot [AnimDiag]
@@ -1992,17 +2108,7 @@ namespace ENCAccessProof
                 // RESIZE LAB: a vanilla pawn (no model entry) whose descriptor has a resolved scale rule gets its
                 // ObjectSpace.Scale multiplied ONCE at spawn — the same mechanism the per-entry `scale` field uses.
                 if (unitScaleByDesc.Count > 0 && unitScaleByDesc.TryGetValue(ctx.descId, out float vScale) && HookedEntryFor(ctx.skelId) == null)
-                {
-                    // RUNTIME SCALING DISABLED (2026-07-29, the bireme truth-table): the GPU skinning composes
-                    // scale into bone TRANSLATIONS only (parts spread apart — the oars) and NEVER stretches
-                    // vertices — no transform input can grow geometry. Falsified in order: ObjectSpace.Scale
-                    // (inert), buffer/managed bone Local.Scale (persists, ignored), InverseBindPose scale
-                    // (translation-only distortion). Render size lives in VERTEX DATA alone; the working design
-                    // is a MESH-CLONE engine (clone the unit's fragments scaled + repoint the descriptor). Until
-                    // that lands, matched rules log-and-skip rather than distort articulated units.
-                    if (vanillaScaledLogged.Add(ctx.descId))
-                        Plugin.Log.LogInfo($"[Resize] desc {ctx.descId} rule x{vScale:0.###} NOT applied — runtime transform scaling can't grow geometry (mesh-clone engine pending)");
-                }
+                    ApplyVanillaScale(ctx, vScale);   // v3: root Local (spacing) + IBP T&S (growth), rebuild-proof — see the method comment
 
                 // Match this pawn to one of our entries (animated OR freeze-static) by OUR baked skeleton id (the correctly
                 // skinned pawn), else by the descriptor learned from that first correct pawn. The game spawns a unit's LATER
