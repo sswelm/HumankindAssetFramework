@@ -2016,13 +2016,13 @@ namespace ENCAccessProof
                         // what this empire has BUILT (armies at sea/on land + air squadrons)
                         foreach (var collName in new[] { "Armies", "Squadrons" })
                         {
-                            var groups = GetMember(emp, collName) as System.Collections.IEnumerable;
+                            var groups = GetMember(emp, collName);
                             if (groups == null) continue;
-                            foreach (var group in groups)
+                            foreach (var group in WalkCollection(groups, collName))
                             {
-                                var units = GetMember(group, "Units") as System.Collections.IEnumerable;
+                                var units = GetMember(group, "Units");
                                 if (units == null) continue;
-                                foreach (var unit in units)
+                                foreach (var unit in WalkCollection(units, "Units"))
                                 {
                                     var def = GetMember(unit, "UnitDefinition");
                                     if (def == null) continue;
@@ -2072,6 +2072,49 @@ namespace ENCAccessProof
         // appearing in era 5 renders exactly as authored, while an era-1 hull recedes by whatever the grid says.
         // An un-authored cell is 1.0 — NO invented curve (user rule): every number that changes a unit's size comes
         // from the Global Era Lab, so an empty grid means "sizes behave exactly as the Resize Lab rules say".
+        // Amplitude's simulation collections (ReferenceCollection<T>, entity collections) do NOT all implement
+        // IEnumerable — the first frontier build foreach'd them and silently walked NOTHING (log read
+        // "naval -1" while an era-6 cruiser was on screen). So walk defensively: IEnumerable if offered, else
+        // Count + indexer, else a backing Data array. Logs the type once per collection name when it finds no way in,
+        // so a future engine change is diagnosable instead of silent.
+        static HashSet<string> walkFailLogged;
+        static IEnumerable<object> WalkCollection(object coll, string label)
+        {
+            if (coll == null) yield break;
+            if (coll is System.Collections.IEnumerable en)
+            {
+                foreach (var x in en) if (x != null) yield return x;
+                yield break;
+            }
+            var t = coll.GetType();
+            int n = -1;
+            try { n = Convert.ToInt32(GetMember(coll, "Count") ?? -1); } catch { }
+            var getItem = t.GetMethod("get_Item", new[] { typeof(int) });
+            if (n >= 0 && getItem != null)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    object v = null;
+                    try { v = getItem.Invoke(coll, new object[] { i }); } catch { }
+                    if (v != null) yield return v;
+                }
+                yield break;
+            }
+            if (GetMember(coll, "Data") is Array data)
+            {
+                int lim = n >= 0 && n <= data.Length ? n : data.Length;
+                for (int i = 0; i < lim; i++)
+                {
+                    var v = data.GetValue(i);
+                    if (v != null) yield return v;
+                }
+                yield break;
+            }
+            if (walkFailLogged == null) walkFailLogged = new HashSet<string>();
+            if (walkFailLogged.Add(label))
+                Plugin.Log.LogWarning($"[Resize] can't walk '{label}' ({t.FullName}) — no IEnumerable, no Count+indexer, no Data array; era frontier will fall back");
+        }
+
         // Amplitude names every definition with its era ("Era1_Common_Biremes_01") — the cheapest reliable era source.
         static int EraFromName(string name)
         {
@@ -2268,7 +2311,11 @@ namespace ENCAccessProof
                     AccessTools.Field(pmType, "descriptorBufferDirty")?.SetValue(pm, true);
                 }
                 descApplied[descId] = target;   // records the target even when nothing moved, so the per-frame path stops re-entering
-                Plugin.Log.LogInfo($"[Resize] desc {descId} -> x{target:0.###} (era {cachedEra}): {meshesScaled} mesh(es), {vertsScaled} vert(s) re-scaled by {descRatio:0.###}x + per-pawn placement x{target:0.###}");
+                // Log the anchor ACTUALLY used, not the cached world era — the first build printed cachedEra (the
+                // tech-era fallback, 6) while the modifier had come from the aggregate floor (5), which made a
+                // correct-looking line describe the wrong arithmetic.
+                int anchorUsed = unitScaleByDesc.TryGetValue(descId, out var dInfo) ? WorldEraFor(dInfo.domain) : cachedEra;
+                Plugin.Log.LogInfo($"[Resize] desc {descId} -> x{target:0.###} (anchor era {anchorUsed} {EraName(anchorUsed)}): {meshesScaled} mesh(es), {vertsScaled} vert(s) re-scaled by {descRatio:0.###}x + per-pawn placement x{target:0.###}");
             }
             catch (Exception ex) { Plugin.Log.LogError("[Resize] mesh scale: " + ex); }
         }
