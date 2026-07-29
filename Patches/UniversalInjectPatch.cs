@@ -721,7 +721,7 @@ namespace ENCAccessProof
         {
             registered = false;
             anyAnimated = null; anyFreeze = null;                    // recomputed on the next pawn-add
-            unitScaleByDesc.Clear(); vanillaScaledLogged.Clear(); meshScaledDescs.Clear();   // descriptor ids are session-scoped — re-resolve (scaledMeshes deliberately KEPT: the Fx buffers persist)
+            unitScaleByDesc.Clear(); vanillaScaledLogged.Clear(); descApplied.Clear(); cachedEra = -1;   // descriptor ids + era are session-scoped (meshApplied deliberately KEPT: the Fx vertex buffers persist)
             _listenerChecked = false;                                // the AudioListener rode a session-scoped camera
             var list = entries;
             if (list != null)
@@ -1899,37 +1899,83 @@ namespace ENCAccessProof
         //   PLACEMENT (per pawn per frame — the pawn buffer is immediate-mode): ObjectSpace.Scale *= s; the
         //     second pass multiplies bone world positions by it and the VS scales bind offsets by it
         //     (entry.Scale = ObjectSpace.Scale / IBP.Scale), so part spacing follows the grown geometry.
-        // scaledMeshes is keyed by (layer, mesh index) and deliberately NOT session-reset: the Fx content
-        // buffers persist across save/load while descriptor ids re-resolve — clearing it would double-scale.
-        static readonly HashSet<long> scaledMeshes = new HashSet<long>();    // (layerIndex << 32) | meshTableIndex — NOT session-reset
-        static readonly HashSet<int> meshScaledDescs = new HashSet<int>();   // descriptors whose meshes were processed (session-reset)
+        // RATIO-BASED, so the size can CHANGE while the game runs (era anchoring): every mesh remembers the factor
+        // currently baked into its vertices, and a new target applies only the DIFFERENCE (target/applied). That
+        // makes re-scaling idempotent and reversible instead of compounding. Both maps are keyed by data that
+        // outlives a session reset in the same way the buffers do — the Fx content buffers persist across
+        // save/load while descriptor ids re-resolve, so clearing the mesh map would double-scale.
+        // The mesh record is SELF-VERIFYING rather than assumed: it stores the factor AND the first vertex as we
+        // left it. If the engine reloads its Fx content (menu round trip, streaming), that vertex comes back
+        // vanilla and the probe no longer matches — we then know the buffer is fresh and re-scale from 1 instead
+        // of trusting a stale bookkeeping entry. That closes both failure modes at once: double-scaling a buffer
+        // that persisted, and silently under-scaling one that was rebuilt.
+        struct MeshScale { public float factor; public UnityEngine.Vector3 probe; }
+        static readonly Dictionary<long, MeshScale> meshApplied = new Dictionary<long, MeshScale>();   // (layer<<32)|meshIndex
+        static readonly Dictionary<int, float> descApplied = new Dictionary<int, float>();             // descriptor -> current target (session-scoped)
 
-        static void ApplyVanillaScale(PawnCtx ctx, float s)
+        // ── ERA ANCHORING (2026-07-29, crude PoC per user request): effective = rule.scale / era ────────────────
+        // Sandbox.Timeline.GetGlobalEraIndex() is the GAME-WIDE era (computed from every major empire's research —
+        // the right anchor for a shared presentation, vs. one empire's own era). Internal class, so reflection.
+        // Polled rather than event-hooked: the index is derived, not a notification, and a few seconds of lag on an
+        // era change is invisible. When it moves, the per-frame pawn path picks up the new target and the ratio
+        // machinery above re-scales the geometry live — the ship shrinks in place, no reload.
+        static int cachedEra = -1;
+        static float lastEraPoll = -999f;
+        static bool eraApiLogged;
+
+        static int CurrentEra()
+        {
+            if (UnityEngine.Time.time - lastEraPoll < 2f) return cachedEra;
+            lastEraPoll = UnityEngine.Time.time;
+            int era = -1;
+            try
+            {
+                var sbType = AccessTools.TypeByName("Amplitude.Mercury.Sandbox.Sandbox");
+                var timeline = AccessTools.Field(sbType, "Timeline")?.GetValue(null);
+                if (timeline != null)
+                    era = Convert.ToInt32(AccessTools.Method(timeline.GetType(), "GetGlobalEraIndex")?.Invoke(timeline, null) ?? -1);
+            }
+            catch (Exception ex) { if (!eraApiLogged) { eraApiLogged = true; Plugin.Log.LogWarning("[Resize] era read failed: " + ex.Message); } }
+            if (!eraApiLogged && era >= 0) { eraApiLogged = true; Plugin.Log.LogInfo($"[Resize] era anchoring live — global era index {era} (divisor {EraDivisor(era):0.###})"); }
+            if (era != cachedEra && cachedEra >= 0 && era >= 0)
+                Plugin.Log.LogInfo($"[Resize] ERA CHANGED {cachedEra} -> {era} — rescaling by {EraDivisor(cachedEra) / EraDivisor(era):0.###}x (units shrink as ages advance)");
+            cachedEra = era;
+            return era;
+        }
+
+        // Crude PoC divisor: the era index itself (index 0/unknown = no division). A real table would map each era
+        // to a reference SIZE in metres and divide trueSize by it — this just proves the anchor moves the size.
+        static float EraDivisor(int era) => era >= 1 ? era : 1f;
+
+        static void ApplyVanillaScale(PawnCtx ctx, float baseScale)
         {
             try
             {
+                float target = baseScale / EraDivisor(CurrentEra());
+
                 // PLACEMENT half — every frame (the game rebuilds pawnEntries[] from scratch each frame)
                 var oss = GetMember(ctx.entry, "ObjectSpace");
-                SetMember(oss, "Scale", Convert.ToSingle(GetMember(oss, "Scale")) * s);
+                SetMember(oss, "Scale", Convert.ToSingle(GetMember(oss, "Scale")) * target);
                 SetMember(ctx.entry, "ObjectSpace", oss);
                 ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
 
-                // GEOMETRY half — once per descriptor per session
-                if (meshScaledDescs.Add(ctx.descId)) ScaleDescriptorMeshes(ctx.descId, s);
+                // GEOMETRY half — only when the target actually differs from what the buffer already carries
+                if (!descApplied.TryGetValue(ctx.descId, out float cur) || Math.Abs(cur - target) > 1e-4f)
+                    ScaleDescriptorMeshes(ctx.descId, target);
             }
             catch (Exception ex) { if (!poseErrLogged) { poseErrLogged = true; Plugin.Log.LogError("[Resize] " + ex); } }
         }
 
-        static void ScaleDescriptorMeshes(int descId, float s)
+        static void ScaleDescriptorMeshes(int descId, float target)
         {
             try
             {
                 var am = animMgrRef;
-                if (am == null) { meshScaledDescs.Remove(descId); return; }   // registration pass not seen yet — retry
+                if (am == null) return;   // registration pass not seen yet — the per-frame path retries
                 var pmType = AccessTools.TypeByName("Amplitude.Mercury.Animation.PawnManager");
                 var pm = pmType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
                          ?? AccessTools.Field(pmType, "Instance")?.GetValue(null);
-                if (pm == null) { meshScaledDescs.Remove(descId); return; }
+                if (pm == null) return;
                 var descs = AccessTools.Field(pmType, "gpuPawnDescriptorEntries")?.GetValue(pm) as Array;
                 var gfrags = AccessTools.Field(pmType, "gpuPawnDescriptorFragmentEntries")?.GetValue(pm) as Array;
                 if (descs == null || gfrags == null || descId < 0 || descId >= descs.Length) return;
@@ -1963,6 +2009,7 @@ namespace ENCAccessProof
                 var mbMinF = msType.GetField("BBoxMin"); var mbMaxF = msType.GetField("BBoxMax");
 
                 int meshesScaled = 0, vertsScaled = 0;
+                float ratio = 1f;                 // the ratio actually applied to geometry this pass (bbox follows it)
                 for (uint fi = 0; fi < count && start + fi < gfrags.Length; fi++)
                 {
                     uint enc = Convert.ToUInt32(encGpuF.GetValue(gfrags.GetValue((int)(start + fi))));
@@ -1975,35 +2022,52 @@ namespace ENCAccessProof
                         int vc = Convert.ToInt32(vcF.GetValue(mEntry));
                         if (vc <= 0) break;
                         long key = ((long)layerIdx << 32) | (uint)mi;
-                        if (scaledMeshes.Add(key))
+                        uint sv = Convert.ToUInt32(svF.GetValue(mEntry));
+                        if (sv >= verts.Length) break;
+                        var probeNow = (UnityEngine.Vector3)posF.GetValue(verts.GetValue((int)sv));
+
+                        // trust the record only if the buffer still holds the data we wrote (see MeshScale)
+                        float applied = 1f;
+                        if (meshApplied.TryGetValue(key, out var st) && (st.probe - probeNow).sqrMagnitude < 1e-8f)
+                            applied = st.factor;
+                        else if (meshApplied.ContainsKey(key))
+                            Plugin.Log.LogInfo($"[Resize] mesh {mi} came back unscaled (Fx content reloaded) — re-scaling from 1");
+
+                        ratio = target / applied;                       // only the DIFFERENCE — re-scaling never compounds
+                        if (Math.Abs(ratio - 1f) > 1e-4f)
                         {
-                            uint sv = Convert.ToUInt32(svF.GetValue(mEntry));
                             for (uint v = sv; v < sv + vc && v < verts.Length; v++)
                             {
                                 var vert = verts.GetValue((int)v);
-                                posF.SetValue(vert, (UnityEngine.Vector3)posF.GetValue(vert) * s);
+                                posF.SetValue(vert, (UnityEngine.Vector3)posF.GetValue(vert) * ratio);
                                 verts.SetValue(vert, (int)v);
                             }
-                            mbMinF.SetValue(mEntry, (UnityEngine.Vector3)mbMinF.GetValue(mEntry) * s);
-                            mbMaxF.SetValue(mEntry, (UnityEngine.Vector3)mbMaxF.GetValue(mEntry) * s);
+                            mbMinF.SetValue(mEntry, (UnityEngine.Vector3)mbMinF.GetValue(mEntry) * ratio);
+                            mbMaxF.SetValue(mEntry, (UnityEngine.Vector3)mbMaxF.GetValue(mEntry) * ratio);
                             meshTable.SetValue(mEntry, mi);
                             meshesScaled++; vertsScaled += vc;
                         }
+                        meshApplied[key] = new MeshScale { factor = target, probe = probeNow * ratio };
                         break;
                     }
                 }
 
-                if (meshesScaled > 0)
+                // BBox = culling only, so it deliberately errs LARGE: follow the geometry ratio when we moved
+                // vertices; if the geometry was already at target but this descriptor is new to us (a fresh
+                // session rebuilt it with a vanilla bbox), take the full target once.
+                float descRatio = meshesScaled > 0 ? ratio : (descApplied.ContainsKey(descId) ? 1f : target);
+                if (meshesScaled > 0 || Math.Abs(descRatio - 1f) > 1e-4f)
                 {
                     AccessTools.Method(vertBufObj.GetType(), "Apply", Type.EmptyTypes)?.Invoke(vertBufObj, null);
                     AccessTools.Method(meshBufObj?.GetType(), "Apply", Type.EmptyTypes)?.Invoke(meshBufObj, null);
-                    // descriptor bbox (culling) + re-upload
-                    dT.GetField("BBoxMin")?.SetValue(dEntry, (UnityEngine.Vector3)dT.GetField("BBoxMin").GetValue(dEntry) * s);
-                    dT.GetField("BBoxMax")?.SetValue(dEntry, (UnityEngine.Vector3)dT.GetField("BBoxMax").GetValue(dEntry) * s);
+                    // descriptor bbox (culling) + re-upload — same ratio discipline as the vertices
+                    dT.GetField("BBoxMin")?.SetValue(dEntry, (UnityEngine.Vector3)dT.GetField("BBoxMin").GetValue(dEntry) * descRatio);
+                    dT.GetField("BBoxMax")?.SetValue(dEntry, (UnityEngine.Vector3)dT.GetField("BBoxMax").GetValue(dEntry) * descRatio);
                     descs.SetValue(dEntry, descId);
                     AccessTools.Field(pmType, "descriptorBufferDirty")?.SetValue(pm, true);
                 }
-                Plugin.Log.LogInfo($"[Resize] desc {descId}: {meshesScaled} mesh(es), {vertsScaled} vert(s) scaled x{s:0.###} + per-pawn placement x{s:0.###}");
+                descApplied[descId] = target;   // records the target even when nothing moved, so the per-frame path stops re-entering
+                Plugin.Log.LogInfo($"[Resize] desc {descId} -> x{target:0.###} (era {cachedEra}): {meshesScaled} mesh(es), {vertsScaled} vert(s) re-scaled by {descRatio:0.###}x + per-pawn placement x{target:0.###}");
             }
             catch (Exception ex) { Plugin.Log.LogError("[Resize] mesh scale: " + ex); }
         }
