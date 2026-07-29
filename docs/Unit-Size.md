@@ -173,6 +173,10 @@ Ancient era, ×0.8 once industry arrives and ×0.6 in the Contemporary age.
 
 **Rules that shape the grid:**
 
+- **Naval only, for now.** Ships age with the world; land and air units keep their authored size in every era. Ships
+  are where the mismatch is glaring and where scaling is safest (single pawn, no formation spacing, no gear anchors).
+  This deliberately leaves the cave-bear case intact — an animal is a *land* unit, so it still scales via a Resize
+  Lab rule, it just doesn't drift as ages pass.
 - **Defaults are 1.0 everywhere.** The Lab ships neutral and the runtime invents no curve — every number that
   changes a unit's size is authored by you. An untouched grid means units simply keep their Resize Lab size.
 - **Only units with a Resize Lab rule are affected.** The grid modifies opted-in units and can never resize

@@ -2148,7 +2148,14 @@ namespace ENCAccessProof
         // everything else Land(0). The profile is what we already read when resolving the rule.
         static int DomainFromProfile(int prof) => prof == 7 ? 1 : prof == 14 ? 2 : prof == 15 ? 3 : 0;
 
-        static float EraAnchor(UnitScaleInfo info) => EraAnchorFor(info.homeEra, WorldEraFor(info.domain));
+        // NAVAL-ONLY FOR NOW (user rule, 2026-07-29): only ships age with the world. Ships are where the mismatch is
+        // glaring (a trireme beside a battleship) and where scaling is safe — single-pawn, no formation spacing, no
+        // gear anchors. Land and air keep their authored size in every era: crucially this leaves the cave-bear case
+        // intact (an animal IS a land unit, and the user wants those scalable), it just doesn't drift with the eras.
+        // Lifting the gate later is this one line, plus deciding whether the grid needs per-domain rows.
+        const int NavalDomain = 1;                       // UnitSpawnType.Maritime
+        static float EraAnchor(UnitScaleInfo info)
+            => info.domain == NavalDomain ? EraAnchorFor(info.homeEra, WorldEraFor(info.domain)) : 1f;
 
         static readonly string[] EraNames = { "Neolithic", "Ancient", "Classical", "Medieval", "Early Modern", "Industrial", "Contemporary" };
         static string EraName(int era) => era >= 0 && era < EraNames.Length ? EraNames[era] : "?";
@@ -2169,12 +2176,14 @@ namespace ENCAccessProof
             foreach (var kv in unitScaleByDesc)
             {
                 var info = kv.Value;
-                int worldEra = WorldEraFor(info.domain);
-                float mod = EraAnchorFor(info.homeEra, worldEra);
+                float mod = EraAnchor(info);
                 string name = unitScaleNameByDesc.TryGetValue(kv.Key, out var n) ? n : $"desc {kv.Key}";
                 string applied = descApplied.TryGetValue(kv.Key, out float a) ? $"applied x{a:0.###}" : "not drawn yet";
                 string dom = info.domain >= 0 && info.domain < domName.Length ? domName[info.domain] : "?";
-                lines.Add($"  {name}: rule x{info.scale:0.###} (own era {info.homeEra} {EraName(info.homeEra)}, {dom}) vs {dom} frontier {worldEra} {EraName(worldEra)} -> x{mod:0.###} = x{info.scale * mod:0.###}   [{applied}]");
+                string how = info.domain == NavalDomain
+                    ? $"vs naval frontier {WorldEraFor(info.domain)} {EraName(WorldEraFor(info.domain))} -> x{mod:0.###}"
+                    : "era ageing off (naval only for now)";
+                lines.Add($"  {name}: rule x{info.scale:0.###} (own era {info.homeEra} {EraName(info.homeEra)}, {dom}) {how} = x{info.scale * mod:0.###}   [{applied}]");
             }
             if (unitScaleByDesc.Count == 0 && unitScaleRules.Count > 0)
                 lines.Add($"  {unitScaleRules.Count} rule(s) loaded, none matched a live unit yet");
