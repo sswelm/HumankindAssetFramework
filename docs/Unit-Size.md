@@ -185,28 +185,35 @@ Ancient era, ×0.8 once industry arrives and ×0.6 in the Contemporary age.
 
 ### What counts as "the era the world is in"
 
-Not research — **what has actually been built**, per domain. The plugin walks every major empire's armies and
-squadrons every two seconds, reads each unit's era off its definition name (Amplitude names them `Era1_…`), and
-keeps the maximum **separately for land, naval, air and missile** units. A ruled unit is then measured against its
-*own* domain's frontier: the moment an era-6 battleship exists, ships are compared to era 6, while land progress
-leaves them alone. A trireme should look small beside a battleship, not beside a tank.
+```
+anchor = max( built frontier for the unit's domain , the world's era )
+```
 
-Two research-based anchors were tried first and both misread the world:
+**The built frontier** is what is actually on the map: every two seconds the plugin walks each major empire's armies
+and squadrons, reads each unit's era off its definition name (Amplitude names them `Era1_…`), and keeps the maximum
+**separately for land, naval, air and missile**. A ruled unit is measured against its *own* domain — the moment an
+era-6 battleship exists, ships are compared to era 6, while land progress leaves them alone. A trireme should look
+small beside a battleship, not beside a tank.
 
-| Anchor | Why it's wrong |
+**The world's era** (`Timeline.GetGlobalEraIndex()`) is combined in as a floor, because the frontier alone says
+nothing in a game where nobody bothered to build a navy — the trireme would stay huge into the Contemporary age.
+Taking the higher of the two means the anchor only moves forward: ships pull it up the moment a modern hull exists,
+and general progress carries it even at an empty sea.
+
+Why *that* floor and not the empires' technological era — the two research anchors fail in opposite directions:
+
+| Anchor | Behaviour |
 |---|---|
-| `Timeline.GetGlobalEraIndex()` | A threshold over the *sum* of all empires' techs, so it **lags**: a late game reported era 5 while era-6 ships were already sailing. |
-| Empires' technological era | **Overshoots**: Humankind advances eras by *fame*, so an empire can sit in the last era without a single unit from it. |
+| `Timeline.GetGlobalEraIndex()` | A threshold over the *sum* of all empires' techs, so it **lags** the frontier: a late game reported era 5 while era-6 ships were already sailing. Harmless as a floor inside a `max()`. |
+| Empires' technological era | **Overshoots**: Humankind advances eras by *fame*, so an empire can sit in the last era without a single unit from it. As a floor it would undo the point of measuring what was built — kept only as a last resort if the aggregate index is unavailable. |
 
-Both remain as fallbacks (overall built frontier → tech era → aggregate index) for the moment before any units
-exist, and both are shown in the F8 readout for comparison. Era indices equal the numbers players see, with
-Neolithic at 0 — confirmed in-game.
+Era indices equal the numbers players see, with Neolithic at 0 — confirmed in-game.
 
 **Live readout.** The F8 debug window (Humankind Asset Framework) shows the frontier per domain and, for each ruled
 unit, its own era, the frontier it is measured against, the modifier that produces, and the size currently applied:
 
 ```
-Built-unit frontier — naval: 6 Contemporary | land: 5 Industrial | air: 6 Contemporary   (tech era 5, aggregate 5)
+Anchor = max(built frontier, world era 5) — built: naval 6 Contemporary | land 5 Industrial | air none   (tech era 5)
 era-grid rows authored: 5   |   scaled units: 1
   Era1_Common_Biremes_01: rule x4 (own era 1 Ancient, naval) vs naval frontier 6 Contemporary -> x0.15 = x0.6   [applied x0.6]
 ```

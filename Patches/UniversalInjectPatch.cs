@@ -2080,13 +2080,25 @@ namespace ENCAccessProof
             return m.Success && int.TryParse(m.Groups[1].Value, out int e) ? e : -1;
         }
 
-        // The era a unit is measured against: its OWN domain's built frontier (ships vs ships), then the overall
-        // frontier, so a naval rule is unaffected by land-only progress and vice versa.
+        // The era a unit is measured against = MAX(its own domain's built frontier, the world's own era).
+        //
+        // Combining the two rather than preferring one (user) covers both failure modes: the built frontier alone
+        // says nothing in a game where nobody bothered to build ships — the trireme would stay huge into the
+        // Contemporary age — while the world era alone lags what is actually sailing. Taking the higher of the two
+        // means the anchor only ever moves forward: ships pull it up the moment a modern hull exists, and general
+        // progress carries it even at an empty sea.
+        //
+        // The FLOOR is deliberately the aggregate Timeline index, not the empires' technological era: the tech era
+        // overshoots (fame-driven era advancement, no units to match), and inside a max() an overshooting floor
+        // would undo the whole point of measuring what was built. The tech era stays a last resort if the aggregate
+        // is unavailable.
         static int WorldEraFor(int domain)
         {
-            int now = CurrentEra();
-            if (domain >= 0 && domain < domainEra.Length && domainEra[domain] >= 1) return domainEra[domain];
-            return now;
+            CurrentEra();                                   // keep the 2s poll fresh
+            int built = domain >= 0 && domain < domainEra.Length ? domainEra[domain] : -1;
+            int floor = aggregateEra >= 0 ? aggregateEra : techEra;
+            int era = built > floor ? built : floor;
+            return era >= 0 ? era : cachedEra;
         }
 
         // Presentation profile -> UnitSpawnType domain: Boat(7) = Maritime(1), Plane(14)/Missile(15) = Air(2)/Missile(3),
@@ -2108,7 +2120,7 @@ namespace ENCAccessProof
             string Front(int d) => domainEra[d] >= 0 ? $"{domainEra[d]} {EraName(domainEra[d])}" : "none";
             lines.Add(era < 0
                 ? "World era: not in a game yet"
-                : $"Built-unit frontier — naval: {Front(1)} | land: {Front(0)} | air: {Front(2)}      (tech era {techEra}, aggregate {aggregateEra})");
+                : $"Anchor = max(built frontier, world era {aggregateEra}) — built: naval {Front(1)} | land {Front(0)} | air {Front(2)}   (tech era {techEra})");
             lines.Add($"era-grid rows authored: {eraGridRows.Count}   |   scaled units: {unitScaleByDesc.Count}");
             string[] domName = { "land", "naval", "air", "missile" };
             foreach (var kv in unitScaleByDesc)
