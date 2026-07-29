@@ -183,10 +183,33 @@ Ancient era, ×0.8 once industry arrives and ×0.6 in the Contemporary age.
 - **The unit's era is read from its name** (`Era4_Common_ManOWar_01` → 4). For definitions with no era token, set
   the **Era** column on the rule in the Resize Lab.
 
-**The era itself** comes from `Sandbox.Timeline.GetGlobalEraIndex()` (reflection — the class is `internal`), polled
-every two seconds. That is the **game-wide** era, computed from *every* major empire's research, which is the
-correct anchor because unit visuals are shared by everyone on the map. The index equals the era number players see,
-with Neolithic at 0 — confirmed in-game by observing index 5 during Industrial-era play.
+### What counts as "the era the world is in"
+
+Not research — **what has actually been built**, per domain. The plugin walks every major empire's armies and
+squadrons every two seconds, reads each unit's era off its definition name (Amplitude names them `Era1_…`), and
+keeps the maximum **separately for land, naval, air and missile** units. A ruled unit is then measured against its
+*own* domain's frontier: the moment an era-6 battleship exists, ships are compared to era 6, while land progress
+leaves them alone. A trireme should look small beside a battleship, not beside a tank.
+
+Two research-based anchors were tried first and both misread the world:
+
+| Anchor | Why it's wrong |
+|---|---|
+| `Timeline.GetGlobalEraIndex()` | A threshold over the *sum* of all empires' techs, so it **lags**: a late game reported era 5 while era-6 ships were already sailing. |
+| Empires' technological era | **Overshoots**: Humankind advances eras by *fame*, so an empire can sit in the last era without a single unit from it. |
+
+Both remain as fallbacks (overall built frontier → tech era → aggregate index) for the moment before any units
+exist, and both are shown in the F8 readout for comparison. Era indices equal the numbers players see, with
+Neolithic at 0 — confirmed in-game.
+
+**Live readout.** The F8 debug window (Humankind Asset Framework) shows the frontier per domain and, for each ruled
+unit, its own era, the frontier it is measured against, the modifier that produces, and the size currently applied:
+
+```
+Built-unit frontier — naval: 6 Contemporary | land: 5 Industrial | air: 6 Contemporary   (tech era 5, aggregate 5)
+era-grid rows authored: 5   |   scaled units: 1
+  Era1_Common_Biremes_01: rule x4 (own era 1 Ancient, naval) vs naval frontier 6 Contemporary -> x0.15 = x0.6   [applied x0.6]
+```
 
 **Era changes re-scale live.** Thanks to the ratio engine [above](#how-it-works), a new era just sets a new target
 and the geometry is multiplied by the difference — the ship changes size in place within the poll interval, no
