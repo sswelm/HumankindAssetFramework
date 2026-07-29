@@ -5,8 +5,10 @@ assets** — a runtime override driven by `enc_formations.json`. Link a `Present
 whose dummy count and layout you author in the Unity SDK, and the plugin injects it into the live database and
 repoints the unit at load. Fully reversible: delete the link and the unit is vanilla next launch.
 
-> Status: **VERIFIED IN-GAME 2026-07-28** — 12- and 16-model Warriors units render correctly (all models on the hex,
-> banner centered). The fix is count-agnostic; the vanilla 9/10 ceiling is gone. See [The >9 story](#the-9-story).
+> Status: **VERIFIED IN-GAME 2026-07-28** — 12-, 16-, 19- and 32-model units render correctly (all models on the
+> hex, banner centered). The fix is count-agnostic; the vanilla 9/10 ceiling is gone. See [The >9 story](#the-9-story).
+> Model **scale** is built with two selectable modes — solved for spacing and non-human models, WIP on vanilla
+> humans; see [Model scale](#model-scale-two-modes-and-their-limits) before using it.
 
 ---
 
@@ -23,6 +25,33 @@ repoints the unit at load. Fully reversible: delete the link and the unit is van
   (registry `dummyOffset`, runtime-only) lets you tighten it: `0` sits models perfectly on the dummy grid, a small
   value (e.g. `0.05`) packs them tightly with a touch of variation, unticked (`-1`) keeps the vanilla scatter. On
   repoint the plugin sets the unit's `DummyOffsetPosition` to that value — no rebuild.
+- **Scale** — the window's **Formation scale** toggle (registry `scale`) resizes the unit's models AND their
+  spacing together (scaling a formation means the whole formation); **Footprint override** (`layoutScale`)
+  decouples the spacing when you want small men on a wide line or vice versa. Two implementations selectable per
+  link (`scaleMode`) — see [Model scale](#model-scale-two-modes-and-their-limits) for what works and what breaks.
+
+## Two entry kinds: unit links and MACRO replacements
+
+An `enc_formations.json` entry works in one of two modes, decided by whether **Unit** is set:
+
+- **Unit link** (`unit` set) — repoints ONE `PresentationUnitDefinition` at the named formation. Precise, per-unit.
+- **Macro replacement** (`unit` EMPTY) — overwrites a named formation in the live database with the entry's data.
+  Every unit of every era — *including units from other mod packs that reference vanilla formation names and never
+  rescaled anything* — inherits the new layout with ONE entry. Example: replace `Formation_Scatter_Spaced_9` with a
+  19-dummy layout and the whole roster's scatter infantry fields 19 models. The window has an explicit entry-type
+  toolbar: **Replace a formation (macro)** shows two fields — *Replace formation* (the target name, with a picker
+  over the known vanilla formations) and *With layout* (Pick the project asset that carries the new layout; its data
+  is used, its name isn't). Per-unit knobs (jitter/scale) don't apply — they live on unit definitions; use a unit
+  link for those.
+
+**Precedence:** macro replacements rewrite the shared formation; unit links repoint their unit at a *different*
+formation and therefore overrule the replacement for that unit. A handful of macro entries + a few unit links for
+showcases covers the entire roster without forgetting anyone.
+
+*Why "macro":* the entry expresses a **rule**, not a single override — and the rule vocabulary is meant to grow.
+Planned discriminators (reserved, not yet implemented): **era** (e.g. replace `Formation_Scatter_Spaced_9` with 19
+dummies *only for Era 4+ units*), unit class, and land/naval — so one registry can express "denser formations as
+eras progress" without touching every unit definition.
 
 ## User workflow (no mod rebuild)
 
@@ -104,11 +133,22 @@ to keep whatever count a unit had when it first rendered.
 - `[Formation] registry: N link(s)` — the file was read.
 - `[Formation] '<formation>' … OVERWRITTEN in place (N dummies)` / `injected …` — the formation data is live.
 - `[Formation] '<unit>' now uses formation '<formation>' (N pawns at full health)` — the repoint took.
+- `[Formation] MACRO replacement live: every unit referencing '<formation>' now fields N pawns …` — a macro
+  replacement entry applied (the OVERWRITTEN-in-place warning above it is expected and is the mechanism).
 - `[Formation] Formation3DPrefab dummy pool extended 9 -> N` — the >9 growth ran.
 - `[Formation] replaced N prefab-bound dummy slot(s) …` — the origin-stranding fix ran (expected for any formation
   once the prefab is grown past vanilla).
 - `[Formation] re-instantiated '<unit>': pawns A -> B …` — the load-race catch-up fired.
 - `[Formation] '<unit>' dummy jitter -> V (tighter packing).` — the packing override was applied.
+- `[Formation] '<unit>' pawns scaled xS (Transform mode: root localScale).` — `transform` scale mode applied.
+- `[Formation] '<def>': skeleton '<name>_HAFsS' — N bone binds ×S, M hosted mesh(es) scaled.` — `data` mode built
+  the scaled skeleton clone.
+- `[Formation] '<def>': SCALED xS in data (skeleton + k fragment(s) this pass); descriptor[id] repointed …` — `data`
+  mode fully applied to the definition.
+- `[Formation] '<def>': descriptor not yet populated — …` — normal on early Loads in `data` mode; a later pass (or
+  the game's own fill from the already-replaced entries) completes it.
+- **Gear floats above scaled bodies / heads tilt (`data` mode, humans)** → the known procedural-bone-layer limit —
+  see [Model scale](#model-scale-two-modes-and-their-limits).
 - **Fewer models than expected, no "Invalid pawn count" error** → the unit isn't full health, or it's a different
   definition (e.g. `_Rogue`).
 - **A stray unit icon / models far away** → pre-fix origin stranding; make sure the plugin build has the
@@ -116,27 +156,83 @@ to keep whatever count a unit had when it first rendered.
 - **"Mismatched mods" / crash at load** → inconsistent `ColumnsCountPerRow` vs dummy coords; the Formation Override
   window validates this before it lets you save, so re-save from the window.
 
+## Model scale: two modes and their limits
+
+The formation link carries a per-unit **scale** (window: *Formation scale*, 0.2–2.0). By default it scales the
+models **and** the dummy spacing together; *Footprint override* (`layoutScale`) decouples the spacing. Two
+implementations exist, selectable per link (window dropdown, registry `scaleMode`) — a hard-won field campaign
+(2026-07-28) established exactly what each can and cannot do:
+
+### `transform` (default — "Transform (simple)")
+
+Sets each pawn root's `localScale` at `PresentationPawn.InstantiatePawn` (`Hk_FormationPawnScale`). One line of
+mechanism, and bodies + spacing look right immediately.
+
+**Known limits (field-proven, unfixable in this mode):** the engine applies a root scale **inconsistently across
+three GPU subsystems** —
+1. *Body skinning* follows it (bodies look right scaling down; scaling **up** distorts limbs — shriveled arms at 1.25);
+2. *Rigid equipment fragments* (helmet/shield/weapon — bone-glued meshes) receive it **twice** on their vertices and
+   once on their anchor: at 0.8 a helmet buries inside the skull ("bald legionaries") and shields hug the hand;
+3. *Procedural weapon-slot / look-at bones* ignore it entirely.
+
+**Verdict: usable for vehicles/creatures/custom models (single skinned mesh, no fragments) and for quick
+experiments; NOT shippable on vanilla humans.**
+
+### `data` ("Skeleton data (deep, WIP)")
+
+Puts the scale **into the data** and leaves every transform at 1: clones the definition's `Skeleton`, multiplies all
+bone `BindPose`/`Local` **translations** by *s* (rotations untouched — the engine's clips are rotation-only, so
+vanilla animations replay correctly on a scaled bind *by construction*), scales every hosted body mesh and every EQ
+fragment collection's pre-encoded vertices by *s*, then swaps the addon onto the clones (the custom-model repoint
+idiom) with a FragmentEntry rebuild + surgical GPU-descriptor repoint.
+
+**State: bodies and gear meshes verified correct; one subsystem still defeats it on humans** — the **procedural bone
+layers** (head look-at, RLUDS weapon slots) write bone poses each frame in authored vanilla proportions, so helmets
+anchor at vanilla head height above a scaled body and heads tilt. Next attack documented: decompile the
+`BoneRotation0-3`/slot layer writer (the plugin already owns aim-layer levers from the barrel-twist work). Untested
+but promising on vehicles (no fragments, no slots, no look-at).
+
+### Engine internals the `data` mode ran into (reusable knowledge)
+
+- Vanilla fragment geometry ships **pre-encoded** in `FxMeshContent.verticesBytes` inside the MeshCollection — there
+  is **no loadable FxMesh asset** behind those guids. Positions are the first 3 floats of each vertex record
+  (stride = `bytes/(vertexCount·4)` floats).
+- Modified bytes are rejected as *"Mesh content is corrupted: checksum failed"* — **zero `verticesBytesCrc`** to skip
+  the guard (0 disables validation by design).
+- The encoder caches mesh slots **per guid** — a mutated content needs a **fresh guid** or the cached original wins.
+- `RegisterMeshCollection` only encodes when the fx pipeline reports Loaded — call `LoadIFN` explicitly after it.
+- The addon's `Load` runs **more than once**; vanilla `ReloadFragments` rebuilds `FragmentEntries` from the
+  definition each time (clobbering replacements) — re-apply on every Load, tag clones (`_HAFs` name suffix) so they
+  are never re-scaled, and expect the GPU descriptor slot to be **empty (count 0)** on early passes (the game fills
+  it later from the addon's — by then replaced — array).
+
+### Capability summary
+
+| Target | `transform` | `data` |
+|---|---|---|
+| Vanilla humans | bodies OK (down only), gear breaks | bodies + gear meshes OK, gear **anchors** break (procedural layers) — WIP |
+| Vehicles / ships / planes | expected clean (untested) | expected clean (untested) |
+| Custom HAF models | expected clean | expected clean (or bake at the right size instead) |
+
+Baking a scaled unit as a **custom model** (gear merged into the mesh, Model Factory pipeline) sidesteps every
+runtime subsystem at the cost of per-pawn equipment variation — the pragmatic route if a scaled human unit is needed
+before the procedural-layer work lands.
+
 ## R.E.D.-style: the count + scale pair
 
-This axis is one half of a **R.E.D.-style** rebalance (after the classic Civ 5 *R.E.D. Modpack* by Gedemon), which
-made map armies look proportionate and immersive by adjusting two things per unit:
-
-- **Model count** — how many figures a unit fields (infantry = a squad of many; artillery = a small crew). **This is
-  the formation axis, above.**
-- **Model scale** — the relative *size* of the figures (vanilla makes them cartoonishly large — a tank can end up
-  bigger than the plane above it). **Planned as a sibling "unit-size" axis** (feasibility confirmed): each pawn's
-  `ObjectSpace.Scale` is multiplied at runtime — the same lever the plugin already uses for custom models — matched
-  per unit by `PawnDescriptorId`. No baked assets, no rebuild. GPU-free (pawns are instanced).
-
-The eventual goal is an **optional "R.E.D. Patch" pack** — a curated set of formation + size overrides that rebalances
-the whole vanilla roster (smaller, more-numerous infantry; big-but-sparse tanks; tiny planes) across all eras, opt-in
-and fully reversible. Practical counts: a hero/showcase unit can go 30–50; a whole-roster rebalance wants ~12–20 per
-unit (cost scales with *total* on-screen pawns, not per-unit), so ~18 is a good roster default.
+This axis is one half of a **R.E.D.-style** rebalance (after the classic Civ 5 *R.E.D. Modpack* by Gedemon):
+**model count** (the formation axis above — solved, verified to 32/unit) + **model scale** (above — solved for the
+spacing half; model-size half usable on non-humans, WIP on vanilla humans). The eventual goal is an **optional
+"R.E.D. Patch" pack** — a curated set of formation + size overrides across the roster (smaller, more-numerous
+infantry; big-but-sparse tanks; smaller planes), opt-in and fully reversible. Practical counts: a hero/showcase unit
+can go 30–50; a whole-roster rebalance wants ~12–20 per unit (cost scales with *total* on-screen pawns, not
+per-unit), so ~18 is a good roster default.
 
 ## Files
 
 - Editor: `Assets/Scripts/Editor/FormationOverrideWindow.cs`, `FormationRegistry.cs` → `enc_formations.json`.
 - Plugin: `Patches/FormationOverridePatch.cs` (`FormationOverride` + the `Hk_FormationPrefabExtend` /
-  `Hk_FormationInstanceCapacity` / `Hk_FormationSpawnDiag` hooks). Registered in `Plugin.cs`.
+  `Hk_FormationInstanceCapacity` / `Hk_FormationSpawnDiag` / `Hk_FormationPawnScale` hooks; the `data` scale mode
+  also rides `UniRepointHook`'s AddOn.Load postfix via `MaybeScaleFragments`). Registered in `Plugin.cs`.
 - Registry lives in the game's `BepInEx/config/enc_formations.json` (the editor writes there directly — same file the
   plugin reads, no source/deployed split).

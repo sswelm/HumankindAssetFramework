@@ -30,6 +30,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using BepInEx;
 using HarmonyLib;
 using Newtonsoft.Json.Linq;
@@ -47,6 +48,9 @@ namespace ENCAccessProof
             public readonly List<Dummy> dummies = new List<Dummy>();
             public readonly int[][] columns = new int[6][];
             public float dummyOffset = -1f;   // RUNTIME override of the unit's random per-model jitter (CoordinationValues.DummyOffsetPosition). -1 = leave vanilla; >=0 sets BOTH axes (0 = perfectly on the dummy grid, small = tightly packed). Lets a custom formation read as a clean block instead of a loose scatter, no rebuild.
+            public float scale = -1f;         // RUNTIME per-model scale multiplier (pawn root localScale; the GPU TRS path reads lossyScale). -1/1 = vanilla size; 0.7 = smaller models (denser formations read better), >1 = larger. EXPERIMENTAL: uniform only.
+            public float layoutScale = -1f;   // RUNTIME multiplier on the DUMMY POSITIONS at injection. -1 = FOLLOW `scale` (the natural reading: scaling a formation shrinks models AND spacing together); set explicitly to decouple footprint from model size (e.g. small men, wide skirmish line).
+            public string scaleMode = "transform";   // "transform" = pawn root localScale (v1: simple, decent bodies/spacing; rigid gear mis-anchors on humans) | "data" = cloned skeleton with scaled binds+meshes (v2: deep; humans WIP — procedural bone layers ignore it)
             public bool done;      // this session: injected (if data) + repointed, or dropped after a permanent error
         }
 
@@ -79,6 +83,7 @@ namespace ENCAccessProof
                 if (entries.Count == 0) return;
                 foreach (var e in entries) e.done = false;   // fresh session: repoint again (defs reload per session)
                 appliedAny = false; reformed.Clear();        // fresh session: re-arm + drop last session's unit objects
+                fragDefsDone.Clear(); clonesRegisteredThisSession.Clear();   // equipment counter-scale: re-process defs + re-register clones (AnimationLoad cleared the manager)
                 pending = true;
                 TryApply();                                   // normally succeeds right here
             }
@@ -117,6 +122,9 @@ namespace ENCAccessProof
                         formation = ((string)l["formation"] ?? "").Trim(),
                         lowSpec = ((string)l["lowSpec"] ?? "").Trim(),
                         dummyOffset = (float?)l["dummyOffset"] ?? -1f,
+                        scale = (float?)l["scale"] ?? -1f,
+                        layoutScale = (float?)l["layoutScale"] ?? -1f,
+                        scaleMode = ((string)l["scaleMode"] ?? "transform").Trim().ToLowerInvariant(),
                     };
                     foreach (var d in (l["dummies"] as JArray) ?? new JArray())
                     {
@@ -138,8 +146,10 @@ namespace ENCAccessProof
                         e.columns[i] = v;
                     }
 
-                    if (e.unit.Length == 0 || e.formation.Length == 0)
-                    { Plugin.Log.LogWarning("[Formation] registry entry skipped (unit or formation name empty)."); continue; }
+                    if (e.formation.Length == 0)
+                    { Plugin.Log.LogWarning("[Formation] registry entry skipped (formation name empty)."); continue; }
+                    if (e.unit.Length == 0 && e.dummies.Count == 0)
+                    { Plugin.Log.LogWarning($"[Formation] MACRO replacement of '{e.formation}' skipped — no formation data in the entry."); continue; }
                     var err = Validate(e);
                     if (err != null)
                     { Plugin.Log.LogError($"[Formation] entry '{e.unit}' -> '{e.formation}' INVALID ({err}) — skipped. Re-save it from the Formation Override window."); continue; }
@@ -245,9 +255,18 @@ namespace ENCAccessProof
                 var pdef = Mem(unit, "PresentationUnitDefinition");
                 string pdn = Mem(pdef, "name")?.ToString() ?? Mem(pdef, "Name")?.ToString() ?? "";
                 if (pdn.Length == 0) continue;
+                // macro replacements have no unit name — match those by the definition's own formation reference
+                string fref = null;
+                try
+                {
+                    var r = AccessTools.Field(pdef.GetType(), "PresentationFormationDefinition")?.GetValue(pdef);
+                    fref = r?.GetType().GetProperty("XmlSerializableElementName")?.GetValue(r) as string;
+                }
+                catch { }
                 var e = entries.FirstOrDefault(x => x.done && x.dummies.Count > 0
-                          && string.Equals(x.unit, pdn, StringComparison.OrdinalIgnoreCase));
-                if (e == null) continue;                             // not one of our repointed units
+                          && (string.Equals(x.unit, pdn, StringComparison.OrdinalIgnoreCase)
+                              || (x.unit.Length == 0 && string.Equals(x.formation, fref ?? "", StringComparison.OrdinalIgnoreCase))));
+                if (e == null) continue;                             // not one of our repointed/replaced units
                 present.Add(unit);
                 if (reformed.Contains(unit)) continue;               // already handled this session
                 bool loaded = true; try { loaded = Convert.ToBoolean(Mem(unit, "IsLoaded")); } catch { }
@@ -298,11 +317,20 @@ namespace ENCAccessProof
                 // wearing the _12 name = "9 pawns in a scatter layout"). The registry is the source of truth: overwrite
                 // the existing element's data IN PLACE — every reference (even an already-cached one) points at the
                 // patched object. Deliberate consequence: reusing a VANILLA formation name rewrites that formation for
-                // every unit referencing it (usable as a global override; the log is loud so it's never a surprise).
+                // every unit referencing it (usable as a macro override; the log is loud so it's never a surprise).
                 var fdT = existing.GetType();
                 FillFormationFields(existing, fdT, e);
                 Plugin.Log.LogWarning($"[Formation] '{e.formation}' already existed in the database — its data was OVERWRITTEN in place " +
                                       $"from the registry ({e.dummies.Count} dummies). If that name is a vanilla formation, every unit using it is affected.");
+            }
+
+            // MACRO REPLACEMENT entry (no unit): the in-place overwrite above IS the whole job — every unit of
+            // every mod whose definition references this name (resolved lazily by name at spawn) now gets this
+            // layout. Per-unit link entries still repoint their units elsewhere and thus overrule it.
+            if (e.unit.Length == 0)
+            {
+                Plugin.Log.LogInfo($"[Formation] MACRO replacement live: every unit referencing '{e.formation}' now fields {e.dummies.Count} pawns at full health.");
+                e.done = true; return;
             }
 
             // 2) repoint the unit's formation reference (FRESH struct: the old one may cache the old element)
@@ -353,10 +381,13 @@ namespace ENCAccessProof
             var arr = Array.CreateInstance(dummyType, e.dummies.Count);
             var fPos = AccessTools.Field(dummyType, "Position");
             var fCpd = AccessTools.Field(dummyType, "CoordinatePerDirection");
+            // footprint: explicit layoutScale wins; otherwise the model `scale` shrinks the spacing WITH the models
+            // (scaling a formation means the whole formation); 1/-1 = positions as authored
+            float posMul = e.layoutScale > 0f ? e.layoutScale : (e.scale > 0f ? e.scale : 1f);
             for (int i = 0; i < e.dummies.Count; i++)
             {
                 object d = Activator.CreateInstance(dummyType);   // boxed struct
-                fPos.SetValue(d, e.dummies[i].pos);
+                fPos.SetValue(d, e.dummies[i].pos * posMul);
                 var v = new Vector2Int[e.dummies[i].coords.Count];
                 for (int j = 0; j < v.Length; j++) v[j] = new Vector2Int(e.dummies[i].coords[j].x, e.dummies[i].coords[j].y);
                 fCpd.SetValue(d, v);
@@ -410,6 +441,345 @@ namespace ENCAccessProof
                 }
             }
             catch (Exception ex) { Plugin.Log.LogError("[Formation] spawn diag: " + ex); }
+        }
+
+        // ---------- MODEL SCALE v2 = SCALE-IN-THE-DATA (skeleton-clone architecture, 2026-07-28) ----------
+        // Root-transform scaling is ENGINE-HOSTILE for pawns: the GPU skinning, the rigid-fragment path and the
+        // procedural weapon slots each pick a root scale up DIFFERENTLY (field campaign: gear double-scaled and
+        // slid off its anchors at 0.8; at 1.25 helmets floated 0.4m high and the BODY itself shriveled). v2 puts
+        // the scale into the DATA and leaves every transform at 1, so no subsystem ever sees a scale at all:
+        //   • clone the definition's Skeleton; multiply every bone's BindPose/Local TRANSLATION by s. Rotations
+        //     untouched — clips are rotation-only (Law 5), so vanilla animations replay correctly on a scaled
+        //     bind BY CONSTRUCTION.
+        //   • scale every hosted mesh's pre-encoded vertices by s (positions = first 3 floats of each record;
+        //     verticesBytesCrc ZEROED — the corruption guard rejects modified bytes, 0 skips it by design; FRESH
+        //     guid per mesh — the encoder caches slots per guid, the original would shadow our data).
+        //   • same treatment for each rigid EQ fragment collection (helmet/shield/weapon meshes are bone-local;
+        //     scaled bones sit at scaled positions, so the gear scales in place — no anchor math needed).
+        //   • swap the addon onto the clones exactly like the custom-model repoint does (Skeleton/MeshCollection
+        //     members + FragmentEntry rebuild + surgical descriptor repoint preserving SkinnedMeshIndex).
+        // Runs in the AddOn.Load postfix window (UniRepointHook), where the model axis proved the swap is safe.
+
+        static readonly Dictionary<string, UnityEngine.Object> scaledCollections = new Dictionary<string, UnityEngine.Object>(StringComparer.Ordinal);   // "(instId)|s" -> collection/skeleton clone (process-lived)
+        static readonly HashSet<string> fragDefsDone = new HashSet<string>(StringComparer.Ordinal);            // defNames processed (cleared per session)
+        static readonly HashSet<string> clonesRegisteredThisSession = new HashSet<string>(StringComparer.Ordinal);
+
+        internal static void MaybeScaleFragments(object addon, object animMgr)   // entry-point name kept (wired in UniRepointHook)
+        {
+            try
+            {
+                if (Plugin.FormationOverrideOn == null || !Plugin.FormationOverrideOn.Value || entries.Count == 0 || addon == null || animMgr == null) return;
+                var def = UniversalInject.GetMember(addon, "Definition");
+                var defName = (def as UnityEngine.Object)?.name;
+                if (string.IsNullOrEmpty(defName)) return;
+                var unitRef = AccessTools.Field(def.GetType(), "PresentationUnitDefinition")?.GetValue(def);
+                var unitName = unitRef?.GetType().GetProperty("XmlSerializableElementName")?.GetValue(unitRef) as string;
+                if (string.IsNullOrEmpty(unitName)) return;
+                Entry link = null;
+                foreach (var e in entries) if (e.unit == unitName && e.scale > 0f && Math.Abs(e.scale - 1f) > 0.001f && e.scaleMode == "data") { link = e; break; }
+                if (link == null) return;   // no scale, or Transform mode (handled per-pawn in ApplyPawnScale)
+                // NO once-per-def gate: the addon's Load runs MORE THAN ONCE per session and each vanilla
+                // ReloadFragments rebuilds FragmentEntries from the definition — clobbering our scaled entries
+                // (field-proven: gear reverted to vanilla size while the body kept the scaled skeleton). Re-apply
+                // on every Load; slots already pointing at our clones are skipped, so steady state is cheap.
+                bool firstRun = fragDefsDone.Add(defName);
+                float s = link.scale;
+
+                var sk0 = UniversalInject.GetMember(addon, "Skeleton") as UnityEngine.Object;
+                var mc0 = UniversalInject.GetMember(addon, "MeshCollection") as UnityEngine.Object;
+                if (sk0 == null || !sk0) { Plugin.Log.LogWarning($"[Formation] '{defName}': no skeleton on the addon — cannot scale."); return; }
+                var renderer = UniversalInject.GetMember(animMgr, "FxComponentRenderer");
+                var mcm = UniversalInject.GetMember(animMgr, "FxComponentMeshContentManager");
+                var layerObj = UniversalInject.GetMember(animMgr, "FXMeshLayerIndex");
+                int layerIdx = layerObj is int li ? li : Convert.ToInt32(layerObj ?? 0);
+                if (renderer == null || mcm == null) { Plugin.Log.LogWarning($"[Formation] '{defName}': animation managers not ready — not scaled this session."); return; }
+                var regM = animMgr.GetType().GetMethod("RegisterMeshCollection", BindingFlags.Public | BindingFlags.Instance);
+
+                // 1) the scaled skeleton (bind translations + hosted body meshes ×s) and, if distinct, the mesh collection.
+                // Later Loads see OUR clone already on the addon — never re-scale a clone (double-shrink).
+                UnityEngine.Object sk1;
+                if (sk0.name.Contains("_HAFs")) sk1 = sk0;
+                else { sk1 = GetScaledSkeleton(sk0, s, defName); if (sk1 == null) return; }
+                UnityEngine.Object mc1 = (mc0 == null || !mc0 || ReferenceEquals(mc0, sk0) || ReferenceEquals(mc0, sk1)) ? sk1
+                    : mc0.name.Contains("_HAFs") ? mc0
+                    : GetScaledCollection(mc0, s, defName);
+
+                // 2) register the clones (the Skeleton branch assigns a SkeletonId and uploads the scaled bind slabs)
+                void RegisterOnce(UnityEngine.Object c)
+                {
+                    if (c == null) return;
+                    var rk = c.GetInstanceID().ToString();
+                    if (!clonesRegisteredThisSession.Add(rk)) return;
+                    try { regM?.Invoke(animMgr, new object[] { c }); }
+                    catch (Exception rex) { Plugin.Log.LogWarning("[Formation] scaled-clone register: " + (rex.InnerException ?? rex).Message); }
+                    try { AccessTools.Method(c.GetType(), "LoadIFN")?.Invoke(c, new object[] { mcm, layerIdx, -1 }); }
+                    catch (Exception lex) { Plugin.Log.LogWarning("[Formation] scaled-clone LoadIFN: " + (lex.InnerException ?? lex).Message); }
+                }
+                RegisterOnce(sk1);
+                if (!ReferenceEquals(mc1, sk1)) RegisterOnce(mc1);
+
+                // 3) swap the addon (the custom-model repoint idiom)
+                void SetM(object o, string nm, object val)
+                {
+                    var p = AccessTools.Property(o.GetType(), nm);
+                    if (p != null && p.CanWrite) { try { p.SetValue(o, val); return; } catch { } }
+                    AccessTools.Field(o.GetType(), nm)?.SetValue(o, val);
+                }
+                SetM(addon, "Skeleton", sk1);
+                SetM(addon, "MeshCollection", mc1);
+
+                // 4) rebuild every fragment entry against the scaled assets
+                var fragsArr = UniversalInject.GetMember(addon, "FragmentEntries") as Array;
+                if (fragsArr == null || fragsArr.Length == 0)
+                { Plugin.Log.LogInfo($"[Formation] '{defName}': skeleton scaled x{s} (no fragments)."); return; }
+                var fragType = fragsArr.GetType().GetElementType();
+                var fMc = AccessTools.Field(fragType, "meshCollection");
+                var fMn = AccessTools.Field(fragType, "meshName");
+                var fBn = AccessTools.Field(fragType, "boneName");
+                var fSlot = AccessTools.Field(fragType, "SlotIndex");
+                var fEnc = AccessTools.Field(fragType, "EncodedMeshAndVisualParticleCount");
+                var pFol = AccessTools.Property(fragType, "FxOutputLayer");
+                var ctor5 = fragType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).FirstOrDefault(c => c.GetParameters().Length == 5);
+                var loadM = AccessTools.Method(fragType, "Load");
+                if (fMc == null || fMn == null || ctor5 == null || loadM == null)
+                { Plugin.Log.LogWarning("[Formation] FragmentEntry layout changed (game update?) — fragments not rebuilt."); return; }
+
+                int replaced = 0;
+                var newEnc = new uint[fragsArr.Length];
+                for (int i = 0; i < fragsArr.Length; i++)
+                {
+                    var it = fragsArr.GetValue(i);
+                    if ((uint)fEnc.GetValue(it) == 0) continue;                       // dead slot: leave as-is
+                    var mn = fMn.GetValue(it) as string;
+                    if (string.IsNullOrEmpty(mn)) continue;
+                    var collOrig = fMc.GetValue(it) as UnityEngine.Object;
+                    if (collOrig != null && collOrig && collOrig.name.Contains("_HAFs"))
+                    { newEnc[i] = (uint)fEnc.GetValue(it); continue; }                // already ours (a later Load kept it) — keep its enc for the descriptor pass
+                    UnityEngine.Object coll1 = null;
+                    if (collOrig != null && collOrig)
+                    {
+                        coll1 = ReferenceEquals(collOrig, sk0) ? sk1
+                              : (mc0 != null && ReferenceEquals(collOrig, mc0)) ? mc1
+                              : GetScaledCollection(collOrig, s, defName);
+                        if (coll1 == null) { Plugin.Log.LogWarning($"[Formation] '{defName}' fragment '{mn}': collection not scalable — left vanilla."); continue; }
+                        RegisterOnce(coll1);
+                    }
+                    var item = ctor5.Invoke(new object[] { fSlot.GetValue(it), coll1, mn, pFol?.GetValue(it), fBn.GetValue(it) });
+                    try { loadM.Invoke(item, new object[] { sk1, renderer, mcm, layerIdx }); }
+                    catch (Exception lex) { Plugin.Log.LogWarning($"[Formation] '{defName}' fragment '{mn}' Load: " + (lex.InnerException ?? lex).Message); continue; }
+                    uint enc = (uint)fEnc.GetValue(item);
+                    if (enc == 0)
+                    {
+                        uint cidx = 0;
+                        try { if (coll1 != null) cidx = (uint)AccessTools.Method(coll1.GetType(), "GetFxMeshIndex", new[] { typeof(string) }).Invoke(coll1, new object[] { mn }); } catch { }
+                        Plugin.Log.LogWarning($"[Formation] '{defName}' fragment '{mn}': scaled encode returned 0 (cloneMeshIndex={cidx}) — kept vanilla.");
+                        continue;
+                    }
+                    fragsArr.SetValue(item, i);
+                    newEnc[i] = enc;
+                    replaced++;
+                }
+
+                // 5) descriptor: pre-registration the snapshot picks the swapped assets up; post-registration patch surgically
+                int defId = -1;
+                try { defId = Convert.ToInt32(UniversalInject.GetMember(addon, "PawnDefinitionId")); } catch { }
+                if (defId < 0)
+                {
+                    if (firstRun || replaced > 0)
+                        Plugin.Log.LogInfo($"[Formation] '{defName}': SCALED x{s} in data (skeleton + {replaced} fragment(s)) pre-registration — the snapshot carries it.");
+                    return;
+                }
+                var pmType = AccessTools.TypeByName("Amplitude.Mercury.Animation.PawnManager");
+                var pm = pmType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
+                         ?? AccessTools.Field(pmType, "Instance")?.GetValue(null);
+                var descs = AccessTools.Field(pmType, "gpuPawnDescriptorEntries")?.GetValue(pm) as Array;
+                var gfrags = AccessTools.Field(pmType, "gpuPawnDescriptorFragmentEntries")?.GetValue(pm) as Array;
+                var cntF = AccessTools.Field(pmType, "persistentFragmentEntryCount");
+                var dirtyF = AccessTools.Field(pmType, "descriptorBufferDirty");
+                if (pm == null || descs == null || gfrags == null || cntF == null || defId >= descs.Length)
+                { Plugin.Log.LogWarning($"[Formation] '{defName}': descriptor arrays unreadable — scaled fragments may stay invisible."); return; }
+                var dEntry = descs.GetValue(defId);
+                var dT = dEntry.GetType();
+                uint start = (uint)dT.GetField("StartFragment").GetValue(dEntry);
+                uint count = (uint)dT.GetField("FragmentCount").GetValue(dEntry);
+                if (count == 0)
+                {
+                    // descriptor slot allotted but not yet filled (the game populates it on a LATER pass, from the
+                    // addon's FragmentEntries — which now hold OUR scaled entries; the next Load postfix also re-runs us)
+                    if (firstRun) Plugin.Log.LogInfo($"[Formation] '{defName}': descriptor not yet populated — scaled entries are in place for the game's own fill; re-checked on the next Load.");
+                    return;
+                }
+                if (count != fragsArr.Length)
+                { Plugin.Log.LogWarning($"[Formation] '{defName}': descriptor count {count} != FragmentEntries {fragsArr.Length} — patch skipped (order unknown)."); return; }
+                var feT = gfrags.GetType().GetElementType();
+                var encF2 = feT.GetField("EncodedMeshAndVisualParticleCountFxMeshIndex");
+                // idempotence: if the live block already carries our encodes, don't grow the tail again this Load
+                bool differs = false;
+                for (int k = 0; k < count && !differs; k++)
+                    if (newEnc[k] != 0 && (uint)encF2.GetValue(gfrags.GetValue((int)start + k)) != newEnc[k]) differs = true;
+                if (!differs) return;
+                int tail = Convert.ToInt32(cntF.GetValue(pm));
+                int need = tail + (int)count;
+                if (gfrags.Length < need)
+                {
+                    var grown = Array.CreateInstance(gfrags.GetType().GetElementType(), need + 100);
+                    Array.Copy(gfrags, grown, gfrags.Length);
+                    AccessTools.Field(pmType, "gpuPawnDescriptorFragmentEntries").SetValue(pm, grown); gfrags = grown;
+                }
+                for (int k = 0; k < count; k++)
+                {
+                    var rec = gfrags.GetValue((int)start + k);   // verbatim copy preserves SkinnedMeshIndex/bone/layer
+                    if (newEnc[k] != 0) encF2.SetValue(rec, newEnc[k]);
+                    gfrags.SetValue(rec, tail + k);
+                }
+                dT.GetField("StartFragment").SetValue(dEntry, (uint)tail);
+                descs.SetValue(dEntry, defId);
+                cntF.SetValue(pm, tail + (int)count);
+                dirtyF?.SetValue(pm, true);
+                if (firstRun || replaced > 0)
+                    Plugin.Log.LogInfo($"[Formation] '{defName}': SCALED x{s} in data (skeleton '{sk1.name}' + {replaced}/{count} fragment(s) this pass); descriptor[{defId}] repointed {start}+{count} -> {tail}+{count}.");
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Formation] MaybeScaleFragments: " + ex); }
+        }
+
+        // Scaled Skeleton clone: bone bind/local translations ×s (rotations untouched), bbox ×s, hosted meshes ×s.
+        static UnityEngine.Object GetScaledSkeleton(UnityEngine.Object sk0, float s, string tag)
+        {
+            try
+            {
+                string key = sk0.GetInstanceID() + "|" + s.ToString("0.###");
+                if (scaledCollections.TryGetValue(key, out var have) && have != null) return have;
+                var sk1 = UnityEngine.Object.Instantiate(sk0);
+                sk1.name = sk0.name + "_HAFs" + s.ToString("0.###");
+                sk1.hideFlags = HideFlags.HideAndDontSave;
+                var bones = AccessTools.Field(sk1.GetType(), "BoneInfos")?.GetValue(sk1) as Array;
+                if (bones == null || bones.Length == 0)
+                { Plugin.Log.LogWarning($"[Formation] '{tag}': skeleton clone has no BoneInfos — not scaled."); return null; }
+                for (int j = 0; j < bones.Length; j++)
+                {
+                    var bi = bones.GetValue(j);   // boxed struct
+                    ScaleTrsTranslation(bi, "BindPose", s);
+                    ScaleTrsTranslation(bi, "Local", s);
+                    bones.SetValue(bi, j);
+                }
+                var bminF = AccessTools.Field(sk1.GetType(), "BBoxMin");
+                var bmaxF = AccessTools.Field(sk1.GetType(), "BBoxMax");
+                if (bminF?.GetValue(sk1) is Vector3 bmin) bminF.SetValue(sk1, bmin * s);
+                if (bmaxF?.GetValue(sk1) is Vector3 bmax) bmaxF.SetValue(sk1, bmax * s);
+                int scaledMeshes = ScaleAllContents(sk1, s, tag);
+                Plugin.Log.LogInfo($"[Formation] '{tag}': skeleton '{sk1.name}' — {bones.Length} bone binds ×{s}, {scaledMeshes} hosted mesh(es) scaled.");
+                scaledCollections[key] = sk1;
+                return sk1;
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Formation] GetScaledSkeleton: " + ex); return null; }
+        }
+
+        static void ScaleTrsTranslation(object boneInfoBoxed, string trsField, float s)
+        {
+            var f = AccessTools.Field(boneInfoBoxed.GetType(), trsField);
+            if (f == null) return;
+            var trs = f.GetValue(boneInfoBoxed);   // boxed TRS
+            var tF = AccessTools.Field(trs.GetType(), "Translation");
+            if (tF?.GetValue(trs) is Vector3 t) { tF.SetValue(trs, t * s); f.SetValue(boneInfoBoxed, trs); }
+        }
+
+        // Scaled plain MeshCollection clone (EQ fragment collections): every hosted mesh ×s.
+        static UnityEngine.Object GetScaledCollection(UnityEngine.Object mc0, float s, string tag)
+        {
+            try
+            {
+                string key = mc0.GetInstanceID() + "|" + s.ToString("0.###");
+                if (scaledCollections.TryGetValue(key, out var have) && have != null) return have;
+                var clone = UnityEngine.Object.Instantiate(mc0);
+                clone.name = mc0.name + "_HAFs" + s.ToString("0.###");
+                clone.hideFlags = HideFlags.HideAndDontSave;
+                int n = ScaleAllContents(clone, s, tag);
+                if (n == 0) { Plugin.Log.LogWarning($"[Formation] '{tag}': '{clone.name}' had no scalable mesh contents."); return null; }
+                scaledCollections[key] = clone;
+                return clone;
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Formation] GetScaledCollection: " + ex); return null; }
+        }
+
+        // Scale every hosted mesh's pre-encoded vertex POSITIONS ×s in a collection clone. Positions are the first
+        // 3 floats of each vertex record (stride = bytes/(vertexCount·4) floats; normals/tangents are directions —
+        // invariant under uniform scale; bone weights untouched). CRC zeroed (guard bypass), fresh guid per mesh.
+        static int ScaleAllContents(UnityEngine.Object coll, float s, string tag)
+        {
+            var sis = UniversalInject.GetMember(coll, "skinnedMeshInfos") as Array;
+            if (sis == null) return 0;
+            int done = 0;
+            for (int j = 0; j < sis.Length; j++)
+            {
+                var si = sis.GetValue(j);
+                var fmcF = AccessTools.Field(si.GetType(), "FxMeshContent");
+                var fmc = fmcF?.GetValue(si);   // boxed struct copy
+                if (fmc == null) continue;
+                var fmcT = fmc.GetType();
+                var vbF = AccessTools.Field(fmcT, "verticesBytes");
+                var vcF = AccessTools.Field(fmcT, "vertexCount");
+                var bytes = vbF?.GetValue(fmc) as byte[];
+                int vc = 0; try { vc = Convert.ToInt32(vcF?.GetValue(fmc) ?? 0); } catch { }
+                if (bytes == null || bytes.Length == 0 || vc <= 0 || bytes.Length % (vc * 4) != 0) continue;
+                int strideBytes = bytes.Length / vc;
+                var scaled = new byte[bytes.Length];
+                Buffer.BlockCopy(bytes, 0, scaled, 0, bytes.Length);
+                for (int v = 0; v < vc; v++)
+                {
+                    int b0 = v * strideBytes;
+                    for (int c = 0; c < 3; c++)
+                    {
+                        float f = BitConverter.ToSingle(scaled, b0 + c * 4) * s;
+                        var fb = BitConverter.GetBytes(f);
+                        scaled[b0 + c * 4] = fb[0]; scaled[b0 + c * 4 + 1] = fb[1];
+                        scaled[b0 + c * 4 + 2] = fb[2]; scaled[b0 + c * 4 + 3] = fb[3];
+                    }
+                }
+                vbF.SetValue(fmc, scaled);
+                AccessTools.Field(fmcT, "verticesBytesCrc")?.SetValue(fmc, 0u);   // guard bypass: 0 skips validation by design
+                var bminF = AccessTools.Field(fmcT, "bboxMin");
+                var bmaxF = AccessTools.Field(fmcT, "bboxMax");
+                if (bminF?.GetValue(fmc) is Vector3 bmin) bminF.SetValue(fmc, bmin * s);
+                if (bmaxF?.GetValue(fmc) is Vector3 bmax) bmaxF.SetValue(fmc, bmax * s);
+                var guidObj = UniversalInject.GetMember(fmc, "Guid");
+                var fresh = UniversalInject.MakeGuid(
+                    (guidObj?.GetHashCode() ?? j) ^ 0x48414653,
+                    ((UniversalInject.GetMember(si, "MeshName")?.ToString() ?? j.ToString()).GetHashCode()),
+                    (int)(s * 10000f),
+                    unchecked((int)0x0F0F0F0F));
+                AccessTools.Field(fmcT, "Guid")?.SetValue(fmc, fresh);
+                fmcF.SetValue(si, fmc);
+                if (si.GetType().IsValueType) sis.SetValue(si, j);
+                done++;
+            }
+            return done;
+        }
+
+        // TRANSFORM scale mode (v1, user-elected per link): pawn root localScale at InstantiatePawn. Simple and
+        // decent on bodies + spacing; KNOWN LIMITS on humans (rigid gear double-scales/mis-anchors, limbs distort
+        // when scaling UP) — the window says so. "data" mode routes through MaybeScaleFragments instead.
+        static readonly HashSet<string> scaleLogged = new HashSet<string>(StringComparer.Ordinal);
+        internal static void ApplyPawnScale(object pawn, object unit)
+        {
+            try
+            {
+                if (Plugin.FormationOverrideOn == null || !Plugin.FormationOverrideOn.Value || entries.Count == 0) return;
+                var pc = pawn as Component;
+                if (pc == null || unit == null) return;
+                var unitDef = AccessTools.Field(unit.GetType(), "PresentationUnitDefinition")?.GetValue(unit)
+                              ?? AccessTools.Property(unit.GetType(), "PresentationUnitDefinition")?.GetValue(unit);
+                var unitName = (unitDef as UnityEngine.Object)?.name;
+                if (string.IsNullOrEmpty(unitName)) return;
+                foreach (var e in entries)
+                {
+                    if (e.unit != unitName || e.scale <= 0f || Math.Abs(e.scale - 1f) < 0.001f || e.scaleMode == "data") continue;
+                    pc.transform.localScale = Vector3.one * e.scale;
+                    if (scaleLogged.Add(unitName))
+                        Plugin.Log.LogInfo($"[Formation] '{unitName}' pawns scaled x{e.scale} (Transform mode: root localScale).");
+                    return;
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Formation] pawn scale: " + ex); }
         }
 
         static object DbFind(IEnumerable db, string name)
@@ -586,6 +956,21 @@ namespace ENCAccessProof
     // pawn count = ceil(DummyCount × healthRatio). Logs the actual spawn math for any unit whose formation is bigger
     // than vanilla (DummyCount > 9 = a registry formation), so "9 out of 12" separates into health-driven (working
     // as designed) vs a genuine cap. Must be in Plugin.cs's explicit hook list.
+    // Postfix on the single static PresentationPawn.InstantiatePawn(prefab, container, pawnDef, unit, dummy, audio) —
+    // applies the registry link's per-model Scale to every pawn the game creates for that unit type. Must be in
+    // Plugin.cs's explicit hook list.
+    [HarmonyPatch]
+    internal static class Hk_FormationPawnScale
+    {
+        static System.Reflection.MethodBase TargetMethod()
+        {
+            var t = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PresentationPawn")
+                    ?? AccessTools.TypeByName("PresentationPawn");
+            return t != null ? AccessTools.Method(t, "InstantiatePawn") : null;
+        }
+        static void Postfix(object __result, object __3) => FormationOverride.ApplyPawnScale(__result, __3);
+    }
+
     [HarmonyPatch]
     internal static class Hk_FormationSpawnDiag
     {

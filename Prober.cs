@@ -297,10 +297,16 @@ namespace ENCAccessProof
         }
 
         // Databases.GetDatabase(<elementType>), tried defensively across candidate namespaces.
-        private static IEnumerable ResolveDatabase(string elementTypeFullName)
+        // (internal: FormationOverride resolves the formation + unit-definition databases through this too)
+        internal static IEnumerable ResolveDatabase(string elementTypeFullName)
         {
             var elemType = AccessTools.TypeByName(elementTypeFullName);
             if (elemType == null) return null;
+            return ResolveDatabase(elemType);
+        }
+
+        internal static IEnumerable ResolveDatabase(Type elemType)
+        {
             foreach (var dbTypeName in new[] { "Amplitude.Framework.Databases", "Amplitude.Mercury.Databases", "Amplitude.Databases" })
             {
                 var dbType = AccessTools.TypeByName(dbTypeName);

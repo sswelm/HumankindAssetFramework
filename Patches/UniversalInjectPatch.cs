@@ -721,7 +721,7 @@ namespace ENCAccessProof
         {
             registered = false;
             anyAnimated = null; anyFreeze = null;                    // recomputed on the next pawn-add
-            unitScaleByDesc.Clear(); vanillaScaledLogged.Clear();   // descriptor ids are session-scoped — re-resolve
+            unitScaleByDesc.Clear(); vanillaScaledLogged.Clear(); meshScaledDescs.Clear();   // descriptor ids are session-scoped — re-resolve (scaledMeshes deliberately KEPT: the Fx buffers persist)
             _listenerChecked = false;                                // the AudioListener rode a session-scoped camera
             var list = entries;
             if (list != null)
@@ -1884,9 +1884,129 @@ namespace ENCAccessProof
         //      geometry by a runtime scale; IBP.Scale is never even read by the draw.
         // Geometry size lives exclusively in the baked vertex buffer. Every runtime transform lever is
         // structurally dead (v1 ObjectSpace, v2 root Local, v3 IBP+BindPose — v3's two legs cancel exactly
-        // in the VS: entry.Scale x IBP.T = (1/2s) x 2T). The ONLY road: the MESH-CLONE engine (clone the
-        // unit's mesh/fragments scaled + repoint its descriptor). Rules resolve and log-and-skip until then.
+        // in the VS: entry.Scale x IBP.T = (1/2s) x 2T).
         // Shader-dump toolchain: tools/ShaderDump (bundle -> AssetsTools.NET -> D3DDisassemble).
+        //
+        // MESH-SCALE ENGINE v1 (2026-07-29, the same shader read turned into the FIX): since size lives in
+        // vertex data, scale the vertex data. The pawn layer's vertex format is VertexDataPosUVNormalTangentBones
+        // — Pos is RAW FLOATS at offset 0 (t7 stride 36 in the draw VS; only the static formats quantize
+        // positions) — and the layer's CPU WriteContent stays alive and is what every re-upload sends (never
+        // released; layer dirty-repaints are self-healing for our writes). Two halves, both shader-proven:
+        //   GEOMETRY (once per descriptor): descriptor fragments -> packed field low 24 bits = the mesh's
+        //     StartIndex -> match in the layer's FxOneMeshStruct table -> Pos *= s over [StartVertex,
+        //     +VertexCount) -> Apply(); uniform scale keeps normals/tangents valid. Mesh + descriptor BBoxes
+        //     scaled for culling.
+        //   PLACEMENT (per pawn per frame — the pawn buffer is immediate-mode): ObjectSpace.Scale *= s; the
+        //     second pass multiplies bone world positions by it and the VS scales bind offsets by it
+        //     (entry.Scale = ObjectSpace.Scale / IBP.Scale), so part spacing follows the grown geometry.
+        // scaledMeshes is keyed by (layer, mesh index) and deliberately NOT session-reset: the Fx content
+        // buffers persist across save/load while descriptor ids re-resolve — clearing it would double-scale.
+        static readonly HashSet<long> scaledMeshes = new HashSet<long>();    // (layerIndex << 32) | meshTableIndex — NOT session-reset
+        static readonly HashSet<int> meshScaledDescs = new HashSet<int>();   // descriptors whose meshes were processed (session-reset)
+
+        static void ApplyVanillaScale(PawnCtx ctx, float s)
+        {
+            try
+            {
+                // PLACEMENT half — every frame (the game rebuilds pawnEntries[] from scratch each frame)
+                var oss = GetMember(ctx.entry, "ObjectSpace");
+                SetMember(oss, "Scale", Convert.ToSingle(GetMember(oss, "Scale")) * s);
+                SetMember(ctx.entry, "ObjectSpace", oss);
+                ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
+
+                // GEOMETRY half — once per descriptor per session
+                if (meshScaledDescs.Add(ctx.descId)) ScaleDescriptorMeshes(ctx.descId, s);
+            }
+            catch (Exception ex) { if (!poseErrLogged) { poseErrLogged = true; Plugin.Log.LogError("[Resize] " + ex); } }
+        }
+
+        static void ScaleDescriptorMeshes(int descId, float s)
+        {
+            try
+            {
+                var am = animMgrRef;
+                if (am == null) { meshScaledDescs.Remove(descId); return; }   // registration pass not seen yet — retry
+                var pmType = AccessTools.TypeByName("Amplitude.Mercury.Animation.PawnManager");
+                var pm = pmType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
+                         ?? AccessTools.Field(pmType, "Instance")?.GetValue(null);
+                if (pm == null) { meshScaledDescs.Remove(descId); return; }
+                var descs = AccessTools.Field(pmType, "gpuPawnDescriptorEntries")?.GetValue(pm) as Array;
+                var gfrags = AccessTools.Field(pmType, "gpuPawnDescriptorFragmentEntries")?.GetValue(pm) as Array;
+                if (descs == null || gfrags == null || descId < 0 || descId >= descs.Length) return;
+
+                var mcm = GetMember(am, "FxComponentMeshContentManager");
+                var layerObj = GetMember(am, "FXMeshLayerIndex");
+                int layerIdx = layerObj is int li ? li : Convert.ToInt32(layerObj ?? 0);
+                var layersArr = AccessTools.Field(mcm?.GetType(), "layers")?.GetValue(mcm) as Array;
+                if (layersArr == null || layerIdx < 0 || layerIdx >= layersArr.Length) { Plugin.Log.LogWarning("[Resize] mesh layers unreachable"); return; }
+                var layer = layersArr.GetValue(layerIdx);
+                var meshTable = GetMember(layer, "HxFxOneMeshComputeBufferData") as Array;   // FxOneMeshStruct[]
+                var vertBufObj = AccessTools.Field(layer.GetType(), "vertexBuffer")?.GetValue(layer);
+                var meshBufObj = AccessTools.Field(layer.GetType(), "hxFxOneMeshComputeBuffer")?.GetValue(layer);
+                var verts = vertBufObj == null ? null : GetMember(vertBufObj, "WriteContent") as Array;
+                if (meshTable == null || verts == null) { Plugin.Log.LogWarning("[Resize] mesh/vertex buffers unreachable"); return; }
+
+                // SAFETY: only the Bones format stores Pos as raw floats — anything else would be corrupted
+                var posF = verts.GetType().GetElementType().GetField("Pos");
+                if (posF == null || posF.FieldType != typeof(UnityEngine.Vector3))
+                { Plugin.Log.LogWarning($"[Resize] layer {layerIdx} vertex format has no raw Pos — skipping (format {verts.GetType().GetElementType().Name})"); return; }
+
+                var dEntry = descs.GetValue(descId);
+                var dT = dEntry.GetType();
+                uint start = (uint)dT.GetField("StartFragment").GetValue(dEntry);
+                uint count = (uint)dT.GetField("FragmentCount").GetValue(dEntry);
+                var feType = gfrags.GetType().GetElementType();
+                var encGpuF = feType.GetField("EncodedMeshAndVisualParticleCountFxMeshIndex");
+                var msType = meshTable.GetType().GetElementType();
+                var siF = msType.GetField("StartIndex"); var svF = msType.GetField("StartVertex");
+                var vcF = msType.GetField("VertexCount");
+                var mbMinF = msType.GetField("BBoxMin"); var mbMaxF = msType.GetField("BBoxMax");
+
+                int meshesScaled = 0, vertsScaled = 0;
+                for (uint fi = 0; fi < count && start + fi < gfrags.Length; fi++)
+                {
+                    uint enc = Convert.ToUInt32(encGpuF.GetValue(gfrags.GetValue((int)(start + fi))));
+                    if (enc == 0) continue;                         // hidden / none
+                    uint startIndex = enc & 0xFFFFFF;               // low 24 bits = the mesh's index-buffer start
+                    for (int mi = 1; mi < meshTable.Length; mi++)   // 0 = the none mesh
+                    {
+                        var mEntry = meshTable.GetValue(mi);
+                        if (Convert.ToUInt32(siF.GetValue(mEntry)) != startIndex) continue;
+                        int vc = Convert.ToInt32(vcF.GetValue(mEntry));
+                        if (vc <= 0) break;
+                        long key = ((long)layerIdx << 32) | (uint)mi;
+                        if (scaledMeshes.Add(key))
+                        {
+                            uint sv = Convert.ToUInt32(svF.GetValue(mEntry));
+                            for (uint v = sv; v < sv + vc && v < verts.Length; v++)
+                            {
+                                var vert = verts.GetValue((int)v);
+                                posF.SetValue(vert, (UnityEngine.Vector3)posF.GetValue(vert) * s);
+                                verts.SetValue(vert, (int)v);
+                            }
+                            mbMinF.SetValue(mEntry, (UnityEngine.Vector3)mbMinF.GetValue(mEntry) * s);
+                            mbMaxF.SetValue(mEntry, (UnityEngine.Vector3)mbMaxF.GetValue(mEntry) * s);
+                            meshTable.SetValue(mEntry, mi);
+                            meshesScaled++; vertsScaled += vc;
+                        }
+                        break;
+                    }
+                }
+
+                if (meshesScaled > 0)
+                {
+                    AccessTools.Method(vertBufObj.GetType(), "Apply", Type.EmptyTypes)?.Invoke(vertBufObj, null);
+                    AccessTools.Method(meshBufObj?.GetType(), "Apply", Type.EmptyTypes)?.Invoke(meshBufObj, null);
+                    // descriptor bbox (culling) + re-upload
+                    dT.GetField("BBoxMin")?.SetValue(dEntry, (UnityEngine.Vector3)dT.GetField("BBoxMin").GetValue(dEntry) * s);
+                    dT.GetField("BBoxMax")?.SetValue(dEntry, (UnityEngine.Vector3)dT.GetField("BBoxMax").GetValue(dEntry) * s);
+                    descs.SetValue(dEntry, descId);
+                    AccessTools.Field(pmType, "descriptorBufferDirty")?.SetValue(pm, true);
+                }
+                Plugin.Log.LogInfo($"[Resize] desc {descId}: {meshesScaled} mesh(es), {vertsScaled} vert(s) scaled x{s:0.###} + per-pawn placement x{s:0.###}");
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Resize] mesh scale: " + ex); }
+        }
 
         static object animMgrRef;             // AnimationManager instance, captured at registration ([AnimDiag])
         static HashSet<string> animDiagDone;  // entries already dumped by the one-shot [AnimDiag]
@@ -2002,11 +2122,7 @@ namespace ENCAccessProof
                 // RESIZE LAB: a vanilla pawn (no model entry) whose descriptor has a resolved scale rule gets its
                 // ObjectSpace.Scale multiplied ONCE at spawn — the same mechanism the per-entry `scale` field uses.
                 if (unitScaleByDesc.Count > 0 && unitScaleByDesc.TryGetValue(ctx.descId, out float vScale) && HookedEntryFor(ctx.skelId) == null)
-                {
-                    // shader-proven dead end — see the RESIZE tombstone above the statics; mesh-clone engine pending
-                    if (vanillaScaledLogged.Add(ctx.descId))
-                        Plugin.Log.LogInfo($"[Resize] desc {ctx.descId} rule x{vScale:0.###} NOT applied — the draw shader never scales geometry (mesh-clone engine pending)");
-                }
+                    ApplyVanillaScale(ctx, vScale);   // MESH-SCALE engine v1: verts x s (once) + ObjectSpace.Scale (per frame)
 
                 // Match this pawn to one of our entries (animated OR freeze-static) by OUR baked skeleton id (the correctly
                 // skinned pawn), else by the descriptor learned from that first correct pawn. The game spawns a unit's LATER
