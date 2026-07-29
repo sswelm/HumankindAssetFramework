@@ -721,7 +721,7 @@ namespace ENCAccessProof
         {
             registered = false;
             anyAnimated = null; anyFreeze = null;                    // recomputed on the next pawn-add
-            unitScaleByDesc.Clear(); vanillaScaledLogged.Clear(); scaledSkeletons.Clear();   // descriptor/skeleton ids are session-scoped — re-resolve + re-apply (the new session rebuilds the GPU skeleton buffer unscaled)
+            unitScaleByDesc.Clear(); vanillaScaledLogged.Clear();   // descriptor ids are session-scoped — re-resolve
             _listenerChecked = false;                                // the AudioListener rode a session-scoped camera
             var list = entries;
             if (list != null)
@@ -1873,113 +1873,10 @@ namespace ENCAccessProof
         static HashSet<string> unitScaleLogged;
         static readonly HashSet<int> vanillaScaledLogged = new HashSet<int>();
 
-        // SKELETON-ROOT scaling (2026-07-28, the bireme finding): writing PawnEntry.ObjectSpace.Scale is INERT —
-        // the whole pipeline fired ([Resize] logs) yet the ship rendered unchanged; the draw shader evidently
-        // ignores the pawn-space scale (vanilla never uses it). The PROVEN render-scale path is SKELETON space:
-        // the howitzer's x100 root-bone Local.Scale visibly renders (the unit-fix sandwich). So: multiply the
-        // pawn's skeleton ROOT bone(s) Local.Scale in the GPU skeleton buffer and re-upload — ONCE per skeleton
-        // per session (the buffer persists; repeating would compound). Skeletons can be shared across units, but
-        // the human-presentation family (where sharing is rampant) is already excluded upstream.
-        static readonly HashSet<int> scaledSkeletons = new HashSet<int>();
-        static float lastScaleProbe;
-        static void ApplyVanillaScale(PawnCtx ctx, float s)
-        {
-            try
-            {
-                if (ctx.skelId < 0) return;
-                if (!scaledSkeletons.Add(ctx.skelId))
-                {
-                    // PERSISTENCE PROBE (2026-07-28, "did you actually log it?"): the write was logged — this
-                    // logs the READ-BACK. If the buffer's root scale shows 1 again, a rebuild wiped the patch.
-                    if (UnityEngine.Time.time - lastScaleProbe > 10f && animMgrRef != null)
-                    {
-                        lastScaleProbe = UnityEngine.Time.time;
-                        try
-                        {
-                            var am2 = animMgrRef;
-                            var sb = AccessTools.Field(am2.GetType(), "gpuSkeletonEntriesBuffer")?.GetValue(am2);
-                            var bb = AccessTools.Field(am2.GetType(), "gpuSkeletonBoneEntiesBuffer")?.GetValue(am2);
-                            var sa = sb == null ? null : GetMember(sb, "WriteContent") as Array;
-                            var ba = bb == null ? null : GetMember(bb, "WriteContent") as Array;
-                            if (sa != null && ba != null && ctx.skelId < sa.Length)
-                            {
-                                uint st = Convert.ToUInt32(GetMember(sa.GetValue(ctx.skelId), "StartSkeletonBoneEntry"));
-                                uint bc = Convert.ToUInt32(GetMember(sa.GetValue(ctx.skelId), "BoneCount"));
-                                for (uint b2 = 0; b2 < bc && st + b2 < ba.Length; b2++)
-                                {
-                                    var bn2 = ba.GetValue((int)(st + b2));
-                                    if (Convert.ToUInt32(GetMember(bn2, "ParentIndex")) < (uint)ba.Length) continue;
-                                    float cur2 = Convert.ToSingle(GetMember(GetMember(bn2, "Local"), "Scale"));
-                                    Plugin.Log.LogInfo($"[Resize] PROBE skeleton {ctx.skelId} buffer root Local.Scale = {cur2:0.###} (expected x{s:0.###})");
-                                    break;
-                                }
-                            }
-                        }
-                        catch { }
-                    }
-                    return;
-                }
-                var am = animMgrRef;
-                if (am == null) { scaledSkeletons.Remove(ctx.skelId); return; }   // registration pass not seen yet — retry on a later pawn
-                var skelBufObj = AccessTools.Field(am.GetType(), "gpuSkeletonEntriesBuffer")?.GetValue(am);
-                var boneBufObj = AccessTools.Field(am.GetType(), "gpuSkeletonBoneEntiesBuffer")?.GetValue(am);
-                var skelArr = skelBufObj == null ? null : GetMember(skelBufObj, "WriteContent") as Array;
-                var boneArr = boneBufObj == null ? null : GetMember(boneBufObj, "WriteContent") as Array;
-                if (skelArr == null || boneArr == null || ctx.skelId >= skelArr.Length) { scaledSkeletons.Remove(ctx.skelId); return; }
-                var skelEntry = skelArr.GetValue(ctx.skelId);
-                uint start = Convert.ToUInt32(GetMember(skelEntry, "StartSkeletonBoneEntry"));
-                uint boneCount = Convert.ToUInt32(GetMember(skelEntry, "BoneCount"));
-                int patched = 0;
-                for (uint b = 0; b < boneCount && start + b < boneArr.Length; b++)
-                {
-                    var bone = boneArr.GetValue((int)(start + b));
-                    uint parent = Convert.ToUInt32(GetMember(bone, "ParentIndex"));
-                    if (parent < (uint)boneArr.Length) continue;   // only ROOT bones (engine convention: parent index out of range = root)
-                    var local = GetMember(bone, "Local");
-                    float cur = 1f; try { cur = Convert.ToSingle(GetMember(local, "Scale")); } catch { }
-                    SetMember(local, "Scale", cur * s);
-                    SetMember(bone, "Local", local);
-                    boneArr.SetValue(bone, (int)(start + b));
-                    patched++;
-                }
-                // ALSO patch the MANAGED skeleton's BoneInfos (2026-07-28, the bireme wipe): Apply() rebuilds the
-                // GPU buffer FROM Skeleton.BoneInfos — a rebuild after our buffer write erased the scale before it
-                // drew ("nope, same size"). With the managed data patched, every rebuild re-bakes it; the direct
-                // buffer write above covers the frames until the next rebuild.
-                int patchedManaged = 0;
-                try
-                {
-                    var sklist = AccessTools.Field(am.GetType(), "skeletons")?.GetValue(am) as System.Collections.IList;
-                    if (sklist != null && ctx.skelId < sklist.Count)
-                    {
-                        var skObj = sklist[ctx.skelId];
-                        var infos = GetMember(skObj, "BoneInfos") as Array;
-                        if (infos != null)
-                            for (int bi = 0; bi < infos.Length; bi++)
-                            {
-                                var info = infos.GetValue(bi);
-                                int par = -1; try { par = Convert.ToInt32(GetMember(info, "ParentIndex")); } catch { }
-                                if (par >= 0) continue;   // asset convention: root = ParentIndex < 0
-                                var loc = GetMember(info, "Local");
-                                float c2 = 1f; try { c2 = Convert.ToSingle(GetMember(loc, "Scale")); } catch { }
-                                SetMember(loc, "Scale", c2 * s);
-                                SetMember(info, "Local", loc);
-                                infos.SetValue(info, bi);
-                                patchedManaged++;
-                            }
-                    }
-                }
-                catch (Exception mx) { Plugin.Log.LogWarning("[Resize] managed skeleton patch: " + mx.Message); }
-                if (patched > 0 || patchedManaged > 0)
-                {
-                    AccessTools.Method(boneBufObj.GetType(), "Apply", Type.EmptyTypes)?.Invoke(boneBufObj, null);   // re-upload writeContent to the GPU
-                    if (vanillaScaledLogged.Add(ctx.descId))
-                        Plugin.Log.LogInfo($"[Resize] skeleton {ctx.skelId} scaled x{s:0.###} (buffer roots: {patched}, managed roots: {patchedManaged}; desc {ctx.descId})");
-                }
-                else { scaledSkeletons.Remove(ctx.skelId); }
-            }
-            catch (Exception ex) { if (!poseErrLogged) { poseErrLogged = true; Plugin.Log.LogError("[Resize] " + ex); } }
-        }
+        // (2026-07-29) ApplyVanillaScale REMOVED: all runtime transform-scale levers falsified by the bireme
+        // truth-table (scale composes into bone TRANSLATIONS only — parts spread, geometry never grows).
+        // Render size lives in vertex data; the replacement design is a MESH-CLONE engine. Rules resolve and
+        // log-and-skip until it exists.
 
         static object animMgrRef;             // AnimationManager instance, captured at registration ([AnimDiag])
         static HashSet<string> animDiagDone;  // entries already dumped by the one-shot [AnimDiag]
@@ -2096,8 +1993,15 @@ namespace ENCAccessProof
                 // ObjectSpace.Scale multiplied ONCE at spawn — the same mechanism the per-entry `scale` field uses.
                 if (unitScaleByDesc.Count > 0 && unitScaleByDesc.TryGetValue(ctx.descId, out float vScale) && HookedEntryFor(ctx.skelId) == null)
                 {
-                    ApplyVanillaScale(ctx, vScale);
-                    // fall through — an entry-less pawn exits at the e==null gate below; a hooked pawn continues normally
+                    // RUNTIME SCALING DISABLED (2026-07-29, the bireme truth-table): the GPU skinning composes
+                    // scale into bone TRANSLATIONS only (parts spread apart — the oars) and NEVER stretches
+                    // vertices — no transform input can grow geometry. Falsified in order: ObjectSpace.Scale
+                    // (inert), buffer/managed bone Local.Scale (persists, ignored), InverseBindPose scale
+                    // (translation-only distortion). Render size lives in VERTEX DATA alone; the working design
+                    // is a MESH-CLONE engine (clone the unit's fragments scaled + repoint the descriptor). Until
+                    // that lands, matched rules log-and-skip rather than distort articulated units.
+                    if (vanillaScaledLogged.Add(ctx.descId))
+                        Plugin.Log.LogInfo($"[Resize] desc {ctx.descId} rule x{vScale:0.###} NOT applied — runtime transform scaling can't grow geometry (mesh-clone engine pending)");
                 }
 
                 // Match this pawn to one of our entries (animated OR freeze-static) by OUR baked skeleton id (the correctly
@@ -2314,10 +2218,8 @@ namespace ENCAccessProof
             else SanitizeAimLayer(entry);
             ApplyPositionOffset(e, entry);
             ApplyScale(e, entry);
-            // The entry's runtime `scale` ALSO goes through the proven skeleton-root path (2026-07-28): the
-            // ObjectSpace write above is kept for compatibility but demonstrated inert (the bireme finding).
-            // Our baked skeletons are per-entry, so the once-per-skeleton guard gives exact per-model scaling.
-            if (e.scale > 0f && Math.Abs(e.scale - 1f) > 1e-4f) ApplyVanillaScale(ctx, e.scale);
+            // NOTE (2026-07-29): the per-entry runtime `scale` is DEAD — the GPU cannot scale geometry (see the
+            // Resize disable above). Custom models scale at BAKE time via the Factory's Size field.
             // PROVEN 2026-07-19 (temp probe, removed): PawnDescriptorId is a per-pawn WRITABLE mesh selector the
             // GPU honors — AssaultInfantry pawns rendered another entry's mesh from a one-int write. This is the
             // foundation for the vanilla-in-combat feature: keep the donor's descriptor alive alongside ours and
