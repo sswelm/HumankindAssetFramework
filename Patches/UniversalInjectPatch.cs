@@ -269,6 +269,34 @@ namespace ENCAccessProof
 
                 WriteLoadReport(packs, built.Count, conflicts, applied, resolution);
                 Plugin.Log.LogInfo($"[Uni] loaded {packs.Count} pack(s), {built.Count} model(s), {conflicts.Count} conflict(s), {applied.Count} override(s) [" + string.Join(", ", packs.Select(p => p.modId + "×" + p.models.Count)) + "]");
+                // RESIZE LAB rules (2026-07-28, user-designed): every pack may carry a "unitScales" array of
+                // {match, scale} — a runtime multiplier for ANY pawn whose PRESENTATION DEFINITION name contains
+                // `match` (vanilla units included; no bake, no assets). All matching rules MULTIPLY (a per-unit
+                // true-size correction rides on a broader rule). Resolved to descriptor ids in RepointMatch,
+                // applied at pawn spawn in OnPawnAdded. v2 (planned): trueSize / current-era reference anchoring.
+                unitScaleRules.Clear();
+                foreach (var file in files)
+                {
+                    try
+                    {
+                        var text2 = File.ReadAllText(file);
+                        var arr = Regex.Match(text2, "\"unitScales\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
+                        if (!arr.Success) continue;
+                        foreach (Match rm in Regex.Matches(arr.Groups[1].Value, "\\{[^{}]*\\}", RegexOptions.Singleline))
+                        {
+                            var mm = Regex.Match(rm.Value, "\"match\"\\s*:\\s*\"([^\"]*)\"");
+                            var ms = Regex.Match(rm.Value, "\"scale\"\\s*:\\s*(-?[\\d.eE+]+)");
+                            if (!mm.Success || !ms.Success) continue;
+                            var key = mm.Groups[1].Value.Trim();
+                            if (key.Length == 0) continue;
+                            if (float.TryParse(ms.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float sv) && sv > 0f)
+                                unitScaleRules.Add(new KeyValuePair<string, float>(key, sv));
+                        }
+                    }
+                    catch (Exception ex) { Plugin.Log.LogWarning("[Resize] unitScales parse in '" + Path.GetFileName(file) + "': " + ex.Message); }
+                }
+                if (unitScaleRules.Count > 0)
+                    Plugin.Log.LogInfo($"[Resize] {unitScaleRules.Count} unit-scale rule(s): " + string.Join(", ", unitScaleRules.Select(r => $"'{r.Key}'x{r.Value:0.###}")));
                 entries = built;   // publish fully built — never mutated after this point
                 // Invalidate the pawn-hook early-out caches: if pawns spawned during a transient-failure retry window
                 // they latched anyAnimated/anyFreeze against the EMPTY list — without this, a recovered retry would
@@ -693,6 +721,7 @@ namespace ENCAccessProof
         {
             registered = false;
             anyAnimated = null; anyFreeze = null;                    // recomputed on the next pawn-add
+            unitScaleByDesc.Clear(); vanillaScaledLogged.Clear();    // descriptor ids are session-scoped — re-resolve (rules themselves persist)
             _listenerChecked = false;                                // the AudioListener rode a session-scoped camera
             var list = entries;
             if (list != null)
@@ -802,6 +831,25 @@ namespace ENCAccessProof
                 var name = (def as UnityEngine.Object)?.name ?? "";
                 if (name.Length == 0) return;
                 MaybeDumpPawnRig(addon, name);   // caterpillar investigation: vanilla rig dump, BEFORE any registry matching
+                // RESIZE LAB: resolve this definition's scale (product of every matching rule) to its descriptor
+                // id — BEFORE the model-entry gate, because rules target vanilla units with no entry at all.
+                if (unitScaleRules.Count > 0)
+                {
+                    float prod = 1f;
+                    for (int ri = 0; ri < unitScaleRules.Count; ri++)
+                        if (name.IndexOf(unitScaleRules[ri].Key, StringComparison.OrdinalIgnoreCase) >= 0) prod *= unitScaleRules[ri].Value;
+                    if (Math.Abs(prod - 1f) > 1e-4f)
+                    {
+                        int sdefId = -1;
+                        try { sdefId = Convert.ToInt32(GetMember(addon, "PawnDefinitionId")); } catch { }
+                        if (sdefId >= 0)
+                        {
+                            unitScaleByDesc[sdefId] = prod;
+                            if (unitScaleLogged == null) unitScaleLogged = new HashSet<string>();
+                            if (unitScaleLogged.Add(name)) Plugin.Log.LogInfo($"[Resize] '{name}' -> desc {sdefId} scale x{prod:0.###}");
+                        }
+                    }
+                }
                 if (entries.Count == 0) return;
                 var e = entries.FirstOrDefault(x => x.pawnDescription.Length > 0 && name.IndexOf(x.pawnDescription, StringComparison.OrdinalIgnoreCase) >= 0);
                 if (e == null) return;
@@ -1802,6 +1850,29 @@ namespace ENCAccessProof
             catch (Exception ex) { Plugin.Log.LogWarning($"[Uni] ResolveAnimId '{tag}': " + ex.Message); return -1; }
         }
 
+        // RESIZE LAB (2026-07-28): pattern rules from the packs' "unitScales" arrays + the per-session
+        // resolution to descriptor ids (session-scoped — descriptor indices change per load).
+        static readonly List<KeyValuePair<string, float>> unitScaleRules = new List<KeyValuePair<string, float>>();
+        static readonly Dictionary<int, float> unitScaleByDesc = new Dictionary<int, float>();
+        static HashSet<string> unitScaleLogged;
+        static readonly HashSet<int> vanillaScaledLogged = new HashSet<int>();
+
+        static void ApplyVanillaScale(PawnCtx ctx, float s)
+        {
+            try
+            {
+                var oss = GetMember(ctx.entry, "ObjectSpace");
+                var scObj = GetMember(oss, "Scale");
+                if (scObj is float sf) SetMember(oss, "Scale", sf * s);
+                else if (scObj is UnityEngine.Vector3 sv) SetMember(oss, "Scale", sv * s);
+                else if (scObj != null) { try { SetMember(oss, "Scale", Convert.ToSingle(scObj) * s); } catch { } }
+                SetMember(ctx.entry, "ObjectSpace", oss);
+                ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
+                if (vanillaScaledLogged.Add(ctx.descId)) Plugin.Log.LogInfo($"[Resize] pawn desc {ctx.descId} runtime scale x{s:0.###}");
+            }
+            catch (Exception ex) { if (!poseErrLogged) { poseErrLogged = true; Plugin.Log.LogError("[Resize] " + ex); } }
+        }
+
         static object animMgrRef;             // AnimationManager instance, captured at registration ([AnimDiag])
         static HashSet<string> animDiagDone;  // entries already dumped by the one-shot [AnimDiag]
 
@@ -1910,8 +1981,16 @@ namespace ENCAccessProof
             {
                 if (anyAnimated == null) anyAnimated = entries != null && entries.Any(x => x.ca != 0 || x.cb != 0 || x.cc != 0 || x.cd != 0);
                 if (anyFreeze == null) anyFreeze = entries != null && entries.Any(x => x.freezeDonorAnim);
-                if ((anyAnimated != true && anyFreeze != true) || !Plugin.UniversalInjectOn.Value) return;
+                if ((anyAnimated != true && anyFreeze != true && unitScaleByDesc.Count == 0) || !Plugin.UniversalInjectOn.Value) return;
                 if (!TryReadLastPawn(pawnManager, out var ctx)) return;
+
+                // RESIZE LAB: a vanilla pawn (no model entry) whose descriptor has a resolved scale rule gets its
+                // ObjectSpace.Scale multiplied ONCE at spawn — the same mechanism the per-entry `scale` field uses.
+                if (unitScaleByDesc.Count > 0 && unitScaleByDesc.TryGetValue(ctx.descId, out float vScale) && HookedEntryFor(ctx.skelId) == null)
+                {
+                    ApplyVanillaScale(ctx, vScale);
+                    // fall through — an entry-less pawn exits at the e==null gate below; a hooked pawn continues normally
+                }
 
                 // Match this pawn to one of our entries (animated OR freeze-static) by OUR baked skeleton id (the correctly
                 // skinned pawn), else by the descriptor learned from that first correct pawn. The game spawns a unit's LATER
@@ -3873,9 +3952,9 @@ namespace ENCAccessProof
             catch (Exception ex) { Plugin.Log.LogError("[Audio] DumpSoundCatalog: " + ex); }
         }
 
-        static object GetMember(object o, string name)
+        internal static object GetMember(object o, string name)
         { if (o == null) return null; var t = o.GetType(); var p = CachedProp(t, name); if (p != null) { try { return p.GetValue(o); } catch { } } var f = CachedField(t, name); if (f != null) { try { return f.GetValue(o); } catch { } } return null; }
-        static object MakeGuid(int a, int b, int c, int d)
+        internal static object MakeGuid(int a, int b, int c, int d)
         { var gt = AccessTools.TypeByName("Amplitude.Framework.Guid"); if (gt == null) return null; var g = Activator.CreateInstance(gt);
           gt.GetField("a", BF)?.SetValue(g, a); gt.GetField("b", BF)?.SetValue(g, b); gt.GetField("c", BF)?.SetValue(g, c); gt.GetField("d", BF)?.SetValue(g, d); return g; }
 
@@ -4689,7 +4768,7 @@ namespace ENCAccessProof
             return t != null ? AccessTools.Method(t, "AnimationLoad") : null;
         }
         static bool hookLogged;
-        static void Postfix(object __instance) { if (!hookLogged) { hookLogged = true; Plugin.Log.LogInfo("[Uni] UniRegisterHook POSTFIX fired"); } Prober.AnimMgr = __instance; UniversalInject.RearmModelRegistration(); UniversalInject.EnsureRegistered(__instance); }
+        static void Postfix(object __instance) { if (!hookLogged) { hookLogged = true; Plugin.Log.LogInfo("[Uni] UniRegisterHook POSTFIX fired"); } Prober.AnimMgr = __instance; UniversalInject.RearmModelRegistration(); UniversalInject.EnsureRegistered(__instance); FormationOverride.OnAnimationLoad(); }
     }
 
     [HarmonyPatch]
@@ -4701,7 +4780,7 @@ namespace ENCAccessProof
             var animMgr = AccessTools.TypeByName("Amplitude.Mercury.Animation.AnimationManager");
             return (addon != null && animMgr != null) ? AccessTools.Method(addon, "Load", new[] { animMgr }) : null;
         }
-        static void Postfix(object __instance, object __0) { UniversalInject.RepointMatch(__instance, __0); }
+        static void Postfix(object __instance, object __0) { UniversalInject.RepointMatch(__instance, __0); FormationOverride.MaybeScaleFragments(__instance, __0); }
     }
 
     // muzzleBone: the donor's fire clip fires the muzzle flash from ITS weapon socket (e.g. an AA gun's "Canon"); that bone
