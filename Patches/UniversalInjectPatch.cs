@@ -2253,6 +2253,10 @@ namespace ENCAccessProof
             else SanitizeAimLayer(entry);
             ApplyPositionOffset(e, entry);
             ApplyScale(e, entry);
+            // The entry's runtime `scale` ALSO goes through the proven skeleton-root path (2026-07-28): the
+            // ObjectSpace write above is kept for compatibility but demonstrated inert (the bireme finding).
+            // Our baked skeletons are per-entry, so the once-per-skeleton guard gives exact per-model scaling.
+            if (e.scale > 0f && Math.Abs(e.scale - 1f) > 1e-4f) ApplyVanillaScale(ctx, e.scale);
             // PROVEN 2026-07-19 (temp probe, removed): PawnDescriptorId is a per-pawn WRITABLE mesh selector the
             // GPU honors — AssaultInfantry pawns rendered another entry's mesh from a one-int write. This is the
             // foundation for the vanilla-in-combat feature: keep the donor's descriptor alive alongside ours and
