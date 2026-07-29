@@ -840,13 +840,29 @@ namespace ENCAccessProof
                         if (name.IndexOf(unitScaleRules[ri].Key, StringComparison.OrdinalIgnoreCase) >= 0) prod *= unitScaleRules[ri].Value;
                     if (Math.Abs(prod - 1f) > 1e-4f)
                     {
-                        int sdefId = -1;
-                        try { sdefId = Convert.ToInt32(GetMember(addon, "PawnDefinitionId")); } catch { }
-                        if (sdefId >= 0)
+                        // HUMAN-PRESENTATION EXCLUSION (user rule: "prevents disappointments"): scaled humans read
+                        // as absurd instantly, and scaling a mount/chariot under an unscaled rider is just as bad —
+                        // so the whole human-carrying family is skipped: Human(1), HumanMountedFighter(2),
+                        // ChariotHumanFighter(4), Mount(6), HumanMountedDriver(9), Chariot(10), ChariotMount(12),
+                        // ChariotHumanDriver(13), HumanServant(16). ANIMALS stay scalable (AnimalFighter=3 — cave
+                        // bears!), as do boats, planes, vehicles, missiles and custom rigs.
+                        int prof = -1;
+                        try { prof = Convert.ToInt32(GetMember(def, "AnimationCapabilityProfile")); } catch { }
+                        bool humanClass = prof == 1 || prof == 2 || prof == 4 || prof == 6 || prof == 9 || prof == 10 || prof == 12 || prof == 13 || prof == 16;
+                        if (unitScaleLogged == null) unitScaleLogged = new HashSet<string>();
+                        if (humanClass)
                         {
-                            unitScaleByDesc[sdefId] = prod;
-                            if (unitScaleLogged == null) unitScaleLogged = new HashSet<string>();
-                            if (unitScaleLogged.Add(name)) Plugin.Log.LogInfo($"[Resize] '{name}' -> desc {sdefId} scale x{prod:0.###}");
+                            if (unitScaleLogged.Add(name)) Plugin.Log.LogInfo($"[Resize] '{name}' SKIPPED (human-presentation profile {prof}) — humans/mounts/chariots are excluded from scaling");
+                        }
+                        else
+                        {
+                            int sdefId = -1;
+                            try { sdefId = Convert.ToInt32(GetMember(addon, "PawnDefinitionId")); } catch { }
+                            if (sdefId >= 0)
+                            {
+                                unitScaleByDesc[sdefId] = prod;
+                                if (unitScaleLogged.Add(name)) Plugin.Log.LogInfo($"[Resize] '{name}' -> desc {sdefId} scale x{prod:0.###} (profile {prof})");
+                            }
                         }
                     }
                 }
