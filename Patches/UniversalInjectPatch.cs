@@ -721,7 +721,7 @@ namespace ENCAccessProof
         {
             registered = false;
             anyAnimated = null; anyFreeze = null;                    // recomputed on the next pawn-add
-            unitScaleByDesc.Clear(); vanillaScaledLogged.Clear();    // descriptor ids are session-scoped — re-resolve (rules themselves persist)
+            unitScaleByDesc.Clear(); vanillaScaledLogged.Clear(); scaledSkeletons.Clear();   // descriptor/skeleton ids are session-scoped — re-resolve + re-apply (the new session rebuilds the GPU skeleton buffer unscaled)
             _listenerChecked = false;                                // the AudioListener rode a session-scoped camera
             var list = entries;
             if (list != null)
@@ -1873,18 +1873,49 @@ namespace ENCAccessProof
         static HashSet<string> unitScaleLogged;
         static readonly HashSet<int> vanillaScaledLogged = new HashSet<int>();
 
+        // SKELETON-ROOT scaling (2026-07-28, the bireme finding): writing PawnEntry.ObjectSpace.Scale is INERT —
+        // the whole pipeline fired ([Resize] logs) yet the ship rendered unchanged; the draw shader evidently
+        // ignores the pawn-space scale (vanilla never uses it). The PROVEN render-scale path is SKELETON space:
+        // the howitzer's x100 root-bone Local.Scale visibly renders (the unit-fix sandwich). So: multiply the
+        // pawn's skeleton ROOT bone(s) Local.Scale in the GPU skeleton buffer and re-upload — ONCE per skeleton
+        // per session (the buffer persists; repeating would compound). Skeletons can be shared across units, but
+        // the human-presentation family (where sharing is rampant) is already excluded upstream.
+        static readonly HashSet<int> scaledSkeletons = new HashSet<int>();
         static void ApplyVanillaScale(PawnCtx ctx, float s)
         {
             try
             {
-                var oss = GetMember(ctx.entry, "ObjectSpace");
-                var scObj = GetMember(oss, "Scale");
-                if (scObj is float sf) SetMember(oss, "Scale", sf * s);
-                else if (scObj is UnityEngine.Vector3 sv) SetMember(oss, "Scale", sv * s);
-                else if (scObj != null) { try { SetMember(oss, "Scale", Convert.ToSingle(scObj) * s); } catch { } }
-                SetMember(ctx.entry, "ObjectSpace", oss);
-                ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
-                if (vanillaScaledLogged.Add(ctx.descId)) Plugin.Log.LogInfo($"[Resize] pawn desc {ctx.descId} runtime scale x{s:0.###}");
+                if (ctx.skelId < 0 || !scaledSkeletons.Add(ctx.skelId)) return;
+                var am = animMgrRef;
+                if (am == null) { scaledSkeletons.Remove(ctx.skelId); return; }   // registration pass not seen yet — retry on a later pawn
+                var skelBufObj = AccessTools.Field(am.GetType(), "gpuSkeletonEntriesBuffer")?.GetValue(am);
+                var boneBufObj = AccessTools.Field(am.GetType(), "gpuSkeletonBoneEntiesBuffer")?.GetValue(am);
+                var skelArr = skelBufObj == null ? null : GetMember(skelBufObj, "WriteContent") as Array;
+                var boneArr = boneBufObj == null ? null : GetMember(boneBufObj, "WriteContent") as Array;
+                if (skelArr == null || boneArr == null || ctx.skelId >= skelArr.Length) { scaledSkeletons.Remove(ctx.skelId); return; }
+                var skelEntry = skelArr.GetValue(ctx.skelId);
+                uint start = Convert.ToUInt32(GetMember(skelEntry, "StartSkeletonBoneEntry"));
+                uint boneCount = Convert.ToUInt32(GetMember(skelEntry, "BoneCount"));
+                int patched = 0;
+                for (uint b = 0; b < boneCount && start + b < boneArr.Length; b++)
+                {
+                    var bone = boneArr.GetValue((int)(start + b));
+                    uint parent = Convert.ToUInt32(GetMember(bone, "ParentIndex"));
+                    if (parent < (uint)boneArr.Length) continue;   // only ROOT bones (engine convention: parent index out of range = root)
+                    var local = GetMember(bone, "Local");
+                    float cur = 1f; try { cur = Convert.ToSingle(GetMember(local, "Scale")); } catch { }
+                    SetMember(local, "Scale", cur * s);
+                    SetMember(bone, "Local", local);
+                    boneArr.SetValue(bone, (int)(start + b));
+                    patched++;
+                }
+                if (patched > 0)
+                {
+                    AccessTools.Method(boneBufObj.GetType(), "Apply", Type.EmptyTypes)?.Invoke(boneBufObj, null);   // re-upload writeContent to the GPU
+                    if (vanillaScaledLogged.Add(ctx.descId))
+                        Plugin.Log.LogInfo($"[Resize] skeleton {ctx.skelId} scaled x{s:0.###} ({patched} root bone(s); desc {ctx.descId}) — skeleton-space, the proven render path");
+                }
+                else { scaledSkeletons.Remove(ctx.skelId); }
             }
             catch (Exception ex) { if (!poseErrLogged) { poseErrLogged = true; Plugin.Log.LogError("[Resize] " + ex); } }
         }
