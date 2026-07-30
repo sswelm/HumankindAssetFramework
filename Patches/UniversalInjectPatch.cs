@@ -330,6 +330,37 @@ namespace ENCAccessProof
                 if (eraGridRows.Count > 0)
                     Plugin.Log.LogInfo("[Resize] era grid: " + string.Join(" | ", eraGridRows.OrderBy(k => k.Key)
                         .Select(k => $"unit era {k.Key} -> [" + string.Join(",", k.Value.Select(v => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)).ToArray()) + "]")));
+
+                // FORMATION BY SIZE (Global Era Lab second table, runtime 2026-07-30): {threshold, formation} rows;
+                // when a ruled unit's EFFECTIVE scale (rule x era anchor) drops to <= a threshold, its unit
+                // definition is repointed at that formation (first row with threshold >= scale wins; sorted
+                // ascending here so the walk can take the first hit) and live units re-form. Above every
+                // threshold = the unit's own original formation.
+                formationBySize.Clear();
+                foreach (var file in files)
+                {
+                    try
+                    {
+                        var text4 = File.ReadAllText(file);
+                        var arr4 = Regex.Match(text4, "\"formationThresholds\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
+                        if (!arr4.Success) continue;
+                        var rows = new List<KeyValuePair<float, string>>();
+                        foreach (Match rm in Regex.Matches(arr4.Groups[1].Value, "\\{[^{}]*\\}", RegexOptions.Singleline))
+                        {
+                            var th = Regex.Match(rm.Value, "\"threshold\"\\s*:\\s*([0-9.eE+-]+)");
+                            var fm = Regex.Match(rm.Value, "\"formation\"\\s*:\\s*\"([^\"]+)\"");
+                            if (th.Success && fm.Success
+                                && float.TryParse(th.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float tv))
+                                rows.Add(new KeyValuePair<float, string>(tv, fm.Groups[1].Value));
+                        }
+                        if (rows.Count > 0) { formationBySize.Clear(); formationBySize.AddRange(rows); }   // later packs win
+                    }
+                    catch (Exception ex) { Plugin.Log.LogWarning("[Resize] formationThresholds parse in '" + Path.GetFileName(file) + "': " + ex.Message); }
+                }
+                formationBySize.Sort((a, b) => a.Key.CompareTo(b.Key));
+                if (formationBySize.Count > 0)
+                    Plugin.Log.LogInfo("[Resize] formation-by-size: " + string.Join(", ",
+                        formationBySize.Select(t => $"<= x{t.Key.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} -> {t.Value}")));
                 entries = built;   // publish fully built — never mutated after this point
                 // Invalidate the pawn-hook early-out caches: if pawns spawned during a transient-failure retry window
                 // they latched anyAnimated/anyFreeze against the EMPTY list — without this, a recovered retry would
@@ -2200,11 +2231,125 @@ namespace ENCAccessProof
             return 1f;                                  // un-authored cell = leave the unit alone
         }
 
+        // ---- FORMATION BY SIZE (Global Era Lab second table) ----
+        static readonly List<KeyValuePair<float, string>> formationBySize = new List<KeyValuePair<float, string>>();   // sorted asc: first threshold >= effective scale wins
+        static readonly Dictionary<int, string> sizeFormApplied = new Dictionary<int, string>();       // descId -> formation currently applied ("" = the unit's own)
+        static readonly Dictionary<string, string> sizeFormOriginal = new Dictionary<string, string>(StringComparer.Ordinal);   // unitDefName -> its original formation (for restore)
+        static readonly HashSet<string> sizeFormWarned = new HashSet<string>(StringComparer.Ordinal);
+
+        // Called from the per-frame scale path with the freshly computed effective scale. Cheap steady-state
+        // (name cache + threshold walk + dictionary hit); the definition repoint + live re-form run only when the
+        // desired formation actually CHANGES (i.e. the era anchor moved the unit across a threshold).
+        // Thresholds are PER UNIT (Formation Override window, `sizeFormations` on the unit's link — user ruling
+        // 2026-07-30); the legacy GLOBAL table from the Era Lab remains a fallback for units without their own.
+        static readonly Dictionary<int, string> sizeFormUnitName = new Dictionary<int, string>();   // descId -> unit def name
+        static void MaybeSwapFormationBySize(int descId, float effScale)
+        {
+            // resolve (and cache) the unit definition name for this descriptor
+            if (!sizeFormUnitName.TryGetValue(descId, out var unitName))
+            {
+                try
+                {
+                    var pmT = AccessTools.TypeByName("Amplitude.Mercury.Animation.PawnManager");
+                    var pmI = pmT?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
+                              ?? AccessTools.Field(pmT, "Instance")?.GetValue(null);
+                    var defs = AccessTools.Field(pmT, "pawnDefinitions")?.GetValue(pmI) as System.Collections.IList;
+                    var pawnDef = (defs != null && descId >= 0 && descId < defs.Count) ? defs[descId] : null;
+                    if (pawnDef == null) return;                        // registration not settled — retry next frame
+                    var uRef = AccessTools.Field(pawnDef.GetType(), "PresentationUnitDefinition")?.GetValue(pawnDef);
+                    unitName = uRef?.GetType().GetProperty("XmlSerializableElementName")?.GetValue(uRef) as string ?? "";
+                    sizeFormUnitName[descId] = unitName;
+                }
+                catch { return; }
+            }
+            if (unitName.Length == 0) return;                            // pawn def carries no unit — nothing to swap
+
+            var table = FormationOverride.SizeThresholdsFor(unitName)
+                        ?? (formationBySize.Count > 0 ? formationBySize : null);
+            if (table == null) return;
+
+            string desired = null;                                       // null = the unit's own formation
+            for (int i = 0; i < table.Count; i++)
+                if (effScale <= table[i].Key) { desired = table[i].Value; break; }
+            var key = desired ?? "";
+            if (sizeFormApplied.TryGetValue(descId, out var cur) && cur == key) return;
+
+            try
+            {
+
+                var udb = Prober.ResolveDatabase("Amplitude.Mercury.Data.World.PresentationUnitDefinition");
+                object unitDef = null;
+                if (udb != null) foreach (var el in udb) if ((el as UnityEngine.Object)?.name == unitName) { unitDef = el; break; }
+                if (unitDef == null) return;
+
+                // remember the unit's own formation the first time we touch it (for the restore path)
+                if (!sizeFormOriginal.TryGetValue(unitName, out var original))
+                {
+                    var fr = AccessTools.Field(unitDef.GetType(), "PresentationFormationDefinition")?.GetValue(unitDef);
+                    original = fr?.GetType().GetProperty("XmlSerializableElementName")?.GetValue(fr) as string ?? "";
+                    sizeFormOriginal[unitName] = original;
+                }
+                var targetFormation = desired ?? original;
+                if (string.IsNullOrEmpty(targetFormation)) { sizeFormApplied[descId] = key; return; }
+
+                // the formation must exist in the live database (vanilla, or injected by the Formation axis)
+                var fdb = Prober.ResolveDatabase("Amplitude.Mercury.Data.PresentationFormationDefinition");
+                bool found = false;
+                if (fdb != null) foreach (var el in fdb) if ((el as UnityEngine.Object)?.name == targetFormation) { found = true; break; }
+                if (!found)
+                {
+                    if (sizeFormWarned.Add(targetFormation))
+                        Plugin.Log.LogWarning($"[Resize] formation-by-size: '{targetFormation}' not in the live formation database — " +
+                                              "author/link it via the Formation Override window (a saved entry injects it at load). Swap skipped.");
+                    sizeFormApplied[descId] = key;   // don't retry every frame; a relaunch with the formation present fixes it
+                    return;
+                }
+
+                FormationOverride.SetFreshElementReference(unitDef, "PresentationFormationDefinition", targetFormation);
+                int reformed = ReformLiveUnitsOf(unitName);
+                sizeFormApplied[descId] = key;
+                Plugin.Log.LogInfo($"[Resize] formation-by-size: '{unitName}' at effective x{effScale:0.###} -> " +
+                                   (desired == null ? $"restored own formation '{targetFormation}'" : $"'{targetFormation}'") +
+                                   $" ({reformed} live unit(s) re-formed).");
+            }
+            catch (Exception ex) { if (sizeFormWarned.Add("EX")) Plugin.Log.LogError("[Resize] formation-by-size: " + ex); }
+        }
+
+        // Re-run the game's own UpdatePawns on every live unit of the given definition (the FormationOverride
+        // re-instantiation idiom) so a mid-game formation swap shows without a save/load.
+        static int ReformLiveUnitsOf(string unitDefName)
+        {
+            int n = 0;
+            try
+            {
+                var presType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.Presentation");
+                var factory = presType == null ? null : AccessTools.Field(presType, "PresentationEntityFactoryController")?.GetValue(null);
+                var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
+                if (armies == null) return 0;
+                foreach (var army in armies)
+                {
+                    var unit = army == null ? null : GetMember(army, "PresentationUnit");
+                    if (unit == null) continue;
+                    var pdef = GetMember(unit, "PresentationUnitDefinition");
+                    var pdn = (pdef as UnityEngine.Object)?.name ?? "";
+                    if (!string.Equals(pdn, unitDefName, StringComparison.OrdinalIgnoreCase)) continue;
+                    bool loaded = true; try { loaded = Convert.ToBoolean(GetMember(unit, "IsLoaded")); } catch { }
+                    if (!loaded) continue;
+                    bool naval = false; try { naval = Convert.ToBoolean(GetMember(unit, "IsNaval")); } catch { }
+                    try { AccessTools.Method(unit.GetType(), "UpdatePawns", new[] { typeof(bool) })?.Invoke(unit, new object[] { naval }); n++; }
+                    catch { }
+                }
+            }
+            catch { }
+            return n;
+        }
+
         static void ApplyVanillaScale(PawnCtx ctx, UnitScaleInfo info)
         {
             try
             {
                 float target = info.scale * EraAnchor(info);
+                MaybeSwapFormationBySize(ctx.descId, target);
 
                 // PLACEMENT half — every frame (the game rebuilds pawnEntries[] from scratch each frame)
                 var oss = GetMember(ctx.entry, "ObjectSpace");

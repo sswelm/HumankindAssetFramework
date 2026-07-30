@@ -51,6 +51,7 @@ namespace ENCAccessProof
             public float scale = -1f;         // RUNTIME per-model scale multiplier (pawn root localScale; the GPU TRS path reads lossyScale). -1/1 = vanilla size; 0.7 = smaller models (denser formations read better), >1 = larger. EXPERIMENTAL: uniform only.
             public float layoutScale = -1f;   // RUNTIME multiplier on the DUMMY POSITIONS at injection. -1 = FOLLOW `scale` (the natural reading: scaling a formation shrinks models AND spacing together); set explicitly to decouple footprint from model size (e.g. small men, wide skirmish line).
             public string scaleMode = "transform";   // "transform" = pawn root localScale (v1: simple, decent bodies/spacing; rigid gear mis-anchors on humans) | "data" = cloned skeleton with scaled binds+meshes (v2: deep; humans WIP — procedural bone layers ignore it)
+            public readonly List<KeyValuePair<float, string>> sizeForms = new List<KeyValuePair<float, string>>();   // formation-by-size rows (sorted asc): era ageing swaps this unit's formation when effective scale <= threshold
             public bool done;      // this session: injected (if data) + repointed, or dropped after a permanent error
         }
 
@@ -126,6 +127,13 @@ namespace ENCAccessProof
                         layoutScale = (float?)l["layoutScale"] ?? -1f,
                         scaleMode = ((string)l["scaleMode"] ?? "transform").Trim().ToLowerInvariant(),
                     };
+                    foreach (var sf in (l["sizeFormations"] as JArray) ?? new JArray())
+                    {
+                        var fn = ((string)sf["formation"] ?? "").Trim();
+                        var tv = (float?)sf["threshold"] ?? -1f;
+                        if (fn.Length > 0 && tv > 0f) e.sizeForms.Add(new KeyValuePair<float, string>(tv, fn));
+                    }
+                    e.sizeForms.Sort((a, b) => a.Key.CompareTo(b.Key));
                     foreach (var d in (l["dummies"] as JArray) ?? new JArray())
                     {
                         var dm = new Dummy
@@ -404,7 +412,20 @@ namespace ENCAccessProof
 
         // Install a brand-new DatatableElementReference naming `element` — never mutate the existing struct: its
         // private cache (element + databaseRevision) would keep resolving to the OLD target until the next Commit.
-        static void SetFreshElementReference(object owner, string fieldName, string element)
+        // Formation-by-size (Global Era Lab runtime, size table authored PER UNIT in the Formation Override
+        // window): the resize engine asks for this unit's thresholds; null = no per-unit table (the engine may
+        // then fall back to the legacy global table from enc_models.json).
+        internal static List<KeyValuePair<float, string>> SizeThresholdsFor(string unitDefName)
+        {
+            if (string.IsNullOrEmpty(unitDefName)) return null;
+            EnsureConfig();
+            foreach (var e in entries)
+                if (e.sizeForms.Count > 0 && string.Equals(e.unit, unitDefName, StringComparison.OrdinalIgnoreCase))
+                    return e.sizeForms;
+            return null;
+        }
+
+        internal static void SetFreshElementReference(object owner, string fieldName, string element)
         {
             var f = AccessTools.Field(owner.GetType(), fieldName);
             object boxed = Activator.CreateInstance(f.FieldType);

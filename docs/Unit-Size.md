@@ -186,6 +186,11 @@ Ancient era, ×0.8 once industry arrives and ×0.6 in the Contemporary age.
   why the grid is 5×5 (rows 1–5, columns 2–6): an era-6 unit has no later age, and in era 1 nothing has aged.
 - **The unit's era is read from its name** (`Era4_Common_ManOWar_01` → 4). For definitions with no era token, set
   the **Era** column on the rule in the Resize Lab.
+- **Formation can swap as the unit shrinks** (VERIFIED 2026-07-30): per-unit `{scale up to, formation}` rows —
+  authored in the **Formation Override** window on the unit's link, *not* here (an early global table in this Lab
+  remains as a legacy fallback with a Clear button). When the effective scale crosses a threshold the unit
+  re-forms live — an aged Bireme becomes three small wedge-formation hulls. Details:
+  [Formations.md — Formation by size](Formations.md#formation-by-size-era-ageing--verified-in-game-2026-07-30).
 
 ### What counts as "the era the world is in"
 

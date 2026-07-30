@@ -225,6 +225,27 @@ Baking a scaled unit as a **custom model** (gear merged into the mesh, Model Fac
 runtime subsystem at the cost of per-pawn equipment variation — the pragmatic route if a scaled human unit is needed
 before the procedural-layer work lands.
 
+## Formation by size (era ageing) — VERIFIED IN-GAME 2026-07-30
+
+Pairs the formation axis with the **Unit-Size axis** ([Unit-Size.md](Unit-Size.md)): as the Global Era Lab shrinks an
+aged unit, its formation can swap so a tiny lone hull becomes a **squadron of small hulls** (field-proven: an aged
+Bireme re-formed into three wedge-formation ships, live, when the era anchor crossed the threshold).
+
+- **Authored PER UNIT** in the Formation Override window: a unit link's **"Formation by size"** rows are
+  `{scale up to, formation}` — the first row whose threshold is **>=** the unit's *effective* scale
+  (`Resize-Lab rule × era-grid cell`) wins; above every threshold the unit keeps its configured/own formation.
+  Rows are sorted on Save; stored as `sizeFormations` on the link in `enc_formations.json`.
+- **Only fires for units with a Resize Lab rule** — the thresholds compare against the effective scale the resize
+  engine computes, so an unruled unit never swaps.
+- **Live**: the check rides the same per-frame path as the era re-scaling — when the era anchor moves a unit across
+  a threshold mid-game, the definition is repointed and every live unit re-forms in place (no reload). Rising back
+  above all thresholds restores the unit's original formation.
+- **Guard**: the target formation must exist in the live database (vanilla, or injected by any saved Formation
+  Override entry) — otherwise the swap is skipped with a loud log.
+- **Legacy fallback**: thresholds saved by the old *Global Era Lab table* (in `enc_models.json`) still apply to
+  units **without** per-unit rows; the Era Lab shows them with a Clear button. Per-unit rows always win.
+- Log: `[Resize] formation-by-size: '<unit>' at effective x0.3 -> 'Formation_Wedge_3' (N live unit(s) re-formed).`
+
 ## R.E.D.-style: the count + scale pair
 
 This axis is one half of a **R.E.D.-style** rebalance (after the classic Civ 5 *R.E.D. Modpack* by Gedemon):
