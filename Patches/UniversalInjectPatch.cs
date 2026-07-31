@@ -54,6 +54,7 @@ namespace ENCAccessProof
         public int moveAnimId = -1, afterAnimId = -1, attackAnimId = -1, combatAnimId = -1, preMoveAnimId = -1, idleAnimId = -1, idleAltAnimId = -1, idleAlt2AnimId = -1;
         public float moveDur = 1f, afterDur = 1f, attackDur = 1f, combatDur = 1f, preMoveDur = 1f, idleDur = 1f, idleAltDur = 1f, idleAlt2Dur = 1f;
         public float idleAltInterval = 0f;   // avg SECONDS between idle-alt one-shots (jittered 0.6-1.4x, like the idle growl); <=0 disables even when clips are baked
+        public float animPhaseSpread = 0f;   // 0 = every pawn of this model animates in lockstep (the old behaviour). >0 spreads instances across the clip so a multi-pawn unit stops moving as one body: 1 = the full clip, 0.5 = half of it. Looping poses only — one-shots stay tied to their trigger.
         public float idleAltNextAt, idleAltStart = -1f, idleAltChosenDur = 1f;   // session cadence state (per entry = one voice per unit type)
         public int idleAltChosenId = -1;
         public UnityEngine.Vector3 idleAltPos;   // which pawn is performing this firing (nearest-match, same 4u radius class)
@@ -547,6 +548,7 @@ namespace ENCAccessProof
                                 ala = A(cAlt, 0), alb = A(cAlt, 1), alc = A(cAlt, 2), ald = A(cAlt, 3),
                                 a2a = A(ca2, 0), a2b = A(ca2, 1), a2c = A(ca2, 2), a2d = A(ca2, 3),
                                 idleAltInterval = m["idleAltInterval"] != null ? (float)m["idleAltInterval"] : 0f,
+                                animPhaseSpread = m["animPhaseSpread"] != null ? (float)m["animPhaseSpread"] : 0f,
                                 position = new UnityEngine.Vector3(Fp(p, "x"), Fp(p, "y"), Fp(p, "z")),
                                 scale = m["scale"] != null ? (float)m["scale"] : 1f,
                                 brightness = m["brightness"] != null ? (float)m["brightness"] : 1f,
@@ -624,6 +626,7 @@ namespace ENCAccessProof
                 var calR = Regex.Matches(text, "\"clipIdleAlt\"\\s*:\\s*" + i4);   // parity: idle-alt flavor one-shot ClipCollection guid
                 var ca2R = Regex.Matches(text, "\"clipIdleAlt2\"\\s*:\\s*" + i4);  // parity: second idle-alt flavor ClipCollection guid
                 var iai = Regex.Matches(text, "\"idleAltInterval\"\\s*:\\s*(-?[\\d.eE+]+)");   // parity: avg seconds between idle-alt one-shots
+                var aps = Regex.Matches(text, "\"animPhaseSpread\"\\s*:\\s*(-?[\\d.eE+]+)");  // parity: per-instance animation phase spread
                 var asd = Regex.Matches(text, "\"animStateDriven\"\\s*:\\s*(true|false)");   // parity: state-driven mode flag
                 // position object {x,y,z} — JsonUtility writes Vector3 in x,y,z order. Applied as a runtime world offset for animated models.
                 var po = Regex.Matches(text, "\"position\"\\s*:\\s*\\{\\s*\"x\"\\s*:\\s*(-?[\\d.eE+]+)\\s*,\\s*\"y\"\\s*:\\s*(-?[\\d.eE+]+)\\s*,\\s*\"z\"\\s*:\\s*(-?[\\d.eE+]+)");
@@ -700,6 +703,7 @@ namespace ENCAccessProof
                         ala = i < calR.Count ? G(calR[i], 1) : 0, alb = i < calR.Count ? G(calR[i], 2) : 0, alc = i < calR.Count ? G(calR[i], 3) : 0, ald = i < calR.Count ? G(calR[i], 4) : 0,
                         a2a = i < ca2R.Count ? G(ca2R[i], 1) : 0, a2b = i < ca2R.Count ? G(ca2R[i], 2) : 0, a2c = i < ca2R.Count ? G(ca2R[i], 3) : 0, a2d = i < ca2R.Count ? G(ca2R[i], 4) : 0,
                         idleAltInterval = i < iai.Count && float.TryParse(iai[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _iai) ? _iai : 0f,
+                        animPhaseSpread = i < aps.Count && float.TryParse(aps[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _aps) ? _aps : 0f,
                         position = i < po.Count ? new UnityEngine.Vector3(F(po[i], 1), F(po[i], 2), F(po[i], 3)) : UnityEngine.Vector3.zero,
                         respawnAfterLoad = i < ra.Count && ra[i].Groups[1].Value == "true",
                         freezeDonorAnim = i < fz.Count && fz[i].Groups[1].Value == "true",
@@ -2706,6 +2710,15 @@ namespace ENCAccessProof
             DumpAnimEntries(e);                                        // one-shot [AnimDiag] per entry (no-op after first)
             DumpPawnLive(ctx, e);                                      // throttled [PawnLive] engine-state dump
             var pose0 = GetMember(entry, "Pose0");                     // boxed PawnEntryPose (struct)
+            // PER-INSTANCE PHASE (2026-07-31): every pawn was fed the SAME Time.time/dur, so a multi-pawn unit
+            // moved as one body — twelve canoes rocking in perfect lockstep reads as a single rigid raft. Offset
+            // each pawn by a deterministic fraction of its clip. ctx.idx is the pawn's slot in the entries array
+            // (the game rewrites every pawn every frame, so it holds steady while the pawn lives); the golden
+            // ratio spreads consecutive slots evenly instead of clustering them as idx/count would. Added ONLY to
+            // looping poses — one-shots (attack, deploy, fire) are timed from their trigger and must not shift.
+            float phase = e.animPhaseSpread > 0.0001f
+                ? e.animPhaseSpread * (ctx.idx * 0.6180339887f % 1f)
+                : 0f;
             // PawnEntryPose.Time is NORMALIZED (sampler does Mathf.Repeat(Time,1) = one loop). ComputePoseTime divides by the
             // clip duration so it plays at REAL speed and hits every frame; raw Time.time = duration× too fast + frame-skipping.
             // STATE-DRIVEN models switch Pose0's ANIMATIONID by movement state. This is safe: PawnManager's
@@ -2736,7 +2749,7 @@ namespace ENCAccessProof
                 {
                     float md = e.moveDur > 0.001f ? e.moveDur : 1f;
                     SetMember(pose0, "AnimationId", (uint)e.moveAnimId);
-                    SetMember(pose0, "Time", UnityEngine.Time.time / md);
+                    SetMember(pose0, "Time", UnityEngine.Time.time / md + phase);
                 }
                 else if (inAfter)
                 {
@@ -2749,7 +2762,7 @@ namespace ENCAccessProof
                     // (A single-frame stance clip renders fine: FrameCount 1 pins the sampler to frame 0 at any Time.)
                     float cd = e.combatDur > 0.001f ? e.combatDur : 1f;
                     SetMember(pose0, "AnimationId", (uint)e.combatAnimId);
-                    SetMember(pose0, "Time", UnityEngine.Time.time / cd);
+                    SetMember(pose0, "Time", UnityEngine.Time.time / cd + phase);
                 }
                 else if (inIdleAlt && idleAltId >= 0)
                 {
@@ -2767,13 +2780,13 @@ namespace ENCAccessProof
                     // primary (e.animId) stays the full reference clip and is what plays when no override is set.
                     float idleDur = e.idleDur > 0.001f ? e.idleDur : 1f;
                     SetMember(pose0, "AnimationId", (uint)e.idleAnimId);
-                    SetMember(pose0, "Time", UnityEngine.Time.time / idleDur);
+                    SetMember(pose0, "Time", UnityEngine.Time.time / idleDur + phase);
                 }
                 else
                 {
                     float idleDur = e.animDuration > 0.001f ? e.animDuration : 1f;
                     SetMember(pose0, "AnimationId", (uint)e.animId);
-                    SetMember(pose0, "Time", UnityEngine.Time.time / idleDur);
+                    SetMember(pose0, "Time", UnityEngine.Time.time / idleDur + phase);
                 }
                 SetMember(pose0, "Weight", 1f);
                 SetMember(entry, "Pose0", pose0);
@@ -2783,7 +2796,7 @@ namespace ENCAccessProof
                 float dur = e.animDuration > 0.001f ? e.animDuration : 1f;
                 SetMember(pose0, "AnimationId", (uint)e.animId);
                 SetMember(pose0, "Weight", 1f);
-                SetMember(pose0, "Time", ComputePoseTime(e, entry, dur));
+                SetMember(pose0, "Time", ComputePoseTime(e, entry, dur) + phase);
                 SetMember(entry, "Pose0", pose0);
             }
             for (int i = 1; i < 9; i++)
