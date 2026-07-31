@@ -55,6 +55,13 @@ namespace ENCAccessProof
         public float moveDur = 1f, afterDur = 1f, attackDur = 1f, combatDur = 1f, preMoveDur = 1f, idleDur = 1f, idleAltDur = 1f, idleAlt2Dur = 1f;
         public float idleAltInterval = 0f;   // avg SECONDS between idle-alt one-shots (jittered 0.6-1.4x, like the idle growl); <=0 disables even when clips are baked
         public float animPhaseSpread = 0f;   // 0 = every pawn of this model animates in lockstep (the old behaviour). >0 spreads instances across the clip so a multi-pawn unit stops moving as one body: 1 = the full clip, 0.5 = half of it. Looping poses only — one-shots stay tied to their trigger.
+        // Per-pawn phase, TRACKED BY POSITION. The pawn entry carries no stable identity (only poses, bone
+        // rotations and ObjectSpace), and its array slot is NOT stable: changing camera zoom swaps LODs, the
+        // engine re-adds every pawn, and slot-derived phases jump — the animation visibly snapped on every zoom.
+        // Position is intrinsic to the pawn, so a nearest-match tracker survives the rebuild AND follows the pawn
+        // as it sails. Match radius is deliberately small (well under formation spacing, far over per-frame travel).
+        internal class PawnPhase { public UnityEngine.Vector3 pos; public float phase; public float seen; }
+        public readonly List<PawnPhase> phaseTracks = new List<PawnPhase>();
         public float idleAltNextAt, idleAltStart = -1f, idleAltChosenDur = 1f;   // session cadence state (per entry = one voice per unit type)
         public int idleAltChosenId = -1;
         public UnityEngine.Vector3 idleAltPos;   // which pawn is performing this firing (nearest-match, same 4u radius class)
@@ -2716,9 +2723,7 @@ namespace ENCAccessProof
             // (the game rewrites every pawn every frame, so it holds steady while the pawn lives); the golden
             // ratio spreads consecutive slots evenly instead of clustering them as idx/count would. Added ONLY to
             // looping poses — one-shots (attack, deploy, fire) are timed from their trigger and must not shift.
-            float phase = e.animPhaseSpread > 0.0001f
-                ? e.animPhaseSpread * (ctx.idx * 0.6180339887f % 1f)
-                : 0f;
+            float phase = PhaseFor(e, entry);
             // PawnEntryPose.Time is NORMALIZED (sampler does Mathf.Repeat(Time,1) = one loop). ComputePoseTime divides by the
             // clip duration so it plays at REAL speed and hits every frame; raw Time.time = duration× too fast + frame-skipping.
             // STATE-DRIVEN models switch Pose0's ANIMATIONID by movement state. This is safe: PawnManager's
@@ -2828,6 +2833,41 @@ namespace ENCAccessProof
             // flip each pawn by combat state.
             ctx.pawnEntries.SetValue(entry, ctx.idx);
             LogPoseHookOnce(ctx, e, pose0);
+        }
+
+        // This pawn's animation phase, held STEADY across LOD rebuilds. Identified by position (the entry has no
+        // stable id and its array slot is reshuffled whenever zoom changes the LOD), then followed frame to frame
+        // so a sailing pawn keeps the phase it was given. New pawns take the next value on the golden-ratio
+        // sequence, which spreads arrivals evenly instead of clustering them the way count/total would.
+        static float PhaseFor(ModelEntry e, object entry)
+        {
+            if (e.animPhaseSpread <= 0.0001f) return 0f;
+            var os = GetMember(entry, "ObjectSpace");
+            if (os == null) return 0f;
+            UnityEngine.Vector3 pos;
+            try { pos = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return 0f; }
+            float now = UnityEngine.Time.time;
+            lock (e.phaseTracks)
+            {
+                for (int i = e.phaseTracks.Count - 1; i >= 0; i--)
+                    if (now - e.phaseTracks[i].seen > 5f) e.phaseTracks.RemoveAt(i);   // pawn gone (died / unit despawned)
+                int best = -1; float bestD = 0.75f * 0.75f;   // < formation spacing, >> per-frame travel
+                for (int i = 0; i < e.phaseTracks.Count; i++)
+                {
+                    if (e.phaseTracks[i].seen == now) continue;   // already claimed by another pawn THIS frame
+                    float d = (e.phaseTracks[i].pos - pos).sqrMagnitude;
+                    if (d < bestD) { bestD = d; best = i; }
+                }
+                if (best >= 0)
+                {
+                    e.phaseTracks[best].pos = pos;               // follow it
+                    e.phaseTracks[best].seen = now;
+                    return e.animPhaseSpread * e.phaseTracks[best].phase;
+                }
+                float ph = (e.phaseTracks.Count * 0.6180339887f) % 1f;
+                e.phaseTracks.Add(new ModelEntry.PawnPhase { pos = pos, phase = ph, seen = now });
+                return e.animPhaseSpread * ph;
+            }
         }
 
         // The normalized pose time for one animated pawn, per the model's behavior: continuous loop (a spinning prop),
