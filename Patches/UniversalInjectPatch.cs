@@ -960,6 +960,25 @@ namespace ENCAccessProof
                 var e = entries.FirstOrDefault(x => x.pawnDescription.Length > 0 && name.IndexOf(x.pawnDescription, StringComparison.OrdinalIgnoreCase) >= 0);
                 if (e == null) return;
                 Plugin.Log.LogInfo($"[Uni] MATCH addon='{name}' -> {e.resourceName} (skel {e.sa},{e.sb},{e.sc},{e.sd})");
+                // SEED THE DESCRIPTOR HERE, not from the first correctly-skinned pawn (2026-07-31). OnPawnAdded's
+                // safety net — "this pawn is on the DONOR skeleton, force ours" — matches by descId, but descId was
+                // only ever LEARNED from a pawn that had already arrived on our skeleton. One-directional: if the
+                // first pawns of a model appear before injection matched anything (load restore, or an LOD rebuild
+                // on zoom), nothing is learned, the net stays disarmed for the whole session, and those pawns keep
+                // the donor rig — weights addressing the wrong bones, geometry flung into spikes. The addon knows
+                // its PawnDefinitionId before any pawn exists, and it is the SAME id space OnPawnAdded reads as
+                // ctx.descId (the Resize path above keys unitScaleByDesc with it), so seed it and the net is armed
+                // from the first frame regardless of who wins the race.
+                try
+                {
+                    int seedDesc = Convert.ToInt32(GetMember(addon, "PawnDefinitionId"));
+                    if (seedDesc >= 0 && e.descId != seedDesc)
+                    {
+                        e.descId = seedDesc;
+                        Plugin.Log.LogInfo($"[Uni] '{e.resourceName}' descriptor seeded at injection: desc={seedDesc} (wrong-skeleton net armed before any pawn spawns)");
+                    }
+                }
+                catch (Exception exSeed) { Plugin.Log.LogWarning($"[Uni] '{e.resourceName}' could not seed descriptor from the addon ({exSeed.Message}) — falling back to learning it from the first correct pawn"); }
 
                 // TEXTURE-ONLY override: keep the vanilla mesh, just isolate this unit's output layer and repaint its skin
                 // — either a hot-loaded PNG (textureFile) or a desaturated copy of its own atlas (desaturate). Returns
@@ -2562,6 +2581,7 @@ namespace ENCAccessProof
         static bool? anyFreeze;          // cached early-out: skip the per-pawn hook if no model wants its donor animation frozen
         static bool rescueLogged, posLogged, poseErrLogged, scaleLogged;
         static HashSet<string> poseHookSeen;   // dump the pose-hook + runtime transform once PER MODEL (so the howitzer logs even if the drone spawns first)
+        static readonly HashSet<string> unseededLogged = new HashSet<string>();   // one warning per entry for the disarmed-net state
         static HashSet<int> freezeLogSkels;   // distinct skeleton ids we've logged a freeze for (so a second-instance "twin via descriptor" shows up in the log without spamming)
         static float recoilLogStart = -1f;    // diagnostic: log once per fire when the deploy+recoil overlay actually sweeps
 
@@ -2617,7 +2637,22 @@ namespace ENCAccessProof
                         for (int i = 0; i < list.Count; i++)
                         { var x = list[i]; if (Hooked(x) && x.descId >= 0 && x.descId == ctx.descId) { e = x; break; } }
                 }
-                if (e == null) return;
+                if (e == null)
+                {
+                    // Unmatched pawns are overwhelmingly vanilla, so this must stay silent on the hot path — EXCEPT
+                    // when one of our entries still has no descriptor. That is the disarmed-safety-net state that
+                    // left pawns mis-skinned on the donor rig; the seed at injection should make it impossible, so
+                    // if it ever prints, the seed failed and this is the bug to chase. Once per entry.
+                    var l2 = entries;
+                    if (l2 != null)
+                        for (int i = 0; i < l2.Count; i++)
+                        {
+                            var x = l2[i];
+                            if (Hooked(x) && x.descId < 0 && unseededLogged.Add(x.resourceName))
+                                Plugin.Log.LogWarning($"[Uni] '{x.resourceName}' has NO descriptor yet — its wrong-skeleton net is disarmed, so a pawn spawning now can keep the donor rig (mis-skinned spikes). Expected the injection-time seed to have set it.");
+                        }
+                    return;
+                }
 
                 ForceOurSkeleton(ctx, e);
 
