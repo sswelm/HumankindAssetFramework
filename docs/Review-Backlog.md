@@ -285,3 +285,14 @@ GUID nibble-swap encoding + keep-GUID re-bake; registry corrupt-guard/atomic-wri
 ownership merge (both directions, post-fix); Harmony patch exception discipline; cross-thread sample locking +
 ConcurrentQueue handoff; deploy ramp math; join/decimate + albedo-extraction blocks; frame clamping; noise-filter
 re-entrancy; district bake+registry editor flow; Plugin.cs config wiring.
+
+---
+
+# 2026-07-31 audit — "silently disarmed" class
+
+Ten open findings from the pass that followed the Abomination spike-geometry incident (root cause: a safety net
+that could never arm itself). Recorded separately with file:line, in-game symptom, trigger and suggested fix:
+**[Audit-2026-07-31.md](Audit-2026-07-31.md)**.
+
+Top item — the wrong-skeleton rescue is gated on `Hooked` (animated-or-freeze), so eight shipped STATIC models have
+no rescue path at all: the same failure `0c0b12f` fixed, still live for them.
