@@ -374,7 +374,7 @@ namespace ENCAccessProof
                 // Invalidate the pawn-hook early-out caches: if pawns spawned during a transient-failure retry window
                 // they latched anyAnimated/anyFreeze against the EMPTY list — without this, a recovered retry would
                 // repoint meshes but leave every animated/freeze behavior dead for the session (review round 2).
-                anyAnimated = null; anyFreeze = null;
+                anyAnimated = null; anyFreeze = null; anyRescuable = null;
                 loaded = true;
             }
             catch (Exception e)
@@ -796,7 +796,7 @@ namespace ENCAccessProof
         internal static void RearmModelRegistration()
         {
             registered = false;
-            anyAnimated = null; anyFreeze = null;                    // recomputed on the next pawn-add
+            anyAnimated = null; anyFreeze = null; anyRescuable = null;                    // recomputed on the next pawn-add
             unitScaleByDesc.Clear(); unitScaleNameByDesc.Clear(); vanillaScaledLogged.Clear(); descApplied.Clear(); cachedEra = -1;   // descriptor ids + era are session-scoped (meshApplied deliberately KEPT: the Fx vertex buffers persist)
             _listenerChecked = false;                                // the AudioListener rode a session-scoped camera
             var list = entries;
@@ -1015,7 +1015,7 @@ namespace ENCAccessProof
                 ReloadFragments(addon, animMgr, e.skeleton, e);
                 InjectHandProp(addon, animMgr, e.skeleton, e);
                 ApplyTexture(e, animMgr);
-                if (!e.repointed) { e.repointed = true; Plugin.Log.LogInfo($"[Uni] repointed '{name}' -> {e.resourceName} (mesh '{bodyName}', layer '{e.layerHint}')"); }
+                if (!e.repointed) { e.repointed = true; anyRescuable = null; Plugin.Log.LogInfo($"[Uni] repointed '{name}' -> {e.resourceName} (mesh '{bodyName}', layer '{e.layerHint}')"); }
             }
             catch (Exception ex) { Plugin.Log.LogError("[Uni] repoint: " + ex); }
         }
@@ -2579,6 +2579,7 @@ namespace ENCAccessProof
 
         static bool? anyAnimated;        // cached early-out: skip the per-pawn hook if no model is animated
         static bool? anyFreeze;          // cached early-out: skip the per-pawn hook if no model wants its donor animation frozen
+        static bool? anyRescuable;       // any entry repointed onto our skeleton — the rescue must run even for a purely STATIC pack (no pose behaviour)
         static bool rescueLogged, posLogged, poseErrLogged, scaleLogged;
         static HashSet<string> poseHookSeen;   // dump the pose-hook + runtime transform once PER MODEL (so the howitzer logs even if the drone spawns first)
         static readonly HashSet<string> unseededLogged = new HashSet<string>();   // one warning per entry for the disarmed-net state
@@ -2589,10 +2590,20 @@ namespace ENCAccessProof
         // the donor's animation. Both share the same match (our skeleton id → learned descriptor) + skeleton force; only the
         // pose manipulation differs. Kept as one predicate so the two paths can't drift apart.
         static bool Hooked(ModelEntry x) => x.animId >= 0 || x.freezeDonorAnim;
+        // WHO GETS THE WRONG-SKELETON RESCUE (widened 2026-07-31). This used to be `Hooked`, i.e. only models with a
+        // pose behaviour — which left every purely STATIC repointed model (8 of the 20 shipped: the cruiser, the
+        // hovercraft, the helicopters…) with NO rescue path at all. They are repointed onto our skeleton, so a pawn
+        // the game spawns on the DONOR skeleton skins against the wrong bones and draws as spikes, silently, for the
+        // whole session — the same failure the descriptor seed fixed for animated models. Rescue is about which RIG
+        // a pawn binds to; it has nothing to do with whether we then drive its pose. Gate it on "we repointed this
+        // entry onto our own skeleton" instead, and keep the pose decision separate at the dispatch below.
+        // Bonus: an ANIMATED entry whose clip fails to resolve (stale GUID after a rebake -> animId -1) used to drop
+        // out of `Hooked` and lose the skeleton force too; it keeps it now.
+        static bool Rescuable(ModelEntry x) => x.skeletonId >= 0 && x.repointed;
         static ModelEntry HookedEntryFor(int skeletonId)
         {
             if (entries == null || skeletonId < 0) return null;
-            foreach (var e in entries) if (Hooked(e) && e.skeletonId == skeletonId) return e;
+            foreach (var e in entries) if (Rescuable(e) && e.skeletonId == skeletonId) return e;
             return null;
         }
 
@@ -2614,7 +2625,11 @@ namespace ENCAccessProof
             {
                 if (anyAnimated == null) anyAnimated = entries != null && entries.Any(x => x.ca != 0 || x.cb != 0 || x.cc != 0 || x.cd != 0);
                 if (anyFreeze == null) anyFreeze = entries != null && entries.Any(x => x.freezeDonorAnim);
-                if ((anyAnimated != true && anyFreeze != true && unitScaleByDesc.Count == 0) || !Plugin.UniversalInjectOn.Value) return;
+                // anyRescuable keeps a purely STATIC pack in the hook: those entries have no pose behaviour, so the
+                // two flags above are both false, yet they still need the wrong-skeleton rescue. Recomputed when an
+                // entry is repointed and on session reset — `repointed` flips at runtime, so it cannot be latched.
+                if (anyRescuable == null) anyRescuable = entries != null && entries.Any(Rescuable);
+                if ((anyAnimated != true && anyFreeze != true && anyRescuable != true && unitScaleByDesc.Count == 0) || !Plugin.UniversalInjectOn.Value) return;
                 if (!TryReadLastPawn(pawnManager, out var ctx)) return;
 
                 // RESIZE LAB: a vanilla pawn (no model entry) whose descriptor has a resolved scale rule gets its
@@ -2635,7 +2650,7 @@ namespace ENCAccessProof
                     var list = entries;
                     if (list != null)
                         for (int i = 0; i < list.Count; i++)
-                        { var x = list[i]; if (Hooked(x) && x.descId >= 0 && x.descId == ctx.descId) { e = x; break; } }
+                        { var x = list[i]; if (Rescuable(x) && x.descId >= 0 && x.descId == ctx.descId) { e = x; break; } }
                 }
                 if (e == null)
                 {
@@ -2653,7 +2668,7 @@ namespace ENCAccessProof
                             // map. An entry whose unit has never been seen legitimately has no descriptor, and
                             // warning about it fired 12 times per launch describing a perfectly healthy state.
                             // Once repointed, though, the seed has run, so descId < 0 really is unreachable.
-                            if (Hooked(x) && x.repointed && x.descId < 0 && unseededLogged.Add(x.resourceName))
+                            if (Rescuable(x) && x.descId < 0 && unseededLogged.Add(x.resourceName))
                                 Plugin.Log.LogWarning($"[Uni] '{x.resourceName}' has NO descriptor yet — its wrong-skeleton net is disarmed, so a pawn spawning now can keep the donor rig (mis-skinned spikes). Expected the injection-time seed to have set it.");
                         }
                     return;
@@ -2662,8 +2677,14 @@ namespace ENCAccessProof
                 ForceOurSkeleton(ctx, e);
 
                 // FREEZE (static): no clip of our own — pin the donor pose to frame 0 and stop. ANIMATED: play our clip on Pose0.
+                // NEITHER: a purely static repointed model. It reaches here only since the rescue was widened past
+                // `Hooked`; it wants the skeleton force and nothing else, so persist the entry and leave the pose
+                // alone. Sending it down the animated path would write Pose0 with animId -1. The explicit write-back
+                // matters because ForceOurSkeleton only mutates the boxed struct — the pose handlers are what
+                // normally store it, and this branch runs neither.
                 if (e.freezeDonorAnim && e.animId < 0) ApplyFreeze(ctx, e);
-                else ApplyAnimatedPose(ctx, e);
+                else if (e.animId >= 0) ApplyAnimatedPose(ctx, e);
+                else ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
             }
             // one-shot log: a bare catch here hid member renames after a game update (models just stopped animating, no clue why).
             catch (Exception ex) { if (!poseErrLogged) { poseErrLogged = true; Plugin.Log.LogError("[Uni] OnPawnAdded (pose hook disabled this pawn): " + ex); } }
