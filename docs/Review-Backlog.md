@@ -294,5 +294,5 @@ Ten open findings from the pass that followed the Abomination spike-geometry inc
 that could never arm itself). Recorded separately with file:line, in-game symptom, trigger and suggested fix:
 **[Audit-2026-07-31.md](Audit-2026-07-31.md)**.
 
-Top item — the wrong-skeleton rescue is gated on `Hooked` (animated-or-freeze), so eight shipped STATIC models have
+Top item (now FIXED in `c6154a6`, pending in-game verification) — the wrong-skeleton rescue was gated on `Hooked` (animated-or-freeze), so eight shipped STATIC models have
 no rescue path at all: the same failure `0c0b12f` fixed, still live for them.
