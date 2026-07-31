@@ -2802,7 +2802,7 @@ namespace ENCAccessProof
                 float dur = e.animDuration > 0.001f ? e.animDuration : 1f;
                 SetMember(pose0, "AnimationId", (uint)e.animId);
                 SetMember(pose0, "Weight", 1f);
-                SetMember(pose0, "Time", ComputePoseTime(e, entry, dur) + phase);
+                SetMember(pose0, "Time", ComputePoseTime(e, entry, dur, phase));
                 SetMember(entry, "Pose0", pose0);
             }
             for (int i = 1; i < 9; i++)
@@ -2853,7 +2853,7 @@ namespace ENCAccessProof
                 // throttled census: how many DISTINCT pawn positions this model actually sees. If a multi-pawn unit
                 // reports one position for every pawn, position cannot identify them and the spread has nothing to
                 // key on — that is the thing to read first when instances animate in lockstep.
-                if (now - e.phaseLogAt > 6f)
+                if (now - e.phaseLogAt > 60f)
                 {
                     e.phaseLogAt = now;
                     var seenNow = e.phaseTracks.FindAll(t => now - t.seen < 0.5f);
@@ -2884,11 +2884,14 @@ namespace ENCAccessProof
 
         // The normalized pose time for one animated pawn, per the model's behavior: continuous loop (a spinning prop),
         // fire-once (rest at 0, one pass when this instance bombards), or deploy-on-stop (+ recoil overlay).
-        static float ComputePoseTime(ModelEntry e, object entry, float dur)
+        static float ComputePoseTime(ModelEntry e, object entry, float dur, float phase)
         {
+            // The phase belongs to the LOOP only. Deploy and fire-once are measured from the moment the unit
+            // stopped or fired: shifting them would start the clip part-way through its own one-shot, so a gun
+            // would snap to half-deployed. They stay on their trigger's clock.
             if (e.deployOnStop) return DeployPoseTime(e, entry, dur);
             if (e.fireOnAttack) return FireOncePoseTime(e, entry, dur);
-            return UnityEngine.Time.time / dur;                        // default: continuous loop (a drone's spinning prop)
+            return UnityEngine.Time.time / dur + phase;                // default: continuous loop (a drone's spinning prop)
         }
 
         // STATE-DRIVEN (Phase 2): resolve this pawn's movement state from the samples ProcessAnimStates published,
