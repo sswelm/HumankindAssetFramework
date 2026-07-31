@@ -2648,7 +2648,12 @@ namespace ENCAccessProof
                         for (int i = 0; i < l2.Count; i++)
                         {
                             var x = l2[i];
-                            if (Hooked(x) && x.descId < 0 && unseededLogged.Add(x.resourceName))
+                            // `repointed` is the gate that makes this meaningful: the seed happens in RepointMatch,
+                            // which only runs when a unit's AddOn Loads — i.e. when that unit first appears on the
+                            // map. An entry whose unit has never been seen legitimately has no descriptor, and
+                            // warning about it fired 12 times per launch describing a perfectly healthy state.
+                            // Once repointed, though, the seed has run, so descId < 0 really is unreachable.
+                            if (Hooked(x) && x.repointed && x.descId < 0 && unseededLogged.Add(x.resourceName))
                                 Plugin.Log.LogWarning($"[Uni] '{x.resourceName}' has NO descriptor yet — its wrong-skeleton net is disarmed, so a pawn spawning now can keep the donor rig (mis-skinned spikes). Expected the injection-time seed to have set it.");
                         }
                     return;
