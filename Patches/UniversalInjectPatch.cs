@@ -54,7 +54,7 @@ namespace ENCAccessProof
         public int moveAnimId = -1, afterAnimId = -1, attackAnimId = -1, combatAnimId = -1, preMoveAnimId = -1, idleAnimId = -1, idleAltAnimId = -1, idleAlt2AnimId = -1;
         public float moveDur = 1f, afterDur = 1f, attackDur = 1f, combatDur = 1f, preMoveDur = 1f, idleDur = 1f, idleAltDur = 1f, idleAlt2Dur = 1f;
         public float idleAltInterval = 0f;   // avg SECONDS between idle-alt one-shots (jittered 0.6-1.4x, like the idle growl); <=0 disables even when clips are baked
-        public float animPhaseSpread = 0f;   // 0 = every pawn of this model animates in lockstep (the old behaviour). >0 spreads instances across the clip so a multi-pawn unit stops moving as one body: 1 = the full clip, 0.5 = half of it. Looping poses only — one-shots stay tied to their trigger.
+        public float animPhaseSpread = 0.5f; // DEFAULT 0.5 (2026-07-31): spread this model's pawns over half the clip so a multi-pawn unit stops moving as ONE BODY — twelve canoes rocking as a rigid raft, eight monsters swinging their heads in unison. 1 = the whole clip, 0 = lockstep (the old behaviour). Applies to LOOPING poses only; one-shots stay tied to their trigger. This default also governs registries written before the field existed, so every animated model gains the desync without an edit.
         // Per-pawn phase, TRACKED BY POSITION. The pawn entry carries no stable identity (only poses, bone
         // rotations and ObjectSpace), and its array slot is NOT stable: changing camera zoom swaps LODs, the
         // engine re-adds every pawn, and slot-derived phases jump — the animation visibly snapped on every zoom.
@@ -556,7 +556,7 @@ namespace ENCAccessProof
                                 ala = A(cAlt, 0), alb = A(cAlt, 1), alc = A(cAlt, 2), ald = A(cAlt, 3),
                                 a2a = A(ca2, 0), a2b = A(ca2, 1), a2c = A(ca2, 2), a2d = A(ca2, 3),
                                 idleAltInterval = m["idleAltInterval"] != null ? (float)m["idleAltInterval"] : 0f,
-                                animPhaseSpread = m["animPhaseSpread"] != null ? (float)m["animPhaseSpread"] : 0f,
+                                animPhaseSpread = m["animPhaseSpread"] != null ? (float)m["animPhaseSpread"] : 0.5f,
                                 position = new UnityEngine.Vector3(Fp(p, "x"), Fp(p, "y"), Fp(p, "z")),
                                 scale = m["scale"] != null ? (float)m["scale"] : 1f,
                                 brightness = m["brightness"] != null ? (float)m["brightness"] : 1f,
@@ -711,7 +711,7 @@ namespace ENCAccessProof
                         ala = i < calR.Count ? G(calR[i], 1) : 0, alb = i < calR.Count ? G(calR[i], 2) : 0, alc = i < calR.Count ? G(calR[i], 3) : 0, ald = i < calR.Count ? G(calR[i], 4) : 0,
                         a2a = i < ca2R.Count ? G(ca2R[i], 1) : 0, a2b = i < ca2R.Count ? G(ca2R[i], 2) : 0, a2c = i < ca2R.Count ? G(ca2R[i], 3) : 0, a2d = i < ca2R.Count ? G(ca2R[i], 4) : 0,
                         idleAltInterval = i < iai.Count && float.TryParse(iai[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _iai) ? _iai : 0f,
-                        animPhaseSpread = i < aps.Count && float.TryParse(aps[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _aps) ? _aps : 0f,
+                        animPhaseSpread = i < aps.Count && float.TryParse(aps[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _aps) ? _aps : 0.5f,
                         position = i < po.Count ? new UnityEngine.Vector3(F(po[i], 1), F(po[i], 2), F(po[i], 3)) : UnityEngine.Vector3.zero,
                         respawnAfterLoad = i < ra.Count && ra[i].Groups[1].Value == "true",
                         freezeDonorAnim = i < fz.Count && fz[i].Groups[1].Value == "true",

@@ -155,3 +155,33 @@ Per bone, per pose slot (`ApplyPose` → `GetPoseTRS`):
   plugins folder); runtime code = the same-named DLL in `Humankind_Data/Managed`. `ilspycmd -t <type>` suffices. The
   compute shaders themselves live in the `InstancingAndFx` bundle (not extracted — the C# mirrors
   `GetBoneTRS`/`ApplyPose` have matched observed behavior everywhere tested, litmus included).
+
+## 6. Per-instance phase (`animPhaseSpread`) — don't let a unit move as one body
+
+Every pawn of a model is fed the same `Pose0.Time` (`Time.time / dur`), so a multi-pawn unit animates in perfect
+lockstep: twelve canoes rocking as a single rigid raft, eight monsters swinging their heads in unison. Uncanny, and
+it reads as one object rather than a group.
+
+`animPhaseSpread` offsets each pawn by a share of the clip. **Default 0.5** (half the clip) — enough to desynchronise
+convincingly while the unit still reads as one group; `1` spreads over the whole clip; `0` restores lockstep.
+Animation Lab ▸ **Per-instance offset**. RUNTIME-ONLY: Save (no bake) + relaunch.
+
+Applies to **looping** poses only — the single-clip loop and the state-driven idle/move/combat-idle. Deploy-on-stop
+and fire-once are measured from the moment the unit stopped or fired; shifting them would start the clip part-way
+through its own one-shot (a gun snapping to half-deployed), so they keep their trigger's clock.
+
+**Identity is by POSITION, not array slot.** The pawn entry carries no stable per-instance id — only poses, bone
+rotations, `ObjectSpace` and the descriptor id. The first implementation seeded the phase from the pawn's slot in
+the entries array, which looked right until the camera moved: **changing zoom swaps LODs, the engine re-adds every
+pawn, the slots come back in a different order, and each pawn inherits a different phase** — a hard jump mid-cycle
+on every zoom. A nearest-match tracker keyed on world position survives the rebuild (same position → same track)
+and follows a pawn as it moves. Match radius 0.75u: under formation spacing (a wedge's canoes sit ~1.5–2u apart),
+far over per-frame travel. A track already claimed this frame is skipped so two close pawns can't collapse onto one
+phase; tracks unseen for 5s are pruned.
+
+The engine's own `CoordinationValues.AnimationDelay` (on the PresentationUnitDefinition) cannot do this job for
+injected models: we overwrite `Pose0.Time` every frame, discarding whatever the engine computed.
+
+**Trap:** the field is Animation-Lab-owned. Editing it in the registry by hand is futile while a Factory/Lab window
+holds the entry — its in-memory copy is written back on Save/Bake. Set it in the Lab. (`ModelFactoryWindow`'s
+rebase list carries it for the same reason `keepTranslations` is there.)
