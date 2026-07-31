@@ -185,3 +185,36 @@ injected models: we overwrite `Pose0.Time` every frame, discarding whatever the 
 **Trap:** the field is Animation-Lab-owned. Editing it in the registry by hand is futile while a Factory/Lab window
 holds the entry — its in-memory copy is written back on Save/Bake. Set it in the Lab. (`ModelFactoryWindow`'s
 rebase list carries it for the same reason `keepTranslations` is there.)
+
+## 7. The wrong-skeleton net, and why it must be armed BEFORE the first pawn
+
+`OnPawnAdded` matches a pawn to one of our entries **by our baked skeleton id**, and falls back to matching by
+**descriptor id** — that fallback is the safety net for the pawn the game spawns on the *donor* skeleton (a unit's
+later instances, and anything rebuilt mid-session). Without it, such a pawn keeps the donor rig: its weights address
+the wrong bones and the geometry is flung into long spikes.
+
+**The trap (fixed 2026-07-31):** `descId` used to be learned only *from a pawn that had already arrived on our
+skeleton* — one-directional. If the first pawns of a model appeared before injection had matched anything, nothing
+was learned, **the net stayed disarmed for the whole session**, and every pawn of that model kept the donor rig.
+
+Symptoms, all of which point here:
+
+- One save reproduces it on **every** load while others never do — the load *order* is what differs, not the data.
+  Nothing corrupt is stored: saves hold that the units exist, pawns are rebuilt from scratch each load.
+- **Zoom** can trigger it — an LOD swap re-creates pawns (the same fact that forced the per-instance phase to be
+  keyed by position rather than array slot, §6).
+- **Re-summoning the units clears it** — mid-session spawns happen long after injection settles.
+
+**The fix:** the AddOn exposes `PawnDefinitionId` before any pawn exists, and it is the same id space `OnPawnAdded`
+reads as `ctx.descId` (the Resize path keys `unitScaleByDesc` with it). Seed `descId` at injection time and the net
+is armed from the first frame regardless of who wins the race. Confirmed by one line per animated model:
+
+```
+[Uni] '<model>' descriptor seeded at injection: desc=NN (wrong-skeleton net armed before any pawn spawns)
+```
+
+If an entry ever reaches a pawn spawn still without a descriptor, the plugin now warns once naming the model —
+a should-be-unreachable state that means the seed failed.
+
+`respawnAfterLoad` (re-run `UpdatePawns` ~3s post-load) remains available and is a *workaround* for this class, at
+the cost of a flicker on every load. With the seed in place it should not be needed.
