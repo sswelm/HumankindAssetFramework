@@ -62,6 +62,7 @@ namespace ENCAccessProof
         // as it sails. Match radius is deliberately small (well under formation spacing, far over per-frame travel).
         internal class PawnPhase { public UnityEngine.Vector3 pos; public float phase; public float seen; }
         public readonly List<PawnPhase> phaseTracks = new List<PawnPhase>();
+        public float phaseLogAt = 0f;        // throttle for the [Phase] census
         public float idleAltNextAt, idleAltStart = -1f, idleAltChosenDur = 1f;   // session cadence state (per entry = one voice per unit type)
         public int idleAltChosenId = -1;
         public UnityEngine.Vector3 idleAltPos;   // which pawn is performing this firing (nearest-match, same 4u radius class)
@@ -2849,6 +2850,16 @@ namespace ENCAccessProof
             float now = UnityEngine.Time.time;
             lock (e.phaseTracks)
             {
+                // throttled census: how many DISTINCT pawn positions this model actually sees. If a multi-pawn unit
+                // reports one position for every pawn, position cannot identify them and the spread has nothing to
+                // key on — that is the thing to read first when instances animate in lockstep.
+                if (now - e.phaseLogAt > 6f)
+                {
+                    e.phaseLogAt = now;
+                    var seenNow = e.phaseTracks.FindAll(t => now - t.seen < 0.5f);
+                    Plugin.Log.LogInfo($"[Phase] {e.resourceName} tracks={e.phaseTracks.Count} live={seenNow.Count} " +
+                        string.Join(" ", seenNow.ConvertAll(t => $"[ph={t.phase:0.##}@({t.pos.x:0.#},{t.pos.z:0.#})]")));
+                }
                 for (int i = e.phaseTracks.Count - 1; i >= 0; i--)
                     if (now - e.phaseTracks[i].seen > 5f) e.phaseTracks.RemoveAt(i);   // pawn gone (died / unit despawned)
                 int best = -1; float bestD = 0.75f * 0.75f;   // < formation spacing, >> per-frame travel
@@ -2866,6 +2877,7 @@ namespace ENCAccessProof
                 }
                 float ph = (e.phaseTracks.Count * 0.6180339887f) % 1f;
                 e.phaseTracks.Add(new ModelEntry.PawnPhase { pos = pos, phase = ph, seen = now });
+                Plugin.Log.LogInfo($"[Phase] {e.resourceName} NEW track #{e.phaseTracks.Count - 1} phase={ph:0.###} at ({pos.x:0.##},{pos.y:0.##},{pos.z:0.##}) spread={e.animPhaseSpread:0.##}");
                 return e.animPhaseSpread * ph;
             }
         }
