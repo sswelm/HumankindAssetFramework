@@ -218,3 +218,11 @@ a should-be-unreachable state that means the seed failed.
 
 `respawnAfterLoad` (re-run `UpdatePawns` ~3s post-load) remains available and is a *workaround* for this class, at
 the cost of a flicker on every load. With the seed in place it should not be needed.
+
+**Widened 2026-07-31 (`c6154a6`):** the rescue was additionally gated on `Hooked` (animated-or-freeze), so a
+repointed model with no pose behaviour had no rescue path at all — eight shipped STATIC models (cruiser, hovercraft,
+helicopters, submarine, organ/volley gun). Which RIG a pawn binds to is independent of whether we drive its pose, so
+the gate is now `Rescuable(x) = x.skeletonId >= 0 && x.repointed`, with the pose decision left at the dispatch (a
+third branch forces the skeleton and persists the entry without touching the pose). The per-pawn early-out gained
+`anyRescuable` for the same reason — a purely static pack has both pose flags false and used to return before
+reaching the rescue. See [Audit-2026-07-31](Audit-2026-07-31.md) finding 1.
