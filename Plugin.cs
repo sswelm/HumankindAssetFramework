@@ -212,12 +212,21 @@ namespace HumankindAssetFramework
                 typeof(Hk_FormationPawnScale),     // FORMATION axis: per-model Scale from the registry link (pawn root localScale -> GPU TRS) (2026-07-28)
                 typeof(Hk_SandboxSave), typeof(Hk_SandboxLoad),  // FACING PERSIST: capture each army's FormationAngle on save, restore on load (the standard save has no facing) (2026-08-01)
             };
+            int skipped = 0;
             foreach (var t in hooks)
             {
-                try { harmony.CreateClassProcessor(t).Patch(); patched++; }
-                catch (System.Exception ex) { Log.LogError($"[Uni] hook '{t.Name}' failed to apply (Amplitude API changed?): {ex.Message}"); }
+                try
+                {
+                    // Patch() returns the methods it ACTUALLY patched. A hook whose TargetMethod returns null (the type/method
+                    // wasn't found — Amplitude API drift) patches nothing WITHOUT throwing, so counting "didn't throw" would
+                    // report it as patched. Count real patches instead, and warn on a hook that resolved no target.
+                    var applied = harmony.CreateClassProcessor(t).Patch();
+                    if (applied != null && applied.Count > 0) patched++;
+                    else { skipped++; Log.LogWarning($"[Uni] hook '{t.Name}' patched nothing — its TargetMethod found no method (Amplitude API changed, or the hook self-disabled)."); }
+                }
+                catch (System.Exception ex) { skipped++; Log.LogError($"[Uni] hook '{t.Name}' failed to apply (Amplitude API changed?): {ex.Message}"); }
             }
-            Log.LogInfo($"Model Factory plugin loaded ({patched}/{hooks.Length} hooks patched). Press {ToggleKey.Value} in-game for the " +
+            Log.LogInfo($"Model Factory plugin loaded ({patched}/{hooks.Length} hooks patched{(skipped > 0 ? $", {skipped} skipped — see warnings above" : "")}). Press {ToggleKey.Value} in-game for the " +
                         $"diagnostic window. UniversalInject={UniversalInjectOn.Value}");
         }
 
