@@ -211,6 +211,10 @@ and bone pickers read it directly).
 > rig"*. Verified in-game: the shipped ArmouredCar runs a Lab-generated rig. **Tanks:** mark the tread loop
 > **C (Caterpillar)** and the barrel **G (Gun)** — the Lab instances the track as rigid links riding a measured
 > belt path (see *"Caterpillar tracks — treadize"* there; bake with **Keep bone translations ✓**).
+> **UX (2026-08-01):** recipes load from the top-row **Edit existing** dropdown (`＜new model＞` starts fresh);
+> **Wave rock** (idle sway for floating hulls, e.g. the canoe) has an **Enable** checkbox, off by default — leave it off
+> for wheeled/tracked units. After Vehicleize, the Animation Lab's **Auto-detect** button fills the bake config from the
+> generated `Spin` clip in one click.
 
 1. **In the Factory: Pawn description** — choose a donor with **no animated sub-parts** and a full idle/move set (a land
    vehicle is ideal; an attack-helicopter donor forces its rotor onto your model). Resource name.
@@ -661,6 +665,17 @@ size, geometry/shading, static runtime flags), **the Lab owns the ANIMATION** �
 the two windows, and jump buttons hand context across ("Edit in Animation Lab" in the Factory loads the entry here).
 Both windows Bake through the identical pipeline (`ConfigFor → UniversalBaker.BuildAnimated → ModelRegistry.Upsert`),
 so it does not matter where you press Bake.
+
+**Auto-detect settings** *(2026-08-01)* — a button at the top of the Clip section reads the model's clips + rig and
+fills the whole animation config in one click, then explains its choice in the status bar (review-only, nothing bakes):
+a **Vehicle Lab `Spin` rig** → State-driven with Idle/reference = `Spin[0..0]` (still) and Movement = `Spin` (rolls),
+Convert-raw-rig + Auto-ground + Keep-translations ON, Fix 100× OFF — the exact recipe the Vehicle Lab prints; a
+**character** (an `idle` + a `run`/`walk`/`move` clip) → State-driven with idle/movement guessed from the names; a
+**single clip** → continuous loop; a **deploy** clip → a hint (deploy frame-ranges can't be inferred from a baked clip).
+
+**A failed bake keeps your settings** *(2026-08-01)* — both windows snapshot the form before baking and restore it if
+the bake errors, so a failure no longer reverts the config you just entered (RebaseOnRegistry + the field trims mutate
+the form in place otherwise). The status reads *"Bake FAILED (settings kept): …"*.
 
 **Edit existing** lists the **animated** entries only. The model identity (Resource / Target pawn) shows
 **read-only** — change those in the Factory; the Model file row has a **Browse…** button (2026-07-19) for
