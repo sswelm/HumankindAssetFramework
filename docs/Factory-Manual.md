@@ -214,7 +214,9 @@ and bone pickers read it directly).
 > **UX (2026-08-01):** recipes load from the top-row **Edit existing** dropdown (`＜new model＞` starts fresh);
 > **Wave rock** (idle sway for floating hulls, e.g. the canoe) has an **Enable** checkbox, off by default — leave it off
 > for wheeled/tracked units. After Vehicleize, the Animation Lab's **Auto-detect** button fills the bake config from the
-> generated `Spin` clip in one click.
+> generated `Spin` clip in one click. **Part isolation:** the height bracket (*Hide below/above*) is joined by a
+> **left/right slice** (*Hide left/right of (side)* on the width axis) — bracket both to isolate one wheel, then mark it.
+> All slider defaults are padded so nothing hides until you drag.
 
 1. **In the Factory: Pawn description** — choose a donor with **no animated sub-parts** and a full idle/move set (a land
    vehicle is ideal; an attack-helicopter donor forces its rotor onto your model). Resource name.
