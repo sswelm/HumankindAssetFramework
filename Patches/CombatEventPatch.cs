@@ -118,7 +118,7 @@ namespace HumankindAssetFramework
     }
 
     // (The melee attack SOUND fires EARLIER than any pawn-fight hook — from UnitActionFaceEnemy.StartUnitAction, handled in
-    // OnUnitActionDiag: the attacker turns to face the enemy before the strike. See UniversalInject.OnUnitActionDiag.)
+    // UniversalInject.TryEarlyAttackSound: the attacker turns to face the enemy before the strike.)
 
     // SILENCE DONOR AUDIO (2026-07-23): drop every Wwise post on an emitter we've marked silenced. A custom creature that
     // reuses a donor (the Abomination borrows a BEAR) inherits the donor's sounds — the idle GROWL and the combat
@@ -151,56 +151,21 @@ namespace HumankindAssetFramework
         }
     }
 
-    // ---- ADJACENT-ATTACK ROTATION DIAGNOSTIC (2026-07-21): which facing actions run for OUR units, and does the
-    // rotation FSM ever start? A custom unit turns to a ranged target but not an adjacent one — these three postfixes
-    // localize where the adjacent path drops the turn. Quiet outside fights; filtered to registry units. ----
-    [HarmonyPatch] internal static class Hk_RotDiag_FaceEnemy
+    // ---- EARLY ATTACK SOUND: UnitActionFaceEnemy.StartUnitAction is the earliest presentation seam for "our unit
+    // commits to the strike" — it fires as the attacker turns to face the enemy, before the melee swing. The handler
+    // plays the attack roar there (gated to our attacker + a per-attacker min-gap; see TryEarlyAttackSound). ----
+    [HarmonyPatch] internal static class Hk_EarlyAttackSound
     {
         static MethodBase TargetMethod()
         {
             var t = AccessTools.TypeByName("Amplitude.Mercury.Presentation.UnitActionFaceEnemy");
             var m = t != null ? AccessTools.Method(t, "StartUnitAction") : null;
-            if (m == null) Plugin.Log.LogWarning("[Rot] NOT found: UnitActionFaceEnemy.StartUnitAction (diagnostic off)");
+            if (m == null) Plugin.Log.LogWarning("[Audio] NOT found: UnitActionFaceEnemy.StartUnitAction — early attack sound off");
             return m;
         }
         static void Postfix(object __instance)
         {
-            try { UniversalInject.OnUnitActionDiag(__instance, "FaceEnemy.Start"); } catch { }
-        }
-    }
-
-    [HarmonyPatch] internal static class Hk_RotDiag_LookAt
-    {
-        static MethodBase TargetMethod()
-        {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Presentation.UnitActionLookAt");
-            var m = t != null ? AccessTools.Method(t, "StartUnitAction") : null;
-            if (m == null) Plugin.Log.LogWarning("[Rot] NOT found: UnitActionLookAt.StartUnitAction (diagnostic off)");
-            return m;
-        }
-        static void Postfix(object __instance)
-        {
-            try { UniversalInject.OnUnitActionDiag(__instance, "LookAt.Start"); } catch { }
-        }
-    }
-
-    // Both StartDirectionToLook overloads (Vector3 direction — the LookAt/adjacent path — and the float-angle one
-    // StartRotate forwards to, if present) so range and adjacent report through the same line.
-    [HarmonyPatch] internal static class Hk_RotDiag_FsmStart
-    {
-        static System.Collections.Generic.IEnumerable<MethodBase> TargetMethods()
-        {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Presentation.RotationPawnStateMachine");
-            int n = 0;
-            if (t != null)
-                foreach (var m in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-                    if (m.Name == "StartDirectionToLook") { n++; yield return m; }
-            if (n == 0) Plugin.Log.LogWarning("[Rot] NOT found: RotationPawnStateMachine.StartDirectionToLook (diagnostic off)");
-            else Plugin.Log.LogInfo($"[Rot] rotation diagnostic hooked ({n} FSM overload(s))");
-        }
-        static void Postfix(object __instance, int __result)
-        {
-            try { UniversalInject.OnRotationStartDiag(__instance, __result); } catch { }
+            try { UniversalInject.TryEarlyAttackSound(__instance); } catch { }
         }
     }
 

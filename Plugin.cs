@@ -194,7 +194,7 @@ namespace HumankindAssetFramework
                 typeof(Hk_PawnRangedFight),   // state-driven ATTACK: every pawn ranged shot arms the attack-clip window (per-pawn, main thread)
                 typeof(Hk_PawnMeleeFight),    // state-driven MELEE ATTACK: close-combat pawns (the Abomination animal) arm the attack-clip window (2026-07-22)
                 typeof(Hk_SilenceAudio),      // silenceDonorAudio: drop the borrowed donor's Wwise posts (idle growl + combat maul) on opted-in pawns (2026-07-23)
-                typeof(Hk_RotDiag_FaceEnemy), typeof(Hk_RotDiag_LookAt), typeof(Hk_RotDiag_FsmStart),   // adjacent-attack rotation diagnostic (2026-07-21): who asks our pawns to turn, and does the FSM start
+                typeof(Hk_EarlyAttackSound),  // early attack roar: UnitActionFaceEnemy.StartUnitAction -> TryEarlyAttackSound, the earliest "our unit commits to the strike" seam (2026-07-21)
                 typeof(Hk_PawnDeath),         // death cue: one-shot as a pawn of ours starts dying (2026-07-23)
                 typeof(Hk_SilenceVfx),        // donor VFX suppression: drop misplaced donor muzzle flashes, sounds untouched (2026-07-24)
                 typeof(Hk_FireProjStash),     // muzzle offset stash: bracket AlterationFireProjectile.StartEvent so the bone redirect can pre-compensate the donor's barrel offset (2026-07-24)
@@ -203,7 +203,6 @@ namespace HumankindAssetFramework
                 typeof(Hk_DistrictRepoint),   // EXPERIMENTAL: replace one district's on-map visual (docs/District-Visuals.md)
                 typeof(Hk_DistrictBufferHeadroom), // EXPERIMENTAL: enlarge the shared 'Visual' mesh buffer so custom district meshes fit (opt-in)
                 typeof(Hk_AnimatedBonePoolHeadroom), // enlarge the shared per-frame animated-bone pool (65,535 vanilla) — the spike-plague fix
-                typeof(Hk_PawnEntryDiag),            // spike-plague diagnostic: dump live pawns' descriptor bones/fragments once per unique id
                 typeof(Hk_PropRegister),           // EXPERIMENTAL: register our prop MeshCollections at AnimationLoad, before pawn resolution (opt-in)
                 typeof(Hk_ProjectileOverride),     // EXPERIMENTAL: re-point a unit's Projectile at our baked ProjectileAsset (kamikaze drone) at AnimationLoad (opt-in)
                 typeof(Hk_MuzzleRelocate),         // muzzleBone: redirect the muzzle-flash bone lookup (donor weapon socket missing on our renamed rig) to OUR bone (2026-07-24)

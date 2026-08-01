@@ -95,7 +95,6 @@ namespace HumankindAssetFramework
         public readonly Dictionary<long, float> stateStoppedAt = new Dictionary<long, float>();                            // unit GUID -> Time.time the unit stopped moving
         public readonly Dictionary<long, float> stateMoveStartedAt = new Dictionary<long, float>();                       // unit GUID -> Time.time the unit STARTED moving (the PRE-MOVEMENT one-shot window, e.g. the howitzer folding)
         public readonly List<StateSample> stateSamples = new List<StateSample>();   // published for the pose hook (lock on it); pos = pawn render position
-        public int lastStateAnim = -2;   // diagnostic: last anim the state pose picked (log only on change)
         public float animDuration = 1f;  // clip duration (s); PawnEntryPose.Time is NORMALIZED (Mathf.Repeat(Time,1) = one loop), so Time = seconds/duration plays it at real speed with every frame
         public int skeletonId = -1;      // runtime AnimationManager skeleton index of our registered skeleton (to match PawnManager.PawnEntry.SkeletonId)
         public int descId = -1;          // runtime PawnDescriptorId of our unit (learned from the correctly-skinned pawn), to spot the wrong-skeleton twin the game spawns for the same unit
@@ -3077,10 +3076,8 @@ namespace HumankindAssetFramework
                     }
             }
             float stoppedAt = -1f, moveStartedAt = -1f; bool matched = false;
-            float nearest = float.MaxValue; int sampleCount;   // diagnostic: nearest sample distance even when unmatched
             lock (e.stateSamples)
             {
-                sampleCount = e.stateSamples.Count;
                 // Proximity-weighted MAJORITY over the samples in the 4u radius, NOT the single nearest. Samples are
                 // pooled per model TYPE (there is no per-unit id — the pawn entry's array slot reshuffles on LOD), so
                 // two SAME-TYPE units within the radius (one moving, one idle) could have a pawn match the NEIGHBOUR's
@@ -3095,7 +3092,6 @@ namespace HumankindAssetFramework
                 {
                     var s = e.stateSamples[i];
                     float d = (s.pos - pos).sqrMagnitude;
-                    if (d < nearest) nearest = d;
                     if (d >= R2) continue;
                     float w = R2 - d;   // proximity weight (0 at the radius edge, heaviest at the pawn's own position)
                     if (s.moving) { wMove += w; if (d < dMove) { dMove = d; sMove = s; } }
@@ -3112,8 +3108,6 @@ namespace HumankindAssetFramework
             if (!matched)
             {
                 moving = false;
-                if (e.lastStateAnim != -3)   // log the miss once per streak (this is the link that decides run vs idle)
-                { e.lastStateAnim = -3; Plugin.Log.LogInfo($"[State] pose '{e.resourceName}': NO sample match (samples={sampleCount}, nearest={(nearest < float.MaxValue ? UnityEngine.Mathf.Sqrt(nearest).ToString("0.0") : "-")}u, pawn T={pos.ToString("0.0")}) — idling"); }
                 return;
             }
             // BAKE-ONLY pacing (user decision 2026-07-19): the runtime plays every clip at its authored length —
@@ -3162,9 +3156,6 @@ namespace HumankindAssetFramework
                     inIdleAlt = true; idleAltT = 0f; idleAltId = e.idleAltChosenId;
                 }
             }
-            int chosen = inAttack ? e.attackAnimId : inPreMove ? e.preMoveAnimId : moving ? e.moveAnimId : inAfter ? e.afterAnimId : combatIdle ? e.combatAnimId : inIdleAlt ? idleAltId : e.animId;
-            if (chosen != e.lastStateAnim)   // diagnostic: which state the pose weights select (transitions only)
-            { e.lastStateAnim = chosen; Plugin.Log.LogInfo($"[State] pose '{e.resourceName}': matched, moving={moving} -> {(inAttack ? "ATTACK" : inPreMove ? "PRE-MOVE" : moving ? "MOVE" : inAfter ? "AFTER" : combatIdle ? "COMBAT-IDLE" : inIdleAlt ? "IDLE-ALT" : "IDLE")} (weights)"); }
         }
 
         // DEPLOY-ON-STOP (gradual): hold the pose time Plugin.Update ramped for THIS pawn's unit — the deploy clip plays
@@ -3819,70 +3810,36 @@ namespace HumankindAssetFramework
                         if (at >= 0) e.activeFires[at] = fi; else e.activeFires.Add(fi);   // restart this pawn's bite, or arm a new one
                     }
                 }
-                Plugin.Log.LogInfo($"[State] '{e.resourceName}' {how} at {tr.position.ToString("0.0")} — {(wantAnim ? "attack clip armed" : "")}{(wantAnim && wantSound ? " + " : "")}{(wantSound ? "attack sound" : "")} (pawn {pid})");
             }
             catch (Exception ex) { Plugin.Log.LogError("[State] OnPawnAttack: " + ex); }
         }
 
-        // ---- ADJACENT-ATTACK ROTATION DIAGNOSTIC (2026-07-21) ----
-        // Symptom: a custom unit turns toward a RANGED target but not an ADJACENT one. Range facing and adjacent
-        // facing run different choreography actions (UnitActionFaceEnemy vs UnitActionLookAt, asym vs symmetrical
-        // prepare), all funnelling into RotationFSM.StartDirectionToLook. These logs show, per fight, WHICH actions
-        // start for OUR units and whether the rotation FSM was asked to turn at all — separating "action never
-        // created" (a choreography gate) from "FSM started but nothing visibly turned" (animation-driven yaw or
-        // aim-layer masking). Fires only during fights; filtered to our units, so it stays quiet.
-        internal static void OnUnitActionDiag(object action, string kind)
+        // EARLY ATTACK SOUND (functional — hooked from UnitActionFaceEnemy.StartUnitAction). FaceEnemy fires the moment OUR
+        // unit commits to the strike: it turns to face the enemy BEFORE the melee swing (verified: precedes 'melee start'),
+        // which is as close to "the moment you order the attack" as the presentation gives us — so the roar plays HERE,
+        // ahead of the later fight-start hook. Gate: our unit is the ATTACKER and has an attack clip. Per-attacker min-gap,
+        // keyed the SAME way OnPawnAttack keys it so the two roar paths dedup (no double) and a FaceEnemy re-fire can't
+        // double either. Played mostly-2D at the camera (PlayAttackOneShot) so it's audible at any zoom.
+        internal static void TryEarlyAttackSound(object action)
         {
             try
             {
                 if (entries == null) return;
-                string au = GetMember(GetMember(GetMember(action, "AttackerBattleUnit"), "PresentationUnit"), "UnitDefinition")?.ToString() ?? "";
-                string du = GetMember(GetMember(GetMember(action, "DefenderBattleUnit"), "PresentationUnit"), "UnitDefinition")?.ToString() ?? "";
-                var ea = FindEntryForUnitDefinition(au); var ed = FindEntryForUnitDefinition(du);
-                if (ea == null && ed == null) return;
-                string scope = GetMember(action, "actionScope")?.ToString() ?? "?";
-                Plugin.Log.LogInfo($"[Rot] {kind} scope={scope} attacker={(ea != null ? "OURS:" + ea.resourceName : Tail(au))} defender={(ed != null ? "OURS:" + ed.resourceName : Tail(du))}");
-
-                // EARLY ATTACK SOUND: FaceEnemy.Start fires the moment OUR unit commits to the strike — it turns to face the
-                // enemy BEFORE the melee choreography/swing (verified: this line precedes 'melee start' in the log). That's as
-                // close to "the moment you order the attack" as the presentation gives us, so we fire the roar HERE instead of
-                // the later fight-start hook. Gate: our unit is the ATTACKER and has an attack clip. Per-attacker min-gap
-                // (keyed by our entry + the battle-unit) stops a double if FaceEnemy re-fires. Played mostly-2D at the camera
-                // so it's audible at any zoom (PlayAttackOneShot).
-                if (ea != null && ea.customAttackClip != null && kind == "FaceEnemy.Start"
-                    && scope != null && scope.IndexOf("Attacker", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    long key = AttackSoundKey(ea, GetMember(GetMember(action, "AttackerBattleUnit"), "PresentationUnit"));   // SAME key OnPawnAttack computes -> the two roar paths dedup, no double
-                    float now = UnityEngine.Time.time;
-                    if (!ea.attackSoundNextAt.TryGetValue(key, out var next) || now >= next)
-                    {
-                        var camPos = UnityEngine.Camera.main != null ? UnityEngine.Camera.main.transform.position : UnityEngine.Vector3.zero;
-                        PlayAttackOneShot(ea.customAttackClip, camPos, ea.soundAttackVolume, ea.soundAttackOffset);
-                        ea.attackSoundNextAt[key] = now + Math.Max(0.25f, Math.Min(ea.customAttackClip.length, 1.2f));
-                        Plugin.Log.LogInfo($"[State] '{ea.resourceName}' attack sound (FaceEnemy — early)");
-                    }
-                }
+                var atkUnit = GetMember(GetMember(action, "AttackerBattleUnit"), "PresentationUnit");
+                string au = GetMember(atkUnit, "UnitDefinition")?.ToString() ?? "";
+                var ea = FindEntryForUnitDefinition(au);
+                if (ea == null || ea.customAttackClip == null) return;
+                string scope = GetMember(action, "actionScope")?.ToString() ?? "";
+                if (scope.IndexOf("Attacker", StringComparison.OrdinalIgnoreCase) < 0) return;   // only when OUR unit is the attacker
+                long key = AttackSoundKey(ea, atkUnit);   // SAME key OnPawnAttack computes -> the two roar paths dedup, no double
+                float now = UnityEngine.Time.time;
+                if (ea.attackSoundNextAt.TryGetValue(key, out var next) && now < next) return;
+                var camPos = UnityEngine.Camera.main != null ? UnityEngine.Camera.main.transform.position : UnityEngine.Vector3.zero;
+                PlayAttackOneShot(ea.customAttackClip, camPos, ea.soundAttackVolume, ea.soundAttackOffset);
+                ea.attackSoundNextAt[key] = now + Math.Max(0.25f, Math.Min(ea.customAttackClip.length, 1.2f));
             }
             catch { }
         }
-
-        internal static void OnRotationStartDiag(object fsm, int result)
-        {
-            try
-            {
-                if (entries == null) return;
-                var pawn = GetMember(fsm, "ownerPawn");
-                string ud = GetMember(GetMember(pawn, "PresentationUnit"), "UnitDefinition")?.ToString() ?? "";
-                var e = FindEntryForUnitDefinition(ud);
-                if (e == null) return;
-                var tr = GetMember(pawn, "Transform") as UnityEngine.Transform;
-                string dir = GetMember(fsm, "rotationLookDirection") is UnityEngine.Vector3 d ? d.ToString("0.00") : "?";
-                Plugin.Log.LogInfo($"[Rot] '{e.resourceName}' StartDirectionToLook -> steps={result} lookDir={dir} yawNow={(tr != null ? tr.eulerAngles.y.ToString("0") : "?")}");
-            }
-            catch { }
-        }
-
-        static string Tail(string s) => string.IsNullOrEmpty(s) ? "(none)" : (s.Length > 60 ? s.Substring(0, 60) : s);
 
         // ---- DONOR VFX SUPPRESSION (2026-07-24, the AA-gun flashes): MecanimEvent VFX (muzzle flashes, animator
         // puffs) anchor to DONOR bone names that don't exist on our replaced skeleton, so inherited flashes render
@@ -4102,7 +4059,6 @@ namespace HumankindAssetFramework
                     {
                         if (wasMoving && !moving) e.stateStoppedAt[guid] = now;        // the AFTER one-shot window starts here
                         if (!wasMoving && moving) e.stateMoveStartedAt[guid] = now;    // the PRE-MOVEMENT one-shot window starts here
-                        Plugin.Log.LogInfo($"[State] '{e.resourceName}' unit {guid} moving={moving}{(combat ? " (battle)" : "")}");
                     }
                     e.stateMoving[guid] = moving;
                     float stoppedAt = e.stateStoppedAt.TryGetValue(guid, out var sAt) ? sAt : -1f;
@@ -5787,44 +5743,6 @@ namespace HumankindAssetFramework
         static void Prefix(object __instance) { UniversalInject.DistrictDiag(__instance); UniversalInject.DistrictAffinitySwap(__instance); }
         // Postfix: after UpdateLevelBuild built the request/material — dumps + the registry-driven apply act here.
         static void Postfix(object __instance) { UniversalInject.DistrictDumpMaterial(__instance); UniversalInject.DistrictDumpSubMaterials(__instance); UniversalInject.DistrictApplyEntries(__instance); UniversalInject.DistrictGuidOverride(__instance); }
-    }
-
-    // SPIKE-PLAGUE DIAGNOSTIC (2026-07-26): dump, once per unique (SkeletonId, PawnDescriptorId), what every
-    // LIVE pawn actually carries — the descriptor's BonesCount/fragments as the GPU sees them at AddPawnEntry
-    // time. Three blind fixes in (pool size, fragment hide, descriptor sync) the treads still spike; this ends
-    // the guessing by reading the ground truth of the live path.
-    [HarmonyPatch]
-    internal static class Hk_PawnEntryDiag
-    {
-        static readonly System.Collections.Generic.HashSet<ulong> seen = new System.Collections.Generic.HashSet<ulong>();
-        static MethodBase TargetMethod()
-        {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Animation.PawnManager");
-            return t?.GetMethod("AddPawnEntry", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        }
-        static void Prefix(object __instance, object entry)
-        {
-            try
-            {
-                var eT = entry.GetType();
-                uint skelId = 0, descId = 0;
-                try { skelId = (uint)Convert.ToInt64(eT.GetField("SkeletonId").GetValue(entry)); } catch { }
-                try { descId = (uint)Convert.ToInt64(eT.GetField("PawnDescriptorId").GetValue(entry)); } catch { }
-                ulong key = ((ulong)skelId << 32) | descId;
-                if (!seen.Add(key)) return;
-                var pmType = __instance.GetType();
-                var descs = AccessTools.Field(pmType, "gpuPawnDescriptorEntries")?.GetValue(__instance) as Array;
-                string dInfo = "?";
-                if (descs != null && descId < descs.Length)
-                {
-                    var d = descs.GetValue((int)descId);
-                    var dT = d.GetType();
-                    dInfo = $"bones={dT.GetField("BonesCount")?.GetValue(d)} frags={dT.GetField("FragmentCount")?.GetValue(d)} start={dT.GetField("StartFragment")?.GetValue(d)}";
-                }
-                Plugin.Log.LogInfo($"[PawnDiag] skel={skelId} desc={descId} {dInfo}");
-            }
-            catch { }
-        }
     }
 
     // THE SPIKE PLAGUE (2026-07-26, first seen the day the 242-bone tank-destroyer shipped): every VISIBLE pawn
