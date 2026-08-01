@@ -21,7 +21,6 @@ namespace HumankindAssetFramework
     internal class ModelEntry
     {
         public string resourceName = "", pawnDescription = "";
-        public string coreDesc = "";     // pawnDescription minus the trailing _NN instance suffix, computed ONCE at registry publish. The per-frame movement polls + the sim-thread FindEntryForUnitDefinition matched units by re-running Regex.Replace(pawnDescription,"_[0-9]+$","") per entry per unit — pure garbage since it's a load-time constant. Read-only after publish (safe from any thread).
         public int sa, sb, sc, sd, ta, tb, tc, td;   // skeleton + atlas Amplitude guid components
         public object skeleton;
         public object hostOutputLayer;
@@ -371,7 +370,6 @@ namespace HumankindAssetFramework
                 if (formationBySize.Count > 0)
                     Plugin.Log.LogInfo("[Resize] formation-by-size: " + string.Join(", ",
                         formationBySize.Select(t => $"<= x{t.Key.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} -> {t.Value}")));
-                foreach (var e in built) e.coreDesc = CoreDesc(e.pawnDescription);   // cache the _NN-stripped match key ONCE (read every frame by the movement polls); done before publish so readers never see it unset
                 entries = built;   // publish fully built — never mutated after this point
                 // Invalidate the pawn-hook early-out caches: if pawns spawned during a transient-failure retry window
                 // they latched anyAnimated/anyFreeze against the EMPTY list — without this, a recovered retry would
@@ -784,7 +782,7 @@ namespace HumankindAssetFramework
             foreach (var e in list)
             {
                 if (string.IsNullOrEmpty(e.pawnDescription)) continue;
-                var core = e.coreDesc;   // cached _NN-stripped key (was Regex.Replace per entry per call, on the sim-thread hook path)
+                var core = Regex.Replace(e.pawnDescription, "_\\d+$", "");   // drop the trailing _NN instance suffix
                 if (core.Length > 4 && unitDefText.IndexOf(core, StringComparison.OrdinalIgnoreCase) >= 0) return e;
             }
             return null;
@@ -3532,7 +3530,7 @@ namespace HumankindAssetFramework
                     if (uname.Length == 0) continue;
                     // Is this unit one of our opted-in models? (name match, minus the entry's trailing _NN suffix)
                     if (!entries.Any(x => x.respawnAfterLoad && x.pawnDescription.Length > 0
-                            && uname.IndexOf(x.coreDesc, StringComparison.OrdinalIgnoreCase) >= 0)) continue;
+                            && uname.IndexOf(CoreDesc(x.pawnDescription), StringComparison.OrdinalIgnoreCase) >= 0)) continue;
                     present.Add(unit);
                     // Only start the clock once the unit is actually rendered (IsLoaded) — before that there's nothing to fix
                     // and the 1s marks would be wasted during the load.
@@ -3919,16 +3917,6 @@ namespace HumankindAssetFramework
         // settling unit reads stopped and the after/idle clips play instead of the run). On a moving->stopped flip
         // the stop time is recorded for the AFTER one-shot window. Publishes one sample per PAWN under lock, so
         // every soldier of a squad animates (the pose hook matches by nearest sample).
-        static readonly List<long> scratchGoneKeys = new List<long>();   // reused by PruneGone — was a Keys.Where(...).ToList() alloc per dict per poll (6x/poll)
-        // Remove every key not seen this poll (a unit that despawned). Main-thread only; the shared scratch is safe because
-        // ProcessAnimStates/ProcessDeployState run sequentially from Plugin.Update and PruneGone completes before the next call.
-        static void PruneGone<TV>(Dictionary<long, TV> dict, HashSet<long> seen)
-        {
-            scratchGoneKeys.Clear();
-            foreach (var k in dict.Keys) if (!seen.Contains(k)) scratchGoneKeys.Add(k);   // Dictionary.KeyCollection enumerator is a struct — no alloc
-            for (int i = 0; i < scratchGoneKeys.Count; i++) dict.Remove(scratchGoneKeys[i]);
-        }
-
         static int stateFrame;
         internal static void ProcessAnimStates()
         {
@@ -3960,7 +3948,7 @@ namespace HumankindAssetFramework
                     ModelEntry e = null;
                     foreach (var x in list)
                         if (x.animStateDriven && x.moveAnimId >= 0 && x.pawnDescription.Length > 0
-                            && uname.IndexOf(x.coreDesc, StringComparison.OrdinalIgnoreCase) >= 0) { e = x; break; }
+                            && uname.IndexOf(CoreDesc(x.pawnDescription), StringComparison.OrdinalIgnoreCase) >= 0) { e = x; break; }
                     if (e == null) return;
                     long guid = GuidToLong(GetMember(unit, "GUID"));
                     if (guid == 0) return;
@@ -4016,8 +4004,10 @@ namespace HumankindAssetFramework
                 foreach (var e in fresh.Keys)
                 {
                     lock (e.stateSamples) { e.stateSamples.Clear(); e.stateSamples.AddRange(fresh[e]); }
-                    var sn = seen[e];   // drop gone units from all four per-unit maps
-                    PruneGone(e.stateLastPos, sn); PruneGone(e.stateMoving, sn); PruneGone(e.stateStoppedAt, sn); PruneGone(e.stateMoveStartedAt, sn);
+                    foreach (var g in e.stateLastPos.Keys.Where(k => !seen[e].Contains(k)).ToList()) e.stateLastPos.Remove(g);      // drop gone units
+                    foreach (var g in e.stateMoving.Keys.Where(k => !seen[e].Contains(k)).ToList()) e.stateMoving.Remove(g);
+                    foreach (var g in e.stateStoppedAt.Keys.Where(k => !seen[e].Contains(k)).ToList()) e.stateStoppedAt.Remove(g);
+                    foreach (var g in e.stateMoveStartedAt.Keys.Where(k => !seen[e].Contains(k)).ToList()) e.stateMoveStartedAt.Remove(g);
                 }
             }
             catch (Exception ex) { Plugin.Log.LogError("[State] ProcessAnimStates: " + ex); }
@@ -4032,9 +4022,7 @@ namespace HumankindAssetFramework
         internal static void ProcessDeployState()
         {
             if (entries == null || !Plugin.UniversalInjectOn.Value) return;
-            bool anyDeploy = false;
-            foreach (var x in entries) if (x.deployOnStop) { anyDeploy = true; break; }   // manual foreach — entries.Any(closure) boxed the enumerator every frame at 60Hz
-            if (!anyDeploy) return;
+            if (!entries.Any(x => x.deployOnStop)) return;
             if (++deployFrame % 3 != 0) return;   // ~20x/s; the ramp is dt-based so it stays smooth + framerate-independent
             try
             {
@@ -4063,10 +4051,8 @@ namespace HumankindAssetFramework
                         if (unit == null) continue;
                         string uname = GetMember(GetMember(unit, "UnitDefinition"), "Name")?.ToString() ?? "";
                         if (uname.Length == 0) continue;
-                        ModelEntry e = null;   // plain loop, not entries.FirstOrDefault — no per-unit closure allocation at 20x/s
-                        foreach (var x in entries)
-                            if (x.deployOnStop && x.pawnDescription.Length > 0
-                                && uname.IndexOf(x.coreDesc, StringComparison.OrdinalIgnoreCase) >= 0) { e = x; break; }
+                        var e = entries.FirstOrDefault(x => x.deployOnStop && x.pawnDescription.Length > 0
+                                    && uname.IndexOf(CoreDesc(x.pawnDescription), StringComparison.OrdinalIgnoreCase) >= 0);
                         if (e == null) continue;
                         long guid = GuidToLong(GetMember(unit, "GUID"));
                         if (guid == 0) continue;
@@ -4107,8 +4093,8 @@ namespace HumankindAssetFramework
                 foreach (var e in fresh.Keys)
                 {
                     lock (e.deploySamples) { e.deploySamples.Clear(); e.deploySamples.AddRange(fresh[e]); }
-                    var sn = seen[e];   // drop gone units (+ their last-pos entries — this map used to grow forever)
-                    PruneGone(e.deployProgress, sn); PruneGone(e.deployLastPos, sn);
+                    foreach (var g in e.deployProgress.Keys.Where(k => !seen[e].Contains(k)).ToList()) e.deployProgress.Remove(g);   // drop gone units
+                    foreach (var g in e.deployLastPos.Keys.Where(k => !seen[e].Contains(k)).ToList()) e.deployLastPos.Remove(g);    // ...and their last-pos entries (this map used to grow forever)
                 }
             }
             catch (Exception ex) { Plugin.Log.LogError("[Deploy] ProcessDeployState: " + ex); }
