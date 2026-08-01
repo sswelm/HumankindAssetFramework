@@ -3689,6 +3689,18 @@ namespace HumankindAssetFramework
             UnityEngine.Object.Destroy(go, clip.length - off + 0.15f);
         }
 
+        // Per-(entry, attacking-UNIT) key so the TWO attack-roar paths dedup against each other: the fight-hook path
+        // (OnPawnAttack) and the early FaceEnemy path. A ranged attacker used to roar TWICE (each path used a disjoint
+        // key). Keyed by the sim unit GUID — the state poll notes the army-stack and battle-tile PresentationUnit are
+        // "same GUID, different objects", so BOTH paths resolve the identical GUID for the attacker and compute the same
+        // key. Falls back to the PresentationUnit object identity if the GUID is unreadable (then it just won't cross-dedup).
+        static long AttackSoundKey(ModelEntry e, object presentationUnit)
+        {
+            long g = GuidToLong(GetMember(presentationUnit, "GUID"));
+            if (g == 0) g = presentationUnit?.GetHashCode() ?? 0;
+            return unchecked(((long)e.resourceName.GetHashCode() << 32) ^ g);
+        }
+
         // playSound/armAnim let a hook drive ONLY one channel: the melee attack SOUND fires from the EARLY fight-start hook
         // (StartPawnAction — the moment the attack begins), while the attack ANIMATION arms from the PER-SWING hook
         // (StartPairMeleeAttack). Firing the sound per-swing made the roar land near the END of the anim (too late);
@@ -3712,16 +3724,17 @@ namespace HumankindAssetFramework
                 if (!wantAnim && !wantSound) return;
                 if (!(GetMember(attacker, "Transform") is UnityEngine.Transform tr)) return;
                 long pid = attacker.GetHashCode();
+                long soundKey = AttackSoundKey(e, unit);   // per-UNIT (not per-pawn) so it dedups the early FaceEnemy roar too — one roar per unit-attack
                 float now = UnityEngine.Time.time;
 
                 // ATTACK SOUND: a DISTINCT, more violent one-shot at the attacker (vs the idle growl). Per-pawn min-gap so a
                 // rapid multi-swing fight doesn't machine-gun it — each distinct swing past the gap still triggers. Plays
                 // even when the model isn't state-driven (a unit can want an attack sound without our attack animation).
-                if (wantSound && (!e.attackSoundNextAt.TryGetValue(pid, out var nextS) || now >= nextS))
+                if (wantSound && (!e.attackSoundNextAt.TryGetValue(soundKey, out var nextS) || now >= nextS))
                 {
                     PlayAttackOneShot(e.customAttackClip, tr.position, e.soundAttackVolume, e.soundAttackOffset);
                     float audible = Math.Max(0.05f, e.customAttackClip.length - Math.Max(0f, e.soundAttackOffset));   // gap keys off what actually PLAYS (post-offset)
-                    e.attackSoundNextAt[pid] = now + Math.Max(0.25f, Math.Min(audible, 1.2f));
+                    e.attackSoundNextAt[soundKey] = now + Math.Max(0.25f, Math.Min(audible, 1.2f));
                 }
 
                 // ATTACK ANIMATION: key the fire by the ATTACKING PAWN's identity, and if that pawn already has an active
@@ -3772,7 +3785,7 @@ namespace HumankindAssetFramework
                 if (ea != null && ea.customAttackClip != null && kind == "FaceEnemy.Start"
                     && scope != null && scope.IndexOf("Attacker", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    long key = ((long)ea.resourceName.GetHashCode() << 20) ^ (GetMember(action, "AttackerBattleUnit")?.GetHashCode() ?? 0);
+                    long key = AttackSoundKey(ea, GetMember(GetMember(action, "AttackerBattleUnit"), "PresentationUnit"));   // SAME key OnPawnAttack computes -> the two roar paths dedup, no double
                     float now = UnityEngine.Time.time;
                     if (!ea.attackSoundNextAt.TryGetValue(key, out var next) || now >= next)
                     {
