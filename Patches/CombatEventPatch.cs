@@ -2,7 +2,7 @@ using System;
 using System.Reflection;
 using HarmonyLib;
 
-namespace ENCAccessProof
+namespace HumankindAssetFramework
 {
     // FIRING-ON-ATTACK (complete). A bombard raises SimulationEvent_ArtilleryStrikeStarted; we read the ArtilleryStrike's
     // StrikerUnit.UnitDefinition, match it to our registry entry, and enqueue the firing unit/army GUID so ONLY that pawn

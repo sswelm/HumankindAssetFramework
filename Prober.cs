@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 
-namespace ENCAccessProof
+namespace HumankindAssetFramework
 {
     // All access logic, fully reflection-based so it can't break the build on a namespace guess.
     internal static class Prober

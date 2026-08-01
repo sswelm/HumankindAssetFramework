@@ -110,7 +110,7 @@ post-build-copies the plugin to `BepInEx\scripts\` for ScriptEngine hot reload.
 **What we could use.**
 - **Publicized references would eliminate most of our reflection**: private members become direct
   calls that break at *compile time* after a game update instead of silently at runtime. Strong
-  candidate for ENCAccessProof.csproj (generate locally, never distribute the publicized DLLs —
+  candidate for HumankindAssetFramework.csproj (generate locally, never distribute the publicized DLLs —
   that's how ModdingTools stays in the legal clear).
 - The whole repo is a blueprint for our "distributable package for any Humankind modder" goal:
   game-path detection, templates, dry-run UX.

@@ -36,7 +36,7 @@ using HarmonyLib;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
-namespace ENCAccessProof
+namespace HumankindAssetFramework
 {
     internal static class FormationOverride
     {

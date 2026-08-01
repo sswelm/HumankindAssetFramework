@@ -5,8 +5,7 @@ you're changing the plugin.
 
 ## Plugin (`HumankindAssetFramework.dll`)
 
-Needs the **.NET SDK**. The project file is still named `ENCAccessProof.csproj` (historical; the ASSEMBLY it builds
-is HAF-branded). Put a `References\` folder next to the `.csproj` containing:
+Needs the **.NET SDK**. The project file is `HumankindAssetFramework.csproj`. Put a `References\` folder next to the `.csproj` containing:
 
 - `BepInEx.dll` + `0Harmony.dll` — from `<Humankind>\BepInEx\core\`
 - `UnityEngine*.dll` + `Amplitude.Mercury.Animation.dll` + `Newtonsoft.Json.dll` — from `<Humankind>\Humankind_Data\Managed\`

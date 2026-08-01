@@ -4,7 +4,7 @@ using BepInEx.Logging;
 using HarmonyLib;
 using UnityEngine;
 
-namespace ENCAccessProof
+namespace HumankindAssetFramework
 {
     // First BepInEx mod: prove we can (1) load, (2) hook the game, (3) read the live registry
     // AND the configured target mod's own assets — with a config file + an in-game feedback window.

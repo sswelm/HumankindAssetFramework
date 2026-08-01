@@ -8,7 +8,7 @@ using BepInEx;
 using HarmonyLib;
 using Newtonsoft.Json.Linq;             // provided by the game (mod.io); robust registry parse where JsonUtility no-ops in the game runtime
 
-namespace ENCAccessProof
+namespace HumankindAssetFramework
 {
     // Generic, registry-driven model injector — the runtime half of the Universal Baker. Reads enc_models.json from
     // BepInEx/config (written by the editor), registers every baked skeleton, and on each unit's AddOn.Load repoints

@@ -1,7 +1,7 @@
 // SoundWindow.cs — "Sound Studio" (Tools ▸ HAF ▸ Sound Studio): one place to configure a unit's whole audio profile,
 // apart from the skin (Unit Retexture) window. Foldout sections: Silence an inherited donor sound; add an Idle growl
 // (occasional, one-voice-per-unit), an Attack roar (on strike), Movement WAVs (start/travel/stop), or a Wwise engine
-// event. The runtime plugin (ENCAccessProof) drives all of it — no bake. Writes onto the SAME registry entry the
+// event. The runtime plugin (Humankind Asset Framework) drives all of it — no bake. Writes onto the SAME registry entry the
 // Factory/Retexture use (matched by pawn), so a unit keeps ONE entry.
 using System;
 using System.Collections.Generic;

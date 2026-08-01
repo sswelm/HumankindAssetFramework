@@ -25,7 +25,7 @@ using System.Text;
 using BepInEx;
 using HarmonyLib;
 
-namespace ENCAccessProof
+namespace HumankindAssetFramework
 {
     // ---- SAVE hook: Sandbox.Save(StorageContainerInfo, SerializationFormat, GameSaveDescriptor) — the single choke
     // point for manual/quick/auto saves. __0 = the StorageContainerInfo (its .Name is the save's file identity). ----

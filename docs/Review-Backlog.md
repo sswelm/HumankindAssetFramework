@@ -110,7 +110,7 @@ by when they'll bite.
   `enc_sounds` / `enc_skins` are ENC-the-PACK's files — packs are branded, only the framework is neutral, and a
   third-party pack never touches an `enc_*` path. **Verified in-game same day** (first session clean: new identity
   loads, settings carried, units/districts/audio normal). Still open for the package release: hardcoded paths,
-  package scaffolding, the `ENCAccessProof` C# namespace (invisible externally; rename at leisure).
+  package scaffolding. (The `ENCAccessProof` C# namespace + project filename were renamed to `HumankindAssetFramework` on 2026-08-01; the local repo FOLDER is the last leftover — a manual `git mv`/reclone when convenient.)
 
 ## Future feature seams (mapped, not built — the discovery is done, only the build remains)
 
