@@ -22,15 +22,13 @@ namespace HumankindAssetFramework
             else Plugin.Log.LogWarning("[Fire] NOT found: " + type + ".Raise");
             return m;
         }
-        const BindingFlags BF = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-        internal static object Member(object o, string name)
-        {
-            if (o == null) return null;
-            var t = o.GetType();
-            var f = t.GetField(name, BF); if (f != null) return f.GetValue(o);
-            var p = t.GetProperty(name, BF); if (p != null) return p.GetValue(o);
-            return null;
-        }
+        // Reflection reads go through the shared UniversalInject.GetMember (cached, finds public + non-public). This local
+        // copy used to be FIELD-first and uncached; consolidated onto the one implementation. GetMember is PROPERTY-first —
+        // audited the call-sites (StrikerUnit/StrikerArmy/UnitDefinition/GUID/AttackerEmpireIndex/TargetTileIndex are
+        // properties; 'striker' is a lowercase field with no competing property) so resolution is unchanged, and GUID
+        // already resolves property-first successfully in UniversalInject. Int keeps its null -> int.MinValue sentinel
+        // (GetMember returns null on a missing member, which Convert.ToInt32 would otherwise throw on).
+        internal static object Member(object o, string name) => UniversalInject.GetMember(o, name);
         internal static int Int(object o, string name) { var v = Member(o, name); return v == null ? int.MinValue : Convert.ToInt32(v); }
     }
 

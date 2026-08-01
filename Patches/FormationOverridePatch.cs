@@ -236,26 +236,10 @@ namespace HumankindAssetFramework
             if (allDone) { pending = false; if (entries.Count > 0) appliedAny = true; }
         }
 
-        // Small reflection reader (field OR property) — FormationOverride keeps its own so it needn't reach into UniversalInject.
-        // Member lookups are CACHED per (type,name): MaybeReinstantiate calls Mem dozens of times per army during the catch-up
-        // window, and the raw GetProperty/GetField was the only uncached reflection on that path. Main-thread only (Tick /
-        // AnimationLoad postfix), so a plain Dictionary is safe. Negative results are cached too (same process-lifetime validity).
-        static readonly Dictionary<(Type, string), System.Reflection.MemberInfo> memCache = new Dictionary<(Type, string), System.Reflection.MemberInfo>();
-        static object Mem(object o, string name)
-        {
-            if (o == null) return null;
-            var t = o.GetType();
-            var key = (t, name);
-            if (!memCache.TryGetValue(key, out var mi))
-                memCache[key] = mi = (System.Reflection.MemberInfo)t.GetProperty(name) ?? t.GetField(name);
-            try
-            {
-                if (mi is System.Reflection.PropertyInfo p) return p.GetValue(o);
-                if (mi is System.Reflection.FieldInfo f) return f.GetValue(o);
-            }
-            catch { }
-            return null;
-        }
+        // Reflection reads go through the shared UniversalInject.GetMember (cached per (type,name), property-first, finds
+        // non-public too). FormationOverride used to keep its own copy; consolidated onto the one implementation so the
+        // caching/lookup strategy can't drift between the two. Main-thread only (Tick / AnimationLoad postfix).
+        static object Mem(object o, string name) => UniversalInject.GetMember(o, name);
 
         // Walk the live armies (same path as UniversalInject's post-load respawn) and, for every unit whose
         // PresentationUnitDefinition matches a repointed entry, re-run the game's own UpdatePawns ONCE so it rebuilds its
