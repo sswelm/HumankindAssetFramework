@@ -117,12 +117,20 @@ namespace HumankindAssetFramework
                                   "at startup, so custom district meshes fit even when a built-up late-game city has nearly filled it. 0 = off. " +
                                   "e.g. 1000000 = +~48MB VRAM. Applied once at buffer creation; takes effect on the next launch.");
 
+            // DEFAULT RATIONALE: 262,144 = 4x vanilla (65,535). This is a deliberately generous SAFETY margin, not an
+            // empirically-fitted worst case — at 242 bones/instance it is ~1,080 tread-heavy instances of headroom, far
+            // more than any observed map has needed, chosen so the spike plague cannot recur rather than to hit a tight
+            // bound. It is cheap to over-provision: the pool holds bone entries, so 4x costs only a few MB of VRAM, and
+            // it is applied UNCONDITIONALLY (every plugin user pays it, even a pure-reskin setup with no high-bone custom
+            // on screen). Both trade-offs are intentional given how small the cost is; shrink it only if VRAM is tight,
+            // and re-verify on a dense late-game map (the plague only shows when the pool actually overflows).
             SkeletonBoneBudget  = Config.Bind("Buffers", "SkeletonBoneBudget", 262144,
                                   "Size of the game's shared per-frame ANIMATED-BONE pool (PawnManager's animatedSkeletonEntry buffers; " +
                                   "vanilla = 65,535 entries shared by EVERY pawn on screen). High-bone custom skeletons (tank-destroyer " +
                                   "treads = 242 bones/instance, mech = 240) overflow it on dense late-game maps — overflowing pawns read " +
                                   "other pawns' matrices and stretch into spikes / twitch (INCLUDING vanilla units). Applied at pawn-system " +
-                                  "creation; ~4x vanilla costs a few MB of VRAM. 0 = leave the vanilla size.");
+                                  "creation. Default 262,144 = 4x vanilla: a generous safety margin (~1,080 tread-instances of headroom), " +
+                                  "not a tight bound — costs only a few MB of VRAM, applied to all users. 0 = leave the vanilla size.");
 
             // --- EXPERIMENTAL: generic GPU mesh-buffer overrides. Every mesh family (pawns, districts, effects) uploads
             //     into per-layer GPU buffers created with serialized sizes AND a per-mesh triangle cap that silently
