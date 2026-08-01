@@ -73,6 +73,10 @@ namespace HumankindAssetFramework
         static bool appliedAny;                                            // ≥1 entry applied this session — arm re-instantiation
         static int reformScanFrame;                                        // throttle counter for the live-unit scan
         static readonly HashSet<object> reformed = new HashSet<object>();  // units already re-formed (or logged) this session, once each
+        static readonly HashSet<object> reformPresent = new HashSet<object>();  // reused each scan (Clear, not new) — live matched units this pass
+        static bool reformSettled;                                         // catch-up complete this session -> stop the ~12x/s scan (a reload re-arms it)
+        static int reformQuietScans;                                       // consecutive scans that handled nothing new
+        const int ReformQuietLimit = 60;                                   // settle after ~5s of quiet (~12 body-scans/s), long enough to cover the load-time catch-up
 
         // Called from UniRegisterHook's AnimationLoad postfix — once per game session, before pawn resolution.
         internal static void OnAnimationLoad()
@@ -84,6 +88,7 @@ namespace HumankindAssetFramework
                 if (entries.Count == 0) return;
                 foreach (var e in entries) e.done = false;   // fresh session: repoint again (defs reload per session)
                 appliedAny = false; reformed.Clear();        // fresh session: re-arm + drop last session's unit objects
+                reformSettled = false; reformQuietScans = 0;  // re-arm the re-instantiate catch-up for this session's load-time units
                 fragDefsDone.Clear(); clonesRegisteredThisSession.Clear();   // equipment counter-scale: re-process defs + re-register clones (AnimationLoad cleared the manager)
                 pending = true;
                 TryApply();                                   // normally succeeds right here
@@ -232,12 +237,23 @@ namespace HumankindAssetFramework
         }
 
         // Small reflection reader (field OR property) — FormationOverride keeps its own so it needn't reach into UniversalInject.
+        // Member lookups are CACHED per (type,name): MaybeReinstantiate calls Mem dozens of times per army during the catch-up
+        // window, and the raw GetProperty/GetField was the only uncached reflection on that path. Main-thread only (Tick /
+        // AnimationLoad postfix), so a plain Dictionary is safe. Negative results are cached too (same process-lifetime validity).
+        static readonly Dictionary<(Type, string), System.Reflection.MemberInfo> memCache = new Dictionary<(Type, string), System.Reflection.MemberInfo>();
         static object Mem(object o, string name)
         {
             if (o == null) return null;
             var t = o.GetType();
-            var p = t.GetProperty(name); if (p != null) { try { return p.GetValue(o); } catch { } }
-            var f = t.GetField(name);    if (f != null) { try { return f.GetValue(o); } catch { } }
+            var key = (t, name);
+            if (!memCache.TryGetValue(key, out var mi))
+                memCache[key] = mi = (System.Reflection.MemberInfo)t.GetProperty(name) ?? t.GetField(name);
+            try
+            {
+                if (mi is System.Reflection.PropertyInfo p) return p.GetValue(o);
+                if (mi is System.Reflection.FieldInfo f) return f.GetValue(o);
+            }
+            catch { }
             return null;
         }
 
@@ -248,13 +264,15 @@ namespace HumankindAssetFramework
         // spawned after the override — re-forming them would be a pointless visible pop).
         static void MaybeReinstantiate()
         {
+            if (reformSettled) return;                              // catch-up complete this session — a reload re-arms it (OnAnimationLoad)
             if (++reformScanFrame % 5 != 0) return;                 // ~12x/s is ample; the frame counter still advances
             var presType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.Presentation");
             var factory = presType == null ? null : AccessTools.Field(presType, "PresentationEntityFactoryController")?.GetValue(null);
             var armies = factory == null ? null : Mem(factory, "PresentationArmyEntities") as Array;
             if (armies == null) return;
 
-            var present = new HashSet<object>();
+            reformPresent.Clear();                                  // reused across scans (no per-scan HashSet allocation)
+            bool handledAny = false;
             foreach (var army in armies)
             {
                 if (army == null) continue;
@@ -271,11 +289,14 @@ namespace HumankindAssetFramework
                     fref = r?.GetType().GetProperty("XmlSerializableElementName")?.GetValue(r) as string;
                 }
                 catch { }
-                var e = entries.FirstOrDefault(x => x.done && x.dummies.Count > 0
-                          && (string.Equals(x.unit, pdn, StringComparison.OrdinalIgnoreCase)
-                              || (x.unit.Length == 0 && string.Equals(x.formation, fref ?? "", StringComparison.OrdinalIgnoreCase))));
+                Entry e = null;                                     // plain loop, not entries.FirstOrDefault — no per-army closure allocation at 12x/s
+                foreach (var x in entries)
+                    if (x.done && x.dummies.Count > 0
+                        && (string.Equals(x.unit, pdn, StringComparison.OrdinalIgnoreCase)
+                            || (x.unit.Length == 0 && string.Equals(x.formation, fref ?? "", StringComparison.OrdinalIgnoreCase))))
+                    { e = x; break; }
                 if (e == null) continue;                             // not one of our repointed/replaced units
-                present.Add(unit);
+                reformPresent.Add(unit);
                 if (reformed.Contains(unit)) continue;               // already handled this session
                 bool loaded = true; try { loaded = Convert.ToBoolean(Mem(unit, "IsLoaded")); } catch { }
                 if (!loaded) continue;                                // nothing rendered yet — wait for the next scan
@@ -285,7 +306,7 @@ namespace HumankindAssetFramework
                 string fn = Mem(fo, "name")?.ToString() ?? Mem(Mem(fo, "PresentationFormationDefinition"), "name")?.ToString() ?? "?";
                 object dc = Mem(fo, "DummyCount");
                 int pawns = (Mem(unit, "Pawns") as ICollection)?.Count ?? -1;
-                reformed.Add(unit);                                  // handle/log each unit once; mark BEFORE any call so a throw isn't retried forever
+                reformed.Add(unit); handledAny = true;               // handle/log each unit once; mark BEFORE any call so a throw isn't retried forever
                 if (pawns >= e.dummies.Count)                        // already full — spawned after the override won the race
                 { Plugin.Log.LogInfo($"[Formation] '{pdn}' already {pawns}/{e.dummies.Count} (formation='{fn}' dummyCount={dc}) — no re-form needed"); continue; }
                 bool naval = false; try { naval = Convert.ToBoolean(Mem(unit, "IsNaval")); } catch { }
@@ -294,7 +315,13 @@ namespace HumankindAssetFramework
                 object dc2 = Mem(Mem(unit, "Formation"), "DummyCount");
                 Plugin.Log.LogInfo($"[Formation] re-instantiated '{pdn}': pawns {pawns} -> {after} (formation='{fn}', dummyCount {dc} -> {dc2}, target {e.dummies.Count}) — spawned before the override.");
             }
-            reformed.RemoveWhere(u => !present.Contains(u));         // drop gone units so a genuinely new instance is handled again
+            reformed.RemoveWhere(u => !reformPresent.Contains(u));   // drop gone units so a genuinely new instance is handled again
+            // TERMINATION: the catch-up only ever targets units that spawned BEFORE the override (all present within a few
+            // seconds of load). Once a run of scans handles nothing new, STOP the ~12x/s walk for the rest of the session —
+            // units built LATER already spawn at the overridden count (no re-form needed; they'd only get a diagnostic log).
+            // A save-load re-arms via OnAnimationLoad. This removes the permanent per-frame cost the scan used to pay forever.
+            if (handledAny) reformQuietScans = 0;
+            else if (++reformQuietScans >= ReformQuietLimit) reformSettled = true;
         }
 
         static void ApplyOne(Entry e, IEnumerable fdb, IEnumerable udb)
