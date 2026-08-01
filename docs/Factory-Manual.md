@@ -692,7 +692,12 @@ from the registry** (2026-07-19) — the file is the single source of truth; uns
 are deliberately dropped (*Save (no bake)* first if you want to keep them). The **↻ Reload** button does the same
 explicitly — the escape hatch from any stale window copy (re-selecting the *same* entry in the dropdown does
 NOT reload it). This closed the recurring "stale Lab clobber" trap where a pre-reload form silently overwrote
-registry edits at the next Save/Bake.
+registry edits at the next Save/Bake. **↻ Reload only reloads the DATA — it does NOT rebuild the model preview**
+*(2026-08-01)*: the preview-rebuild path corrupts the texture on some models (a **tiling-UV** rig — UVs outside
+0–1 that tile a seamless source texture — sampled against the *packed* atlas shows a scrambled checkerboard),
+whereas the correct preview from the initial open/bake is fine to keep for the same entry. Selecting a *different*
+entry, or a Bake, still rebuilds it. (The scramble is **preview-only** — the shipped unit uses atlas-remapped UVs
+and is unaffected; the real fix, a preview mesh with atlas UVs, is a backlog item.)
 
 ### Deploy conversion (rigid-parts source → bone-per-part rig, 2026-07-19)
 
