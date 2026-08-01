@@ -278,6 +278,7 @@ strategic map.
 | **Model tiny (a speck) or huge** | **Size** is the world length — set it to what looks right; the Console logs the scale. |
 | **ANIMATED model bakes huge & floats high in the sky** (fine in the Factory *preview*, wrong only in-game) | The rig's FBX embeds a metre→centimetre unit scale the SDK skeleton over-applies → ~100× oversize. **Tick "Fix 100× oversize (FBX unit scale)"** (Animation section) and re-bake at the real Size — the baker measures the FBX at true scale then bakes with the unit scale on, so Size = in-game units. It's a **per-model** toggle (no universal rule: some exports need it, some break with it). |
 | **ANIMATED model vanishes / shrinks to a speck after ticking "Fix 100× oversize"** | That model's FBX does **not** carry the metre→cm scale, so the fix over-shrinks it. **Untick "Fix 100× oversize"** and re-bake — most rigs (e.g. the drone) bake correctly with it off. |
+| **DEPLOY-CONVERT model (`deployConvert` ON): which way for Fix 100×?** | `deploy_convert` auto-selects a path by part count: **small rigs (≤124 parts — the m114 howitzer class) take the LEGACY path** (`DeployArm`, cm verts) → **Fix 100× ON**; **huge rigs (T-62 class) take the CONTRACT path** (`DeployArmV2`, meter verts) → **Fix 100× OFF**. The Console logs `DEPLOY path: LEGACY/CONTRACT`. If a deploy model is a speck with Fix 100× ON it's on the contract path (turn it OFF) and vice-versa. The contract path also runs bone-slimming + a delta-form rebase, gated to big rigs — applying them to a small rig re-breaks it (invisible / crossed legs), which is what the **deploy golden diff** guard (§11) protects against. |
 | **Model looks dark / grey / washed-out in-game** | Expected for skins that relied on PBR shine or a dark texture — the injection path ships flat albedo (donor PBR neutralized). Raise **Albedo brightness** and/or **Albedo saturation** and re-bake. Judge the amount in-game, not in the dim preview. |
 | **A black part (glass canopy, cockpit) renders grey in-game** (multi-material model) | The near-black→grey neutralize step (which hides UV dead-zones) is flattening an intentionally black material. Tick **Keep black (glass/cockpit)** and re-bake. |
 | **Change didn't show in-game** | You didn't **rebuild the mod** (§6) — baked assets only reach the game through the bundle; a registry-only change (runtime flags) needs just a relaunch. (Since 2026-07-18 the re-slim runs automatically when a Blender-step setting changed — the "checkbox swallowed my change" failure mode no longer exists.) |
@@ -352,8 +353,8 @@ The registry is the one Factory artifact that lives in the *game* folder, so it'
 ## 11. Regression guards (run before committing baker changes)
 
 Bakes are manual and the roster is growing, so a baker change can silently break a model you don't happen to re-bake
-until much later. Three guards catch that at the integration seam unit tests can't reach — run them after any change to the
-baker, `rig_anim.py`, `glbconv`, or the registry schema.
+until much later. These guards catch that at the integration seam unit tests can't reach — run them after any change to the
+baker, `rig_anim.py`, `deploy_convert.py`, `glbconv`, or the registry schema.
 
 - **Bake Smoke Test** — `Tools ▸ HAF ▸ Tests ▸ Bake Smoke Test (one per path)` (or `(ALL models)`). Bakes one representative per
   bake-path (`animated × material mode`) through the *same* config route as the Bake button and asserts each completes
@@ -397,6 +398,18 @@ baker, `rig_anim.py`, `glbconv`, or the registry schema.
   models (an empty-clip bake used to pass silently). The full suite re-verified green after the gate refactor:
   smoke 14/14 (soldier fresh-baked as `animated-conv` via the flag at Rotation `0,0,0`; the legacy drone + howitzer
   byte-identical with the flag off) and ConvGate full-conversion PASS on the real soldier rig.
+- **Conversion Gate Test (deploy golden diff)** — `Tools ▸ HAF ▸ Tests ▸ Bake Conversion Gate Test (deploy golden diff)`,
+  or CLI `bash Tools/deploy_regression.sh` (2026-08-01). The two variants above test `convertRig` rigs against
+  *invariants*; this covers the **deploy-convert models** (`deployConvert`, not `convertRig` — the m114 howitzers, the
+  T-62) with a **golden-master** diff, because an invariant pass can't catch a per-model regression (a crossed-legs bake
+  is still a valid rotation-only clip). It re-runs `deploy_convert` on every model's recorded args
+  (`Assets/FactorySource/<res>/deploy_converted.args.txt`) and diffs a deterministic bone snapshot (`deploy_bonedump.py`:
+  armature name = legacy/contract path, bone count, per-bone rot+loc at start/mid/end) against
+  `Tools/deploy_golden/<res>.txt`. Goldens cover both path classes (m114 `DeployArm`/legacy/29 bones, T-62
+  `DeployArmV2`/contract/126). **A `FAIL` on a model you didn't mean to touch is the regression** — that is precisely the
+  T-62 "engine contract" silently breaking the m114 (invisible / microscopic / crossed legs) that this guard now catches.
+  The CLI form prints the line-level diff and re-blesses goldens with `--capture` (only after re-verifying that model
+  in-game — review the `git diff Tools/deploy_golden/`). *Menu item and CLI share the same scripts + goldens.*
 - **Schema parity** — `bash Tools/check_schema_parity.sh`. The registry is written by the baker (`ModelDef`, JsonUtility)
   and read by the plugin two ways (`ModelEntry` via Newtonsoft, plus a regex fallback) across two separate repos, kept in
   sync by hand. The guard makes drift loud: it asserts (1) the Newtonsoft and regex read paths read the **same** key set,
