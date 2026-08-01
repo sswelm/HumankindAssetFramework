@@ -1781,7 +1781,20 @@ namespace HumankindAssetFramework
                 }
                 // isolated path: paint ONLY our private clone (the host layer + real units keep their own skin)
                 if (e.isolatedLayer != null) { e.hostOutputLayer = e.isolatedLayer; TickOne(e); return; }
-                // fallback (no clone): the shared host layer
+                // TEXTURE-ONLY SAFETY: a skinless entry (all-zero skeleton guid) that never got its isolated
+                // clone must NOT fall through to the shared host layer. That layer is shared with the emblematic
+                // ORIGINAL unit, so painting it would bleed this reskin/desaturate onto the vanilla unit. This is
+                // reachable when GreyIsolate couldn't clone at inject — the fragment's output layer wasn't ready
+                // yet (host==null), or its meshName didn't EXACTLY equal layerHint (GreyIsolate is exact-match,
+                // this fallback is substring). Degrade to vanilla instead of corrupting the original. A custom
+                // model (non-zero skeleton guid) legitimately owns its own layer and keeps the fallback below.
+                if (e.sa == 0 && e.sb == 0 && e.sc == 0 && e.sd == 0)
+                {
+                    lock (_ambigLogged) if (_ambigLogged.Add("isoFail:" + e.resourceName))
+                        Plugin.Log.LogWarning($"[Uni] '{e.resourceName}' retexture has no isolated layer clone (layer not ready or meshName!=layerHint '{e.layerHint}' at inject) — skipping the shared-layer repaint so the reskin can't bleed onto the emblematic original; this unit shows its vanilla skin.");
+                    return;
+                }
+                // fallback (no clone): the shared host layer — reached only by a custom model that owns its layer
                 var content = GetMember(mgr, "Content");
                 var list = content != null ? GetMember(content, "OutputLayerEntries") as Array : null;
                 if (list == null || string.IsNullOrEmpty(e.layerHint)) return;
