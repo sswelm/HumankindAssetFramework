@@ -3014,13 +3014,32 @@ namespace HumankindAssetFramework
             lock (e.stateSamples)
             {
                 sampleCount = e.stateSamples.Count;
-                float best = 4f * 4f;   // same 4u match radius class as the fire/deploy hooks
+                // Proximity-weighted MAJORITY over the samples in the 4u radius, NOT the single nearest. Samples are
+                // pooled per model TYPE (there is no per-unit id — the pawn entry's array slot reshuffles on LOD), so
+                // two SAME-TYPE units within the radius (one moving, one idle) could have a pawn match the NEIGHBOUR's
+                // nearest sample and play the wrong clip. Weighting by proximity (w = R^2 - d^2) lets a pawn deep in
+                // its own formation be carried by its mates instead of flipped by a single closer neighbour sample.
+                // IDENTICAL to the old nearest-sample pick whenever the in-radius samples AGREE (the common case:
+                // one non-zero side, whose nearest sample IS the overall nearest).
+                const float R2 = 4f * 4f;   // same 4u match radius class as the fire/deploy hooks
+                float wMove = 0f, wIdle = 0f, dMove = float.MaxValue, dIdle = float.MaxValue;
+                StateSample sMove = default, sIdle = default;
                 for (int i = 0; i < e.stateSamples.Count; i++)
                 {
                     var s = e.stateSamples[i];
                     float d = (s.pos - pos).sqrMagnitude;
                     if (d < nearest) nearest = d;
-                    if (d < best) { best = d; moving = s.moving; stoppedAt = s.stoppedAt; moveStartedAt = s.moveStartedAt; inCombat = s.combat; matched = true; }
+                    if (d >= R2) continue;
+                    float w = R2 - d;   // proximity weight (0 at the radius edge, heaviest at the pawn's own position)
+                    if (s.moving) { wMove += w; if (d < dMove) { dMove = d; sMove = s; } }
+                    else          { wIdle += w; if (d < dIdle) { dIdle = d; sIdle = s; } }
+                }
+                if (wMove > 0f || wIdle > 0f)
+                {
+                    matched = true;
+                    // representative = the winning state's NEAREST sample (carries that unit's stoppedAt/combat); tie -> nearest overall
+                    var pick = wMove > wIdle ? sMove : wIdle > wMove ? sIdle : (dMove <= dIdle ? sMove : sIdle);
+                    moving = pick.moving; stoppedAt = pick.stoppedAt; moveStartedAt = pick.moveStartedAt; inCombat = pick.combat;
                 }
             }
             if (!matched)
