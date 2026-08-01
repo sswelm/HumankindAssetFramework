@@ -841,6 +841,15 @@ namespace ENCAccessProof
             // Latch on empty ONLY if the load actually succeeded (`loaded` — a genuinely empty/absent registry).
             // While a transient load failure is still retrying (`loaded` false), leave `registered` unlatched too, or
             // the retry would succeed later but registration would never run again — injection dead for the session.
+            // CAPTURE THE HANDLE BEFORE ANY EARLY RETURN (audit finding 2, 2026-08-01). animMgrRef used to be set
+            // further down, inside the block a zero-model pack never reaches — and it is assigned nowhere else. A
+            // RULES-ONLY pack (the R.E.D. Patch shape: unitScales / eraGrid / formationThresholds parse independently
+            // of the `models` array, so this is a supported configuration) therefore latched registered = loaded here,
+            // never ran again, and left animMgrRef null forever. ScaleDescriptorMeshes then bailed on `am == null`
+            // whose comment promises "the per-frame path retries" — a retry that could never succeed. The symptom was
+            // scale rules half-working: the per-pawn ObjectSpace.Scale placement still ran, so a multi-part unit's
+            // parts spread apart while nothing actually resized, with nothing in the log naming the cause.
+            animMgrRef = animMgr;
             if (entries.Count == 0) { registered = loaded; return; }
             try
             {
@@ -866,7 +875,7 @@ namespace ENCAccessProof
                 // inject our ClipCollections (animated models) into loadedAnimationClipCollections BEFORE Apply, so
                 // Apply's builder bakes their pose data + assigns each clip an animation id.
                 InjectClipCollections(animMgr);
-                animMgrRef = animMgr;   // captured for the one-shot [AnimDiag] GPU-record dump (T-62 rest-pose hunt)
+                // (animMgrRef is captured above, before the zero-model early return — see audit finding 2)
                 if (n > 0 || entries.Any(x => x.clipColl != null))
                 {
                     var apply = AccessTools.Method(animMgr.GetType(), "Apply", Type.EmptyTypes)
