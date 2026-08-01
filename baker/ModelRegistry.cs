@@ -1,3 +1,10 @@
+// ⚠ STALE REFERENCE COPY — DO NOT EDIT OR BAKE FROM THIS FILE. The AUTHORITATIVE editor + ModelDef schema live in the
+// Unity project at  C:\Repo\ENCReload\Assets\Scripts\Editor\ModelRegistry.cs . This baker/ folder is a snapshot that is
+// NOT kept in sync: this ModelDef is BEHIND ENCReload's (e.g. it lacks the runtime fields `scale` and `animPhaseSpread`),
+// and this repo is NOT a Unity project, so these UnityEditor scripts can't even compile/run here. Baking or writing a
+// pack.json from THIS copy would silently OMIT the newer fields the runtime plugin reads. Always use the ENCReload editor.
+// (baker/glbconv/ and baker/Tools/ are live build tools — see baker/README.md.)
+//
 // ModelRegistry.cs (ENC editor) — the ENC Model Factory's config store. Writes a JSON file the in-game plugin reads
 // to bind each baked model onto its pawn definition at runtime. This EDITOR side uses UnityEngine.JsonUtility to WRITE
 // the file (fine in the editor's Mono). IMPORTANT: the game-runtime plugin does NOT read it back with JsonUtility —
