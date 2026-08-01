@@ -690,7 +690,8 @@ reproduces from the entry alone:
 | Field | Meaning |
 | --- | --- |
 | **Deploy frames … End** | the deploy motion's source-frame range (scrub the raw file in ▶ to find it). **Required.** |
-| **Strip parts** | name substrings to delete (crew, loose props); empty = the converter's proven defaults |
+| **Also remove (adds to defaults)** | extra parts to delete **on top of** the default crew/prop kill-list — build it with the **Pick parts…** dialog (a ticklist of the source model's parts; no typing, no re-carrying the defaults). A ticked name also removes any sub-part whose name contains it. *(`deployStripExtra`; the M114's `contrl_wheel,ctrl_wheel2` control hand-wheels live here.)* |
+| **Strip parts (replace defaults)** | *advanced* — name substrings that **REPLACE** the default kill-list wholesale (usually leave empty; the Dugout Canoe's `camera` is the rare case). To ADD parts, use **Also remove** above — it keeps the defaults |
 | **Barrel ready frame** | source frame of the fully-elevated barrel; re-keys barrel/cannon parts to rise over the deploy's back half (empty = leave as authored) |
 | **Leg spread scale** | empty = source leg curves verbatim; a number re-keys `*leg*` parts as pure travel→spread rotation (`1` = full width). **Required for legs that slide — see the rotation-only law in [Animated-Models.md](Animated-Models.md)** |
 | **Barrel elevation scale** | `>1` exaggerates past the source's max (empty = 1) |
