@@ -32,11 +32,19 @@ key, not a tile position); `angleDegrees` = its `FormationAngle`.
 - **Save (`Sandbox.Save` postfix, `Hk_SandboxSave`):** the save may run off the main thread, so we write the
   **pre-captured** map (not a fresh presentation read) to `<StorageContainerInfo.Name>.facing`.
 - **Load (`Sandbox.Load` postfix, `Hk_SandboxLoad`):** arm the matching file; the tick applies it once pawns exist.
-- **Restore (main thread):** while a file is armed, the tick runs **every frame** and, for each army, re-applies
-  `PresentationUnit.FlipPawnsGrid(angle, FormationMoveBehaviour.Teleport)` whenever the current heading has
-  **drifted** from the target. Drift-based means it turns the unit the instant its pawn loads (no neutral flash),
-  re-corrects a `respawnAfterLoad` rebuild that resets the heading, and costs nothing for units already facing
-  right. The restore window closes after ~5 s.
+- **Restore (main thread):** while a file is armed, the tick makes a pass over the armies and restores each saved
+  unit's heading **exactly once** — the instant its pawn loads (no neutral flash) — via
+  `PresentationUnit.FlipPawnsGrid(angle, FormationMoveBehaviour.Teleport)`, then marks it handled and **never touches
+  it again**. A unit already **in motion** when the pass reaches it (`IsAnyPawnMoving`) is left alone — its heading
+  is the game's. The restore **stops the moment every saved unit has been handled** (one cycle); a ~5 s frame cap
+  only backstops saved units that never load this session.
+
+  > **Why single-shot** (2026-08-01): the original design re-applied on *any* heading **drift** for a ~5 s window to
+  > catch a `respawnAfterLoad` rebuild. But it couldn't tell a load/respawn reset from **the player moving the unit**,
+  > so it snapped the heading back every frame and the unit **crab-walked sideways** for the first ~5 s after a load.
+  > Single-shot restore + skip-if-moving removes that entirely (and drops the per-frame walk + a per-tick dictionary
+  > allocation — it was a real perf cost too). Trade-off: a `respawnAfterLoad` unit that resets *after* the one pass
+  > isn't re-corrected — an acceptable rarity versus fighting every unit's movement.
 
 ## Config
 

@@ -233,7 +233,7 @@ namespace HumankindAssetFramework
                 UniversalInject.ProcessEngineAudio();   // engine sound: fire the per-ship Start/Stop move sound on our units
                 UniversalInject.ProcessBattleCries();   // battle-start war cries queued by the sim-thread hook
                 UniversalInject.TickDistrictMeshSwap(); // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
-                FacingPersist.Tick();                   // capture each army's facing (main thread) + restore it after a load
+                FacingPersist.Tick();                   // capture each army's facing (main thread) + restore it after a load (stationary units only — never fights a unit the player is moving)
             }
             if (PropRegisterOn.Value)
                 UniversalInject.TickPropRegister();     // EXPERIMENTAL props: register our MeshCollections once the AnimationManager exists

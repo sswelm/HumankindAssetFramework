@@ -59,15 +59,16 @@ namespace HumankindAssetFramework
 
     internal static class FacingPersist
     {
-        const int ApplyWindow  = 300;  // keep restoring for ~5s to catch late-loading armies AND re-correct a respawn reset, then stop
+        const int ApplyWindow  = 300;  // BACKSTOP only (~5s): the restore stops the moment every saved unit has been handled once (Walk); this cap just bounds the wait for saved units that never load this session
 
         static readonly object gate = new object();
         static readonly Dictionary<ulong, int> live = new Dictionary<ulong, int>();   // guid -> angle, main-thread snapshot (save reads it)
+        static readonly Dictionary<ulong, int> snap = new Dictionary<ulong, int>();   // reused scratch for each Walk (was a fresh Dictionary per tick — GC every capture) -> copied into `live` under lock
 
         // apply state (touched on the main thread except pendingFile, set by the load hook thread)
         static string pendingFile;
         static readonly Dictionary<ulong, int> pendingMap = new Dictionary<ulong, int>();
-        static readonly HashSet<ulong> applied = new HashSet<ulong>();   // per-army: logged-once guard (drift re-applies still fire)
+        static readonly HashSet<ulong> applied = new HashSet<ulong>();   // per-army: handled ONCE (restored / released / already-correct), then NEVER touched again this load — the single-shot model, so no continuous re-apply can fight a move
         static bool mapLoaded;
         static int applyStart = -1;
         static int frame;
@@ -152,7 +153,7 @@ namespace HumankindAssetFramework
             var armies = factory == null ? null : UniversalInject.GetMember(factory, "PresentationArmyEntities") as Array;
             if (armies == null) return;
 
-            var snap = new Dictionary<ulong, int>();
+            snap.Clear();
             foreach (var army in armies)
             {
                 if (army == null) continue;
@@ -168,23 +169,34 @@ namespace HumankindAssetFramework
                 // Restore? Apply the instant a pawn exists — no settle — and keep re-applying whenever the heading has
                 // DRIFTED from the target (a fresh load renders neutral; a respawnAfterLoad rebuild resets it). Skipping
                 // when already-facing means stable units cost nothing and never jitter.
-                if (applying && pendingMap.TryGetValue(guid, out int want))
+                if (applying && pendingMap.TryGetValue(guid, out int want) && !applied.Contains(guid))
                 {
-                    int d = ((angle - want) % 360 + 360) % 360;          // circular difference; ~0 or ~360 == already there
-                    if (d > 2 && d < 358)
+                    // SINGLE-SHOT restore per unit: correct the saved heading ONCE, the first time the unit is loaded,
+                    // then mark it done and NEVER touch it again this load. This removes the continuous re-apply that
+                    // fought a moving unit for ~5s and made it crab SIDEWAYS / jerk — nothing re-faces the unit after its
+                    // one restore. A unit already IN MOTION on first sight is released un-restored (its heading is the
+                    // game's). Once every saved unit is handled, the window closes (below) — no fixed wait.
+                    bool moving = false;
+                    try { if (UniversalInject.GetMember(unit, "IsAnyPawnMoving") is bool mv && mv) moving = true; } catch { }
+                    if (moving) applied.Add(guid);                       // moving on first sight -> leave it to the game
+                    else
                     {
-                        if (ApplyFacing(unit, want) && applied.Add(guid)) Plugin.Log.LogInfo($"[Facing] restored army {guid} -> {want}°");
+                        int d = ((angle - want) % 360 + 360) % 360;      // circular difference; ~0 or ~360 == already there
+                        if (d > 2 && d < 358) { if (ApplyFacing(unit, want)) { applied.Add(guid); Plugin.Log.LogInfo($"[Facing] restored army {guid} -> {want}°"); } }
+                        else applied.Add(guid);                          // already at the saved heading -> done
                     }
-                    else applied.Add(guid);
                 }
             }
 
             lock (gate) { live.Clear(); foreach (var kv in snap) live[kv.Key] = kv.Value; }
 
-            if (applying && applyStart >= 0 && frame - applyStart > ApplyWindow)
+            // Stop the instant EVERY saved unit has been handled once (your "one cycle then stop") — no fixed wait; the
+            // frame cap only backstops saved units that never load this session (destroyed / off the visible map).
+            bool allDone; lock (gate) allDone = pendingMap.Count > 0 && pendingMap.Keys.All(applied.Contains);
+            if (applying && (allDone || (applyStart >= 0 && frame - applyStart > ApplyWindow)))
             {
                 lock (gate) { pendingFile = null; pendingMap.Clear(); }
-                Plugin.Log.LogInfo($"[Facing] restore window closed ({applied.Count} armies restored)");
+                Plugin.Log.LogInfo($"[Facing] restore done ({applied.Count} handled, {(allDone ? "all loaded" : "timeout")})");
             }
         }
 
