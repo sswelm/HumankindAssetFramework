@@ -23,6 +23,7 @@ namespace ENCAccessProof
         internal static ConfigEntry<bool>   StateProbePose0Move; // TEMP diagnostic: play a state-driven model's MOVE clip on Pose0, weight 1, always (isolates move-clip vs Pose1-slot failures)
         internal static ConfigEntry<string> DumpPawnRig;      // CATERPILLAR investigation: pawn-name substring (e.g. "MediumTanks"); when that VANILLA addon loads, dump its skeleton bone tables + clip fields once (how do vanilla tank treads roll?). "" = off.
         internal static ConfigEntry<int>    RespawnDelayFrames; // frames to wait after a borrowed-rotor unit renders before re-spawning it (first-instance rotor fix)
+        internal static ConfigEntry<bool>   PersistUnitFacing;  // persist each army's on-screen facing to a HAF side-file on save and restore it on load (the standard save has no facing field)
         // --- EXPERIMENTAL: district visual repoint (the second injection axis; see docs/District-Visuals.md) ---
         internal static ConfigEntry<bool>   DistrictRepointOn;   // master enable for the district-visual repoint hook
         internal static ConfigEntry<string> DistrictName;        // which district's on-map visual to replace (ConstructibleDefinitionName), e.g. Villages_StoneQuarry
@@ -77,6 +78,12 @@ namespace ENCAccessProof
                                   "Frames to wait after a borrowed-rotor unit (a model with respawnAfterLoad set) renders before " +
                                   "the plugin re-spawns it to clear the first-instance low-rotor bug. 1 = near-instant (default). " +
                                   "Increase (e.g. 30 = ~0.5s at 60fps) only if a slower machine briefly shows the low rotor before it corrects.");
+
+            PersistUnitFacing = Config.Bind("Factory", "PersistUnitFacing", true,
+                                  "Persist each army's on-screen facing (FormationAngle) to a HAF side-file " +
+                                  "(BepInEx/config/haf_state/facing/<save>.facing) on save, and restore it on load. The game's own " +
+                                  "save has NO facing field — units otherwise reset heading on reload. Keyed by the army's serialized " +
+                                  "GUID; never touches the standard save. true = on (default).");
 
             // --- EXPERIMENTAL district-visual repoint (docs/District-Visuals.md). Off by default; scoped to ONE district by
             //     name so the shared visual affinity other districts borrow is never touched. Two independent modes below. ---
@@ -196,6 +203,7 @@ namespace ENCAccessProof
                 typeof(Hk_FormationInstanceExtend),// FORMATION axis: top up a live pooled Formation3D when its definition outgrows it (belt-and-braces for the prefab surgery) (2026-07-27)
                 typeof(Hk_FormationSpawnDiag),     // FORMATION axis TEMP diagnostic: log dummies/pawns/health at InstantiatePawns for >9-dummy formations (2026-07-27)
                 typeof(Hk_FormationPawnScale),     // FORMATION axis: per-model Scale from the registry link (pawn root localScale -> GPU TRS) (2026-07-28)
+                typeof(Hk_SandboxSave), typeof(Hk_SandboxLoad),  // FACING PERSIST: capture each army's FormationAngle on save, restore on load (the standard save has no facing) (2026-08-01)
             };
             foreach (var t in hooks)
             {
@@ -225,6 +233,7 @@ namespace ENCAccessProof
                 UniversalInject.ProcessEngineAudio();   // engine sound: fire the per-ship Start/Stop move sound on our units
                 UniversalInject.ProcessBattleCries();   // battle-start war cries queued by the sim-thread hook
                 UniversalInject.TickDistrictMeshSwap(); // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
+                FacingPersist.Tick();                   // capture each army's facing (main thread) + restore it after a load
             }
             if (PropRegisterOn.Value)
                 UniversalInject.TickPropRegister();     // EXPERIMENTAL props: register our MeshCollections once the AnimationManager exists
