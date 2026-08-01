@@ -814,6 +814,14 @@ namespace HumankindAssetFramework
                     // Retexture/isolation state is session-scoped too: the isolated layer is a clone of a SESSION-1
                     // output layer and the adjusted atlas was dumped from it — handing either to the new session's
                     // content manager re-injects dead objects. Cheap to re-derive; destroy the texture we created.
+                    // DESTROY the Instantiate'd layer CLONES we made (isolatedLayer/handPropLayer): they're runtime clones
+                    // the game doesn't track, so nulling alone leaked a native layer object per retexture/prop entry per
+                    // reload. The session-1 objects they were cloned from + injected into are torn down by now, so nothing
+                    // live references them (the `&& iso` fake-null guard also covers the case teardown already got them).
+                    // hostOutputLayer may alias isolatedLayer (same clone, destroyed once); propAtlasTex is a game-owned
+                    // bundle asset — only null those two.
+                    if (e.isolatedLayer is UnityEngine.Object iso && iso) UnityEngine.Object.Destroy(iso);
+                    if (e.handPropLayer is UnityEngine.Object hpl && hpl) UnityEngine.Object.Destroy(hpl);
                     e.isolatedLayer = null; e.hostOutputLayer = null; e.handPropLayer = null; e.propAtlasTex = null;
                     if (e.tex != null) { try { UnityEngine.Object.Destroy(e.tex); } catch { } e.tex = null; }
                     // Per-instance state keyed by session-scoped ids (unit GUIDs / sub-pawn instance ids): a new game
@@ -822,9 +830,11 @@ namespace HumankindAssetFramework
                     // with them) — dropping the references is enough.
                     e.deployProgress.Clear(); e.deployLastPos.Clear();
                     e.customSources.Clear(); e.loopHoldUntil.Clear(); e.engineLastPos.Clear(); e.engineMoving.Clear();
+                    e.idleNextAt.Clear(); e.attackSoundNextAt.Clear();   // were UNBOUNDED across reloads (never cleared) — session-scoped sub-pawn ids / attacker hashcodes
                 }
             deployMoveState = null;                                  // diagnostic map, unit GUIDs are session-scoped
             respawnBase.Clear(); respawnCount.Clear();               // keyed by session-1 unit objects
+            _silencedEmitterIds.Clear();                             // static: grew per silenced AudioEmitter ever seen, never reset — session-scoped instance ids
             // DISTRICT axis session state (same bug class): the FxManager and each entry's leaves/private clone were
             // captured from session-1 presentation objects — reusing them in a second game points at torn-down GPU
             // state. Null everything; DistrictApplyEntries re-derives per district instance as the new session loads.
@@ -4379,6 +4389,18 @@ namespace HumankindAssetFramework
         // every post and returns false — no lock: both writer (this poll) and reader (the post) run on the presentation
         // thread. Stale ids from destroyed emitters are harmless (they just never match a live emitter again).
         internal static readonly HashSet<int> _silencedEmitterIds = new HashSet<int>();
+        static readonly HashSet<int> _engineLiveIds = new HashSet<int>();   // reused each ~2s subpawn refresh — live sub-pawn ids, to prune the per-pawn engine dicts of dead ones
+        // Remove per-pawn dict entries whose sub-pawn is gone (combat death / zoom-LOD rebuild). These id-keyed maps
+        // (engineLastPos/engineMoving/customSources/loopHoldUntil/idleNextAt) otherwise ONLY grew — a slow managed-heap
+        // leak proportional to pawns spawned. Called only on the ~2s subpawn refresh (not per frame); allocates a
+        // removal list only when something actually died.
+        static void PruneById<TV>(Dictionary<int, TV> dict, HashSet<int> live)
+        {
+            if (dict.Count == 0) return;
+            List<int> gone = null;
+            foreach (var k in dict.Keys) if (!live.Contains(k)) (gone ?? (gone = new List<int>())).Add(k);
+            if (gone != null) for (int i = 0; i < gone.Count; i++) dict.Remove(gone[i]);
+        }
         static System.Reflection.MethodInfo _akStopAll; static bool _akStopAllTried;
         // Cut everything currently playing on ONE emitter's Wwise game-object — the idle loop that already started at spawn,
         // before this poll first registered the emitter. Future posts are handled by the suppress-prefix, so this is a
@@ -4462,6 +4484,14 @@ namespace HumankindAssetFramework
                         if (m != null) _ourSubpawns.Add(new KeyValuePair<UnityEngine.Object, ModelEntry>(o, m));
                     }
                     _spCacheAt = now;
+                    // Prune the per-pawn engine dicts of ids whose sub-pawn is gone (died / LOD-rebuilt) — they only grew.
+                    _engineLiveIds.Clear();
+                    foreach (var pr in _ourSubpawns) if (pr.Key != null) _engineLiveIds.Add(pr.Key.GetInstanceID());
+                    foreach (var e in on)
+                    {
+                        PruneById(e.engineLastPos, _engineLiveIds); PruneById(e.engineMoving, _engineLiveIds);
+                        PruneById(e.customSources, _engineLiveIds); PruneById(e.loopHoldUntil, _engineLiveIds); PruneById(e.idleNextAt, _engineLiveIds);
+                    }
                 }
                 foreach (var pair in _ourSubpawns)
                 {
