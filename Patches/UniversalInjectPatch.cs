@@ -809,20 +809,39 @@ namespace HumankindAssetFramework
         // FIRING-ON-ATTACK: match a firing unit's UnitDefinition text (e.g. "LandUnit_Era6_Common_TowedGunHowitzers …")
         // to one of our injected models by the shared core of its pawnDescription
         // ("Era6_Common_TowedGunHowitzers_01" -> core "Era6_Common_TowedGunHowitzers"). Returns the entry, or null.
+        // Match a game NAME to the MOST SPECIFIC entry — the LONGEST `key` that is a substring of `name`, NOT the first
+        // in registry order. So a variant entry (pawnDescription "..._Elite") wins over the base it extends, instead of
+        // whichever sorts first silently claiming the specialised unit and binding the wrong model. Warns ONCE per name
+        // when >1 entry matches, so a nested/ambiguous pawnDescription surfaces in the log instead of mis-binding in
+        // silence. Log guard is locked (called from the main pawn hook AND the sim-thread combat hook). Result is
+        // IDENTICAL to the old FirstOrDefault when only one entry matches (the common case). Non-capturing key lambdas
+        // are cached by the compiler, so no per-call allocation.
+        static readonly HashSet<string> _ambigLogged = new HashSet<string>();
+        static ModelEntry LongestMatch(List<ModelEntry> list, string name, Func<ModelEntry, string> key)
+        {
+            if (list == null || string.IsNullOrEmpty(name)) return null;
+            ModelEntry best = null; int bestLen = -1, count = 0;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var k = key(list[i]);
+                if (string.IsNullOrEmpty(k) || name.IndexOf(k, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                count++;
+                if (k.Length > bestLen) { bestLen = k.Length; best = list[i]; }
+            }
+            if (count > 1 && best != null)
+                lock (_ambigLogged)
+                    if (_ambigLogged.Add(name))
+                        Plugin.Log.LogWarning($"[Uni] '{name}' matched {count} registry entries by substring — using the most specific ('{key(best)}'). Make nested pawnDescriptions distinct to avoid mis-binding.");
+            return best;
+        }
+
         internal static ModelEntry FindEntryForUnitDefinition(string unitDefText)
         {
             // Snapshot the reference: this runs on the SIM thread (combat hook) while the main thread may republish
             // `entries` (LoadRegistry retry). The published list is never mutated after publish, so iterating a
             // snapshot is safe; iterating the field directly was not (review 2026-07-19).
-            var list = entries;
-            if (list == null || string.IsNullOrEmpty(unitDefText)) return null;
-            foreach (var e in list)
-            {
-                if (string.IsNullOrEmpty(e.pawnDescription)) continue;
-                var core = e.coreDesc;   // cached _NN-stripped key (was Regex.Replace per entry per call, on the sim-thread hook path)
-                if (core.Length > 4 && unitDefText.IndexOf(core, StringComparison.OrdinalIgnoreCase) >= 0) return e;
-            }
-            return null;
+            // coreDesc = pawnDescription minus the _NN suffix; the >4 floor keeps a too-short key from matching everything.
+            return LongestMatch(entries, unitDefText, x => x.coreDesc.Length > 4 ? x.coreDesc : "");
         }
 
         // SESSION RE-ARM (review 2026-07-19): AnimationLoad fires per game-session and the manager's collection list is
@@ -1013,7 +1032,7 @@ namespace HumankindAssetFramework
                     }
                 }
                 if (entries.Count == 0) return;
-                var e = entries.FirstOrDefault(x => x.pawnDescription.Length > 0 && name.IndexOf(x.pawnDescription, StringComparison.OrdinalIgnoreCase) >= 0);
+                var e = LongestMatch(entries, name, x => x.pawnDescription);   // most-specific (longest) match, not first-in-order — a variant entry wins over the base it extends
                 if (e == null) return;
                 Plugin.Log.LogInfo($"[Uni] MATCH addon='{name}' -> {e.resourceName} (skel {e.sa},{e.sb},{e.sc},{e.sd})");
                 // SEED THE DESCRIPTOR HERE, not from the first correctly-skinned pawn (2026-07-31). OnPawnAdded's
@@ -4566,7 +4585,7 @@ namespace HumankindAssetFramework
                     foreach (var o in UnityEngine.Object.FindObjectsOfType(spType))
                     {
                         if (!(o is UnityEngine.Component c) || c == null) continue;
-                        var m = on.FirstOrDefault(x => c.gameObject.name.IndexOf(x.pawnDescription, StringComparison.OrdinalIgnoreCase) >= 0);
+                        var m = LongestMatch(on, c.gameObject.name, x => x.pawnDescription);   // most-specific match (shared with the inject + combat matchers)
                         if (m != null) _ourSubpawns.Add(new KeyValuePair<UnityEngine.Object, ModelEntry>(o, m));
                     }
                     _spCacheAt = now;
