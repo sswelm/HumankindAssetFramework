@@ -376,7 +376,7 @@ namespace HumankindAssetFramework
                 // Invalidate the pawn-hook early-out caches: if pawns spawned during a transient-failure retry window
                 // they latched anyAnimated/anyFreeze against the EMPTY list — without this, a recovered retry would
                 // repoint meshes but leave every animated/freeze behavior dead for the session (review round 2).
-                anyAnimated = null; anyFreeze = null; anyRescuable = null;
+                anyAnimated = null; anyMuzzle = null; anyFreeze = null; anyRescuable = null;
                 loaded = true;
             }
             catch (Exception e)
@@ -798,7 +798,7 @@ namespace HumankindAssetFramework
         internal static void RearmModelRegistration()
         {
             registered = false;
-            anyAnimated = null; anyFreeze = null; anyRescuable = null;                    // recomputed on the next pawn-add
+            anyAnimated = null; anyMuzzle = null; anyFreeze = null; anyRescuable = null;                    // recomputed on the next pawn-add
             unitScaleByDesc.Clear(); unitScaleNameByDesc.Clear(); vanillaScaledLogged.Clear(); descApplied.Clear(); cachedEra = -1;   // descriptor ids + era are session-scoped (meshApplied deliberately KEPT: the Fx vertex buffers persist)
             _listenerChecked = false;                                // the AudioListener rode a session-scoped camera
             var list = entries;
@@ -2599,6 +2599,7 @@ namespace HumankindAssetFramework
         }
 
         static bool? anyAnimated;        // cached early-out: skip the per-pawn hook if no model is animated
+        static bool? anyMuzzle;          // cached early-out: skip the muzzle-redirect GetBoneTRS hook if no model has a muzzleBone
         static bool? anyFreeze;          // cached early-out: skip the per-pawn hook if no model wants its donor animation frozen
         static bool? anyRescuable;       // any entry repointed onto our skeleton — the rescue must run even for a purely STATIC pack (no pose behaviour)
         static bool rescueLogged, posLogged, poseErrLogged, scaleLogged;
@@ -3086,7 +3087,8 @@ namespace HumankindAssetFramework
         static float DeployPoseTime(ModelEntry e, object entry, float dur)
         {
             var osD = GetMember(entry, "ObjectSpace");
-            UnityEngine.Vector3 dpos = (UnityEngine.Vector3)GetMember(osD, "Translation");
+            UnityEngine.Vector3 dpos;
+            try { dpos = (UnityEngine.Vector3)GetMember(osD, "Translation"); } catch { return e.deployPoseTime; }   // member renamed by a game update -> degrade to the default pose instead of throwing per pawn per frame
             float poseTime = e.deployPoseTime;
             float bestSqD = 3f * 3f;
             lock (e.deploySamples)
@@ -3133,7 +3135,8 @@ namespace HumankindAssetFramework
         {
             float poseTime = 0f;
             var osT = GetMember(entry, "ObjectSpace");
-            UnityEngine.Vector3 tpos = (UnityEngine.Vector3)GetMember(osT, "Translation");
+            UnityEngine.Vector3 tpos;
+            try { tpos = (UnityEngine.Vector3)GetMember(osT, "Translation"); } catch { return 0f; }   // renamed member -> rest at frame 0 instead of throwing per pawn per frame
             float bestSq = float.MaxValue, bestStart = -1f;
             lock (e.activeFires)
             {
@@ -3299,9 +3302,8 @@ namespace HumankindAssetFramework
             {
                 if (muzzleReentry) return false;   // inner call from our own branch below — run the original untouched
                 if (string.IsNullOrEmpty(boneName) || entries == null || entries.Count == 0) return false;
-                bool anyMuzzle = false;                                   // cheap early-out for the hot path (most units have no muzzleBone)
-                for (int i = 0; i < entries.Count; i++) if (!string.IsNullOrEmpty(entries[i].muzzleBone)) { anyMuzzle = true; break; }
-                if (!anyMuzzle) return false;
+                if (anyMuzzle == null) anyMuzzle = entries.Any(x => !string.IsNullOrEmpty(x.muzzleBone));   // cached early-out (was an entries loop on EVERY GetBoneTRS/VFX lookup during combat); reset on registry publish
+                if (!anyMuzzle.Value) return false;
                 var e = MuzzleEntryForSubPawn(subPawn);
                 // DIAGNOSTIC (temporary, first 12 distinct names): what does the fire path actually ask GetBoneTRS for,
                 // and does the sub-pawn->entry match work? Zero [Muzzle] lines while flashes stay off-side = the redirect
@@ -3452,7 +3454,8 @@ namespace HumankindAssetFramework
         {
             if (e.position == UnityEngine.Vector3.zero) return;
             var os = GetMember(entry, "ObjectSpace");                  // boxed TRS
-            var tr = (UnityEngine.Vector3)GetMember(os, "Translation");
+            UnityEngine.Vector3 tr;
+            try { tr = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return; }   // renamed member -> skip the offset instead of throwing per pawn per frame
             var planar = new UnityEngine.Vector3(e.position.x, 0f, e.position.y);   // registry y (fore/aft) -> local Z
             bool rotated = TryQuaternion(GetMember(os, "Rotation"), out var rot);
             if (rotated) planar = rot * planar;                        // pawn frame; else fall back to world axes
@@ -3579,6 +3582,9 @@ namespace HumankindAssetFramework
         {
             if (entries == null || !Plugin.UniversalInjectOn.Value) return;
             bool anyQueued = false;
+            // This prune loop is intentionally OUTSIDE the try below: it's pure non-throwing ops (List.RemoveAt on a
+            // reverse index + ConcurrentQueue.IsEmpty + Time.time), so guarding it would be dead code. The reflection /
+            // presentation walk that CAN throw is wrapped.
             foreach (var e in entries)
             {
                 // Two consumers share activeFires: fireOnAttack (artillery one-shot, window = the main clip's duration)
@@ -3907,20 +3913,26 @@ namespace HumankindAssetFramework
         // first audio poll), the cry is left in the queue for a later frame rather than dropped.
         internal static void ProcessBattleCries()
         {
-            while (battleCryQueue.TryDequeue(out var e))
+            // Guarded like the other Update polls: PlayAttackOneShot does `new GameObject` + AddComponent + Camera.main —
+            // an unhandled throw here would kill the whole Update chain for the rest of the session (high blast radius).
+            try
             {
-                if (e.customBattleClip == null)
+                while (battleCryQueue.TryDequeue(out var e))
                 {
-                    if (!e.customClipTried) { battleCryQueue.Enqueue(e); return; }   // clips not loaded yet — retry next frame
-                    continue;                                                        // load ran and failed — drop, already logged
+                    if (e.customBattleClip == null)
+                    {
+                        if (!e.customClipTried) { battleCryQueue.Enqueue(e); return; }   // clips not loaded yet — retry next frame
+                        continue;                                                        // load ran and failed — drop, already logged
+                    }
+                    float now = UnityEngine.Time.time;
+                    if (now < e.battleCryNextAt) continue;
+                    e.battleCryNextAt = now + 2f;
+                    var camPos = UnityEngine.Camera.main != null ? UnityEngine.Camera.main.transform.position : UnityEngine.Vector3.zero;
+                    PlayAttackOneShot(e.customBattleClip, camPos, e.soundBattleVolume, e.soundBattleOffset);
+                    Plugin.Log.LogInfo($"[Sound] '{e.resourceName}' war cry");
                 }
-                float now = UnityEngine.Time.time;
-                if (now < e.battleCryNextAt) continue;
-                e.battleCryNextAt = now + 2f;
-                var camPos = UnityEngine.Camera.main != null ? UnityEngine.Camera.main.transform.position : UnityEngine.Vector3.zero;
-                PlayAttackOneShot(e.customBattleClip, camPos, e.soundBattleVolume, e.soundBattleOffset);
-                Plugin.Log.LogInfo($"[Sound] '{e.resourceName}' war cry");
             }
+            catch (Exception ex) { Plugin.Log.LogError("[Sound] ProcessBattleCries: " + ex); }
         }
 
         // STATE-DRIVEN poll (main thread — Plugin.Update; Phase 2, 2026-07-19). For each animStateDriven model: per
@@ -4219,13 +4231,20 @@ namespace HumankindAssetFramework
         // Memoize the Property/Field resolution per (type,name). OnPawnAdded resolves ~a dozen members per pawn-add on the
         // game's hot path; caching the lookup (null included) turns those from member scans into dict hits. Semantics are
         // identical to the old inline AccessTools calls (property-first, CanWrite for writes, field fallback). Main-thread only.
-        static readonly Dictionary<(Type, string), PropertyInfo> propCache = new Dictionary<(Type, string), PropertyInfo>();
+        // ONE combined member cache (2026-08-01): GetMember/SetMember run per-pawn-per-frame on the game's hot path, and
+        // every Amplitude member we touch is a FIELD — so the old property-THEN-field pair paid a wasted CachedProp dict
+        // lookup on every call. Resolve property-or-field in a single dict hit (null cached too). Main-thread only.
+        // `fieldCache`/`CachedField` stays for the polls' direct static-field lookups.
+        static readonly Dictionary<(Type, string), MemberInfo> memberCache = new Dictionary<(Type, string), MemberInfo>();
         static readonly Dictionary<(Type, string), FieldInfo> fieldCache = new Dictionary<(Type, string), FieldInfo>();
-        static PropertyInfo CachedProp(Type t, string name) { var k = (t, name); if (!propCache.TryGetValue(k, out var p)) propCache[k] = p = AccessTools.Property(t, name); return p; }
+        static MemberInfo CachedMember(Type t, string name) { var k = (t, name); if (!memberCache.TryGetValue(k, out var m)) memberCache[k] = m = (MemberInfo)AccessTools.Property(t, name) ?? AccessTools.Field(t, name); return m; }
         static FieldInfo CachedField(Type t, string name) { var k = (t, name); if (!fieldCache.TryGetValue(k, out var f)) fieldCache[k] = f = AccessTools.Field(t, name); return f; }
 
         static void SetMember(object o, string name, object val)
-        { var t = o.GetType(); var p = CachedProp(t, name); if (p != null && p.CanWrite) { try { p.SetValue(o, val); return; } catch { } } var f = CachedField(t, name); if (f != null) { try { f.SetValue(o, val); } catch { } } }
+        {
+            var m = CachedMember(o.GetType(), name);
+            try { if (m is PropertyInfo p) { if (p.CanWrite) p.SetValue(o, val); } else if (m is FieldInfo f) f.SetValue(o, val); } catch { }
+        }
         // ---- AUDIO PROBE (step 1 diagnostic) ----
         // Walk every live PresentationSubPawn and log its audio wiring, so we can see WHY custom/retextured units are
         // silent. The decompile says movement/engine sound is posted to an AudioEmitter component on the sub-pawn
@@ -4738,7 +4757,12 @@ namespace HumankindAssetFramework
         }
 
         internal static object GetMember(object o, string name)
-        { if (o == null) return null; var t = o.GetType(); var p = CachedProp(t, name); if (p != null) { try { return p.GetValue(o); } catch { } } var f = CachedField(t, name); if (f != null) { try { return f.GetValue(o); } catch { } } return null; }
+        {
+            if (o == null) return null;
+            var m = CachedMember(o.GetType(), name);
+            try { if (m is PropertyInfo p) return p.GetValue(o); if (m is FieldInfo f) return f.GetValue(o); } catch { }
+            return null;
+        }
         internal static object MakeGuid(int a, int b, int c, int d)
         { var gt = AccessTools.TypeByName("Amplitude.Framework.Guid"); if (gt == null) return null; var g = Activator.CreateInstance(gt);
           gt.GetField("a", BF)?.SetValue(g, a); gt.GetField("b", BF)?.SetValue(g, b); gt.GetField("c", BF)?.SetValue(g, c); gt.GetField("d", BF)?.SetValue(g, d); return g; }
