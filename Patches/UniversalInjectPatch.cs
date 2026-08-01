@@ -422,13 +422,48 @@ namespace HumankindAssetFramework
                         if (om.Length > 0 && op.Length > 0) pk.overrides.Add(new PackOverride { modId = om, pawn = op });
                     }
             }
-            catch { }   // wrapper is best-effort; the models parse below has its own primary+fallback and is what matters
+            catch (Exception ex)
+            {
+                // The wrapper JSON didn't parse — almost always the SAME hand-edit typo that also drops the MODELS parse
+                // (below) to its regex fallback. Without recovering the header here, a declared cross-pack `overrides`
+                // silently vanished and the merge downgraded it to a first-loaded-wins conflict. Recover by regex + WARN
+                // loudly so the modder knows to fix the JSON (models still load, so nothing else signals the header loss).
+                Plugin.Log.LogWarning($"[Uni] pack '{Path.GetFileName(file)}' header didn't JSON-parse ({ex.Message}) — recovering modId/dependsOn/loadAfter/overrides by regex. Fix the JSON syntax to be safe.");
+                pk.overrides.Clear();   // in case the try partially populated before throwing
+                var mid = Regex.Match(text, "\"modId\"\\s*:\\s*\"([^\"]*)\"");
+                if (mid.Success && mid.Groups[1].Value.Length > 0) pk.modId = mid.Groups[1].Value;
+                var sv = Regex.Match(text, "\"schemaVersion\"\\s*:\\s*(\\d+)");
+                if (sv.Success && int.TryParse(sv.Groups[1].Value, out var svi)) pk.schemaVersion = svi;
+                pk.dependsOn = RegexStrArray(text, "dependsOn");
+                pk.loadAfter = RegexStrArray(text, "loadAfter");
+                var ovBlock = Regex.Match(text, "\"overrides\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
+                if (ovBlock.Success)
+                    foreach (Match ovm in Regex.Matches(ovBlock.Groups[1].Value, "\\{[^}]*\\}"))
+                    {
+                        var om = Regex.Match(ovm.Value, "\"modId\"\\s*:\\s*\"([^\"]*)\"");
+                        var op = Regex.Match(ovm.Value, "\"pawnDescription\"\\s*:\\s*\"([^\"]*)\"");
+                        if (om.Success && op.Success && om.Groups[1].Value.Length > 0 && op.Groups[1].Value.Length > 0)
+                            pk.overrides.Add(new PackOverride { modId = om.Groups[1].Value, pawn = op.Groups[1].Value });
+                    }
+            }
             pk.models = ParseModels(text);
             return pk;
         }
 
         static List<string> StrList(JToken t) =>
             (t as JArray)?.Select(x => (string)x).Where(s => !string.IsNullOrEmpty(s)).ToList() ?? new List<string>();
+
+        // REGEX recovery of a wrapper string-array ("dependsOn"/"loadAfter") when JObject.Parse failed — same resilience
+        // the models parse already has. These keys are wrapper-only (never in a model entry), so matching the whole file is safe.
+        static List<string> RegexStrArray(string text, string field)
+        {
+            var list = new List<string>();
+            var m = Regex.Match(text, "\"" + field + "\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
+            if (m.Success)
+                foreach (Match s in Regex.Matches(m.Groups[1].Value, "\"([^\"]*)\""))
+                    if (s.Groups[1].Value.Length > 0) list.Add(s.Groups[1].Value);
+            return list;
+        }
 
         // Write a human-readable load report next to the registry — packs discovered, model counts, reserved metadata, and
         // any conflicts. This is what makes a multi-pack setup DEBUGGABLE (the early slice of HAF runtime diagnostics) and is
