@@ -87,5 +87,15 @@ namespace HumankindAssetFramework.Tests
         {
             Assert.Empty(UniversalInject.ParseModels(@"{ ""models"": [] }"));
         }
+
+        // ---- GuidToLong: the per-attack/per-pawn dedup key derivation. Null or non-numeric -> 0 (no throw). ----
+        [Fact]
+        public void GuidToLong_NullReturnsZero() => Assert.Equal(0L, UniversalInject.GuidToLong(null));
+
+        [Fact]
+        public void GuidToLong_NonNumericReturnsZero() => Assert.Equal(0L, UniversalInject.GuidToLong("not-a-number"));
+
+        [Fact]
+        public void GuidToLong_NumericStringParses() => Assert.Equal(123456789L, UniversalInject.GuidToLong("123456789"));
     }
 }

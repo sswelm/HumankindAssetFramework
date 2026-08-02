@@ -78,6 +78,37 @@ namespace HumankindAssetFramework.Tests
             Assert.Contains(notes, n => n.Contains("duplicate modId"));
         }
 
+        // loadAfter naming an ABSENT modId is soft — the edge is ignored, the pack still loads (seed order).
+        [Fact]
+        public void ResolvePacks_LoadAfterAbsentModId_IsIgnored()
+        {
+            var packs = new List<Pack> { P("a", loadAfter: new[] { "ghost" }), P("b") };
+            var ordered = UniversalInject.ResolvePacks(packs, new List<string>());
+            Assert.Equal(new[] { "a", "b" }, Ids(ordered));
+        }
+
+        // The dependsOn skip is a FIXPOINT: B needs an absent dep -> B dropped -> A (which needs B) is then stranded too.
+        [Fact]
+        public void ResolvePacks_MissingDependency_StrandsDependentsTransitively()
+        {
+            var packs = new List<Pack> { P("a", dependsOn: new[] { "b" }), P("b", dependsOn: new[] { "ghost" }) };
+            var notes = new List<string>();
+            var ordered = UniversalInject.ResolvePacks(packs, notes);
+            Assert.Empty(ordered);                                    // both gone
+            Assert.Equal(2, notes.Count(n => n.Contains("SKIPPED"))); // one skip per pack
+        }
+
+        // A dependsOn/loadAfter CYCLE can't be ordered -> the members are appended in file order with a loud note.
+        [Fact]
+        public void ResolvePacks_Cycle_FallsBackToFileOrderWithNote()
+        {
+            var packs = new List<Pack> { P("a", dependsOn: new[] { "b" }), P("b", dependsOn: new[] { "a" }) };
+            var notes = new List<string>();
+            var ordered = UniversalInject.ResolvePacks(packs, notes);
+            Assert.Equal(new[] { "a", "b" }, Ids(ordered));   // both survive (deps ARE present), file order used
+            Assert.Contains(notes, n => n.Contains("CYCLE"));
+        }
+
         // ---- RegexStrArray: the last-resort recovery of wrapper string-arrays (dependsOn/loadAfter/overrides)
         // when JObject.Parse fails — the fix behind "wrapper-parse drops overrides". ----
         [Fact]
@@ -85,6 +116,13 @@ namespace HumankindAssetFramework.Tests
         {
             var text = @"{ ""loadAfter"": [ ""alpha"", ""beta"" ], ""x"": 1 }";
             Assert.Equal(new[] { "alpha", "beta" }, UniversalInject.RegexStrArray(text, "loadAfter").ToArray());
+        }
+
+        [Fact]
+        public void RegexStrArray_FiltersEmptyItems()
+        {
+            var text = @"{ ""dependsOn"": [ ""a"", """", ""b"" ] }";
+            Assert.Equal(new[] { "a", "b" }, UniversalInject.RegexStrArray(text, "dependsOn").ToArray());
         }
 
         [Fact]
