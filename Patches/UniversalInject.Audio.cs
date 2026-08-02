@@ -255,11 +255,25 @@ namespace HumankindAssetFramework
             }
         }
         static readonly List<int> _goneEngines = new List<int>();
+        // Kill a stuck engine loop by BOTH routes: the captured playing-id (reliable even after the emitter object is gone)
+        // and StopAll on the cached game-object id (fallback, and cuts any other voice still on it). Returns a short tag
+        // for the diagnostic log so we can see which handles we actually had.
+        static string StopEngineLoop(ModelEntry e, int id)
+        {
+            bool havePid = e.enginePlayingIds.TryGetValue(id, out var pid) && pid != 0;
+            bool haveGuid = e.engineEmitterGuids.TryGetValue(id, out var gid) && gid != 0;
+            if (havePid) StopPlayingId(pid);
+            if (haveGuid) StopByGuid(gid);
+            return $"pid={(havePid ? pid.ToString() : "-")} guid={(haveGuid ? gid.ToString() : "-")}";
+        }
         // The Wwise engine loop (Play_UNIT_Vehicles_*_Start) is stopped only on a move→stop TRANSITION while the pawn is
         // still polled. A unit that despawns mid-move — notably into a BATTLE, which swaps its PresentationUnit so the id
         // leaves the live set — never gets its _Stop, so the loop runs forever: the "cart sound" that keeps echoing after
         // a battle (verified: OrganGun / SiegeHowitzersCar etc. have engineSound=true). On prune, for any id that was
-        // moving, cut everything on its cached (possibly battle-hidden) emitter, then forget it.
+        // moving, cut its loop by the Wwise game-object id we cached WHILE IT WAS ALIVE (the emitter GameObject may already
+        // be destroyed — reading its guid now would fail — so we can't depend on the live emitter reference), then forget it.
+        // MUST run before the generic engineMoving/engineLastPos prune, or those dicts are already emptied of the dead ids
+        // this scans for (that ordering silently disabled this net once already — the battle echo came straight back).
         static void StopAndPruneEngines(ModelEntry e, HashSet<int> live)
         {
             if (e.engineMoving.Count == 0) return;
@@ -268,9 +282,31 @@ namespace HumankindAssetFramework
             for (int i = 0; i < _goneEngines.Count; i++)
             {
                 int id = _goneEngines[i];
-                if (e.engineSound && e.engineMoving[id] && e.engineEmitters.TryGetValue(id, out var em) && em != null)
-                    StopAllOnEmitter(em);   // a moving unit vanished with a looping _Start still going — cut it
-                e.engineMoving.Remove(id); e.engineEmitters.Remove(id); e.engineLastPos.Remove(id);
+                if (e.engineSound && e.engineMoving[id]) StopEngineLoop(e, id);   // vanished mid-move with a looping _Start — cut it
+                e.engineMoving.Remove(id); e.engineEmitterGuids.Remove(id); e.engineLastPos.Remove(id); e.engineLoudSince.Remove(id); e.enginePlayingIds.Remove(id);
+            }
+        }
+        // WATCHDOG — the hard backstop. Despawn detection kept missing the battle case (the loop survived every "detect the
+        // vanish" fix), so instead of trusting detection we time-box every loop: while a unit is polled we stamp
+        // engineLoudSince[id] = now each poll (a heartbeat). If a loop is still flagged moving but its heartbeat is older
+        // than EngineLoopMaxSilence, the unit stopped being polled (battle despawn / kill / LOD drop) yet never got its
+        // _Stop — so force-stop it by the cached game-object id. Runs every poll over the small engineMoving dict (NOT the
+        // found sub-pawns), so it fires even when the unit is gone from the scene entirely. A genuinely long move refreshes
+        // the heartbeat ~10x/s, so it never trips mid-travel.
+        const float EngineLoopMaxSilence = 2.5f;   // seconds a loop may run without a heartbeat before we force-stop it
+        static readonly List<int> _watchdogStop = new List<int>();
+        static void WatchdogEngineLoops(ModelEntry e, float now)
+        {
+            if (!e.engineSound || e.engineMoving.Count == 0) return;
+            _watchdogStop.Clear();
+            foreach (var kv in e.engineMoving)
+                if (kv.Value && (!e.engineLoudSince.TryGetValue(kv.Key, out var seen) || now - seen > EngineLoopMaxSilence))
+                    _watchdogStop.Add(kv.Key);
+            for (int i = 0; i < _watchdogStop.Count; i++)
+            {
+                int id = _watchdogStop[i];
+                Plugin.Log.LogInfo($"[Audio] engine-loop watchdog: force-stopped '{e.resourceName}' pawn {id} ({StopEngineLoop(e, id)}) — stuck loop after despawn");
+                e.engineMoving[id] = false;   // stopped — don't re-fire every poll; a real reappearance re-posts _Start
             }
         }
         static System.Reflection.MethodInfo _akStopAll; static bool _akStopAllTried;
@@ -283,6 +319,20 @@ namespace HumankindAssetFramework
         {
             try
             {
+                var g = GetMember(emitter, "AudioEntityGUID"); if (g == null) return;   // AudioEntityGUID struct (boxed)
+                var raw = GetMember(g, "guid"); if (raw == null) return;                 // private readonly ulong backing field
+                StopByGuid(Convert.ToUInt64(raw));
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Audio] StopAllOnEmitter: " + ex.Message); }
+        }
+        // Cut everything playing on a Wwise game-object by its id (AkSoundEngine.StopAll(ulong)). Split out of
+        // StopAllOnEmitter so StopAndPruneEngines can stop a despawned unit's loop from a guid it cached while the unit was
+        // alive — no live emitter reference needed. Best-effort: if the method can't be resolved, future posts are still
+        // caught by the suppress-prefix; only an already-playing loop would linger.
+        static void StopByGuid(ulong gid)
+        {
+            try
+            {
                 if (!_akStopAllTried)
                 {
                     _akStopAllTried = true;
@@ -290,14 +340,12 @@ namespace HumankindAssetFramework
                     if (ak != null)
                         foreach (var m in ak.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))
                             if (m.Name == "StopAll" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(ulong)) { _akStopAll = m; break; }
-                    if (_akStopAll == null) Plugin.Log.LogWarning("[Audio] AkSoundEngine.StopAll(ulong) not found — an already-playing donor idle loop may linger until re-init");
+                    if (_akStopAll == null) Plugin.Log.LogWarning("[Audio] AkSoundEngine.StopAll(ulong) not found — an already-playing loop may linger until re-init");
                 }
-                if (_akStopAll == null) return;
-                var g = GetMember(emitter, "AudioEntityGUID"); if (g == null) return;   // AudioEntityGUID struct (boxed)
-                var raw = GetMember(g, "guid"); if (raw == null) return;                 // private readonly ulong backing field
-                _akStopAll.Invoke(null, new object[] { Convert.ToUInt64(raw) });
+                if (_akStopAll == null || gid == 0) return;
+                _akStopAll.Invoke(null, new object[] { gid });
             }
-            catch (Exception ex) { Plugin.Log.LogWarning("[Audio] StopAllOnEmitter: " + ex.Message); }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Audio] StopByGuid: " + ex.Message); }
         }
 
         public static void ProcessEngineAudio()
@@ -361,9 +409,12 @@ namespace HumankindAssetFramework
                     foreach (var pr in _ourSubpawns) if (pr.Key != null) _engineLiveIds.Add(pr.Key.GetInstanceID());
                     foreach (var e in on)
                     {
-                        PruneById(e.engineLastPos, _engineLiveIds); PruneById(e.engineMoving, _engineLiveIds);
-                        PruneSources(e.customSources, _engineLiveIds); PruneById(e.loopHoldUntil, _engineLiveIds); PruneById(e.idleNextAt, _engineLiveIds);
+                        // StopAndPruneEngines FIRST — it stops the move-loop of any unit that vanished mid-move and then
+                        // removes that id from engineMoving/engineLastPos/engineEmitterGuids. Pruning engineMoving here
+                        // before it (the old order) emptied the dict of the very dead ids it scans for, so it stopped
+                        // nothing and the battle echo leaked. It now owns engineMoving + engineLastPos.
                         StopAndPruneEngines(e, _engineLiveIds);
+                        PruneSources(e.customSources, _engineLiveIds); PruneById(e.loopHoldUntil, _engineLiveIds); PruneById(e.idleNextAt, _engineLiveIds);
                     }
                 }
                 foreach (var pair in _ourSubpawns)
@@ -384,6 +435,7 @@ namespace HumankindAssetFramework
                     var pos = (GetMember(sp, "Transform") as UnityEngine.Transform)?.position ?? comp.transform.position;
                     bool moving = e.engineLastPos.TryGetValue(id, out var last) && (pos - last).sqrMagnitude > 0.06f * 0.06f;
                     e.engineLastPos[id] = pos;
+                    if (e.engineSound) e.engineLoudSince[id] = now;   // watchdog heartbeat: we saw this unit alive this poll
                     bool wasMoving = e.engineMoving.TryGetValue(id, out var wm) && wm;
 
                     // custom one-shots on a move-start / move-stop TRANSITION (spool-up / spool-down), 3D at the unit.
@@ -448,11 +500,22 @@ namespace HumankindAssetFramework
 
                     // (B) Wwise engine event: post Start/Stop on a movement TRANSITION
                     var emitter = GetMember(sp, "AudioEmitter");
-                    if (e.engineSound && emitter != null) e.engineEmitters[id] = emitter;   // cache for stop-on-despawn (the battle-echo fix)
+                    // Cache the Wwise game-object id WHILE THE UNIT IS ALIVE, so a despawn-mid-move (battle) can still stop
+                    // its loop after the emitter GameObject is gone (StopAndPruneEngines / the battle-echo fix).
+                    if (e.engineSound && emitter != null)
+                    {
+                        var eg = GetMember(emitter, "AudioEntityGUID");
+                        if (eg != null && GetMember(eg, "guid") is ulong egid && egid != 0) e.engineEmitterGuids[id] = egid;
+                    }
                     if (e.engineSound && emitter != null && moving != wasMoving)
                     {
                         string evName = moving ? e.engineStartEvent : e.engineStopEvent;
-                        if (!string.IsNullOrEmpty(evName)) PostEventByName(emitter, evName);   // BY NAME — first-unit-safe
+                        if (!string.IsNullOrEmpty(evName))
+                        {
+                            uint pid = PostEventByName(emitter, evName);   // BY NAME — first-unit-safe
+                            if (moving) { if (pid != 0) e.enginePlayingIds[id] = pid; }   // remember the loop so we can stop it after despawn
+                            else e.enginePlayingIds.Remove(id);                            // _Stop posted the normal way — nothing stuck to track
+                        }
                         else
                         {
                             if (_postEvent == null)
@@ -464,6 +527,9 @@ namespace HumankindAssetFramework
                     }
                     e.engineMoving[id] = moving;
                 }
+                // Watchdog runs AFTER the per-pawn loop so this poll's heartbeats are already recorded: present units read
+                // fresh, only vanished ones read stale. This is the guaranteed backstop for the battle echo.
+                for (int ei = 0; ei < on.Count; ei++) WatchdogEngineLoops(on[ei], now);
             }
             catch (Exception ex) { Plugin.Log.LogError("[Audio] ProcessEngineAudio: " + ex); }
         }
@@ -636,12 +702,14 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogError("[Audio] StopEventAudition: " + ex); }
         }
 
-        static void PostEventByName(object emitter, string eventName)
+        // Returns the Wwise PLAYING id (AkPlayingID, uint) so a looping _Start can be stopped later by that id even after
+        // its emitter game-object is gone. 0 if the post failed or the binding returns void.
+        static uint PostEventByName(object emitter, string eventName)
         {
             try
             {
                 var g = GetMember(emitter, "AudioEntityGUID");
-                if (!(GetMember(g, "guid") is ulong gid)) return;
+                if (!(GetMember(g, "guid") is ulong gid)) return 0;
                 if (_postByName == null)
                 {
                     var ak = GameBinding.AkSoundEngine;
@@ -650,9 +718,38 @@ namespace HumankindAssetFramework
                         && m.GetParameters()[0].ParameterType == typeof(string)
                         && m.GetParameters()[1].ParameterType == typeof(ulong));
                 }
-                _postByName?.Invoke(null, new object[] { eventName, gid });
+                var r = _postByName?.Invoke(null, new object[] { eventName, gid });
+                return r is uint pid ? pid : 0;
             }
-            catch (Exception ex) { Plugin.Log.LogWarning("[Audio] postByName '" + eventName + "': " + ex.Message); }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Audio] postByName '" + eventName + "': " + ex.Message); return 0; }
+        }
+
+        static System.Reflection.MethodInfo _akStopPid; static bool _akStopPidTried;
+        // Stop ONE playing voice by its Wwise playing-id (AkSoundEngine.StopPlayingID(uint, [int transMs], [curve])). Unlike
+        // StopAll(gameObjectId), this targets the voice itself, so it works even after the emitter object is destroyed /
+        // unregistered — the reliable way to kill a looping _Start whose unit despawned into a battle. Best-effort.
+        static void StopPlayingId(uint playingId)
+        {
+            try
+            {
+                if (!_akStopPidTried)
+                {
+                    _akStopPidTried = true;
+                    var ak = GameBinding.AkSoundEngine;
+                    if (ak != null)
+                        foreach (var m in ak.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))
+                            if (m.Name == "StopPlayingID" && m.GetParameters().Length >= 1 && m.GetParameters()[0].ParameterType == typeof(uint)) { _akStopPid = m; break; }
+                    if (_akStopPid == null) Plugin.Log.LogWarning("[Audio] AkSoundEngine.StopPlayingID(uint) not found — despawn loop-stop falls back to StopAll(guid)");
+                }
+                if (_akStopPid == null || playingId == 0) return;
+                var ps = _akStopPid.GetParameters();
+                var args = new object[ps.Length];
+                args[0] = playingId;
+                for (int i = 1; i < ps.Length; i++)   // fill optional transition/curve params with their defaults
+                    args[i] = ps[i].HasDefaultValue ? ps[i].DefaultValue : (ps[i].ParameterType.IsValueType ? Activator.CreateInstance(ps[i].ParameterType) : null);
+                _akStopPid.Invoke(null, args);
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Audio] StopPlayingId: " + ex.Message); }
         }
 
         // Runtime SOUND EXTRACTOR: write the full Wwise event-name catalog (every loaded AudioEventHandle) to a config
