@@ -170,6 +170,13 @@ the mechanics are detailed in [Animated-Runtime §3b](Animated-Runtime.md#3b-run
 - **Save-safe.** The whole system writes only **presentation** state (pawn entries, poses, `ObjectSpace`, atlases,
   audio). It never touches the simulation model, so a failed or malformed injection **cannot corrupt a save or crash
   the battle simulation** — and uninstalling the plugin returns every unit to vanilla.
+- **Game updates fail loud, not silent.** HAF binds to the game's types by name via reflection (the cost of no source
+  access), so a game update *could* rename one. Rather than misbehave silently, a startup **compatibility report**
+  (`GameBinding`) resolves a catalog of **31 core types/members** and logs exactly what's missing —
+  `[GameBinding] … type(s) + member(s) NOT FOUND (game update?)`, naming each one — stamped with the running game
+  version against the last **verified** build (currently `1.30`). With per-hook fail-soft degradation on top, a
+  game-update break is *localized and named*: the log tells you which binding drifted, instead of a silent malfunction.
+  (Rationale and full arc in [Framework-Review](Framework-Review.md) — the "reflection fragility" entries.)
 
 ## Known limitations
 
