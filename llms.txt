@@ -35,6 +35,7 @@ so an agent can crawl the whole doc set from here with no authentication. The hu
 - [docs/Building.md](docs/Building.md): build the plugin and set up the Blender dependency.
 
 ## Authoring content
+- [docs/Editor-Tools.md](docs/Editor-Tools.md): the **editor reference** — every authoring window under `Tools ▸ HAF`, its menu path, purpose, controls, and which registry it writes. The map of the authoring surface; start here to find the right tool.
 - [docs/Factory-Manual.md](docs/Factory-Manual.md): the main authoring guide — every field, the static and animated workflows, a troubleshooting table. Also covers unit/creature audio (§13–14).
 - [docs/Animated-Models.md](docs/Animated-Models.md): can HAF import your model? Clean rigs, rigid-part machines, and full character rigs, in plain language.
 - [docs/Textures.md](docs/Textures.md): the atlas pipeline — every knob, the complete failure catalog, and runtime re-skins.

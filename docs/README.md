@@ -18,6 +18,7 @@ then come back here to go deep.
 
 ## Author content
 The core authoring workflows — bake a model, animate it, texture it, add sound.
+- [**Editor-Tools.md**](Editor-Tools.md) — the **editor reference**: every window under `Tools ▸ HAF`, its menu path, what it does, and which registry it writes. Start here to find the right tool.
 - [**Factory-Manual.md**](Factory-Manual.md) — the main guide. Every field, the static and animated workflows, and a troubleshooting table. **Start here to add a model.**
 - [**Animated-Models.md**](Animated-Models.md) — can HAF import *your* model? The plain-language answer in three levels (clean rigs → rigid-part machines → full character rigs). **Start here for animation.**
 - [**Textures.md**](Textures.md) — the atlas pipeline: every knob, the complete failure catalog, and runtime re-skins.
