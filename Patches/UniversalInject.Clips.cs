@@ -28,7 +28,7 @@ namespace HumankindAssetFramework
                 if (g == null) { Plugin.Log.LogError($"[Uni] loadClip '{tag}': Amplitude LoadAsset/TryLoadAsset not resolved (game update?)"); return null; }
                 var args = g.GetParameters().Length == 1 ? new[] { guid } : new[] { guid, null };
                 var cc = g.Invoke(null, args);
-                Plugin.Log.LogInfo($"[Uni] loaded clipCollection '{tag}': " + ((cc as UnityEngine.Object)?.name ?? "NULL (rebuild mod?)"));
+                Plugin.Diag($"[Uni] loaded clipCollection '{tag}': " + ((cc as UnityEngine.Object)?.name ?? "NULL (rebuild mod?)"));
                 return cc;
             }
             catch (Exception e) { Plugin.Log.LogError("[Uni] loadClip: " + e); return null; }
@@ -58,7 +58,7 @@ namespace HumankindAssetFramework
                     if (arr != null) Array.Copy(arr, narr, len);
                     narr.SetValue(coll, len);
                     field.SetValue(animMgr, narr);
-                    Plugin.Log.LogInfo($"[Uni] injected clipCollection '{tag}' at [{len}]");
+                    Plugin.Diag($"[Uni] injected clipCollection '{tag}' at [{len}]");
                     return coll;
                 }
                 foreach (var e in entries)
@@ -107,7 +107,7 @@ namespace HumankindAssetFramework
                     if (getDur != null)
                     {
                         float d = Convert.ToSingle(getDur.Invoke(animMgr, new object[] { id }));
-                        if (d > 0.001f) { dur = d; Plugin.Log.LogInfo($"[Uni] clip '{tag}' animId {id} duration {d:0.###}s"); }
+                        if (d > 0.001f) { dur = d; Plugin.Diag($"[Uni] clip '{tag}' animId {id} duration {d:0.###}s"); }
                     }
                 }
                 return id;

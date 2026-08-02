@@ -29,7 +29,7 @@ namespace HumankindAssetFramework
                         if (e.tex != null && NeedsAdjust(e))
                         {
                             AdjustSkin(e.tex, e.brightness, e.desaturate, e.tintR, e.tintG, e.tintB);
-                            Plugin.Log.LogInfo($"[Skin] {e.resourceName}: adjustments applied to retexture (gamma {e.brightness:0.00}, desat {UnityEngine.Mathf.Clamp01(e.desaturate):0.00}, rgb {e.tintR:+0;-0;0}/{e.tintG:+0;-0;0}/{e.tintB:+0;-0;0})");
+                            Plugin.Diag($"[Skin] {e.resourceName}: adjustments applied to retexture (gamma {e.brightness:0.00}, desat {UnityEngine.Mathf.Clamp01(e.desaturate):0.00}, rgb {e.tintR:+0;-0;0}/{e.tintG:+0;-0;0}/{e.tintB:+0;-0;0})");
                         }
                     }
                     if (e.tex == null) e.tex = LoadAtlas(e.ta, e.tb, e.tc, e.td, e.resourceName);
@@ -80,7 +80,7 @@ namespace HumankindAssetFramework
                 }
                 GreyIsolate(addon, animMgr, e);    // clone the body fragment's output layer (+ build the desaturated atlas if desaturate>0)
                 ApplyTexture(e, animMgr);          // paint e.tex on the isolated clone + neutralise the civ-colour/overlay maps (TickOne)
-                if (!e.repointed) { e.repointed = true; Plugin.Log.LogInfo($"[Skin] '{name}' -> {e.resourceName}: {(string.IsNullOrEmpty(e.textureFile) ? $"greyed (desaturate {e.desaturate:0.00})" : $"retextured ('{e.textureFile}')")}, layer '{e.layerHint}', atlas={(e.tex != null ? e.tex.width + "x" + e.tex.height : "NONE — will retry")}"); }
+                if (!e.repointed) { e.repointed = true; Plugin.Diag($"[Skin] '{name}' -> {e.resourceName}: {(string.IsNullOrEmpty(e.textureFile) ? $"greyed (desaturate {e.desaturate:0.00})" : $"retextured ('{e.textureFile}')")}, layer '{e.layerHint}', atlas={(e.tex != null ? e.tex.width + "x" + e.tex.height : "NONE — will retry")}"); }
             }
             catch (Exception ex) { Plugin.Log.LogError("[Skin] " + ex); }
         }
@@ -103,7 +103,7 @@ namespace HumankindAssetFramework
                 // as noisy near-black. LoadImage fills the chain; AdjustSkin's Apply() rebuilds it after the pixel pass.
                 var t = new UnityEngine.Texture2D(2, 2, UnityEngine.TextureFormat.RGBA32, true) { name = tag + "_Skin" };
                 if (!UnityEngine.ImageConversion.LoadImage(t, File.ReadAllBytes(path))) { Plugin.Log.LogWarning($"[Skin] {tag}: LoadImage failed for {file} (not a PNG/JPG?)"); UnityEngine.Object.DestroyImmediate(t); return null; }
-                Plugin.Log.LogInfo($"[Skin] {tag}: loaded retexture '{file}' ({t.width}x{t.height})");
+                Plugin.Diag($"[Skin] {tag}: loaded retexture '{file}' ({t.width}x{t.height})");
                 return t;
             }
             catch (Exception e) { Plugin.Log.LogError($"[Skin] {tag}: retexture load failed: " + e); return null; }
@@ -139,7 +139,7 @@ namespace HumankindAssetFramework
                     if (e.isolatedLayer == null && host is UnityEngine.Object ho && ho != null)
                     {
                         var clone = UnityEngine.Object.Instantiate(ho); clone.name = e.resourceName + "_GreyLayer"; e.isolatedLayer = clone;
-                        Plugin.Log.LogInfo($"[Grey] cloned output layer for {e.resourceName} -> '{clone.name}'");
+                        Plugin.Diag($"[Grey] cloned output layer for {e.resourceName} -> '{clone.name}'");
                     }
                     if (e.isolatedLayer != null) folField.SetValue(item, e.isolatedLayer);
                     var mc = mcField?.GetValue(item);   // KEEP the vanilla meshCollection; re-Load so the clone gets its own GPU slot
@@ -179,7 +179,7 @@ namespace HumankindAssetFramework
                 t.ReadPixels(new UnityEngine.Rect(0, 0, w, h), 0, 0); t.Apply();
                 UnityEngine.RenderTexture.active = prev; UnityEngine.RenderTexture.ReleaseTemporary(rt);
                 AdjustSkin(t, brightness, desat, tR, tG, tB);
-                Plugin.Log.LogInfo($"[Grey] {tag}: adjusted atlas {w}x{h} (gamma {brightness:0.00}, desat {UnityEngine.Mathf.Clamp01(desat):0.00}, rgb {tR:+0;-0;0}/{tG:+0;-0;0}/{tB:+0;-0;0})");
+                Plugin.Diag($"[Grey] {tag}: adjusted atlas {w}x{h} (gamma {brightness:0.00}, desat {UnityEngine.Mathf.Clamp01(desat):0.00}, rgb {tR:+0;-0;0}/{tG:+0;-0;0}/{tB:+0;-0;0})");
                 return t;
             }
             catch (Exception e) { Plugin.Log.LogError("[Grey] build atlas: " + e); return null; }

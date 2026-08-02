@@ -16,6 +16,12 @@ namespace HumankindAssetFramework
         public const string GUID = "community.humankind.haf";
 
         internal static ManualLogSource Log;
+        internal static ConfigEntry<bool>   VerboseLog;      // gate the chatty per-model/per-pawn bring-up logs; OFF = a quiet load (summaries + warnings/errors only)
+
+        // Gated diagnostic log: per-model/per-pawn bring-up detail that's a useful trace when investigating but noise in a
+        // normal run. OFF by default -> quiet. Summaries ("loaded N models"), warnings and errors stay on Log directly.
+        internal static void Diag(string msg) { if (VerboseLog != null && VerboseLog.Value) Log?.LogInfo(msg); }
+
         internal static ConfigEntry<string> TargetMod;       // which mod's assets to access
         internal static ConfigEntry<string> AssetNameFilter; // substring that identifies that mod's assets
         internal static ConfigEntry<KeyCode> ToggleKey;      // open/close the feedback window (Shift+ToggleKey = dump GPU mesh-buffer usage)
@@ -65,6 +71,10 @@ namespace HumankindAssetFramework
             ToggleKey       = Config.Bind("General", "ToggleWindowKey", KeyCode.F8,
                                   "Key to toggle the in-game feedback window. Hold SHIFT + this key to instead dump the live " +
                                   "GPU mesh-content buffer usage (verts/indices/meshes per layer vs the 100k/250k/256 ceiling) to the log.");
+            VerboseLog      = Config.Bind("General", "VerboseLog", false,
+                                  "Log the chatty per-model / per-pawn BRING-UP detail (skeleton repoints, atlas/skin/prop injection, " +
+                                  "pose-hook dumps, per-unit state, etc.). OFF (default) keeps a normal load QUIET — only the summary lines " +
+                                  "('loaded N models/districts/sounds'), warnings and errors. Turn ON when investigating a specific model.");
             UniversalInjectOn = Config.Bind("Factory", "UniversalInject", true,
                                   "Registry-driven universal model injector (the Model Factory). Reads the model registry JSON " +
                                   "from this config folder and repoints each listed pawn definition onto its baked skeleton.");

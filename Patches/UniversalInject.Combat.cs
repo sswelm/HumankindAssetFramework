@@ -65,7 +65,7 @@ namespace HumankindAssetFramework
                     respawnCount[unit] = done + 1;                                                     // bump first so a throwing unit isn't stuck
                     bool naval = false; try { naval = Convert.ToBoolean(GetMember(unit, "IsNaval")); } catch { }
                     AccessTools.Method(unit.GetType(), "UpdatePawns", new[] { typeof(bool) })?.Invoke(unit, new object[] { naval });
-                    Plugin.Log.LogInfo($"[Uni][RESPAWN] re-spawned '{uname}' shortly after it rendered (clears the first-instance rotor race)");
+                    Plugin.Diag($"[Uni][RESPAWN] re-spawned '{uname}' shortly after it rendered (clears the first-instance rotor race)");
                 }
                 // Drop bookkeeping for units that are gone (destroyed, or the previous game's units after a reload) so the
                 // dicts don't grow and a genuinely new instance (a new object) is detected + fixed again.
@@ -144,7 +144,7 @@ namespace HumankindAssetFramework
                         matched = true;
                         // Log the fire positions so they can be compared to the pose hook's 'ObjectSpace T=...' dump — if the
                         // two are in different spaces the nearest-match (radius 4u) won't fire; this shows it at a glance.
-                        Plugin.Log.LogInfo($"[Fire] '{e.resourceName}' unit/army {uguid}: armed {n} pawn(s) at{posDump}");
+                        Plugin.Diag($"[Fire] '{e.resourceName}' unit/army {uguid}: armed {n} pawn(s) at{posDump}");
                     }
                     if (!matched) Plugin.Log.LogWarning($"[Fire] '{e.resourceName}': fired GUID(s) [{string.Join(",", fired)}] matched no PresentationUnit — barrel won't animate (timing/GUID mismatch)");
                 }
@@ -293,7 +293,7 @@ namespace HumankindAssetFramework
                 foreach (var e in list)
                     if (e.silenceDonorVfx && !string.IsNullOrEmpty(e.pawnDescription) && n.IndexOf(e.pawnDescription, StringComparison.OrdinalIgnoreCase) >= 0)
                     {
-                        if (!e.vfxSilencedLogged) { e.vfxSilencedLogged = true; Plugin.Log.LogInfo($"[Vfx] '{e.resourceName}' donor VFX suppressed (first event on '{n}'; sounds untouched)"); }
+                        if (!e.vfxSilencedLogged) { e.vfxSilencedLogged = true; Plugin.Diag($"[Vfx] '{e.resourceName}' donor VFX suppressed (first event on '{n}'; sounds untouched)"); }
                         return true;
                     }
             }
@@ -351,7 +351,7 @@ namespace HumankindAssetFramework
                 e.deathSoundNextAt = now + 0.6f;
                 var tr = GetMember(pawn, "Transform") as UnityEngine.Transform;
                 PlayAttackOneShot(e.customDeathClip, tr != null ? tr.position : UnityEngine.Vector3.zero, e.soundDeathVolume, e.soundDeathOffset);
-                Plugin.Log.LogInfo($"[Sound] '{e.resourceName}' death cue");
+                Plugin.Diag($"[Sound] '{e.resourceName}' death cue");
             }
             catch (Exception ex) { Plugin.Log.LogError("[Sound] OnPawnDeath: " + ex); }
         }
@@ -389,7 +389,7 @@ namespace HumankindAssetFramework
                 foreach (var e in found)
                 {
                     battleCryQueue.Enqueue(e);
-                    Plugin.Log.LogInfo($"[Sound] battle started with '{e.resourceName}' — war cry queued");
+                    Plugin.Diag($"[Sound] battle started with '{e.resourceName}' — war cry queued");
                 }
             }
             catch (Exception ex) { Plugin.Log.LogError("[Sound] OnBattleStarted: " + ex); }
@@ -415,7 +415,7 @@ namespace HumankindAssetFramework
                     e.battleCryNextAt = now + 2f;
                     var camPos = UnityEngine.Camera.main != null ? UnityEngine.Camera.main.transform.position : UnityEngine.Vector3.zero;
                     PlayAttackOneShot(e.customBattleClip, camPos, e.soundBattleVolume, e.soundBattleOffset);
-                    Plugin.Log.LogInfo($"[Sound] '{e.resourceName}' war cry");
+                    Plugin.Diag($"[Sound] '{e.resourceName}' war cry");
                 }
             }
             catch (Exception ex) { Plugin.Log.LogError("[Sound] ProcessBattleCries: " + ex); }
@@ -606,7 +606,7 @@ namespace HumankindAssetFramework
                         seen[e].Add(guid);
                         if (deployMoveState == null) deployMoveState = new Dictionary<long, bool>();
                         if (!deployMoveState.TryGetValue(guid, out bool wasMoving) || wasMoving != moving)   // log on each moving<->stopped flip
-                        { deployMoveState[guid] = moving; Plugin.Log.LogInfo($"[Deploy] '{e.resourceName}' unit {guid} moving={moving} poseTime={cur:0.00}"); }
+                        { deployMoveState[guid] = moving; Plugin.Diag($"[Deploy] '{e.resourceName}' unit {guid} moving={moving} poseTime={cur:0.00}"); }
                         if (pawnList != null)
                             foreach (var pawn in pawnList)
                                 if (GetMember(pawn, "Transform") is UnityEngine.Transform tr) fresh[e].Add(new DeploySample { pos = tr.position, poseTime = cur });
@@ -641,7 +641,7 @@ namespace HumankindAssetFramework
                                 // no longer runs redundantly every frame on a stable material (perf pass 2026-07-19).
                                 if (ReferenceEquals(mat.GetTexture("_MainTex"), e.tex)) continue;
                                 if (_flatN == null) { _flatN = Solid(0.5f, 0.5f, 1f); _white = Solid(1f, 1f, 1f); _black = Solid(0f, 0f, 0f); _grey = Solid(0.5f, 0.5f, 0.5f); }
-                                if (!stLogged) { stLogged = true; Plugin.Log.LogInfo($"[Uni] {e.resourceName} host _MainTex_ST scale={mat.GetTextureScale("_MainTex")} offset={mat.GetTextureOffset("_MainTex")}"); }
+                                if (!stLogged) { stLogged = true; Plugin.Diag($"[Uni] {e.resourceName} host _MainTex_ST scale={mat.GetTextureScale("_MainTex")} offset={mat.GetTextureOffset("_MainTex")}"); }
                                 mat.SetTexture("_MainTex", e.tex);
                                 // Reset the atlas UV transform. The host's material crops _MainTex to its slice of a SHARED
                                 // atlas (scale/offset != 1,0); left in place, our full atlas is sampled through that crop and
@@ -689,7 +689,7 @@ namespace HumankindAssetFramework
                             painted++;
                         }
                 if (painted > 0)   // silent when stable (per-tick recovery path) — logs only actual (re)paints
-                    Plugin.Log.LogInfo($"[Props] '{tag}' prop layer painted ({painted} material(s), atlas {tex.width}x{tex.height})");
+                    Plugin.Diag($"[Props] '{tag}' prop layer painted ({painted} material(s), atlas {tex.width}x{tex.height})");
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[Props] PaintLayer: " + ex.Message); }
         }
@@ -707,7 +707,7 @@ namespace HumankindAssetFramework
                 if (g == null) { Plugin.Log.LogError($"[Uni] loadAtlas '{tag}': Amplitude LoadAsset/TryLoadAsset not resolved (game update?)"); return null; }
                 var args = g.GetParameters().Length == 1 ? new object[] { guid } : new object[] { guid, null };
                 var tex = g.Invoke(null, args) as UnityEngine.Texture2D;
-                Plugin.Log.LogInfo($"[Uni] loaded atlas '{tag}': " + (tex != null ? tex.name + " " + tex.width + "x" + tex.height : "NULL"));
+                Plugin.Diag($"[Uni] loaded atlas '{tag}': " + (tex != null ? tex.name + " " + tex.width + "x" + tex.height : "NULL"));
                 return tex;
             }
             catch (Exception e) { Plugin.Log.LogError("[Uni] atlas: " + e); return null; }

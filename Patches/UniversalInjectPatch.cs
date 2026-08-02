@@ -221,7 +221,7 @@ namespace HumankindAssetFramework
                     }
                     files.AddRange(found.OrderBy(f => f, StringComparer.OrdinalIgnoreCase));
                 }
-                if (files.Count == 0) { Plugin.Log.LogInfo("[Uni] no registry at " + basePath + " and no haf_packs/*.json"); loaded = true; return; }
+                if (files.Count == 0) { Plugin.Diag("[Uni] no registry at " + basePath + " and no haf_packs/*.json"); loaded = true; return; }
 
                 var packs = new List<Pack>();
                 foreach (var file in files)
@@ -264,14 +264,14 @@ namespace HumankindAssetFramework
                                 built[ownerIdx[e.pawnDescription]] = e;   // replace in place — ownerIdx stays valid
                                 ownerMod[e.pawnDescription] = pk.modId;
                                 applied.Add($"pawn={e.pawnDescription} '{pk.modId}' replaces '{held}' (declared override)");
-                                Plugin.Log.LogInfo($"[Uni] OVERRIDE: pack '{pk.modId}' replaces '{held}' on pawn '{e.pawnDescription}' (declared).");
+                                Plugin.Diag($"[Uni] OVERRIDE: pack '{pk.modId}' replaces '{held}' on pawn '{e.pawnDescription}' (declared).");
                                 continue;
                             }
                             conflicts.Add($"pawn={e.pawnDescription} kept={held} dropped={pk.modId}({e.resourceName})");
                             Plugin.Log.LogWarning($"[Uni] CONFLICT: pack '{pk.modId}' targets pawn '{e.pawnDescription}' already claimed by '{held}' — keeping '{held}' (first-loaded wins; declare it in `overrides` to replace).");
                             continue;
                         }
-                        if (e.disabled) { Plugin.Log.LogInfo($"[Uni] '{e.resourceName}' -> '{e.pawnDescription}': DISABLED in registry — skipping override (original unit rendered)."); continue; }
+                        if (e.disabled) { Plugin.Diag($"[Uni] '{e.resourceName}' -> '{e.pawnDescription}': DISABLED in registry — skipping override (original unit rendered)."); continue; }
                         if (!string.IsNullOrEmpty(e.pawnDescription)) { ownerMod[e.pawnDescription] = pk.modId; ownerIdx[e.pawnDescription] = built.Count; }
                         built.Add(e);
                     }
@@ -307,7 +307,7 @@ namespace HumankindAssetFramework
                     catch (Exception ex) { Plugin.Log.LogWarning("[Resize] unitScales parse in '" + Path.GetFileName(file) + "': " + ex.Message); }
                 }
                 if (unitScaleRules.Count > 0)
-                    Plugin.Log.LogInfo($"[Resize] {unitScaleRules.Count} unit-scale rule(s): " + string.Join(", ", unitScaleRules.Select(r => $"'{r.match}'x{r.scale:0.###}" + (r.era > 0 ? $"@era{r.era}" : ""))));
+                    Plugin.Diag($"[Resize] {unitScaleRules.Count} unit-scale rule(s): " + string.Join(", ", unitScaleRules.Select(r => $"'{r.match}'x{r.scale:0.###}" + (r.era > 0 ? $"@era{r.era}" : ""))));
 
                 // GLOBAL ERA LAB (2026-07-29, user-designed): each pack may carry an "eraGrid" — one row per UNIT
                 // era holding that unit's rescale modifier for every CURRENT era, i.e. modifier[unitEra][nowEra].
@@ -337,7 +337,7 @@ namespace HumankindAssetFramework
                     catch (Exception ex) { Plugin.Log.LogWarning("[Resize] eraGrid parse in '" + Path.GetFileName(file) + "': " + ex.Message); }
                 }
                 if (eraGridRows.Count > 0)
-                    Plugin.Log.LogInfo("[Resize] era grid: " + string.Join(" | ", eraGridRows.OrderBy(k => k.Key)
+                    Plugin.Diag("[Resize] era grid: " + string.Join(" | ", eraGridRows.OrderBy(k => k.Key)
                         .Select(k => $"unit era {k.Key} -> [" + string.Join(",", k.Value.Select(v => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)).ToArray()) + "]")));
 
                 // FORMATION BY SIZE (Global Era Lab second table, runtime 2026-07-30): {threshold, formation} rows;
@@ -368,7 +368,7 @@ namespace HumankindAssetFramework
                 }
                 formationBySize.Sort((a, b) => a.Key.CompareTo(b.Key));
                 if (formationBySize.Count > 0)
-                    Plugin.Log.LogInfo("[Resize] formation-by-size: " + string.Join(", ",
+                    Plugin.Diag("[Resize] formation-by-size: " + string.Join(", ",
                         formationBySize.Select(t => $"<= x{t.Key.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} -> {t.Value}")));
                 foreach (var e in built) e.coreDesc = CoreDesc(e.pawnDescription);   // cache the _NN-stripped match key ONCE (read every frame by the movement polls); done before publish so readers never see it unset
                 entries = built;   // publish fully built — never mutated after this point

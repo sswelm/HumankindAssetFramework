@@ -78,7 +78,7 @@ namespace HumankindAssetFramework
             if (!eraApiLogged && era >= 0)
             {
                 eraApiLogged = true;
-                Plugin.Log.LogInfo($"[Resize] era anchoring live — built-unit frontier: land {domainEra[0]}, naval {domainEra[1]}, air {domainEra[2]} (tech era {techEra}, aggregate Timeline {aggregateEra}); {eraGridRows.Count} authored grid row(s)");
+                Plugin.Diag($"[Resize] era anchoring live — built-unit frontier: land {domainEra[0]}, naval {domainEra[1]}, air {domainEra[2]} (tech era {techEra}, aggregate Timeline {aggregateEra}); {eraGridRows.Count} authored grid row(s)");
             }
             if (era != cachedEra && cachedEra >= 0 && era >= 0)
                 Plugin.Log.LogInfo($"[Resize] ERA CHANGED {cachedEra} -> {era} — scaled units re-anchor live (an era-1 unit now renders x{EraAnchorFor(1, era):0.###})");
@@ -296,7 +296,7 @@ namespace HumankindAssetFramework
                 FormationOverride.SetFreshElementReference(unitDef, "PresentationFormationDefinition", targetFormation);
                 int reformed = ReformLiveUnitsOf(unitName);
                 sizeFormApplied[descId] = key;
-                Plugin.Log.LogInfo($"[Resize] formation-by-size: '{unitName}' at effective x{effScale:0.###} -> " +
+                Plugin.Diag($"[Resize] formation-by-size: '{unitName}' at effective x{effScale:0.###} -> " +
                                    (desired == null ? $"restored own formation '{targetFormation}'" : $"'{targetFormation}'") +
                                    $" ({reformed} live unit(s) re-formed).");
             }
@@ -417,7 +417,7 @@ namespace HumankindAssetFramework
                         if (meshApplied.TryGetValue(key, out var st) && (st.probe - probeNow).sqrMagnitude < 1e-8f)
                             applied = st.factor;
                         else if (meshApplied.ContainsKey(key))
-                            Plugin.Log.LogInfo($"[Resize] mesh {mi} came back unscaled (Fx content reloaded) — re-scaling from 1");
+                            Plugin.Diag($"[Resize] mesh {mi} came back unscaled (Fx content reloaded) — re-scaling from 1");
 
                         ratio = target / applied;                       // only the DIFFERENCE — re-scaling never compounds
                         if (Math.Abs(ratio - 1f) > 1e-4f)
@@ -457,7 +457,7 @@ namespace HumankindAssetFramework
                 // tech-era fallback, 6) while the modifier had come from the aggregate floor (5), which made a
                 // correct-looking line describe the wrong arithmetic.
                 int anchorUsed = unitScaleByDesc.TryGetValue(descId, out var dInfo) ? WorldEraFor(dInfo.domain) : cachedEra;
-                Plugin.Log.LogInfo($"[Resize] desc {descId} -> x{target:0.###} (anchor era {anchorUsed} {EraName(anchorUsed)}): {meshesScaled} mesh(es), {vertsScaled} vert(s) re-scaled by {descRatio:0.###}x + per-pawn placement x{target:0.###}");
+                Plugin.Diag($"[Resize] desc {descId} -> x{target:0.###} (anchor era {anchorUsed} {EraName(anchorUsed)}): {meshesScaled} mesh(es), {vertsScaled} vert(s) re-scaled by {descRatio:0.###}x + per-pawn placement x{target:0.###}");
             }
             catch (Exception ex) { Plugin.Log.LogError("[Resize] mesh scale: " + ex); }
         }

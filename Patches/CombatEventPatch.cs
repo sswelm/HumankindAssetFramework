@@ -54,11 +54,11 @@ namespace HumankindAssetFramework
                     long aguid = UniversalInject.GuidToLong(FireProbe.Member(FireProbe.Member(__1, "StrikerArmy"), "GUID"));
                     if (uguid != 0) entry.fireGuidQueue.Enqueue(uguid);
                     if (aguid != 0 && aguid != uguid) entry.fireGuidQueue.Enqueue(aguid);
-                    if (uguid != 0 || aguid != 0) Plugin.Log.LogInfo($"[Fire] *** OUR MODEL '{entry.resourceName}' FIRED (unit {uguid}, army {aguid}, empire={emp} targetTile={tile}) — queued");
+                    if (uguid != 0 || aguid != 0) Plugin.Diag($"[Fire] *** OUR MODEL '{entry.resourceName}' FIRED (unit {uguid}, army {aguid}, empire={emp} targetTile={tile}) — queued");
                     else Plugin.Log.LogWarning($"[Fire] '{entry.resourceName}' fired but GUIDs unreadable — can't target the instance");
                 }
                 else
-                    Plugin.Log.LogInfo($"[Fire] >>> ArtilleryStrikeStarted FIRED (not ours): {unitDef}");
+                    Plugin.Diag($"[Fire] >>> ArtilleryStrikeStarted FIRED (not ours): {unitDef}");
             }
             catch (Exception e) { Plugin.Log.LogError("[Fire] artillery postfix: " + e); }
         }

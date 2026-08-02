@@ -93,7 +93,7 @@ namespace HumankindAssetFramework
                 foreach (var kv in snap)
                     sb.Append(kv.Key.ToString(CultureInfo.InvariantCulture)).Append(',').Append(kv.Value.ToString(CultureInfo.InvariantCulture)).Append('\n');
                 File.WriteAllText(FileFor(name), sb.ToString());
-                Plugin.Log.LogInfo($"[Facing] saved {snap.Count} army facings -> '{name}.facing'");
+                Plugin.Diag($"[Facing] saved {snap.Count} army facings -> '{name}.facing'");
             }
             catch (Exception ex) { Plugin.Log.LogError("[Facing] write: " + ex); }
         }
@@ -110,7 +110,7 @@ namespace HumankindAssetFramework
                 pendingMap.Clear(); applied.Clear();
                 mapLoaded = false; applyStart = -1;
             }
-            Plugin.Log.LogInfo($"[Facing] load '{name}' — will restore facing if a side-file exists");
+            Plugin.Diag($"[Facing] load '{name}' — will restore facing if a side-file exists");
         }
 
         // ---------------- MAIN THREAD (Plugin.Update) ----------------
@@ -143,7 +143,7 @@ namespace HumankindAssetFramework
                         if (p.Length == 2 && ulong.TryParse(p[0].Trim(), out var g) && int.TryParse(p[1].Trim(), out var a))
                             lock (gate) pendingMap[g] = a;
                     }
-                    Plugin.Log.LogInfo($"[Facing] restoring {pendingMap.Count} army facings");
+                    Plugin.Diag($"[Facing] restoring {pendingMap.Count} army facings");
                 }
                 if (pendingMap.Count == 0) { lock (gate) pendingFile = null; applying = false; }
             }
@@ -182,7 +182,7 @@ namespace HumankindAssetFramework
                     else
                     {
                         int d = ((angle - want) % 360 + 360) % 360;      // circular difference; ~0 or ~360 == already there
-                        if (d > 2 && d < 358) { if (ApplyFacing(unit, want)) { applied.Add(guid); Plugin.Log.LogInfo($"[Facing] restored army {guid} -> {want}°"); } }
+                        if (d > 2 && d < 358) { if (ApplyFacing(unit, want)) { applied.Add(guid); Plugin.Diag($"[Facing] restored army {guid} -> {want}°"); } }
                         else applied.Add(guid);                          // already at the saved heading -> done
                     }
                 }
@@ -196,7 +196,7 @@ namespace HumankindAssetFramework
             if (applying && (allDone || (applyStart >= 0 && frame - applyStart > ApplyWindow)))
             {
                 lock (gate) { pendingFile = null; pendingMap.Clear(); }
-                Plugin.Log.LogInfo($"[Facing] restore done ({applied.Count} handled, {(allDone ? "all loaded" : "timeout")})");
+                Plugin.Diag($"[Facing] restore done ({applied.Count} handled, {(allDone ? "all loaded" : "timeout")})");
             }
         }
 

@@ -17,7 +17,7 @@ namespace HumankindAssetFramework
         {
             if (registered) return;
             if (animMgr == null) { Plugin.Log.LogWarning("[Uni] EnsureRegistered: animMgr null"); return; }
-            Plugin.Log.LogInfo("[Uni] EnsureRegistered fired");
+            Plugin.Diag("[Uni] EnsureRegistered fired");
             LoadRegistry();
             // Latch on empty ONLY if the load actually succeeded (`loaded` — a genuinely empty/absent registry).
             // While a transient load failure is still retrying (`loaded` false), leave `registered` unlatched too, or
@@ -79,7 +79,7 @@ namespace HumankindAssetFramework
                     if (e.idleAlt2ClipColl != null) e.idleAlt2AnimId = ResolveCollAnimId(animMgr, e.idleAlt2ClipColl, e.resourceName + ":idlealt2", out e.idleAlt2Dur);
                 }
                 registered = true;
-                Plugin.Log.LogInfo($"[Uni] registered {n} skeleton(s) + re-Apply'd; " + string.Join(", ", entries.Select(x => $"{x.resourceName}(skel {x.skeletonId}, anim {x.animId})")));
+                Plugin.Diag($"[Uni] registered {n} skeleton(s) + re-Apply'd; " + string.Join(", ", entries.Select(x => $"{x.resourceName}(skel {x.skeletonId}, anim {x.animId})")));
             }
             catch (Exception e) { Plugin.Log.LogError("[Uni] register: " + e); }
         }
@@ -88,7 +88,7 @@ namespace HumankindAssetFramework
         internal static void RepointMatch(object addon, object animMgr)
         {
             if (addon == null || animMgr == null) return;
-            if (!repointActiveLogged) { repointActiveLogged = true; Plugin.Log.LogInfo($"[Uni] repoint-hook ACTIVE (UniversalInject={Plugin.UniversalInjectOn.Value}, entries={(entries == null ? -1 : entries.Count)})"); }
+            if (!repointActiveLogged) { repointActiveLogged = true; Plugin.Diag($"[Uni] repoint-hook ACTIVE (UniversalInject={Plugin.UniversalInjectOn.Value}, entries={(entries == null ? -1 : entries.Count)})"); }
             if (!Plugin.UniversalInjectOn.Value) return;
             LoadRegistry();
             try
@@ -123,7 +123,7 @@ namespace HumankindAssetFramework
                         if (unitScaleLogged == null) unitScaleLogged = new HashSet<string>();
                         if (humanClass)
                         {
-                            if (unitScaleLogged.Add(name)) Plugin.Log.LogInfo($"[Resize] '{name}' SKIPPED (human-presentation profile {prof}) — humans/mounts/chariots are excluded from scaling");
+                            if (unitScaleLogged.Add(name)) Plugin.Diag($"[Resize] '{name}' SKIPPED (human-presentation profile {prof}) — humans/mounts/chariots are excluded from scaling");
                         }
                         else
                         {
@@ -141,7 +141,7 @@ namespace HumankindAssetFramework
                                 if (ruleEraOverride > 0) homeEra = ruleEraOverride;
                                 unitScaleByDesc[sdefId] = new UnitScaleInfo { scale = prod, homeEra = homeEra, domain = DomainFromProfile(prof) };
                                 unitScaleNameByDesc[sdefId] = name;
-                                if (unitScaleLogged.Add(name)) Plugin.Log.LogInfo($"[Resize] '{name}' -> desc {sdefId} scale x{prod:0.###} (profile {prof}, own era {homeEra}{(ruleEraOverride > 0 ? " from rule" : " from name")})");
+                                if (unitScaleLogged.Add(name)) Plugin.Diag($"[Resize] '{name}' -> desc {sdefId} scale x{prod:0.###} (profile {prof}, own era {homeEra}{(ruleEraOverride > 0 ? " from rule" : " from name")})");
                             }
                         }
                     }
@@ -149,7 +149,7 @@ namespace HumankindAssetFramework
                 if (entries.Count == 0) return;
                 var e = LongestMatch(entries, name, x => x.pawnDescription);   // most-specific (longest) match, not first-in-order — a variant entry wins over the base it extends
                 if (e == null) return;
-                Plugin.Log.LogInfo($"[Uni] MATCH addon='{name}' -> {e.resourceName} (skel {e.sa},{e.sb},{e.sc},{e.sd})");
+                Plugin.Diag($"[Uni] MATCH addon='{name}' -> {e.resourceName} (skel {e.sa},{e.sb},{e.sc},{e.sd})");
                 // SEED THE DESCRIPTOR HERE, not from the first correctly-skinned pawn (2026-07-31). OnPawnAdded's
                 // safety net — "this pawn is on the DONOR skeleton, force ours" — matches by descId, but descId was
                 // only ever LEARNED from a pawn that had already arrived on our skeleton. One-directional: if the
@@ -165,7 +165,7 @@ namespace HumankindAssetFramework
                     if (seedDesc >= 0 && e.descId != seedDesc)
                     {
                         e.descId = seedDesc;
-                        Plugin.Log.LogInfo($"[Uni] '{e.resourceName}' descriptor seeded at injection: desc={seedDesc} (wrong-skeleton net armed before any pawn spawns)");
+                        Plugin.Diag($"[Uni] '{e.resourceName}' descriptor seeded at injection: desc={seedDesc} (wrong-skeleton net armed before any pawn spawns)");
                     }
                 }
                 catch (Exception exSeed) { Plugin.Log.LogWarning($"[Uni] '{e.resourceName}' could not seed descriptor from the addon ({exSeed.Message}) — falling back to learning it from the first correct pawn"); }
@@ -185,7 +185,7 @@ namespace HumankindAssetFramework
                 if (!e.fragsLogged)
                 {
                     var sk0 = GetMember(addon, "Skeleton"); var mc0 = GetMember(addon, "MeshCollection");
-                    Plugin.Log.LogInfo($"[Uni] {e.resourceName} donor Skeleton='{(sk0 as UnityEngine.Object)?.name}' MeshCollection='{(mc0 as UnityEngine.Object)?.name}'");
+                    Plugin.Diag($"[Uni] {e.resourceName} donor Skeleton='{(sk0 as UnityEngine.Object)?.name}' MeshCollection='{(mc0 as UnityEngine.Object)?.name}'");
                     DumpSkinned(sk0, e.resourceName + " donor.Skeleton");
                     if (mc0 != null && !ReferenceEquals(mc0, sk0)) DumpSkinned(mc0, e.resourceName + " donor.MeshCollection");
                     // WIDE NET: the rotor is neither a sub-mesh nor a fragment, so dump every field/array on the addon
@@ -205,7 +205,7 @@ namespace HumankindAssetFramework
                 ReloadFragments(addon, animMgr, e.skeleton, e);
                 InjectHandProp(addon, animMgr, e.skeleton, e);
                 ApplyTexture(e, animMgr);
-                if (!e.repointed) { e.repointed = true; anyRescuable = null; Plugin.Log.LogInfo($"[Uni] repointed '{name}' -> {e.resourceName} (mesh '{bodyName}', layer '{e.layerHint}')"); }
+                if (!e.repointed) { e.repointed = true; anyRescuable = null; Plugin.Diag($"[Uni] repointed '{name}' -> {e.resourceName} (mesh '{bodyName}', layer '{e.layerHint}')"); }
             }
             catch (Exception ex) { Plugin.Log.LogError("[Uni] repoint: " + ex); }
         }
@@ -237,7 +237,7 @@ namespace HumankindAssetFramework
             if (g == null) { Plugin.Log.LogError($"[Uni] LoadSkeleton '{tag}': Amplitude LoadAsset/TryLoadAsset not resolved (game update?) — skipping this model"); return null; }
             var args = g.GetParameters().Length == 1 ? new[] { guid } : new[] { guid, null };
             var skel = g.Invoke(null, args);
-            Plugin.Log.LogInfo($"[Uni] loaded skeleton '{tag}': " + ((skel as UnityEngine.Object)?.name ?? "NULL (rebuild mod?)"));
+            Plugin.Diag($"[Uni] loaded skeleton '{tag}': " + ((skel as UnityEngine.Object)?.name ?? "NULL (rebuild mod?)"));
             return skel;
         }
 
@@ -271,7 +271,7 @@ namespace HumankindAssetFramework
             if (want.Length == 0 || name.IndexOf(want, StringComparison.OrdinalIgnoreCase) < 0 || !rigDumped.Add(name)) return;
             try
             {
-                Plugin.Log.LogInfo($"[RigDump] ================ VANILLA PAWN RIG: '{name}' ================");
+                Plugin.Diag($"[RigDump] ================ VANILLA PAWN RIG: '{name}' ================");
                 var sk = GetMember(addon, "Skeleton"); var mc = GetMember(addon, "MeshCollection");
                 DumpSkinned(sk, name + ".Skeleton");
                 if (mc != null && !ReferenceEquals(mc, sk)) DumpSkinned(mc, name + ".MeshCollection");
@@ -297,7 +297,7 @@ namespace HumankindAssetFramework
                         }
                 }
                 DumpClipCollections(sk, name);
-                Plugin.Log.LogInfo($"[RigDump] ================ END '{name}' ================");
+                Plugin.Diag($"[RigDump] ================ END '{name}' ================");
             }
             catch (Exception ex) { Plugin.Log.LogError("[RigDump] " + ex); }
         }
@@ -310,7 +310,7 @@ namespace HumankindAssetFramework
             try
             {
                 var ccType = AccessTools.TypeByName("Amplitude.Mercury.Animation.ClipCollection");
-                if (ccType == null) { Plugin.Log.LogInfo("[RigDump] ClipCollection type not found"); return; }
+                if (ccType == null) { Plugin.Diag("[RigDump] ClipCollection type not found"); return; }
                 // bone index -> name from the skeleton's BoneInfos
                 var boneNames = new List<string>();
                 var bi = sk == null ? null : AccessTools.Field(sk.GetType(), "BoneInfos")?.GetValue(sk) as Array;
@@ -322,7 +322,7 @@ namespace HumankindAssetFramework
                     if (ccName.IndexOf(family, StringComparison.OrdinalIgnoreCase) < 0) continue;
                     var entries = AccessTools.Field(ccType, "animationClipEntries")?.GetValue(cc) as Array;
                     var curves = AccessTools.Field(ccType, "animationClipCurveEntries")?.GetValue(cc) as Array;
-                    Plugin.Log.LogInfo($"[RigDump] ClipCollection '{ccName}': {entries?.Length ?? 0} clip(s), {curves?.Length ?? 0} curve(s)");
+                    Plugin.Diag($"[RigDump] ClipCollection '{ccName}': {entries?.Length ?? 0} clip(s), {curves?.Length ?? 0} curve(s)");
                     if (entries == null || curves == null) continue;
                     for (int e = 0; e < entries.Length; e++)
                     {
@@ -343,9 +343,9 @@ namespace HumankindAssetFramework
                             if (fmt != "Fixe")   // the interesting curves: anything that MOVES
                                 perBone.Add($"{(bIdx >= 0 && bIdx < boneNames.Count ? boneNames[bIdx] : "#" + bIdx)}={fmt}");
                         }
-                        Plugin.Log.LogInfo($"[RigDump]   clip '{cn}' frames={frames} bones={bones} loop={loop} formats={{{string.Join(", ", formats.Select(kv => kv.Key + ":" + kv.Value))}}}");
+                        Plugin.Diag($"[RigDump]   clip '{cn}' frames={frames} bones={bones} loop={loop} formats={{{string.Join(", ", formats.Select(kv => kv.Key + ":" + kv.Value))}}}");
                         if (perBone.Count > 0)
-                            Plugin.Log.LogInfo($"[RigDump]     moving: {string.Join(", ", perBone)}");
+                            Plugin.Diag($"[RigDump]     moving: {string.Join(", ", perBone)}");
                     }
                 }
             }
@@ -376,7 +376,7 @@ namespace HumankindAssetFramework
                         {
                             var names = new List<string>();
                             for (int i = 0; i < a.Length && i < 400; i++) names.Add(Probe(a.GetValue(i)) ?? "?");
-                            Plugin.Log.LogInfo($"[RigDump] {label}.{f.Name}[{a.Length}]: {string.Join(", ", names)}");
+                            Plugin.Diag($"[RigDump] {label}.{f.Name}[{a.Length}]: {string.Join(", ", names)}");
                         }
                     }
             }
@@ -389,16 +389,16 @@ namespace HumankindAssetFramework
         {
             try
             {
-                if (mc == null) { Plugin.Log.LogInfo($"[Uni] {label}: <null>"); return; }
+                if (mc == null) { Plugin.Diag($"[Uni] {label}: <null>"); return; }
                 var arr = AccessTools.Field(mc.GetType(), "skinnedMeshInfos")?.GetValue(mc) as Array;
-                if (arr == null) { Plugin.Log.LogInfo($"[Uni] {label}: no skinnedMeshInfos field"); return; }
-                Plugin.Log.LogInfo($"[Uni] {label}: {arr.Length} skinned sub-mesh(es)");
+                if (arr == null) { Plugin.Diag($"[Uni] {label}: no skinnedMeshInfos field"); return; }
+                Plugin.Diag($"[Uni] {label}: {arr.Length} skinned sub-mesh(es)");
                 for (int i = 0; i < arr.Length; i++)
                 {
                     var it = arr.GetValue(i);
                     var nm = GetMember(it, "MeshName");
                     var mi = GetMember(it, "MeshIndex");
-                    Plugin.Log.LogInfo($"[Uni]    {label}[{i}] mesh='{nm}' meshIndex={mi}");
+                    Plugin.Diag($"[Uni]    {label}[{i}] mesh='{nm}' meshIndex={mi}");
                 }
             }
             catch (Exception ex) { Plugin.Log.LogWarning($"[Uni] DumpSkinned {label}: " + ex.Message); }
@@ -410,9 +410,9 @@ namespace HumankindAssetFramework
         {
             try
             {
-                if (o == null) { Plugin.Log.LogInfo($"[Uni] {label}: <null>"); return; }
+                if (o == null) { Plugin.Diag($"[Uni] {label}: <null>"); return; }
                 var t = o.GetType();
-                Plugin.Log.LogInfo($"[Uni] === {label} ({t.Name}) fields ===");
+                Plugin.Diag($"[Uni] === {label} ({t.Name}) fields ===");
                 for (var bt = t; bt != null && bt != typeof(object); bt = bt.BaseType)
                     foreach (var f in bt.GetFields(BF | BindingFlags.DeclaredOnly))
                     {
@@ -437,7 +437,7 @@ namespace HumankindAssetFramework
                         // only log the interesting ones to keep the log readable
                         string ln = f.Name.ToLowerInvariant();
                         if (v is Array || v is UnityEngine.Object || v is string || ln.Contains("mesh") || ln.Contains("rotor") || ln.Contains("fx") || ln.Contains("bone") || ln.Contains("attach") || ln.Contains("sub") || ln.Contains("frag"))
-                            Plugin.Log.LogInfo($"[Uni]    {label}.{f.Name} ({f.FieldType.Name}) = {disp}");
+                            Plugin.Diag($"[Uni]    {label}.{f.Name} ({f.FieldType.Name}) = {disp}");
                     }
             }
             catch (Exception ex) { Plugin.Log.LogWarning($"[Uni] DumpFields {label}: " + ex.Message); }
@@ -519,7 +519,7 @@ namespace HumankindAssetFramework
 
                     // Dump the donor's fragment mesh names once, so the modder can see what to hide (e.g. a rotor).
                     var fragMesh = mnField?.GetValue(item) as string;
-                    if (e != null && !e.fragsLogged) Plugin.Log.LogInfo($"[Uni] {e.resourceName} donor fragment[{i}] mesh='{fragMesh}'");
+                    if (e != null && !e.fragsLogged) Plugin.Diag($"[Uni] {e.resourceName} donor fragment[{i}] mesh='{fragMesh}'");
 
                     // HIDE donor fragments whose mesh name matches hideMeshes (kept separate per model: a drone hides the
                     // helicopter rotor; a custom helicopter leaves hideMeshes empty and borrows that same spinning rotor).
@@ -528,7 +528,7 @@ namespace HumankindAssetFramework
                         encField?.SetValue(item, (uint)0);   // force EncodedMeshAndVisualParticleCount = 0 => invisible
                         frags.SetValue(item, i);
                         hiddenIdx.Add(i);
-                        if (e != null && !e.fragsLogged) Plugin.Log.LogInfo($"[Uni] {e.resourceName} HID donor fragment[{i}] mesh='{fragMesh}'");
+                        if (e != null && !e.fragsLogged) Plugin.Diag($"[Uni] {e.resourceName} HID donor fragment[{i}] mesh='{fragMesh}'");
                         continue;
                     }
 
@@ -544,7 +544,7 @@ namespace HumankindAssetFramework
                             var clone = UnityEngine.Object.Instantiate(host);
                             clone.name = e.resourceName + "_OutputLayer";
                             e.isolatedLayer = clone;
-                            Plugin.Log.LogInfo($"[Uni] cloned output layer for {e.resourceName} -> '{clone.name}'");
+                            Plugin.Diag($"[Uni] cloned output layer for {e.resourceName} -> '{clone.name}'");
                         }
                         if (e.isolatedLayer != null) folField.SetValue(item, e.isolatedLayer);
                     }
@@ -592,7 +592,7 @@ namespace HumankindAssetFramework
                             if (patched > 0)
                             {
                                 changed = true;
-                                Plugin.Log.LogInfo($"[Uni] {e?.resourceName}: descriptor[{defId}] hide patched IN PLACE ({patched} donor fragment(s) zeroed on the GPU snapshot)");
+                                Plugin.Diag($"[Uni] {e?.resourceName}: descriptor[{defId}] hide patched IN PLACE ({patched} donor fragment(s) zeroed on the GPU snapshot)");
                             }
                             // BONES-COUNT SYNC (the tread spike plague, part 3): RegisterPawnDefinition snapshots
                             // BonesCount from the addon's Skeleton BEFORE our skeleton swap — the descriptor still
@@ -615,7 +615,7 @@ namespace HumankindAssetFramework
                                         if (bmin != null) dT.GetField("BBoxMin")?.SetValue(dEntry, bmin);
                                         if (bmax != null) dT.GetField("BBoxMax")?.SetValue(dEntry, bmax);
                                         changed = true;
-                                        Plugin.Log.LogInfo($"[Uni] {e?.resourceName}: descriptor[{defId}] BonesCount {dBones} -> {ourBones} (donor snapshot starved the skeleton; bones past #{dBones - 1} skinned garbage)");
+                                        Plugin.Diag($"[Uni] {e?.resourceName}: descriptor[{defId}] BonesCount {dBones} -> {ourBones} (donor snapshot starved the skeleton; bones past #{dBones - 1} skinned garbage)");
                                     }
                                 }
                             }
@@ -735,7 +735,7 @@ namespace HumankindAssetFramework
                                 }
                                 break;
                             }
-                        Plugin.Log.LogInfo($"[Props] '{e.resourceName}' hand prop import angles ({ax},{ay},{az}) content={(stamped ? "stamped" : "MISS")} fxMeshAsset={(fxStamped ? "stamped" : "MISS")}{(preRegistered ? " — WARNING: collection was already registered/encoded (PropCollectionGuids?), angles may not take this session" : "")}");
+                        Plugin.Diag($"[Props] '{e.resourceName}' hand prop import angles ({ax},{ay},{az}) content={(stamped ? "stamped" : "MISS")} fxMeshAsset={(fxStamped ? "stamped" : "MISS")}{(preRegistered ? " — WARNING: collection was already registered/encoded (PropCollectionGuids?), angles may not take this session" : "")}");
                     }
                     else Plugin.Log.LogWarning($"[Props] '{e.resourceName}' hand prop: bad angles '{e.handPropAngles}' (want \"x,y,z\")");
                 }
@@ -766,7 +766,7 @@ namespace HumankindAssetFramework
                     fol = clone;
                 }
                 else if (propAtlas == null)
-                    Plugin.Log.LogInfo($"[Props] '{e.resourceName}' hand prop: no '{propName}_Atlas' in the mounted bundles — keeping the borrowed layer's skin");
+                    Plugin.Diag($"[Props] '{e.resourceName}' hand prop: no '{propName}_Atlas' in the mounted bundles — keeping the borrowed layer's skin");
                 // 3) OUR bone, by substring (case-insensitive; first match wins)
                 string boneSub = string.IsNullOrEmpty(e.handPropBone) ? "R_Hand" : e.handPropBone;
                 string boneName = null;
@@ -821,7 +821,7 @@ namespace HumankindAssetFramework
                     if (pm == null || defId < 0)
                     {
                         // Not registered yet: RegisterPawnDefinition's own Add() snapshots the appended array — nothing to patch.
-                        Plugin.Log.LogInfo($"[Props] '{e.resourceName}' hand prop appended pre-registration — the registration snapshot carries it");
+                        Plugin.Diag($"[Props] '{e.resourceName}' hand prop appended pre-registration — the registration snapshot carries it");
                     }
                     else
                     {
@@ -862,12 +862,12 @@ namespace HumankindAssetFramework
                             descs.SetValue(dEntry, defId);
                             cntF.SetValue(pm, tail + (int)count + 1);
                             dirtyF?.SetValue(pm, true);
-                            Plugin.Log.LogInfo($"[Props] descriptor[{defId}] repointed: fragments {start}+{count} -> {tail}+{count + 1} (surgical, layer {folIdx})");
+                            Plugin.Diag($"[Props] descriptor[{defId}] repointed: fragments {start}+{count} -> {tail}+{count + 1} (surgical, layer {folIdx})");
                         }
                     }
                 }
                 catch (Exception ex) { Plugin.Log.LogWarning("[Props] descriptor patch: " + ex.Message); }
-                Plugin.Log.LogInfo($"[Props] '{e.resourceName}' hand prop '{meshName}' glued to bone '{boneName}' (boneIndex {bidx}, encoded {enc})");
+                Plugin.Diag($"[Props] '{e.resourceName}' hand prop '{meshName}' glued to bone '{boneName}' (boneIndex {bidx}, encoded {enc})");
             }
             catch (Exception ex) { Plugin.Log.LogError("[Props] InjectHandProp: " + ex); }
         }

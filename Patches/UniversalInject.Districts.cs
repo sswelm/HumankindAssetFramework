@@ -52,7 +52,7 @@ namespace HumankindAssetFramework
                 distAffinity = Plugin.DistrictAffinity?.Value?.Trim() ?? "";
                 distGuid = ParseGuidCsv(Plugin.DistrictEvolverGuid?.Value?.Trim() ?? "");
                 distFxMeshGuid = ParseGuidCsv(Plugin.DistrictFxMeshGuid?.Value?.Trim() ?? "");
-                if (distOn) Plugin.Log.LogInfo($"[District] repoint ACTIVE: name='{distName}' affinity='{distAffinity}' evolverGuid={(distGuid != null ? "set" : "none")} fxMeshGuid={(distFxMeshGuid != null ? "set" : "none")}");
+                if (distOn) Plugin.Diag($"[District] repoint ACTIVE: name='{distName}' affinity='{distAffinity}' evolverGuid={(distGuid != null ? "set" : "none")} fxMeshGuid={(distFxMeshGuid != null ? "set" : "none")}");
 
                 // The district REGISTRY (written by the District Factory window): any number of district models at once.
                 distModels.Clear();
@@ -95,7 +95,7 @@ namespace HumankindAssetFramework
                 if (!distOn || Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;   // investigation aid — off unless DistrictDebug
                 var name = GetMember(district, "ConstructibleDefinitionName")?.ToString() ?? "<null>";
                 if (distSeen.Add(name))
-                    Plugin.Log.LogInfo($"[District] saw district '{name}'{(name == distName ? "  <-- MATCHES DistrictName" : "")}");
+                    Plugin.Diag($"[District] saw district '{name}'{(name == distName ? "  <-- MATCHES DistrictName" : "")}");
             }
             catch { }
         }
@@ -124,7 +124,7 @@ namespace HumankindAssetFramework
                 var gt = guid.GetType();
                 object a = gt.GetField("a", BF)?.GetValue(guid), b = gt.GetField("b", BF)?.GetValue(guid),
                        c = gt.GetField("c", BF)?.GetValue(guid), d = gt.GetField("d", BF)?.GetValue(guid);
-                Plugin.Log.LogInfo($"[DistrictMat] {name} -> material {a},{b},{c},{d}");
+                Plugin.Diag($"[DistrictMat] {name} -> material {a},{b},{c},{d}");
             }
             catch (Exception ex) { Plugin.Log.LogError("[DistrictMat] dump: " + ex); }
         }
@@ -201,7 +201,7 @@ namespace HumankindAssetFramework
                 var ss = Activator.CreateInstance(vf.FieldType, new object[] { distAffinity });
                 SetMember(district, "visualAffinityName", ss);
                 SetMember(district, "initialVisualAffinityName", ss);
-                if (!distSwapLogged) { distSwapLogged = true; Plugin.Log.LogInfo($"[District] '{distName}' affinity -> '{distAffinity}' (zero-bake swap)"); }
+                if (!distSwapLogged) { distSwapLogged = true; Plugin.Diag($"[District] '{distName}' affinity -> '{distAffinity}' (zero-bake swap)"); }
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] affinity swap: " + ex); }
         }
@@ -291,14 +291,14 @@ namespace HumankindAssetFramework
                             {
                                 var mi = AccessTools.Field(t, "meshIndex")?.GetValue(leaf);
                                 var oli = AccessTools.Field(t, "outputLayerIndex")?.GetValue(leaf);
-                                Plugin.Log.LogInfo($"[District]   leaf '{GetMember(leaf, "Name")}' after Load: meshIndex={mi} outputLayerIndex={oli}");
+                                Plugin.Diag($"[District]   leaf '{GetMember(leaf, "Name")}' after Load: meshIndex={mi} outputLayerIndex={oli}");
                             }
                         }
                     }
                     catch { }
                 }
             }
-            if (resolve) Plugin.Log.LogInfo($"[District] '{distName}': re-pointed {n} leaves, re-resolved {resolved} via Load().");
+            if (resolve) Plugin.Diag($"[District] '{distName}': re-pointed {n} leaves, re-resolved {resolved} via Load().");
             return n;
         }
 
@@ -355,7 +355,7 @@ namespace HumankindAssetFramework
                 }
             }
             catch (Exception ex) { lines.Add("dump error: " + ex.Message); }
-            foreach (var l in lines) Plugin.Log.LogInfo("[DistrictState] " + l);
+            foreach (var l in lines) Plugin.Diag("[DistrictState] " + l);
             return lines;
         }
 
@@ -388,7 +388,7 @@ namespace HumankindAssetFramework
                 var load = t.GetMethod("Load", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
                 if (load != null && load.GetParameters().Length == 2 && distFxManager != null)
                     load.Invoke(clone, new object[] { distFxManager, fxNextDoublon != null ? fxNextDoublon.Invoke(null, null) : (uint)0 });
-                Plugin.Log.LogInfo($"[District] built PRIVATE leaf '{t.Name}': MaterialIndex={GF(t, "materialIndex")?.GetValue(clone)} meshIndex={GF(t, "meshIndex")?.GetValue(clone)}");
+                Plugin.Diag($"[District] built PRIVATE leaf '{t.Name}': MaterialIndex={GF(t, "materialIndex")?.GetValue(clone)} meshIndex={GF(t, "meshIndex")?.GetValue(clone)}");
                 return clone;
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] build private leaf: " + ex); return null; }
@@ -410,7 +410,7 @@ namespace HumankindAssetFramework
                     var sel = evf.GetValue(box);
                     if (sel == null) return;
                     e.privateLeaf = BuildPrivateLeaf(sel, e.fxMeshGuid);
-                    if (e.privateLeaf == null) { if (e.wait++ % 300 == 0) Plugin.Log.LogInfo($"[District] '{e.district}': waiting for leaves to load..."); return; }
+                    if (e.privateLeaf == null) { if (e.wait++ % 300 == 0) Plugin.Diag($"[District] '{e.district}': waiting for leaves to load..."); return; }
                 }
                 if (ReferenceEquals(evf.GetValue(box), e.privateLeaf)) return;   // already ours this frame
                 evf.SetValue(box, e.privateLeaf);
@@ -419,7 +419,7 @@ namespace HumankindAssetFramework
                 var refresh = e.plbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
                     .FirstOrDefault(m => m.Name == "RefreshChannel" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
                 if (refresh != null) refresh.Invoke(e.plbc, new object[] { e.layer, System.Enum.ToObject(refresh.GetParameters()[1].ParameterType, 0) });
-                if (!e.pointedLogged) { e.pointedLogged = true; Plugin.Log.LogInfo($"[District] '{e.district}' ISOLATED: channel {e.layer} -> its private leaf (this tile only)."); }
+                if (!e.pointedLogged) { e.pointedLogged = true; Plugin.Diag($"[District] '{e.district}' ISOLATED: channel {e.layer} -> its private leaf (this tile only)."); }
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] point channel: " + ex); }
         }
@@ -439,7 +439,7 @@ namespace HumankindAssetFramework
                     CollectLeaves(mat, e.leaves, 0, new HashSet<object>());
                     if (e.leaves.Count == 0) return;   // async load — retry next frame
                     e.collected = true;
-                    Plugin.Log.LogInfo($"[District] '{e.district}': collected {e.leaves.Count} shared leaf Element(s) (GLOBAL swap).");
+                    Plugin.Diag($"[District] '{e.district}': collected {e.leaves.Count} shared leaf Element(s) (GLOBAL swap).");
                     ApplyLeaves(e.leaves, e.fxMeshGuid, resolve: true);
                 }
                 else ApplyLeaves(e.leaves, e.fxMeshGuid, resolve: false);   // keep our GUID set in case the game re-Loads
@@ -466,7 +466,7 @@ namespace HumankindAssetFramework
                     var lf = district.GetType().GetField("mainLevelBuildComponantLayer", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.FlattenHierarchy);
                     if (lf?.GetValue(null) is int li) layer = li;
                     e.plbc = plbc; e.layer = layer;
-                    if (!e.matchLogged) { e.matchLogged = true; Plugin.Log.LogInfo($"[District] registry matched '{e.district}' (isolate={e.isolate})."); }
+                    if (!e.matchLogged) { e.matchLogged = true; Plugin.Diag($"[District] registry matched '{e.district}' (isolate={e.isolate})."); }
                 }
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] apply entries: " + ex); }
@@ -557,7 +557,7 @@ namespace HumankindAssetFramework
                     if (pawnGuid == null || projGuid == null) { Plugin.Log.LogError($"[Projectile] both sides must be four ints \"a,b,c,d\" (got '{e}')"); continue; }
                     projOverrides.Add((pawnGuid, projGuid, e));
                 }
-                if (projOverrides.Count > 0) Plugin.Log.LogInfo($"[Projectile] {projOverrides.Count} override(s) to apply");
+                if (projOverrides.Count > 0) Plugin.Diag($"[Projectile] {projOverrides.Count} override(s) to apply");
             }
             if (projOverrides.Count == 0) return;
 
@@ -578,7 +578,7 @@ namespace HumankindAssetFramework
                 var gf = FindGuidField(pref.GetType());
                 if (gf == null) { Plugin.Log.LogError("[Projectile] ProjectileAssetReference has no guid field (layout changed?)"); continue; }
                 gf.SetValue(pref, projGuid);
-                Plugin.Log.LogInfo($"[Projectile] '{pawnDef.name}'.Projectile -> '{proj.name}'  ({raw})");
+                Plugin.Diag($"[Projectile] '{pawnDef.name}'.Projectile -> '{proj.name}'  ({raw})");
             }
         }
 
@@ -594,7 +594,7 @@ namespace HumankindAssetFramework
                 var g = ParseGuidCsv(part.Trim());
                 if (g != null) propPending.Add(g);
             }
-            if (propPending.Count > 0) Plugin.Log.LogInfo($"[Props] {propPending.Count} mesh collection(s) to register");
+            if (propPending.Count > 0) Plugin.Diag($"[Props] {propPending.Count} mesh collection(s) to register");
         }
 
         // Called from Hk_PropRegister's postfix (loud: this is THE moment it must work) and from the Update tick (quiet).
@@ -621,7 +621,7 @@ namespace HumankindAssetFramework
                     continue;
                 }
                 reg.Invoke(animationManager, new[] { mc });   // dedupes internally; also LoadIFNs the meshes into the GPU content manager
-                Plugin.Log.LogInfo($"[Props] registered mesh collection '{(mc as UnityEngine.Object)?.name}'" + (loud ? " (at AnimationLoad — before pawn resolution)" : " (late tick)"));
+                Plugin.Diag($"[Props] registered mesh collection '{(mc as UnityEngine.Object)?.name}'" + (loud ? " (at AnimationLoad — before pawn resolution)" : " (late tick)"));
                 propPending.RemoveAt(i);
             }
         }
@@ -685,7 +685,7 @@ namespace HumankindAssetFramework
                         && m.GetParameters()[1].ParameterType.Name == "Guid");
                 if (setChannel == null) { Plugin.Log.LogError("[District] SetChannel(int,Guid,...) overload not found (game update?)."); distGuid = null; return; }
                 setChannel.Invoke(plbc, new object[] { layer, distGuid, renderMode, true });
-                if (!distGuidLogged) { distGuidLogged = true; Plugin.Log.LogInfo($"[District] '{distName}' mesh channel -> our FxEvolverMaterial (layer {layer})"); }
+                if (!distGuidLogged) { distGuidLogged = true; Plugin.Diag($"[District] '{distName}' mesh channel -> our FxEvolverMaterial (layer {layer})"); }
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] guid override: " + ex); }
         }

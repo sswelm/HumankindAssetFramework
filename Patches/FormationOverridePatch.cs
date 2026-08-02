@@ -219,7 +219,7 @@ namespace HumankindAssetFramework
                 if (!dbWaitLogged)
                 {
                     dbWaitLogged = true;
-                    Plugin.Log.LogInfo($"[Formation] waiting for databases (formationType={(fdType != null ? "ok" : "MISSING")}, " +
+                    Plugin.Diag($"[Formation] waiting for databases (formationType={(fdType != null ? "ok" : "MISSING")}, " +
                                        $"formationDb={(fdb != null ? "ok" : "null")}, unitDb={(udb != null ? "ok" : "null")}) — retrying in the background.");
                 }
                 return;   // stay pending; Tick() retries
@@ -292,12 +292,12 @@ namespace HumankindAssetFramework
                 int pawns = (Mem(unit, "Pawns") as ICollection)?.Count ?? -1;
                 reformed.Add(unit); handledAny = true;               // handle/log each unit once; mark BEFORE any call so a throw isn't retried forever
                 if (pawns >= e.dummies.Count)                        // already full — spawned after the override won the race
-                { Plugin.Log.LogInfo($"[Formation] '{pdn}' already {pawns}/{e.dummies.Count} (formation='{fn}' dummyCount={dc}) — no re-form needed"); continue; }
+                { Plugin.Diag($"[Formation] '{pdn}' already {pawns}/{e.dummies.Count} (formation='{fn}' dummyCount={dc}) — no re-form needed"); continue; }
                 bool naval = false; try { naval = Convert.ToBoolean(Mem(unit, "IsNaval")); } catch { }
                 AccessTools.Method(unit.GetType(), "UpdatePawns", new[] { typeof(bool) })?.Invoke(unit, new object[] { naval });
                 int after = (Mem(unit, "Pawns") as ICollection)?.Count ?? -1;
                 object dc2 = Mem(Mem(unit, "Formation"), "DummyCount");
-                Plugin.Log.LogInfo($"[Formation] re-instantiated '{pdn}': pawns {pawns} -> {after} (formation='{fn}', dummyCount {dc} -> {dc2}, target {e.dummies.Count}) — spawned before the override.");
+                Plugin.Diag($"[Formation] re-instantiated '{pdn}': pawns {pawns} -> {after} (formation='{fn}', dummyCount {dc} -> {dc2}, target {e.dummies.Count}) — spawned before the override.");
             }
             reformed.RemoveWhere(u => !reformPresent.Contains(u));   // drop gone units so a genuinely new instance is handled again
             // TERMINATION: the catch-up only ever targets units that spawned BEFORE the override (all present within a few
@@ -326,7 +326,7 @@ namespace HumankindAssetFramework
                 var add = AccessTools.Method(fdb.GetType(), "Add", new[] { fdType });
                 if (add == null) { Plugin.Log.LogError("[Formation] Database.Add not found (game update?)."); e.done = true; return; }
                 add.Invoke(fdb, new object[] { so });
-                Plugin.Log.LogInfo($"[Formation] injected '{e.formation}' ({e.dummies.Count} dummies) into the live formation database.");
+                Plugin.Diag($"[Formation] injected '{e.formation}' ({e.dummies.Count} dummies) into the live formation database.");
             }
             else if (e.dummies.Count > 0 && !(created.TryGetValue(e.formation, out var mine) && ReferenceEquals(existing, mine)))
             {
@@ -348,7 +348,7 @@ namespace HumankindAssetFramework
             // layout. Per-unit link entries still repoint their units elsewhere and thus overrule it.
             if (e.unit.Length == 0)
             {
-                Plugin.Log.LogInfo($"[Formation] MACRO replacement live: every unit referencing '{e.formation}' now fields {e.dummies.Count} pawns at full health.");
+                Plugin.Diag($"[Formation] MACRO replacement live: every unit referencing '{e.formation}' now fields {e.dummies.Count} pawns at full health.");
                 e.done = true; return;
             }
 
@@ -361,7 +361,7 @@ namespace HumankindAssetFramework
                 e.done = true; return;
             }
             SetFreshElementReference(unitDef, "PresentationFormationDefinition", e.formation);
-            Plugin.Log.LogInfo($"[Formation] '{e.unit}' now uses formation '{e.formation}'" +
+            Plugin.Diag($"[Formation] '{e.unit}' now uses formation '{e.formation}'" +
                                (e.dummies.Count > 0 ? $" ({e.dummies.Count} pawns at full health)." : "."));
 
             // Optional: tighten the packing by overriding the unit's random per-model jitter. DummyOffsetPosition lives in
@@ -375,7 +375,7 @@ namespace HumankindAssetFramework
                 {
                     offField.SetValue(cv, new Vector2(e.dummyOffset, e.dummyOffset));
                     cvField.SetValue(unitDef, cv);   // struct: write the mutated box back onto the def
-                    Plugin.Log.LogInfo($"[Formation] '{e.unit}' dummy jitter -> {e.dummyOffset} (tighter packing).");
+                    Plugin.Diag($"[Formation] '{e.unit}' dummy jitter -> {e.dummyOffset} (tighter packing).");
                 }
             }
             e.done = true;
@@ -458,7 +458,7 @@ namespace HumankindAssetFramework
                 object holder = AccessTools.Field(presentationUnit.GetType(), "PresentationEntityHolder")?.GetValue(presentationUnit)
                                 ?? AccessTools.Property(presentationUnit.GetType(), "PresentationEntityHolder")?.GetValue(presentationUnit);
                 object health = holder != null ? AccessTools.Method(holder.GetType(), "GetHealthRatio")?.Invoke(holder, null) : null;
-                Plugin.Log.LogInfo($"[Formation] spawn: dummies={dummyCount} pawns={pawns?.Count ?? -1} healthRatio={health ?? "?"} — pawns should be ceil(dummies × health).");
+                Plugin.Diag($"[Formation] spawn: dummies={dummyCount} pawns={pawns?.Count ?? -1} healthRatio={health ?? "?"} — pawns should be ceil(dummies × health).");
                 // Per-pawn placement dump: 12 spawned but only 9 visible = either 3 draw invisibly or 3 stand
                 // somewhere unexpected — this shows each pawn's dummy slot, active state and world position.
                 int k = 0;
@@ -468,7 +468,7 @@ namespace HumankindAssetFramework
                                 ?? AccessTools.Property(pw.GetType(), "Dummy")?.GetValue(pw);
                     var dtr = dummy != null ? AccessTools.Field(dummy.GetType(), "Transform")?.GetValue(dummy) as Transform : null;
                     var go = (pw as Component)?.gameObject;
-                    Plugin.Log.LogInfo($"[Formation]   pawn{k++}: dummyLocal={(dtr != null ? dtr.localPosition.ToString("F2") : "?")} " +
+                    Plugin.Diag($"[Formation]   pawn{k++}: dummyLocal={(dtr != null ? dtr.localPosition.ToString("F2") : "?")} " +
                                        $"active={(go != null ? go.activeInHierarchy.ToString() : "?")} world={(go != null ? go.transform.position.ToString("F1") : "?")}");
                 }
             }
@@ -563,7 +563,7 @@ namespace HumankindAssetFramework
                 // 4) rebuild every fragment entry against the scaled assets
                 var fragsArr = UniversalInject.GetMember(addon, "FragmentEntries") as Array;
                 if (fragsArr == null || fragsArr.Length == 0)
-                { Plugin.Log.LogInfo($"[Formation] '{defName}': skeleton scaled x{s} (no fragments)."); return; }
+                { Plugin.Diag($"[Formation] '{defName}': skeleton scaled x{s} (no fragments)."); return; }
                 var fragType = fragsArr.GetType().GetElementType();
                 var fMc = AccessTools.Field(fragType, "meshCollection");
                 var fMn = AccessTools.Field(fragType, "meshName");
@@ -618,7 +618,7 @@ namespace HumankindAssetFramework
                 if (defId < 0)
                 {
                     if (firstRun || replaced > 0)
-                        Plugin.Log.LogInfo($"[Formation] '{defName}': SCALED x{s} in data (skeleton + {replaced} fragment(s)) pre-registration — the snapshot carries it.");
+                        Plugin.Diag($"[Formation] '{defName}': SCALED x{s} in data (skeleton + {replaced} fragment(s)) pre-registration — the snapshot carries it.");
                     return;
                 }
                 var pmType = AccessTools.TypeByName("Amplitude.Mercury.Animation.PawnManager");
@@ -638,7 +638,7 @@ namespace HumankindAssetFramework
                 {
                     // descriptor slot allotted but not yet filled (the game populates it on a LATER pass, from the
                     // addon's FragmentEntries — which now hold OUR scaled entries; the next Load postfix also re-runs us)
-                    if (firstRun) Plugin.Log.LogInfo($"[Formation] '{defName}': descriptor not yet populated — scaled entries are in place for the game's own fill; re-checked on the next Load.");
+                    if (firstRun) Plugin.Diag($"[Formation] '{defName}': descriptor not yet populated — scaled entries are in place for the game's own fill; re-checked on the next Load.");
                     return;
                 }
                 if (count != fragsArr.Length)
@@ -669,7 +669,7 @@ namespace HumankindAssetFramework
                 cntF.SetValue(pm, tail + (int)count);
                 dirtyF?.SetValue(pm, true);
                 if (firstRun || replaced > 0)
-                    Plugin.Log.LogInfo($"[Formation] '{defName}': SCALED x{s} in data (skeleton '{sk1.name}' + {replaced}/{count} fragment(s) this pass); descriptor[{defId}] repointed {start}+{count} -> {tail}+{count}.");
+                    Plugin.Diag($"[Formation] '{defName}': SCALED x{s} in data (skeleton '{sk1.name}' + {replaced}/{count} fragment(s) this pass); descriptor[{defId}] repointed {start}+{count} -> {tail}+{count}.");
             }
             catch (Exception ex) { Plugin.Log.LogError("[Formation] MaybeScaleFragments: " + ex); }
         }
@@ -699,7 +699,7 @@ namespace HumankindAssetFramework
                 if (bminF?.GetValue(sk1) is Vector3 bmin) bminF.SetValue(sk1, bmin * s);
                 if (bmaxF?.GetValue(sk1) is Vector3 bmax) bmaxF.SetValue(sk1, bmax * s);
                 int scaledMeshes = ScaleAllContents(sk1, s, tag);
-                Plugin.Log.LogInfo($"[Formation] '{tag}': skeleton '{sk1.name}' — {bones.Length} bone binds ×{s}, {scaledMeshes} hosted mesh(es) scaled.");
+                Plugin.Diag($"[Formation] '{tag}': skeleton '{sk1.name}' — {bones.Length} bone binds ×{s}, {scaledMeshes} hosted mesh(es) scaled.");
                 scaledCollections[key] = sk1;
                 return sk1;
             }
@@ -807,7 +807,7 @@ namespace HumankindAssetFramework
                     if (e.unit != unitName || e.scale <= 0f || Math.Abs(e.scale - 1f) < 0.001f || e.scaleMode == "data") continue;
                     pc.transform.localScale = Vector3.one * e.scale;
                     if (scaleLogged.Add(unitName))
-                        Plugin.Log.LogInfo($"[Formation] '{unitName}' pawns scaled x{e.scale} (Transform mode: root localScale).");
+                        Plugin.Diag($"[Formation] '{unitName}' pawns scaled x{e.scale} (Transform mode: root localScale).");
                     return;
                 }
             }
@@ -840,9 +840,9 @@ namespace HumankindAssetFramework
 
                 int have = ExtendDummies(prefab, need, out int grew);
                 if (grew > 0)
-                    Plugin.Log.LogInfo($"[Formation] Formation3DPrefab dummy pool extended {have - grew} -> {have} (before Formation3DPool creation).");
+                    Plugin.Diag($"[Formation] Formation3DPrefab dummy pool extended {have - grew} -> {have} (before Formation3DPool creation).");
                 else
-                    Plugin.Log.LogInfo($"[Formation] Formation3DPrefab dummy pool: {have} (biggest custom formation needs {need}) — no extension needed.");
+                    Plugin.Diag($"[Formation] Formation3DPrefab dummy pool: {have} (biggest custom formation needs {need}) — no extension needed.");
             }
             catch (Exception ex) { Plugin.Log.LogError("[Formation] prefab extension: " + ex); }
         }
@@ -904,13 +904,13 @@ namespace HumankindAssetFramework
                 if (ours || oursArmies.Contains(parentName) || initSeen.Add(defName))
                 {
                     var instArr = AccessTools.Field(f3d.GetType(), "Dummies")?.GetValue(f3d) as Array;
-                    Plugin.Log.LogInfo($"[Formation] init: '{defName}' ({need} dummies) -> '{parentName}' (instance capacity {instArr?.Length ?? 0})" + (ours ? "   << REGISTRY FORMATION" : ""));
+                    Plugin.Diag($"[Formation] init: '{defName}' ({need} dummies) -> '{parentName}' (instance capacity {instArr?.Length ?? 0})" + (ours ? "   << REGISTRY FORMATION" : ""));
                 }
 
                 if (need <= 0) return;
                 int have = ExtendDummies(f3d, need, out int grew);
                 if (grew > 0)
-                    Plugin.Log.LogInfo($"[Formation] live Formation3D instance topped up {have - grew} -> {have} dummies for '{defName}'.");
+                    Plugin.Diag($"[Formation] live Formation3D instance topped up {have - grew} -> {have} dummies for '{defName}'.");
 
                 // THE >9 FIX: replace any dummy that isn't parented under THIS instance. When the prefab is grown past the
                 // vanilla 9/10, the pooled clones carry a 12-entry Dummies array whose extra entries still REFERENCE the
@@ -948,7 +948,7 @@ namespace HumankindAssetFramework
                             fixedCount++;
                         }
                     if (fixedCount > 0)
-                        Plugin.Log.LogInfo($"[Formation] replaced {fixedCount} prefab-bound dummy slot(s) with fresh instance children for '{defName}' (fixes pawns stranded at world origin).");
+                        Plugin.Diag($"[Formation] replaced {fixedCount} prefab-bound dummy slot(s) with fresh instance children for '{defName}' (fixes pawns stranded at world origin).");
                 }
             }
             catch (Exception ex) { Plugin.Log.LogError("[Formation] instance capacity: " + ex); }

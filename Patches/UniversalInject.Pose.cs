@@ -77,7 +77,7 @@ namespace HumankindAssetFramework
                             }
                         }
                         catch { }
-                        Plugin.Log.LogInfo($"[AnimDiag] {e.resourceName}:{pair.Item1} bone{b}: frames={fc} fmt={fmt} start={spd} bbox={bmin}..{bmax}{local}{decoded}");
+                        Plugin.Diag($"[AnimDiag] {e.resourceName}:{pair.Item1} bone{b}: frames={fc} fmt={fmt} start={spd} bbox={bmin}..{bmax}{local}{decoded}");
                     }
                 }
             }
@@ -224,7 +224,7 @@ namespace HumankindAssetFramework
         {
             if (ctx.skelId == e.skeletonId) return;
             SetMember(ctx.entry, "SkeletonId", e.skeletonId);
-            if (!rescueLogged) { rescueLogged = true; Plugin.Log.LogInfo($"[Uni] rescued wrong-skeleton pawn: skelId {ctx.skelId} -> {e.skeletonId} (descId {ctx.descId})"); }
+            if (!rescueLogged) { rescueLogged = true; Plugin.Diag($"[Uni] rescued wrong-skeleton pawn: skelId {ctx.skelId} -> {e.skeletonId} (descId {ctx.descId})"); }
         }
 
         // FREEZE (static): pin every pose's Time to frame 0 so the donor clip can't advance — the borrowed mesh holds rigid
@@ -242,7 +242,7 @@ namespace HumankindAssetFramework
             ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
             if (freezeLogSkels == null) freezeLogSkels = new HashSet<int>();
             if (freezeLogSkels.Add(ctx.skelId) && freezeLogSkels.Count <= 6)
-                Plugin.Log.LogInfo($"[Uni] freeze: '{e.resourceName}' pinned (skelId {ctx.skelId} -> {e.skeletonId}, descId {ctx.descId})");
+                Plugin.Diag($"[Uni] freeze: '{e.resourceName}' pinned (skelId {ctx.skelId} -> {e.skeletonId}, descId {ctx.descId})");
         }
 
         // ANIMATED: play OUR clip on Pose0 (weight 1, advancing time); zero the others (never all-zero => NaN => invisible),
@@ -276,7 +276,7 @@ namespace HumankindAssetFramework
                     try { bi = Convert.ToInt64(GetMember(br, "SkeletonBoneIndex")); ax = Convert.ToInt64(GetMember(br, "AxisIndex")); an = Convert.ToSingle(GetMember(br, "Angle")); } catch { }
                     sb.Append($" | BR{i} bone={bi} axis={ax} ang={an:0.#}");
                 }
-                Plugin.Log.LogInfo(sb.ToString());
+                Plugin.Diag(sb.ToString());
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[PawnLive] " + ex.Message); }
         }
@@ -426,7 +426,7 @@ namespace HumankindAssetFramework
                 {
                     e.phaseLogAt = now;
                     var seenNow = e.phaseTracks.FindAll(t => now - t.seen < 0.5f);
-                    Plugin.Log.LogInfo($"[Phase] {e.resourceName} tracks={e.phaseTracks.Count} live={seenNow.Count} " +
+                    Plugin.Diag($"[Phase] {e.resourceName} tracks={e.phaseTracks.Count} live={seenNow.Count} " +
                         string.Join(" ", seenNow.ConvertAll(t => $"[ph={t.phase:0.##}@({t.pos.x:0.#},{t.pos.z:0.#})]")));
                 }
                 for (int i = e.phaseTracks.Count - 1; i >= 0; i--)
@@ -446,7 +446,7 @@ namespace HumankindAssetFramework
                 }
                 float ph = (e.phaseTracks.Count * 0.6180339887f) % 1f;
                 e.phaseTracks.Add(new ModelEntry.PawnPhase { pos = pos, phase = ph, seen = now });
-                Plugin.Log.LogInfo($"[Phase] {e.resourceName} NEW track #{e.phaseTracks.Count - 1} phase={ph:0.###} at ({pos.x:0.##},{pos.y:0.##},{pos.z:0.##}) spread={e.animPhaseSpread:0.##}");
+                Plugin.Diag($"[Phase] {e.resourceName} NEW track #{e.phaseTracks.Count - 1} phase={ph:0.###} at ({pos.x:0.##},{pos.y:0.##},{pos.z:0.##}) spread={e.animPhaseSpread:0.##}");
                 return e.animPhaseSpread * ph;
             }
         }
@@ -620,7 +620,7 @@ namespace HumankindAssetFramework
             {
                 poseTime = e.deployPoseTime + (elapsedF / recoilDur) * (recoilMax - e.deployPoseTime);
                 if (recoilLogStart != bestStartF)
-                { recoilLogStart = bestStartF; Plugin.Log.LogInfo($"[Deploy-Fire] '{e.resourceName}' RECOIL sweep (dur={recoilDur:0.00}s, poseTime {e.deployPoseTime:0.00}->{recoilMax}, matchDist={UnityEngine.Mathf.Sqrt(bestSqF):0.0}u)"); }
+                { recoilLogStart = bestStartF; Plugin.Diag($"[Deploy-Fire] '{e.resourceName}' RECOIL sweep (dur={recoilDur:0.00}s, poseTime {e.deployPoseTime:0.00}->{recoilMax}, matchDist={UnityEngine.Mathf.Sqrt(bestSqF):0.0}u)"); }
             }
             return poseTime;
         }

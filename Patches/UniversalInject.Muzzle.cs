@@ -29,7 +29,7 @@ namespace HumankindAssetFramework
                         var n = GetMember(bones.GetValue(i), "Name")?.ToString() ?? "";
                         if (n.IndexOf(e.turretBone, StringComparison.OrdinalIgnoreCase) >= 0) { e.turretBoneIdx = i; break; }
                     }
-                Plugin.Log.LogInfo($"[Turret] '{e.resourceName}' turret bone '{e.turretBone}' -> skeleton index {e.turretBoneIdx}");
+                Plugin.Diag($"[Turret] '{e.resourceName}' turret bone '{e.turretBone}' -> skeleton index {e.turretBoneIdx}");
             }
             if (e.turretBoneIdx < 0) { SanitizeAimLayer(entry); return; }   // no such bone — fall back to the safe path
             for (int i = 0; i < 4; i++)
@@ -67,7 +67,7 @@ namespace HumankindAssetFramework
                     }
                     SetMember(entry, BoneRotationNames[i], br);
                     if (!turretLogged) { turretLogged = true; float ang = 0f; try { ang = Convert.ToSingle(GetMember(br, "Angle")); } catch { }
-                        Plugin.Log.LogInfo($"[Turret] '{e.resourceName}' slot {i} heading angle {ang:0.#}° -> bone {e.turretBoneIdx}, axis {(e.turretAxis >= 0 ? e.turretAxis.ToString() : "keep")}"); }
+                        Plugin.Diag($"[Turret] '{e.resourceName}' slot {i} heading angle {ang:0.#}° -> bone {e.turretBoneIdx}, axis {(e.turretAxis >= 0 ? e.turretAxis.ToString() : "keep")}"); }
                 }
                 else                                                       // wheel-spin (axis 0) etc. -> zero
                 {
@@ -100,7 +100,7 @@ namespace HumankindAssetFramework
                     var n = GetMember(bones.GetValue(i), "Name")?.ToString() ?? "";
                     if (n.IndexOf(e.muzzleBone, StringComparison.OrdinalIgnoreCase) >= 0) { e.muzzleBoneName = n; break; }
                 }
-            Plugin.Log.LogInfo($"[Muzzle] '{e.resourceName}' muzzle bone '{e.muzzleBone}' -> '{(e.muzzleBoneName.Length == 0 ? "(not found)" : e.muzzleBoneName)}'");
+            Plugin.Diag($"[Muzzle] '{e.resourceName}' muzzle bone '{e.muzzleBone}' -> '{(e.muzzleBoneName.Length == 0 ? "(not found)" : e.muzzleBoneName)}'");
             return e.muzzleBoneName.Length == 0 ? null : e.muzzleBoneName;
         }
 
@@ -166,7 +166,7 @@ namespace HumankindAssetFramework
                 // and does the sub-pawn->entry match work? Zero [Muzzle] lines while flashes stay off-side = the redirect
                 // never engages; this shows whether the CALL is missing or the MATCH is failing.
                 if (muzzleSeen.Count < 12 && muzzleSeen.Add(boneName))
-                    Plugin.Log.LogInfo($"[Muzzle] GetBoneTRS('{boneName}') subPawn='{(subPawn as UnityEngine.Component)?.gameObject?.name ?? "?"}' entry={(e?.resourceName ?? "none")}");
+                    Plugin.Diag($"[Muzzle] GetBoneTRS('{boneName}') subPawn='{(subPawn as UnityEngine.Component)?.gameObject?.name ?? "?"}' entry={(e?.resourceName ?? "none")}");
                 if (e == null) return false;
                 if (SkelHasBone(e.skeleton, boneName))
                 {
@@ -233,7 +233,7 @@ namespace HumankindAssetFramework
             {
                 e.muzzlePinLogged = true;
                 var pawnTr = (subPawn as UnityEngine.Component)?.transform;
-                Plugin.Log.LogInfo($"[Muzzle] '{e.resourceName}' fire origin pinned to '{boneLabel}' T={tr.ToString("0.0")} +dial={e.muzzleOffsetV.ToString("0.00")} scale={sc:0.###} donorOff={pendingMuzzleOffset.ToString("0.00")} pawnWorld={(pawnTr != null ? pawnTr.position.ToString("0.0") : "?")}");
+                Plugin.Diag($"[Muzzle] '{e.resourceName}' fire origin pinned to '{boneLabel}' T={tr.ToString("0.0")} +dial={e.muzzleOffsetV.ToString("0.00")} scale={sc:0.###} donorOff={pendingMuzzleOffset.ToString("0.00")} pawnWorld={(pawnTr != null ? pawnTr.position.ToString("0.0") : "?")}");
             }
         }
 
@@ -267,7 +267,7 @@ namespace HumankindAssetFramework
                 if (a == 0f) continue;
                 SetMember(br, "Angle", 0f);
                 SetMember(entry, BoneRotationNames[i], br);
-                if (!sanitizeLogged) { sanitizeLogged = true; Plugin.Log.LogInfo($"[Uni] aim-layer sanitize: slot {i} bone={boneIdx} axis={axis} angle {a:0.#} -> 0 (donor wheel-spin on an invalid bone)"); }
+                if (!sanitizeLogged) { sanitizeLogged = true; Plugin.Diag($"[Uni] aim-layer sanitize: slot {i} bone={boneIdx} axis={axis} angle {a:0.#} -> 0 (donor wheel-spin on an invalid bone)"); }
             }
         }
 
@@ -292,7 +292,7 @@ namespace HumankindAssetFramework
                         var t = br.GetType();
                         var dump = string.Join(" ", t.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
                             .Select(fi => fi.Name + "=" + fi.GetValue(br)));
-                        Plugin.Log.LogInfo($"[Aim] streamed slot{i} ({t.Name}): {dump} (cleared)");
+                        Plugin.Diag($"[Aim] streamed slot{i} ({t.Name}): {dump} (cleared)");
                     }
                 }
                 catch (Exception ex) { Plugin.Log.LogWarning("[Aim] dump: " + ex.Message); }
@@ -317,7 +317,7 @@ namespace HumankindAssetFramework
             bool rotated = TryQuaternion(GetMember(os, "Rotation"), out var rot);
             if (rotated) planar = rot * planar;                        // pawn frame; else fall back to world axes
             tr += planar; tr.y += e.position.z;                        // registry z (height) -> world Y (up)
-            if (!posLogged) { posLogged = true; Plugin.Log.LogInfo($"[Uni] {e.resourceName} position offset {e.position} applied in {(rotated ? "PAWN frame (turns with the unit)" : "world axes (Rotation unreadable)")}, z->up Y"); }
+            if (!posLogged) { posLogged = true; Plugin.Diag($"[Uni] {e.resourceName} position offset {e.position} applied in {(rotated ? "PAWN frame (turns with the unit)" : "world axes (Rotation unreadable)")}, z->up Y"); }
             SetMember(os, "Translation", tr);
             SetMember(entry, "ObjectSpace", os);
         }
@@ -348,7 +348,7 @@ namespace HumankindAssetFramework
             else if (scObj is UnityEngine.Vector3 sv) SetMember(oss, "Scale", sv * e.scale);
             else if (scObj != null) { try { SetMember(oss, "Scale", Convert.ToSingle(scObj) * e.scale); } catch { } }
             SetMember(entry, "ObjectSpace", oss);
-            if (!scaleLogged) { scaleLogged = true; Plugin.Log.LogInfo($"[Uni] {e.resourceName} runtime scale x{e.scale} (ObjectSpace.Scale was {scObj})"); }
+            if (!scaleLogged) { scaleLogged = true; Plugin.Diag($"[Uni] {e.resourceName} runtime scale x{e.scale} (ObjectSpace.Scale was {scObj})"); }
         }
 
         // Diagnostic: dump the pawn's runtime transform once per model — a zero/huge Scale or an off Translation explains a
@@ -358,7 +358,7 @@ namespace HumankindAssetFramework
             if (poseHookSeen == null) poseHookSeen = new HashSet<string>();
             if (!poseHookSeen.Add(e.resourceName)) return;
             var osd = GetMember(ctx.entry, "ObjectSpace");
-            Plugin.Log.LogInfo($"[Uni] pose hook: '{e.resourceName}' -> Pose0 anim {e.animId} (skelId {ctx.skelId} -> {e.skeletonId}, desc {ctx.descId}); " +
+            Plugin.Diag($"[Uni] pose hook: '{e.resourceName}' -> Pose0 anim {e.animId} (skelId {ctx.skelId} -> {e.skeletonId}, desc {ctx.descId}); " +
                 $"ObjectSpace T={GetMember(osd, "Translation")} S={GetMember(osd, "Scale")} R={GetMember(osd, "Rotation")} poseW={GetMember(pose0, "Weight")}");
         }
 

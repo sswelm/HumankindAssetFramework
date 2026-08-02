@@ -19,7 +19,7 @@ namespace HumankindAssetFramework
             return t != null ? AccessTools.Method(t, "AnimationLoad") : null;
         }
         static bool hookLogged;
-        static void Postfix(object __instance) { if (!hookLogged) { hookLogged = true; Plugin.Log.LogInfo("[Uni] UniRegisterHook POSTFIX fired"); } Prober.AnimMgr = __instance; UniversalInject.RearmModelRegistration(); UniversalInject.EnsureRegistered(__instance); FormationOverride.OnAnimationLoad(); }
+        static void Postfix(object __instance) { if (!hookLogged) { hookLogged = true; Plugin.Diag("[Uni] UniRegisterHook POSTFIX fired"); } Prober.AnimMgr = __instance; UniversalInject.RearmModelRegistration(); UniversalInject.EnsureRegistered(__instance); FormationOverride.OnAnimationLoad(); }
     }
 
     [HarmonyPatch]
@@ -125,7 +125,7 @@ namespace HumankindAssetFramework
                 if (en.IndexOf("Vehicles", StringComparison.OrdinalIgnoreCase) >= 0 && en.IndexOf("_Stop", StringComparison.OrdinalIgnoreCase) >= 0)
                     UniversalInject.StashedStopHandle = __0;
                 if (!UniversalInject.AudioTraceOn) return;
-                if (UniversalInject.SeenEvents.Add(en)) Plugin.Log.LogInfo($"[AudioTrace] NEW event: '{en}'");
+                if (UniversalInject.SeenEvents.Add(en)) Plugin.Diag($"[AudioTrace] NEW event: '{en}'");
             }
             // This was the ONLY unguarded patch body in the plugin, sitting inside the game's own audio call path — a
             // destroyed handle whose .name throws must never break AudioManager.PostEvent (review 2026-07-19).
@@ -184,7 +184,7 @@ namespace HumankindAssetFramework
                 int cur = (int)f.GetValue(inst);
                 if (cur >= target) return;
                 f.SetValue(inst, target);
-                Plugin.Log.LogInfo($"[Bones] shared animated-bone pool: {cur} -> {target} entries (per-frame skinning budget for ALL pawns).");
+                Plugin.Diag($"[Bones] shared animated-bone pool: {cur} -> {target} entries (per-frame skinning budget for ALL pawns).");
             }
             catch (System.Exception ex) { Plugin.Log.LogError("[Bones] pool headroom: " + ex); }
         }
@@ -248,7 +248,7 @@ namespace HumankindAssetFramework
             if (f == null || f.FieldType != typeof(int)) { Plugin.Log.LogWarning($"{tag} field '{field}' not found on ContentLayer."); return; }
             int cur = (int)f.GetValue(o);
             f.SetValue(o, cur + extra);
-            Plugin.Log.LogInfo($"{tag} '{layer}' {field}: {cur} -> {cur + extra} (+{extra}).");
+            Plugin.Diag($"{tag} '{layer}' {field}: {cur} -> {cur + extra} (+{extra}).");
         }
 
         static void SetIntField(object o, string field, int val, string layer, string tag)
@@ -257,7 +257,7 @@ namespace HumankindAssetFramework
             if (f == null || f.FieldType != typeof(int)) { Plugin.Log.LogWarning($"{tag} field '{field}' not found on ContentLayer."); return; }
             int cur = (int)f.GetValue(o);
             f.SetValue(o, val);
-            Plugin.Log.LogInfo($"{tag} '{layer}' {field}: {cur} -> {val}{(field == "maxMeshTriangleCount" && val == 0 ? " (unlimited)" : "")}.");
+            Plugin.Diag($"{tag} '{layer}' {field}: {cur} -> {val}{(field == "maxMeshTriangleCount" && val == 0 ? " (unlimited)" : "")}.");
         }
     }
 

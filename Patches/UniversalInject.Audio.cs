@@ -27,7 +27,7 @@ namespace HumankindAssetFramework
                 if (spType == null) { Plugin.Log.LogError("[Audio] PresentationSubPawn type not found (game update?)"); return; }
                 var holderType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PresentationUnitHolder");
                 var all = UnityEngine.Object.FindObjectsOfType(spType);
-                Plugin.Log.LogInfo($"[Audio] --- audio probe: {all.Length} sub-pawns in scene (filter='{filter}') ---");
+                Plugin.Diag($"[Audio] --- audio probe: {all.Length} sub-pawns in scene (filter='{filter}') ---");
                 int shown = 0;
                 foreach (var sp in all)
                 {
@@ -81,7 +81,7 @@ namespace HumankindAssetFramework
                     string act = "?";
                     if (emitter is UnityEngine.Behaviour beh)
                         act = $"en={beh.enabled} actHier={(beh.gameObject != null && beh.gameObject.activeInHierarchy)} actSelf={(beh.gameObject != null && beh.gameObject.activeSelf)}";
-                    Plugin.Log.LogInfo($"[Audio] '{goName}' emitter={(emitter != null ? "YES" : "NULL")} id={eid} reg={reg} {act} " +
+                    Plugin.Diag($"[Audio] '{goName}' emitter={(emitter != null ? "YES" : "NULL")} id={eid} reg={reg} {act} " +
                                        $"idleEvent={idle} freeEvents={freeCount} pos=[{pos}]");
                     shown++;
                 }
@@ -99,12 +99,12 @@ namespace HumankindAssetFramework
                         if (hemit != null) { var g = GetMember(hemit, "AudioEntityGUID"); if (g != null && GetMember(g, "IsValid") is bool hb) hreg = hb ? "REG" : "unreg"; }
                         object playV = null; var play = GetMember(h, "playRumbleAudioEvent");
                         if (play != null) { try { playV = GetMember(play, "Value"); } catch { } }
-                        Plugin.Log.LogInfo($"[Audio] holder[{hi}] {h.GetType().Name} emitter={(hemit != null ? "YES" : "NULL")} reg={hreg} rumble={(playV != null ? "SET" : "empty")}");
+                        Plugin.Diag($"[Audio] holder[{hi}] {h.GetType().Name} emitter={(hemit != null ? "YES" : "NULL")} reg={hreg} rumble={(playV != null ? "SET" : "empty")}");
                         if (++hi >= 8) break;
                     }
-                    Plugin.Log.LogInfo($"[Audio] total holders in scene: {holders.Length}");
+                    Plugin.Diag($"[Audio] total holders in scene: {holders.Length}");
                 }
-                Plugin.Log.LogInfo($"[Audio] --- probe done: {shown} shown of {all.Length} (emitter reg=REG/unreg, idle/free events, holder rumble) ---");
+                Plugin.Diag($"[Audio] --- probe done: {shown} shown of {all.Length} (emitter reg=REG/unreg, idle/free events, holder rumble) ---");
             }
             catch (Exception ex) { Plugin.Log.LogError("[Audio] DumpAudioState: " + ex); }
         }
@@ -343,7 +343,7 @@ namespace HumankindAssetFramework
                     if (e.silenceDonorAudio && GetMember(sp, "AudioEmitter") is UnityEngine.Object emo && emo != null && _silencedEmitterIds.Add(emo.GetInstanceID()))
                     {
                         StopAllOnEmitter(emo);
-                        Plugin.Log.LogInfo($"[Audio] '{e.resourceName}' donor audio silenced (emitter {emo.GetInstanceID()})");
+                        Plugin.Diag($"[Audio] '{e.resourceName}' donor audio silenced (emitter {emo.GetInstanceID()})");
                     }
                     var pos = (GetMember(sp, "Transform") as UnityEngine.Transform)?.position ?? comp.transform.position;
                     bool moving = e.engineLastPos.TryGetValue(id, out var last) && (pos - last).sqrMagnitude > 0.06f * 0.06f;
@@ -459,7 +459,7 @@ namespace HumankindAssetFramework
                     _testSrc.spatialBlend = 0f; _testSrc.volume = 1f; _testSrc.loop = false;
                 }
                 _testSrc.clip = clip; _testSrc.Play();
-                Plugin.Log.LogInfo($"[Sound] test: playing '{clip.name}' 2D @full volume. AudioListener: present={haveListener}, volume was {ov} (forced 1), pause was {op} (forced false).");
+                Plugin.Diag($"[Sound] test: playing '{clip.name}' 2D @full volume. AudioListener: present={haveListener}, volume was {ov} (forced 1), pause was {op} (forced false).");
             }
             catch (Exception e) { Plugin.Log.LogError("[Sound] PlaySoundTest: " + e); }
         }
@@ -474,7 +474,7 @@ namespace HumankindAssetFramework
                 var cam = UnityEngine.Camera.main;
                 var go = cam != null ? cam.gameObject : new UnityEngine.GameObject("ENC_AudioListener");
                 go.AddComponent<UnityEngine.AudioListener>();
-                Plugin.Log.LogInfo("[Sound] no Unity AudioListener found — added one to '" + go.name + "'");
+                Plugin.Diag("[Sound] no Unity AudioListener found — added one to '" + go.name + "'");
             }
             catch (Exception e) { Plugin.Log.LogWarning("[Sound] EnsureAudioListener: " + e.Message); }
         }
@@ -527,7 +527,7 @@ namespace HumankindAssetFramework
                 }
                 var clip = UnityEngine.AudioClip.Create(tag, n / channels, channels, rate, false);
                 clip.SetData(f, 0);
-                Plugin.Log.LogInfo($"[Sound] loaded WAV '{tag}' ({channels}ch {rate}Hz {bits}bit, {(n / (float)channels / rate):0.0}s)");
+                Plugin.Diag($"[Sound] loaded WAV '{tag}' ({channels}ch {rate}Hz {bits}bit, {(n / (float)channels / rate):0.0}s)");
                 return clip;
             }
             catch (Exception e) { Plugin.Log.LogError("[Sound] LoadWav '" + path + "': " + e); return null; }
