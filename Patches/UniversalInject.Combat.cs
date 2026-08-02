@@ -712,13 +712,5 @@ namespace HumankindAssetFramework
             }
             catch (Exception e) { Plugin.Log.LogError("[Uni] atlas: " + e); return null; }
         }
-
-        // Memoize the Property/Field resolution per (type,name). OnPawnAdded resolves ~a dozen members per pawn-add on the
-        // game's hot path; caching the lookup (null included) turns those from member scans into dict hits. Semantics are
-        // identical to the old inline AccessTools calls (property-first, CanWrite for writes, field fallback). Main-thread only.
-        // ONE combined member cache (2026-08-01): GetMember/SetMember run per-pawn-per-frame on the game's hot path, and
-        // every Amplitude member we touch is a FIELD — so the old property-THEN-field pair paid a wasted CachedProp dict
-        // lookup on every call. Resolve property-or-field in a single dict hit (null cached too). Main-thread only.
-        // `fieldCache`/`CachedField` stays for the polls' direct static-field lookups.
     }
 }

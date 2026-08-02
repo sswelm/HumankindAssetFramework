@@ -12,17 +12,6 @@ namespace HumankindAssetFramework
 {
     internal static partial class UniversalInject
     {
-        internal static object GetMember(object o, string name)
-        {
-            if (o == null) return null;
-            var m = CachedMember(o.GetType(), name);
-            try { if (m is PropertyInfo p) return p.GetValue(o); if (m is FieldInfo f) return f.GetValue(o); } catch { }
-            return null;
-        }
-        internal static object MakeGuid(int a, int b, int c, int d)
-        { var gt = AccessTools.TypeByName("Amplitude.Framework.Guid"); if (gt == null) return null; var g = Activator.CreateInstance(gt);
-          gt.GetField("a", BF)?.SetValue(g, a); gt.GetField("b", BF)?.SetValue(g, b); gt.GetField("c", BF)?.SetValue(g, c); gt.GetField("d", BF)?.SetValue(g, d); return g; }
-
         // ---- EXPERIMENTAL district-visual repoint (docs/District-Visuals.md) ----
         // Parsed once from config: the target district name + the two override modes. dGuid is a boxed Amplitude Guid or null.
         // One custom district model, from the enc_districts.json registry (written by the District Factory window).

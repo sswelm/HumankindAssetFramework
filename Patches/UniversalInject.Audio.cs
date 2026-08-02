@@ -12,16 +12,6 @@ namespace HumankindAssetFramework
 {
     internal static partial class UniversalInject
     {
-        static readonly Dictionary<(Type, string), MemberInfo> memberCache = new Dictionary<(Type, string), MemberInfo>();
-        static readonly Dictionary<(Type, string), FieldInfo> fieldCache = new Dictionary<(Type, string), FieldInfo>();
-        static MemberInfo CachedMember(Type t, string name) { var k = (t, name); if (!memberCache.TryGetValue(k, out var m)) memberCache[k] = m = (MemberInfo)AccessTools.Property(t, name) ?? AccessTools.Field(t, name); return m; }
-        static FieldInfo CachedField(Type t, string name) { var k = (t, name); if (!fieldCache.TryGetValue(k, out var f)) fieldCache[k] = f = AccessTools.Field(t, name); return f; }
-
-        static void SetMember(object o, string name, object val)
-        {
-            var m = CachedMember(o.GetType(), name);
-            try { if (m is PropertyInfo p) { if (p.CanWrite) p.SetValue(o, val); } else if (m is FieldInfo f) f.SetValue(o, val); } catch { }
-        }
         // ---- AUDIO PROBE (step 1 diagnostic) ----
         // Walk every live PresentationSubPawn and log its audio wiring, so we can see WHY custom/retextured units are
         // silent. The decompile says movement/engine sound is posted to an AudioEmitter component on the sub-pawn

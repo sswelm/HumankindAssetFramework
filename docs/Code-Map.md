@@ -29,8 +29,9 @@ carry no access or lifetime meaning. To find a method, pick the concern:
 | `UniversalInject.Pose.cs` | Pawn creation + per-frame pose: `OnPawnAdded`, `ForceOurSkeleton`, `ApplyFreeze`, `ApplyAnimatedPose`, `PhaseFor`, `ComputePoseTime`, `StatePose` (idle/move/after/attack state machine), `DeployPoseTime`, `FireOncePoseTime`. Nested `PawnCtx`. |
 | `UniversalInject.Muzzle.cs` | Turret aim + muzzle: `TurretizeAimLayer`, `MuzzleRedirect`/`CompensateDonorOffset`, `SanitizeAimLayer`/`ClearAimLayer`, `ApplyPositionOffset`, `ApplyScale`, `LogPoseHookOnce`. |
 | `UniversalInject.Combat.cs` | Combat + post-load: `MaybeRespawnPostLoad` (first-instance rotor race), `ProcessFireQueues`, `TryEarlyAttackSound` (the FaceEnemy roar seam), `OnPawnDeath`/`OnBattleStarted`/`ProcessBattleCries`, `ProcessAnimStates`, `ProcessDeployState`, `TickOne`. |
-| `UniversalInject.Audio.cs` | Engine/move audio: `ProcessEngineAudio`, emitter helpers, `PlaySoundTest`, `DumpSoundCatalog`. Also (temporarily, until Phase 2) the member cache + `SetMember`. |
-| `UniversalInject.Districts.cs` | District-visual repoint, prop/projectile registration, `DumpMeshBudget`. Also (temporarily, until Phase 2) `GetMember`, `MakeGuid`, `ParseGuidCsv`. Nested `DistrictModel`. |
+| `UniversalInject.Audio.cs` | Engine/move audio: `ProcessEngineAudio`, emitter helpers, `PlaySoundTest`, `DumpSoundCatalog`. |
+| `UniversalInject.Districts.cs` | District-visual repoint, prop/projectile registration, `DumpMeshBudget`, `ParseGuidCsv`. Nested `DistrictModel`. |
+| `UniversalInject.Reflection.cs` | The one member reader/writer the whole plugin funnels through: `GetMember`/`SetMember`/`MakeGuid` + the `(type,name)` member cache. |
 | `UniversalInject.Hooks.cs` | The Harmony patch classes that call into the above: `UniRegisterHook`, `UniRepointHook`, `UniPawnPoseHook`, `Hk_MuzzleRelocate`, `Hk_AudioTrace`, `Hk_DistrictRepoint`, `Hk_AnimatedBonePoolHeadroom`, `Hk_DistrictBufferHeadroom`, `Hk_PropRegister`, `Hk_ProjectileOverride`. |
 
 Other patch files (already separate, not part of `UniversalInject`):
@@ -43,11 +44,10 @@ Other patch files (already separate, not part of `UniversalInject`):
 
 ## Reflection
 
-All reflection member reads funnel through **`UniversalInject.GetMember`** (cached, property-first, finds
-non-public). `FormationOverride.Mem` and `FireProbe.Member` are thin forwarding aliases to it. `SetMember` /
-`CachedMember` live alongside. (Phase 2 will co-locate `GetMember`/`SetMember`/`CachedMember` into a dedicated
-`UniversalInject.Reflection.cs` — they're currently split across `.Audio`/`.Districts` as an artifact of the
-Phase-1 contiguous-range split.)
+All reflection member access funnels through **`UniversalInject.GetMember`/`SetMember`** (cached, property-first,
+finds non-public), which live — with `MakeGuid` and the member cache — in `UniversalInject.Reflection.cs`.
+`FormationOverride.Mem` and `FireProbe.Member` are thin forwarding aliases to `GetMember`. (`FacingPersist` keeps
+its own small field-only cache, `CachedField`, for its self-contained use.)
 
 ## Conventions
 
