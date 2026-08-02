@@ -14,7 +14,8 @@ by when they'll bite.
   un-stripping risked re-introducing the drone's unscaled-translation wobble. Rationale: legacy rigs have a sane rest
   by definition, and for them the fold was a near-no-op (frame-0 pose ≈ rest) — so gating it off converges on the
   same output. **Bake-level verification DONE** (same day): smoke test 14/14 with the howitzer fresh-baked
-  `animated-legacy` through the gated pipeline. Remaining: eyeball the howitzer in-game after the next REAL re-bake.
+  `animated-legacy` through the gated pipeline. **In-game verification DONE (2026-08-02)** — the howitzer checked out
+  correctly after a real re-bake.
 
 ## Worth fixing before the next model of the affected kind
 
@@ -168,10 +169,10 @@ by when they'll bite.
   sub-pawn — the same neighborhood the audio investigation mapped) and gate it per opted-in unit. Later composable
   with a "replace with footprints" mode. Adds GROUND FX to the donor-matching criteria list (rotor/wheels, audio,
   ranged capability, aim streaming, now decals).
-- **Muzzle-flash relocate — 🔧 BUILT & DEPLOYED 2026-07-24, in-game fire test PENDING** (was: its own scoped session).
+- **Muzzle-flash relocate — ✅ VERIFIED IN-GAME 2026-07-24** (commit `1751b74` "muzzle endgame lands — flash, smoke and tracers on the tracking turret"; was its own scoped session).
   Implemented as the `muzzleBone` field + `Hk_MuzzleRelocate` prefix on `PresentationSubPawn.GetBoneTRS(string)` — see the
-  cracked mechanism + fix below; ArmouredCar set to `muzzleBone: "Turret"`. Remaining: confirm in-game that the flash now
-  anchors on the turret/gun (relaunch + attack). If the turret pivot reads too low/centre, pick a barrel-tip bone instead.
+  cracked mechanism + fix below; ArmouredCar set to `muzzleBone: "Turret"`. The flash now anchors on the turret/gun on
+  fire. (If a turret pivot ever reads too low/centre on another model, pick a barrel-tip bone instead.)
   On the Ehrhardt armored car the MG muzzle flash fires off-side ("mirrored"). ROOT CAUSE (verified): the donor is
   `Unit_Era6_Common_AntiAirGuns_01` (an anti-air gun — bones `Azimuth`, `bras-*`, `Canon_down_*`), and the flash is
   the projectile's **`Muzzle` FxEvolverMaterial** ("launch flash", `ProjectileAsset.muzzle`) — a TRANSIENT VFX (NOT a
