@@ -558,7 +558,7 @@ namespace HumankindAssetFramework
         // missing/reordered field). FALLBACK: field-by-field regex (index-aligned). Semantics identical to the original
         // single-file loader; lifted into a helper so every pack shares it. The local `entries` intentionally shadows the
         // field to keep the large per-field Add blocks below verbatim.
-        static List<ModelEntry> ParseModels(string text)
+        internal static List<ModelEntry> ParseModels(string text)
         {
             var entries = new List<ModelEntry>();
                 // PRIMARY: Newtonsoft (the game's own copy) parses each model as an OBJECT, so fields stay with their
@@ -816,7 +816,7 @@ namespace HumankindAssetFramework
         // IDENTICAL to the old FirstOrDefault when only one entry matches (the common case). Non-capturing key lambdas
         // are cached by the compiler, so no per-call allocation.
         static readonly HashSet<string> _ambigLogged = new HashSet<string>();
-        static ModelEntry LongestMatch(List<ModelEntry> list, string name, Func<ModelEntry, string> key)
+        internal static ModelEntry LongestMatch(List<ModelEntry> list, string name, Func<ModelEntry, string> key)
         {
             if (list == null || string.IsNullOrEmpty(name)) return null;
             ModelEntry best = null; int bestLen = -1, count = 0;

@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net471</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>HumankindAssetFramework.Tests</AssemblyName>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <!-- these tests exercise the PURE registry/parse/match logic only (no live-game reflection). -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.6.6" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HumankindAssetFramework.csproj" />
+  </ItemGroup>
+
+  <!-- compile-time references the TEST code uses directly -->
+  <ItemGroup>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>..\References\UnityEngine.CoreModule.dll</HintPath></Reference>
+    <Reference Include="BepInEx"><HintPath>..\References\BepInEx.dll</HintPath></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>..\References\Newtonsoft.Json.dll</HintPath></Reference>
+  </ItemGroup>
+
+  <!-- The plugin marks its refs Private=false (not copied), so mirror ALL of them into the test bin
+       or the runtime can't resolve the plugin assembly's dependencies. -->
+  <ItemGroup>
+    <None Include="..\References\*.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
+  </ItemGroup>
+
+</Project>

@@ -14,7 +14,7 @@
          (a self-contained .NET 8 publish full of mscorlib.dll/System.*.dll) gets swept in as candidate assembly
          files, and reference resolution silently prefers its .NET 8 facade mscorlib over the net471 reference
          assemblies — every framework type then fails to resolve (271x CS0518/CS0103). -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);baker\**;tools\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);baker\**;tools\**;Tests\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <!-- baker/ is the Unity *editor* mesh baker (needs UnityEditor); it ships in the mod, not this plugin. -->
