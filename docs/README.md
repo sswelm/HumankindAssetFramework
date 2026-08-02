@@ -1,6 +1,12 @@
 # HAF documentation
 
-Everything HAF documents, grouped by what you're trying to do. New here? This index is the map; the
+**HAF gives a Humankind unit a genuinely custom 3D model** — a ship, vehicle, creature, or mech, animated and textured —
+not just a reskin of the game's existing (human) units, which is where modding stopped before. It also handles districts,
+pawn props, projectiles, textures, sounds, formations, and unit scaling, all from a JSON pack registry. You **supply the
+model** (a licensed download, a commission, or your own build); HAF bakes and injects it, coexisting with other mods'
+asset packs. Within engine bounds (rotation-only animation, a shared GPU budget).
+
+Everything HAF documents is below, grouped by what you're trying to do. New here? This index is the map; the
 [project overview and feature list](https://github.com/sswelm/HumankindAssetFramework#readme) live on the repo home,
 then come back here to go deep.
 

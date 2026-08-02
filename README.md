@@ -10,6 +10,13 @@ Factory**, **Prop Lab**, **Projectile Lab**, and **Unit Retexture / Sound Studio
 **injects** the result onto the live game: correct geometry, correct texture, **its own animation**, and movement
 audio, all driven by a JSON registry. Adding a model is just baking it — there is no code to write per model.
 
+**What HAF changes.** Until now, giving a Humankind unit a different look meant reskinning the existing (human) models,
+swapping their gear, or remapping a unit onto a **donor** unit — always a variation on something the game already ships.
+HAF lets a unit be a **genuinely custom model** — a ship, vehicle, creature, or mech, animated and textured — within the
+engine's bounds (rotation-only animation, a shared GPU vertex budget). One honest note for authors: **you supply the
+model.** HAF is the *pipeline*, not an art library — bring a licensed download, a commission, or your own build, and
+baking + injecting it (correct orientation, texture, animation, isolation) is HAF's job.
+
 **It's multi-mod by design.** The runtime merges asset **packs** from many mods at once, so any modder ships their own
 config + assets and joins *without editing anyone else's files*. **ENC** is the reference pack (a set of modern-era
 units); a stranger's pack loads and merges right alongside it, with conflicts detected and reported. The aim is to make a
