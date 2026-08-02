@@ -88,9 +88,10 @@ one-off. There is **no managed per-frame per-bone loop** — a common wrong assu
   `ObjectSpace`, atlases) and never the simulation model, a failure **cannot corrupt a save or crash the battle
   simulation loop** — those code paths are never touched.
 
-The one scaling lever — *only if a stutter is ever measured* at very high animated-pawn counts — is the per-frame
-hook's cached-reflection field access (compiled delegates would cut it). It is not a current bottleneck and should not
-be optimized speculatively.
+The one scaling lever — *only if a stutter is ever measured* at very high animated-pawn counts — is the reflection
+funnel (`GetMember` / `SetMember`, a `(Type, name)`-keyed `MemberInfo` **cache hit once per field per pawn** — a small
+constant, **not** per bone, and not a per-frame clip re-resolve). Swapping those cached lookups for compiled delegates
+would shave it. It is not a current bottleneck and should not be optimized speculatively.
 
 ## 4. The pose math (decompiled — what actually gets computed)
 
