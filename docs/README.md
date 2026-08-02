@@ -54,7 +54,8 @@ Development-facing docs — status, review, testing, and the wider ecosystem.
 - [**Testing.md**](Testing.md) — the testing strategy: what's unit-tested, what's covered by in-editor instruments, and why.
 - [**Ecosystem-Survey.md**](Ecosystem-Survey.md) — every Humankind BepInEx plugin on GitHub and the techniques worth borrowing.
 - [**Pack-Validator-Design.md**](Pack-Validator-Design.md) — design note for the planned pack pre-flight validator (author-facing content validation); designed, not built.
-- [**Headless-CLI-Design.md**](Headless-CLI-Design.md) — design note for a headless CLI (validate + bake without the GUI, via Unity batch mode); makes HAF operable by AI/automation. Designed, not built.
+- [**Headless-CLI.md**](Headless-CLI.md) — the **headless CLI**: run model re-bake and the full Humankind mod **build + deploy** from the command line (Unity batch mode), so scripts / CI / an AI agent can drive HAF without the editor GUI. Built + verified.
+- [**Headless-CLI-Design.md**](Headless-CLI-Design.md) — the original design note behind it (superseded by the reference above).
 - [**Audit-2026-07-31.md**](Audit-2026-07-31.md) — a point-in-time project audit.
 
 ---

@@ -95,6 +95,9 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
 - **Guided authoring** — Pick-driven clip/bone/hide fields, an embedded interactive 3D preview, auto-detected game and
   Blender paths, and an in-game **F8** scan/feedback window.
 - **Backup & Restore** — a guarded, additive snapshot of everything ENCReload's git doesn't track.
+- **Headless CLI** — re-bake a model and run the full Humankind mod **build + deploy** from the command line (Unity batch
+  mode), reusing the exact code the editor buttons call — so scripts, CI, or an AI agent can drive HAF without the GUI.
+  See [Headless-CLI.md](docs/Headless-CLI.md).
 
 > **Polishing:** moving **caterpillar tracks** (treadize) run in-game, with a remaining idle micro-twitch to smooth out;
 > the **death / battle-start war-cry** creature voices are built and awaiting in-game verification. See [CHANGELOG.md](CHANGELOG.md).
