@@ -81,7 +81,7 @@ namespace HumankindAssetFramework
                 registered = true;
                 Plugin.Diag($"[Uni] registered {n} skeleton(s) + re-Apply'd; " + string.Join(", ", entries.Select(x => $"{x.resourceName}(skel {x.skeletonId}, anim {x.animId})")));
             }
-            catch (Exception e) { Plugin.Log.LogError("[Uni] register: " + e); }
+            catch (Exception e) { InjectionErrors++; Plugin.Log.LogError("[Uni] register: " + e); }
         }
 
         // repoint a matching unit (AddOn.Load postfix)
@@ -207,7 +207,7 @@ namespace HumankindAssetFramework
                 ApplyTexture(e, animMgr);
                 if (!e.repointed) { e.repointed = true; anyRescuable = null; Plugin.Diag($"[Uni] repointed '{name}' -> {e.resourceName} (mesh '{bodyName}', layer '{e.layerHint}')"); }
             }
-            catch (Exception ex) { Plugin.Log.LogError("[Uni] repoint: " + ex); }
+            catch (Exception ex) { InjectionErrors++; Plugin.Log.LogError("[Uni] repoint: " + ex); }
         }
 
         internal static void TickTexture()
@@ -631,7 +631,7 @@ namespace HumankindAssetFramework
                 catch (Exception ex) { Plugin.Log.LogWarning("[Uni] descriptor sync: " + ex.Message); }
                 if (e != null) e.fragsLogged = true;   // dumped the donor fragment names once; don't spam on every load
             }
-            catch (Exception ex) { Plugin.Log.LogError("[Uni] ReloadFragments: " + ex); }
+            catch (Exception ex) { InjectionErrors++; Plugin.Log.LogError("[Uni] ReloadFragments: " + ex); }
         }
 
         // HAND PROP (weapon axis, 2026-07-19): append ONE rigid fragment — a Prop-Lab weapon glued to a bone of OUR

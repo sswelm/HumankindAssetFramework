@@ -195,7 +195,7 @@ namespace HumankindAssetFramework
                 else ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
             }
             // one-shot log: a bare catch here hid member renames after a game update (models just stopped animating, no clue why).
-            catch (Exception ex) { if (!poseErrLogged) { poseErrLogged = true; Plugin.Log.LogError("[Uni] OnPawnAdded (pose hook disabled this pawn): " + ex); } }
+            catch (Exception ex) { InjectionErrors++; if (!poseErrLogged) { poseErrLogged = true; Plugin.Log.LogError("[Uni] OnPawnAdded (pose hook disabled this pawn): " + ex); } }
         }
 
         // Read the just-written PawnEntry (pawnCount-1) + its skeleton/descriptor ids, or false if there's nothing to act on.
