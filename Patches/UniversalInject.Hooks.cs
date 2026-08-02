@@ -15,7 +15,7 @@ namespace HumankindAssetFramework
     {
         static MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Animation.AnimationManager");
+            var t = GameBinding.AnimationManager;
             return t != null ? AccessTools.Method(t, "AnimationLoad") : null;
         }
         static bool hookLogged;
@@ -27,8 +27,8 @@ namespace HumankindAssetFramework
     {
         static MethodBase TargetMethod()
         {
-            var addon = AccessTools.TypeByName("Amplitude.Mercury.Animation.PresentationPawnDefinitionAddOn");
-            var animMgr = AccessTools.TypeByName("Amplitude.Mercury.Animation.AnimationManager");
+            var addon = GameBinding.PresentationPawnDefinitionAddOn;
+            var animMgr = GameBinding.AnimationManager;
             return (addon != null && animMgr != null) ? AccessTools.Method(addon, "Load", new[] { animMgr }) : null;
         }
         static void Postfix(object __instance, object __0) { UniversalInject.RepointMatch(__instance, __0); FormationOverride.MaybeScaleFragments(__instance, __0); }
@@ -59,7 +59,7 @@ namespace HumankindAssetFramework
     {
         static MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Animation.PawnManager");
+            var t = GameBinding.PawnManager;
             return t != null ? AccessTools.Method(t, "AddPawnEntry") : null;
         }
         static void Postfix(object __instance) => UniversalInject.OnPawnAdded(__instance);
@@ -144,7 +144,7 @@ namespace HumankindAssetFramework
     {
         static MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PresentationDistrict");
+            var t = GameBinding.PresentationDistrict;
             // UpdateLevelBuild(HgFxAnchorComponent.EventNameEnum) — the district's own override (fires only for districts).
             return t?.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
                     .FirstOrDefault(m => m.Name == "UpdateLevelBuild" && m.GetParameters().Length == 1);
@@ -167,7 +167,7 @@ namespace HumankindAssetFramework
     {
         static MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Animation.PawnManager");
+            var t = GameBinding.PawnManager;
             return t?.GetMethod("Load", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
         }
         static void Prefix()
@@ -176,7 +176,7 @@ namespace HumankindAssetFramework
             {
                 int target = Plugin.SkeletonBoneBudget != null ? Plugin.SkeletonBoneBudget.Value : 0;
                 if (target <= 0) return;
-                var am = AccessTools.TypeByName("Amplitude.Mercury.Animation.AnimationManager");
+                var am = GameBinding.AnimationManager;
                 var inst = AccessTools.Property(am, "Instance")?.GetValue(null);
                 if (inst == null) { Plugin.Log.LogWarning("[Bones] AnimationManager.Instance not ready — pool not enlarged."); return; }
                 var f = AccessTools.Field(am, "skeletonBufferSize");
@@ -198,7 +198,7 @@ namespace HumankindAssetFramework
     {
         static MethodBase TargetMethod()
         {
-            var layer = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxComponentMeshContentManager+ContentLayer");
+            var layer = GameBinding.ContentLayer;
             return layer?.GetMethod("LoadEncodingVertexAndBuffer", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
         }
         static void Prefix(object __instance)
@@ -271,7 +271,7 @@ namespace HumankindAssetFramework
     {
         static MethodBase TargetMethod()
         {
-            var am = AccessTools.TypeByName("Amplitude.Mercury.Animation.AnimationManager");
+            var am = GameBinding.AnimationManager;
             return am?.GetMethod("AnimationLoad", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
         }
         static void Postfix(object __instance)
@@ -294,7 +294,7 @@ namespace HumankindAssetFramework
     {
         static MethodBase TargetMethod()
         {
-            var am = AccessTools.TypeByName("Amplitude.Mercury.Animation.AnimationManager");
+            var am = GameBinding.AnimationManager;
             return am?.GetMethod("AnimationLoad", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
         }
         static void Postfix()

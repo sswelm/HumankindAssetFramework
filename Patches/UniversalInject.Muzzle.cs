@@ -135,7 +135,7 @@ namespace HumankindAssetFramework
             if (!gocaResolved)
             {
                 gocaResolved = true;
-                var addOnT = AccessTools.TypeByName("Amplitude.Mercury.Animation.PresentationPawnDefinitionAddOn");
+                var addOnT = GameBinding.PresentationPawnDefinitionAddOn;
                 gocaMethod = addOnT != null ? AccessTools.Method(addOnT, "GetOrCreateAddOn") : null;
             }
             if (gocaMethod == null) return null;

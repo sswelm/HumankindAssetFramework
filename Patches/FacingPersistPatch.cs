@@ -34,7 +34,7 @@ namespace HumankindAssetFramework
     {
         static MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Sandbox.Sandbox");
+            var t = GameBinding.Sandbox;
             return t?.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                 .FirstOrDefault(m => m.Name == "Save" && m.GetParameters().Length >= 1
                     && m.GetParameters()[0].ParameterType.Name == "StorageContainerInfo");
@@ -49,7 +49,7 @@ namespace HumankindAssetFramework
     {
         static MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Sandbox.Sandbox");
+            var t = GameBinding.Sandbox;
             return t?.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                 .FirstOrDefault(m => m.Name == "Load" && m.GetParameters().Length >= 1
                     && m.GetParameters()[0].ParameterType.Name == "StorageContainerInfo");
@@ -148,7 +148,7 @@ namespace HumankindAssetFramework
                 if (pendingMap.Count == 0) { lock (gate) pendingFile = null; applying = false; }
             }
 
-            var presType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.Presentation");
+            var presType = GameBinding.Presentation;
             var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
             var armies = factory == null ? null : UniversalInject.GetMember(factory, "PresentationArmyEntities") as Array;
             if (armies == null) return;

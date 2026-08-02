@@ -203,10 +203,7 @@ namespace HumankindAssetFramework
         // PresentationFormationDefinition lives in Amplitude.Mercury.Data (NOT .Data.World like the unit/pawn defs —
         // the .World guess cost the first in-game test: the DB lookup returned null forever, silently). Fallbacks
         // cover a future namespace move; the simple name works because HarmonyX's TypeByName matches t.Name last.
-        static Type FormationDefType() =>
-            AccessTools.TypeByName("Amplitude.Mercury.Data.PresentationFormationDefinition")
-            ?? AccessTools.TypeByName("Amplitude.Mercury.Data.World.PresentationFormationDefinition")
-            ?? AccessTools.TypeByName("PresentationFormationDefinition");
+        static Type FormationDefType() => GameBinding.PresentationFormationDefinition;
 
         static void TryApply()
         {
@@ -250,7 +247,7 @@ namespace HumankindAssetFramework
         {
             if (reformSettled) return;                              // catch-up complete this session — a reload re-arms it (OnAnimationLoad)
             if (++reformScanFrame % 5 != 0) return;                 // ~12x/s is ample; the frame counter still advances
-            var presType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.Presentation");
+            var presType = GameBinding.Presentation;
             var factory = presType == null ? null : AccessTools.Field(presType, "PresentationEntityFactoryController")?.GetValue(null);
             var armies = factory == null ? null : Mem(factory, "PresentationArmyEntities") as Array;
             if (armies == null) return;
@@ -621,7 +618,7 @@ namespace HumankindAssetFramework
                         Plugin.Diag($"[Formation] '{defName}': SCALED x{s} in data (skeleton + {replaced} fragment(s)) pre-registration — the snapshot carries it.");
                     return;
                 }
-                var pmType = AccessTools.TypeByName("Amplitude.Mercury.Animation.PawnManager");
+                var pmType = GameBinding.PawnManager;
                 var pm = pmType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
                          ?? AccessTools.Field(pmType, "Instance")?.GetValue(null);
                 var descs = AccessTools.Field(pmType, "gpuPawnDescriptorEntries")?.GetValue(pm) as Array;
@@ -833,7 +830,7 @@ namespace HumankindAssetFramework
                 foreach (var e in entries) if (e.dummies.Count > need) need = e.dummies.Count;
                 if (need == 0) return;
 
-                var st = AccessTools.TypeByName("PresentationEntityFactoryControllerSettings");
+                var st = GameBinding.EntityFactoryControllerSettings;
                 var inst = st != null ? AccessTools.Property(st, "Instance")?.GetValue(null) : null;
                 var prefab = inst != null ? AccessTools.Field(st, "Formation3DPrefab")?.GetValue(inst) as Component : null;
                 if (prefab == null) { Plugin.Log.LogWarning("[Formation] Formation3DPrefab not reachable — big formations may exceed the dummy pool."); return; }
@@ -963,7 +960,7 @@ namespace HumankindAssetFramework
     {
         static System.Reflection.MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("PresentationGameObjectPoolController");
+            var t = GameBinding.GameObjectPoolController;
             return t != null ? AccessTools.Method(t, "DoStart") : null;
         }
         static void Prefix() => FormationOverride.ExtendFormationPrefab();
@@ -977,8 +974,7 @@ namespace HumankindAssetFramework
     {
         static System.Reflection.MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Data.World.FormationHelper")   // verified home (decompile)
-                    ?? AccessTools.TypeByName("FormationHelper");
+            var t = GameBinding.FormationHelper;   // verified home (decompile)
             return t != null ? AccessTools.Method(t, "InitializeFormation3DForDefinition") : null;
         }
         static void Prefix(object __0, object __1, object __2) => FormationOverride.EnsureInstanceCapacity(__0, __1, __2);
@@ -996,8 +992,7 @@ namespace HumankindAssetFramework
     {
         static System.Reflection.MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PresentationPawn")
-                    ?? AccessTools.TypeByName("PresentationPawn");
+            var t = GameBinding.PresentationPawn;
             return t != null ? AccessTools.Method(t, "InstantiatePawn") : null;
         }
         static void Postfix(object __result, object __3) => FormationOverride.ApplyPawnScale(__result, __3);
@@ -1008,8 +1003,7 @@ namespace HumankindAssetFramework
     {
         static System.Reflection.MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PresentationUnit")
-                    ?? AccessTools.TypeByName("PresentationUnit");
+            var t = GameBinding.PresentationUnit;
             return t != null ? AccessTools.Method(t, "InstantiatePawns") : null;
         }
         static void Postfix(object __instance) => FormationOverride.SpawnDiag(__instance);

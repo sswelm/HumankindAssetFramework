@@ -22,9 +22,10 @@ namespace HumankindAssetFramework
     {
         internal sealed class Dep
         {
-            public readonly string Type;
+            public readonly Type Type;      // resolved via a GameBinding accessor (so the NAME lives only there) — null if the game type is missing
+            public readonly string Name;    // display name for the report
             public readonly string[] Members;
-            public Dep(string type, params string[] members) { Type = type; Members = members ?? new string[0]; }
+            public Dep(Type type, string name, params string[] members) { Type = type; Name = name; Members = members ?? new string[0]; }
         }
 
         internal struct DepResult { public string Type; public bool TypeFound; public List<string> MissingMembers; }
@@ -38,8 +39,13 @@ namespace HumankindAssetFramework
             if (string.IsNullOrEmpty(name)) return null;
             var t = Type.GetType(name, false);           // resolves mscorlib/qualified names directly
             if (t != null) return t;
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())   // scan loaded assemblies (Amplitude.* in-game)
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())   // full name: scan loaded assemblies (Amplitude.* in-game)
                 try { t = asm.GetType(name, false); if (t != null) return t; } catch { }
+            if (name.IndexOf('.') < 0)   // SIMPLE (namespace-less) name — match by Type.Name, like AccessTools.TypeByName (the game uses a few short-name-only types)
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                    try { foreach (var ty in asm.GetTypes()) if (ty.Name == name) return ty; }
+                    catch (ReflectionTypeLoadException rtle) { foreach (var ty in rtle.Types) if (ty != null && ty.Name == name) return ty; }   // partial load: use what loaded
+                    catch { }
             return null;
         }
 
@@ -56,19 +62,55 @@ namespace HumankindAssetFramework
         // cached (non-null only, so a type not yet loaded at first touch re-resolves next call). `fallback` mirrors the
         // game's own short-name fallback used for a couple of these. Rolling this out one subsystem at a time; AUDIO first.
         static readonly Dictionary<string, Type> _typeCache = new Dictionary<string, Type>();
-        internal static Type Cached(string name, string fallback = null)
+        internal static Type Cached(string name, params string[] fallbacks)
         {
             if (_typeCache.TryGetValue(name, out var c) && c != null) return c;
-            var t = ResolveType(name) ?? (fallback != null ? ResolveType(fallback) : null);
+            var t = ResolveType(name);
+            if (t == null && fallbacks != null)
+                foreach (var f in fallbacks) { t = ResolveType(f); if (t != null) break; }
             if (t != null) _typeCache[name] = t;
             return t;
         }
 
+        // ---- audio ----
         internal static Type PresentationSubPawn => Cached("Amplitude.Mercury.Presentation.PresentationSubPawn");
         internal static Type AudioEmitter        => Cached("Amplitude.Wwise.Components.AudioEmitter");
         internal static Type AudioManager        => Cached("Amplitude.Wwise.Audio.AudioManager");
         internal static Type AkSoundEngine       => Cached("Amplitude.Wwise.Interop.AkSoundEngine", "AkSoundEngine");
         internal static Type AudioEventHandle    => Cached("Amplitude.Wwise.AudioEventHandle", "AudioEventHandle");
+        // ---- combat / fight ----
+        internal static Type PawnRangedFightSequence  => Cached("Amplitude.Mercury.Presentation.PawnRangedFightSequence");
+        internal static Type PawnActionMeleeStartFight => Cached("Amplitude.Mercury.Presentation.PawnActionMeleeStartFight");
+        internal static Type UnitActionFaceEnemy      => Cached("Amplitude.Mercury.Presentation.UnitActionFaceEnemy");
+        internal static Type MecanimEventInterpreter  => Cached("Amplitude.Mercury.Animation.MecanimEventInterpreter");
+        internal static Type AlterationFireProjectile => Cached("Amplitude.Mercury.Animation.AlterationFireProjectile");
+        // ---- presentation core ----
+        internal static Type Presentation        => Cached("Amplitude.Mercury.Presentation.Presentation");
+        internal static Type PresentationPawn    => Cached("Amplitude.Mercury.Presentation.PresentationPawn", "PresentationPawn");
+        internal static Type PresentationUnit    => Cached("Amplitude.Mercury.Presentation.PresentationUnit", "PresentationUnit");
+        internal static Type PresentationUnitHolder => Cached("Amplitude.Mercury.Presentation.PresentationUnitHolder");
+        internal static Type PresentationDistrict => Cached("Amplitude.Mercury.Presentation.PresentationDistrict");
+        // ---- animation / pawn ----
+        internal static Type PawnManager         => Cached("Amplitude.Mercury.Animation.PawnManager");
+        internal static Type AnimationManager    => Cached("Amplitude.Mercury.Animation.AnimationManager");
+        internal static Type PresentationPawnDefinitionAddOn => Cached("Amplitude.Mercury.Animation.PresentationPawnDefinitionAddOn");
+        internal static Type ClipCollection      => Cached("Amplitude.Mercury.Animation.ClipCollection");
+        internal static Type MeshCollection      => Cached("Amplitude.Mercury.Animation.MeshCollection");
+        // ---- data / assets / graphics ----
+        internal static Type AssetDatabase       => Cached("Amplitude.Framework.Asset.AssetDatabase");
+        internal static Type Guid                => Cached("Amplitude.Framework.Guid");
+        internal static Type FxEvolverMaterial   => Cached("Amplitude.Graphics.Fx.FxEvolverMaterial");
+        internal static Type FxMesh              => Cached("Amplitude.Graphics.Fx.FxMesh");
+        internal static Type ContentLayer        => Cached("Amplitude.Graphics.Fx.FxComponentMeshContentManager+ContentLayer");
+        internal static Type PresentationPawnDefinition => Cached("Amplitude.Mercury.Data.World.PresentationPawnDefinition");
+        internal static Type ProjectileAsset     => Cached("Amplitude.Mercury.Data.World.ProjectileAsset");
+        // ---- formation ----
+        internal static Type PresentationFormationDefinition => Cached("Amplitude.Mercury.Data.PresentationFormationDefinition", "Amplitude.Mercury.Data.World.PresentationFormationDefinition", "PresentationFormationDefinition");
+        internal static Type FormationHelper     => Cached("Amplitude.Mercury.Data.World.FormationHelper", "FormationHelper");
+        internal static Type EntityFactoryControllerSettings => Cached("PresentationEntityFactoryControllerSettings");
+        internal static Type GameObjectPoolController        => Cached("PresentationGameObjectPoolController");
+        // ---- world state ----
+        internal static Type Sandbox             => Cached("Amplitude.Mercury.Sandbox.Sandbox");
 
         // Resolve each dep. Unit-testable against known .NET types (the game types simply aren't present in a test host,
         // which exercises the "missing type" path).
@@ -77,11 +119,10 @@ namespace HumankindAssetFramework
             var results = new List<DepResult>();
             foreach (var d in deps ?? Enumerable.Empty<Dep>())
             {
-                var t = ResolveType(d.Type);
-                var r = new DepResult { Type = d.Type, TypeFound = t != null, MissingMembers = new List<string>() };
-                if (t != null)
+                var r = new DepResult { Type = d.Name, TypeFound = d.Type != null, MissingMembers = new List<string>() };
+                if (d.Type != null)
                     foreach (var m in d.Members)
-                        if (!MemberExists(t, m)) r.MissingMembers.Add(m);
+                        if (!MemberExists(d.Type, m)) r.MissingMembers.Add(m);
                 results.Add(r);
             }
             return results;
@@ -110,31 +151,52 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogError("[GameBinding] validate: " + ex); }
         }
 
-        // The catalog — the game types/members HAF binds to on its hot paths. Each member here is read by a feature that
-        // works today, so a "missing" is a real game-API change (or a catalog typo — the report catches both). Members are
-        // attributed to the type they're actually read off (A1's PresentationUnit mistake was the lesson). A2 growth.
+        // The catalog validates the ACCESSORS above (the one place each game-type name lives — A3). Every accessor is
+        // listed so the startup report covers all of them; members are attributed to the type they're actually read off
+        // (A1's PresentationUnit mistake was the lesson). A "missing" here is a real game-API change.
         internal static readonly Dep[] Catalog =
         {
-            // ---- audio (engine sound / silence / audition) ----
-            new Dep("Amplitude.Mercury.Presentation.PresentationSubPawn", "AudioEmitter", "Transform", "PresentationPawnDescription"),
-            new Dep("Amplitude.Wwise.Components.AudioEmitter", "AudioEntityGUID", "PostEvent"),
-            new Dep("Amplitude.Wwise.Audio.AudioEntityGUID", "IsValid", "guid"),
-            new Dep("Amplitude.Wwise.Audio.AudioManager", "PostEvent"),
-            new Dep("Amplitude.Wwise.Interop.AkSoundEngine", "PostEvent", "StopAll"),
-            // ---- pawn registration / pose / injection ----
-            new Dep("Amplitude.Mercury.Animation.PawnManager", "Load", "AddPawnEntry", "gpuPawnDescriptorEntries"),
-            new Dep("Amplitude.Mercury.Animation.AnimationManager", "Instance", "skeletonBufferSize", "FxComponentRenderer", "FxComponentMeshContentManager", "FXMeshLayerIndex"),
-            new Dep("Amplitude.Mercury.Animation.PresentationPawnDefinitionAddOn", "FragmentEntries", "Skeleton", "MeshCollection"),
-            new Dep("Amplitude.Mercury.Animation.ClipCollection"),
-            new Dep("Amplitude.Mercury.Animation.MeshCollection"),
-            // ---- unit / combat ----
-            new Dep("Amplitude.Mercury.Presentation.PresentationUnit", "UnitDefinition", "GUID", "Pawns", "Formation"),
-            new Dep("Amplitude.Mercury.Presentation.PawnRangedFightSequence"),
-            new Dep("Amplitude.Mercury.Presentation.UnitActionFaceEnemy", "StartUnitAction", "actionScope", "AttackerBattleUnit"),
-            // ---- era / world state ----
-            new Dep("Amplitude.Mercury.Sandbox.Sandbox", "MajorEmpires", "NumberOfMajorEmpires", "Timeline"),
-            // ---- misc ----
-            new Dep("Amplitude.Framework.Guid", "a", "b", "c", "d"),
+            // audio
+            new Dep(PresentationSubPawn, nameof(PresentationSubPawn), "AudioEmitter", "Transform", "PresentationPawnDescription"),
+            new Dep(AudioEmitter, nameof(AudioEmitter), "AudioEntityGUID", "PostEvent"),
+            new Dep(AudioManager, nameof(AudioManager), "PostEvent"),
+            new Dep(AkSoundEngine, nameof(AkSoundEngine), "PostEvent", "StopAll"),
+            // combat / fight
+            new Dep(PawnRangedFightSequence, nameof(PawnRangedFightSequence)),
+            new Dep(PawnActionMeleeStartFight, nameof(PawnActionMeleeStartFight)),
+            new Dep(UnitActionFaceEnemy, nameof(UnitActionFaceEnemy), "StartUnitAction", "actionScope", "AttackerBattleUnit"),
+            new Dep(MecanimEventInterpreter, nameof(MecanimEventInterpreter)),
+            new Dep(AlterationFireProjectile, nameof(AlterationFireProjectile)),
+            // presentation core
+            new Dep(Presentation, nameof(Presentation)),
+            new Dep(PresentationPawn, nameof(PresentationPawn)),
+            new Dep(PresentationUnit, nameof(PresentationUnit), "UnitDefinition", "GUID", "Pawns", "Formation"),
+            new Dep(PresentationUnitHolder, nameof(PresentationUnitHolder)),
+            new Dep(PresentationDistrict, nameof(PresentationDistrict)),
+            // animation / pawn
+            new Dep(PawnManager, nameof(PawnManager), "Load", "AddPawnEntry", "gpuPawnDescriptorEntries"),
+            new Dep(AnimationManager, nameof(AnimationManager), "Instance", "skeletonBufferSize", "FxComponentRenderer", "FxComponentMeshContentManager", "FXMeshLayerIndex"),
+            new Dep(PresentationPawnDefinitionAddOn, nameof(PresentationPawnDefinitionAddOn), "FragmentEntries", "Skeleton", "MeshCollection"),
+            new Dep(ClipCollection, nameof(ClipCollection)),
+            new Dep(MeshCollection, nameof(MeshCollection)),
+            // data / assets / graphics
+            new Dep(AssetDatabase, nameof(AssetDatabase)),
+            new Dep(Guid, nameof(Guid), "a", "b", "c", "d"),
+            new Dep(FxEvolverMaterial, nameof(FxEvolverMaterial)),
+            new Dep(FxMesh, nameof(FxMesh)),
+            new Dep(ContentLayer, nameof(ContentLayer)),
+            new Dep(PresentationPawnDefinition, nameof(PresentationPawnDefinition)),
+            new Dep(ProjectileAsset, nameof(ProjectileAsset)),
+            // formation (EntityFactoryControllerSettings / GameObjectPoolController resolve by SIMPLE name — see ResolveType)
+            new Dep(PresentationFormationDefinition, nameof(PresentationFormationDefinition)),
+            new Dep(FormationHelper, nameof(FormationHelper)),
+            new Dep(EntityFactoryControllerSettings, nameof(EntityFactoryControllerSettings)),
+            new Dep(GameObjectPoolController, nameof(GameObjectPoolController)),
+            // world
+            new Dep(Sandbox, nameof(Sandbox), "MajorEmpires", "NumberOfMajorEmpires", "Timeline"),
+            // NOTE: AudioEventHandle has an accessor but is NOT in this startup catalog — it's a genuine LATE-LOADER (the
+            // Wwise event-handle type loads after the menu), so it can't resolve at this report's Awake time and would
+            // false-positive. Its accessor re-resolves on first use (the audio catalog dump / audition) in a loaded game.
         };
     }
 }

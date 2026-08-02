@@ -219,7 +219,7 @@ namespace HumankindAssetFramework
             {
                 if (fxTryLoad == null)
                 {
-                    var fmType = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxEvolverMaterial");
+                    var fmType = GameBinding.FxEvolverMaterial;
                     // prefer the SYNCHRONOUS overload TryLoad(Guid, bool synchrone) so we get the material now, not async-null.
                     fxTryLoad = fmType?.GetMethods(BindingFlags.Static | BindingFlags.Public)
                         .FirstOrDefault(m => m.Name == "TryLoad" && m.GetParameters().Length == 2
@@ -283,7 +283,7 @@ namespace HumankindAssetFramework
                         if (load != null && load.GetParameters().Length == 2)
                         {
                             if (fxNextDoublon == null)
-                                fxNextDoublon = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxEvolverMaterial")?.GetMethod("NextDoublonAvoidanceIndex", BindingFlags.Static | BindingFlags.Public);
+                                fxNextDoublon = GameBinding.FxEvolverMaterial?.GetMethod("NextDoublonAvoidanceIndex", BindingFlags.Static | BindingFlags.Public);
                             uint doublon = fxNextDoublon != null ? (uint)fxNextDoublon.Invoke(null, null) : 0u;
                             load.Invoke(leaf, new object[] { distFxManager, doublon });
                             resolved++;
@@ -315,8 +315,8 @@ namespace HumankindAssetFramework
             {
                 EnsureDistrictConfig();
                 lines.Add($"district registry: {distModels.Count} model(s)");
-                var fxMeshType = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxMesh");
-                var adb = AccessTools.TypeByName("Amplitude.Framework.Asset.AssetDatabase");
+                var fxMeshType = GameBinding.FxMesh;
+                var adb = GameBinding.AssetDatabase;
                 var load = adb?.GetMethods(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(m => (m.Name == "LoadAsset" || m.Name == "TryLoadAsset") && m.IsGenericMethodDefinition && m.GetParameters().Length >= 1);
                 var loadFx = fxMeshType != null && load != null ? load.MakeGenericMethod(fxMeshType) : null;
                 object anyLeaf = null;
@@ -379,7 +379,7 @@ namespace HumankindAssetFramework
                     .FirstOrDefault(m => m.Name == "LoadIFN" && m.GetParameters().Length >= 1 && m.GetParameters()[0].ParameterType.Name.Contains("FxManager"));
                 if (loadIFN != null && distFxManager != null)
                 {
-                    if (fxNextDoublon == null) fxNextDoublon = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxEvolverMaterial")?.GetMethod("NextDoublonAvoidanceIndex", BindingFlags.Static | BindingFlags.Public);
+                    if (fxNextDoublon == null) fxNextDoublon = GameBinding.FxEvolverMaterial?.GetMethod("NextDoublonAvoidanceIndex", BindingFlags.Static | BindingFlags.Public);
                     var pars = loadIFN.GetParameters();
                     var args = pars.Length == 1 ? new[] { distFxManager } : new object[] { distFxManager, fxNextDoublon != null ? fxNextDoublon.Invoke(null, null) : (uint)0 };
                     loadIFN.Invoke(clone, args);
@@ -523,7 +523,7 @@ namespace HumankindAssetFramework
         {
             if (adbLoadAsset == null)
             {
-                var adb = AccessTools.TypeByName("Amplitude.Framework.Asset.AssetDatabase");
+                var adb = GameBinding.AssetDatabase;
                 adbLoadAsset = adb?.GetMethods(BindingFlags.Public | BindingFlags.Static)
                     .FirstOrDefault(m => (m.Name == "TryLoadAsset" || m.Name == "LoadAsset") && m.IsGenericMethodDefinition && m.GetParameters().Length == 1);
             }
@@ -561,8 +561,8 @@ namespace HumankindAssetFramework
             }
             if (projOverrides.Count == 0) return;
 
-            var pawnType = AccessTools.TypeByName("Amplitude.Mercury.Data.World.PresentationPawnDefinition");
-            var projType = AccessTools.TypeByName("Amplitude.Mercury.Data.World.ProjectileAsset");
+            var pawnType = GameBinding.PresentationPawnDefinition;
+            var projType = GameBinding.ProjectileAsset;
             if (pawnType == null || projType == null) { Plugin.Log.LogError("[Projectile] ProjectileAsset/PresentationPawnDefinition type not found (game update?)"); return; }
             var projField = AccessTools.Field(pawnType, "Projectile");   // ProjectileAssetReference (declared on the base; AccessTools walks it)
             if (projField == null) { Plugin.Log.LogError("[Projectile] pawn def has no 'Projectile' field (game update?)"); return; }
@@ -603,8 +603,8 @@ namespace HumankindAssetFramework
             ParsePropGuidsIFN();
             if (propPending.Count == 0 || animationManager == null) return;
             var amType = animationManager.GetType();
-            var mcType = AccessTools.TypeByName("Amplitude.Mercury.Animation.MeshCollection");
-            var adb = AccessTools.TypeByName("Amplitude.Framework.Asset.AssetDatabase");
+            var mcType = GameBinding.MeshCollection;
+            var adb = GameBinding.AssetDatabase;
             var load = adb?.GetMethods(BindingFlags.Public | BindingFlags.Static)
                 .FirstOrDefault(m => (m.Name == "TryLoadAsset" || m.Name == "LoadAsset") && m.IsGenericMethodDefinition && m.GetParameters().Length == 1)?.MakeGenericMethod(mcType);
             var reg = amType.GetMethod("RegisterMeshCollection", BindingFlags.Public | BindingFlags.Instance);
@@ -658,7 +658,7 @@ namespace HumankindAssetFramework
                 if (!propTickArmed || (++propTick % 60) != 0) return;
                 ParsePropGuidsIFN();
                 if (propPending.Count == 0) return;
-                var amType = AccessTools.TypeByName("Amplitude.Mercury.Animation.AnimationManager");
+                var amType = GameBinding.AnimationManager;
                 var inst = amType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
                            ?? GF(amType, "Instance")?.GetValue(null);
                 if (inst != null) RegisterPropCollections(inst, loud: false);
@@ -701,7 +701,7 @@ namespace HumankindAssetFramework
             var lines = new System.Collections.Generic.List<string>();
             try
             {
-                var amType = AccessTools.TypeByName("Amplitude.Mercury.Animation.AnimationManager");
+                var amType = GameBinding.AnimationManager;
                 var inst = amType != null ? AccessTools.Property(amType, "Instance")?.GetValue(null) : null;
                 if (inst == null) { lines.Add("AnimationManager.Instance is null — load a game first."); return lines; }
                 var fxMgr = GetMember(inst, "FxComponentMeshContentManager");
@@ -745,7 +745,7 @@ namespace HumankindAssetFramework
         {
             try
             {
-                var amType = AccessTools.TypeByName("Amplitude.Mercury.Animation.AnimationManager");
+                var amType = GameBinding.AnimationManager;
                 var mgr = amType != null ? AccessTools.Property(amType, "Instance")?.GetValue(null) : null;
                 if (mgr == null) { Plugin.Log.LogWarning("[AtlasDump] AnimationManager.Instance is null — load a game first."); return; }
                 var content = GetMember(mgr, "Content");

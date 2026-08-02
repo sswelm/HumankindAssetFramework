@@ -19,7 +19,7 @@ namespace HumankindAssetFramework
             int era = -1;
             try
             {
-                var sbType = AccessTools.TypeByName("Amplitude.Mercury.Sandbox.Sandbox");
+                var sbType = GameBinding.Sandbox;
                 int count = 0;
                 try { count = Convert.ToInt32(AccessTools.Field(sbType, "NumberOfMajorEmpires")?.GetValue(null) ?? 0); } catch { }
                 var empires = AccessTools.Field(sbType, "MajorEmpires")?.GetValue(null) as Array;
@@ -238,7 +238,7 @@ namespace HumankindAssetFramework
             {
                 try
                 {
-                    var pmT = AccessTools.TypeByName("Amplitude.Mercury.Animation.PawnManager");
+                    var pmT = GameBinding.PawnManager;
                     var pmI = pmT?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
                               ?? AccessTools.Field(pmT, "Instance")?.GetValue(null);
                     var defs = AccessTools.Field(pmT, "pawnDefinitions")?.GetValue(pmI) as System.Collections.IList;
@@ -310,7 +310,7 @@ namespace HumankindAssetFramework
             int n = 0;
             try
             {
-                var presType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.Presentation");
+                var presType = GameBinding.Presentation;
                 var factory = presType == null ? null : AccessTools.Field(presType, "PresentationEntityFactoryController")?.GetValue(null);
                 var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
                 if (armies == null) return 0;
@@ -358,7 +358,7 @@ namespace HumankindAssetFramework
             {
                 var am = animMgrRef;
                 if (am == null) return;   // registration pass not seen yet — the per-frame path retries
-                var pmType = AccessTools.TypeByName("Amplitude.Mercury.Animation.PawnManager");
+                var pmType = GameBinding.PawnManager;
                 var pm = pmType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
                          ?? AccessTools.Field(pmType, "Instance")?.GetValue(null);
                 if (pm == null) return;

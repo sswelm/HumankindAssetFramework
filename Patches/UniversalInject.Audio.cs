@@ -25,7 +25,7 @@ namespace HumankindAssetFramework
             {
                 var spType = GameBinding.PresentationSubPawn;
                 if (spType == null) { Plugin.Log.LogError("[Audio] PresentationSubPawn type not found (game update?)"); return; }
-                var holderType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PresentationUnitHolder");
+                var holderType = GameBinding.PresentationUnitHolder;
                 var all = UnityEngine.Object.FindObjectsOfType(spType);
                 Plugin.Diag($"[Audio] --- audio probe: {all.Length} sub-pawns in scene (filter='{filter}') ---");
                 int shown = 0;

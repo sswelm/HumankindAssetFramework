@@ -13,7 +13,7 @@ namespace HumankindAssetFramework.Tests
         public void Validate_KnownType_AllMembersFound()
         {
             // String.Length (property) + Substring (method) both exist.
-            var r = GameBinding.Validate(new[] { new GameBinding.Dep("System.String", "Length", "Substring") }).Single();
+            var r = GameBinding.Validate(new[] { new GameBinding.Dep(typeof(string), "String", "Length", "Substring") }).Single();
             Assert.True(r.TypeFound);
             Assert.Empty(r.MissingMembers);
         }
@@ -21,7 +21,7 @@ namespace HumankindAssetFramework.Tests
         [Fact]
         public void Validate_ReportsMissingMemberButKeepsTheReal()
         {
-            var r = GameBinding.Validate(new[] { new GameBinding.Dep("System.String", "Length", "NopeNotAMember") }).Single();
+            var r = GameBinding.Validate(new[] { new GameBinding.Dep(typeof(string), "String", "Length", "NopeNotAMember") }).Single();
             Assert.True(r.TypeFound);
             Assert.Equal(new[] { "NopeNotAMember" }, r.MissingMembers.ToArray());   // Length resolved, only the bogus one flagged
         }
@@ -29,7 +29,7 @@ namespace HumankindAssetFramework.Tests
         [Fact]
         public void Validate_ReportsMissingType()
         {
-            var r = GameBinding.Validate(new[] { new GameBinding.Dep("Totally.Nonexistent.GameType", "X") }).Single();
+            var r = GameBinding.Validate(new[] { new GameBinding.Dep(null, "Missing.Game.Type", "X") }).Single();
             Assert.False(r.TypeFound);
             // members aren't probed when the type is missing (nothing to probe against)
             Assert.Empty(r.MissingMembers);
@@ -39,7 +39,7 @@ namespace HumankindAssetFramework.Tests
         public void Validate_MethodAndField_BothCountAsMembers()
         {
             // StringBuilder.Append (method) + Capacity (property); plus a field-bearing type for the field path.
-            var sb = GameBinding.Validate(new[] { new GameBinding.Dep("System.Text.StringBuilder", "Append", "Capacity") }).Single();
+            var sb = GameBinding.Validate(new[] { new GameBinding.Dep(typeof(System.Text.StringBuilder), "StringBuilder", "Append", "Capacity") }).Single();
             Assert.True(sb.TypeFound);
             Assert.Empty(sb.MissingMembers);
         }
@@ -50,7 +50,7 @@ namespace HumankindAssetFramework.Tests
             Assert.Empty(GameBinding.Validate(null));
             Assert.Empty(GameBinding.Validate(System.Array.Empty<GameBinding.Dep>()));
             // an empty member name is treated as missing (a catalog typo), not silently OK
-            var r = GameBinding.Validate(new[] { new GameBinding.Dep("System.String", "") }).Single();
+            var r = GameBinding.Validate(new[] { new GameBinding.Dep(typeof(string), "String", "") }).Single();
             Assert.Contains("", r.MissingMembers);
         }
 
@@ -75,6 +75,14 @@ namespace HumankindAssetFramework.Tests
         public void Cached_MissingBothReturnsNull()
         {
             Assert.Null(GameBinding.Cached("Totally.Bogus.Nope.Type"));
+        }
+
+        [Fact]
+        public void Cached_ResolvesSimpleName()
+        {
+            // AccessTools-style simple-name (namespace-less) resolution — the game has a few short-name-only types,
+            // and this is what Hk_FormationPrefabExtend needs (it broke when ResolveType only did full names).
+            Assert.Same(typeof(System.Text.StringBuilder), GameBinding.Cached("StringBuilder"));
         }
     }
 }

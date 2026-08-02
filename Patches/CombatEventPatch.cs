@@ -72,7 +72,7 @@ namespace HumankindAssetFramework
     {
         static MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PawnRangedFightSequence");
+            var t = GameBinding.PawnRangedFightSequence;
             var m = t != null ? AccessTools.Method(t, "InitializeCommon") : null;
             if (m != null) Plugin.Log.LogInfo("[Fire] hooked PawnRangedFightSequence (state-driven attack)");
             else Plugin.Log.LogWarning("[Fire] NOT found: PawnRangedFightSequence.InitializeCommon — state-driven attack clips won't trigger");
@@ -100,7 +100,7 @@ namespace HumankindAssetFramework
     {
         static MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PawnActionMeleeStartFight");
+            var t = GameBinding.PawnActionMeleeStartFight;
             var m = t != null ? AccessTools.Method(t, "StartPairMeleeAttack") : null;
             if (m != null) Plugin.Log.LogInfo("[Fire] hooked PawnActionMeleeStartFight.StartPairMeleeAttack (per-swing melee attack)");
             else Plugin.Log.LogWarning("[Fire] NOT found: PawnActionMeleeStartFight.StartPairMeleeAttack — melee attack clips won't trigger");
@@ -158,7 +158,7 @@ namespace HumankindAssetFramework
     {
         static MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Presentation.UnitActionFaceEnemy");
+            var t = GameBinding.UnitActionFaceEnemy;
             var m = t != null ? AccessTools.Method(t, "StartUnitAction") : null;
             if (m == null) Plugin.Log.LogWarning("[Audio] NOT found: UnitActionFaceEnemy.StartUnitAction — early attack sound off");
             return m;
@@ -176,7 +176,7 @@ namespace HumankindAssetFramework
     {
         static MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PresentationPawn");
+            var t = GameBinding.PresentationPawn;
             var m = t != null ? AccessTools.Method(t, "TriggerDeath") : null;
             if (m != null) Plugin.Log.LogInfo("[Sound] hooked PresentationPawn.TriggerDeath (death cue)");
             else Plugin.Log.LogWarning("[Sound] NOT found: PresentationPawn.TriggerDeath — death sounds won't trigger");
@@ -197,7 +197,7 @@ namespace HumankindAssetFramework
         // silent 18/19 failure); enumerate and patch them all.
         static System.Collections.Generic.IEnumerable<MethodBase> TargetMethods()
         {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Animation.MecanimEventInterpreter");
+            var t = GameBinding.MecanimEventInterpreter;
             int n = 0;
             if (t != null)
                 foreach (var m in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
@@ -221,7 +221,7 @@ namespace HumankindAssetFramework
     {
         static MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Animation.AlterationFireProjectile");
+            var t = GameBinding.AlterationFireProjectile;
             var m = t != null ? AccessTools.Method(t, "StartEvent") : null;
             if (m != null) Plugin.Log.LogInfo("[Muzzle] hooked AlterationFireProjectile.StartEvent (offset stash)");
             else Plugin.Log.LogWarning("[Muzzle] NOT found: AlterationFireProjectile.StartEvent — muzzle offset compensation off");

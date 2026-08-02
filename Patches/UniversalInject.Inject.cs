@@ -228,8 +228,8 @@ namespace HumankindAssetFramework
         static object LoadSkeleton(int a, int b, int c, int d, string tag)
         {
             var guid = MakeGuid(a, b, c, d);
-            var mcType = AccessTools.TypeByName("Amplitude.Mercury.Animation.MeshCollection");
-            var adb = AccessTools.TypeByName("Amplitude.Framework.Asset.AssetDatabase");
+            var mcType = GameBinding.MeshCollection;
+            var adb = GameBinding.AssetDatabase;
             if (guid == null || mcType == null || adb == null) return null;
             var load = adb.GetMethods(BindingFlags.Public | BindingFlags.Static)
                 .FirstOrDefault(m => (m.Name == "LoadAsset" || m.Name == "TryLoadAsset") && m.IsGenericMethodDefinition && m.GetParameters().Length >= 1);
@@ -309,7 +309,7 @@ namespace HumankindAssetFramework
         {
             try
             {
-                var ccType = AccessTools.TypeByName("Amplitude.Mercury.Animation.ClipCollection");
+                var ccType = GameBinding.ClipCollection;
                 if (ccType == null) { Plugin.Diag("[RigDump] ClipCollection type not found"); return; }
                 // bone index -> name from the skeleton's BoneInfos
                 var boneNames = new List<string>();
@@ -561,7 +561,7 @@ namespace HumankindAssetFramework
                 // which otherwise skins by donor bone indices against OUR skeleton = giant spikes.
                 try
                 {
-                    var pmType = AccessTools.TypeByName("Amplitude.Mercury.Animation.PawnManager");
+                    var pmType = GameBinding.PawnManager;
                     var pm = pmType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
                              ?? AccessTools.Field(pmType, "Instance")?.GetValue(null);
                     int defId = -1;
@@ -667,7 +667,7 @@ namespace HumankindAssetFramework
                 // 1) the MeshCollection: already-registered lookup -> Amplitude catalog -> mounted-bundle name fallback
                 //    (the catalog misses mod-bundle MeshCollections by GUID — Pawn-Props trap 3); register after a raw load
                 //    (RegisterMeshCollection dedupes internally and LoadIFNs the meshes into the GPU content manager).
-                var mcType = AccessTools.TypeByName("Amplitude.Mercury.Animation.MeshCollection");
+                var mcType = GameBinding.MeshCollection;
                 var guid = MakeGuid(cg[0], cg[1], cg[2], cg[3]);
                 if (mcType == null || guid == null) return;
                 object mc = null;
@@ -677,7 +677,7 @@ namespace HumankindAssetFramework
                 bool preRegistered = !Dead(mc);   // already encoded (e.g. via [Props] PropCollectionGuids) — angles stamped now would be TOO LATE (guid-cached)
                 if (Dead(mc))
                 {
-                    var adb = AccessTools.TypeByName("Amplitude.Framework.Asset.AssetDatabase");
+                    var adb = GameBinding.AssetDatabase;
                     var loadA = adb?.GetMethods(BindingFlags.Public | BindingFlags.Static)
                         .FirstOrDefault(m2 => (m2.Name == "TryLoadAsset" || m2.Name == "LoadAsset") && m2.IsGenericMethodDefinition && m2.GetParameters().Length == 1)?.MakeGenericMethod(mcType);
                     try { mc = loadA?.Invoke(null, new[] { guid }); } catch { }
@@ -717,10 +717,10 @@ namespace HumankindAssetFramework
                                     { iaF.SetValue(fmc, new UnityEngine.Vector3(ax, ay, az)); stamped = true; }
                                     // resolve + stamp the FxMesh asset the content entry points at
                                     var fxGuid = GetMember(fmc, "Guid");
-                                    var fxType = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxMesh");
+                                    var fxType = GameBinding.FxMesh;
                                     if (fxGuid != null && fxType != null)
                                     {
-                                        var adb2 = AccessTools.TypeByName("Amplitude.Framework.Asset.AssetDatabase");
+                                        var adb2 = GameBinding.AssetDatabase;
                                         var loadFx = adb2?.GetMethods(BindingFlags.Public | BindingFlags.Static)
                                             .FirstOrDefault(m2 => (m2.Name == "TryLoadAsset" || m2.Name == "LoadAsset") && m2.IsGenericMethodDefinition && m2.GetParameters().Length == 1)?.MakeGenericMethod(fxType);
                                         object fx = null;
@@ -813,7 +813,7 @@ namespace HumankindAssetFramework
                 // repoint just descriptor[defId] at the new contiguous block (its old slots go dead, harmless).
                 try
                 {
-                    var pmType = AccessTools.TypeByName("Amplitude.Mercury.Animation.PawnManager");
+                    var pmType = GameBinding.PawnManager;
                     var pm = pmType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
                              ?? AccessTools.Field(pmType, "Instance")?.GetValue(null);
                     int defId = -1;

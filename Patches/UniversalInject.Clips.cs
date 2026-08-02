@@ -19,8 +19,8 @@ namespace HumankindAssetFramework
             try
             {
                 var guid = MakeGuid(a, b, c, d);
-                var ccType = AccessTools.TypeByName("Amplitude.Mercury.Animation.ClipCollection");
-                var adb = AccessTools.TypeByName("Amplitude.Framework.Asset.AssetDatabase");
+                var ccType = GameBinding.ClipCollection;
+                var adb = GameBinding.AssetDatabase;
                 if (guid == null || ccType == null || adb == null) return null;
                 var load = adb.GetMethods(BindingFlags.Public | BindingFlags.Static)
                     .FirstOrDefault(m => (m.Name == "LoadAsset" || m.Name == "TryLoadAsset") && m.IsGenericMethodDefinition && m.GetParameters().Length >= 1);
@@ -41,7 +41,7 @@ namespace HumankindAssetFramework
             try
             {
                 var field = AccessTools.Field(animMgr.GetType(), "loadedAnimationClipCollections");
-                var ccType = AccessTools.TypeByName("Amplitude.Mercury.Animation.ClipCollection");
+                var ccType = GameBinding.ClipCollection;
                 if (field == null || ccType == null) { Plugin.Log.LogWarning("[Uni] clipCollection field/type not found"); return; }
                 object InjectOne(object coll, int a, int b, int c2, int d2, string tag)
                 {

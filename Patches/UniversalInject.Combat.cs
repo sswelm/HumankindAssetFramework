@@ -37,7 +37,7 @@ namespace HumankindAssetFramework
             if (++respawnFrame % 5 != 0) return;                    // throttle the scan to ~12x/s (frame counter still advances every frame)
             try
             {
-                var presType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.Presentation");
+                var presType = GameBinding.Presentation;
                 var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
                 var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
                 if (armies == null) return;
@@ -110,7 +110,7 @@ namespace HumankindAssetFramework
             if (!anyQueued) return;
             try
             {
-                var presType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.Presentation");
+                var presType = GameBinding.Presentation;
                 var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
                 var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
                 if (armies == null) return;
@@ -449,7 +449,7 @@ namespace HumankindAssetFramework
             try
             {
                 float now = UnityEngine.Time.time;
-                var presType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.Presentation");
+                var presType = GameBinding.Presentation;
                 var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
                 var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
                 if (armies == null) return;
@@ -559,7 +559,7 @@ namespace HumankindAssetFramework
                     fresh[e] = new List<DeploySample>();
                     seen[e] = new HashSet<long>();
                 }
-                var presType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.Presentation");
+                var presType = GameBinding.Presentation;
                 var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
                 var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
                 if (armies != null)
@@ -699,7 +699,7 @@ namespace HumankindAssetFramework
             try
             {
                 var guid = MakeGuid(a, b, c, d);
-                var adb = AccessTools.TypeByName("Amplitude.Framework.Asset.AssetDatabase");
+                var adb = GameBinding.AssetDatabase;
                 if (guid == null || adb == null) return null;
                 var load = adb.GetMethods(BindingFlags.Public | BindingFlags.Static)
                     .FirstOrDefault(m => (m.Name == "LoadAsset" || m.Name == "TryLoadAsset") && m.IsGenericMethodDefinition && m.GetParameters().Length >= 1);

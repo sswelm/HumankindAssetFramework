@@ -42,7 +42,7 @@ namespace HumankindAssetFramework
         }
 
         internal static object MakeGuid(int a, int b, int c, int d)
-        { var gt = AccessTools.TypeByName("Amplitude.Framework.Guid"); if (gt == null) return null; var g = Activator.CreateInstance(gt);
+        { var gt = GameBinding.Guid; if (gt == null) return null; var g = Activator.CreateInstance(gt);
           gt.GetField("a", BF)?.SetValue(g, a); gt.GetField("b", BF)?.SetValue(g, b); gt.GetField("c", BF)?.SetValue(g, c); gt.GetField("d", BF)?.SetValue(g, d); return g; }
     }
 }
