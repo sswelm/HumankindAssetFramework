@@ -10,6 +10,7 @@ tooling is a separate project (`C:\Repo\ENCReload\Assets\Scripts\Editor\`); this
 | `Plugin.cs` | BepInEx entry point. Config binds, the Harmony hook **registration list** (every `Hk_*` / `Uni*Hook` must be listed here or it silently never patches), the per-frame `Update()` pump, and the F8 diagnostic window. |
 | `Prober.cs` | Standalone reflection prober / dev spelunking. |
 | `Patches/` | The injection engine + Harmony patches (below). |
+| `Tests/` | xUnit suite over the pure registry/parse/era layer. See `docs/Testing.md`. |
 | `baker/` | STALE editor snapshot (do not edit/bake here) + LIVE `glbconv`/`Tools`. See `baker/README.md`. |
 
 ## The injection engine — `UniversalInject` (one `partial class`, split by concern)

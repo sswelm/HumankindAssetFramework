@@ -56,18 +56,10 @@ decimation/import/export executes inside Blender's C/C++ core:
 dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release
 ```
 
-`Tests/` is an xUnit project (net471) covering the **pure registry layer** — `ParseModels` (JSON → `ModelEntry`),
-`ResolvePacks` (duplicate-modId reject, `dependsOn`/`loadAfter` ordering, missing-dep skip), `LongestMatch`
-(most-specific substring match), `CoreDesc`, and `RegexStrArray` (wrapper-parse recovery). These are the functions
-that touch no live-game reflection, and where the registry bugs have historically been — so this is a regression net,
-not coverage theatre.
-
-- Needs the same gitignored `References\` DLLs as the plugin build (the test project mirrors them into its bin).
-- Access: the tested helpers are `internal`, exposed via `[InternalsVisibleTo]` (`Properties/AssemblyInfo.cs`); a
-  `ManualLogSource("test")` fixture stands in for `Plugin.Log`.
-- **Out of scope by design:** anything that reflects into Amplitude/Unity at runtime (inject, pose, audio, muzzle,
-  districts) can't run outside the game — that's the deferred in-game smoke seam (maintainability plan Phase 5).
-  `ParseGuidCsv` is likewise not unit-tested: it builds an Amplitude `Guid` via reflection, absent in the test host.
+An xUnit suite (net471) over the **pure registry/parse/era layer** — the half that touches no live-game reflection,
+and where the bugs have historically been. Needs the same gitignored `References\` DLLs as the plugin build (mirrored
+into the test bin). Full detail — what's covered, what's deliberately out of scope and why, how to add a test — is in
+**[Testing.md](Testing.md)**.
 
 ## Editor tooling (`baker/`)
 
