@@ -135,7 +135,7 @@ namespace HumankindAssetFramework
         }
 
         // Amplitude names every definition with its era ("Era1_Common_Biremes_01") — the cheapest reliable era source.
-        static int EraFromName(string name)
+        internal static int EraFromName(string name)
         {
             if (string.IsNullOrEmpty(name)) return -1;
             var m = Regex.Match(name, "Era(\\d+)", RegexOptions.IgnoreCase);
@@ -210,7 +210,7 @@ namespace HumankindAssetFramework
         }
 
         // Split from EraAnchor so the era POLL can log a sample without re-entering CurrentEra().
-        static float EraAnchorFor(int homeEra, int now)
+        internal static float EraAnchorFor(int homeEra, int now)
         {
             if (now < 1) now = 1;                       // Neolithic (0) / unknown: treat as the first era
             if (homeEra < 1) homeEra = 1;
