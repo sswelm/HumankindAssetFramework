@@ -238,6 +238,41 @@ namespace HumankindAssetFramework
             foreach (var k in dict.Keys) if (!live.Contains(k)) (gone ?? (gone = new List<int>())).Add(k);
             if (gone != null) for (int i = 0; i < gone.Count; i++) dict.Remove(gone[i]);
         }
+        // Like PruneById, but for the travel-loop AudioSources: STOP + Destroy each source before forgetting it. A pawn
+        // that despawns mid-move — e.g. into a BATTLE, which replaces its PresentationUnit so the old id leaves the live
+        // set — would otherwise leave a looping AudioSource playing forever (the "sound that never stopped" after a
+        // battle). The normal move→stop transition Pauses it; the despawn path skipped any stop, so do it here.
+        static void PruneSources(Dictionary<int, UnityEngine.AudioSource> dict, HashSet<int> live)
+        {
+            if (dict.Count == 0) return;
+            List<int> gone = null;
+            foreach (var k in dict.Keys) if (!live.Contains(k)) (gone ?? (gone = new List<int>())).Add(k);
+            if (gone == null) return;
+            for (int i = 0; i < gone.Count; i++)
+            {
+                if (dict.TryGetValue(gone[i], out var src) && src != null) { src.Stop(); UnityEngine.Object.Destroy(src); }
+                dict.Remove(gone[i]);
+            }
+        }
+        static readonly List<int> _goneEngines = new List<int>();
+        // The Wwise engine loop (Play_UNIT_Vehicles_*_Start) is stopped only on a move→stop TRANSITION while the pawn is
+        // still polled. A unit that despawns mid-move — notably into a BATTLE, which swaps its PresentationUnit so the id
+        // leaves the live set — never gets its _Stop, so the loop runs forever: the "cart sound" that keeps echoing after
+        // a battle (verified: OrganGun / SiegeHowitzersCar etc. have engineSound=true). On prune, for any id that was
+        // moving, cut everything on its cached (possibly battle-hidden) emitter, then forget it.
+        static void StopAndPruneEngines(ModelEntry e, HashSet<int> live)
+        {
+            if (e.engineMoving.Count == 0) return;
+            _goneEngines.Clear();
+            foreach (var k in e.engineMoving.Keys) if (!live.Contains(k)) _goneEngines.Add(k);
+            for (int i = 0; i < _goneEngines.Count; i++)
+            {
+                int id = _goneEngines[i];
+                if (e.engineSound && e.engineMoving[id] && e.engineEmitters.TryGetValue(id, out var em) && em != null)
+                    StopAllOnEmitter(em);   // a moving unit vanished with a looping _Start still going — cut it
+                e.engineMoving.Remove(id); e.engineEmitters.Remove(id); e.engineLastPos.Remove(id);
+            }
+        }
         static System.Reflection.MethodInfo _akStopAll; static bool _akStopAllTried;
         // Cut everything currently playing on ONE emitter's Wwise game-object — the idle loop that already started at spawn,
         // before this poll first registered the emitter. Future posts are handled by the suppress-prefix, so this is a
@@ -327,7 +362,8 @@ namespace HumankindAssetFramework
                     foreach (var e in on)
                     {
                         PruneById(e.engineLastPos, _engineLiveIds); PruneById(e.engineMoving, _engineLiveIds);
-                        PruneById(e.customSources, _engineLiveIds); PruneById(e.loopHoldUntil, _engineLiveIds); PruneById(e.idleNextAt, _engineLiveIds);
+                        PruneSources(e.customSources, _engineLiveIds); PruneById(e.loopHoldUntil, _engineLiveIds); PruneById(e.idleNextAt, _engineLiveIds);
+                        StopAndPruneEngines(e, _engineLiveIds);
                     }
                 }
                 foreach (var pair in _ourSubpawns)
@@ -412,6 +448,7 @@ namespace HumankindAssetFramework
 
                     // (B) Wwise engine event: post Start/Stop on a movement TRANSITION
                     var emitter = GetMember(sp, "AudioEmitter");
+                    if (e.engineSound && emitter != null) e.engineEmitters[id] = emitter;   // cache for stop-on-despawn (the battle-echo fix)
                     if (e.engineSound && emitter != null && moving != wasMoving)
                     {
                         string evName = moving ? e.engineStartEvent : e.engineStopEvent;

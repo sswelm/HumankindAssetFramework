@@ -158,6 +158,7 @@ namespace HumankindAssetFramework
         public readonly Dictionary<int, float> loopHoldUntil = new Dictionary<int, float>();   // instance id -> Time.time to hold the travel loop off until (so the spool-up one-shot isn't masked)
         public readonly Dictionary<int, UnityEngine.Vector3> engineLastPos = new Dictionary<int, UnityEngine.Vector3>();  // sub-pawn instance id -> last render pos
         public readonly Dictionary<int, bool> engineMoving = new Dictionary<int, bool>();                                  // sub-pawn instance id -> was moving last poll
+        public readonly Dictionary<int, object> engineEmitters = new Dictionary<int, object>();                            // sub-pawn instance id -> its AudioEmitter (cached so a moving unit that despawns into a battle can have its looping Wwise _Start Stopped)
     }
 
     // One in-flight one-shot: the world position of a pawn that just fired + when it started. The pose hook matches a
@@ -882,7 +883,7 @@ namespace HumankindAssetFramework
                     // and the maps otherwise only ever grow. The AudioSources rode session-1 pawn objects (destroyed
                     // with them) — dropping the references is enough.
                     e.deployProgress.Clear(); e.deployLastPos.Clear();
-                    e.customSources.Clear(); e.loopHoldUntil.Clear(); e.engineLastPos.Clear(); e.engineMoving.Clear();
+                    e.customSources.Clear(); e.loopHoldUntil.Clear(); e.engineLastPos.Clear(); e.engineMoving.Clear(); e.engineEmitters.Clear();
                     e.idleNextAt.Clear(); e.attackSoundNextAt.Clear();   // were UNBOUNDED across reloads (never cleared) — session-scoped sub-pawn ids / attacker hashcodes
                 }
             deployMoveState = null;                                  // diagnostic map, unit GUIDs are session-scoped
