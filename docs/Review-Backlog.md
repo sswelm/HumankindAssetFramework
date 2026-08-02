@@ -112,6 +112,15 @@ by when they'll bite.
   third-party pack never touches an `enc_*` path. **Verified in-game same day** (first session clean: new identity
   loads, settings carried, units/districts/audio normal). Still open for the package release: hardcoded paths,
   package scaffolding. (The `ENCAccessProof` C# namespace + project filename were renamed to `HumankindAssetFramework` on 2026-08-01; the local repo FOLDER is the last leftover — a manual `git mv`/reclone when convenient.)
+- **Pack pre-flight validator (third-party author DX)** — *legitimate gap, not yet built.* Today pack **structure**
+  resolution is loud and human-readable (malformed JSON, duplicate `modId`, missing `dependsOn`, cycles, conflicts →
+  clear warnings + `haf_load_report.txt`), and bad input fails *soft* (never crashes). But there's **no entry-level
+  content validation**: a wrong bone name, an unresolvable GUID, or a missing texture path degrades silently rather
+  than producing a "pack X, entry Y: bone `Z` not found" message. For a distributable framework this is a real
+  barrier to entry for external authors. Build a **pre-flight linter** (editor button + a boot-time pass) that checks
+  each entry's referenced assets/bones and reports mismatches in plain language before render. Fits the "guided, not
+  guessy" design goal; scoped for the package phase. (Raised by an external review 2026-08-02; the structure half was
+  already done in the 07-14/07-19 multi-mod work.)
 
 ## Future feature seams (mapped, not built — the discovery is done, only the build remains)
 
