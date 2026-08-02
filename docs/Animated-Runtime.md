@@ -79,10 +79,14 @@ one-off. There is **no managed per-frame per-bone loop** — a common wrong assu
 - **Cost scales by model *type*, not instance.** The GPU mesh buffer is the real ceiling, spent per distinct model
   type — see [Vertex-Budget](Vertex-Budget.md). A hundred *instances* of one animated model is cheap; a hundred
   distinct animated *types* would exhaust the buffer long before CPU mattered.
-- **Fail-soft and presentation-only.** The hook is wrapped per pawn: a mismatch (stale skeleton, unresolved clip)
-  disables *only that pawn's* pose, logs once, and increments `InjectionErrors` (surfaced by the F8 smoke test). It
-  never throws into the game loop, and because pose injection touches only **presentation** state it **cannot corrupt
-  a save or the battle simulation**.
+- **Fail-soft and presentation-only.** Every injection path — repoint, register, clip reload, and the per-frame pose
+  hook — is wrapped in its own try/catch that isolates the failure, logs once, and increments `InjectionErrors`
+  (surfaced by the F8 smoke test). A mismatch (stale skeleton, unresolved clip, member rename after a game update)
+  disables *only that one pawn/model*, never the game loop. A **bone-hierarchy mismatch degrades even more gently**: a
+  `BoneRotation` slot whose `SkeletonBoneIndex` matches no bone is a **no-op**, not an exception (§3) — a missing bone
+  is skipped, not thrown. And because the system writes only **presentation** state (pawn entries, poses,
+  `ObjectSpace`, atlases) and never the simulation model, a failure **cannot corrupt a save or crash the battle
+  simulation loop** — those code paths are never touched.
 
 The one scaling lever — *only if a stutter is ever measured* at very high animated-pawn counts — is the per-frame
 hook's cached-reflection field access (compiled delegates would cut it). It is not a current bottleneck and should not
