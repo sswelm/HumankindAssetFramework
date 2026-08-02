@@ -23,7 +23,7 @@ namespace HumankindAssetFramework
         {
             try
             {
-                var spType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PresentationSubPawn");
+                var spType = GameBinding.PresentationSubPawn;
                 if (spType == null) { Plugin.Log.LogError("[Audio] PresentationSubPawn type not found (game update?)"); return; }
                 var holderType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PresentationUnitHolder");
                 var all = UnityEngine.Object.FindObjectsOfType(spType);
@@ -188,7 +188,7 @@ namespace HumankindAssetFramework
                 string which = StashedLoudHandle != null ? StashedLoudName : ((StashedEngineHandle as UnityEngine.Object)?.name ?? "engine");
                 if (handle == null) { Plugin.Log.LogError("[Audio] nothing captured — turn Audio Trace ON and give a unit a MOVE ORDER (captures a recognizable sound), then retry."); return; }
 
-                var spType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PresentationSubPawn");
+                var spType = GameBinding.PresentationSubPawn;
                 int posted = 0;
                 foreach (var sp in UnityEngine.Object.FindObjectsOfType(spType))
                 {
@@ -251,7 +251,7 @@ namespace HumankindAssetFramework
                 if (!_akStopAllTried)
                 {
                     _akStopAllTried = true;
-                    var ak = AccessTools.TypeByName("Amplitude.Wwise.Interop.AkSoundEngine") ?? AccessTools.TypeByName("AkSoundEngine");
+                    var ak = GameBinding.AkSoundEngine;
                     if (ak != null)
                         foreach (var m in ak.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))
                             if (m.Name == "StopAll" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(ulong)) { _akStopAll = m; break; }
@@ -305,7 +305,7 @@ namespace HumankindAssetFramework
                 }
                 if (anyCustom) EnsureAudioListener();
 
-                var spType = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PresentationSubPawn");
+                var spType = GameBinding.PresentationSubPawn;
                 if (spType == null) return;
                 // FindObjectsOfType is a FULL scene scan — running it every poll causes periodic frame spikes (bad 1% lows).
                 // Do it (and the name-match) only every ~2s, caching just OUR units' sub-pawns; each poll then touches only
@@ -549,7 +549,7 @@ namespace HumankindAssetFramework
                 // Find the AudioEventHandle OBJECT by name (same source DumpSoundCatalog enumerates). We post the handle via
                 // the emitter's own PostEvent(AudioEventHandle) — the PROVEN path PlayAudioTest uses — NOT AkSoundEngine's
                 // by-name static (which posted silently). The by-name path was the bug.
-                var ht = AccessTools.TypeByName("Amplitude.Wwise.AudioEventHandle") ?? AccessTools.TypeByName("AudioEventHandle");
+                var ht = GameBinding.AudioEventHandle;
                 object handle = ht == null ? null : UnityEngine.Resources.FindObjectsOfTypeAll(ht).OfType<UnityEngine.Object>()
                     .FirstOrDefault(o => string.Equals(o.name, eventName, StringComparison.OrdinalIgnoreCase));
                 if (handle == null) { Plugin.Log.LogError($"[Audio] Play Event: no loaded AudioEventHandle named '{eventName}' (check spelling; some banks only load in certain game states)."); return; }
@@ -558,7 +558,7 @@ namespace HumankindAssetFramework
                 // emitter; a city-ambience event (Play_HG_ENV_City_*) needs the CITY's emitter — walking only sub-pawns
                 // misses it. No camera math (Camera.main is null in-game). If the F8 name filter is set, narrow by
                 // emitter name. The listener sits in-scene, so at least one post lands audibly.
-                var emType = AccessTools.TypeByName("Amplitude.Wwise.Components.AudioEmitter");
+                var emType = GameBinding.AudioEmitter;
                 if (emType == null) { Plugin.Log.LogError("[Audio] Play Event: AudioEmitter type not found — are you in a loaded game?"); return; }
                 int posted = 0;
                 foreach (var emObj in UnityEngine.Object.FindObjectsOfType(emType))
@@ -586,7 +586,7 @@ namespace HumankindAssetFramework
         {
             try
             {
-                var emType = AccessTools.TypeByName("Amplitude.Wwise.Components.AudioEmitter");
+                var emType = GameBinding.AudioEmitter;
                 if (emType == null) return;
                 int stopped = 0;
                 foreach (var emObj in UnityEngine.Object.FindObjectsOfType(emType))
@@ -607,7 +607,7 @@ namespace HumankindAssetFramework
                 if (!(GetMember(g, "guid") is ulong gid)) return;
                 if (_postByName == null)
                 {
-                    var ak = AccessTools.TypeByName("Amplitude.Wwise.Interop.AkSoundEngine");
+                    var ak = GameBinding.AkSoundEngine;
                     _postByName = ak?.GetMethods().FirstOrDefault(m => m.Name == "PostEvent"
                         && m.GetParameters().Length == 2
                         && m.GetParameters()[0].ParameterType == typeof(string)
@@ -624,7 +624,7 @@ namespace HumankindAssetFramework
         {
             try
             {
-                var t = AccessTools.TypeByName("Amplitude.Wwise.AudioEventHandle") ?? AccessTools.TypeByName("AudioEventHandle");
+                var t = GameBinding.AudioEventHandle;
                 if (t == null) { Plugin.Log.LogError("[Audio] AudioEventHandle type not found"); return; }
                 var names = UnityEngine.Resources.FindObjectsOfTypeAll(t).OfType<UnityEngine.Object>()
                     .Select(o => o.name).Where(n => !string.IsNullOrEmpty(n))

@@ -133,7 +133,7 @@ namespace HumankindAssetFramework
     {
         static MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("Amplitude.Wwise.Components.AudioEmitter");
+            var t = GameBinding.AudioEmitter;
             var m = t != null ? AccessTools.Method(t, "PostEvent") : null;   // instance PostEvent(AudioEventHandle) — the one overload
             if (m != null) Plugin.Log.LogInfo("[Audio] hooked AudioEmitter.PostEvent (donor-audio silence)");
             else Plugin.Log.LogWarning("[Audio] NOT found: AudioEmitter.PostEvent — silenceDonorAudio won't work");

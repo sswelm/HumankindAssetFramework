@@ -51,6 +51,25 @@ namespace HumankindAssetFramework
             return false;
         }
 
+        // ---- A3: cached type handles — the ONE place each game type NAME lives. Call sites use GameBinding.<Type> instead
+        // of a scattered TypeByName("…"), so a rename is fixed here, not hunted across the codebase. Resolved once and
+        // cached (non-null only, so a type not yet loaded at first touch re-resolves next call). `fallback` mirrors the
+        // game's own short-name fallback used for a couple of these. Rolling this out one subsystem at a time; AUDIO first.
+        static readonly Dictionary<string, Type> _typeCache = new Dictionary<string, Type>();
+        internal static Type Cached(string name, string fallback = null)
+        {
+            if (_typeCache.TryGetValue(name, out var c) && c != null) return c;
+            var t = ResolveType(name) ?? (fallback != null ? ResolveType(fallback) : null);
+            if (t != null) _typeCache[name] = t;
+            return t;
+        }
+
+        internal static Type PresentationSubPawn => Cached("Amplitude.Mercury.Presentation.PresentationSubPawn");
+        internal static Type AudioEmitter        => Cached("Amplitude.Wwise.Components.AudioEmitter");
+        internal static Type AudioManager        => Cached("Amplitude.Wwise.Audio.AudioManager");
+        internal static Type AkSoundEngine       => Cached("Amplitude.Wwise.Interop.AkSoundEngine", "AkSoundEngine");
+        internal static Type AudioEventHandle    => Cached("Amplitude.Wwise.AudioEventHandle", "AudioEventHandle");
+
         // Resolve each dep. Unit-testable against known .NET types (the game types simply aren't present in a test host,
         // which exercises the "missing type" path).
         internal static List<DepResult> Validate(IEnumerable<Dep> deps)

@@ -45,7 +45,7 @@ namespace HumankindAssetFramework
         static MethodBase _getBoneTRS;
         static MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Presentation.PresentationSubPawn");
+            var t = GameBinding.PresentationSubPawn;
             _getBoneTRS = t != null ? AccessTools.Method(t, "GetBoneTRS", new[] { typeof(string) }) : null;
             return _getBoneTRS;
         }
@@ -77,7 +77,7 @@ namespace HumankindAssetFramework
     {
         static MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("Amplitude.Wwise.Audio.AudioManager");
+            var t = GameBinding.AudioManager;
             return t?.GetMethods().FirstOrDefault(m => m.Name == "PostEvent"
                 && m.GetParameters().Length == 2
                 && m.GetParameters()[0].ParameterType.Name == "AudioEventHandle"
@@ -99,7 +99,7 @@ namespace HumankindAssetFramework
         // uses — including whatever path the audible engine actually takes (the emitter-level trace only saw the idle).
         static MethodBase TargetMethod()
         {
-            var t = AccessTools.TypeByName("Amplitude.Wwise.Audio.AudioManager");
+            var t = GameBinding.AudioManager;
             return t?.GetMethods().FirstOrDefault(m => m.Name == "PostEvent"
                 && m.GetParameters().Length == 2
                 && m.GetParameters()[0].ParameterType.Name == "AudioEventHandle"

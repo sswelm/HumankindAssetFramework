@@ -53,5 +53,28 @@ namespace HumankindAssetFramework.Tests
             var r = GameBinding.Validate(new[] { new GameBinding.Dep("System.String", "") }).Single();
             Assert.Contains("", r.MissingMembers);
         }
+
+        // ---- A3: cached type accessors ----
+        [Fact]
+        public void Cached_ResolvesAndCachesSameInstance()
+        {
+            var a = GameBinding.Cached("System.String");
+            var b = GameBinding.Cached("System.String");
+            Assert.Same(typeof(string), a);
+            Assert.Same(a, b);   // cached: same instance
+        }
+
+        [Fact]
+        public void Cached_FallsBackWhenPrimaryMissing()
+        {
+            var t = GameBinding.Cached("Bogus.Missing.Primary.Type", "System.Text.StringBuilder");
+            Assert.Same(typeof(System.Text.StringBuilder), t);
+        }
+
+        [Fact]
+        public void Cached_MissingBothReturnsNull()
+        {
+            Assert.Null(GameBinding.Cached("Totally.Bogus.Nope.Type"));
+        }
     }
 }
