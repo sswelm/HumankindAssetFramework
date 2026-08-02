@@ -1,8 +1,9 @@
 # Testing
 
-The plugin has a focused unit-test suite (**44 tests as of 2026-08-02**) over the **pure registry/parse/era layer** —
-the half of the runtime that touches no live-game reflection. It is a deliberate, bounded suite, not a coverage target:
-it guards the functions where bugs have actually hidden, and stops there on purpose.
+The plugin has a focused unit-test suite (**59 tests as of 2026-08-02**) over the **pure logic that can run outside the
+game** — the registry/parse/era layer, the reflection **compatibility report** (`GameBinding`), and the **in-game smoke
+harness's verdict** (`SmokeVerdict`). It is a deliberate, bounded suite, not a coverage target: it guards the functions
+where bugs have actually hidden, and stops there on purpose.
 
 ```
 dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release
@@ -20,6 +21,8 @@ dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release
 | `GuidToLong` | `UniversalInject.Combat.cs` | null / non-numeric → 0; numeric string parses |
 | `EraFromName` | `UniversalInject.ScaleEra.cs` | extract `EraN` (case-insensitive, multi-digit); none/null → −1 |
 | `EraAnchorFor` | `UniversalInject.ScaleEra.cs` | the Global Era Lab anchor rule — **a unit stays at 1.0 unless an authored grid cell says otherwise** (own-age-or-earlier → 1.0; later-but-unauthored → 1.0; non-positive eras clamp cleanly) |
+| `GameBinding.Validate` / `Cached` | `Patches/GameBinding.cs` | the startup **reflection compatibility report** — type/member resolution, incl. the simple-name (`Type.Name`) fallback scan; a game-update rename is *reported*, not silently absorbed |
+| `SmokeVerdict` | `Patches/UniversalInject.SmokeTest.cs` | the **in-game smoke harness's** PASS/FAIL rule — PASS iff every catalogued binding resolved, zero injection errors, and the registry loaded ≥1 model; each fail reason surfaced; `repointed`-zero still passes (no units on the map isn't a failure) |
 
 These map directly to the registry bugs this codebase has actually hit — the `ParseGuidCsv` sign bug, `LongestMatch`
 ambiguity, "wrapper-parse drops overrides", the substring pawn-match — so the suite is a **regression net, not
@@ -43,8 +46,11 @@ This boundary is intentional. Adding tests past it would be green ceremony that 
 - **The runtime/integration seam** — inject, pose, muzzle, audio, districts, formations. These reflect into Amplitude
   types that only exist inside the running game process; they can't be loaded in a test host. Their correctness comes
   from **fail-soft resilience** (per-entry try/catch, null-guards), the **rebuild → relaunch → verify-log** discipline,
-  and the editor-side bake smoke/feature tests — and, eventually, the **in-game smoke seam (maintainability plan
-  Phase 5)**, which is the *right* instrument for this half and is parked until the package push.
+  the editor-side bake smoke/feature tests, and the **in-game smoke harness** — an F8-triggered runtime integration
+  check (`RunSmokeTest`) that asserts the plugin came up and injected cleanly and logs one PASS/FAIL line. That's the
+  *right* instrument for this half: a human loads a game, the harness does the checking. Its **verdict logic is pure
+  and unit-tested** (`SmokeVerdict`, above); only the genuinely untestable part — gathering the live numbers via
+  reflection — runs in-game.
 - **`ParseGuidCsv`, `MakeGuid`, `EmitterName`** — build/consume Amplitude types via reflection, absent in the test host.
 - **`FindEntryForUnitDefinition`** — delegates to the already-tested `LongestMatch` + `CoreDesc`; testing it would mean
   exposing the `entries` global as a test seam for ~zero new coverage.
