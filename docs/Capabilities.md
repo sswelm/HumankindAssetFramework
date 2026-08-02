@@ -173,10 +173,13 @@ the mechanics are detailed in [Animated-Runtime §3b](Animated-Runtime.md#3b-run
   a failure disables only that one pawn/model, logs once, and increments an error counter surfaced by the F8 smoke
   test. A bone that doesn't match is a **no-op**, not an exception.
 - **Save-safe.** The whole system writes only **presentation** state (pawn entries, poses, `ObjectSpace`, atlases,
-  audio). It never touches the simulation model, so a failed or malformed injection **cannot corrupt a save or crash
-  the battle simulation** — and uninstalling the plugin returns every unit to vanilla. It also means **no multiplayer
-  desync**: HAF changes what a unit *looks like*, never what the deterministic simulation computes (Humankind combat is
-  tile/data-based, not mesh-raycast), so custom models, sizes, and formations can't drift the sim.
+  audio) — never the simulation model or serialized save data. So it does **not corrupt saved games** or alter the
+  deterministic simulation, and uninstalling the plugin returns every unit to vanilla. (It is still a runtime patch: a
+  plugin *bug* can throw or, rarely, crash the process — every injection path is try/catch-isolated to keep that rare
+  and localized — but it can't silently rewrite your save.) By the same token it **should not cause multiplayer
+  desync** — it changes what a unit *looks like*, not what the deterministic simulation computes (Humankind combat is
+  tile/data-based, not mesh-raycast). Treat that as an architectural expectation, not a tested guarantee: it hasn't
+  been stress-tested across asymmetric host/client pack setups.
 - **Game updates fail loud, not silent.** HAF binds to the game's types by name via reflection (the cost of no source
   access), so a game update *could* rename one. Rather than misbehave silently, a startup **compatibility report**
   (`GameBinding`) resolves a catalog of **31 core types/members** and logs exactly what's missing —

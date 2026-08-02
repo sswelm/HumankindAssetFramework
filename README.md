@@ -15,8 +15,9 @@ config + assets and joins *without editing anyone else's files*. **ENC** is the 
 units); a stranger's pack loads and merges right alongside it, with conflicts detected and reported. The aim is to make a
 custom Humankind unit something **anyone willing to take some effort** can build. See [**Multi-Mod.md**](docs/Multi-Mod.md).
 
-Custom units ride the game's own GPU-instanced renderer, so **instances are free** — the cost is the number of distinct
-model *types* loaded, not units on screen.
+Custom units ride the game's own GPU-instanced renderer, so **repeated instances are cheap** — the mesh-buffer/asset
+cost is per distinct model *type*, not per unit on screen (each visible instance still carries the game's normal
+render/cull cost).
 
 > **Two halves, one contract.** The **HAF Authoring Tools** (bake, in the Unity editor) and a **runtime plugin**
 > (inject, in the game) talk only through a small JSON pack registry — so the tooling and the injector stay fully

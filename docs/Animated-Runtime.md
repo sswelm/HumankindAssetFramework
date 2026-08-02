@@ -85,8 +85,9 @@ one-off. There is **no managed per-frame per-bone loop** — a common wrong assu
   disables *only that one pawn/model*, never the game loop. A **bone-hierarchy mismatch degrades even more gently**: a
   `BoneRotation` slot whose `SkeletonBoneIndex` matches no bone is a **no-op**, not an exception (§3) — a missing bone
   is skipped, not thrown. And because the system writes only **presentation** state (pawn entries, poses,
-  `ObjectSpace`, atlases) and never the simulation model, a failure **cannot corrupt a save or crash the battle
-  simulation loop** — those code paths are never touched.
+  `ObjectSpace`, atlases) and never the simulation model or serialized save data, a failure **does not corrupt saves or
+  alter the simulation** — those code paths are never touched. (It's still a runtime patch, so a plugin *bug* can throw
+  or, rarely, crash the process; the per-path isolation keeps that rare and localized rather than a save-integrity risk.)
 
 The one scaling lever — *only if a stutter is ever measured* at very high animated-pawn counts — is the reflection
 funnel (`GetMember` / `SetMember`, a `(Type, name)`-keyed `MemberInfo` **cache hit once per field per pawn** — a small

@@ -1,7 +1,8 @@
 # HAF documentation
 
-Everything HAF documents, grouped by what you're trying to do. New here? Start with the
-[project README](../README.md) for the overview, then come back here to go deep.
+Everything HAF documents, grouped by what you're trying to do. New here? This index is the map; the
+[project overview and feature list](https://github.com/sswelm/HumankindAssetFramework#readme) live on the repo home,
+then come back here to go deep.
 
 ---
 
