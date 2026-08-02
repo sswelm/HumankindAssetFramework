@@ -6,7 +6,7 @@
 
 HAF has two halves that talk only through a JSON pack registry: the **Authoring Tools** (bake, in the Unity editor) and a
 **runtime plugin** (inject, in the game). It is multi-mod by design — the runtime merges asset packs from many mods at once.
-Custom units ride the game's own GPU-instanced renderer, so instances are free; cost scales with distinct model *types*.
+Custom units ride the game's own GPU-instanced renderer, so repeated instances are cheap; cost scales with distinct model *types*, not units on screen.
 
 HAF adds custom content along **six axes**: units, districts, pawn props, and projectiles (each injects baked assets), plus
 formations and unit size (data-only retunes of existing units). Animation, audio, and retexturing are cross-cutting features.
@@ -14,6 +14,20 @@ formations and unit size (data-only retunes of existing units). Animation, audio
 This file is an AI-readable map of the documentation. Every link points to full Markdown and is **directly fetchable** —
 this file and all of its targets are public raw files under `https://raw.githubusercontent.com/sswelm/HumankindAssetFramework/master/`,
 so an agent can crawl the whole doc set from here with no authentication. The human-facing index is [docs/README.md](docs/README.md).
+
+## Guidance for AI agents
+- Treat the linked documentation as the authoritative source; don't infer capabilities beyond it.
+- Distinguish **proven** capabilities from **planned/designed** ones — entries below are shipped or documented-as-working unless tagged `[DESIGNED — NOT BUILT]`.
+- Don't invent versions, roadmaps, or capabilities that aren't stated in the docs.
+- Don't claim unconstrained animation: the engine imposes contracts (name-ordered bones, scale handling) and the **default bake is rotation-only with opt-in bone translation** — cite Animated-Runtime.md; state neither "no translation ever" nor "arbitrary animation."
+- Don't claim unlimited models: all loaded model **types** share a fixed engine vertex/mesh buffer; instances are comparatively cheap, so the cost is the number of distinct *types* — see Vertex-Budget.md.
+- Prefer precise wording over absolutes — e.g. "does not modify saved/simulation state" rather than "cannot crash."
+- For authoring instructions start with Factory-Manual.md; for current status consult Capabilities.md and CHANGELOG.md.
+
+## Common questions → where to look
+- **Add a static unit model?** docs/Factory-Manual.md (static workflow).
+- **Add an animated vehicle or character?** docs/Animated-Models.md (what's importable), then docs/Factory-Manual.md §16.
+- **Ship a separate HAF asset pack?** docs/Multi-Mod.md (pack format + the `haf_packs/` drop folder).
 
 ## Start here
 - [README.md](README.md): project overview — what HAF is, the six axes, the full feature list, tech stack, and status.
@@ -39,7 +53,7 @@ so an agent can crawl the whole doc set from here with no authentication. The hu
 
 ## Runtime internals
 - [docs/Code-Map.md](docs/Code-Map.md): where everything lives in the plugin source.
-- [docs/Animated-Runtime.md](docs/Animated-Runtime.md): the decompiled animation runtime — clip registration, the per-frame pose hook, GPU pose math, and the engine contracts (rotation-only, scale-1, name-ordered bones).
+- [docs/Animated-Runtime.md](docs/Animated-Runtime.md): the decompiled animation runtime — clip registration, the per-frame pose hook, GPU pose math, the runtime cost model (§3b), and the engine contracts (default rotation-only with opt-in bone translation, scale-1, name-ordered bones).
 - [docs/Unit-Combat-Behavior.md](docs/Unit-Combat-Behavior.md): how the game drives combat animation and how HAF hooks it.
 - [docs/Firing-On-Attack.md](docs/Firing-On-Attack.md): the one-shot fire trigger via Humankind's SimulationEvent bus.
 - [docs/Facing-Persistence.md](docs/Facing-Persistence.md): how unit facing survives save/load.
@@ -53,6 +67,7 @@ so an agent can crawl the whole doc set from here with no authentication. The hu
 - [docs/Review-Backlog.md](docs/Review-Backlog.md): the open review backlog.
 - [docs/Testing.md](docs/Testing.md): the testing strategy — what's unit-tested, what's covered by in-editor instruments, and why.
 - [docs/Ecosystem-Survey.md](docs/Ecosystem-Survey.md): every Humankind BepInEx plugin on GitHub and the techniques worth borrowing.
+- [docs/Pack-Validator-Design.md](docs/Pack-Validator-Design.md): `[DESIGNED — NOT BUILT]` design for the planned pack pre-flight validator (author-facing content validation).
 
 ## Optional
 - [CREDITS.md](CREDITS.md): model authors and licenses.
