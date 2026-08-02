@@ -120,21 +120,50 @@ namespace HumankindAssetFramework
         // fast-returns immediately, and the substring list is re-parsed ONLY when the config string actually changes.
         static string _silenceRaw = "\0";   // sentinel != any real config value (incl. "") so the first call parses
         static string[] _silenceSubs = new string[0];
+        static string[] SplitSubs(string raw)
+        {
+            var parts = raw.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
+            var kept = new List<string>();
+            foreach (var p in parts) { var s = p.Trim(); if (s.Length > 0) kept.Add(s); }
+            return kept.ToArray();
+        }
         internal static bool ShouldSilenceEvent(string name)
         {
             if (string.IsNullOrEmpty(name)) return false;
+            // (1) the hand-edit escape hatch: Audio/SilenceAudioEvents config string (re-parsed only when it changes).
             var raw = Plugin.SilenceAudioEvents != null ? Plugin.SilenceAudioEvents.Value : "";
-            if (!string.Equals(raw, _silenceRaw, StringComparison.Ordinal))
-            {
-                _silenceRaw = raw;
-                var parts = raw.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
-                var kept = new List<string>();
-                foreach (var p in parts) { var s = p.Trim(); if (s.Length > 0) kept.Add(s); }
-                _silenceSubs = kept.ToArray();
-            }
+            if (!string.Equals(raw, _silenceRaw, StringComparison.Ordinal)) { _silenceRaw = raw; _silenceSubs = SplitSubs(raw); }
             for (int i = 0; i < _silenceSubs.Length; i++)
                 if (name.IndexOf(_silenceSubs[i], StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            // (2) the registry: enc_sounds.json, authored by the Ambient Sounds Lab (loaded once at first use).
+            EnsureSoundOverrides();
+            for (int i = 0; i < _soundOverrideSubs.Length; i++)
+                if (name.IndexOf(_soundOverrideSubs[i], StringComparison.OrdinalIgnoreCase) >= 0) return true;
             return false;
+        }
+
+        // Ambient Sounds Lab registry: BepInEx/config/enc_sounds.json = { "overrides": [ { "silence": "<event-substring>",
+        // "replaceWith": "" } ] }. Loaded once (relaunch to apply Lab edits, same as the district/formation registries).
+        // replaceWith is reserved for the future silence-then-substitute step; only `silence` is consumed today.
+        static bool _soundOvLoaded;
+        static string[] _soundOverrideSubs = new string[0];
+        static void EnsureSoundOverrides()
+        {
+            if (_soundOvLoaded) return;
+            _soundOvLoaded = true;
+            try
+            {
+                var path = Path.Combine(Paths.ConfigPath, "enc_sounds.json");
+                if (!File.Exists(path)) return;
+                var arr = JObject.Parse(File.ReadAllText(path))["overrides"] as JArray;
+                if (arr == null) return;
+                var kept = new List<string>();
+                foreach (var o in arr) { var s = (string)o["silence"]; if (!string.IsNullOrEmpty(s)) kept.Add(s.Trim()); }
+                _soundOverrideSubs = kept.ToArray();
+                if (_soundOverrideSubs.Length > 0)
+                    Plugin.Log.LogInfo($"[Audio] sound overrides: {_soundOverrideSubs.Length} silence rule(s) from enc_sounds.json");
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Audio] enc_sounds.json parse: " + ex); }
         }
 
         // Live audio trace (Hk_AudioTrace patches Wwise PostEvent; gated here so it's free until toggled on in F8).
