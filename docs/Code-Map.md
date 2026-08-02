@@ -53,6 +53,10 @@ its own small field-only cache, `CachedField`, for its self-contained use.)
 
 - **A new Harmony hook only fires if it's added to the `hooks[]` list in `Plugin.cs`** — a missed registration
   is silent. The load line reports `patched/total` counting the methods actually patched (not "didn't throw").
-- Adding a **registry field**: update BOTH the editor `ModelDef` (`ENCReload`) and the plugin parse
-  (`ParseModels` + the regex fallback in `UniversalInjectPatch.cs`), or the field is silently dropped.
+- Adding a **registry field** touches FOUR hand-synced places: the editor `ModelDef` (`ENCReload/…/ModelRegistry.cs`),
+  `ModelEntry`, and the plugin's two read paths — the Newtonsoft object parse **and** the regex fallback, both in
+  `ParseModels` (`UniversalInjectPatch.cs`). Miss one and the feature silently dies with no error. **After the edit, run
+  the drift guard:** `bash ../ENCReload/Tools/check_schema_parity.sh` — it asserts Newtonsoft == regex keys, every read
+  key is a `ModelDef` field, and the cast types agree. This is the schema single-source-of-truth mechanism (a full
+  auto-bound-POCO merge was deliberately declined; the guard monitors the duplication instead).
 - `ModelEntry` is a deliberately flat data object (the POCO split was declined); leave it as one type.
