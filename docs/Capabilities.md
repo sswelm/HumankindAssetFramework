@@ -151,6 +151,26 @@ see the [Factory Manual](Factory-Manual.md).
   auto-restore** — after a game reinstall or "verify files", just opening the Factory restores the registry into
   `BepInEx\config` automatically.
 
+## Runtime guarantees
+
+The injection layer is built to be cheap and safe by construction — the properties below hold for every model, and
+the mechanics are detailed in [Animated-Runtime §3b](Animated-Runtime.md#3b-runtime-cost--why-the-per-frame-drive-stays-cheap).
+
+- **Cheap per frame.** There is no managed per-frame per-bone loop. The per-frame pose hook writes a handful of
+  `PawnEntry` fields per animated pawn (via a cached-reflection funnel); the actual bone skinning is done by the
+  engine's **GPU sampler**, which is instanced. All expensive detection (movement/state, deploy/recoil ramps,
+  formation and respawn scans, audio) is **throttled to ~10–20×/s**, not run every frame. Clips resolve to cached
+  `int` ids once per session — no hot-path clip lookups.
+- **Free per instance, budgeted per type.** GPU cost scales with the number of distinct model **types** loaded, not
+  units on screen — a hundred instances of one model is free. The real ceiling is the shared mesh buffer; see
+  [Vertex-Budget](Vertex-Budget.md).
+- **Fail-soft.** Every injection path (repoint, register, clip-reload, pose hook) is individually try/catch-wrapped:
+  a failure disables only that one pawn/model, logs once, and increments an error counter surfaced by the F8 smoke
+  test. A bone that doesn't match is a **no-op**, not an exception.
+- **Save-safe.** The whole system writes only **presentation** state (pawn entries, poses, `ObjectSpace`, atlases,
+  audio). It never touches the simulation model, so a failed or malformed injection **cannot corrupt a save or crash
+  the battle simulation** — and uninstalling the plugin returns every unit to vanilla.
+
 ## Known limitations
 
 - **Editor-only texture preview:** right after a multi-material bake, Unity may show the baked atlas stale until the
