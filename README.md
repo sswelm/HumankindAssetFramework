@@ -158,6 +158,12 @@ field-by-field breakdown is in the [Factory Manual](docs/Factory-Manual.md) and 
 The plugin's own cfg (`…\community.humankind.haf.cfg`) — press **F8** in-game for a scan/feedback window.
 
 ## Documentation
+
+> **For AI agents:** the machine-readable entry point is [**`llms.txt`**](llms.txt) — fetch it raw at
+> `https://raw.githubusercontent.com/sswelm/HumankindAssetFramework/master/llms.txt`. It maps the whole doc set with
+> links that resolve to public raw Markdown, so an agent can crawl everything with no authentication. (The GitHub
+> *Wiki* is the human-browsable mirror; point AIs at the raw docs, not the rendered wiki HTML.)
+
 The full documentation set, grouped by task (get started · author · ship a pack · internals · project), is indexed in
 [**docs/README.md**](docs/README.md). The fastest starting points:
 

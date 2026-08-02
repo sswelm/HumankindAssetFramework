@@ -11,8 +11,9 @@ Custom units ride the game's own GPU-instanced renderer, so instances are free; 
 HAF adds custom content along **six axes**: units, districts, pawn props, and projectiles (each injects baked assets), plus
 formations and unit size (data-only retunes of existing units). Animation, audio, and retexturing are cross-cutting features.
 
-This file is an AI-readable map of the documentation. Every link points to full Markdown. The human-facing index is
-[docs/README.md](docs/README.md).
+This file is an AI-readable map of the documentation. Every link points to full Markdown and is **directly fetchable** —
+this file and all of its targets are public raw files under `https://raw.githubusercontent.com/sswelm/HumankindAssetFramework/master/`,
+so an agent can crawl the whole doc set from here with no authentication. The human-facing index is [docs/README.md](docs/README.md).
 
 ## Start here
 - [README.md](README.md): project overview — what HAF is, the six axes, the full feature list, tech stack, and status.
