@@ -77,6 +77,23 @@ tests already use) means the CLI **can't drift** from the GUI's behaviour.
 - **No prompts, no partial state:** validate-before-bake by default; registries are already **corruption-guarded** (an unparsable file is never overwritten) and git-backed, so an agent's mistake is recoverable.
 - **Deterministic:** same request → same assets (the bake pipeline is already deterministic; see the golden regression tests).
 
+## The two verbs the real workflow needs
+
+A rebuilt model isn't in the game until the mod is **built** ("referencing ≠ rendering — it needs a Build for the
+MeshCollection"). So the CLI needs both, and they differ sharply in difficulty:
+
+- **`rebuild-model` — ready.** Reuses the exact GUI/`BakeSmokeTest` path: `ModelRegistry.Load()` →
+  `ModelFactoryWindow.ConfigFor(def)` → `UniversalBaker.Build / BuildAnimated` → copy the `BakeResult` GUIDs back →
+  `ModelRegistry.Upsert`. A batch-mode `-executeMethod HAF.Cli.RebuildModel` is a direct implementation. (Honor the
+  def's `reuseExtracted`/keepTexture so a rebuild doesn't clobber hand-edited extracted textures; offer `-fresh` to
+  force a re-slim.)
+- **`build-mod` — needs discovery.** This is **not** HAF's code nor this project's editor DLLs (those are inspectors).
+  `Assets/Configurations/ModdingSettings.txt` points at the **Humankind Mod Tools** (Steam app **1718880**) — the mod
+  build is the modding **SDK's** pipeline. Its programmatic/headless entry point is unknown: candidates are a build
+  method in `Amplitude.Framework.Editor.dll` (decompile + test), a Unity `-executeMethod` target the SDK exposes, or a
+  CLI the Mod Tools app itself provides. **Open question for the author:** how is the mod built today (which menu /
+  button / tool)? That answer targets this verb directly instead of guessing.
+
 ## Phasing
 
 - **Phase 1 (proof):** `HAF.Cli.Bake` — one `-executeMethod` command that bakes a single existing registry entry headless
