@@ -33,6 +33,7 @@ carry no access or lifetime meaning. To find a method, pick the concern:
 | `UniversalInject.Audio.cs` | Engine/move audio: `ProcessEngineAudio`, emitter helpers, `PlaySoundTest`, `DumpSoundCatalog`. Also the Game Sound Lab plumbing: `ShouldSilenceEvent`/`EnsureSoundOverrides` (silence vanilla events from `enc_sounds.json`) and `PlayEventByName`/`StopEventAudition` (F8 audition). See `docs/Game-Sound-Lab.md`. |
 | `UniversalInject.Districts.cs` | District-visual repoint, prop/projectile registration, `DumpMeshBudget`, `ParseGuidCsv`. Nested `DistrictModel`. |
 | `UniversalInject.Reflection.cs` | The one member reader/writer the whole plugin funnels through: `GetMember`/`SetMember`/`MakeGuid` + the `(type,name)` member cache. |
+| `UniversalInject.SmokeTest.cs` | The in-game smoke harness: `RunSmokeTest` (gathers live binding/registry/injection counts and logs a single PASS/FAIL line, echoed to the F8 panel), the pure **`SmokeVerdict`** (unit-tested), and the `InjectionErrors` counter the four injection paths bump. See `docs/Testing.md`. |
 | `UniversalInject.Hooks.cs` | The Harmony patch classes that call into the above: `UniRegisterHook`, `UniRepointHook`, `UniPawnPoseHook`, `Hk_MuzzleRelocate`, `Hk_AudioTrace`, `Hk_DistrictRepoint`, `Hk_AnimatedBonePoolHeadroom`, `Hk_DistrictBufferHeadroom`, `Hk_PropRegister`, `Hk_ProjectileOverride`. |
 
 Other patch files (already separate, not part of `UniversalInject`):
