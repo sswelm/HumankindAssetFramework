@@ -178,7 +178,7 @@ namespace HumankindAssetFramework
         // multi-mod support merges many packs into `entries`, so ENC is just one mod among many — any modder ships their
         // own pack (config + assets) to join. The wrapper keys (modId/schemaVersion/dependsOn/loadAfter/overrides) sit
         // BESIDE the existing "models" array, so a legacy bare { "models": [...] } file still parses — with default metadata.
-        class Pack
+        internal class Pack
         {
             public string modId = "", file = "";
             public string assetDir = "";              // per-pack ASSET ROOT (2026-07-19): file-based assets (WAVs in sounds/, PNGs in skins/) resolve here FIRST, then fall back to the legacy shared enc_sounds/enc_skins — so a third-party pack ships self-contained instead of feeling like an ENC extension. "" (the base pack) = legacy folders only.
@@ -190,7 +190,7 @@ namespace HumankindAssetFramework
         }
         // A declared cross-pack replacement: "this pack intentionally replaces <modId>'s entry on <pawnDescription>".
         // Declared = consensual under the HAF conflict philosophy (an UNdeclared clash is still first-loaded-wins, loud).
-        class PackOverride { public string modId = "", pawn = ""; }
+        internal class PackOverride { public string modId = "", pawn = ""; }
 
         static void LoadRegistry()
         {
@@ -454,7 +454,7 @@ namespace HumankindAssetFramework
 
         // REGEX recovery of a wrapper string-array ("dependsOn"/"loadAfter") when JObject.Parse failed — same resilience
         // the models parse already has. These keys are wrapper-only (never in a model entry), so matching the whole file is safe.
-        static List<string> RegexStrArray(string text, string field)
+        internal static List<string> RegexStrArray(string text, string field)
         {
             var list = new List<string>();
             var m = Regex.Match(text, "\"" + field + "\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
@@ -474,7 +474,7 @@ namespace HumankindAssetFramework
         // filename order), so with no declared constraints the result is byte-identical to the pre-resolution order —
         // today's single-pack setup is provably unaffected. loadAfter naming an absent modId is soft (ignored);
         // a dependency cycle appends its members in seed order with a loud warning. `notes` feeds the load report.
-        static List<Pack> ResolvePacks(List<Pack> packs, List<string> notes)
+        internal static List<Pack> ResolvePacks(List<Pack> packs, List<string> notes)
         {
             // -- duplicate modIds --
             var byId = new Dictionary<string, Pack>(StringComparer.OrdinalIgnoreCase);

@@ -50,6 +50,25 @@ decimation/import/export executes inside Blender's C/C++ core:
   dependency for static models *and* the round-trip cost. Blender would remain only for what genuinely needs a DCC:
   `.blend` files and animation. Tracked in `Framework-Review.md`.
 
+## Tests
+
+```
+dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release
+```
+
+`Tests/` is an xUnit project (net471) covering the **pure registry layer** — `ParseModels` (JSON → `ModelEntry`),
+`ResolvePacks` (duplicate-modId reject, `dependsOn`/`loadAfter` ordering, missing-dep skip), `LongestMatch`
+(most-specific substring match), `CoreDesc`, and `RegexStrArray` (wrapper-parse recovery). These are the functions
+that touch no live-game reflection, and where the registry bugs have historically been — so this is a regression net,
+not coverage theatre.
+
+- Needs the same gitignored `References\` DLLs as the plugin build (the test project mirrors them into its bin).
+- Access: the tested helpers are `internal`, exposed via `[InternalsVisibleTo]` (`Properties/AssemblyInfo.cs`); a
+  `ManualLogSource("test")` fixture stands in for `Plugin.Log`.
+- **Out of scope by design:** anything that reflects into Amplitude/Unity at runtime (inject, pose, audio, muzzle,
+  districts) can't run outside the game — that's the deferred in-game smoke seam (maintainability plan Phase 5).
+  `ParseGuidCsv` is likewise not unit-tested: it builds an Amplitude `Guid` via reflection, absent in the test host.
+
 ## Editor tooling (`baker/`)
 
 The Model Factory editor scripts are mirrored in `baker/` (the live copies compile inside the ENCReload Unity
