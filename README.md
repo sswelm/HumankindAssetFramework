@@ -160,12 +160,11 @@ The plugin's own cfg (`…\community.humankind.haf.cfg`) — press **F8** in-gam
 ## Documentation
 
 📖 **Docs site:** **<https://sswelm.github.io/HumankindAssetFramework/>** — the full documentation as a browsable static
-site (also mirrored in the [GitHub Wiki](https://github.com/sswelm/HumankindAssetFramework/wiki)).
+site, generated from [`/docs`](docs/).
 
 > **For AI agents:** the machine-readable entry point is [**`llms.txt`**](llms.txt) — fetch it raw at
 > `https://raw.githubusercontent.com/sswelm/HumankindAssetFramework/master/llms.txt`. It maps the whole doc set with
-> links that resolve to public raw Markdown, so an agent can crawl everything with no authentication. (The GitHub
-> *Wiki* is the human-browsable mirror; point AIs at the raw docs, not the rendered wiki HTML.)
+> links that resolve to public raw Markdown, so an agent can crawl everything with no authentication.
 
 The full documentation set, grouped by task (get started · author · ship a pack · internals · project), is indexed in
 [**docs/README.md**](docs/README.md). The fastest starting points:

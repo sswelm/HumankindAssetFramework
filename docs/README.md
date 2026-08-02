@@ -51,7 +51,7 @@ Development-facing docs — status, review, testing, and the wider ecosystem.
 
 **For AI agents** — the machine-readable map is
 [`llms.txt`](https://raw.githubusercontent.com/sswelm/HumankindAssetFramework/master/llms.txt) (public raw Markdown, no
-auth, fully crawlable). Point AIs at the raw docs, not the rendered wiki HTML.
+auth, fully crawlable), or the browsable site at <https://sswelm.github.io/HumankindAssetFramework/>.
 
 **Project history** — the dated milestone log (what was proven when, and the war stories behind it) lives in
 [../CHANGELOG.md](../CHANGELOG.md).

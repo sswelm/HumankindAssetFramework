@@ -18,6 +18,3 @@ References/
 *.gltf
 *.usdz
 
-# Wiki sync working dirs (Tools/sync_wiki.sh)
-.wiki/
-.wiki-build/
