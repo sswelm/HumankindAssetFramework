@@ -1,0 +1,59 @@
+# Humankind Asset Framework (HAF)
+
+> HAF gives any Humankind unit — or district, pawn prop, or projectile — a custom 3D model, texture, and sound, with no
+> executable patching and no per-model code. You bake an ordinary model (`.glb`/`.fbx`/`.obj`/`.blend`) in a suite of
+> Unity editor tools, and a data-driven BepInEx plugin injects the result onto the live game, all driven by a JSON registry.
+
+HAF has two halves that talk only through a JSON pack registry: the **Authoring Tools** (bake, in the Unity editor) and a
+**runtime plugin** (inject, in the game). It is multi-mod by design — the runtime merges asset packs from many mods at once.
+Custom units ride the game's own GPU-instanced renderer, so instances are free; cost scales with distinct model *types*.
+
+HAF adds custom content along **six axes**: units, districts, pawn props, and projectiles (each injects baked assets), plus
+formations and unit size (data-only retunes of existing units). Animation, audio, and retexturing are cross-cutting features.
+
+This file is an AI-readable map of the documentation. Every link points to full Markdown. The human-facing index is
+[docs/README.md](docs/README.md).
+
+## Start here
+- [README.md](README.md): project overview — what HAF is, the six axes, the full feature list, tech stack, and status.
+- [docs/README.md](docs/README.md): the documentation index, grouped by task.
+- [docs/Building.md](docs/Building.md): build the plugin and set up the Blender dependency.
+
+## Authoring content
+- [docs/Factory-Manual.md](docs/Factory-Manual.md): the main authoring guide — every field, the static and animated workflows, a troubleshooting table. Also covers unit/creature audio (§13–14).
+- [docs/Animated-Models.md](docs/Animated-Models.md): can HAF import your model? Clean rigs, rigid-part machines, and full character rigs, in plain language.
+- [docs/Textures.md](docs/Textures.md): the atlas pipeline — every knob, the complete failure catalog, and runtime re-skins.
+- [docs/Game-Sound-Lab.md](docs/Game-Sound-Lab.md): game-wide audio overrides — silence or replace any vanilla Wwise event by name, with in-game F8 audition.
+
+## The injection axes
+- [docs/District-Visuals.md](docs/District-Visuals.md): a custom building on a single district tile (District Factory).
+- [docs/Pawn-Props.md](docs/Pawn-Props.md): custom weapons and gear on a pawn's attachment slots (Prop Lab).
+- [docs/Projectiles.md](docs/Projectiles.md): a custom model as a unit's fired munition (Projectile Lab).
+- [docs/Formations.md](docs/Formations.md): how many models a unit fields and how they're arranged (data only, no bake).
+- [docs/Unit-Size.md](docs/Unit-Size.md): resize any unit including vanilla, with era-based scaling (data only, no bake).
+
+## Shipping a pack
+- [docs/Multi-Mod.md](docs/Multi-Mod.md): the HAF pack format, the `haf_packs/` drop folder, pack merge and conflict rules, and the load report. Add assets without touching ENC.
+- [docs/haf-pack.example.json](docs/haf-pack.example.json): a minimal pack template.
+
+## Runtime internals
+- [docs/Code-Map.md](docs/Code-Map.md): where everything lives in the plugin source.
+- [docs/Animated-Runtime.md](docs/Animated-Runtime.md): the decompiled animation runtime — clip registration, the per-frame pose hook, GPU pose math, and the engine contracts (rotation-only, scale-1, name-ordered bones).
+- [docs/Unit-Combat-Behavior.md](docs/Unit-Combat-Behavior.md): how the game drives combat animation and how HAF hooks it.
+- [docs/Firing-On-Attack.md](docs/Firing-On-Attack.md): the one-shot fire trigger via Humankind's SimulationEvent bus.
+- [docs/Facing-Persistence.md](docs/Facing-Persistence.md): how unit facing survives save/load.
+- [docs/Vertex-Budget.md](docs/Vertex-Budget.md): the shared GPU mesh-buffer ceiling and how to budget by model type.
+- [docs/Capabilities.md](docs/Capabilities.md): the full capability list and known limitations, in reference form.
+- [docs/Animation-Pitfalls.md](docs/Animation-Pitfalls.md): hard-won post-mortems — what broke, why, and the fix.
+
+## Project and roadmap
+- [CHANGELOG.md](CHANGELOG.md): the dated milestone log and the war stories behind each capability.
+- [docs/Framework-Review.md](docs/Framework-Review.md): verified code-review findings (prioritized) and the hardening order.
+- [docs/Review-Backlog.md](docs/Review-Backlog.md): the open review backlog.
+- [docs/Testing.md](docs/Testing.md): the testing strategy — what's unit-tested, what's covered by in-editor instruments, and why.
+- [docs/Ecosystem-Survey.md](docs/Ecosystem-Survey.md): every Humankind BepInEx plugin on GitHub and the techniques worth borrowing.
+
+## Optional
+- [CREDITS.md](CREDITS.md): model authors and licenses.
+- [docs/Backup.md](docs/Backup.md): snapshot and restore the un-versioned assets.
+- [docs/Audit-2026-07-31.md](docs/Audit-2026-07-31.md): a point-in-time project audit.
