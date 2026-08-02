@@ -129,6 +129,22 @@ namespace HumankindAssetFramework
         }
 
         // Validate the catalog and log a one-line OK, or a per-item WARNING naming exactly what's missing.
+        // A4 — the game version the catalog was last VERIFIED against. Update after re-verifying on a new game build.
+        // "" = not pinned. Gives the report context: a NOT FOUND on a matching version is a real regression; on a
+        // different version it's most likely just an untested game update.
+        internal const string VerifiedGameVersion = "1.30";   // verified 2026-08-02; update after re-checking on a new build
+
+        static string VersionNote()
+        {
+            string ver = null;
+            try { ver = UnityEngine.Application.version; } catch { }
+            if (string.IsNullOrEmpty(ver)) return "";
+            if (string.IsNullOrEmpty(VerifiedGameVersion)) return $" [game {ver}]";
+            return ver == VerifiedGameVersion
+                ? $" [game {ver}, verified]"
+                : $" [game {ver} — UNTESTED; catalog verified against {VerifiedGameVersion}, so warnings are likely this update]";
+        }
+
         internal static void ValidateAndLog(IEnumerable<Dep> deps)
         {
             try
@@ -138,10 +154,10 @@ namespace HumankindAssetFramework
                 int membersMissing = results.Where(r => r.TypeFound).Sum(r => r.MissingMembers.Count);
                 if (typesMissing == 0 && membersMissing == 0)
                 {
-                    Plugin.Log.LogInfo($"[GameBinding] OK — {results.Count} game type(s) + their members all resolved.");
+                    Plugin.Log.LogInfo($"[GameBinding] OK — {results.Count} game type(s) + their members all resolved.{VersionNote()}");
                     return;
                 }
-                Plugin.Log.LogWarning($"[GameBinding] {typesMissing} type(s) + {membersMissing} member(s) NOT FOUND (game update?) — features using them may misbehave:");
+                Plugin.Log.LogWarning($"[GameBinding] {typesMissing} type(s) + {membersMissing} member(s) NOT FOUND (game update?) — features using them may misbehave:{VersionNote()}");
                 foreach (var r in results)
                 {
                     if (!r.TypeFound) Plugin.Log.LogWarning($"[GameBinding]   MISSING TYPE: {r.Type}");
