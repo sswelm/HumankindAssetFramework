@@ -247,6 +247,7 @@ namespace HumankindAssetFramework
             }
             Log.LogInfo($"Model Factory plugin loaded ({patched}/{hooks.Length} hooks patched{(skipped > 0 ? $", {skipped} skipped — see warnings above" : "")}). Press {ToggleKey.Value} in-game for the " +
                         $"diagnostic window. UniversalInject={UniversalInjectOn.Value}");
+            GameBinding.ValidateAndLog(GameBinding.Catalog);   // compatibility report: warn loudly if a bound game type/member went missing (game update)
         }
 
         private void Update()
