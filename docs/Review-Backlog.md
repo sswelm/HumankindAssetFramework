@@ -120,7 +120,9 @@ by when they'll bite.
   barrier to entry for external authors. Build a **pre-flight linter** (editor button + a boot-time pass) that checks
   each entry's referenced assets/bones and reports mismatches in plain language before render. Fits the "guided, not
   guessy" design goal; scoped for the package phase. (Raised by an external review 2026-08-02; the structure half was
-  already done in the 07-14/07-19 multi-mod work.)
+  already done in the 07-14/07-19 multi-mod work.) **Designed** — see
+  [Pack-Validator-Design.md](Pack-Validator-Design.md) (what to validate, editor vs boot-time surfaces, message format,
+  phasing); build remains.
 
 ## Future feature seams (mapped, not built — the discovery is done, only the build remains)
 

@@ -45,6 +45,7 @@ Development-facing docs — status, review, testing, and the wider ecosystem.
 - [**Review-Backlog.md**](Review-Backlog.md) — the open review backlog.
 - [**Testing.md**](Testing.md) — the testing strategy: what's unit-tested, what's covered by in-editor instruments, and why.
 - [**Ecosystem-Survey.md**](Ecosystem-Survey.md) — every Humankind BepInEx plugin on GitHub and the techniques worth borrowing.
+- [**Pack-Validator-Design.md**](Pack-Validator-Design.md) — design note for the planned pack pre-flight validator (author-facing content validation); designed, not built.
 - [**Audit-2026-07-31.md**](Audit-2026-07-31.md) — a point-in-time project audit.
 
 ---
