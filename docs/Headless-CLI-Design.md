@@ -1,5 +1,10 @@
 # Design note — headless CLI (make HAF *operable* by AI/automation)
 
+> **BUILT — see [Headless-CLI.md](Headless-CLI.md) for the real, current reference.** `rebuild-model` + `clean` verified;
+> `build-mod` wired to the game's own `ModuleEditor.BuildModification` (full build+deploy, headless). This file is the
+> original design/reasoning; the "build-mod needs discovery / build stays in the editor" speculation below was superseded
+> once the `Mercury ▸ Mod Editor` build method was found and called via reflection.
+
 **Status: designed, not built.** The documentation work made HAF **readable** by AI (llms.txt, the Pages site). This is
 the complement: a command-line surface that makes the editor's functions **operable** without the GUI — so an agent, a
 script, or CI can author, validate, and bake content the same way a human does in `Tools ▸ HAF`, minus the clicking.
