@@ -91,15 +91,30 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogError("[GameBinding] validate: " + ex); }
         }
 
-        // The catalog — SMALL + confident to start (each is used by a feature that already works, so a "missing" here is a
-        // real game-API change, not a typo). Expand toward the hot-path reflection over time.
+        // The catalog — the game types/members HAF binds to on its hot paths. Each member here is read by a feature that
+        // works today, so a "missing" is a real game-API change (or a catalog typo — the report catches both). Members are
+        // attributed to the type they're actually read off (A1's PresentationUnit mistake was the lesson). A2 growth.
         internal static readonly Dep[] Catalog =
         {
-            new Dep("Amplitude.Mercury.Presentation.PresentationSubPawn", "AudioEmitter", "Transform"),   // PresentationUnit is on the ARMY/battle-unit, not the sub-pawn (A1 report caught that mis-attribution)
-            new Dep("Amplitude.Wwise.Components.AudioEmitter", "AudioEntityGUID"),
-            new Dep("Amplitude.Wwise.Audio.AudioManager"),
-            new Dep("Amplitude.Mercury.Animation.PawnManager", "Load", "AddPawnEntry"),
-            new Dep("Amplitude.Mercury.Animation.AnimationManager", "skeletonBufferSize"),
+            // ---- audio (engine sound / silence / audition) ----
+            new Dep("Amplitude.Mercury.Presentation.PresentationSubPawn", "AudioEmitter", "Transform", "PresentationPawnDescription"),
+            new Dep("Amplitude.Wwise.Components.AudioEmitter", "AudioEntityGUID", "PostEvent"),
+            new Dep("Amplitude.Wwise.Audio.AudioEntityGUID", "IsValid", "guid"),
+            new Dep("Amplitude.Wwise.Audio.AudioManager", "PostEvent"),
+            new Dep("Amplitude.Wwise.Interop.AkSoundEngine", "PostEvent", "StopAll"),
+            // ---- pawn registration / pose / injection ----
+            new Dep("Amplitude.Mercury.Animation.PawnManager", "Load", "AddPawnEntry", "gpuPawnDescriptorEntries"),
+            new Dep("Amplitude.Mercury.Animation.AnimationManager", "Instance", "skeletonBufferSize", "FxComponentRenderer", "FxComponentMeshContentManager", "FXMeshLayerIndex"),
+            new Dep("Amplitude.Mercury.Animation.PresentationPawnDefinitionAddOn", "FragmentEntries", "Skeleton", "MeshCollection"),
+            new Dep("Amplitude.Mercury.Animation.ClipCollection"),
+            new Dep("Amplitude.Mercury.Animation.MeshCollection"),
+            // ---- unit / combat ----
+            new Dep("Amplitude.Mercury.Presentation.PresentationUnit", "UnitDefinition", "GUID", "Pawns", "Formation"),
+            new Dep("Amplitude.Mercury.Presentation.PawnRangedFightSequence"),
+            new Dep("Amplitude.Mercury.Presentation.UnitActionFaceEnemy", "StartUnitAction", "actionScope", "AttackerBattleUnit"),
+            // ---- era / world state ----
+            new Dep("Amplitude.Mercury.Sandbox.Sandbox", "MajorEmpires", "NumberOfMajorEmpires", "Timeline"),
+            // ---- misc ----
             new Dep("Amplitude.Framework.Guid", "a", "b", "c", "d"),
         };
     }
