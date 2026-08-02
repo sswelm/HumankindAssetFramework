@@ -159,6 +159,9 @@ The plugin's own cfg (`…\community.humankind.haf.cfg`) — press **F8** in-gam
 
 ## Documentation
 
+📖 **Docs site:** **<https://sswelm.github.io/HumankindAssetFramework/>** — the full documentation as a browsable static
+site (also mirrored in the [GitHub Wiki](https://github.com/sswelm/HumankindAssetFramework/wiki)).
+
 > **For AI agents:** the machine-readable entry point is [**`llms.txt`**](llms.txt) — fetch it raw at
 > `https://raw.githubusercontent.com/sswelm/HumankindAssetFramework/master/llms.txt`. It maps the whole doc set with
 > links that resolve to public raw Markdown, so an agent can crawl everything with no authentication. (The GitHub
