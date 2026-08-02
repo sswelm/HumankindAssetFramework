@@ -135,14 +135,14 @@ namespace HumankindAssetFramework
             if (!string.Equals(raw, _silenceRaw, StringComparison.Ordinal)) { _silenceRaw = raw; _silenceSubs = SplitSubs(raw); }
             for (int i = 0; i < _silenceSubs.Length; i++)
                 if (name.IndexOf(_silenceSubs[i], StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            // (2) the registry: enc_sounds.json, authored by the Ambient Sounds Lab (loaded once at first use).
+            // (2) the registry: enc_sounds.json, authored by the Game Sound Lab (loaded once at first use).
             EnsureSoundOverrides();
             for (int i = 0; i < _soundOverrideSubs.Length; i++)
                 if (name.IndexOf(_soundOverrideSubs[i], StringComparison.OrdinalIgnoreCase) >= 0) return true;
             return false;
         }
 
-        // Ambient Sounds Lab registry: BepInEx/config/enc_sounds.json = { "overrides": [ { "silence": "<event-substring>",
+        // Game Sound Lab registry: BepInEx/config/enc_sounds.json = { "overrides": [ { "silence": "<event-substring>",
         // "replaceWith": "" } ] }. Loaded once (relaunch to apply Lab edits, same as the district/formation registries).
         // replaceWith is reserved for the future silence-then-substitute step; only `silence` is consumed today.
         static bool _soundOvLoaded;
