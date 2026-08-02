@@ -77,6 +77,9 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
   *Dump Sound Catalog* lists all ~845), or **any custom WAV** as a spool-up → loop → spool-down sequence.
 - **Creature voices** — silence a borrowed animal donor's Wwise voice and add your own idle growl and attack roar
   (camera-anchored, jittered, one-voice-per-stack).
+- **Game-wide sound overrides** — the **Game Sound Lab** silences (and, reserved, replaces) any vanilla Wwise event —
+  music, UI, ambience — by name, authored into `enc_sounds.json`, with in-game **F8 audition** to hear an event before
+  you target it. Aimed at soundscape-overhaul mods. See [Game-Sound-Lab.md](docs/Game-Sound-Lab.md).
 
 **Multi-mod & tooling**
 - **Pack merging** — the runtime merges any number of third-party packs from `haf_packs/`: duplicate-`modId` rejection,

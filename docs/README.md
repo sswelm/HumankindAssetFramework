@@ -14,7 +14,8 @@ The core authoring workflows — bake a model, animate it, texture it, add sound
 - [**Factory-Manual.md**](Factory-Manual.md) — the main guide. Every field, the static and animated workflows, and a troubleshooting table. **Start here to add a model.**
 - [**Animated-Models.md**](Animated-Models.md) — can HAF import *your* model? The plain-language answer in three levels (clean rigs → rigid-part machines → full character rigs). **Start here for animation.**
 - [**Textures.md**](Textures.md) — the atlas pipeline: every knob, the complete failure catalog, and runtime re-skins.
-- [**Game-Sound-Lab.md**](Game-Sound-Lab.md) — movement audio, creature voices, and custom WAVs (the Sound Studio window).
+- **Unit & creature audio** — engine/movement sounds, custom WAVs (the Sound Studio), and creature voices live in [Factory-Manual.md](Factory-Manual.md) §13–14.
+- [**Game-Sound-Lab.md**](Game-Sound-Lab.md) — game-*wide* sound overrides: silence or replace any vanilla Wwise event (music, UI, ambience) by name, with in-game F8 audition.
 
 ### The injection axes
 Each axis adds custom content in a different place, from the same JSON registry.
