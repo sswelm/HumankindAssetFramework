@@ -69,6 +69,7 @@ so an agent can crawl the whole doc set from here with no authentication. The hu
 - [docs/Testing.md](docs/Testing.md): the testing strategy — what's unit-tested, what's covered by in-editor instruments, and why.
 - [docs/Ecosystem-Survey.md](docs/Ecosystem-Survey.md): every Humankind BepInEx plugin on GitHub and the techniques worth borrowing.
 - [docs/Pack-Validator-Design.md](docs/Pack-Validator-Design.md): `[DESIGNED — NOT BUILT]` design for the planned pack pre-flight validator (author-facing content validation).
+- [docs/Headless-CLI-Design.md](docs/Headless-CLI-Design.md): `[DESIGNED — NOT BUILT]` design for a headless CLI that makes the editor's functions (validate, bake) operable without the GUI, via Unity batch mode.
 
 ## Optional
 - [CREDITS.md](CREDITS.md): model authors and licenses.
