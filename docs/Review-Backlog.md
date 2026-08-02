@@ -135,18 +135,32 @@ by when they'll bite.
   wrap link's velocity equals the run direction, speed-matched on the exact belt path. Prereq: none — build
   whenever tread bone budgets start pinching again (or for the twitch-ceiling escape).
 
-- **Normal-map (and ORM) atlas support (shelved 2026-07-24).** Today the bake produces a SINGLE albedo atlas and the
-  runtime injection NEUTRALIZES the donor's PBR (flat albedo). To render surface detail (normals/roughness/metallic), the
-  Factory would need to bake a matching **normal atlas** repacked to the combined-atlas UVs, and the injector would wire it
-  into the pawn material's normal slot instead of clearing it. Low priority: at map zoom (~80px units) the payoff is
-  marginal, which is why flat-albedo was chosen. TEST CANDIDATE READY: the **Ehrhardt armored car** has its `_Normal`
-  (+ `_ORM`) maps exported alongside the albedo, so it's a drop-in test bed if/when this is built.
-  **Related same-bucket gap — UDIM / multi-tile textures:** the bake assumes ONE texture per material in a single 0–1 UV
-  tile. Higher-fidelity source assets (e.g. the armored car's *cinematics* mesh + its 5-tile `.1001–.1005` UDIM camo
-  variants) can't be consumed directly. Today's escape hatch is a manual Blender **texture-transfer bake** (paint the
-  hi-res/UDIM source, bake down onto the single-tile game UVs) — no pipeline change needed, just per-model effort. A real
-  pipeline feature would be UDIM assembly at bake time. NOTE: a mesh authored with single-tile UVs (the armored car's
-  *game* mesh) needs none of this — it bakes fine on the current flat-albedo path.
+- **Normal-map atlas support (shelved 2026-07-24; the one real UV-pipeline gap for the Ehrhardt's `Textures/` set).**
+  Today the bake produces a SINGLE albedo atlas and the runtime injection NEUTRALIZES the donor's PBR (flat albedo). The
+  **albedo half of a source set is already consumable** — bake the `BaseOp` down onto the game-mesh UVs — but the
+  **`_Normal` maps are not processable at all**; that is the missing pipeline. To render surface detail the Factory would
+  bake a matching **normal atlas** repacked to the combined-atlas UVs, and the injector would wire it into the pawn
+  material's normal slot (`_BumpMap`) instead of clearing it.
+  **What "fully process `Ehrhardt_E_V/Textures/`" actually takes (read off the shipped files, not hand-waved):**
+  1. **UDIM assembly** — the chassis normal is **5 tiles** (`T_..._C_V*_Normal.1001–1005`) and the gun a single tile
+     (`T_..._G_V1_Normal`); assemble the UDIM set into one image before repacking. (Same assembly the albedo/UDIM note
+     below needs — build it once, feed both maps.)
+  2. **Tangent-correct repack — the real work.** A normal map can't be atlas-packed like albedo: for every UV island the
+     atlas rotates or flips, the normal's **R/G channels must be rotated/flipped to match**, or lighting inverts on those
+     islands. This is why it's a pipeline *feature*, not just a second texture slot.
+  3. **Normal-appropriate import** — linear (NOT sRGB) sampling, `TextureImporterType.NormalMap`, normal-safe
+     compression + mips; a naively-imported normal atlas is read as colour and lights wrong.
+  4. **Runtime wire-in, per variant** — point the pawn material's normal slot at our atlas instead of neutralizing it. The
+     set ships **5 variants (V1–V5)**, each with its own `BaseOp` + `Normal`, so this composes with the
+     runtime-retexture-variant axis (one skeleton/atlas, swap the pair per descriptor).
+  Priority moderate: at map zoom (~80px units) the payoff is subtle — but this is the concrete build if/when we want it,
+  and the Ehrhardt set is the ready test bed. Escape hatch today: bake the normal *into* the albedo's lighting in Blender
+  (static, no runtime normal response) — cosmetic only. (If a source set also ships ORM/roughness/metallic, the same four
+  steps extend to a packed ORM atlas + the material's metallic/smoothness slots.)
+  **Related same-bucket gap — UDIM / multi-tile ALBEDO:** the bake assumes ONE texture per material in a single 0–1 UV
+  tile, so the armored car's *cinematics* mesh + its 5-tile `.1001–.1005` UDIM camo can't be consumed directly. Escape
+  hatch is the same manual Blender **texture-transfer bake** onto the single-tile game UVs. NOTE: a mesh authored with
+  single-tile UVs (the armored car's *game* mesh) needs none of this — it bakes fine on the current flat-albedo path.
 
 - **✅ Aim-layer REMAP — SHIPPED as "turretize" (2026-07-24), verified in-game on the Ehrhardt armored car.** Built as
   the `TurretizeAimLayer` runtime handler: `turretBone` (substring) + `turretAxis` (Lab dropdown) retarget the
