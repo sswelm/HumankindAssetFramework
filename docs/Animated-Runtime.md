@@ -61,6 +61,33 @@ Every frame the game writes each pawn's `PawnEntry`; our postfix rewrites it for
 - **Runtime extras:** the registry `position` is applied **in the pawn's frame** (planar part rotated by
   `ObjectSpace.Rotation` each frame; z = world-up altitude), and `scale` multiplies `ObjectSpace.Scale`.
 
+## 3b. Runtime cost — why the per-frame drive stays cheap
+
+The chain is deliberately structured so per-frame CPU work is small and flat, and everything expensive is throttled or
+one-off. There is **no managed per-frame per-bone loop** — a common wrong assumption about runtime pose injection.
+
+- **The per-frame pose hook is light.** Per animated pawn it reads already-computed state and writes a handful of
+  `PawnEntry` fields (Pose0 `AnimationId` / `Weight` / `Time`, occasionally an `ObjectSpace` or `BoneRotation` slot)
+  through **cached reflection** — no iteration over bones. The actual bone skinning is done by the engine's GPU
+  sampler, which is **instanced**: 1 or 500 pawns of a model cost the same on the GPU.
+- **The expensive work is throttled, not per-frame.** Movement/state detection (`ProcessAnimStates`), deploy + recoil
+  ramps (`ProcessDeployState`), formation/respawn scans, and movement audio each run behind a frame-modulo gate —
+  ~10–20×/s, not every frame (`Combat.cs`: `stateFrame % 3` / `deployFrame % 3` ≈ 20×/s; era re-scale polls every
+  2 s). The per-frame hook only *consumes* their published result.
+- **Registration is once per session** (§2): clips and skeletons resolve to cached `AnimationId`s at `AnimationLoad`,
+  never per frame — so there are no string-keyed clip lookups in the hot path.
+- **Cost scales by model *type*, not instance.** The GPU mesh buffer is the real ceiling, spent per distinct model
+  type — see [Vertex-Budget](Vertex-Budget.md). A hundred *instances* of one animated model is cheap; a hundred
+  distinct animated *types* would exhaust the buffer long before CPU mattered.
+- **Fail-soft and presentation-only.** The hook is wrapped per pawn: a mismatch (stale skeleton, unresolved clip)
+  disables *only that pawn's* pose, logs once, and increments `InjectionErrors` (surfaced by the F8 smoke test). It
+  never throws into the game loop, and because pose injection touches only **presentation** state it **cannot corrupt
+  a save or the battle simulation**.
+
+The one scaling lever — *only if a stutter is ever measured* at very high animated-pawn counts — is the per-frame
+hook's cached-reflection field access (compiled delegates would cut it). It is not a current bottleneck and should not
+be optimized speculatively.
+
 ## 4. The pose math (decompiled — what actually gets computed)
 
 Per bone, per pose slot (`ApplyPose` → `GetPoseTRS`):
