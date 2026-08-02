@@ -537,6 +537,68 @@ namespace HumankindAssetFramework
         // handle, so a named engine sound plays for the FIRST unit at load. The emitter's Wwise game-object id is its
         // AudioEntityGUID (a ulong).
         static System.Reflection.MethodInfo _postByName;
+        // F8 AUDITION: post a Wwise event by name so a modder can HEAR a catalog sound before silencing/replacing it.
+        // Wwise needs a registered game object to post on, so we borrow a live sub-pawn's emitter (AudioEntityGUID.IsValid).
+        // The sound plays at that unit's position — fine to audition; a truly 2D ambience event plays 2D regardless.
+        public static void PlayEventByName(string eventName)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(eventName)) { Plugin.Log.LogWarning("[Audio] Play Event: type an event name first (from Dump Sound Catalog)."); return; }
+                eventName = eventName.Trim();
+                // Find the AudioEventHandle OBJECT by name (same source DumpSoundCatalog enumerates). We post the handle via
+                // the emitter's own PostEvent(AudioEventHandle) — the PROVEN path PlayAudioTest uses — NOT AkSoundEngine's
+                // by-name static (which posted silently). The by-name path was the bug.
+                var ht = AccessTools.TypeByName("Amplitude.Wwise.AudioEventHandle") ?? AccessTools.TypeByName("AudioEventHandle");
+                object handle = ht == null ? null : UnityEngine.Resources.FindObjectsOfTypeAll(ht).OfType<UnityEngine.Object>()
+                    .FirstOrDefault(o => string.Equals(o.name, eventName, StringComparison.OrdinalIgnoreCase));
+                if (handle == null) { Plugin.Log.LogError($"[Audio] Play Event: no loaded AudioEventHandle named '{eventName}' (check spelling; some banks only load in certain game states)."); return; }
+
+                // Post on ALL AudioEmitters in the scene — UNITS *and* cities/districts/etc. A unit sound needs a unit
+                // emitter; a city-ambience event (Play_HG_ENV_City_*) needs the CITY's emitter — walking only sub-pawns
+                // misses it. No camera math (Camera.main is null in-game). If the F8 name filter is set, narrow by
+                // emitter name. The listener sits in-scene, so at least one post lands audibly.
+                var emType = AccessTools.TypeByName("Amplitude.Wwise.Components.AudioEmitter");
+                if (emType == null) { Plugin.Log.LogError("[Audio] Play Event: AudioEmitter type not found — are you in a loaded game?"); return; }
+                int posted = 0;
+                foreach (var emObj in UnityEngine.Object.FindObjectsOfType(emType))
+                {
+                    if (!(emObj is UnityEngine.Object em) || em == null) continue;
+                    if (!string.IsNullOrEmpty(AudioTraceFilter) && em.name.IndexOf(AudioTraceFilter, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    var g = GetMember(em, "AudioEntityGUID");
+                    if (!(g != null && GetMember(g, "IsValid") is bool bv && bv)) continue;   // registered only
+                    if (_postEvent == null)
+                        _postEvent = em.GetType().GetMethods().FirstOrDefault(m => m.Name == "PostEvent"
+                            && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType.Name == "AudioEventHandle");
+                    if (_postEvent == null) { Plugin.Log.LogError("[Audio] Play Event: emitter.PostEvent(AudioEventHandle) not found."); return; }
+                    try { _postEvent.Invoke(em, new[] { handle }); posted++; } catch (Exception ie) { Plugin.Log.LogWarning("[Audio] Play Event post: " + (ie.InnerException ?? ie).Message); }
+                }
+                if (posted == 0) { Plugin.Log.LogError("[Audio] Play Event: no registered emitter to post on — load a game (or clear the name filter)."); return; }
+                Plugin.Log.LogInfo($"[Audio] Play Event: posted '{eventName}' on {posted} emitter(s) (units + cities). LISTEN.");
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Audio] PlayEventByName: " + ex); }
+        }
+
+        // Stop the audition: a "_Start" event begins a LOOP that runs until its "_Stop", so posting one leaves it playing.
+        // StopAll on every emitter cuts whatever we started (blunt — also stops the game's own sounds on those units, which
+        // it re-triggers naturally). Use it to end a looping audition.
+        public static void StopEventAudition()
+        {
+            try
+            {
+                var emType = AccessTools.TypeByName("Amplitude.Wwise.Components.AudioEmitter");
+                if (emType == null) return;
+                int stopped = 0;
+                foreach (var emObj in UnityEngine.Object.FindObjectsOfType(emType))
+                {
+                    if (!(emObj is UnityEngine.Object em) || em == null) continue;
+                    StopAllOnEmitter(em); stopped++;
+                }
+                Plugin.Log.LogInfo($"[Audio] Play Event: STOPPED audio on {stopped} emitter(s).");
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Audio] StopEventAudition: " + ex); }
+        }
+
         static void PostEventByName(object emitter, string eventName)
         {
             try

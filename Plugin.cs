@@ -51,6 +51,7 @@ namespace HumankindAssetFramework
         private Rect winRect = new Rect(60, 60, 480, 420);
         private Vector2 scroll;
         private string atlasFilter = "";   // Dump Atlases: only layers whose name contains this (blank = all)
+        private string previewEvent = "";  // F8 audition: Wwise event name to post via Play Event
 
         private void Awake()
         {
@@ -303,6 +304,13 @@ namespace HumankindAssetFramework
                 { UniversalInject.AudioTraceOn = !UniversalInject.AudioTraceOn; UniversalInject.AudioTraceFilter = atlasFilter; }
                 if (GUILayout.Button("Dump Sound Catalog")) UniversalInject.DumpSoundCatalog();
                 if (GUILayout.Button("Play Sound Test (WAV)")) UniversalInject.PlaySoundTest();
+            }
+            using (new GUILayout.HorizontalScope())
+            {
+                GUILayout.Label("Play Event:", GUILayout.Width(70));   // audition a Wwise event by name (from Dump Sound Catalog) on a live emitter
+                previewEvent = GUILayout.TextField(previewEvent);
+                if (GUILayout.Button("Play Event", GUILayout.Width(90))) UniversalInject.PlayEventByName(previewEvent);
+                if (GUILayout.Button("Stop", GUILayout.Width(50))) UniversalInject.StopEventAudition();   // cut a looping "_Start" audition
             }
             GUILayout.Space(4);
             // Unit resize / era ageing (live): the global era drives the Global Era Lab grid, so seeing both the era
