@@ -68,6 +68,29 @@ namespace HumankindAssetFramework
     // Live trace of every Wwise PostEvent — see exactly what the game posts on the AUDIBLE vanilla unit's emitter vs
     // ours during a move. Gated behind UniversalInject.AudioTraceOn (+ name filter), toggled from the F8 window, so it's
     // free until enabled. The recipe extracted here is what we reproduce to give our units real movement sound.
+    // SILENCE-BY-EVENT-NAME: a Prefix on the SAME service sink the trace watches. Any posted event whose name contains a
+    // configured substring (Audio/SilenceAudioEvents) is dropped (return false = skip the original post). No-op while the
+    // config is empty (ShouldSilenceEvent fast-returns). The POC building block for era-audio: silence the wrong sound,
+    // then (later) post the right one.
+    [HarmonyPatch]
+    internal static class Hk_SilenceEvents
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = AccessTools.TypeByName("Amplitude.Wwise.Audio.AudioManager");
+            return t?.GetMethods().FirstOrDefault(m => m.Name == "PostEvent"
+                && m.GetParameters().Length == 2
+                && m.GetParameters()[0].ParameterType.Name == "AudioEventHandle"
+                && m.GetParameters()[1].ParameterType.Name == "AudioEntityGUID");
+        }
+        static bool Prefix(object __0)
+        {
+            try { if (__0 is UnityEngine.Object eo && eo != null && UniversalInject.ShouldSilenceEvent(eo.name)) return false; }
+            catch { }
+            return true;
+        }
+    }
+
     [HarmonyPatch]
     internal static class Hk_AudioTrace
     {

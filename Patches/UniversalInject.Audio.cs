@@ -115,6 +115,28 @@ namespace HumankindAssetFramework
         // harvest one live, registered move-rumble AudioEventHandle (every holder carries one), and PostEvent it straight
         // onto each matched sub-pawn's AudioEmitter (which is present + registered). If audible, we own unit audio and
         // can wire play-on-move / stop-on-idle next. NOTE: rumble is a LOOP — each click stacks another until we add Stop.
+        // SILENCE-BY-EVENT-NAME (Hk_SilenceEvents Prefix on AudioManager.PostEvent). Config is a comma-separated list of
+        // event-name SUBSTRINGS to drop; a match suppresses the post. Runs on the game's hot audio path, so: empty config
+        // fast-returns immediately, and the substring list is re-parsed ONLY when the config string actually changes.
+        static string _silenceRaw = "\0";   // sentinel != any real config value (incl. "") so the first call parses
+        static string[] _silenceSubs = new string[0];
+        internal static bool ShouldSilenceEvent(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return false;
+            var raw = Plugin.SilenceAudioEvents != null ? Plugin.SilenceAudioEvents.Value : "";
+            if (!string.Equals(raw, _silenceRaw, StringComparison.Ordinal))
+            {
+                _silenceRaw = raw;
+                var parts = raw.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
+                var kept = new List<string>();
+                foreach (var p in parts) { var s = p.Trim(); if (s.Length > 0) kept.Add(s); }
+                _silenceSubs = kept.ToArray();
+            }
+            for (int i = 0; i < _silenceSubs.Length; i++)
+                if (name.IndexOf(_silenceSubs[i], StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            return false;
+        }
+
         // Live audio trace (Hk_AudioTrace patches Wwise PostEvent; gated here so it's free until toggled on in F8).
         public static bool AudioTraceOn;
         public static string AudioTraceFilter = "";

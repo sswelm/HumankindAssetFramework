@@ -36,6 +36,7 @@ namespace HumankindAssetFramework
         // --- EXPERIMENTAL: generic GPU mesh-buffer overrides (units, districts, any content layer) ---
         internal static ConfigEntry<string> BufferOverrides;     // per-layer overrides "<nameSubstr>:verts=+N,idx=+N,meshes=+N,maxtris=N;..." applied at layer creation
         internal static ConfigEntry<int>    SkeletonBoneBudget;  // shared per-frame animated-bone pool size (vanilla 65,535; high-bone customs overflow it -> spike plague)
+        internal static ConfigEntry<string> SilenceAudioEvents;  // comma-separated Wwise event-name SUBSTRINGS to drop at AudioManager.PostEvent (test/POC for era-audio) — "" = silence nothing
         // --- EXPERIMENTAL: pawn prop/attachment axis (custom weapons & gear; see the sling experiment) ---
         internal static ConfigEntry<bool>   PropRegisterOn;      // register our baked MeshCollections with the AnimationManager (the fragment render gate)
         internal static ConfigEntry<string> PropCollectionGuids; // semicolon-separated "a,b,c,d" GUIDs of MeshCollection/Skeleton assets to register
@@ -116,6 +117,12 @@ namespace HumankindAssetFramework
                                   "Extra VERTICES to add to the game's big 'Visual' GPU mesh buffer (the shared building buffer, ~3,000,000 by default) " +
                                   "at startup, so custom district meshes fit even when a built-up late-game city has nearly filled it. 0 = off. " +
                                   "e.g. 1000000 = +~48MB VRAM. Applied once at buffer creation; takes effect on the next launch.");
+
+            SilenceAudioEvents  = Config.Bind("Audio", "SilenceAudioEvents", "",
+                                  "Comma-separated Wwise event-name SUBSTRINGS to SILENCE — any sound whose event name contains one is dropped at the " +
+                                  "service sink (AudioManager.PostEvent), the same chokepoint the F8 Audio Trace watches. Case-insensitive. \"\" = silence " +
+                                  "nothing (default, no-op). e.g. \"Vehicles_Mortar_Move\" mutes the organ gun's move sound; add a city-ambience event once " +
+                                  "the Audio Trace names it. Re-read on every post, so edits take effect without a relaunch (F5-reload the config).");
 
             // DEFAULT RATIONALE: 262,144 = 4x vanilla (65,535). This is a deliberately generous SAFETY margin, not an
             // empirically-fitted worst case — at 242 bones/instance it is ~1,080 tread-heavy instances of headroom, far
@@ -200,6 +207,7 @@ namespace HumankindAssetFramework
                 typeof(Hk_FireProjStash),     // muzzle offset stash: bracket AlterationFireProjectile.StartEvent so the bone redirect can pre-compensate the donor's barrel offset (2026-07-24)
                 typeof(Hk_BattleStarted),     // battle-start war cry: sim-thread match -> main-thread camera-anchored one-shot (2026-07-23)
                 typeof(Hk_AudioTrace),        // diagnostic: live-trace Wwise PostEvent (gated behind the F8 Audio Trace toggle)
+                typeof(Hk_SilenceEvents),     // silence-by-event-name: drop any Wwise post whose name matches Audio/SilenceAudioEvents (POC for era-audio; no-op when empty)
                 typeof(Hk_DistrictRepoint),   // EXPERIMENTAL: replace one district's on-map visual (docs/District-Visuals.md)
                 typeof(Hk_DistrictBufferHeadroom), // EXPERIMENTAL: enlarge the shared 'Visual' mesh buffer so custom district meshes fit (opt-in)
                 typeof(Hk_AnimatedBonePoolHeadroom), // enlarge the shared per-frame animated-bone pool (65,535 vanilla) — the spike-plague fix
