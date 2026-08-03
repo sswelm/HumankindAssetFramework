@@ -193,10 +193,23 @@ namespace HumankindAssetFramework
                     if (e.lastPawnFrame == fr && ++e.pawnsThisFrame > 1)
                     {
                         SetMember(ctx.entry, "HideFactor", 1f);
+                        // AND bury it (user's call): HideFactor hides the pawn's own mesh draw, but the ghost overlay
+                        // demonstrably samples a pawn slot's data — if it rides a duplicate slot, dropping that slot
+                        // 1000 units under the world takes the ghost with it. The duplicate's real mesh is hidden
+                        // anyway, so mangling its position costs nothing.
+                        var os = GetMember(ctx.entry, "ObjectSpace");
+                        if (os != null && GetMember(os, "Translation") is UnityEngine.Vector3 tp)
+                        {
+                            SetMember(os, "Translation", new UnityEngine.Vector3(tp.x, tp.y - 1000f, tp.z));
+                            SetMember(ctx.entry, "ObjectSpace", os);
+                        }
                         ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
-                        return;   // hidden duplicate — no pose work
+                        return;   // hidden + buried duplicate — no pose work
                     }
                     if (e.lastPawnFrame != fr) { e.lastPawnFrame = fr; e.pawnsThisFrame = 1; }
+                    // the KEPT pawn: un-hide every frame — the cached struct posts HideFactor=1 (the sandwich that
+                    // starves the ghost's pre-hook draw); the real post-hook state must render.
+                    SetMember(ctx.entry, "HideFactor", 0f);
                 }
 
                 ForceOurSkeleton(ctx, e);

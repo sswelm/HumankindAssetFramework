@@ -429,9 +429,16 @@ namespace HumankindAssetFramework
                         {
                             var pe = peF.GetValue(c);
                             int cachedSkel = Convert.ToInt32(GetMember(pe, "SkeletonId"));
-                            if (cachedSkel != e.skeletonId)
+                            float cachedHide = 0f; try { cachedHide = Convert.ToSingle(GetMember(pe, "HideFactor")); } catch { }
+                            // THE SANDWICH (2026-08-03, the ghost kill): the ghost renders from this CACHED struct's
+                            // state (proven: repairing its skeleton reoriented the ghost; offsetting OUR post-hook
+                            // position moved the model but not the ghost). So poison the source: the cached struct is
+                            // permanently HideFactor=1 — whatever draws the pre-hook state draws nothing — while the
+                            // pose hook sets HideFactor=0 on the real pawn every frame, so OUR model stays visible.
+                            if (cachedSkel != e.skeletonId || cachedHide < 1f)
                             {
                                 SetMember(pe, "SkeletonId", e.skeletonId);
+                                SetMember(pe, "HideFactor", 1f);
                                 var p0 = GetMember(pe, "Pose0");
                                 if (p0 != null && e.animId >= 0)
                                 {
@@ -439,7 +446,7 @@ namespace HumankindAssetFramework
                                     SetMember(pe, "Pose0", p0);
                                 }
                                 peF.SetValue(c, pe);
-                                Plugin.Log.LogInfo($"[Uni][SRCFIX] '{e.resourceName}' sub-pawn '{c.gameObject.name}': cached PawnEntry repaired (skel {cachedSkel} -> {e.skeletonId}, Pose0 -> {e.animId})");
+                                Plugin.Log.LogInfo($"[Uni][SRCFIX] '{e.resourceName}' sub-pawn '{c.gameObject.name}': cached PawnEntry poisoned (skel {cachedSkel} -> {e.skeletonId}, HideFactor 1, Pose0 -> {e.animId})");
                             }
                         }
                     }
@@ -474,6 +481,15 @@ namespace HumankindAssetFramework
                     if (!hierDumped.Add(e.resourceName)) continue;
                     Plugin.Log.LogInfo($"[Uni][HIER] '{e.resourceName}' pawn GO '{c.gameObject.name}' hierarchy:");
                     DumpTransformTree(c.transform, 0);
+                    // OUTPUT-LAYER AUTOPSY (2026-08-03, endgame): the donor mesh carries a 53-prim TRANSPARENT slice in
+                    // ContentLayer 0 (the rotor blur disc) drawn via the output layer's visual-particle channel — and our
+                    // texture-isolation CLONE of the donor's FxOutputLayer inherited that channel: we draw the ghost
+                    // ourselves. Dump every field of the clone so the disc channel can be identified and cut.
+                    if (e.isolatedLayer != null)
+                    {
+                        Plugin.Log.LogInfo($"[Uni][LAYER] '{e.resourceName}' cloned output layer '{(e.isolatedLayer as UnityEngine.Object)?.name}' fields:");
+                        DumpFields(e.isolatedLayer, e.resourceName + " outputLayer");
+                    }
                 }
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[Uni] ProcessSubPawnVisuals: " + ex.Message); }
@@ -491,6 +507,29 @@ namespace HumankindAssetFramework
             }
             Plugin.Log.LogInfo($"[Uni][HIER] {new string(' ', depth * 2)}{t.name} (active={t.gameObject.activeSelf}){rinfo}");
             for (int i = 0; i < t.childCount; i++) DumpTransformTree(t.GetChild(i), depth + 1);
+        }
+
+        // Cut the transparent rotor-blur pass out of a freshly-cloned FxOutputLayer, keeping the opaque body pass.
+        // Dumps every RenderOutput's fields first so a wrong keep-choice is visible in the log (if the body vanishes
+        // and the disc stays, the indices are swapped — flip the kept index). Runs ONLY at clone time, pre-registration.
+        static void PruneCloneRenderOutputs(UnityEngine.Object clone, ModelEntry e)
+        {
+            try
+            {
+                var roF = AccessTools.Field(clone.GetType(), "renderOutputs");
+                var ros = roF?.GetValue(clone) as Array;
+                if (ros == null || ros.Length <= 1) { Plugin.Log.LogInfo($"[Uni][LAYER] '{e.resourceName}': clone has {(ros?.Length ?? -1)} renderOutput(s) — nothing to prune"); return; }
+                for (int i = 0; i < ros.Length; i++)
+                {
+                    Plugin.Log.LogInfo($"[Uni][LAYER] '{e.resourceName}' renderOutput[{i}]:");
+                    DumpFields(ros.GetValue(i), $"{e.resourceName} renderOutput[{i}]");
+                }
+                var kept = Array.CreateInstance(ros.GetType().GetElementType(), 1);
+                kept.SetValue(ros.GetValue(0), 0);
+                roF.SetValue(clone, kept);
+                Plugin.Log.LogInfo($"[Uni][LAYER] '{e.resourceName}': PRUNED clone renderOutputs {ros.Length} -> 1 (kept [0] — the opaque body pass; the transparent blur pass is gone)");
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] PruneCloneRenderOutputs: " + ex.Message); }
         }
 
         // FX-INDEX RESOLUTION (ghost hunt): the GPU descriptor encodes an FxMeshIndex in ITS OWN numbering (not
@@ -524,6 +563,21 @@ namespace HumankindAssetFramework
                 if (e.hideSubPawns)
                 {
                     ghostNeedle = dStart; ghostOurStart = oStart; ghostEntryName = e.resourceName;
+                    // PER-LAYER NEEDLES (the transparent-layer test): the blur disc is TRANSLUCENT — its geometry
+                    // plausibly lives in a TRANSPARENT ContentLayer whose StartIndex for the same mesh index differs
+                    // from layer 2's. Collect the donor mesh's start in EVERY layer and scan against all of them.
+                    ghostNeedles.Clear();
+                    if (dStart != 0) ghostNeedles.Add(dStart);
+                    try
+                    {
+                        if (dIdx != null)
+                            foreach (var t in ReadFxStartsAllLayers(animMgr, Convert.ToUInt32(dIdx)))
+                            {
+                                Plugin.Log.LogInfo($"[Uni][FX]   donor mesh {dIdx} in layer {t.Item1}: start=0x{t.Item2:X6} prim={t.Item3}");
+                                if (t.Item2 != 0 && t.Item2 != oStart) ghostNeedles.Add(t.Item2);
+                            }
+                    }
+                    catch (Exception lex) { Plugin.Log.LogWarning("[Uni] per-layer needles: " + lex.Message); }
                     DumpDescriptorTable();
                     ScanGhostDescriptors();
                     DumpFxMeshTable(animMgr);   // name every mesh in the layer — the rotor/blur mesh will be findable BY NAME
@@ -531,6 +585,30 @@ namespace HumankindAssetFramework
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[Uni] FX index dump: " + ex.Message); }
         }
+
+        // The donor mesh's StartIndex in EVERY ContentLayer (layer, start, prim) — the transparent-layer needles.
+        static List<Tuple<int, uint, uint>> ReadFxStartsAllLayers(object animMgr, uint fxMeshIdx)
+        {
+            var outp = new List<Tuple<int, uint, uint>>();
+            var mcm = GetMember(animMgr, "FxComponentMeshContentManager");
+            var layers = GetMember(mcm, "Layers") as Array ?? AccessTools.Field(mcm.GetType(), "layers")?.GetValue(mcm) as Array;
+            if (layers == null) return outp;
+            for (int li = 0; li < layers.Length; li++)
+            {
+                try
+                {
+                    var buf = GetMember(layers.GetValue(li), "HxFxOneMeshComputeBufferData") as Array;
+                    if (buf == null || fxMeshIdx >= buf.Length) continue;
+                    var be = buf.GetValue((int)fxMeshIdx);
+                    uint st = Convert.ToUInt32(GetMember(be, "StartIndex"));
+                    uint pr = Convert.ToUInt32(GetMember(be, "PrimitiveCount"));
+                    if (st != 0 || pr != 0) outp.Add(Tuple.Create(li, st, pr));
+                }
+                catch { }
+            }
+            return outp;
+        }
+        internal static readonly HashSet<uint> ghostNeedles = new HashSet<uint>();
 
         // StartIndex of a mesh in the unit ContentLayer buffer (the low-24-bit half of the fragment encoding).
         static uint ReadFxStart(object animMgr, uint fxMeshIdx)
@@ -632,7 +710,9 @@ namespace HumankindAssetFramework
                     {
                         var ge = gfrags.GetValue((int)(sf + fi));
                         uint enc = Convert.ToUInt32(encF.GetValue(ge));
-                        if (enc == 0 || (enc & 0xFFFFFF) != ghostNeedle) continue;
+                        if (enc == 0) continue;
+                        uint lo = enc & 0xFFFFFF;
+                        if (lo != ghostNeedle && !ghostNeedles.Contains(lo)) continue;
                         Plugin.Log.LogInfo($"[Uni][GHOST] descriptor[{d}] frag[{fi}] encodes the DONOR mesh (0x{enc:X8}, needle start=0x{ghostNeedle:X6}, '{ghostEntryName}') — ZEROED");
                         encF.SetValue(ge, 0u);
                         gfrags.SetValue(ge, (int)(sf + fi));
@@ -871,6 +951,12 @@ namespace HumankindAssetFramework
                         {
                             var clone = UnityEngine.Object.Instantiate(host);
                             clone.name = e.resourceName + "_OutputLayer";
+                            // GHOST ROTOR FIX (2026-08-03): the donor gunship's FxOutputLayer carries TWO RenderOutputs —
+                            // the opaque body pass AND a transparent rotor-blur pass (donor mesh 74's 53-prim slice in
+                            // ContentLayer 0). Our texture-isolation clone inherited both, so WE drew the ghost disc on
+                            // every pawn. Prune the blur pass from the clone HERE — before fragment.Load registers the
+                            // layer (registration copies the outputs; post-registration edits never reach the live pass).
+                            if (e.hideSubPawns) PruneCloneRenderOutputs(clone, e);
                             e.isolatedLayer = clone;
                             Plugin.Diag($"[Uni] cloned output layer for {e.resourceName} -> '{clone.name}'");
                         }
