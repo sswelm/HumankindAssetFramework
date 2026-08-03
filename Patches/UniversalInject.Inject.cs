@@ -509,6 +509,285 @@ namespace HumankindAssetFramework
             for (int i = 0; i < t.childCount; i++) DumpTransformTree(t.GetChild(i), depth + 1);
         }
 
+        // CRUSH THE GHOST SLICE (2026-08-03, the geometry kill): the ghost rotor's geometry is the donor mesh's slice
+        // in ContentLayer 0 (53 prims at start 0x006400) — drawn by a unit-level pass no pawn/descriptor lever reaches.
+        // So stop fighting the drawer and destroy the GEOMETRY: scale that slice's vertex positions to ~0 in the
+        // layer's CPU WriteContent (the mesh-scale engine's proven write path) and Apply. A degenerate point renders
+        // as nothing regardless of who draws it. Self-verifying probe (first vertex) makes it idempotent and
+        // reload-resilient; re-run from the NEAR tick. Affects ONLY the layer-0 blur slice — bodies live in layer 2.
+        static bool ghostCrushLogged;
+        internal static void CrushGhostSlice(object animMgr, ModelEntry e, uint donorFxIdx)
+        {
+            try
+            {
+                if (animMgr == null || donorFxIdx == 0) return;
+                var mcm = GetMember(animMgr, "FxComponentMeshContentManager");
+                var layers = GetMember(mcm, "Layers") as Array ?? AccessTools.Field(mcm.GetType(), "layers")?.GetValue(mcm) as Array;
+                if (layers == null || layers.Length == 0) return;
+                var layer = layers.GetValue(0);   // layer 0 = the slice's home
+                var meshTable = GetMember(layer, "HxFxOneMeshComputeBufferData") as Array;
+                var vertBufObj = AccessTools.Field(layer.GetType(), "vertexBuffer")?.GetValue(layer);
+                var verts = vertBufObj == null ? null : GetMember(vertBufObj, "WriteContent") as Array;
+                if (meshTable == null || verts == null || donorFxIdx >= meshTable.Length) return;
+                // FORMAT-AGNOSTIC DEGENERATION: layer 0 uses the static quantized vertex format (no raw Pos), so
+                // instead of zeroing positions, copy the FIRST vertex record over the whole slice — identical
+                // vertices make every triangle zero-area, which renders as nothing in any encoding.
+                var mEntry = meshTable.GetValue((int)donorFxIdx);
+                var msType = mEntry.GetType();
+                uint sv = Convert.ToUInt32(msType.GetField("StartVertex").GetValue(mEntry));
+                int vc = Convert.ToInt32(msType.GetField("VertexCount").GetValue(mEntry));
+                if (vc <= 1 || sv + 1 >= verts.Length) return;
+                var first = verts.GetValue((int)sv);
+                if (Equals(verts.GetValue((int)sv + 1), first)) return;   // already degenerated (write persisted)
+                for (uint v = sv + 1; v < sv + vc && v < verts.Length; v++)
+                    verts.SetValue(first, (int)v);
+                AccessTools.Method(vertBufObj.GetType(), "Apply", Type.EmptyTypes)?.Invoke(vertBufObj, null);
+                Plugin.Log.LogInfo($"[Uni][CRUSH] '{e.resourceName}': DEGENERATED donor mesh {donorFxIdx}'s layer-0 slice ({vc} verts @ {sv}, format {verts.GetType().GetElementType().Name}) — every triangle is now zero-area");
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] CrushGhostSlice: " + ex.Message); }
+        }
+        static uint ghostDonorFxIdx;   // stashed for periodic re-crush from the NEAR tick
+
+        // LIVE GHOST BISECT (2026-08-03 23:00): the ghost's mesh is SOME layer-0 FxMesh we can't name — so find it by
+        // elimination WITHOUT relaunching. Poll BepInEx/config/enc_ghostbisect.txt every ~2s:
+        //     crush <from> <to>    degenerate layer-0 meshes [from..to] (originals saved on first touch)
+        //     restore              restore every saved mesh
+        // The operator edits the file while the player watches the ghost; halving the range pins the mesh in ~8 rounds.
+        static string lastBisectCmd = "";
+        static readonly Dictionary<long, Array> bisectSaved = new Dictionary<long, Array>();   // (layer<<32)|meshIdx -> original vertex records (animMgr manager)
+        // manager-aware storage: key -> [mcm, layerIdx, meshIdx, savedArray]. The ghost's mesh proved to live outside
+        // the AnimationManager's content manager entirely — other FxManager Behaviours in the scene own their own.
+        static readonly Dictionary<string, object[]> bisectSavedM = new Dictionary<string, object[]>();
+        static List<object> ListFxManagers()
+        {
+            var outp = new List<object>();
+            var t = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxManager") ?? AccessTools.TypeByName("Amplitude.Graphics.FxManager");
+            if (t == null) return outp;
+            foreach (var o in UnityEngine.Object.FindObjectsOfType(t)) outp.Add(o);
+            outp.Sort((a, b) => string.CompareOrdinal((a as UnityEngine.Object)?.name, (b as UnityEngine.Object)?.name));
+            return outp;
+        }
+        static object McmOf(object fxManager)
+        {
+            try
+            {
+                var mcmType = GameBinding.ContentLayer?.DeclaringType ?? AccessTools.TypeByName("Amplitude.Graphics.Fx.FxComponentMeshContentManager");
+                var g = fxManager.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(m => m.Name == "GetFxComponent" && m.IsGenericMethodDefinition && m.GetParameters().Length == 0);
+                return g == null || mcmType == null ? null : g.MakeGenericMethod(mcmType).Invoke(fxManager, null);
+            }
+            catch { return null; }
+        }
+        internal static void PollGhostBisect()
+        {
+            try
+            {
+                if (ghostAnimMgr == null) return;
+                var path = Path.Combine(Paths.ConfigPath, "enc_ghostbisect.txt");
+                if (!File.Exists(path)) return;
+                string cmd = File.ReadAllText(path).Trim();
+                if (cmd.Length == 0 || cmd == lastBisectCmd) return;
+                lastBisectCmd = cmd;
+                var mcm = GetMember(ghostAnimMgr, "FxComponentMeshContentManager");
+                var layers = GetMember(mcm, "Layers") as Array ?? AccessTools.Field(mcm.GetType(), "layers")?.GetValue(mcm) as Array;
+                if (layers == null) return;
+
+                object LayerObjs(int li, out Array table, out object vb, out Array vts)
+                {
+                    table = null; vb = null; vts = null;
+                    if (li < 0 || li >= layers.Length) return null;
+                    var lay = layers.GetValue(li);
+                    table = GetMember(lay, "HxFxOneMeshComputeBufferData") as Array;
+                    vb = AccessTools.Field(lay.GetType(), "vertexBuffer")?.GetValue(lay);
+                    vts = vb == null ? null : GetMember(vb, "WriteContent") as Array;
+                    return lay;
+                }
+
+                var parts = cmd.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                // mgrs — enumerate every FxManager Behaviour + its mesh content manager's layer/mesh population
+                if (parts[0].Equals("mgrs", StringComparison.OrdinalIgnoreCase))
+                {
+                    var ms = ListFxManagers();
+                    Plugin.Log.LogInfo($"[Uni][BISECT] {ms.Count} FxManager(s) in scene:");
+                    for (int m = 0; m < ms.Count; m++)
+                    {
+                        var mcm2 = McmOf(ms[m]);
+                        var lay2 = mcm2 == null ? null : GetMember(mcm2, "Layers") as Array ?? AccessTools.Field(mcm2.GetType(), "layers")?.GetValue(mcm2) as Array;
+                        string desc = mcm2 == null ? "no mesh content manager" : $"{lay2?.Length ?? 0} layer(s)";
+                        if (lay2 != null)
+                            for (int li = 0; li < lay2.Length; li++)
+                            {
+                                var tb = GetMember(lay2.GetValue(li), "HxFxOneMeshComputeBufferData") as Array;
+                                int pop = 0;
+                                if (tb != null)
+                                    for (int i = 1; i < tb.Length; i++)
+                                        if (Convert.ToInt32(tb.GetValue(i).GetType().GetField("VertexCount").GetValue(tb.GetValue(i))) > 0) pop++;
+                                desc += $" | L{li}:{pop} meshes";
+                            }
+                        Plugin.Log.LogInfo($"[Uni][BISECT]   mgr[{m}] '{(ms[m] as UnityEngine.Object)?.name}' — {desc}");
+                    }
+                    return;
+                }
+                // crushm <mgr> <layer> <from> <to> — crush in ANY manager's content layer
+                if (parts[0].Equals("crushm", StringComparison.OrdinalIgnoreCase) && parts.Length >= 5
+                    && int.TryParse(parts[1], out int mIdx) && int.TryParse(parts[2], out int mLayer)
+                    && int.TryParse(parts[3], out int mFrom) && int.TryParse(parts[4], out int mTo))
+                {
+                    var ms = ListFxManagers();
+                    if (mIdx < 0 || mIdx >= ms.Count) { Plugin.Log.LogWarning($"[Uni][BISECT] mgr {mIdx} out of range ({ms.Count})"); return; }
+                    var mcm2 = McmOf(ms[mIdx]);
+                    var lay2 = mcm2 == null ? null : GetMember(mcm2, "Layers") as Array ?? AccessTools.Field(mcm2.GetType(), "layers")?.GetValue(mcm2) as Array;
+                    if (lay2 == null || mLayer < 0 || mLayer >= lay2.Length) { Plugin.Log.LogWarning($"[Uni][BISECT] mgr {mIdx} layer {mLayer} unreachable"); return; }
+                    var lobj = lay2.GetValue(mLayer);
+                    var tb = GetMember(lobj, "HxFxOneMeshComputeBufferData") as Array;
+                    var vb2 = AccessTools.Field(lobj.GetType(), "vertexBuffer")?.GetValue(lobj);
+                    var vts2 = vb2 == null ? null : GetMember(vb2, "WriteContent") as Array;
+                    if (tb == null || vts2 == null) { Plugin.Log.LogWarning($"[Uni][BISECT] mgr {mIdx} L{mLayer} buffers unreachable"); return; }
+                    var svF2 = tb.GetType().GetElementType().GetField("StartVertex");
+                    var vcF2 = tb.GetType().GetElementType().GetField("VertexCount");
+                    int crushed2 = 0;
+                    for (int mi = Math.Max(1, mFrom); mi <= mTo && mi < tb.Length; mi++)
+                    {
+                        var mE = tb.GetValue(mi);
+                        uint sv = Convert.ToUInt32(svF2.GetValue(mE));
+                        int vc = Convert.ToInt32(vcF2.GetValue(mE));
+                        if (vc <= 1 || sv + 1 >= vts2.Length) continue;
+                        string key = $"{mIdx}:{mLayer}:{mi}";
+                        if (!bisectSavedM.ContainsKey(key))
+                        {
+                            var save = Array.CreateInstance(vts2.GetType().GetElementType(), vc);
+                            for (int i = 0; i < vc && sv + i < vts2.Length; i++) save.SetValue(vts2.GetValue((int)sv + i), i);
+                            bisectSavedM[key] = new object[] { mcm2, mLayer, mi, save };
+                        }
+                        var first = vts2.GetValue((int)sv);
+                        for (uint v = sv + 1; v < sv + vc && v < vts2.Length; v++) vts2.SetValue(first, (int)v);
+                        crushed2++;
+                    }
+                    AccessTools.Method(vb2.GetType(), "Apply", Type.EmptyTypes)?.Invoke(vb2, null);
+                    Plugin.Log.LogInfo($"[Uni][BISECT] mgr[{mIdx}] L{mLayer}: crushed [{mFrom}..{mTo}] ({crushed2} touched)");
+                    return;
+                }
+                // rend <x> <y> <z> <radius> — census every Unity Renderer near a WORLD point (the earlier census
+                // centered on the SubPawn transform, which sits at origin for these bare GOs — it scanned nothing).
+                if (parts[0].Equals("rend", StringComparison.OrdinalIgnoreCase) && parts.Length >= 5
+                    && float.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float rx)
+                    && float.TryParse(parts[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float ry)
+                    && float.TryParse(parts[3], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float rz)
+                    && float.TryParse(parts[4], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float rr))
+                {
+                    var origin = new UnityEngine.Vector3(rx, ry, rz);
+                    int found = 0;
+                    foreach (var r in UnityEngine.Object.FindObjectsOfType<UnityEngine.Renderer>())
+                    {
+                        if (r == null || !r.enabled || !r.gameObject.activeInHierarchy) continue;
+                        if ((r.bounds.center - origin).sqrMagnitude > rr * rr) continue;
+                        string rpath = r.transform.name;
+                        for (var t2 = r.transform.parent; t2 != null && rpath.Length < 220; t2 = t2.parent) rpath = t2.name + "/" + rpath;
+                        string mesh = r is UnityEngine.SkinnedMeshRenderer smr3 && smr3.sharedMesh != null ? smr3.sharedMesh.name
+                                    : r.GetComponent<UnityEngine.MeshFilter>()?.sharedMesh?.name ?? "-";
+                        Plugin.Log.LogInfo($"[Uni][REND2] {r.GetType().Name} '{rpath}' mesh='{mesh}' mat='{r.sharedMaterial?.name}' center={r.bounds.center} size={r.bounds.size}");
+                        if (++found >= 40) break;
+                    }
+                    Plugin.Log.LogInfo($"[Uni][REND2] {found} renderer(s) within {rr} of {origin}");
+                    return;
+                }
+                // kill <substring> — disable every Renderer whose path/mesh/material matches; revive <substring> undoes
+                if ((parts[0].Equals("kill", StringComparison.OrdinalIgnoreCase) || parts[0].Equals("revive", StringComparison.OrdinalIgnoreCase)) && parts.Length >= 2)
+                {
+                    bool on = parts[0].Equals("revive", StringComparison.OrdinalIgnoreCase);
+                    string needle = cmd.Substring(parts[0].Length).Trim();
+                    int hit = 0;
+                    foreach (var r in UnityEngine.Object.FindObjectsOfType<UnityEngine.Renderer>())
+                    {
+                        if (r == null) continue;
+                        string rpath = r.transform.name;
+                        for (var t2 = r.transform.parent; t2 != null && rpath.Length < 220; t2 = t2.parent) rpath = t2.name + "/" + rpath;
+                        string mesh = r is UnityEngine.SkinnedMeshRenderer smr4 && smr4.sharedMesh != null ? smr4.sharedMesh.name
+                                    : r.GetComponent<UnityEngine.MeshFilter>()?.sharedMesh?.name ?? "-";
+                        string hay = rpath + "|" + mesh + "|" + (r.sharedMaterial?.name ?? "");
+                        if (hay.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                        r.enabled = on; hit++;
+                        Plugin.Log.LogInfo($"[Uni][REND2] {(on ? "REVIVED" : "KILLED")} '{rpath}' mesh='{mesh}'");
+                    }
+                    Plugin.Log.LogInfo($"[Uni][REND2] {(on ? "revived" : "killed")} {hit} renderer(s) matching '{needle}'");
+                    return;
+                }
+                if (parts[0].Equals("restore", StringComparison.OrdinalIgnoreCase))
+                {
+                    int restored = 0;
+                    var touchedLayers = new HashSet<int>();
+                    foreach (var kv in bisectSaved)
+                    {
+                        int li = (int)(kv.Key >> 32); int mi = (int)(kv.Key & 0xFFFFFFFF);
+                        if (LayerObjs(li, out var table, out var vb, out var vts) == null || table == null || vts == null) continue;
+                        var mE = table.GetValue(mi);
+                        uint sv = Convert.ToUInt32(mE.GetType().GetField("StartVertex").GetValue(mE));
+                        for (int i = 0; i < kv.Value.Length && sv + i < vts.Length; i++)
+                            vts.SetValue(kv.Value.GetValue(i), (int)sv + i);
+                        touchedLayers.Add(li); restored++;
+                    }
+                    foreach (var li in touchedLayers)
+                        if (LayerObjs(li, out _, out var vb2, out _) != null && vb2 != null)
+                            AccessTools.Method(vb2.GetType(), "Apply", Type.EmptyTypes)?.Invoke(vb2, null);
+                    bisectSaved.Clear();
+                    // manager-aware saves too
+                    var touchedBufs = new HashSet<object>();
+                    foreach (var kv in bisectSavedM)
+                    {
+                        var mcm3 = kv.Value[0]; int li3 = (int)kv.Value[1]; int mi3 = (int)kv.Value[2]; var save3 = kv.Value[3] as Array;
+                        var lay3 = GetMember(mcm3, "Layers") as Array ?? AccessTools.Field(mcm3.GetType(), "layers")?.GetValue(mcm3) as Array;
+                        if (lay3 == null || li3 >= lay3.Length) continue;
+                        var lobj3 = lay3.GetValue(li3);
+                        var tb3 = GetMember(lobj3, "HxFxOneMeshComputeBufferData") as Array;
+                        var vb3 = AccessTools.Field(lobj3.GetType(), "vertexBuffer")?.GetValue(lobj3);
+                        var vts3 = vb3 == null ? null : GetMember(vb3, "WriteContent") as Array;
+                        if (tb3 == null || vts3 == null || save3 == null) continue;
+                        var mE3 = tb3.GetValue(mi3);
+                        uint sv3 = Convert.ToUInt32(mE3.GetType().GetField("StartVertex").GetValue(mE3));
+                        for (int i = 0; i < save3.Length && sv3 + i < vts3.Length; i++) vts3.SetValue(save3.GetValue(i), (int)sv3 + i);
+                        touchedBufs.Add(vb3); restored++;
+                    }
+                    foreach (var vb4 in touchedBufs) AccessTools.Method(vb4.GetType(), "Apply", Type.EmptyTypes)?.Invoke(vb4, null);
+                    bisectSavedM.Clear();
+                    Plugin.Log.LogInfo($"[Uni][BISECT] restored {restored} mesh(es) across {touchedLayers.Count + touchedBufs.Count} buffer(s)");
+                    return;
+                }
+                // crush <layer> <from> <to>   (legacy 3-arg form = layer 0)
+                if (parts[0].Equals("crush", StringComparison.OrdinalIgnoreCase) && parts.Length >= 3)
+                {
+                    int layerIdx = 0, from, to;
+                    if (parts.Length >= 4 && int.TryParse(parts[1], out layerIdx) && int.TryParse(parts[2], out from) && int.TryParse(parts[3], out to)) { }
+                    else if (int.TryParse(parts[1], out from) && int.TryParse(parts[2], out to)) layerIdx = 0;
+                    else return;
+                    if (LayerObjs(layerIdx, out var table, out var vb, out var vts) == null || table == null || vts == null)
+                    { Plugin.Log.LogWarning($"[Uni][BISECT] layer {layerIdx} unreachable ({layers.Length} layers exist)"); return; }
+                    var svF = table.GetType().GetElementType().GetField("StartVertex");
+                    var vcF = table.GetType().GetElementType().GetField("VertexCount");
+                    int crushed = 0;
+                    for (int mi = Math.Max(1, from); mi <= to && mi < table.Length; mi++)
+                    {
+                        var mE = table.GetValue(mi);
+                        uint sv = Convert.ToUInt32(svF.GetValue(mE));
+                        int vc = Convert.ToInt32(vcF.GetValue(mE));
+                        if (vc <= 1 || sv + 1 >= vts.Length) continue;
+                        long key = ((long)layerIdx << 32) | (uint)mi;
+                        if (!bisectSaved.ContainsKey(key))
+                        {
+                            var save = Array.CreateInstance(vts.GetType().GetElementType(), vc);
+                            for (int i = 0; i < vc && sv + i < vts.Length; i++) save.SetValue(vts.GetValue((int)sv + i), i);
+                            bisectSaved[key] = save;
+                        }
+                        var first = vts.GetValue((int)sv);
+                        for (uint v = sv + 1; v < sv + vc && v < vts.Length; v++) vts.SetValue(first, (int)v);
+                        crushed++;
+                    }
+                    AccessTools.Method(vb.GetType(), "Apply", Type.EmptyTypes)?.Invoke(vb, null);
+                    Plugin.Log.LogInfo($"[Uni][BISECT] layer {layerIdx}: crushed meshes [{from}..{to}] ({crushed} touched; {bisectSaved.Count} saved total; {layers.Length} layers exist)");
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] PollGhostBisect: " + ex.Message); }
+        }
+
         // Cut the transparent rotor-blur pass out of a freshly-cloned FxOutputLayer, keeping the opaque body pass.
         // Dumps every RenderOutput's fields first so a wrong keep-choice is visible in the log (if the body vanishes
         // and the disc stays, the indices are swapped — flip the kept index). Runs ONLY at clone time, pre-registration.
@@ -581,6 +860,7 @@ namespace HumankindAssetFramework
                     DumpDescriptorTable();
                     ScanGhostDescriptors();
                     DumpFxMeshTable(animMgr);   // name every mesh in the layer — the rotor/blur mesh will be findable BY NAME
+                    if (dIdx != null) { ghostDonorFxIdx = Convert.ToUInt32(dIdx); CrushGhostSlice(animMgr, e, ghostDonorFxIdx); }   // the geometry kill
                 }
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[Uni] FX index dump: " + ex.Message); }

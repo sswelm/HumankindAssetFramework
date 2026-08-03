@@ -325,6 +325,8 @@ namespace HumankindAssetFramework
             // repoint-time dump — re-dump the full table once while the unit is actually on screen (ghost included).
             if (!descTableDumpedLate) { descTableDumpedLate = true; ResetDescTableDump(); DumpDescriptorTable(); ResetFxMeshTableDump(); DumpFxMeshTable(ghostAnimMgr); }
             ScanGhostDescriptors();   // re-scan for late-registered descriptors still drawing the donor mesh (every NEAR tick, ~10s)
+            CrushGhostSlice(ghostAnimMgr, e, ghostDonorFxIdx);   // re-crush if the Fx content reloaded (probe-guarded, cheap)
+            PollGhostBisect();   // live operator-driven mesh bisect via enc_ghostbisect.txt (no relaunch needed)
             try
             {
                 var os0 = GetMember(ctx.entry, "ObjectSpace");
