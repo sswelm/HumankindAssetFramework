@@ -194,8 +194,9 @@ namespace HumankindAssetFramework
                 // skeleton (the helicopter body hover-bob/pitch restored; its rotor channels land on OUR rotor hubs by
                 // bone-index aliasing, so the blades may spin from it too — the Cobra proof: static bakes play the donor
                 // clip and move like helicopters). The skeleton force above still applies, so it skins OUR mesh; the
-                // explicit write-back persists it.
-                if (e.useDonorClip) ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
+                // explicit write-back persists it. rotorSpinBones then RECLAIMS the hijacked rotor bones: BoneRotation
+                // slots override the clip's channel per bone, spun at a constant rate about the dialed axis.
+                if (e.useDonorClip) { ApplyRotorSpin(ctx.entry, e); ctx.pawnEntries.SetValue(ctx.entry, ctx.idx); }
                 else if (e.freezeDonorAnim && e.animId < 0) ApplyFreeze(ctx, e);
                 else if (e.animId >= 0) ApplyAnimatedPose(ctx, e);
                 else ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
@@ -221,6 +222,48 @@ namespace HumankindAssetFramework
                 descId = Convert.ToInt32(GetMember(entry, "PawnDescriptorId")),
             };
             return true;
+        }
+
+        // ROTOR RECLAIM (2026-08-04): the donor clip hijacks our rotor bones by index (tumbling disc). The aim-layer
+        // BoneRotation slots override a bone's rotation on top of the playing clip (turretize's proven mechanism) —
+        // here driven as a CONSTANT-RATE spinner: each configured bone gets a slot with an ever-advancing angle about
+        // its dialed axis. Config "BoneName@axis;BoneName@axis" + rotorSpinSpeed deg/s. Axis is per-model (0/1/2 —
+        // the turretAxis lesson: try each). Resolved once against our skeleton's BoneInfos by substring.
+        static void ApplyRotorSpin(object entry, ModelEntry e)
+        {
+            if (string.IsNullOrEmpty(e.rotorSpinBones)) return;
+            if (e.rotorIdx == null)
+            {
+                var specs = e.rotorSpinBones.Split(';').Select(s => s.Trim()).Where(s => s.Length > 0).ToArray();
+                var idx = new List<int>(); var axes = new List<int>();
+                foreach (var spec in specs)
+                {
+                    var at = spec.Split('@');
+                    string bn = at[0].Trim();
+                    int ax = at.Length > 1 && int.TryParse(at[1], out var a) ? a : 1;
+                    int found = -1;
+                    if (e.skeleton != null && GetMember(e.skeleton, "BoneInfos") is Array bones)
+                        for (int i = 0; i < bones.Length; i++)
+                        {
+                            var n = GetMember(bones.GetValue(i), "Name")?.ToString() ?? "";
+                            if (n.IndexOf(bn, StringComparison.OrdinalIgnoreCase) >= 0) { found = i; break; }
+                        }
+                    if (found >= 0) { idx.Add(found); axes.Add(ax); }
+                    Plugin.Diag($"[RotorSpin] '{e.resourceName}' bone '{bn}' -> index {found} axis {ax}");
+                }
+                e.rotorIdx = idx.ToArray(); e.rotorAxis = axes.ToArray();
+            }
+            if (e.rotorIdx.Length == 0) return;
+            float angle = (UnityEngine.Time.time * e.rotorSpinSpeed) % 360f;
+            for (int i = 0; i < e.rotorIdx.Length && i < 4; i++)
+            {
+                var br = GetMember(entry, BoneRotationNames[i]);
+                if (br == null) continue;
+                SetMember(br, "SkeletonBoneIndex", (uint)e.rotorIdx[i]);
+                SetMember(br, "AxisIndex", (uint)e.rotorAxis[i]);
+                SetMember(br, "Angle", angle);
+                SetMember(entry, BoneRotationNames[i], br);
+            }
         }
 
         // FORCE our skeleton so this pawn skins by OUR rig. A LATER instance the game spawned on a vanilla skeleton would

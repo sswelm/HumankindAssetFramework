@@ -193,6 +193,15 @@ namespace HumankindAssetFramework
                     DumpFields(addon, e.resourceName + " addon");
                     DumpFields(sk0, e.resourceName + " skeleton");
                 }
+                // PLAN-A DIAGNOSTIC (2026-08-04): dump the DONOR skeleton's per-bone REST frames (Local + BindPose
+                // TRS) alongside OURS. The donor clip's rotor channels are expressed in the donor Helix/Helix_back
+                // rest frames; giving OUR rotor bones the SAME rest orientation makes those channels spin our blades
+                // correctly (the hijack becomes cooperation). These numbers are what the Vehicle Lab must reproduce.
+                if (e.useDonorClip && restDumped.Add(e.resourceName))
+                {
+                    DumpBoneRests(GetMember(addon, "Skeleton"), e.resourceName + " DONOR");
+                    DumpBoneRests(e.skeleton, e.resourceName + " OURS");
+                }
 
                 EnsureRegistered(animMgr);
                 if (e.skeleton == null) return;
@@ -381,6 +390,34 @@ namespace HumankindAssetFramework
                     }
             }
             catch (Exception ex) { Plugin.Log.LogWarning($"[RigDump] name tables {label}: " + ex.Message); }
+        }
+
+        // Plan-A diagnostic: every bone's rest frames — Local + BindPose TRS (T + R quaternion) — plain LogInfo.
+        static readonly HashSet<string> restDumped = new HashSet<string>();
+        static void DumpBoneRests(object skel, string label)
+        {
+            try
+            {
+                var bones = skel == null ? null : GetMember(skel, "BoneInfos") as Array;
+                if (bones == null) { Plugin.Log.LogInfo($"[Rest] {label}: no BoneInfos"); return; }
+                Plugin.Log.LogInfo($"[Rest] {label}: {bones.Length} bone(s)");
+                for (int i = 0; i < bones.Length && i < 12; i++)
+                {
+                    var bi = bones.GetValue(i);
+                    var nm = GetMember(bi, "Name");
+                    string TR(string field)
+                    {
+                        var trs = GetMember(bi, field);
+                        if (trs == null) return "-";
+                        var t = GetMember(trs, "Translation"); var r = GetMember(trs, "Rotation");
+                        string rq = "-";
+                        try { rq = $"({Convert.ToSingle(GetMember(r, "x")):0.####},{Convert.ToSingle(GetMember(r, "y")):0.####},{Convert.ToSingle(GetMember(r, "z")):0.####},{Convert.ToSingle(GetMember(r, "w")):0.####})"; } catch { }
+                        return $"T={t} R={rq}";
+                    }
+                    Plugin.Log.LogInfo($"[Rest] {label}[{i}] '{nm}' Local: {TR("Local")} | Bind: {TR("BindPose")}");
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Rest] " + label + ": " + ex.Message); }
         }
 
         // Diagnostic: list a MeshCollection/Skeleton's skinned sub-meshes (names + fx mesh index), to spot baked-in
