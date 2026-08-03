@@ -190,7 +190,13 @@ namespace HumankindAssetFramework
                 // alone. Sending it down the animated path would write Pose0 with animId -1. The explicit write-back
                 // matters because ForceOurSkeleton only mutates the boxed struct — the pose handlers are what
                 // normally store it, and this branch runs neither.
-                if (e.freezeDonorAnim && e.animId < 0) ApplyFreeze(ctx, e);
+                // USE-DONOR-CLIP (2026-08-04): leave Pose0 exactly as the game wrote it — the DONOR clip plays on our
+                // skeleton (the helicopter body hover-bob/pitch restored; its rotor channels land on OUR rotor hubs by
+                // bone-index aliasing, so the blades may spin from it too — the Cobra proof: static bakes play the donor
+                // clip and move like helicopters). The skeleton force above still applies, so it skins OUR mesh; the
+                // explicit write-back persists it.
+                if (e.useDonorClip) ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
+                else if (e.freezeDonorAnim && e.animId < 0) ApplyFreeze(ctx, e);
                 else if (e.animId >= 0) ApplyAnimatedPose(ctx, e);
                 else ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
             }

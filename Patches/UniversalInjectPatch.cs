@@ -78,6 +78,7 @@ namespace HumankindAssetFramework
         public string handPropAngles = "";// draw-time rotation "x,y,z" (deg) stamped onto the FxMesh asset BEFORE encoding; "" stamps ZERO (neutralizes the engine's -90X class default — baked angle values don't survive the bundle). Hand-edited escape hatch: change + relaunch, no bake/rebuild.
         public bool disabled;             // DEBUG toggle: skip this override entirely so the ORIGINAL vanilla unit renders (compare against the custom model, observe the donor's own animation). Runtime-only — Save (no bake) + relaunch. The entry is dropped at load, so it doesn't even claim its pawn.
         public bool silenceDonorVfx;      // suppress the donor's MecanimEvent VFX (muzzle flashes, animator-driven puffs) for THIS unit. The donor's flash anchors are DONOR bone names (ParentNameToLaunchVFXPosition) that don't exist on our replaced skeleton, so inherited flashes render misplaced — this drops them at the StartVFXEvent chokepoint (the audio-silence pattern). Runtime-only.
+        public bool useDonorClip;         // let the DONOR clip drive this unit (skip our Pose0 override): restores the donor body animation (helicopter hover-bob/pitch) on an animated bake. The donor clip channels land on OUR bones by INDEX (donor Helix -> our rotor hub), so rotors may spin from it too. The Cobra proof: static bakes play the donor clip and move like helicopters.
         public bool vfxSilencedLogged;    // session flag: log the first suppressed event once per entry
         public bool clearAimLayer;        // clear the game's procedural BoneRotation layer for THIS model (artillery: the donor streams aim/wheel junk that twists the rig). Replaces the old blanket fire/deploy rule for STATE-DRIVEN artillery — characters need the layer (facing), a migrated howitzer needs it cleared. Runtime-only.
         public string turretBone = "";    // TURRETIZE (2026-07-24): bone-name SUBSTRING (renamed b###_<orig>) of a turret to aim at the target. The game already streams its aim/heading angle into a BoneRotation slot on an INVALID bone index — we retarget that slot's SkeletonBoneIndex to THIS bone so the engine's own aim yaws our turret. "" = no turret aim. Runtime-only (no re-bake).
@@ -614,6 +615,7 @@ namespace HumankindAssetFramework
                                 disabled = (bool?)m["disabled"] ?? false,
                                 clearAimLayer = (bool?)m["clearAimLayer"] ?? false,
                                 silenceDonorVfx = (bool?)m["silenceDonorVfx"] ?? false,
+                                useDonorClip = (bool?)m["useDonorClip"] ?? false,
                                 turretBone = (string)m["turretBone"] ?? "",
                                 turretAxis = (int?)m["turretAxis"] ?? -1,
                                 muzzleBone = (string)m["muzzleBone"] ?? "",
@@ -686,6 +688,7 @@ namespace HumankindAssetFramework
                 var eng = Regex.Matches(text, "\"engineSound\"\\s*:\\s*(true|false)");      // parity: fire the per-ship engine move sound on our units
                 var sda = Regex.Matches(text, "\"silenceDonorAudio\"\\s*:\\s*(true|false)"); // parity: suppress the borrowed donor's Wwise sound (idle + combat)
                 var svx = Regex.Matches(text, "\"silenceDonorVfx\"\\s*:\\s*(true|false)");   // parity: suppress the donor's MecanimEvent VFX (misplaced muzzle flashes)
+                var udc = Regex.Matches(text, "\"useDonorClip\"\\s*:\\s*(true|false)");   // parity: donor clip drives the unit
                 var esa = Regex.Matches(text, "\"engineStartEvent\"\\s*:\\s*\"([^\"]*)\"");  // parity: Wwise event name posted on move-start
                 var eso = Regex.Matches(text, "\"engineStopEvent\"\\s*:\\s*\"([^\"]*)\"");    // parity: Wwise event name posted on move-stop
                 var sf = Regex.Matches(text, "\"soundFile\"\\s*:\\s*\"([^\"]*)\"");           // parity: custom WAV loop in enc_sounds/
@@ -761,6 +764,7 @@ namespace HumankindAssetFramework
                         engineSound = i < eng.Count && eng[i].Groups[1].Value == "true",
                         silenceDonorAudio = i < sda.Count && sda[i].Groups[1].Value == "true",
                         silenceDonorVfx = i < svx.Count && svx[i].Groups[1].Value == "true",
+                        useDonorClip = i < udc.Count && udc[i].Groups[1].Value == "true",
                         engineStartEvent = i < esa.Count ? esa[i].Groups[1].Value : "",
                         engineStopEvent = i < eso.Count ? eso[i].Groups[1].Value : "",
                         soundFile = i < sf.Count ? sf[i].Groups[1].Value : "",
