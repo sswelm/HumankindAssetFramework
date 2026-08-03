@@ -101,6 +101,21 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Authoring tools
 
+- **Vehicle Lab: helicopters + interior-part detection (2026-08-03).** Two new part roles rig a **rotorcraft** the
+  same no-Blender way as a wheeled vehicle: **Rotor** (`R`) and **Tail rotor** (`L`). Each rotor fuses into **one
+  hub bone** (proximity clustering would shred a wide blade disc into pinwheeling halves — the RAH-66's 18-unit
+  disc proved it): the main rotor pivots on its central hub part and spins about that hub's own *pole-to-pole*
+  axis, the tail fan pivots on its blades' centroid and spins about the axis *perpendicular to the duct ring*,
+  with an own Auto/X/Y/Z override + **yaw/pitch trim sliders** for the last degrees by eye. Rotors are exempt from
+  the wheels' rolling-contact speed scaling (it span the small tail fan ~3.6× too fast), Verify understands them
+  (1 hub per group; car-only symmetry checks skipped), and new preview aids — **Pause**, **one-frame step ◀/▶**,
+  a **Level line** at rotor height — make the axle judgeable. Preview-verified on the RAH-66; in-game bake pending.
+  Same day, the probe gained **escape-ray visibility classification**: every part is tested for a straight
+  line-of-sight to infinity, and a **Visibility switch** (All / External / **Interior only**) surfaces the parts
+  that are *provably never visible* — cockpit gear, engine guts — for a one-key **Ignore** sweep. On the RAH-66 it
+  found 47 interior parts worth **28% of the model's vertices** (11,042 → 8,651 in the generated rig), budget
+  returned to the shared GPU vertex pool. Deliberately conservative: a part that peeks through any opening counts
+  as external.
 - **The Vehicle Lab — any static vehicle model becomes that unit, no Blender knowledge (2026-07-25).** A dedicated
   window "vehicleizes" a raw model: headless-probe its parts (a 3,350-shard game rip included), mark wheels &
   turret with a keyboard-driven review UI (zoom-highlight preview, classification filters, height-slab sliders,

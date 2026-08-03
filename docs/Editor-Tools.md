@@ -53,6 +53,15 @@ action, optional rolling tracks and wave-rock) that the animated bake path then 
 block, **Generate rig**, save/load **recipes**, **Verify** report. *Writes:* the rigged GLB + a recipe JSON (no unit
 registry write here — the GLB is then baked via Model Factory/Animation Lab).
 
+**Interior-part detection (strip what's never seen).** The probe classifies every part by **escape-ray sampling**:
+a part is *external* if any sampled surface point has a straight, unblocked line to infinity; a part blocked in every
+direction from every sample is **interior** — provably invisible (cockpit instruments, engine internals) and safe to
+strip. The **Visibility** switch (All / External only / **Interior only**) filters the part list; set it to *Interior
+only* and sweep the rows with `I` (**Ignore** = deleted from the output GLB) to reclaim the vertex budget for visible
+surfaces — on the RAH-66 that was 47 parts and **28% of the model's vertices**. The verdict is deliberately
+conservative: anything that peeks through an opening (canopy, gun bay) counts as external, so "inside-ish" parts
+remain a manual judgment call. Classification happens at probe time — re-Probe an older session to populate it.
+
 **Rotorcraft roles (helicopters).** Besides Wheel/Turret/Body there are **Rotor** (`R`) and **Tail rotor** (`L`) roles.
 Each rotor group fuses into **one hub bone** (unlike wheels' proximity clusters, so a wide blade disc spins as one):
 the **main rotor** pivots on its central hub part and spins about that hub's own *pole-to-pole* axis; the **tail fan**
