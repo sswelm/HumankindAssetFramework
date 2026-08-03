@@ -61,6 +61,8 @@ only* and sweep the rows with `I` (**Ignore** = deleted from the output GLB) to 
 surfaces — on the RAH-66 that was 47 parts and **28% of the model's vertices**. The verdict is deliberately
 conservative: anything that peeks through an opening (canopy, gun bay) counts as external, so "inside-ish" parts
 remain a manual judgment call. Classification happens at probe time — re-Probe an older session to populate it.
+**Verify** also warns about interior parts *not yet Ignored* (name, role, vert count — clickable), so wasted budget
+can't slip through unnoticed.
 
 **Rotorcraft roles (helicopters).** Besides Wheel/Turret/Body there are **Rotor** (`R`) and **Tail rotor** (`L`) roles.
 Each rotor group fuses into **one hub bone** (unlike wheels' proximity clusters, so a wide blade disc spins as one):
