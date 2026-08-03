@@ -267,6 +267,7 @@ namespace HumankindAssetFramework
                 UniversalInject.ProcessDeployState();   // deploy-on-stop: record which of our pawns' units are currently moving
                 UniversalInject.ProcessAnimStates();    // state-driven (Phase 2): publish per-unit moving/stopped for the idle/move/after clips
                 UniversalInject.ProcessEngineAudio();   // engine sound: fire the per-ship Start/Stop move sound on our units
+                UniversalInject.ProcessSubPawnVisuals();   // one-shot pawn-prefab hierarchy dump (the ghost-rotor hunt); no-op once dumped
                 UniversalInject.ProcessBattleCries();   // battle-start war cries queued by the sim-thread hook
                 UniversalInject.TickDistrictMeshSwap(); // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
             }

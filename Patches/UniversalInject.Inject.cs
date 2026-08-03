@@ -193,6 +193,13 @@ namespace HumankindAssetFramework
                     DumpFields(addon, e.resourceName + " addon");
                     DumpFields(sk0, e.resourceName + " skeleton");
                 }
+                // SUB-PAWNS — the "GPU rotor" (2026-08-03): a PresentationPawnDefinition can carry SubPawnDefinitions —
+                // SECONDARY pawns spawned alongside the main pawn (the cavalry-mount mechanism; a helicopter gunship's
+                // rotor rides here). They render independently of the main pawn's mesh/skeleton, which is why no mesh
+                // swap, fragment hide, or pawn-array rescue ever touched the ghost rotor. Dump the list once (ground
+                // truth), and when the entry opts in (hideSubPawns) clear the array so future spawns — including the
+                // respawnAfterLoad respawn — attach nothing.
+                DumpAndMaybeClearSubPawns(addon, e);
 
                 EnsureRegistered(animMgr);
                 if (e.skeleton == null) return;
@@ -381,6 +388,83 @@ namespace HumankindAssetFramework
                     }
             }
             catch (Exception ex) { Plugin.Log.LogWarning($"[RigDump] name tables {label}: " + ex.Message); }
+        }
+
+        // GHOST-ROTOR HIERARCHY DUMP (2026-08-03): the pawn's visual root is a Unity PREFAB (description.Template) —
+        // child renderers there (the gunship's rotor blur disc) render through ORDINARY Unity rendering, outside the
+        // GPU-instanced pipeline every previous lever targeted. One-shot per hideSubPawns entry: walk a matched live
+        // PresentationSubPawn's transform tree and log every child with its renderer/mesh/material names, so the next
+        // step can disable the rotor children BY NAME instead of guessing. Poll-driven (~3s) from Plugin.Update.
+        static readonly HashSet<string> hierDumped = new HashSet<string>();
+        static float hierNextAt;
+        internal static void ProcessSubPawnVisuals()
+        {
+            var list = entries;
+            if (list == null || !Plugin.UniversalInjectOn.Value) return;
+            float now = UnityEngine.Time.time;
+            if (now < hierNextAt) return;
+            hierNextAt = now + 3f;
+            bool anyWanted = false;
+            for (int i = 0; i < list.Count; i++) if (list[i].hideSubPawns && !hierDumped.Contains(list[i].resourceName)) { anyWanted = true; break; }
+            if (!anyWanted) return;
+            try
+            {
+                var spType = GameBinding.PresentationSubPawn;
+                if (spType == null) return;
+                foreach (var o in UnityEngine.Object.FindObjectsOfType(spType))
+                {
+                    if (!(o is UnityEngine.Component c) || c == null) continue;
+                    var e = LongestMatch(list, c.gameObject.name, x => x.pawnDescription);
+                    if (e == null || !e.hideSubPawns || !hierDumped.Add(e.resourceName)) continue;
+                    Plugin.Log.LogInfo($"[Uni][HIER] '{e.resourceName}' pawn GO '{c.gameObject.name}' hierarchy:");
+                    DumpTransformTree(c.transform, 0);
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] ProcessSubPawnVisuals: " + ex.Message); }
+        }
+        static void DumpTransformTree(UnityEngine.Transform t, int depth)
+        {
+            if (depth > 8) return;
+            var rend = t.GetComponent<UnityEngine.Renderer>();
+            string rinfo = "";
+            if (rend != null)
+            {
+                string mesh = rend is UnityEngine.SkinnedMeshRenderer smr && smr.sharedMesh != null ? smr.sharedMesh.name
+                            : t.GetComponent<UnityEngine.MeshFilter>()?.sharedMesh?.name ?? "?";
+                rinfo = $"  <{rend.GetType().Name} enabled={rend.enabled} mesh='{mesh}' mat='{rend.sharedMaterial?.name}'>";
+            }
+            Plugin.Log.LogInfo($"[Uni][HIER] {new string(' ', depth * 2)}{t.name} (active={t.gameObject.activeSelf}){rinfo}");
+            for (int i = 0; i < t.childCount; i++) DumpTransformTree(t.GetChild(i), depth + 1);
+        }
+
+        // The donor definition's SubPawnDefinitions: log what's attached (once per entry), and clear the array when the
+        // entry sets hideSubPawns. The definition asset is per-unit-type, so clearing only affects OUR overridden unit;
+        // clearing is idempotent (an emptied array stays empty across re-Loads).
+        static readonly HashSet<string> subPawnsLogged = new HashSet<string>();
+        static void DumpAndMaybeClearSubPawns(object addon, ModelEntry e)
+        {
+            try
+            {
+                var def = GetMember(addon, "definition");
+                if (def == null) { if (subPawnsLogged.Add(e.resourceName)) Plugin.Diag($"[Uni] {e.resourceName} sub-pawns: no definition on addon"); return; }
+                var arr = GetMember(def, "SubPawnDefinitions") as Array;
+                if (arr == null) { if (subPawnsLogged.Add(e.resourceName)) Plugin.Diag($"[Uni] {e.resourceName} sub-pawns: definition has no SubPawnDefinitions field ({def.GetType().Name})"); return; }
+                if (subPawnsLogged.Add(e.resourceName))
+                {
+                    Plugin.Diag($"[Uni] {e.resourceName} sub-pawns: {arr.Length} SubPawnDefinition(s) on '{(def as UnityEngine.Object)?.name}'");
+                    for (int i = 0; i < arr.Length; i++)
+                    {
+                        var sub = GetMember(arr.GetValue(i), "Definition");
+                        Plugin.Diag($"[Uni]    subPawn[{i}] = '{(sub as UnityEngine.Object)?.name ?? sub?.GetType().Name ?? "null"}'");
+                    }
+                }
+                if (e.hideSubPawns && arr.Length > 0)
+                {
+                    SetMember(def, "SubPawnDefinitions", Array.CreateInstance(arr.GetType().GetElementType(), 0));
+                    Plugin.Log.LogInfo($"[Uni] {e.resourceName}: CLEARED {arr.Length} donor sub-pawn(s) (hideSubPawns — the independent rotor/attachment pawns)");
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning($"[Uni] {e.resourceName} sub-pawn dump/clear: " + ex.Message); }
         }
 
         // Diagnostic: list a MeshCollection/Skeleton's skinned sub-meshes (names + fx mesh index), to spot baked-in

@@ -122,7 +122,7 @@ namespace HumankindAssetFramework
 
         // Per-pawn state read once at the top of the hook and threaded through the behavior handlers. `entry` is the boxed
         // PawnEntry struct — every SetMember mutates that one box, and the handler writes it back via pawnEntries.SetValue.
-        struct PawnCtx { public Array pawnEntries; public int idx; public object entry; public int skelId; public int descId; }
+        struct PawnCtx { public Array pawnEntries; public int idx; public object entry; public int skelId; public int descId; public int pawnCount; }
 
         // The game just wrote pawnEntries[pawnCount-1]. Match it to one of our models and hand off to the behavior that model
         // wants: FREEZE (pin the donor clip to frame 0) or an ANIMATED pose whose time is driven by loop / fire-once / deploy.
@@ -139,6 +139,7 @@ namespace HumankindAssetFramework
                 if (anyRescuable == null) anyRescuable = entries != null && entries.Any(Rescuable);
                 if ((anyAnimated != true && anyFreeze != true && anyRescuable != true && unitScaleByDesc.Count == 0) || !Plugin.UniversalInjectOn.Value) return;
                 if (!TryReadLastPawn(pawnManager, out var ctx)) return;
+                if (!knownManagers.Contains(pawnManager)) knownManagers.Add(pawnManager);   // every manager, incl. ones only adding vanilla pawns — the sweep needs them all
 
                 // RESIZE LAB: a vanilla pawn (no model entry) whose descriptor has a resolved scale rule gets its
                 // ObjectSpace.Scale multiplied ONCE at spawn — the same mechanism the per-entry `scale` field uses.
@@ -183,6 +184,7 @@ namespace HumankindAssetFramework
                 }
 
                 ForceOurSkeleton(ctx, e);
+                SweepForStrays(ctx, e);   // stale same-descriptor slots the game no longer rewrites (the ghost-donor fix)
 
                 // FREEZE (static): no clip of our own — pin the donor pose to frame 0 and stop. ANIMATED: play our clip on Pose0.
                 // NEITHER: a purely static repointed model. It reaches here only since the rescue was widened past
@@ -213,8 +215,66 @@ namespace HumankindAssetFramework
                 pawnEntries = pawnEntries, idx = idx, entry = entry,
                 skelId = Convert.ToInt32(GetMember(entry, "SkeletonId")),
                 descId = Convert.ToInt32(GetMember(entry, "PawnDescriptorId")),
+                pawnCount = pawnCount,
             };
             return true;
+        }
+
+        // GHOST-DONOR SWEEP (2026-08-03, the StealthHelicopter "GPU rotor"): the hook only ever sees the pawn the game
+        // JUST wrote (pawnCount-1), so a STALE slot — left behind by a respawn/reload and never re-added — keeps whatever
+        // the game last wrote there (DONOR skeleton + donor clip), yet is still uploaded to the GPU every frame by
+        // DoComputation's full-buffer SetData. It renders as a ghost of the donor coincident with the real unit (on the
+        // Comanche only the donor's big rotor disc stuck out of our larger model). Every ~2s per entry, walk the WHOLE
+        // live array — from inside the hook, i.e. the same thread as the game's writes — and rescue any same-descriptor
+        // slot sitting on a foreign skeleton: force our skeleton and put our clip on Pose0 (the donor clip id can't
+        // resolve on our rig). A rescued stale slot stays rescued (nobody rewrites it), so the log goes quiet once clean.
+        static readonly Dictionary<string, float> sweepLast = new Dictionary<string, float>();
+        static readonly HashSet<string> sweepScanLogged = new HashSet<string>();
+        static int sweepFixLogged;
+        // EVERY pawn manager the hook has ever seen (reference-identity; a handful — the map's plus per-battle ones).
+        // The hook fires per-manager as pawns are ADDED, so a manager whose buffer was written once and never re-added
+        // (a stale PresentationUnit from the load/respawn path) would never be swept via ctx alone — its stale slots
+        // keep rendering donor visuals forever. Sweeping every known manager closes that hole. Cleared on session reset.
+        internal static readonly List<object> knownManagers = new List<object>();
+        static void SweepForStrays(PawnCtx ctx, ModelEntry e)
+        {
+            if (e.descId < 0) return;
+            float now = UnityEngine.Time.time;
+            if (sweepLast.TryGetValue(e.resourceName, out var last) && now - last < 2f) return;
+            sweepLast[e.resourceName] = now;
+            for (int m = 0; m < knownManagers.Count; m++)
+            {
+                var arr = GetMember(knownManagers[m], "pawnEntries") as Array;
+                if (arr == null) continue;
+                int cnt;
+                try { cnt = Convert.ToInt32(GetMember(knownManagers[m], "pawnCount")); } catch { continue; }
+                if (cnt <= 0 || cnt > arr.Length) continue;
+                int nFixed = 0, nSeen = 0;
+                for (int i = 0; i < cnt; i++)
+                {
+                    var slot = arr.GetValue(i);
+                    int d, s;
+                    try { d = Convert.ToInt32(GetMember(slot, "PawnDescriptorId")); s = Convert.ToInt32(GetMember(slot, "SkeletonId")); }
+                    catch { continue; }
+                    if (d != e.descId) continue;
+                    nSeen++;
+                    if (s == e.skeletonId) continue;
+                    SetMember(slot, "SkeletonId", e.skeletonId);
+                    var p0 = GetMember(slot, "Pose0");
+                    if (p0 != null && e.animId >= 0)
+                    {
+                        SetMember(p0, "AnimationId", e.animId);
+                        SetMember(p0, "Weight", 1f);
+                        SetMember(slot, "Pose0", p0);
+                    }
+                    arr.SetValue(slot, i);
+                    nFixed++;
+                }
+                if (nFixed > 0 && sweepFixLogged < 12)
+                { sweepFixLogged++; Plugin.Log.LogInfo($"[Uni][SWEEP] '{e.resourceName}' manager#{m}: rescued {nFixed} stray slot(s) off a foreign skeleton ({nSeen} slot(s) carry desc {e.descId})"); }
+                else if (sweepScanLogged.Add(e.resourceName + "#" + m))
+                    Plugin.Diag($"[Uni][SWEEP] '{e.resourceName}' manager#{m}: scan — {nSeen} slot(s) carry desc {e.descId}, all on our skeleton {e.skeletonId} ({knownManagers.Count} manager(s) known)");
+            }
         }
 
         // FORCE our skeleton so this pawn skins by OUR rig. A LATER instance the game spawned on a vanilla skeleton would

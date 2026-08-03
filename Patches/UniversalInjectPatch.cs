@@ -125,6 +125,7 @@ namespace HumankindAssetFramework
         // the plugin detects each instance starting/stopping (render-position delta, like deployOnStop) and posts the
         // captured Start/Stop AudioEventHandle onto that pawn's AudioEmitter, restoring the missing engine sound.
         public bool engineSound;
+        public bool hideSubPawns;        // strip the donor definition's SubPawnDefinitions at injection — kills secondary attachments like the helicopter gunship's independent rotor pawn (the "GPU rotor" a mesh swap can't remove)
         public bool silenceDonorAudio;         // SUPPRESS all of the borrowed donor's Wwise sound on this unit's pawns (idle growl + combat maul/scratch that ride in on the reused animator/description). Reusable: any unit that inherits an unwanted donor sound can set it. Silences ONLY Wwise (AudioEmitter.PostEvent) — our own custom WAVs (Unity AudioSource) still play, so it composes with soundIdleFile/soundFile.
         public string engineStartEvent = "";  // Wwise event NAME posted on move-START (e.g. Play_UNIT_Vehicles_StealthCorvette_Start). Set => posted BY NAME (works for the FIRST unit, no live capture); empty => fall back to the auto-captured handle.
         public string engineStopEvent = "";   // ... move-STOP (..._Stop). Extract names via the F8 "Dump Sound Catalog"; assign per unit in the registry.
@@ -621,6 +622,7 @@ namespace HumankindAssetFramework
                                 fireOnAttack = (bool?)m["fireOnAttack"] ?? false,
                                 deployOnStop = (bool?)m["deployOnStop"] ?? false,
                                 engineSound = (bool?)m["engineSound"] ?? false,
+                                hideSubPawns = (bool?)m["hideSubPawns"] ?? false,
                                 silenceDonorAudio = (bool?)m["silenceDonorAudio"] ?? false,
                                 engineStartEvent = (string)m["engineStartEvent"] ?? "",
                                 engineStopEvent = (string)m["engineStopEvent"] ?? "",
@@ -684,6 +686,7 @@ namespace HumankindAssetFramework
                 var foa = Regex.Matches(text, "\"fireOnAttack\"\\s*:\\s*(true|false)");     // parity: play the clip once on attack vs loop
                 var dos = Regex.Matches(text, "\"deployOnStop\"\\s*:\\s*(true|false)");     // parity: hold deployed when idle, undeploy while moving
                 var eng = Regex.Matches(text, "\"engineSound\"\\s*:\\s*(true|false)");      // parity: fire the per-ship engine move sound on our units
+                var hsp = Regex.Matches(text, "\"hideSubPawns\"\\s*:\\s*(true|false)");    // parity: strip the donor's secondary sub-pawns (the "GPU rotor")
                 var sda = Regex.Matches(text, "\"silenceDonorAudio\"\\s*:\\s*(true|false)"); // parity: suppress the borrowed donor's Wwise sound (idle + combat)
                 var svx = Regex.Matches(text, "\"silenceDonorVfx\"\\s*:\\s*(true|false)");   // parity: suppress the donor's MecanimEvent VFX (misplaced muzzle flashes)
                 var esa = Regex.Matches(text, "\"engineStartEvent\"\\s*:\\s*\"([^\"]*)\"");  // parity: Wwise event name posted on move-start
@@ -759,6 +762,7 @@ namespace HumankindAssetFramework
                         fireOnAttack = i < foa.Count && foa[i].Groups[1].Value == "true",
                         deployOnStop = i < dos.Count && dos[i].Groups[1].Value == "true",
                         engineSound = i < eng.Count && eng[i].Groups[1].Value == "true",
+                        hideSubPawns = i < hsp.Count && hsp[i].Groups[1].Value == "true",
                         silenceDonorAudio = i < sda.Count && sda[i].Groups[1].Value == "true",
                         silenceDonorVfx = i < svx.Count && svx[i].Groups[1].Value == "true",
                         engineStartEvent = i < esa.Count ? esa[i].Groups[1].Value : "",
@@ -890,6 +894,7 @@ namespace HumankindAssetFramework
                 }
             deployMoveState = null;                                  // diagnostic map, unit GUIDs are session-scoped
             respawnBase.Clear(); respawnCount.Clear();               // keyed by session-1 unit objects
+            knownManagers.Clear();                                   // dead session's pawn managers (the stray-slot sweep re-learns live ones)
             _silencedEmitterIds.Clear();                             // static: grew per silenced AudioEmitter ever seen, never reset — session-scoped instance ids
             // DISTRICT axis session state (same bug class): the FxManager and each entry's leaves/private clone were
             // captured from session-1 presentation objects — reusing them in a second game points at torn-down GPU
