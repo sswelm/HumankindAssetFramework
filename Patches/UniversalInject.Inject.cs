@@ -704,6 +704,24 @@ namespace HumankindAssetFramework
                                 }
                             }
                             catch (Exception bex) { Plugin.Log.LogWarning("[Uni] descriptor bones sync: " + bex.Message); }
+                            // GPU-DESCRIPTOR DUMP (ghost hunt 2026-08-03): print the snapshot's raw fragment entries.
+                            // The encoded field packs Mesh + VisualParticle count + FxMeshIndex — if any fragment still
+                            // encodes the DONOR's FxMesh index (the gunship body+rotor mesh), the ghost renders straight
+                            // from the descriptor snapshot regardless of everything pawn-side. Compare against ourMeshIndex.
+                            try
+                            {
+                                uint ourMeshIdx = 0;
+                                if (GetMember(skel, "skinnedMeshInfos") is Array smi && smi.Length > 0)
+                                    try { ourMeshIdx = Convert.ToUInt32(GetMember(smi.GetValue(0), "MeshIndex")); } catch { }
+                                Plugin.Log.LogInfo($"[Uni][DESC] '{e?.resourceName}' descriptor[{defId}]: StartFragment={start} FragmentCount={count} BonesCount={dT.GetField("BonesCount")?.GetValue(dEntry)} ourMeshIndex={ourMeshIdx}");
+                                for (uint fi = 0; fi < count && fi < 8; fi++)
+                                {
+                                    var ge = gfrags.GetValue((int)(start + fi));
+                                    uint enc = (uint)encGpuF.GetValue(ge);
+                                    Plugin.Log.LogInfo($"[Uni][DESC]   frag[{fi}] encoded=0x{enc:X8} (lo16={enc & 0xFFFF} hi16={enc >> 16})");
+                                }
+                            }
+                            catch (Exception dex) { Plugin.Log.LogWarning("[Uni] descriptor dump: " + dex.Message); }
                             if (changed)
                             {
                                 descs.SetValue(dEntry, defId);

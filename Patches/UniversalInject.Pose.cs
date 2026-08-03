@@ -185,6 +185,7 @@ namespace HumankindAssetFramework
 
                 ForceOurSkeleton(ctx, e);
                 SweepForStrays(ctx, e);   // stale same-descriptor slots the game no longer rewrites (the ghost-donor fix)
+                DumpNearbyPawns(ctx, e);  // ghost census BY POSITION — catches a coincident pawn wearing a DIFFERENT descriptor
 
                 // FREEZE (static): no clip of our own — pin the donor pose to frame 0 and stop. ANIMATED: play our clip on Pose0.
                 // NEITHER: a purely static repointed model. It reaches here only since the rescue was widened past
@@ -275,6 +276,50 @@ namespace HumankindAssetFramework
                 else if (sweepScanLogged.Add(e.resourceName + "#" + m))
                     Plugin.Diag($"[Uni][SWEEP] '{e.resourceName}' manager#{m}: scan — {nSeen} slot(s) carry desc {e.descId}, all on our skeleton {e.skeletonId} ({knownManagers.Count} manager(s) known)");
             }
+        }
+
+        // GHOST CENSUS BY POSITION (2026-08-03): every desc-filtered probe came back clean, yet the donor gunship still
+        // renders over the StealthHelicopter — so if the ghost IS a pawn, it wears a DIFFERENT PawnDescriptorId (a
+        // second pawn definition: an LOD twin, the raw donor def, whatever) and every desc==ours filter is blind to it.
+        // For hideSubPawns entries, periodically log EVERY pawn slot within a few world units of our pawn, whatever its
+        // descriptor: desc, skel, Pose0 id, position. If a coincident foreign-desc pawn shows up, that's the ghost and
+        // its descId is the handle to kill it. If nothing shows, the ghost is provably not a pawn — Fx-layer next.
+        static float nearNextAt;
+        static void DumpNearbyPawns(PawnCtx ctx, ModelEntry e)
+        {
+            if (!e.hideSubPawns) return;
+            float now = UnityEngine.Time.time;
+            if (now < nearNextAt) return;
+            nearNextAt = now + 10f;
+            try
+            {
+                var os0 = GetMember(ctx.entry, "ObjectSpace");
+                if (!(GetMember(os0, "Translation") is UnityEngine.Vector3 p0)) return;
+                int shown = 0;
+                for (int m = 0; m < knownManagers.Count && shown < 12; m++)
+                {
+                    var arr = GetMember(knownManagers[m], "pawnEntries") as Array;
+                    if (arr == null) continue;
+                    int cnt;
+                    try { cnt = Convert.ToInt32(GetMember(knownManagers[m], "pawnCount")); } catch { continue; }
+                    if (cnt <= 0 || cnt > arr.Length) continue;
+                    for (int i = 0; i < cnt && shown < 12; i++)
+                    {
+                        var slot = arr.GetValue(i);
+                        var os = GetMember(slot, "ObjectSpace");
+                        if (!(GetMember(os, "Translation") is UnityEngine.Vector3 p)) continue;
+                        if ((p - p0).sqrMagnitude > 9f) continue;   // within 3 world units of our pawn
+                        int d = -1, s = -1; object animId = null;
+                        try { d = Convert.ToInt32(GetMember(slot, "PawnDescriptorId")); s = Convert.ToInt32(GetMember(slot, "SkeletonId")); } catch { }
+                        var pose0 = GetMember(slot, "Pose0");
+                        if (pose0 != null) animId = GetMember(pose0, "AnimationId");
+                        Plugin.Log.LogInfo($"[Uni][NEAR] '{e.resourceName}' mgr#{m} slot[{i}] desc={d} skel={s} pose0={animId} at ({p.x:0.0},{p.y:0.0},{p.z:0.0})" +
+                                           (d == e.descId ? "  <ours>" : "  <<< FOREIGN DESC — ghost candidate"));
+                        shown++;
+                    }
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] DumpNearbyPawns: " + ex.Message); }
         }
 
         // FORCE our skeleton so this pawn skins by OUR rig. A LATER instance the game spawned on a vanilla skeleton would
