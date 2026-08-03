@@ -129,6 +129,8 @@ namespace HumankindAssetFramework
         public int lastPawnFrame = -1;   // duplicate-pawn hide (hideSubPawns): Time.frameCount of the last pawn add for this entry
         public int pawnsThisFrame;       // how many pawns this entry added this frame — every one after the first gets HideFactor=1
         public float rendererCensusNextAt;   // next Unity-renderer census time for this entry (the ghost-rotor hunt)
+        public float moveTilt;               // degrees of nose-down pitch while MOVING (helicopter forward-flight attitude); 0 = off. Runtime-only, eased in/out.
+        public UnityEngine.Vector3 tiltLastPos; public float tiltCur; public float tiltLastTime;   // move-tilt runtime state
         public bool silenceDonorAudio;         // SUPPRESS all of the borrowed donor's Wwise sound on this unit's pawns (idle growl + combat maul/scratch that ride in on the reused animator/description). Reusable: any unit that inherits an unwanted donor sound can set it. Silences ONLY Wwise (AudioEmitter.PostEvent) — our own custom WAVs (Unity AudioSource) still play, so it composes with soundIdleFile/soundFile.
         public string engineStartEvent = "";  // Wwise event NAME posted on move-START (e.g. Play_UNIT_Vehicles_StealthCorvette_Start). Set => posted BY NAME (works for the FIRST unit, no live capture); empty => fall back to the auto-captured handle.
         public string engineStopEvent = "";   // ... move-STOP (..._Stop). Extract names via the F8 "Dump Sound Catalog"; assign per unit in the registry.
@@ -626,6 +628,7 @@ namespace HumankindAssetFramework
                                 deployOnStop = (bool?)m["deployOnStop"] ?? false,
                                 engineSound = (bool?)m["engineSound"] ?? false,
                                 hideSubPawns = (bool?)m["hideSubPawns"] ?? false,
+                                moveTilt = (float?)m["moveTilt"] ?? 0f,
                                 silenceDonorAudio = (bool?)m["silenceDonorAudio"] ?? false,
                                 engineStartEvent = (string)m["engineStartEvent"] ?? "",
                                 engineStopEvent = (string)m["engineStopEvent"] ?? "",
@@ -690,6 +693,7 @@ namespace HumankindAssetFramework
                 var dos = Regex.Matches(text, "\"deployOnStop\"\\s*:\\s*(true|false)");     // parity: hold deployed when idle, undeploy while moving
                 var eng = Regex.Matches(text, "\"engineSound\"\\s*:\\s*(true|false)");      // parity: fire the per-ship engine move sound on our units
                 var hsp = Regex.Matches(text, "\"hideSubPawns\"\\s*:\\s*(true|false)");    // parity: strip the donor's secondary sub-pawns (the "GPU rotor")
+                var mtl = Regex.Matches(text, "\"moveTilt\"\\s*:\\s*(-?[0-9.]+)");         // parity: nose-down pitch while moving (helicopter attitude)
                 var sda = Regex.Matches(text, "\"silenceDonorAudio\"\\s*:\\s*(true|false)"); // parity: suppress the borrowed donor's Wwise sound (idle + combat)
                 var svx = Regex.Matches(text, "\"silenceDonorVfx\"\\s*:\\s*(true|false)");   // parity: suppress the donor's MecanimEvent VFX (misplaced muzzle flashes)
                 var esa = Regex.Matches(text, "\"engineStartEvent\"\\s*:\\s*\"([^\"]*)\"");  // parity: Wwise event name posted on move-start
@@ -766,6 +770,7 @@ namespace HumankindAssetFramework
                         deployOnStop = i < dos.Count && dos[i].Groups[1].Value == "true",
                         engineSound = i < eng.Count && eng[i].Groups[1].Value == "true",
                         hideSubPawns = i < hsp.Count && hsp[i].Groups[1].Value == "true",
+                        moveTilt = i < mtl.Count && float.TryParse(mtl[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mtv) ? mtv : 0f,
                         silenceDonorAudio = i < sda.Count && sda[i].Groups[1].Value == "true",
                         silenceDonorVfx = i < svx.Count && svx[i].Groups[1].Value == "true",
                         engineStartEvent = i < esa.Count ? esa[i].Groups[1].Value : "",

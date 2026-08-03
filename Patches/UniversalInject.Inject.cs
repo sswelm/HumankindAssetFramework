@@ -1236,7 +1236,7 @@ namespace HumankindAssetFramework
                             // ContentLayer 0). Our texture-isolation clone inherited both, so WE drew the ghost disc on
                             // every pawn. Prune the blur pass from the clone HERE — before fragment.Load registers the
                             // layer (registration copies the outputs; post-registration edits never reach the live pass).
-                            if (e.hideSubPawns) PruneCloneRenderOutputs(clone, e);
+                            // (SHADOW_PASS prune removed 2026-08-04: the ghost was the donor VFX sprite, not the shadow pass — the clone keeps both outputs)
                             e.isolatedLayer = clone;
                             Plugin.Diag($"[Uni] cloned output layer for {e.resourceName} -> '{clone.name}'");
                         }

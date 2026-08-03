@@ -10,6 +10,20 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Units & animation
 
+- **A HELICOPTER WITH ITS OWN SPINNING ROTORS — and the four-mechanism ghost hunt (2026-08-03/04).** The RAH-66
+  Comanche now flies with **its own main + tail rotor spinning** (Vehicle Lab Rotor/Tail-rotor roles → continuous
+  bake) instead of borrowing the donor gunship's. Getting there uncovered — and defeated — FOUR stacked mechanisms
+  that together were the old "a donor's rotor can't be removed" wall: (1) gunship-class units spawn a **squadron
+  of pawns** via the air hardcode (formation dummies don't cap them) → stacked copies of the model; fixed by
+  keep-first-hide-rest (`hideSubPawns`); (2) our own `respawnAfterLoad` **leaked live sub-pawns** per attempt →
+  off for own-rotor models; (3) one leaked pawn kept the **pre-injection donor cache** → the cached-struct repair
+  (SRCFIX); (4) the last ghost — a translucent rotor that survived crushing every vertex of every ContentLayer,
+  every pawn sweep, and a full renderer census — was **not geometry at all**: the donor's Mecanim-event **VFX
+  billboard**, a 2D rotor sprite (the user's "it has no depth" observation cracked it), dropped by the July-era
+  `silenceDonorVfx` flag. One registry flag; four hours of elimination to learn which one. The live **ghost-bisect
+  tool** (file-driven in-session vertex surgery: crush/restore/census, no relaunches) ships from the hunt.
+  Planned: a per-NAME VFX filter (`silenceDonorVfxNames`) to drop only the rotor sprite while keeping other donor
+  effects, and a `moveTilt` nose-down attitude while moving (wired, dormant).
 - **HAND PROPS — a weapon on a custom skeleton (2026-07-19).** The Combine soldier **carries a textured M60**,
   gripped correctly through idle, run, combat stance, and sustained fire. The donor (a vehicle) has no weapon
   slots, so the plugin constructs the pawn fragment itself and glues the Prop-Lab mesh to the injected skeleton's

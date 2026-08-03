@@ -1,7 +1,16 @@
 # Animation Pitfalls — a field guide to the woes
 
 Every trap in this document was hit for real, cost hours, and is now either fixed in the tooling or has a
-one-field recipe answer. Read this BEFORE debugging an animated model that "looks wrong": the odds are your
+one-field recipe answer.
+
+> **THE GHOST ROTOR (2026-08-03, four hours, ~19 relaunches).** If a donor's part *survives replacing the entire
+> mesh*, surviving descriptor zeroing, pawn sweeps, and even degenerating every vertex of every Fx ContentLayer —
+> **stop looking for geometry. It may be a VFX billboard**: a 2D animated sprite (the gunship's rotor) played by
+> the donor's animator through a Mecanim event, drawn procedurally with shader-generated quads. It has no mesh,
+> no renderer, no pawn, and ignores every geometry lever by definition. The tell: it looks flat/depthless from
+> every angle. The fix: `silenceDonorVfx` (all donor Mecanim VFX) — per-name filtering is planned. Related traps
+> from the same hunt: gunship-class donors spawn a pawn SQUADRON the formation override cannot cap (use
+> `hideSubPawns`), and `respawnAfterLoad` leaks a live sub-pawn per attempt (turn it off for own-rotor models). Read this BEFORE debugging an animated model that "looks wrong": the odds are your
 problem is on this page, and the odds are the first three explanations you'll think of are not the cause.
 (Case study behind almost every entry: migrating the M114 howitzer from the legacy fire/deploy behaviors to the
 state-driven machine, 2026-07-19 — a day in which the model file was accused of corruption, three preview

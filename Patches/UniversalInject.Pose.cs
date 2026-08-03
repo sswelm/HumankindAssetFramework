@@ -544,6 +544,7 @@ namespace HumankindAssetFramework
             else if (!string.IsNullOrEmpty(e.turretBone)) TurretizeAimLayer(entry, e);   // retarget the game's aim/heading angle onto OUR turret bone (a vehicle turret tracks the target)
             else SanitizeAimLayer(entry);
             ApplyPositionOffset(e, entry);
+            ApplyMoveTilt(e, entry);       // nose-down while moving (helicopter attitude), eased; no-op at moveTilt 0
             ApplyScale(e, entry);
             // NOTE (2026-07-29, shader-proven): ApplyScale above writes ObjectSpace.Scale, which the GPU honours for
             // PLACEMENT ONLY (bone world positions + bind offsets) — it can never grow a mesh. So the per-entry
