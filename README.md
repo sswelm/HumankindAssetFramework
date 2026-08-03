@@ -69,6 +69,11 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
 - **Fire-on-attack** — a baked clip plays once, on the unit's combat action (e.g. a howitzer barrel that elevates only
   when it bombards), via Humankind's own combat event bus.
 - **Turret aim** — a turret yaws to track its target by retargeting the engine's own aim slot (no per-frame trig).
+- **A static model becomes a moving vehicle — no Blender knowledge** — the **Vehicle Lab** probes a raw model into
+  parts; mark what moves (**wheels**, **caterpillar tracks**, turret + gun, or a helicopter's **main + tail rotor**)
+  and it generates the rigged, spin-animated source the bake consumes. Its probe also classifies **interior parts**
+  (escape-ray sampling: provably-never-visible cockpit gear, engine guts) so hidden geometry is stripped before it
+  costs shared GPU vertex budget — 28% of the test helicopter's vertices.
 - **Borrow or freeze the donor's motion** — strip your model's rotor and the donor's spinning rotor shows through; or
   *Freeze donor animation* to pin a rigid model still while it glides tile-to-tile.
 
