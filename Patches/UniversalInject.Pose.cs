@@ -183,6 +183,22 @@ namespace HumankindAssetFramework
                     return;
                 }
 
+                // DUPLICATE-PAWN HIDE (2026-08-03, the helicopter "GPU rotor" endgame): gunship-class units spawn a
+                // SQUADRON of pawns via the air hardcode — the formation override's 1-dummy layout doesn't reduce them,
+                // so 4-5 copies of the model render stacked (the phantom rotors). For hideSubPawns entries keep the
+                // FIRST pawn added each frame and hide the rest with the engine's own HideFactor (fog-of-war mechanism).
+                if (e.hideSubPawns)
+                {
+                    int fr = UnityEngine.Time.frameCount;
+                    if (e.lastPawnFrame == fr && ++e.pawnsThisFrame > 1)
+                    {
+                        SetMember(ctx.entry, "HideFactor", 1f);
+                        ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
+                        return;   // hidden duplicate — no pose work
+                    }
+                    if (e.lastPawnFrame != fr) { e.lastPawnFrame = fr; e.pawnsThisFrame = 1; }
+                }
+
                 ForceOurSkeleton(ctx, e);
                 SweepForStrays(ctx, e);   // stale same-descriptor slots the game no longer rewrites (the ghost-donor fix)
                 DumpNearbyPawns(ctx, e);  // ghost census BY POSITION — catches a coincident pawn wearing a DIFFERENT descriptor
@@ -285,37 +301,54 @@ namespace HumankindAssetFramework
         // descriptor: desc, skel, Pose0 id, position. If a coincident foreign-desc pawn shows up, that's the ghost and
         // its descId is the handle to kill it. If nothing shows, the ghost is provably not a pawn — Fx-layer next.
         static float nearNextAt;
+        static bool descTableDumpedLate;
         static void DumpNearbyPawns(PawnCtx ctx, ModelEntry e)
         {
             if (!e.hideSubPawns) return;
             float now = UnityEngine.Time.time;
             if (now < nearNextAt) return;
             nearNextAt = now + 10f;
+            // LATE table dump: descriptors registered after our repoint (LODs, lazily-loaded defs) are invisible to the
+            // repoint-time dump — re-dump the full table once while the unit is actually on screen (ghost included).
+            if (!descTableDumpedLate) { descTableDumpedLate = true; ResetDescTableDump(); DumpDescriptorTable(); ResetFxMeshTableDump(); DumpFxMeshTable(ghostAnimMgr); }
+            ScanGhostDescriptors();   // re-scan for late-registered descriptors still drawing the donor mesh (every NEAR tick, ~10s)
             try
             {
                 var os0 = GetMember(ctx.entry, "ObjectSpace");
                 if (!(GetMember(os0, "Translation") is UnityEngine.Vector3 p0)) return;
                 int shown = 0;
-                for (int m = 0; m < knownManagers.Count && shown < 12; m++)
+                for (int m = 0; m < knownManagers.Count && shown < 24; m++)
                 {
                     var arr = GetMember(knownManagers[m], "pawnEntries") as Array;
                     if (arr == null) continue;
                     int cnt;
                     try { cnt = Convert.ToInt32(GetMember(knownManagers[m], "pawnCount")); } catch { continue; }
                     if (cnt <= 0 || cnt > arr.Length) continue;
-                    for (int i = 0; i < cnt && shown < 12; i++)
+                    // THE STALE-BUFFER REGION (the ghost's hiding place, 2026-08-03): the GPU uploads the WHOLE
+                    // pawnEntries array every frame — but the game (and every census we wrote) only touches
+                    // [0..pawnCount). A slot left behind PAST pawnCount by a respawn/rebuild keeps its donor state
+                    // forever and still renders. Scan the full array; slots >= pawnCount that carry OUR descriptor
+                    // are cleared to default (invisible), which the next full-buffer upload takes to the GPU.
+                    int limit = Math.Min(arr.Length, cnt + 64);
+                    for (int i = 0; i < limit && shown < 24; i++)
                     {
                         var slot = arr.GetValue(i);
-                        var os = GetMember(slot, "ObjectSpace");
-                        if (!(GetMember(os, "Translation") is UnityEngine.Vector3 p)) continue;
-                        if ((p - p0).sqrMagnitude > 9f) continue;   // within 3 world units of our pawn
                         int d = -1, s = -1; object animId = null;
                         try { d = Convert.ToInt32(GetMember(slot, "PawnDescriptorId")); s = Convert.ToInt32(GetMember(slot, "SkeletonId")); } catch { }
+                        var os = GetMember(slot, "ObjectSpace");
+                        bool near = GetMember(os, "Translation") is UnityEngine.Vector3 p && (p - p0).sqrMagnitude <= 9f;
+                        bool beyond = i >= cnt;
+                        if (!near && !(beyond && d == e.descId)) continue;
                         var pose0 = GetMember(slot, "Pose0");
                         if (pose0 != null) animId = GetMember(pose0, "AnimationId");
-                        Plugin.Log.LogInfo($"[Uni][NEAR] '{e.resourceName}' mgr#{m} slot[{i}] desc={d} skel={s} pose0={animId} at ({p.x:0.0},{p.y:0.0},{p.z:0.0})" +
-                                           (d == e.descId ? "  <ours>" : "  <<< FOREIGN DESC — ghost candidate"));
+                        var pv = GetMember(os, "Translation") is UnityEngine.Vector3 pp ? pp : default;
+                        Plugin.Log.LogInfo($"[Uni][NEAR] '{e.resourceName}' mgr#{m} slot[{i}]{(beyond ? " (BEYOND pawnCount=" + cnt + ")" : "")} desc={d} skel={s} pose0={animId} at ({pv.x:0.0},{pv.y:0.0},{pv.z:0.0})" +
+                                           (beyond && d == e.descId ? "  <<< STALE GHOST SLOT — CLEARING" : d == e.descId ? "  <ours>" : "  <<< FOREIGN DESC — ghost candidate"));
                         shown++;
+                        if (beyond && d == e.descId)
+                        {
+                            arr.SetValue(Activator.CreateInstance(arr.GetType().GetElementType()), i);   // default struct = renders nothing
+                        }
                     }
                 }
             }

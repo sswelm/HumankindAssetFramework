@@ -126,6 +126,9 @@ namespace HumankindAssetFramework
         // captured Start/Stop AudioEventHandle onto that pawn's AudioEmitter, restoring the missing engine sound.
         public bool engineSound;
         public bool hideSubPawns;        // strip the donor definition's SubPawnDefinitions at injection — kills secondary attachments like the helicopter gunship's independent rotor pawn (the "GPU rotor" a mesh swap can't remove)
+        public int lastPawnFrame = -1;   // duplicate-pawn hide (hideSubPawns): Time.frameCount of the last pawn add for this entry
+        public int pawnsThisFrame;       // how many pawns this entry added this frame — every one after the first gets HideFactor=1
+        public float rendererCensusNextAt;   // next Unity-renderer census time for this entry (the ghost-rotor hunt)
         public bool silenceDonorAudio;         // SUPPRESS all of the borrowed donor's Wwise sound on this unit's pawns (idle growl + combat maul/scratch that ride in on the reused animator/description). Reusable: any unit that inherits an unwanted donor sound can set it. Silences ONLY Wwise (AudioEmitter.PostEvent) — our own custom WAVs (Unity AudioSource) still play, so it composes with soundIdleFile/soundFile.
         public string engineStartEvent = "";  // Wwise event NAME posted on move-START (e.g. Play_UNIT_Vehicles_StealthCorvette_Start). Set => posted BY NAME (works for the FIRST unit, no live capture); empty => fall back to the auto-captured handle.
         public string engineStopEvent = "";   // ... move-STOP (..._Stop). Extract names via the F8 "Dump Sound Catalog"; assign per unit in the registry.

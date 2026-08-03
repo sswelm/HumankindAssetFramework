@@ -205,6 +205,7 @@ namespace HumankindAssetFramework
                 if (e.skeleton == null) return;
 
                 var bodyName = DiscoverBodyMeshName(addon);
+                var donorSkel0 = GetMember(addon, "Skeleton");   // pre-swap donor skeleton — Fx-index resolution needs it
                 if (!string.IsNullOrEmpty(bodyName)) { RenameBodyMesh(e.skeleton, bodyName); e.layerHint = bodyName; }
                 EnsureUploaded(e, animMgr);
                 SetMember(addon, "Skeleton", e.skeleton);
@@ -212,6 +213,7 @@ namespace HumankindAssetFramework
                 ReloadFragments(addon, animMgr, e.skeleton, e);
                 InjectHandProp(addon, animMgr, e.skeleton, e);
                 ApplyTexture(e, animMgr);
+                DumpFxIndices(donorSkel0, e, bodyName, animMgr);   // ghost hunt: donor vs our FxMeshIndex + StartIndex needle + descriptor scan
                 if (!e.repointed) { e.repointed = true; anyRescuable = null; Plugin.Diag($"[Uni] repointed '{name}' -> {e.resourceName} (mesh '{bodyName}', layer '{e.layerHint}')"); }
             }
             catch (Exception ex) { InjectionErrors++; Plugin.Log.LogError("[Uni] repoint: " + ex); }
@@ -405,7 +407,7 @@ namespace HumankindAssetFramework
             if (now < hierNextAt) return;
             hierNextAt = now + 3f;
             bool anyWanted = false;
-            for (int i = 0; i < list.Count; i++) if (list[i].hideSubPawns && !hierDumped.Contains(list[i].resourceName)) { anyWanted = true; break; }
+            for (int i = 0; i < list.Count; i++) if (list[i].hideSubPawns) { anyWanted = true; break; }   // keep polling: a respawn re-caches the donor struct, the source fix must re-repair
             if (!anyWanted) return;
             try
             {
@@ -415,7 +417,61 @@ namespace HumankindAssetFramework
                 {
                     if (!(o is UnityEngine.Component c) || c == null) continue;
                     var e = LongestMatch(list, c.gameObject.name, x => x.pawnDescription);
-                    if (e == null || !e.hideSubPawns || !hierDumped.Add(e.resourceName)) continue;
+                    if (e == null || !e.hideSubPawns) continue;
+                    // SOURCE FIX (2026-08-03): the SubPawn caches a private PawnEntry STRUCT at init and re-posts it
+                    // every frame — after a respawn it re-cached the DONOR SkeletonId (40) + donor clip, so the game
+                    // fights our per-frame overwrite forever (the ghost's engine). Repair the CACHED struct once:
+                    // our skeleton + our clip on Pose0. From then on the game itself posts the right state.
+                    try
+                    {
+                        var peF = AccessTools.Field(c.GetType(), "pawnEntry");
+                        if (peF != null && e.skeletonId >= 0)
+                        {
+                            var pe = peF.GetValue(c);
+                            int cachedSkel = Convert.ToInt32(GetMember(pe, "SkeletonId"));
+                            if (cachedSkel != e.skeletonId)
+                            {
+                                SetMember(pe, "SkeletonId", e.skeletonId);
+                                var p0 = GetMember(pe, "Pose0");
+                                if (p0 != null && e.animId >= 0)
+                                {
+                                    SetMember(p0, "AnimationId", e.animId);
+                                    SetMember(pe, "Pose0", p0);
+                                }
+                                peF.SetValue(c, pe);
+                                Plugin.Log.LogInfo($"[Uni][SRCFIX] '{e.resourceName}' sub-pawn '{c.gameObject.name}': cached PawnEntry repaired (skel {cachedSkel} -> {e.skeletonId}, Pose0 -> {e.animId})");
+                            }
+                        }
+                    }
+                    catch (Exception sx) { Plugin.Log.LogWarning("[Uni] SRCFIX: " + sx.Message); }
+                    // UNITY-SIDE RENDERER CENSUS (2026-08-03, the last ghost): with every pawn accounted for, the giant
+                    // translucent rotor must be ordinary Unity geometry positioned at the unit (the GetBoneTRS('Base')
+                    // caller — a RotationTransformInfo-driven attachment living OUTSIDE the SubPawn's own GameObject).
+                    // Log every Renderer within 15 units (path, mesh, material, size); auto-disable those with
+                    // donor-specific names (Gunship/Helix/Rotor/Blur — NOT "Helicopter", which matches our own assets).
+                    if (UnityEngine.Time.time >= e.rendererCensusNextAt)
+                    {
+                        e.rendererCensusNextAt = UnityEngine.Time.time + 15f;
+                        var origin = c.transform.position;
+                        int found = 0;
+                        foreach (var r in UnityEngine.Object.FindObjectsOfType<UnityEngine.Renderer>())
+                        {
+                            if (r == null || !r.enabled) continue;
+                            if ((r.bounds.center - origin).sqrMagnitude > 225f) continue;   // within 15 units
+                            string path = r.transform.name;
+                            for (var t = r.transform.parent; t != null && path.Length < 200; t = t.parent) path = t.name + "/" + path;
+                            string mesh = r is UnityEngine.SkinnedMeshRenderer smr2 && smr2.sharedMesh != null ? smr2.sharedMesh.name
+                                        : r.GetComponent<UnityEngine.MeshFilter>()?.sharedMesh?.name ?? "-";
+                            string mat = r.sharedMaterial != null ? r.sharedMaterial.name : "-";
+                            string hay = path + "|" + mesh + "|" + mat;
+                            bool donorish = new[] { "Gunship", "Helix", "Rotor", "Blur" }.Any(k => hay.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0);
+                            Plugin.Log.LogInfo($"[Uni][REND] '{e.resourceName}' {r.GetType().Name} '{path}' mesh='{mesh}' mat='{mat}' size={r.bounds.size} {(donorish ? "<<< DONOR-ISH — DISABLING" : "")}");
+                            if (donorish) r.enabled = false;
+                            if (++found >= 25) break;
+                        }
+                        Plugin.Log.LogInfo($"[Uni][REND] '{e.resourceName}': {found} renderer(s) within 15 units");
+                    }
+                    if (!hierDumped.Add(e.resourceName)) continue;
                     Plugin.Log.LogInfo($"[Uni][HIER] '{e.resourceName}' pawn GO '{c.gameObject.name}' hierarchy:");
                     DumpTransformTree(c.transform, 0);
                 }
@@ -435,6 +491,194 @@ namespace HumankindAssetFramework
             }
             Plugin.Log.LogInfo($"[Uni][HIER] {new string(' ', depth * 2)}{t.name} (active={t.gameObject.activeSelf}){rinfo}");
             for (int i = 0; i < t.childCount; i++) DumpTransformTree(t.GetChild(i), depth + 1);
+        }
+
+        // FX-INDEX RESOLUTION (ghost hunt): the GPU descriptor encodes an FxMeshIndex in ITS OWN numbering (not
+        // skinnedMeshInfos.MeshIndex). GetFxMeshIndex(name) on a mesh collection resolves name -> that numbering
+        // (the formation clone path uses it). Log the DONOR skeleton's index for the donor body mesh and OURS for the
+        // same (renamed) mesh — two known (descriptor, index) pairs per entry crack the encoding's bit layout, and the
+        // donor's index is the needle to find in whichever descriptor still draws the ghost.
+        static readonly HashSet<string> fxDumped = new HashSet<string>();
+        static void DumpFxIndices(object donorSkel, ModelEntry e, string bodyName, object animMgr)
+        {
+            try
+            {
+                if (e == null || donorSkel == null || string.IsNullOrEmpty(bodyName)) return;
+                if (ReferenceEquals(donorSkel, e.skeleton) || !fxDumped.Add(e.resourceName)) return;   // repeat Load: addon already ours
+                object dIdx = null, oIdx = null;
+                var mi = AccessTools.Method(donorSkel.GetType(), "GetFxMeshIndex", new[] { typeof(string) });
+                if (mi != null) dIdx = mi.Invoke(donorSkel, new object[] { bodyName });
+                if (e.skeleton != null)
+                {
+                    var mi2 = AccessTools.Method(e.skeleton.GetType(), "GetFxMeshIndex", new[] { typeof(string) });
+                    if (mi2 != null) oIdx = mi2.Invoke(e.skeleton, new object[] { bodyName });
+                }
+                // DECODED ENCODING (Amplitude.Graphics.GetEncodedMeshAndVisualParticleCount):
+                //   encoded = ContentLayer.HxFxOneMeshComputeBufferData[fxMeshIndex].StartIndex | (particleCount << 24)
+                // The low 24 bits are the mesh's START INDEX in the layer buffer — per-mesh unique. The donor mesh's
+                // StartIndex is therefore the NEEDLE that identifies any descriptor fragment still drawing the donor.
+                uint dStart = 0, oStart = 0;
+                try { if (dIdx != null) dStart = ReadFxStart(animMgr, Convert.ToUInt32(dIdx)); } catch { }
+                try { if (oIdx != null) oStart = ReadFxStart(animMgr, Convert.ToUInt32(oIdx)); } catch { }
+                Plugin.Log.LogInfo($"[Uni][FX] '{e.resourceName}': FxMeshIndex for '{bodyName}' — donor={dIdx} (start=0x{dStart:X6}) ours={oIdx} (start=0x{oStart:X6})");
+                if (e.hideSubPawns)
+                {
+                    ghostNeedle = dStart; ghostOurStart = oStart; ghostEntryName = e.resourceName;
+                    DumpDescriptorTable();
+                    ScanGhostDescriptors();
+                    DumpFxMeshTable(animMgr);   // name every mesh in the layer — the rotor/blur mesh will be findable BY NAME
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] FX index dump: " + ex.Message); }
+        }
+
+        // StartIndex of a mesh in the unit ContentLayer buffer (the low-24-bit half of the fragment encoding).
+        static uint ReadFxStart(object animMgr, uint fxMeshIdx)
+        {
+            var mcm = GetMember(animMgr, "FxComponentMeshContentManager");
+            var layerObj = GetMember(animMgr, "FXMeshLayerIndex");
+            int layer = layerObj is int li ? li : Convert.ToInt32(layerObj ?? 0);
+            var layers = GetMember(mcm, "Layers") as Array ?? AccessTools.Field(mcm.GetType(), "layers")?.GetValue(mcm) as Array;
+            var buf = GetMember(layers.GetValue(layer), "HxFxOneMeshComputeBufferData") as Array;
+            return Convert.ToUInt32(GetMember(buf.GetValue((int)fxMeshIdx), "StartIndex"));
+        }
+
+        // FX MESH TABLE (ghost hunt): name every mesh in the unit ContentLayer. FxMesh assets are Unity objects with
+        // names + Guids; the layer maps index -> guid (FindGuidAssociatedToIndex). Join the two and print index, name,
+        // StartIndex, PrimitiveCount for the whole table — the donor's separate rotor/blur mesh (its OWN FxMesh, its own
+        // translucent output layer; the reason the skinned-mesh needle found nothing) becomes identifiable BY NAME.
+        static bool fxMeshTableDumped;
+        internal static void ResetFxMeshTableDump() => fxMeshTableDumped = false;
+        internal static object ghostAnimMgr;   // stashed at repoint so the late trigger can re-dump
+        internal static void DumpFxMeshTable(object animMgr)
+        {
+            if (fxMeshTableDumped || animMgr == null) return;
+            fxMeshTableDumped = true;
+            ghostAnimMgr = animMgr;
+            try
+            {
+                // guid -> name via Amplitude's own AssetDatabase.LoadAsset<FxMesh>(guid) — the proven districts path
+                // (Resources.FindObjectsOfTypeAll returned nothing: the FxMesh assets aren't loose Unity objects).
+                var fxMeshType = GameBinding.FxMesh;
+                var adb = GameBinding.AssetDatabase;
+                var loadG = adb?.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                    .FirstOrDefault(m => (m.Name == "LoadAsset" || m.Name == "TryLoadAsset") && m.IsGenericMethodDefinition && m.GetParameters().Length >= 1);
+                var loadFx = fxMeshType != null && loadG != null ? loadG.MakeGenericMethod(fxMeshType) : null;
+                var mcm = GetMember(animMgr, "FxComponentMeshContentManager");
+                var layerObj = GetMember(animMgr, "FXMeshLayerIndex");
+                int layer = layerObj is int li ? li : Convert.ToInt32(layerObj ?? 0);
+                var layers = GetMember(mcm, "Layers") as Array ?? AccessTools.Field(mcm.GetType(), "layers")?.GetValue(mcm) as Array;
+                var lay = layers.GetValue(layer);
+                var buf = GetMember(lay, "HxFxOneMeshComputeBufferData") as Array;
+                var find = AccessTools.Method(lay.GetType(), "FindGuidAssociatedToIndex");
+                var sb = new System.Text.StringBuilder($"[Uni][FXMESHES] layer {layer}: {buf?.Length ?? 0} slots (loader={(loadFx != null ? "OK" : "MISSING")})\n");
+                for (int i = 0; buf != null && i < buf.Length && i < 300; i++)
+                {
+                    uint start = 0, prim = 0;
+                    try { start = Convert.ToUInt32(GetMember(buf.GetValue(i), "StartIndex")); prim = Convert.ToUInt32(GetMember(buf.GetValue(i), "PrimitiveCount")); } catch { }
+                    if (start == 0 && prim == 0) continue;   // empty slot
+                    string nm = "?";
+                    if (find != null)
+                    {
+                        var args = new object[] { i, null };
+                        try
+                        {
+                            if ((bool)find.Invoke(lay, args) && args[1] != null)
+                            {
+                                if (loadFx != null)
+                                {
+                                    var fx = loadFx.Invoke(null, loadFx.GetParameters().Length == 1 ? new[] { args[1] } : new object[] { args[1], null });
+                                    nm = (fx as UnityEngine.Object)?.name ?? args[1].ToString();
+                                }
+                                else nm = args[1].ToString();
+                            }
+                        }
+                        catch { }
+                    }
+                    sb.Append($"  mesh[{i}] start=0x{start:X6} prim={prim} name='{nm}'\n");
+                }
+                Plugin.Log.LogInfo(sb.ToString());
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] FXMESHES dump: " + ex.Message); }
+        }
+
+        // THE KILL: scan every GPU descriptor fragment for the donor mesh's StartIndex needle and zero the match in
+        // place (same mechanism as the hideMeshes descriptor patch). Our own descriptor encodes OUR StartIndex, so it
+        // can't match. Re-run periodically (from the NEAR tick) — the ghost's descriptor may register after repoint.
+        static uint ghostNeedle, ghostOurStart; static string ghostEntryName;
+        internal static void ScanGhostDescriptors()
+        {
+            if (ghostNeedle == 0) return;
+            try
+            {
+                var pmType = GameBinding.PawnManager;
+                var pm = pmType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
+                         ?? AccessTools.Field(pmType, "Instance")?.GetValue(null);
+                var descs = AccessTools.Field(pmType, "gpuPawnDescriptorEntries")?.GetValue(pm) as Array;
+                var gfrags = AccessTools.Field(pmType, "gpuPawnDescriptorFragmentEntries")?.GetValue(pm) as Array;
+                var dirtyF = AccessTools.Field(pmType, "descriptorBufferDirty");
+                if (descs == null || gfrags == null) return;
+                var dT = descs.GetType().GetElementType();
+                var sfF = dT.GetField("StartFragment"); var fcF = dT.GetField("FragmentCount");
+                var encF = gfrags.GetType().GetElementType().GetField("EncodedMeshAndVisualParticleCountFxMeshIndex");
+                bool dirty = false;
+                for (int d = 0; d < descs.Length; d++)
+                {
+                    var de = descs.GetValue(d);
+                    uint fc = Convert.ToUInt32(fcF.GetValue(de));
+                    if (fc == 0) continue;
+                    uint sf = Convert.ToUInt32(sfF.GetValue(de));
+                    for (uint fi = 0; fi < fc && sf + fi < gfrags.Length; fi++)
+                    {
+                        var ge = gfrags.GetValue((int)(sf + fi));
+                        uint enc = Convert.ToUInt32(encF.GetValue(ge));
+                        if (enc == 0 || (enc & 0xFFFFFF) != ghostNeedle) continue;
+                        Plugin.Log.LogInfo($"[Uni][GHOST] descriptor[{d}] frag[{fi}] encodes the DONOR mesh (0x{enc:X8}, needle start=0x{ghostNeedle:X6}, '{ghostEntryName}') — ZEROED");
+                        encF.SetValue(ge, 0u);
+                        gfrags.SetValue(ge, (int)(sf + fi));
+                        dirty = true;
+                    }
+                }
+                if (dirty) dirtyF?.SetValue(pm, true);
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] ghost scan: " + ex.Message); }
+        }
+
+        // One-shot: every GPU descriptor that draws fragments, with raw fragment encodings. Cross-referenced against the
+        // [FX] known pairs this identifies WHICH descriptor still encodes the donor gunship's FxMesh = the ghost's body.
+        static bool descTableDumped;
+        internal static void ResetDescTableDump() => descTableDumped = false;
+        internal static void DumpDescriptorTable()
+        {
+            if (descTableDumped) return;
+            descTableDumped = true;
+            try
+            {
+                var pmType = GameBinding.PawnManager;
+                var pm = pmType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
+                         ?? AccessTools.Field(pmType, "Instance")?.GetValue(null);
+                var descs = AccessTools.Field(pmType, "gpuPawnDescriptorEntries")?.GetValue(pm) as Array;
+                var gfrags = AccessTools.Field(pmType, "gpuPawnDescriptorFragmentEntries")?.GetValue(pm) as Array;
+                if (descs == null || gfrags == null) return;
+                var dT = descs.GetType().GetElementType();
+                var sfF = dT.GetField("StartFragment"); var fcF = dT.GetField("FragmentCount");
+                var encF = gfrags.GetType().GetElementType().GetField("EncodedMeshAndVisualParticleCountFxMeshIndex");
+                var sb = new System.Text.StringBuilder($"[Uni][FXTABLE] descriptors with fragments (of {descs.Length}):\n");
+                int rows = 0;
+                for (int d = 0; d < descs.Length && rows < 500; d++)
+                {
+                    var de = descs.GetValue(d);
+                    uint fc = Convert.ToUInt32(fcF.GetValue(de));
+                    if (fc == 0) continue;
+                    uint sf = Convert.ToUInt32(sfF.GetValue(de));
+                    sb.Append($"  desc[{d}] start={sf} n={fc}:");
+                    for (uint fi = 0; fi < fc && fi < 6 && sf + fi < gfrags.Length; fi++)
+                    { sb.Append($" 0x{Convert.ToUInt32(encF.GetValue(gfrags.GetValue((int)(sf + fi)))):X8}"); rows++; }
+                    sb.Append('\n');
+                }
+                Plugin.Log.LogInfo(sb.ToString());
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] FXTABLE dump: " + ex.Message); }
         }
 
         // The donor definition's SubPawnDefinitions: log what's attached (once per entry), and clear the array when the
