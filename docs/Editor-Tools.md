@@ -53,6 +53,15 @@ action, optional rolling tracks and wave-rock) that the animated bake path then 
 block, **Generate rig**, save/load **recipes**, **Verify** report. *Writes:* the rigged GLB + a recipe JSON (no unit
 registry write here — the GLB is then baked via Model Factory/Animation Lab).
 
+**Rotorcraft roles (helicopters).** Besides Wheel/Turret/Body there are **Rotor** (`R`) and **Tail rotor** (`L`) roles.
+Each rotor group fuses into **one hub bone** (unlike wheels' proximity clusters, so a wide blade disc spins as one):
+the **main rotor** pivots on its central hub part and spins about that hub's own *pole-to-pole* axis; the **tail fan**
+pivots on the blades' centroid and spins about the axis *perpendicular to the duct ring* (lateral to the boom), with
+**Tail-rotor axle** X/Y/Z override plus **yaw/pitch trim sliders** for the final degrees. Rotors are excluded from the
+wheels' rolling-contact speed scaling, so main + tail spin at the same rate, and a rotor marking switches the printed
+next-step recipe to the rotorcraft bake (**continuous** spin — State-driven OFF — and Auto-ground OFF). Preview aids
+for dialing it in: **Pause**, **◀/▶ frame-step**, and a **Level line** (horizontal reference at rotor height).
+
 ---
 
 ## The injection-axis tools
