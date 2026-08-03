@@ -122,7 +122,7 @@ namespace HumankindAssetFramework
 
         // Per-pawn state read once at the top of the hook and threaded through the behavior handlers. `entry` is the boxed
         // PawnEntry struct — every SetMember mutates that one box, and the handler writes it back via pawnEntries.SetValue.
-        struct PawnCtx { public Array pawnEntries; public int idx; public object entry; public int skelId; public int descId; }
+        struct PawnCtx { public Array pawnEntries; public int idx; public object entry; public int skelId; public int descId; public int pawnCount; }
 
         // The game just wrote pawnEntries[pawnCount-1]. Match it to one of our models and hand off to the behavior that model
         // wants: FREEZE (pin the donor clip to frame 0) or an ANIMATED pose whose time is driven by loop / fire-once / deploy.
@@ -139,6 +139,7 @@ namespace HumankindAssetFramework
                 if (anyRescuable == null) anyRescuable = entries != null && entries.Any(Rescuable);
                 if ((anyAnimated != true && anyFreeze != true && anyRescuable != true && unitScaleByDesc.Count == 0) || !Plugin.UniversalInjectOn.Value) return;
                 if (!TryReadLastPawn(pawnManager, out var ctx)) return;
+                if (!knownManagers.Contains(pawnManager)) knownManagers.Add(pawnManager);   // every manager, incl. ones only adding vanilla pawns — the sweep needs them all
 
                 // RESIZE LAB: a vanilla pawn (no model entry) whose descriptor has a resolved scale rule gets its
                 // ObjectSpace.Scale multiplied ONCE at spawn — the same mechanism the per-entry `scale` field uses.
@@ -182,7 +183,38 @@ namespace HumankindAssetFramework
                     return;
                 }
 
+                // DUPLICATE-PAWN HIDE (2026-08-03, the helicopter "GPU rotor" endgame): gunship-class units spawn a
+                // SQUADRON of pawns via the air hardcode — the formation override's 1-dummy layout doesn't reduce them,
+                // so 4-5 copies of the model render stacked (the phantom rotors). For hideSubPawns entries keep the
+                // FIRST pawn added each frame and hide the rest with the engine's own HideFactor (fog-of-war mechanism).
+                if (e.hideSubPawns)
+                {
+                    int fr = UnityEngine.Time.frameCount;
+                    if (e.lastPawnFrame == fr && ++e.pawnsThisFrame > 1)
+                    {
+                        SetMember(ctx.entry, "HideFactor", 1f);
+                        // AND bury it (user's call): HideFactor hides the pawn's own mesh draw, but the ghost overlay
+                        // demonstrably samples a pawn slot's data — if it rides a duplicate slot, dropping that slot
+                        // 1000 units under the world takes the ghost with it. The duplicate's real mesh is hidden
+                        // anyway, so mangling its position costs nothing.
+                        var os = GetMember(ctx.entry, "ObjectSpace");
+                        if (os != null && GetMember(os, "Translation") is UnityEngine.Vector3 tp)
+                        {
+                            SetMember(os, "Translation", new UnityEngine.Vector3(tp.x, tp.y - 1000f, tp.z));
+                            SetMember(ctx.entry, "ObjectSpace", os);
+                        }
+                        ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
+                        return;   // hidden + buried duplicate — no pose work
+                    }
+                    if (e.lastPawnFrame != fr) { e.lastPawnFrame = fr; e.pawnsThisFrame = 1; }
+                    // the KEPT pawn: un-hide every frame — the cached struct posts HideFactor=1 (the sandwich that
+                    // starves the ghost's pre-hook draw); the real post-hook state must render.
+                    SetMember(ctx.entry, "HideFactor", 0f);
+                }
+
                 ForceOurSkeleton(ctx, e);
+                SweepForStrays(ctx, e);   // stale same-descriptor slots the game no longer rewrites (the ghost-donor fix)
+                DumpNearbyPawns(ctx, e);  // ghost census BY POSITION — catches a coincident pawn wearing a DIFFERENT descriptor
 
                 // FREEZE (static): no clip of our own — pin the donor pose to frame 0 and stop. ANIMATED: play our clip on Pose0.
                 // NEITHER: a purely static repointed model. It reaches here only since the rescue was widened past
@@ -213,8 +245,129 @@ namespace HumankindAssetFramework
                 pawnEntries = pawnEntries, idx = idx, entry = entry,
                 skelId = Convert.ToInt32(GetMember(entry, "SkeletonId")),
                 descId = Convert.ToInt32(GetMember(entry, "PawnDescriptorId")),
+                pawnCount = pawnCount,
             };
             return true;
+        }
+
+        // GHOST-DONOR SWEEP (2026-08-03, the StealthHelicopter "GPU rotor"): the hook only ever sees the pawn the game
+        // JUST wrote (pawnCount-1), so a STALE slot — left behind by a respawn/reload and never re-added — keeps whatever
+        // the game last wrote there (DONOR skeleton + donor clip), yet is still uploaded to the GPU every frame by
+        // DoComputation's full-buffer SetData. It renders as a ghost of the donor coincident with the real unit (on the
+        // Comanche only the donor's big rotor disc stuck out of our larger model). Every ~2s per entry, walk the WHOLE
+        // live array — from inside the hook, i.e. the same thread as the game's writes — and rescue any same-descriptor
+        // slot sitting on a foreign skeleton: force our skeleton and put our clip on Pose0 (the donor clip id can't
+        // resolve on our rig). A rescued stale slot stays rescued (nobody rewrites it), so the log goes quiet once clean.
+        static readonly Dictionary<string, float> sweepLast = new Dictionary<string, float>();
+        static readonly HashSet<string> sweepScanLogged = new HashSet<string>();
+        static int sweepFixLogged;
+        // EVERY pawn manager the hook has ever seen (reference-identity; a handful — the map's plus per-battle ones).
+        // The hook fires per-manager as pawns are ADDED, so a manager whose buffer was written once and never re-added
+        // (a stale PresentationUnit from the load/respawn path) would never be swept via ctx alone — its stale slots
+        // keep rendering donor visuals forever. Sweeping every known manager closes that hole. Cleared on session reset.
+        internal static readonly List<object> knownManagers = new List<object>();
+        static void SweepForStrays(PawnCtx ctx, ModelEntry e)
+        {
+            if (e.descId < 0) return;
+            float now = UnityEngine.Time.time;
+            if (sweepLast.TryGetValue(e.resourceName, out var last) && now - last < 2f) return;
+            sweepLast[e.resourceName] = now;
+            for (int m = 0; m < knownManagers.Count; m++)
+            {
+                var arr = GetMember(knownManagers[m], "pawnEntries") as Array;
+                if (arr == null) continue;
+                int cnt;
+                try { cnt = Convert.ToInt32(GetMember(knownManagers[m], "pawnCount")); } catch { continue; }
+                if (cnt <= 0 || cnt > arr.Length) continue;
+                int nFixed = 0, nSeen = 0;
+                for (int i = 0; i < cnt; i++)
+                {
+                    var slot = arr.GetValue(i);
+                    int d, s;
+                    try { d = Convert.ToInt32(GetMember(slot, "PawnDescriptorId")); s = Convert.ToInt32(GetMember(slot, "SkeletonId")); }
+                    catch { continue; }
+                    if (d != e.descId) continue;
+                    nSeen++;
+                    if (s == e.skeletonId) continue;
+                    SetMember(slot, "SkeletonId", e.skeletonId);
+                    var p0 = GetMember(slot, "Pose0");
+                    if (p0 != null && e.animId >= 0)
+                    {
+                        SetMember(p0, "AnimationId", e.animId);
+                        SetMember(p0, "Weight", 1f);
+                        SetMember(slot, "Pose0", p0);
+                    }
+                    arr.SetValue(slot, i);
+                    nFixed++;
+                }
+                if (nFixed > 0 && sweepFixLogged < 12)
+                { sweepFixLogged++; Plugin.Log.LogInfo($"[Uni][SWEEP] '{e.resourceName}' manager#{m}: rescued {nFixed} stray slot(s) off a foreign skeleton ({nSeen} slot(s) carry desc {e.descId})"); }
+                else if (sweepScanLogged.Add(e.resourceName + "#" + m))
+                    Plugin.Diag($"[Uni][SWEEP] '{e.resourceName}' manager#{m}: scan — {nSeen} slot(s) carry desc {e.descId}, all on our skeleton {e.skeletonId} ({knownManagers.Count} manager(s) known)");
+            }
+        }
+
+        // GHOST CENSUS BY POSITION (2026-08-03): every desc-filtered probe came back clean, yet the donor gunship still
+        // renders over the StealthHelicopter — so if the ghost IS a pawn, it wears a DIFFERENT PawnDescriptorId (a
+        // second pawn definition: an LOD twin, the raw donor def, whatever) and every desc==ours filter is blind to it.
+        // For hideSubPawns entries, periodically log EVERY pawn slot within a few world units of our pawn, whatever its
+        // descriptor: desc, skel, Pose0 id, position. If a coincident foreign-desc pawn shows up, that's the ghost and
+        // its descId is the handle to kill it. If nothing shows, the ghost is provably not a pawn — Fx-layer next.
+        static float nearNextAt;
+        static bool descTableDumpedLate;
+        static void DumpNearbyPawns(PawnCtx ctx, ModelEntry e)
+        {
+            if (!e.hideSubPawns) return;
+            float now = UnityEngine.Time.time;
+            if (now < nearNextAt) return;
+            nearNextAt = now + 10f;
+            // LATE table dump: descriptors registered after our repoint (LODs, lazily-loaded defs) are invisible to the
+            // repoint-time dump — re-dump the full table once while the unit is actually on screen (ghost included).
+            if (!descTableDumpedLate) { descTableDumpedLate = true; ResetDescTableDump(); DumpDescriptorTable(); ResetFxMeshTableDump(); DumpFxMeshTable(ghostAnimMgr); }
+            ScanGhostDescriptors();   // re-scan for late-registered descriptors still drawing the donor mesh (every NEAR tick, ~10s)
+            CrushGhostSlice(ghostAnimMgr, e, ghostDonorFxIdx);   // re-crush if the Fx content reloaded (probe-guarded, cheap)
+            PollGhostBisect();   // live operator-driven mesh bisect via enc_ghostbisect.txt (no relaunch needed)
+            try
+            {
+                var os0 = GetMember(ctx.entry, "ObjectSpace");
+                if (!(GetMember(os0, "Translation") is UnityEngine.Vector3 p0)) return;
+                int shown = 0;
+                for (int m = 0; m < knownManagers.Count && shown < 24; m++)
+                {
+                    var arr = GetMember(knownManagers[m], "pawnEntries") as Array;
+                    if (arr == null) continue;
+                    int cnt;
+                    try { cnt = Convert.ToInt32(GetMember(knownManagers[m], "pawnCount")); } catch { continue; }
+                    if (cnt <= 0 || cnt > arr.Length) continue;
+                    // THE STALE-BUFFER REGION (the ghost's hiding place, 2026-08-03): the GPU uploads the WHOLE
+                    // pawnEntries array every frame — but the game (and every census we wrote) only touches
+                    // [0..pawnCount). A slot left behind PAST pawnCount by a respawn/rebuild keeps its donor state
+                    // forever and still renders. Scan the full array; slots >= pawnCount that carry OUR descriptor
+                    // are cleared to default (invisible), which the next full-buffer upload takes to the GPU.
+                    int limit = Math.Min(arr.Length, cnt + 64);
+                    for (int i = 0; i < limit && shown < 24; i++)
+                    {
+                        var slot = arr.GetValue(i);
+                        int d = -1, s = -1; object animId = null;
+                        try { d = Convert.ToInt32(GetMember(slot, "PawnDescriptorId")); s = Convert.ToInt32(GetMember(slot, "SkeletonId")); } catch { }
+                        var os = GetMember(slot, "ObjectSpace");
+                        bool near = GetMember(os, "Translation") is UnityEngine.Vector3 p && (p - p0).sqrMagnitude <= 9f;
+                        bool beyond = i >= cnt;
+                        if (!near && !(beyond && d == e.descId)) continue;
+                        var pose0 = GetMember(slot, "Pose0");
+                        if (pose0 != null) animId = GetMember(pose0, "AnimationId");
+                        var pv = GetMember(os, "Translation") is UnityEngine.Vector3 pp ? pp : default;
+                        Plugin.Log.LogInfo($"[Uni][NEAR] '{e.resourceName}' mgr#{m} slot[{i}]{(beyond ? " (BEYOND pawnCount=" + cnt + ")" : "")} desc={d} skel={s} pose0={animId} at ({pv.x:0.0},{pv.y:0.0},{pv.z:0.0})" +
+                                           (beyond && d == e.descId ? "  <<< STALE GHOST SLOT — CLEARING" : d == e.descId ? "  <ours>" : "  <<< FOREIGN DESC — ghost candidate"));
+                        shown++;
+                        if (beyond && d == e.descId)
+                        {
+                            arr.SetValue(Activator.CreateInstance(arr.GetType().GetElementType()), i);   // default struct = renders nothing
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] DumpNearbyPawns: " + ex.Message); }
         }
 
         // FORCE our skeleton so this pawn skins by OUR rig. A LATER instance the game spawned on a vanilla skeleton would
@@ -391,6 +544,7 @@ namespace HumankindAssetFramework
             else if (!string.IsNullOrEmpty(e.turretBone)) TurretizeAimLayer(entry, e);   // retarget the game's aim/heading angle onto OUR turret bone (a vehicle turret tracks the target)
             else SanitizeAimLayer(entry);
             ApplyPositionOffset(e, entry);
+            ApplyMoveTilt(e, entry);       // nose-down while moving (helicopter attitude), eased; no-op at moveTilt 0
             ApplyScale(e, entry);
             // NOTE (2026-07-29, shader-proven): ApplyScale above writes ObjectSpace.Scale, which the GPU honours for
             // PLACEMENT ONLY (bone world positions + bind offsets) — it can never grow a mesh. So the per-entry

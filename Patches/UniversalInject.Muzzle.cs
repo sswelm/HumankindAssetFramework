@@ -322,6 +322,36 @@ namespace HumankindAssetFramework
             SetMember(entry, "ObjectSpace", os);
         }
 
+        // MOVE TILT (2026-08-04, user request — "helicopter-ness" after the ghost-rotor sprite was silenced): pitch the
+        // model nose-down while it MOVES (the classic forward-flight attitude), ease back level at rest. Movement =
+        // frame-to-frame planar delta of the pawn's own Translation (the settle-immune signal). Applied as a LOCAL
+        // pitch on top of the game's facing each frame (never accumulates — recomputed from the game's fresh rotation).
+        // Per-entry state is fine: tilt targets single-pawn hero units (multi-pawn units share one tilt, acceptable).
+        static void ApplyMoveTilt(ModelEntry e, object entry)
+        {
+            if (e.moveTilt == 0f) return;
+            var os = GetMember(entry, "ObjectSpace");
+            UnityEngine.Vector3 tr;
+            try { tr = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return; }
+            float now = UnityEngine.Time.time;
+            float dt = UnityEngine.Mathf.Clamp(now - e.tiltLastTime, 0f, 0.1f);
+            var dp = tr - e.tiltLastPos; dp.y = 0f;
+            bool moving = e.tiltLastTime > 0f && dt > 0f && dp.magnitude / UnityEngine.Mathf.Max(dt, 1e-4f) > 0.5f;   // > 0.5 world units/s
+            e.tiltLastPos = tr; e.tiltLastTime = now;
+            e.tiltCur = UnityEngine.Mathf.MoveTowards(e.tiltCur, moving ? e.moveTilt : 0f, 60f * dt);   // ease 60 deg/s
+            if (UnityEngine.Mathf.Abs(e.tiltCur) < 0.01f) return;
+            var ro = GetMember(os, "Rotation");
+            if (!TryQuaternion(ro, out var rot)) return;
+            var tilted = rot * UnityEngine.Quaternion.Euler(e.tiltCur, 0f, 0f);   // local pitch; negative registry value = nose-up if the axis reads inverted
+            if (ro is UnityEngine.Quaternion) SetMember(os, "Rotation", tilted);
+            else
+            {   // Amplitude quaternion struct: write components onto the boxed value, then put it back
+                SetMember(ro, "x", tilted.x); SetMember(ro, "y", tilted.y); SetMember(ro, "z", tilted.z); SetMember(ro, "w", tilted.w);
+                SetMember(os, "Rotation", ro);
+            }
+            SetMember(entry, "ObjectSpace", os);
+        }
+
         // ObjectSpace.Rotation as a UnityEngine.Quaternion: it may BE one, or an Amplitude quaternion type with the
         // same x/y/z/w layout — read the components reflectively in that case. False (identity) if unreadable.
         static bool TryQuaternion(object o, out UnityEngine.Quaternion q)

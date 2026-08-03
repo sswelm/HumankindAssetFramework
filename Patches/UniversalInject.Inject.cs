@@ -193,11 +193,19 @@ namespace HumankindAssetFramework
                     DumpFields(addon, e.resourceName + " addon");
                     DumpFields(sk0, e.resourceName + " skeleton");
                 }
+                // SUB-PAWNS — the "GPU rotor" (2026-08-03): a PresentationPawnDefinition can carry SubPawnDefinitions —
+                // SECONDARY pawns spawned alongside the main pawn (the cavalry-mount mechanism; a helicopter gunship's
+                // rotor rides here). They render independently of the main pawn's mesh/skeleton, which is why no mesh
+                // swap, fragment hide, or pawn-array rescue ever touched the ghost rotor. Dump the list once (ground
+                // truth), and when the entry opts in (hideSubPawns) clear the array so future spawns — including the
+                // respawnAfterLoad respawn — attach nothing.
+                DumpAndMaybeClearSubPawns(addon, e);
 
                 EnsureRegistered(animMgr);
                 if (e.skeleton == null) return;
 
                 var bodyName = DiscoverBodyMeshName(addon);
+                var donorSkel0 = GetMember(addon, "Skeleton");   // pre-swap donor skeleton — Fx-index resolution needs it
                 if (!string.IsNullOrEmpty(bodyName)) { RenameBodyMesh(e.skeleton, bodyName); e.layerHint = bodyName; }
                 EnsureUploaded(e, animMgr);
                 SetMember(addon, "Skeleton", e.skeleton);
@@ -205,6 +213,7 @@ namespace HumankindAssetFramework
                 ReloadFragments(addon, animMgr, e.skeleton, e);
                 InjectHandProp(addon, animMgr, e.skeleton, e);
                 ApplyTexture(e, animMgr);
+                DumpFxIndices(donorSkel0, e, bodyName, animMgr);   // ghost hunt: donor vs our FxMeshIndex + StartIndex needle + descriptor scan
                 if (!e.repointed) { e.repointed = true; anyRescuable = null; Plugin.Diag($"[Uni] repointed '{name}' -> {e.resourceName} (mesh '{bodyName}', layer '{e.layerHint}')"); }
             }
             catch (Exception ex) { InjectionErrors++; Plugin.Log.LogError("[Uni] repoint: " + ex); }
@@ -383,6 +392,685 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogWarning($"[RigDump] name tables {label}: " + ex.Message); }
         }
 
+        // GHOST-ROTOR HIERARCHY DUMP (2026-08-03): the pawn's visual root is a Unity PREFAB (description.Template) —
+        // child renderers there (the gunship's rotor blur disc) render through ORDINARY Unity rendering, outside the
+        // GPU-instanced pipeline every previous lever targeted. One-shot per hideSubPawns entry: walk a matched live
+        // PresentationSubPawn's transform tree and log every child with its renderer/mesh/material names, so the next
+        // step can disable the rotor children BY NAME instead of guessing. Poll-driven (~3s) from Plugin.Update.
+        static readonly HashSet<string> hierDumped = new HashSet<string>();
+        static float hierNextAt;
+        internal static void ProcessSubPawnVisuals()
+        {
+            var list = entries;
+            if (list == null || !Plugin.UniversalInjectOn.Value) return;
+            float now = UnityEngine.Time.time;
+            if (now < hierNextAt) return;
+            hierNextAt = now + 3f;
+            bool anyWanted = false;
+            for (int i = 0; i < list.Count; i++) if (list[i].hideSubPawns) { anyWanted = true; break; }   // keep polling: a respawn re-caches the donor struct, the source fix must re-repair
+            if (!anyWanted) return;
+            try
+            {
+                var spType = GameBinding.PresentationSubPawn;
+                if (spType == null) return;
+                foreach (var o in UnityEngine.Object.FindObjectsOfType(spType))
+                {
+                    if (!(o is UnityEngine.Component c) || c == null) continue;
+                    var e = LongestMatch(list, c.gameObject.name, x => x.pawnDescription);
+                    if (e == null || !e.hideSubPawns) continue;
+                    // SOURCE FIX (2026-08-03): the SubPawn caches a private PawnEntry STRUCT at init and re-posts it
+                    // every frame — after a respawn it re-cached the DONOR SkeletonId (40) + donor clip, so the game
+                    // fights our per-frame overwrite forever (the ghost's engine). Repair the CACHED struct once:
+                    // our skeleton + our clip on Pose0. From then on the game itself posts the right state.
+                    try
+                    {
+                        var peF = AccessTools.Field(c.GetType(), "pawnEntry");
+                        if (peF != null && e.skeletonId >= 0)
+                        {
+                            var pe = peF.GetValue(c);
+                            int cachedSkel = Convert.ToInt32(GetMember(pe, "SkeletonId"));
+                            float cachedHide = 0f; try { cachedHide = Convert.ToSingle(GetMember(pe, "HideFactor")); } catch { }
+                            // THE SANDWICH (2026-08-03, the ghost kill): the ghost renders from this CACHED struct's
+                            // state (proven: repairing its skeleton reoriented the ghost; offsetting OUR post-hook
+                            // position moved the model but not the ghost). So poison the source: the cached struct is
+                            // permanently HideFactor=1 — whatever draws the pre-hook state draws nothing — while the
+                            // pose hook sets HideFactor=0 on the real pawn every frame, so OUR model stays visible.
+                            if (cachedSkel != e.skeletonId || cachedHide < 1f)
+                            {
+                                SetMember(pe, "SkeletonId", e.skeletonId);
+                                SetMember(pe, "HideFactor", 1f);
+                                var p0 = GetMember(pe, "Pose0");
+                                if (p0 != null && e.animId >= 0)
+                                {
+                                    SetMember(p0, "AnimationId", e.animId);
+                                    SetMember(pe, "Pose0", p0);
+                                }
+                                peF.SetValue(c, pe);
+                                Plugin.Log.LogInfo($"[Uni][SRCFIX] '{e.resourceName}' sub-pawn '{c.gameObject.name}': cached PawnEntry poisoned (skel {cachedSkel} -> {e.skeletonId}, HideFactor 1, Pose0 -> {e.animId})");
+                            }
+                        }
+                    }
+                    catch (Exception sx) { Plugin.Log.LogWarning("[Uni] SRCFIX: " + sx.Message); }
+                    // UNITY-SIDE RENDERER CENSUS (2026-08-03, the last ghost): with every pawn accounted for, the giant
+                    // translucent rotor must be ordinary Unity geometry positioned at the unit (the GetBoneTRS('Base')
+                    // caller — a RotationTransformInfo-driven attachment living OUTSIDE the SubPawn's own GameObject).
+                    // Log every Renderer within 15 units (path, mesh, material, size); auto-disable those with
+                    // donor-specific names (Gunship/Helix/Rotor/Blur — NOT "Helicopter", which matches our own assets).
+                    if (UnityEngine.Time.time >= e.rendererCensusNextAt)
+                    {
+                        e.rendererCensusNextAt = UnityEngine.Time.time + 15f;
+                        var origin = c.transform.position;
+                        int found = 0;
+                        foreach (var r in UnityEngine.Object.FindObjectsOfType<UnityEngine.Renderer>())
+                        {
+                            if (r == null || !r.enabled) continue;
+                            if ((r.bounds.center - origin).sqrMagnitude > 225f) continue;   // within 15 units
+                            string path = r.transform.name;
+                            for (var t = r.transform.parent; t != null && path.Length < 200; t = t.parent) path = t.name + "/" + path;
+                            string mesh = r is UnityEngine.SkinnedMeshRenderer smr2 && smr2.sharedMesh != null ? smr2.sharedMesh.name
+                                        : r.GetComponent<UnityEngine.MeshFilter>()?.sharedMesh?.name ?? "-";
+                            string mat = r.sharedMaterial != null ? r.sharedMaterial.name : "-";
+                            string hay = path + "|" + mesh + "|" + mat;
+                            bool donorish = new[] { "Gunship", "Helix", "Rotor", "Blur" }.Any(k => hay.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0);
+                            Plugin.Log.LogInfo($"[Uni][REND] '{e.resourceName}' {r.GetType().Name} '{path}' mesh='{mesh}' mat='{mat}' size={r.bounds.size} {(donorish ? "<<< DONOR-ISH — DISABLING" : "")}");
+                            if (donorish) r.enabled = false;
+                            if (++found >= 25) break;
+                        }
+                        Plugin.Log.LogInfo($"[Uni][REND] '{e.resourceName}': {found} renderer(s) within 15 units");
+                    }
+                    if (!hierDumped.Add(e.resourceName)) continue;
+                    Plugin.Log.LogInfo($"[Uni][HIER] '{e.resourceName}' pawn GO '{c.gameObject.name}' hierarchy:");
+                    DumpTransformTree(c.transform, 0);
+                    // OUTPUT-LAYER AUTOPSY (2026-08-03, endgame): the donor mesh carries a 53-prim TRANSPARENT slice in
+                    // ContentLayer 0 (the rotor blur disc) drawn via the output layer's visual-particle channel — and our
+                    // texture-isolation CLONE of the donor's FxOutputLayer inherited that channel: we draw the ghost
+                    // ourselves. Dump every field of the clone so the disc channel can be identified and cut.
+                    if (e.isolatedLayer != null)
+                    {
+                        Plugin.Log.LogInfo($"[Uni][LAYER] '{e.resourceName}' cloned output layer '{(e.isolatedLayer as UnityEngine.Object)?.name}' fields:");
+                        DumpFields(e.isolatedLayer, e.resourceName + " outputLayer");
+                    }
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] ProcessSubPawnVisuals: " + ex.Message); }
+        }
+        static void DumpTransformTree(UnityEngine.Transform t, int depth)
+        {
+            if (depth > 8) return;
+            var rend = t.GetComponent<UnityEngine.Renderer>();
+            string rinfo = "";
+            if (rend != null)
+            {
+                string mesh = rend is UnityEngine.SkinnedMeshRenderer smr && smr.sharedMesh != null ? smr.sharedMesh.name
+                            : t.GetComponent<UnityEngine.MeshFilter>()?.sharedMesh?.name ?? "?";
+                rinfo = $"  <{rend.GetType().Name} enabled={rend.enabled} mesh='{mesh}' mat='{rend.sharedMaterial?.name}'>";
+            }
+            Plugin.Log.LogInfo($"[Uni][HIER] {new string(' ', depth * 2)}{t.name} (active={t.gameObject.activeSelf}){rinfo}");
+            for (int i = 0; i < t.childCount; i++) DumpTransformTree(t.GetChild(i), depth + 1);
+        }
+
+        // CRUSH THE GHOST SLICE (2026-08-03, the geometry kill): the ghost rotor's geometry is the donor mesh's slice
+        // in ContentLayer 0 (53 prims at start 0x006400) — drawn by a unit-level pass no pawn/descriptor lever reaches.
+        // So stop fighting the drawer and destroy the GEOMETRY: scale that slice's vertex positions to ~0 in the
+        // layer's CPU WriteContent (the mesh-scale engine's proven write path) and Apply. A degenerate point renders
+        // as nothing regardless of who draws it. Self-verifying probe (first vertex) makes it idempotent and
+        // reload-resilient; re-run from the NEAR tick. Affects ONLY the layer-0 blur slice — bodies live in layer 2.
+        static bool ghostCrushLogged;
+        internal static void CrushGhostSlice(object animMgr, ModelEntry e, uint donorFxIdx)
+        {
+            try
+            {
+                if (animMgr == null || donorFxIdx == 0) return;
+                var mcm = GetMember(animMgr, "FxComponentMeshContentManager");
+                var layers = GetMember(mcm, "Layers") as Array ?? AccessTools.Field(mcm.GetType(), "layers")?.GetValue(mcm) as Array;
+                if (layers == null || layers.Length == 0) return;
+                var layer = layers.GetValue(0);   // layer 0 = the slice's home
+                var meshTable = GetMember(layer, "HxFxOneMeshComputeBufferData") as Array;
+                var vertBufObj = AccessTools.Field(layer.GetType(), "vertexBuffer")?.GetValue(layer);
+                var verts = vertBufObj == null ? null : GetMember(vertBufObj, "WriteContent") as Array;
+                if (meshTable == null || verts == null || donorFxIdx >= meshTable.Length) return;
+                // FORMAT-AGNOSTIC DEGENERATION: layer 0 uses the static quantized vertex format (no raw Pos), so
+                // instead of zeroing positions, copy the FIRST vertex record over the whole slice — identical
+                // vertices make every triangle zero-area, which renders as nothing in any encoding.
+                var mEntry = meshTable.GetValue((int)donorFxIdx);
+                var msType = mEntry.GetType();
+                uint sv = Convert.ToUInt32(msType.GetField("StartVertex").GetValue(mEntry));
+                int vc = Convert.ToInt32(msType.GetField("VertexCount").GetValue(mEntry));
+                if (vc <= 1 || sv + 1 >= verts.Length) return;
+                var first = verts.GetValue((int)sv);
+                if (Equals(verts.GetValue((int)sv + 1), first)) return;   // already degenerated (write persisted)
+                for (uint v = sv + 1; v < sv + vc && v < verts.Length; v++)
+                    verts.SetValue(first, (int)v);
+                AccessTools.Method(vertBufObj.GetType(), "Apply", Type.EmptyTypes)?.Invoke(vertBufObj, null);
+                Plugin.Log.LogInfo($"[Uni][CRUSH] '{e.resourceName}': DEGENERATED donor mesh {donorFxIdx}'s layer-0 slice ({vc} verts @ {sv}, format {verts.GetType().GetElementType().Name}) — every triangle is now zero-area");
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] CrushGhostSlice: " + ex.Message); }
+        }
+        static uint ghostDonorFxIdx;   // stashed for periodic re-crush from the NEAR tick
+
+        // LIVE GHOST BISECT (2026-08-03 23:00): the ghost's mesh is SOME layer-0 FxMesh we can't name — so find it by
+        // elimination WITHOUT relaunching. Poll BepInEx/config/enc_ghostbisect.txt every ~2s:
+        //     crush <from> <to>    degenerate layer-0 meshes [from..to] (originals saved on first touch)
+        //     restore              restore every saved mesh
+        // The operator edits the file while the player watches the ghost; halving the range pins the mesh in ~8 rounds.
+        static string lastBisectCmd = "";
+        static readonly Dictionary<long, Array> bisectSaved = new Dictionary<long, Array>();   // (layer<<32)|meshIdx -> original vertex records (animMgr manager)
+        // manager-aware storage: key -> [mcm, layerIdx, meshIdx, savedArray]. The ghost's mesh proved to live outside
+        // the AnimationManager's content manager entirely — other FxManager Behaviours in the scene own their own.
+        static readonly Dictionary<string, object[]> bisectSavedM = new Dictionary<string, object[]>();
+        static List<object> ListFxManagers()
+        {
+            var outp = new List<object>();
+            var t = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxManager") ?? AccessTools.TypeByName("Amplitude.Graphics.FxManager");
+            if (t == null) return outp;
+            foreach (var o in UnityEngine.Object.FindObjectsOfType(t)) outp.Add(o);
+            outp.Sort((a, b) => string.CompareOrdinal((a as UnityEngine.Object)?.name, (b as UnityEngine.Object)?.name));
+            return outp;
+        }
+        static object McmOf(object fxManager)
+        {
+            try
+            {
+                var mcmType = GameBinding.ContentLayer?.DeclaringType ?? AccessTools.TypeByName("Amplitude.Graphics.Fx.FxComponentMeshContentManager");
+                var g = fxManager.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(m => m.Name == "GetFxComponent" && m.IsGenericMethodDefinition && m.GetParameters().Length == 0);
+                return g == null || mcmType == null ? null : g.MakeGenericMethod(mcmType).Invoke(fxManager, null);
+            }
+            catch { return null; }
+        }
+        internal static void PollGhostBisect()
+        {
+            try
+            {
+                if (ghostAnimMgr == null) return;
+                var path = Path.Combine(Paths.ConfigPath, "enc_ghostbisect.txt");
+                if (!File.Exists(path)) return;
+                string cmd = File.ReadAllText(path).Trim();
+                if (cmd.Length == 0 || cmd == lastBisectCmd) return;
+                lastBisectCmd = cmd;
+                var mcm = GetMember(ghostAnimMgr, "FxComponentMeshContentManager");
+                var layers = GetMember(mcm, "Layers") as Array ?? AccessTools.Field(mcm.GetType(), "layers")?.GetValue(mcm) as Array;
+                if (layers == null) return;
+
+                object LayerObjs(int li, out Array table, out object vb, out Array vts)
+                {
+                    table = null; vb = null; vts = null;
+                    if (li < 0 || li >= layers.Length) return null;
+                    var lay = layers.GetValue(li);
+                    table = GetMember(lay, "HxFxOneMeshComputeBufferData") as Array;
+                    vb = AccessTools.Field(lay.GetType(), "vertexBuffer")?.GetValue(lay);
+                    vts = vb == null ? null : GetMember(vb, "WriteContent") as Array;
+                    return lay;
+                }
+
+                var parts = cmd.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                // mgrs — enumerate every FxManager Behaviour + its mesh content manager's layer/mesh population
+                if (parts[0].Equals("mgrs", StringComparison.OrdinalIgnoreCase))
+                {
+                    var ms = ListFxManagers();
+                    Plugin.Log.LogInfo($"[Uni][BISECT] {ms.Count} FxManager(s) in scene:");
+                    for (int m = 0; m < ms.Count; m++)
+                    {
+                        var mcm2 = McmOf(ms[m]);
+                        var lay2 = mcm2 == null ? null : GetMember(mcm2, "Layers") as Array ?? AccessTools.Field(mcm2.GetType(), "layers")?.GetValue(mcm2) as Array;
+                        string desc = mcm2 == null ? "no mesh content manager" : $"{lay2?.Length ?? 0} layer(s)";
+                        if (lay2 != null)
+                            for (int li = 0; li < lay2.Length; li++)
+                            {
+                                var tb = GetMember(lay2.GetValue(li), "HxFxOneMeshComputeBufferData") as Array;
+                                int pop = 0;
+                                if (tb != null)
+                                    for (int i = 1; i < tb.Length; i++)
+                                        if (Convert.ToInt32(tb.GetValue(i).GetType().GetField("VertexCount").GetValue(tb.GetValue(i))) > 0) pop++;
+                                desc += $" | L{li}:{pop} meshes";
+                            }
+                        Plugin.Log.LogInfo($"[Uni][BISECT]   mgr[{m}] '{(ms[m] as UnityEngine.Object)?.name}' — {desc}");
+                    }
+                    return;
+                }
+                // crushm <mgr> <layer> <from> <to> — crush in ANY manager's content layer
+                if (parts[0].Equals("crushm", StringComparison.OrdinalIgnoreCase) && parts.Length >= 5
+                    && int.TryParse(parts[1], out int mIdx) && int.TryParse(parts[2], out int mLayer)
+                    && int.TryParse(parts[3], out int mFrom) && int.TryParse(parts[4], out int mTo))
+                {
+                    var ms = ListFxManagers();
+                    if (mIdx < 0 || mIdx >= ms.Count) { Plugin.Log.LogWarning($"[Uni][BISECT] mgr {mIdx} out of range ({ms.Count})"); return; }
+                    var mcm2 = McmOf(ms[mIdx]);
+                    var lay2 = mcm2 == null ? null : GetMember(mcm2, "Layers") as Array ?? AccessTools.Field(mcm2.GetType(), "layers")?.GetValue(mcm2) as Array;
+                    if (lay2 == null || mLayer < 0 || mLayer >= lay2.Length) { Plugin.Log.LogWarning($"[Uni][BISECT] mgr {mIdx} layer {mLayer} unreachable"); return; }
+                    var lobj = lay2.GetValue(mLayer);
+                    var tb = GetMember(lobj, "HxFxOneMeshComputeBufferData") as Array;
+                    var vb2 = AccessTools.Field(lobj.GetType(), "vertexBuffer")?.GetValue(lobj);
+                    var vts2 = vb2 == null ? null : GetMember(vb2, "WriteContent") as Array;
+                    if (tb == null || vts2 == null) { Plugin.Log.LogWarning($"[Uni][BISECT] mgr {mIdx} L{mLayer} buffers unreachable"); return; }
+                    var svF2 = tb.GetType().GetElementType().GetField("StartVertex");
+                    var vcF2 = tb.GetType().GetElementType().GetField("VertexCount");
+                    int crushed2 = 0;
+                    for (int mi = Math.Max(1, mFrom); mi <= mTo && mi < tb.Length; mi++)
+                    {
+                        var mE = tb.GetValue(mi);
+                        uint sv = Convert.ToUInt32(svF2.GetValue(mE));
+                        int vc = Convert.ToInt32(vcF2.GetValue(mE));
+                        if (vc <= 1 || sv + 1 >= vts2.Length) continue;
+                        string key = $"{mIdx}:{mLayer}:{mi}";
+                        if (!bisectSavedM.ContainsKey(key))
+                        {
+                            var save = Array.CreateInstance(vts2.GetType().GetElementType(), vc);
+                            for (int i = 0; i < vc && sv + i < vts2.Length; i++) save.SetValue(vts2.GetValue((int)sv + i), i);
+                            bisectSavedM[key] = new object[] { mcm2, mLayer, mi, save };
+                        }
+                        var first = vts2.GetValue((int)sv);
+                        for (uint v = sv + 1; v < sv + vc && v < vts2.Length; v++) vts2.SetValue(first, (int)v);
+                        crushed2++;
+                    }
+                    AccessTools.Method(vb2.GetType(), "Apply", Type.EmptyTypes)?.Invoke(vb2, null);
+                    Plugin.Log.LogInfo($"[Uni][BISECT] mgr[{mIdx}] L{mLayer}: crushed [{mFrom}..{mTo}] ({crushed2} touched)");
+                    return;
+                }
+                // rend <x> <y> <z> <radius> — census every Unity Renderer near a WORLD point (the earlier census
+                // centered on the SubPawn transform, which sits at origin for these bare GOs — it scanned nothing).
+                if (parts[0].Equals("rend", StringComparison.OrdinalIgnoreCase) && parts.Length >= 5
+                    && float.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float rx)
+                    && float.TryParse(parts[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float ry)
+                    && float.TryParse(parts[3], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float rz)
+                    && float.TryParse(parts[4], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float rr))
+                {
+                    var origin = new UnityEngine.Vector3(rx, ry, rz);
+                    int found = 0;
+                    foreach (var r in UnityEngine.Object.FindObjectsOfType<UnityEngine.Renderer>())
+                    {
+                        if (r == null || !r.enabled || !r.gameObject.activeInHierarchy) continue;
+                        if ((r.bounds.center - origin).sqrMagnitude > rr * rr) continue;
+                        string rpath = r.transform.name;
+                        for (var t2 = r.transform.parent; t2 != null && rpath.Length < 220; t2 = t2.parent) rpath = t2.name + "/" + rpath;
+                        string mesh = r is UnityEngine.SkinnedMeshRenderer smr3 && smr3.sharedMesh != null ? smr3.sharedMesh.name
+                                    : r.GetComponent<UnityEngine.MeshFilter>()?.sharedMesh?.name ?? "-";
+                        Plugin.Log.LogInfo($"[Uni][REND2] {r.GetType().Name} '{rpath}' mesh='{mesh}' mat='{r.sharedMaterial?.name}' center={r.bounds.center} size={r.bounds.size}");
+                        if (++found >= 40) break;
+                    }
+                    Plugin.Log.LogInfo($"[Uni][REND2] {found} renderer(s) within {rr} of {origin}");
+                    return;
+                }
+                // kill <substring> — disable every Renderer whose path/mesh/material matches; revive <substring> undoes
+                if ((parts[0].Equals("kill", StringComparison.OrdinalIgnoreCase) || parts[0].Equals("revive", StringComparison.OrdinalIgnoreCase)) && parts.Length >= 2)
+                {
+                    bool on = parts[0].Equals("revive", StringComparison.OrdinalIgnoreCase);
+                    string needle = cmd.Substring(parts[0].Length).Trim();
+                    int hit = 0;
+                    foreach (var r in UnityEngine.Object.FindObjectsOfType<UnityEngine.Renderer>())
+                    {
+                        if (r == null) continue;
+                        string rpath = r.transform.name;
+                        for (var t2 = r.transform.parent; t2 != null && rpath.Length < 220; t2 = t2.parent) rpath = t2.name + "/" + rpath;
+                        string mesh = r is UnityEngine.SkinnedMeshRenderer smr4 && smr4.sharedMesh != null ? smr4.sharedMesh.name
+                                    : r.GetComponent<UnityEngine.MeshFilter>()?.sharedMesh?.name ?? "-";
+                        string hay = rpath + "|" + mesh + "|" + (r.sharedMaterial?.name ?? "");
+                        if (hay.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                        r.enabled = on; hit++;
+                        Plugin.Log.LogInfo($"[Uni][REND2] {(on ? "REVIVED" : "KILLED")} '{rpath}' mesh='{mesh}'");
+                    }
+                    Plugin.Log.LogInfo($"[Uni][REND2] {(on ? "revived" : "killed")} {hit} renderer(s) matching '{needle}'");
+                    return;
+                }
+                if (parts[0].Equals("restore", StringComparison.OrdinalIgnoreCase))
+                {
+                    int restored = 0;
+                    var touchedLayers = new HashSet<int>();
+                    foreach (var kv in bisectSaved)
+                    {
+                        int li = (int)(kv.Key >> 32); int mi = (int)(kv.Key & 0xFFFFFFFF);
+                        if (LayerObjs(li, out var table, out var vb, out var vts) == null || table == null || vts == null) continue;
+                        var mE = table.GetValue(mi);
+                        uint sv = Convert.ToUInt32(mE.GetType().GetField("StartVertex").GetValue(mE));
+                        for (int i = 0; i < kv.Value.Length && sv + i < vts.Length; i++)
+                            vts.SetValue(kv.Value.GetValue(i), (int)sv + i);
+                        touchedLayers.Add(li); restored++;
+                    }
+                    foreach (var li in touchedLayers)
+                        if (LayerObjs(li, out _, out var vb2, out _) != null && vb2 != null)
+                            AccessTools.Method(vb2.GetType(), "Apply", Type.EmptyTypes)?.Invoke(vb2, null);
+                    bisectSaved.Clear();
+                    // manager-aware saves too
+                    var touchedBufs = new HashSet<object>();
+                    foreach (var kv in bisectSavedM)
+                    {
+                        var mcm3 = kv.Value[0]; int li3 = (int)kv.Value[1]; int mi3 = (int)kv.Value[2]; var save3 = kv.Value[3] as Array;
+                        var lay3 = GetMember(mcm3, "Layers") as Array ?? AccessTools.Field(mcm3.GetType(), "layers")?.GetValue(mcm3) as Array;
+                        if (lay3 == null || li3 >= lay3.Length) continue;
+                        var lobj3 = lay3.GetValue(li3);
+                        var tb3 = GetMember(lobj3, "HxFxOneMeshComputeBufferData") as Array;
+                        var vb3 = AccessTools.Field(lobj3.GetType(), "vertexBuffer")?.GetValue(lobj3);
+                        var vts3 = vb3 == null ? null : GetMember(vb3, "WriteContent") as Array;
+                        if (tb3 == null || vts3 == null || save3 == null) continue;
+                        var mE3 = tb3.GetValue(mi3);
+                        uint sv3 = Convert.ToUInt32(mE3.GetType().GetField("StartVertex").GetValue(mE3));
+                        for (int i = 0; i < save3.Length && sv3 + i < vts3.Length; i++) vts3.SetValue(save3.GetValue(i), (int)sv3 + i);
+                        touchedBufs.Add(vb3); restored++;
+                    }
+                    foreach (var vb4 in touchedBufs) AccessTools.Method(vb4.GetType(), "Apply", Type.EmptyTypes)?.Invoke(vb4, null);
+                    bisectSavedM.Clear();
+                    Plugin.Log.LogInfo($"[Uni][BISECT] restored {restored} mesh(es) across {touchedLayers.Count + touchedBufs.Count} buffer(s)");
+                    return;
+                }
+                // crush <layer> <from> <to>   (legacy 3-arg form = layer 0)
+                if (parts[0].Equals("crush", StringComparison.OrdinalIgnoreCase) && parts.Length >= 3)
+                {
+                    int layerIdx = 0, from, to;
+                    if (parts.Length >= 4 && int.TryParse(parts[1], out layerIdx) && int.TryParse(parts[2], out from) && int.TryParse(parts[3], out to)) { }
+                    else if (int.TryParse(parts[1], out from) && int.TryParse(parts[2], out to)) layerIdx = 0;
+                    else return;
+                    if (LayerObjs(layerIdx, out var table, out var vb, out var vts) == null || table == null || vts == null)
+                    { Plugin.Log.LogWarning($"[Uni][BISECT] layer {layerIdx} unreachable ({layers.Length} layers exist)"); return; }
+                    var svF = table.GetType().GetElementType().GetField("StartVertex");
+                    var vcF = table.GetType().GetElementType().GetField("VertexCount");
+                    int crushed = 0;
+                    for (int mi = Math.Max(1, from); mi <= to && mi < table.Length; mi++)
+                    {
+                        var mE = table.GetValue(mi);
+                        uint sv = Convert.ToUInt32(svF.GetValue(mE));
+                        int vc = Convert.ToInt32(vcF.GetValue(mE));
+                        if (vc <= 1 || sv + 1 >= vts.Length) continue;
+                        long key = ((long)layerIdx << 32) | (uint)mi;
+                        if (!bisectSaved.ContainsKey(key))
+                        {
+                            var save = Array.CreateInstance(vts.GetType().GetElementType(), vc);
+                            for (int i = 0; i < vc && sv + i < vts.Length; i++) save.SetValue(vts.GetValue((int)sv + i), i);
+                            bisectSaved[key] = save;
+                        }
+                        var first = vts.GetValue((int)sv);
+                        for (uint v = sv + 1; v < sv + vc && v < vts.Length; v++) vts.SetValue(first, (int)v);
+                        crushed++;
+                    }
+                    AccessTools.Method(vb.GetType(), "Apply", Type.EmptyTypes)?.Invoke(vb, null);
+                    Plugin.Log.LogInfo($"[Uni][BISECT] layer {layerIdx}: crushed meshes [{from}..{to}] ({crushed} touched; {bisectSaved.Count} saved total; {layers.Length} layers exist)");
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] PollGhostBisect: " + ex.Message); }
+        }
+
+        // Cut the transparent rotor-blur pass out of a freshly-cloned FxOutputLayer, keeping the opaque body pass.
+        // Dumps every RenderOutput's fields first so a wrong keep-choice is visible in the log (if the body vanishes
+        // and the disc stays, the indices are swapped — flip the kept index). Runs ONLY at clone time, pre-registration.
+        static void PruneCloneRenderOutputs(UnityEngine.Object clone, ModelEntry e)
+        {
+            try
+            {
+                var roF = AccessTools.Field(clone.GetType(), "renderOutputs");
+                var ros = roF?.GetValue(clone) as Array;
+                if (ros == null || ros.Length <= 1) { Plugin.Log.LogInfo($"[Uni][LAYER] '{e.resourceName}': clone has {(ros?.Length ?? -1)} renderOutput(s) — nothing to prune"); return; }
+                for (int i = 0; i < ros.Length; i++)
+                {
+                    Plugin.Log.LogInfo($"[Uni][LAYER] '{e.resourceName}' renderOutput[{i}]:");
+                    DumpFields(ros.GetValue(i), $"{e.resourceName} renderOutput[{i}]");
+                }
+                var kept = Array.CreateInstance(ros.GetType().GetElementType(), 1);
+                kept.SetValue(ros.GetValue(0), 0);
+                roF.SetValue(clone, kept);
+                Plugin.Log.LogInfo($"[Uni][LAYER] '{e.resourceName}': PRUNED clone renderOutputs {ros.Length} -> 1 (kept [0] — the opaque body pass; the transparent blur pass is gone)");
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] PruneCloneRenderOutputs: " + ex.Message); }
+        }
+
+        // FX-INDEX RESOLUTION (ghost hunt): the GPU descriptor encodes an FxMeshIndex in ITS OWN numbering (not
+        // skinnedMeshInfos.MeshIndex). GetFxMeshIndex(name) on a mesh collection resolves name -> that numbering
+        // (the formation clone path uses it). Log the DONOR skeleton's index for the donor body mesh and OURS for the
+        // same (renamed) mesh — two known (descriptor, index) pairs per entry crack the encoding's bit layout, and the
+        // donor's index is the needle to find in whichever descriptor still draws the ghost.
+        static readonly HashSet<string> fxDumped = new HashSet<string>();
+        static void DumpFxIndices(object donorSkel, ModelEntry e, string bodyName, object animMgr)
+        {
+            try
+            {
+                if (e == null || donorSkel == null || string.IsNullOrEmpty(bodyName)) return;
+                if (ReferenceEquals(donorSkel, e.skeleton) || !fxDumped.Add(e.resourceName)) return;   // repeat Load: addon already ours
+                object dIdx = null, oIdx = null;
+                var mi = AccessTools.Method(donorSkel.GetType(), "GetFxMeshIndex", new[] { typeof(string) });
+                if (mi != null) dIdx = mi.Invoke(donorSkel, new object[] { bodyName });
+                if (e.skeleton != null)
+                {
+                    var mi2 = AccessTools.Method(e.skeleton.GetType(), "GetFxMeshIndex", new[] { typeof(string) });
+                    if (mi2 != null) oIdx = mi2.Invoke(e.skeleton, new object[] { bodyName });
+                }
+                // DECODED ENCODING (Amplitude.Graphics.GetEncodedMeshAndVisualParticleCount):
+                //   encoded = ContentLayer.HxFxOneMeshComputeBufferData[fxMeshIndex].StartIndex | (particleCount << 24)
+                // The low 24 bits are the mesh's START INDEX in the layer buffer — per-mesh unique. The donor mesh's
+                // StartIndex is therefore the NEEDLE that identifies any descriptor fragment still drawing the donor.
+                uint dStart = 0, oStart = 0;
+                try { if (dIdx != null) dStart = ReadFxStart(animMgr, Convert.ToUInt32(dIdx)); } catch { }
+                try { if (oIdx != null) oStart = ReadFxStart(animMgr, Convert.ToUInt32(oIdx)); } catch { }
+                Plugin.Log.LogInfo($"[Uni][FX] '{e.resourceName}': FxMeshIndex for '{bodyName}' — donor={dIdx} (start=0x{dStart:X6}) ours={oIdx} (start=0x{oStart:X6})");
+                if (e.hideSubPawns)
+                {
+                    ghostNeedle = dStart; ghostOurStart = oStart; ghostEntryName = e.resourceName;
+                    // PER-LAYER NEEDLES (the transparent-layer test): the blur disc is TRANSLUCENT — its geometry
+                    // plausibly lives in a TRANSPARENT ContentLayer whose StartIndex for the same mesh index differs
+                    // from layer 2's. Collect the donor mesh's start in EVERY layer and scan against all of them.
+                    ghostNeedles.Clear();
+                    if (dStart != 0) ghostNeedles.Add(dStart);
+                    try
+                    {
+                        if (dIdx != null)
+                            foreach (var t in ReadFxStartsAllLayers(animMgr, Convert.ToUInt32(dIdx)))
+                            {
+                                Plugin.Log.LogInfo($"[Uni][FX]   donor mesh {dIdx} in layer {t.Item1}: start=0x{t.Item2:X6} prim={t.Item3}");
+                                if (t.Item2 != 0 && t.Item2 != oStart) ghostNeedles.Add(t.Item2);
+                            }
+                    }
+                    catch (Exception lex) { Plugin.Log.LogWarning("[Uni] per-layer needles: " + lex.Message); }
+                    DumpDescriptorTable();
+                    ScanGhostDescriptors();
+                    DumpFxMeshTable(animMgr);   // name every mesh in the layer — the rotor/blur mesh will be findable BY NAME
+                    if (dIdx != null) { ghostDonorFxIdx = Convert.ToUInt32(dIdx); CrushGhostSlice(animMgr, e, ghostDonorFxIdx); }   // the geometry kill
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] FX index dump: " + ex.Message); }
+        }
+
+        // The donor mesh's StartIndex in EVERY ContentLayer (layer, start, prim) — the transparent-layer needles.
+        static List<Tuple<int, uint, uint>> ReadFxStartsAllLayers(object animMgr, uint fxMeshIdx)
+        {
+            var outp = new List<Tuple<int, uint, uint>>();
+            var mcm = GetMember(animMgr, "FxComponentMeshContentManager");
+            var layers = GetMember(mcm, "Layers") as Array ?? AccessTools.Field(mcm.GetType(), "layers")?.GetValue(mcm) as Array;
+            if (layers == null) return outp;
+            for (int li = 0; li < layers.Length; li++)
+            {
+                try
+                {
+                    var buf = GetMember(layers.GetValue(li), "HxFxOneMeshComputeBufferData") as Array;
+                    if (buf == null || fxMeshIdx >= buf.Length) continue;
+                    var be = buf.GetValue((int)fxMeshIdx);
+                    uint st = Convert.ToUInt32(GetMember(be, "StartIndex"));
+                    uint pr = Convert.ToUInt32(GetMember(be, "PrimitiveCount"));
+                    if (st != 0 || pr != 0) outp.Add(Tuple.Create(li, st, pr));
+                }
+                catch { }
+            }
+            return outp;
+        }
+        internal static readonly HashSet<uint> ghostNeedles = new HashSet<uint>();
+
+        // StartIndex of a mesh in the unit ContentLayer buffer (the low-24-bit half of the fragment encoding).
+        static uint ReadFxStart(object animMgr, uint fxMeshIdx)
+        {
+            var mcm = GetMember(animMgr, "FxComponentMeshContentManager");
+            var layerObj = GetMember(animMgr, "FXMeshLayerIndex");
+            int layer = layerObj is int li ? li : Convert.ToInt32(layerObj ?? 0);
+            var layers = GetMember(mcm, "Layers") as Array ?? AccessTools.Field(mcm.GetType(), "layers")?.GetValue(mcm) as Array;
+            var buf = GetMember(layers.GetValue(layer), "HxFxOneMeshComputeBufferData") as Array;
+            return Convert.ToUInt32(GetMember(buf.GetValue((int)fxMeshIdx), "StartIndex"));
+        }
+
+        // FX MESH TABLE (ghost hunt): name every mesh in the unit ContentLayer. FxMesh assets are Unity objects with
+        // names + Guids; the layer maps index -> guid (FindGuidAssociatedToIndex). Join the two and print index, name,
+        // StartIndex, PrimitiveCount for the whole table — the donor's separate rotor/blur mesh (its OWN FxMesh, its own
+        // translucent output layer; the reason the skinned-mesh needle found nothing) becomes identifiable BY NAME.
+        static bool fxMeshTableDumped;
+        internal static void ResetFxMeshTableDump() => fxMeshTableDumped = false;
+        internal static object ghostAnimMgr;   // stashed at repoint so the late trigger can re-dump
+        internal static void DumpFxMeshTable(object animMgr)
+        {
+            if (fxMeshTableDumped || animMgr == null) return;
+            fxMeshTableDumped = true;
+            ghostAnimMgr = animMgr;
+            try
+            {
+                // guid -> name via Amplitude's own AssetDatabase.LoadAsset<FxMesh>(guid) — the proven districts path
+                // (Resources.FindObjectsOfTypeAll returned nothing: the FxMesh assets aren't loose Unity objects).
+                var fxMeshType = GameBinding.FxMesh;
+                var adb = GameBinding.AssetDatabase;
+                var loadG = adb?.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                    .FirstOrDefault(m => (m.Name == "LoadAsset" || m.Name == "TryLoadAsset") && m.IsGenericMethodDefinition && m.GetParameters().Length >= 1);
+                var loadFx = fxMeshType != null && loadG != null ? loadG.MakeGenericMethod(fxMeshType) : null;
+                var mcm = GetMember(animMgr, "FxComponentMeshContentManager");
+                var layerObj = GetMember(animMgr, "FXMeshLayerIndex");
+                int layer = layerObj is int li ? li : Convert.ToInt32(layerObj ?? 0);
+                var layers = GetMember(mcm, "Layers") as Array ?? AccessTools.Field(mcm.GetType(), "layers")?.GetValue(mcm) as Array;
+                var lay = layers.GetValue(layer);
+                var buf = GetMember(lay, "HxFxOneMeshComputeBufferData") as Array;
+                var find = AccessTools.Method(lay.GetType(), "FindGuidAssociatedToIndex");
+                var sb = new System.Text.StringBuilder($"[Uni][FXMESHES] layer {layer}: {buf?.Length ?? 0} slots (loader={(loadFx != null ? "OK" : "MISSING")})\n");
+                for (int i = 0; buf != null && i < buf.Length && i < 300; i++)
+                {
+                    uint start = 0, prim = 0;
+                    try { start = Convert.ToUInt32(GetMember(buf.GetValue(i), "StartIndex")); prim = Convert.ToUInt32(GetMember(buf.GetValue(i), "PrimitiveCount")); } catch { }
+                    if (start == 0 && prim == 0) continue;   // empty slot
+                    string nm = "?";
+                    if (find != null)
+                    {
+                        var args = new object[] { i, null };
+                        try
+                        {
+                            if ((bool)find.Invoke(lay, args) && args[1] != null)
+                            {
+                                if (loadFx != null)
+                                {
+                                    var fx = loadFx.Invoke(null, loadFx.GetParameters().Length == 1 ? new[] { args[1] } : new object[] { args[1], null });
+                                    nm = (fx as UnityEngine.Object)?.name ?? args[1].ToString();
+                                }
+                                else nm = args[1].ToString();
+                            }
+                        }
+                        catch { }
+                    }
+                    sb.Append($"  mesh[{i}] start=0x{start:X6} prim={prim} name='{nm}'\n");
+                }
+                Plugin.Log.LogInfo(sb.ToString());
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] FXMESHES dump: " + ex.Message); }
+        }
+
+        // THE KILL: scan every GPU descriptor fragment for the donor mesh's StartIndex needle and zero the match in
+        // place (same mechanism as the hideMeshes descriptor patch). Our own descriptor encodes OUR StartIndex, so it
+        // can't match. Re-run periodically (from the NEAR tick) — the ghost's descriptor may register after repoint.
+        static uint ghostNeedle, ghostOurStart; static string ghostEntryName;
+        internal static void ScanGhostDescriptors()
+        {
+            if (ghostNeedle == 0) return;
+            try
+            {
+                var pmType = GameBinding.PawnManager;
+                var pm = pmType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
+                         ?? AccessTools.Field(pmType, "Instance")?.GetValue(null);
+                var descs = AccessTools.Field(pmType, "gpuPawnDescriptorEntries")?.GetValue(pm) as Array;
+                var gfrags = AccessTools.Field(pmType, "gpuPawnDescriptorFragmentEntries")?.GetValue(pm) as Array;
+                var dirtyF = AccessTools.Field(pmType, "descriptorBufferDirty");
+                if (descs == null || gfrags == null) return;
+                var dT = descs.GetType().GetElementType();
+                var sfF = dT.GetField("StartFragment"); var fcF = dT.GetField("FragmentCount");
+                var encF = gfrags.GetType().GetElementType().GetField("EncodedMeshAndVisualParticleCountFxMeshIndex");
+                bool dirty = false;
+                for (int d = 0; d < descs.Length; d++)
+                {
+                    var de = descs.GetValue(d);
+                    uint fc = Convert.ToUInt32(fcF.GetValue(de));
+                    if (fc == 0) continue;
+                    uint sf = Convert.ToUInt32(sfF.GetValue(de));
+                    for (uint fi = 0; fi < fc && sf + fi < gfrags.Length; fi++)
+                    {
+                        var ge = gfrags.GetValue((int)(sf + fi));
+                        uint enc = Convert.ToUInt32(encF.GetValue(ge));
+                        if (enc == 0) continue;
+                        uint lo = enc & 0xFFFFFF;
+                        if (lo != ghostNeedle && !ghostNeedles.Contains(lo)) continue;
+                        Plugin.Log.LogInfo($"[Uni][GHOST] descriptor[{d}] frag[{fi}] encodes the DONOR mesh (0x{enc:X8}, needle start=0x{ghostNeedle:X6}, '{ghostEntryName}') — ZEROED");
+                        encF.SetValue(ge, 0u);
+                        gfrags.SetValue(ge, (int)(sf + fi));
+                        dirty = true;
+                    }
+                }
+                if (dirty) dirtyF?.SetValue(pm, true);
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] ghost scan: " + ex.Message); }
+        }
+
+        // One-shot: every GPU descriptor that draws fragments, with raw fragment encodings. Cross-referenced against the
+        // [FX] known pairs this identifies WHICH descriptor still encodes the donor gunship's FxMesh = the ghost's body.
+        static bool descTableDumped;
+        internal static void ResetDescTableDump() => descTableDumped = false;
+        internal static void DumpDescriptorTable()
+        {
+            if (descTableDumped) return;
+            descTableDumped = true;
+            try
+            {
+                var pmType = GameBinding.PawnManager;
+                var pm = pmType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
+                         ?? AccessTools.Field(pmType, "Instance")?.GetValue(null);
+                var descs = AccessTools.Field(pmType, "gpuPawnDescriptorEntries")?.GetValue(pm) as Array;
+                var gfrags = AccessTools.Field(pmType, "gpuPawnDescriptorFragmentEntries")?.GetValue(pm) as Array;
+                if (descs == null || gfrags == null) return;
+                var dT = descs.GetType().GetElementType();
+                var sfF = dT.GetField("StartFragment"); var fcF = dT.GetField("FragmentCount");
+                var encF = gfrags.GetType().GetElementType().GetField("EncodedMeshAndVisualParticleCountFxMeshIndex");
+                var sb = new System.Text.StringBuilder($"[Uni][FXTABLE] descriptors with fragments (of {descs.Length}):\n");
+                int rows = 0;
+                for (int d = 0; d < descs.Length && rows < 500; d++)
+                {
+                    var de = descs.GetValue(d);
+                    uint fc = Convert.ToUInt32(fcF.GetValue(de));
+                    if (fc == 0) continue;
+                    uint sf = Convert.ToUInt32(sfF.GetValue(de));
+                    sb.Append($"  desc[{d}] start={sf} n={fc}:");
+                    for (uint fi = 0; fi < fc && fi < 6 && sf + fi < gfrags.Length; fi++)
+                    { sb.Append($" 0x{Convert.ToUInt32(encF.GetValue(gfrags.GetValue((int)(sf + fi)))):X8}"); rows++; }
+                    sb.Append('\n');
+                }
+                Plugin.Log.LogInfo(sb.ToString());
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] FXTABLE dump: " + ex.Message); }
+        }
+
+        // The donor definition's SubPawnDefinitions: log what's attached (once per entry), and clear the array when the
+        // entry sets hideSubPawns. The definition asset is per-unit-type, so clearing only affects OUR overridden unit;
+        // clearing is idempotent (an emptied array stays empty across re-Loads).
+        static readonly HashSet<string> subPawnsLogged = new HashSet<string>();
+        static void DumpAndMaybeClearSubPawns(object addon, ModelEntry e)
+        {
+            try
+            {
+                var def = GetMember(addon, "definition");
+                if (def == null) { if (subPawnsLogged.Add(e.resourceName)) Plugin.Diag($"[Uni] {e.resourceName} sub-pawns: no definition on addon"); return; }
+                var arr = GetMember(def, "SubPawnDefinitions") as Array;
+                if (arr == null) { if (subPawnsLogged.Add(e.resourceName)) Plugin.Diag($"[Uni] {e.resourceName} sub-pawns: definition has no SubPawnDefinitions field ({def.GetType().Name})"); return; }
+                if (subPawnsLogged.Add(e.resourceName))
+                {
+                    Plugin.Diag($"[Uni] {e.resourceName} sub-pawns: {arr.Length} SubPawnDefinition(s) on '{(def as UnityEngine.Object)?.name}'");
+                    for (int i = 0; i < arr.Length; i++)
+                    {
+                        var sub = GetMember(arr.GetValue(i), "Definition");
+                        Plugin.Diag($"[Uni]    subPawn[{i}] = '{(sub as UnityEngine.Object)?.name ?? sub?.GetType().Name ?? "null"}'");
+                    }
+                }
+                if (e.hideSubPawns && arr.Length > 0)
+                {
+                    SetMember(def, "SubPawnDefinitions", Array.CreateInstance(arr.GetType().GetElementType(), 0));
+                    Plugin.Log.LogInfo($"[Uni] {e.resourceName}: CLEARED {arr.Length} donor sub-pawn(s) (hideSubPawns — the independent rotor/attachment pawns)");
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning($"[Uni] {e.resourceName} sub-pawn dump/clear: " + ex.Message); }
+        }
+
         // Diagnostic: list a MeshCollection/Skeleton's skinned sub-meshes (names + fx mesh index), to spot baked-in
         // parts like a rotor that aren't separate fragments.
         static void DumpSkinned(object mc, string label)
@@ -543,6 +1231,12 @@ namespace HumankindAssetFramework
                         {
                             var clone = UnityEngine.Object.Instantiate(host);
                             clone.name = e.resourceName + "_OutputLayer";
+                            // GHOST ROTOR FIX (2026-08-03): the donor gunship's FxOutputLayer carries TWO RenderOutputs —
+                            // the opaque body pass AND a transparent rotor-blur pass (donor mesh 74's 53-prim slice in
+                            // ContentLayer 0). Our texture-isolation clone inherited both, so WE drew the ghost disc on
+                            // every pawn. Prune the blur pass from the clone HERE — before fragment.Load registers the
+                            // layer (registration copies the outputs; post-registration edits never reach the live pass).
+                            // (SHADOW_PASS prune removed 2026-08-04: the ghost was the donor VFX sprite, not the shadow pass — the clone keeps both outputs)
                             e.isolatedLayer = clone;
                             Plugin.Diag($"[Uni] cloned output layer for {e.resourceName} -> '{clone.name}'");
                         }
@@ -620,6 +1314,24 @@ namespace HumankindAssetFramework
                                 }
                             }
                             catch (Exception bex) { Plugin.Log.LogWarning("[Uni] descriptor bones sync: " + bex.Message); }
+                            // GPU-DESCRIPTOR DUMP (ghost hunt 2026-08-03): print the snapshot's raw fragment entries.
+                            // The encoded field packs Mesh + VisualParticle count + FxMeshIndex — if any fragment still
+                            // encodes the DONOR's FxMesh index (the gunship body+rotor mesh), the ghost renders straight
+                            // from the descriptor snapshot regardless of everything pawn-side. Compare against ourMeshIndex.
+                            try
+                            {
+                                uint ourMeshIdx = 0;
+                                if (GetMember(skel, "skinnedMeshInfos") is Array smi && smi.Length > 0)
+                                    try { ourMeshIdx = Convert.ToUInt32(GetMember(smi.GetValue(0), "MeshIndex")); } catch { }
+                                Plugin.Log.LogInfo($"[Uni][DESC] '{e?.resourceName}' descriptor[{defId}]: StartFragment={start} FragmentCount={count} BonesCount={dT.GetField("BonesCount")?.GetValue(dEntry)} ourMeshIndex={ourMeshIdx}");
+                                for (uint fi = 0; fi < count && fi < 8; fi++)
+                                {
+                                    var ge = gfrags.GetValue((int)(start + fi));
+                                    uint enc = (uint)encGpuF.GetValue(ge);
+                                    Plugin.Log.LogInfo($"[Uni][DESC]   frag[{fi}] encoded=0x{enc:X8} (lo16={enc & 0xFFFF} hi16={enc >> 16})");
+                                }
+                            }
+                            catch (Exception dex) { Plugin.Log.LogWarning("[Uni] descriptor dump: " + dex.Message); }
                             if (changed)
                             {
                                 descs.SetValue(dEntry, defId);
