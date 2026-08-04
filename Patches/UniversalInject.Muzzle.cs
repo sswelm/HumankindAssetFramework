@@ -404,6 +404,134 @@ namespace HumankindAssetFramework
             SetMember(entry, "ObjectSpace", os);
         }
 
+        // TERRAIN HUG (spike/terrain-hug 2026-08-04): the engine already flies air units at a terrain-RELATIVE
+        // altitude (user-verified), but that altitude ignores BUILDINGS — hence the registry position.z lift that
+        // clears a city skyline. Flying that high everywhere wastes the terrain-following: this drops the unit
+        // back down (`drop`, negative) whenever no district is under/ahead of it, and eases the lift back in as
+        // it approaches one. Districts are enumerated from live PresentationDistrict components (cached ~3s —
+        // they're static) and matched on the horizontal plane only. The probe point LEADS the unit along its own
+        // movement vector (`lookahead`), so it climbs BEFORE the buildings, like a pilot, instead of reacting.
+        // Runs AFTER ApplyPositionOffset: position.z stays the city-clearing height, this subtracts over open
+        // ground. Live-tuned via BepInEx/config/enc_hugterrain.txt; drop 0 or no file = off.
+        internal static float hugDrop = 0f, hugRadius = 0f, hugLookahead = 3f, hugEase = 4f;
+        internal static readonly List<string> hugOnly = new List<string>();   // name whitelist (empty = all)
+        internal static readonly List<string> hugSkip = new List<string>();   // name blacklist (farms, exploitations)
+        static readonly List<UnityEngine.Vector3> districtPts = new List<UnityEngine.Vector3>();
+        static float districtNextScan, tileSpacing;
+        class HugState { public UnityEngine.Vector3 pos; public UnityEngine.Vector3 dir; public float cur; public float lastT; }
+        static readonly List<HugState> hugStates = new List<HugState>();
+
+        internal static void RearmDistrictScan() { districtNextScan = 0f; hugScanLogged = false; }
+
+        static void RescanDistricts()
+        {
+            float now = UnityEngine.Time.time;
+            if (now < districtNextScan) return;
+            districtNextScan = now + 3f;   // districts are static; a rescan every few seconds is plenty
+            try
+            {
+                var dt = GameBinding.PresentationDistrict;
+                if (dt == null) return;
+                districtPts.Clear();
+                var names = new List<string>();
+                foreach (var o in UnityEngine.Object.FindObjectsOfType(dt))
+                {
+                    if (!(o is UnityEngine.Component c) || c == null) continue;
+                    // NOT every PresentationDistrict is a BUILDING: Humankind renders cultivated tiles
+                    // (farms, vineyards, mines) as districts too, and lifting over farmland defeats the
+                    // whole feature. Filter by name — `only=` (whitelist) or `skip=` (blacklist), both
+                    // live-tunable substrings, so the classification is dialed without a rebuild.
+                    // The GameObject is always "PresentationDistrict(Clone)" — useless. The real identity is the
+                    // private `constructibleDefinitionName` (e.g. Extension_Base_CityCenter, an Exploitation_*
+                    // for a cultivated tile), which is exactly the built-vs-farmed distinction we need.
+                    string nm = GetMember(c, "constructibleDefinitionName")?.ToString();
+                    if (string.IsNullOrEmpty(nm)) nm = c.gameObject.name ?? "";
+                    if (!hugScanLogged && names.Count < 40) names.Add(nm);
+                    if (hugOnly.Count > 0 && !hugOnly.Any(s => nm.IndexOf(s, StringComparison.OrdinalIgnoreCase) >= 0)) continue;
+                    if (hugSkip.Count > 0 && hugSkip.Any(s => nm.IndexOf(s, StringComparison.OrdinalIgnoreCase) >= 0)) continue;
+                    districtPts.Add(c.transform.position);
+                }
+                if (names.Count > 0)
+                    Plugin.Log.LogInfo("[Hug] district names seen: " + string.Join(" | ", names.Distinct().Take(40)));
+                // TILE SCALE, measured not guessed: the median nearest-neighbour distance between districts IS
+                // the tile spacing (adjacent districts sit one tile apart). `radius` then means "this tile only"
+                // instead of an arbitrary world distance — the difference between climbing OVER the buildings and
+                // climbing for the whole neighbourhood around them.
+                var nn = new List<float>();
+                for (int i = 0; i < districtPts.Count; i++)
+                {
+                    float b = float.MaxValue;
+                    for (int j = 0; j < districtPts.Count; j++)
+                    {
+                        if (i == j) continue;
+                        float dx = districtPts[i].x - districtPts[j].x, dz = districtPts[i].z - districtPts[j].z;
+                        float d2 = dx * dx + dz * dz;
+                        if (d2 < b) b = d2;
+                    }
+                    if (b < float.MaxValue) nn.Add(UnityEngine.Mathf.Sqrt(b));
+                }
+                if (nn.Count > 0) { nn.Sort(); tileSpacing = nn[nn.Count / 2]; }
+                if (!hugScanLogged)
+                {
+                    hugScanLogged = true;
+                    Plugin.Log.LogInfo($"[Hug] district scan: {districtPts.Count} PresentationDistrict(s), tile spacing ~{tileSpacing:0.##} " +
+                                       $"=> auto radius {tileSpacing * 0.55f:0.##} (radius<=0 in the dial file uses this)");
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Hug] district scan: " + ex.Message); }
+        }
+        static bool hugScanLogged, hugWasOver;
+
+        static void ApplyTerrainHug(ModelEntry e, object entry)
+        {
+            if (hugDrop == 0f) return;
+            RescanDistricts();
+            var os = GetMember(entry, "ObjectSpace");
+            UnityEngine.Vector3 tr;
+            try { tr = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return; }
+            float now = UnityEngine.Time.time;
+            HugState st = null; float best = 16f;
+            for (int i = hugStates.Count - 1; i >= 0; i--)
+            {
+                if (now - hugStates[i].lastT > 10f) { hugStates.RemoveAt(i); continue; }
+                var d = hugStates[i].pos - tr; d.y = 0f;
+                if (d.sqrMagnitude < best) { best = d.sqrMagnitude; st = hugStates[i]; }
+            }
+            if (st == null) { st = new HugState { pos = tr, cur = 0f, lastT = now }; hugStates.Add(st); }
+            float dt = UnityEngine.Mathf.Clamp(now - st.lastT, 0f, 0.1f);
+            var step = tr - st.pos; step.y = 0f;
+            if (step.sqrMagnitude > 1e-6f) st.dir = UnityEngine.Vector3.Lerp(st.dir, step.normalized, 0.25f);   // smoothed heading
+            st.pos = tr; st.lastT = now;
+            // probe AHEAD of the unit so the climb anticipates the skyline
+            var probe = tr + st.dir * hugLookahead;
+            // radius <= 0 => AUTO: a bit over half the measured tile spacing, i.e. "this district's own tile".
+            // A wider radius lifts the unit for every field and forest NEXT to the city (observed: cruising high
+            // over farmland with one building two tiles away).
+            float rad = hugRadius > 0f ? hugRadius : (tileSpacing > 0.01f ? tileSpacing * 0.55f : 3f);
+            bool overDistrict = false;
+            float r2 = rad * rad, nearest2 = float.MaxValue;
+            for (int i = 0; i < districtPts.Count; i++)
+            {
+                float dx = districtPts[i].x - probe.x, dz = districtPts[i].z - probe.z;
+                float d2 = dx * dx + dz * dz;
+                if (d2 < nearest2) nearest2 = d2;
+                if (d2 < r2) { overDistrict = true; break; }
+            }
+            // calibration aid: log only when the verdict FLIPS (not per frame), with the distance that decided it
+            if (overDistrict != hugWasOver)
+            {
+                hugWasOver = overDistrict;
+                Plugin.Log.LogInfo($"[Hug] {(overDistrict ? "OVER district -> climbing" : "open ground -> descending")} " +
+                                   $"(nearest district {UnityEngine.Mathf.Sqrt(nearest2):0.##}, radius {rad:0.##}, tile ~{tileSpacing:0.##})");
+            }
+            // target: 0 near a district (keep the full position.z lift) or `drop` over open ground
+            st.cur = UnityEngine.Mathf.MoveTowards(st.cur, overDistrict ? 0f : hugDrop, hugEase * dt);
+            if (UnityEngine.Mathf.Abs(st.cur) < 0.001f) return;
+            tr.y += st.cur;
+            SetMember(os, "Translation", tr);
+            SetMember(entry, "ObjectSpace", os);
+        }
+
         // ObjectSpace.Rotation as a UnityEngine.Quaternion: it may BE one, or an Amplitude quaternion type with the
         // same x/y/z/w layout — read the components reflectively in that case. False (identity) if unreadable.
         static bool TryQuaternion(object o, out UnityEngine.Quaternion q)

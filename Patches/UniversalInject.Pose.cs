@@ -232,7 +232,7 @@ namespace HumankindAssetFramework
                 // Donor-clip path: the donor's clip drives the pose, but the pawn-level adjusters must still run —
                 // they live in ApplyAnimatedPose, which this branch bypasses, and without them Position offset
                 // (hover height!), moveTilt and runtime scale are silently dead on donor-clip models.
-                if (e.useDonorClip) { DumpDonorChannels(ctx.entry, e); ApplyRotorSpin(ctx.entry, e); ApplyRotorTrim(ctx.entry, e); ApplyPositionOffset(e, ctx.entry); ApplyTurnEase(e, ctx.entry); ApplyMoveTilt(e, ctx.entry); ApplyScale(e, ctx.entry); ctx.pawnEntries.SetValue(ctx.entry, ctx.idx); }
+                if (e.useDonorClip) { DumpDonorChannels(ctx.entry, e); ApplyRotorSpin(ctx.entry, e); ApplyRotorTrim(ctx.entry, e); ApplyPositionOffset(e, ctx.entry); ApplyTerrainHug(e, ctx.entry); ApplyTurnEase(e, ctx.entry); ApplyMoveTilt(e, ctx.entry); ApplyScale(e, ctx.entry); ctx.pawnEntries.SetValue(ctx.entry, ctx.idx); }
                 else if (e.freezeDonorAnim && e.animId < 0) ApplyFreeze(ctx, e);
                 else if (e.animId >= 0) ApplyAnimatedPose(ctx, e);
                 else ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
@@ -555,6 +555,55 @@ namespace HumankindAssetFramework
                 Plugin.Log.LogInfo($"[TurnEase] rate={rate} deg/s, bank={bank} deg");
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[TurnEase] " + ex.Message); }
+        }
+
+        // TERRAIN-HUG FILE POLL (spike): enc_hugterrain.txt — `drop=-2` (how much LOWER over open ground; 0 = off),
+        // `radius=6` (district match radius), `lookahead=3` (probe distance ahead), `ease=4` (units/s climb rate).
+        static string hugSig;
+        static float hugNextPoll;
+        internal static void PollTerrainHug()
+        {
+            if (UnityEngine.Time.realtimeSinceStartup < hugNextPoll) return;
+            hugNextPoll = UnityEngine.Time.realtimeSinceStartup + 1f;
+            try
+            {
+                var path = Path.Combine(Paths.ConfigPath, "enc_hugterrain.txt");
+                string txt = File.Exists(path) ? File.ReadAllText(path) : "";
+                if (txt == hugSig) return;
+                hugSig = txt;
+                float drop = 0f, radius = 0f, look = 3f, ease = 4f;
+                hugOnly.Clear(); hugSkip.Clear();
+                foreach (var raw in txt.Split('\n'))
+                {
+                    var line = raw.Trim();
+                    if (line.Length == 0 || line.StartsWith("#")) continue;
+                    var eq = line.Split('=');
+                    if (eq.Length != 2) continue;
+                    string key = eq[0].Trim().ToLowerInvariant(), val = eq[1].Trim();
+                    // name filters: which PresentationDistricts count as "a city block" (vs a farm/exploitation)
+                    if (key == "only" || key == "skip")
+                    {
+                        var target = key == "only" ? hugOnly : hugSkip;
+                        foreach (var s in val.Split(',')) if (s.Trim().Length > 0) target.Add(s.Trim());
+                        continue;
+                    }
+                    if (!float.TryParse(val, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var v)) continue;
+                    switch (key)
+                    {
+                        case "drop": drop = v; break;
+                        case "radius": radius = v; break;
+                        case "lookahead": look = v; break;
+                        case "ease": ease = v; break;
+                    }
+                }
+                hugDrop = drop; hugRadius = radius; hugLookahead = look; hugEase = ease;
+                RearmDistrictScan();   // filters changed -> the cached district set must be rebuilt
+                Plugin.Log.LogInfo($"[Hug] drop={drop} radius={radius} lookahead={look} ease={ease}" +
+                                   (hugOnly.Count > 0 ? " only=" + string.Join(",", hugOnly) : "") +
+                                   (hugSkip.Count > 0 ? " skip=" + string.Join(",", hugSkip) : ""));
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Hug] " + ex.Message); }
         }
 
         static void ApplyRotorTrim(object entry, ModelEntry e)

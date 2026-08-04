@@ -115,6 +115,33 @@ Tuning is live via **`BepInEx/config/enc_turnease.txt`** (polled ~1/s, edit whil
 `rate=180` (deg/s; 0 = off) and `bank=6` (max lean, negative flips). Spike status: the dial is session-global
 for all donor-clip units; per-model Factory fields (`turnRate`/`turnBank`) are the planned graduation.
 
+## Terrain hug — low over open ground, climb for the city
+
+The engine already flies air units at a **terrain-relative** altitude, so they follow hills for free — but that
+altitude ignores *buildings*, which is why an aircraft needs a `position.z` lift to clear a city skyline.
+Flying that high everywhere wastes the terrain-following. Terrain hug drops the unit back down (`drop`,
+negative) whenever no **built** district is under or ahead of it, and eases the lift back in as it approaches
+one. The probe point **leads** the unit along its own movement vector (`lookahead`), so it climbs *before*
+the buildings like a pilot rather than reacting inside them.
+
+Two things make the classification honest instead of guessed:
+
+- **Tile scale is measured.** The median nearest-neighbour distance between districts *is* the map's tile
+  spacing (adjacent districts sit one tile apart). With `radius=0` the match radius is auto-set to ~55% of it
+  — "this district's own tile". A hand-picked world radius lifted the unit for every field and forest *next*
+  to the city (observed at radius 6 on a 6.93-unit tile map).
+- **Not every `PresentationDistrict` is a building.** Humankind renders cultivated tiles as districts too.
+  The real identity is the component's private `constructibleDefinitionName` (the GameObject is always
+  `PresentationDistrict(Clone)` — useless): `Extension_Base_CityCenter`, `Extension_Base_Food`,
+  `Extension_Era5_ZuluKingdom`, `Extension_ArtificialWonder_*` … alongside the FLAT kinds **`Exploitation`**
+  (fields, vineyards, mines) and **`Ruin`**. Only `Extension_*` carries buildings, so the flat kinds go in
+  `skip`.
+
+Live dial: **`BepInEx/config/enc_hugterrain.txt`** — `drop=-2`, `radius=0` (auto), `lookahead=1.5`, `ease=4`,
+`skip=Exploitation,Ruin` (or `only=` as a whitelist). Polled ~1/s; `drop=0` disables. The log prints the
+district names it sees, the measured tile spacing, and every climb/descend transition with the distance that
+decided it. Note the district set grows while the map streams in — the 3-second rescan self-corrects.
+
 ## Instruments
 
 - **`[Rest]`** — one-shot per entry: donor + our skeleton, per-bone Local + Bind TRS, logged at injection.
@@ -125,11 +152,13 @@ for all donor-clip units; per-model Factory fields (`turnRate`/`turnBank`) are t
   polled ~1/s and re-applied to live pawns without a relaunch. Kept inert (comments only) unless a residual
   wobble needs hand-finishing.
 - **`enc_turnease.txt`** (BepInEx/config) — the turn-ease dial (see the section above).
+- **`enc_hugterrain.txt`** (BepInEx/config) — the terrain-hug dial (see the section above).
 
 ## Open ends
 
-- Turn-ease graduation — promote the session-global `enc_turnease.txt` dial to per-model Factory fields
-  (`turnRate`/`turnBank`); mechanism built + verified (section above), only the plumbing is pending.
+- Turn-ease + terrain-hug graduation — promote the session-global `enc_turnease.txt` / `enc_hugterrain.txt`
+  dials to per-model Factory fields (`turnRate`/`turnBank`, `hugDrop`/`hugLookahead`); both mechanisms are
+  built and verified in-game (sections above), only the plumbing is pending.
 - `donorClipSpeed` — whole-clip playback speed multiplier (body + rotors together); designed, not built.
 - `silenceDonorVfxNames` — per-name VFX filter so only the donor's rotor sprite is dropped; backlog.
 - **Per-rotor speed via pose-slot blending (the promising experiment).** The pawn has multiple pose slots
