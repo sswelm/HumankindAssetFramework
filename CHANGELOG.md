@@ -10,6 +10,19 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Units & animation
 
+- **TERRAIN HUG — nap-of-the-earth flight, climbing only for the city (2026-08-05).** The helicopter now
+  **skims low over open ground and climbs only for built districts**, instead of cruising at skyline height
+  everywhere. The engine's air altitude is already terrain-relative (it follows hills for free) but ignores
+  buildings — so the model's `position.z` lift is now *subtracted* wherever no built district sits under or
+  ahead of the unit, with the probe **leading** along the movement vector so it climbs before the buildings.
+  Two measurements replaced two guesses: the map's **tile spacing is derived** from the median
+  nearest-neighbour distance between districts (6.93 units on the test map → auto match radius 3.81 = "this
+  district's own tile"; a hand-picked radius lifted the unit for every field beside the city), and districts
+  are classified by their private **`constructibleDefinitionName`** rather than the always-identical
+  GameObject name — which exposed that Humankind renders cultivated tiles as districts too (`Exploitation`,
+  `Ruin` are flat; only `Extension_*` carries buildings). Live-tunable via `enc_hugterrain.txt`
+  (drop/radius/lookahead/ease + `only`/`skip` name filters). See
+  [docs/Donor-Clip-Flight.md](docs/Donor-Clip-Flight.md).
 - **TURN EASE — flown turns instead of the facing snap (2026-08-04, same day as the flight milestone).** The
   engine snaps a pawn's facing instantly on a move order; the Comanche now **sweeps** to its new heading at a
   capped rate and **banks into the turn**, composed under the nose-down attitude machinery. Every angle eases
