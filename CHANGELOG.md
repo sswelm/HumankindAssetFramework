@@ -10,6 +10,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Units & animation
 
+- **TURN EASE — flown turns instead of the facing snap (2026-08-04, same day as the flight milestone).** The
+  engine snaps a pawn's facing instantly on a move order; the Comanche now **sweeps** to its new heading at a
+  capped rate and **banks into the turn**, composed under the nose-down attitude machinery. Every angle eases
+  (180s included) while teleports/battle placement snap naturally — the per-pawn state is position-matched, so
+  a jumped pawn simply starts fresh at the target heading. Live-tunable in-game via `enc_turnease.txt`
+  (rate/bank, ~1/s poll) — dialed to feel on the first flight. Spotted as a gap by **shakee** on the milestone
+  video within minutes of posting; built and verified the same evening. Per-model Factory fields are the
+  planned graduation. See [docs/Donor-Clip-Flight.md](docs/Donor-Clip-Flight.md).
 - **DONOR-CLIP NATIVE FLIGHT — the donor's own animation on our rig (2026-08-04).** The Comanche now flies with
   the donor gunship's **complete original animation** — hover bob, main rotor flat on the mast, tail fan spinning
   in its own **canted** ring — driving OUR baked mesh natively (`useDonorClip`, now a Factory checkbox). Cracked

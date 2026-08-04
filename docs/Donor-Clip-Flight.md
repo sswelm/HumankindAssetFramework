@@ -103,6 +103,18 @@ Idempotent, logged as `[Rest] <name>: rests rebased (...)`, and followed by the 
 | Fan spins backwards | handedness of the constructed frame | negate the axle (sign flip in the rig script) |
 | Whole unit moves like a zeppelin | `useDonorClip` lost from the pack | it's a Factory checkbox now; re-tick and rebuild |
 
+## Turn ease — flown turns instead of the facing snap
+
+The engine writes a pawn's facing as an **instant transform snap** when a move order changes heading — jarring
+on an aircraft. The plugin smooths it (verified in-game 2026-08-04): a per-pawn eased yaw advances toward the
+game's fresh target at a capped rate, with a **bank roll** proportional to how hard it's turning, composed
+before the `moveTilt` nose-down. Every angle eases, full 180s included; teleports and battle placement still
+snap naturally (a jumped pawn misses its position-matched state and starts at the target yaw).
+
+Tuning is live via **`BepInEx/config/enc_turnease.txt`** (polled ~1/s, edit while the game runs):
+`rate=180` (deg/s; 0 = off) and `bank=6` (max lean, negative flips). Spike status: the dial is session-global
+for all donor-clip units; per-model Factory fields (`turnRate`/`turnBank`) are the planned graduation.
+
 ## Instruments
 
 - **`[Rest]`** — one-shot per entry: donor + our skeleton, per-bone Local + Bind TRS, logged at injection.
@@ -112,9 +124,12 @@ Idempotent, logged as `[Rest] <name>: rests rebased (...)`, and followed by the 
 - **`enc_rotortrim.txt`** (BepInEx/config) — live constant-tilt dial on named bones (`Bone@axis=deg`),
   polled ~1/s and re-applied to live pawns without a relaunch. Kept inert (comments only) unless a residual
   wobble needs hand-finishing.
+- **`enc_turnease.txt`** (BepInEx/config) — the turn-ease dial (see the section above).
 
 ## Open ends
 
+- Turn-ease graduation — promote the session-global `enc_turnease.txt` dial to per-model Factory fields
+  (`turnRate`/`turnBank`); mechanism built + verified (section above), only the plumbing is pending.
 - `donorClipSpeed` — whole-clip playback speed multiplier (body + rotors together); designed, not built.
 - `silenceDonorVfxNames` — per-name VFX filter so only the donor's rotor sprite is dropped; backlog.
 - **Per-rotor speed via pose-slot blending (the promising experiment).** The pawn has multiple pose slots

@@ -352,6 +352,58 @@ namespace HumankindAssetFramework
             SetMember(entry, "ObjectSpace", os);
         }
 
+        // TURN EASE (spike/turn-ease 2026-08-04, "make it more fluent"): the engine writes a pawn's FACING as an
+        // instant SNAP when a move order changes heading (spotted by shakee on the Comanche video). Smooth it:
+        // keep a per-pawn eased yaw, advance it toward the game's fresh target yaw at a capped rate, and BANK a
+        // few degrees into the turn. Live-tunable via BepInEx/config/enc_turnease.txt (`rate=180` deg/s,
+        // `bank=6` deg, `snap=120` deg) polled ~1/s like the rotor trim; rate 0 or no file = fully off. Runs
+        // BEFORE ApplyMoveTilt so the nose-down composes on top of the eased heading. State is position-matched
+        // (nearest within 4u — the deploy poll's approximation) so multiple units smooth independently; a
+        // stacked squadron shares one state harmlessly (same spot, same heading). Every yaw angle eases, 180s
+        // included; teleports/battle placement snap naturally by MISSING the position match (fresh state = target yaw).
+        class TurnState { public UnityEngine.Vector3 pos; public float yaw; public float bank; public float lastT; }
+        static readonly List<TurnState> turnStates = new List<TurnState>();
+        internal static float turnRate = 0f, turnBank = 0f;   // file-driven while spiking
+
+        static void ApplyTurnEase(ModelEntry e, object entry)
+        {
+            if (turnRate <= 0f) return;
+            var os = GetMember(entry, "ObjectSpace");
+            UnityEngine.Vector3 tr;
+            try { tr = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return; }
+            var ro = GetMember(os, "Rotation");
+            if (!TryQuaternion(ro, out var rot)) return;
+            float target = rot.eulerAngles.y;
+            float now = UnityEngine.Time.time;
+            TurnState st = null; float best = 16f;   // nearest live state within 4 world units
+            for (int i = turnStates.Count - 1; i >= 0; i--)
+            {
+                if (now - turnStates[i].lastT > 10f) { turnStates.RemoveAt(i); continue; }
+                var d = turnStates[i].pos - tr; d.y = 0f;
+                if (d.sqrMagnitude < best) { best = d.sqrMagnitude; st = turnStates[i]; }
+            }
+            if (st == null) { st = new TurnState { pos = tr, yaw = target, lastT = now }; turnStates.Add(st); }
+            float dt = UnityEngine.Mathf.Clamp(now - st.lastT, 0f, 0.1f);
+            st.pos = tr; st.lastT = now;
+            float diff = UnityEngine.Mathf.DeltaAngle(st.yaw, target);
+            // NO yaw-size guard (user verdict: every angle eases, incl. full 180s). Teleports/battle placement
+            // still snap NATURALLY: a pawn that jumps >4u misses its position-matched state and the fresh state
+            // starts AT the target yaw. The old `snap` threshold was redundant and ate legitimate 180-turns.
+            st.yaw = UnityEngine.Mathf.MoveTowardsAngle(st.yaw, target, turnRate * dt);
+            float wantBank = UnityEngine.Mathf.Clamp(diff / 45f, -1f, 1f) * turnBank;   // bank ~ how hard we're turning
+            st.bank = UnityEngine.Mathf.MoveTowards(st.bank, wantBank, (UnityEngine.Mathf.Abs(turnBank) * 3f + 30f) * dt);
+            if (UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(st.yaw, target)) < 0.01f && UnityEngine.Mathf.Abs(st.bank) < 0.05f)
+                return;   // converged — leave the game's exact value
+            var eased = UnityEngine.Quaternion.Euler(rot.eulerAngles.x, st.yaw, st.bank);   // keep the game's pitch; z = our bank
+            if (ro is UnityEngine.Quaternion) SetMember(os, "Rotation", eased);
+            else
+            {
+                SetMember(ro, "x", eased.x); SetMember(ro, "y", eased.y); SetMember(ro, "z", eased.z); SetMember(ro, "w", eased.w);
+                SetMember(os, "Rotation", ro);
+            }
+            SetMember(entry, "ObjectSpace", os);
+        }
+
         // ObjectSpace.Rotation as a UnityEngine.Quaternion: it may BE one, or an Amplitude quaternion type with the
         // same x/y/z/w layout — read the components reflectively in that case. False (identity) if unreadable.
         static bool TryQuaternion(object o, out UnityEngine.Quaternion q)
