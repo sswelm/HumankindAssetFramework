@@ -367,7 +367,10 @@ namespace HumankindAssetFramework
 
         static void ApplyTurnEase(ModelEntry e, object entry)
         {
-            if (turnRate <= 0f) return;
+            // per-model (Factory "Turn ease — rate") with the live dial file as an override, same rule as the hug
+            float rate = turnRate > 0f ? turnRate : e.turnRate;
+            float bank = turnRate > 0f ? turnBank : e.turnBank;
+            if (rate <= 0f) return;
             var os = GetMember(entry, "ObjectSpace");
             UnityEngine.Vector3 tr;
             try { tr = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return; }
@@ -389,9 +392,9 @@ namespace HumankindAssetFramework
             // NO yaw-size guard (user verdict: every angle eases, incl. full 180s). Teleports/battle placement
             // still snap NATURALLY: a pawn that jumps >4u misses its position-matched state and the fresh state
             // starts AT the target yaw. The old `snap` threshold was redundant and ate legitimate 180-turns.
-            st.yaw = UnityEngine.Mathf.MoveTowardsAngle(st.yaw, target, turnRate * dt);
-            float wantBank = UnityEngine.Mathf.Clamp(diff / 45f, -1f, 1f) * turnBank;   // bank ~ how hard we're turning
-            st.bank = UnityEngine.Mathf.MoveTowards(st.bank, wantBank, (UnityEngine.Mathf.Abs(turnBank) * 3f + 30f) * dt);
+            st.yaw = UnityEngine.Mathf.MoveTowardsAngle(st.yaw, target, rate * dt);
+            float wantBank = UnityEngine.Mathf.Clamp(diff / 45f, -1f, 1f) * bank;   // bank ~ how hard we're turning
+            st.bank = UnityEngine.Mathf.MoveTowards(st.bank, wantBank, (UnityEngine.Mathf.Abs(bank) * 3f + 30f) * dt);
             if (UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(st.yaw, target)) < 0.01f && UnityEngine.Mathf.Abs(st.bank) < 0.05f)
                 return;   // converged — leave the game's exact value
             var eased = UnityEngine.Quaternion.Euler(rot.eulerAngles.x, st.yaw, st.bank);   // keep the game's pitch; z = our bank
@@ -484,7 +487,12 @@ namespace HumankindAssetFramework
 
         static void ApplyTerrainHug(ModelEntry e, object entry)
         {
-            if (hugDrop == 0f) return;
+            // PER-MODEL first (the Factory's "Terrain hug — drop"), with the live dial file as an OVERRIDE for
+            // in-game tuning: a non-zero enc_hugterrain.txt `drop` wins so a session can be dialed by feel, and
+            // clearing it (drop=0/no file) falls back to whatever each model shipped with.
+            float drop = hugDrop != 0f ? hugDrop : e.hugDrop;
+            float lookahead = hugDrop != 0f ? hugLookahead : e.hugLookahead;
+            if (drop == 0f) return;
             RescanDistricts();
             var os = GetMember(entry, "ObjectSpace");
             UnityEngine.Vector3 tr;
@@ -503,7 +511,7 @@ namespace HumankindAssetFramework
             if (step.sqrMagnitude > 1e-6f) st.dir = UnityEngine.Vector3.Lerp(st.dir, step.normalized, 0.25f);   // smoothed heading
             st.pos = tr; st.lastT = now;
             // probe AHEAD of the unit so the climb anticipates the skyline
-            var probe = tr + st.dir * hugLookahead;
+            var probe = tr + st.dir * lookahead;
             // radius <= 0 => AUTO: a bit over half the measured tile spacing, i.e. "this district's own tile".
             // A wider radius lifts the unit for every field and forest NEXT to the city (observed: cruising high
             // over farmland with one building two tiles away).
@@ -525,7 +533,7 @@ namespace HumankindAssetFramework
                                    $"(nearest district {UnityEngine.Mathf.Sqrt(nearest2):0.##}, radius {rad:0.##}, tile ~{tileSpacing:0.##})");
             }
             // target: 0 near a district (keep the full position.z lift) or `drop` over open ground
-            st.cur = UnityEngine.Mathf.MoveTowards(st.cur, overDistrict ? 0f : hugDrop, hugEase * dt);
+            st.cur = UnityEngine.Mathf.MoveTowards(st.cur, overDistrict ? 0f : drop, hugEase * dt);
             if (UnityEngine.Mathf.Abs(st.cur) < 0.001f) return;
             tr.y += st.cur;
             SetMember(os, "Translation", tr);

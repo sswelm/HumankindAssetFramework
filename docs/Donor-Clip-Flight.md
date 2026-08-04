@@ -111,9 +111,12 @@ game's fresh target at a capped rate, with a **bank roll** proportional to how h
 before the `moveTilt` nose-down. Every angle eases, full 180s included; teleports and battle placement still
 snap naturally (a jumped pawn misses its position-matched state and starts at the target yaw).
 
-Tuning is live via **`BepInEx/config/enc_turnease.txt`** (polled ~1/s, edit while the game runs):
-`rate=180` (deg/s; 0 = off) and `bank=6` (max lean, negative flips). Spike status: the dial is session-global
-for all donor-clip units; per-model Factory fields (`turnRate`/`turnBank`) are the planned graduation.
+**Per model** (Model Factory ▸ Runtime): **Turn ease — rate** (deg/s; 0 = the vanilla snap) and **Bank into
+turn** (degrees). Registry keys `turnRate` / `turnBank`; runtime-only, no re-bake.
+
+**Live dial** (overrides the per-model values while `rate` is non-zero): **`BepInEx/config/enc_turnease.txt`**
+— `rate=180`, `bank=6`, polled ~1/s so you can dial the feel with the game running; `rate=0` hands control
+back to each model's own setting.
 
 ## Terrain hug — low over open ground, climb for the city
 
@@ -137,10 +140,15 @@ Two things make the classification honest instead of guessed:
   (fields, vineyards, mines) and **`Ruin`**. Only `Extension_*` carries buildings, so the flat kinds go in
   `skip`.
 
-Live dial: **`BepInEx/config/enc_hugterrain.txt`** — `drop=-2`, `radius=0` (auto), `lookahead=1.5`, `ease=4`,
-`skip=Exploitation,Ruin` (or `only=` as a whitelist). Polled ~1/s; `drop=0` disables. The log prints the
-district names it sees, the measured tile spacing, and every climb/descend transition with the distance that
-decided it. Note the district set grows while the map streams in — the 3-second rescan self-corrects.
+**Per model** (Model Factory ▸ Runtime): **Terrain hug — drop** (units, negative; 0 = off) and **Climb
+anticipation**. Registry keys `hugDrop` / `hugLookahead`; runtime-only, no re-bake.
+
+**Live dial** (overrides the per-model values while it has a non-zero `drop`, for tuning by feel in-game):
+**`BepInEx/config/enc_hugterrain.txt`** — `drop=-2`, `radius=0` (auto), `lookahead=1.5`, `ease=4`,
+`skip=Exploitation,Ruin` (or `only=` as a whitelist). Polled ~1/s; set `drop=0` (or delete the file) to hand
+control back to each model's own setting. The log prints the district names it sees, the measured tile
+spacing, and every climb/descend transition with the distance that decided it. Note the district set grows
+while the map streams in — the 3-second rescan self-corrects.
 
 ## Instruments
 
@@ -156,9 +164,9 @@ decided it. Note the district set grows while the map streams in — the 3-secon
 
 ## Open ends
 
-- Turn-ease + terrain-hug graduation — promote the session-global `enc_turnease.txt` / `enc_hugterrain.txt`
-  dials to per-model Factory fields (`turnRate`/`turnBank`, `hugDrop`/`hugLookahead`); both mechanisms are
-  built and verified in-game (sections above), only the plumbing is pending.
+- Terrain-hug tuning knobs still session-global: `radius`, `ease` and the `only`/`skip` district-name filters
+  live only in the dial file (they describe the *map*, not the model, so per-model versions may never be
+  needed — revisit if a second flying unit wants a different city definition).
 - `donorClipSpeed` — whole-clip playback speed multiplier (body + rotors together); designed, not built.
 - `silenceDonorVfxNames` — per-name VFX filter so only the donor's rotor sprite is dropped; backlog.
 - **Per-rotor speed via pose-slot blending (the promising experiment).** The pawn has multiple pose slots

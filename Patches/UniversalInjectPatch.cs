@@ -134,6 +134,10 @@ namespace HumankindAssetFramework
         public int pawnsThisFrame;       // how many pawns this entry added this frame — every one after the first gets HideFactor=1
         public float rendererCensusNextAt;   // next Unity-renderer census time for this entry (the ghost-rotor hunt)
         public float moveTilt;               // degrees of nose-down pitch while MOVING (helicopter forward-flight attitude); 0 = off. Runtime-only, eased in/out.
+        public float turnRate;               // TURN EASE: deg/s toward a new heading; 0 = off (the engine's instant facing snap). Live override: enc_turnease.txt `rate`.
+        public float turnBank;               // TURN EASE: max roll INTO the turn, degrees; negative flips the lean. Live override: enc_turnease.txt `bank`.
+        public float hugDrop;                // TERRAIN HUG: how much LOWER over open ground (negative units); 0 = off. Live override: enc_hugterrain.txt `drop`.
+        public float hugLookahead = 1.5f;    // TERRAIN HUG: probe distance AHEAD along the movement vector, so the climb anticipates the skyline.
         public UnityEngine.Vector3 tiltLastPos; public float tiltCur; public float tiltLastTime;   // move-tilt runtime state
         public bool silenceDonorAudio;         // SUPPRESS all of the borrowed donor's Wwise sound on this unit's pawns (idle growl + combat maul/scratch that ride in on the reused animator/description). Reusable: any unit that inherits an unwanted donor sound can set it. Silences ONLY Wwise (AudioEmitter.PostEvent) — our own custom WAVs (Unity AudioSource) still play, so it composes with soundIdleFile/soundFile.
         public string engineStartEvent = "";  // Wwise event NAME posted on move-START (e.g. Play_UNIT_Vehicles_StealthCorvette_Start). Set => posted BY NAME (works for the FIRST unit, no live capture); empty => fall back to the auto-captured handle.
@@ -636,6 +640,10 @@ namespace HumankindAssetFramework
                                 engineSound = (bool?)m["engineSound"] ?? false,
                                 hideSubPawns = (bool?)m["hideSubPawns"] ?? false,
                                 moveTilt = (float?)m["moveTilt"] ?? 0f,
+                                turnRate = (float?)m["turnRate"] ?? 0f,
+                                turnBank = (float?)m["turnBank"] ?? 0f,
+                                hugDrop = (float?)m["hugDrop"] ?? 0f,
+                                hugLookahead = (float?)m["hugLookahead"] ?? 1.5f,
                                 silenceDonorAudio = (bool?)m["silenceDonorAudio"] ?? false,
                                 engineStartEvent = (string)m["engineStartEvent"] ?? "",
                                 engineStopEvent = (string)m["engineStopEvent"] ?? "",
@@ -701,6 +709,10 @@ namespace HumankindAssetFramework
                 var eng = Regex.Matches(text, "\"engineSound\"\\s*:\\s*(true|false)");      // parity: fire the per-ship engine move sound on our units
                 var hsp = Regex.Matches(text, "\"hideSubPawns\"\\s*:\\s*(true|false)");    // parity: strip the donor's secondary sub-pawns (the "GPU rotor")
                 var mtl = Regex.Matches(text, "\"moveTilt\"\\s*:\\s*(-?[0-9.]+)");         // parity: nose-down pitch while moving (helicopter attitude)
+                var trt = Regex.Matches(text, "\"turnRate\"\\s*:\\s*(-?[0-9.]+)");         // parity: eased facing, deg/s
+                var tbk = Regex.Matches(text, "\"turnBank\"\\s*:\\s*(-?[0-9.]+)");         // parity: bank into the turn, degrees
+                var hgd = Regex.Matches(text, "\"hugDrop\"\\s*:\\s*(-?[0-9.]+)");          // parity: terrain hug drop, units
+                var hgl = Regex.Matches(text, "\"hugLookahead\"\\s*:\\s*(-?[0-9.]+)");     // parity: terrain hug probe lead, units
                 var sda = Regex.Matches(text, "\"silenceDonorAudio\"\\s*:\\s*(true|false)"); // parity: suppress the borrowed donor's Wwise sound (idle + combat)
                 var svx = Regex.Matches(text, "\"silenceDonorVfx\"\\s*:\\s*(true|false)");   // parity: suppress the donor's MecanimEvent VFX (misplaced muzzle flashes)
                 var udc = Regex.Matches(text, "\"useDonorClip\"\\s*:\\s*(true|false)");   // parity: donor clip drives the unit
@@ -781,6 +793,10 @@ namespace HumankindAssetFramework
                         engineSound = i < eng.Count && eng[i].Groups[1].Value == "true",
                         hideSubPawns = i < hsp.Count && hsp[i].Groups[1].Value == "true",
                         moveTilt = i < mtl.Count && float.TryParse(mtl[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mtv) ? mtv : 0f,
+                        turnRate = i < trt.Count && float.TryParse(trt[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var trv) ? trv : 0f,
+                        turnBank = i < tbk.Count && float.TryParse(tbk[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var tbv) ? tbv : 0f,
+                        hugDrop = i < hgd.Count && float.TryParse(hgd[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hdv) ? hdv : 0f,
+                        hugLookahead = i < hgl.Count && float.TryParse(hgl[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hlv) ? hlv : 1.5f,
                         silenceDonorAudio = i < sda.Count && sda[i].Groups[1].Value == "true",
                         silenceDonorVfx = i < svx.Count && svx[i].Groups[1].Value == "true",
                         useDonorClip = i < udc.Count && udc[i].Groups[1].Value == "true",
