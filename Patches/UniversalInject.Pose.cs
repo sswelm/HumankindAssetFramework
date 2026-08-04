@@ -138,6 +138,7 @@ namespace HumankindAssetFramework
                 // entry is repointed and on session reset — `repointed` flips at runtime, so it cannot be latched.
                 if (anyRescuable == null) anyRescuable = entries != null && entries.Any(Rescuable);
                 if ((anyAnimated != true && anyFreeze != true && anyRescuable != true && unitScaleByDesc.Count == 0) || !Plugin.UniversalInjectOn.Value) return;
+                pawnMgrRef = pawnManager;   // cached for the live rotor-trim re-apply (PollRotorTrim walks live pawns)
                 if (!TryReadLastPawn(pawnManager, out var ctx)) return;
                 if (!knownManagers.Contains(pawnManager)) knownManagers.Add(pawnManager);   // every manager, incl. ones only adding vanilla pawns — the sweep needs them all
 
@@ -222,7 +223,14 @@ namespace HumankindAssetFramework
                 // alone. Sending it down the animated path would write Pose0 with animId -1. The explicit write-back
                 // matters because ForceOurSkeleton only mutates the boxed struct — the pose handlers are what
                 // normally store it, and this branch runs neither.
-                if (e.freezeDonorAnim && e.animId < 0) ApplyFreeze(ctx, e);
+                // USE-DONOR-CLIP (2026-08-04): leave Pose0 exactly as the game wrote it — the DONOR clip plays on our
+                // skeleton (the helicopter body hover-bob/pitch restored; its rotor channels land on OUR rotor hubs by
+                // bone-index aliasing, so the blades may spin from it too — the Cobra proof: static bakes play the donor
+                // clip and move like helicopters). The skeleton force above still applies, so it skins OUR mesh; the
+                // explicit write-back persists it. rotorSpinBones then RECLAIMS the hijacked rotor bones: BoneRotation
+                // slots override the clip's channel per bone, spun at a constant rate about the dialed axis.
+                if (e.useDonorClip) { DumpDonorChannels(ctx.entry, e); ApplyRotorSpin(ctx.entry, e); ApplyRotorTrim(ctx.entry, e); ctx.pawnEntries.SetValue(ctx.entry, ctx.idx); }
+                else if (e.freezeDonorAnim && e.animId < 0) ApplyFreeze(ctx, e);
                 else if (e.animId >= 0) ApplyAnimatedPose(ctx, e);
                 else ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
             }
@@ -368,6 +376,174 @@ namespace HumankindAssetFramework
                 }
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[Uni] DumpNearbyPawns: " + ex.Message); }
+        }
+
+        // ROTOR RECLAIM (2026-08-04): the donor clip hijacks our rotor bones by index (tumbling disc). The aim-layer
+        // BoneRotation slots override a bone's rotation on top of the playing clip (turretize's proven mechanism) —
+        // here driven as a CONSTANT-RATE spinner: each configured bone gets a slot with an ever-advancing angle about
+        // its dialed axis. Config "BoneName@axis;BoneName@axis" + rotorSpinSpeed deg/s. Axis is per-model (0/1/2 —
+        // the turretAxis lesson: try each). Resolved once against our skeleton's BoneInfos by substring.
+        static void ApplyRotorSpin(object entry, ModelEntry e)
+        {
+            if (string.IsNullOrEmpty(e.rotorSpinBones)) return;
+            if (e.rotorIdx == null)
+            {
+                var specs = e.rotorSpinBones.Split(';').Select(s => s.Trim()).Where(s => s.Length > 0).ToArray();
+                var idx = new List<int>(); var axes = new List<int>();
+                foreach (var spec in specs)
+                {
+                    var at = spec.Split('@');
+                    string bn = at[0].Trim();
+                    int ax = at.Length > 1 && int.TryParse(at[1], out var a) ? a : 1;
+                    int found = -1;
+                    if (e.skeleton != null && GetMember(e.skeleton, "BoneInfos") is Array bones)
+                        for (int i = 0; i < bones.Length; i++)
+                        {
+                            var n = GetMember(bones.GetValue(i), "Name")?.ToString() ?? "";
+                            if (n.IndexOf(bn, StringComparison.OrdinalIgnoreCase) >= 0) { found = i; break; }
+                        }
+                    if (found >= 0) { idx.Add(found); axes.Add(ax); }
+                    Plugin.Diag($"[RotorSpin] '{e.resourceName}' bone '{bn}' -> index {found} axis {ax}");
+                }
+                e.rotorIdx = idx.ToArray(); e.rotorAxis = axes.ToArray();
+            }
+            if (e.rotorIdx.Length == 0) return;
+            float angle = (UnityEngine.Time.time * e.rotorSpinSpeed) % 360f;
+            for (int i = 0; i < e.rotorIdx.Length && i < 4; i++)
+            {
+                var br = GetMember(entry, BoneRotationNames[i]);
+                if (br == null) continue;
+                SetMember(br, "SkeletonBoneIndex", (uint)e.rotorIdx[i]);
+                SetMember(br, "AxisIndex", (uint)e.rotorAxis[i]);
+                SetMember(br, "Angle", angle);
+                SetMember(entry, BoneRotationNames[i], br);
+            }
+        }
+
+        // DONOR-AXIS DIAGNOSTIC (2026-08-04, the canted-fantail question): decode the DONOR clip's four channels
+        // straight from the GPU animation records (same GetPoseTRS route as [AnimDiag]) and log each channel's
+        // rotation quaternion at several frames. Answers WITH DATA which local axis the donor's tail-rotor channel
+        // (ch3, Helix_back) spins about — the bake must orient our canted fan bone so that axis lands on the fan's
+        // real axle. One-shot per entry, useDonorClip only.
+        static readonly HashSet<string> donorAxisDumped = new HashSet<string>();
+        static void DumpDonorChannels(object entry, ModelEntry e)
+        {
+            if (animMgrRef == null || !donorAxisDumped.Add(e.resourceName)) return;
+            try
+            {
+                var p0 = GetMember(entry, "Pose0");
+                uint animId = Convert.ToUInt32(GetMember(p0, "AnimationId"));
+                var am = animMgrRef;
+                var buf = AccessTools.Field(am.GetType(), "gpuAnimationEntryBuffer")?.GetValue(am);
+                var animBuf = buf == null ? null : GetMember(buf, "WriteContent") as Array;
+                var getPose = AccessTools.Method(am.GetType(), "GetPoseTRS");
+                if (animBuf == null || getPose == null) { Plugin.Log.LogWarning("[DonorAxis] buffers/GetPoseTRS unavailable"); return; }
+                Plugin.Log.LogInfo($"[DonorAxis] {e.resourceName}: donor animId={animId} — decoding channels 0..3");
+                for (int ch = 0; ch < 4; ch++)
+                {
+                    long idx = animId + ch;
+                    if (idx < 0 || idx >= animBuf.Length) break;
+                    var ae = animBuf.GetValue((int)idx);
+                    uint fc = Convert.ToUInt32(GetMember(ae, "FrameCount"));
+                    var fmt = GetMember(ae, "Format"); var spd = GetMember(ae, "StartPoseData");
+                    var bmin = GetMember(ae, "BBoxMin"); var bmax = GetMember(ae, "BBoxMax");
+                    var line = $"[DonorAxis] ch{ch}: frames={fc}";
+                    foreach (uint f in new uint[] { 0, 1, fc / 4, fc / 2, 3 * fc / 4 })
+                    {
+                        if (fc > 0 && f >= fc) continue;
+                        var trs = getPose.Invoke(am, new object[] { spd, fmt, f, bmin, bmax });
+                        var r = GetMember(trs, "Rotation");
+                        line += $" | f{f} T={GetMember(trs, "Translation")} R=({Convert.ToSingle(GetMember(r, "x")):0.###},{Convert.ToSingle(GetMember(r, "y")):0.###},{Convert.ToSingle(GetMember(r, "z")):0.###},{Convert.ToSingle(GetMember(r, "w")):0.###})";
+                    }
+                    Plugin.Log.LogInfo(line);
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[DonorAxis] " + ex.Message); }
+        }
+
+        // ROTOR TRIM (2026-08-04, the "slightly wobbling" fix): the airframe is modeled leaning ~10-15 deg forward,
+        // so the blade disc is perpendicular to the TILTED mast while the donor clip spins it about true vertical —
+        // the disc precesses by the lean angle. A CONSTANT BoneRotation-slot rotation (turretize's mechanism; the
+        // spawn-time write is fine because the angle never advances) re-aligns disc and spin axis. Dialed LIVE via
+        // BepInEx/config/enc_rotortrim.txt — one line per bone, `BoneSubstring@axis=degrees` (axis 0/1/2), '#'
+        // comments — polled ~1/s and re-applied to live pawns, so tuning needs no relaunch.
+        struct TrimSpec { public string bone; public int axis; public float deg; }
+        static readonly List<TrimSpec> trims = new List<TrimSpec>();
+        static object pawnMgrRef;
+        static string trimSig;
+        static float trimNextPoll;
+
+        internal static void PollRotorTrim()
+        {
+            if (UnityEngine.Time.realtimeSinceStartup < trimNextPoll) return;
+            trimNextPoll = UnityEngine.Time.realtimeSinceStartup + 1f;
+            try
+            {
+                var path = Path.Combine(Paths.ConfigPath, "enc_rotortrim.txt");
+                string txt = File.Exists(path) ? File.ReadAllText(path) : "";
+                if (txt == trimSig) return;
+                trimSig = txt;
+                trims.Clear();
+                foreach (var raw in txt.Split('\n'))
+                {
+                    var line = raw.Trim();
+                    if (line.Length == 0 || line.StartsWith("#")) continue;
+                    var eq = line.Split('=');
+                    if (eq.Length != 2 || !float.TryParse(eq[1].Trim(), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var deg)) continue;
+                    var at = eq[0].Split('@');
+                    trims.Add(new TrimSpec
+                    {
+                        bone = at[0].Trim(),
+                        axis = at.Length > 1 && int.TryParse(at[1].Trim(), out var a) ? a : 0,
+                        deg = deg,
+                    });
+                }
+                int applied = 0;
+                if (pawnMgrRef != null && entries != null &&
+                    GetMember(pawnMgrRef, "pawnEntries") is Array pe)
+                {
+                    int pc = Convert.ToInt32(GetMember(pawnMgrRef, "pawnCount"));
+                    for (int i = 0; i < pc && i < pe.Length; i++)
+                    {
+                        var en = pe.GetValue(i);
+                        int sk = Convert.ToInt32(GetMember(en, "SkeletonId"));
+                        var e = entries.FirstOrDefault(x => x.useDonorClip && x.skeletonId >= 0 && x.skeletonId == sk);
+                        if (e == null) continue;
+                        ApplyRotorTrim(en, e);
+                        pe.SetValue(en, i);
+                        applied++;
+                    }
+                }
+                Plugin.Log.LogInfo($"[Trim] reloaded {trims.Count} line(s), re-applied to {applied} live pawn(s)");
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Trim] " + ex.Message); }
+        }
+
+        static void ApplyRotorTrim(object entry, ModelEntry e)
+        {
+            if (trims.Count == 0) return;
+            var bones = e.skeleton == null ? null : GetMember(e.skeleton, "BoneInfos") as Array;
+            if (bones == null) return;
+            int slot = 0;
+            foreach (var t in trims)
+            {
+                if (slot >= 4) break;
+                int found = -1;
+                for (int i = 0; i < bones.Length; i++)
+                {
+                    var n = GetMember(bones.GetValue(i), "Name")?.ToString() ?? "";
+                    if (n.IndexOf(t.bone, StringComparison.OrdinalIgnoreCase) >= 0) { found = i; break; }
+                }
+                if (found < 0) continue;
+                var br = GetMember(entry, BoneRotationNames[slot]);
+                if (br == null) continue;
+                SetMember(br, "SkeletonBoneIndex", (uint)found);
+                SetMember(br, "AxisIndex", (uint)t.axis);
+                SetMember(br, "Angle", t.deg);
+                SetMember(entry, BoneRotationNames[slot], br);
+                slot++;
+            }
         }
 
         // FORCE our skeleton so this pawn skins by OUR rig. A LATER instance the game spawned on a vanilla skeleton would

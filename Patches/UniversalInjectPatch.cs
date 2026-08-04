@@ -78,6 +78,10 @@ namespace HumankindAssetFramework
         public string handPropAngles = "";// draw-time rotation "x,y,z" (deg) stamped onto the FxMesh asset BEFORE encoding; "" stamps ZERO (neutralizes the engine's -90X class default — baked angle values don't survive the bundle). Hand-edited escape hatch: change + relaunch, no bake/rebuild.
         public bool disabled;             // DEBUG toggle: skip this override entirely so the ORIGINAL vanilla unit renders (compare against the custom model, observe the donor's own animation). Runtime-only — Save (no bake) + relaunch. The entry is dropped at load, so it doesn't even claim its pawn.
         public bool silenceDonorVfx;      // suppress the donor's MecanimEvent VFX (muzzle flashes, animator-driven puffs) for THIS unit. The donor's flash anchors are DONOR bone names (ParentNameToLaunchVFXPosition) that don't exist on our replaced skeleton, so inherited flashes render misplaced — this drops them at the StartVFXEvent chokepoint (the audio-silence pattern). Runtime-only.
+        public bool useDonorClip;         // let the DONOR clip drive this unit (skip our Pose0 override): restores the donor body animation (helicopter hover-bob/pitch) on an animated bake. The donor clip channels land on OUR bones by INDEX (donor Helix -> our rotor hub), so rotors may spin from it too. The Cobra proof: static bakes play the donor clip and move like helicopters.
+        public string rotorSpinBones = "";  // reclaim rotor bones the donor clip hijacks: "BoneName@axis;BoneName@axis" (axis 0/1/2, per-model like turretAxis). Each named bone gets a BoneRotation slot with a constantly-advancing angle — the aim-layer override outranks the clip's channel, so the rotor spins flat about the chosen axis while the donor clip drives the body.
+        public float rotorSpinSpeed = 720f; // rotor spin rate, degrees/second (720 = 120 RPM)
+        public int[] rotorIdx; public int[] rotorAxis;   // resolved bone indices + axes (cached once)
         public bool vfxSilencedLogged;    // session flag: log the first suppressed event once per entry
         public bool clearAimLayer;        // clear the game's procedural BoneRotation layer for THIS model (artillery: the donor streams aim/wheel junk that twists the rig). Replaces the old blanket fire/deploy rule for STATE-DRIVEN artillery — characters need the layer (facing), a migrated howitzer needs it cleared. Runtime-only.
         public string turretBone = "";    // TURRETIZE (2026-07-24): bone-name SUBSTRING (renamed b###_<orig>) of a turret to aim at the target. The game already streams its aim/heading angle into a BoneRotation slot on an INVALID bone index — we retarget that slot's SkeletonBoneIndex to THIS bone so the engine's own aim yaws our turret. "" = no turret aim. Runtime-only (no re-bake).
@@ -620,6 +624,9 @@ namespace HumankindAssetFramework
                                 disabled = (bool?)m["disabled"] ?? false,
                                 clearAimLayer = (bool?)m["clearAimLayer"] ?? false,
                                 silenceDonorVfx = (bool?)m["silenceDonorVfx"] ?? false,
+                                useDonorClip = (bool?)m["useDonorClip"] ?? false,
+                                rotorSpinBones = (string)m["rotorSpinBones"] ?? "",
+                                rotorSpinSpeed = (float?)m["rotorSpinSpeed"] ?? 720f,
                                 turretBone = (string)m["turretBone"] ?? "",
                                 turretAxis = (int?)m["turretAxis"] ?? -1,
                                 muzzleBone = (string)m["muzzleBone"] ?? "",
@@ -696,6 +703,9 @@ namespace HumankindAssetFramework
                 var mtl = Regex.Matches(text, "\"moveTilt\"\\s*:\\s*(-?[0-9.]+)");         // parity: nose-down pitch while moving (helicopter attitude)
                 var sda = Regex.Matches(text, "\"silenceDonorAudio\"\\s*:\\s*(true|false)"); // parity: suppress the borrowed donor's Wwise sound (idle + combat)
                 var svx = Regex.Matches(text, "\"silenceDonorVfx\"\\s*:\\s*(true|false)");   // parity: suppress the donor's MecanimEvent VFX (misplaced muzzle flashes)
+                var udc = Regex.Matches(text, "\"useDonorClip\"\\s*:\\s*(true|false)");   // parity: donor clip drives the unit
+                var rsb = Regex.Matches(text, "\"rotorSpinBones\"\\s*:\\s*\"([^\"]*)\"");  // parity: reclaimed rotor bones
+                var rss = Regex.Matches(text, "\"rotorSpinSpeed\"\\s*:\\s*(-?[0-9.]+)");   // parity: rotor spin deg/s
                 var esa = Regex.Matches(text, "\"engineStartEvent\"\\s*:\\s*\"([^\"]*)\"");  // parity: Wwise event name posted on move-start
                 var eso = Regex.Matches(text, "\"engineStopEvent\"\\s*:\\s*\"([^\"]*)\"");    // parity: Wwise event name posted on move-stop
                 var sf = Regex.Matches(text, "\"soundFile\"\\s*:\\s*\"([^\"]*)\"");           // parity: custom WAV loop in enc_sounds/
@@ -773,6 +783,9 @@ namespace HumankindAssetFramework
                         moveTilt = i < mtl.Count && float.TryParse(mtl[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mtv) ? mtv : 0f,
                         silenceDonorAudio = i < sda.Count && sda[i].Groups[1].Value == "true",
                         silenceDonorVfx = i < svx.Count && svx[i].Groups[1].Value == "true",
+                        useDonorClip = i < udc.Count && udc[i].Groups[1].Value == "true",
+                        rotorSpinBones = i < rsb.Count ? rsb[i].Groups[1].Value : "",
+                        rotorSpinSpeed = i < rss.Count && float.TryParse(rss[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var rsv) ? rsv : 720f,
                         engineStartEvent = i < esa.Count ? esa[i].Groups[1].Value : "",
                         engineStopEvent = i < eso.Count ? eso[i].Groups[1].Value : "",
                         soundFile = i < sf.Count ? sf[i].Groups[1].Value : "",

@@ -269,6 +269,7 @@ namespace HumankindAssetFramework
                 UniversalInject.ProcessEngineAudio();   // engine sound: fire the per-ship Start/Stop move sound on our units
                 UniversalInject.ProcessSubPawnVisuals();   // one-shot pawn-prefab hierarchy dump (the ghost-rotor hunt); no-op once dumped
                 UniversalInject.ProcessBattleCries();   // battle-start war cries queued by the sim-thread hook
+                UniversalInject.PollRotorTrim();        // live rotor-trim dial (enc_rotortrim.txt): constant BR-slot tilt on donor-clip rotor bones
                 UniversalInject.TickDistrictMeshSwap(); // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
             }
             if (PersistUnitFacing.Value)
