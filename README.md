@@ -76,6 +76,11 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
   costs shared GPU vertex budget — 28% of the test helicopter's vertices.
 - **Borrow or freeze the donor's motion** — strip your model's rotor and the donor's spinning rotor shows through; or
   *Freeze donor animation* to pin a rigid model still while it glides tile-to-tile.
+- **Fly the donor's animation on YOUR rig** — *Use donor animation clip* plays the donor's complete original motion
+  (a helicopter's hover bob, main rotor, canted tail fan) natively on your baked skeleton: the plugin rebases the rig
+  to the donor's rest conventions and the Vehicle Lab authors rotor bones as axle frames, so the clip channels land
+  exactly on your parts. Plus **eased, banked turns** on move orders instead of the engine's facing snap
+  (live-tunable). The measured engine contract: [docs/Donor-Clip-Flight.md](docs/Donor-Clip-Flight.md).
 
 **Textures**
 - **Correct, isolated skins** out of the box — glTF/OBJ V-convention reconciled, off-tile UVs shifted back in range, and
