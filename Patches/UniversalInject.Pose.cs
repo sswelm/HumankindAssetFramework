@@ -232,7 +232,7 @@ namespace HumankindAssetFramework
                 // Donor-clip path: the donor's clip drives the pose, but the pawn-level adjusters must still run —
                 // they live in ApplyAnimatedPose, which this branch bypasses, and without them Position offset
                 // (hover height!), moveTilt and runtime scale are silently dead on donor-clip models.
-                if (e.useDonorClip) { DumpDonorChannels(ctx.entry, e); ApplyRotorSpin(ctx.entry, e); ApplyRotorTrim(ctx.entry, e); ApplyPositionOffset(e, ctx.entry); ApplyMoveTilt(e, ctx.entry); ApplyScale(e, ctx.entry); ctx.pawnEntries.SetValue(ctx.entry, ctx.idx); }
+                if (e.useDonorClip) { DumpDonorChannels(ctx.entry, e); ApplyRotorSpin(ctx.entry, e); ApplyRotorTrim(ctx.entry, e); ApplyPositionOffset(e, ctx.entry); ApplyTurnEase(e, ctx.entry); ApplyMoveTilt(e, ctx.entry); ApplyScale(e, ctx.entry); ctx.pawnEntries.SetValue(ctx.entry, ctx.idx); }
                 else if (e.freezeDonorAnim && e.animId < 0) ApplyFreeze(ctx, e);
                 else if (e.animId >= 0) ApplyAnimatedPose(ctx, e);
                 else ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
@@ -521,6 +521,41 @@ namespace HumankindAssetFramework
                 Plugin.Log.LogInfo($"[Trim] reloaded {trims.Count} line(s), re-applied to {applied} live pawn(s)");
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[Trim] " + ex.Message); }
+        }
+
+        // TURN-EASE FILE POLL (spike): enc_turnease.txt in BepInEx/config — `rate=<deg/s>` `bank=<deg>`
+        // `snap=<deg>`, '#' comments. Same ~1/s cadence as the rotor trim; missing file or rate=0 disables.
+        static string turnSig;
+        static float turnNextPoll;
+        internal static void PollTurnEase()
+        {
+            if (UnityEngine.Time.realtimeSinceStartup < turnNextPoll) return;
+            turnNextPoll = UnityEngine.Time.realtimeSinceStartup + 1f;
+            try
+            {
+                var path = Path.Combine(Paths.ConfigPath, "enc_turnease.txt");
+                string txt = File.Exists(path) ? File.ReadAllText(path) : "";
+                if (txt == turnSig) return;
+                turnSig = txt;
+                float rate = 0f, bank = 0f, snap = 120f;
+                foreach (var raw in txt.Split('\n'))
+                {
+                    var line = raw.Trim();
+                    if (line.Length == 0 || line.StartsWith("#")) continue;
+                    var eq = line.Split('=');
+                    if (eq.Length != 2 || !float.TryParse(eq[1].Trim(), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var v)) continue;
+                    switch (eq[0].Trim().ToLowerInvariant())
+                    {
+                        case "rate": rate = v; break;
+                        case "bank": bank = v; break;
+                        case "snap": snap = v; break;
+                    }
+                }
+                turnRate = rate; turnBank = bank; turnSnap = snap;
+                Plugin.Log.LogInfo($"[TurnEase] rate={rate} deg/s, bank={bank} deg, snap={snap} deg");
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[TurnEase] " + ex.Message); }
         }
 
         static void ApplyRotorTrim(object entry, ModelEntry e)
