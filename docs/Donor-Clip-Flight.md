@@ -117,4 +117,12 @@ Idempotent, logged as `[Rest] <name>: rests rebased (...)`, and followed by the 
 
 - `donorClipSpeed` — whole-clip playback speed multiplier (body + rotors together); designed, not built.
 - `silenceDonorVfxNames` — per-name VFX filter so only the donor's rotor sprite is dropped; backlog.
-- Per-rotor speed offsets (additive BR-slot spin) — uncertain, the pose hook may be spawn-only for that path.
+- **Per-rotor speed via pose-slot blending (the promising experiment).** The pawn has multiple pose slots
+  (`Pose0`–`Pose8`, each its own clip + weight), and the plugin already knows how to write them (the soldier
+  state machine). Leave Pose0 = the donor clip and set **Pose1 = our own baked Spin clip**: if the engine
+  *sums* pose deltas, the body keeps the donor's motion untouched (our clip's body channels are empty) while
+  the rotors get donor spin **plus** ours — i.e. the Vehicle Lab's Spin RPM becomes a per-rotor speed *offset*
+  on top of the donor. One cheap in-game test decides it: additive → per-rotor speed control for free;
+  averaging → half-speed mush, drop the idea. (Blocking the donor instead — dummy channel-eater bones at
+  indices 2/3 — would only *freeze* our rotors: bones beyond the clip's channels get no animation at all,
+  and continuous plugin-side driving is exactly what the spawn-frozen BR writes couldn't do.)
