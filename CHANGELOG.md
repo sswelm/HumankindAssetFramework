@@ -10,6 +10,20 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Units & animation
 
+- **DONOR-CLIP NATIVE FLIGHT — the donor's own animation on our rig (2026-08-04).** The Comanche now flies with
+  the donor gunship's **complete original animation** — hover bob, main rotor flat on the mast, tail fan spinning
+  in its own **canted** ring — driving OUR baked mesh natively (`useDonorClip`, now a Factory checkbox). Cracked
+  with instruments, not guesses: a `[Rest]` skeleton dump (donor rigs keep ALL rests identity; ours carried the
+  glTF -90°X on bone 0 and the facing rotation on Root — each **conjugates** every animated descendant, because
+  the engine composes clips ON TOP of rests) and a `[DonorAxis]` decoder that read the donor channels straight
+  from the GPU records (ch2 main = pure local-Y spin ~18°/frame; ch3 tail = pure local-X ~36°/frame). The fix is
+  two-sided: the plugin **rebases the injected skeleton at registration** (ancestors → identity rests with world
+  positions preserved — and it MUST run before `AnimationManager.Apply`, which snapshots BoneInfos into the GPU;
+  leaf rotor bones keep their orientation), and the Vehicle Lab **authors the axle frames** (main-rotor bone
+  local Y = mast, tail-fan bone local X = the canted fan axle). Five failure modes catalogued on the way
+  (index-shifted channels, rolled axis, orbiting rotor, vertical loop, stale-rig rebake) — the full contract
+  and catalog: [docs/Donor-Clip-Flight.md](docs/Donor-Clip-Flight.md). Plus a live `enc_rotortrim.txt` dial
+  (constant BR-slot tilt, re-applied to live pawns ~1/s, no relaunch) kept inert as a finishing tool.
 - **A HELICOPTER WITH ITS OWN SPINNING ROTORS — and the four-mechanism ghost hunt (2026-08-03/04).** The RAH-66
   Comanche now flies with **its own main + tail rotor spinning** (Vehicle Lab Rotor/Tail-rotor roles → continuous
   bake) instead of borrowing the donor gunship's. Getting there uncovered — and defeated — FOUR stacked mechanisms

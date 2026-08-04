@@ -72,6 +72,11 @@ pivots on the blades' centroid and spins about the axis *perpendicular to the du
 wheels' rolling-contact speed scaling, so main + tail spin at the same rate, and a rotor marking switches the printed
 next-step recipe to the rotorcraft bake (**continuous** spin — State-driven OFF — and Auto-ground OFF). Preview aids
 for dialing it in: **Pause**, **◀/▶ frame-step**, and a **Level line** (horizontal reference at rotor height).
+Rotor bones are authored as **axle frames** (main: local Y = mast; tail fan: local X = the canted fan axle) so the
+donor's own clip can drive them — see [Donor-Clip-Flight.md](Donor-Clip-Flight.md). Two workflow notes: Orientation
+composes **yaw-first** (Pitch/Roll act on the grid-aligned model as you see it), and the sliders only take effect on
+the next **Vehicleize** run — which is also a *mandatory separate step* before an Animation Lab rebake (the Lab
+reuses the last rig GLB; skipping Vehicleize bakes the OLD rig).
 
 ---
 
