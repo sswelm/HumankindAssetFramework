@@ -419,6 +419,11 @@ namespace HumankindAssetFramework
         internal static float hugDrop = 0f, hugRadius = 0f, hugLookahead = 3f, hugEase = 4f;
         internal static readonly List<string> hugOnly = new List<string>();   // name whitelist (empty = all)
         internal static readonly List<string> hugSkip = new List<string>();   // name blacklist (farms, exploitations)
+        // BUILT-IN default blacklist: these district kinds are FLAT (cultivated tiles — fields, vineyards, mines —
+        // and rubble), so they must never make an aircraft climb. It's a property of Humankind's data, not a user
+        // preference, so it applies whenever the dial file specifies no filter of its own — deleting the file
+        // can't resurrect the "cruises high over farmland" bug.
+        static readonly List<string> hugSkipDefault = new List<string> { "Exploitation", "Ruin" };
         static readonly List<UnityEngine.Vector3> districtPts = new List<UnityEngine.Vector3>();
         static float districtNextScan, tileSpacing;
         class HugState { public UnityEngine.Vector3 pos; public UnityEngine.Vector3 dir; public float cur; public float lastT; }
@@ -450,8 +455,9 @@ namespace HumankindAssetFramework
                     string nm = GetMember(c, "constructibleDefinitionName")?.ToString();
                     if (string.IsNullOrEmpty(nm)) nm = c.gameObject.name ?? "";
                     if (!hugScanLogged && names.Count < 40) names.Add(nm);
+                    var skip = hugSkip.Count > 0 || hugOnly.Count > 0 ? hugSkip : hugSkipDefault;
                     if (hugOnly.Count > 0 && !hugOnly.Any(s => nm.IndexOf(s, StringComparison.OrdinalIgnoreCase) >= 0)) continue;
-                    if (hugSkip.Count > 0 && hugSkip.Any(s => nm.IndexOf(s, StringComparison.OrdinalIgnoreCase) >= 0)) continue;
+                    if (skip.Count > 0 && skip.Any(s => nm.IndexOf(s, StringComparison.OrdinalIgnoreCase) >= 0)) continue;
                     districtPts.Add(c.transform.position);
                 }
                 if (names.Count > 0)
