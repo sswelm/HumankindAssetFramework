@@ -45,6 +45,10 @@ namespace HumankindAssetFramework
                     {
                         if (e.skeleton == null) e.skeleton = LoadSkeleton(e.sa, e.sb, e.sc, e.sd, e.resourceName);
                         if (e.skeleton == null) continue;
+                        // MUST run BEFORE RegisterMeshCollection + Apply below: Apply's GPU build snapshots
+                        // BoneInfos into gpuSkeletonBoneEntiesBuffer, so a later rebase never reaches the GPU
+                        // (proven 2026-08-04: rebasing in Repoint — post-Apply — changed nothing on screen).
+                        if (e.useDonorClip) RebaseRootIdentity(e.skeleton, e.resourceName);
                         var sf = AccessTools.Field(e.skeleton.GetType(), "loadingStatus");
                         if (sf != null) sf.SetValue(e.skeleton, Enum.ToObject(sf.FieldType, 0)); // NotLoaded
                         SetMember(e.skeleton, "SkeletonId", -1);
@@ -418,6 +422,115 @@ namespace HumankindAssetFramework
                 }
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[Rest] " + label + ": " + ex.Message); }
+        }
+
+        // PLAN-A STEP 2 (2026-08-04): rebase our skeleton to an IDENTITY root, donor-convention.
+        // Blender's glTF export leaves the armature OBJECT as bone 0 carrying the Z-up->Y-up -90X conversion;
+        // donor rigs are Y-up native (bone 0 identity). The donor clip has NO track on channel 0, so that -90X
+        // rest SURVIVES playback and CONJUGATES every animated child rotation — the donor's vertical rotor yaw
+        // lands as a ROLL ("the rotor is now rolling"). Fix: clear bone 0's Local rotation and fold it into every
+        // bone's BindPose rotation (BindPose' = BindPose x R0; matrix algebra leaves the Bind TRANSLATION
+        // unchanged, confirmed by the [Rest] dump where Bind.T is already R0-free). Static render stays
+        // pixel-identical (W'.Bind' == W.Bind == I at rest); animated deviations land in donor space.
+        // Idempotent: skips when bone 0 is already identity, so re-injection is safe.
+        // v3 (2026-08-04): GENERAL identity-rest rebase — EVERY bone's rest rotation folds away, not just bone 0's.
+        // v2 cleared only the root (glTF -90X) and worked until the leveled rebake put the Factory's FACING rotation
+        // on b000_Root's rest (R=-90 about game-Z): any rest rotation anywhere in the chain conjugates the animated
+        // deviations below it (that run: vertical rotor loop off the mast). Donor convention is ALL rests identity
+        // with world-space translations (verified in the [Rest] dump: donor Bind.T == -worldPos, R == identity), so
+        // rebuild ours the same way: world rest POSITIONS preserved exactly, every Local/Bind rotation -> identity,
+        // Local.T -> world offset from parent, Bind.T -> -worldPos (x bind scale). Static render is unchanged
+        // (W'.Bind' == I at rest); animated deviations land in donor space regardless of bake-time orientation.
+        // Idempotent: skips when every rest is already identity.
+        static void RebaseRootIdentity(object skel, string label)
+        {
+            try
+            {
+                var bones = skel == null ? null : GetMember(skel, "BoneInfos") as Array;
+                if (bones == null || bones.Length == 0) return;
+                int n = bones.Length;
+                float[] Q(object o) => new[] { Convert.ToSingle(GetMember(o, "x")), Convert.ToSingle(GetMember(o, "y")),
+                                               Convert.ToSingle(GetMember(o, "z")), Convert.ToSingle(GetMember(o, "w")) };
+                float[] V(object o) => new[] { Convert.ToSingle(GetMember(o, "x")), Convert.ToSingle(GetMember(o, "y")),
+                                               Convert.ToSingle(GetMember(o, "z")) };
+                float[] QMul(float[] a, float[] b) => new[] {
+                    a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+                    a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+                    a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+                    a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2] };
+                float[] QRot(float[] q, float x, float y, float z)
+                {   // v' = v + 2*q.xyz x (q.xyz x v + w*v)
+                    float cx = q[1] * z - q[2] * y + q[3] * x, cy = q[2] * x - q[0] * z + q[3] * y, cz = q[0] * y - q[1] * x + q[3] * z;
+                    return new[] { x + 2f * (q[1] * cz - q[2] * cy), y + 2f * (q[2] * cx - q[0] * cz), z + 2f * (q[0] * cy - q[1] * cx) };
+                }
+                var wq = new float[n][]; var wp = new float[n][]; var ws = new float[n];
+                var par = new int[n]; var hasChild = new bool[n];
+                for (int i = 0; i < n; i++)
+                {
+                    var bi = bones.GetValue(i);
+                    par[i] = Convert.ToInt32(GetMember(bi, "ParentIndex"));
+                    if (par[i] >= 0 && par[i] < n) hasChild[par[i]] = true;
+                    var lc = GetMember(bi, "Local");
+                    var r = Q(GetMember(lc, "Rotation")); var t = V(GetMember(lc, "Translation"));
+                    float s = Convert.ToSingle(GetMember(lc, "Scale"));
+                    int p = par[i];
+                    if (p < 0 || p >= i) { wq[i] = r; wp[i] = t; ws[i] = s; }
+                    else
+                    {
+                        wq[i] = QMul(wq[p], r);
+                        var off = QRot(wq[p], t[0] * ws[p], t[1] * ws[p], t[2] * ws[p]);
+                        wp[i] = new[] { wp[p][0] + off[0], wp[p][1] + off[1], wp[p][2] + off[2] };
+                        ws[i] = ws[p] * s;
+                    }
+                }
+                // v4: only ANCESTOR (has-children) rests need flattening — LEAF bones (the rotors) keep their
+                // world rest orientation, so a bake-authored axle frame (tail-fan cant, mast tilt) survives and
+                // the donor channel's fixed-axis spin gets CONJUGATED into the rotor's real plane. If every
+                // ancestor is already identity, leaves are already world==local and there is nothing to do.
+                bool any = false;
+                for (int i = 0; i < n; i++)
+                    if (hasChild[i])
+                    {
+                        var r = Q(GetMember(GetMember(bones.GetValue(i), "Local"), "Rotation"));
+                        if (Math.Abs(r[0]) + Math.Abs(r[1]) + Math.Abs(r[2]) > 1e-4f) { any = true; break; }
+                    }
+                if (!any) return;
+                for (int i = 0; i < n; i++)
+                {
+                    var bi = bones.GetValue(i);
+                    int p = par[i];
+                    float inv = (p >= 0 && p < i && Math.Abs(ws[p]) > 1e-8f) ? 1f / ws[p] : 1f;
+                    float lx = p < 0 || p >= i ? wp[i][0] : (wp[i][0] - wp[p][0]) * inv;
+                    float ly = p < 0 || p >= i ? wp[i][1] : (wp[i][1] - wp[p][1]) * inv;
+                    float lz = p < 0 || p >= i ? wp[i][2] : (wp[i][2] - wp[p][2]) * inv;
+                    var lc = GetMember(bi, "Local");
+                    var lt = GetMember(lc, "Translation");
+                    SetMember(lt, "x", lx); SetMember(lt, "y", ly); SetMember(lt, "z", lz);
+                    SetMember(lc, "Translation", lt);
+                    // leaf keeps world orientation (local == world once parents are identity); ancestors flatten
+                    float[] nr = hasChild[i] ? new[] { 0f, 0f, 0f, 1f } : wq[i];
+                    var lr = GetMember(lc, "Rotation");
+                    SetMember(lr, "x", nr[0]); SetMember(lr, "y", nr[1]); SetMember(lr, "z", nr[2]); SetMember(lr, "w", nr[3]);
+                    SetMember(lc, "Rotation", lr);
+                    SetMember(bi, "Local", lc);
+                    // Bind = W'^-1: rotation = conj(world rest R), translation = -(conj . worldPos) x bindScale
+                    var bp = GetMember(bi, "BindPose");
+                    float bs = Convert.ToSingle(GetMember(bp, "Scale"));
+                    float[] cj = { -nr[0], -nr[1], -nr[2], nr[3] };
+                    var bT = QRot(cj, wp[i][0], wp[i][1], wp[i][2]);
+                    var bt = GetMember(bp, "Translation");
+                    SetMember(bt, "x", -bT[0] * bs); SetMember(bt, "y", -bT[1] * bs); SetMember(bt, "z", -bT[2] * bs);
+                    SetMember(bp, "Translation", bt);
+                    var brr = GetMember(bp, "Rotation");
+                    SetMember(brr, "x", cj[0]); SetMember(brr, "y", cj[1]); SetMember(brr, "z", cj[2]); SetMember(brr, "w", cj[3]);
+                    SetMember(bp, "Rotation", brr);
+                    SetMember(bi, "BindPose", bp);
+                    bones.SetValue(bi, i);
+                }
+                SetMember(skel, "BoneInfos", bones);   // no-op if BoneInfos is the live array; covers a copy-returning property
+                Plugin.Log.LogInfo($"[Rest] {label}: rests rebased ({n} bone(s), ancestors -> identity, leaf orientations + world positions preserved)");
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Rest] rebase " + label + ": " + ex.Message); }
         }
 
         // Diagnostic: list a MeshCollection/Skeleton's skinned sub-meshes (names + fx mesh index), to spot baked-in
