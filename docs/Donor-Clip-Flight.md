@@ -103,6 +103,18 @@ Idempotent, logged as `[Rest] <name>: rests rebased (...)`, and followed by the 
 | Fan spins backwards | handedness of the constructed frame | negate the axle (sign flip in the rig script) |
 | Whole unit moves like a zeppelin | `useDonorClip` lost from the pack | it's a Factory checkbox now; re-tick and rebuild |
 
+## Flight character
+
+Three knobs decide how a unit *carries itself* in the air, independent of which animation is playing. In the
+Model Factory they sit together under **Flight character**; all are runtime-only (no re-bake) and default to
+off, so nothing changes for existing models.
+
+| Knob | Question it answers |
+|---|---|
+| **Turn ease** (`turnRate` / `turnBank`) | how it changes heading — swept and banked, or the engine's instant snap |
+| **Terrain hug** (`hugDrop` / `hugLookahead`) | how it holds altitude — nap-of-the-earth over open country, climbing for the city |
+| **Move tilt** (`moveTilt`) | its attitude while moving — nose-down forward-flight pitch |
+
 ## Turn ease — flown turns instead of the facing snap
 
 The engine writes a pawn's facing as an **instant transform snap** when a move order changes heading — jarring
