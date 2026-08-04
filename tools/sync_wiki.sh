@@ -11,6 +11,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 WIKI="${1:?usage: tools/sync_wiki.sh <wiki-clone-dir>}"
 HDR='> _Auto-generated from the repo docs by `tools/sync_wiki.sh` — edit the source Markdown in the repo, not this wiki page._'
+REPO='https://github.com/sswelm/HumankindAssetFramework'   # repo-only files (CREDITS/LICENSE/llms.txt/examples) can't be wiki pages
 
 emit() {  # emit <src> <dst-basename>
   { echo "$HDR"; echo; cat "$1"; } | sed \
@@ -19,6 +20,7 @@ emit() {  # emit <src> <dst-basename>
     -e 's#](docs/#](#g' \
     -e 's#](README\.md#](Overview#g' \
     -e 's#](CHANGELOG\.md#](Changelog#g' \
+    -e "s#](\(CREDITS\.md\|LICENSE\|llms\.txt\|haf-pack\.example\.json\))#]($REPO/blob/master/\1)#g" \
     -e 's#](\([A-Za-z0-9._-]*\)\.md)#](\1)#g' \
     -e 's#](\([A-Za-z0-9._-]*\)\.md\##](\1\##g' \
     > "$WIKI/$2"
