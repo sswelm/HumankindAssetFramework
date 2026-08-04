@@ -416,7 +416,7 @@ namespace HumankindAssetFramework
         // movement vector (`lookahead`), so it climbs BEFORE the buildings, like a pilot, instead of reacting.
         // Runs AFTER ApplyPositionOffset: position.z stays the city-clearing height, this subtracts over open
         // ground. Live-tuned via BepInEx/config/enc_hugterrain.txt; drop 0 or no file = off.
-        internal static float hugDrop = 0f, hugRadius = 0f, hugLookahead = 3f, hugEase = 4f;
+        internal static float hugDrop = 0f, hugRadius = 0f, hugLookahead = 3f, hugEase = 4f, hugCliff = 1f;
         internal static readonly List<string> hugOnly = new List<string>();   // name whitelist (empty = all)
         internal static readonly List<string> hugSkip = new List<string>();   // name blacklist (farms, exploitations)
         // BUILT-IN default blacklist: these district kinds are FLAT (cultivated tiles — fields, vineyards, mines —
@@ -430,6 +430,44 @@ namespace HumankindAssetFramework
         static readonly List<HugState> hugStates = new List<HugState>();
 
         internal static void RearmDistrictScan() { districtNextScan = 0f; hugScanLogged = false; }
+
+        // Ground height under a world point via a downward physics raycast (float.MinValue = nothing hit).
+        // One-shot log of the first hit so we know WHAT we're standing on — and, if nothing ever hits, that the
+        // terrain is collider-less and cliff anticipation needs the tile-elevation route instead.
+        static bool cliffProbeLogged;
+        static float GroundHeight(UnityEngine.Vector3 p)
+        {
+            try
+            {
+                // RaycastAll + take the LOWEST hit, skipping units: the first version used a plain Raycast and
+                // measured the helicopter's OWN army collider ("hit 'PresentationArmy #64685'"), i.e. it compared
+                // unit heights instead of ground and the cliff climb was noise. Armies/units sit on layer 10 and
+                // are named Presentation*; the ground is whatever remains underneath them.
+                var hits = UnityEngine.Physics.RaycastAll(new UnityEngine.Vector3(p.x, p.y + 80f, p.z),
+                                                          UnityEngine.Vector3.down, 400f);
+                float best = float.MinValue; string bestName = null; int bestLayer = -1;
+                for (int i = 0; i < hits.Length; i++)
+                {
+                    var col = hits[i].collider;
+                    if (col == null) continue;
+                    var nm = col.name ?? "";
+                    if (col.gameObject.layer == 10 || nm.StartsWith("Presentation", StringComparison.Ordinal)) continue;
+                    if (best == float.MinValue || hits[i].point.y < best)   // lowest = the ground, not rooftops
+                    { best = hits[i].point.y; bestName = nm; bestLayer = col.gameObject.layer; }
+                }
+                if (!cliffProbeLogged)
+                {
+                    cliffProbeLogged = true;
+                    var all = string.Join(", ", hits.Select(h => $"{h.collider?.name}(L{h.collider?.gameObject.layer},y{h.point.y:0.#})").Take(6));
+                    Plugin.Log.LogInfo(best > float.MinValue
+                        ? $"[Hug] cliff probe: ground '{bestName}' (layer {bestLayer}) at y={best:0.##}, unit y={p.y:0.##} | all hits: {all}"
+                        : $"[Hug] cliff probe: NO ground collider (only units/none) — cliff anticipation inert. Hits: {(hits.Length == 0 ? "none" : all)}");
+                }
+                return best;
+            }
+            catch { }
+            return float.MinValue;
+        }
 
         static void RescanDistricts()
         {
@@ -538,8 +576,23 @@ namespace HumankindAssetFramework
                 Plugin.Log.LogInfo($"[Hug] {(overDistrict ? "OVER district -> climbing" : "open ground -> descending")} " +
                                    $"(nearest district {UnityEngine.Mathf.Sqrt(nearest2):0.##}, radius {rad:0.##}, tile ~{tileSpacing:0.##})");
             }
-            // target: 0 near a district (keep the full position.z lift) or `drop` over open ground
-            st.cur = UnityEngine.Mathf.MoveTowards(st.cur, overDistrict ? 0f : drop, hugEase * dt);
+            // CLIFF ANTICIPATION (user request): the engine's terrain following is tied to the tile the unit is
+            // ON, so a step up in the ground arrives at the cell boundary — the aircraft rises INTO the cliff
+            // instead of over it. Probe the ground under the same lead point: if it stands higher than the
+            // ground here, add that difference NOW so the climb starts before the edge; on arrival the engine's
+            // own altitude catches up and the extra decays to zero. Climb-only (a descent handled early would
+            // fly us at the LOWER level while still over the high ground). Uses a physics raycast — if the
+            // terrain has no collider the probe simply finds nothing and the feature no-ops (logged once).
+            float cliff = 0f;
+            if (hugCliff > 0f)
+            {
+                float gHere = GroundHeight(tr), gAhead = GroundHeight(probe);
+                if (gHere > float.MinValue && gAhead > float.MinValue && gAhead > gHere)
+                    cliff = UnityEngine.Mathf.Min(gAhead - gHere, 12f) * hugCliff;
+            }
+            // target: 0 near a district (keep the full position.z lift) or `drop` over open ground, plus any
+            // cliff pre-climb
+            st.cur = UnityEngine.Mathf.MoveTowards(st.cur, (overDistrict ? 0f : drop) + cliff, hugEase * dt);
             if (UnityEngine.Mathf.Abs(st.cur) < 0.001f) return;
             tr.y += st.cur;
             SetMember(os, "Translation", tr);

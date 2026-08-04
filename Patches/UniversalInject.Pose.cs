@@ -571,7 +571,7 @@ namespace HumankindAssetFramework
                 string txt = File.Exists(path) ? File.ReadAllText(path) : "";
                 if (txt == hugSig) return;
                 hugSig = txt;
-                float drop = 0f, radius = 0f, look = 3f, ease = 4f;
+                float drop = 0f, radius = 0f, look = 3f, ease = 4f, cliff = 1f;
                 hugOnly.Clear(); hugSkip.Clear();
                 foreach (var raw in txt.Split('\n'))
                 {
@@ -595,11 +595,12 @@ namespace HumankindAssetFramework
                         case "radius": radius = v; break;
                         case "lookahead": look = v; break;
                         case "ease": ease = v; break;
+                        case "cliff": cliff = v; break;
                     }
                 }
-                hugDrop = drop; hugRadius = radius; hugLookahead = look; hugEase = ease;
+                hugDrop = drop; hugRadius = radius; hugLookahead = look; hugEase = ease; hugCliff = cliff;
                 RearmDistrictScan();   // filters changed -> the cached district set must be rebuilt
-                Plugin.Log.LogInfo($"[Hug] drop={drop} radius={radius} lookahead={look} ease={ease}" +
+                Plugin.Log.LogInfo($"[Hug] drop={drop} radius={radius} lookahead={look} ease={ease} cliff={cliff}" +
                                    (hugOnly.Count > 0 ? " only=" + string.Join(",", hugOnly) : "") +
                                    (hugSkip.Count > 0 ? " skip=" + string.Join(",", hugSkip) : ""));
             }

@@ -112,7 +112,7 @@ off, so nothing changes for existing models.
 | Knob | Question it answers |
 |---|---|
 | **Turn ease** (`turnRate` / `turnBank`) | how it changes heading — swept and banked, or the engine's instant snap |
-| **Terrain hug** (`hugDrop` / `hugLookahead`) | how it holds altitude — nap-of-the-earth over open country, climbing for the city |
+| **Terrain hug** (`hugDrop` / `hugLookahead`) | how it holds altitude — nap-of-the-earth over open country, climbing for the city and ahead of cliffs |
 | **Move tilt** (`moveTilt`) | its attitude while moving — nose-down forward-flight pitch |
 
 ## Turn ease — flown turns instead of the facing snap
@@ -151,6 +151,17 @@ Two things make the classification honest instead of guessed:
   `Extension_Era5_ZuluKingdom`, `Extension_ArtificialWonder_*` … alongside the FLAT kinds **`Exploitation`**
   (fields, vineyards, mines) and **`Ruin`**. Only `Extension_*` carries buildings, so the flat kinds go in
   `skip`.
+
+**Cliff anticipation** (same lead point, `cliff` in the dial file; 0 disables). The engine's terrain following
+is tied to the tile the unit is *on*, so a step up in the ground arrives at the cell boundary — the aircraft
+rises *into* the cliff instead of over it. The probe reads the ground height at the lead point and, if it
+stands higher than the ground here, adds that difference immediately, so the climb starts before the edge and
+the engine's own altitude catches up on arrival. Climb-only: anticipating a descent would drop the unit toward
+the high ground it is still crossing. **Implementation note:** the ground is read with a downward
+`Physics.RaycastAll`, taking the LOWEST hit and skipping units (layer 10 / `Presentation*` names) — the first
+version used a plain raycast and measured the helicopter's own army collider, i.e. compared unit heights, not
+terrain. The first probe logs what it hit; if it ever reports no ground collider, the fallback is the per-tile
+`TileInfo[].Elevation` data (needs world→hex coordinates and a world-unit scale).
 
 **Per model** (Model Factory ▸ Runtime): **Terrain hug — drop** (units, negative; 0 = off) and **Climb
 anticipation**. Registry keys `hugDrop` / `hugLookahead`; runtime-only, no re-bake.

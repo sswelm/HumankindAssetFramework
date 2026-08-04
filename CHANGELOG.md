@@ -10,6 +10,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Units & animation
 
+- **CLIFF ANTICIPATION — climbing before the edge, not into it (2026-08-05).** Terrain hug's lead point now
+  also reads the *ground* ahead: where the terrain steps up, the aircraft gains that height immediately instead
+  of rising at the cell boundary, and the engine's own tile-bound altitude catches up on arrival (climb-only —
+  anticipating a descent would sink toward the ridge still being crossed). Needed a physics reference and one
+  correction found by reading the log rather than the screen: the first probe was a plain downward raycast and
+  measured the helicopter's **own army collider**, so it compared unit heights, not terrain; it now uses
+  `RaycastAll`, skips units, and takes the lowest hit. Dial: `cliff` in `enc_hugterrain.txt`.
 - **TERRAIN HUG — nap-of-the-earth flight, climbing only for the city (2026-08-05).** The helicopter now
   **skims low over open ground and climbs only for built districts**, instead of cruising at skyline height
   everywhere. The engine's air altitude is already terrain-relative (it follows hills for free) but ignores
