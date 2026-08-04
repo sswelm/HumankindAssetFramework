@@ -359,11 +359,11 @@ namespace HumankindAssetFramework
         // `bank=6` deg, `snap=120` deg) polled ~1/s like the rotor trim; rate 0 or no file = fully off. Runs
         // BEFORE ApplyMoveTilt so the nose-down composes on top of the eased heading. State is position-matched
         // (nearest within 4u — the deploy poll's approximation) so multiple units smooth independently; a
-        // stacked squadron shares one state harmlessly (same spot, same heading). Yaw jumps beyond `snap`
-        // (battle placement, teleports) are taken instantly — easing a 180 across the map reads as drifting.
+        // stacked squadron shares one state harmlessly (same spot, same heading). Every yaw angle eases, 180s
+        // included; teleports/battle placement snap naturally by MISSING the position match (fresh state = target yaw).
         class TurnState { public UnityEngine.Vector3 pos; public float yaw; public float bank; public float lastT; }
         static readonly List<TurnState> turnStates = new List<TurnState>();
-        internal static float turnRate = 0f, turnBank = 0f, turnSnap = 120f;   // file-driven while spiking
+        internal static float turnRate = 0f, turnBank = 0f;   // file-driven while spiking
 
         static void ApplyTurnEase(ModelEntry e, object entry)
         {
@@ -386,8 +386,10 @@ namespace HumankindAssetFramework
             float dt = UnityEngine.Mathf.Clamp(now - st.lastT, 0f, 0.1f);
             st.pos = tr; st.lastT = now;
             float diff = UnityEngine.Mathf.DeltaAngle(st.yaw, target);
-            if (UnityEngine.Mathf.Abs(diff) > turnSnap) st.yaw = target;
-            else st.yaw = UnityEngine.Mathf.MoveTowardsAngle(st.yaw, target, turnRate * dt);
+            // NO yaw-size guard (user verdict: every angle eases, incl. full 180s). Teleports/battle placement
+            // still snap NATURALLY: a pawn that jumps >4u misses its position-matched state and the fresh state
+            // starts AT the target yaw. The old `snap` threshold was redundant and ate legitimate 180-turns.
+            st.yaw = UnityEngine.Mathf.MoveTowardsAngle(st.yaw, target, turnRate * dt);
             float wantBank = UnityEngine.Mathf.Clamp(diff / 45f, -1f, 1f) * turnBank;   // bank ~ how hard we're turning
             st.bank = UnityEngine.Mathf.MoveTowards(st.bank, wantBank, (UnityEngine.Mathf.Abs(turnBank) * 3f + 30f) * dt);
             if (UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(st.yaw, target)) < 0.01f && UnityEngine.Mathf.Abs(st.bank) < 0.05f)

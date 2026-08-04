@@ -537,7 +537,7 @@ namespace HumankindAssetFramework
                 string txt = File.Exists(path) ? File.ReadAllText(path) : "";
                 if (txt == turnSig) return;
                 turnSig = txt;
-                float rate = 0f, bank = 0f, snap = 120f;
+                float rate = 0f, bank = 0f;
                 foreach (var raw in txt.Split('\n'))
                 {
                     var line = raw.Trim();
@@ -549,11 +549,10 @@ namespace HumankindAssetFramework
                     {
                         case "rate": rate = v; break;
                         case "bank": bank = v; break;
-                        case "snap": snap = v; break;
                     }
                 }
-                turnRate = rate; turnBank = bank; turnSnap = snap;
-                Plugin.Log.LogInfo($"[TurnEase] rate={rate} deg/s, bank={bank} deg, snap={snap} deg");
+                turnRate = rate; turnBank = bank;
+                Plugin.Log.LogInfo($"[TurnEase] rate={rate} deg/s, bank={bank} deg");
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[TurnEase] " + ex.Message); }
         }
