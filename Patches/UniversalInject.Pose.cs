@@ -229,7 +229,10 @@ namespace HumankindAssetFramework
                 // clip and move like helicopters). The skeleton force above still applies, so it skins OUR mesh; the
                 // explicit write-back persists it. rotorSpinBones then RECLAIMS the hijacked rotor bones: BoneRotation
                 // slots override the clip's channel per bone, spun at a constant rate about the dialed axis.
-                if (e.useDonorClip) { DumpDonorChannels(ctx.entry, e); ApplyRotorSpin(ctx.entry, e); ApplyRotorTrim(ctx.entry, e); ctx.pawnEntries.SetValue(ctx.entry, ctx.idx); }
+                // Donor-clip path: the donor's clip drives the pose, but the pawn-level adjusters must still run —
+                // they live in ApplyAnimatedPose, which this branch bypasses, and without them Position offset
+                // (hover height!), moveTilt and runtime scale are silently dead on donor-clip models.
+                if (e.useDonorClip) { DumpDonorChannels(ctx.entry, e); ApplyRotorSpin(ctx.entry, e); ApplyRotorTrim(ctx.entry, e); ApplyPositionOffset(e, ctx.entry); ApplyMoveTilt(e, ctx.entry); ApplyScale(e, ctx.entry); ctx.pawnEntries.SetValue(ctx.entry, ctx.idx); }
                 else if (e.freezeDonorAnim && e.animId < 0) ApplyFreeze(ctx, e);
                 else if (e.animId >= 0) ApplyAnimatedPose(ctx, e);
                 else ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
