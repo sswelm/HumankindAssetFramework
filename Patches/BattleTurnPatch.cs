@@ -202,10 +202,50 @@ namespace HumankindAssetFramework
                     catch { }
                 }
                 pending.RemoveAt(i);
-                try { replaying = true; miTeleport.Invoke(fsm, null); }
-                catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] deferred teleport: " + ex.Message); }
-                finally { replaying = false; }
+                ReplayAligned(fsm);
             }
+        }
+
+        // Start the attack clip DETERMINISTICALLY at frame 0 (shell/smoke sync fix): the vanilla teleport plays
+        // the state with randomOffset:true — a random clip phase — while the artillery scheduler times the shell
+        // + launch smoke to the fire event's literal clip time. In vanilla the mismatch hid in the same-frame
+        // chaos; on our shared clock it showed as a per-shot random shell/smoke drift (the sound + FLASH ride
+        // the mecanim events, so they stayed with the anim). randomOffset:false makes the mecanim fire moment
+        // land exactly on triggerDelay = NormalizedTime x clipDuration — the scheduler's own arithmetic.
+        static MethodInfo miPlayState; static object simpleAttackId, capAttack; static bool playResolveFailed;
+        static void ReplayAligned(object fsm)
+        {
+            try
+            {
+                var pawn = UniversalInject.GetMember(fsm, "ownerPawn");
+                if (pawn != null && !playResolveFailed)
+                {
+                    if (miPlayState == null)
+                    {
+                        foreach (var m in pawn.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                            if (m.Name == "PlayAnimationState" && m.GetParameters().Length == 7) { miPlayState = m; break; }
+                        var avn = AccessTools.TypeByName("AnimationVariableNames")
+                               ?? AccessTools.TypeByName("Amplitude.Mercury.Presentation.AnimationVariableNames")
+                               ?? AccessTools.TypeByName("Amplitude.Mercury.Animation.AnimationVariableNames");
+                        simpleAttackId = avn != null ? AccessTools.Field(avn, "SimpleAttackState")?.GetValue(null) : null;
+                        if (miPlayState != null && simpleAttackId != null)
+                            capAttack = Enum.Parse(miPlayState.GetParameters()[2].ParameterType, "Attack");
+                        if (miPlayState == null || simpleAttackId == null || capAttack == null)
+                        { playResolveFailed = true; Plugin.Log.LogWarning("[BattleTurn] PlayAnimationState/SimpleAttackState not resolvable — falling back to the random-offset teleport (shell may drift)"); }
+                    }
+                    if (!playResolveFailed)
+                    {
+                        var subs = UniversalInject.GetMember(pawn, "SubPawns");
+                        int cnt = Convert.ToInt32(UniversalInject.GetMember(pawn, "SubPawnCount"));
+                        miPlayState.Invoke(pawn, new object[] { simpleAttackId, 0f, capAttack, false, subs, cnt, true });
+                        return;
+                    }
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] aligned replay failed (" + ex.Message + ") — using the vanilla teleport"); }
+            try { replaying = true; miTeleport.Invoke(fsm, null); }
+            catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] deferred teleport: " + ex.Message); }
+            finally { replaying = false; }
         }
     }
 
