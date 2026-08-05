@@ -120,7 +120,7 @@ namespace HumankindAssetFramework
     // our held recoil clip all land together at alignment. Single caller = the map bombard. ----
     [HarmonyPatch] internal static class Hk_BombardAnimHold
     {
-        class Pending { public object fsm; public float due; }
+        class Pending { public object fsm; public float due; public float start; }
         static readonly List<Pending> pending = new List<Pending>();
         static MethodInfo miTeleport;
         static bool replaying;
@@ -141,13 +141,16 @@ namespace HumankindAssetFramework
                 if (pawn == null) return true;
                 float hold = UniversalInject.TurnHoldTransformSeconds(pawn);
                 if (hold <= 0f) return true;
-                pending.Add(new Pending { fsm = __instance, due = UnityEngine.Time.time + hold });
+                pending.Add(new Pending { fsm = __instance, due = UnityEngine.Time.time + hold, start = UnityEngine.Time.time });
                 Plugin.Log.LogInfo($"[BattleTurn] bombard attack pose deferred +{hold:F2}s (muzzle/sound wait for the turn)");
                 return false;
             }
             catch { return true; }
         }
-        // Ticked from Plugin.Update: replay deferred teleports when their hold elapses.
+        // Ticked from Plugin.Update: replay deferred teleports when their hold elapses. At the deadline the
+        // remaining turn is RE-CHECKED (the true-bearing aim override registers a frame after the defer, so the
+        // original hold was computed against the hex-quantized flip angle — up to 30 deg short); still-misaligned
+        // pawns get pushed back in small steps until aligned or the 4 s cap from the ORIGINAL defer expires.
         internal static void Tick()
         {
             if (pending.Count == 0 || miTeleport == null) return;
@@ -156,6 +159,16 @@ namespace HumankindAssetFramework
             {
                 if (now < pending[i].due) continue;
                 var fsm = pending[i].fsm;
+                if (now - pending[i].start < 4f)
+                {
+                    try
+                    {
+                        var pawn = UniversalInject.GetMember(fsm, "ownerPawn");
+                        if (pawn != null && UniversalInject.TurnHoldTransformSeconds(pawn) > 0f)
+                        { pending[i].due = now + 0.1f; continue; }   // aim not reached yet — check again shortly
+                    }
+                    catch { }
+                }
                 pending.RemoveAt(i);
                 try { replaying = true; miTeleport.Invoke(fsm, null); }
                 catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] deferred teleport: " + ex.Message); }

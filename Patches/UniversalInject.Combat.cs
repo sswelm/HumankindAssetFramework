@@ -90,6 +90,26 @@ namespace HumankindAssetFramework
         // formation (FlipPawnsGrid Teleport = the instant facing snap) — so the pawn TRANSFORM already faces the
         // target while the eased ObjectSpace yaw still lags. remaining = eased-vs-transform, no snap-ordering
         // race. Returns 0 when the striker has no easing (no entry AND no Formation Lab link) or is aligned.
+        // The strike's target tile as a Unity-world point (the pawn Transforms' space, cyclicity handled by the
+        // world controller). Vector3.zero on any resolution failure — callers fall back to the quantized facing.
+        static object miToVector3Ext;   // cached MethodInfo (WorldPositionExtensions.ToVector3(WorldPosition, bool))
+        static UnityEngine.Vector3 StrikeTargetWorldPos(object strike)
+        {
+            try
+            {
+                int tile = Convert.ToInt32(GetMember(strike, "TargetTileIndex"));
+                if (tile < 0) return UnityEngine.Vector3.zero;
+                var wpT = GameBinding.WorldPosition;
+                var extT = GameBinding.WorldPositionExtensions;
+                if (wpT == null || extT == null) return UnityEngine.Vector3.zero;
+                if (miToVector3Ext == null) miToVector3Ext = AccessTools.Method(extT, "ToVector3");
+                if (!(miToVector3Ext is System.Reflection.MethodInfo mi)) return UnityEngine.Vector3.zero;
+                var wp = Activator.CreateInstance(wpT, tile);
+                return mi.Invoke(null, new object[] { wp, false }) is UnityEngine.Vector3 v ? v : UnityEngine.Vector3.zero;
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] StrikeTargetWorldPos: " + ex.Message); return UnityEngine.Vector3.zero; }
+        }
+
         internal static float TurnHoldForStrike(object strike)
         {
             try
@@ -109,17 +129,28 @@ namespace HumankindAssetFramework
                     float rate = TurnRateForUnitDef(unitDef);                  // our entry OR a Formation Lab vanilla link
                     if (rate <= 0f) return 0f;                                 // no easing — vanilla pacing
                     if (!(GetMember(unit, "Pawns") is System.Collections.IEnumerable pawns)) return 0f;
+                    // TRUE-BEARING AIM: the flip put the unit on a HEX-QUANTIZED angle (up to 30 deg off the
+                    // target); resolve the strike's target tile to a Unity-world point so each pawn can be
+                    // steered to its REAL bearing instead. Vector3.zero = resolution failed -> quantized fallback.
+                    var targetPos = StrikeTargetWorldPos(strike);
+                    float hold = 0f; bool first = true;
                     foreach (var pawn in pawns)
                     {
                         if (!(GetMember(pawn, "Transform") is UnityEngine.Transform tr)) continue;
-                        float target = tr.eulerAngles.y;                       // already flipped to the strike facing
+                        float target = tr.eulerAngles.y;                       // already flipped to the strike facing (quantized)
+                        if (targetPos != UnityEngine.Vector3.zero)
+                        {
+                            target = UnityEngine.Mathf.Atan2(targetPos.x - tr.position.x, targetPos.z - tr.position.z) * UnityEngine.Mathf.Rad2Deg;
+                            SetAimOverride(tr.position, target, 10f);          // ease target = the real bearing while the strike plays out
+                        }
+                        if (!first) continue;                                  // the FIRST pawn's remaining turn sets the hold; the rest just get their aim
+                        first = false;
                         if (!TryTurnYawAt(tr.position, out float eased)) return 0f;
                         float miss = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(eased, target));
-                        float hold = miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.2f, 3f) : 0f;
-                        Plugin.Log.LogInfo($"[BattleTurn] strike hold '{unitDef}': eased={eased:F0} target={target:F0} miss={miss:F0}deg -> +{hold:F2}s");
-                        return hold;
+                        hold = miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.2f, 3f) : 0f;
+                        Plugin.Log.LogInfo($"[BattleTurn] strike hold '{unitDef}': eased={eased:F0} aim={target:F0}{(targetPos != UnityEngine.Vector3.zero ? " (true bearing)" : " (quantized)")} miss={miss:F0}deg -> +{hold:F2}s");
                     }
-                    return 0f;
+                    return hold;
                 }
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] TurnHoldForStrike: " + ex.Message); }

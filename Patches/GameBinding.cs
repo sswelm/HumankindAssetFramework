@@ -86,6 +86,8 @@ namespace HumankindAssetFramework
         internal static Type AttackAnimationStateMachine => Cached("Amplitude.Mercury.Presentation.AttackAnimationStateMachine");
         internal static Type AbstractAnimationStateMachine => Cached("Amplitude.Mercury.Presentation.AbstractAnimationStateMachine");
         internal static Type PresentationArtilleryStrikeController => Cached("Amplitude.Mercury.Presentation.PresentationArtilleryStrikeController");
+        internal static Type WorldPosition          => Cached("Amplitude.Mercury.WorldPosition");
+        internal static Type WorldPositionExtensions => Cached("WorldPositionExtensions", "Amplitude.Mercury.WorldPositionExtensions");
         internal static Type UnitActionFaceEnemy      => Cached("Amplitude.Mercury.Presentation.UnitActionFaceEnemy");
         internal static Type MecanimEventInterpreter  => Cached("Amplitude.Mercury.Animation.MecanimEventInterpreter");
         internal static Type AlterationFireProjectile => Cached("Amplitude.Mercury.Animation.AlterationFireProjectile");
@@ -190,6 +192,8 @@ namespace HumankindAssetFramework
             new Dep(AttackAnimationStateMachine, nameof(AttackAnimationStateMachine), "TeleportToSimpleAttack"),
             new Dep(AbstractAnimationStateMachine, nameof(AbstractAnimationStateMachine), "StepWaitingDelay", "ownerPawn"),
             new Dep(PresentationArtilleryStrikeController, nameof(PresentationArtilleryStrikeController), "ScheduleArtilleryStrikeProjectileLaunch", "ScheduleArtilleryStrikeHit"),
+            new Dep(WorldPosition, nameof(WorldPosition)),
+            new Dep(WorldPositionExtensions, nameof(WorldPositionExtensions), "ToVector3"),
             new Dep(UnitActionFaceEnemy, nameof(UnitActionFaceEnemy), "StartUnitAction", "actionScope", "AttackerBattleUnit"),
             new Dep(MecanimEventInterpreter, nameof(MecanimEventInterpreter)),
             new Dep(AlterationFireProjectile, nameof(AlterationFireProjectile)),

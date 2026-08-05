@@ -365,6 +365,34 @@ namespace HumankindAssetFramework
         static readonly List<TurnState> turnStates = new List<TurnState>();
         internal static float turnRate = 0f, turnBank = 0f;   // file-driven while spiking
 
+        // TRUE-BEARING AIM (2026-08-05, "turn to the exact angle needed to realistically shoot"): a vanilla map
+        // bombard flips the unit to a HEX-QUANTIZED angle (GetHexagonAngleToPosition = one of six directions, up
+        // to 30 deg off the target) — invisible at snap speed, glaring on an eased turn. While a strike is in
+        // progress an override registered here (position-matched, like everything in this system) replaces the
+        // ease TARGET with the real bearing to the target tile; the barrel lays ON the target, and after the
+        // override expires the unit eases back to the game's quantized facing (the crew re-laying the gun).
+        class AimOverride { public UnityEngine.Vector3 pos; public float yaw; public float until; }
+        static readonly List<AimOverride> aimOverrides = new List<AimOverride>();
+        internal static void SetAimOverride(UnityEngine.Vector3 pos, float yaw, float duration)
+        {
+            float now = UnityEngine.Time.time;
+            for (int i = aimOverrides.Count - 1; i >= 0; i--) if (now > aimOverrides[i].until) aimOverrides.RemoveAt(i);
+            foreach (var o in aimOverrides)
+            { var d = o.pos - pos; d.y = 0f; if (d.sqrMagnitude < 4f) { o.pos = pos; o.yaw = yaw; o.until = now + duration; return; } }
+            aimOverrides.Add(new AimOverride { pos = pos, yaw = yaw, until = now + duration });
+        }
+        static bool TryAimAt(UnityEngine.Vector3 pos, out float yaw)
+        {
+            yaw = 0f; float now = UnityEngine.Time.time; float best = 16f; bool found = false;
+            for (int i = 0; i < aimOverrides.Count; i++)
+            {
+                if (now > aimOverrides[i].until) continue;
+                var d = aimOverrides[i].pos - pos; d.y = 0f;
+                if (d.sqrMagnitude < best) { best = d.sqrMagnitude; yaw = aimOverrides[i].yaw; found = true; }
+            }
+            return found;
+        }
+
         // How far (deg) the pawn nearest `pos` still has to turn (eased yaw vs the game's target). 0 = aligned,
         // no state, or easing off. Main-thread only (pose hook + Plugin.Update), like every turnStates consumer.
         // Battle-turn spike: lets the fire-clip arm HOLD the recoil until the barrel actually faces the enemy.
@@ -422,7 +450,10 @@ namespace HumankindAssetFramework
             float rate = TurnRateForUnitDef(GetMember(unit, "UnitDefinition")?.ToString() ?? "");
             if (rate <= 0f || !(GetMember(pawn, "Transform") is UnityEngine.Transform tr)) return 0f;
             if (!TryTurnYawAt(tr.position, out float eased)) return 0f;
-            float miss = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(eased, tr.eulerAngles.y));
+            // an active true-bearing override IS the aim the shot should wait for; the flipped transform
+            // (hex-quantized) is the fallback when no strike override exists
+            float target = TryAimAt(tr.position, out float ay) ? ay : tr.eulerAngles.y;
+            float miss = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(eased, target));
             return miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.2f, 3f) : 0f;
         }
 
@@ -461,7 +492,9 @@ namespace HumankindAssetFramework
             try { tr = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return; }
             var ro = GetMember(os, "Rotation");
             if (!TryQuaternion(ro, out var rot)) return;
-            float target = rot.eulerAngles.y;
+            // true-bearing aim: an active strike override replaces the game's (hex-quantized) yaw as the target
+            bool aimed = TryAimAt(tr, out float aimYaw);
+            float target = aimed ? aimYaw : rot.eulerAngles.y;
             float now = UnityEngine.Time.time;
             TurnState st = null; float best = 16f;   // nearest live state within 4 world units
             for (int i = turnStates.Count - 1; i >= 0; i--)
@@ -480,8 +513,8 @@ namespace HumankindAssetFramework
             st.yaw = UnityEngine.Mathf.MoveTowardsAngle(st.yaw, target, rate * dt);
             float wantBank = UnityEngine.Mathf.Clamp(diff / 45f, -1f, 1f) * bank;   // bank ~ how hard we're turning
             st.bank = UnityEngine.Mathf.MoveTowards(st.bank, wantBank, (UnityEngine.Mathf.Abs(bank) * 3f + 30f) * dt);
-            if (UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(st.yaw, target)) < 0.01f && UnityEngine.Mathf.Abs(st.bank) < 0.05f)
-                return;   // converged — leave the game's exact value
+            if (!aimed && UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(st.yaw, target)) < 0.01f && UnityEngine.Mathf.Abs(st.bank) < 0.05f)
+                return;   // converged on the game's own value — leave it (while AIMED we must keep writing: the game re-writes the quantized yaw every frame)
             var eased = UnityEngine.Quaternion.Euler(rot.eulerAngles.x, st.yaw, st.bank);   // keep the game's pitch; z = our bank
             if (ro is UnityEngine.Quaternion) SetMember(os, "Rotation", eased);
             else
