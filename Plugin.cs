@@ -234,6 +234,7 @@ namespace HumankindAssetFramework
                 typeof(Hk_BattleHoldFire),  // BATTLE TURN spike: hold PawnActionRangedStartAttack until the shooter's turn completes (2026-08-05)
                 typeof(Hk_BattleTurnProbe), // BATTLE TURN spike DIAGNOSTIC: log RotationFSM turn starts (which path does an attack's turn take?) (2026-08-05)
                 typeof(Hk_BattleTurnStep),  // BATTLE TURN spike DIAGNOSTIC: log StepTurning route (animated turn-anim vs unanimated 0.5 s lerp) per unit (2026-08-05)
+                typeof(Hk_BattleAttackDelay), // BATTLE TURN spike: extend AttackFSM delayDuration by the remaining turn-ease time — the shell waits for the barrel (2026-08-05)
             };
             int skipped = 0;
             foreach (var t in hooks)

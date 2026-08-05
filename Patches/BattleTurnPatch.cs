@@ -185,6 +185,44 @@ namespace HumankindAssetFramework
         }
     }
 
+    // ---- Patch C: hold the ATTACK FSM for turn-easing units (2026-08-05, iteration 3). The MAP attack path
+    // (UnitActionTriggerAttack, bombards) starts each pawn's AttackAnimationStateMachine directly with only a
+    // small random stagger (delayDuration = GetAnimationRandomDelay) — the attack anim AND the shell (fired by
+    // the anim's FireProjectile mecanim event) begin while the unit is still pivoting. Postfix on the 7-arg
+    // Start extends the FSM's own delayDuration by the pawn's remaining turn-ease time — OUR entries only
+    // (TurnHoldSeconds returns 0 for vanilla units and when easing is off), capped at 3 s. ----
+    [HarmonyPatch] internal static class Hk_BattleAttackDelay
+    {
+        static FieldInfo fiDelay, fiOwner;
+        static MethodBase TargetMethod()
+        {
+            var t = GameBinding.AttackAnimationStateMachine;
+            MethodBase m = null;
+            if (t != null)
+                foreach (var mm in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                    if (mm.Name == "Start" && mm.GetParameters().Length == 7) { m = mm; break; }
+            fiDelay = t != null ? AccessTools.Field(t, "delayDuration") : null;
+            fiOwner = t != null ? AccessTools.Field(t, "ownerPawn") : null;
+            if (m != null && fiDelay != null && fiOwner != null) Plugin.Log.LogInfo("[BattleTurn] hooked AttackAnimationStateMachine.Start (attack waits for turn ease)");
+            else Plugin.Log.LogWarning("[BattleTurn] NOT found: AttackAnimationStateMachine.Start/delayDuration/ownerPawn — attack won't wait for the turn");
+            return (fiDelay != null && fiOwner != null) ? m : null;
+        }
+        static void Postfix(object __instance)
+        {
+            try
+            {
+                var pawn = fiOwner.GetValue(__instance);
+                if (pawn == null) return;
+                if (!(UniversalInject.GetMember(pawn, "Transform") is UnityEngine.Transform tr)) return;
+                float extra = UniversalInject.TurnHoldSeconds(pawn, tr.position);
+                if (extra <= 0f) return;
+                fiDelay.SetValue(__instance, Convert.ToSingle(fiDelay.GetValue(__instance)) + extra);
+                Plugin.Log.LogInfo($"[BattleTurn] attack FSM delayed {extra:F2}s (waiting for the turn)");
+            }
+            catch { }
+        }
+    }
+
     // ---- Patch B: hold fire while turning. PawnActionRangedStartAttack.OnReadyToStart is called from
     // StartPawnAction and re-tried from UpdatePawnAction every frame until isReadyToStart latches true — the
     // action's own wait loop. While the shooter's RotationFSM is running (the group's LookAt is mid-turn) we

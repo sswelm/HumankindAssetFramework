@@ -380,6 +380,22 @@ namespace HumankindAssetFramework
             return st == null ? 0f : UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(st.yaw, st.targetYaw));
         }
 
+        // Seconds until the pawn nearest `pos` finishes its eased turn — OUR entries only (vanilla pawns don't
+        // ease, so they keep vanilla attack pacing). Feeds the AttackFSM delay patch so the attack animation and
+        // its FireProjectile mecanim event (the shell!) wait for the barrel to face the target.
+        internal static float TurnHoldSeconds(object pawn, UnityEngine.Vector3 pos)
+        {
+            var unit = GetMember(pawn, "PresentationUnit");
+            string unitDef = GetMember(unit, "UnitDefinition")?.ToString() ?? "";
+            var e = FindEntryForUnitDefinition(unitDef);
+            if (e == null) return 0f;
+            float rate = turnRate > 0f ? turnRate : e.turnRate;
+            if (rate <= 0f) return 0f;
+            float miss = TurnMisalignAt(pos);
+            if (miss < 8f) return 0f;                                        // already (nearly) aligned
+            return UnityEngine.Mathf.Min(miss / rate + 0.15f, 3f);           // remaining turn + a beat, capped
+        }
+
         static void ApplyTurnEase(ModelEntry e, object entry)
         {
             // per-model (Factory "Turn ease — rate") with the live dial file as an override, same rule as the hug.
