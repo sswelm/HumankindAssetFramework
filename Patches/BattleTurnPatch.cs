@@ -106,6 +106,25 @@ namespace HumankindAssetFramework
         }
     }
 
+    // ---- LAUNCH POSE REFRESH (shell/smoke position fix): re-capture + re-aim the shell's spawn pose at FIRE
+    // time — vanilla captured it at schedule time, i.e. at the PRE-pivot barrel. Invoked through the strike's
+    // launch-action delegate, which calls through the detour (delegate-invoked = inline-safe). ----
+    [HarmonyPatch] internal static class Hk_ArtilleryLaunchPose
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = GameBinding.PresentationArtilleryStrike;
+            var m = t != null ? AccessTools.Method(t, "TriggerArtilleryStrikeFX") : null;
+            if (m != null) Plugin.Log.LogInfo("[BattleTurn] hooked TriggerArtilleryStrikeFX (launch pose refresh)");
+            else Plugin.Log.LogWarning("[BattleTurn] NOT found: TriggerArtilleryStrikeFX — shell will spawn at the pre-turn pose");
+            return m;
+        }
+        static void Prefix(object __instance)
+        {
+            try { UniversalInject.RefreshStrikeLaunchPose(__instance); } catch { }
+        }
+    }
+
     // ---- MAP BOMBARD hold (VERIFIED): a world-map bombard never touches the battle attack actions —
     // PresentationArtilleryStrike.TriggerBombardAnimation does FlipPawnsGrid(angle, Teleport) (THE instant
     // facing snap) plus AttackFSM.TeleportToSimpleAttack(), and the shell + impact are fired by PLAIN

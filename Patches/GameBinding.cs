@@ -193,7 +193,7 @@ namespace HumankindAssetFramework
             new Dep(AttackAnimationStateMachine, nameof(AttackAnimationStateMachine), "TeleportToSimpleAttack"),
             new Dep(AbstractAnimationStateMachine, nameof(AbstractAnimationStateMachine), "StepWaitingDelay", "ownerPawn"),
             new Dep(PresentationArtilleryStrikeController, nameof(PresentationArtilleryStrikeController), "ScheduleArtilleryStrikeProjectileLaunch", "ScheduleArtilleryStrikeHit"),
-            new Dep(PresentationArtilleryStrike, nameof(PresentationArtilleryStrike), "TriggerArtilleryStrikeVisuals", "TargetTileIndex", "AttackerArmyGUID"),
+            new Dep(PresentationArtilleryStrike, nameof(PresentationArtilleryStrike), "TriggerArtilleryStrikeVisuals", "TriggerArtilleryStrikeFX", "PrepareArtilleryStrikeFX", "projectileData", "TargetTileIndex", "AttackerArmyGUID"),
             new Dep(WorldPosition, nameof(WorldPosition)),
             new Dep(WorldPositionExtensions, nameof(WorldPositionExtensions), "ToVector3"),
             new Dep(UnitActionFaceEnemy, nameof(UnitActionFaceEnemy), "StartUnitAction", "actionScope", "AttackerBattleUnit"),
