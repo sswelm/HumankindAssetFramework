@@ -86,6 +86,45 @@ namespace HumankindAssetFramework
         }
     }
 
+    // ---- STRIKE CLOCK PREP (sync fix 2026-08-05): arm the strike's aim overrides + its ONE shared release
+    // time BEFORE anything inside TriggerArtilleryStrikeVisuals runs (the flip, the attack-pose teleport, the
+    // launch/hit schedules). Every consumer then reads the same clock, so recoil, muzzle flash, shot sound,
+    // smoke and shell stay in lockstep — computing holds per-consumer desynced the bang from the animation. ----
+    [HarmonyPatch] internal static class Hk_ArtilleryAimPrep
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = GameBinding.PresentationArtilleryStrike;
+            var m = t != null ? AccessTools.Method(t, "TriggerArtilleryStrikeVisuals") : null;
+            if (m != null) Plugin.Log.LogInfo("[BattleTurn] hooked TriggerArtilleryStrikeVisuals (strike clock prep)");
+            else Plugin.Log.LogWarning("[BattleTurn] NOT found: TriggerArtilleryStrikeVisuals — strike effects may drift ~0.25s apart");
+            return m;
+        }
+        static void Prefix(object __instance)
+        {
+            try { UniversalInject.TurnHoldForStrike(__instance); } catch { }
+        }
+    }
+
+    // ---- LAUNCH POSE REFRESH (shell/smoke position fix): re-capture + re-aim the shell's spawn pose at FIRE
+    // time — vanilla captured it at schedule time, i.e. at the PRE-pivot barrel. Invoked through the strike's
+    // launch-action delegate, which calls through the detour (delegate-invoked = inline-safe). ----
+    [HarmonyPatch] internal static class Hk_ArtilleryLaunchPose
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = GameBinding.PresentationArtilleryStrike;
+            var m = t != null ? AccessTools.Method(t, "TriggerArtilleryStrikeFX") : null;
+            if (m != null) Plugin.Log.LogInfo("[BattleTurn] hooked TriggerArtilleryStrikeFX (launch pose refresh)");
+            else Plugin.Log.LogWarning("[BattleTurn] NOT found: TriggerArtilleryStrikeFX — shell will spawn at the pre-turn pose");
+            return m;
+        }
+        static void Prefix(object __instance)
+        {
+            try { UniversalInject.RefreshStrikeLaunchPose(__instance); } catch { }
+        }
+    }
+
     // ---- MAP BOMBARD hold (VERIFIED): a world-map bombard never touches the battle attack actions —
     // PresentationArtilleryStrike.TriggerBombardAnimation does FlipPawnsGrid(angle, Teleport) (THE instant
     // facing snap) plus AttackFSM.TeleportToSimpleAttack(), and the shell + impact are fired by PLAIN
@@ -120,7 +159,7 @@ namespace HumankindAssetFramework
     // our held recoil clip all land together at alignment. Single caller = the map bombard. ----
     [HarmonyPatch] internal static class Hk_BombardAnimHold
     {
-        class Pending { public object fsm; public float due; public float start; }
+        class Pending { public object fsm; public float due; public float start; public bool fixedDue; }
         static readonly List<Pending> pending = new List<Pending>();
         static MethodInfo miTeleport;
         static bool replaying;
@@ -139,9 +178,21 @@ namespace HumankindAssetFramework
                 if (replaying) return true;
                 var pawn = UniversalInject.GetMember(__instance, "ownerPawn");
                 if (pawn == null) return true;
+                // PREFERRED: the strike's ONE shared release time (armed by Hk_ArtilleryAimPrep before the
+                // flip) — the launch/hit schedules use the same clock, so anim, sound, smoke and shell stay
+                // in lockstep. Fallback: own estimate + deadline re-check (no strike context, e.g. dial off).
+                float now = UnityEngine.Time.time;
+                if (UniversalInject.GetMember(pawn, "Transform") is UnityEngine.Transform tr &&
+                    UniversalInject.TryAimRelease(tr.position, out float rel))
+                {
+                    if (rel <= now) return true;   // clock already elapsed — fire now
+                    pending.Add(new Pending { fsm = __instance, due = rel, start = now, fixedDue = true });
+                    Plugin.Log.LogInfo($"[BattleTurn] bombard attack pose deferred +{rel - now:F2}s (strike clock)");
+                    return false;
+                }
                 float hold = UniversalInject.TurnHoldTransformSeconds(pawn);
                 if (hold <= 0f) return true;
-                pending.Add(new Pending { fsm = __instance, due = UnityEngine.Time.time + hold, start = UnityEngine.Time.time });
+                pending.Add(new Pending { fsm = __instance, due = now + hold, start = now });
                 Plugin.Log.LogInfo($"[BattleTurn] bombard attack pose deferred +{hold:F2}s (muzzle/sound wait for the turn)");
                 return false;
             }
@@ -159,7 +210,7 @@ namespace HumankindAssetFramework
             {
                 if (now < pending[i].due) continue;
                 var fsm = pending[i].fsm;
-                if (now - pending[i].start < 4f)
+                if (!pending[i].fixedDue && now - pending[i].start < 4f)
                 {
                     try
                     {
@@ -170,10 +221,50 @@ namespace HumankindAssetFramework
                     catch { }
                 }
                 pending.RemoveAt(i);
-                try { replaying = true; miTeleport.Invoke(fsm, null); }
-                catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] deferred teleport: " + ex.Message); }
-                finally { replaying = false; }
+                ReplayAligned(fsm);
             }
+        }
+
+        // Start the attack clip DETERMINISTICALLY at frame 0 (shell/smoke sync fix): the vanilla teleport plays
+        // the state with randomOffset:true — a random clip phase — while the artillery scheduler times the shell
+        // + launch smoke to the fire event's literal clip time. In vanilla the mismatch hid in the same-frame
+        // chaos; on our shared clock it showed as a per-shot random shell/smoke drift (the sound + FLASH ride
+        // the mecanim events, so they stayed with the anim). randomOffset:false makes the mecanim fire moment
+        // land exactly on triggerDelay = NormalizedTime x clipDuration — the scheduler's own arithmetic.
+        static MethodInfo miPlayState; static object simpleAttackId, capAttack; static bool playResolveFailed;
+        static void ReplayAligned(object fsm)
+        {
+            try
+            {
+                var pawn = UniversalInject.GetMember(fsm, "ownerPawn");
+                if (pawn != null && !playResolveFailed)
+                {
+                    if (miPlayState == null)
+                    {
+                        foreach (var m in pawn.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                            if (m.Name == "PlayAnimationState" && m.GetParameters().Length == 7) { miPlayState = m; break; }
+                        var avn = AccessTools.TypeByName("AnimationVariableNames")
+                               ?? AccessTools.TypeByName("Amplitude.Mercury.Presentation.AnimationVariableNames")
+                               ?? AccessTools.TypeByName("Amplitude.Mercury.Animation.AnimationVariableNames");
+                        simpleAttackId = avn != null ? AccessTools.Field(avn, "SimpleAttackState")?.GetValue(null) : null;
+                        if (miPlayState != null && simpleAttackId != null)
+                            capAttack = Enum.Parse(miPlayState.GetParameters()[2].ParameterType, "Attack");
+                        if (miPlayState == null || simpleAttackId == null || capAttack == null)
+                        { playResolveFailed = true; Plugin.Log.LogWarning("[BattleTurn] PlayAnimationState/SimpleAttackState not resolvable — falling back to the random-offset teleport (shell may drift)"); }
+                    }
+                    if (!playResolveFailed)
+                    {
+                        var subs = UniversalInject.GetMember(pawn, "SubPawns");
+                        int cnt = Convert.ToInt32(UniversalInject.GetMember(pawn, "SubPawnCount"));
+                        miPlayState.Invoke(pawn, new object[] { simpleAttackId, 0f, capAttack, false, subs, cnt, true });
+                        return;
+                    }
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] aligned replay failed (" + ex.Message + ") — using the vanilla teleport"); }
+            try { replaying = true; miTeleport.Invoke(fsm, null); }
+            catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] deferred teleport: " + ex.Message); }
+            finally { replaying = false; }
         }
     }
 

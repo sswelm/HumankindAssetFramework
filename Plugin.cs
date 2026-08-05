@@ -230,6 +230,8 @@ namespace HumankindAssetFramework
                 typeof(Hk_FormationSpawnDiag),     // FORMATION axis TEMP diagnostic: log dummies/pawns/health at InstantiatePawns for >9-dummy formations (2026-07-27)
                 typeof(Hk_FormationPawnScale),     // FORMATION axis: per-model Scale from the registry link (pawn root localScale -> GPU TRS) (2026-07-28)
                 typeof(Hk_SandboxSave), typeof(Hk_SandboxLoad),  // FACING PERSIST: capture each army's FormationAngle on save, restore on load (the standard save has no facing) (2026-08-01)
+                typeof(Hk_ArtilleryAimPrep),  // BATTLE TURN: arm the strike's aim overrides + ONE shared release clock before flip/teleport/schedules — keeps anim, sound, smoke, shell in lockstep (2026-08-05)
+                typeof(Hk_ArtilleryLaunchPose), // BATTLE TURN: re-capture + re-aim the shell's spawn pose at FIRE time (vanilla captures it pre-pivot; the transform never turns with the eased model) (2026-08-05)
                 typeof(Hk_ArtilleryHold),     // BATTLE TURN (verified): MAP BOMBARD — add the striker's remaining turn-ease time to the artillery launch/hit schedules (2026-08-05, docs/Turn-Ease.md)
                 typeof(Hk_BombardAnimHold),   // BATTLE TURN (verified): defer the bombard's TeleportToSimpleAttack so the donor muzzle flash + shot SOUND also wait for the turn (2026-08-05)
                 typeof(Hk_BattleHoldFire),    // BATTLE TURN experimental (hold=1): hold a BATTLE ranged attack until the shooter's rotation FSM finishes (2026-08-05)

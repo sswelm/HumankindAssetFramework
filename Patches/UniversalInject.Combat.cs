@@ -110,6 +110,28 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] StrikeTargetWorldPos: " + ex.Message); return UnityEngine.Vector3.zero; }
         }
 
+        // LAUNCH POSE REFRESH (shell/smoke position fix): vanilla captures the shell's spawn position +
+        // direction (muzzle bone TRS) at SCHEDULE time — before our held pivot has even started — so the
+        // shell and its launch smoke appeared at the PRE-TURN barrel pose. Prefixed onto
+        // TriggerArtilleryStrikeFX (the delayed launch action): (1) re-run PrepareArtilleryStrikeFX so the
+        // muzzle is re-read at FIRE time (the attack clip is at its fire frame by now), then (2) rotate the
+        // captured pose from the pawn TRANSFORM's hex-quantized yaw onto the true-bearing aim — the transform
+        // never turns with the eased GPU model, so a raw recapture would still be up to 30 deg off.
+        internal static void RefreshStrikeLaunchPose(object strike)
+        {
+            try
+            {
+                var prep = AccessTools.Method(strike.GetType(), "PrepareArtilleryStrikeFX");
+                if (prep == null) return;
+                // Refresh projectileData off the LIVE pose. The bearing rotation itself now happens INSIDE this
+                // call: PrepareArtilleryStrikeFX reads the muzzle via GetBoneTRS, whose postfix (AimRotateBoneTRS)
+                // rotates every TRS onto the aim override while the strike is live — the same seam that fixes the
+                // mecanim muzzle smoke. Rotating here TOO would double-rotate the shell.
+                prep.Invoke(strike, new object[] { 0f, 0f });
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] RefreshStrikeLaunchPose: " + ex.Message); }
+        }
+
         internal static float TurnHoldForStrike(object strike)
         {
             try
@@ -126,29 +148,41 @@ namespace HumankindAssetFramework
                     var unit = GetMember(army, "PresentationUnit");
                     if (unit == null || GuidToLong(GetMember(unit, "GUID")) != aguid) continue;
                     string unitDef = GetMember(unit, "UnitDefinition")?.ToString() ?? "";
+                    if (!(GetMember(unit, "Pawns") is System.Collections.IEnumerable pawns)) return 0f;
+                    // ONE SHARED CLOCK (sync fix): if this strike is already armed, every caller — the
+                    // Visuals prefix, the teleport defer, the launch AND the hit schedule — gets the SAME
+                    // remaining hold off the stored release time. Computing per-caller desynced the bang
+                    // from the recoil (~0.25 s: dynamic 8-deg release vs padded static delays).
+                    foreach (var pawn0 in pawns)
+                    {
+                        if (!(GetMember(pawn0, "Transform") is UnityEngine.Transform tr0)) continue;
+                        if (TryAimRelease(tr0.position, out float rel))
+                            return UnityEngine.Mathf.Max(0f, rel - UnityEngine.Time.time);
+                        break;   // first pawn only — not armed yet, fall through to arm below
+                    }
                     float rate = TurnRateForUnitDef(unitDef);                  // our entry OR a Formation Lab vanilla link
                     if (rate <= 0f) return 0f;                                 // no easing — vanilla pacing
-                    if (!(GetMember(unit, "Pawns") is System.Collections.IEnumerable pawns)) return 0f;
-                    // TRUE-BEARING AIM: the flip put the unit on a HEX-QUANTIZED angle (up to 30 deg off the
+                    // TRUE-BEARING AIM: the flip puts the unit on a HEX-QUANTIZED angle (up to 30 deg off the
                     // target); resolve the strike's target tile to a Unity-world point so each pawn can be
                     // steered to its REAL bearing instead. Vector3.zero = resolution failed -> quantized fallback.
                     var targetPos = StrikeTargetWorldPos(strike);
-                    float hold = 0f; bool first = true;
+                    float hold = 0f; bool first = true; float releaseAt = 0f;
                     foreach (var pawn in pawns)
                     {
                         if (!(GetMember(pawn, "Transform") is UnityEngine.Transform tr)) continue;
-                        float target = tr.eulerAngles.y;                       // already flipped to the strike facing (quantized)
+                        float target = tr.eulerAngles.y;                       // strike facing (quantized) when the tile fails to resolve
                         if (targetPos != UnityEngine.Vector3.zero)
-                        {
                             target = UnityEngine.Mathf.Atan2(targetPos.x - tr.position.x, targetPos.z - tr.position.z) * UnityEngine.Mathf.Rad2Deg;
-                            SetAimOverride(tr.position, target, 10f);          // ease target = the real bearing while the strike plays out
+                        if (first)
+                        {
+                            first = false;
+                            if (!TryTurnYawAt(tr.position, out float eased)) return 0f;
+                            float miss = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(eased, target));
+                            hold = miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.2f, 3f) : 0f;
+                            releaseAt = UnityEngine.Time.time + hold;
+                            Plugin.Log.LogInfo($"[BattleTurn] strike hold '{unitDef}': eased={eased:F0} aim={target:F0}{(targetPos != UnityEngine.Vector3.zero ? " (true bearing)" : " (quantized)")} miss={miss:F0}deg -> +{hold:F2}s (shared clock)");
                         }
-                        if (!first) continue;                                  // the FIRST pawn's remaining turn sets the hold; the rest just get their aim
-                        first = false;
-                        if (!TryTurnYawAt(tr.position, out float eased)) return 0f;
-                        float miss = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(eased, target));
-                        hold = miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.2f, 3f) : 0f;
-                        Plugin.Log.LogInfo($"[BattleTurn] strike hold '{unitDef}': eased={eased:F0} aim={target:F0}{(targetPos != UnityEngine.Vector3.zero ? " (true bearing)" : " (quantized)")} miss={miss:F0}deg -> +{hold:F2}s");
+                        SetAimOverride(tr.position, target, 10f, releaseAt);   // ease target = real bearing; releaseAt = the strike's one clock
                     }
                     return hold;
                 }
@@ -180,11 +214,15 @@ namespace HumankindAssetFramework
                         var f = e.activeFires[i];
                         if (f.waitAlign)
                         {
-                            // battle-turn spike: hold the clip's clock at 'now' while the pawn is still easing its
-                            // yaw toward the target (recoil waits for the barrel to face the enemy); 4 s failsafe.
-                            if (UnityEngine.Time.time - f.armTime < 4f && UniversalInject.TurnMisalignAt(f.pos) > 8f)
-                            { f.startTime = UnityEngine.Time.time; e.activeFires[i] = f; continue; }
-                            f.waitAlign = false; e.activeFires[i] = f;   // aligned (or timed out): clock runs from here
+                            // battle-turn: hold the clip's clock while the pawn is still turning. PREFERRED
+                            // signal = the strike's ONE shared release time (same clock as the attack pose and
+                            // the shell schedules — per-consumer checks desynced the recoil from the bang);
+                            // fallback = the live misalignment. 4 s failsafe either way.
+                            bool still = UnityEngine.Time.time - f.armTime < 4f &&
+                                         (TryAimRelease(f.pos, out float rel) ? UnityEngine.Time.time < rel
+                                                                              : TurnMisalignAt(f.pos) > 8f);
+                            if (still) { f.startTime = UnityEngine.Time.time; e.activeFires[i] = f; continue; }
+                            f.waitAlign = false; e.activeFires[i] = f;   // released (or timed out): clock runs from here
                         }
                         if (UnityEngine.Time.time - f.startTime >= dur) e.activeFires.RemoveAt(i);   // drop finished one-shots
                     }
