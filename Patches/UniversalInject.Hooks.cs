@@ -51,6 +51,10 @@ namespace HumankindAssetFramework
         }
         static bool Prefix(object __instance, string boneName, ref object __result)
             => !UniversalInject.MuzzleRedirect(__instance, boneName, _getBoneTRS, ref __result);
+        // battle-turn: while the pawn's strike aim override is live, every TRS handed out is rotated onto the
+        // true bearing — muzzle smoke, flash and the shell's fire-time recapture all align with the visible barrel.
+        static void Postfix(object __instance, ref object __result)
+            => UniversalInject.AimRotateBoneTRS(__instance, __result);
     }
 
     // Per-pawn-per-frame: after the game writes a PawnEntry, let us override its pose for our animated models.

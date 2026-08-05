@@ -123,41 +123,11 @@ namespace HumankindAssetFramework
             {
                 var prep = AccessTools.Method(strike.GetType(), "PrepareArtilleryStrikeFX");
                 if (prep == null) return;
-                prep.Invoke(strike, new object[] { 0f, 0f });          // refresh projectileData off the LIVE pose
-                // rotate spawn pos + direction onto the aim override, if one is active for the striker
-                long aguid = GuidToLong(GetMember(strike, "AttackerArmyGUID"));
-                if (aguid == 0) return;
-                var presType = GameBinding.Presentation;
-                var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
-                var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
-                if (armies == null) return;
-                foreach (var army in armies)
-                {
-                    if (army == null) continue;
-                    var unit = GetMember(army, "PresentationUnit");
-                    if (unit == null || GuidToLong(GetMember(unit, "GUID")) != aguid) continue;
-                    if (!(GetMember(unit, "Pawns") is System.Collections.IEnumerable pawns)) return;
-                    foreach (var pawn in pawns)
-                    {
-                        if (!(GetMember(pawn, "Transform") is UnityEngine.Transform tr)) continue;
-                        if (!TryAimAt(tr.position, out float aim)) return;   // no aim override — recapture alone is the fix
-                        float delta = UnityEngine.Mathf.DeltaAngle(tr.eulerAngles.y, aim);
-                        if (UnityEngine.Mathf.Abs(delta) < 0.5f) return;
-                        var fd = AccessTools.Field(strike.GetType(), "projectileData");
-                        if (fd == null) return;
-                        var pd = fd.GetValue(strike);
-                        var rot = UnityEngine.Quaternion.Euler(0f, delta, 0f);
-                        if (GetMember(pd, "StartPosition") is UnityEngine.Vector3 sp && GetMember(pd, "Direction") is UnityEngine.Vector3 dir)
-                        {
-                            SetMember(pd, "StartPosition", tr.position + rot * (sp - tr.position));
-                            SetMember(pd, "Direction", rot * dir);
-                            fd.SetValue(strike, pd);
-                            Plugin.Diag($"[BattleTurn] launch pose re-aimed {delta:F0} deg onto the true bearing");
-                        }
-                        return;
-                    }
-                    return;
-                }
+                // Refresh projectileData off the LIVE pose. The bearing rotation itself now happens INSIDE this
+                // call: PrepareArtilleryStrikeFX reads the muzzle via GetBoneTRS, whose postfix (AimRotateBoneTRS)
+                // rotates every TRS onto the aim override while the strike is live — the same seam that fixes the
+                // mecanim muzzle smoke. Rotating here TOO would double-rotate the shell.
+                prep.Invoke(strike, new object[] { 0f, 0f });
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] RefreshStrikeLaunchPose: " + ex.Message); }
         }
