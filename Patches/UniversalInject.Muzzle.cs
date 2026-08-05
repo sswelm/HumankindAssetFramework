@@ -383,6 +383,23 @@ namespace HumankindAssetFramework
         // Seconds until the pawn nearest `pos` finishes its eased turn — OUR entries only (vanilla pawns don't
         // ease, so they keep vanilla attack pacing). Feeds the AttackFSM delay patch so the attack animation and
         // its FireProjectile mecanim event (the shell!) wait for the barrel to face the target.
+        // The eased yaw of the pawn nearest `pos`, if a live turn-ease state exists there. Lets the artillery
+        // hold compute remaining-turn against a target read from the (already flipped) pawn Transform — no
+        // dependence on TurnState.targetYaw, which only refreshes on the NEXT pose frame (the v3/v4 race).
+        internal static bool TryTurnYawAt(UnityEngine.Vector3 pos, out float yaw)
+        {
+            yaw = 0f;
+            float now = UnityEngine.Time.time; TurnState st = null; float best = 16f;
+            for (int i = turnStates.Count - 1; i >= 0; i--)
+            {
+                if (now - turnStates[i].lastT > 10f) continue;
+                var d = turnStates[i].pos - pos; d.y = 0f;
+                if (d.sqrMagnitude < best) { best = d.sqrMagnitude; st = turnStates[i]; }
+            }
+            if (st == null) return false;
+            yaw = st.yaw; return true;
+        }
+
         static float holdLogAt;
         internal static float TurnHoldSeconds(object pawn, UnityEngine.Vector3 pos)
         {

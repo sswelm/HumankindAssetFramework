@@ -85,6 +85,7 @@ namespace HumankindAssetFramework
         internal static Type PawnActionRangedStartAttack => Cached("Amplitude.Mercury.Presentation.PawnActionRangedStartAttack");
         internal static Type AttackAnimationStateMachine => Cached("Amplitude.Mercury.Presentation.AttackAnimationStateMachine");
         internal static Type AbstractAnimationStateMachine => Cached("Amplitude.Mercury.Presentation.AbstractAnimationStateMachine");
+        internal static Type PresentationArtilleryStrikeController => Cached("Amplitude.Mercury.Presentation.PresentationArtilleryStrikeController");
         internal static Type UnitActionFaceEnemy      => Cached("Amplitude.Mercury.Presentation.UnitActionFaceEnemy");
         internal static Type MecanimEventInterpreter  => Cached("Amplitude.Mercury.Animation.MecanimEventInterpreter");
         internal static Type AlterationFireProjectile => Cached("Amplitude.Mercury.Animation.AlterationFireProjectile");
@@ -188,6 +189,7 @@ namespace HumankindAssetFramework
             new Dep(PawnActionRangedStartAttack, nameof(PawnActionRangedStartAttack), "OnReadyToStart", "isReadyToStart"),
             new Dep(AttackAnimationStateMachine, nameof(AttackAnimationStateMachine), "Start", "delayDuration"),
             new Dep(AbstractAnimationStateMachine, nameof(AbstractAnimationStateMachine), "StepWaitingDelay", "ownerPawn"),
+            new Dep(PresentationArtilleryStrikeController, nameof(PresentationArtilleryStrikeController), "ScheduleArtilleryStrikeProjectileLaunch", "ScheduleArtilleryStrikeHit"),
             new Dep(UnitActionFaceEnemy, nameof(UnitActionFaceEnemy), "StartUnitAction", "actionScope", "AttackerBattleUnit"),
             new Dep(MecanimEventInterpreter, nameof(MecanimEventInterpreter)),
             new Dep(AlterationFireProjectile, nameof(AlterationFireProjectile)),

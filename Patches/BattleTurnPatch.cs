@@ -223,6 +223,31 @@ namespace HumankindAssetFramework
         }
     }
 
+    // ---- Patch E: MAP BOMBARD hold (iteration 5 — the real seam at last). A world-map bombard never touches
+    // the battle attack actions OR AttackFSM.Start: PresentationArtilleryStrike.TriggerBombardAnimation does
+    // FlipPawnsGrid(angle, Teleport) — THE instant facing snap — plus AttackFSM.TeleportToSimpleAttack(), and
+    // the shell + impact are fired by PLAIN SCHEDULED DELAYS on PresentationArtilleryStrikeController. So:
+    // prefix both Schedule calls and add the striker's remaining turn-ease time to the delay. Launch and hit
+    // get the same hold (computed twice in the same frame, same value), so flight time is preserved. ----
+    [HarmonyPatch] internal static class Hk_ArtilleryHold
+    {
+        static System.Collections.Generic.IEnumerable<MethodBase> TargetMethods()
+        {
+            var t = GameBinding.PresentationArtilleryStrikeController;
+            int n = 0;
+            if (t != null)
+                foreach (var m in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                    if (m.Name == "ScheduleArtilleryStrikeProjectileLaunch" || m.Name == "ScheduleArtilleryStrikeHit") { n++; yield return m; }
+            if (n > 0) Plugin.Log.LogInfo($"[BattleTurn] hooked artillery strike schedule ({n} method(s) — map bombard waits for the turn)");
+            else Plugin.Log.LogWarning("[BattleTurn] NOT found: PresentationArtilleryStrikeController schedule methods — map bombard won't wait");
+        }
+        // (PresentationArtilleryStrike artilleryStrike, float delay)
+        static void Prefix(object __0, ref float __1)
+        {
+            try { __1 += UniversalInject.TurnHoldForStrike(__0); } catch { }
+        }
+    }
+
     // ---- Patch D: DYNAMIC attack gate (iteration 4). Patch C computes its delay ONCE at AttackFSM.Start —
     // but the facing snap can land AFTER the FSM starts (the log showed the delay computing 0: at that instant
     // the pawn still read as aligned), so the shell flew mid-pivot anyway. This gates the FSM's delay STEP

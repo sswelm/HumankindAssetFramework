@@ -85,6 +85,48 @@ namespace HumankindAssetFramework
         internal static long GuidToLong(object guidBox)
             => guidBox != null && ulong.TryParse(guidBox.ToString(), out ulong g) ? unchecked((long)g) : 0L;
 
+        // BATTLE-TURN spike (iteration 5): how long the MAP-BOMBARD FX should wait for the striker's eased turn.
+        // Called from the artillery schedule prefixes, which run right AFTER TriggerBombardAnimation flipped the
+        // formation (FlipPawnsGrid Teleport = the instant facing snap) — so the pawn TRANSFORM already faces the
+        // target while the eased ObjectSpace yaw still lags. remaining = eased-vs-transform, no snap-ordering
+        // race. Returns 0 for vanilla strikers, easing off, or an already-aligned barrel.
+        internal static float TurnHoldForStrike(object strike)
+        {
+            try
+            {
+                long aguid = GuidToLong(GetMember(strike, "AttackerArmyGUID"));
+                if (aguid == 0) return 0f;
+                var presType = GameBinding.Presentation;
+                var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
+                var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
+                if (armies == null) return 0f;
+                foreach (var army in armies)
+                {
+                    if (army == null) continue;
+                    var unit = GetMember(army, "PresentationUnit");
+                    if (unit == null || GuidToLong(GetMember(unit, "GUID")) != aguid) continue;
+                    var e = FindEntryForUnitDefinition(GetMember(unit, "UnitDefinition")?.ToString() ?? "");
+                    if (e == null) return 0f;                                  // vanilla striker — vanilla pacing
+                    float rate = turnRate > 0f ? turnRate : e.turnRate;
+                    if (rate <= 0f) return 0f;
+                    if (!(GetMember(unit, "Pawns") is System.Collections.IEnumerable pawns)) return 0f;
+                    foreach (var pawn in pawns)
+                    {
+                        if (!(GetMember(pawn, "Transform") is UnityEngine.Transform tr)) continue;
+                        float target = tr.eulerAngles.y;                       // already flipped to the strike facing
+                        if (!TryTurnYawAt(tr.position, out float eased)) return 0f;
+                        float miss = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(eased, target));
+                        float hold = miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.2f, 3f) : 0f;
+                        Plugin.Log.LogInfo($"[BattleTurn] strike hold '{e.resourceName}': eased={eased:F0} target={target:F0} miss={miss:F0}deg -> +{hold:F2}s");
+                        return hold;
+                    }
+                    return 0f;
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] TurnHoldForStrike: " + ex.Message); }
+            return 0f;
+        }
+
         internal static void ProcessFireQueues()
         {
             if (entries == null || !Plugin.UniversalInjectOn.Value) return;
