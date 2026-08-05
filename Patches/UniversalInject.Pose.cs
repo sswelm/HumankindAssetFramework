@@ -153,6 +153,8 @@ namespace HumankindAssetFramework
                 // downstream persists the mutation for us.
                 if (vanillaTurnByDesc.Count > 0 && vanillaTurnByDesc.TryGetValue(ctx.descId, out float vTurn) && HookedEntryFor(ctx.skelId) == null)
                 {
+                    if (vanillaEaseLogged.Add(ctx.descId))
+                        Plugin.Log.LogInfo($"[TurnEase] easing vanilla desc {ctx.descId} at {vTurn} deg/s (first pawn seen)");
                     ApplyTurnEaseCore(vTurn, 0f, ctx.entry);
                     ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
                 }

@@ -125,6 +125,28 @@ namespace HumankindAssetFramework
         // TURN EASE for VANILLA units (docs/Turn-Ease.md): Formation Lab turn links resolved to descriptor ids at
         // addon load (same session-scoped resolution as the Resize rules above); read by the pose hook per pawn.
         static readonly Dictionary<int, float> vanillaTurnByDesc = new Dictionary<int, float>();
+        static readonly HashSet<int> vanillaEaseLogged = new HashSet<int>();   // one "easing vanilla desc N" line per type per session
+        static readonly Dictionary<string, int> addonDefIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);   // every addon seen this session: name -> PawnDefinitionId
+
+        // Match the Formation Lab turn links against every addon recorded so far. Called from the addon-load
+        // hook (new addon) AND from FormationOverride right after the registry parses (addons that loaded
+        // first) — whichever side arrives last completes the mapping.
+        internal static void SweepTurnLinks()
+        {
+            if (FormationOverride.TurnRateByUnit.Count == 0 || addonDefIds.Count == 0) return;
+            foreach (var ad in addonDefIds)
+            {
+                if (vanillaTurnByDesc.ContainsKey(ad.Value)) continue;
+                foreach (var kv in FormationOverride.TurnRateByUnit)
+                    if (ad.Key.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        kv.Key.IndexOf(ad.Key, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        vanillaTurnByDesc[ad.Value] = kv.Value;
+                        Plugin.Log.LogInfo($"[TurnEase] vanilla '{ad.Key}' -> desc {ad.Value} rate {kv.Value} deg/s (Formation Lab link '{kv.Key}')");
+                        break;
+                    }
+            }
+        }
         static readonly Dictionary<int, float[]> eraGridRows = new Dictionary<int, float[]>();  // Global Era Lab: unit era -> modifier per CURRENT era
         static HashSet<string> unitScaleLogged;
         static readonly HashSet<int> vanillaScaledLogged = new HashSet<int>();

@@ -203,6 +203,10 @@ namespace HumankindAssetFramework
                 }
                 if (entries.Count > 0)
                     Plugin.Log.LogInfo($"[Formation] registry: {entries.Count} link(s) from enc_formations.json");
+                // map turn links onto addons that loaded BEFORE this parse (the SiegeHowitzers ordering: the
+                // MAIN pawn's addon loads early; its satellites load on first view) — the addon-load hook
+                // covers the other direction.
+                UniversalInject.SweepTurnLinks();
             }
             catch (Exception ex) { Plugin.Log.LogError("[Formation] enc_formations.json parse: " + ex); }
         }
