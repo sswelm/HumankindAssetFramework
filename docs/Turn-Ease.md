@@ -43,6 +43,14 @@ target tile (per pawn), the hold and the recoil release measure against it, and 
 back to the game's own facing — the crew re-laying the gun. Falls back to the quantized angle if the tile
 resolution ever fails.
 
+**Strike synchronization** (verified — three separate vanilla shortcuts had to fall): every effect of a shot
+fires off **one shared release clock** armed before the flip (mixing a dynamic release with padded static
+delays drifted the bang ~0.25 s from the recoil); the attack clip starts **deterministically at frame 0**
+(vanilla teleports into it at a *random phase* while timing the shell to the fire event's literal clip time);
+and the shell's spawn pose is **re-captured at fire time and every bone TRS is rotated onto the aim** while
+the strike is live — vanilla captures the muzzle *before* the pivot, and the pawn's invisible transform
+skeleton (which mecanim smoke/flash spawn from) never turns with the eased GPU model.
+
 ## How it works (maintainers)
 
 Two different worlds, two different treatments:
@@ -80,3 +88,13 @@ volleys that bypass the action. Both are off by default until verified in a real
 - The battle-side machinery (`PawnActionLookAt`, `UnitActionFaceEnemy`, the rotation FSM) **does not drive the
   world map** — five iterations of patching it changed nothing there. Follow the strike report handler
   (`PresentationArtilleryStrike`) end-to-end before picking a seam.
+- **Never give a strike two clocks.** A dynamically-released effect (aligned-within-ε) next to a
+  statically-scheduled one (projected hold + pad) WILL drift audibly. Arm one release timestamp up front and
+  make every consumer read it.
+- `TeleportToSimpleAttack` plays the attack state at a **random clip phase** (`randomOffset: true`) while the
+  artillery scheduler times the shell to the fire event's literal clip time — deterministic frame-0 playback
+  is required for anything that must sync with the schedule.
+- The pawn's **transform skeleton does not turn with the eased GPU model** — anything resolved off bones
+  (mecanim VFX, `PrepareArtilleryStrikeFX`'s muzzle capture) sits at the stale/quantized angle. Rotate at the
+  `GetBoneTRS` seam while the aim override is live; never patch `StartVFXEvent` arguments (the 18/19 IL
+  incident).
