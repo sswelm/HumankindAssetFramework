@@ -21,8 +21,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   Comanche's ObjectSpace turn ease generalized to every entry, plus three holds keyed off the same
   remaining-turn time — the artillery controller's scheduled launch/hit delays, a deferred
   `TeleportToSimpleAttack` (the muzzle/sound carrier), and the fire clip's clock pinned until aligned.
-  Turn ease also smooths ordinary move-order facing for any model with a rate. See
-  [docs/Turn-Ease.md](docs/Turn-Ease.md).
+  Turn ease also smooths ordinary move-order facing for any model with a rate. Same day, two extensions, both
+  verified: **vanilla units** get the identical treatment through a Formation Lab link (per-unit rate, resolved
+  to the pawn descriptor at load; a link on a Common unit covers its culture-emblematic variants — found when
+  the player's ZULU siege howitzers ignored the Common link, by a one-line-per-descriptor render census), and
+  **true-bearing aim** — the eased turn exposed that vanilla bombards face a HEX-QUANTIZED angle (one of six
+  directions, up to 30° off); the ease target now becomes the real bearing to the target tile while the strike
+  plays out, so the barrel lays exactly on the city it shells. See [docs/Turn-Ease.md](docs/Turn-Ease.md).
 - **CLIFF ANTICIPATION — climbing before the edge, not into it (2026-08-05).** Terrain hug's lead point now
   also reads the *ground* ahead: where the terrain steps up, the aircraft gains that height immediately instead
   of rising at the cell boundary, and the engine's own tile-bound altitude catches up on arrival (climb-only —

@@ -1,7 +1,8 @@
 # Turn ease & attack hold — units that pivot before they fire
 
-*Verified in-game 2026-08-05 (TowedGunHowitzers map bombard). Flight-specific easing (bank, terrain hug) lives in
-[Donor-Clip-Flight.md](Donor-Clip-Flight.md); this page covers the general feature for any HAF model.*
+*Verified in-game 2026-08-05: HAF models (TowedGunHowitzers), vanilla units via Formation Lab links (the Zulu
+Kingdom siege howitzers), and the true-bearing aim. Flight-specific easing (bank, terrain hug) lives in
+[Donor-Clip-Flight.md](Donor-Clip-Flight.md); this page covers the general feature for any unit.*
 
 Humankind snaps a unit's facing instantly — on move orders and, most visibly, on attacks: a towed gun
 teleport-pivots 150° and fires in the same instant. With turn ease, a HAF model **sweeps to its new heading at a
@@ -27,11 +28,20 @@ Live dials (`BepInEx/config/`, polled ~1/s, no restart):
 - **`enc_battleturn.txt`** — `hold=1` enables the **experimental, untested** battle-side hold (ranged attacks in
   deployed battles wait for the rotation FSM); `diag=1` turns on choreography forensics logging.
 
-**Vanilla units** (built, awaiting in-game verification): the Formation Override window has a per-unit
-**Turn ease** row — tick it on any unit link (a link may even carry *only* turn ease, no formation change),
-Save, relaunch. The plugin resolves the link to the unit's pawn descriptor at load (`[TurnEase] vanilla …`
-in the log confirms the mapping) and eases those pawns exactly like a HAF model; the bombard hold follows
-automatically. Ships the facing-snap fix for units HAF never touched.
+**Vanilla units** (verified): the Formation Override window has a per-unit **Turn ease** row — tick it on any
+unit link (a link may even carry *only* turn ease, no formation change), Save, relaunch. The plugin resolves
+the link to the unit's pawn descriptor at load (`[TurnEase] vanilla …` in the log confirms the mapping) and
+eases those pawns exactly like a HAF model; the bombard hold follows automatically. A link on a `_Common_`
+family unit **also covers its culture-emblematic variants** (the Zulu siege howitzers matched a link on the
+Common unit); a link on a specific culture's own unit stays culture-exact. Picking a unit prefills the
+Formation field with its current formation, so a turn-ease-only link starts as a neutral no-op.
+
+**True-bearing aim** (verified): vanilla flips a bombarding unit to a **hex-quantized** angle — one of six
+directions, up to 30° off the target (`GetHexagonAngleToPosition`); the instant snap hid it for years, the
+eased turn made it obvious. While a strike is in progress the ease target becomes the **real bearing** to the
+target tile (per pawn), the hold and the recoil release measure against it, and after ~10 s the unit eases
+back to the game's own facing — the crew re-laying the gun. Falls back to the quantized angle if the tile
+resolution ever fails.
 
 ## How it works (maintainers)
 
