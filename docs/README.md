@@ -22,6 +22,7 @@ The core authoring workflows — bake a model, animate it, texture it, add sound
 - [**Factory-Manual.md**](Factory-Manual.md) — the main guide. Every field, the static and animated workflows, and a troubleshooting table. **Start here to add a model.**
 - [**Animated-Models.md**](Animated-Models.md) — can HAF import *your* model? The plain-language answer in three levels (clean rigs → rigid-part machines → full character rigs). **Start here for animation.**
 - [**Donor-Clip-Flight.md**](Donor-Clip-Flight.md) — play the **donor's own animation on your custom rig** (`useDonorClip`): the measured engine contract (channels-by-index, rest∘delta, axle frames), the workflow, and the failure catalog. Proven on the helicopter.
+- [**Turn-Ease.md**](Turn-Ease.md) — **turn first, fire second**: eased facing for any HAF model, and the map-bombard hold that keeps muzzle flash, shot sound, shell and recoil waiting until the barrel faces the target. Includes the choreography-seam map for maintainers.
 - [**Textures.md**](Textures.md) — the atlas pipeline: every knob, the complete failure catalog, and runtime re-skins.
 - **Unit & creature audio** — engine/movement sounds, custom WAVs (the Sound Studio), and creature voices live in [Factory-Manual.md](Factory-Manual.md) §13–14.
 - [**Game-Sound-Lab.md**](Game-Sound-Lab.md) — game-*wide* sound overrides: silence or replace any vanilla Wwise event (music, UI, ambience) by name, with in-game F8 audition.

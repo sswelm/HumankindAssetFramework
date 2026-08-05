@@ -185,9 +185,9 @@ namespace HumankindAssetFramework
             // combat / fight
             new Dep(PawnRangedFightSequence, nameof(PawnRangedFightSequence)),
             new Dep(PawnActionMeleeStartFight, nameof(PawnActionMeleeStartFight)),
-            new Dep(RotationPawnStateMachine, nameof(RotationPawnStateMachine), "GetUnanimatedRotationProgress"),
+            new Dep(RotationPawnStateMachine, nameof(RotationPawnStateMachine), "StartDirectionToLook", "StepTurning"),
             new Dep(PawnActionRangedStartAttack, nameof(PawnActionRangedStartAttack), "OnReadyToStart", "isReadyToStart"),
-            new Dep(AttackAnimationStateMachine, nameof(AttackAnimationStateMachine), "Start", "delayDuration"),
+            new Dep(AttackAnimationStateMachine, nameof(AttackAnimationStateMachine), "TeleportToSimpleAttack"),
             new Dep(AbstractAnimationStateMachine, nameof(AbstractAnimationStateMachine), "StepWaitingDelay", "ownerPawn"),
             new Dep(PresentationArtilleryStrikeController, nameof(PresentationArtilleryStrikeController), "ScheduleArtilleryStrikeProjectileLaunch", "ScheduleArtilleryStrikeHit"),
             new Dep(UnitActionFaceEnemy, nameof(UnitActionFaceEnemy), "StartUnitAction", "actionScope", "AttackerBattleUnit"),
