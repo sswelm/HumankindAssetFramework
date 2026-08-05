@@ -223,6 +223,49 @@ namespace HumankindAssetFramework
         }
     }
 
+    // ---- Patch D: DYNAMIC attack gate (iteration 4). Patch C computes its delay ONCE at AttackFSM.Start —
+    // but the facing snap can land AFTER the FSM starts (the log showed the delay computing 0: at that instant
+    // the pawn still read as aligned), so the shell flew mid-pivot anyway. This gates the FSM's delay STEP
+    // instead: StepWaitingDelay is the attack FSM's first step, ticked every frame and invoked through the
+    // StaticSteps delegate array (detour-safe — no inlining, the lesson of the rotation-progress patch). While
+    // the owner pawn is one of OUR turn-easing entries and still >8 deg off its target, keep returning
+    // 'not done' — the attack anim + FireProjectile shell wait until the barrel is actually there, whenever the
+    // snap lands. 4 s failsafe per FSM instance. Other FSM types (rotation, deploy, hit...) share this step;
+    // the attack-type check keeps them untouched. ----
+    [HarmonyPatch] internal static class Hk_BattleAttackGate
+    {
+        class HoldTag { public float since; }
+        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object, HoldTag> holds =
+            new System.Runtime.CompilerServices.ConditionalWeakTable<object, HoldTag>();
+        static MethodBase TargetMethod()
+        {
+            var t = GameBinding.AbstractAnimationStateMachine;
+            var m = t != null ? AccessTools.Method(t, "StepWaitingDelay") : null;
+            if (m != null) Plugin.Log.LogInfo("[BattleTurn] hooked AbstractAnimationStateMachine.StepWaitingDelay (dynamic attack gate)");
+            else Plugin.Log.LogWarning("[BattleTurn] NOT found: AbstractAnimationStateMachine.StepWaitingDelay — attack won't wait for the turn");
+            return m;
+        }
+        // StepWaitingDelay(AbstractAnimationStateMachine fsm, bool isFirstRun)
+        static bool Prefix(object __0, ref bool __result)
+        {
+            try
+            {
+                if (__0 == null) return true;
+                var at = GameBinding.AttackAnimationStateMachine;
+                if (at == null || !at.IsInstanceOfType(__0)) return true;   // only the ATTACK FSM is gated
+                var pawn = UniversalInject.GetMember(__0, "ownerPawn");
+                if (pawn == null || !(UniversalInject.GetMember(pawn, "Transform") is UnityEngine.Transform tr)) return true;
+                float hold = UniversalInject.TurnHoldSeconds(pawn, tr.position);
+                if (hold <= 0f) { holds.Remove(__0); return true; }        // aligned (or not ours / easing off)
+                var tag = holds.GetValue(__0, _ => new HoldTag { since = UnityEngine.Time.time });
+                if (UnityEngine.Time.time - tag.since > 4f) return true;   // failsafe: fire anyway
+                __result = false;                                          // still turning — stay in the delay step
+                return false;
+            }
+            catch { return true; }
+        }
+    }
+
     // ---- Patch B: hold fire while turning. PawnActionRangedStartAttack.OnReadyToStart is called from
     // StartPawnAction and re-tried from UpdatePawnAction every frame until isReadyToStart latches true — the
     // action's own wait loop. While the shooter's RotationFSM is running (the group's LookAt is mid-turn) we

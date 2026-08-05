@@ -383,6 +383,7 @@ namespace HumankindAssetFramework
         // Seconds until the pawn nearest `pos` finishes its eased turn — OUR entries only (vanilla pawns don't
         // ease, so they keep vanilla attack pacing). Feeds the AttackFSM delay patch so the attack animation and
         // its FireProjectile mecanim event (the shell!) wait for the barrel to face the target.
+        static float holdLogAt;
         internal static float TurnHoldSeconds(object pawn, UnityEngine.Vector3 pos)
         {
             var unit = GetMember(pawn, "PresentationUnit");
@@ -390,10 +391,13 @@ namespace HumankindAssetFramework
             var e = FindEntryForUnitDefinition(unitDef);
             if (e == null) return 0f;
             float rate = turnRate > 0f ? turnRate : e.turnRate;
-            if (rate <= 0f) return 0f;
-            float miss = TurnMisalignAt(pos);
-            if (miss < 8f) return 0f;                                        // already (nearly) aligned
-            return UnityEngine.Mathf.Min(miss / rate + 0.15f, 3f);           // remaining turn + a beat, capped
+            float miss = rate > 0f ? TurnMisalignAt(pos) : 0f;
+            float hold = rate > 0f && miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.15f, 3f) : 0f;
+            // our models attack rarely — a throttled trace here is the spike's ground truth for WHY an attack
+            // did or didn't wait (rate resolution, measured misalignment, resulting hold)
+            if (UnityEngine.Time.time > holdLogAt)
+            { holdLogAt = UnityEngine.Time.time + 0.5f; Plugin.Log.LogInfo($"[BattleTurn] hold check '{e.resourceName}': rate={rate} misalign={miss:F0}deg -> hold {hold:F2}s"); }
+            return hold;
         }
 
         static void ApplyTurnEase(ModelEntry e, object entry)
