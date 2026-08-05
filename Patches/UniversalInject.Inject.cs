@@ -150,6 +150,26 @@ namespace HumankindAssetFramework
                         }
                     }
                 }
+                // TURN EASE for VANILLA units (Formation Lab links, docs/Turn-Ease.md): resolve each turn link's
+                // unit name to this addon's descriptor id — same seam and same reasoning as the Resize rules
+                // above (the addon knows PawnDefinitionId before any pawn exists; ids are session-scoped).
+                // Contains-either-way bridges naming layers (presentation unit 'Era5_Common_Riflemen' vs pawn
+                // definition 'Era5_Common_Riflemen_01'); the Diag line is the ground truth that a link mapped.
+                if (FormationOverride.TurnRateByUnit.Count > 0)
+                    foreach (var kv in FormationOverride.TurnRateByUnit)
+                        if (name.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            kv.Key.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            int tdefId = -1;
+                            try { tdefId = Convert.ToInt32(GetMember(addon, "PawnDefinitionId")); } catch { }
+                            if (tdefId >= 0 && !vanillaTurnByDesc.ContainsKey(tdefId))
+                            {
+                                vanillaTurnByDesc[tdefId] = kv.Value;
+                                Plugin.Diag($"[TurnEase] vanilla '{name}' -> desc {tdefId} rate {kv.Value} deg/s (Formation Lab link '{kv.Key}')");
+                            }
+                            break;
+                        }
+
                 if (entries.Count == 0) return;
                 var e = LongestMatch(entries, name, x => x.pawnDescription);   // most-specific (longest) match, not first-in-order — a variant entry wins over the base it extends
                 if (e == null) return;

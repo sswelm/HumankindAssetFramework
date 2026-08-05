@@ -89,7 +89,7 @@ namespace HumankindAssetFramework
         // Called from the artillery schedule prefixes, which run right AFTER TriggerBombardAnimation flipped the
         // formation (FlipPawnsGrid Teleport = the instant facing snap) — so the pawn TRANSFORM already faces the
         // target while the eased ObjectSpace yaw still lags. remaining = eased-vs-transform, no snap-ordering
-        // race. Returns 0 for vanilla strikers, easing off, or an already-aligned barrel.
+        // race. Returns 0 when the striker has no easing (no entry AND no Formation Lab link) or is aligned.
         internal static float TurnHoldForStrike(object strike)
         {
             try
@@ -105,10 +105,9 @@ namespace HumankindAssetFramework
                     if (army == null) continue;
                     var unit = GetMember(army, "PresentationUnit");
                     if (unit == null || GuidToLong(GetMember(unit, "GUID")) != aguid) continue;
-                    var e = FindEntryForUnitDefinition(GetMember(unit, "UnitDefinition")?.ToString() ?? "");
-                    if (e == null) return 0f;                                  // vanilla striker — vanilla pacing
-                    float rate = turnRate > 0f ? turnRate : e.turnRate;
-                    if (rate <= 0f) return 0f;
+                    string unitDef = GetMember(unit, "UnitDefinition")?.ToString() ?? "";
+                    float rate = TurnRateForUnitDef(unitDef);                  // our entry OR a Formation Lab vanilla link
+                    if (rate <= 0f) return 0f;                                 // no easing — vanilla pacing
                     if (!(GetMember(unit, "Pawns") is System.Collections.IEnumerable pawns)) return 0f;
                     foreach (var pawn in pawns)
                     {
@@ -117,7 +116,7 @@ namespace HumankindAssetFramework
                         if (!TryTurnYawAt(tr.position, out float eased)) return 0f;
                         float miss = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(eased, target));
                         float hold = miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.2f, 3f) : 0f;
-                        Plugin.Log.LogInfo($"[BattleTurn] strike hold '{e.resourceName}': eased={eased:F0} target={target:F0} miss={miss:F0}deg -> +{hold:F2}s");
+                        Plugin.Log.LogInfo($"[BattleTurn] strike hold '{unitDef}': eased={eased:F0} target={target:F0} miss={miss:F0}deg -> +{hold:F2}s");
                         return hold;
                     }
                     return 0f;

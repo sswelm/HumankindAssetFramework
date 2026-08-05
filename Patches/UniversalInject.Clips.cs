@@ -122,6 +122,9 @@ namespace HumankindAssetFramework
         struct UnitScaleInfo { public float scale; public int homeEra; public int domain; }   // rule product, the unit's own era, and its domain (UnitSpawnType) for the frontier lookup
         static readonly Dictionary<int, UnitScaleInfo> unitScaleByDesc = new Dictionary<int, UnitScaleInfo>();
         static readonly Dictionary<int, string> unitScaleNameByDesc = new Dictionary<int, string>();   // F8 readout only
+        // TURN EASE for VANILLA units (docs/Turn-Ease.md): Formation Lab turn links resolved to descriptor ids at
+        // addon load (same session-scoped resolution as the Resize rules above); read by the pose hook per pawn.
+        static readonly Dictionary<int, float> vanillaTurnByDesc = new Dictionary<int, float>();
         static readonly Dictionary<int, float[]> eraGridRows = new Dictionary<int, float[]>();  // Global Era Lab: unit era -> modifier per CURRENT era
         static HashSet<string> unitScaleLogged;
         static readonly HashSet<int> vanillaScaledLogged = new HashSet<int>();

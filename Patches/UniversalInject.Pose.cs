@@ -137,7 +137,7 @@ namespace HumankindAssetFramework
                 // two flags above are both false, yet they still need the wrong-skeleton rescue. Recomputed when an
                 // entry is repointed and on session reset — `repointed` flips at runtime, so it cannot be latched.
                 if (anyRescuable == null) anyRescuable = entries != null && entries.Any(Rescuable);
-                if ((anyAnimated != true && anyFreeze != true && anyRescuable != true && unitScaleByDesc.Count == 0) || !Plugin.UniversalInjectOn.Value) return;
+                if ((anyAnimated != true && anyFreeze != true && anyRescuable != true && unitScaleByDesc.Count == 0 && vanillaTurnByDesc.Count == 0) || !Plugin.UniversalInjectOn.Value) return;
                 pawnMgrRef = pawnManager;   // cached for the live rotor-trim re-apply (PollRotorTrim walks live pawns)
                 if (!TryReadLastPawn(pawnManager, out var ctx)) return;
                 if (!knownManagers.Contains(pawnManager)) knownManagers.Add(pawnManager);   // every manager, incl. ones only adding vanilla pawns — the sweep needs them all
@@ -146,6 +146,16 @@ namespace HumankindAssetFramework
                 // ObjectSpace.Scale multiplied ONCE at spawn — the same mechanism the per-entry `scale` field uses.
                 if (unitScaleByDesc.Count > 0 && unitScaleByDesc.TryGetValue(ctx.descId, out var vInfo) && HookedEntryFor(ctx.skelId) == null)
                     ApplyVanillaScale(ctx, vInfo);   // MESH-SCALE engine: verts x s (on change) + ObjectSpace.Scale (per frame)
+
+                // TURN EASE for VANILLA units (Formation Lab link resolved to this descriptor at addon load,
+                // docs/Turn-Ease.md): ease the pawn's ObjectSpace yaw at the linked rate — bank always 0 (ground
+                // units). Same write-back rule as the vanilla scale above: this pawn matches no entry, so nothing
+                // downstream persists the mutation for us.
+                if (vanillaTurnByDesc.Count > 0 && vanillaTurnByDesc.TryGetValue(ctx.descId, out float vTurn) && HookedEntryFor(ctx.skelId) == null)
+                {
+                    ApplyTurnEaseCore(vTurn, 0f, ctx.entry);
+                    ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
+                }
 
                 // Match this pawn to one of our entries (animated OR freeze-static) by OUR baked skeleton id (the correctly
                 // skinned pawn), else by the descriptor learned from that first correct pawn. The game spawns a unit's LATER

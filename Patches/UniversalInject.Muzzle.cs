@@ -400,14 +400,26 @@ namespace HumankindAssetFramework
             yaw = st.yaw; return true;
         }
 
+        // The turn-ease rate an attacking pawn is governed by: our entry's (dial override first), else a
+        // Formation Lab per-unit link — the VANILLA route (unitDef here is the simulation name, e.g.
+        // "LandUnit_Era5_Common_LineInfantry (…)"; the link stores the presentation name inside it, so
+        // case-insensitive contains bridges the two). 0 = no easing, vanilla pacing.
+        internal static float TurnRateForUnitDef(string unitDef)
+        {
+            var e = FindEntryForUnitDefinition(unitDef);
+            if (e != null) return turnRate > 0f ? turnRate : e.turnRate;
+            if (string.IsNullOrEmpty(unitDef)) return 0f;
+            foreach (var kv in FormationOverride.TurnRateByUnit)
+                if (unitDef.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) >= 0) return kv.Value;
+            return 0f;
+        }
+
         // Like TurnHoldSeconds, but the target is the pawn's TRANSFORM yaw — valid the same frame a bombard's
         // FlipPawnsGrid(Teleport) snaps it, when TurnState.targetYaw hasn't refreshed yet (next pose frame).
         internal static float TurnHoldTransformSeconds(object pawn)
         {
             var unit = GetMember(pawn, "PresentationUnit");
-            var e = FindEntryForUnitDefinition(GetMember(unit, "UnitDefinition")?.ToString() ?? "");
-            if (e == null) return 0f;
-            float rate = turnRate > 0f ? turnRate : e.turnRate;
+            float rate = TurnRateForUnitDef(GetMember(unit, "UnitDefinition")?.ToString() ?? "");
             if (rate <= 0f || !(GetMember(pawn, "Transform") is UnityEngine.Transform tr)) return 0f;
             if (!TryTurnYawAt(tr.position, out float eased)) return 0f;
             float miss = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(eased, tr.eulerAngles.y));
@@ -419,15 +431,14 @@ namespace HumankindAssetFramework
         {
             var unit = GetMember(pawn, "PresentationUnit");
             string unitDef = GetMember(unit, "UnitDefinition")?.ToString() ?? "";
-            var e = FindEntryForUnitDefinition(unitDef);
-            if (e == null) return 0f;
-            float rate = turnRate > 0f ? turnRate : e.turnRate;
-            float miss = rate > 0f ? TurnMisalignAt(pos) : 0f;
-            float hold = rate > 0f && miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.15f, 3f) : 0f;
-            // our models attack rarely — a throttled trace here is the spike's ground truth for WHY an attack
+            float rate = TurnRateForUnitDef(unitDef);
+            if (rate <= 0f) return 0f;
+            float miss = TurnMisalignAt(pos);
+            float hold = miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.15f, 3f) : 0f;
+            // eased units attack rarely — a throttled trace here is the ground truth for WHY an attack
             // did or didn't wait (rate resolution, measured misalignment, resulting hold)
             if (UnityEngine.Time.time > holdLogAt)
-            { holdLogAt = UnityEngine.Time.time + 0.5f; Plugin.Log.LogInfo($"[BattleTurn] hold check '{e.resourceName}': rate={rate} misalign={miss:F0}deg -> hold {hold:F2}s"); }
+            { holdLogAt = UnityEngine.Time.time + 0.5f; Plugin.Log.LogInfo($"[BattleTurn] hold check '{unitDef}': rate={rate} misalign={miss:F0}deg -> hold {hold:F2}s"); }
             return hold;
         }
 
@@ -436,8 +447,14 @@ namespace HumankindAssetFramework
             // per-model (Factory "Turn ease — rate") with the live dial file as an override, same rule as the hug.
             // bank resolves per-FIELD (file bank only when the file SETS one) so a global file rate doesn't strip
             // a flyer's per-model bank or force one onto ground vehicles (battle-turn spike).
-            float rate = turnRate > 0f ? turnRate : e.turnRate;
-            float bank = turnBank != 0f ? turnBank : e.turnBank;
+            ApplyTurnEaseCore(turnRate > 0f ? turnRate : e.turnRate,
+                              turnBank != 0f ? turnBank : e.turnBank, entry);
+        }
+
+        // Core easing, rate/bank already resolved — shared by our model entries and VANILLA pawns whose unit
+        // carries a Formation Lab turn-ease link (rate from vanillaTurnByDesc, bank always 0 for those).
+        internal static void ApplyTurnEaseCore(float rate, float bank, object entry)
+        {
             if (rate <= 0f) return;
             var os = GetMember(entry, "ObjectSpace");
             UnityEngine.Vector3 tr;

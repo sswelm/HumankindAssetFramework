@@ -27,8 +27,11 @@ Live dials (`BepInEx/config/`, polled ~1/s, no restart):
 - **`enc_battleturn.txt`** — `hold=1` enables the **experimental, untested** battle-side hold (ranged attacks in
   deployed battles wait for the rotation FSM); `diag=1` turns on choreography forensics logging.
 
-Planned: per-unit rates for **vanilla units** via the Formation Lab (its registry already reaches arbitrary
-units by definition name — the same route as per-unit pawn counts and scale).
+**Vanilla units** (built, awaiting in-game verification): the Formation Override window has a per-unit
+**Turn ease** row — tick it on any unit link (a link may even carry *only* turn ease, no formation change),
+Save, relaunch. The plugin resolves the link to the unit's pawn descriptor at load (`[TurnEase] vanilla …`
+in the log confirms the mapping) and eases those pawns exactly like a HAF model; the bombard hold follows
+automatically. Ships the facing-snap fix for units HAF never touched.
 
 ## How it works (maintainers)
 
