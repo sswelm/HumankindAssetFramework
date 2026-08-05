@@ -82,6 +82,9 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
   exactly on your parts. Plus **eased, banked turns** on move orders instead of the engine's facing snap, and
   **terrain hugging** — skim low over open country, climb only for built city districts (all live-tunable).
   The measured engine contract: [docs/Donor-Clip-Flight.md](docs/Donor-Clip-Flight.md).
+- **Turn first, fire second** — any model with a per-model turn rate **sweeps** to its new heading instead of the
+  engine's instant facing snap, and a map bombard **waits for the pivot**: muzzle flash, shot sound, shell and the
+  model's recoil clip all hold until the barrel faces the target, then land together. [docs/Turn-Ease.md](docs/Turn-Ease.md).
 
 **Textures**
 - **Correct, isolated skins** out of the box — glTF/OBJ V-convention reconciled, off-tile UVs shifted back in range, and

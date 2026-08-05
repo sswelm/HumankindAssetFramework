@@ -10,6 +10,24 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Units & animation
 
+- **ATTACK TURN — the howitzer pivots, THEN fires (2026-08-05).** A map bombard used to teleport-snap the
+  unit's facing and fire in the same instant; now a HAF model with a turn-ease rate **sweeps to the attack
+  heading first**, and every observable of the shot — muzzle flash, shot sound, shell, impact, the model's own
+  recoil clip — **waits for the barrel** and lands together at alignment. Six iterations to find the real seam,
+  each killed by a measurement: the battle choreography (LookAt actions, rotation FSM) is a **no-op on the
+  world map** (`StepTurning` runs 0→0 — the snap is `FlipPawnsGrid(Teleport)` stamping the GPU pawn data);
+  patching the unanimated-rotation method silently did nothing because **the JIT inlines it** into its caller;
+  and a one-shot delay at attack start **raced the snap** and computed zero. The fix rides HAF's own seams: the
+  Comanche's ObjectSpace turn ease generalized to every entry, plus three holds keyed off the same
+  remaining-turn time — the artillery controller's scheduled launch/hit delays, a deferred
+  `TeleportToSimpleAttack` (the muzzle/sound carrier), and the fire clip's clock pinned until aligned.
+  Turn ease also smooths ordinary move-order facing for any model with a rate. Same day, two extensions, both
+  verified: **vanilla units** get the identical treatment through a Formation Lab link (per-unit rate, resolved
+  to the pawn descriptor at load; a link on a Common unit covers its culture-emblematic variants — found when
+  the player's ZULU siege howitzers ignored the Common link, by a one-line-per-descriptor render census), and
+  **true-bearing aim** — the eased turn exposed that vanilla bombards face a HEX-QUANTIZED angle (one of six
+  directions, up to 30° off); the ease target now becomes the real bearing to the target tile while the strike
+  plays out, so the barrel lays exactly on the city it shells. See [docs/Turn-Ease.md](docs/Turn-Ease.md).
 - **CLIFF ANTICIPATION — climbing before the edge, not into it (2026-08-05).** Terrain hug's lead point now
   also reads the *ground* ahead: where the terrain steps up, the aircraft gains that height immediately instead
   of rising at the cell boundary, and the engine's own tile-bound altitude catches up on arrival (climb-only —

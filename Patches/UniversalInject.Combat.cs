@@ -85,6 +85,78 @@ namespace HumankindAssetFramework
         internal static long GuidToLong(object guidBox)
             => guidBox != null && ulong.TryParse(guidBox.ToString(), out ulong g) ? unchecked((long)g) : 0L;
 
+        // BATTLE-TURN spike (iteration 5): how long the MAP-BOMBARD FX should wait for the striker's eased turn.
+        // Called from the artillery schedule prefixes, which run right AFTER TriggerBombardAnimation flipped the
+        // formation (FlipPawnsGrid Teleport = the instant facing snap) — so the pawn TRANSFORM already faces the
+        // target while the eased ObjectSpace yaw still lags. remaining = eased-vs-transform, no snap-ordering
+        // race. Returns 0 when the striker has no easing (no entry AND no Formation Lab link) or is aligned.
+        // The strike's target tile as a Unity-world point (the pawn Transforms' space, cyclicity handled by the
+        // world controller). Vector3.zero on any resolution failure — callers fall back to the quantized facing.
+        static object miToVector3Ext;   // cached MethodInfo (WorldPositionExtensions.ToVector3(WorldPosition, bool))
+        static UnityEngine.Vector3 StrikeTargetWorldPos(object strike)
+        {
+            try
+            {
+                int tile = Convert.ToInt32(GetMember(strike, "TargetTileIndex"));
+                if (tile < 0) return UnityEngine.Vector3.zero;
+                var wpT = GameBinding.WorldPosition;
+                var extT = GameBinding.WorldPositionExtensions;
+                if (wpT == null || extT == null) return UnityEngine.Vector3.zero;
+                if (miToVector3Ext == null) miToVector3Ext = AccessTools.Method(extT, "ToVector3");
+                if (!(miToVector3Ext is System.Reflection.MethodInfo mi)) return UnityEngine.Vector3.zero;
+                var wp = Activator.CreateInstance(wpT, tile);
+                return mi.Invoke(null, new object[] { wp, false }) is UnityEngine.Vector3 v ? v : UnityEngine.Vector3.zero;
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] StrikeTargetWorldPos: " + ex.Message); return UnityEngine.Vector3.zero; }
+        }
+
+        internal static float TurnHoldForStrike(object strike)
+        {
+            try
+            {
+                long aguid = GuidToLong(GetMember(strike, "AttackerArmyGUID"));
+                if (aguid == 0) return 0f;
+                var presType = GameBinding.Presentation;
+                var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
+                var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
+                if (armies == null) return 0f;
+                foreach (var army in armies)
+                {
+                    if (army == null) continue;
+                    var unit = GetMember(army, "PresentationUnit");
+                    if (unit == null || GuidToLong(GetMember(unit, "GUID")) != aguid) continue;
+                    string unitDef = GetMember(unit, "UnitDefinition")?.ToString() ?? "";
+                    float rate = TurnRateForUnitDef(unitDef);                  // our entry OR a Formation Lab vanilla link
+                    if (rate <= 0f) return 0f;                                 // no easing — vanilla pacing
+                    if (!(GetMember(unit, "Pawns") is System.Collections.IEnumerable pawns)) return 0f;
+                    // TRUE-BEARING AIM: the flip put the unit on a HEX-QUANTIZED angle (up to 30 deg off the
+                    // target); resolve the strike's target tile to a Unity-world point so each pawn can be
+                    // steered to its REAL bearing instead. Vector3.zero = resolution failed -> quantized fallback.
+                    var targetPos = StrikeTargetWorldPos(strike);
+                    float hold = 0f; bool first = true;
+                    foreach (var pawn in pawns)
+                    {
+                        if (!(GetMember(pawn, "Transform") is UnityEngine.Transform tr)) continue;
+                        float target = tr.eulerAngles.y;                       // already flipped to the strike facing (quantized)
+                        if (targetPos != UnityEngine.Vector3.zero)
+                        {
+                            target = UnityEngine.Mathf.Atan2(targetPos.x - tr.position.x, targetPos.z - tr.position.z) * UnityEngine.Mathf.Rad2Deg;
+                            SetAimOverride(tr.position, target, 10f);          // ease target = the real bearing while the strike plays out
+                        }
+                        if (!first) continue;                                  // the FIRST pawn's remaining turn sets the hold; the rest just get their aim
+                        first = false;
+                        if (!TryTurnYawAt(tr.position, out float eased)) return 0f;
+                        float miss = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(eased, target));
+                        hold = miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.2f, 3f) : 0f;
+                        Plugin.Log.LogInfo($"[BattleTurn] strike hold '{unitDef}': eased={eased:F0} aim={target:F0}{(targetPos != UnityEngine.Vector3.zero ? " (true bearing)" : " (quantized)")} miss={miss:F0}deg -> +{hold:F2}s");
+                    }
+                    return hold;
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] TurnHoldForStrike: " + ex.Message); }
+            return 0f;
+        }
+
         internal static void ProcessFireQueues()
         {
             if (entries == null || !Plugin.UniversalInjectOn.Value) return;
@@ -104,7 +176,18 @@ namespace HumankindAssetFramework
                 // even with zero active fires (perf pass 2026-07-19)
                 lock (e.activeFires)
                     for (int i = e.activeFires.Count - 1; i >= 0; i--)
-                        if (UnityEngine.Time.time - e.activeFires[i].startTime >= dur) e.activeFires.RemoveAt(i);   // drop finished one-shots
+                    {
+                        var f = e.activeFires[i];
+                        if (f.waitAlign)
+                        {
+                            // battle-turn spike: hold the clip's clock at 'now' while the pawn is still easing its
+                            // yaw toward the target (recoil waits for the barrel to face the enemy); 4 s failsafe.
+                            if (UnityEngine.Time.time - f.armTime < 4f && UniversalInject.TurnMisalignAt(f.pos) > 8f)
+                            { f.startTime = UnityEngine.Time.time; e.activeFires[i] = f; continue; }
+                            f.waitAlign = false; e.activeFires[i] = f;   // aligned (or timed out): clock runs from here
+                        }
+                        if (UnityEngine.Time.time - f.startTime >= dur) e.activeFires.RemoveAt(i);   // drop finished one-shots
+                    }
                 if (!e.fireGuidQueue.IsEmpty) anyQueued = true;
             }
             if (!anyQueued) return;
@@ -133,12 +216,15 @@ namespace HumankindAssetFramework
                         var pawns = GetMember(unit, "Pawns") as System.Collections.IEnumerable;
                         if (pawns == null) continue;
                         int n = 0; string posDump = "";
+                        // battle-turn spike: when turn ease is live for this entry, arm the fire HELD (waitAlign) so
+                        // the recoil starts only once the pawn's eased yaw reaches the attack facing.
+                        bool hold = turnRate > 0f || e.turnRate > 0f;
                         lock (e.activeFires)
                             foreach (var pawn in pawns)
                             {
                                 var tr = GetMember(pawn, "Transform") as UnityEngine.Transform;
                                 if (tr == null) continue;
-                                e.activeFires.Add(new FireInstance { pos = tr.position, startTime = UnityEngine.Time.time });
+                                e.activeFires.Add(new FireInstance { pos = tr.position, startTime = UnityEngine.Time.time, waitAlign = hold, armTime = UnityEngine.Time.time });
                                 posDump += $" {tr.position.ToString("0.0")}"; n++;
                             }
                         matched = true;

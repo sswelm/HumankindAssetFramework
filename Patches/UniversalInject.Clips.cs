@@ -122,6 +122,49 @@ namespace HumankindAssetFramework
         struct UnitScaleInfo { public float scale; public int homeEra; public int domain; }   // rule product, the unit's own era, and its domain (UnitSpawnType) for the frontier lookup
         static readonly Dictionary<int, UnitScaleInfo> unitScaleByDesc = new Dictionary<int, UnitScaleInfo>();
         static readonly Dictionary<int, string> unitScaleNameByDesc = new Dictionary<int, string>();   // F8 readout only
+        // TURN EASE for VANILLA units (docs/Turn-Ease.md): Formation Lab turn links resolved to descriptor ids at
+        // addon load (same session-scoped resolution as the Resize rules above); read by the pose hook per pawn.
+        static readonly Dictionary<int, float> vanillaTurnByDesc = new Dictionary<int, float>();
+        static readonly HashSet<int> vanillaEaseLogged = new HashSet<int>();   // one "easing vanilla desc N" line per type per session
+        static readonly Dictionary<string, int> addonDefIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);   // every addon seen this session: name -> PawnDefinitionId
+        internal static readonly HashSet<int> descCensusLogged = new HashSet<int>();   // diag=1 census: one line per rendered descriptor per session
+
+        // Does `name` (a pawn definition or simulation unit name) belong to the turn link whose core is `core`?
+        // Plain contains-either-way first; then the CULTURE-VARIANT relaxation: a link on the COMMON family
+        // unit also covers the emblematic variants — the census showed the player's howitzers rendering as
+        // 'Era5_ZuluKingdom_Common_SiegeHowitzers_01' while the link (naturally) targeted the Common unit.
+        // A link whose core names a specific culture has no "_Common_" and stays culture-exact.
+        internal static bool TurnLinkMatches(string name, string core)
+        {
+            if (name.IndexOf(core, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                core.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            int ci = core.IndexOf("_Common_", StringComparison.OrdinalIgnoreCase);
+            if (ci < 0) return false;
+            string era = core.Substring(0, ci);                        // "Era5" ("" tolerated for odd names)
+            string tail = core.Substring(ci + "_Common_".Length);      // "SiegeHowitzers"
+            if (tail.Length < 4) return false;                         // too short to be a safe family token
+            return name.IndexOf(tail, StringComparison.OrdinalIgnoreCase) >= 0 &&
+                   (era.Length == 0 || name.IndexOf(era, StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        // Match the Formation Lab turn links against every addon recorded so far. Called from the addon-load
+        // hook (new addon) AND from FormationOverride right after the registry parses (addons that loaded
+        // first) — whichever side arrives last completes the mapping.
+        internal static void SweepTurnLinks()
+        {
+            if (FormationOverride.TurnRateByUnit.Count == 0 || addonDefIds.Count == 0) return;
+            foreach (var ad in addonDefIds)
+            {
+                if (vanillaTurnByDesc.ContainsKey(ad.Value)) continue;
+                foreach (var kv in FormationOverride.TurnRateByUnit)
+                    if (TurnLinkMatches(ad.Key, kv.Key))
+                    {
+                        vanillaTurnByDesc[ad.Value] = kv.Value;
+                        Plugin.Log.LogInfo($"[TurnEase] vanilla '{ad.Key}' -> desc {ad.Value} rate {kv.Value} deg/s (Formation Lab link '{kv.Key}')");
+                        break;
+                    }
+            }
+        }
         static readonly Dictionary<int, float[]> eraGridRows = new Dictionary<int, float[]>();  // Global Era Lab: unit era -> modifier per CURRENT era
         static HashSet<string> unitScaleLogged;
         static readonly HashSet<int> vanillaScaledLogged = new HashSet<int>();

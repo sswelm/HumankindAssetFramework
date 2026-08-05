@@ -81,6 +81,13 @@ namespace HumankindAssetFramework
         // ---- combat / fight ----
         internal static Type PawnRangedFightSequence  => Cached("Amplitude.Mercury.Presentation.PawnRangedFightSequence");
         internal static Type PawnActionMeleeStartFight => Cached("Amplitude.Mercury.Presentation.PawnActionMeleeStartFight");
+        internal static Type RotationPawnStateMachine  => Cached("Amplitude.Mercury.Presentation.RotationPawnStateMachine");
+        internal static Type PawnActionRangedStartAttack => Cached("Amplitude.Mercury.Presentation.PawnActionRangedStartAttack");
+        internal static Type AttackAnimationStateMachine => Cached("Amplitude.Mercury.Presentation.AttackAnimationStateMachine");
+        internal static Type AbstractAnimationStateMachine => Cached("Amplitude.Mercury.Presentation.AbstractAnimationStateMachine");
+        internal static Type PresentationArtilleryStrikeController => Cached("Amplitude.Mercury.Presentation.PresentationArtilleryStrikeController");
+        internal static Type WorldPosition          => Cached("Amplitude.Mercury.WorldPosition");
+        internal static Type WorldPositionExtensions => Cached("WorldPositionExtensions", "Amplitude.Mercury.WorldPositionExtensions");
         internal static Type UnitActionFaceEnemy      => Cached("Amplitude.Mercury.Presentation.UnitActionFaceEnemy");
         internal static Type MecanimEventInterpreter  => Cached("Amplitude.Mercury.Animation.MecanimEventInterpreter");
         internal static Type AlterationFireProjectile => Cached("Amplitude.Mercury.Animation.AlterationFireProjectile");
@@ -180,6 +187,13 @@ namespace HumankindAssetFramework
             // combat / fight
             new Dep(PawnRangedFightSequence, nameof(PawnRangedFightSequence)),
             new Dep(PawnActionMeleeStartFight, nameof(PawnActionMeleeStartFight)),
+            new Dep(RotationPawnStateMachine, nameof(RotationPawnStateMachine), "StartDirectionToLook", "StepTurning"),
+            new Dep(PawnActionRangedStartAttack, nameof(PawnActionRangedStartAttack), "OnReadyToStart", "isReadyToStart"),
+            new Dep(AttackAnimationStateMachine, nameof(AttackAnimationStateMachine), "TeleportToSimpleAttack"),
+            new Dep(AbstractAnimationStateMachine, nameof(AbstractAnimationStateMachine), "StepWaitingDelay", "ownerPawn"),
+            new Dep(PresentationArtilleryStrikeController, nameof(PresentationArtilleryStrikeController), "ScheduleArtilleryStrikeProjectileLaunch", "ScheduleArtilleryStrikeHit"),
+            new Dep(WorldPosition, nameof(WorldPosition)),
+            new Dep(WorldPositionExtensions, nameof(WorldPositionExtensions), "ToVector3"),
             new Dep(UnitActionFaceEnemy, nameof(UnitActionFaceEnemy), "StartUnitAction", "actionScope", "AttackerBattleUnit"),
             new Dep(MecanimEventInterpreter, nameof(MecanimEventInterpreter)),
             new Dep(AlterationFireProjectile, nameof(AlterationFireProjectile)),

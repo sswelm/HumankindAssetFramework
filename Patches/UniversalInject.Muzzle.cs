@@ -361,22 +361,140 @@ namespace HumankindAssetFramework
         // (nearest within 4u — the deploy poll's approximation) so multiple units smooth independently; a
         // stacked squadron shares one state harmlessly (same spot, same heading). Every yaw angle eases, 180s
         // included; teleports/battle placement snap naturally by MISSING the position match (fresh state = target yaw).
-        class TurnState { public UnityEngine.Vector3 pos; public float yaw; public float bank; public float lastT; }
+        class TurnState { public UnityEngine.Vector3 pos; public float yaw; public float targetYaw; public float bank; public float lastT; }
         static readonly List<TurnState> turnStates = new List<TurnState>();
         internal static float turnRate = 0f, turnBank = 0f;   // file-driven while spiking
 
+        // TRUE-BEARING AIM (2026-08-05, "turn to the exact angle needed to realistically shoot"): a vanilla map
+        // bombard flips the unit to a HEX-QUANTIZED angle (GetHexagonAngleToPosition = one of six directions, up
+        // to 30 deg off the target) — invisible at snap speed, glaring on an eased turn. While a strike is in
+        // progress an override registered here (position-matched, like everything in this system) replaces the
+        // ease TARGET with the real bearing to the target tile; the barrel lays ON the target, and after the
+        // override expires the unit eases back to the game's quantized facing (the crew re-laying the gun).
+        class AimOverride { public UnityEngine.Vector3 pos; public float yaw; public float until; }
+        static readonly List<AimOverride> aimOverrides = new List<AimOverride>();
+        internal static void SetAimOverride(UnityEngine.Vector3 pos, float yaw, float duration)
+        {
+            float now = UnityEngine.Time.time;
+            for (int i = aimOverrides.Count - 1; i >= 0; i--) if (now > aimOverrides[i].until) aimOverrides.RemoveAt(i);
+            foreach (var o in aimOverrides)
+            { var d = o.pos - pos; d.y = 0f; if (d.sqrMagnitude < 4f) { o.pos = pos; o.yaw = yaw; o.until = now + duration; return; } }
+            aimOverrides.Add(new AimOverride { pos = pos, yaw = yaw, until = now + duration });
+        }
+        static bool TryAimAt(UnityEngine.Vector3 pos, out float yaw)
+        {
+            yaw = 0f; float now = UnityEngine.Time.time; float best = 16f; bool found = false;
+            for (int i = 0; i < aimOverrides.Count; i++)
+            {
+                if (now > aimOverrides[i].until) continue;
+                var d = aimOverrides[i].pos - pos; d.y = 0f;
+                if (d.sqrMagnitude < best) { best = d.sqrMagnitude; yaw = aimOverrides[i].yaw; found = true; }
+            }
+            return found;
+        }
+
+        // How far (deg) the pawn nearest `pos` still has to turn (eased yaw vs the game's target). 0 = aligned,
+        // no state, or easing off. Main-thread only (pose hook + Plugin.Update), like every turnStates consumer.
+        // Battle-turn spike: lets the fire-clip arm HOLD the recoil until the barrel actually faces the enemy.
+        internal static float TurnMisalignAt(UnityEngine.Vector3 pos)
+        {
+            float now = UnityEngine.Time.time; TurnState st = null; float best = 16f;
+            for (int i = turnStates.Count - 1; i >= 0; i--)
+            {
+                if (now - turnStates[i].lastT > 10f) continue;   // stale — pruning is ApplyTurnEase's job
+                var d = turnStates[i].pos - pos; d.y = 0f;
+                if (d.sqrMagnitude < best) { best = d.sqrMagnitude; st = turnStates[i]; }
+            }
+            return st == null ? 0f : UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(st.yaw, st.targetYaw));
+        }
+
+        // Seconds until the pawn nearest `pos` finishes its eased turn — OUR entries only (vanilla pawns don't
+        // ease, so they keep vanilla attack pacing). Feeds the AttackFSM delay patch so the attack animation and
+        // its FireProjectile mecanim event (the shell!) wait for the barrel to face the target.
+        // The eased yaw of the pawn nearest `pos`, if a live turn-ease state exists there. Lets the artillery
+        // hold compute remaining-turn against a target read from the (already flipped) pawn Transform — no
+        // dependence on TurnState.targetYaw, which only refreshes on the NEXT pose frame (the v3/v4 race).
+        internal static bool TryTurnYawAt(UnityEngine.Vector3 pos, out float yaw)
+        {
+            yaw = 0f;
+            float now = UnityEngine.Time.time; TurnState st = null; float best = 16f;
+            for (int i = turnStates.Count - 1; i >= 0; i--)
+            {
+                if (now - turnStates[i].lastT > 10f) continue;
+                var d = turnStates[i].pos - pos; d.y = 0f;
+                if (d.sqrMagnitude < best) { best = d.sqrMagnitude; st = turnStates[i]; }
+            }
+            if (st == null) return false;
+            yaw = st.yaw; return true;
+        }
+
+        // The turn-ease rate an attacking pawn is governed by: our entry's (dial override first), else a
+        // Formation Lab per-unit link — the VANILLA route (unitDef here is the simulation name, e.g.
+        // "LandUnit_Era5_Common_LineInfantry (…)"; the link stores the presentation name inside it, so
+        // case-insensitive contains bridges the two). 0 = no easing, vanilla pacing.
+        internal static float TurnRateForUnitDef(string unitDef)
+        {
+            var e = FindEntryForUnitDefinition(unitDef);
+            if (e != null) return turnRate > 0f ? turnRate : e.turnRate;
+            if (string.IsNullOrEmpty(unitDef)) return 0f;
+            foreach (var kv in FormationOverride.TurnRateByUnit)
+                if (TurnLinkMatches(unitDef, kv.Key)) return kv.Value;   // incl. the culture-variant relaxation
+            return 0f;
+        }
+
+        // Like TurnHoldSeconds, but the target is the pawn's TRANSFORM yaw — valid the same frame a bombard's
+        // FlipPawnsGrid(Teleport) snaps it, when TurnState.targetYaw hasn't refreshed yet (next pose frame).
+        internal static float TurnHoldTransformSeconds(object pawn)
+        {
+            var unit = GetMember(pawn, "PresentationUnit");
+            float rate = TurnRateForUnitDef(GetMember(unit, "UnitDefinition")?.ToString() ?? "");
+            if (rate <= 0f || !(GetMember(pawn, "Transform") is UnityEngine.Transform tr)) return 0f;
+            if (!TryTurnYawAt(tr.position, out float eased)) return 0f;
+            // an active true-bearing override IS the aim the shot should wait for; the flipped transform
+            // (hex-quantized) is the fallback when no strike override exists
+            float target = TryAimAt(tr.position, out float ay) ? ay : tr.eulerAngles.y;
+            float miss = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(eased, target));
+            return miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.2f, 3f) : 0f;
+        }
+
+        static float holdLogAt;
+        internal static float TurnHoldSeconds(object pawn, UnityEngine.Vector3 pos)
+        {
+            var unit = GetMember(pawn, "PresentationUnit");
+            string unitDef = GetMember(unit, "UnitDefinition")?.ToString() ?? "";
+            float rate = TurnRateForUnitDef(unitDef);
+            if (rate <= 0f) return 0f;
+            float miss = TurnMisalignAt(pos);
+            float hold = miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.15f, 3f) : 0f;
+            // eased units attack rarely — a throttled trace here is the ground truth for WHY an attack
+            // did or didn't wait (rate resolution, measured misalignment, resulting hold)
+            if (UnityEngine.Time.time > holdLogAt)
+            { holdLogAt = UnityEngine.Time.time + 0.5f; Plugin.Log.LogInfo($"[BattleTurn] hold check '{unitDef}': rate={rate} misalign={miss:F0}deg -> hold {hold:F2}s"); }
+            return hold;
+        }
+
         static void ApplyTurnEase(ModelEntry e, object entry)
         {
-            // per-model (Factory "Turn ease — rate") with the live dial file as an override, same rule as the hug
-            float rate = turnRate > 0f ? turnRate : e.turnRate;
-            float bank = turnRate > 0f ? turnBank : e.turnBank;
+            // per-model (Factory "Turn ease — rate") with the live dial file as an override, same rule as the hug.
+            // bank resolves per-FIELD (file bank only when the file SETS one) so a global file rate doesn't strip
+            // a flyer's per-model bank or force one onto ground vehicles (battle-turn spike).
+            ApplyTurnEaseCore(turnRate > 0f ? turnRate : e.turnRate,
+                              turnBank != 0f ? turnBank : e.turnBank, entry);
+        }
+
+        // Core easing, rate/bank already resolved — shared by our model entries and VANILLA pawns whose unit
+        // carries a Formation Lab turn-ease link (rate from vanillaTurnByDesc, bank always 0 for those).
+        internal static void ApplyTurnEaseCore(float rate, float bank, object entry)
+        {
             if (rate <= 0f) return;
             var os = GetMember(entry, "ObjectSpace");
             UnityEngine.Vector3 tr;
             try { tr = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return; }
             var ro = GetMember(os, "Rotation");
             if (!TryQuaternion(ro, out var rot)) return;
-            float target = rot.eulerAngles.y;
+            // true-bearing aim: an active strike override replaces the game's (hex-quantized) yaw as the target
+            bool aimed = TryAimAt(tr, out float aimYaw);
+            float target = aimed ? aimYaw : rot.eulerAngles.y;
             float now = UnityEngine.Time.time;
             TurnState st = null; float best = 16f;   // nearest live state within 4 world units
             for (int i = turnStates.Count - 1; i >= 0; i--)
@@ -387,7 +505,7 @@ namespace HumankindAssetFramework
             }
             if (st == null) { st = new TurnState { pos = tr, yaw = target, lastT = now }; turnStates.Add(st); }
             float dt = UnityEngine.Mathf.Clamp(now - st.lastT, 0f, 0.1f);
-            st.pos = tr; st.lastT = now;
+            st.pos = tr; st.lastT = now; st.targetYaw = target;   // published for TurnMisalignAt (fire-clip hold)
             float diff = UnityEngine.Mathf.DeltaAngle(st.yaw, target);
             // NO yaw-size guard (user verdict: every angle eases, incl. full 180s). Teleports/battle placement
             // still snap NATURALLY: a pawn that jumps >4u misses its position-matched state and the fresh state
@@ -395,8 +513,8 @@ namespace HumankindAssetFramework
             st.yaw = UnityEngine.Mathf.MoveTowardsAngle(st.yaw, target, rate * dt);
             float wantBank = UnityEngine.Mathf.Clamp(diff / 45f, -1f, 1f) * bank;   // bank ~ how hard we're turning
             st.bank = UnityEngine.Mathf.MoveTowards(st.bank, wantBank, (UnityEngine.Mathf.Abs(bank) * 3f + 30f) * dt);
-            if (UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(st.yaw, target)) < 0.01f && UnityEngine.Mathf.Abs(st.bank) < 0.05f)
-                return;   // converged — leave the game's exact value
+            if (!aimed && UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(st.yaw, target)) < 0.01f && UnityEngine.Mathf.Abs(st.bank) < 0.05f)
+                return;   // converged on the game's own value — leave it (while AIMED we must keep writing: the game re-writes the quantized yaw every frame)
             var eased = UnityEngine.Quaternion.Euler(rot.eulerAngles.x, st.yaw, st.bank);   // keep the game's pitch; z = our bank
             if (ro is UnityEngine.Quaternion) SetMember(os, "Rotation", eased);
             else

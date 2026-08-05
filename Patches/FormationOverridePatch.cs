@@ -57,6 +57,25 @@ namespace HumankindAssetFramework
 
         static bool parsed;
         static readonly List<Entry> entries = new List<Entry>();
+        // TURN EASE for VANILLA units (docs/Turn-Ease.md): per-unit rate rows parsed off the SAME registry links
+        // (the Formation Lab is HAF's per-unit config surface). Kept separate from `entries` because a link may be
+        // turn-ease-ONLY (no formation change: `formation` empty) — the formation pipeline skips it, this map keeps
+        // it. Consumed by UniversalInject: descriptor mapping at addon load + the attack-hold name fallback.
+        // KEYED BY THE CORE TOKEN, not the raw link name: the window's Pick stores the full presentation name
+        // ("PresentationLandUnit_Era5_Common_SiegeHowitzers_Default"), whose wrapper prefix/suffix appear in NO
+        // other naming layer — the pawn definition is "Era5_Common_SiegeHowitzers_…" and the simulation unit is
+        // "LandUnit_Era5_Common_SiegeHowitzers". TurnCore strips the wrappers so contains-matching bridges all three.
+        internal static readonly Dictionary<string, float> TurnRateByUnit = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+
+        static string TurnCore(string unit)
+        {
+            var s = unit.Trim();
+            if (s.StartsWith("Presentation", StringComparison.OrdinalIgnoreCase)) s = s.Substring("Presentation".Length);
+            foreach (var p in new[] { "LandUnit_", "NavalUnit_", "AirUnit_", "SeaUnit_", "Unit_" })
+                if (s.StartsWith(p, StringComparison.OrdinalIgnoreCase)) { s = s.Substring(p.Length); break; }
+            if (s.EndsWith("_Default", StringComparison.OrdinalIgnoreCase)) s = s.Substring(0, s.Length - "_Default".Length);
+            return s;
+        }
         // Injected formation SOs live for the whole process (HideAndDontSave keeps Unity's unused-asset sweep off
         // them); re-Add per session is cheap and guarded by a by-name DB lookup.
         static readonly Dictionary<string, ScriptableObject> created = new Dictionary<string, ScriptableObject>(StringComparer.Ordinal);
@@ -159,8 +178,22 @@ namespace HumankindAssetFramework
                         e.columns[i] = v;
                     }
 
+                    // turn ease rides the link independently of the formation pipeline below (unit links only)
+                    float tRate = (float?)l["turnRate"] ?? 0f;
+                    if (e.unit.Length > 0 && tRate > 0f)
+                    {
+                        var core = TurnCore(e.unit);
+                        TurnRateByUnit[core] = tRate;
+                        Plugin.Log.LogInfo($"[Formation] '{e.unit}' turn ease {tRate} deg/s (match core '{core}', docs/Turn-Ease.md)");
+                    }
+
                     if (e.formation.Length == 0)
-                    { Plugin.Log.LogWarning("[Formation] registry entry skipped (formation name empty)."); continue; }
+                    {
+                        // a unit link that ONLY carries turn ease is legitimate — no formation change requested
+                        if (!(e.unit.Length > 0 && tRate > 0f))
+                            Plugin.Log.LogWarning("[Formation] registry entry skipped (formation name empty).");
+                        continue;
+                    }
                     if (e.unit.Length == 0 && e.dummies.Count == 0)
                     { Plugin.Log.LogWarning($"[Formation] MACRO replacement of '{e.formation}' skipped — no formation data in the entry."); continue; }
                     var err = Validate(e);
@@ -170,6 +203,10 @@ namespace HumankindAssetFramework
                 }
                 if (entries.Count > 0)
                     Plugin.Log.LogInfo($"[Formation] registry: {entries.Count} link(s) from enc_formations.json");
+                // map turn links onto addons that loaded BEFORE this parse (the SiegeHowitzers ordering: the
+                // MAIN pawn's addon loads early; its satellites load on first view) — the addon-load hook
+                // covers the other direction.
+                UniversalInject.SweepTurnLinks();
             }
             catch (Exception ex) { Plugin.Log.LogError("[Formation] enc_formations.json parse: " + ex); }
         }

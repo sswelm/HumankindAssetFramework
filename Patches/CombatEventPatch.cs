@@ -81,7 +81,13 @@ namespace HumankindAssetFramework
         // InitializeCommon(PresentationPawn shooter, bool dies, bool delay, bool miss, float projectileSpread)
         static void Postfix(object __0)
         {
-            try { UniversalInject.OnPawnAttack(__0, "ranged shot"); }
+            try
+            {
+                // BATTLE TURN spike: when hold-fire is on the real attack starts LATER (after the turn), and the
+                // arm moves to that moment (Hk_BattleHoldFire) — arming here too would fire the clip mid-pivot.
+                if (BattleTurn.holdFire) return;
+                UniversalInject.OnPawnAttack(__0, "ranged shot");
+            }
             catch (Exception e) { Plugin.Log.LogError("[Fire] ranged-fight postfix: " + e); }
         }
     }

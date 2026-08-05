@@ -150,6 +150,20 @@ namespace HumankindAssetFramework
                         }
                     }
                 }
+                // TURN EASE for VANILLA units (Formation Lab links, docs/Turn-Ease.md): record EVERY addon's
+                // name -> PawnDefinitionId (session-scoped, same id space the pose hook reads as ctx.descId),
+                // then sweep the turn links over the WHOLE record. Recording unconditionally makes the mapping
+                // independent of parse-vs-load ordering — the SiegeHowitzers MAIN pawn's addon loads BEFORE the
+                // formation registry parses (its horse/car/servant satellites load later, on first view), so a
+                // map-at-load-only approach permanently missed the one descriptor that actually renders.
+                try
+                {
+                    int adId = Convert.ToInt32(GetMember(addon, "PawnDefinitionId"));
+                    if (adId >= 0) addonDefIds[name] = adId;
+                }
+                catch { }
+                SweepTurnLinks();
+
                 if (entries.Count == 0) return;
                 var e = LongestMatch(entries, name, x => x.pawnDescription);   // most-specific (longest) match, not first-in-order — a variant entry wins over the base it extends
                 if (e == null) return;

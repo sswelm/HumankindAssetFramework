@@ -137,7 +137,7 @@ namespace HumankindAssetFramework
                 // two flags above are both false, yet they still need the wrong-skeleton rescue. Recomputed when an
                 // entry is repointed and on session reset — `repointed` flips at runtime, so it cannot be latched.
                 if (anyRescuable == null) anyRescuable = entries != null && entries.Any(Rescuable);
-                if ((anyAnimated != true && anyFreeze != true && anyRescuable != true && unitScaleByDesc.Count == 0) || !Plugin.UniversalInjectOn.Value) return;
+                if ((anyAnimated != true && anyFreeze != true && anyRescuable != true && unitScaleByDesc.Count == 0 && vanillaTurnByDesc.Count == 0) || !Plugin.UniversalInjectOn.Value) return;
                 pawnMgrRef = pawnManager;   // cached for the live rotor-trim re-apply (PollRotorTrim walks live pawns)
                 if (!TryReadLastPawn(pawnManager, out var ctx)) return;
                 if (!knownManagers.Contains(pawnManager)) knownManagers.Add(pawnManager);   // every manager, incl. ones only adding vanilla pawns — the sweep needs them all
@@ -147,10 +147,31 @@ namespace HumankindAssetFramework
                 if (unitScaleByDesc.Count > 0 && unitScaleByDesc.TryGetValue(ctx.descId, out var vInfo) && HookedEntryFor(ctx.skelId) == null)
                     ApplyVanillaScale(ctx, vInfo);   // MESH-SCALE engine: verts x s (on change) + ObjectSpace.Scale (per frame)
 
+                // TURN EASE for VANILLA units (Formation Lab link resolved to this descriptor at addon load,
+                // docs/Turn-Ease.md): ease the pawn's ObjectSpace yaw at the linked rate — bank always 0 (ground
+                // units). Same write-back rule as the vanilla scale above: this pawn matches no entry, so nothing
+                // downstream persists the mutation for us.
+                if (vanillaTurnByDesc.Count > 0 && vanillaTurnByDesc.TryGetValue(ctx.descId, out float vTurn) && HookedEntryFor(ctx.skelId) == null)
+                {
+                    if (vanillaEaseLogged.Add(ctx.descId))
+                        Plugin.Log.LogInfo($"[TurnEase] easing vanilla desc {ctx.descId} at {vTurn} deg/s (first pawn seen)");
+                    ApplyTurnEaseCore(vTurn, 0f, ctx.entry);
+                    ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
+                }
+
                 // Match this pawn to one of our entries (animated OR freeze-static) by OUR baked skeleton id (the correctly
                 // skinned pawn), else by the descriptor learned from that first correct pawn. The game spawns a unit's LATER
                 // instances on a different vanilla skeleton; without the descriptor fallback only the first instance is
                 // handled and the rest slip through (animating / rocking on the donor's rig).
+                // RENDER CENSUS (diag=1 in enc_battleturn.txt): one line per DISTINCT descriptor that actually
+                // renders, with how this hook classifies it — ends the "which pawn is that on screen?" guessing
+                // (the SiegeHowitzers hunt: linked unit, mapped satellites, yet nothing eased).
+                if (BattleTurn.diag && descCensusLogged.Add(ctx.descId))
+                {
+                    string an = null; foreach (var kv in addonDefIds) if (kv.Value == ctx.descId) { an = kv.Key; break; }
+                    Plugin.Log.LogInfo($"[Census] desc {ctx.descId} ('{an ?? "?"}') skel {ctx.skelId} entry={(HookedEntryFor(ctx.skelId)?.resourceName ?? "-")} vanillaTurn={(vanillaTurnByDesc.TryGetValue(ctx.descId, out var cvr) ? cvr.ToString("0") : "-")}");
+                }
+
                 var e = HookedEntryFor(ctx.skelId);
                 if (e != null) e.descId = ctx.descId;                  // learn our unit's descriptor from the correct pawn
                 else if (ctx.descId >= 0)
@@ -233,9 +254,18 @@ namespace HumankindAssetFramework
                 // they live in ApplyAnimatedPose, which this branch bypasses, and without them Position offset
                 // (hover height!), moveTilt and runtime scale are silently dead on donor-clip models.
                 if (e.useDonorClip) { DumpDonorChannels(ctx.entry, e); ApplyRotorSpin(ctx.entry, e); ApplyRotorTrim(ctx.entry, e); ApplyPositionOffset(e, ctx.entry); ApplyTerrainHug(e, ctx.entry); ApplyTurnEase(e, ctx.entry); ApplyMoveTilt(e, ctx.entry); ApplyScale(e, ctx.entry); ctx.pawnEntries.SetValue(ctx.entry, ctx.idx); }
-                else if (e.freezeDonorAnim && e.animId < 0) ApplyFreeze(ctx, e);
-                else if (e.animId >= 0) ApplyAnimatedPose(ctx, e);
-                else ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
+                else
+                {
+                    // TURN EASE for every non-donor entry too (battle-turn spike): a map attack SNAPS the unit's
+                    // facing straight into ObjectSpace.Rotation (the pawn-Transform rotation FSM is a no-op on the
+                    // world map — measured 0->0), so ObjectSpace easing is the ONE seam that smooths it — same
+                    // mechanism the Comanche flies with. Self-gated: no dial rate AND no per-model rate = no-op.
+                    // Runs before the pose handlers; they mutate the same boxed entry and write it back.
+                    ApplyTurnEase(e, ctx.entry);
+                    if (e.freezeDonorAnim && e.animId < 0) ApplyFreeze(ctx, e);
+                    else if (e.animId >= 0) ApplyAnimatedPose(ctx, e);
+                    else ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
+                }
             }
             // one-shot log: a bare catch here hid member renames after a game update (models just stopped animating, no clue why).
             catch (Exception ex) { InjectionErrors++; if (!poseErrLogged) { poseErrLogged = true; Plugin.Log.LogError("[Uni] OnPawnAdded (pose hook disabled this pawn): " + ex); } }

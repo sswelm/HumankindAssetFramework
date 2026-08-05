@@ -230,6 +230,12 @@ namespace HumankindAssetFramework
                 typeof(Hk_FormationSpawnDiag),     // FORMATION axis TEMP diagnostic: log dummies/pawns/health at InstantiatePawns for >9-dummy formations (2026-07-27)
                 typeof(Hk_FormationPawnScale),     // FORMATION axis: per-model Scale from the registry link (pawn root localScale -> GPU TRS) (2026-07-28)
                 typeof(Hk_SandboxSave), typeof(Hk_SandboxLoad),  // FACING PERSIST: capture each army's FormationAngle on save, restore on load (the standard save has no facing) (2026-08-01)
+                typeof(Hk_ArtilleryHold),     // BATTLE TURN (verified): MAP BOMBARD — add the striker's remaining turn-ease time to the artillery launch/hit schedules (2026-08-05, docs/Turn-Ease.md)
+                typeof(Hk_BombardAnimHold),   // BATTLE TURN (verified): defer the bombard's TeleportToSimpleAttack so the donor muzzle flash + shot SOUND also wait for the turn (2026-08-05)
+                typeof(Hk_BattleHoldFire),    // BATTLE TURN experimental (hold=1): hold a BATTLE ranged attack until the shooter's rotation FSM finishes (2026-08-05)
+                typeof(Hk_BattleAttackGate),  // BATTLE TURN experimental (hold=1): dynamic gate on the attack FSM's delay step for battle volleys (2026-08-05)
+                typeof(Hk_BattleTurnProbe),   // BATTLE TURN forensics (diag=1): log RotationFSM turn starts (2026-08-05)
+                typeof(Hk_BattleTurnStep),    // BATTLE TURN forensics (diag=1): log StepTurning route (animated vs unanimated) + start/end angles (2026-08-05)
             };
             int skipped = 0;
             foreach (var t in hooks)
@@ -274,6 +280,8 @@ namespace HumankindAssetFramework
                 UniversalInject.PollTerrainHug();       // live terrain-hug dial (enc_hugterrain.txt): fly low over open ground, climb for districts (spike)
                 UniversalInject.TickDistrictMeshSwap(); // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
             }
+            BattleTurn.Poll();                          // live battle-turn dial (enc_battleturn.txt): turn rate + hold-fire for ALL units — independent of model injection, so outside the UniversalInject gate (spike)
+            Hk_BombardAnimHold.Tick();                  // replay deferred bombard attack poses once their turn-hold elapses (muzzle flash + shot sound timing)
             if (PersistUnitFacing.Value)
                 FacingPersist.Tick();                   // capture each army's facing + restore it after a load (stationary units only). OWN gate — facing is independent of model injection, so turning UniversalInject off must NOT silence it (it has its own save/load hooks + config).
             if (PropRegisterOn.Value)
