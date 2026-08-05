@@ -27,7 +27,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   the player's ZULU siege howitzers ignored the Common link, by a one-line-per-descriptor render census), and
   **true-bearing aim** — the eased turn exposed that vanilla bombards face a HEX-QUANTIZED angle (one of six
   directions, up to 30° off); the ease target now becomes the real bearing to the target tile while the strike
-  plays out, so the barrel lays exactly on the city it shells. See [docs/Turn-Ease.md](docs/Turn-Ease.md).
+  plays out, so the barrel lays exactly on the city it shells. The aim then surfaced **three more vanilla
+  shortcuts** (2026-08-06, each spotted by the user frame-stepping captures, each verified fixed): the strike
+  ran on TWO CLOCKS (dynamic release vs padded schedule — the bang drifted ~0.25 s from the recoil; now one
+  shared release timestamp armed before the flip), the attack clip teleported in at a RANDOM PHASE while the
+  shell was timed to its literal event time (now deterministic frame-0 playback), and the shell + muzzle smoke
+  spawned at the PRE-PIVOT barrel — vanilla captures the muzzle at schedule time, and the pawn's invisible
+  transform skeleton never turns with the eased model (now: fire-time recapture + every bone TRS aim-rotated at
+  the GetBoneTRS seam while the strike is live). See [docs/Turn-Ease.md](docs/Turn-Ease.md).
 - **CLIFF ANTICIPATION — climbing before the edge, not into it (2026-08-05).** Terrain hug's lead point now
   also reads the *ground* ahead: where the terrain steps up, the aircraft gains that height immediately instead
   of rising at the cell boundary, and the engine's own tile-bound altitude catches up on arrival (climb-only —
