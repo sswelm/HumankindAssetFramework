@@ -137,7 +137,7 @@ namespace HumankindAssetFramework
                 // two flags above are both false, yet they still need the wrong-skeleton rescue. Recomputed when an
                 // entry is repointed and on session reset — `repointed` flips at runtime, so it cannot be latched.
                 if (anyRescuable == null) anyRescuable = entries != null && entries.Any(Rescuable);
-                if ((anyAnimated != true && anyFreeze != true && anyRescuable != true && unitScaleByDesc.Count == 0 && vanillaTurnByDesc.Count == 0) || !Plugin.UniversalInjectOn.Value) return;
+                if ((anyAnimated != true && anyFreeze != true && anyRescuable != true && unitScaleByDesc.Count == 0 && vanillaTurnByDesc.Count == 0 && !AnyCatRate) || !Plugin.UniversalInjectOn.Value) return;
                 pawnMgrRef = pawnManager;   // cached for the live rotor-trim re-apply (PollRotorTrim walks live pawns)
                 if (!TryReadLastPawn(pawnManager, out var ctx)) return;
                 if (!knownManagers.Contains(pawnManager)) knownManagers.Add(pawnManager);   // every manager, incl. ones only adding vanilla pawns — the sweep needs them all
@@ -147,16 +147,30 @@ namespace HumankindAssetFramework
                 if (unitScaleByDesc.Count > 0 && unitScaleByDesc.TryGetValue(ctx.descId, out var vInfo) && HookedEntryFor(ctx.skelId) == null)
                     ApplyVanillaScale(ctx, vInfo);   // MESH-SCALE engine: verts x s (on change) + ObjectSpace.Scale (per frame)
 
-                // TURN EASE for VANILLA units (Formation Lab link resolved to this descriptor at addon load,
-                // docs/Turn-Ease.md): ease the pawn's ObjectSpace yaw at the linked rate — bank always 0 (ground
-                // units). Same write-back rule as the vanilla scale above: this pawn matches no entry, so nothing
-                // downstream persists the mutation for us.
-                if (vanillaTurnByDesc.Count > 0 && vanillaTurnByDesc.TryGetValue(ctx.descId, out float vTurn) && HookedEntryFor(ctx.skelId) == null)
+                // TURN EASE for VANILLA units (docs/Turn-Ease.md): a Formation Lab LINK rate wins; else the
+                // TYPE-CATEGORY default (human/land/turret/air/ship — the dial's global defaults). Bank: air
+                // category only. Land descriptors learn their turret refinement by position-joining the slow
+                // army scan. Same write-back rule as the vanilla scale above: this pawn matches no entry, so
+                // nothing downstream persists the mutation for us.
+                if ((vanillaTurnByDesc.Count > 0 || AnyCatRate) && HookedEntryFor(ctx.skelId) == null)
                 {
-                    if (vanillaEaseLogged.Add(ctx.descId))
-                        Plugin.Log.LogInfo($"[TurnEase] easing vanilla desc {ctx.descId} at {vTurn} deg/s (first pawn seen)");
-                    ApplyTurnEaseCore(vTurn, 0f, ctx.entry);
-                    ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
+                    float vTurn = 0f; int vCat = -1;
+                    if (!vanillaTurnByDesc.TryGetValue(ctx.descId, out vTurn) && AnyCatRate &&
+                        vanillaCatByDesc.TryGetValue(ctx.descId, out vCat))
+                    {
+                        if (vCat == CatLand && catLandRate != catTurretRate &&
+                            GetMember(ctx.entry, "ObjectSpace") is object vos &&
+                            GetMember(vos, "Translation") is UnityEngine.Vector3 vpos)
+                            TryLearnTurret(ctx.descId, vpos);
+                        vTurn = CategoryRateForDesc(ctx.descId, vCat);
+                    }
+                    if (vTurn > 0f)
+                    {
+                        if (vanillaEaseLogged.Add(ctx.descId))
+                            Plugin.Log.LogInfo($"[TurnEase] easing vanilla desc {ctx.descId} at {vTurn} deg/s ({(vCat >= 0 ? "category" : "link")}, first pawn seen)");
+                        ApplyTurnEaseCore(vTurn, vCat == CatAir ? turnBank : 0f, ctx.entry);
+                        ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
+                    }
                 }
 
                 // Match this pawn to one of our entries (animated OR freeze-static) by OUR baked skeleton id (the correctly
@@ -567,7 +581,7 @@ namespace HumankindAssetFramework
                 string txt = File.Exists(path) ? File.ReadAllText(path) : "";
                 if (txt == turnSig) return;
                 turnSig = txt;
-                float rate = 0f, bank = 0f;
+                float rate = 0f, bank = 0f, cHum = 0f, cLand = 0f, cTur = 0f, cAir = 0f, cShip = 0f;
                 foreach (var raw in txt.Split('\n'))
                 {
                     var line = raw.Trim();
@@ -579,10 +593,16 @@ namespace HumankindAssetFramework
                     {
                         case "rate": rate = v; break;
                         case "bank": bank = v; break;
+                        case "human": cHum = v; break;    // category defaults (docs/Turn-Ease.md): per-model > category > rate
+                        case "land": cLand = v; break;    // turretless land vehicles (towed guns, assault guns)
+                        case "turret": cTur = v; break;   // land vehicles WITH a traversing turret (learned from live pawns)
+                        case "air": cAir = v; break;
+                        case "ship": cShip = v; break;
                     }
                 }
                 turnRate = rate; turnBank = bank;
-                Plugin.Log.LogInfo($"[TurnEase] rate={rate} deg/s, bank={bank} deg");
+                catHumanRate = cHum; catLandRate = cLand; catTurretRate = cTur; catAirRate = cAir; catShipRate = cShip;
+                Plugin.Log.LogInfo($"[TurnEase] rate={rate} bank={bank} | categories human={cHum} land={cLand} turret={cTur} air={cAir} ship={cShip} deg/s");
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[TurnEase] " + ex.Message); }
         }

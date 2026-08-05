@@ -480,10 +480,32 @@ namespace HumankindAssetFramework
         internal static float TurnRateForUnitDef(string unitDef)
         {
             var e = FindEntryForUnitDefinition(unitDef);
-            if (e != null) return turnRate > 0f ? turnRate : e.turnRate;
+            if (e != null)   // our entry: per-model > category default > global rate (docs/Turn-Ease.md precedence)
+                return e.turnRate > 0f ? e.turnRate
+                     : CategoryRateForDesc(e.descId, e.profCat) > 0f ? CategoryRateForDesc(e.descId, e.profCat)
+                     : turnRate;
             if (string.IsNullOrEmpty(unitDef)) return 0f;
             foreach (var kv in FormationOverride.TurnRateByUnit)
                 if (TurnLinkMatches(unitDef, kv.Key)) return kv.Value;   // incl. the culture-variant relaxation
+            if (AnyCatRate)
+            {
+                // vanilla category fallback: find the unit's MAIN pawn definition (variant-suffix-stripped
+                // addon name contained in the simulation unit-def string) and use its category rate.
+                foreach (var ad in addonDefIds)
+                {
+                    var nm = ad.Key;
+                    int us = nm.LastIndexOf('_');
+                    if (us > 0 && us + 1 < nm.Length)
+                    {
+                        bool digits = true;
+                        for (int i = us + 1; i < nm.Length; i++) if (!char.IsDigit(nm[i])) { digits = false; break; }
+                        if (digits) nm = nm.Substring(0, us);
+                    }
+                    if (nm.Length >= 6 && unitDef.IndexOf(nm, StringComparison.OrdinalIgnoreCase) >= 0 &&
+                        vanillaCatByDesc.TryGetValue(ad.Value, out int cat))
+                        return CategoryRateForDesc(ad.Value, cat);
+                }
+            }
             return 0f;
         }
 
@@ -520,11 +542,19 @@ namespace HumankindAssetFramework
 
         static void ApplyTurnEase(ModelEntry e, object entry)
         {
-            // per-model (Factory "Turn ease — rate") with the live dial file as an override, same rule as the hug.
-            // bank resolves per-FIELD (file bank only when the file SETS one) so a global file rate doesn't strip
-            // a flyer's per-model bank or force one onto ground vehicles (battle-turn spike).
-            ApplyTurnEaseCore(turnRate > 0f ? turnRate : e.turnRate,
-                              turnBank != 0f ? turnBank : e.turnBank, entry);
+            // PRECEDENCE (2026-08-06, user design): per-model Factory value > CATEGORY default (human/land/
+            // turret/air/ship, from the dial) > global `rate`. The old file-overrides-model rule surprised the
+            // user ("the howitzer turned despite not being configured") — an explicit per-model value is now
+            // always authoritative, and the dial provides type-level DEFAULTS instead of a blanket override.
+            float rate = e.turnRate > 0f ? e.turnRate
+                       : CategoryRateForDesc(e.descId, e.profCat) > 0f ? CategoryRateForDesc(e.descId, e.profCat)
+                       : turnRate;
+            // bank: per-model wins; the file bank otherwise applies only to AIR-category units (a global bank
+            // on ground vehicles reads as a capsizing truck).
+            float bank = e.turnBank != 0f ? e.turnBank
+                       : e.profCat == CatAir || e.turnRate > 0f || turnRate > 0f ? turnBank
+                       : 0f;
+            ApplyTurnEaseCore(rate, bank, entry);
         }
 
         // Core easing, rate/bank already resolved — shared by our model entries and VANILLA pawns whose unit

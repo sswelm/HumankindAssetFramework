@@ -110,6 +110,43 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] StrikeTargetWorldPos: " + ex.Message); return UnityEngine.Vector3.zero; }
         }
 
+        // TURRET SCAN (category turn ease, docs/Turn-Ease.md): every ~3 s while the land and turret rates
+        // differ, sample each live army's first pawn — a traversing turret shows as EXTRA azimuth rotation
+        // transforms on the pawn (rotationTransformInfos.Length > 1, the same array the azimuth audio keys
+        // off). The pose hook joins these samples to descriptors by position and learns each land descriptor's
+        // refinement ONCE per session.
+        static float turretScanNext;
+        static System.Reflection.FieldInfo fiRotInfos;
+        internal static void PollTurretScan()
+        {
+            if (catLandRate == catTurretRate) return;   // distinction unused — no scan cost
+            if (UnityEngine.Time.realtimeSinceStartup < turretScanNext) return;
+            turretScanNext = UnityEngine.Time.realtimeSinceStartup + 3f;
+            try
+            {
+                var presType = GameBinding.Presentation;
+                var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
+                var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
+                if (armies == null) return;
+                turretSamples.Clear();
+                foreach (var army in armies)
+                {
+                    if (army == null) continue;
+                    var unit = GetMember(army, "PresentationUnit");
+                    if (unit == null || !(GetMember(unit, "Pawns") is System.Collections.IEnumerable pawns)) continue;
+                    foreach (var pawn in pawns)
+                    {
+                        if (!(GetMember(pawn, "Transform") is UnityEngine.Transform tr)) break;
+                        if (fiRotInfos == null) fiRotInfos = AccessTools.Field(pawn.GetType(), "rotationTransformInfos");
+                        if (!(fiRotInfos?.GetValue(pawn) is Array infos)) break;
+                        turretSamples.Add(new TurretSample { pos = tr.position, turret = infos.Length > 1 });
+                        break;   // the first pawn is representative for the unit's descriptor family
+                    }
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[TurnEase] turret scan: " + ex.Message); }
+        }
+
         // LAUNCH POSE REFRESH (shell/smoke position fix): vanilla captures the shell's spawn position +
         // direction (muzzle bone TRS) at SCHEDULE time — before our held pivot has even started — so the
         // shell and its launch smoke appeared at the PRE-TURN barrel pose. Prefixed onto

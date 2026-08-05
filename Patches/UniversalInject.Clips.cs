@@ -129,6 +129,70 @@ namespace HumankindAssetFramework
         static readonly Dictionary<string, int> addonDefIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);   // every addon seen this session: name -> PawnDefinitionId
         internal static readonly HashSet<int> descCensusLogged = new HashSet<int>();   // diag=1 census: one line per rendered descriptor per session
 
+        // CATEGORY TURN EASE (2026-08-06, user design): global defaults per unit TYPE instead of one blanket
+        // rate — Human, turretless Land vehicle, Land vehicle WITH a turret, Air, Ship. Base category derives
+        // from PawnAnimationCapabilityProfileType at addon load (Boat=7 ship; Plane=14/Missile=15 air;
+        // InanimateObject=5/Custom=8 land; every organic profile = human). Turret-ness has no data flag — it is
+        // LEARNED once per descriptor from live pawns: a turreted vehicle carries extra azimuth rotation
+        // transforms (rotationTransformInfos.Length > 1), sampled by a slow army walk and joined to the pose
+        // hook's descriptor by position (the system's standard join). Precedence: per-model turnRate > category
+        // rate > global `rate` (the dial no longer stomps per-model values — the user's mental model).
+        internal const int CatHuman = 0, CatLand = 1, CatTurret = 2, CatAir = 3, CatShip = 4;
+        internal static float catHumanRate, catLandRate, catTurretRate, catAirRate, catShipRate;
+        internal static bool AnyCatRate => catHumanRate > 0f || catLandRate > 0f || catTurretRate > 0f || catAirRate > 0f || catShipRate > 0f;
+        static readonly Dictionary<int, int> vanillaCatByDesc = new Dictionary<int, int>();   // desc -> BASE category (land, not yet turret-refined)
+        static readonly Dictionary<int, bool> descTurret = new Dictionary<int, bool>();       // desc -> has azimuth turret (learned)
+        internal struct TurretSample { public UnityEngine.Vector3 pos; public bool turret; }
+        internal static readonly List<TurretSample> turretSamples = new List<TurretSample>(); // slow-scan output for the position join
+
+        internal static int CategoryFromProfile(int prof)
+        {
+            switch (prof)
+            {
+                case 7: return CatShip;                    // Boat
+                case 14: case 15: return CatAir;           // Plane, Missile
+                case 5: case 8: return CatLand;            // InanimateObject (vehicles/guns), Custom
+                default: return prof >= 0 ? CatHuman : -1; // every organic profile (humans, mounts, chariots, animals)
+            }
+        }
+
+        internal static float CategoryRate(int cat)
+        {
+            switch (cat)
+            {
+                case CatHuman: return catHumanRate;
+                case CatLand: return catLandRate;
+                case CatTurret: return catTurretRate;
+                case CatAir: return catAirRate;
+                case CatShip: return catShipRate;
+                default: return 0f;
+            }
+        }
+
+        // The category rate for a specific descriptor: land refines to turret when learned. An unlearned land
+        // vehicle uses the plain land rate until its first turret sample lands (a few seconds into a session).
+        internal static float CategoryRateForDesc(int descId, int baseCat)
+        {
+            int cat = baseCat == CatLand && descTurret.TryGetValue(descId, out bool t) && t ? CatTurret : baseCat;
+            return CategoryRate(cat);
+        }
+
+        // Position-join learn: called from the pose hook for land descriptors while the land/turret rates differ.
+        internal static void TryLearnTurret(int descId, UnityEngine.Vector3 pos)
+        {
+            if (descTurret.ContainsKey(descId)) return;
+            for (int i = 0; i < turretSamples.Count; i++)
+            {
+                var d = turretSamples[i].pos - pos; d.y = 0f;
+                if (d.sqrMagnitude < 2f * 2f)
+                {
+                    descTurret[descId] = turretSamples[i].turret;
+                    Plugin.Log.LogInfo($"[TurnEase] desc {descId} classified: land vehicle {(turretSamples[i].turret ? "WITH turret" : "without turret")}");
+                    return;
+                }
+            }
+        }
+
         // Does `name` (a pawn definition or simulation unit name) belong to the turn link whose core is `core`?
         // Plain contains-either-way first; then the CULTURE-VARIANT relaxation: a link on the COMMON family
         // unit also covers the emblematic variants — the census showed the player's howitzers rendering as
