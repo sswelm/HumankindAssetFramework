@@ -371,15 +371,30 @@ namespace HumankindAssetFramework
         // progress an override registered here (position-matched, like everything in this system) replaces the
         // ease TARGET with the real bearing to the target tile; the barrel lays ON the target, and after the
         // override expires the unit eases back to the game's quantized facing (the crew re-laying the gun).
-        class AimOverride { public UnityEngine.Vector3 pos; public float yaw; public float until; }
+        // releaseAt is THE strike's one shared clock (sync fix 2026-08-05): the attack pose teleport, the shot
+        // sound/smoke and the shell schedule all fire off this single timestamp — mixing a dynamic release
+        // (aligned-within-8°) with static scheduler delays desynced the bang from the recoil by ~0.25 s.
+        class AimOverride { public UnityEngine.Vector3 pos; public float yaw; public float until; public float releaseAt; }
         static readonly List<AimOverride> aimOverrides = new List<AimOverride>();
-        internal static void SetAimOverride(UnityEngine.Vector3 pos, float yaw, float duration)
+        internal static void SetAimOverride(UnityEngine.Vector3 pos, float yaw, float duration, float releaseAt = 0f)
         {
             float now = UnityEngine.Time.time;
             for (int i = aimOverrides.Count - 1; i >= 0; i--) if (now > aimOverrides[i].until) aimOverrides.RemoveAt(i);
             foreach (var o in aimOverrides)
-            { var d = o.pos - pos; d.y = 0f; if (d.sqrMagnitude < 4f) { o.pos = pos; o.yaw = yaw; o.until = now + duration; return; } }
-            aimOverrides.Add(new AimOverride { pos = pos, yaw = yaw, until = now + duration });
+            { var d = o.pos - pos; d.y = 0f; if (d.sqrMagnitude < 4f) { o.pos = pos; o.yaw = yaw; o.until = now + duration; o.releaseAt = releaseAt; return; } }
+            aimOverrides.Add(new AimOverride { pos = pos, yaw = yaw, until = now + duration, releaseAt = releaseAt });
+        }
+        // The strike's shared release time for the pawn nearest `pos` (false = no armed strike there).
+        internal static bool TryAimRelease(UnityEngine.Vector3 pos, out float releaseAt)
+        {
+            releaseAt = 0f; float now = UnityEngine.Time.time; float best = 16f; bool found = false;
+            for (int i = 0; i < aimOverrides.Count; i++)
+            {
+                if (now > aimOverrides[i].until || aimOverrides[i].releaseAt <= 0f) continue;
+                var d = aimOverrides[i].pos - pos; d.y = 0f;
+                if (d.sqrMagnitude < best) { best = d.sqrMagnitude; releaseAt = aimOverrides[i].releaseAt; found = true; }
+            }
+            return found;
         }
         static bool TryAimAt(UnityEngine.Vector3 pos, out float yaw)
         {

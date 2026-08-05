@@ -86,6 +86,26 @@ namespace HumankindAssetFramework
         }
     }
 
+    // ---- STRIKE CLOCK PREP (sync fix 2026-08-05): arm the strike's aim overrides + its ONE shared release
+    // time BEFORE anything inside TriggerArtilleryStrikeVisuals runs (the flip, the attack-pose teleport, the
+    // launch/hit schedules). Every consumer then reads the same clock, so recoil, muzzle flash, shot sound,
+    // smoke and shell stay in lockstep — computing holds per-consumer desynced the bang from the animation. ----
+    [HarmonyPatch] internal static class Hk_ArtilleryAimPrep
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = GameBinding.PresentationArtilleryStrike;
+            var m = t != null ? AccessTools.Method(t, "TriggerArtilleryStrikeVisuals") : null;
+            if (m != null) Plugin.Log.LogInfo("[BattleTurn] hooked TriggerArtilleryStrikeVisuals (strike clock prep)");
+            else Plugin.Log.LogWarning("[BattleTurn] NOT found: TriggerArtilleryStrikeVisuals — strike effects may drift ~0.25s apart");
+            return m;
+        }
+        static void Prefix(object __instance)
+        {
+            try { UniversalInject.TurnHoldForStrike(__instance); } catch { }
+        }
+    }
+
     // ---- MAP BOMBARD hold (VERIFIED): a world-map bombard never touches the battle attack actions —
     // PresentationArtilleryStrike.TriggerBombardAnimation does FlipPawnsGrid(angle, Teleport) (THE instant
     // facing snap) plus AttackFSM.TeleportToSimpleAttack(), and the shell + impact are fired by PLAIN
@@ -120,7 +140,7 @@ namespace HumankindAssetFramework
     // our held recoil clip all land together at alignment. Single caller = the map bombard. ----
     [HarmonyPatch] internal static class Hk_BombardAnimHold
     {
-        class Pending { public object fsm; public float due; public float start; }
+        class Pending { public object fsm; public float due; public float start; public bool fixedDue; }
         static readonly List<Pending> pending = new List<Pending>();
         static MethodInfo miTeleport;
         static bool replaying;
@@ -139,9 +159,21 @@ namespace HumankindAssetFramework
                 if (replaying) return true;
                 var pawn = UniversalInject.GetMember(__instance, "ownerPawn");
                 if (pawn == null) return true;
+                // PREFERRED: the strike's ONE shared release time (armed by Hk_ArtilleryAimPrep before the
+                // flip) — the launch/hit schedules use the same clock, so anim, sound, smoke and shell stay
+                // in lockstep. Fallback: own estimate + deadline re-check (no strike context, e.g. dial off).
+                float now = UnityEngine.Time.time;
+                if (UniversalInject.GetMember(pawn, "Transform") is UnityEngine.Transform tr &&
+                    UniversalInject.TryAimRelease(tr.position, out float rel))
+                {
+                    if (rel <= now) return true;   // clock already elapsed — fire now
+                    pending.Add(new Pending { fsm = __instance, due = rel, start = now, fixedDue = true });
+                    Plugin.Log.LogInfo($"[BattleTurn] bombard attack pose deferred +{rel - now:F2}s (strike clock)");
+                    return false;
+                }
                 float hold = UniversalInject.TurnHoldTransformSeconds(pawn);
                 if (hold <= 0f) return true;
-                pending.Add(new Pending { fsm = __instance, due = UnityEngine.Time.time + hold, start = UnityEngine.Time.time });
+                pending.Add(new Pending { fsm = __instance, due = now + hold, start = now });
                 Plugin.Log.LogInfo($"[BattleTurn] bombard attack pose deferred +{hold:F2}s (muzzle/sound wait for the turn)");
                 return false;
             }
@@ -159,7 +191,7 @@ namespace HumankindAssetFramework
             {
                 if (now < pending[i].due) continue;
                 var fsm = pending[i].fsm;
-                if (now - pending[i].start < 4f)
+                if (!pending[i].fixedDue && now - pending[i].start < 4f)
                 {
                     try
                     {
