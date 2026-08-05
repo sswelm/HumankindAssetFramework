@@ -410,7 +410,7 @@ namespace HumankindAssetFramework
             if (e != null) return turnRate > 0f ? turnRate : e.turnRate;
             if (string.IsNullOrEmpty(unitDef)) return 0f;
             foreach (var kv in FormationOverride.TurnRateByUnit)
-                if (unitDef.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) >= 0) return kv.Value;
+                if (TurnLinkMatches(unitDef, kv.Key)) return kv.Value;   // incl. the culture-variant relaxation
             return 0f;
         }
 

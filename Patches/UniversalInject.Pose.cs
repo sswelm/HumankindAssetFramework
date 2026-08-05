@@ -163,6 +163,15 @@ namespace HumankindAssetFramework
                 // skinned pawn), else by the descriptor learned from that first correct pawn. The game spawns a unit's LATER
                 // instances on a different vanilla skeleton; without the descriptor fallback only the first instance is
                 // handled and the rest slip through (animating / rocking on the donor's rig).
+                // RENDER CENSUS (diag=1 in enc_battleturn.txt): one line per DISTINCT descriptor that actually
+                // renders, with how this hook classifies it — ends the "which pawn is that on screen?" guessing
+                // (the SiegeHowitzers hunt: linked unit, mapped satellites, yet nothing eased).
+                if (BattleTurn.diag && descCensusLogged.Add(ctx.descId))
+                {
+                    string an = null; foreach (var kv in addonDefIds) if (kv.Value == ctx.descId) { an = kv.Key; break; }
+                    Plugin.Log.LogInfo($"[Census] desc {ctx.descId} ('{an ?? "?"}') skel {ctx.skelId} entry={(HookedEntryFor(ctx.skelId)?.resourceName ?? "-")} vanillaTurn={(vanillaTurnByDesc.TryGetValue(ctx.descId, out var cvr) ? cvr.ToString("0") : "-")}");
+                }
+
                 var e = HookedEntryFor(ctx.skelId);
                 if (e != null) e.descId = ctx.descId;                  // learn our unit's descriptor from the correct pawn
                 else if (ctx.descId >= 0)

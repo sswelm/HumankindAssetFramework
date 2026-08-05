@@ -901,7 +901,7 @@ namespace HumankindAssetFramework
             registered = false;
             anyAnimated = null; anyMuzzle = null; anyFreeze = null; anyRescuable = null;                    // recomputed on the next pawn-add
             unitScaleByDesc.Clear(); unitScaleNameByDesc.Clear(); vanillaScaledLogged.Clear(); descApplied.Clear(); cachedEra = -1;   // descriptor ids + era are session-scoped (meshApplied deliberately KEPT: the Fx vertex buffers persist)
-            vanillaTurnByDesc.Clear(); vanillaEaseLogged.Clear(); addonDefIds.Clear();   // vanilla turn-ease links re-resolve to fresh descriptor ids next session
+            vanillaTurnByDesc.Clear(); vanillaEaseLogged.Clear(); addonDefIds.Clear(); descCensusLogged.Clear();   // vanilla turn-ease links re-resolve to fresh descriptor ids next session
             _listenerChecked = false;                                // the AudioListener rode a session-scoped camera
             var list = entries;
             if (list != null)
