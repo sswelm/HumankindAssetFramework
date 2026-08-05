@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using BepInEx;
@@ -245,6 +246,57 @@ namespace HumankindAssetFramework
         static void Prefix(object __0, ref float __1)
         {
             try { __1 += UniversalInject.TurnHoldForStrike(__0); } catch { }
+        }
+    }
+
+    // ---- Patch F: defer the bombard's attack-pose teleport (iteration 6). v5 delayed the SHELL, but
+    // TriggerBombardAnimation also slams the animator into the attack state via TeleportToSimpleAttack() —
+    // and that animator emits the MUZZLE FLASH and the SHOT SOUND on its own timeline, still mid-pivot.
+    // Defer the teleport by the same transform-vs-eased hold; a pending queue ticked from Plugin.Update
+    // replays it (re-entrancy flag lets the replay through the prefix). Single caller = the map bombard. ----
+    [HarmonyPatch] internal static class Hk_BombardAnimHold
+    {
+        class Pending { public object fsm; public float due; }
+        static readonly List<Pending> pending = new List<Pending>();
+        static MethodInfo miTeleport;
+        static bool replaying;
+        static MethodBase TargetMethod()
+        {
+            var t = GameBinding.AttackAnimationStateMachine;
+            miTeleport = t != null ? AccessTools.Method(t, "TeleportToSimpleAttack") : null;
+            if (miTeleport != null) Plugin.Log.LogInfo("[BattleTurn] hooked AttackFSM.TeleportToSimpleAttack (muzzle/sound wait for the turn)");
+            else Plugin.Log.LogWarning("[BattleTurn] NOT found: TeleportToSimpleAttack — bombard muzzle flash/sound won't wait");
+            return miTeleport;
+        }
+        static bool Prefix(object __instance)
+        {
+            try
+            {
+                if (replaying) return true;
+                var pawn = UniversalInject.GetMember(__instance, "ownerPawn");
+                if (pawn == null) return true;
+                float hold = UniversalInject.TurnHoldTransformSeconds(pawn);
+                if (hold <= 0f) return true;
+                pending.Add(new Pending { fsm = __instance, due = UnityEngine.Time.time + hold });
+                Plugin.Log.LogInfo($"[BattleTurn] bombard attack pose deferred +{hold:F2}s (muzzle/sound wait for the turn)");
+                return false;
+            }
+            catch { return true; }
+        }
+        // Ticked from Plugin.Update: replay deferred teleports when their hold elapses.
+        internal static void Tick()
+        {
+            if (pending.Count == 0 || miTeleport == null) return;
+            float now = UnityEngine.Time.time;
+            for (int i = pending.Count - 1; i >= 0; i--)
+            {
+                if (now < pending[i].due) continue;
+                var fsm = pending[i].fsm;
+                pending.RemoveAt(i);
+                try { replaying = true; miTeleport.Invoke(fsm, null); }
+                catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] deferred teleport: " + ex.Message); }
+                finally { replaying = false; }
+            }
         }
     }
 

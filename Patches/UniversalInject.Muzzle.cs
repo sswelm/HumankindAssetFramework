@@ -400,6 +400,20 @@ namespace HumankindAssetFramework
             yaw = st.yaw; return true;
         }
 
+        // Like TurnHoldSeconds, but the target is the pawn's TRANSFORM yaw — valid the same frame a bombard's
+        // FlipPawnsGrid(Teleport) snaps it, when TurnState.targetYaw hasn't refreshed yet (next pose frame).
+        internal static float TurnHoldTransformSeconds(object pawn)
+        {
+            var unit = GetMember(pawn, "PresentationUnit");
+            var e = FindEntryForUnitDefinition(GetMember(unit, "UnitDefinition")?.ToString() ?? "");
+            if (e == null) return 0f;
+            float rate = turnRate > 0f ? turnRate : e.turnRate;
+            if (rate <= 0f || !(GetMember(pawn, "Transform") is UnityEngine.Transform tr)) return 0f;
+            if (!TryTurnYawAt(tr.position, out float eased)) return 0f;
+            float miss = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(eased, tr.eulerAngles.y));
+            return miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.2f, 3f) : 0f;
+        }
+
         static float holdLogAt;
         internal static float TurnHoldSeconds(object pawn, UnityEngine.Vector3 pos)
         {

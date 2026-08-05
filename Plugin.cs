@@ -237,6 +237,7 @@ namespace HumankindAssetFramework
                 typeof(Hk_BattleAttackDelay), // BATTLE TURN spike: extend AttackFSM delayDuration by the remaining turn-ease time — the shell waits for the barrel (2026-08-05)
                 typeof(Hk_BattleAttackGate),  // BATTLE TURN spike: DYNAMIC gate on the attack FSM's delay step — waits for alignment whenever the facing snap lands (fixes the Start-time race) (2026-08-05)
                 typeof(Hk_ArtilleryHold),     // BATTLE TURN spike: MAP BOMBARD — add the striker's remaining turn-ease time to the artillery launch/hit schedules (the bombard's real seam) (2026-08-05)
+                typeof(Hk_BombardAnimHold),   // BATTLE TURN spike: defer the bombard's TeleportToSimpleAttack so the donor muzzle flash + shot SOUND also wait for the turn (2026-08-05)
             };
             int skipped = 0;
             foreach (var t in hooks)
@@ -282,6 +283,7 @@ namespace HumankindAssetFramework
                 UniversalInject.TickDistrictMeshSwap(); // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
             }
             BattleTurn.Poll();                          // live battle-turn dial (enc_battleturn.txt): turn rate + hold-fire for ALL units — independent of model injection, so outside the UniversalInject gate (spike)
+            Hk_BombardAnimHold.Tick();                  // replay deferred bombard attack poses once their turn-hold elapses (muzzle flash + shot sound timing)
             if (PersistUnitFacing.Value)
                 FacingPersist.Tick();                   // capture each army's facing + restore it after a load (stationary units only). OWN gate — facing is independent of model injection, so turning UniversalInject off must NOT silence it (it has its own save/load hooks + config).
             if (PropRegisterOn.Value)
