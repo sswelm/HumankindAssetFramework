@@ -233,9 +233,18 @@ namespace HumankindAssetFramework
                 // they live in ApplyAnimatedPose, which this branch bypasses, and without them Position offset
                 // (hover height!), moveTilt and runtime scale are silently dead on donor-clip models.
                 if (e.useDonorClip) { DumpDonorChannels(ctx.entry, e); ApplyRotorSpin(ctx.entry, e); ApplyRotorTrim(ctx.entry, e); ApplyPositionOffset(e, ctx.entry); ApplyTerrainHug(e, ctx.entry); ApplyTurnEase(e, ctx.entry); ApplyMoveTilt(e, ctx.entry); ApplyScale(e, ctx.entry); ctx.pawnEntries.SetValue(ctx.entry, ctx.idx); }
-                else if (e.freezeDonorAnim && e.animId < 0) ApplyFreeze(ctx, e);
-                else if (e.animId >= 0) ApplyAnimatedPose(ctx, e);
-                else ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
+                else
+                {
+                    // TURN EASE for every non-donor entry too (battle-turn spike): a map attack SNAPS the unit's
+                    // facing straight into ObjectSpace.Rotation (the pawn-Transform rotation FSM is a no-op on the
+                    // world map — measured 0->0), so ObjectSpace easing is the ONE seam that smooths it — same
+                    // mechanism the Comanche flies with. Self-gated: no dial rate AND no per-model rate = no-op.
+                    // Runs before the pose handlers; they mutate the same boxed entry and write it back.
+                    ApplyTurnEase(e, ctx.entry);
+                    if (e.freezeDonorAnim && e.animId < 0) ApplyFreeze(ctx, e);
+                    else if (e.animId >= 0) ApplyAnimatedPose(ctx, e);
+                    else ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
+                }
             }
             // one-shot log: a bare catch here hid member renames after a game update (models just stopped animating, no clue why).
             catch (Exception ex) { InjectionErrors++; if (!poseErrLogged) { poseErrLogged = true; Plugin.Log.LogError("[Uni] OnPawnAdded (pose hook disabled this pawn): " + ex); } }

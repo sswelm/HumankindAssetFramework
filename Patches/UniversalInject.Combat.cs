@@ -104,7 +104,18 @@ namespace HumankindAssetFramework
                 // even with zero active fires (perf pass 2026-07-19)
                 lock (e.activeFires)
                     for (int i = e.activeFires.Count - 1; i >= 0; i--)
-                        if (UnityEngine.Time.time - e.activeFires[i].startTime >= dur) e.activeFires.RemoveAt(i);   // drop finished one-shots
+                    {
+                        var f = e.activeFires[i];
+                        if (f.waitAlign)
+                        {
+                            // battle-turn spike: hold the clip's clock at 'now' while the pawn is still easing its
+                            // yaw toward the target (recoil waits for the barrel to face the enemy); 4 s failsafe.
+                            if (UnityEngine.Time.time - f.armTime < 4f && UniversalInject.TurnMisalignAt(f.pos) > 8f)
+                            { f.startTime = UnityEngine.Time.time; e.activeFires[i] = f; continue; }
+                            f.waitAlign = false; e.activeFires[i] = f;   // aligned (or timed out): clock runs from here
+                        }
+                        if (UnityEngine.Time.time - f.startTime >= dur) e.activeFires.RemoveAt(i);   // drop finished one-shots
+                    }
                 if (!e.fireGuidQueue.IsEmpty) anyQueued = true;
             }
             if (!anyQueued) return;
@@ -133,12 +144,15 @@ namespace HumankindAssetFramework
                         var pawns = GetMember(unit, "Pawns") as System.Collections.IEnumerable;
                         if (pawns == null) continue;
                         int n = 0; string posDump = "";
+                        // battle-turn spike: when turn ease is live for this entry, arm the fire HELD (waitAlign) so
+                        // the recoil starts only once the pawn's eased yaw reaches the attack facing.
+                        bool hold = turnRate > 0f || e.turnRate > 0f;
                         lock (e.activeFires)
                             foreach (var pawn in pawns)
                             {
                                 var tr = GetMember(pawn, "Transform") as UnityEngine.Transform;
                                 if (tr == null) continue;
-                                e.activeFires.Add(new FireInstance { pos = tr.position, startTime = UnityEngine.Time.time });
+                                e.activeFires.Add(new FireInstance { pos = tr.position, startTime = UnityEngine.Time.time, waitAlign = hold, armTime = UnityEngine.Time.time });
                                 posDump += $" {tr.position.ToString("0.0")}"; n++;
                             }
                         matched = true;

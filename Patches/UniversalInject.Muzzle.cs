@@ -361,15 +361,32 @@ namespace HumankindAssetFramework
         // (nearest within 4u — the deploy poll's approximation) so multiple units smooth independently; a
         // stacked squadron shares one state harmlessly (same spot, same heading). Every yaw angle eases, 180s
         // included; teleports/battle placement snap naturally by MISSING the position match (fresh state = target yaw).
-        class TurnState { public UnityEngine.Vector3 pos; public float yaw; public float bank; public float lastT; }
+        class TurnState { public UnityEngine.Vector3 pos; public float yaw; public float targetYaw; public float bank; public float lastT; }
         static readonly List<TurnState> turnStates = new List<TurnState>();
         internal static float turnRate = 0f, turnBank = 0f;   // file-driven while spiking
 
+        // How far (deg) the pawn nearest `pos` still has to turn (eased yaw vs the game's target). 0 = aligned,
+        // no state, or easing off. Main-thread only (pose hook + Plugin.Update), like every turnStates consumer.
+        // Battle-turn spike: lets the fire-clip arm HOLD the recoil until the barrel actually faces the enemy.
+        internal static float TurnMisalignAt(UnityEngine.Vector3 pos)
+        {
+            float now = UnityEngine.Time.time; TurnState st = null; float best = 16f;
+            for (int i = turnStates.Count - 1; i >= 0; i--)
+            {
+                if (now - turnStates[i].lastT > 10f) continue;   // stale — pruning is ApplyTurnEase's job
+                var d = turnStates[i].pos - pos; d.y = 0f;
+                if (d.sqrMagnitude < best) { best = d.sqrMagnitude; st = turnStates[i]; }
+            }
+            return st == null ? 0f : UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(st.yaw, st.targetYaw));
+        }
+
         static void ApplyTurnEase(ModelEntry e, object entry)
         {
-            // per-model (Factory "Turn ease — rate") with the live dial file as an override, same rule as the hug
+            // per-model (Factory "Turn ease — rate") with the live dial file as an override, same rule as the hug.
+            // bank resolves per-FIELD (file bank only when the file SETS one) so a global file rate doesn't strip
+            // a flyer's per-model bank or force one onto ground vehicles (battle-turn spike).
             float rate = turnRate > 0f ? turnRate : e.turnRate;
-            float bank = turnRate > 0f ? turnBank : e.turnBank;
+            float bank = turnBank != 0f ? turnBank : e.turnBank;
             if (rate <= 0f) return;
             var os = GetMember(entry, "ObjectSpace");
             UnityEngine.Vector3 tr;
@@ -387,7 +404,7 @@ namespace HumankindAssetFramework
             }
             if (st == null) { st = new TurnState { pos = tr, yaw = target, lastT = now }; turnStates.Add(st); }
             float dt = UnityEngine.Mathf.Clamp(now - st.lastT, 0f, 0.1f);
-            st.pos = tr; st.lastT = now;
+            st.pos = tr; st.lastT = now; st.targetYaw = target;   // published for TurnMisalignAt (fire-clip hold)
             float diff = UnityEngine.Mathf.DeltaAngle(st.yaw, target);
             // NO yaw-size guard (user verdict: every angle eases, incl. full 180s). Teleports/battle placement
             // still snap NATURALLY: a pawn that jumps >4u misses its position-matched state and the fresh state

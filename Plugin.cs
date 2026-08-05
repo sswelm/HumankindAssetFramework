@@ -232,6 +232,8 @@ namespace HumankindAssetFramework
                 typeof(Hk_SandboxSave), typeof(Hk_SandboxLoad),  // FACING PERSIST: capture each army's FormationAngle on save, restore on load (the standard save has no facing) (2026-08-01)
                 typeof(Hk_BattleTurnRate),  // BATTLE TURN spike: cap unanimated choreography turns at rate deg/s instead of the vanilla fixed 0.5 s (2026-08-05)
                 typeof(Hk_BattleHoldFire),  // BATTLE TURN spike: hold PawnActionRangedStartAttack until the shooter's turn completes (2026-08-05)
+                typeof(Hk_BattleTurnProbe), // BATTLE TURN spike DIAGNOSTIC: log RotationFSM turn starts (which path does an attack's turn take?) (2026-08-05)
+                typeof(Hk_BattleTurnStep),  // BATTLE TURN spike DIAGNOSTIC: log StepTurning route (animated turn-anim vs unanimated 0.5 s lerp) per unit (2026-08-05)
             };
             int skipped = 0;
             foreach (var t in hooks)

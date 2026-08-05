@@ -23,6 +23,7 @@ namespace HumankindAssetFramework
     {
         internal static float rate = 0f;      // deg/s ceiling for unanimated battle turns; 0 = vanilla 0.5 s snap
         internal static bool holdFire = false; // delay PawnActionRangedStartAttack until the turn completes
+        internal static bool diag = false;     // verbose probe logging (turn starts/routes) — spike forensics only
         internal const float HoldDeadline = 4f; // failsafe: never hold an attack longer than this (180 deg at 60 deg/s = 3 s)
 
         static string sig;
@@ -37,7 +38,7 @@ namespace HumankindAssetFramework
                 string txt = File.Exists(path) ? File.ReadAllText(path) : "";
                 if (txt == sig) return;
                 sig = txt;
-                float r = 0f, h = 0f;
+                float r = 0f, h = 0f, dg = 0f;
                 foreach (var raw in txt.Split('\n'))
                 {
                     var line = raw.Trim();
@@ -49,12 +50,24 @@ namespace HumankindAssetFramework
                     {
                         case "rate": r = v; break;
                         case "hold": h = v; break;
+                        case "diag": dg = v; break;
                     }
                 }
-                rate = r; holdFire = h > 0f;
-                Plugin.Log.LogInfo($"[BattleTurn] rate={rate} deg/s, hold={(holdFire ? 1 : 0)}");
+                rate = r; holdFire = h > 0f; diag = dg > 0f;
+                Plugin.Log.LogInfo($"[BattleTurn] rate={rate} deg/s, hold={(holdFire ? 1 : 0)}, diag={(diag ? 1 : 0)}");
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] " + ex.Message); }
+        }
+
+        // Diagnostic helper: a pawn's unit-definition name (readable identity — pawn ToString is just pawnId).
+        internal static string UnitOf(object pawn)
+        {
+            try
+            {
+                var unit = UniversalInject.GetMember(pawn, "PresentationUnit");
+                return UniversalInject.GetMember(unit, "UnitDefinition")?.ToString() ?? pawn?.ToString() ?? "?";
+            }
+            catch { return "?"; }
         }
     }
 
@@ -73,6 +86,7 @@ namespace HumankindAssetFramework
             else Plugin.Log.LogWarning("[BattleTurn] NOT found: RotationPawnStateMachine.GetUnanimatedRotationProgress — battle turn rate off");
             return m;
         }
+        static float nextLog;   // spike diagnostic throttle
         static void Postfix(ref float __result, float startingAngle, float wantedAngle, float deltaTime, UnityEngine.Transform transformToComputeFrom)
         {
             try
@@ -80,9 +94,92 @@ namespace HumankindAssetFramework
                 float rate = BattleTurn.rate;
                 if (rate <= 0f) return;
                 float total = Math.Abs(UnityEngine.Mathf.DeltaAngle(startingAngle, wantedAngle));
-                if (total < 0.01f) return;   // vanilla already returned 1 (nothing to turn)
+                if (total < 0.01f)
+                {
+                    // spike diagnostic: a ZERO-length turn — the transform was already AT the target when the
+                    // turning step captured it, i.e. something snapped it there before the lerp could run.
+                    if (BattleTurn.diag && UnityEngine.Time.realtimeSinceStartup > nextLog)
+                    {
+                        nextLog = UnityEngine.Time.realtimeSinceStartup + 0.5f;
+                        Plugin.Log.LogInfo($"[BattleTurn] unanimated NO-OP (already at target): start={startingAngle:F0} wanted={wantedAngle:F0} dt={deltaTime:F3} ('{transformToComputeFrom.name}')");
+                    }
+                    return;   // vanilla already returned 1 (nothing to turn)
+                }
                 float cur = UnityEngine.Mathf.Clamp01(Math.Abs(UnityEngine.Mathf.DeltaAngle(startingAngle, transformToComputeFrom.eulerAngles.y)) / total);
                 __result = Math.Min(__result, Math.Min(cur + deltaTime * rate / total, 1f));
+                // spike diagnostic: prove this path actually runs during a turn (2/s max). If a turn visibly
+                // snaps and this NEVER prints, the method was inlined by the JIT or the turn used another path.
+                // dt is the smoking gun for INSTANT completes: GetAnimationDeltaTime >= 0.5 finishes in one call.
+                if (BattleTurn.diag && UnityEngine.Time.realtimeSinceStartup > nextLog)
+                {
+                    nextLog = UnityEngine.Time.realtimeSinceStartup + 0.5f;
+                    Plugin.Log.LogInfo($"[BattleTurn] unanimated turn: total={total:F0}deg progress={__result:P0} dt={deltaTime:F3} ('{transformToComputeFrom.name}')");
+                }
+            }
+            catch { }
+        }
+    }
+
+    // ---- SPIKE DIAGNOSTIC: log every RotationFSM turn start (the Vector3 StartDirectionToLook overload every
+    // rotate/look-at funnels through) with the pawn and requested policy — tells us whether an attack's turn
+    // enters this FSM at all, and as what. Remove once the spike verdict is in. ----
+    [HarmonyPatch] internal static class Hk_BattleTurnProbe
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = GameBinding.RotationPawnStateMachine;
+            if (t != null)
+                foreach (var m in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                    if (m.Name == "StartDirectionToLook" && m.GetParameters()[0].ParameterType == typeof(UnityEngine.Vector3))
+                    { Plugin.Log.LogInfo("[BattleTurn] probe hooked StartDirectionToLook"); return m; }
+            Plugin.Log.LogWarning("[BattleTurn] probe NOT hooked: StartDirectionToLook(Vector3, ...) not found");
+            return null;
+        }
+        // (Vector3 direction, float angleEpsilon, bool addDelay, subPawns, policy, callback) — __4 = boxed policy enum
+        static void Postfix(object __instance, UnityEngine.Vector3 __0, object __4)
+        {
+            try
+            {
+                if (!BattleTurn.diag) return;   // forensics only — silent in normal spike use
+                var pawn = UniversalInject.GetMember(__instance, "ownerPawn");
+                Plugin.Log.LogInfo($"[BattleTurn] FSM turn start: unit='{BattleTurn.UnitOf(pawn)}' dir=({__0.x:F2},{__0.z:F2}) policy={__4}");
+            }
+            catch { }
+        }
+    }
+
+    // ---- SPIKE DIAGNOSTIC 2: which ROUTE does each turn take? StepTurning is the FSM's final step; its public
+    // UseRotationAnimation field says animated (turn-anim cycle drives it — our rate cap does NOT apply) vs
+    // unanimated (the 0.5 s lerp — our rate cap DOES apply). Big static method, safely patchable. ----
+    [HarmonyPatch] internal static class Hk_BattleTurnStep
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = GameBinding.RotationPawnStateMachine;
+            var m = t != null ? AccessTools.Method(t, "StepTurning") : null;
+            if (m != null) Plugin.Log.LogInfo("[BattleTurn] probe hooked StepTurning");
+            else Plugin.Log.LogWarning("[BattleTurn] probe NOT hooked: StepTurning not found");
+            return m;
+        }
+        static float nextLog;
+        // StepTurning(RotationPawnStateMachine fsm, bool isFirstRun)
+        static void Postfix(object __0, bool __1, bool __result)
+        {
+            try
+            {
+                if (!BattleTurn.diag) return;   // forensics only — silent in normal spike use
+                if (!__1 && UnityEngine.Time.realtimeSinceStartup < nextLog) return;   // always log first runs; throttle the rest
+                nextLog = UnityEngine.Time.realtimeSinceStartup + 0.5f;
+                var pawn = UniversalInject.GetMember(__0, "ownerPawn");
+                bool anim = UniversalInject.GetMember(__0, "UseRotationAnimation") is bool a && a;
+                string angles = "";
+                if (__1 && UniversalInject.GetMember(__0, "rotationStart") is float[] rs &&
+                    UniversalInject.GetMember(__0, "rotationEnd") is float[] re)
+                {
+                    for (int i = 0; i < rs.Length && i < re.Length; i++)
+                        angles += $" [{i}] {rs[i]:F0}->{re[i]:F0}";
+                }
+                Plugin.Log.LogInfo($"[BattleTurn] StepTurning{(__1 ? " FIRST" : "")}: unit='{BattleTurn.UnitOf(pawn)}' animated={anim} done={__result}{angles}");
             }
             catch { }
         }
@@ -109,6 +206,7 @@ namespace HumankindAssetFramework
             else Plugin.Log.LogWarning("[BattleTurn] NOT found: PawnActionRangedStartAttack.OnReadyToStart/isReadyToStart — hold-fire off");
             return fiReady != null ? m : null;   // no field, no patch — skipping without the un-latch would stall attacks
         }
+        static float nextLog;   // spike diagnostic throttle
         static bool Prefix(object __instance)
         {
             try
@@ -123,11 +221,17 @@ namespace HumankindAssetFramework
                     var ct = UniversalInject.GetMember(__instance, "creationTime");
                     if (ct == null || UnityEngine.Time.time - Convert.ToSingle(ct) < BattleTurn.HoldDeadline)
                     {
+                        if (UnityEngine.Time.realtimeSinceStartup > nextLog)
+                        {
+                            nextLog = UnityEngine.Time.realtimeSinceStartup + 0.5f;
+                            Plugin.Log.LogInfo("[BattleTurn] holding ranged attack — shooter still turning");
+                        }
                         fiReady.SetValue(__instance, false);   // un-latch so UpdatePawnAction retries next frame
                         return false;                          // defer the attack — still turning
                     }
                 }
                 // turn done (or failsafe): the attack starts NOW — arm our fire-on-attack clip at the real moment
+                Plugin.Log.LogInfo("[BattleTurn] ranged attack released (turn complete)");
                 UniversalInject.OnPawnAttack(pawn, "ranged attack start (post-turn)");
             }
             catch { }
