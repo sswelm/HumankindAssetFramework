@@ -498,8 +498,16 @@ namespace HumankindAssetFramework
                 if (TurnLinkMatches(unitDef, kv.Key)) return kv.Value;   // incl. the culture-variant relaxation
             if (AnyCatRate)
             {
-                // vanilla category fallback: find the unit's MAIN pawn definition (variant-suffix-stripped
-                // addon name contained in the simulation unit-def string) and use its category rate.
+                // vanilla category fallback: find a pawn definition belonging to this unit and use its
+                // category rate. Match BOTH directions (measured necessity): the pawn name may sit INSIDE the
+                // unit name ("Era5_Common_SiegeHowitzers_01" in "LandUnit_Era5_Common_SiegeHowitzers"), or
+                // EXTEND the unit core — on the map artillery renders its LIMBERED pawn
+                // ("Era5_Common_SiegeHowitzersCar_01"), whose name the unit string does not contain.
+                string ucore = unitDef;
+                int sp = ucore.IndexOf(' ');                                   // drop " (Amplitude…Definition)"
+                if (sp > 0) ucore = ucore.Substring(0, sp);
+                int up = ucore.IndexOf("Unit_", StringComparison.OrdinalIgnoreCase);   // drop the LandUnit_/NavalUnit_/… domain prefix
+                if (up >= 0) ucore = ucore.Substring(up + 5);
                 foreach (var ad in addonDefIds)
                 {
                     var nm = ad.Key;
@@ -510,8 +518,10 @@ namespace HumankindAssetFramework
                         for (int i = us + 1; i < nm.Length; i++) if (!char.IsDigit(nm[i])) { digits = false; break; }
                         if (digits) nm = nm.Substring(0, us);
                     }
-                    if (nm.Length >= 6 && unitDef.IndexOf(nm, StringComparison.OrdinalIgnoreCase) >= 0 &&
-                        vanillaCatByDesc.TryGetValue(ad.Value, out int cat))
+                    if (nm.Length < 6) continue;
+                    bool match = unitDef.IndexOf(nm, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                 (ucore.Length >= 6 && nm.IndexOf(ucore, StringComparison.OrdinalIgnoreCase) >= 0);
+                    if (match && vanillaCatByDesc.TryGetValue(ad.Value, out int cat))
                         return CategoryRateForDesc(ad.Value, cat);
                 }
             }
