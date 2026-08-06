@@ -151,9 +151,17 @@ namespace HumankindAssetFramework
                         break;   // the first pawn is representative for the unit's descriptor family
                     }
                 }
+                int hov = 0;
+                for (int i = 0; i < classSamples.Count; i++) if (classSamples[i].hover) hov++;
+                if (classSamples.Count != lastScanN || hov != lastScanH)
+                {
+                    lastScanN = classSamples.Count; lastScanH = hov;
+                    Plugin.Log.LogInfo($"[TurnEase] class scan: {classSamples.Count} unit(s), {hov} with the Hover ability");
+                }
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[TurnEase] class scan: " + ex.Message); }
         }
+        static int lastScanN = -1, lastScanH = -1;
 
         // LAUNCH POSE REFRESH (shell/smoke position fix): vanilla captures the shell's spawn position +
         // direction (muzzle bone TRS) at SCHEDULE time — before our held pivot has even started — so the
@@ -182,11 +190,11 @@ namespace HumankindAssetFramework
             try
             {
                 long aguid = GuidToLong(GetMember(strike, "AttackerArmyGUID"));
-                if (aguid == 0) return 0f;
+                if (aguid == 0) { Plugin.Log.LogInfo("[BattleTurn] strike prep: no attacker army GUID"); return 0f; }
                 var presType = GameBinding.Presentation;
                 var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
                 var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
-                if (armies == null) return 0f;
+                if (armies == null) { Plugin.Log.LogInfo("[BattleTurn] strike prep: no army list"); return 0f; }
                 foreach (var army in armies)
                 {
                     if (army == null) continue;
@@ -205,8 +213,8 @@ namespace HumankindAssetFramework
                             return UnityEngine.Mathf.Max(0f, rel - UnityEngine.Time.time);
                         break;   // first pawn only — not armed yet, fall through to arm below
                     }
-                    float rate = TurnRateForUnitDef(unitDef);                  // our entry OR a Formation Lab vanilla link
-                    if (rate <= 0f) return 0f;                                 // no easing — vanilla pacing
+                    float rate = TurnRateForUnitDef(unitDef);                  // entry > link > category fallback
+                    if (rate <= 0f) { Plugin.Log.LogInfo($"[BattleTurn] strike prep '{unitDef}': rate resolved 0 — no hold (entry/link/category all empty?)"); return 0f; }
                     // TRUE-BEARING AIM: the flip puts the unit on a HEX-QUANTIZED angle (up to 30 deg off the
                     // target); resolve the strike's target tile to a Unity-world point so each pawn can be
                     // steered to its REAL bearing instead. Vector3.zero = resolution failed -> quantized fallback.
@@ -234,7 +242,8 @@ namespace HumankindAssetFramework
                         if (first)
                         {
                             first = false;
-                            if (!TryTurnYawAt(tr.position, out float eased)) return 0f;
+                            if (!TryTurnYawAt(tr.position, out float eased))
+                            { Plugin.Log.LogInfo($"[BattleTurn] strike prep '{unitDef}': rate={rate} but NO ease state near the pawn — no hold"); return 0f; }
                             float miss = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(eased, target));
                             hold = miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.2f, 3f) : 0f;
                             releaseAt = UnityEngine.Time.time + hold;
@@ -245,7 +254,8 @@ namespace HumankindAssetFramework
                     return hold;
                 }
             }
-            catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] TurnHoldForStrike: " + ex.Message); }
+            catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] TurnHoldForStrike: " + ex.Message); return 0f; }
+            Plugin.Log.LogInfo("[BattleTurn] strike prep: attacker army not found in the entity list");
             return 0f;
         }
 
