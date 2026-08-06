@@ -1,9 +1,9 @@
 # District Visuals — replacing a district's on-map model
 
-**Status: SOLVED (2026-07-16) — a custom 3D model renders on a *single* district tile in-game.** Render, fit, and
-scope are all working: the reactor mesh sits on the reactor tile and the rest of the city is untouched. This was long
-thought impossible (see the history at the end); it is not. This page documents the working recipe, the mechanism, and
-the constraints. Only cosmetic tuning (scale/orientation/texture) remains.
+**Status: SOLVED (2026-07-16; textured 2026-08-06) — a custom 3D model renders on a *single* district tile in-game,
+with its own baked texture.** Render, fit, scope, grounding and color are all working: the plant mesh sits level on the
+reactor tile wearing its own albedo, and the rest of the city is untouched. This was long thought impossible (see the
+history at the end); it is not. This page documents the working recipe, the mechanism, and the constraints.
 
 The second injection axis, alongside units. Goal: let a pack replace a **district's** on-map building with a custom
 static 3D model. It is far deeper than the unit path, but it works.
@@ -61,12 +61,14 @@ to the git-tracked `Assets/Databases/enc_districts.backup.json`) holds any numbe
 { "districts": [
     { "district": "Extension_Base_BreederReactor",
       "fxMeshGuid": "1457749632,1176062388,715769744,1624515593",
+      "atlasGuid": "260107174,1193535976,-95465828,-2065892038",
       "isolate": true }
 ] }
 ```
 
-The plugin reads only `district` / `fxMeshGuid` / `isolate` per entry (Newtonsoft — extra fields are bake-time state for
-the window and are ignored). Each entry gets its own leaf collection / private-leaf machinery, so several districts can
+The plugin reads only `district` / `fxMeshGuid` / `atlasGuid` / `isolate` per entry (Newtonsoft — extra fields are
+bake-time state for the window and are ignored). `atlasGuid` is the baked albedo the texture injection binds (below);
+entries without it render untextured like before. Each entry gets its own leaf collection / private-leaf machinery, so several districts can
 carry custom models simultaneously. The old single-model `[District]` keys (`DistrictName` + `DistrictFxMeshGuid`)
 still work as a fallback **only when the registry has no entries**. `DistrictRepoint = true` remains the master enable.
 
@@ -125,17 +127,45 @@ tile. Build lazily (sub-materials load async → retry) and re-apply every frame
 into the channel on each `UpdateLevelBuild`). **Verified in-game: the reactor tile shows our mesh, the rest of the city
 is untouched.**
 
-## Remaining refinements (cosmetic only)
+## Orientation, grounding & preview
 
-1. **Scale + orientation.** The mesh bakes at unit orientation/size, and the unit static-bake auto-aligns the *longest*
-   axis — which tips a near-cubic model (like the reactor's 34×30×38 box) onto its side on a district tile. Fix with the
-   bake **Rotation offset** (bakes into the mesh — cleanest) or the FxMesh **`importAngles`** (`-90,0,0` is the vanilla
-   upright default). The correction is **not always the obvious X axis** — the align can tip the model around any axis,
-   so expect to combine axes (the reactor needed **Rotation `Y=180, Z=90`**). **Workflow tip:** the
-   `<name>_FxMesh` **Inspector preview predicts the in-game orientation** — tune rotation/importAngles there and rebuild
-   the mod only once it looks upright, instead of a rebuild+relaunch round-trip per guess.
-2. **Scale.** Baked-in (the `Size` knob), so shrinking needs a re-bake — e.g. Size ~2.5 for tile-sized vs ~5 imposing.
-3. **Texture (optional).** It rides the vanilla shader untextured → flat-dark; a baked atlas would color it.
+1. **Orientation.** The mesh bakes at unit orientation/size, and the unit static-bake auto-aligns the *longest*
+   axis — which can tip a near-cubic model (like the first reactor's 34×30×38 box) onto its side, around ANY axis.
+   Fix with the bake **Rotation offset** (bakes into the mesh) or the FxMesh **`importAngles`** (`-90,0,0` is the
+   vanilla upright default). **The District Factory window has an embedded preview pane** (2026-08-06): the baked mesh,
+   textured, standing on a tile-sized ground square at the true in-game surface level — import angles turn it LIVE,
+   rotation offset shows after a re-Bake. No more rebuild+relaunch round-trips per guess.
+2. **Grounding is automatic** (2026-08-06). The game plants the mesh by its origin at the tile surface and nothing
+   re-grounds it — a rotation offset that changed which axis is "up" used to sink the model (the plant surfaced only
+   its containment domes). The district bake now **auto-levels**: it computes where the vertices land *with the entry's
+   import angles applied* and shifts them so the lowest point sits on the surface, footprint centered. Any
+   rotation/import combination comes out standing level. (District paths only — props/projectiles keep their
+   meaningful pivots.)
+3. **Scale.** Baked-in (the `Size` knob), so resizing needs a re-bake. A district tile is ~10 across; a full site-plan
+   model can carry Size 6–9, a single building ~2.5–5.
+
+## Texture — SOLVED (2026-08-06): the private output layer
+
+Districts rendered **untextured** for three weeks — the swap reused the game's own leaf material, and our atlas had no
+way in. Two measured facts cracked it:
+
+- **The district building layer is a *full-texture* layer.** It has no `FxComponentTextureAtlasManager` entry; every
+  leaf resolves `textureIndex` to the fixed full-texture slot (1) and the shader samples the layer material's bound
+  sheet straight through the mesh UVs. (That's why an untextured custom mesh showed *patches of the culture's building
+  sheet* — its 0..1 UVs swept a texture authored for baked-UV building parts.) An earlier design that painted a rect
+  into the atlas-manager page was falsified by this trace and never shipped.
+- **Texture is therefore a per-LAYER binding**, shared by every building drawn through that layer — recoloring the
+  shared material would repaint the whole culture.
+
+The unlock is one step up from the leaf clone: **clone the whole `FxOutputLayer`**. `BuildPrivateLeaf` instantiates the
+leaf's output layer alongside the leaf (Unity resets the non-serialized runtime state, so the clone is unregistered);
+during the leaf's own `Load`, the game's renderer **registers and loads the clone itself**
+(`FxComponentRenderer.GetLayerIndexAddItIFN` — a real registration API), creating private runtime materials and command
+buffers. `DistrictApplyTexture` then registers a null atlas-info slot for the new layer (so the game's own resolve
+returns full-texture for it forever), points the leaf at slot 1, and **binds the baked albedo on the private runtime
+materials** (`_MainTex` when present, else the largest bound sheet — `DistrictDebug` dumps every property to catch a
+wrong pick). The mesh's own 0..1 UVs sample the albedo exactly; no other building is touched. Re-asserted periodically
+because resolution switches rebuild runtime materials.
 
 ---
 

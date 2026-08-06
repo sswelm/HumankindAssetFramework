@@ -20,12 +20,16 @@ namespace HumankindAssetFramework
         {
             public string district = "";     // ConstructibleDefinitionName to match
             public object fxMeshGuid;        // parsed Amplitude Guid of the baked FxMesh
+            public object atlasGuid;         // parsed Amplitude Guid of the baked albedo atlas (null = untextured, pre-2.0 entries)
             public bool isolate = true;      // true = private per-instance leaf (this tile only); false = global shared-leaf swap
             // runtime
             public object plbc; public int layer;
             public object privateLeaf;                                   // isolate mode: the Instantiated leaf
             public readonly List<object> leaves = new List<object>();    // global mode: collected shared leaves
             public bool collected, matchLogged, pointedLogged; public int wait;
+            // texture injection runtime (isolate mode)
+            public UnityEngine.Texture2D texAlbedo;                      // our baked albedo, bound on the PRIVATE output layer
+            public bool texApplied; public int texWait;
         }
         internal static readonly List<DistrictModel> distModels = new List<DistrictModel>();
 
@@ -68,6 +72,7 @@ namespace HumankindAssetFramework
                             {
                                 district = (string)d["district"] ?? "",
                                 fxMeshGuid = ParseGuidCsv((string)d["fxMeshGuid"] ?? ""),
+                                atlasGuid = ParseGuid4((string)d["atlasGuid"] ?? ""),   // optional: entries baked before texture injection have none
                                 isolate = (bool?)d["isolate"] ?? true,
                             };
                             if (e.district.Length > 0 && e.fxMeshGuid != null) distModels.Add(e);
@@ -362,7 +367,7 @@ namespace HumankindAssetFramework
         // ISOLATION: instead of mutating the shared building leaves globally, give ONLY the target district a PRIVATE leaf.
         // Each PresentationLevelBuildComponent has its own channel + Shuriken particle, so pointing just this district's
         // channel at a private (Instantiated) leaf — and re-spawning its particle — scopes our mesh to this tile alone.
-        static object BuildPrivateLeaf(object channelSelector, object fxGuid)
+        static object BuildPrivateLeaf(object channelSelector, object fxGuid, object atlasGuid)
         {
             try
             {
@@ -373,6 +378,30 @@ namespace HumankindAssetFramework
                 var clone = UnityEngine.Object.Instantiate(src);   // a private copy — mutating it won't touch the shared leaf
                 var t = clone.GetType();
                 (GF(t, "fxMesh") ?? GF(t, "mesh"))?.SetValue(clone, fxGuid);
+                // TEXTURE INJECTION step 1: point the leaf's texture at the LAYER's own missing-texture slot. That slot's
+                // atlas rect is never rendered by vanilla content (everything real is bound), so its pixels are ours to
+                // paint (step 2, DistrictApplyTexture). The Load below then resolves textureIndex to that rect via the
+                // game's own RefreshIndices — no private-index poking.
+                // TEXTURE INJECTION step 1: give this leaf a PRIVATE clone of its whole FxOutputLayer. The district layer
+                // is a FULL-TEXTURE layer (textureIndex resolves to the fixed full-texture slot 1; no atlas manager entry
+                // — measured): every element samples the layer material's bound sheet through its mesh UVs [0,1]. The
+                // sheet binding is per-LAYER, so coloring our mesh without corrupting every building sharing the layer
+                // needs a layer of our own. Instantiate resets the NonSerialized runtime state (layerIndex -1, unloaded),
+                // and the leaf's own Load below hands the clone to FxComponentRenderer.GetLayerIndexAddItIFN — the game
+                // registers and loads it like any authored layer, cloning private runtime materials we can then re-bind
+                // (DistrictApplyTexture step 2).
+                if (atlasGuid != null)
+                {
+                    var olF = GF(t, "outputLayer");
+                    if (olF?.GetValue(clone) is UnityEngine.Object srcLayer && srcLayer != null)
+                    {
+                        var layerClone = UnityEngine.Object.Instantiate(srcLayer);
+                        layerClone.name = srcLayer.name + "_HAF";
+                        olF.SetValue(clone, layerClone);
+                        Plugin.Diag($"[DistrictTex] private output layer '{layerClone.name}' cloned from '{srcLayer.name}'");
+                    }
+                    else Plugin.Log.LogWarning("[DistrictTex] leaf has no outputLayer to clone — texture injection unavailable.");
+                }
                 // reset load state so LoadIFN actually re-runs and resolves our mesh + assigns a MaterialIndex
                 foreach (var ls in new[] { "loadingStatus" }) { var f = GF(t, ls); if (f != null) f.SetValue(clone, System.Enum.ToObject(f.FieldType, 0)); }
                 var loadIFN = t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
@@ -388,7 +417,7 @@ namespace HumankindAssetFramework
                 var load = t.GetMethod("Load", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
                 if (load != null && load.GetParameters().Length == 2 && distFxManager != null)
                     load.Invoke(clone, new object[] { distFxManager, fxNextDoublon != null ? fxNextDoublon.Invoke(null, null) : (uint)0 });
-                Plugin.Diag($"[District] built PRIVATE leaf '{t.Name}': MaterialIndex={GF(t, "materialIndex")?.GetValue(clone)} meshIndex={GF(t, "meshIndex")?.GetValue(clone)}");
+                Plugin.Diag($"[District] built PRIVATE leaf '{t.Name}': MaterialIndex={GF(t, "materialIndex")?.GetValue(clone)} meshIndex={GF(t, "meshIndex")?.GetValue(clone)} textureIndex={GF(t, "textureIndex")?.GetValue(clone)}");
                 return clone;
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] build private leaf: " + ex); return null; }
@@ -409,7 +438,7 @@ namespace HumankindAssetFramework
                 {
                     var sel = evf.GetValue(box);
                     if (sel == null) return;
-                    e.privateLeaf = BuildPrivateLeaf(sel, e.fxMeshGuid);
+                    e.privateLeaf = BuildPrivateLeaf(sel, e.fxMeshGuid, e.atlasGuid);
                     if (e.privateLeaf == null) { if (e.wait++ % 300 == 0) Plugin.Diag($"[District] '{e.district}': waiting for leaves to load..."); return; }
                 }
                 if (ReferenceEquals(evf.GetValue(box), e.privateLeaf)) return;   // already ours this frame
@@ -478,9 +507,98 @@ namespace HumankindAssetFramework
             if (distModels.Count == 0) return;
             foreach (var e in distModels)
             {
-                if (e.isolate) PointEntryAtPrivateLeaf(e);
+                if (e.isolate) { PointEntryAtPrivateLeaf(e); DistrictApplyTexture(e); }
                 else GlobalSwapEntry(e);
             }
+        }
+
+        // ---- district TEXTURE injection (docs/District-Visuals.md) --------------------------------------------------
+        // MEASURED (the breeder-reactor arc): the district building layer is a FULL-TEXTURE layer — it has NO atlas
+        // manager entry, every leaf resolves textureIndex to the fixed full-texture slot (1), and the shader samples the
+        // layer material's bound sheet straight through the mesh UVs. (An earlier rect-painting design targeting
+        // FxComponentTextureAtlasManager was falsified by that trace and never shipped — the layer isn't atlas-managed.)
+        // So texture = a per-LAYER material binding, shared by every building drawn through the layer. The unlock is one
+        // step up from the leaf clone: BuildPrivateLeaf also clones the whole FxOutputLayer (the game registers + loads
+        // it via GetLayerIndexAddItIFN during the leaf's own Load, creating PRIVATE runtime materials), and here we bind
+        // our baked albedo on those materials. Our mesh's own [0,1] UVs then sample our albedo exactly — no rects, no
+        // shared-sheet corruption. Re-asserted periodically: res switches rebuild the runtime materials.
+        static void DistrictApplyTexture(DistrictModel e)
+        {
+            try
+            {
+                if (e.atlasGuid == null || e.privateLeaf == null) return;
+                if (e.texApplied) { if ((++e.texWait % 120) == 0) BindAlbedo(e, log: false); return; }
+                var leaf = e.privateLeaf; var t = leaf.GetType();
+
+                int layerIdx = GF(t, "outputLayerIndex")?.GetValue(leaf) is int li ? li : -1;
+                if (layerIdx < 0)
+                { if ((++e.texWait % 300) == 1) Plugin.Diag($"[DistrictTex] '{e.district}': private layer not registered yet"); return; }
+
+                // give our private layer a NULL atlas info slot so the game's own resolve (RefreshIndices ->
+                // GetTextureIndex) returns the full-texture slot for it on every future re-Load, then point the live
+                // leaf there right now.
+                var desc = GetMember(leaf, "FxEvolverDescriptor");
+                var texMgr = desc != null ? AccessTools.Field(desc.GetType(), "assetContentManagerTexture")?.GetValue(desc) : null;
+                texMgr?.GetType().GetMethod("AddNullAtlasInfo", BindingFlags.Instance | BindingFlags.Public)?.Invoke(texMgr, new object[] { layerIdx });
+                GF(t, "textureIndex")?.SetValue(leaf, 1);   // TextureIndexForFullTexture — mesh UVs sample the sheet [0,1]
+
+                // our shipped albedo
+                e.texAlbedo = LoadAmpliAsset(typeof(UnityEngine.Texture2D), e.atlasGuid) as UnityEngine.Texture2D;
+                if (e.texAlbedo == null)
+                { if ((++e.texWait % 300) == 1) Plugin.Diag($"[DistrictTex] '{e.district}': albedo atlas not loadable by GUID yet"); return; }
+
+                if (!BindAlbedo(e, log: true))
+                { if ((++e.texWait % 300) == 1) Plugin.Diag($"[DistrictTex] '{e.district}': private layer has no runtime materials yet"); return; }
+
+                e.texApplied = true;
+                // flush: mark the descriptor's material data changed (re-writes the element GPU data, incl. our
+                // textureIndex + layer index) and re-spawn this district's particle so nothing keeps a stale index
+                if (desc != null) AccessTools.Field(desc.GetType(), "materialDataHasChanged")?.SetValue(desc, true);
+                if (e.plbc != null)
+                {
+                    var refresh = e.plbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                        .FirstOrDefault(m => m.Name == "RefreshChannel" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
+                    refresh?.Invoke(e.plbc, new object[] { e.layer, System.Enum.ToObject(refresh.GetParameters()[1].ParameterType, 0) });
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[DistrictTex] apply: " + ex); e.texApplied = true; }   // fail once, loudly — don't spam per frame
+        }
+
+        // Bind our albedo on the PRIVATE layer's runtime materials. The sheet property is picked per material: "_MainTex"
+        // when present and bound, else the largest bound Texture2D (the building sheet dwarfs masks/LUTs). Under
+        // DistrictDebug the first pass dumps every material's texture properties so a wrong pick is visible in the log.
+        static bool BindAlbedo(DistrictModel e, bool log)
+        {
+            try
+            {
+                if (e.texAlbedo == null || e.privateLeaf == null) return false;
+                var ol = GF(e.privateLeaf.GetType(), "outputLayer")?.GetValue(e.privateLeaf);
+                if (!(GetMember(ol, "RenderOutputs") is Array ros)) return false;
+                int n = 0;
+                bool dump = log && Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value;
+                foreach (var ro in ros)
+                    foreach (var fld in new[] { "currentRenderMaterial", "runTimeRenderMaterial", "highResRunTimeRenderMaterial" })
+                        if (GetMember(ro, fld) is UnityEngine.Material mat && mat != null)
+                        {
+                            string pick = null; UnityEngine.Texture2D biggest = null; string biggestProp = null;
+                            bool already = false;
+                            foreach (var pn in mat.GetTexturePropertyNames())
+                            {
+                                var cur = mat.GetTexture(pn);
+                                if (dump) Plugin.Diag($"[DistrictTex]   {fld}('{mat.shader?.name}').{pn} = {(cur != null ? $"'{cur.name}' {cur.width}x{cur.height}" : "null")}");
+                                if (ReferenceEquals(cur, e.texAlbedo)) { already = true; continue; }
+                                if (!(cur is UnityEngine.Texture2D t2)) continue;
+                                if (pn == "_MainTex") pick = pn;
+                                if (biggest == null || t2.width * t2.height > biggest.width * biggest.height) { biggest = t2; biggestProp = pn; }
+                            }
+                            if (already) { n++; continue; }
+                            if (pick == null) pick = biggestProp;
+                            if (pick != null) { mat.SetTexture(pick, e.texAlbedo); n++; if (log) Plugin.Diag($"[DistrictTex] '{e.district}': albedo bound on {fld}.{pick}"); }
+                        }
+                if (log) Plugin.Diag($"[DistrictTex] '{e.district}': albedo bound on {n} material slot(s) of the private layer");
+                return n > 0;
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[DistrictTex] bind: " + ex.Message); return false; }
         }
 
         // ---- EXPERIMENTAL pawn PROP/attachment axis (custom weapons & gear on attachment slots; the sling experiment) ----

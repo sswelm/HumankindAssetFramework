@@ -205,6 +205,26 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   `Helix_back` tail), so stripping both the Comanche's main *and* tail rotor gives it a spinning main rotor **and** a spinning
   shrouded fantail — two borrowed animations on one static model. Or give the model **its own** clip.
 
+## Districts
+
+- **DISTRICT TEXTURES — the nuclear plant arc (2026-08-06).** Replacing the Breeder Reactor's model (a
+  Sketchfab site-plan plant) turned one swap into three capabilities. (1) The **District Factory grew an
+  embedded preview pane** — the baked mesh, textured, on a tile-sized ground square at the true in-game
+  surface level, import angles live — after its first version *hid* a grounding bug by anchoring the ground
+  to the model's own bottom. (2) That bug (the plant surfaced only its containment domes) exposed that the
+  game plants the mesh by its origin and nothing re-grounds a rotated bake — the district bake now
+  **auto-levels**: vertices shifted so the model lands lowest-point-on-the-surface *with its import angles
+  applied*, any rotation combination stands level. (3) **Districts finally wear their own texture.** Three
+  weeks of flat-shaded custom districts ended with two measurements: the district building layer is a
+  **full-texture layer** (no atlas manager — leaves sample the layer material's bound sheet through mesh UVs,
+  which is why an unbound custom mesh wore *patches of the culture's building sheet*), so texture is a
+  per-layer binding — and `FxComponentRenderer.GetLayerIndexAddItIFN` **registers any output layer handed to
+  it**. So the private leaf now brings a **private clone of the whole FxOutputLayer**: the game registers and
+  loads it itself during the leaf's own Load, and the plugin binds the baked albedo on the clone's runtime
+  materials. One tile, exact UVs, zero effect on every other building. A rect-painting design targeting the
+  atlas manager was built first, falsified by the trace, and never shipped. See
+  [docs/District-Visuals.md](docs/District-Visuals.md).
+
 ## Authoring tools
 
 - **Vehicle Lab: helicopters + interior-part detection (2026-08-03).** Two new part roles rig a **rotorcraft** the
