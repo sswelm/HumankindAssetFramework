@@ -477,13 +477,22 @@ namespace HumankindAssetFramework
         // Formation Lab per-unit link — the VANILLA route (unitDef here is the simulation name, e.g.
         // "LandUnit_Era5_Common_LineInfantry (…)"; the link stores the presentation name inside it, so
         // case-insensitive contains bridges the two). 0 = no easing, vanilla pacing.
+        static float rateTraceAt;
         internal static float TurnRateForUnitDef(string unitDef)
         {
             var e = FindEntryForUnitDefinition(unitDef);
             if (e != null)   // our entry: per-model > category default > global rate (docs/Turn-Ease.md precedence)
-                return e.turnRate > 0f ? e.turnRate
-                     : CategoryRateForDesc(e.descId, e.profCat) > 0f ? CategoryRateForDesc(e.descId, e.profCat)
-                     : turnRate;
+            {
+                if (e.turnRate > 0f) return e.turnRate;
+                if (e.profCat == CatPlane) return 0f;              // planes stay excluded even from fallbacks
+                float cr = CategoryRateForDesc(e.descId, e.profCat);
+                if (cr > 0f) return cr;
+                if (turnRate > 0f) return turnRate;
+                // FALL THROUGH (regression fix): an entry with no per-model rate and an unset/stale
+                // profCat/descId used to DEAD-END here at 0 while the pose side happily eased the rendered
+                // pawn via its own desc-keyed category — the howitzer turned but the strike chain never armed.
+                // The name-based category fallback below answers for it instead.
+            }
             if (string.IsNullOrEmpty(unitDef)) return 0f;
             foreach (var kv in FormationOverride.TurnRateByUnit)
                 if (TurnLinkMatches(unitDef, kv.Key)) return kv.Value;   // incl. the culture-variant relaxation
@@ -505,6 +514,13 @@ namespace HumankindAssetFramework
                         vanillaCatByDesc.TryGetValue(ad.Value, out int cat))
                         return CategoryRateForDesc(ad.Value, cat);
                 }
+            }
+            // resolution trace (throttled): everything above came up empty — name the state so a dead strike
+            // chain is diagnosable from one log line instead of another instrumented round-trip
+            if (UnityEngine.Time.time > rateTraceAt)
+            {
+                rateTraceAt = UnityEngine.Time.time + 1f;
+                Plugin.Log.LogInfo($"[TurnEase] rate 0 for '{unitDef}': entry={(e != null ? $"{e.resourceName} (turnRate={e.turnRate}, profCat={e.profCat}, descId={e.descId})" : "-")}, links={FormationOverride.TurnRateByUnit.Count}, catRates={(AnyCatRate ? "on" : "off")}, addons={addonDefIds.Count}");
             }
             return 0f;
         }
