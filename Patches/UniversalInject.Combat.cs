@@ -203,13 +203,26 @@ namespace HumankindAssetFramework
                     // target); resolve the strike's target tile to a Unity-world point so each pawn can be
                     // steered to its REAL bearing instead. Vector3.zero = resolution failed -> quantized fallback.
                     var targetPos = StrikeTargetWorldPos(strike);
+                    // BROADSIDE FACING (user catch): FacingAngleOffset units — ships, offset typically 90 —
+                    // present their SIDE to the target, not the bow; the battle path rotates its look target
+                    // by the same offset. Aim at bearing +/- offset, whichever side needs the smaller turn.
+                    int fao = 0;
+                    try { fao = Convert.ToInt32(GetMember(GetMember(unit, "PresentationUnitDefinition"), "FacingAngleOffset")); } catch { }
                     float hold = 0f; bool first = true; float releaseAt = 0f;
                     foreach (var pawn in pawns)
                     {
                         if (!(GetMember(pawn, "Transform") is UnityEngine.Transform tr)) continue;
                         float target = tr.eulerAngles.y;                       // strike facing (quantized) when the tile fails to resolve
                         if (targetPos != UnityEngine.Vector3.zero)
+                        {
                             target = UnityEngine.Mathf.Atan2(targetPos.x - tr.position.x, targetPos.z - tr.position.z) * UnityEngine.Mathf.Rad2Deg;
+                            if (fao != 0)
+                            {
+                                float cur = TryTurnYawAt(tr.position, out float ce) ? ce : tr.eulerAngles.y;
+                                float a1 = target - fao, a2 = target + fao;
+                                target = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(cur, a1)) <= UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(cur, a2)) ? a1 : a2;
+                            }
+                        }
                         if (first)
                         {
                             first = false;
@@ -217,7 +230,7 @@ namespace HumankindAssetFramework
                             float miss = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(eased, target));
                             hold = miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.2f, 3f) : 0f;
                             releaseAt = UnityEngine.Time.time + hold;
-                            Plugin.Log.LogInfo($"[BattleTurn] strike hold '{unitDef}': eased={eased:F0} aim={target:F0}{(targetPos != UnityEngine.Vector3.zero ? " (true bearing)" : " (quantized)")} miss={miss:F0}deg -> +{hold:F2}s (shared clock)");
+                            Plugin.Log.LogInfo($"[BattleTurn] strike hold '{unitDef}': eased={eased:F0} aim={target:F0}{(targetPos != UnityEngine.Vector3.zero ? fao != 0 ? $" (true bearing, broadside {fao}deg)" : " (true bearing)" : " (quantized)")} miss={miss:F0}deg -> +{hold:F2}s (shared clock)");
                         }
                         SetAimOverride(tr.position, target, 10f, releaseAt);   // ease target = real bearing; releaseAt = the strike's one clock
                     }
