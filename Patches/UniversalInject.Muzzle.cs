@@ -494,7 +494,7 @@ namespace HumankindAssetFramework
             {
                 if (e.turnRate > 0f) return e.turnRate;
                 if (e.profCat == CatPlane) return 0f;              // planes stay excluded even from fallbacks
-                float cr = CategoryRateForDesc(e.descId, e.profCat);
+                float cr = CategoryRateForDesc(e.descId, EntryBaseCat(e));
                 if (cr > 0f) return cr;
                 if (turnRate > 0f) return turnRate;
                 // FALL THROUGH (regression fix): an entry with no per-model rate and an unset/stale
@@ -608,20 +608,26 @@ namespace HumankindAssetFramework
                 GetMember(entry, "ObjectSpace") is object eos &&
                 GetMember(eos, "Translation") is UnityEngine.Vector3 epos)
                 TryLearnClass(e.descId, epos);   // our land-profile models refine to hover/turret too (the Comanche IS a Hover unit)
-            float catRate = CategoryRateForDesc(e.descId, e.profCat);
+            // a model that configures HAF's own turret aim (turretBone) SELF-DECLARES as turreted — the entry's
+            // declaration is a characteristic (the Jagdpanzer lesson: a stray turretBone made a casemate gun
+            // traverse while the scan rightly saw no engine azimuth and called it turretless)
+            float catRate = CategoryRateForDesc(e.descId, EntryBaseCat(e));
             float rate = e.turnRate > 0f ? e.turnRate
                        : e.profCat == CatPlane ? 0f
                        : catRate > 0f ? catRate
                        : turnRate;
             // bank: per-model wins; then the CATEGORY bank (hoverbank/shipbank — a chopper banks, a ship
             // heels, a truck does neither); the legacy file `bank` covers models eased per-model/global-rate.
-            float catBank = CategoryBank(EffectiveCat(e.descId, e.profCat));
+            float catBank = CategoryBank(EffectiveCat(e.descId, EntryBaseCat(e)));
             float bank = e.turnBank != 0f ? e.turnBank
                        : catBank != 0f ? catBank
                        : e.turnRate > 0f || turnRate > 0f ? turnBank
                        : 0f;
             ApplyTurnEaseCore(rate, bank, entry);
         }
+
+        // The entry-declared base category (turretBone lifts land to turret) — shared with TurnRateForUnitDef.
+        static int EntryBaseCat(ModelEntry e) => e.profCat == CatLand && !string.IsNullOrEmpty(e.turretBone) ? CatTurret : e.profCat;
 
         // Core easing, rate/bank already resolved — shared by our model entries and VANILLA pawns whose unit
         // carries a Formation Lab turn-ease link (rate from vanillaTurnByDesc, bank always 0 for those).
