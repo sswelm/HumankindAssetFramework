@@ -10,6 +10,19 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Units & animation
 
+- **CATEGORY TURN EASE — every unit type turns in character (2026-08-06).** Turn ease graduated from a
+  per-model knob to a **game-wide system with per-TYPE defaults** — human / land / turret / hover / ship —
+  each classified by **characteristic, never by name** (user rule, enforced twice): capability profiles, the
+  game's own `Hover` "ignores terrain" ability, and live azimuth-transform detection for turrets; fixed-wing
+  planes are excluded outright (they already fly natural curves — user call). Hover and ship carry their own
+  bank (`hoverbank`/`shipbank`: a chopper banks, a ship heels), and precedence flipped to per-model > per-unit
+  link > category > global. Getting the *strike hold* to follow the category cost four measured bugs, each a
+  different naming-layer trap (an entry dead-end, artillery rendering its LIMBERED variant whose name extends
+  the unit's, the servant CREW answering for its gun, and artillery main-gun pawn definitions that never pass
+  the addon hook at all) — closed structurally: the slow class scan reads the rendered unit itself and is the
+  classification authority, and the hold reads the eased pawn's ground-truth rate off its live turn state, so
+  the visible turn and the fire hold cannot disagree by construction. Configured from the Formation Override
+  window's **Turn ease defaults** panel (live dial write). See [docs/Turn-Ease.md](docs/Turn-Ease.md).
 - **ATTACK TURN — the howitzer pivots, THEN fires (2026-08-05).** A map bombard used to teleport-snap the
   unit's facing and fire in the same instant; now a HAF model with a turn-ease rate **sweeps to the attack
   heading first**, and every observable of the shot — muzzle flash, shot sound, shell, impact, the model's own
