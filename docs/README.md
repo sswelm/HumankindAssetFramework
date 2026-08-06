@@ -29,7 +29,7 @@ The core authoring workflows — bake a model, animate it, texture it, add sound
 
 ### The injection axes
 Each axis adds custom content in a different place, from the same JSON registry.
-- [**District-Visuals.md**](District-Visuals.md) — a custom building on a single district tile (the District Factory).
+- [**District-Visuals.md**](District-Visuals.md) — a custom building on a single district tile, with its own texture, auto-leveled (the District Factory).
 - [**Pawn-Props.md**](Pawn-Props.md) — weapons and gear on a pawn's attachment slots (the Prop Lab).
 - [**Projectiles.md**](Projectiles.md) — a custom model as a unit's fired munition (the Projectile Lab).
 - [**Formations.md**](Formations.md) — how many models a unit fields and how they're arranged (data only, no bake).

@@ -83,10 +83,13 @@ reuses the last rig GLB; skipping Vehicleize bakes the OLD rig).
 ## The injection-axis tools
 
 ### District Factory — `Tools ▸ HAF ▸ District Factory`
-Bake a custom static district building — imports a model, bakes a **bone-free FxMesh**, writes the district registry
-entry the plugin's district repoint reads. *Key controls:* district name + Pick, model file, Size, rotation/import
-angles, target tris, normals, strip parts, isolate. *Writes:* `enc_districts.json` (via `DistrictRegistry.Upsert`;
-mesh via `DistrictBaker.BakeFxMesh`). **Deep dive:** [District-Visuals.md](District-Visuals.md).
+Bake a custom static district building — imports a model, bakes a **bone-free, auto-leveled FxMesh**, writes the
+district registry entry (incl. the baked **albedo GUID** the plugin's texture injection binds) the district repoint
+reads. An **embedded preview pane** shows the baked mesh, textured, on a tile-sized ground square at the true in-game
+surface level — import angles rotate it live, orbit/zoom/pan like the Animation Lab. *Key controls:* district name +
+Pick, model file, Size, rotation/import angles, target tris, normals, strip parts, isolate. *Writes:*
+`enc_districts.json` (via `DistrictRegistry.Upsert`; mesh via `DistrictBaker.BakeFxMesh`). **Deep dive:**
+[District-Visuals.md](District-Visuals.md).
 
 ### Prop Lab (attachments) — `Tools ▸ HAF ▸ Prop Lab (attachments)` · *experimental*
 Author custom pawn attachments (weapons/gear): static bake → bone-free FxMesh → MeshCollection → FragmentMesh. Includes a
