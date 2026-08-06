@@ -543,16 +543,24 @@ namespace HumankindAssetFramework
         static void ApplyTurnEase(ModelEntry e, object entry)
         {
             // PRECEDENCE (2026-08-06, user design): per-model Factory value > CATEGORY default (human/land/
-            // turret/air/ship, from the dial) > global `rate`. The old file-overrides-model rule surprised the
-            // user ("the howitzer turned despite not being configured") — an explicit per-model value is now
-            // always authoritative, and the dial provides type-level DEFAULTS instead of a blanket override.
+            // turret/hover/ship, from the dial) > global `rate`. The old file-overrides-model rule surprised
+            // the user ("the howitzer turned despite not being configured") — an explicit per-model value is
+            // now always authoritative, and the dial provides type-level DEFAULTS instead of a blanket
+            // override. PLANES (CatPlane) never ease from category OR global — the engine flies fixed-wing
+            // aircraft on natural curved paths (user rule); only their own per-model rate can opt them in.
+            if (e.profCat == CatLand && AnyCatRate && e.descId >= 0 &&
+                GetMember(entry, "ObjectSpace") is object eos &&
+                GetMember(eos, "Translation") is UnityEngine.Vector3 epos)
+                TryLearnClass(e.descId, epos);   // our land-profile models refine to hover/turret too (the Comanche IS a Hover unit)
+            float catRate = CategoryRateForDesc(e.descId, e.profCat);
             float rate = e.turnRate > 0f ? e.turnRate
-                       : CategoryRateForDesc(e.descId, e.profCat) > 0f ? CategoryRateForDesc(e.descId, e.profCat)
+                       : e.profCat == CatPlane ? 0f
+                       : catRate > 0f ? catRate
                        : turnRate;
-            // bank: per-model wins; the file bank otherwise applies only to AIR-category units (a global bank
-            // on ground vehicles reads as a capsizing truck).
+            // bank: per-model wins; the file bank otherwise applies to HOVER-category units and rate-eased
+            // models (a global bank on ground vehicles reads as a capsizing truck).
             float bank = e.turnBank != 0f ? e.turnBank
-                       : e.profCat == CatAir || e.turnRate > 0f || turnRate > 0f ? turnBank
+                       : EffectiveCat(e.descId, e.profCat) == CatHover || e.turnRate > 0f || turnRate > 0f ? turnBank
                        : 0f;
             ApplyTurnEaseCore(rate, bank, entry);
         }

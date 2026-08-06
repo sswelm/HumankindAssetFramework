@@ -280,7 +280,7 @@ namespace HumankindAssetFramework
                 UniversalInject.PollRotorTrim();        // live rotor-trim dial (enc_rotortrim.txt): constant BR-slot tilt on donor-clip rotor bones
                 UniversalInject.PollTurnEase();         // live turn-ease dial (enc_turnease.txt): eased facing + bank on donor-clip units (spike)
                 UniversalInject.PollTerrainHug();       // live terrain-hug dial (enc_hugterrain.txt): fly low over open ground, climb for districts (spike)
-                UniversalInject.PollTurretScan();       // category turn ease: sample live pawns for azimuth turrets (~3s; only while land= and turret= rates differ)
+                UniversalInject.PollClassScan();        // category turn ease: sample live units for the Hover ability + azimuth turrets (~3s; only while category rates are active)
                 UniversalInject.TickDistrictMeshSwap(); // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
             }
             BattleTurn.Poll();                          // live battle-turn dial (enc_battleturn.txt): turn rate + hold-fire for ALL units — independent of model injection, so outside the UniversalInject gate (spike)

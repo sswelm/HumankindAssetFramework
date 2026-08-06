@@ -162,6 +162,9 @@ namespace HumankindAssetFramework
                     int adId = Convert.ToInt32(GetMember(addon, "PawnDefinitionId"));
                     // base TYPE category off the capability profile (category turn ease, docs/Turn-Ease.md) —
                     // same read the Resize human-exclusion uses; turret refinement is learned later from pawns
+                    // classification is by CHARACTERISTIC only (user rule — never by name): helicopters and
+                    // hovercraft carry the generic vehicle profile (StealthHelicopters measured at 5) and are
+                    // refined to HOVER later via the game's own UnitTagAsAbility.Hover flag (the class scan).
                     try { adProfCat = CategoryFromProfile(Convert.ToInt32(GetMember(def, "AnimationCapabilityProfile"))); } catch { }
                     if (adId >= 0)
                     {

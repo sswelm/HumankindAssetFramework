@@ -130,28 +130,33 @@ namespace HumankindAssetFramework
         internal static readonly HashSet<int> descCensusLogged = new HashSet<int>();   // diag=1 census: one line per rendered descriptor per session
 
         // CATEGORY TURN EASE (2026-08-06, user design): global defaults per unit TYPE instead of one blanket
-        // rate — Human, turretless Land vehicle, Land vehicle WITH a turret, Air, Ship. Base category derives
-        // from PawnAnimationCapabilityProfileType at addon load (Boat=7 ship; Plane=14/Missile=15 air;
-        // InanimateObject=5/Custom=8 land; every organic profile = human). Turret-ness has no data flag — it is
-        // LEARNED once per descriptor from live pawns: a turreted vehicle carries extra azimuth rotation
-        // transforms (rotationTransformInfos.Length > 1), sampled by a slow army walk and joined to the pose
-        // hook's descriptor by position (the system's standard join). Precedence: per-model turnRate > category
-        // rate > global `rate` (the dial no longer stomps per-model values — the user's mental model).
-        internal const int CatHuman = 0, CatLand = 1, CatTurret = 2, CatAir = 3, CatShip = 4;
-        internal static float catHumanRate, catLandRate, catTurretRate, catAirRate, catShipRate;
-        internal static bool AnyCatRate => catHumanRate > 0f || catLandRate > 0f || catTurretRate > 0f || catAirRate > 0f || catShipRate > 0f;
-        static readonly Dictionary<int, int> vanillaCatByDesc = new Dictionary<int, int>();   // desc -> BASE category (land, not yet turret-refined)
+        // rate — Human, turretless Land vehicle, Land vehicle WITH a turret, Hover, Ship. Classification is by
+        // CHARACTERISTIC, never by name (user rule): the base category derives from
+        // PawnAnimationCapabilityProfileType at addon load (Boat=7 ship; InanimateObject=5/Custom=8 land;
+        // every organic profile = human); HOVER is the game's own UnitTagAsAbility.Hover (index 32 — the
+        // "ignores terrain" flag helicopters and hovercraft carry) read off the sim UnitDefinition by the slow
+        // army scan; TURRET is the pawn's extra azimuth rotation transforms. Both refinements are LEARNED once
+        // per descriptor via the system's standard position join. FIXED-WING planes and missiles
+        // (Plane=14/Missile=15) are EXCLUDED entirely — the engine already flies them on natural curved paths
+        // (user rule); only an explicit per-model rate can ease them.
+        // Precedence: per-model turnRate > category rate > global `rate`.
+        internal const int CatHuman = 0, CatLand = 1, CatTurret = 2, CatHover = 3, CatShip = 4, CatPlane = 5;
+        internal const int HoverAbilityIndex = 32;   // UnitTagAsAbility.Hover (verified against Artillery=16, Interceptor=19 usages)
+        internal static float catHumanRate, catLandRate, catTurretRate, catHoverRate, catShipRate;
+        internal static bool AnyCatRate => catHumanRate > 0f || catLandRate > 0f || catTurretRate > 0f || catHoverRate > 0f || catShipRate > 0f;
+        static readonly Dictionary<int, int> vanillaCatByDesc = new Dictionary<int, int>();   // desc -> BASE category (land, not yet hover/turret-refined)
         static readonly Dictionary<int, bool> descTurret = new Dictionary<int, bool>();       // desc -> has azimuth turret (learned)
-        internal struct TurretSample { public UnityEngine.Vector3 pos; public bool turret; }
-        internal static readonly List<TurretSample> turretSamples = new List<TurretSample>(); // slow-scan output for the position join
+        static readonly Dictionary<int, bool> descHover = new Dictionary<int, bool>();        // desc -> carries the Hover ability (learned)
+        internal struct ClassSample { public UnityEngine.Vector3 pos; public bool turret; public bool hover; }
+        internal static readonly List<ClassSample> classSamples = new List<ClassSample>();    // slow-scan output for the position join
 
         internal static int CategoryFromProfile(int prof)
         {
             switch (prof)
             {
                 case 7: return CatShip;                    // Boat
-                case 14: case 15: return CatAir;           // Plane, Missile
-                case 5: case 8: return CatLand;            // InanimateObject (vehicles/guns), Custom
+                case 14: case 15: return CatPlane;         // Plane, Missile — EXCLUDED (natural flight paths)
+                case 5: case 8: return CatLand;            // InanimateObject (vehicles/guns), Custom — may refine to hover/turret
                 default: return prof >= 0 ? CatHuman : -1; // every organic profile (humans, mounts, chariots, animals)
             }
         }
@@ -163,31 +168,36 @@ namespace HumankindAssetFramework
                 case CatHuman: return catHumanRate;
                 case CatLand: return catLandRate;
                 case CatTurret: return catTurretRate;
-                case CatAir: return catAirRate;
+                case CatHover: return catHoverRate;
                 case CatShip: return catShipRate;
-                default: return 0f;
+                default: return 0f;                        // CatPlane and unknown: no category easing
             }
         }
 
-        // The category rate for a specific descriptor: land refines to turret when learned. An unlearned land
-        // vehicle uses the plain land rate until its first turret sample lands (a few seconds into a session).
-        internal static float CategoryRateForDesc(int descId, int baseCat)
+        // A land descriptor's LEARNED refinement: hover beats turret beats plain land. Unlearned descriptors
+        // use the plain land rate until their first scan sample lands (a few seconds into a session).
+        internal static int EffectiveCat(int descId, int baseCat)
         {
-            int cat = baseCat == CatLand && descTurret.TryGetValue(descId, out bool t) && t ? CatTurret : baseCat;
-            return CategoryRate(cat);
+            if (baseCat != CatLand) return baseCat;
+            if (descHover.TryGetValue(descId, out bool h) && h) return CatHover;
+            if (descTurret.TryGetValue(descId, out bool t) && t) return CatTurret;
+            return CatLand;
         }
 
-        // Position-join learn: called from the pose hook for land descriptors while the land/turret rates differ.
-        internal static void TryLearnTurret(int descId, UnityEngine.Vector3 pos)
+        internal static float CategoryRateForDesc(int descId, int baseCat) => CategoryRate(EffectiveCat(descId, baseCat));
+
+        // Position-join learn: called per land-descriptor pawn while any category rate is active.
+        internal static void TryLearnClass(int descId, UnityEngine.Vector3 pos)
         {
-            if (descTurret.ContainsKey(descId)) return;
-            for (int i = 0; i < turretSamples.Count; i++)
+            if (descHover.ContainsKey(descId)) return;   // hover + turret always learned together
+            for (int i = 0; i < classSamples.Count; i++)
             {
-                var d = turretSamples[i].pos - pos; d.y = 0f;
+                var d = classSamples[i].pos - pos; d.y = 0f;
                 if (d.sqrMagnitude < 2f * 2f)
                 {
-                    descTurret[descId] = turretSamples[i].turret;
-                    Plugin.Log.LogInfo($"[TurnEase] desc {descId} classified: land vehicle {(turretSamples[i].turret ? "WITH turret" : "without turret")}");
+                    descHover[descId] = classSamples[i].hover;
+                    descTurret[descId] = classSamples[i].turret;
+                    Plugin.Log.LogInfo($"[TurnEase] desc {descId} classified: {(classSamples[i].hover ? "HOVER (ignores terrain)" : classSamples[i].turret ? "land vehicle WITH turret" : "land vehicle without turret")}");
                     return;
                 }
             }

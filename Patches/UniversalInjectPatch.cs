@@ -903,7 +903,7 @@ namespace HumankindAssetFramework
             anyAnimated = null; anyMuzzle = null; anyFreeze = null; anyRescuable = null;                    // recomputed on the next pawn-add
             unitScaleByDesc.Clear(); unitScaleNameByDesc.Clear(); vanillaScaledLogged.Clear(); descApplied.Clear(); cachedEra = -1;   // descriptor ids + era are session-scoped (meshApplied deliberately KEPT: the Fx vertex buffers persist)
             vanillaTurnByDesc.Clear(); vanillaEaseLogged.Clear(); addonDefIds.Clear(); descCensusLogged.Clear();   // vanilla turn-ease links re-resolve to fresh descriptor ids next session
-            vanillaCatByDesc.Clear(); descTurret.Clear(); turretSamples.Clear();   // category + turret classifications are descriptor-id keyed -> session-scoped too
+            vanillaCatByDesc.Clear(); descTurret.Clear(); descHover.Clear(); classSamples.Clear();   // category + hover/turret classifications are descriptor-id keyed -> session-scoped too
             _listenerChecked = false;                                // the AudioListener rode a session-scoped camera
             var list = entries;
             if (list != null)

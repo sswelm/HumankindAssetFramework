@@ -158,17 +158,17 @@ namespace HumankindAssetFramework
                     if (!vanillaTurnByDesc.TryGetValue(ctx.descId, out vTurn) && AnyCatRate &&
                         vanillaCatByDesc.TryGetValue(ctx.descId, out vCat))
                     {
-                        if (vCat == CatLand && catLandRate != catTurretRate &&
+                        if (vCat == CatLand &&
                             GetMember(ctx.entry, "ObjectSpace") is object vos &&
                             GetMember(vos, "Translation") is UnityEngine.Vector3 vpos)
-                            TryLearnTurret(ctx.descId, vpos);
+                            TryLearnClass(ctx.descId, vpos);   // hover (ignores-terrain ability) + turret refinements
                         vTurn = CategoryRateForDesc(ctx.descId, vCat);
                     }
                     if (vTurn > 0f)
                     {
                         if (vanillaEaseLogged.Add(ctx.descId))
                             Plugin.Log.LogInfo($"[TurnEase] easing vanilla desc {ctx.descId} at {vTurn} deg/s ({(vCat >= 0 ? "category" : "link")}, first pawn seen)");
-                        ApplyTurnEaseCore(vTurn, vCat == CatAir ? turnBank : 0f, ctx.entry);
+                        ApplyTurnEaseCore(vTurn, vCat >= 0 && EffectiveCat(ctx.descId, vCat) == CatHover ? turnBank : 0f, ctx.entry);
                         ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
                     }
                 }
@@ -581,7 +581,7 @@ namespace HumankindAssetFramework
                 string txt = File.Exists(path) ? File.ReadAllText(path) : "";
                 if (txt == turnSig) return;
                 turnSig = txt;
-                float rate = 0f, bank = 0f, cHum = 0f, cLand = 0f, cTur = 0f, cAir = 0f, cShip = 0f;
+                float rate = 0f, bank = 0f, cHum = 0f, cLand = 0f, cTur = 0f, cHov = 0f, cShip = 0f;
                 foreach (var raw in txt.Split('\n'))
                 {
                     var line = raw.Trim();
@@ -596,13 +596,13 @@ namespace HumankindAssetFramework
                         case "human": cHum = v; break;    // category defaults (docs/Turn-Ease.md): per-model > category > rate
                         case "land": cLand = v; break;    // turretless land vehicles (towed guns, assault guns)
                         case "turret": cTur = v; break;   // land vehicles WITH a traversing turret (learned from live pawns)
-                        case "air": cAir = v; break;
+                        case "hover": case "air": cHov = v; break;   // Hover-ability units (helicopters, hovercraft); "air" = legacy alias — PLANES are always excluded
                         case "ship": cShip = v; break;
                     }
                 }
                 turnRate = rate; turnBank = bank;
-                catHumanRate = cHum; catLandRate = cLand; catTurretRate = cTur; catAirRate = cAir; catShipRate = cShip;
-                Plugin.Log.LogInfo($"[TurnEase] rate={rate} bank={bank} | categories human={cHum} land={cLand} turret={cTur} air={cAir} ship={cShip} deg/s");
+                catHumanRate = cHum; catLandRate = cLand; catTurretRate = cTur; catHoverRate = cHov; catShipRate = cShip;
+                Plugin.Log.LogInfo($"[TurnEase] rate={rate} bank={bank} | categories human={cHum} land={cLand} turret={cTur} hover={cHov} ship={cShip} deg/s (planes excluded)");
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[TurnEase] " + ex.Message); }
         }

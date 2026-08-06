@@ -110,41 +110,49 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] StrikeTargetWorldPos: " + ex.Message); return UnityEngine.Vector3.zero; }
         }
 
-        // TURRET SCAN (category turn ease, docs/Turn-Ease.md): every ~3 s while the land and turret rates
-        // differ, sample each live army's first pawn — a traversing turret shows as EXTRA azimuth rotation
-        // transforms on the pawn (rotationTransformInfos.Length > 1, the same array the azimuth audio keys
-        // off). The pose hook joins these samples to descriptors by position and learns each land descriptor's
-        // refinement ONCE per session.
-        static float turretScanNext;
+        // CLASS SCAN (category turn ease, docs/Turn-Ease.md): every ~3 s while any category rate is active,
+        // sample each live army's first pawn for the two CHARACTERISTIC refinements of the land category —
+        // HOVER = the sim UnitDefinition's own UnitTagAsAbility.Hover flag ("ignores terrain": helicopters,
+        // hovercraft; user's identification), TURRET = extra azimuth rotation transforms on the pawn
+        // (rotationTransformInfos.Length > 1, the array the azimuth audio keys off). The pose hook joins these
+        // samples to descriptors by position and learns each land descriptor's refinement ONCE per session.
+        static float classScanNext;
         static System.Reflection.FieldInfo fiRotInfos;
-        internal static void PollTurretScan()
+        internal static void PollClassScan()
         {
-            if (catLandRate == catTurretRate) return;   // distinction unused — no scan cost
-            if (UnityEngine.Time.realtimeSinceStartup < turretScanNext) return;
-            turretScanNext = UnityEngine.Time.realtimeSinceStartup + 3f;
+            if (!AnyCatRate) return;   // categories off — no scan cost
+            if (UnityEngine.Time.realtimeSinceStartup < classScanNext) return;
+            classScanNext = UnityEngine.Time.realtimeSinceStartup + 3f;
             try
             {
                 var presType = GameBinding.Presentation;
                 var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
                 var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
                 if (armies == null) return;
-                turretSamples.Clear();
+                classSamples.Clear();
                 foreach (var army in armies)
                 {
                     if (army == null) continue;
                     var unit = GetMember(army, "PresentationUnit");
                     if (unit == null || !(GetMember(unit, "Pawns") is System.Collections.IEnumerable pawns)) continue;
+                    bool hover = false;
+                    try
+                    {
+                        if (GetMember(GetMember(unit, "UnitDefinition"), "TagAsAbilities") is Array tags && tags.Length > HoverAbilityIndex)
+                            hover = Convert.ToBoolean(tags.GetValue(HoverAbilityIndex));
+                    }
+                    catch { }
                     foreach (var pawn in pawns)
                     {
                         if (!(GetMember(pawn, "Transform") is UnityEngine.Transform tr)) break;
                         if (fiRotInfos == null) fiRotInfos = AccessTools.Field(pawn.GetType(), "rotationTransformInfos");
-                        if (!(fiRotInfos?.GetValue(pawn) is Array infos)) break;
-                        turretSamples.Add(new TurretSample { pos = tr.position, turret = infos.Length > 1 });
+                        bool turret = fiRotInfos?.GetValue(pawn) is Array infos && infos.Length > 1;
+                        classSamples.Add(new ClassSample { pos = tr.position, turret = turret, hover = hover });
                         break;   // the first pawn is representative for the unit's descriptor family
                     }
                 }
             }
-            catch (Exception ex) { Plugin.Log.LogWarning("[TurnEase] turret scan: " + ex.Message); }
+            catch (Exception ex) { Plugin.Log.LogWarning("[TurnEase] class scan: " + ex.Message); }
         }
 
         // LAUNCH POSE REFRESH (shell/smoke position fix): vanilla captures the shell's spawn position +
