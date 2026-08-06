@@ -196,7 +196,7 @@ namespace HumankindAssetFramework
                 // and does the sub-pawn->entry match work? Zero [Muzzle] lines while flashes stay off-side = the redirect
                 // never engages; this shows whether the CALL is missing or the MATCH is failing.
                 if (muzzleSeen.Count < 12 && muzzleSeen.Add(boneName))
-                    Plugin.Diag($"[Muzzle] GetBoneTRS('{boneName}') subPawn='{(subPawn as UnityEngine.Component)?.gameObject?.name ?? "?"}' entry={(e?.resourceName ?? "none")}");
+                    Plugin.Log.LogInfo($"[Muzzle] GetBoneTRS('{boneName}') subPawn='{(subPawn as UnityEngine.Component)?.gameObject?.name ?? "?"}' entry={(e?.resourceName ?? "none")}");   // LogInfo while hunting the battle flash-at-center (max 12/session)
                 if (e == null) return false;
                 if (SkelHasBone(e.skeleton, boneName))
                 {
@@ -212,7 +212,7 @@ namespace HumankindAssetFramework
                         muzzleReentry = true;
                         try { result = getBoneTRS.Invoke(subPawn, new object[] { boneName }); }
                         finally { muzzleReentry = false; }
-                        if (result != null) { CompensateDonorOffset(result, e, boneName, subPawn); return true; }
+                        if (result != null) { CompensateDonorOffset(result, e, boneName, subPawn, donorComp: true); return true; }
                     }
                     return false;      // any other real-bone lookup — genuine, leave it
                 }
@@ -221,10 +221,11 @@ namespace HumankindAssetFramework
                 muzzleReentry = true;   // belt-and-braces: the mn lookup exits via the found-bone branch today, but that branch is no longer a plain pass-through
                 try { result = getBoneTRS.Invoke(subPawn, new object[] { mn }); }
                 finally { muzzleReentry = false; }
-                // Inside AlterationFireProjectile.StartEvent and this is the POSITION socket: pre-compensate the donor
-                // offset on the boxed TRS so the caller's own Transform(offset) lands back on our muzzle bone (v3 above).
-                if (pendingMuzzleActive && boneName == pendingMuzzlePosName && result != null)
-                    CompensateDonorOffset(result, e, mn, subPawn);
+                // The muzzle-offset DIAL now applies to EVERY redirected lookup (flash, tracer AND smoke — the
+                // smoke lived outside the StartEvent bracket and sat at the raw bone); the donor-offset
+                // SUBTRACTION still only counters the caller's own +offset inside StartEvent's position socket.
+                if (result != null)
+                    CompensateDonorOffset(result, e, mn, subPawn, donorComp: pendingMuzzleActive && boneName == pendingMuzzlePosName);
                 return true;
             }
             catch (Exception ex) { if (!muzzleErrLogged) { muzzleErrLogged = true; Plugin.Log.LogError("[Muzzle] redirect failed (disabled): " + ex); } return false; }
@@ -232,7 +233,7 @@ namespace HumankindAssetFramework
 
         // Subtract the donor's socket-local offset from a boxed TRS (Translation -= Rotation * (offset * Scale)) so the
         // caller's own Transform(offset) returns to the bone. Per-shot diagnostic log stays on while this calibrates.
-        static void CompensateDonorOffset(object trs, ModelEntry e, string boneLabel, object subPawn)
+        static void CompensateDonorOffset(object trs, ModelEntry e, string boneLabel, object subPawn, bool donorComp = true)
         {
             if (!trsFieldsResolved)
             {
@@ -256,7 +257,10 @@ namespace HumankindAssetFramework
                     && float.TryParse(p[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var oz))
                     e.muzzleOffsetV = new UnityEngine.Vector3(ox, oy, oz);
             }
-            trsTranslation.SetValue(trs, tr - rot * (pendingMuzzleOffset * sc) + e.muzzleOffsetV);
+            // dial is BONE-LOCAL now (rotated by the bone's live rotation, aim + elevation included): a FORWARD
+            // offset finally reaches the barrel END and stays there as the hull turns — a world-space dial only
+            // ever worked for vertical shifts (the ArmouredCar's 0,2.6,0 is yaw-invariant, so it is unaffected).
+            trsTranslation.SetValue(trs, tr - (donorComp ? rot * (pendingMuzzleOffset * sc) : UnityEngine.Vector3.zero) + rot * e.muzzleOffsetV);
             // Verified recipe (ArmouredCar 2026-07-24): sockets Move_bloc/Canon_Up_left on the gun + dial 0,2.6,0 —
             // flash, smoke and tracer all on the tracking turret. Log ONCE per entry (was per-shot while calibrating).
             if (!e.muzzlePinLogged)
