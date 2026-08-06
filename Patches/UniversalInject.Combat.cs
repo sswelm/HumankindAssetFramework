@@ -271,7 +271,7 @@ namespace HumankindAssetFramework
                 if (rate <= 0f) return;                                         // not eased — leave vanilla
                 float miss = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(eased0, aim));
                 float hold = miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.2f, 3f) : 0f;
-                SetAimOverride(tr.position, aim, 8f, UnityEngine.Time.time + hold, dv.magnitude);
+                SetAimOverride(tr.position, aim, 120f, UnityEngine.Time.time + hold, dv.magnitude);   // long-stop only — facing persists until the game changes intent (AimMaintain)
                 Plugin.Diag($"[BattleTurn] battle hull-aim '{e.resourceName}': aim={aim:F0} miss={miss:F0}deg hold=+{hold:F2}s");
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] BattleAimPrep: " + ex.Message); }
@@ -346,7 +346,7 @@ namespace HumankindAssetFramework
                             Plugin.Log.LogInfo($"[BattleTurn] strike hold '{unitDef}': eased={eased:F0} aim={target:F0}{(targetPos != UnityEngine.Vector3.zero ? fao != 0 ? $" (true bearing, broadside {fao}deg)" : " (true bearing)" : " (quantized)")} miss={miss:F0}deg -> +{hold:F2}s (shared clock)");
                         }
                         var dv = targetPos - tr.position; dv.y = 0f;   // horizontal range drives the gun-elevation envelope
-                        SetAimOverride(tr.position, target, 10f, releaseAt, targetPos != UnityEngine.Vector3.zero ? dv.magnitude : 0f);
+                        SetAimOverride(tr.position, target, 120f, releaseAt, targetPos != UnityEngine.Vector3.zero ? dv.magnitude : 0f);   // long-stop only — facing persists until the game changes intent (AimMaintain)
                     }
                     return hold;
                 }

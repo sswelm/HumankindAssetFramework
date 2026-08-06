@@ -408,15 +408,36 @@ namespace HumankindAssetFramework
         // releaseAt is THE strike's one shared clock (sync fix 2026-08-05): the attack pose teleport, the shot
         // sound/smoke and the shell schedule all fire off this single timestamp — mixing a dynamic release
         // (aligned-within-8°) with static scheduler delays desynced the bang from the recoil by ~0.25 s.
-        class AimOverride { public UnityEngine.Vector3 pos; public float yaw; public float until; public float releaseAt; public float createdAt; public float dist; }
+        class AimOverride { public UnityEngine.Vector3 pos; public float yaw; public float until; public float releaseAt; public float createdAt; public float dist; public float gameYaw; public bool gameYawSet; }
         static readonly List<AimOverride> aimOverrides = new List<AimOverride>();
         internal static void SetAimOverride(UnityEngine.Vector3 pos, float yaw, float duration, float releaseAt = 0f, float dist = 0f)
         {
             float now = UnityEngine.Time.time;
             for (int i = aimOverrides.Count - 1; i >= 0; i--) if (now > aimOverrides[i].until) aimOverrides.RemoveAt(i);
             foreach (var o in aimOverrides)
-            { var d = o.pos - pos; d.y = 0f; if (d.sqrMagnitude < 4f) { o.pos = pos; o.yaw = yaw; o.until = now + duration; o.releaseAt = releaseAt; o.createdAt = now; o.dist = dist; return; } }
+            { var d = o.pos - pos; d.y = 0f; if (d.sqrMagnitude < 4f) { o.pos = pos; o.yaw = yaw; o.until = now + duration; o.releaseAt = releaseAt; o.createdAt = now; o.dist = dist; o.gameYawSet = false; return; } }
             aimOverrides.Add(new AimOverride { pos = pos, yaw = yaw, until = now + duration, releaseAt = releaseAt, createdAt = now, dist = dist });
+        }
+
+        // FACING PERSISTENCE (2026-08-06, user: after the shot the unit eased BACK to its original facing):
+        // the ease-side override lookup with MAINTENANCE — the override now lives until the GAME changes its
+        // own facing intent (move order, new attack: the underlying yaw shifts >15° from what it was when the
+        // aim armed), at which point control hands back instantly. The unit stays laid on its target like a
+        // real gun crew instead of springing back on a timer; `until` remains only as a long-stop prune.
+        static bool AimMaintain(UnityEngine.Vector3 pos, float rawGameYaw, out float yaw)
+        {
+            yaw = 0f; float now = UnityEngine.Time.time; AimOverride o = null; float best = 16f;
+            for (int i = 0; i < aimOverrides.Count; i++)
+            {
+                if (now > aimOverrides[i].until) continue;
+                var d = aimOverrides[i].pos - pos; d.y = 0f;
+                if (d.sqrMagnitude < best) { best = d.sqrMagnitude; o = aimOverrides[i]; }
+            }
+            if (o == null) return false;
+            if (!o.gameYawSet) { o.gameYaw = rawGameYaw; o.gameYawSet = true; }
+            else if (UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(rawGameYaw, o.gameYaw)) > 15f)
+            { o.until = 0f; return false; }   // the game wants a new facing — yield immediately
+            yaw = o.yaw; return true;
         }
 
         // GUN ELEVATION envelope (2026-08-06, user spec: "raised depending on distance to configurable max
@@ -436,7 +457,9 @@ namespace HumankindAssetFramework
             if (o == null) return false;
             float relEnd = o.releaseAt > o.createdAt ? o.releaseAt : o.createdAt + 0.5f;
             float up = UnityEngine.Mathf.Clamp01((now - o.createdAt) / UnityEngine.Mathf.Max(0.3f, relEnd - o.createdAt));
-            float down = UnityEngine.Mathf.Clamp01((o.until - now) / 2f);
+            // lower the barrel a few seconds after the SHOT (releaseAt), not when the override dies — with
+            // facing persistence the override outlives the strike, but the gun shouldn't stay elevated forever
+            float down = 1f - UnityEngine.Mathf.Clamp01((now - (relEnd + 4f)) / 2f);
             envelope = UnityEngine.Mathf.Min(up, down);
             dist = o.dist;
             return envelope > 0.001f;
@@ -671,8 +694,10 @@ namespace HumankindAssetFramework
             try { tr = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return; }
             var ro = GetMember(os, "Rotation");
             if (!TryQuaternion(ro, out var rot)) return;
-            // true-bearing aim: an active strike override replaces the game's (hex-quantized) yaw as the target
-            bool aimed = TryAimAt(tr, out float aimYaw);
+            // true-bearing aim: an active strike/battle override replaces the game's yaw as the target — and
+            // PERSISTS until the game itself changes facing intent (AimMaintain), so the unit stays laid on
+            // its target after the shot instead of springing back to the pre-attack facing
+            bool aimed = AimMaintain(tr, rot.eulerAngles.y, out float aimYaw);
             float target = aimed ? aimYaw : rot.eulerAngles.y;
             float now = UnityEngine.Time.time;
             TurnState st = null; float best = 16f;   // nearest live state within 4 world units
