@@ -296,7 +296,8 @@ namespace HumankindAssetFramework
                             releaseAt = UnityEngine.Time.time + hold;
                             Plugin.Log.LogInfo($"[BattleTurn] strike hold '{unitDef}': eased={eased:F0} aim={target:F0}{(targetPos != UnityEngine.Vector3.zero ? fao != 0 ? $" (true bearing, broadside {fao}deg)" : " (true bearing)" : " (quantized)")} miss={miss:F0}deg -> +{hold:F2}s (shared clock)");
                         }
-                        SetAimOverride(tr.position, target, 10f, releaseAt);   // ease target = real bearing; releaseAt = the strike's one clock
+                        var dv = targetPos - tr.position; dv.y = 0f;   // horizontal range drives the gun-elevation envelope
+                        SetAimOverride(tr.position, target, 10f, releaseAt, targetPos != UnityEngine.Vector3.zero ? dv.magnitude : 0f);
                     }
                     return hold;
                 }

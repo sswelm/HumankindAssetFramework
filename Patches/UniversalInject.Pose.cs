@@ -272,7 +272,7 @@ namespace HumankindAssetFramework
                 // Donor-clip path: the donor's clip drives the pose, but the pawn-level adjusters must still run —
                 // they live in ApplyAnimatedPose, which this branch bypasses, and without them Position offset
                 // (hover height!), moveTilt and runtime scale are silently dead on donor-clip models.
-                if (e.useDonorClip) { DumpDonorChannels(ctx.entry, e); ApplyRotorSpin(ctx.entry, e); ApplyRotorTrim(ctx.entry, e); ApplyPositionOffset(e, ctx.entry); ApplyTerrainHug(e, ctx.entry); ApplyTurnEase(e, ctx.entry); ApplyMoveTilt(e, ctx.entry); ApplyScale(e, ctx.entry); ctx.pawnEntries.SetValue(ctx.entry, ctx.idx); }
+                if (e.useDonorClip) { DumpDonorChannels(ctx.entry, e); ApplyRotorSpin(ctx.entry, e); ApplyRotorTrim(ctx.entry, e); ApplyPositionOffset(e, ctx.entry); ApplyTerrainHug(e, ctx.entry); ApplyTurnEase(e, ctx.entry); ApplyMoveTilt(e, ctx.entry); ApplyGunElevation(e, ctx.entry); ApplyScale(e, ctx.entry); ctx.pawnEntries.SetValue(ctx.entry, ctx.idx); }
                 else
                 {
                     // TURN EASE for every non-donor entry too (battle-turn spike): a map attack SNAPS the unit's
@@ -281,6 +281,7 @@ namespace HumankindAssetFramework
                     // mechanism the Comanche flies with. Self-gated: no dial rate AND no per-model rate = no-op.
                     // Runs before the pose handlers; they mutate the same boxed entry and write it back.
                     ApplyTurnEase(e, ctx.entry);
+                    ApplyGunElevation(e, ctx.entry);   // distance-proportional barrel raise during a bombard (BR slot — independent of the pose)
                     if (e.freezeDonorAnim && e.animId < 0) ApplyFreeze(ctx, e);
                     else if (e.animId >= 0) ApplyAnimatedPose(ctx, e);
                     else ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
@@ -665,6 +666,42 @@ namespace HumankindAssetFramework
                                    (hugSkip.Count > 0 ? " skip=" + string.Join(",", hugSkip) : ""));
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[Hug] " + ex.Message); }
+        }
+
+        // GUN ELEVATION (2026-08-06, user spec): during a bombard, raise the gun barrel DISTANCE-proportionally
+        // to the model's configured max angle — a short lob barely lifts, a full-range shot elevates fully
+        // (full at ~3 tiles). Rides the strike aim override's envelope (up over the turn hold, hold, down as
+        // the override expires) and writes BoneRotation slot 3 (spin/trim fill 0-up; a 4-trim dial would
+        // collide — documented). Bone = turretBone else muzzleBone, axis per gunElevAxis, resolved once.
+        static void ApplyGunElevation(ModelEntry e, object entry)
+        {
+            if (e.gunElevMax == 0f) return;
+            var os = GetMember(entry, "ObjectSpace");
+            if (os == null || !(GetMember(os, "Translation") is UnityEngine.Vector3 pos)) return;
+            if (!TryAimElevAt(pos, out float dist, out float f)) return;
+            if (e.gunElevBoneIdx == -2)
+            {
+                e.gunElevBoneIdx = -1;
+                string bn = !string.IsNullOrEmpty(e.turretBone) ? e.turretBone : e.muzzleBone;
+                var bones = e.skeleton == null ? null : GetMember(e.skeleton, "BoneInfos") as Array;
+                if (!string.IsNullOrEmpty(bn) && bones != null)
+                    for (int i = 0; i < bones.Length; i++)
+                    {
+                        var n = GetMember(bones.GetValue(i), "Name")?.ToString() ?? "";
+                        if (n.IndexOf(bn, StringComparison.OrdinalIgnoreCase) >= 0) { e.gunElevBoneIdx = i; break; }
+                    }
+                if (e.gunElevBoneIdx < 0) Plugin.Log.LogWarning($"[Elev] '{e.resourceName}': gun bone '{bn}' not found — gun elevation off");
+            }
+            if (e.gunElevBoneIdx < 0) return;
+            float full = 3f * (tileSpacing > 0.1f ? tileSpacing : 6.93f);
+            float angle = e.gunElevMax * UnityEngine.Mathf.Clamp01(dist / full) * f;
+            if (UnityEngine.Mathf.Abs(angle) < 0.05f) return;
+            var br = GetMember(entry, BoneRotationNames[3]);
+            if (br == null) return;
+            SetMember(br, "SkeletonBoneIndex", (uint)e.gunElevBoneIdx);
+            SetMember(br, "AxisIndex", (uint)e.gunElevAxis);
+            SetMember(br, "Angle", angle);
+            SetMember(entry, BoneRotationNames[3], br);
         }
 
         static void ApplyRotorTrim(object entry, ModelEntry e)

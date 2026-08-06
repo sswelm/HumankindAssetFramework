@@ -404,15 +404,38 @@ namespace HumankindAssetFramework
         // releaseAt is THE strike's one shared clock (sync fix 2026-08-05): the attack pose teleport, the shot
         // sound/smoke and the shell schedule all fire off this single timestamp — mixing a dynamic release
         // (aligned-within-8°) with static scheduler delays desynced the bang from the recoil by ~0.25 s.
-        class AimOverride { public UnityEngine.Vector3 pos; public float yaw; public float until; public float releaseAt; }
+        class AimOverride { public UnityEngine.Vector3 pos; public float yaw; public float until; public float releaseAt; public float createdAt; public float dist; }
         static readonly List<AimOverride> aimOverrides = new List<AimOverride>();
-        internal static void SetAimOverride(UnityEngine.Vector3 pos, float yaw, float duration, float releaseAt = 0f)
+        internal static void SetAimOverride(UnityEngine.Vector3 pos, float yaw, float duration, float releaseAt = 0f, float dist = 0f)
         {
             float now = UnityEngine.Time.time;
             for (int i = aimOverrides.Count - 1; i >= 0; i--) if (now > aimOverrides[i].until) aimOverrides.RemoveAt(i);
             foreach (var o in aimOverrides)
-            { var d = o.pos - pos; d.y = 0f; if (d.sqrMagnitude < 4f) { o.pos = pos; o.yaw = yaw; o.until = now + duration; o.releaseAt = releaseAt; return; } }
-            aimOverrides.Add(new AimOverride { pos = pos, yaw = yaw, until = now + duration, releaseAt = releaseAt });
+            { var d = o.pos - pos; d.y = 0f; if (d.sqrMagnitude < 4f) { o.pos = pos; o.yaw = yaw; o.until = now + duration; o.releaseAt = releaseAt; o.createdAt = now; o.dist = dist; return; } }
+            aimOverrides.Add(new AimOverride { pos = pos, yaw = yaw, until = now + duration, releaseAt = releaseAt, createdAt = now, dist = dist });
+        }
+
+        // GUN ELEVATION envelope (2026-08-06, user spec: "raised depending on distance to configurable max
+        // angle"): for the strike override nearest `pos`, the target DISTANCE plus a 0→1 envelope — rising
+        // over the turn hold (the barrel comes up while the hull lays), holding through the strike, easing
+        // back down over the last 2 s of the override window (the crew lowering the gun).
+        internal static bool TryAimElevAt(UnityEngine.Vector3 pos, out float dist, out float envelope)
+        {
+            dist = 0f; envelope = 0f;
+            float now = UnityEngine.Time.time; AimOverride o = null; float best = 16f;
+            for (int i = 0; i < aimOverrides.Count; i++)
+            {
+                if (now > aimOverrides[i].until || aimOverrides[i].dist <= 0f) continue;
+                var d = aimOverrides[i].pos - pos; d.y = 0f;
+                if (d.sqrMagnitude < best) { best = d.sqrMagnitude; o = aimOverrides[i]; }
+            }
+            if (o == null) return false;
+            float relEnd = o.releaseAt > o.createdAt ? o.releaseAt : o.createdAt + 0.5f;
+            float up = UnityEngine.Mathf.Clamp01((now - o.createdAt) / UnityEngine.Mathf.Max(0.3f, relEnd - o.createdAt));
+            float down = UnityEngine.Mathf.Clamp01((o.until - now) / 2f);
+            envelope = UnityEngine.Mathf.Min(up, down);
+            dist = o.dist;
+            return envelope > 0.001f;
         }
         // The strike's shared release time for the pawn nearest `pos` (false = no armed strike there).
         internal static bool TryAimRelease(UnityEngine.Vector3 pos, out float releaseAt)
