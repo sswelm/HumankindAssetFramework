@@ -607,6 +607,7 @@ namespace HumankindAssetFramework
         static bool pendingMuzzleActive;
         static System.Reflection.FieldInfo trsTranslation, trsRotation, trsScale;
         static bool trsFieldsResolved;
+        static int fireProjLogCount;
         internal static void OnFireProjectileStart(object mecanimEvent)
         {
             try
@@ -614,6 +615,9 @@ namespace HumankindAssetFramework
                 pendingMuzzlePosName = GetMember(mecanimEvent, "ParentNameToLaunchVFXPosition")?.ToString();
                 pendingMuzzleOffset = GetMember(mecanimEvent, "PositionToLaunchVFX") is UnityEngine.Vector3 v ? v : UnityEngine.Vector3.zero;
                 pendingMuzzleActive = !string.IsNullOrEmpty(pendingMuzzlePosName);
+                // invisible-shell hunt (2026-08-06): does the projectile event even FIRE in battle? First 8 per session.
+                if (fireProjLogCount < 8)
+                { fireProjLogCount++; Plugin.Log.LogInfo($"[Muzzle] FireProjectile event: posSocket='{pendingMuzzlePosName}' offset={pendingMuzzleOffset.ToString("0.00")}"); }
             }
             catch { pendingMuzzleActive = false; }
         }
