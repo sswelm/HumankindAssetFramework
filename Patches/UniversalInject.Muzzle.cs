@@ -478,6 +478,8 @@ namespace HumankindAssetFramework
         // "LandUnit_Era5_Common_LineInfantry (…)"; the link stores the presentation name inside it, so
         // case-insensitive contains bridges the two). 0 = no easing, vanilla pacing.
         static float rateTraceAt;
+        // family-governance priority: the heaviest equipment in a unit decides its turn behavior
+        static int CatPriority(int cat) => cat == CatHover ? 4 : cat == CatTurret ? 3 : cat == CatShip ? 2 : cat == CatLand ? 1 : cat == CatHuman ? 0 : -1;
         internal static float TurnRateForUnitDef(string unitDef)
         {
             var e = FindEntryForUnitDefinition(unitDef);
@@ -508,6 +510,10 @@ namespace HumankindAssetFramework
                 if (sp > 0) ucore = ucore.Substring(0, sp);
                 int up = ucore.IndexOf("Unit_", StringComparison.OrdinalIgnoreCase);   // drop the LandUnit_/NavalUnit_/… domain prefix
                 if (up >= 0) ucore = ucore.Substring(up + 5);
+                // among the unit's pawn FAMILY the heaviest equipment governs the unit's turn behavior:
+                // hover > turret > ship > land > human — a mortar's family is its GUN plus human SERVANT
+                // crew, and returning the first match let the crew (human, rate 0) answer for the gun.
+                int bestEff = -1; string fam = null;
                 foreach (var ad in addonDefIds)
                 {
                     var nm = ad.Key;
@@ -521,8 +527,21 @@ namespace HumankindAssetFramework
                     if (nm.Length < 6) continue;
                     bool match = unitDef.IndexOf(nm, StringComparison.OrdinalIgnoreCase) >= 0 ||
                                  (ucore.Length >= 6 && nm.IndexOf(ucore, StringComparison.OrdinalIgnoreCase) >= 0);
-                    if (match && vanillaCatByDesc.TryGetValue(ad.Value, out int cat))
-                        return CategoryRateForDesc(ad.Value, cat);
+                    if (!match || !vanillaCatByDesc.TryGetValue(ad.Value, out int cat)) continue;
+                    int eff = EffectiveCat(ad.Value, cat);
+                    fam = (fam == null ? "" : fam + ", ") + $"{ad.Key}:cat{eff}";
+                    if (CatPriority(eff) > CatPriority(bestEff)) bestEff = eff;
+                }
+                if (bestEff >= 0)
+                {
+                    float r = CategoryRate(bestEff);
+                    if (r > 0f) return r;
+                }
+                if (fam != null && UnityEngine.Time.time > rateTraceAt)
+                {
+                    rateTraceAt = UnityEngine.Time.time + 1f;
+                    Plugin.Log.LogInfo($"[TurnEase] rate 0 for '{unitDef}': family [{fam}] -> best cat {bestEff} rate 0");
+                    return 0f;
                 }
             }
             // resolution trace (throttled): everything above came up empty — name the state so a dead strike
