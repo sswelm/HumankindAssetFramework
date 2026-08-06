@@ -473,7 +473,12 @@ namespace HumankindAssetFramework
                 var d = turnStates[i].pos - pos; d.y = 0f;
                 if (d.sqrMagnitude < best) { best = d.sqrMagnitude; st = turnStates[i]; }
             }
-            return st == null ? 0f : UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(st.yaw, st.targetYaw));
+            if (st == null) return 0f;
+            // measure against the LIVE aim override when armed: TurnState.targetYaw only refreshes on the NEXT
+            // pose frame, so a battle volley checked the same frame its aim was armed read misalign 0 and fired
+            // mid-turn (the map's v3/v4 race, replayed in battle)
+            float target = TryAimAt(pos, out float ay) ? ay : st.targetYaw;
+            return UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(st.yaw, target));
         }
 
         // Seconds until the pawn nearest `pos` finishes its eased turn — OUR entries only (vanilla pawns don't
