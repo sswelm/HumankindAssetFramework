@@ -168,7 +168,7 @@ namespace HumankindAssetFramework
                     {
                         if (vanillaEaseLogged.Add(ctx.descId))
                             Plugin.Log.LogInfo($"[TurnEase] easing vanilla desc {ctx.descId} at {vTurn} deg/s ({(vCat >= 0 ? "category" : "link")}, first pawn seen)");
-                        ApplyTurnEaseCore(vTurn, vCat >= 0 && EffectiveCat(ctx.descId, vCat) == CatHover ? turnBank : 0f, ctx.entry);
+                        ApplyTurnEaseCore(vTurn, vCat >= 0 ? CategoryBank(EffectiveCat(ctx.descId, vCat)) : 0f, ctx.entry);
                         ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
                     }
                 }
@@ -582,6 +582,7 @@ namespace HumankindAssetFramework
                 if (txt == turnSig) return;
                 turnSig = txt;
                 float rate = 0f, bank = 0f, cHum = 0f, cLand = 0f, cTur = 0f, cHov = 0f, cShip = 0f;
+                float hovBank = 0f, shipBank = 0f; bool seenHovBank = false;
                 foreach (var raw in txt.Split('\n'))
                 {
                     var line = raw.Trim();
@@ -592,17 +593,21 @@ namespace HumankindAssetFramework
                     switch (eq[0].Trim().ToLowerInvariant())
                     {
                         case "rate": rate = v; break;
-                        case "bank": bank = v; break;
+                        case "bank": bank = v; break;     // legacy/fallback bank: models eased by the global `rate`
                         case "human": cHum = v; break;    // category defaults (docs/Turn-Ease.md): per-model > category > rate
                         case "land": cLand = v; break;    // turretless land vehicles (towed guns, assault guns)
                         case "turret": cTur = v; break;   // land vehicles WITH a traversing turret (learned from live pawns)
                         case "hover": case "air": cHov = v; break;   // Hover-ability units (helicopters, hovercraft); "air" = legacy alias — PLANES are always excluded
                         case "ship": cShip = v; break;
+                        case "hoverbank": hovBank = v; seenHovBank = true; break;   // per-category bank (user: hover and ship bank differently)
+                        case "shipbank": shipBank = v; break;
                     }
                 }
                 turnRate = rate; turnBank = bank;
                 catHumanRate = cHum; catLandRate = cLand; catTurretRate = cTur; catHoverRate = cHov; catShipRate = cShip;
-                Plugin.Log.LogInfo($"[TurnEase] rate={rate} bank={bank} | categories human={cHum} land={cLand} turret={cTur} hover={cHov} ship={cShip} deg/s (planes excluded)");
+                catHoverBank = seenHovBank ? hovBank : bank;   // legacy files: hover keeps inheriting `bank`
+                catShipBank = shipBank;
+                Plugin.Log.LogInfo($"[TurnEase] rate={rate} bank={bank} | categories human={cHum} land={cLand} turret={cTur} hover={cHov} ship={cShip} deg/s, hoverbank={catHoverBank} shipbank={catShipBank} deg (planes excluded)");
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[TurnEase] " + ex.Message); }
         }

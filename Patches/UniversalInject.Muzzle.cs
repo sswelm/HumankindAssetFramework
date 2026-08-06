@@ -557,10 +557,12 @@ namespace HumankindAssetFramework
                        : e.profCat == CatPlane ? 0f
                        : catRate > 0f ? catRate
                        : turnRate;
-            // bank: per-model wins; the file bank otherwise applies to HOVER-category units and rate-eased
-            // models (a global bank on ground vehicles reads as a capsizing truck).
+            // bank: per-model wins; then the CATEGORY bank (hoverbank/shipbank — a chopper banks, a ship
+            // heels, a truck does neither); the legacy file `bank` covers models eased per-model/global-rate.
+            float catBank = CategoryBank(EffectiveCat(e.descId, e.profCat));
             float bank = e.turnBank != 0f ? e.turnBank
-                       : EffectiveCat(e.descId, e.profCat) == CatHover || e.turnRate > 0f || turnRate > 0f ? turnBank
+                       : catBank != 0f ? catBank
+                       : e.turnRate > 0f || turnRate > 0f ? turnBank
                        : 0f;
             ApplyTurnEaseCore(rate, bank, entry);
         }

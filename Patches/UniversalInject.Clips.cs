@@ -143,6 +143,10 @@ namespace HumankindAssetFramework
         internal const int CatHuman = 0, CatLand = 1, CatTurret = 2, CatHover = 3, CatShip = 4, CatPlane = 5;
         internal const int HoverAbilityIndex = 32;   // UnitTagAsAbility.Hover (verified against Artillery=16, Interceptor=19 usages)
         internal static float catHumanRate, catLandRate, catTurretRate, catHoverRate, catShipRate;
+        internal static float catHoverBank, catShipBank;   // per-category bank (user: hover and ship bank differently — a chopper banks, a ship heels)
+
+        // The bank a category-eased unit gets (per-model turnBank still wins for entries).
+        internal static float CategoryBank(int effCat) => effCat == CatHover ? catHoverBank : effCat == CatShip ? catShipBank : 0f;
         internal static bool AnyCatRate => catHumanRate > 0f || catLandRate > 0f || catTurretRate > 0f || catHoverRate > 0f || catShipRate > 0f;
         static readonly Dictionary<int, int> vanillaCatByDesc = new Dictionary<int, int>();   // desc -> BASE category (land, not yet hover/turret-refined)
         static readonly Dictionary<int, bool> descTurret = new Dictionary<int, bool>();       // desc -> has azimuth turret (learned)
