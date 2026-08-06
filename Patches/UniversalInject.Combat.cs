@@ -228,6 +228,55 @@ namespace HumankindAssetFramework
             return lines;
         }
 
+        // BATTLE HULL AIM (2026-08-06): in deployed battles the engine NEVER rotates a vehicle's hull —
+        // vehicles avoid facing rotation and are "aimed" by streaming the aim angle into a TURRET bone slot
+        // (invalid on our rigs; the turretBone retarget exists for exactly that). A TURRETLESS vehicle (the
+        // Jagdpanzer) therefore aims with NOTHING in vanilla battles. Called when a ranged fight sequence is
+        // choreographed: for OUR turretless land/ship entries, register the same aim override the map bombard
+        // uses — the eased hull turns to the target, the gun elevation rides the same data, and (hold=1) the
+        // battle hold-fire gate waits for the alignment.
+        internal static void BattleAimPrep(object fightSequence)
+        {
+            try
+            {
+                var shooter = GetMember(fightSequence, "Shooter");
+                if (shooter == null || !(GetMember(shooter, "Transform") is UnityEngine.Transform tr)) return;
+                var unit = GetMember(shooter, "PresentationUnit");
+                string unitDef = GetMember(unit, "UnitDefinition")?.ToString() ?? "";
+                var e = FindEntryForUnitDefinition(unitDef);
+                if (e == null) return;                                          // v1: our entries only — vanilla battle behavior untouched
+                if (!string.IsNullOrEmpty(e.turretBone)) return;                // a turreted model aims with its turret natively
+                int cat = EntryBaseCat(e);
+                if (cat != CatLand && cat != CatShip) return;                   // hull-aim is a land/ship behavior
+                // target position: first target pawn, else the target unit's first pawn
+                UnityEngine.Vector3 tp; object tgt = null;
+                if (GetMember(fightSequence, "Targets") is Array targets && targets.Length > 0) tgt = targets.GetValue(0);
+                if (tgt == null && GetMember(fightSequence, "TargetUnit") is object tu &&
+                    GetMember(tu, "Pawns") is System.Collections.IList tps && tps.Count > 0) tgt = tps[0];
+                if (tgt == null || !(GetMember(tgt, "Transform") is UnityEngine.Transform tt)) return;
+                tp = tt.position;
+                var dv = tp - tr.position; dv.y = 0f;
+                if (dv.sqrMagnitude < 0.01f) return;
+                float aim = UnityEngine.Mathf.Atan2(dv.x, dv.z) * UnityEngine.Mathf.Rad2Deg;
+                // broadside units present the side in battle too
+                int fao = 0;
+                try { fao = Convert.ToInt32(GetMember(GetMember(unit, "PresentationUnitDefinition"), "FacingAngleOffset")); } catch { }
+                float eased0 = TryTurnStateAt(tr.position, out float ey, out float srate) ? ey : tr.eulerAngles.y;
+                if (fao != 0)
+                {
+                    float a1 = aim - fao, a2 = aim + fao;
+                    aim = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(eased0, a1)) <= UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(eased0, a2)) ? a1 : a2;
+                }
+                float rate = srate > 0f ? srate : TurnRateForUnitDef(unitDef);
+                if (rate <= 0f) return;                                         // not eased — leave vanilla
+                float miss = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(eased0, aim));
+                float hold = miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.2f, 3f) : 0f;
+                SetAimOverride(tr.position, aim, 120f, UnityEngine.Time.time + hold, dv.magnitude);   // long-stop only — facing persists until the game changes intent (AimMaintain)
+                Plugin.Diag($"[BattleTurn] battle hull-aim '{e.resourceName}': aim={aim:F0} miss={miss:F0}deg hold=+{hold:F2}s");
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] BattleAimPrep: " + ex.Message); }
+        }
+
         internal static float TurnHoldForStrike(object strike)
         {
             try
@@ -296,7 +345,8 @@ namespace HumankindAssetFramework
                             releaseAt = UnityEngine.Time.time + hold;
                             Plugin.Log.LogInfo($"[BattleTurn] strike hold '{unitDef}': eased={eased:F0} aim={target:F0}{(targetPos != UnityEngine.Vector3.zero ? fao != 0 ? $" (true bearing, broadside {fao}deg)" : " (true bearing)" : " (quantized)")} miss={miss:F0}deg -> +{hold:F2}s (shared clock)");
                         }
-                        SetAimOverride(tr.position, target, 10f, releaseAt);   // ease target = real bearing; releaseAt = the strike's one clock
+                        var dv = targetPos - tr.position; dv.y = 0f;   // horizontal range drives the gun-elevation envelope
+                        SetAimOverride(tr.position, target, 120f, releaseAt, targetPos != UnityEngine.Vector3.zero ? dv.magnitude : 0f);   // long-stop only — facing persists until the game changes intent (AimMaintain)
                     }
                     return hold;
                 }
@@ -557,6 +607,7 @@ namespace HumankindAssetFramework
         static bool pendingMuzzleActive;
         static System.Reflection.FieldInfo trsTranslation, trsRotation, trsScale;
         static bool trsFieldsResolved;
+        static int fireProjLogCount;
         internal static void OnFireProjectileStart(object mecanimEvent)
         {
             try
@@ -564,6 +615,9 @@ namespace HumankindAssetFramework
                 pendingMuzzlePosName = GetMember(mecanimEvent, "ParentNameToLaunchVFXPosition")?.ToString();
                 pendingMuzzleOffset = GetMember(mecanimEvent, "PositionToLaunchVFX") is UnityEngine.Vector3 v ? v : UnityEngine.Vector3.zero;
                 pendingMuzzleActive = !string.IsNullOrEmpty(pendingMuzzlePosName);
+                // invisible-shell hunt (2026-08-06): does the projectile event even FIRE in battle? First 8 per session.
+                if (fireProjLogCount < 8)
+                { fireProjLogCount++; Plugin.Log.LogInfo($"[Muzzle] FireProjectile event: posSocket='{pendingMuzzlePosName}' offset={pendingMuzzleOffset.ToString("0.00")}"); }
             }
             catch { pendingMuzzleActive = false; }
         }

@@ -196,7 +196,7 @@ namespace HumankindAssetFramework
                 // and does the sub-pawn->entry match work? Zero [Muzzle] lines while flashes stay off-side = the redirect
                 // never engages; this shows whether the CALL is missing or the MATCH is failing.
                 if (muzzleSeen.Count < 12 && muzzleSeen.Add(boneName))
-                    Plugin.Diag($"[Muzzle] GetBoneTRS('{boneName}') subPawn='{(subPawn as UnityEngine.Component)?.gameObject?.name ?? "?"}' entry={(e?.resourceName ?? "none")}");
+                    Plugin.Log.LogInfo($"[Muzzle] GetBoneTRS('{boneName}') subPawn='{(subPawn as UnityEngine.Component)?.gameObject?.name ?? "?"}' entry={(e?.resourceName ?? "none")}");   // LogInfo while hunting the battle flash-at-center (max 12/session)
                 if (e == null) return false;
                 if (SkelHasBone(e.skeleton, boneName))
                 {
@@ -212,7 +212,7 @@ namespace HumankindAssetFramework
                         muzzleReentry = true;
                         try { result = getBoneTRS.Invoke(subPawn, new object[] { boneName }); }
                         finally { muzzleReentry = false; }
-                        if (result != null) { CompensateDonorOffset(result, e, boneName, subPawn); return true; }
+                        if (result != null) { CompensateDonorOffset(result, e, boneName, subPawn, donorComp: true); return true; }
                     }
                     return false;      // any other real-bone lookup — genuine, leave it
                 }
@@ -221,10 +221,11 @@ namespace HumankindAssetFramework
                 muzzleReentry = true;   // belt-and-braces: the mn lookup exits via the found-bone branch today, but that branch is no longer a plain pass-through
                 try { result = getBoneTRS.Invoke(subPawn, new object[] { mn }); }
                 finally { muzzleReentry = false; }
-                // Inside AlterationFireProjectile.StartEvent and this is the POSITION socket: pre-compensate the donor
-                // offset on the boxed TRS so the caller's own Transform(offset) lands back on our muzzle bone (v3 above).
-                if (pendingMuzzleActive && boneName == pendingMuzzlePosName && result != null)
-                    CompensateDonorOffset(result, e, mn, subPawn);
+                // The muzzle-offset DIAL now applies to EVERY redirected lookup (flash, tracer AND smoke — the
+                // smoke lived outside the StartEvent bracket and sat at the raw bone); the donor-offset
+                // SUBTRACTION still only counters the caller's own +offset inside StartEvent's position socket.
+                if (result != null)
+                    CompensateDonorOffset(result, e, mn, subPawn, donorComp: pendingMuzzleActive && boneName == pendingMuzzlePosName);
                 return true;
             }
             catch (Exception ex) { if (!muzzleErrLogged) { muzzleErrLogged = true; Plugin.Log.LogError("[Muzzle] redirect failed (disabled): " + ex); } return false; }
@@ -232,7 +233,7 @@ namespace HumankindAssetFramework
 
         // Subtract the donor's socket-local offset from a boxed TRS (Translation -= Rotation * (offset * Scale)) so the
         // caller's own Transform(offset) returns to the bone. Per-shot diagnostic log stays on while this calibrates.
-        static void CompensateDonorOffset(object trs, ModelEntry e, string boneLabel, object subPawn)
+        static void CompensateDonorOffset(object trs, ModelEntry e, string boneLabel, object subPawn, bool donorComp = true)
         {
             if (!trsFieldsResolved)
             {
@@ -256,7 +257,10 @@ namespace HumankindAssetFramework
                     && float.TryParse(p[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var oz))
                     e.muzzleOffsetV = new UnityEngine.Vector3(ox, oy, oz);
             }
-            trsTranslation.SetValue(trs, tr - rot * (pendingMuzzleOffset * sc) + e.muzzleOffsetV);
+            // dial is BONE-LOCAL now (rotated by the bone's live rotation, aim + elevation included): a FORWARD
+            // offset finally reaches the barrel END and stays there as the hull turns — a world-space dial only
+            // ever worked for vertical shifts (the ArmouredCar's 0,2.6,0 is yaw-invariant, so it is unaffected).
+            trsTranslation.SetValue(trs, tr - (donorComp ? rot * (pendingMuzzleOffset * sc) : UnityEngine.Vector3.zero) + rot * e.muzzleOffsetV);
             // Verified recipe (ArmouredCar 2026-07-24): sockets Move_bloc/Canon_Up_left on the gun + dial 0,2.6,0 —
             // flash, smoke and tracer all on the tracking turret. Log ONCE per entry (was per-shot while calibrating).
             if (!e.muzzlePinLogged)
@@ -404,15 +408,62 @@ namespace HumankindAssetFramework
         // releaseAt is THE strike's one shared clock (sync fix 2026-08-05): the attack pose teleport, the shot
         // sound/smoke and the shell schedule all fire off this single timestamp — mixing a dynamic release
         // (aligned-within-8°) with static scheduler delays desynced the bang from the recoil by ~0.25 s.
-        class AimOverride { public UnityEngine.Vector3 pos; public float yaw; public float until; public float releaseAt; }
+        class AimOverride { public UnityEngine.Vector3 pos; public float yaw; public float until; public float releaseAt; public float createdAt; public float dist; public bool settled; }
         static readonly List<AimOverride> aimOverrides = new List<AimOverride>();
-        internal static void SetAimOverride(UnityEngine.Vector3 pos, float yaw, float duration, float releaseAt = 0f)
+        internal static void SetAimOverride(UnityEngine.Vector3 pos, float yaw, float duration, float releaseAt = 0f, float dist = 0f)
         {
             float now = UnityEngine.Time.time;
             for (int i = aimOverrides.Count - 1; i >= 0; i--) if (now > aimOverrides[i].until) aimOverrides.RemoveAt(i);
             foreach (var o in aimOverrides)
-            { var d = o.pos - pos; d.y = 0f; if (d.sqrMagnitude < 4f) { o.pos = pos; o.yaw = yaw; o.until = now + duration; o.releaseAt = releaseAt; return; } }
-            aimOverrides.Add(new AimOverride { pos = pos, yaw = yaw, until = now + duration, releaseAt = releaseAt });
+            { var d = o.pos - pos; d.y = 0f; if (d.sqrMagnitude < 4f) { o.pos = pos; o.yaw = yaw; o.until = now + duration; o.releaseAt = releaseAt; o.createdAt = now; o.dist = dist; o.settled = false; return; } }
+            aimOverrides.Add(new AimOverride { pos = pos, yaw = yaw, until = now + duration, releaseAt = releaseAt, createdAt = now, dist = dist });
+        }
+
+        // FACING PERSISTENCE (2026-08-06, v2 — user: after the attack, settle on the CLOSEST facing in the
+        // direction it shot): the override holds the aim through and after the shot, and a few seconds later
+        // QUANTIZES to the nearest 30° — the hull glides the last few degrees onto a tidy facing aligned with
+        // where it fired, and stays there. No yaw-change yield (v1's yield could not tell a real new order
+        // from the battle choreography's own post-fight facing reset — which yanked the hull home); the
+        // override releases on the NATURAL signals instead: the unit MOVES (position mismatch), the next
+        // attack re-arms it, or the long-stop prune fires.
+        static bool AimMaintain(UnityEngine.Vector3 pos, float rawGameYaw, out float yaw)
+        {
+            yaw = 0f; float now = UnityEngine.Time.time; AimOverride o = null; float best = 16f;
+            for (int i = 0; i < aimOverrides.Count; i++)
+            {
+                if (now > aimOverrides[i].until) continue;
+                var d = aimOverrides[i].pos - pos; d.y = 0f;
+                if (d.sqrMagnitude < best) { best = d.sqrMagnitude; o = aimOverrides[i]; }
+            }
+            if (o == null) return false;
+            if (!o.settled && now > (o.releaseAt > o.createdAt ? o.releaseAt : o.createdAt) + 3f)
+            { o.yaw = UnityEngine.Mathf.Round(o.yaw / 30f) * 30f; o.settled = true; }   // post-shot: nearest clean facing toward the shot
+            yaw = o.yaw; return true;
+        }
+
+        // GUN ELEVATION envelope (2026-08-06, user spec: "raised depending on distance to configurable max
+        // angle"): for the strike override nearest `pos`, the target DISTANCE plus a 0→1 envelope — rising
+        // over the turn hold (the barrel comes up while the hull lays), holding through the strike, easing
+        // back down over the last 2 s of the override window (the crew lowering the gun).
+        internal static bool TryAimElevAt(UnityEngine.Vector3 pos, out float dist, out float envelope)
+        {
+            dist = 0f; envelope = 0f;
+            float now = UnityEngine.Time.time; AimOverride o = null; float best = 16f;
+            for (int i = 0; i < aimOverrides.Count; i++)
+            {
+                if (now > aimOverrides[i].until || aimOverrides[i].dist <= 0f) continue;
+                var d = aimOverrides[i].pos - pos; d.y = 0f;
+                if (d.sqrMagnitude < best) { best = d.sqrMagnitude; o = aimOverrides[i]; }
+            }
+            if (o == null) return false;
+            float relEnd = o.releaseAt > o.createdAt ? o.releaseAt : o.createdAt + 0.5f;
+            float up = UnityEngine.Mathf.Clamp01((now - o.createdAt) / UnityEngine.Mathf.Max(0.3f, relEnd - o.createdAt));
+            // lower the barrel a few seconds after the SHOT (releaseAt), not when the override dies — with
+            // facing persistence the override outlives the strike, but the gun shouldn't stay elevated forever
+            float down = 1f - UnityEngine.Mathf.Clamp01((now - (relEnd + 4f)) / 2f);
+            envelope = UnityEngine.Mathf.Min(up, down);
+            dist = o.dist;
+            return envelope > 0.001f;
         }
         // The strike's shared release time for the pawn nearest `pos` (false = no armed strike there).
         internal static bool TryAimRelease(UnityEngine.Vector3 pos, out float releaseAt)
@@ -450,7 +501,12 @@ namespace HumankindAssetFramework
                 var d = turnStates[i].pos - pos; d.y = 0f;
                 if (d.sqrMagnitude < best) { best = d.sqrMagnitude; st = turnStates[i]; }
             }
-            return st == null ? 0f : UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(st.yaw, st.targetYaw));
+            if (st == null) return 0f;
+            // measure against the LIVE aim override when armed: TurnState.targetYaw only refreshes on the NEXT
+            // pose frame, so a battle volley checked the same frame its aim was armed read misalign 0 and fired
+            // mid-turn (the map's v3/v4 race, replayed in battle)
+            float target = TryAimAt(pos, out float ay) ? ay : st.targetYaw;
+            return UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(st.yaw, target));
         }
 
         // Seconds until the pawn nearest `pos` finishes its eased turn — OUR entries only (vanilla pawns don't
@@ -639,8 +695,10 @@ namespace HumankindAssetFramework
             try { tr = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return; }
             var ro = GetMember(os, "Rotation");
             if (!TryQuaternion(ro, out var rot)) return;
-            // true-bearing aim: an active strike override replaces the game's (hex-quantized) yaw as the target
-            bool aimed = TryAimAt(tr, out float aimYaw);
+            // true-bearing aim: an active strike/battle override replaces the game's yaw as the target — and
+            // PERSISTS until the game itself changes facing intent (AimMaintain), so the unit stays laid on
+            // its target after the shot instead of springing back to the pre-attack facing
+            bool aimed = AimMaintain(tr, rot.eulerAngles.y, out float aimYaw);
             float target = aimed ? aimYaw : rot.eulerAngles.y;
             float now = UnityEngine.Time.time;
             TurnState st = null; float best = 16f;   // nearest live state within 4 world units

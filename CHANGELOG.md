@@ -10,6 +10,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Units & animation
 
+- **BATTLE GUNNERY — the Jagdpanzer arc (2026-08-06).** A casemate tank destroyer exposed, one shot at a
+  time, that vanilla **never rotates a vehicle's hull in battle** (vehicles aim only via a turret bone slot —
+  invalid on custom rigs), and grew the full gunnery chain in a day: **battle hull-aim** (the map bombard's
+  aim machinery armed per volley — the eased hull lays on the actual target, `hold=1` waits for the lay);
+  the **gun-vs-turret model** in the Animation Lab (a Turret bone *yaws* and classifies the vehicle turreted;
+  a Gun bone aims with the hull and only *elevates*); **distance-proportional gun elevation** (user spec:
+  raised by range to a configurable max, rising while the hull turns, lowered after the shot); the **muzzle
+  dial gone gun-local** (rotates with aim + elevation, now moves flash, tracer AND smoke — a world-space dial
+  can't follow a turning hull, and a bone's TRS sits at the breech, not the barrel end); and **post-shot
+  facing that settles on the nearest clean facing toward the shot** (v1's yield-on-yaw-change heuristic
+  couldn't tell a real order from the choreography's own post-fight reset — graveyarded). Every asset in the
+  chain is the game's own; HAF only fixes where and when. See [docs/Turn-Ease.md](docs/Turn-Ease.md).
 - **CATEGORY TURN EASE — every unit type turns in character (2026-08-06).** Turn ease graduated from a
   per-model knob to a **game-wide system with per-TYPE defaults** — human / land / turret / hover / ship —
   each classified by **characteristic, never by name** (user rule, enforced twice): capability profiles, the

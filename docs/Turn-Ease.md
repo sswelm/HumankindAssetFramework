@@ -45,6 +45,27 @@ session. The scan is the authority: some pawn definitions (artillery guns among 
 hook at all, and the scan classifies them from the rendered unit itself. The strike holds read the eased
 pawn's **ground-truth rate off its live turn state**, so the visible turn and the fire hold can never disagree.
 
+**Battle hull-aim** (verified 2026-08-06, the Jagdpanzer arc): vanilla **never rotates a vehicle's hull in a
+deployed battle** — vehicles are flagged to avoid facing rotation and "aim" only via a turret bone slot
+(invalid on custom rigs; the `turretBone` retarget exists for that). A turretless vehicle therefore aimed
+with *nothing*. HAF now arms the same aim machinery the map bombard uses when a battle volley is
+choreographed (our turretless land/ship models): the eased hull turns to the actual target (broadside offset
+honored), `hold=1` makes the shot wait for the lay, and the whole muzzle chain fires from the laid barrel.
+
+**Guns, turrets & elevation** (verified): the Animation Lab models a weapon as two concepts — a **Turret
+bone** *yaws* at targets (and classifies the vehicle as turreted), while a fixed **Gun bone** aims with the
+hull and only *elevates*: **Gun elevation — max** raises the barrel **proportional to target distance** (full
+at ~3 tiles), rising while the hull turns, held through the shot, lowered a few seconds after. The **Muzzle
+offset** dial is **gun-local** (it rotates with the aim and elevation) and moves flash, tracer *and* smoke —
+note that *which* local axis runs along the barrel depends on the rig's bone frames (converted Blender-style
+rigs often use X where Unity-style rigs use Z): dial one axis at a time and watch the flash. The shell itself
+is always the game's own projectile — HAF only fixes *where* and *when*.
+
+**Post-shot facing** (verified): after the shot the unit **stays laid** and, ~3 s later, settles onto the
+**nearest clean facing toward the direction it fired** (30° grid) — no springing back to the pre-attack
+facing. The aim releases only on unambiguous signals: the unit moves, the next attack re-aims it, or a 120 s
+long-stop.
+
 Live dials (`BepInEx/config/`, polled ~1/s, no restart):
 
 - **`enc_turnease.txt`** — the category defaults above, plus `rate=`/`bank=` as last-resort fallbacks for
@@ -130,3 +151,11 @@ volleys that bypass the action. Both are off by default until verified in a real
   data keyed there has holes; the live class scan reads the rendered unit itself and is the authority.
 - A unit's pawn family includes its **servant crew** — first-match resolution let the crew (human, rate 0)
   answer for the gun. The heaviest equipment governs: hover > turret > ship > land > human.
+- **Don't infer "new facing order" from yaw changes.** The battle choreography's own post-fight facing reset
+  is indistinguishable from a genuine order, so a yield-on-change heuristic yanked the hull home after every
+  shot. Release aim holds on unambiguous signals only: position drift, a re-arm, a long-stop.
+- **Bone-frame axis labels lie across rigs.** "Z = forward" holds for Unity-convention bones; converted
+  Blender-style rigs put the barrel on X. Any bone-local knob (muzzle dial, elevation axis) must be dialed
+  empirically per model — and an elevation axis parallel to the barrel is an invisible roll.
+- A bone's TRS sits at its **pivot** (the breech), not the barrel end — and a world-space offset dial can't
+  follow a turning hull. Muzzle corrections must be bone-local.

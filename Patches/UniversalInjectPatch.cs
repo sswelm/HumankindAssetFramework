@@ -87,6 +87,9 @@ namespace HumankindAssetFramework
         public string turretBone = "";    // TURRETIZE (2026-07-24): bone-name SUBSTRING (renamed b###_<orig>) of a turret to aim at the target. The game already streams its aim/heading angle into a BoneRotation slot on an INVALID bone index — we retarget that slot's SkeletonBoneIndex to THIS bone so the engine's own aim yaws our turret. "" = no turret aim. Runtime-only (no re-bake).
         public int turretBoneIdx = -2;    // cached bone index for turretBone (-2 = not resolved yet, -1 = not found). Resolved once from e.skeleton.BoneInfos.
         public int turretAxis = -1;       // aim-axis override for the turret bone: -1 = keep the game's streamed axis (1 = "up" in ITS frame, which on a bone pointing along its own length reads as PITCH); 0/1/2 = force the bone's local X/Y/Z. A vehicle TURRET needs its YAW axis; a mechanized HOWITZER/ARTILLERY barrel needs its PITCH axis — hence per-model.
+        public float gunElevMax;          // GUN ELEVATION (2026-08-06): max barrel raise, degrees, during a bombard — DISTANCE-proportional (full at ~3 tiles); 0 = off; negative flips direction. Applies to turretBone else muzzleBone. Runtime-only.
+        public int gunElevAxis;           // local axis index the elevation rotates about (0=X pitch usual, 1=Y, 2=Z)
+        public int gunElevBoneIdx = -2;   // cached bone index (-2 = unresolved, -1 = not found)
         public string muzzleBone = "";    // MUZZLE-RELOCATE (2026-07-24): bone-name SUBSTRING (renamed b###_<orig>) that the weapon muzzle-flash should fire FROM. The donor's fire clip names ITS weapon socket (e.g. an AA gun's "Canon") in the FireProjectile mecanim event; that name is absent on our renamed rig, so AlterationFireProjectile falls back to the pawn's ROOT + the donor's socket-local offset -> the flash lands off-side. We hook PresentationSubPawn.GetBoneTRS and, when the requested bone isn't on our skeleton, redirect the lookup to THIS bone (e.g. the turret/gun) so the flash anchors on our unit. "" = leave the vanilla behavior. Runtime-only (no re-bake).
         public string muzzleBoneName;     // cached FULL bone name resolved from muzzleBone (null = not resolved yet, "" = not found on our skeleton).
         public string muzzleOffset = "";  // RUNTIME dial: "x,y,z" WORLD-units added to the pinned fire origin (flash + tracer start). The empirical fix for a rig whose gun-bone head sits at the base (the Ehrhardt): raise the origin without re-baking. "" = none.
@@ -639,6 +642,8 @@ namespace HumankindAssetFramework
                                 turretBone = (string)m["turretBone"] ?? "",
                                 turretAxis = (int?)m["turretAxis"] ?? -1,
                                 muzzleBone = (string)m["muzzleBone"] ?? "",
+                                gunElevMax = (float?)m["gunElevMax"] ?? 0f,
+                                gunElevAxis = (int?)m["gunElevAxis"] ?? 0,
                                 muzzleOffset = (string)m["muzzleOffset"] ?? "",
                                 fireOnAttack = (bool?)m["fireOnAttack"] ?? false,
                                 deployOnStop = (bool?)m["deployOnStop"] ?? false,
@@ -716,6 +721,8 @@ namespace HumankindAssetFramework
                 var mtl = Regex.Matches(text, "\"moveTilt\"\\s*:\\s*(-?[0-9.]+)");         // parity: nose-down pitch while moving (helicopter attitude)
                 var trt = Regex.Matches(text, "\"turnRate\"\\s*:\\s*(-?[0-9.]+)");         // parity: eased facing, deg/s
                 var tbk = Regex.Matches(text, "\"turnBank\"\\s*:\\s*(-?[0-9.]+)");         // parity: bank into the turn, degrees
+                var gem = Regex.Matches(text, "\"gunElevMax\"\\s*:\\s*(-?[0-9.]+)");       // parity: distance-proportional barrel elevation, max degrees
+                var gea = Regex.Matches(text, "\"gunElevAxis\"\\s*:\\s*(-?[0-9]+)");       // parity: elevation local axis index
                 var hgd = Regex.Matches(text, "\"hugDrop\"\\s*:\\s*(-?[0-9.]+)");          // parity: terrain hug drop, units
                 var hgl = Regex.Matches(text, "\"hugLookahead\"\\s*:\\s*(-?[0-9.]+)");     // parity: terrain hug probe lead, units
                 var sda = Regex.Matches(text, "\"silenceDonorAudio\"\\s*:\\s*(true|false)"); // parity: suppress the borrowed donor's Wwise sound (idle + combat)
@@ -800,6 +807,8 @@ namespace HumankindAssetFramework
                         moveTilt = i < mtl.Count && float.TryParse(mtl[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mtv) ? mtv : 0f,
                         turnRate = i < trt.Count && float.TryParse(trt[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var trv) ? trv : 0f,
                         turnBank = i < tbk.Count && float.TryParse(tbk[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var tbv) ? tbv : 0f,
+                        gunElevMax = i < gem.Count && float.TryParse(gem[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var gev) ? gev : 0f,
+                        gunElevAxis = i < gea.Count && int.TryParse(gea[i].Groups[1].Value, out var gav) ? gav : 0,
                         hugDrop = i < hgd.Count && float.TryParse(hgd[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hdv) ? hdv : 0f,
                         hugLookahead = i < hgl.Count && float.TryParse(hgl[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hlv) ? hlv : 1.5f,
                         silenceDonorAudio = i < sda.Count && sda[i].Groups[1].Value == "true",

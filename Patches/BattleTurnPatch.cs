@@ -268,6 +268,28 @@ namespace HumankindAssetFramework
         }
     }
 
+    // ---- BATTLE HULL AIM (2026-08-06): when a battle ranged fight is choreographed, arm the aim override
+    // for OUR turretless land/ship models — vanilla NEVER rotates a vehicle hull in battle (vehicles aim by
+    // turret slot only, invalid on our rigs), so a casemate gun aimed with NOTHING. The 5-arg
+    // AddPawnRangedFightSequence is the funnel every battle volley passes through. ----
+    [HarmonyPatch] internal static class Hk_BattleHullAim
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = GameBinding.UnitActionRangedFightSequence;
+            if (t != null)
+                foreach (var m in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                    if (m.Name == "AddPawnRangedFightSequence" && m.GetParameters().Length == 5)
+                    { Plugin.Log.LogInfo("[BattleTurn] hooked AddPawnRangedFightSequence (battle hull aim)"); return m; }
+            Plugin.Log.LogWarning("[BattleTurn] NOT found: AddPawnRangedFightSequence — turretless vehicles won't hull-aim in battles");
+            return null;
+        }
+        static void Prefix(object __0)   // fightSequence — arm BEFORE the actions are built so the ease target leads
+        {
+            try { UniversalInject.BattleAimPrep(__0); } catch { }
+        }
+    }
+
     // ---- EXPERIMENTAL battle path (untested, hold=1 to trial): deployed battles start ranged attacks via
     // PawnActionRangedStartAttack. OnReadyToStart is called from StartPawnAction and re-tried from
     // UpdatePawnAction every frame until isReadyToStart latches true — the action's own wait loop. While the
@@ -297,6 +319,10 @@ namespace HumankindAssetFramework
                 var pawn = UniversalInject.GetMember(__instance, "pawn");
                 if (pawn == null) return true;
                 bool turning = UniversalInject.GetMember(pawn, "IsTurning") is bool b && b;
+                // vehicles never rotate their transform in battle (IsTurning is meaningless for them) — the
+                // hull-aim override + eased ObjectSpace yaw is their turn; wait on that alignment too
+                if (!turning && UniversalInject.GetMember(pawn, "Transform") is UnityEngine.Transform htr)
+                    turning = UniversalInject.TurnMisalignAt(htr.position) > 8f;
                 if (turning)
                 {
                     // failsafe: creationTime is set from Time.time when the action spawns (base PresentationChoreographyAction)
