@@ -83,10 +83,15 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
   **terrain hugging** — skim low over open country, climb only for built city districts (all live-tunable).
   The measured engine contract: [docs/Donor-Clip-Flight.md](docs/Donor-Clip-Flight.md).
 - **Turn first, aim true, fire second** — any unit with a turn rate (HAF models via the Factory, **vanilla units**
-  via a Formation Lab link) **sweeps** to its new heading instead of the engine's instant facing snap, and a map
-  bombard **waits for the pivot**: recoil, muzzle flash, shot sound, smoke and shell all hold on one shared clock
-  and land together — aimed at the **true bearing** to the target, not vanilla's hex-quantized angle (up to 30°
-  off, hidden for years by the snap). [docs/Turn-Ease.md](docs/Turn-Ease.md).
+  via a Formation Lab link, or whole **categories** — human / land / turret / hover / ship — from one panel)
+  **sweeps** to its new heading instead of the engine's instant facing snap, and an attack **waits for the
+  pivot**: recoil, muzzle flash, shot sound, smoke and shell all hold on one shared clock and land together —
+  aimed at the **true bearing**, not vanilla's hex-quantized angle. [docs/Turn-Ease.md](docs/Turn-Ease.md).
+- **Real gunnery, even in battles** — vanilla never turns a vehicle's hull in battle (turret-slot aiming only);
+  HAF's **battle hull-aim** lays a turretless vehicle on its actual target, the **gun elevates with range** to a
+  configurable max, the muzzle chain fires from the **barrel end** (gun-local offset that rides aim + elevation),
+  and after the shot the unit **stays laid**, settling on the nearest clean facing toward where it fired.
+  A Turret bone yaws; a Gun bone elevates — configured in the Animation Lab. [docs/Turn-Ease.md](docs/Turn-Ease.md).
 
 **Textures**
 - **Correct, isolated skins** out of the box — glTF/OBJ V-convention reconciled, off-tile UVs shifted back in range, and
