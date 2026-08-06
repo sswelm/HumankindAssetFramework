@@ -151,7 +151,7 @@ namespace HumankindAssetFramework
         static readonly Dictionary<int, int> vanillaCatByDesc = new Dictionary<int, int>();   // desc -> BASE category (land, not yet hover/turret-refined)
         static readonly Dictionary<int, bool> descTurret = new Dictionary<int, bool>();       // desc -> has azimuth turret (learned)
         static readonly Dictionary<int, bool> descHover = new Dictionary<int, bool>();        // desc -> carries the Hover ability (learned)
-        internal struct ClassSample { public UnityEngine.Vector3 pos; public bool turret; public bool hover; }
+        internal struct ClassSample { public UnityEngine.Vector3 pos; public bool turret; public bool hover; public int baseCat; }
         internal static readonly List<ClassSample> classSamples = new List<ClassSample>();    // slow-scan output for the position join
 
         internal static int CategoryFromProfile(int prof)
@@ -190,18 +190,24 @@ namespace HumankindAssetFramework
 
         internal static float CategoryRateForDesc(int descId, int baseCat) => CategoryRate(EffectiveCat(descId, baseCat));
 
-        // Position-join learn: called per land-descriptor pawn while any category rate is active.
+        // Position-join learn: called per pawn while any category rate is active — for LAND descriptors it
+        // learns the hover/turret refinement; for descriptors with NO category at all (their pawn definition
+        // never passed the addon hook — the mortar gun's does not) it learns the BASE category too, read off
+        // the live pawn's Definition by the scan. The scan is the universal classifier; addon capture is just
+        // the fast path.
         internal static void TryLearnClass(int descId, UnityEngine.Vector3 pos)
         {
-            if (descHover.ContainsKey(descId)) return;   // hover + turret always learned together
+            if (descHover.ContainsKey(descId)) return;   // base + hover + turret always learned together
             for (int i = 0; i < classSamples.Count; i++)
             {
                 var d = classSamples[i].pos - pos; d.y = 0f;
                 if (d.sqrMagnitude < 2f * 2f)
                 {
+                    if (!vanillaCatByDesc.ContainsKey(descId) && classSamples[i].baseCat >= 0)
+                        vanillaCatByDesc[descId] = classSamples[i].baseCat;
                     descHover[descId] = classSamples[i].hover;
                     descTurret[descId] = classSamples[i].turret;
-                    Plugin.Log.LogInfo($"[TurnEase] desc {descId} classified: {(classSamples[i].hover ? "HOVER (ignores terrain)" : classSamples[i].turret ? "land vehicle WITH turret" : "land vehicle without turret")}");
+                    Plugin.Log.LogInfo($"[TurnEase] desc {descId} classified: baseCat={(vanillaCatByDesc.TryGetValue(descId, out int bc) ? bc : -1)} {(classSamples[i].hover ? "HOVER (ignores terrain)" : classSamples[i].turret ? "WITH turret" : "no turret")}");
                     return;
                 }
             }

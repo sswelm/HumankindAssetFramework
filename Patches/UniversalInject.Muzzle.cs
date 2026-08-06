@@ -391,7 +391,7 @@ namespace HumankindAssetFramework
         // (nearest within 4u — the deploy poll's approximation) so multiple units smooth independently; a
         // stacked squadron shares one state harmlessly (same spot, same heading). Every yaw angle eases, 180s
         // included; teleports/battle placement snap naturally by MISSING the position match (fresh state = target yaw).
-        class TurnState { public UnityEngine.Vector3 pos; public float yaw; public float targetYaw; public float bank; public float lastT; }
+        class TurnState { public UnityEngine.Vector3 pos; public float yaw; public float targetYaw; public float bank; public float lastT; public float rate; }
         static readonly List<TurnState> turnStates = new List<TurnState>();
         internal static float turnRate = 0f, turnBank = 0f;   // file-driven while spiking
 
@@ -462,6 +462,13 @@ namespace HumankindAssetFramework
         internal static bool TryTurnYawAt(UnityEngine.Vector3 pos, out float yaw)
         {
             yaw = 0f;
+            return TryTurnStateAt(pos, out yaw, out _);
+        }
+
+        // The eased yaw AND the ground-truth easing rate of the pawn nearest `pos`.
+        internal static bool TryTurnStateAt(UnityEngine.Vector3 pos, out float yaw, out float rate)
+        {
+            yaw = 0f; rate = 0f;
             float now = UnityEngine.Time.time; TurnState st = null; float best = 16f;
             for (int i = turnStates.Count - 1; i >= 0; i--)
             {
@@ -470,7 +477,7 @@ namespace HumankindAssetFramework
                 if (d.sqrMagnitude < best) { best = d.sqrMagnitude; st = turnStates[i]; }
             }
             if (st == null) return false;
-            yaw = st.yaw; return true;
+            yaw = st.yaw; rate = st.rate; return true;
         }
 
         // The turn-ease rate an attacking pawn is governed by: our entry's (dial override first), else a
@@ -558,10 +565,14 @@ namespace HumankindAssetFramework
         // FlipPawnsGrid(Teleport) snaps it, when TurnState.targetYaw hasn't refreshed yet (next pose frame).
         internal static float TurnHoldTransformSeconds(object pawn)
         {
-            var unit = GetMember(pawn, "PresentationUnit");
-            float rate = TurnRateForUnitDef(GetMember(unit, "UnitDefinition")?.ToString() ?? "");
-            if (rate <= 0f || !(GetMember(pawn, "Transform") is UnityEngine.Transform tr)) return 0f;
-            if (!TryTurnYawAt(tr.position, out float eased)) return 0f;
+            if (!(GetMember(pawn, "Transform") is UnityEngine.Transform tr)) return 0f;
+            if (!TryTurnStateAt(tr.position, out float eased, out float rate)) return 0f;
+            if (rate <= 0f)   // state without a live rate (shouldn't happen) — name-resolution fallback
+            {
+                var unit = GetMember(pawn, "PresentationUnit");
+                rate = TurnRateForUnitDef(GetMember(unit, "UnitDefinition")?.ToString() ?? "");
+                if (rate <= 0f) return 0f;
+            }
             // an active true-bearing override IS the aim the shot should wait for; the flipped transform
             // (hex-quantized) is the fallback when no strike override exists
             float target = TryAimAt(tr.position, out float ay) ? ay : tr.eulerAngles.y;
@@ -635,7 +646,7 @@ namespace HumankindAssetFramework
             }
             if (st == null) { st = new TurnState { pos = tr, yaw = target, lastT = now }; turnStates.Add(st); }
             float dt = UnityEngine.Mathf.Clamp(now - st.lastT, 0f, 0.1f);
-            st.pos = tr; st.lastT = now; st.targetYaw = target;   // published for TurnMisalignAt (fire-clip hold)
+            st.pos = tr; st.lastT = now; st.targetYaw = target; st.rate = rate;   // published for the holds: target for misalign, rate as GROUND TRUTH (whatever path resolved it — the strike side must never re-derive and disagree)
             float diff = UnityEngine.Mathf.DeltaAngle(st.yaw, target);
             // NO yaw-size guard (user verdict: every angle eases, incl. full 180s). Teleports/battle placement
             // still snap NATURALLY: a pawn that jumps >4u misses its position-matched state and the fresh state

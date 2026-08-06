@@ -155,14 +155,19 @@ namespace HumankindAssetFramework
                 if ((vanillaTurnByDesc.Count > 0 || AnyCatRate) && HookedEntryFor(ctx.skelId) == null)
                 {
                     float vTurn = 0f; int vCat = -1;
-                    if (!vanillaTurnByDesc.TryGetValue(ctx.descId, out vTurn) && AnyCatRate &&
-                        vanillaCatByDesc.TryGetValue(ctx.descId, out vCat))
+                    if (!vanillaTurnByDesc.TryGetValue(ctx.descId, out vTurn) && AnyCatRate)
                     {
-                        if (vCat == CatLand &&
+                        // learn from the class scan whenever the desc is UNKNOWN (its pawn definition never
+                        // passed the addon hook — the mortar gun) or is land awaiting hover/turret refinement
+                        bool known = vanillaCatByDesc.TryGetValue(ctx.descId, out vCat);
+                        if ((!known || vCat == CatLand) &&
                             GetMember(ctx.entry, "ObjectSpace") is object vos &&
                             GetMember(vos, "Translation") is UnityEngine.Vector3 vpos)
-                            TryLearnClass(ctx.descId, vpos);   // hover (ignores-terrain ability) + turret refinements
-                        vTurn = CategoryRateForDesc(ctx.descId, vCat);
+                        {
+                            TryLearnClass(ctx.descId, vpos);
+                            if (!known) known = vanillaCatByDesc.TryGetValue(ctx.descId, out vCat);
+                        }
+                        if (known) vTurn = CategoryRateForDesc(ctx.descId, vCat);
                     }
                     if (vTurn > 0f)
                     {

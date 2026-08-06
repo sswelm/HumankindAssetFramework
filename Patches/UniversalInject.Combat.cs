@@ -147,7 +147,11 @@ namespace HumankindAssetFramework
                         if (!(GetMember(pawn, "Transform") is UnityEngine.Transform tr)) break;
                         if (fiRotInfos == null) fiRotInfos = AccessTools.Field(pawn.GetType(), "rotationTransformInfos");
                         bool turret = fiRotInfos?.GetValue(pawn) is Array infos && infos.Length > 1;
-                        classSamples.Add(new ClassSample { pos = tr.position, turret = turret, hover = hover });
+                        // base category off the LIVE pawn's Definition — classifies descriptors whose pawn
+                        // definition never passes the addon hook (the mortar gun's route)
+                        int baseCat = -1;
+                        try { baseCat = CategoryFromProfile(Convert.ToInt32(GetMember(GetMember(pawn, "Definition"), "AnimationCapabilityProfile"))); } catch { }
+                        classSamples.Add(new ClassSample { pos = tr.position, turret = turret, hover = hover, baseCat = baseCat });
                         break;   // the first pawn is representative for the unit's descriptor family
                     }
                 }
@@ -206,15 +210,19 @@ namespace HumankindAssetFramework
                     // Visuals prefix, the teleport defer, the launch AND the hit schedule — gets the SAME
                     // remaining hold off the stored release time. Computing per-caller desynced the bang
                     // from the recoil (~0.25 s: dynamic 8-deg release vs padded static delays).
+                    float stateRate = 0f;
                     foreach (var pawn0 in pawns)
                     {
                         if (!(GetMember(pawn0, "Transform") is UnityEngine.Transform tr0)) continue;
                         if (TryAimRelease(tr0.position, out float rel))
                             return UnityEngine.Mathf.Max(0f, rel - UnityEngine.Time.time);
+                        TryTurnStateAt(tr0.position, out _, out stateRate);   // GROUND TRUTH: the rate this pawn is actually easing at
                         break;   // first pawn only — not armed yet, fall through to arm below
                     }
-                    float rate = TurnRateForUnitDef(unitDef);                  // entry > link > category fallback
-                    if (rate <= 0f) { Plugin.Log.LogInfo($"[BattleTurn] strike prep '{unitDef}': rate resolved 0 — no hold (entry/link/category all empty?)"); return 0f; }
+                    // the live ease state's rate is authoritative (whatever path resolved it — entry, link,
+                    // category, scan-learned); name-resolution is only the fallback for a pruned/missing state.
+                    float rate = stateRate > 0f ? stateRate : TurnRateForUnitDef(unitDef);
+                    if (rate <= 0f) { Plugin.Log.LogInfo($"[BattleTurn] strike prep '{unitDef}': rate resolved 0 (no ease state, no name match) — no hold"); return 0f; }
                     // TRUE-BEARING AIM: the flip puts the unit on a HEX-QUANTIZED angle (up to 30 deg off the
                     // target); resolve the strike's target tile to a Unity-world point so each pawn can be
                     // steered to its REAL bearing instead. Vector3.zero = resolution failed -> quantized fallback.
