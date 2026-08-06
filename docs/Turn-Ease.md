@@ -21,10 +21,34 @@ Per model (the proper way):
 The attack hold needs no switch of its own: any model with a turn-ease rate automatically holds its bombard
 until aligned (within 8°, 4 s failsafe). Vanilla units and models without a rate keep exact vanilla pacing.
 
+**Category defaults** (verified 2026-08-06): global rates per unit **type**, for HAF models *and* vanilla
+units — classified by **characteristic, never by name**:
+
+| Key | Covers | Identified by |
+|---|---|---|
+| `human` | infantry, cavalry, chariots, animals | organic capability profiles |
+| `land` | turretless land vehicles (towed guns, carts) | vehicle profile, no refinement |
+| `turret` | land vehicles with a traversing turret | extra azimuth rotation transforms on the live pawn |
+| `hover` | helicopters, hovercraft | the game's own `Hover` ability ("ignores terrain") |
+| `ship` | boats and ships | boat profile |
+
+Fixed-wing **planes and missiles are always excluded** — the engine flies them on natural curved paths; only
+an explicit per-model rate can ease one. `hoverbank=` / `shipbank=` give hover and ship their own roll into
+the turn (a chopper banks, a ship heels); other categories stay flat. **Precedence: per-model Factory value >
+per-unit Formation link > category default > global `rate`.** Configure in the Formation Override window's
+**Turn ease defaults** panel (writes the dial live) or edit `enc_turnease.txt` directly.
+
+Classification runs two paths: capability profiles are read when a pawn definition loads (fast path), and a
+slow **class scan** (~3 s, active only while category rates are set) reads every live unit directly — its
+`Hover` ability, its turret transforms, and its pawn's profile — position-joined to descriptors once per
+session. The scan is the authority: some pawn definitions (artillery guns among them) never pass the load
+hook at all, and the scan classifies them from the rendered unit itself. The strike holds read the eased
+pawn's **ground-truth rate off its live turn state**, so the visible turn and the fire hold can never disagree.
+
 Live dials (`BepInEx/config/`, polled ~1/s, no restart):
 
-- **`enc_turnease.txt`** — `rate=` overrides every model's rate while non-zero (spike/tuning tool); `bank=`
-  overrides bank only while non-zero, so a global rate doesn't strip a flyer's bank or force one onto guns.
+- **`enc_turnease.txt`** — the category defaults above, plus `rate=`/`bank=` as last-resort fallbacks for
+  uncategorized units and per-model-eased flyers.
 - **`enc_battleturn.txt`** — `hold=1` enables the **experimental, untested** battle-side hold (ranged attacks in
   deployed battles wait for the rotation FSM); `diag=1` turns on choreography forensics logging.
 
@@ -98,3 +122,11 @@ volleys that bypass the action. Both are off by default until verified in a real
   (mecanim VFX, `PrepareArtilleryStrikeFX`'s muzzle capture) sits at the stale/quantized angle. Rotate at the
   `GetBoneTRS` seam while the aim override is live; never patch `StartVFXEvent` arguments (the 18/19 IL
   incident).
+- **Never resolve the same value through two different code paths.** The pose side eased at one rate while
+  the strike side re-derived it by name and got zero — three separate times (an entry dead-end, the limbered
+  render variant, the servant crew answering for the gun). The fix wasn't better name matching but a single
+  source of truth: the hold reads the rate off the live ease state.
+- **Some pawn definitions never pass the addon Load hook** (artillery main guns, measured). Any per-descriptor
+  data keyed there has holes; the live class scan reads the rendered unit itself and is the authority.
+- A unit's pawn family includes its **servant crew** — first-match resolution let the crew (human, rate 0)
+  answer for the gun. The heaviest equipment governs: hover > turret > ship > land > human.

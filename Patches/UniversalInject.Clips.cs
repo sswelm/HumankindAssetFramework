@@ -129,6 +129,90 @@ namespace HumankindAssetFramework
         static readonly Dictionary<string, int> addonDefIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);   // every addon seen this session: name -> PawnDefinitionId
         internal static readonly HashSet<int> descCensusLogged = new HashSet<int>();   // diag=1 census: one line per rendered descriptor per session
 
+        // CATEGORY TURN EASE (2026-08-06, user design): global defaults per unit TYPE instead of one blanket
+        // rate — Human, turretless Land vehicle, Land vehicle WITH a turret, Hover, Ship. Classification is by
+        // CHARACTERISTIC, never by name (user rule): the base category derives from
+        // PawnAnimationCapabilityProfileType at addon load (Boat=7 ship; InanimateObject=5/Custom=8 land;
+        // every organic profile = human); HOVER is the game's own UnitTagAsAbility.Hover (index 32 — the
+        // "ignores terrain" flag helicopters and hovercraft carry) read off the sim UnitDefinition by the slow
+        // army scan; TURRET is the pawn's extra azimuth rotation transforms. Both refinements are LEARNED once
+        // per descriptor via the system's standard position join. FIXED-WING planes and missiles
+        // (Plane=14/Missile=15) are EXCLUDED entirely — the engine already flies them on natural curved paths
+        // (user rule); only an explicit per-model rate can ease them.
+        // Precedence: per-model turnRate > category rate > global `rate`.
+        internal const int CatHuman = 0, CatLand = 1, CatTurret = 2, CatHover = 3, CatShip = 4, CatPlane = 5;
+        internal const int HoverAbilityIndex = 32;   // UnitTagAsAbility.Hover (verified against Artillery=16, Interceptor=19 usages)
+        internal static float catHumanRate, catLandRate, catTurretRate, catHoverRate, catShipRate;
+        internal static float catHoverBank, catShipBank;   // per-category bank (user: hover and ship bank differently — a chopper banks, a ship heels)
+
+        // The bank a category-eased unit gets (per-model turnBank still wins for entries).
+        internal static float CategoryBank(int effCat) => effCat == CatHover ? catHoverBank : effCat == CatShip ? catShipBank : 0f;
+        internal static bool AnyCatRate => catHumanRate > 0f || catLandRate > 0f || catTurretRate > 0f || catHoverRate > 0f || catShipRate > 0f;
+        static readonly Dictionary<int, int> vanillaCatByDesc = new Dictionary<int, int>();   // desc -> BASE category (land, not yet hover/turret-refined)
+        static readonly Dictionary<int, bool> descTurret = new Dictionary<int, bool>();       // desc -> has azimuth turret (learned)
+        static readonly Dictionary<int, bool> descHover = new Dictionary<int, bool>();        // desc -> carries the Hover ability (learned)
+        internal struct ClassSample { public UnityEngine.Vector3 pos; public bool turret; public bool hover; public int baseCat; }
+        internal static readonly List<ClassSample> classSamples = new List<ClassSample>();    // slow-scan output for the position join
+
+        internal static int CategoryFromProfile(int prof)
+        {
+            switch (prof)
+            {
+                case 7: return CatShip;                    // Boat
+                case 14: case 15: return CatPlane;         // Plane, Missile — EXCLUDED (natural flight paths)
+                case 5: case 8: return CatLand;            // InanimateObject (vehicles/guns), Custom — may refine to hover/turret
+                default: return prof >= 0 ? CatHuman : -1; // every organic profile (humans, mounts, chariots, animals)
+            }
+        }
+
+        internal static float CategoryRate(int cat)
+        {
+            switch (cat)
+            {
+                case CatHuman: return catHumanRate;
+                case CatLand: return catLandRate;
+                case CatTurret: return catTurretRate;
+                case CatHover: return catHoverRate;
+                case CatShip: return catShipRate;
+                default: return 0f;                        // CatPlane and unknown: no category easing
+            }
+        }
+
+        // A land descriptor's LEARNED refinement: hover beats turret beats plain land. Unlearned descriptors
+        // use the plain land rate until their first scan sample lands (a few seconds into a session).
+        internal static int EffectiveCat(int descId, int baseCat)
+        {
+            if (baseCat != CatLand) return baseCat;
+            if (descHover.TryGetValue(descId, out bool h) && h) return CatHover;
+            if (descTurret.TryGetValue(descId, out bool t) && t) return CatTurret;
+            return CatLand;
+        }
+
+        internal static float CategoryRateForDesc(int descId, int baseCat) => CategoryRate(EffectiveCat(descId, baseCat));
+
+        // Position-join learn: called per pawn while any category rate is active — for LAND descriptors it
+        // learns the hover/turret refinement; for descriptors with NO category at all (their pawn definition
+        // never passed the addon hook — the mortar gun's does not) it learns the BASE category too, read off
+        // the live pawn's Definition by the scan. The scan is the universal classifier; addon capture is just
+        // the fast path.
+        internal static void TryLearnClass(int descId, UnityEngine.Vector3 pos)
+        {
+            if (descHover.ContainsKey(descId)) return;   // base + hover + turret always learned together
+            for (int i = 0; i < classSamples.Count; i++)
+            {
+                var d = classSamples[i].pos - pos; d.y = 0f;
+                if (d.sqrMagnitude < 2f * 2f)
+                {
+                    if (!vanillaCatByDesc.ContainsKey(descId) && classSamples[i].baseCat >= 0)
+                        vanillaCatByDesc[descId] = classSamples[i].baseCat;
+                    descHover[descId] = classSamples[i].hover;
+                    descTurret[descId] = classSamples[i].turret;
+                    Plugin.Log.LogInfo($"[TurnEase] desc {descId} classified: baseCat={(vanillaCatByDesc.TryGetValue(descId, out int bc) ? bc : -1)} {(classSamples[i].hover ? "HOVER (ignores terrain)" : classSamples[i].turret ? "WITH turret" : "no turret")}");
+                    return;
+                }
+            }
+        }
+
         // Does `name` (a pawn definition or simulation unit name) belong to the turn link whose core is `core`?
         // Plain contains-either-way first; then the CULTURE-VARIANT relaxation: a link on the COMMON family
         // unit also covers the emblematic variants — the census showed the player's howitzers rendering as

@@ -134,8 +134,9 @@ namespace HumankindAssetFramework
         public int pawnsThisFrame;       // how many pawns this entry added this frame — every one after the first gets HideFactor=1
         public float rendererCensusNextAt;   // next Unity-renderer census time for this entry (the ghost-rotor hunt)
         public float moveTilt;               // degrees of nose-down pitch while MOVING (helicopter forward-flight attitude); 0 = off. Runtime-only, eased in/out.
-        public float turnRate;               // TURN EASE: deg/s toward a new heading; 0 = off (the engine's instant facing snap). Live override: enc_turnease.txt `rate`.
-        public float turnBank;               // TURN EASE: max roll INTO the turn, degrees; negative flips the lean. Live override: enc_turnease.txt `bank`.
+        public float turnRate;               // TURN EASE: deg/s toward a new heading; 0 = off -> category default -> dial `rate` (precedence, docs/Turn-Ease.md).
+        public float turnBank;               // TURN EASE: max roll INTO the turn, degrees; negative flips the lean. 0 -> dial `bank` (air category / rate-eased models).
+        public int profCat = -1;             // runtime: the unit's TYPE category (human/land/turret/air/ship) off its capability profile at addon load — drives the category default rates.
         public float hugDrop;                // TERRAIN HUG: how much LOWER over open ground (negative units); 0 = off. Live override: enc_hugterrain.txt `drop`.
         public float hugLookahead = 1.5f;    // TERRAIN HUG: probe distance AHEAD along the movement vector, so the climb anticipates the skyline.
         public UnityEngine.Vector3 tiltLastPos; public float tiltCur; public float tiltLastTime;   // move-tilt runtime state
@@ -902,6 +903,7 @@ namespace HumankindAssetFramework
             anyAnimated = null; anyMuzzle = null; anyFreeze = null; anyRescuable = null;                    // recomputed on the next pawn-add
             unitScaleByDesc.Clear(); unitScaleNameByDesc.Clear(); vanillaScaledLogged.Clear(); descApplied.Clear(); cachedEra = -1;   // descriptor ids + era are session-scoped (meshApplied deliberately KEPT: the Fx vertex buffers persist)
             vanillaTurnByDesc.Clear(); vanillaEaseLogged.Clear(); addonDefIds.Clear(); descCensusLogged.Clear();   // vanilla turn-ease links re-resolve to fresh descriptor ids next session
+            vanillaCatByDesc.Clear(); descTurret.Clear(); descHover.Clear(); classSamples.Clear();   // category + hover/turret classifications are descriptor-id keyed -> session-scoped too
             _listenerChecked = false;                                // the AudioListener rode a session-scoped camera
             var list = entries;
             if (list != null)

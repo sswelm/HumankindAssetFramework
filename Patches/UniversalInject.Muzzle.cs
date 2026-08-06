@@ -391,7 +391,7 @@ namespace HumankindAssetFramework
         // (nearest within 4u — the deploy poll's approximation) so multiple units smooth independently; a
         // stacked squadron shares one state harmlessly (same spot, same heading). Every yaw angle eases, 180s
         // included; teleports/battle placement snap naturally by MISSING the position match (fresh state = target yaw).
-        class TurnState { public UnityEngine.Vector3 pos; public float yaw; public float targetYaw; public float bank; public float lastT; }
+        class TurnState { public UnityEngine.Vector3 pos; public float yaw; public float targetYaw; public float bank; public float lastT; public float rate; }
         static readonly List<TurnState> turnStates = new List<TurnState>();
         internal static float turnRate = 0f, turnBank = 0f;   // file-driven while spiking
 
@@ -462,6 +462,13 @@ namespace HumankindAssetFramework
         internal static bool TryTurnYawAt(UnityEngine.Vector3 pos, out float yaw)
         {
             yaw = 0f;
+            return TryTurnStateAt(pos, out yaw, out _);
+        }
+
+        // The eased yaw AND the ground-truth easing rate of the pawn nearest `pos`.
+        internal static bool TryTurnStateAt(UnityEngine.Vector3 pos, out float yaw, out float rate)
+        {
+            yaw = 0f; rate = 0f;
             float now = UnityEngine.Time.time; TurnState st = null; float best = 16f;
             for (int i = turnStates.Count - 1; i >= 0; i--)
             {
@@ -470,20 +477,87 @@ namespace HumankindAssetFramework
                 if (d.sqrMagnitude < best) { best = d.sqrMagnitude; st = turnStates[i]; }
             }
             if (st == null) return false;
-            yaw = st.yaw; return true;
+            yaw = st.yaw; rate = st.rate; return true;
         }
 
         // The turn-ease rate an attacking pawn is governed by: our entry's (dial override first), else a
         // Formation Lab per-unit link — the VANILLA route (unitDef here is the simulation name, e.g.
         // "LandUnit_Era5_Common_LineInfantry (…)"; the link stores the presentation name inside it, so
         // case-insensitive contains bridges the two). 0 = no easing, vanilla pacing.
+        static float rateTraceAt;
+        // family-governance priority: the heaviest equipment in a unit decides its turn behavior
+        static int CatPriority(int cat) => cat == CatHover ? 4 : cat == CatTurret ? 3 : cat == CatShip ? 2 : cat == CatLand ? 1 : cat == CatHuman ? 0 : -1;
         internal static float TurnRateForUnitDef(string unitDef)
         {
             var e = FindEntryForUnitDefinition(unitDef);
-            if (e != null) return turnRate > 0f ? turnRate : e.turnRate;
+            if (e != null)   // our entry: per-model > category default > global rate (docs/Turn-Ease.md precedence)
+            {
+                if (e.turnRate > 0f) return e.turnRate;
+                if (e.profCat == CatPlane) return 0f;              // planes stay excluded even from fallbacks
+                float cr = CategoryRateForDesc(e.descId, e.profCat);
+                if (cr > 0f) return cr;
+                if (turnRate > 0f) return turnRate;
+                // FALL THROUGH (regression fix): an entry with no per-model rate and an unset/stale
+                // profCat/descId used to DEAD-END here at 0 while the pose side happily eased the rendered
+                // pawn via its own desc-keyed category — the howitzer turned but the strike chain never armed.
+                // The name-based category fallback below answers for it instead.
+            }
             if (string.IsNullOrEmpty(unitDef)) return 0f;
             foreach (var kv in FormationOverride.TurnRateByUnit)
                 if (TurnLinkMatches(unitDef, kv.Key)) return kv.Value;   // incl. the culture-variant relaxation
+            if (AnyCatRate)
+            {
+                // vanilla category fallback: find a pawn definition belonging to this unit and use its
+                // category rate. Match BOTH directions (measured necessity): the pawn name may sit INSIDE the
+                // unit name ("Era5_Common_SiegeHowitzers_01" in "LandUnit_Era5_Common_SiegeHowitzers"), or
+                // EXTEND the unit core — on the map artillery renders its LIMBERED pawn
+                // ("Era5_Common_SiegeHowitzersCar_01"), whose name the unit string does not contain.
+                string ucore = unitDef;
+                int sp = ucore.IndexOf(' ');                                   // drop " (Amplitude…Definition)"
+                if (sp > 0) ucore = ucore.Substring(0, sp);
+                int up = ucore.IndexOf("Unit_", StringComparison.OrdinalIgnoreCase);   // drop the LandUnit_/NavalUnit_/… domain prefix
+                if (up >= 0) ucore = ucore.Substring(up + 5);
+                // among the unit's pawn FAMILY the heaviest equipment governs the unit's turn behavior:
+                // hover > turret > ship > land > human — a mortar's family is its GUN plus human SERVANT
+                // crew, and returning the first match let the crew (human, rate 0) answer for the gun.
+                int bestEff = -1; string fam = null;
+                foreach (var ad in addonDefIds)
+                {
+                    var nm = ad.Key;
+                    int us = nm.LastIndexOf('_');
+                    if (us > 0 && us + 1 < nm.Length)
+                    {
+                        bool digits = true;
+                        for (int i = us + 1; i < nm.Length; i++) if (!char.IsDigit(nm[i])) { digits = false; break; }
+                        if (digits) nm = nm.Substring(0, us);
+                    }
+                    if (nm.Length < 6) continue;
+                    bool match = unitDef.IndexOf(nm, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                 (ucore.Length >= 6 && nm.IndexOf(ucore, StringComparison.OrdinalIgnoreCase) >= 0);
+                    if (!match || !vanillaCatByDesc.TryGetValue(ad.Value, out int cat)) continue;
+                    int eff = EffectiveCat(ad.Value, cat);
+                    fam = (fam == null ? "" : fam + ", ") + $"{ad.Key}:cat{eff}";
+                    if (CatPriority(eff) > CatPriority(bestEff)) bestEff = eff;
+                }
+                if (bestEff >= 0)
+                {
+                    float r = CategoryRate(bestEff);
+                    if (r > 0f) return r;
+                }
+                if (fam != null && UnityEngine.Time.time > rateTraceAt)
+                {
+                    rateTraceAt = UnityEngine.Time.time + 1f;
+                    Plugin.Log.LogInfo($"[TurnEase] rate 0 for '{unitDef}': family [{fam}] -> best cat {bestEff} rate 0");
+                    return 0f;
+                }
+            }
+            // resolution trace (throttled): everything above came up empty — name the state so a dead strike
+            // chain is diagnosable from one log line instead of another instrumented round-trip
+            if (UnityEngine.Time.time > rateTraceAt)
+            {
+                rateTraceAt = UnityEngine.Time.time + 1f;
+                Plugin.Log.LogInfo($"[TurnEase] rate 0 for '{unitDef}': entry={(e != null ? $"{e.resourceName} (turnRate={e.turnRate}, profCat={e.profCat}, descId={e.descId})" : "-")}, links={FormationOverride.TurnRateByUnit.Count}, catRates={(AnyCatRate ? "on" : "off")}, addons={addonDefIds.Count}");
+            }
             return 0f;
         }
 
@@ -491,10 +565,14 @@ namespace HumankindAssetFramework
         // FlipPawnsGrid(Teleport) snaps it, when TurnState.targetYaw hasn't refreshed yet (next pose frame).
         internal static float TurnHoldTransformSeconds(object pawn)
         {
-            var unit = GetMember(pawn, "PresentationUnit");
-            float rate = TurnRateForUnitDef(GetMember(unit, "UnitDefinition")?.ToString() ?? "");
-            if (rate <= 0f || !(GetMember(pawn, "Transform") is UnityEngine.Transform tr)) return 0f;
-            if (!TryTurnYawAt(tr.position, out float eased)) return 0f;
+            if (!(GetMember(pawn, "Transform") is UnityEngine.Transform tr)) return 0f;
+            if (!TryTurnStateAt(tr.position, out float eased, out float rate)) return 0f;
+            if (rate <= 0f)   // state without a live rate (shouldn't happen) — name-resolution fallback
+            {
+                var unit = GetMember(pawn, "PresentationUnit");
+                rate = TurnRateForUnitDef(GetMember(unit, "UnitDefinition")?.ToString() ?? "");
+                if (rate <= 0f) return 0f;
+            }
             // an active true-bearing override IS the aim the shot should wait for; the flipped transform
             // (hex-quantized) is the fallback when no strike override exists
             float target = TryAimAt(tr.position, out float ay) ? ay : tr.eulerAngles.y;
@@ -520,11 +598,29 @@ namespace HumankindAssetFramework
 
         static void ApplyTurnEase(ModelEntry e, object entry)
         {
-            // per-model (Factory "Turn ease — rate") with the live dial file as an override, same rule as the hug.
-            // bank resolves per-FIELD (file bank only when the file SETS one) so a global file rate doesn't strip
-            // a flyer's per-model bank or force one onto ground vehicles (battle-turn spike).
-            ApplyTurnEaseCore(turnRate > 0f ? turnRate : e.turnRate,
-                              turnBank != 0f ? turnBank : e.turnBank, entry);
+            // PRECEDENCE (2026-08-06, user design): per-model Factory value > CATEGORY default (human/land/
+            // turret/hover/ship, from the dial) > global `rate`. The old file-overrides-model rule surprised
+            // the user ("the howitzer turned despite not being configured") — an explicit per-model value is
+            // now always authoritative, and the dial provides type-level DEFAULTS instead of a blanket
+            // override. PLANES (CatPlane) never ease from category OR global — the engine flies fixed-wing
+            // aircraft on natural curved paths (user rule); only their own per-model rate can opt them in.
+            if (e.profCat == CatLand && AnyCatRate && e.descId >= 0 &&
+                GetMember(entry, "ObjectSpace") is object eos &&
+                GetMember(eos, "Translation") is UnityEngine.Vector3 epos)
+                TryLearnClass(e.descId, epos);   // our land-profile models refine to hover/turret too (the Comanche IS a Hover unit)
+            float catRate = CategoryRateForDesc(e.descId, e.profCat);
+            float rate = e.turnRate > 0f ? e.turnRate
+                       : e.profCat == CatPlane ? 0f
+                       : catRate > 0f ? catRate
+                       : turnRate;
+            // bank: per-model wins; then the CATEGORY bank (hoverbank/shipbank — a chopper banks, a ship
+            // heels, a truck does neither); the legacy file `bank` covers models eased per-model/global-rate.
+            float catBank = CategoryBank(EffectiveCat(e.descId, e.profCat));
+            float bank = e.turnBank != 0f ? e.turnBank
+                       : catBank != 0f ? catBank
+                       : e.turnRate > 0f || turnRate > 0f ? turnBank
+                       : 0f;
+            ApplyTurnEaseCore(rate, bank, entry);
         }
 
         // Core easing, rate/bank already resolved — shared by our model entries and VANILLA pawns whose unit
@@ -550,7 +646,7 @@ namespace HumankindAssetFramework
             }
             if (st == null) { st = new TurnState { pos = tr, yaw = target, lastT = now }; turnStates.Add(st); }
             float dt = UnityEngine.Mathf.Clamp(now - st.lastT, 0f, 0.1f);
-            st.pos = tr; st.lastT = now; st.targetYaw = target;   // published for TurnMisalignAt (fire-clip hold)
+            st.pos = tr; st.lastT = now; st.targetYaw = target; st.rate = rate;   // published for the holds: target for misalign, rate as GROUND TRUTH (whatever path resolved it — the strike side must never re-derive and disagree)
             float diff = UnityEngine.Mathf.DeltaAngle(st.yaw, target);
             // NO yaw-size guard (user verdict: every angle eases, incl. full 180s). Teleports/battle placement
             // still snap NATURALLY: a pawn that jumps >4u misses its position-matched state and the fresh state

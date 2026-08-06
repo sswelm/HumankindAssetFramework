@@ -110,6 +110,63 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] StrikeTargetWorldPos: " + ex.Message); return UnityEngine.Vector3.zero; }
         }
 
+        // CLASS SCAN (category turn ease, docs/Turn-Ease.md): every ~3 s while any category rate is active,
+        // sample each live army's first pawn for the two CHARACTERISTIC refinements of the land category —
+        // HOVER = the sim UnitDefinition's own UnitTagAsAbility.Hover flag ("ignores terrain": helicopters,
+        // hovercraft; user's identification), TURRET = extra azimuth rotation transforms on the pawn
+        // (rotationTransformInfos.Length > 1, the array the azimuth audio keys off). The pose hook joins these
+        // samples to descriptors by position and learns each land descriptor's refinement ONCE per session.
+        static float classScanNext;
+        static System.Reflection.FieldInfo fiRotInfos;
+        internal static void PollClassScan()
+        {
+            if (!AnyCatRate) return;   // categories off — no scan cost
+            if (UnityEngine.Time.realtimeSinceStartup < classScanNext) return;
+            classScanNext = UnityEngine.Time.realtimeSinceStartup + 3f;
+            try
+            {
+                var presType = GameBinding.Presentation;
+                var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
+                var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
+                if (armies == null) return;
+                classSamples.Clear();
+                foreach (var army in armies)
+                {
+                    if (army == null) continue;
+                    var unit = GetMember(army, "PresentationUnit");
+                    if (unit == null || !(GetMember(unit, "Pawns") is System.Collections.IEnumerable pawns)) continue;
+                    bool hover = false;
+                    try
+                    {
+                        if (GetMember(GetMember(unit, "UnitDefinition"), "TagAsAbilities") is Array tags && tags.Length > HoverAbilityIndex)
+                            hover = Convert.ToBoolean(tags.GetValue(HoverAbilityIndex));
+                    }
+                    catch { }
+                    foreach (var pawn in pawns)
+                    {
+                        if (!(GetMember(pawn, "Transform") is UnityEngine.Transform tr)) break;
+                        if (fiRotInfos == null) fiRotInfos = AccessTools.Field(pawn.GetType(), "rotationTransformInfos");
+                        bool turret = fiRotInfos?.GetValue(pawn) is Array infos && infos.Length > 1;
+                        // base category off the LIVE pawn's Definition — classifies descriptors whose pawn
+                        // definition never passes the addon hook (the mortar gun's route)
+                        int baseCat = -1;
+                        try { baseCat = CategoryFromProfile(Convert.ToInt32(GetMember(GetMember(pawn, "Definition"), "AnimationCapabilityProfile"))); } catch { }
+                        classSamples.Add(new ClassSample { pos = tr.position, turret = turret, hover = hover, baseCat = baseCat });
+                        break;   // the first pawn is representative for the unit's descriptor family
+                    }
+                }
+                int hov = 0;
+                for (int i = 0; i < classSamples.Count; i++) if (classSamples[i].hover) hov++;
+                if (classSamples.Count != lastScanN || hov != lastScanH)
+                {
+                    lastScanN = classSamples.Count; lastScanH = hov;
+                    Plugin.Log.LogInfo($"[TurnEase] class scan: {classSamples.Count} unit(s), {hov} with the Hover ability");
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[TurnEase] class scan: " + ex.Message); }
+        }
+        static int lastScanN = -1, lastScanH = -1;
+
         // LAUNCH POSE REFRESH (shell/smoke position fix): vanilla captures the shell's spawn position +
         // direction (muzzle bone TRS) at SCHEDULE time — before our held pivot has even started — so the
         // shell and its launch smoke appeared at the PRE-TURN barrel pose. Prefixed onto
@@ -137,11 +194,11 @@ namespace HumankindAssetFramework
             try
             {
                 long aguid = GuidToLong(GetMember(strike, "AttackerArmyGUID"));
-                if (aguid == 0) return 0f;
+                if (aguid == 0) { Plugin.Log.LogInfo("[BattleTurn] strike prep: no attacker army GUID"); return 0f; }
                 var presType = GameBinding.Presentation;
                 var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
                 var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
-                if (armies == null) return 0f;
+                if (armies == null) { Plugin.Log.LogInfo("[BattleTurn] strike prep: no army list"); return 0f; }
                 foreach (var army in armies)
                 {
                     if (army == null) continue;
@@ -153,41 +210,60 @@ namespace HumankindAssetFramework
                     // Visuals prefix, the teleport defer, the launch AND the hit schedule — gets the SAME
                     // remaining hold off the stored release time. Computing per-caller desynced the bang
                     // from the recoil (~0.25 s: dynamic 8-deg release vs padded static delays).
+                    float stateRate = 0f;
                     foreach (var pawn0 in pawns)
                     {
                         if (!(GetMember(pawn0, "Transform") is UnityEngine.Transform tr0)) continue;
                         if (TryAimRelease(tr0.position, out float rel))
                             return UnityEngine.Mathf.Max(0f, rel - UnityEngine.Time.time);
+                        TryTurnStateAt(tr0.position, out _, out stateRate);   // GROUND TRUTH: the rate this pawn is actually easing at
                         break;   // first pawn only — not armed yet, fall through to arm below
                     }
-                    float rate = TurnRateForUnitDef(unitDef);                  // our entry OR a Formation Lab vanilla link
-                    if (rate <= 0f) return 0f;                                 // no easing — vanilla pacing
+                    // the live ease state's rate is authoritative (whatever path resolved it — entry, link,
+                    // category, scan-learned); name-resolution is only the fallback for a pruned/missing state.
+                    float rate = stateRate > 0f ? stateRate : TurnRateForUnitDef(unitDef);
+                    if (rate <= 0f) { Plugin.Log.LogInfo($"[BattleTurn] strike prep '{unitDef}': rate resolved 0 (no ease state, no name match) — no hold"); return 0f; }
                     // TRUE-BEARING AIM: the flip puts the unit on a HEX-QUANTIZED angle (up to 30 deg off the
                     // target); resolve the strike's target tile to a Unity-world point so each pawn can be
                     // steered to its REAL bearing instead. Vector3.zero = resolution failed -> quantized fallback.
                     var targetPos = StrikeTargetWorldPos(strike);
+                    // BROADSIDE FACING (user catch): FacingAngleOffset units — ships, offset typically 90 —
+                    // present their SIDE to the target, not the bow; the battle path rotates its look target
+                    // by the same offset. Aim at bearing +/- offset, whichever side needs the smaller turn.
+                    int fao = 0;
+                    try { fao = Convert.ToInt32(GetMember(GetMember(unit, "PresentationUnitDefinition"), "FacingAngleOffset")); } catch { }
                     float hold = 0f; bool first = true; float releaseAt = 0f;
                     foreach (var pawn in pawns)
                     {
                         if (!(GetMember(pawn, "Transform") is UnityEngine.Transform tr)) continue;
                         float target = tr.eulerAngles.y;                       // strike facing (quantized) when the tile fails to resolve
                         if (targetPos != UnityEngine.Vector3.zero)
+                        {
                             target = UnityEngine.Mathf.Atan2(targetPos.x - tr.position.x, targetPos.z - tr.position.z) * UnityEngine.Mathf.Rad2Deg;
+                            if (fao != 0)
+                            {
+                                float cur = TryTurnYawAt(tr.position, out float ce) ? ce : tr.eulerAngles.y;
+                                float a1 = target - fao, a2 = target + fao;
+                                target = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(cur, a1)) <= UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(cur, a2)) ? a1 : a2;
+                            }
+                        }
                         if (first)
                         {
                             first = false;
-                            if (!TryTurnYawAt(tr.position, out float eased)) return 0f;
+                            if (!TryTurnYawAt(tr.position, out float eased))
+                            { Plugin.Log.LogInfo($"[BattleTurn] strike prep '{unitDef}': rate={rate} but NO ease state near the pawn — no hold"); return 0f; }
                             float miss = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(eased, target));
                             hold = miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.2f, 3f) : 0f;
                             releaseAt = UnityEngine.Time.time + hold;
-                            Plugin.Log.LogInfo($"[BattleTurn] strike hold '{unitDef}': eased={eased:F0} aim={target:F0}{(targetPos != UnityEngine.Vector3.zero ? " (true bearing)" : " (quantized)")} miss={miss:F0}deg -> +{hold:F2}s (shared clock)");
+                            Plugin.Log.LogInfo($"[BattleTurn] strike hold '{unitDef}': eased={eased:F0} aim={target:F0}{(targetPos != UnityEngine.Vector3.zero ? fao != 0 ? $" (true bearing, broadside {fao}deg)" : " (true bearing)" : " (quantized)")} miss={miss:F0}deg -> +{hold:F2}s (shared clock)");
                         }
                         SetAimOverride(tr.position, target, 10f, releaseAt);   // ease target = real bearing; releaseAt = the strike's one clock
                     }
                     return hold;
                 }
             }
-            catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] TurnHoldForStrike: " + ex.Message); }
+            catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] TurnHoldForStrike: " + ex.Message); return 0f; }
+            Plugin.Log.LogInfo("[BattleTurn] strike prep: attacker army not found in the entity list");
             return 0f;
         }
 

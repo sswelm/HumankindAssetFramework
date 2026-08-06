@@ -156,10 +156,21 @@ namespace HumankindAssetFramework
                 // independent of parse-vs-load ordering — the SiegeHowitzers MAIN pawn's addon loads BEFORE the
                 // formation registry parses (its horse/car/servant satellites load later, on first view), so a
                 // map-at-load-only approach permanently missed the one descriptor that actually renders.
+                int adProfCat = -1;
                 try
                 {
                     int adId = Convert.ToInt32(GetMember(addon, "PawnDefinitionId"));
-                    if (adId >= 0) addonDefIds[name] = adId;
+                    // base TYPE category off the capability profile (category turn ease, docs/Turn-Ease.md) —
+                    // same read the Resize human-exclusion uses; turret refinement is learned later from pawns
+                    // classification is by CHARACTERISTIC only (user rule — never by name): helicopters and
+                    // hovercraft carry the generic vehicle profile (StealthHelicopters measured at 5) and are
+                    // refined to HOVER later via the game's own UnitTagAsAbility.Hover flag (the class scan).
+                    try { adProfCat = CategoryFromProfile(Convert.ToInt32(GetMember(def, "AnimationCapabilityProfile"))); } catch { }
+                    if (adId >= 0)
+                    {
+                        addonDefIds[name] = adId;
+                        if (adProfCat >= 0 && !vanillaCatByDesc.ContainsKey(adId)) vanillaCatByDesc[adId] = adProfCat;
+                    }
                 }
                 catch { }
                 SweepTurnLinks();
@@ -177,6 +188,7 @@ namespace HumankindAssetFramework
                 // its PawnDefinitionId before any pawn exists, and it is the SAME id space OnPawnAdded reads as
                 // ctx.descId (the Resize path above keys unitScaleByDesc with it), so seed it and the net is armed
                 // from the first frame regardless of who wins the race.
+                if (adProfCat >= 0) e.profCat = adProfCat;   // the entry's TYPE category (per-model rate still wins over it)
                 try
                 {
                     int seedDesc = Convert.ToInt32(GetMember(addon, "PawnDefinitionId"));
