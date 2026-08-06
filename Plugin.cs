@@ -316,6 +316,7 @@ namespace HumankindAssetFramework
                 if (GUILayout.Button("Dump Atlases")) UniversalInject.DumpOutputLayerAtlases(atlasFilter);
                 if (GUILayout.Button("Dump Audio")) UniversalInject.DumpAudioState(atlasFilter);
                 if (GUILayout.Button("Dump District")) { Prober.Report.Clear(); foreach (var l in UniversalInject.DumpDistrictState()) Prober.Report.Add(l); }
+                if (GUILayout.Button("Turn Ease")) { Prober.Report.Clear(); foreach (var l in UniversalInject.TurnEaseCensusLines()) { Prober.Report.Add(l); Plugin.Log.LogInfo("[TurnEase] " + l); } }
                 if (GUILayout.Button("Mesh Budget")) { Prober.Report.Clear(); foreach (var l in UniversalInject.MeshBudgetLines()) { Prober.Report.Add(l); Plugin.Log.LogInfo("[Budget] " + l); } }
                 if (GUILayout.Button("Smoke Test")) UniversalInject.RunSmokeTest();   // runtime integration check: bindings + registry + injection health -> [SmokeTest] PASS/FAIL
             }

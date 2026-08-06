@@ -189,6 +189,45 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] RefreshStrikeLaunchPose: " + ex.Message); }
         }
 
+        // F8 "Turn Ease" census — the GENERALIZATION guarantee instrument (user: "what guarantee will I get it
+        // will work with other vehicles?"): resolve EVERY live unit through the exact strike-chain logic and
+        // print the verdict table. Any unit that would snap-and-fire shows up as NO RATE here, before a single
+        // bombard is ever ordered with it.
+        internal static List<string> TurnEaseCensusLines()
+        {
+            var lines = new List<string>();
+            try
+            {
+                var presType = GameBinding.Presentation;
+                var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
+                var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
+                if (armies == null) { lines.Add("no army list (not in a game session?)"); return lines; }
+                int easing = 0, resolved = 0, none = 0;
+                var seen = new HashSet<string>();
+                foreach (var army in armies)
+                {
+                    if (army == null) continue;
+                    var unit = GetMember(army, "PresentationUnit");
+                    if (unit == null) continue;
+                    string unitDef = GetMember(unit, "UnitDefinition")?.ToString() ?? "";
+                    string shortName = unitDef; int sp = shortName.IndexOf(' '); if (sp > 0) shortName = shortName.Substring(0, sp);
+                    if (shortName.Length == 0 || !seen.Add(shortName)) continue;
+                    float stateRate = 0f;
+                    if (GetMember(unit, "Pawns") is System.Collections.IEnumerable pawns)
+                        foreach (var pawn in pawns)
+                        { if (GetMember(pawn, "Transform") is UnityEngine.Transform tr) TryTurnStateAt(tr.position, out _, out stateRate); break; }
+                    float nameRate = TurnRateForUnitDef(unitDef);
+                    if (stateRate > 0f) { easing++; lines.Add($"{shortName}: {stateRate:0} deg/s (EASING live)"); }
+                    else if (nameRate > 0f) { resolved++; lines.Add($"{shortName}: {nameRate:0} deg/s (resolves; eases once seen/classified)"); }
+                    else { none++; lines.Add($"{shortName}: NO RATE — will snap (excluded plane, human at 0, or unclassified)"); }
+                }
+                lines.Sort();
+                lines.Insert(0, $"TURN EASE CENSUS: {seen.Count} unit type(s) — {easing} easing live, {resolved} resolved, {none} without a rate");
+            }
+            catch (Exception ex) { lines.Add("census failed: " + ex.Message); }
+            return lines;
+        }
+
         internal static float TurnHoldForStrike(object strike)
         {
             try
