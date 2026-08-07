@@ -71,24 +71,26 @@ All three instability mechanisms were measured and fixed:
 - **Save-reload** (the corpse-leaf empty tile): the district session reset also fires from the `Sandbox.Load`
   postfix. Verified: the temple rebuilds cleanly after an in-session reload.
 
+## Surface-map atlases — SHIPPED & VERIFIED IN-GAME (same day)
+
+The Oracle temple's wall albedo is 1024² of *pure white* — the marble lives in the **normal + roughness maps**
+(`Temple_BaseColor` 5 KB, `Temple_Normal` 879 KB). The bake now packs **normal + roughness atlases with the albedo
+pack's exact rects** (the remapped UVs index them for free), sourced from a `Textures/` folder of per-material
+files next to the model (the Sketchfab original-format layout; missing files keep a neutral fill). The district
+registry carries `normalAtlasGuid`/`roughAtlasGuid`; the runtime binds them on the private layer where the neutral
+stand-ins go; the editor preview binds a DXT5nm-swizzled variant. Three lessons, paid for in bakes:
+
+1. **Downsample with an area average** — a single bilinear tap aliases dense normal maps into rainbow static.
+2. **Normal-atlas thumbnails always look like chaos** — judge by *measurement* (neighbor-delta statistics on the
+   pre-compression PNG dump the bake now writes), never by eye; half an evening went to convicting healthy data on
+   its thumbnail.
+3. **Relief strength is calibrated into the data** (65% toward flat, tuned in-preview) so the preview and the game
+   — whose shader has no scale knob — show the identical result, and a re-bake can never reset it.
+
+Stale-bundle note stands: re-bakes reshuffle atlas packing — ALWAYS rebuild the mod after the final bake.
+
 ## Open items
 
-- **SURFACE-MAP ATLASES (the real "missing texture", designed — the temple's flat look explained):** the Oracle
-  temple's wall albedo is 1024² of *pure white* — the marble detail lives entirely in the **normal +
-  metallic-roughness maps** (the GLB ships 4 maps × 10 materials), which the pipeline has never extracted or
-  shipped. The model renders its albedo faithfully; the albedo is a blank canvas. Design: (1) extract `_normal`
-  (+`_mr`) per material next to the albedo; (2) pack them with the **identical atlas rects** the albedo packer
-  already computes — the remapped UVs then index them for free; (3) registry `normalAtlasGuid`, runtime binds it
-  on `_NormalMap` where the neutral flat goes today (one line — the private-material binding already exists);
-  (4) bind in the editor preview material first (preview-first rule). **v1 shortcut (the Oracle's FBX package):**
-  Sketchfab's original-format download ships every map as loose per-material files (`<Material>_Normal.png`,
-  `_Roughness.png`, …) whose names match the extracted albedos — when such a `Textures/` folder sits next to the
-  model, pack straight from disk and skip GLB extraction. (Measured: the source's ceiling is 1024² everywhere —
-  the 2048 atlas already preserves all of it; `Temple_BaseColor` is 5 KB of white while `Temple_Normal` is 879 KB —
-  the marble is literally in the normal map.) An earlier suspicion of submesh↔material
-  mis-assignment was retired by the same measurement — the assignments are correct, the maps were absent.
-  (Stale-bundle note: re-bakes reshuffle atlas packing, so ALWAYS rebuild the mod after the final bake — a bundle
-  carrying an older mesh+atlas pair renders plausible-but-wrong colors.)
 - **Participation-phase skinning** (construction site as a second registry entry) — untested.
 
 *Related: [District-Visuals.md](District-Visuals.md) (the axis this rides), the July wonder-material mapping in
