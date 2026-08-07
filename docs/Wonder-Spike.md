@@ -80,7 +80,12 @@ All three instability mechanisms were measured and fixed:
   (+`_mr`) per material next to the albedo; (2) pack them with the **identical atlas rects** the albedo packer
   already computes — the remapped UVs then index them for free; (3) registry `normalAtlasGuid`, runtime binds it
   on `_NormalMap` where the neutral flat goes today (one line — the private-material binding already exists);
-  (4) bind in the editor preview material first (preview-first rule). An earlier suspicion of submesh↔material
+  (4) bind in the editor preview material first (preview-first rule). **v1 shortcut (the Oracle's FBX package):**
+  Sketchfab's original-format download ships every map as loose per-material files (`<Material>_Normal.png`,
+  `_Roughness.png`, …) whose names match the extracted albedos — when such a `Textures/` folder sits next to the
+  model, pack straight from disk and skip GLB extraction. (Measured: the source's ceiling is 1024² everywhere —
+  the 2048 atlas already preserves all of it; `Temple_BaseColor` is 5 KB of white while `Temple_Normal` is 879 KB —
+  the marble is literally in the normal map.) An earlier suspicion of submesh↔material
   mis-assignment was retired by the same measurement — the assignments are correct, the maps were absent.
   (Stale-bundle note: re-bakes reshuffle atlas packing, so ALWAYS rebuild the mod after the final bake — a bundle
   carrying an older mesh+atlas pair renders plausible-but-wrong colors.)
