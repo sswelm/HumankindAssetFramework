@@ -73,8 +73,18 @@ All three instability mechanisms were measured and fixed:
 
 ## Open items
 
+- **SURFACE-MAP ATLASES (the real "missing texture", designed — the temple's flat look explained):** the Oracle
+  temple's wall albedo is 1024² of *pure white* — the marble detail lives entirely in the **normal +
+  metallic-roughness maps** (the GLB ships 4 maps × 10 materials), which the pipeline has never extracted or
+  shipped. The model renders its albedo faithfully; the albedo is a blank canvas. Design: (1) extract `_normal`
+  (+`_mr`) per material next to the albedo; (2) pack them with the **identical atlas rects** the albedo packer
+  already computes — the remapped UVs then index them for free; (3) registry `normalAtlasGuid`, runtime binds it
+  on `_NormalMap` where the neutral flat goes today (one line — the private-material binding already exists);
+  (4) bind in the editor preview material first (preview-first rule). An earlier suspicion of submesh↔material
+  mis-assignment was retired by the same measurement — the assignments are correct, the maps were absent.
+  (Stale-bundle note: re-bakes reshuffle atlas packing, so ALWAYS rebuild the mod after the final bake — a bundle
+  carrying an older mesh+atlas pair renders plausible-but-wrong colors.)
 - **Participation-phase skinning** (construction site as a second registry entry) — untested.
-- **Real surface maps**: ship baked normal/roughness alongside the albedo instead of neutral stand-ins.
 
 *Related: [District-Visuals.md](District-Visuals.md) (the axis this rides), the July wonder-material mapping in
 that page's History section.*
