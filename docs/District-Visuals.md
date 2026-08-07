@@ -174,8 +174,15 @@ during the leaf's own `Load`, the game's renderer **registers and loads the clon
 buffers. `DistrictApplyTexture` then registers a null atlas-info slot for the new layer (so the game's own resolve
 returns full-texture for it forever), points the leaf at slot 1, and **binds the baked albedo on the private runtime
 materials** (`_MainTex` when present, else the largest bound sheet — `DistrictDebug` dumps every property to catch a
-wrong pick). The mesh's own 0..1 UVs sample the albedo exactly; no other building is touched. Re-asserted periodically
-because resolution switches rebuild runtime materials.
+wrong pick). The mesh's own 0..1 UVs sample the albedo exactly; no other building is touched.
+
+**Stability (2026-08-07, the Oracle arc):** the private layer **opts out of texture streaming** (its mid/hi-res
+material GUIDs are nulled at clone time, so the reduction system never loads a material over our binding — the cause
+of a "perfect → brown → corrupt" degradation), and **neutral surface maps** (flat normal, matte roughness, black
+metallic, white AO) are bound alongside the albedo so the donor sheet's bricks can't ghost through. District session
+state fully resets on new games *and* in-session save-reloads (`Sandbox.Load`), so leaves and bindings always rebuild
+against the living world. All verified in-game, incl. reload survival. Wonders ride the same machinery — see
+[Wonder-Spike.md](Wonder-Spike.md).
 
 ---
 

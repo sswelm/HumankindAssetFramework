@@ -56,15 +56,25 @@ Net: the native affinity gives a custom wonder *nothing to see and nothing to sw
   session's private leaf, whose `meshIndex` means nothing in the rebuilt GPU buffers — an actively-emptied tile.
   Fix: the district session reset also fires from the `Sandbox.Load` postfix.
 
+## Stability (RESOLVED same day — the stability pass, verified in-game)
+
+All three instability mechanisms were measured and fixed:
+
+- **Texture streaming** ("perfect → brown → corrupt"): the reduction system kept loading proxy/mid/hi-res
+  materials into the private layer, each arrival stomping the injected albedo. The layer clone now **opts out of
+  streaming** (its mid/hi-res material GUIDs nulled — the game's own loader short-circuits), so the one bound
+  material is stable under any camera abuse.
+- **Corrupt surface detail**: the vanilla sheet's normal/roughness/metallic/AO maps stayed bound under the
+  injected albedo, painting the donor building's bricks over the custom texture. **Neutral surface maps** are
+  bound alongside the albedo — the model renders as authored. (Future knob: bake real normal/roughness maps from
+  the source GLB.)
+- **Save-reload** (the corpse-leaf empty tile): the district session reset also fires from the `Sandbox.Load`
+  postfix. Verified: the temple rebuilds cleanly after an in-session reload.
+
 ## Open items
 
-- **Texture streaming fight** (diagnosed, fix designed, not built): the game populates the private layer's runtime
-  materials asynchronously — 64×64 *Proxy* textures first, hi-res later — repeatedly displacing the injected
-  albedo (the "perfect → brown → corrupt" sequence). The trace also shows the vanilla **normal/roughness/metallic
-  /AO maps** stay bound under our albedo, giving the "corrupt" surface. Designed fix: bind neutral PBR maps
-  alongside the albedo and re-assert through the stream-in window; needs its own session.
-- **Save-reload verification** of the corpse-leaf fix under the working (MissileSilo-donor) data.
 - **Participation-phase skinning** (construction site as a second registry entry) — untested.
+- **Real surface maps**: ship baked normal/roughness alongside the albedo instead of neutral stand-ins.
 
 *Related: [District-Visuals.md](District-Visuals.md) (the axis this rides), the July wonder-material mapping in
 that page's History section.*
