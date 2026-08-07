@@ -207,6 +207,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Districts
 
+- **THE ORACLE — first custom Artificial Wonder, shipped & announced (2026-08-07).** A Sketchfab Greek temple
+  became a fully playable custom wonder in one arc: the district swap machinery carries `ArtificialWonderDefinition`
+  unchanged (donor = a renderable district affinity; the *designed-for* native wonder affinity was measured a
+  dead end — scaffolding-only material family, zero swappable leaves). Stability took a same-day triad, each
+  mechanism measured: **streaming opt-out** (the private layer clone nulls its mid/hi-res material GUIDs so the
+  reduction system can't stomp the injected albedo), **neutral surface maps** (the donor's bricks no longer bleed
+  through), and a **session reset from the `Sandbox.Load` postfix** (save-reload had been re-pointing onto a
+  corpse leaf → empty tile). Then the temple got its marble: **normal + roughness atlases baked with the albedo
+  pack's exact rects** (the walls' albedo is pure white — the beauty was in the surface maps all along), area-average
+  downsampling (a single bilinear tap aliases dense normals into rainbow static), relief calibrated into the data
+  so preview and game agree. Card/small/tooltip portraits ride the standard UIMapper `Images` slots. Announced on
+  Discord the same evening. See [docs/Wonder-Spike.md](docs/Wonder-Spike.md).
 - **DISTRICT TEXTURES — the nuclear plant arc (2026-08-06).** Replacing the Breeder Reactor's model (a
   Sketchfab site-plan plant) turned one swap into three capabilities. (1) The **District Factory grew an
   embedded preview pane** — the baked mesh, textured, on a tile-sized ground square at the true in-game

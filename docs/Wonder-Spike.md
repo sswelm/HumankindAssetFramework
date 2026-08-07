@@ -1,8 +1,9 @@
 # Wonder Spike — custom 3D models on (artificial) wonders
 
-*Research spike, 2026-08-07 — the Oracle arc. Status: the recipe WORKS (a custom Greek temple renders on a
-player-authored Artificial Wonder in-game); the native wonder visual chain is a measured dead end; two session
-bugs found and fixed en route. This page records what was proven, what was falsified, and what remains.*
+*Research spike, 2026-08-07 — the Oracle arc. Status: SHIPPED — the Oracle (a custom Greek temple on a
+player-authored Artificial Wonder) is stable in-game with its own textures, surface maps, and card portraits,
+and was publicly announced. The native wonder visual chain is a measured dead end; two session bugs were found
+and fixed en route. This page records what was proven, what was falsified, and what remains.*
 
 ## The working recipe (proven in-game on `ArtificialWonderDefinition`)
 
@@ -29,6 +30,12 @@ constructible *is*, only that its tile resolves to a leaf it can clone:
 construction and under the main name when complete — so vanilla scaffolding during the build and the custom model
 on completion, which is the right feel by default. (A second registry entry keyed to the Participation name could
 skin the construction site too; untested.)
+
+**Card images / portraits:** a wonder's UI images ride the standard UIMapper mechanism — the wonder's UIMapper
+entry (e.g. in a `ConstructibleArtificialWonderUIMappers` asset) has an `Images` list keyed `ArtificialWonderCard`
+/ `Small` / `Tooltip`. Drop portrait PNGs into `Assets/Resources/Images/` and assign them on the mapper in the
+Inspector (the serialized reference is Amplitude's `{a,b,c,d}` GUID encoding — assignment via Inspector handles
+it). The Oracle ships a 512×366 card and a 512² small/tooltip portrait this way.
 
 ## Falsified: the native wonder affinity (measured, don't re-attempt blindly)
 
