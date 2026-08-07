@@ -490,7 +490,11 @@ namespace HumankindAssetFramework
                     if (e.district != name || e.fxMeshGuid == null) continue;
                     var plbc = AccessTools.Field(district.GetType(), "presentationLevelBuildComponent")?.GetValue(district);
                     if (plbc == null) continue;
-                    distFxManager = distFxManager ?? GetMember(plbc, "FxManager");
+                    // FRESH-FIRST, never `??`-cached: a second game in the same app run replaces the FxManager, and a
+                    // stale cached one has fxComponents == null — every leaf LoadIFN then NREs (the Oracle incident:
+                    // the wonder class was innocent, the corpse manager was the whole failure).
+                    var fm = GetMember(plbc, "FxManager");
+                    if (fm != null) distFxManager = fm;
                     int layer = 0;
                     var lf = district.GetType().GetField("mainLevelBuildComponantLayer", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.FlattenHierarchy);
                     if (lf?.GetValue(null) is int li) layer = li;
@@ -527,7 +531,10 @@ namespace HumankindAssetFramework
             try
             {
                 if (e.atlasGuid == null || e.privateLeaf == null) return;
-                if (e.texApplied) { if ((++e.texWait % 120) == 0) BindAlbedo(e, log: false); return; }
+                // tight re-assert: the game rebuilds the layer's runtime materials when hi-res textures stream in /
+                // resolution switches, dropping our binding — at 120 ticks the wrong-texture window was ~2 s visible
+                // on the Oracle; 15 ticks makes it a blink. Cheap: ReferenceEquals early-outs when already bound.
+                if (e.texApplied) { if ((++e.texWait % 15) == 0) BindAlbedo(e, log: false); return; }
                 var leaf = e.privateLeaf; var t = leaf.GetType();
 
                 int layerIdx = GF(t, "outputLayerIndex")?.GetValue(leaf) is int li ? li : -1;
