@@ -36,7 +36,9 @@ model file, Size, Strip parts, reduce-to-tris, height-UVs, winding fix, double-s
 keep-black, atlas size (256–4096), material mode, hide-donor, freeze-donor, re-spawn-after-load, embedded 3D preview.
 The preview stands the model on a tile-sized ground square at the true in-game surface level — sunk or floating bakes
 preview that way (static entries show the shipped mesh; animated entries the rest-pose rig, the same faithful view as
-the Animation Lab). Orbit/pan/deep-zoom controls with a **Center** button that re-frames a lost view.
+the Animation Lab). Boats stand on a **water-blue** square instead of grass — detected from the pawn's own Boat
+capability profile, never the name — so a waterline offset (hull below the blue) reads naturally. Orbit/pan/deep-zoom
+controls with a **Center** button that re-frames a lost view.
 *Writes:* `pack.json` (via `ModelRegistry.Upsert`) + baked assets, through `ConfigFor → UniversalBaker`.
 **Deep dive:** [Factory-Manual.md](Factory-Manual.md).
 
@@ -46,8 +48,8 @@ state-driven idle/move/after/attack, deploy conversion, recoil/slam, turret & mu
 *Key controls:* Clip field + range picker (▶) + Pick, state-driven toggle (idle-alt interval, attack repeats), deploy
 block (frames, strip-parts, recoil frames/step/return, slam), turret bone + aim axis, muzzle bone + offset, hand prop
 (bone/material/live rotation), animate-only bones, convert-raw-rig, fix-100×. The rest-pose preview stands the rig on a
-tile-sized ground square at the in-game surface level — the faithful upright/grounded view for animated models —
-with orbit/pan/deep-zoom and a **Center** re-frame button.
+tile-sized ground square at the in-game surface level (water-blue for Boat-profile pawns) — the faithful
+upright/grounded view for animated models — with orbit/pan/deep-zoom and a **Center** re-frame button.
 *Writes:* `pack.json`, same `UniversalBaker.BuildAnimated` pipeline. **Deep dive:** [Animated-Models.md](Animated-Models.md), [Factory-Manual.md](Factory-Manual.md) §16.
 
 ### Vehicle Lab — `Tools ▸ HAF ▸ Vehicle Lab`
