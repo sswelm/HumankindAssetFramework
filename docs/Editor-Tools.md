@@ -33,9 +33,10 @@ backup mirror. The runtime plugin reads them on launch.
 Author a static model (or the *model half* of an animated one): pick/create a resource, a target pawn, and a model file;
 tune geometry and shading; **Bake** → produces a `Skeleton` + `Atlas` and a registry entry. *Key controls:* target pawn,
 model file, Size, Strip parts, reduce-to-tris, height-UVs, winding fix, double-sided, albedo brightness/saturation,
-keep-black, atlas size (256–4096), material mode, hide-donor, freeze-donor, re-spawn-after-load, embedded 3D preview
-(static entries stand on a tile-sized ground square at the true in-game surface level — sunk or floating bakes preview
-that way; animated entries show a display pose, judge those in the Animation Lab).
+keep-black, atlas size (256–4096), material mode, hide-donor, freeze-donor, re-spawn-after-load, embedded 3D preview.
+The preview stands the model on a tile-sized ground square at the true in-game surface level — sunk or floating bakes
+preview that way (static entries show the shipped mesh; animated entries the rest-pose rig, the same faithful view as
+the Animation Lab).
 *Writes:* `pack.json` (via `ModelRegistry.Upsert`) + baked assets, through `ConfigFor → UniversalBaker`.
 **Deep dive:** [Factory-Manual.md](Factory-Manual.md).
 
