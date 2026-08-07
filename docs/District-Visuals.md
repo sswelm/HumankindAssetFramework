@@ -136,8 +136,10 @@ ground square pinned at the true in-game surface level. The placement controls s
    auto-aligns the *longest* axis, which can tip a near-cubic model onto its side around ANY axis (the plant needed
    `Z=-90`). Dial it in the preview — no relaunch round-trips.
 2. **Facing on tile — turn it** (0–360°, previewed LIVE). Always rotates the standing building about the vertical, so
-   it can never tip the model; written into the FxMesh at Bake. *(The old three-field FxMesh import-angles control is
-   retired from the UI — it overlapped Rotation offset and invited tipping; entries authored with it keep working.)*
+   it can never tip the model; written into the FxMesh at Bake. The **arrow on the preview tile** is the Facing
+   reference — the direction 0° corresponds to — so re-dialing a building later stays consistent. *(The old
+   three-field FxMesh import-angles control is retired from the UI — it overlapped Rotation offset and invited
+   tipping; entries authored with it keep working.)*
 3. **Position offset — place it** (previewed LIVE). Nudge across the tile in world units (a tile is ~10; X/Z slide,
    Y lifts off the ground) — the same knob the Model Factory has for units, applied *after* the auto-level so the
    leveling can't cancel it.
