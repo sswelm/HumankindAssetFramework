@@ -64,6 +64,14 @@ For every `useDonorClip` entry, at registration time the plugin rebases the inje
 
 Idempotent, logged as `[Rest] <name>: rests rebased (...)`, and followed by the full before/after dump.
 
+**Placement consequence (the stealth-helicopter arc, 2026-08-07):** because the rebase re-anchors the geometry
+through the donor's skeleton, a donor-clip model's in-game position is **not** simply its FBX position — most of a
+source file's own off-centering is absorbed by the rebase, and the editor preview (which shows the un-rebased rig)
+cannot fully predict it. The preview caption flags this (`⚠ donor-clip`). Practical rule: get the model upright,
+sized and facing right in the preview; judge **position** in-game and trim with the Factory's **Position offset**
+(now in true game units on the animated path — the helicopter needed a single −0.5 sway trim). Reproducing the
+rebase inside the editor preview is a possible future feature.
+
 ## The bake's axle frames (Vehicle Lab)
 
 `vehicle_rig.py` orients each rotor bone so the donor's measured spin axis IS the rotor's real axle:
