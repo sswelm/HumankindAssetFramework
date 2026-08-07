@@ -21,6 +21,8 @@ namespace HumankindAssetFramework
             public string district = "";     // ConstructibleDefinitionName to match
             public object fxMeshGuid;        // parsed Amplitude Guid of the baked FxMesh
             public object atlasGuid;         // parsed Amplitude Guid of the baked albedo atlas (null = untextured, pre-2.0 entries)
+            public object normalAtlasGuid;   // baked normal atlas (null = neutral flat) — same rects as the albedo
+            public object roughAtlasGuid;    // baked roughness atlas (null = neutral matte)
             public bool isolate = true;      // true = private per-instance leaf (this tile only); false = global shared-leaf swap
             // runtime
             public object plbc; public int layer;
@@ -29,6 +31,7 @@ namespace HumankindAssetFramework
             public bool collected, matchLogged, pointedLogged; public int wait;
             // texture injection runtime (isolate mode)
             public UnityEngine.Texture2D texAlbedo;                      // our baked albedo, bound on the PRIVATE output layer
+            public UnityEngine.Texture2D texNormal, texRough;            // baked surface maps (null = the neutral stand-ins)
             public bool texApplied; public int texWait;
         }
         internal static readonly List<DistrictModel> distModels = new List<DistrictModel>();
@@ -73,6 +76,8 @@ namespace HumankindAssetFramework
                                 district = (string)d["district"] ?? "",
                                 fxMeshGuid = ParseGuidCsv((string)d["fxMeshGuid"] ?? ""),
                                 atlasGuid = ParseGuid4((string)d["atlasGuid"] ?? ""),   // optional: entries baked before texture injection have none
+                                normalAtlasGuid = ParseGuid4((string)d["normalAtlasGuid"] ?? ""),
+                                roughAtlasGuid = ParseGuid4((string)d["roughAtlasGuid"] ?? ""),
                                 isolate = (bool?)d["isolate"] ?? true,
                             };
                             if (e.district.Length > 0 && e.fxMeshGuid != null) distModels.Add(e);
@@ -531,7 +536,7 @@ namespace HumankindAssetFramework
             {
                 d.plbc = null; d.privateLeaf = null; d.leaves.Clear(); d.collected = false;
                 d.matchLogged = d.pointedLogged = false; d.wait = 0;
-                d.texApplied = false; d.texWait = 0; d.texAlbedo = null;
+                d.texApplied = false; d.texWait = 0; d.texAlbedo = null; d.texNormal = null; d.texRough = null;
             }
             Plugin.Diag("[District] session state reset (new game or save-reload) — leaves + texture bindings rebuild");
         }
@@ -580,10 +585,14 @@ namespace HumankindAssetFramework
                 texMgr?.GetType().GetMethod("AddNullAtlasInfo", BindingFlags.Instance | BindingFlags.Public)?.Invoke(texMgr, new object[] { layerIdx });
                 GF(t, "textureIndex")?.SetValue(leaf, 1);   // TextureIndexForFullTexture — mesh UVs sample the sheet [0,1]
 
-                // our shipped albedo
+                // our shipped albedo (+ the optional surface-map atlases — null falls back to the neutral stand-ins)
                 e.texAlbedo = LoadAmpliAsset(typeof(UnityEngine.Texture2D), e.atlasGuid) as UnityEngine.Texture2D;
                 if (e.texAlbedo == null)
                 { if ((++e.texWait % 300) == 1) Plugin.Diag($"[DistrictTex] '{e.district}': albedo atlas not loadable by GUID yet"); return; }
+                if (e.normalAtlasGuid != null && e.texNormal == null)
+                    e.texNormal = LoadAmpliAsset(typeof(UnityEngine.Texture2D), e.normalAtlasGuid) as UnityEngine.Texture2D;
+                if (e.roughAtlasGuid != null && e.texRough == null)
+                    e.texRough = LoadAmpliAsset(typeof(UnityEngine.Texture2D), e.roughAtlasGuid) as UnityEngine.Texture2D;
 
                 if (!BindAlbedo(e, log: true))
                 { if ((++e.texWait % 300) == 1) Plugin.Diag($"[DistrictTex] '{e.district}': private layer has no runtime materials yet"); return; }
@@ -614,7 +623,7 @@ namespace HumankindAssetFramework
             t.SetPixels32(px); t.Apply(false, true);
             return t;
         }
-        static void NeutralizeSurfaceMaps(UnityEngine.Material mat)
+        static void NeutralizeSurfaceMaps(DistrictModel e, UnityEngine.Material mat)
         {
             if (neuNormal == null)
             {
@@ -627,8 +636,9 @@ namespace HumankindAssetFramework
             {
                 if (mat.HasProperty(prop) && !ReferenceEquals(mat.GetTexture(prop), tex)) mat.SetTexture(prop, tex);
             }
-            Set("_NormalMap", neuNormal);
-            Set("_RoughnessMap", neuRough);
+            // REAL surface maps when the bake shipped them (same rects as the albedo atlas); neutral stand-ins otherwise
+            Set("_NormalMap", e.texNormal != null ? e.texNormal : neuNormal);
+            Set("_RoughnessMap", e.texRough != null ? e.texRough : neuRough);
             Set("_MetallicMap", neuMetal);
             Set("_AmbiantOcclusionMap", neuAO);   // the game's own spelling
         }
@@ -660,12 +670,12 @@ namespace HumankindAssetFramework
                                 if (pn == "_MainTex") pick = pn;
                                 if (biggest == null || t2.width * t2.height > biggest.width * biggest.height) { biggest = t2; biggestProp = pn; }
                             }
-                            if (already) { n++; NeutralizeSurfaceMaps(mat); continue; }
+                            if (already) { n++; NeutralizeSurfaceMaps(e, mat); continue; }
                             if (pick == null) pick = biggestProp;
                             if (pick != null)
                             {
                                 mat.SetTexture(pick, e.texAlbedo); n++;
-                                NeutralizeSurfaceMaps(mat);
+                                NeutralizeSurfaceMaps(e, mat);
                                 if (log) Plugin.Diag($"[DistrictTex] '{e.district}': albedo bound on {fld}.{pick} (+neutral surface maps)");
                             }
                         }
