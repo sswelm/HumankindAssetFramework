@@ -244,6 +244,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   donor-clip entries **footprint-centered** — the measured approximation, ±0.5 units on the helicopter, honest
   caption included; exact rebase-in-editor prediction is the documented open end. See
   [docs/Donor-Clip-Flight.md](docs/Donor-Clip-Flight.md) and [docs/Editor-Tools.md](docs/Editor-Tools.md).
+  **CORRECTION (same day, user-caught):** the animated-path offset bake and the donor-clip approximations were
+  built on a **doubled signal** — the plugin had applied the registry `position` at RUNTIME all along
+  (`ApplyPositionOffset`, per frame, pawn frame, game units), so baking it too made every animated model carry
+  the offset twice: the helicopter flew at *exactly 2×* its dialed height, and the "calibration" launches were
+  fitting multipliers to runtime + bake in two different frames. The user's arithmetic (halving the dial restored
+  the exact old height) exposed it. Unwound: bake-side application removed, footprint-centering removed, previews
+  draw the **runtime offset live** — one dial, one application, no re-bake to nudge a model. The lasting morals:
+  *grep for a runtime consumer before resurrecting a "dead" knob*, and *a knob that seems to need calibration
+  usually has two writers*.
 - **Vehicle Lab: helicopters + interior-part detection (2026-08-03).** Two new part roles rig a **rotorcraft** the
   same no-Blender way as a wheeled vehicle: **Rotor** (`R`) and **Tail rotor** (`L`). Each rotor fuses into **one
   hub bone** (proximity clustering would shred a wide blade disc into pinwheeling halves — the RAH-66's 18-unit

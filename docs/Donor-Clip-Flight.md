@@ -64,16 +64,18 @@ For every `useDonorClip` entry, at registration time the plugin rebases the inje
 
 Idempotent, logged as `[Rest] <name>: rests rebased (...)`, and followed by the full before/after dump.
 
-**Placement consequence (the stealth-helicopter arc, 2026-08-07):** because the rebase re-anchors the geometry
-through the donor's skeleton, a donor-clip model's in-game position is **not** simply its FBX position — most of a
-source file's own off-centering is absorbed by the rebase. The editor previews apply that **measured net effect**:
-donor-clip entries are shown **footprint-centered on the tile hex**, which matched the game to within ±0.5 units on
-the helicopter (the caption says "shown centered — fine position trims in-game"). Practical rule: upright, size and
-facing are dialed in the preview; the last half-unit of **position** is judged in-game and trimmed with the
-Factory's **Position offset** — now in true **game units** on the animated path (the bake pre-divides by the FBX
-import's `size/longest` scale, which used to silently multiply the dial ~3×; the helicopter's final trim was a
-single −0.5 sway). The *exact* version — reproducing `RebaseRootIdentity` + the donor's root-channel anchoring in
-the editor for pixel prediction — is an open end (below).
+**Placement (the stealth-helicopter arc, resolved 2026-08-07):** a model's **Position offset is a RUNTIME
+mechanism on the animated path** — the plugin adds the registry `position` to the pawn **every frame**
+(`ApplyPositionOffset`: X/Y rotated into the pawn's frame so the offset turns with the unit, Z as world-up), in
+true game units, with **no re-bake needed** (Save settings + mod rebuild). The editor previews draw it **live**.
+
+The war story, so nobody repeats it: believing the knob was dead on the animated path, a bake-time application was
+added — and every animated model then carried the offset **twice** (runtime + baked): the helicopter flew at
+*exactly 2×* its dialed height, and X/Y centering became incoherent because the two copies lived in different
+frames (pawn frame vs rig-through-rebase). Five launches of "calibration" fit multipliers to a doubled signal —
+including a falsified "the rebase absorbs off-centering" theory and a footprint-centered preview approximation
+built on it. The user's arithmetic (halving the dial restored the exact old height) exposed the doubling. The
+bake-side copy is removed; **one dial, one application, previewed live**.
 
 ## The bake's axle frames (Vehicle Lab)
 
@@ -198,12 +200,10 @@ while the map streams in — the 3-second rescan self-corrects.
 
 ## Open ends
 
-- **Exact placement prediction in the editor preview.** Today's previews show donor-clip entries
-  footprint-centered — the *measured approximation* of the rebase (±0.5 units on the helicopter). The exact
-  version would load the donor skeleton asset in the editor, run the same `RebaseRootIdentity` math plus the
-  donor's root-channel anchoring, and render where those equations put the vertices — pixel prediction, no
-  error bar, and the Position-offset trim visible in the preview too (the approximation deliberately hides it,
-  since re-centering would cancel it). All inputs exist editor-side; scoped future work.
+- **One placement verification outstanding.** With the double-application removed, the preview (rest-pose FBX +
+  live runtime offset) should predict in-game placement exactly, since the rebase preserves world rest positions
+  by design. One clean in-game check on a district-free tile confirms it; if a residual mismatch appears, measure
+  it (an F8 pawn-vs-tile-center readout is the designed instrument) before touching anything.
 - Terrain-hug tuning knobs still session-global: `radius`, `ease` and the `only`/`skip` district-name filters
   live only in the dial file (they describe the *map*, not the model, so per-model versions may never be
   needed — revisit if a second flying unit wants a different city definition).
