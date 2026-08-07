@@ -127,21 +127,27 @@ tile. Build lazily (sub-materials load async → retry) and re-apply every frame
 into the channel on each `UpdateLevelBuild`). **Verified in-game: the reactor tile shows our mesh, the rest of the city
 is untouched.**
 
-## Orientation, grounding & preview
+## Placement: orientation, facing, position, grounding & preview
 
-1. **Orientation.** The mesh bakes at unit orientation/size, and the unit static-bake auto-aligns the *longest*
-   axis — which can tip a near-cubic model (like the first reactor's 34×30×38 box) onto its side, around ANY axis.
-   Fix with the bake **Rotation offset** (bakes into the mesh) or the FxMesh **`importAngles`** (`-90,0,0` is the
-   vanilla upright default). **The District Factory window has an embedded preview pane** (2026-08-06): the baked mesh,
-   textured, standing on a tile-sized ground square at the true in-game surface level — import angles turn it LIVE,
-   rotation offset shows after a re-Bake. No more rebuild+relaunch round-trips per guess.
-2. **Grounding is automatic** (2026-08-06). The game plants the mesh by its origin at the tile surface and nothing
+The District Factory has an **embedded preview pane** (2026-08-06): the baked mesh, textured, standing on a tile-sized
+ground square pinned at the true in-game surface level. The placement controls split by job:
+
+1. **Rotation offset — stand it up** (baked into the mesh; the preview shows the result after each Bake). The bake
+   auto-aligns the *longest* axis, which can tip a near-cubic model onto its side around ANY axis (the plant needed
+   `Z=-90`). Dial it in the preview — no relaunch round-trips.
+2. **Facing on tile — turn it** (0–360°, previewed LIVE). Always rotates the standing building about the vertical, so
+   it can never tip the model; written into the FxMesh at Bake. *(The old three-field FxMesh import-angles control is
+   retired from the UI — it overlapped Rotation offset and invited tipping; entries authored with it keep working.)*
+3. **Position offset — place it** (previewed LIVE). Nudge across the tile in world units (a tile is ~10; X/Z slide,
+   Y lifts off the ground) — the same knob the Model Factory has for units, applied *after* the auto-level so the
+   leveling can't cancel it.
+4. **Grounding is automatic** (2026-08-06). The game plants the mesh by its origin at the tile surface and nothing
    re-grounds it — a rotation offset that changed which axis is "up" used to sink the model (the plant surfaced only
-   its containment domes). The district bake now **auto-levels**: it computes where the vertices land *with the entry's
-   import angles applied* and shifts them so the lowest point sits on the surface, footprint centered. Any
-   rotation/import combination comes out standing level. (District paths only — props/projectiles keep their
-   meaningful pivots.)
-3. **Scale.** Baked-in (the `Size` knob), so resizing needs a re-bake. A district tile is ~10 across; a full site-plan
+   its containment domes). The district bake **auto-levels**: it computes where the vertices land with the entry's
+   draw-time rotation applied and shifts them so the lowest point sits on the surface, footprint centered. Any
+   rotation combination comes out standing level. (District paths only — props/projectiles keep their meaningful
+   pivots.)
+5. **Scale.** Baked-in (the `Size` knob), so resizing needs a re-bake. A district tile is ~10 across; a full site-plan
    model can carry Size 6–9, a single building ~2.5–5.
 
 ## Texture — SOLVED (2026-08-06): the private output layer

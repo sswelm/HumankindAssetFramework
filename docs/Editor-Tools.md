@@ -33,7 +33,9 @@ backup mirror. The runtime plugin reads them on launch.
 Author a static model (or the *model half* of an animated one): pick/create a resource, a target pawn, and a model file;
 tune geometry and shading; **Bake** → produces a `Skeleton` + `Atlas` and a registry entry. *Key controls:* target pawn,
 model file, Size, Strip parts, reduce-to-tris, height-UVs, winding fix, double-sided, albedo brightness/saturation,
-keep-black, atlas size (256–4096), material mode, hide-donor, freeze-donor, re-spawn-after-load, embedded 3D preview.
+keep-black, atlas size (256–4096), material mode, hide-donor, freeze-donor, re-spawn-after-load, embedded 3D preview
+(static entries stand on a tile-sized ground square at the true in-game surface level — sunk or floating bakes preview
+that way; animated entries show a display pose, judge those in the Animation Lab).
 *Writes:* `pack.json` (via `ModelRegistry.Upsert`) + baked assets, through `ConfigFor → UniversalBaker`.
 **Deep dive:** [Factory-Manual.md](Factory-Manual.md).
 
@@ -42,8 +44,9 @@ The animation-only companion (docks beside the Factory): configures *which clip 
 state-driven idle/move/after/attack, deploy conversion, recoil/slam, turret & muzzle bones, hand props, donor sockets.
 *Key controls:* Clip field + range picker (▶) + Pick, state-driven toggle (idle-alt interval, attack repeats), deploy
 block (frames, strip-parts, recoil frames/step/return, slam), turret bone + aim axis, muzzle bone + offset, hand prop
-(bone/material/live rotation), animate-only bones, convert-raw-rig, fix-100×. *Writes:* `pack.json`, same
-`UniversalBaker.BuildAnimated` pipeline. **Deep dive:** [Animated-Models.md](Animated-Models.md), [Factory-Manual.md](Factory-Manual.md) §16.
+(bone/material/live rotation), animate-only bones, convert-raw-rig, fix-100×. The rest-pose preview stands the rig on a
+tile-sized ground square at the in-game surface level — the faithful upright/grounded view for animated models.
+*Writes:* `pack.json`, same `UniversalBaker.BuildAnimated` pipeline. **Deep dive:** [Animated-Models.md](Animated-Models.md), [Factory-Manual.md](Factory-Manual.md) §16.
 
 ### Vehicle Lab — `Tools ▸ HAF ▸ Vehicle Lab`
 Turn a **raw static** vehicle model into a rigged, animated GLB (Root + per-wheel/turret bones, a procedural *Spin*
@@ -86,8 +89,9 @@ reuses the last rig GLB; skipping Vehicleize bakes the OLD rig).
 Bake a custom static district building — imports a model, bakes a **bone-free, auto-leveled FxMesh**, writes the
 district registry entry (incl. the baked **albedo GUID** the plugin's texture injection binds) the district repoint
 reads. An **embedded preview pane** shows the baked mesh, textured, on a tile-sized ground square at the true in-game
-surface level — import angles rotate it live, orbit/zoom/pan like the Animation Lab. *Key controls:* district name +
-Pick, model file, Size, rotation/import angles, target tris, normals, strip parts, isolate. *Writes:*
+surface level — Facing and Position offset preview live, orbit/zoom/pan like the Animation Lab. *Key controls:* district
+name + Pick, model file, Size, Rotation offset (stand it up), Facing on tile (turn it), Position offset (place it),
+target tris, normals, strip parts, isolate. *Writes:*
 `enc_districts.json` (via `DistrictRegistry.Upsert`; mesh via `DistrictBaker.BakeFxMesh`). **Deep dive:**
 [District-Visuals.md](District-Visuals.md).
 
