@@ -917,13 +917,7 @@ namespace HumankindAssetFramework
             // DISTRICT runtime state is session-scoped too (the Oracle incident): the cached FxManager, each entry's
             // matched component, its private leaf (a clone of a SESSION-1 material whose cloned output layer registered
             // into the OLD renderer) and the texture-injection state all reference dead objects after a new game loads.
-            distFxManager = null;
-            foreach (var d in distModels)
-            {
-                d.plbc = null; d.privateLeaf = null; d.leaves.Clear(); d.collected = false;
-                d.matchLogged = d.pointedLogged = false; d.wait = 0;
-                d.texApplied = false; d.texWait = 0; d.texAlbedo = null;
-            }
+            ResetDistrictSessionState();
             var list = entries;
             if (list != null)
                 foreach (var e in list)

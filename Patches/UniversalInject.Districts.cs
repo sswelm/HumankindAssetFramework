@@ -397,8 +397,21 @@ namespace HumankindAssetFramework
                     {
                         var layerClone = UnityEngine.Object.Instantiate(srcLayer);
                         layerClone.name = srcLayer.name + "_HAF";
+                        // OPT OUT OF TEXTURE STREAMING (the perfect->brown->corrupt fix, measured on the Oracle): the
+                        // reduction system keeps loading proxy/mid/hi-res materials into the layer's RenderOutputs and
+                        // each arrival stomps our albedo binding. Null the clone's mid/high material GUIDs — the game's
+                        // own LoadOrContinueLoadingHighResRenderMaterial short-circuits on a null guid, so our layer
+                        // simply never streams: one runtime material, bound once, stable forever.
+                        int cleared = 0;
+                        if (GetMember(layerClone, "RenderOutputs") is Array ros0)
+                            foreach (var ro in ros0)
+                                foreach (var gn in new[] { "midResMaterialGuid", "highResMaterialGuid" })
+                                {
+                                    var gf2 = ro?.GetType().GetField(gn, BF);
+                                    if (gf2 != null) { gf2.SetValue(ro, Activator.CreateInstance(gf2.FieldType)); cleared++; }
+                                }
                         olF.SetValue(clone, layerClone);
-                        Plugin.Diag($"[DistrictTex] private output layer '{layerClone.name}' cloned from '{srcLayer.name}'");
+                        Plugin.Diag($"[DistrictTex] private output layer '{layerClone.name}' cloned from '{srcLayer.name}' (streaming opted out: {cleared} reduction guid(s) nulled)");
                     }
                     else Plugin.Log.LogWarning("[DistrictTex] leaf has no outputLayer to clone — texture injection unavailable.");
                 }
@@ -505,6 +518,24 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogError("[District] apply entries: " + ex); }
         }
 
+        // Session/save-load reset: everything the district machinery caches references the CURRENT world — the
+        // FxManager, each entry's matched component, its private leaf (whose meshIndex points into the CURRENT
+        // session's GPU buffers) and the texture bindings. A SAVE-RELOAD rebuilds the world WITHOUT firing the
+        // AnimationLoad rearm (measured: the Oracle tile came up EMPTY because the per-frame repoint kept forcing the
+        // NEW channel onto the SESSION-1 corpse leaf — stale meshIndex = draws nothing). Called from the rearm AND
+        // from the Sandbox.Load postfix, so both full loads and in-session reloads rebuild fresh.
+        internal static void ResetDistrictSessionState()
+        {
+            distFxManager = null;
+            foreach (var d in distModels)
+            {
+                d.plbc = null; d.privateLeaf = null; d.leaves.Clear(); d.collected = false;
+                d.matchLogged = d.pointedLogged = false; d.wait = 0;
+                d.texApplied = false; d.texWait = 0; d.texAlbedo = null;
+            }
+            Plugin.Diag("[District] session state reset (new game or save-reload) — leaves + texture bindings rebuild");
+        }
+
         // Per-frame (Plugin.Update): drive every registry entry.
         internal static void TickDistrictMeshSwap()
         {
@@ -571,6 +602,37 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogError("[DistrictTex] apply: " + ex); e.texApplied = true; }   // fail once, loudly — don't spam per frame
         }
 
+        // Neutral PBR maps: the vanilla sheet's normal/roughness/metallic/AO stay bound under our albedo and paint the
+        // donor building's surface detail (bricks, window bumps) over the custom texture — the "corrupt" look. Flat
+        // stand-ins kill it: normal (128,128,255,a128 — flat in both standard and swizzled encodings), mid-grey
+        // roughness (matte), black metallic, white AO. Created once, 4x4, uncompressed.
+        static UnityEngine.Texture2D neuNormal, neuRough, neuMetal, neuAO;
+        static UnityEngine.Texture2D NeutralTex(UnityEngine.Color32 c)
+        {
+            var t = new UnityEngine.Texture2D(4, 4, UnityEngine.TextureFormat.RGBA32, false);
+            var px = new UnityEngine.Color32[16]; for (int i = 0; i < 16; i++) px[i] = c;
+            t.SetPixels32(px); t.Apply(false, true);
+            return t;
+        }
+        static void NeutralizeSurfaceMaps(UnityEngine.Material mat)
+        {
+            if (neuNormal == null)
+            {
+                neuNormal = NeutralTex(new UnityEngine.Color32(128, 128, 255, 128));
+                neuRough = NeutralTex(new UnityEngine.Color32(140, 140, 140, 140));
+                neuMetal = NeutralTex(new UnityEngine.Color32(0, 0, 0, 255));
+                neuAO = NeutralTex(new UnityEngine.Color32(255, 255, 255, 255));
+            }
+            void Set(string prop, UnityEngine.Texture2D tex)
+            {
+                if (mat.HasProperty(prop) && !ReferenceEquals(mat.GetTexture(prop), tex)) mat.SetTexture(prop, tex);
+            }
+            Set("_NormalMap", neuNormal);
+            Set("_RoughnessMap", neuRough);
+            Set("_MetallicMap", neuMetal);
+            Set("_AmbiantOcclusionMap", neuAO);   // the game's own spelling
+        }
+
         // Bind our albedo on the PRIVATE layer's runtime materials. The sheet property is picked per material: "_MainTex"
         // when present and bound, else the largest bound Texture2D (the building sheet dwarfs masks/LUTs). Under
         // DistrictDebug the first pass dumps every material's texture properties so a wrong pick is visible in the log.
@@ -598,9 +660,14 @@ namespace HumankindAssetFramework
                                 if (pn == "_MainTex") pick = pn;
                                 if (biggest == null || t2.width * t2.height > biggest.width * biggest.height) { biggest = t2; biggestProp = pn; }
                             }
-                            if (already) { n++; continue; }
+                            if (already) { n++; NeutralizeSurfaceMaps(mat); continue; }
                             if (pick == null) pick = biggestProp;
-                            if (pick != null) { mat.SetTexture(pick, e.texAlbedo); n++; if (log) Plugin.Diag($"[DistrictTex] '{e.district}': albedo bound on {fld}.{pick}"); }
+                            if (pick != null)
+                            {
+                                mat.SetTexture(pick, e.texAlbedo); n++;
+                                NeutralizeSurfaceMaps(mat);
+                                if (log) Plugin.Diag($"[DistrictTex] '{e.district}': albedo bound on {fld}.{pick} (+neutral surface maps)");
+                            }
                         }
                 if (log) Plugin.Diag($"[DistrictTex] '{e.district}': albedo bound on {n} material slot(s) of the private layer");
                 return n > 0;

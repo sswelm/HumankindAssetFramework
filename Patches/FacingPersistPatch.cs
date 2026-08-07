@@ -54,7 +54,14 @@ namespace HumankindAssetFramework
                 .FirstOrDefault(m => m.Name == "Load" && m.GetParameters().Length >= 1
                     && m.GetParameters()[0].ParameterType.Name == "StorageContainerInfo");
         }
-        static void Postfix(object __0) { try { FacingPersist.OnLoad(__0); } catch (Exception ex) { Plugin.Log.LogError("[Facing] load hook: " + ex); } }
+        static void Postfix(object __0)
+        {
+            try { FacingPersist.OnLoad(__0); } catch (Exception ex) { Plugin.Log.LogError("[Facing] load hook: " + ex); }
+            // an IN-SESSION save-reload rebuilds the world without the AnimationLoad rearm — the district machinery
+            // must drop its session-scoped leaves/bindings here or it forces the new channels onto corpse leaves
+            // (the Oracle's empty tile). Cheap and idempotent; the per-frame tick rebuilds everything lazily.
+            try { UniversalInject.ResetDistrictSessionState(); } catch (Exception ex) { Plugin.Log.LogError("[District] load reset: " + ex); }
+        }
     }
 
     internal static class FacingPersist
