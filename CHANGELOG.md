@@ -227,6 +227,23 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Authoring tools
 
+- **THE PREVIEW TRUTH ARC (2026-08-07).** Two days that turned the editor previews from bake-inspection aids
+  into placement instruments a pack author can trust. The shared conventions, across the Model Factory,
+  Animation Lab and District Factory panes: a **true-size tile hex** (6.93 across flats — the measured
+  center-to-center tile spacing; the old ~10 square flattered every fit) pinned at the **origin plane** (never
+  anchored to the model's bounds — that once hid a half-sunk district bake); **water-blue for boats** (the
+  pawn's own Boat capability profile, never the name); a **forward arrow** (+Z, verified against the
+  Jagdpanzer's barrel; edge-on, the six hex facings); **Center** re-frame and 2× deeper zoom. The Factory and
+  the Lab now share the faithful **rest-pose FBX view** for animated entries — attempt 1 force-reimported the
+  shared FBX and scrambled tiling-UV preview textures (reverted, root-caused, re-attempted read-only:
+  VERIFIED). The arc's crown was the stealth helicopter's centering: the hex made a years-invisible off-center
+  bake obvious, which exposed that **Position offset was silently dead on the animated path** — now applied in
+  the rig conversion in true **game units** (pre-divided by the FBX import's `size/longest` factor that used
+  to multiply the dial ~3×) — and that **donor-clip models are re-anchored by the donor rebase** (in-game
+  position ≠ FBX position; three launches burned misreading placement over a district tile). Previews now show
+  donor-clip entries **footprint-centered** — the measured approximation, ±0.5 units on the helicopter, honest
+  caption included; exact rebase-in-editor prediction is the documented open end. See
+  [docs/Donor-Clip-Flight.md](docs/Donor-Clip-Flight.md) and [docs/Editor-Tools.md](docs/Editor-Tools.md).
 - **Vehicle Lab: helicopters + interior-part detection (2026-08-03).** Two new part roles rig a **rotorcraft** the
   same no-Blender way as a wheeled vehicle: **Rotor** (`R`) and **Tail rotor** (`L`). Each rotor fuses into **one
   hub bone** (proximity clustering would shred a wide blade disc into pinwheeling halves — the RAH-66's 18-unit

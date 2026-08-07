@@ -66,11 +66,14 @@ Idempotent, logged as `[Rest] <name>: rests rebased (...)`, and followed by the 
 
 **Placement consequence (the stealth-helicopter arc, 2026-08-07):** because the rebase re-anchors the geometry
 through the donor's skeleton, a donor-clip model's in-game position is **not** simply its FBX position — most of a
-source file's own off-centering is absorbed by the rebase, and the editor preview (which shows the un-rebased rig)
-cannot fully predict it. The preview caption flags this (`⚠ donor-clip`). Practical rule: get the model upright,
-sized and facing right in the preview; judge **position** in-game and trim with the Factory's **Position offset**
-(now in true game units on the animated path — the helicopter needed a single −0.5 sway trim). Reproducing the
-rebase inside the editor preview is a possible future feature.
+source file's own off-centering is absorbed by the rebase. The editor previews apply that **measured net effect**:
+donor-clip entries are shown **footprint-centered on the tile hex**, which matched the game to within ±0.5 units on
+the helicopter (the caption says "shown centered — fine position trims in-game"). Practical rule: upright, size and
+facing are dialed in the preview; the last half-unit of **position** is judged in-game and trimmed with the
+Factory's **Position offset** — now in true **game units** on the animated path (the bake pre-divides by the FBX
+import's `size/longest` scale, which used to silently multiply the dial ~3×; the helicopter's final trim was a
+single −0.5 sway). The *exact* version — reproducing `RebaseRootIdentity` + the donor's root-channel anchoring in
+the editor for pixel prediction — is an open end (below).
 
 ## The bake's axle frames (Vehicle Lab)
 
@@ -195,6 +198,12 @@ while the map streams in — the 3-second rescan self-corrects.
 
 ## Open ends
 
+- **Exact placement prediction in the editor preview.** Today's previews show donor-clip entries
+  footprint-centered — the *measured approximation* of the rebase (±0.5 units on the helicopter). The exact
+  version would load the donor skeleton asset in the editor, run the same `RebaseRootIdentity` math plus the
+  donor's root-channel anchoring, and render where those equations put the vertices — pixel prediction, no
+  error bar, and the Position-offset trim visible in the preview too (the approximation deliberately hides it,
+  since re-centering would cancel it). All inputs exist editor-side; scoped future work.
 - Terrain-hug tuning knobs still session-global: `radius`, `ease` and the `only`/`skip` district-name filters
   live only in the dial file (they describe the *map*, not the model, so per-model versions may never be
   needed — revisit if a second flying unit wants a different city definition).
