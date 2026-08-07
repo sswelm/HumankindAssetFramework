@@ -34,11 +34,11 @@ Author a static model (or the *model half* of an animated one): pick/create a re
 tune geometry and shading; **Bake** → produces a `Skeleton` + `Atlas` and a registry entry. *Key controls:* target pawn,
 model file, Size, Strip parts, reduce-to-tris, height-UVs, winding fix, double-sided, albedo brightness/saturation,
 keep-black, atlas size (256–4096), material mode, hide-donor, freeze-donor, re-spawn-after-load, embedded 3D preview.
-The preview stands the model on a tile-sized ground square at the true in-game surface level — sunk or floating bakes
+The preview stands the model on a true-size tile hex at the true in-game surface level — sunk or floating bakes
 preview that way (static entries show the shipped mesh; animated entries the rest-pose rig, the same faithful view as
-the Animation Lab). Boats stand on a **water-blue** square instead of grass — detected from the pawn's own Boat
+the Animation Lab). Boats stand on a **water-blue** hex instead of grass — detected from the pawn's own Boat
 capability profile, never the name — so a waterline offset (hull below the blue) reads naturally. The **forward arrow**
-on the square marks the in-game facing: dial the model's nose/bow/barrel along it and the unit moves and fights the
+on the hex marks the in-game facing: dial the model's nose/bow/barrel along it and the unit moves and fights the
 right way round. Orbit/pan/deep-zoom controls with a **Center** button that re-frames a lost view.
 *Writes:* `pack.json` (via `ModelRegistry.Upsert`) + baked assets, through `ConfigFor → UniversalBaker`.
 **Deep dive:** [Factory-Manual.md](Factory-Manual.md).
@@ -49,7 +49,7 @@ state-driven idle/move/after/attack, deploy conversion, recoil/slam, turret & mu
 *Key controls:* Clip field + range picker (▶) + Pick, state-driven toggle (idle-alt interval, attack repeats), deploy
 block (frames, strip-parts, recoil frames/step/return, slam), turret bone + aim axis, muzzle bone + offset, hand prop
 (bone/material/live rotation), animate-only bones, convert-raw-rig, fix-100×. The rest-pose preview stands the rig on a
-tile-sized ground square at the in-game surface level (water-blue for Boat-profile pawns, forward arrow = in-game
+true-size tile hex at the in-game surface level (water-blue for Boat-profile pawns, forward arrow = in-game
 facing) — the faithful upright/grounded view for animated models — with orbit/pan/deep-zoom and a **Center** re-frame
 button.
 *Writes:* `pack.json`, same `UniversalBaker.BuildAnimated` pipeline. **Deep dive:** [Animated-Models.md](Animated-Models.md), [Factory-Manual.md](Factory-Manual.md) §16.
@@ -94,7 +94,7 @@ reuses the last rig GLB; skipping Vehicleize bakes the OLD rig).
 ### District Factory — `Tools ▸ HAF ▸ District Factory`
 Bake a custom static district building — imports a model, bakes a **bone-free, auto-leveled FxMesh**, writes the
 district registry entry (incl. the baked **albedo GUID** the plugin's texture injection binds) the district repoint
-reads. An **embedded preview pane** shows the baked mesh, textured, on a tile-sized ground square at the true in-game
+reads. An **embedded preview pane** shows the baked mesh, textured, on a true-size tile hex at the true in-game
 surface level — Facing and Position offset preview live; orbit/pan/deep-zoom + a **Center** re-frame button. *Key controls:* district
 name + Pick, model file, Size, Rotation offset (stand it up), Facing on tile (turn it), Position offset (place it),
 target tris, normals, strip parts, isolate. *Writes:*

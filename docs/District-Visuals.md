@@ -140,7 +140,8 @@ ground square pinned at the true in-game surface level. The placement controls s
    reference — the direction 0° corresponds to — so re-dialing a building later stays consistent. *(The old
    three-field FxMesh import-angles control is retired from the UI — it overlapped Rotation offset and invited
    tipping; entries authored with it keep working.)*
-3. **Position offset — place it** (previewed LIVE). Nudge across the tile in world units (a tile is ~10; X/Z slide,
+3. **Position offset — place it** (previewed LIVE). Nudge across the tile in world units (a tile hex is ~7 across
+   its flats; X/Z slide,
    Y lifts off the ground) — the same knob the Model Factory has for units, applied *after* the auto-level so the
    leveling can't cancel it.
 4. **Grounding is automatic** (2026-08-06). The game plants the mesh by its origin at the tile surface and nothing
@@ -149,8 +150,9 @@ ground square pinned at the true in-game surface level. The placement controls s
    draw-time rotation applied and shifts them so the lowest point sits on the surface, footprint centered. Any
    rotation combination comes out standing level. (District paths only — props/projectiles keep their meaningful
    pivots.)
-5. **Scale.** Baked-in (the `Size` knob), so resizing needs a re-bake. A district tile is ~10 across; a full site-plan
-   model can carry Size 6–9, a single building ~2.5–5.
+5. **Scale.** Baked-in (the `Size` knob), so resizing needs a re-bake. A district tile hex is **~7 across its flats
+   (~8 corner to corner)** — the preview hex is true size, measured from the map's center-to-center tile spacing
+   (6.93). A full site-plan model can carry Size 5–6, a single building ~2.5–5.
 
 ## Texture — SOLVED (2026-08-06): the private output layer
 
