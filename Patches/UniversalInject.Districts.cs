@@ -684,7 +684,11 @@ namespace HumankindAssetFramework
             {
                 if (mat.HasProperty(prop) && !ReferenceEquals(mat.GetTexture(prop), tex)) mat.SetTexture(prop, tex);
             }
-            // REAL surface maps when the bake shipped them (same rects as the albedo atlas); neutral stand-ins otherwise
+            // ONLY entries that BAKED surface maps get the full set (real normal/rough + neutral metal/AO — the
+            // temple's verified combo). Entries WITHOUT baked maps keep the donor material's own vanilla maps —
+            // the reactor's verified 08-06 look; blanket neutrals turned its grey palette into chrome domes and
+            // near-black walls (the 08-08 "texture got scrambled" regression).
+            if (e.texNormal == null && e.texRough == null) return;
             Set("_NormalMap", e.texNormal != null ? e.texNormal : neuNormal);
             Set("_RoughnessMap", e.texRough != null ? e.texRough : neuRough);
             Set("_MetallicMap", neuMetal);
