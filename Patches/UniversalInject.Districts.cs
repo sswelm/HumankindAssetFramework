@@ -436,6 +436,7 @@ namespace HumankindAssetFramework
                 if (load != null && load.GetParameters().Length == 2 && distFxManager != null)
                     load.Invoke(clone, new object[] { distFxManager, fxNextDoublon != null ? fxNextDoublon.Invoke(null, null) : (uint)0 });
                 Plugin.Diag($"[District] built PRIVATE leaf '{t.Name}': MaterialIndex={GF(t, "materialIndex")?.GetValue(clone)} meshIndex={GF(t, "meshIndex")?.GetValue(clone)} textureIndex={GF(t, "textureIndex")?.GetValue(clone)}");
+                DumpLeafFields(clone);   // reveal-ramp hunt: what timing/growth levers does the clone carry?
                 return clone;
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] build private leaf: " + ex); return null; }
@@ -477,6 +478,36 @@ namespace HumankindAssetFramework
                 if (!e.pointedLogged) { e.pointedLogged = true; Plugin.Diag($"[District] '{e.district}' ISOLATED: channel {e.layer} -> its private leaf (this tile only)."); }
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] point channel: " + ex); }
+        }
+
+        // Diagnostic (DistrictDebug): dump every serializable field of the cloned leaf — the hunt for the
+        // level-build reveal-ramp levers (duration/speed/curve fields we could zero on the load path).
+        static bool leafFieldsDumped;
+        static void DumpLeafFields(object clone)
+        {
+            try
+            {
+                if (leafFieldsDumped || Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;
+                leafFieldsDumped = true;
+                var t = clone.GetType();
+                Plugin.Log.LogInfo($"[LeafDump] === {t.FullName} (base {t.BaseType?.Name}) ===");
+                for (var ct = t; ct != null && ct.Name != "Object" && ct.Name != "ScriptableObject"; ct = ct.BaseType)
+                {
+                    foreach (var f in ct.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+                    {
+                        object v = null; try { v = f.GetValue(clone); } catch { }
+                        string vs;
+                        var ft = f.FieldType;
+                        if (v == null) vs = "<null>";
+                        else if (ft.IsPrimitive || ft.IsEnum || ft == typeof(string)) vs = v.ToString();
+                        else if (ft.IsValueType) vs = v.ToString();
+                        else if (ft.IsArray) vs = $"{ft.GetElementType()?.Name}[{((Array)v).Length}]";
+                        else vs = ft.Name;
+                        Plugin.Log.LogInfo($"[LeafDump] {ct.Name}.{f.Name} : {ft.Name} = {vs}");
+                    }
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[LeafDump] " + ex); }
         }
 
         // GLOBAL mode, per entry: collect the shared leaves once and re-point them all (affects every district sharing them).
