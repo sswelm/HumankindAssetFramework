@@ -457,6 +457,14 @@ namespace HumankindAssetFramework
                     var sel = evf.GetValue(box);
                     if (sel == null) return;
                     e.privateLeaf = BuildPrivateLeaf(sel, e.fxMeshGuid, e.atlasGuid);
+                    // WONDER path: a database-fed selector (fillMode LevelBuildDatabase) has no inline leaves to walk —
+                    // source them from the entry's own cell asset in the 'ArtificialWonder' repository database instead
+                    // (filled natively for vanilla wonders; via [WonderRow] for ours). Same clone/swap downstream.
+                    if (e.privateLeaf == null)
+                    {
+                        var wm = WonderDbMaterial(e.district);
+                        if (wm != null) e.privateLeaf = BuildPrivateLeaf(wm, e.fxMeshGuid, e.atlasGuid);
+                    }
                     if (e.privateLeaf == null) { if (e.wait++ % 300 == 0) Plugin.Diag($"[District] '{e.district}': waiting for leaves to load..."); return; }
                 }
                 if (ReferenceEquals(evf.GetValue(box), e.privateLeaf)) return;   // already ours this frame
