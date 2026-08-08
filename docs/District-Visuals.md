@@ -136,10 +136,13 @@ ground square pinned at the true in-game surface level. The placement controls s
    auto-aligns the *longest* axis, which can tip a near-cubic model onto its side around ANY axis (the plant needed
    `Z=-90`). Dial it in the preview — no relaunch round-trips.
 2. **Facing on tile — turn it** (0–360°, previewed LIVE). Always rotates the standing building about the vertical, so
-   it can never tip the model; written into the FxMesh at Bake. The **arrow on the preview tile** is the Facing
-   reference — the direction 0° corresponds to — so re-dialing a building later stays consistent. *(The old
-   three-field FxMesh import-angles control is retired from the UI — it overlapped Rotation offset and invited
-   tipping; entries authored with it keep working.)*
+   it can never tip the model; written into the FxMesh at Bake. The preview draws a **NESW compass rose** (2026-08-08)
+   — lines to all four cardinals with letters reading North-up — because a district has no facing of its own: the
+   rose shows how the tile sits on the map, and Facing 0° points along the North line. The preview hex is also
+   **corner-forward** (the in-game district cell presents a *corner* toward North, measured on the reactor; unit
+   previews stay edge-forward — units face their neighbors edge-on), and the bake's hex-clip planes match the same
+   orientation. *(The old three-field FxMesh import-angles control is retired from the UI — it overlapped Rotation
+   offset and invited tipping; entries authored with it keep working.)*
 3. **Position offset — place it** (previewed LIVE). Nudge across the tile in world units (a tile hex is ~7 across
    its flats; X/Z slide,
    Y lifts off the ground) — the same knob the Model Factory has for units, applied *after* the auto-level so the

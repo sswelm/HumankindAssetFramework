@@ -268,6 +268,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Authoring tools
 
+- **DISTRICT COMPASS ROSE + CORNER-FORWARD HEX (2026-08-08, verified in-game).** The district preview's tile
+  hex was drawn edge-forward — the *unit* convention — but the in-game district cell presents a **corner**
+  toward the model's forward (user-measured on the reactor). The shared hex builder gained an orientation
+  parameter (units 30°, districts 0°) and the bake's hex-clip planes rotated to match the real cell walls. The
+  facing arrow became a **NESW compass rose** — lines to all four cardinals, letters reading North-up — since
+  a district has no facing of its own: what its author needs is map orientation, and the preview and the game
+  now agree on it.
 - **THE PREVIEW TRUTH ARC (2026-08-07).** Two days that turned the editor previews from bake-inspection aids
   into placement instruments a pack author can trust. The shared conventions, across the Model Factory,
   Animation Lab and District Factory panes: a **true-size tile hex** (6.93 across flats — the measured
