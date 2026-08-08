@@ -33,6 +33,11 @@ namespace HumankindAssetFramework
             public UnityEngine.Texture2D texAlbedo;                      // our baked albedo, bound on the PRIVATE output layer
             public UnityEngine.Texture2D texNormal, texRough;            // baked surface maps (null = the neutral stand-ins)
             public bool texApplied; public int texWait;
+            // PERF: the (runtime material, texture property) slots the albedo is bound on, captured by the first full
+            // walk — the periodic re-assert then compares one reference per slot instead of re-discovering properties
+            // (GetTexturePropertyNames allocates a string[] per material per call). Cleared when a material dies
+            // (res switch rebuilds the layer's materials) or on session reset — the full walk then runs again.
+            public readonly List<(UnityEngine.Material mat, string prop)> boundSlots = new List<(UnityEngine.Material, string)>();
         }
         internal static readonly List<DistrictModel> distModels = new List<DistrictModel>();
 
@@ -449,6 +454,11 @@ namespace HumankindAssetFramework
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] build private leaf: " + ex); return null; }
         }
+        // PERF: reflection handles for the per-frame hot path — the types are stable within a session, so resolve
+        // once and reuse (AccessTools.Field/GetMethods re-walk the type's members on every call otherwise).
+        static FieldInfo fiPlbcChannels, fiChanEvolverMaterial;
+        static MethodInfo miRefreshChannel; static object[] refreshArgs;
+
         // ISOLATE mode, per entry: keep this district's channel pointed at ITS private leaf + re-spawned particle.
         // Re-applied each frame (the game reloads the shared selector into the channel on UpdateLevelBuild).
         static void PointEntryAtPrivateLeaf(DistrictModel e)
@@ -456,9 +466,11 @@ namespace HumankindAssetFramework
             try
             {
                 if (e.plbc == null) return;
-                if (!(AccessTools.Field(e.plbc.GetType(), "channels")?.GetValue(e.plbc) is Array channels) || e.layer >= channels.Length) return;
+                if (fiPlbcChannels == null) fiPlbcChannels = AccessTools.Field(e.plbc.GetType(), "channels");
+                if (!(fiPlbcChannels?.GetValue(e.plbc) is Array channels) || e.layer >= channels.Length) return;
                 var box = channels.GetValue(e.layer);
-                var evf = GF(box.GetType(), "evolverMaterial");
+                if (fiChanEvolverMaterial == null) fiChanEvolverMaterial = GF(box.GetType(), "evolverMaterial");
+                var evf = fiChanEvolverMaterial;
                 if (evf == null) return;
                 // build the private leaf lazily — the selector's sub-materials load async, so retry until they're ready.
                 if (e.privateLeaf == null)
@@ -480,9 +492,14 @@ namespace HumankindAssetFramework
                 evf.SetValue(box, e.privateLeaf);
                 channels.SetValue(box, e.layer);   // write the mutated struct back into the array
                 // re-spawn the particle so PatchParticle picks up the private leaf's MaterialIndex
-                var refresh = e.plbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
-                    .FirstOrDefault(m => m.Name == "RefreshChannel" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
-                if (refresh != null) refresh.Invoke(e.plbc, new object[] { e.layer, System.Enum.ToObject(refresh.GetParameters()[1].ParameterType, 0) });
+                if (miRefreshChannel == null)
+                {
+                    miRefreshChannel = e.plbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                        .FirstOrDefault(m => m.Name == "RefreshChannel" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
+                    if (miRefreshChannel != null)
+                        refreshArgs = new object[] { 0, System.Enum.ToObject(miRefreshChannel.GetParameters()[1].ParameterType, 0) };
+                }
+                if (miRefreshChannel != null) { refreshArgs[0] = e.layer; miRefreshChannel.Invoke(e.plbc, refreshArgs); }
                 if (!e.pointedLogged) { e.pointedLogged = true; Plugin.Diag($"[District] '{e.district}' ISOLATED: channel {e.layer} -> its private leaf (this tile only)."); }
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] point channel: " + ex); }
@@ -542,6 +559,8 @@ namespace HumankindAssetFramework
         }
 
         // Postfix (per district UpdateLevelBuild): match against the registry and cache each entry's component + layer.
+        // PERF: this fires for EVERY district on the map (city refreshes touch dozens) — cache the reflection handles.
+        static FieldInfo fiDistrictPlbc; static int mainLayerCached = -1;
         internal static void DistrictApplyEntries(object district)
         {
             try
@@ -553,17 +572,20 @@ namespace HumankindAssetFramework
                 foreach (var e in distModels)
                 {
                     if (e.district != name || e.fxMeshGuid == null) continue;
-                    var plbc = AccessTools.Field(district.GetType(), "presentationLevelBuildComponent")?.GetValue(district);
+                    if (fiDistrictPlbc == null) fiDistrictPlbc = AccessTools.Field(district.GetType(), "presentationLevelBuildComponent");
+                    var plbc = fiDistrictPlbc?.GetValue(district);
                     if (plbc == null) continue;
                     // FRESH-FIRST, never `??`-cached: a second game in the same app run replaces the FxManager, and a
                     // stale cached one has fxComponents == null — every leaf LoadIFN then NREs (the Oracle incident:
                     // the wonder class was innocent, the corpse manager was the whole failure).
                     var fm = GetMember(plbc, "FxManager");
                     if (fm != null) distFxManager = fm;
-                    int layer = 0;
-                    var lf = district.GetType().GetField("mainLevelBuildComponantLayer", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.FlattenHierarchy);
-                    if (lf?.GetValue(null) is int li) layer = li;
-                    e.plbc = plbc; e.layer = layer;
+                    if (mainLayerCached < 0)
+                    {
+                        var lf = district.GetType().GetField("mainLevelBuildComponantLayer", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.FlattenHierarchy);
+                        mainLayerCached = lf?.GetValue(null) is int li ? li : 0;
+                    }
+                    e.plbc = plbc; e.layer = mainLayerCached;
                     if (!e.matchLogged) { e.matchLogged = true; Plugin.Diag($"[District] registry matched '{e.district}' (isolate={e.isolate})."); }
                 }
             }
@@ -584,6 +606,7 @@ namespace HumankindAssetFramework
                 d.plbc = null; d.privateLeaf = null; d.leaves.Clear(); d.collected = false;
                 d.matchLogged = d.pointedLogged = false; d.wait = 0;
                 d.texApplied = false; d.texWait = 0; d.texAlbedo = null; d.texNormal = null; d.texRough = null;
+                d.boundSlots.Clear();   // the cached (material, property) bind slots are corpses with the old layer
             }
             ResetWonderTemplates();   // plugin-loaded wonder templates are corpses after a reload; re-load + re-fill swap-first
             Plugin.Diag("[District] session state reset (new game or save-reload) — leaves + texture bindings rebuild");
@@ -649,12 +672,7 @@ namespace HumankindAssetFramework
                 // flush: mark the descriptor's material data changed (re-writes the element GPU data, incl. our
                 // textureIndex + layer index) and re-spawn this district's particle so nothing keeps a stale index
                 if (desc != null) AccessTools.Field(desc.GetType(), "materialDataHasChanged")?.SetValue(desc, true);
-                if (e.plbc != null)
-                {
-                    var refresh = e.plbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
-                        .FirstOrDefault(m => m.Name == "RefreshChannel" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
-                    refresh?.Invoke(e.plbc, new object[] { e.layer, System.Enum.ToObject(refresh.GetParameters()[1].ParameterType, 0) });
-                }
+                if (e.plbc != null && miRefreshChannel != null) { refreshArgs[0] = e.layer; miRefreshChannel.Invoke(e.plbc, refreshArgs); }
             }
             catch (Exception ex) { Plugin.Log.LogError("[DistrictTex] apply: " + ex); e.texApplied = true; }   // fail once, loudly — don't spam per frame
         }
@@ -703,31 +721,51 @@ namespace HumankindAssetFramework
             try
             {
                 if (e.texAlbedo == null || e.privateLeaf == null) return false;
+
+                // FAST re-assert (the % 15 tick): rebind only the CACHED slots — one reference compare per slot,
+                // zero allocation. A destroyed material (res switch rebuilt the layer's materials) invalidates the
+                // cache and drops through to the full walk, which is exactly when re-discovery is needed.
+                if (!log && e.boundSlots.Count > 0)
+                {
+                    bool stale = false;
+                    for (int i = 0; i < e.boundSlots.Count && !stale; i++)
+                    {
+                        var (mat, prop) = e.boundSlots[i];
+                        if (mat == null) { stale = true; break; }   // Unity fake-null: material was destroyed
+                        if (!ReferenceEquals(mat.GetTexture(prop), e.texAlbedo))
+                        { mat.SetTexture(prop, e.texAlbedo); NeutralizeSurfaceMaps(e, mat); }
+                    }
+                    if (!stale) return true;
+                    e.boundSlots.Clear();
+                }
+
                 var ol = GF(e.privateLeaf.GetType(), "outputLayer")?.GetValue(e.privateLeaf);
                 if (!(GetMember(ol, "RenderOutputs") is Array ros)) return false;
                 int n = 0;
                 bool dump = log && Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value;
+                e.boundSlots.Clear();
                 foreach (var ro in ros)
                     foreach (var fld in new[] { "currentRenderMaterial", "runTimeRenderMaterial", "highResRunTimeRenderMaterial" })
                         if (GetMember(ro, fld) is UnityEngine.Material mat && mat != null)
                         {
                             string pick = null; UnityEngine.Texture2D biggest = null; string biggestProp = null;
-                            bool already = false;
+                            string alreadyProp = null;
                             foreach (var pn in mat.GetTexturePropertyNames())
                             {
                                 var cur = mat.GetTexture(pn);
                                 if (dump) Plugin.Diag($"[DistrictTex]   {fld}('{mat.shader?.name}').{pn} = {(cur != null ? $"'{cur.name}' {cur.width}x{cur.height}" : "null")}");
-                                if (ReferenceEquals(cur, e.texAlbedo)) { already = true; continue; }
+                                if (ReferenceEquals(cur, e.texAlbedo)) { alreadyProp = pn; continue; }
                                 if (!(cur is UnityEngine.Texture2D t2)) continue;
                                 if (pn == "_MainTex") pick = pn;
                                 if (biggest == null || t2.width * t2.height > biggest.width * biggest.height) { biggest = t2; biggestProp = pn; }
                             }
-                            if (already) { n++; NeutralizeSurfaceMaps(e, mat); continue; }
+                            if (alreadyProp != null) { n++; NeutralizeSurfaceMaps(e, mat); e.boundSlots.Add((mat, alreadyProp)); continue; }
                             if (pick == null) pick = biggestProp;
                             if (pick != null)
                             {
                                 mat.SetTexture(pick, e.texAlbedo); n++;
                                 NeutralizeSurfaceMaps(e, mat);
+                                e.boundSlots.Add((mat, pick));
                                 if (log) Plugin.Diag($"[DistrictTex] '{e.district}': albedo bound on {fld}.{pick} (+neutral surface maps)");
                             }
                         }
