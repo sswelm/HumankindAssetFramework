@@ -74,10 +74,13 @@ Verified: the temple renders on the native chain, and an in-session reload plays
 **bottom-to-roof level-build reveal** on the custom mesh — native wonder theatrics for free. Donor roulette
 (silo / holy site / natural reserve) is over; en route it produced the donor laws below, kept for reference.
 
-**Known cosmetic race (fix in progress):** on load, the native selector can start revealing the *template*
-material (Artemis) for the seconds before the walker's swap lands — the swap and the native reveal race, and
-either can win. The refinement is swap-first sequencing: load the template plugin-side, repoint the channel
-first, fill the cell last, so the template is never drawable on the tile.
+**Swap-first sequencing (VERIFIED — the template is never visible):** the first build filled the cell up
+front, which raced the walker's swap against the native reveal — on a cold cache the template (Artemis) showed
+for a few seconds before the swap landed. Now the template material is loaded *plugin-side* into a stash
+(never via the repository cell), the walker builds the private leaf from the stash, and the cell is filled
+only **after** the swap is live (fallback only). The native selector never has a drawable template on the
+tile: briefly empty, then the custom model, at any load speed. The session reset clears the stash (corpse
+assets after reload) and re-runs the same sequence.
 
 **Donor-family laws (measured 2026-08-08, now historical):** a donor affinity only worked if its family was a
 **culture-agnostic building-model family** with inline variant pairs (Missile Silo: works). Holy Site's table
