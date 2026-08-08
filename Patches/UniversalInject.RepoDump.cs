@@ -18,35 +18,37 @@ namespace HumankindAssetFramework
         static int wonderRowTick;
         static readonly HashSet<string> wonderRowLogged = new HashSet<string>();
 
-        // SPIKE step 2: fill a wonder's empty cell in the 'ArtificialWonder' database (name -> FxEvolverMaterial guid).
-        // The dump proved our wonder's name is already in the criteria axis with a NULL guid — the whole reason the
-        // native ArtificialWonder affinity rendered nothing. Config format: "WonderName=a,b,c,d;Other=..." .
+        // SPIKE step 2, SWAP-FIRST sequencing (the "wipe Artemis clean" rule): the template material is loaded
+        // PLUGIN-SIDE (never via the repository cell), the walker builds the private leaf from the stash and
+        // repoints the channel — and only THEN is the wonder's cell filled (fallback/consistency only). The
+        // native selector therefore never has a drawable template on our tile: blank for a moment, then OUR
+        // model, every load. Config format: "WonderName=a,b,c,d;Other=..." .
         // Re-arms itself: the repository rebuilds its matrices on session reload, wiping late-added cells.
+        static readonly Dictionary<string, object> wonderTemplates = new Dictionary<string, object>();
+
+        internal static void ResetWonderTemplates()   // called from ResetDistrictSessionState — assets are corpses after a reload
+        {
+            wonderTemplates.Clear();
+            wonderRowLogged.Clear();
+        }
+
+        // Leaf source for wonder entries: the plugin-loaded template material (never the repository cell).
+        internal static object WonderTemplate(string wonderName)
+        {
+            return wonderTemplates.TryGetValue(wonderName, out var m) ? m : null;
+        }
+
         internal static void PollWonderRows()
         {
             var cfg = Plugin.WonderNativeRows?.Value?.Trim();
             if (string.IsNullOrEmpty(cfg)) return;
-            if (++wonderRowTick % 30 != 1) return;   // ~2x/second is plenty; the fill is idempotent
+            if (++wonderRowTick % 30 != 1) return;   // ~2x/second is plenty; every step below is idempotent
             try
             {
-                var repoType = AccessTools.TypeByName("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");
-                var inst = repoType?.GetMethod("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.Invoke(null, null);
-                if (inst == null) return;
-                if (!(AccessTools.Property(inst.GetType(), "Loaded")?.GetValue(inst) is bool b) || !b) return;
-                if (!(AccessTools.Field(inst.GetType(), "databaseMatrices1D")?.GetValue(inst) is Array arr)) return;
-
-                // find the 'ArtificialWonder' 1D matrix (boxed struct copy — its cells/criterionNames arrays are shared,
-                // so Add() on the box mutates the real matrix; only value-type fields would be lost, and we touch none)
-                object matrix = null;
-                foreach (var m in arr)
-                    if (m != null && AccessTools.Field(m.GetType(), "Name")?.GetValue(m)?.ToString() == "ArtificialWonder") { matrix = m; break; }
-                if (matrix == null) return;
-                var mt = matrix.GetType();
-                if (!(AccessTools.Property(mt, "CriteriaNames")?.GetValue(matrix) is Array axis)) return;
-                var cells = AccessTools.Field(mt, "cells")?.GetValue(matrix) as Array;
-                var ssType = AccessTools.TypeByName("Amplitude.StaticString");
-                var addM = mt.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(x => x.Name == "Add" && x.GetParameters().Length == 3);
-                if (cells == null || ssType == null || addM == null) return;
+                var fxmType = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxEvolverMaterial");
+                var tryLoad = fxmType?.GetMethods(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(x => x.Name == "TryLoad" && x.GetParameters().Length == 1);
+                var nextIdx = fxmType?.GetMethod("NextDoublonAvoidanceIndex", BindingFlags.Public | BindingFlags.Static);
+                if (tryLoad == null || nextIdx == null) return;
 
                 foreach (var part in cfg.Split(';'))
                 {
@@ -56,72 +58,58 @@ namespace HumankindAssetFramework
                     var guid = ParseGuid4(part.Substring(eq + 1).Trim());
                     if (guid == null) { if (wonderRowLogged.Add(wname + ":badguid")) Plugin.Log.LogWarning($"[WonderRow] '{wname}': unparseable guid"); continue; }
 
-                    int idx = -1;
-                    for (int i = 0; i < axis.Length; i++) if (axis.GetValue(i)?.ToString() == wname) { idx = i; break; }
-                    if (idx < 0) { if (wonderRowLogged.Add(wname + ":noaxis")) Plugin.Log.LogWarning($"[WonderRow] '{wname}': not in the criteria axis (definition not loaded?)"); continue; }
-
-                    // already filled with our guid AND loaded? then nothing to do this tick
-                    var cell = cells.GetValue(idx);
-                    var ct = cell.GetType();
-                    var curGuid = AccessTools.Field(ct, "Guid")?.GetValue(cell);
-                    var curAsset = AccessTools.Field(ct, "Asset")?.GetValue(cell);
-                    bool guidSet = curGuid != null && curGuid.Equals(guid);
-                    if (guidSet && curAsset != null) continue;
-
-                    if (!guidSet)
-                        addM.Invoke(matrix, new object[] { Activator.CreateInstance(ssType, wname), guid, null });
-
-                    // force the cell's asset load — the repo's own LoadAssets coroutine has long finished by now
-                    var fxm = distFxManager;   // the terrain FxManager the district machinery already tracks
-                    if (fxm != null)
+                    // 1) load the template material ourselves and stash it once fully Loaded
+                    if (!wonderTemplates.ContainsKey(wname))
                     {
-                        var loadM = ct.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(x => x.Name == "LoadAssets" && x.GetParameters().Length == 5);
-                        var next = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxEvolverMaterial")?.GetMethod("NextDoublonAvoidanceIndex", BindingFlags.Public | BindingFlags.Static);
-                        var contentType = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxEvolverMaterial");
-                        if (loadM != null && next != null)
-                        {
-                            cell = cells.GetValue(idx);   // re-read: Add mutated it
-                            var args = new object[] { AccessTools.Field(mt, "Name").GetValue(matrix), axis.GetValue(idx), fxm, next.Invoke(null, null), contentType };
-                            var ok = loadM.Invoke(cell, args);
-                            cells.SetValue(cell, idx);    // write the boxed struct (Asset/loadingStatus) back
-                            var asset = AccessTools.Field(ct, "Asset")?.GetValue(cell);
-                            if (wonderRowLogged.Add(wname + ":filled"))
-                                Plugin.Log.LogInfo($"[WonderRow] '{wname}' cell filled -> loaded={ok} asset={(asset != null ? asset.GetType().Name + " '" + asset + "'" : "<null>")}");
-                        }
+                        var mat = tryLoad.Invoke(null, new object[] { guid });
+                        if (mat == null) { if (wonderRowLogged.Add(wname + ":noasset")) Plugin.Log.LogWarning($"[WonderRow] '{wname}': template material not loadable"); continue; }
+                        var fxm = distFxManager;                        // the FxManager the district machinery already tracks
+                        if (fxm == null) continue;                      // not up yet — retry next tick
+                        var loadIfn = mat.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(x => x.Name == "LoadIFN" && x.GetParameters().Length == 2);
+                        loadIfn?.Invoke(mat, new object[] { fxm, nextIdx.Invoke(null, null) });
+                        if (!(AccessTools.Property(mat.GetType(), "Loaded")?.GetValue(mat) is bool ld) || !ld) continue;   // still loading — retry
+                        wonderTemplates[wname] = mat;
+                        Plugin.Diag($"[WonderRow] '{wname}': template loaded plugin-side ({mat.GetType().Name})");
                     }
-                    else if (wonderRowLogged.Add(wname + ":nofxm"))
-                        Plugin.Log.LogInfo($"[WonderRow] '{wname}' guid set; waiting for FxManager to force the asset load");
+
+                    // 2) fill the repository cell ONLY once the entry's swap is live (the player never sees the template)
+                    var entry = distModels.FirstOrDefault(d => d.district == wname);
+                    if (entry == null || entry.privateLeaf == null) continue;   // swap not established yet — cell stays empty
+                    FillWonderCell(wname, guid);
                 }
             }
             catch (Exception ex) { if (wonderRowLogged.Add("ex")) Plugin.Log.LogError("[WonderRow] " + ex); }
         }
 
-        // Leaf source for wonder entries: the loaded FxEvolverMaterial in the entry's own 'ArtificialWonder' DB cell.
-        // Returns null until the cell's asset is loaded (the repoint loop simply retries next frame).
-        internal static object WonderDbMaterial(string wonderName)
+        static void FillWonderCell(string wname, object guid)
         {
-            try
+            var repoType = AccessTools.TypeByName("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");
+            var inst = repoType?.GetMethod("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.Invoke(null, null);
+            if (inst == null) return;
+            if (!(AccessTools.Property(inst.GetType(), "Loaded")?.GetValue(inst) is bool b) || !b) return;
+            if (!(AccessTools.Field(inst.GetType(), "databaseMatrices1D")?.GetValue(inst) is Array arr)) return;
+            // the 'ArtificialWonder' 1D matrix (boxed struct copy — its cells/criterionNames arrays are shared,
+            // so Add() on the box mutates the real matrix; only value-type fields would be lost, and we touch none)
+            foreach (var m in arr)
             {
-                var repoType = AccessTools.TypeByName("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");
-                var inst = repoType?.GetMethod("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.Invoke(null, null);
-                if (inst == null) return null;
-                if (!(AccessTools.Field(inst.GetType(), "databaseMatrices1D")?.GetValue(inst) is Array arr)) return null;
-                foreach (var m in arr)
-                {
-                    if (m == null || AccessTools.Field(m.GetType(), "Name")?.GetValue(m)?.ToString() != "ArtificialWonder") continue;
-                    if (!(AccessTools.Property(m.GetType(), "CriteriaNames")?.GetValue(m) is Array axis)) return null;
-                    if (!(AccessTools.Field(m.GetType(), "cells")?.GetValue(m) is Array cells)) return null;
-                    for (int i = 0; i < axis.Length; i++)
-                    {
-                        if (axis.GetValue(i)?.ToString() != wonderName) continue;
-                        var cell = cells.GetValue(i);
-                        return AccessTools.Field(cell.GetType(), "Asset")?.GetValue(cell);
-                    }
-                    return null;
-                }
+                if (m == null || AccessTools.Field(m.GetType(), "Name")?.GetValue(m)?.ToString() != "ArtificialWonder") continue;
+                var mt = m.GetType();
+                if (!(AccessTools.Property(mt, "CriteriaNames")?.GetValue(m) is Array axis)) return;
+                var cells = AccessTools.Field(mt, "cells")?.GetValue(m) as Array;
+                var ssType = AccessTools.TypeByName("Amplitude.StaticString");
+                var addM = mt.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(x => x.Name == "Add" && x.GetParameters().Length == 3);
+                if (cells == null || ssType == null || addM == null) return;
+                int idx = -1;
+                for (int i = 0; i < axis.Length; i++) if (axis.GetValue(i)?.ToString() == wname) { idx = i; break; }
+                if (idx < 0) { if (wonderRowLogged.Add(wname + ":noaxis")) Plugin.Log.LogWarning($"[WonderRow] '{wname}': not in the criteria axis (definition not loaded?)"); return; }
+                var cell = cells.GetValue(idx);
+                var curGuid = AccessTools.Field(cell.GetType(), "Guid")?.GetValue(cell);
+                if (curGuid != null && curGuid.Equals(guid)) return;   // already filled
+                addM.Invoke(m, new object[] { Activator.CreateInstance(ssType, wname), guid, null });
+                if (wonderRowLogged.Add(wname + ":filled"))
+                    Plugin.Diag($"[WonderRow] '{wname}': cell filled AFTER swap went live (fallback only — the tile draws our private leaf)");
+                return;
             }
-            catch { }
-            return null;
         }
 
         internal static void PollRepoDump()
