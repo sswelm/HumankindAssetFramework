@@ -32,7 +32,6 @@ namespace HumankindAssetFramework
             wonderTemplates.Clear();
             wonderTemplateReqs.Clear();
             wonderRowLogged.Clear();
-            earlyFxm = null; earlyFxmFailed = false;   // the render context's FxManager is a corpse too — re-fetch
         }
 
         // Leaf source for wonder entries: the plugin-loaded template material (never the repository cell).
@@ -61,15 +60,15 @@ namespace HumankindAssetFramework
                     var guid = ParseGuid4(part.Substring(eq + 1).Trim());
                     if (guid == null) { if (wonderRowLogged.Add(wname + ":badguid")) Plugin.Log.LogWarning($"[WonderRow] '{wname}': unparseable guid"); continue; }
 
-                    // 1) load the template material ourselves and stash it once fully Loaded. Start as EARLY as the
-                    // render context allows (during the loading screen) — the level-build reveal ramp then plays
-                    // behind the screen on session load, exactly like vanilla wonders, while a genuine mid-game
-                    // build completion still shows the ceremony. ASYNC ONLY: the synchronous TryLoad variant
-                    // DEADLOCKED the loading screen (blocking bundle load vs the game's own async streaming);
-                    // TryLoadAsync + request polling is the exact flow the repository's own load coroutine uses here.
+                    // 1) load the template material ourselves and stash it once fully Loaded.
+                    // HARD-WON LAW (two deadlocks): DO NOT reach for the render context / FxManager before the
+                    // district machinery has tracked one (distFxManager) — RenderContextAccess.GetInstance from a
+                    // plugin Update tick during the load sequence deadlocks the loading screen, with EITHER load
+                    // variant. Behind-the-screen template loading is falsified; the reveal-on-load is handled
+                    // elsewhere (event capture), not by racing the loading screen.
                     if (!wonderTemplates.ContainsKey(wname))
                     {
-                        var fxm = distFxManager ?? EarlyFxManager();    // district-tracked, or the render context's own (available during load)
+                        var fxm = distFxManager;                        // the FxManager the district machinery tracks — never earlier
                         if (fxm == null) continue;                      // not up yet — retry next tick
                         wonderTemplateReqs.TryGetValue(wname, out var pending);
                         var asyncArgs = new object[] { guid, pending };
@@ -91,34 +90,6 @@ namespace HumankindAssetFramework
                 }
             }
             catch (Exception ex) { if (wonderRowLogged.Add("ex")) Plugin.Log.LogError("[WonderRow] " + ex); }
-        }
-
-        // The render context's IFxManager — how the repository's own asset loader gets it (RenderContextAccess
-        // .GetInstance<IFxManager>(0)). Available during the loading screen, long before distFxManager is tracked.
-        static object earlyFxm; static bool earlyFxmFailed;
-        static Type FindTypeBySimpleName(string simple)
-        {
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                try { foreach (var t in asm.GetTypes()) if (t.Name == simple && t.Namespace != null && t.Namespace.StartsWith("Amplitude")) return t; }
-                catch { }
-            }
-            return null;
-        }
-        static object EarlyFxManager()
-        {
-            if (earlyFxm != null || earlyFxmFailed) return earlyFxm;
-            try
-            {
-                var rca = AccessTools.TypeByName("Amplitude.Graphics.RenderContextAccess") ?? FindTypeBySimpleName("RenderContextAccess");
-                var ifxm = AccessTools.TypeByName("Amplitude.Graphics.Fx.IFxManager") ?? FindTypeBySimpleName("IFxManager");
-                var get = rca?.GetMethods(BindingFlags.Public | BindingFlags.Static)
-                    .FirstOrDefault(x => x.Name == "GetInstance" && x.IsGenericMethodDefinition && x.GetParameters().Length == 1);
-                if (get == null || ifxm == null) { earlyFxmFailed = true; return null; }
-                earlyFxm = get.MakeGenericMethod(ifxm).Invoke(null, new object[] { 0 });   // may be null until the context exists — retry
-                return earlyFxm;
-            }
-            catch { earlyFxmFailed = true; return null; }
         }
 
         static void FillWonderCell(string wname, object guid)
