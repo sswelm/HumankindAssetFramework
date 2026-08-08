@@ -207,6 +207,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Districts
 
+- **THE REVEAL-RAMP LEVER — wonders load complete (2026-08-08, same day).** Every session load replayed the
+  bottom-to-roof level-build reveal on the custom wonder — vanilla plays the same ramp, the loading screen just
+  hides it, and our swap necessarily lands after the screen lifts. Racing the loading screen was **falsified
+  twice** (silent deadlocks — reaching for the render context from a plugin Update tick during the load
+  sequence hangs the game with sync AND async loaders; LAW: never before `distFxManager` is tracked). The
+  answer was a field dump away: `FxEvolverMaterialLevelBuildElement.fadeInOutMode {Stepped, Smooth, Instant}`,
+  the appearance transition itself, encoded per element into GPU data. The wonder-path private clone sets
+  **`Instant`** before its first Load — the temple stands complete the moment the tile renders. Open refinement:
+  an `UpdateLevelBuild` event capture to keep the `Stepped` ceremony for wonders genuinely completed mid-game.
 - **NATIVE WONDER VISUALS — the empty-cell revelation (2026-08-08).** One day after shipping, the Oracle's
   donor-district hack died of obsolescence. Three donor swaps failed in a row (Holy Site: bare tile; Natural
   Reserve: swap landed but drew nothing visible), so instead of donor roulette the visual-resolution chain got
