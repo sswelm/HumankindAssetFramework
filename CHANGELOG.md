@@ -277,6 +277,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Authoring tools
 
+- **DISTRICT FACTORY HEALTH PANEL (2026-08-08, verified through its full lifecycle).** The review's last
+  finding: the week's two costly failures — registry-vs-asset GUID drift and the stale mod bundle — plus
+  July's data-prerequisite trap were all detectable at authoring time, and now they are. On selection, after
+  every Bake, and on Re-check, the window compares every shipped GUID against the asset on disk (mismatch =
+  red box instead of a silent "waiting for leaves" launch), the newest baked asset against the newest built
+  Community assetbundle (bake → STALE BUNDLE warning → rebuild → clears), and the district definition's data
+  (non-empty Additional Visual Levels = the guaranteed-empty-tile error; missing affinity = warning). One
+  green line when everything agrees.
 - **DISTRICT COMPASS ROSE + CORNER-FORWARD HEX (2026-08-08, verified in-game).** The district preview's tile
   hex was drawn edge-forward — the *unit* convention — but the in-game district cell presents a **corner**
   toward the model's forward (user-measured on the reactor). The shared hex builder gained an orientation

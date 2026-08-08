@@ -161,6 +161,12 @@ ground square pinned at the true in-game surface level. The placement controls s
    (~8 corner to corner)** — the preview hex is true size, measured from the map's center-to-center tile spacing
    (6.93). A full site-plan model can carry Size 5–6, a single building ~2.5–5.
 
+**Health panel (2026-08-08):** the District Factory validates on selection / after Bake / Re-check: shipped
+GUIDs vs the assets on disk (drift = the silent "waiting for leaves" launch, now a red box), newest baked
+asset vs the newest built Community assetbundle (**STALE BUNDLE** — re-bakes reshuffle atlas packing, the
+mesh/atlas halves must ship from the same bake), and the definition's data prerequisites (non-empty
+Additional Visual Levels = a guaranteed empty tile; missing ConstructibleVisualAffinity = nothing to swap).
+
 ## Texture — SOLVED (2026-08-06): the private output layer
 
 Districts rendered **untextured** for three weeks — the swap reused the game's own leaf material, and our atlas had no
