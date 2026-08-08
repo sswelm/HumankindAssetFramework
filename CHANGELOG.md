@@ -277,6 +277,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Authoring tools
 
+- **THE PIZZA BAKERY — multi-model districts (2026-08-08, verified: the Oracle's temple + a beech tree).** The
+  District Factory composes MULTIPLE models onto one tile: parts bake with their own knobs, auto-ground to the
+  base's floor, and merge into one mesh with super albedo/normal/rough atlases sharing one rect set — the
+  runtime never learns the word "pizza" (one FxMesh + atlas trio per entry, so isolation/wonders/multi-instance
+  compose for free). The dressing fought back three times, each measured: the multi-material pack
+  **force-flattened alpha** (a=255) and the atlas compressed to **DXT1 (no alpha channel)** — cutout foliage
+  baked as solid triangles until both were made alpha-aware; the v1 albedo-only compose dropped the temple's
+  surface maps and the donor's maps **turned the marble blue** — super normal/rough maps with same-rect
+  area-average blits brought it back; and the game's **shadow pass doesn't alpha-test**, so a dense leaf crown
+  casts a soft solid blob (cosmetic, documented). The headline discovery: **the district shader honors
+  alpha cutout** — card-foliage trees are first-class district dressing.
 - **DISTRICT FACTORY HEALTH PANEL (2026-08-08, verified through its full lifecycle).** The review's last
   finding: the week's two costly failures — registry-vs-asset GUID drift and the stale mod bundle — plus
   July's data-prerequisite trap were all detectable at authoring time, and now they are. On selection, after

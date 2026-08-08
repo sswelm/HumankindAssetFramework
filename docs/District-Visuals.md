@@ -167,6 +167,25 @@ asset vs the newest built Community assetbundle (**STALE BUNDLE** — re-bakes r
 mesh/atlas halves must ship from the same bake), and the definition's data prerequisites (non-empty
 Additional Visual Levels = a guaranteed empty tile; missing ConstructibleVisualAffinity = nothing to swap).
 
+## The pizza bakery — multi-model composition (2026-08-08, verified: temple + beech tree)
+
+A district entry can carry **parts**: extra models composed onto the tile at bake, each with its own model file,
+Size, Rotation offset (stand it up), Facing (turn it) and Position offset (X/Z slide, Y lift). Each part bakes
+through the same core, **auto-grounds to the base model's floor**, and merges into **one mesh + super
+albedo/normal/rough atlases** sharing one set of pack rects — the runtime is untouched (still one FxMesh + one
+atlas trio per entry, so isolation, wonders, and multi-instance all just work). Parts are baked-in: placement
+shows in the preview after Bake.
+
+- **Alpha-cutout foliage works in-game** (verified on the beech tree — the district shader honors the atlas's
+  alpha). The bake keeps transparency end-to-end when a source carries it: the multi-material pack no longer
+  force-flattens alpha, transparent texels skip the black-repaint, `FinalizeAtlas` picks DXT5 over DXT1, and
+  the preview material flips to cutout. Opaque models keep the exact old path (byte-identical re-bakes).
+- **Surface maps ride along**: the base's baked normal/rough atlases blit into same-rect super maps
+  (area-average — a single tap aliases dense normals), neutral fill where a part ships none. (The v1
+  albedo-only shortcut let the donor's maps tint the whole composed model blue — falsified same evening.)
+- **Known cosmetic**: the game's shadow pass does NOT alpha-test, so a dense leaf-card crown casts a merged
+  solid shadow blob (the color pass cuts the leaves correctly; preview clean, measured in-game).
+
 ## Texture — SOLVED (2026-08-06): the private output layer
 
 Districts rendered **untextured** for three weeks — the swap reused the game's own leaf material, and our atlas had no
