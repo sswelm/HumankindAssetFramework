@@ -372,7 +372,7 @@ namespace HumankindAssetFramework
         // ISOLATION: instead of mutating the shared building leaves globally, give ONLY the target district a PRIVATE leaf.
         // Each PresentationLevelBuildComponent has its own channel + Shuriken particle, so pointing just this district's
         // channel at a private (Instantiated) leaf — and re-spawning its particle — scopes our mesh to this tile alone.
-        static object BuildPrivateLeaf(object channelSelector, object fxGuid, object atlasGuid)
+        static object BuildPrivateLeaf(object channelSelector, object fxGuid, object atlasGuid, bool instantAppear = false)
         {
             try
             {
@@ -383,6 +383,14 @@ namespace HumankindAssetFramework
                 var clone = UnityEngine.Object.Instantiate(src);   // a private copy — mutating it won't touch the shared leaf
                 var t = clone.GetType();
                 (GF(t, "fxMesh") ?? GF(t, "mesh"))?.SetValue(clone, fxGuid);
+                // REVEAL-RAMP lever (wonder path): fadeInOutMode {Stepped, Smooth, Instant} is the element's
+                // appearance transition, encoded into its GPU data — Instant skips the bottom-to-roof build ramp.
+                // Set BEFORE the Load below so the first GPU write already carries it.
+                if (instantAppear)
+                {
+                    var fm = GF(t, "fadeInOutMode");
+                    if (fm != null) { fm.SetValue(clone, Enum.Parse(fm.FieldType, "Instant")); Plugin.Diag("[District] private leaf fadeInOutMode -> Instant (reveal ramp skipped)"); }
+                }
                 // TEXTURE INJECTION step 1: point the leaf's texture at the LAYER's own missing-texture slot. That slot's
                 // atlas rect is never rendered by vanilla content (everything real is bound), so its pixels are ours to
                 // paint (step 2, DistrictApplyTexture). The Load below then resolves textureIndex to that rect via the
@@ -464,7 +472,7 @@ namespace HumankindAssetFramework
                     if (e.privateLeaf == null)
                     {
                         var wm = WonderTemplate(e.district);
-                        if (wm != null) e.privateLeaf = BuildPrivateLeaf(wm, e.fxMeshGuid, e.atlasGuid);
+                        if (wm != null) e.privateLeaf = BuildPrivateLeaf(wm, e.fxMeshGuid, e.atlasGuid, instantAppear: true);
                     }
                     if (e.privateLeaf == null) { if (e.wait++ % 300 == 0) Plugin.Diag($"[District] '{e.district}': waiting for leaves to load..."); return; }
                 }
