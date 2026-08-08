@@ -38,6 +38,7 @@ namespace HumankindAssetFramework
             public UnityEngine.Texture2D texAlbedo;                      // our baked albedo, bound on the PRIVATE output layer
             public UnityEngine.Texture2D texNormal, texRough;            // baked surface maps (null = the neutral stand-ins)
             public bool texApplied; public int texWait;
+            public int texErrors;                                        // bounded retry: a transient exception must not permanently kill texture (the old catch latched texApplied on first throw)
             // PERF: the (runtime material, texture property) slots the albedo is bound on, captured by the first full
             // walk — the periodic re-assert then compares one reference per slot instead of re-discovering properties
             // (GetTexturePropertyNames allocates a string[] per material per call). Cleared when a material dies
@@ -620,11 +621,15 @@ namespace HumankindAssetFramework
             {
                 d.tiles.Clear(); d.privateLeaf = null; d.leaves.Clear(); d.collected = false;
                 d.matchLogged = false;
-                d.texApplied = false; d.texWait = 0; d.texAlbedo = null; d.texNormal = null; d.texRough = null;
+                d.texApplied = false; d.texWait = 0; d.texErrors = 0; d.texAlbedo = null; d.texNormal = null; d.texRough = null;
                 d.boundSlots.Clear();   // the cached (material, property) bind slots are corpses with the old layer
             }
             ResetWonderTemplates();   // plugin-loaded wonder templates are corpses after a reload; re-load + re-fill swap-first
-            Plugin.Diag("[District] session state reset (new game or save-reload) — leaves + texture bindings rebuild");
+            // re-parse the registry too: a reload then picks up enc_districts.json edits (new/changed entries) without
+            // a game restart. NOTE the honest limit: baked ASSETS ship in the mod bundle, which the game loads once per
+            // app run — a re-BAKE still needs a restart; only registry-value changes arrive on reload.
+            distParsed = false;
+            Plugin.Diag("[District] session state reset (new game or save-reload) — registry re-parses, leaves + texture bindings rebuild");
         }
 
         // Per-frame (Plugin.Update): drive every registry entry, each across ALL of its live tiles.
@@ -699,7 +704,13 @@ namespace HumankindAssetFramework
                     foreach (var t2 in e.tiles)   // every live instance re-spawns its particle with the fresh texture index
                         if (t2.plbc != null) { refreshArgs[0] = t2.layer; miRefreshChannel.Invoke(t2.plbc, refreshArgs); }
             }
-            catch (Exception ex) { Plugin.Log.LogError("[DistrictTex] apply: " + ex); e.texApplied = true; }   // fail once, loudly — don't spam per frame
+            catch (Exception ex)
+            {
+                // bounded retry, not a first-throw latch: the old `texApplied = true` here turned one transient
+                // exception (asset mid-load, layer mid-rebuild) into a silent permanent untextured downgrade.
+                if (++e.texErrors >= 3) { e.texApplied = true; Plugin.Log.LogError($"[DistrictTex] apply failed {e.texErrors}x — giving up for '{e.district}' until the next session reset: " + ex); }
+                else Plugin.Log.LogWarning($"[DistrictTex] apply (attempt {e.texErrors}, will retry): " + ex.Message);
+            }
         }
 
         // Neutral PBR maps: the vanilla sheet's normal/roughness/metallic/AO stay bound under our albedo and paint the
