@@ -10,7 +10,7 @@ using Newtonsoft.Json.Linq;             // provided by the game (mod.io); robust
 
 namespace HumankindAssetFramework
 {
-    // Generic, registry-driven model injector — the runtime half of the Universal Baker. Reads enc_models.json from
+    // Generic, registry-driven model injector — the runtime half of the Universal Baker. Reads haf_models.json from
     // BepInEx/config (written by the editor), registers every baked skeleton, and on each unit's AddOn.Load repoints
     // the matching pawn definition onto its skeleton using the proven self-discovery (read the host's body mesh name,
     // rename ours to match, resolve, skin via <bodyMesh>_OutputLayer). One patch handles any number of models.
@@ -33,7 +33,7 @@ namespace HumankindAssetFramework
         public float scale = 1f;              // ANIMATED models: runtime multiplier on the pawn's ObjectSpace.Scale (default 1 = unchanged). Lets us fix an animated model baked at the wrong scale WITHOUT a re-bake (e.g. the howitzer's 100x FBX unit-conversion oversize -> set 0.01). Config-only field; absent = 1.
         public float desaturate = 0f;         // TEXTURE-ONLY GREY variant: 0 = off. >0 = DON'T repoint the mesh; isolate this unit's output layer and paint a DESATURATED copy of its OWN atlas (1 = full grey) while the civ-colour tint is neutralised. Makes a Common copy read as a bland grey version of an emblematic unit; the original is untouched (they share the layer, so the isolation clone is essential). No bake / no custom model needed.
         public float brightness = 1f;         // UNIVERSAL skin brightness GAMMA (1 = unchanged, >1 lighter, <1 darker). Applied FIRST (before desaturate/tint) to whatever skin the unit gets. Multiplicative in the dark range, so a near-black atlas actually lightens — the additive tint tops out (+30 lifts 18 to only 48; gamma 1.5 lifts it ~2.4x). Managed by the Unit Retexture window.
-        public string textureFile = "";       // TEXTURE-ONLY RETEXTURE: a PNG filename in BepInEx/config/enc_skins/. When set, the plugin loads that PNG and paints it onto the unit's ISOLATED output layer (same isolation as desaturate — original untouched, vanilla mesh kept). Hot-loaded at runtime, no bake/rebuild. Takes precedence over desaturate. Painted on a dump of the unit's own atlas (round-trips via PNG). Managed by the Unit Retexture editor window.
+        public string textureFile = "";       // TEXTURE-ONLY RETEXTURE: a PNG filename in BepInEx/config/haf_skins/. When set, the plugin loads that PNG and paints it onto the unit's ISOLATED output layer (same isolation as desaturate — original untouched, vanilla mesh kept). Hot-loaded at runtime, no bake/rebuild. Takes precedence over desaturate. Painted on a dump of the unit's own atlas (round-trips via PNG). Managed by the Unit Retexture editor window.
         public float tintR = 0f;              // UNIVERSAL skin colour offset, red channel (-255..+255, 0 = none). Added AFTER desaturate to whatever skin this unit ends up with — the loaded textureFile PNG, OR a copy of its own atlas. Equal negative R/G/B = darken; equal positive = brighten; one channel tints.
         public float tintG = 0f;              // ... green channel (-255..+255).
         public float tintB = 0f;              // ... blue channel (-255..+255).
@@ -140,23 +140,23 @@ namespace HumankindAssetFramework
         public float turnRate;               // TURN EASE: deg/s toward a new heading; 0 = off -> category default -> dial `rate` (precedence, docs/Turn-Ease.md).
         public float turnBank;               // TURN EASE: max roll INTO the turn, degrees; negative flips the lean. 0 -> dial `bank` (air category / rate-eased models).
         public int profCat = -1;             // runtime: the unit's TYPE category (human/land/turret/air/ship) off its capability profile at addon load — drives the category default rates.
-        public float hugDrop;                // TERRAIN HUG: how much LOWER over open ground (negative units); 0 = off. Live override: enc_hugterrain.txt `drop`.
+        public float hugDrop;                // TERRAIN HUG: how much LOWER over open ground (negative units); 0 = off. Live override: haf_hugterrain.txt `drop`.
         public float hugLookahead = 1.5f;    // TERRAIN HUG: probe distance AHEAD along the movement vector, so the climb anticipates the skyline.
         public UnityEngine.Vector3 tiltLastPos; public float tiltCur; public float tiltLastTime;   // move-tilt runtime state
         public bool silenceDonorAudio;         // SUPPRESS all of the borrowed donor's Wwise sound on this unit's pawns (idle growl + combat maul/scratch that ride in on the reused animator/description). Reusable: any unit that inherits an unwanted donor sound can set it. Silences ONLY Wwise (AudioEmitter.PostEvent) — our own custom WAVs (Unity AudioSource) still play, so it composes with soundIdleFile/soundFile.
         public string engineStartEvent = "";  // Wwise event NAME posted on move-START (e.g. Play_UNIT_Vehicles_StealthCorvette_Start). Set => posted BY NAME (works for the FIRST unit, no live capture); empty => fall back to the auto-captured handle.
         public string engineStopEvent = "";   // ... move-STOP (..._Stop). Extract names via the F8 "Dump Sound Catalog"; assign per unit in the registry.
-        public string soundFile = "";          // CUSTOM audio, LOOP while moving: a WAV filename in BepInEx/config/enc_sounds/. Unity AudioSource, 3D. For units the game has NO sound for (drones, zeppelins) or a bespoke engine.
-        public string soundStartFile = "";     // CUSTOM one-shot on move-START (spool-up): a WAV in enc_sounds/.
-        public string soundStopFile = "";      // CUSTOM one-shot on move-STOP (spool-down): a WAV in enc_sounds/.
+        public string soundFile = "";          // CUSTOM audio, LOOP while moving: a WAV filename in BepInEx/config/haf_sounds/. Unity AudioSource, 3D. For units the game has NO sound for (drones, zeppelins) or a bespoke engine.
+        public string soundStartFile = "";     // CUSTOM one-shot on move-START (spool-up): a WAV in haf_sounds/.
+        public string soundStopFile = "";      // CUSTOM one-shot on move-STOP (spool-down): a WAV in haf_sounds/.
         public float soundVolume = 1f;         // travel-loop volume
         public float soundStartVolume = 1f;    // move-start one-shot volume
         public float soundStopVolume = 1f;     // move-stop one-shot volume
-        public string soundIdleFile = "";      // CUSTOM one-shot growl played OCCASIONALLY WHILE IDLE (not moving): a WAV in enc_sounds/. Replaces a donor's periodic idle vocalization (pair with silenceDonorAudio). Fired on a randomized timer per pawn.
+        public string soundIdleFile = "";      // CUSTOM one-shot growl played OCCASIONALLY WHILE IDLE (not moving): a WAV in haf_sounds/. Replaces a donor's periodic idle vocalization (pair with silenceDonorAudio). Fired on a randomized timer per pawn.
         public float soundIdleVolume = 1f;     // idle-growl one-shot volume
         public float soundIdleInterval = 11f;  // AVERAGE seconds between idle growls (jittered 0.6..1.4x per pawn so a pack doesn't chorus). <=0 disables.
         public float soundIdleGroupRadius = 10f; // GROUP de-dup: growls suppressed within this radius of another recent growl, so a clustered unit (many pawns) snarls with ONE voice per interval instead of all at once. <=0 = per-pawn (no de-dup).
-        public string soundAttackFile = "";    // CUSTOM one-shot played ON ATTACK (each swing/shot) — a WAV in enc_sounds/. A DISTINCT, more violent sound than the idle growl; fired from OnPawnAttack with a per-pawn min-gap so rapid multi-swing fights don't machine-gun it.
+        public string soundAttackFile = "";    // CUSTOM one-shot played ON ATTACK (each swing/shot) — a WAV in haf_sounds/. A DISTINCT, more violent sound than the idle growl; fired from OnPawnAttack with a per-pawn min-gap so rapid multi-swing fights don't machine-gun it.
         public float soundAttackVolume = 1f;   // attack one-shot volume
         public float soundAttackOffset = 0f;   // seconds INTO the attack WAV where playback starts (skip a silent/windup lead-in so the impact lands on the swing); 0 = from the top
         public string soundDeathFile = "";     // CUSTOM one-shot on a pawn's DEATH (PresentationPawn.TriggerDeath) — the rattle/scream that closes the unit's audio arc. Per-entry min-gap so a wiped stack doesn't chorus five at once.
@@ -171,7 +171,7 @@ namespace HumankindAssetFramework
         public bool customClipTried;                                                 // don't retry a failed load every poll
         public readonly Dictionary<int, float> idleNextAt = new Dictionary<int, float>();   // sub-pawn instance id -> Time.time of its next idle growl (jittered)
         public readonly List<KeyValuePair<UnityEngine.Vector3, float>> idleRecent = new List<KeyValuePair<UnityEngine.Vector3, float>>();  // recent growls (pos, Time.time) for group de-dup — pruned each poll
-        public string assetDir = "";     // owning pack's asset root (set at registry load, never parsed from JSON): WAVs/PNGs resolve from <assetDir>/sounds|skins first, then the legacy shared enc_sounds/enc_skins
+        public string assetDir = "";     // owning pack's asset root (set at registry load, never parsed from JSON): WAVs/PNGs resolve from <assetDir>/sounds|skins first, then the legacy shared haf_sounds/haf_skins
         public readonly Dictionary<int, UnityEngine.AudioSource> customSources = new Dictionary<int, UnityEngine.AudioSource>();  // sub-pawn instance id -> our looping AudioSource (played while moving)
         public readonly Dictionary<int, float> loopHoldUntil = new Dictionary<int, float>();   // instance id -> Time.time to hold the travel loop off until (so the spool-up one-shot isn't masked)
         public readonly Dictionary<int, UnityEngine.Vector3> engineLastPos = new Dictionary<int, UnityEngine.Vector3>();  // sub-pawn instance id -> last render pos
@@ -206,7 +206,7 @@ namespace HumankindAssetFramework
         internal class Pack
         {
             public string modId = "", file = "";
-            public string assetDir = "";              // per-pack ASSET ROOT (2026-07-19): file-based assets (WAVs in sounds/, PNGs in skins/) resolve here FIRST, then fall back to the legacy shared enc_sounds/enc_skins — so a third-party pack ships self-contained instead of feeling like an ENC extension. "" (the base pack) = legacy folders only.
+            public string assetDir = "";              // per-pack ASSET ROOT (2026-07-19): file-based assets (WAVs in sounds/, PNGs in skins/) resolve here FIRST, then fall back to the legacy shared haf_sounds/haf_skins — so a third-party pack ships self-contained instead of feeling like an ENC extension. "" (the base pack) = legacy folders only.
             public int schemaVersion;
             public List<string> dependsOn = new List<string>();
             public List<string> loadAfter = new List<string>();
@@ -227,10 +227,10 @@ namespace HumankindAssetFramework
             var built = new List<ModelEntry>();
             try
             {
-                // DISCOVERY: the ENC base registry (enc_models.json) + every *.json a third-party mod drops in haf_packs/.
+                // DISCOVERY: the ENC base registry (haf_models.json) + every *.json a third-party mod drops in haf_packs/.
                 // Each file is a PACK; a joining modder ships their own pack instead of editing ours. The base loads FIRST,
                 // so ENC's own models are protected from an accidental clash (first-loaded wins — see the merge below).
-                var basePath = Path.Combine(Paths.ConfigPath, "enc_models.json");
+                var basePath = Path.Combine(Paths.ConfigPath, "haf_models.json");
                 var files = new List<string>();
                 if (File.Exists(basePath)) files.Add(basePath);
                 var packDir = Path.Combine(Paths.ConfigPath, "haf_packs");
@@ -428,7 +428,7 @@ namespace HumankindAssetFramework
                 modId = isBase ? "enc" : isDirPack ? Path.GetFileName(Path.GetDirectoryName(file)) : Path.GetFileNameWithoutExtension(file),
                 // asset root: the pack's own directory for a subdirectory pack; for a flat haf_packs/<name>.json, a
                 // sibling folder of the same name (may not exist — resolution then falls through to the legacy
-                // shared folders); the base pack keeps the legacy enc_sounds/enc_skins.
+                // shared folders); the base pack keeps the legacy haf_sounds/haf_skins.
                 assetDir = isBase ? "" : isDirPack ? Path.GetDirectoryName(file)
                                                    : Path.Combine(Path.GetDirectoryName(file), Path.GetFileNameWithoutExtension(file)),
             };
@@ -732,7 +732,7 @@ namespace HumankindAssetFramework
                 var rss = Regex.Matches(text, "\"rotorSpinSpeed\"\\s*:\\s*(-?[0-9.]+)");   // parity: rotor spin deg/s
                 var esa = Regex.Matches(text, "\"engineStartEvent\"\\s*:\\s*\"([^\"]*)\"");  // parity: Wwise event name posted on move-start
                 var eso = Regex.Matches(text, "\"engineStopEvent\"\\s*:\\s*\"([^\"]*)\"");    // parity: Wwise event name posted on move-stop
-                var sf = Regex.Matches(text, "\"soundFile\"\\s*:\\s*\"([^\"]*)\"");           // parity: custom WAV loop in enc_sounds/
+                var sf = Regex.Matches(text, "\"soundFile\"\\s*:\\s*\"([^\"]*)\"");           // parity: custom WAV loop in haf_sounds/
                 var sfa = Regex.Matches(text, "\"soundStartFile\"\\s*:\\s*\"([^\"]*)\"");     // parity: custom WAV one-shot on move-start
                 var sfo = Regex.Matches(text, "\"soundStopFile\"\\s*:\\s*\"([^\"]*)\"");      // parity: custom WAV one-shot on move-stop
                 var svl = Regex.Matches(text, "\"soundVolume\"\\s*:\\s*(-?[\\d.eE+]+)");       // parity: travel-loop volume
@@ -761,7 +761,7 @@ namespace HumankindAssetFramework
                 var tR = Regex.Matches(text, "\"tintR\"\\s*:\\s*(-?[\\d.eE+]+)");           // universal skin colour offset R (-255..255)
                 var tG = Regex.Matches(text, "\"tintG\"\\s*:\\s*(-?[\\d.eE+]+)");           // ... G
                 var tB = Regex.Matches(text, "\"tintB\"\\s*:\\s*(-?[\\d.eE+]+)");           // ... B
-                var txf = Regex.Matches(text, "\"textureFile\"\\s*:\\s*\"([^\"]*)\"");      // texture-only retexture: PNG filename in enc_skins/
+                var txf = Regex.Matches(text, "\"textureFile\"\\s*:\\s*\"([^\"]*)\"");      // texture-only retexture: PNG filename in haf_skins/
                 var hpn = Regex.Matches(text, "\"handPropName\"\\s*:\\s*\"([^\"]*)\"");     // parity: hand-prop resource name
                 var hpg = Regex.Matches(text, "\"handPropGuid\"\\s*:\\s*\"([^\"]*)\"");     // parity: hand-prop collection guid csv
                 var hpm = Regex.Matches(text, "\"handPropMat\"\\s*:\\s*\"([^\"]*)\"");      // parity: hand-prop borrowed material guid csv

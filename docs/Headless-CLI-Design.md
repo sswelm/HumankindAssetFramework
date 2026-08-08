@@ -20,7 +20,7 @@ with no window open**. The CLI is the same invocation, parameterised.
 
 | Capability | Needs Unity? | How |
 |---|---|---|
-| Edit data-only registries (resize, formations, era, sound overrides, retexture config) | **No** | plain JSON (`pack.json`, `enc_*.json`) — editable directly or by a standalone verb |
+| Edit data-only registries (resize, formations, era, sound overrides, retexture config) | **No** | plain JSON (`pack.json`, `haf_*.json`) — editable directly or by a standalone verb |
 | Validate a pack (bones/paths/GUIDs/schema) | **No** (mostly) | the [pack validator](Pack-Validator-Design.md) core — pure logic + file checks |
 | Convert a model file (GLB/glTF/OBJ/FBX) | **No** | `glbconv.exe` (already standalone) |
 | Blender prep (rig/decimate/clip extract) | **No** | already headless (`blender -b`) |

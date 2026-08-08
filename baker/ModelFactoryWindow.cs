@@ -242,7 +242,7 @@ public class ModelFactoryWindow : EditorWindow
         {
             int sel = EditorGUILayout.Popup("3D resource", selected, existing);
             if (GUILayout.Button("Refresh", GUILayout.Width(70))) RefreshList();
-            // Remove the selected registry entry (disabled on <New>). Prompts, then drops it from enc_models.json.
+            // Remove the selected registry entry (disabled on <New>). Prompts, then drops it from haf_models.json.
             using (new EditorGUI.DisabledScope(selected <= 0))
                 if (GUILayout.Button("Remove", GUILayout.Width(70)))
                 {
@@ -589,11 +589,11 @@ public class ModelFactoryWindow : EditorWindow
             "Registry: " + ModelRegistry.RegistryPath, MessageType.None);
         using (new EditorGUILayout.HorizontalScope())
         {
-            // One-click way to reach the config folder (enc_models.json + the plugin's .cfg live here).
+            // One-click way to reach the config folder (haf_models.json + the plugin's .cfg live here).
             if (GUILayout.Button("Open config folder", GUILayout.Width(150)))
                 EditorUtility.RevealInFinder(System.IO.File.Exists(ModelRegistry.RegistryPath)
                     ? ModelRegistry.RegistryPath : ModelRegistry.ConfigDir);
-            GUILayout.Label("↑ enc_models.json + the plugin .cfg", EditorStyles.miniLabel);
+            GUILayout.Label("↑ haf_models.json + the plugin .cfg", EditorStyles.miniLabel);
         }
         EditorGUILayout.EndScrollView();
     }
@@ -1132,7 +1132,7 @@ public class ModelFactoryWindow : EditorWindow
             // The asset baked, but writing the registry entry failed (Save logged why). Say so plainly instead of a false
             // "Baked ✓" — otherwise the user assumes it's registered when the plugin will never see it. Re-bake retries.
             status = $"Baked '{cur.resourceName}', but the REGISTRY SAVE FAILED (see Console). The asset is baked; close " +
-                     "whatever's locking enc_models.json (AV / indexer / the running game) and re-bake to write the entry.";
+                     "whatever's locking haf_models.json (AV / indexer / the running game) and re-bake to write the entry.";
             Debug.LogError("[Factory] " + status);
             LoadPreview(cur.resourceName, forceReimport: true);
             return;

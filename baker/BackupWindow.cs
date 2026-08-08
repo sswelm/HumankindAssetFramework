@@ -1,7 +1,7 @@
 // BackupWindow.cs — Tools ▸ HAF ▸ Backup & Restore. A safety net for everything that ISN'T under git: the editor
 // scripts (Assets/Scripts/Editor), the source models (Assets/FactorySource), the baked assets (Assets/Resources),
-// the ENC databases, the Tools scripts, and the LIVE runtime config the plugin reads (BepInEx/config: enc_*.json +
-// enc_skins + enc_sounds). ENCReload's git only tracks Assets/Databases, so most of this has no version control.
+// the ENC databases, the Tools scripts, and the LIVE runtime config the plugin reads (BepInEx/config: haf_*.json +
+// haf_skins + haf_sounds). ENCReload's git only tracks Assets/Databases, so most of this has no version control.
 //
 // DESIGN — anti-loss first (the user's explicit ask, "guards that ensure we don't lose anything"):
 //   • A backup is a TIMESTAMPED, self-describing folder on D: with a manifest.txt recording every source's ORIGINAL
@@ -42,7 +42,7 @@ public class BackupWindow : EditorWindow
     // A backup group: a display name, a prefs/manifest key, and the concrete source paths it captures (file or dir).
     class Group { public string Name, Key; public List<string> Sources; public Group(string n, string k, List<string> s) { Name = n; Key = k; Sources = s; } }
 
-    // Resolved fresh each time (paths must exist to be offered). Runtime config = the enc_* entries the plugin reads.
+    // Resolved fresh each time (paths must exist to be offered). Runtime config = the haf_* entries the plugin reads.
     static List<Group> BuildGroups()
     {
         var g = new List<Group>();
@@ -56,13 +56,13 @@ public class BackupWindow : EditorWindow
         Add("Baked assets (Assets/Resources)", "resources", new[] { Path.Combine(AssetsDir, "Resources") });
         Add("ENC Databases (Assets/Databases)", "databases", new[] { Path.Combine(AssetsDir, "Databases") });
         Add("Tools (Blender / converters)", "tools", new[] { Path.Combine(ProjectRoot, "Tools") });
-        // Runtime config: the LIVE files the plugin reads — enc_*.json + the skins/sounds folders (skip the regenerable atlas dump).
+        // Runtime config: the LIVE files the plugin reads — haf_*.json + the skins/sounds folders (skip the regenerable atlas dump).
         string cfg = SafeConfigDir();
         if (!string.IsNullOrEmpty(cfg) && Directory.Exists(cfg))
         {
             var cfgSrcs = new List<string>();
-            cfgSrcs.AddRange(Directory.GetFiles(cfg, "enc_*.json"));
-            foreach (var sub in new[] { "enc_skins", "enc_sounds" }) { var p = Path.Combine(cfg, sub); if (Directory.Exists(p)) cfgSrcs.Add(p); }
+            cfgSrcs.AddRange(Directory.GetFiles(cfg, "haf_*.json"));
+            foreach (var sub in new[] { "haf_skins", "haf_sounds" }) { var p = Path.Combine(cfg, sub); if (Directory.Exists(p)) cfgSrcs.Add(p); }
             Add("Runtime config (registry + skins + sounds)", "config", cfgSrcs);
         }
         return g;

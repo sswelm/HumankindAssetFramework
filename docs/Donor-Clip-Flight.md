@@ -139,7 +139,7 @@ snap naturally (a jumped pawn misses its position-matched state and starts at th
 **Per model** (Model Factory ▸ Runtime): **Turn ease — rate** (deg/s; 0 = the vanilla snap) and **Bank into
 turn** (degrees). Registry keys `turnRate` / `turnBank`; runtime-only, no re-bake.
 
-**Live dial** (overrides the per-model values while `rate` is non-zero): **`BepInEx/config/enc_turnease.txt`**
+**Live dial** (overrides the per-model values while `rate` is non-zero): **`BepInEx/config/haf_turnease.txt`**
 — `rate=180`, `bank=6`, polled ~1/s so you can dial the feel with the game running; `rate=0` hands control
 back to each model's own setting.
 
@@ -180,7 +180,7 @@ terrain. The first probe logs what it hit; if it ever reports no ground collider
 anticipation**. Registry keys `hugDrop` / `hugLookahead`; runtime-only, no re-bake.
 
 **Live dial** (overrides the per-model values while it has a non-zero `drop`, for tuning by feel in-game):
-**`BepInEx/config/enc_hugterrain.txt`** — `drop=-2`, `radius=0` (auto), `lookahead=1.5`, `ease=4`,
+**`BepInEx/config/haf_hugterrain.txt`** — `drop=-2`, `radius=0` (auto), `lookahead=1.5`, `ease=4`,
 `skip=Exploitation,Ruin` (or `only=` as a whitelist). Polled ~1/s; set `drop=0` (or delete the file) to hand
 control back to each model's own setting. The log prints the district names it sees, the measured tile
 spacing, and every climb/descend transition with the distance that decided it. Note the district set grows
@@ -192,11 +192,11 @@ while the map streams in — the 3-second rescan self-corrects.
   The ground truth for every rest-frame question.
 - **`[DonorAxis]`** — one-shot per entry: decodes the donor clip's channels from the GPU records at several
   frames. The ground truth for what the clip actually does.
-- **`enc_rotortrim.txt`** (BepInEx/config) — live constant-tilt dial on named bones (`Bone@axis=deg`),
+- **`haf_rotortrim.txt`** (BepInEx/config) — live constant-tilt dial on named bones (`Bone@axis=deg`),
   polled ~1/s and re-applied to live pawns without a relaunch. Kept inert (comments only) unless a residual
   wobble needs hand-finishing.
-- **`enc_turnease.txt`** (BepInEx/config) — the turn-ease dial (see the section above).
-- **`enc_hugterrain.txt`** (BepInEx/config) — the terrain-hug dial (see the section above).
+- **`haf_turnease.txt`** (BepInEx/config) — the turn-ease dial (see the section above).
+- **`haf_hugterrain.txt`** (BepInEx/config) — the terrain-hug dial (see the section above).
 
 ## Open ends
 

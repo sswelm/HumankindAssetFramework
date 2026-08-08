@@ -35,8 +35,8 @@ public class RetextureWindow : EditorWindow
     string previewSig = null;                        // signature of the built preview (source + adjustments)
 
     // The game's BepInEx/config (auto-detected by ModelRegistry, same folder the plugin reads).
-    static string SkinsDir => Path.Combine(ModelRegistry.ConfigDir, "enc_skins");
-    static string DumpDir  => Path.Combine(ModelRegistry.ConfigDir, "enc_atlas_dump");
+    static string SkinsDir => Path.Combine(ModelRegistry.ConfigDir, "haf_skins");
+    static string DumpDir  => Path.Combine(ModelRegistry.ConfigDir, "haf_atlas_dump");
 
     void OnGUI()
     {
@@ -94,13 +94,13 @@ public class RetextureWindow : EditorWindow
                 if (!string.IsNullOrEmpty(p)) pngPath = p;
             }
         }
-        // BROKEN-LINK REPORT: the loaded entry references a skin PNG that isn't in enc_skins/ (deleted/renamed) and no new
+        // BROKEN-LINK REPORT: the loaded entry references a skin PNG that isn't in haf_skins/ (deleted/renamed) and no new
         // PNG is queued — warn so it's obvious the skin won't load (the unit would fall back to its own atlas).
         if (string.IsNullOrEmpty(pngPath))
         {
             var curEntry = existing.FirstOrDefault(m => m.pawnDescription == pawn && !string.IsNullOrEmpty(m.textureFile));
             if (curEntry != null && !File.Exists(Path.Combine(SkinsDir, curEntry.textureFile)))
-                EditorGUILayout.HelpBox("Skin PNG missing from enc_skins/: " + curEntry.textureFile +
+                EditorGUILayout.HelpBox("Skin PNG missing from haf_skins/: " + curEntry.textureFile +
                     "\nBrowse a replacement, or the unit falls back to its own atlas.", MessageType.Warning);
         }
         EditorGUILayout.LabelField("Adjustments — applied on top of the skin above (or the own atlas):", EditorStyles.miniLabel);
@@ -318,7 +318,7 @@ public class RetextureWindow : EditorWindow
                 if (!File.Exists(pngPath)) { status = "PNG not found: " + pngPath; return; }
                 Directory.CreateDirectory(SkinsDir);
                 string file = Sanitize(resourceName) + ".png";
-                File.Copy(pngPath, Path.Combine(SkinsDir, file), true);   // into the game's config/enc_skins the plugin reads
+                File.Copy(pngPath, Path.Combine(SkinsDir, file), true);   // into the game's config/haf_skins the plugin reads
                 def.textureFile = file;
             }
             // else: keep def.textureFile as-is (an existing entry's PNG, or "" to adjust the unit's own atlas).

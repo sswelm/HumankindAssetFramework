@@ -389,7 +389,7 @@ namespace HumankindAssetFramework
         // TURN EASE (spike/turn-ease 2026-08-04, "make it more fluent"): the engine writes a pawn's FACING as an
         // instant SNAP when a move order changes heading (spotted by shakee on the Comanche video). Smooth it:
         // keep a per-pawn eased yaw, advance it toward the game's fresh target yaw at a capped rate, and BANK a
-        // few degrees into the turn. Live-tunable via BepInEx/config/enc_turnease.txt (`rate=180` deg/s,
+        // few degrees into the turn. Live-tunable via BepInEx/config/haf_turnease.txt (`rate=180` deg/s,
         // `bank=6` deg, `snap=120` deg) polled ~1/s like the rotor trim; rate 0 or no file = fully off. Runs
         // BEFORE ApplyMoveTilt so the nose-down composes on top of the eased heading. State is position-matched
         // (nearest within 4u — the deploy poll's approximation) so multiple units smooth independently; a
@@ -738,7 +738,7 @@ namespace HumankindAssetFramework
         // they're static) and matched on the horizontal plane only. The probe point LEADS the unit along its own
         // movement vector (`lookahead`), so it climbs BEFORE the buildings, like a pilot, instead of reacting.
         // Runs AFTER ApplyPositionOffset: position.z stays the city-clearing height, this subtracts over open
-        // ground. Live-tuned via BepInEx/config/enc_hugterrain.txt; drop 0 or no file = off.
+        // ground. Live-tuned via BepInEx/config/haf_hugterrain.txt; drop 0 or no file = off.
         internal static float hugDrop = 0f, hugRadius = 0f, hugLookahead = 3f, hugEase = 4f, hugCliff = 1f;
         internal static readonly List<string> hugOnly = new List<string>();   // name whitelist (empty = all)
         internal static readonly List<string> hugSkip = new List<string>();   // name blacklist (farms, exploitations)
@@ -855,7 +855,7 @@ namespace HumankindAssetFramework
         static void ApplyTerrainHug(ModelEntry e, object entry)
         {
             // PER-MODEL first (the Factory's "Terrain hug — drop"), with the live dial file as an OVERRIDE for
-            // in-game tuning: a non-zero enc_hugterrain.txt `drop` wins so a session can be dialed by feel, and
+            // in-game tuning: a non-zero haf_hugterrain.txt `drop` wins so a session can be dialed by feel, and
             // clearing it (drop=0/no file) falls back to whatever each model shipped with.
             float drop = hugDrop != 0f ? hugDrop : e.hugDrop;
             float lookahead = hugDrop != 0f ? hugLookahead : e.hugLookahead;

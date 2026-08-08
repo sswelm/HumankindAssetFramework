@@ -110,7 +110,7 @@ see the [Factory Manual](Factory-Manual.md).
 - **Texture-only reskins (no bake).** Two registry-only overrides ride that same layer isolation, keeping the vanilla
   mesh: **`desaturate`** paints a desaturated copy of the unit's *own* atlas with the civ-colour tint neutralised (a
   bland grey Common copy of an emblematic unit — proven on GreyStealthCorvette), and **`textureFile`** hot-loads a
-  hand-painted PNG from `BepInEx\config\enc_skins\` (paint over the unit's own atlas dump from the in-game F8 ▸ Dump
+  hand-painted PNG from `BepInEx\config\haf_skins\` (paint over the unit's own atlas dump from the in-game F8 ▸ Dump
   Atlases tool). Managed by the **Unit Retexture** editor window; no bake, no mod rebuild, original unit untouched.
   **(2026-07-20)** `textureFile` + adjustments work on **custom (baked) model entries** too — the plugin hot-loads the
   PNG *in place of the baked atlas*, so a custom model is recoloured without a re-bake (adjust-only needs a PNG: the

@@ -123,6 +123,66 @@ namespace HumankindAssetFramework
             }
         }
 
+        // GROUND MATERIAL under a custom district (the "maintained grass field"): vanilla resolves a
+        // GroundMaterialDefinition from (Biome × ConstructibleVisualAffinity) and calls ApplyGroundMaterialDefinition
+        // (index into criteria 24). Our wonder's affinity has no row for this biome → index 0 → bare sand. This
+        // postfix forces a chosen ground-material index for our registry districts — the game's own terrain paint,
+        // blended, not a flat mesh. Also dumps the ground-material vocabulary once (DistrictDebug) so a name can be picked.
+        static bool groundNamesDumped; static readonly HashSet<string> groundLogged = new HashSet<string>();
+        internal static void DistrictApplyGroundMaterial(object district)
+        {
+            try
+            {
+                EnsureDistrictConfig();
+                if (!distOn) return;
+                var name = GetMember(district, "ConstructibleDefinitionName")?.ToString();
+                if (string.IsNullOrEmpty(name)) return;
+                DistrictModel entry = null; foreach (var e in distModels) if (e.district == name) { entry = e; break; }
+                if (entry == null) return;
+
+                var repoType = AccessTools.TypeByName("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");
+                var inst = repoType?.GetMethod("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.Invoke(null, null);
+                if (inst == null) return;
+                if (!(AccessTools.Property(inst.GetType(), "Loaded")?.GetValue(inst) is bool ld) || !ld) return;
+
+                // 24 = GroundMaterialDefinitionCriteriaIndex — dump the vocabulary once so the user can pick a grass name
+                const int GroundCriteria = 24;
+                if (!groundNamesDumped && Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value)
+                {
+                    groundNamesDumped = true;
+                    var namesM = repoType.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(m => m.Name == "Names" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(int));
+                    if (namesM?.Invoke(inst, new object[] { GroundCriteria }) is Array arr)
+                    {
+                        var list = new List<string>(); foreach (var s in arr) list.Add(s?.ToString());
+                        Plugin.Log.LogInfo($"[Ground] GroundMaterialDefinition names ({list.Count}): {string.Join(", ", list)}");
+                    }
+                }
+
+                // per-ENTRY terrain paint (the Factory's Ground field), falling back to the global config default
+                var want = !string.IsNullOrEmpty(entry.groundMaterial) ? entry.groundMaterial : Plugin.DistrictGroundMaterial?.Value?.Trim();
+                if (string.IsNullOrEmpty(want)) return;
+
+                if (entry.groundIdx == int.MinValue)
+                {
+                    var ssType = AccessTools.TypeByName("Amplitude.StaticString");
+                    var idxM = repoType.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(m => m.Name == "IndexOf" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
+                    if (idxM == null || ssType == null) { entry.groundIdx = -1; return; }
+                    var args = new object[] { GroundCriteria, Activator.CreateInstance(ssType, want) };
+                    entry.groundIdx = (int)idxM.Invoke(inst, args);
+                    if (entry.groundIdx <= 0) Plugin.Log.LogWarning($"[Ground] '{want}' not found in the GroundMaterialDefinition vocabulary (index {entry.groundIdx}) — set DistrictDebug=true to log the valid names.");
+                }
+                if (entry.groundIdx <= 0) return;
+
+                var apply = district.GetType().GetMethod("ApplyGroundMaterialDefinition", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (apply != null && apply.GetParameters().Length == 1)
+                {
+                    apply.Invoke(district, new object[] { entry.groundIdx });
+                    if (groundLogged.Add(name)) Plugin.Diag($"[Ground] '{name}': forced ground material '{want}' (index {entry.groundIdx}) — maintained field under the district.");
+                }
+            }
+            catch (Exception ex) { if (groundLogged.Add("ex")) Plugin.Log.LogError("[Ground] " + ex); }
+        }
+
         internal static void PollRepoDump()
         {
             if (repoDumped || Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;

@@ -33,17 +33,17 @@ A copy-ready starting point is [`haf-pack.example.json`](haf-pack.example.json).
 | `overrides` | explicit `{modId, pawnDescription}` replacements: your entry **replaces** that pack's entry on that pawn. Declared = consensual; without it, the clash is a conflict and the first-loaded entry wins. |
 
 **Backward compatible:** a legacy bare `{ "models": [...] }` with no wrapper still loads — it just gets default metadata
-(`modId` = the filename, `schemaVersion` = 0). ENC's own `enc_models.json` is treated as the base pack `enc`.
+(`modId` = the filename, `schemaVersion` = 0). ENC's own `haf_models.json` is treated as the base pack `enc`.
 
 > **Naming — framework vs packs (deliberate):** everything FRAMEWORK-level is `haf_*` (`haf_packs/`,
-> `haf_load_report.txt`); everything `enc_*` (`enc_models.json`, `enc_sounds/`, `enc_skins/`) belongs to **ENC the
+> `haf_load_report.txt`); everything `haf_*` (`haf_models.json`, `haf_sounds/`, `haf_skins/`) belongs to **ENC the
 > pack** — the reference pack, branded like any pack should be. Your pack's files carry *your* name (your folder,
-> your modId); you never touch an `enc_*` path. The framework identity is fully neutral since 2026-07-19:
+> your modId); you never touch an `haf_*` path. The framework identity is fully neutral since 2026-07-19:
 > `HumankindAssetFramework.dll`, GUID `community.humankind.haf`, menu root `Tools ▸ HAF`.
 
 ## Where it goes
 
-- **ENC's base registry:** `BepInEx/config/enc_models.json` (loaded first, as `modId` `enc`).
+- **ENC's base registry:** `BepInEx/config/haf_models.json` (loaded first, as `modId` `enc`).
 - **Your pack, self-contained (recommended, since 2026-07-19):** one directory in `haf_packs/`:
 
   ```
@@ -59,8 +59,8 @@ A copy-ready starting point is [`haf-pack.example.json`](haf-pack.example.json).
 
 > **Assets:** baked mesh/skeleton/atlas resolve by Amplitude **GUID**, so they work from any mod's bundle the game loads —
 > the runtime doesn't care which mod shipped them. *File-based* assets (custom WAVs, PNG skins) resolve **relative to the
-> owning pack first** (`sounds/` / `skins/` in your pack folder), falling back to the legacy shared `enc_sounds/` and
-> `enc_skins/` folders — so old packs keep working, and a new pack ships as one self-contained directory that never
+> owning pack first** (`sounds/` / `skins/` in your pack folder), falling back to the legacy shared `haf_sounds/` and
+> `haf_skins/` folders — so old packs keep working, and a new pack ships as one self-contained directory that never
 > collides with another mod's filenames.
 
 ## How packs merge (resolution ENFORCED since 2026-07-19)
@@ -91,7 +91,7 @@ Every load writes **`BepInEx/config/haf_load_report.txt`** — the first thing t
 HAF load report  (regenerated every load)
 packs=2  models=14  conflicts=0  overrides applied=0
 
-[enc]      schemaVersion=1  models=13  file=enc_models.json
+[enc]      schemaVersion=1  models=13  file=haf_models.json
 [yourmod]  schemaVersion=1  models=1   file=yourmod.json
     loadAfter: enc
 ```

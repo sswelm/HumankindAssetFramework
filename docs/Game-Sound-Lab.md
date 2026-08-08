@@ -8,21 +8,21 @@ itself it's mostly a diagnostic/authoring aid. Operates at the **event** level (
 
 | Part | Where | What |
 |---|---|---|
-| **Game Sound Lab** window | ENCReload editor, `Tools/HAF/Game Sound Lab` | authors `enc_sounds.json` — a list of overrides; has a searchable catalog pick list with category tabs |
-| `enc_sounds.json` | `BepInEx/config/` | `{ "overrides": [ { "silence": "<event-substring>", "replaceWith": "" } ] }` — the registry (via `SoundOverrideRegistry`) |
+| **Game Sound Lab** window | ENCReload editor, `Tools/HAF/Game Sound Lab` | authors `haf_sounds.json` — a list of overrides; has a searchable catalog pick list with category tabs |
+| `haf_sounds.json` | `BepInEx/config/` | `{ "overrides": [ { "silence": "<event-substring>", "replaceWith": "" } ] }` — the registry (via `SoundOverrideRegistry`) |
 | Plugin read | `UniversalInject.ShouldSilenceEvent` / `EnsureSoundOverrides` | drops any Wwise event whose name contains a `silence` substring, at the `AudioManager.PostEvent` service sink (`Hk_SilenceEvents`) |
 | `Audio/SilenceAudioEvents` config | `BepInEx/config/community.humankind.haf.cfg` | the same silence mechanism as a hand-edit escape hatch (comma-separated substrings) |
 | **F8 audition** | plugin F8 window — `Play Event` / `Stop` | post any event by name on live emitters so you can HEAR it; `Stop` halts a looping audition |
-| Catalog | `Dump Sound Catalog` (F8) → `enc_sound_catalog.txt` | the game's full list of Wwise event names; feeds the Lab's pick list |
+| Catalog | `Dump Sound Catalog` (F8) → `haf_sound_catalog.txt` | the game's full list of Wwise event names; feeds the Lab's pick list |
 
 ## Workflow
 
-1. **In-game:** `F8 → Dump Sound Catalog` (in a loaded save, so the catalog is full) → writes `enc_sound_catalog.txt`.
+1. **In-game:** `F8 → Dump Sound Catalog` (in a loaded save, so the catalog is full) → writes `haf_sound_catalog.txt`.
 2. **Audition (optional):** `F8 → Play Event`, type/paste an event name, hear it. `Stop` ends loops. This is how you
    identify *which* event is the one you want.
 3. **Author:** open the **Game Sound Lab**, `Browse sound catalog` → search (filter by category tab) → click an event
    to add it as an override → optionally trim to a substring (drop `_Start`/`_Stop` to catch a whole family) → **Save**.
-4. **Apply:** relaunch. The load log shows `[Audio] sound overrides: N silence rule(s) from enc_sounds.json`.
+4. **Apply:** relaunch. The load log shows `[Audio] sound overrides: N silence rule(s) from haf_sounds.json`.
 
 ## How the audition works (hard-won)
 

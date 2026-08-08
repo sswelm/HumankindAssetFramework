@@ -132,7 +132,7 @@ public static class UniversalBaker
     {
         var b = new OutputBackup { name = name ?? "" };
         if (string.IsNullOrEmpty(name)) return b;
-        b.dir = Path.Combine(Path.GetTempPath(), "enc_rebake_backup", name);
+        b.dir = Path.Combine(Path.GetTempPath(), "haf_rebake_backup", name);
         try
         {
             if (Directory.Exists(b.dir)) Directory.Delete(b.dir, true);

@@ -6,7 +6,7 @@ using Xunit;
 namespace HumankindAssetFramework.Tests
 {
     // Robustness of the registry model parse — the case the testing-strategy note called out for third-party
-    // enc_models.json: malformed/partial input must NOT throw, and must yield sane defaults. Also proves the
+    // haf_models.json: malformed/partial input must NOT throw, and must yield sane defaults. Also proves the
     // Newtonsoft per-object parse keeps each field with ITS model (the reason it's preferred over the index-aligned
     // regex fallback), and that the regex fallback still recovers when JObject.Parse rejects the document.
     public class ParseModelsTests

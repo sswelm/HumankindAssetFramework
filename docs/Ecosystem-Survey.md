@@ -138,7 +138,7 @@ renaming, historical city names, culture-change territory loss, extra empire slo
   `GameOptionDefinition`, `UIMapper`.
 - **Map-hash-keyed external JSON with LoadOrder merging**: third parties drop `*TCL.json` in a known
   folder; the plugin discovers, validates against a map hash, and merges by priority. A proven shape
-  if our `enc_models.json` ever needs multi-pack merging.
+  if our `haf_models.json` ever needs multi-pack merging.
 - Its `CollectibleManagerPatch` comments enumerate the definition databases relevant to us:
   `PresentationUnitDefinition`, `UnitVisualAffinityDefinition`, `BuildingVisualAffinityDefinition`.
   And its district code shows **visual affinity is mutable simulation state**
@@ -266,7 +266,7 @@ set in code.
   if the registry ever needs to adjust `UnitDefinition`/pawn definitions in code rather than assets.
 - **Write-defaults-then-read config**: first run serializes the built-in defaults *out* to
   `BepInEx/config/...json`; later runs read user edits back. Self-documenting — a nice touch for
-  `enc_models.json` template generation.
+  `haf_models.json` template generation.
 - Compact Harmony idioms: `___PrivateField` parameter injection to read private manager state;
   prefix with `__result` + `return false` for full replacement.
 - A (disabled) postfix on `Databases.GetDatabase(Type)` that dumps **every** game database to JSON —

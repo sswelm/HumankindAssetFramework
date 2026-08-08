@@ -18,4 +18,4 @@ of the mod** — CC-BY requires the author be credited.
 
 ## How to add a new model's credit
 When you bake a new model in the Factory, add a row here with its author, source URL, and license.
-Keep the `Resource (registry)` column matching the `resourceName` in `enc_models.json`.
+Keep the `Resource (registry)` column matching the `resourceName` in `haf_models.json`.

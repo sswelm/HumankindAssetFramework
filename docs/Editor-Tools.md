@@ -16,13 +16,13 @@ backup mirror. The runtime plugin reads them on launch.
 | Registry | Live path | Repo backup | Written by |
 |---|---|---|---|
 | **Model registry** (`pack.json`) | `config/haf_packs/ENCReload/pack.json` | `Assets/Pack/ENCReload/pack.json` | Model Factory, Animation Lab, Resize Lab, Unit Retexture, Sound Studio, Global Era Lab |
-| **Districts** (`enc_districts.json`) | `config/enc_districts.json` | `Assets/Databases/enc_districts.backup.json` | District Factory |
-| **Formations** (`enc_formations.json`) | `config/enc_formations.json` | project backup | Formation Override |
-| **Sound overrides** (`enc_sounds.json`) | `config/enc_sounds.json` | project backup | Game Sound Lab |
-| **Props** (`enc_props.json`) | `Assets/Databases/enc_props.json` | — | Prop Lab (editor-side recipe store; the runtime reads the baked GUIDs, not this file) |
+| **Districts** (`haf_districts.json`) | `config/haf_districts.json` | `Assets/Databases/haf_districts.backup.json` | District Factory |
+| **Formations** (`haf_formations.json`) | `config/haf_formations.json` | project backup | Formation Override |
+| **Sound overrides** (`haf_sounds.json`) | `config/haf_sounds.json` | project backup | Game Sound Lab |
+| **Props** (`haf_props.json`) | `Assets/Databases/haf_props.json` | — | Prop Lab (editor-side recipe store; the runtime reads the baked GUIDs, not this file) |
 
 > `pack.json` is ENC's own **pack** (see [Multi-Mod.md](Multi-Mod.md)). Older docs/config call the base model file
-> `enc_models.json` colloquially — the real shipped filename is `pack.json` in the pack folder. Baked assets
+> `haf_models.json` colloquially — the real shipped filename is `pack.json` in the pack folder. Baked assets
 > (`<name>_ModelMesh` / `_Skeleton` / `_Atlas`) go under `Assets/Resources`.
 
 ---
@@ -98,13 +98,13 @@ reads. An **embedded preview pane** shows the baked mesh, textured, on a true-si
 surface level — Facing and Position offset preview live; orbit/pan/deep-zoom + a **Center** re-frame button. *Key controls:* district
 name + Pick, model file, Size, Rotation offset (stand it up), Facing on tile (turn it), Position offset (place it),
 target tris, normals, strip parts, isolate. *Writes:*
-`enc_districts.json` (via `DistrictRegistry.Upsert`; mesh via `DistrictBaker.BakeFxMesh`). **Deep dive:**
+`haf_districts.json` (via `DistrictRegistry.Upsert`; mesh via `DistrictBaker.BakeFxMesh`). **Deep dive:**
 [District-Visuals.md](District-Visuals.md).
 
 ### Prop Lab (attachments) — `Tools ▸ HAF ▸ Prop Lab (attachments)` · *experimental*
 Author custom pawn attachments (weapons/gear): static bake → bone-free FxMesh → MeshCollection → FragmentMesh. Includes a
 **dump** tool for vanilla fragment GUIDs. *Key controls:* fragment GUID (dump), Size, rotation/position offset, target
-tris, borrowed material GUID. *Writes:* `Assets/Databases/enc_props.json` (editor recipe store; runtime reads the baked
+tris, borrowed material GUID. *Writes:* `Assets/Databases/haf_props.json` (editor recipe store; runtime reads the baked
 GUIDs). **Deep dive:** [Pawn-Props.md](Pawn-Props.md).
 
 ### Projectile Lab (munitions) — `Tools ▸ HAF ▸ Projectile Lab (munitions)` · *experimental*
@@ -117,7 +117,7 @@ The final mesh-swap output field is still being discovered, so its registry/asse
 Link a unit to a custom/vanilla formation (changing displayed pawn count) by serializing the formation's full layout into
 config; supports a single-unit link or a full formation replacement (macro). *Key controls:* mode toggle, unit + Pick,
 formation + Pick, re-read layout, packing jitter, formation scale + mode, footprint override. *Writes:*
-`enc_formations.json` (dummy positions + 6 orientation grids, via `FormationRegistry.Upsert`). **Deep dive:** [Formations.md](Formations.md).
+`haf_formations.json` (dummy positions + 6 orientation grids, via `FormationRegistry.Upsert`). **Deep dive:** [Formations.md](Formations.md).
 
 ### Resize Lab — `Tools ▸ HAF ▸ Resize Lab`
 Runtime per-unit rescaling, **no bake** — rules `{match, scale, era, trueSize, note}` the plugin applies to any unit whose
@@ -150,7 +150,7 @@ toggle. *Writes:* the unit's entry in `pack.json`; sound files under the pack's 
 ### Game Sound Lab — `Tools ▸ HAF ▸ Game Sound Lab`
 Author **global** audio overrides — silence any vanilla Wwise *event* by name-substring (units / ambient / music / UI).
 Distinct from Sound Studio (which is per-model). *Key controls:* override rows (silence substring), category tabs, a
-searchable catalog pick list. *Writes:* `enc_sounds.json` (via `SoundOverrideRegistry.Save`). **Deep dive:**
+searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideRegistry.Save`). **Deep dive:**
 [Game-Sound-Lab.md](Game-Sound-Lab.md).
 
 ---

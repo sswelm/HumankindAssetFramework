@@ -108,7 +108,7 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
 - **Creature voices** — silence a borrowed animal donor's Wwise voice and add your own idle growl and attack roar
   (camera-anchored, jittered, one-voice-per-stack).
 - **Game-wide sound overrides** — the **Game Sound Lab** silences (and, reserved, replaces) any vanilla Wwise event —
-  music, UI, ambience — by name, authored into `enc_sounds.json`, with in-game **F8 audition** to hear an event before
+  music, UI, ambience — by name, authored into `haf_sounds.json`, with in-game **F8 audition** to hear an event before
   you target it. Aimed at soundscape-overhaul mods. See [Game-Sound-Lab.md](docs/Game-Sound-Lab.md).
 
 **Multi-mod & tooling**
@@ -132,7 +132,7 @@ The complete capability list and known limitations are in [**Capabilities.md**](
 transform / size / shading, **Bake**. Static models bake an Amplitude `Skeleton` on the proven single-bone vehicle rig +
 a packed atlas; ticking **Animated** takes a parallel path (`UniversalBaker.BuildAnimated`) that keeps the model's **own
 armature + clip** (Blender slims it, then bakes `Skeleton` + `ClipCollection` + atlas, with the clip isolated in a
-per-model `anim/` subfolder). `ModelRegistry` writes `enc_models.json` into the auto-detected `BepInEx/config`.
+per-model `anim/` subfolder). `ModelRegistry` writes `haf_models.json` into the auto-detected `BepInEx/config`.
 
 **Runtime — `UniversalInject`** (`Patches/`): one patch, any number of models. Reads the registry, registers each baked
 skeleton, and on `AddOn.Load` repoints the matching pawn by **self-discovery** (reads the host's body-mesh name, renames
@@ -155,7 +155,7 @@ hang — the danger was malformed skeletons, not custom ones per se.*
 | Editor tooling ([ENCReload](https://github.com/sswelm/ENCReload)) | **Unity 2021.3.1f1** (Humankind's own engine version) + the **official Amplitude modding SDK**, which bakes the native `Skeleton` / `ClipCollection` / mesh / atlas assets; editor scripts mirrored here in `baker/` |
 | `glbconv` converter | Standalone C# console app on **.NET 8** (self-contained single-file exe — adopters need no .NET install), built on **SharpGLTF** |
 | Model-prep scripts | **Python** run headless inside **Blender** (`blender -b --python …`, `bpy` API) — rigging, decimation, clip extraction |
-| Editor ↔ runtime contract | A plain **JSON** registry (`enc_models.json`) — the only thing the two halves share |
+| Editor ↔ runtime contract | A plain **JSON** registry (`haf_models.json`) — the only thing the two halves share |
 
 ## Zero-config adoption
 Built to work on a stranger's machine, not just the author's:
@@ -183,7 +183,7 @@ and must be copied from your own install), and any 3D model you bake (each stays
 [ENCReload](https://github.com/sswelm/ENCReload) repo and is all-rights-reserved there.
 
 ## Config
-The plugin reads `<Humankind>\BepInEx\config\enc_models.json` — ENC's base **pack** (one entry per model: pawn description,
+The plugin reads `<Humankind>\BepInEx\config\haf_models.json` — ENC's base **pack** (one entry per model: pawn description,
 skeleton + atlas GUIDs, transform, shading flags; animated entries add `clip` + `animated`/`animClip`/`animateBones`),
 wrapped with pack metadata (`schemaVersion`/`modId`). It then merges any additional packs in `BepInEx/config/haf_packs/*.json`
 and writes a `haf_load_report.txt` of what loaded. The Factory writes ENC's registry and auto-detects the path; the

@@ -107,9 +107,9 @@ by when they'll bite.
   machine, old DLL removed from plugins in the same deploy — BepInEx would load both and double-patch), editor menu
   root → **`Tools ▸ HAF`** (all windows + Tech Tree + Database Browser consolidated under it; Tests submenu intact),
   instructional docs swept (Framework-Review's dated history rows keep their period-correct `Tools ▸ ENC` paths).
-  **Deliberately NOT migrated** (framework/pack split, decided 07-14 and reaffirmed 07-19): `enc_models.json` /
-  `enc_sounds` / `enc_skins` are ENC-the-PACK's files — packs are branded, only the framework is neutral, and a
-  third-party pack never touches an `enc_*` path. **Verified in-game same day** (first session clean: new identity
+  **Deliberately NOT migrated** (framework/pack split, decided 07-14 and reaffirmed 07-19): `haf_models.json` /
+  `haf_sounds` / `haf_skins` are ENC-the-PACK's files — packs are branded, only the framework is neutral, and a
+  third-party pack never touches an `haf_*` path. **Verified in-game same day** (first session clean: new identity
   loads, settings carried, units/districts/audio normal). Still open for the package release: hardcoded paths,
   package scaffolding. (The `ENCAccessProof` C# namespace + project filename were renamed to `HumankindAssetFramework` on 2026-08-01; the local repo FOLDER is the last leftover — a manual `git mv`/reclone when convenient.)
 - **Pack pre-flight validator (third-party author DX)** — *legitimate gap, not yet built.* Today pack **structure**

@@ -587,7 +587,7 @@ namespace HumankindAssetFramework
         static uint ghostDonorFxIdx;   // stashed for periodic re-crush from the NEAR tick
 
         // LIVE GHOST BISECT (2026-08-03 23:00): the ghost's mesh is SOME layer-0 FxMesh we can't name — so find it by
-        // elimination WITHOUT relaunching. Poll BepInEx/config/enc_ghostbisect.txt every ~2s:
+        // elimination WITHOUT relaunching. Poll BepInEx/config/haf_ghostbisect.txt every ~2s:
         //     crush <from> <to>    degenerate layer-0 meshes [from..to] (originals saved on first touch)
         //     restore              restore every saved mesh
         // The operator edits the file while the player watches the ghost; halving the range pins the mesh in ~8 rounds.
@@ -621,7 +621,7 @@ namespace HumankindAssetFramework
             try
             {
                 if (ghostAnimMgr == null) return;
-                var path = Path.Combine(Paths.ConfigPath, "enc_ghostbisect.txt");
+                var path = Path.Combine(Paths.ConfigPath, "haf_ghostbisect.txt");
                 if (!File.Exists(path)) return;
                 string cmd = File.ReadAllText(path).Trim();
                 if (cmd.Length == 0 || cmd == lastBisectCmd) return;

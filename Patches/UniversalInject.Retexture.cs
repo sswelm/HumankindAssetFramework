@@ -19,7 +19,7 @@ namespace HumankindAssetFramework
                 if (e.tex == null)
                 {
                     // A custom model's skin is its baked atlas — UNLESS a textureFile recolour is set on the model entry,
-                    // then hot-load THAT PNG instead (recolour a custom model without a re-bake; same enc_skins PNG the
+                    // then hot-load THAT PNG instead (recolour a custom model without a re-bake; same haf_skins PNG the
                     // Unit Retexture window writes). Desaturate/RGB then adjust the loaded PNG. Falls back to the baked
                     // atlas if the PNG is missing. (Adjust-only with no PNG stays on the baked atlas — that path isn't
                     // CPU-readable for AdjustSkin, so a model recolour goes through a PNG.)
@@ -86,12 +86,12 @@ namespace HumankindAssetFramework
         }
 
         // Load a retexture PNG: the owning pack's <assetDir>/skins/<file> first (per-pack assets, 2026-07-19), then the
-        // legacy shared BepInEx/config/enc_skins/<file>. (Needs ImageConversionModule.LoadImage.)
+        // legacy shared BepInEx/config/haf_skins/<file>. (Needs ImageConversionModule.LoadImage.)
         static UnityEngine.Texture2D LoadSkinPng(string file, string tag, string assetDir = "")
         {
             try
             {
-                var path = Path.Combine(Paths.ConfigPath, "enc_skins", file);
+                var path = Path.Combine(Paths.ConfigPath, "haf_skins", file);
                 if (!string.IsNullOrEmpty(assetDir))
                 {
                     var pp = Path.Combine(assetDir, "skins", file);

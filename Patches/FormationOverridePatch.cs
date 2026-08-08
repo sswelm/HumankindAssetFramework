@@ -5,7 +5,7 @@
 // a bundle at all: a mod-bundle formation would never enter the game's datatable system (references resolve BY NAME
 // via Databases.GetDatabase — the same catalog gap the prop axis hit with MeshCollections). Instead the editor's
 // Formation Override window serializes the FULL formation data (dummies + the six hidden per-orientation
-// ColumnsCountPerRow grids) into enc_formations.json, and this patch rebuilds it as a runtime ScriptableObject and
+// ColumnsCountPerRow grids) into haf_formations.json, and this patch rebuilds it as a runtime ScriptableObject and
 // adds it to the live database through the PUBLIC Database<T>.Add — instantly visible to every by-name lookup.
 //
 // Engine facts this rides on (decompiled 2026-07-27):
@@ -136,7 +136,7 @@ namespace HumankindAssetFramework
             if (parsed) return; parsed = true;
             try
             {
-                var regPath = Path.Combine(Paths.ConfigPath, "enc_formations.json");
+                var regPath = Path.Combine(Paths.ConfigPath, "haf_formations.json");
                 if (!File.Exists(regPath)) return;
                 var root = JObject.Parse(File.ReadAllText(regPath));
                 foreach (var l in (root["links"] as JArray) ?? new JArray())
@@ -202,13 +202,13 @@ namespace HumankindAssetFramework
                     entries.Add(e);
                 }
                 if (entries.Count > 0)
-                    Plugin.Log.LogInfo($"[Formation] registry: {entries.Count} link(s) from enc_formations.json");
+                    Plugin.Log.LogInfo($"[Formation] registry: {entries.Count} link(s) from haf_formations.json");
                 // map turn links onto addons that loaded BEFORE this parse (the SiegeHowitzers ordering: the
                 // MAIN pawn's addon loads early; its satellites load on first view) — the addon-load hook
                 // covers the other direction.
                 UniversalInject.SweepTurnLinks();
             }
-            catch (Exception ex) { Plugin.Log.LogError("[Formation] enc_formations.json parse: " + ex); }
+            catch (Exception ex) { Plugin.Log.LogError("[Formation] haf_formations.json parse: " + ex); }
         }
 
         // The consistency rules BuildDummiesGrid enforces by crashing; we enforce them by skipping. Null = valid.
@@ -459,7 +459,7 @@ namespace HumankindAssetFramework
         // private cache (element + databaseRevision) would keep resolving to the OLD target until the next Commit.
         // Formation-by-size (Global Era Lab runtime, size table authored PER UNIT in the Formation Override
         // window): the resize engine asks for this unit's thresholds; null = no per-unit table (the engine may
-        // then fall back to the legacy global table from enc_models.json).
+        // then fall back to the legacy global table from haf_models.json).
         internal static List<KeyValuePair<float, string>> SizeThresholdsFor(string unitDefName)
         {
             if (string.IsNullOrEmpty(unitDefName)) return null;

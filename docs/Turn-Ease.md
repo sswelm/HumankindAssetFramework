@@ -36,7 +36,7 @@ Fixed-wing **planes and missiles are always excluded** — the engine flies them
 an explicit per-model rate can ease one. `hoverbank=` / `shipbank=` give hover and ship their own roll into
 the turn (a chopper banks, a ship heels); other categories stay flat. **Precedence: per-model Factory value >
 per-unit Formation link > category default > global `rate`.** Configure in the Formation Override window's
-**Turn ease defaults** panel (writes the dial live) or edit `enc_turnease.txt` directly.
+**Turn ease defaults** panel (writes the dial live) or edit `haf_turnease.txt` directly.
 
 Classification runs two paths: capability profiles are read when a pawn definition loads (fast path), and a
 slow **class scan** (~3 s, active only while category rates are set) reads every live unit directly — its
@@ -68,9 +68,9 @@ long-stop.
 
 Live dials (`BepInEx/config/`, polled ~1/s, no restart):
 
-- **`enc_turnease.txt`** — the category defaults above, plus `rate=`/`bank=` as last-resort fallbacks for
+- **`haf_turnease.txt`** — the category defaults above, plus `rate=`/`bank=` as last-resort fallbacks for
   uncategorized units and per-model-eased flyers.
-- **`enc_battleturn.txt`** — `hold=1` enables the **experimental, untested** battle-side hold (ranged attacks in
+- **`haf_battleturn.txt`** — `hold=1` enables the **experimental, untested** battle-side hold (ranged attacks in
   deployed battles wait for the rotation FSM); `diag=1` turns on choreography forensics logging.
 
 **Vanilla units** (verified): the Formation Override window has a per-unit **Turn ease** row — tick it on any

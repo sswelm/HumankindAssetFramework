@@ -66,7 +66,7 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   anticipating a descent would sink toward the ridge still being crossed). Needed a physics reference and one
   correction found by reading the log rather than the screen: the first probe was a plain downward raycast and
   measured the helicopter's **own army collider**, so it compared unit heights, not terrain; it now uses
-  `RaycastAll`, skips units, and takes the lowest hit. Dial: `cliff` in `enc_hugterrain.txt`.
+  `RaycastAll`, skips units, and takes the lowest hit. Dial: `cliff` in `haf_hugterrain.txt`.
 - **TERRAIN HUG — nap-of-the-earth flight, climbing only for the city (2026-08-05).** The helicopter now
   **skims low over open ground and climbs only for built districts**, instead of cruising at skyline height
   everywhere. The engine's air altitude is already terrain-relative (it follows hills for free) but ignores
@@ -77,14 +77,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   district's own tile"; a hand-picked radius lifted the unit for every field beside the city), and districts
   are classified by their private **`constructibleDefinitionName`** rather than the always-identical
   GameObject name — which exposed that Humankind renders cultivated tiles as districts too (`Exploitation`,
-  `Ruin` are flat; only `Extension_*` carries buildings). Live-tunable via `enc_hugterrain.txt`
+  `Ruin` are flat; only `Extension_*` carries buildings). Live-tunable via `haf_hugterrain.txt`
   (drop/radius/lookahead/ease + `only`/`skip` name filters). See
   [docs/Donor-Clip-Flight.md](docs/Donor-Clip-Flight.md).
 - **TURN EASE — flown turns instead of the facing snap (2026-08-04, same day as the flight milestone).** The
   engine snaps a pawn's facing instantly on a move order; the Comanche now **sweeps** to its new heading at a
   capped rate and **banks into the turn**, composed under the nose-down attitude machinery. Every angle eases
   (180s included) while teleports/battle placement snap naturally — the per-pawn state is position-matched, so
-  a jumped pawn simply starts fresh at the target heading. Live-tunable in-game via `enc_turnease.txt`
+  a jumped pawn simply starts fresh at the target heading. Live-tunable in-game via `haf_turnease.txt`
   (rate/bank, ~1/s poll) — dialed to feel on the first flight. Spotted as a gap by **shakee** on the milestone
   video within minutes of posting; built and verified the same evening. Per-model Factory fields are the
   planned graduation. See [docs/Donor-Clip-Flight.md](docs/Donor-Clip-Flight.md).
@@ -100,7 +100,7 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   leaf rotor bones keep their orientation), and the Vehicle Lab **authors the axle frames** (main-rotor bone
   local Y = mast, tail-fan bone local X = the canted fan axle). Five failure modes catalogued on the way
   (index-shifted channels, rolled axis, orbiting rotor, vertical loop, stale-rig rebake) — the full contract
-  and catalog: [docs/Donor-Clip-Flight.md](docs/Donor-Clip-Flight.md). Plus a live `enc_rotortrim.txt` dial
+  and catalog: [docs/Donor-Clip-Flight.md](docs/Donor-Clip-Flight.md). Plus a live `haf_rotortrim.txt` dial
   (constant BR-slot tilt, re-applied to live pawns ~1/s, no relaunch) kept inert as a finishing tool.
 - **A HELICOPTER WITH ITS OWN SPINNING ROTORS — and the four-mechanism ghost hunt (2026-08-03/04).** The RAH-66
   Comanche now flies with **its own main + tail rotor spinning** (Vehicle Lab Rotor/Tail-rotor roles → continuous
@@ -207,6 +207,19 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Districts
 
+- **GROUND MATERIAL — the maintained field (2026-08-08).** A district paints the terrain under it via
+  `UpdateGroundMaterial` (a `(Biome × affinity)` → `GroundMaterialDefinition` resolve); a custom wonder's
+  affinity has no row, so the Oracle stood on bare desert. The plugin postfixes the resolve and **forces a
+  chosen ground index** — the game's own blended terrain paint, not a flat mesh. It's a **per-district** field
+  in the Factory (dropdown of the game's vocabulary — grass / paved / sparse), with a global config fallback.
+  Verified: `Prairie_Grassland` under the Oracle's temple and grove — the same empty-cell insight as the wonder
+  visual, applied a third time, now to the terrain layer.
+- **DE-ENC — framework filenames dropped the pack prefix (2026-08-08).** HAF is a universal framework, so its
+  registry and tuning files shed the `enc_` badge of one pack: `enc_districts.json` → `haf_districts.json`,
+  and likewise `haf_models` / `haf_formations` / `haf_sounds` / `haf_props` and the live-tuning `haf_*.txt`
+  dials (177 references across 35 files, both repos + the git-tracked backups + the deployed data). The pack
+  itself keeps its identity — `haf_packs/ENCReload/`, `pack.json`, its own skins/sounds — because that name is
+  the pack, not a prefix.
 - **DISTRICTS GO MULTI-INSTANCE (2026-08-08, verified with a second reactor).** A critical review of the
   district axis found its one architectural flaw: each registry entry held ONE component slot, overwritten by
   whichever district instance last refreshed — build the same district in two cities and ownership ping-ponged,

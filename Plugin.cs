@@ -38,6 +38,7 @@ namespace HumankindAssetFramework
         internal static ConfigEntry<string> DistrictFxMeshGuid;  // MESH-SWAP: our baked FxMesh GUID; keep the district's own working material, swap only its mesh to ours (best render odds)
         internal static ConfigEntry<int>    DistrictBufferHeadroom; // extra vertices to add to the big (Visual) GPU mesh buffer at init, so custom district meshes fit even in a full late-game city. 0 = off (leave the buffer as the game sizes it).
         internal static ConfigEntry<int>    DistrictMeshDensityBoost; // multiplier on the private layer's PrimitivePerParticleCount — raises the per-mesh 255-sub-particle render ceiling so high-poly composed districts (grove pizzas) draw fully. 0/1 = vanilla.
+        internal static ConfigEntry<string> DistrictGroundMaterial; // force a GroundMaterialDefinition (grass field) under custom districts — the terrain paint a wonder's affinity lacks. Blank = off. DistrictDebug logs the valid names.
         internal static ConfigEntry<bool>   DistrictIsolate;         // scope the mesh-swap to only the target district's own tile (private per-instance leaf) instead of the shared-global swap
         internal static ConfigEntry<bool>   DistrictDebug;           // investigation diagnostics ([District] saw / [DistrictMat] / [DistrictSub] dumps) — off in normal play, they reflect on every district update
         internal static ConfigEntry<string> WonderNativeRows;        // SPIKE wip-wonder-affinity: fill empty cells in the ArtificialWonder repo database, "WonderName=a,b,c,d;..." (FxEvolverMaterial guid)
@@ -52,7 +53,7 @@ namespace HumankindAssetFramework
 
         internal static ConfigEntry<string> ProjectileOverrides;  // EXPERIMENTAL projectile axis: "<pawnDefGuid>=<projectileGuid>;..." — point a unit's fired projectile at our baked ProjectileAsset (the kamikaze drone)
 
-        internal static ConfigEntry<bool>   FormationOverrideOn;  // FORMATION axis: enc_formations.json (Formation Override window) — inject custom formations + repoint units (pawn count per unit)
+        internal static ConfigEntry<bool>   FormationOverrideOn;  // FORMATION axis: haf_formations.json (Formation Override window) — inject custom formations + repoint units (pawn count per unit)
         internal static ConfigEntry<bool>   FormationReinstantiateOn; // FORMATION axis: after apply, re-instantiate already-spawned units of a repointed type so they reach the new pawn count (fixes the load-race undercount)
 
         private bool show;
@@ -134,6 +135,11 @@ namespace HumankindAssetFramework
                                   "Extra VERTICES to add to the game's big 'Visual' GPU mesh buffer (the shared building buffer, ~3,000,000 by default) " +
                                   "at startup, so custom district meshes fit even when a built-up late-game city has nearly filled it. 0 = off. " +
                                   "e.g. 1000000 = +~48MB VRAM. Applied once at buffer creation; takes effect on the next launch.");
+            DistrictGroundMaterial = Config.Bind("District", "DistrictGroundMaterial", "",
+                                  "Force a GROUND MATERIAL (the terrain paint — grass, pavement) under EVERY custom district in the registry, " +
+                                  "so a custom wonder gets a maintained field instead of bare terrain. The value is a GroundMaterialDefinition " +
+                                  "NAME; set DistrictDebug=true and check the log for '[Ground] GroundMaterialDefinition names (...)' to see the " +
+                                  "valid options (pick a grass one). Blank = off (vanilla terrain). Uses the game's own terrain paint, blended.");
             DistrictMeshDensityBoost = Config.Bind("District", "DistrictMeshDensityBoost", 8,
                                   "Multiplier on a custom district's private-layer PrimitivePerParticleCount, raising the PER-MESH primitive ceiling. " +
                                   "A district mesh renders as sub-particles whose count is hard-clamped at 255 (an 8-bit field): a high-poly composed " +
@@ -198,9 +204,9 @@ namespace HumankindAssetFramework
                                   "def GUID is the Guid line of the unit in the SDK Asset Picker). Applied at AnimationLoad. Blank = off.");
 
             // --- FORMATION override (fifth data axis; ZERO baked assets — see Patches/FormationOverridePatch.cs).
-            //     Registry-driven and inert without enc_formations.json, so it defaults ON like UniversalInject. ---
+            //     Registry-driven and inert without haf_formations.json, so it defaults ON like UniversalInject. ---
             FormationOverrideOn = Config.Bind("Formations", "FormationOverride", true,
-                                  "Registry-driven FORMATION override (the Formation Override editor window): reads enc_formations.json, " +
+                                  "Registry-driven FORMATION override (the Formation Override editor window): reads haf_formations.json, " +
                                   "rebuilds each custom PresentationFormationDefinition at runtime (dummy positions + the six per-orientation " +
                                   "grids), adds it to the live formation database at load, and repoints each linked unit's formation " +
                                   "reference — changing how MANY pawn models the unit displays (pawn count = ceil(health% x dummy count)). " +
@@ -233,6 +239,7 @@ namespace HumankindAssetFramework
                 typeof(Hk_SilenceEvents),     // silence-by-event-name: drop any Wwise post whose name matches Audio/SilenceAudioEvents (POC for era-audio; no-op when empty)
                 typeof(Hk_DistrictRepoint),   // EXPERIMENTAL: replace one district's on-map visual (docs/District-Visuals.md)
                 typeof(Hk_DistrictBufferHeadroom), // EXPERIMENTAL: enlarge the shared 'Visual' mesh buffer so custom district meshes fit (opt-in)
+                typeof(Hk_DistrictGroundMaterial), // EXPERIMENTAL: force a ground material (grass field) under a custom district
                 typeof(Hk_AnimatedBonePoolHeadroom), // enlarge the shared per-frame animated-bone pool (65,535 vanilla) — the spike-plague fix
                 typeof(Hk_PropRegister),           // EXPERIMENTAL: register our prop MeshCollections at AnimationLoad, before pawn resolution (opt-in)
                 typeof(Hk_ProjectileOverride),     // EXPERIMENTAL: re-point a unit's Projectile at our baked ProjectileAsset (kamikaze drone) at AnimationLoad (opt-in)
@@ -290,15 +297,15 @@ namespace HumankindAssetFramework
                 UniversalInject.ProcessEngineAudio();   // engine sound: fire the per-ship Start/Stop move sound on our units
                 UniversalInject.ProcessSubPawnVisuals();   // one-shot pawn-prefab hierarchy dump (the ghost-rotor hunt); no-op once dumped
                 UniversalInject.ProcessBattleCries();   // battle-start war cries queued by the sim-thread hook
-                UniversalInject.PollRotorTrim();        // live rotor-trim dial (enc_rotortrim.txt): constant BR-slot tilt on donor-clip rotor bones
-                UniversalInject.PollTurnEase();         // live turn-ease dial (enc_turnease.txt): eased facing + bank on donor-clip units (spike)
-                UniversalInject.PollTerrainHug();       // live terrain-hug dial (enc_hugterrain.txt): fly low over open ground, climb for districts (spike)
+                UniversalInject.PollRotorTrim();        // live rotor-trim dial (haf_rotortrim.txt): constant BR-slot tilt on donor-clip rotor bones
+                UniversalInject.PollTurnEase();         // live turn-ease dial (haf_turnease.txt): eased facing + bank on donor-clip units (spike)
+                UniversalInject.PollTerrainHug();       // live terrain-hug dial (haf_hugterrain.txt): fly low over open ground, climb for districts (spike)
                 UniversalInject.PollClassScan();        // category turn ease: sample live units for the Hover ability + azimuth turrets (~3s; only while category rates are active)
                 UniversalInject.TickDistrictMeshSwap(); // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
                 UniversalInject.PollRepoDump();         // SPIKE wip-wonder-affinity: one-shot AssetReferenceRepository dump (DistrictDebug-gated)
                 UniversalInject.PollWonderRows();       // SPIKE wip-wonder-affinity: fill configured wonder cells in the ArtificialWonder visual DB
             }
-            BattleTurn.Poll();                          // live battle-turn dial (enc_battleturn.txt): turn rate + hold-fire for ALL units — independent of model injection, so outside the UniversalInject gate (spike)
+            BattleTurn.Poll();                          // live battle-turn dial (haf_battleturn.txt): turn rate + hold-fire for ALL units — independent of model injection, so outside the UniversalInject gate (spike)
             Hk_BombardAnimHold.Tick();                  // replay deferred bombard attack poses once their turn-hold elapses (muzzle flash + shot sound timing)
             if (PersistUnitFacing.Value)
                 FacingPersist.Tick();                   // capture each army's facing + restore it after a load (stationary units only). OWN gate — facing is independent of model injection, so turning UniversalInject off must NOT silence it (it has its own save/load hooks + config).

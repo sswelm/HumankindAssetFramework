@@ -30,7 +30,7 @@ public static class ConversionGateTest
     public static void RunLitmus()
     {
         // --- fixture: synthesize the litmus rig if it isn't cached ---
-        string litmus = Path.Combine(Path.GetTempPath(), "enc_litmus.glb");
+        string litmus = Path.Combine(Path.GetTempPath(), "haf_litmus.glb");
         if (!File.Exists(litmus))
         {
             string script = Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Tools", "make_litmus.py");

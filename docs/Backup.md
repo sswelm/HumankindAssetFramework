@@ -18,7 +18,7 @@ Each group is an independent toggle with a live size readout:
 | Baked assets | `Assets/Resources` (skeletons, atlases, clip collections, PNGs) |
 | ENC Databases | `Assets/Databases` |
 | Tools | `Tools/` (Blender rig/convert scripts, `glbconv`) |
-| Runtime config | `BepInEx/config/enc_*.json` + `enc_skins/` + `enc_sounds/` (the regenerable `enc_atlas_dump/` is skipped) |
+| Runtime config | `BepInEx/config/haf_*.json` + `haf_skins/` + `haf_sounds/` (the regenerable `haf_atlas_dump/` is skipped) |
 
 ## How a backup is stored
 

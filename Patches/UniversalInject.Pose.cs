@@ -182,7 +182,7 @@ namespace HumankindAssetFramework
                 // skinned pawn), else by the descriptor learned from that first correct pawn. The game spawns a unit's LATER
                 // instances on a different vanilla skeleton; without the descriptor fallback only the first instance is
                 // handled and the rest slip through (animating / rocking on the donor's rig).
-                // RENDER CENSUS (diag=1 in enc_battleturn.txt): one line per DISTINCT descriptor that actually
+                // RENDER CENSUS (diag=1 in haf_battleturn.txt): one line per DISTINCT descriptor that actually
                 // renders, with how this hook classifies it — ends the "which pawn is that on screen?" guessing
                 // (the SiegeHowitzers hunt: linked unit, mapped satellites, yet nothing eased).
                 if (BattleTurn.diag && descCensusLogged.Add(ctx.descId))
@@ -387,7 +387,7 @@ namespace HumankindAssetFramework
             if (!descTableDumpedLate) { descTableDumpedLate = true; ResetDescTableDump(); DumpDescriptorTable(); ResetFxMeshTableDump(); DumpFxMeshTable(ghostAnimMgr); }
             ScanGhostDescriptors();   // re-scan for late-registered descriptors still drawing the donor mesh (every NEAR tick, ~10s)
             CrushGhostSlice(ghostAnimMgr, e, ghostDonorFxIdx);   // re-crush if the Fx content reloaded (probe-guarded, cheap)
-            PollGhostBisect();   // live operator-driven mesh bisect via enc_ghostbisect.txt (no relaunch needed)
+            PollGhostBisect();   // live operator-driven mesh bisect via haf_ghostbisect.txt (no relaunch needed)
             try
             {
                 var os0 = GetMember(ctx.entry, "ObjectSpace");
@@ -518,7 +518,7 @@ namespace HumankindAssetFramework
         // so the blade disc is perpendicular to the TILTED mast while the donor clip spins it about true vertical —
         // the disc precesses by the lean angle. A CONSTANT BoneRotation-slot rotation (turretize's mechanism; the
         // spawn-time write is fine because the angle never advances) re-aligns disc and spin axis. Dialed LIVE via
-        // BepInEx/config/enc_rotortrim.txt — one line per bone, `BoneSubstring@axis=degrees` (axis 0/1/2), '#'
+        // BepInEx/config/haf_rotortrim.txt — one line per bone, `BoneSubstring@axis=degrees` (axis 0/1/2), '#'
         // comments — polled ~1/s and re-applied to live pawns, so tuning needs no relaunch.
         struct TrimSpec { public string bone; public int axis; public float deg; }
         static readonly List<TrimSpec> trims = new List<TrimSpec>();
@@ -532,7 +532,7 @@ namespace HumankindAssetFramework
             trimNextPoll = UnityEngine.Time.realtimeSinceStartup + 1f;
             try
             {
-                var path = Path.Combine(Paths.ConfigPath, "enc_rotortrim.txt");
+                var path = Path.Combine(Paths.ConfigPath, "haf_rotortrim.txt");
                 string txt = File.Exists(path) ? File.ReadAllText(path) : "";
                 if (txt == trimSig) return;
                 trimSig = txt;
@@ -573,7 +573,7 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogWarning("[Trim] " + ex.Message); }
         }
 
-        // TURN-EASE FILE POLL (spike): enc_turnease.txt in BepInEx/config — `rate=<deg/s>` `bank=<deg>`
+        // TURN-EASE FILE POLL (spike): haf_turnease.txt in BepInEx/config — `rate=<deg/s>` `bank=<deg>`
         // `snap=<deg>`, '#' comments. Same ~1/s cadence as the rotor trim; missing file or rate=0 disables.
         static string turnSig;
         static float turnNextPoll;
@@ -583,7 +583,7 @@ namespace HumankindAssetFramework
             turnNextPoll = UnityEngine.Time.realtimeSinceStartup + 1f;
             try
             {
-                var path = Path.Combine(Paths.ConfigPath, "enc_turnease.txt");
+                var path = Path.Combine(Paths.ConfigPath, "haf_turnease.txt");
                 string txt = File.Exists(path) ? File.ReadAllText(path) : "";
                 if (txt == turnSig) return;
                 turnSig = txt;
@@ -618,7 +618,7 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogWarning("[TurnEase] " + ex.Message); }
         }
 
-        // TERRAIN-HUG FILE POLL (spike): enc_hugterrain.txt — `drop=-2` (how much LOWER over open ground; 0 = off),
+        // TERRAIN-HUG FILE POLL (spike): haf_hugterrain.txt — `drop=-2` (how much LOWER over open ground; 0 = off),
         // `radius=6` (district match radius), `lookahead=3` (probe distance ahead), `ease=4` (units/s climb rate).
         static string hugSig;
         static float hugNextPoll;
@@ -628,7 +628,7 @@ namespace HumankindAssetFramework
             hugNextPoll = UnityEngine.Time.realtimeSinceStartup + 1f;
             try
             {
-                var path = Path.Combine(Paths.ConfigPath, "enc_hugterrain.txt");
+                var path = Path.Combine(Paths.ConfigPath, "haf_hugterrain.txt");
                 string txt = File.Exists(path) ? File.ReadAllText(path) : "";
                 if (txt == hugSig) return;
                 hugSig = txt;

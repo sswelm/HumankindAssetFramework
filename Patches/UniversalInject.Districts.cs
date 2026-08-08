@@ -14,7 +14,7 @@ namespace HumankindAssetFramework
     {
         // ---- EXPERIMENTAL district-visual repoint (docs/District-Visuals.md) ----
         // Parsed once from config: the target district name + the two override modes. dGuid is a boxed Amplitude Guid or null.
-        // One custom district model, from the enc_districts.json registry (written by the District Factory window).
+        // One custom district model, from the haf_districts.json registry (written by the District Factory window).
         // Runtime state lives here too, so any number of districts can carry custom models simultaneously.
         internal class DistrictModel
         {
@@ -24,6 +24,8 @@ namespace HumankindAssetFramework
             public object normalAtlasGuid;   // baked normal atlas (null = neutral flat) — same rects as the albedo
             public object roughAtlasGuid;    // baked roughness atlas (null = neutral matte)
             public bool isolate = true;      // true = private per-instance leaf (this tile only); false = global shared-leaf swap
+            public string groundMaterial = ""; // per-entry terrain paint (GroundMaterialDefinition name, e.g. Prairie_Grassland) — "" falls back to the global DistrictGroundMaterial config
+            public int groundIdx = int.MinValue; // resolved ground-material index cache (MinValue = unresolved, -1 = name not found)
             // runtime — PER-INSTANCE targeting: a district can be BUILT ON MANY TILES (one PresentationDistrict each);
             // the old single plbc slot made ownership ping-pong between instances (only the most recently updated tile
             // showed the custom model — the review's architectural finding). The private leaf + layer clone + texture
@@ -74,7 +76,7 @@ namespace HumankindAssetFramework
 
                 // The district REGISTRY (written by the District Factory window): any number of district models at once.
                 distModels.Clear();
-                var regPath = Path.Combine(Paths.ConfigPath, "enc_districts.json");
+                var regPath = Path.Combine(Paths.ConfigPath, "haf_districts.json");
                 if (File.Exists(regPath))
                 {
                     try
@@ -90,13 +92,14 @@ namespace HumankindAssetFramework
                                 normalAtlasGuid = ParseGuid4((string)d["normalAtlasGuid"] ?? ""),
                                 roughAtlasGuid = ParseGuid4((string)d["roughAtlasGuid"] ?? ""),
                                 isolate = (bool?)d["isolate"] ?? true,
+                                groundMaterial = (string)d["groundMaterial"] ?? "",
                             };
                             if (e.district.Length > 0 && e.fxMeshGuid != null) distModels.Add(e);
                             else Plugin.Log.LogWarning($"[District] registry entry skipped (district='{e.district}', bad fxMeshGuid?)");
                         }
-                        Plugin.Log.LogInfo($"[District] registry: {distModels.Count} district model(s) from enc_districts.json");
+                        Plugin.Log.LogInfo($"[District] registry: {distModels.Count} district model(s) from haf_districts.json");
                     }
-                    catch (Exception rex) { Plugin.Log.LogError("[District] enc_districts.json parse: " + rex); }
+                    catch (Exception rex) { Plugin.Log.LogError("[District] haf_districts.json parse: " + rex); }
                 }
                 // legacy single-model config keeps working: synthesize an entry when the registry has none
                 if (distModels.Count == 0 && !string.IsNullOrEmpty(distName) && distFxMeshGuid != null)
@@ -641,9 +644,10 @@ namespace HumankindAssetFramework
                 d.matchLogged = false;
                 d.texApplied = false; d.texWait = 0; d.texErrors = 0; d.texAlbedo = null; d.texNormal = null; d.texRough = null;
                 d.boundSlots.Clear();   // the cached (material, property) bind slots are corpses with the old layer
+                d.groundIdx = int.MinValue;   // re-resolve the ground-material index against the new session's repository
             }
             ResetWonderTemplates();   // plugin-loaded wonder templates are corpses after a reload; re-load + re-fill swap-first
-            // re-parse the registry too: a reload then picks up enc_districts.json edits (new/changed entries) without
+            // re-parse the registry too: a reload then picks up haf_districts.json edits (new/changed entries) without
             // a game restart. NOTE the honest limit: baked ASSETS ship in the mod bundle, which the game loads once per
             // app run — a re-BAKE still needs a restart; only registry-value changes arrive on reload.
             distParsed = false;
@@ -1082,7 +1086,7 @@ namespace HumankindAssetFramework
 
         // ---- ATLAS DUMP (retexture aid) ------------------------------------------------------------------------------
         // Dump every currently-loaded unit output-layer atlas (its material's _MainTex) to
-        // BepInEx/config/enc_atlas_dump/<layer>.png, so a unit's skin can be found by its layer name and used as a
+        // BepInEx/config/haf_atlas_dump/<layer>.png, so a unit's skin can be found by its layer name and used as a
         // paint canvas (e.g. to make a desaturated "grey" variant of a Common copy). Reuses ApplyTexture's Content walk
         // (Content -> OutputLayerEntries -> OutputLayerInstance) and TickOne's material fields; the host atlas isn't
         // CPU-readable, so each is blitted through a RenderTexture first. One PNG per layer. Bound to the F8 window's
@@ -1097,7 +1101,7 @@ namespace HumankindAssetFramework
                 var content = GetMember(mgr, "Content");
                 var list = content != null ? GetMember(content, "OutputLayerEntries") as Array : null;
                 if (list == null) { Plugin.Log.LogWarning("[AtlasDump] no OutputLayerEntries found."); return; }
-                string dir = Path.Combine(Paths.ConfigPath, "enc_atlas_dump");
+                string dir = Path.Combine(Paths.ConfigPath, "haf_atlas_dump");
                 Directory.CreateDirectory(dir);
                 var seen = new HashSet<string>();
                 int n = 0;

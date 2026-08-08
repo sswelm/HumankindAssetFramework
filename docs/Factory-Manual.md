@@ -330,9 +330,9 @@ strategic map.
   (static); animated adds `_Clips.asset` and a `<name>/anim/<name>_anim.fbx`.
 - **Bake inputs (NOT shipped):** the imported model + extracted OBJ/albedo sit in `Assets/FactorySource/<name>/`, kept out
   of the built mod so licensed source models aren't redistributed. Safe to delete to reclaim space (a re-bake re-extracts).
-- **Registry:** `<Humankind>\BepInEx\config\enc_models.json` — one entry per model (pawn description, `skel`/`atlas` GUIDs,
+- **Registry:** `<Humankind>\BepInEx\config\haf_models.json` — one entry per model (pawn description, `skel`/`atlas` GUIDs,
   transform, flags; animated adds `clip` + `animated`/`animClip`/`animateBones`).
-- **Registry backup (versioned):** `Assets/Databases/enc_models.backup.json` — a git-tracked shadow copy, rewritten on
+- **Registry backup (versioned):** `Assets/Databases/haf_models.backup.json` — a git-tracked shadow copy, rewritten on
   every Save/bake. See "Registry safety net" below.
 - **Runtime log:** `<Humankind>\BepInEx\LogOutput.log` — `[Uni] …` lines show what was injected (and the donor fragment
   names the Hide-donor Pick reads).
@@ -347,9 +347,9 @@ The registry is the one Factory artifact that lives in the *game* folder, so it'
   the bake status says **"Baked, but REGISTRY SAVE FAILED"** — the asset is baked; close the lock and re-bake to write
   the entry.
 - **Corrupt-file guard.** If the registry exists but won't parse (a hand-edit typo, a half-written file), it is copied
-  aside to `enc_models.json.corrupt.json` and **Save refuses to run** until you fix or delete the original — so a bake
+  aside to `haf_models.json.corrupt.json` and **Save refuses to run** until you fix or delete the original — so a bake
   can never overwrite your unreadable-but-recoverable registry with a fresh empty list.
-- **Versioned backup + auto-restore.** Every Save also writes `Assets/Databases/enc_models.backup.json` inside the mod
+- **Versioned backup + auto-restore.** Every Save also writes `Assets/Databases/haf_models.backup.json` inside the mod
   repo (git-tracked → full history, survives anything that happens to the game folder). If the game registry is
   **missing** — fresh install, verified files — the next `Load()` restores it from this backup and writes it back to
   `BepInEx\config` automatically. Just **opening the Factory window** triggers this (the console logs
@@ -433,7 +433,7 @@ sharing that layer) is untouched.
 
 Everything is a plain registry entry (no assets, no mod rebuild). Section 3 of the window is **Replace / adjust skin**:
 
-- **Replacement PNG** *(optional)* — `textureFile`: a PNG filename in `BepInEx\config\enc_skins\`. The plugin hot-loads
+- **Replacement PNG** *(optional)* — `textureFile`: a PNG filename in `BepInEx\config\haf_skins\`. The plugin hot-loads
   it at runtime. Leave it empty to adjust the unit's OWN atlas (or, when editing an entry, to keep its current skin).
 - **Adjustments** (applied on top of whichever skin above — the PNG *or* the own atlas):
   - **Brightness (gamma)** *(2026-07-21, applied FIRST; 1 = unchanged, >1 lighter, <1 darker)* — a gamma lift:
@@ -470,9 +470,9 @@ Workflow:
 1. **Pawn** — pick the pawn descriptor (use the `_Common_..._01` copy, **not** the emblematic original — the isolation
    clone is what leaves the original untouched; they share an output layer). The entry name defaults to `Retex_<pawn>`.
 2. **Download the skin to paint** — dump the unit atlases in-game first (**F8 window ▸ Dump Atlases**; files land in
-   `BepInEx\config\enc_atlas_dump\`), then paint over the unit's PNG in any editor. It's the unit's real UV layout, so
+   `BepInEx\config\haf_atlas_dump\`), then paint over the unit's PNG in any editor. It's the unit's real UV layout, so
    what you paint is what wraps.
-3. **Replace** — point the window at your painted PNG and Apply: it copies the PNG into `config\enc_skins\` and writes
+3. **Replace** — point the window at your painted PNG and Apply: it copies the PNG into `config\haf_skins\` and writes
    the registry entry (or tick **Grey** for the desaturate mode). Relaunch/reload the game to see it.
 
 Because the mesh is untouched this can't fix silhouettes — it's for palettes, markings, camo. And since the plugin
@@ -516,7 +516,7 @@ unit at load — no dependency on anything else having moved. Leave them blank a
 then) — so **name the events for a shipping mod.**
 
 **Extract every sound — the catalog:** F8 window ▸ **Dump Sound Catalog** writes every Wwise event name in the game (~800+)
-to `BepInEx\config\enc_sound_catalog.txt` — this file also FEEDS the Pick dropdowns and the donor auto-button above,
+to `BepInEx\config\haf_sound_catalog.txt` — this file also FEEDS the Pick dropdowns and the donor auto-button above,
 so dump it once per machine and the UI takes over. Examples:
 
 | Unit family | Start event | Stop event |
@@ -568,7 +568,7 @@ HAF ▸ Sound Studio** — the **Movement** section — assigns up to three WAVs
 - **Stop** — a one-shot **spool-down** played on move-end.
 
 These play through Unity's own `AudioSource` (not Wwise), so **any** WAV works — no soundbank needed. Requirements: **16-bit
-PCM WAV** (convert mp3/ogg first); **mono** for true 3-D positioning. Files are copied into `BepInEx\config\enc_sounds\` and
+PCM WAV** (convert mp3/ogg first); **mono** for true 3-D positioning. Files are copied into `BepInEx\config\haf_sounds\` and
 referenced by the registry (`soundStartFile`/`soundFile`/`soundStopFile` + `soundStartVolume`/`soundVolume`/`soundStopVolume`).
 It writes onto the unit's *existing* registry entry, so a unit still has one entry. (A `Wwise engine event` option in the
 same window covers the §13 game-sound path.)
@@ -620,7 +620,7 @@ periodic snarl.
 ### 14c. Attack sound (`soundAttackFile`)
 
 A **distinct, violent** one-shot for when the unit strikes — separate from the idle growl. `soundAttackFile` /
-`soundAttackVolume` / `soundAttackOffset` (a WAV in `enc_sounds/`). Three things make it land right:
+`soundAttackVolume` / `soundAttackOffset` (a WAV in `haf_sounds/`). Three things make it land right:
 
 - **Timing — fired at attack *commit*, not mid-swing.** The trigger is `UnitActionFaceEnemy.StartUnitAction` — the moment
   the attacker turns to face its target, *before* the strike choreography. (Earlier attempts fired per-swing, which landed

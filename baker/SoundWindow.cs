@@ -143,7 +143,7 @@ public class SoundWindow : EditorWindow
         if (Section(ref foldWwise, "Wwise engine event (game's own sound)", engineSound ? ShortEvent(engineStart) : null))
         {
             engineSound = EditorGUILayout.ToggleLeft(new GUIContent("Use a Wwise engine event (posted on move start/stop)",
-                "The game's own per-ship sound. Get names from F8 ▸ Dump Sound Catalog (enc_sound_catalog.txt)."), engineSound);
+                "The game's own per-ship sound. Get names from F8 ▸ Dump Sound Catalog (haf_sound_catalog.txt)."), engineSound);
             UseDonorSoundButton();
             if (engineSound)
             {
@@ -297,14 +297,14 @@ public class SoundWindow : EditorWindow
 
     // ── Wwise event picker ────────────────────────────────────────────────────────────────────────────────────────
     // A text field + a searchable Pick dropdown over the game's full event catalog (the F8 ▸ Dump Sound Catalog
-    // output, enc_sound_catalog.txt in BepInEx/config). No more hand-copying names out of a text file; the dropdown
+    // output, haf_sound_catalog.txt in BepInEx/config). No more hand-copying names out of a text file; the dropdown
     // is disabled with a how-to tooltip until the catalog has been dumped once on this machine.
     static string[] soundCatalog; static long soundCatalogStamp = -1;
     static string[] LoadSoundCatalog()
     {
         try
         {
-            var p = Path.Combine(ModelRegistry.ConfigDir, "enc_sound_catalog.txt");
+            var p = Path.Combine(ModelRegistry.ConfigDir, "haf_sound_catalog.txt");
             if (!File.Exists(p)) { soundCatalog = null; return null; }
             long stamp = File.GetLastWriteTimeUtc(p).Ticks;
             if (soundCatalog != null && stamp == soundCatalogStamp) return soundCatalog;
@@ -400,7 +400,7 @@ public class SoundWindow : EditorWindow
             var cat = LoadSoundCatalog();
             using (new EditorGUI.DisabledScope(cat == null || cat.Length == 0))
                 if (GUILayout.Button(new GUIContent("Pick", cat == null
-                        ? "No sound catalog on this machine yet — in-game: F8 window ▸ Dump Sound Catalog (writes enc_sound_catalog.txt), then come back."
+                        ? "No sound catalog on this machine yet — in-game: F8 window ▸ Dump Sound Catalog (writes haf_sound_catalog.txt), then come back."
                         : $"Pick from the game's {cat.Length} Wwise events (searchable)"), GUILayout.Width(50)))
                 {
                     var r = GUILayoutUtility.GetLastRect();
@@ -414,7 +414,7 @@ public class SoundWindow : EditorWindow
         using (new EditorGUILayout.HorizontalScope())
         {
             EditorGUILayout.LabelField(label, GUILayout.Width(130));
-            // The stored value is a bare filename resolved against enc_sounds/ (all sound WAVs live there). Show the FOLDER +
+            // The stored value is a bare filename resolved against haf_sounds/ (all sound WAVs live there). Show the FOLDER +
             // name inline, and the ABSOLUTE path as a hover tooltip — so the location is visible (parity with the model file),
             // without a long common prefix crowding out the filename in this narrow field. A browsed (not-yet-imported) file
             // shows "→ name" with its source path on hover.
@@ -442,7 +442,7 @@ public class SoundWindow : EditorWindow
             EditorGUILayout.LabelField($"×{perc * perc:0.00}", GUILayout.Width(48));
         }
         vol = perc * perc;
-        // BROKEN-LINK REPORT: a filename is saved in the registry but the WAV isn't in enc_sounds/ (deleted/renamed).
+        // BROKEN-LINK REPORT: a filename is saved in the registry but the WAV isn't in haf_sounds/ (deleted/renamed).
         if (string.IsNullOrEmpty(path) && !string.IsNullOrEmpty(current) && !File.Exists(Path.Combine(SoundsDir, current)))
             EditorGUILayout.HelpBox("Missing WAV in the pack's sounds/: " + current + " — Browse… to re-point it.", MessageType.Warning);
     }

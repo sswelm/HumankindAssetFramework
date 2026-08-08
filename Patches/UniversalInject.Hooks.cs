@@ -159,6 +159,21 @@ namespace HumankindAssetFramework
         static void Postfix(object __instance) { UniversalInject.DistrictDumpMaterial(__instance); UniversalInject.DistrictDumpSubMaterials(__instance); UniversalInject.DistrictApplyEntries(__instance); UniversalInject.DistrictGuidOverride(__instance); }
     }
 
+    // EXPERIMENTAL — GROUND MATERIAL under a custom district ("maintained grass field"). PresentationDistrict
+    // .UpdateGroundMaterial resolves the terrain paint from (Biome × affinity) and calls ApplyGroundMaterialDefinition;
+    // our wonder's affinity has no row → bare sand. Postfix forces a chosen ground-material index for our districts.
+    [HarmonyPatch]
+    internal static class Hk_DistrictGroundMaterial
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = GameBinding.PresentationDistrict;
+            return t?.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+                    .FirstOrDefault(m => m.Name == "UpdateGroundMaterial");
+        }
+        static void Postfix(object __instance) { UniversalInject.DistrictApplyGroundMaterial(__instance); }
+    }
+
     // THE SPIKE PLAGUE (2026-07-26, first seen the day the 242-bone tank-destroyer shipped): every VISIBLE pawn
     // gets a per-frame slice of ONE shared animated-bone pool (PawnManager.animatedSkeletonEntry buffers, sized
     // from AnimationManager.skeletonBufferSize = 65,535 entries). High-bone custom skeletons (tread links: 242

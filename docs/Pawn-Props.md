@@ -103,7 +103,7 @@ that LogErrors into the Amplitude diagnostics — it used to paint 64+ red lines
 
 - ~~**Own texture**~~ SOLVED 2026-07-19 for hand props: the plugin paints the prop's own `<name>_Atlas` on a private
   clone of the borrowed layer, repainted per tick (see §Hand props). Vanilla-slot fragments still borrow.
-- **Registry**: prop *recipes* now persist per prop in `enc_props.json` (Edit existing / New / Remove in the Prop
+- **Registry**: prop *recipes* now persist per prop in `haf_props.json` (Edit existing / New / Remove in the Prop
   Lab); the vanilla-slot runtime remains config-key driven (`PropCollectionGuids/Names`).
 
 ---

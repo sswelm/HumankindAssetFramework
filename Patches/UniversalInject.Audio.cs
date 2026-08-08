@@ -135,14 +135,14 @@ namespace HumankindAssetFramework
             if (!string.Equals(raw, _silenceRaw, StringComparison.Ordinal)) { _silenceRaw = raw; _silenceSubs = SplitSubs(raw); }
             for (int i = 0; i < _silenceSubs.Length; i++)
                 if (name.IndexOf(_silenceSubs[i], StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            // (2) the registry: enc_sounds.json, authored by the Game Sound Lab (loaded once at first use).
+            // (2) the registry: haf_sounds.json, authored by the Game Sound Lab (loaded once at first use).
             EnsureSoundOverrides();
             for (int i = 0; i < _soundOverrideSubs.Length; i++)
                 if (name.IndexOf(_soundOverrideSubs[i], StringComparison.OrdinalIgnoreCase) >= 0) return true;
             return false;
         }
 
-        // Game Sound Lab registry: BepInEx/config/enc_sounds.json = { "overrides": [ { "silence": "<event-substring>",
+        // Game Sound Lab registry: BepInEx/config/haf_sounds.json = { "overrides": [ { "silence": "<event-substring>",
         // "replaceWith": "" } ] }. Loaded once (relaunch to apply Lab edits, same as the district/formation registries).
         // replaceWith is reserved for the future silence-then-substitute step; only `silence` is consumed today.
         static bool _soundOvLoaded;
@@ -153,7 +153,7 @@ namespace HumankindAssetFramework
             _soundOvLoaded = true;
             try
             {
-                var path = Path.Combine(Paths.ConfigPath, "enc_sounds.json");
+                var path = Path.Combine(Paths.ConfigPath, "haf_sounds.json");
                 if (!File.Exists(path)) return;
                 var arr = JObject.Parse(File.ReadAllText(path))["overrides"] as JArray;
                 if (arr == null) return;
@@ -161,9 +161,9 @@ namespace HumankindAssetFramework
                 foreach (var o in arr) { var s = (string)o["silence"]; if (!string.IsNullOrEmpty(s)) kept.Add(s.Trim()); }
                 _soundOverrideSubs = kept.ToArray();
                 if (_soundOverrideSubs.Length > 0)
-                    Plugin.Log.LogInfo($"[Audio] sound overrides: {_soundOverrideSubs.Length} silence rule(s) from enc_sounds.json");
+                    Plugin.Log.LogInfo($"[Audio] sound overrides: {_soundOverrideSubs.Length} silence rule(s) from haf_sounds.json");
             }
-            catch (Exception ex) { Plugin.Log.LogError("[Audio] enc_sounds.json parse: " + ex); }
+            catch (Exception ex) { Plugin.Log.LogError("[Audio] haf_sounds.json parse: " + ex); }
         }
 
         // Live audio trace (Hk_AudioTrace patches Wwise PostEvent; gated here so it's free until toggled on in F8).
@@ -546,10 +546,10 @@ namespace HumankindAssetFramework
                 var clip = entries?.FirstOrDefault(e => e.customClip != null)?.customClip;
                 if (clip == null)
                 {
-                    var p = Path.Combine(Paths.ConfigPath, "enc_sounds", "drone.wav");
+                    var p = Path.Combine(Paths.ConfigPath, "haf_sounds", "drone.wav");
                     if (File.Exists(p)) clip = LoadWav(p, "test");
                 }
-                if (clip == null) { Plugin.Log.LogError("[Sound] test: no WAV loaded and no enc_sounds/drone.wav to fall back on"); return; }
+                if (clip == null) { Plugin.Log.LogError("[Sound] test: no WAV loaded and no haf_sounds/drone.wav to fall back on"); return; }
                 EnsureAudioListener();
                 float ov = UnityEngine.AudioListener.volume; bool op = UnityEngine.AudioListener.pause;
                 UnityEngine.AudioListener.volume = 1f; UnityEngine.AudioListener.pause = false;   // force, in case the game muted Unity's bus
@@ -583,7 +583,7 @@ namespace HumankindAssetFramework
         }
 
         // Load a custom WAV: the owning pack's <assetDir>/sounds/<file> first (per-pack assets, 2026-07-19), then the
-        // legacy shared enc_sounds/<file>. Null if unset/missing.
+        // legacy shared haf_sounds/<file>. Null if unset/missing.
         static UnityEngine.AudioClip LoadCustom(string file, string tag, string assetDir = "")
         {
             if (string.IsNullOrEmpty(file)) return null;
@@ -592,7 +592,7 @@ namespace HumankindAssetFramework
                 var pp = Path.Combine(assetDir, "sounds", file);
                 if (File.Exists(pp)) return LoadWav(pp, tag);
             }
-            var p = Path.Combine(Paths.ConfigPath, "enc_sounds", file);
+            var p = Path.Combine(Paths.ConfigPath, "haf_sounds", file);
             if (!File.Exists(p)) { Plugin.Log.LogWarning($"[Sound] file not found: {p}" + (string.IsNullOrEmpty(assetDir) ? "" : $" (also tried {Path.Combine(assetDir, "sounds")})")); return null; }
             return LoadWav(p, tag);
         }
@@ -763,7 +763,7 @@ namespace HumankindAssetFramework
                 var names = UnityEngine.Resources.FindObjectsOfTypeAll(t).OfType<UnityEngine.Object>()
                     .Select(o => o.name).Where(n => !string.IsNullOrEmpty(n))
                     .Distinct().OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
-                var path = Path.Combine(Paths.ConfigPath, "enc_sound_catalog.txt");
+                var path = Path.Combine(Paths.ConfigPath, "haf_sound_catalog.txt");
                 File.WriteAllLines(path, names);
                 Plugin.Log.LogInfo($"[Audio] sound catalog: {names.Count} AudioEventHandle names -> {path}");
             }

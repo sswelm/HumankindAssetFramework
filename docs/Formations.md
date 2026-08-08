@@ -1,7 +1,7 @@
 # Formations — custom unit formations & pawn counts (the fifth data axis)
 
 Change **how many soldier models a unit fields and how they're arranged** on the world map, with **zero baked
-assets** — a runtime override driven by `enc_formations.json`. Link a `PresentationUnitDefinition` to a formation
+assets** — a runtime override driven by `haf_formations.json`. Link a `PresentationUnitDefinition` to a formation
 whose dummy count and layout you author in the Unity SDK, and the plugin injects it into the live database and
 repoints the unit at load. Fully reversible: delete the link and the unit is vanilla next launch.
 
@@ -32,7 +32,7 @@ repoints the unit at load. Fully reversible: delete the link and the unit is van
 
 ## Two entry kinds: unit links and MACRO replacements
 
-An `enc_formations.json` entry works in one of two modes, decided by whether **Unit** is set:
+An `haf_formations.json` entry works in one of two modes, decided by whether **Unit** is set:
 
 - **Unit link** (`unit` set) — repoints ONE `PresentationUnitDefinition` at the named formation. Precise, per-unit.
 - **Macro replacement** (`unit` EMPTY) — overwrites a named formation in the live database with the entry's data.
@@ -63,7 +63,7 @@ eras progress" without touching every unit definition.
    throw at load — see [Troubleshooting](#troubleshooting).
 3. **Link** it: open **Tools ▸ HAF ▸ Formation Override**, **Pick** the unit (`PresentationUnitDefinition` name,
    e.g. `PresentationLandUnit_Era1_Common_Warriors_Default`), **Pick** the formation asset, **Save link**.
-4. **Launch** — no rebuild. The plugin reads `enc_formations.json` from `BepInEx/config`, rebuilds the formation as a
+4. **Launch** — no rebuild. The plugin reads `haf_formations.json` from `BepInEx/config`, rebuilds the formation as a
    runtime ScriptableObject, `Database.Add`s it, and repoints the unit.
 
 **Save always re-reads the asset.** The window used to cache the formation data when you *Picked* it; if you then
@@ -125,7 +125,7 @@ to keep whatever count a unit had when it first rendered.
 
 | Key (`[Formations]`) | Default | Effect |
 |---|---|---|
-| `FormationOverride` | `true` | Master switch. Reads `enc_formations.json`, injects + repoints. Inert if the file is absent/empty. |
+| `FormationOverride` | `true` | Master switch. Reads `haf_formations.json`, injects + repoints. Inert if the file is absent/empty. |
 | `FormationReinstantiate` | `true` | After apply, re-form already-spawned under-count units (load-race catch-up). Costs a one-time visible re-form pop. |
 
 ## Troubleshooting (read `BepInEx/LogOutput.log`)
@@ -234,7 +234,7 @@ Bireme re-formed into three wedge-formation ships, live, when the era anchor cro
 - **Authored PER UNIT** in the Formation Override window: a unit link's **"Formation by size"** rows are
   `{scale up to, formation}` — the first row whose threshold is **>=** the unit's *effective* scale
   (`Resize-Lab rule × era-grid cell`) wins; above every threshold the unit keeps its configured/own formation.
-  Rows are sorted on Save; stored as `sizeFormations` on the link in `enc_formations.json`.
+  Rows are sorted on Save; stored as `sizeFormations` on the link in `haf_formations.json`.
 - **Only fires for units with a Resize Lab rule** — the thresholds compare against the effective scale the resize
   engine computes, so an unruled unit never swaps.
 - **Live**: the check rides the same per-frame path as the era re-scaling — when the era anchor moves a unit across
@@ -242,7 +242,7 @@ Bireme re-formed into three wedge-formation ships, live, when the era anchor cro
   above all thresholds restores the unit's original formation.
 - **Guard**: the target formation must exist in the live database (vanilla, or injected by any saved Formation
   Override entry) — otherwise the swap is skipped with a loud log.
-- **Legacy fallback**: thresholds saved by the old *Global Era Lab table* (in `enc_models.json`) still apply to
+- **Legacy fallback**: thresholds saved by the old *Global Era Lab table* (in `haf_models.json`) still apply to
   units **without** per-unit rows; the Era Lab shows them with a Clear button. Per-unit rows always win.
 - Log: `[Resize] formation-by-size: '<unit>' at effective x0.3 -> 'Formation_Wedge_3' (N live unit(s) re-formed).`
 
@@ -258,9 +258,9 @@ per-unit), so ~18 is a good roster default.
 
 ## Files
 
-- Editor: `Assets/Scripts/Editor/FormationOverrideWindow.cs`, `FormationRegistry.cs` → `enc_formations.json`.
+- Editor: `Assets/Scripts/Editor/FormationOverrideWindow.cs`, `FormationRegistry.cs` → `haf_formations.json`.
 - Plugin: `Patches/FormationOverridePatch.cs` (`FormationOverride` + the `Hk_FormationPrefabExtend` /
   `Hk_FormationInstanceCapacity` / `Hk_FormationSpawnDiag` / `Hk_FormationPawnScale` hooks; the `data` scale mode
   also rides `UniRepointHook`'s AddOn.Load postfix via `MaybeScaleFragments`). Registered in `Plugin.cs`.
-- Registry lives in the game's `BepInEx/config/enc_formations.json` (the editor writes there directly — same file the
+- Registry lives in the game's `BepInEx/config/haf_formations.json` (the editor writes there directly — same file the
   plugin reads, no source/deployed split).

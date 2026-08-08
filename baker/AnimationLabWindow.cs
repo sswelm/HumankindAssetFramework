@@ -722,7 +722,7 @@ public class AnimationLabWindow : EditorWindow
                 "EQ_DLC04_Weapons material (verified working for weapon props)."), cur.handPropMat ?? "");
             // NOTE: the prop's orientation is authored in the PROP LAB recipe (Rotation offset — baked vertices).
             // The registry still supports a per-model runtime override (`handPropAngles` "x,y,z", hand-editable in
-            // enc_models.json): the plugin stamps it onto the FxMesh asset before encoding, making orientation
+            // haf_models.json): the plugin stamps it onto the FxMesh asset before encoding, making orientation
             // dial-in relaunch-only. Deliberately not exposed here to keep one owner per setting.
             if (GUILayout.Button(new GUIContent("Refresh fit preview (model + prop, as glued in-game)",
                 "Rebuilds the combined preview below: the model's rig at rest (the idle stance) with the prop's SHIPPED " +
@@ -905,7 +905,7 @@ public class AnimationLabWindow : EditorWindow
         RefreshList();
         status = saved
             ? $"Saved '{cur.resourceName}' (registry only, assets untouched). Relaunch the game — no re-bake, no mod rebuild."
-            : "REGISTRY SAVE FAILED (see Console). Close whatever's locking enc_models.json and retry.";
+            : "REGISTRY SAVE FAILED (see Console). Close whatever's locking haf_models.json and retry.";
         Debug.Log("[AnimLab] " + status);
     }
 
@@ -955,7 +955,7 @@ public class AnimationLabWindow : EditorWindow
         BuildFitPreview();                     // and OUR preview: combined (hand prop) or plain model — fresh from this bake, never stale
         status = saved
             ? $"Baked ANIMATED '{cur.resourceName}' -> '{cur.pawnDescription}'\nskeleton {r.skeletonGuid}\nclip {r.clipGuid}{(cur.animStateDriven ? $"\nmove clip {r.clipMoveGuid}{(string.IsNullOrEmpty(r.clipAfterGuid) ? "" : $"  after clip {r.clipAfterGuid}")}{(string.IsNullOrEmpty(r.clipAttackGuid) ? "" : $"  attack clip {r.clipAttackGuid}")}{(string.IsNullOrEmpty(r.clipCombatGuid) ? "" : $"  combat clip {r.clipCombatGuid}")}" : "")}\nRebuild the mod + relaunch."
-            : $"Baked '{cur.resourceName}', but the REGISTRY SAVE FAILED (see Console). Close whatever's locking enc_models.json and re-bake.";
+            : $"Baked '{cur.resourceName}', but the REGISTRY SAVE FAILED (see Console). Close whatever's locking haf_models.json and re-bake.";
         Debug.Log("[AnimLab] " + status);
     }
 

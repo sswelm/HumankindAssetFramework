@@ -21,7 +21,7 @@ the building lookup — a mismatched state resolves to no building (`material 0,
 back to the default state, which resolves. (This — not the district *class* — is why foreign affinities kept coming up
 empty.)
 
-**2. Runtime (the plugin, driven by the `enc_districts.json` registry — below):** the rendered mesh lives deep inside
+**2. Runtime (the plugin, driven by the `haf_districts.json` registry — below):** the rendered mesh lives deep inside
 the resolved material:
 
 ```
@@ -52,10 +52,10 @@ handles for you —
 
 Then rebuild the mod (ships the FxMesh) and launch. The reactor renders.
 
-## The district registry — `enc_districts.json`
+## The district registry — `haf_districts.json`
 
-The runtime side is data-driven: `BepInEx/config/enc_districts.json` (written by the District Factory window, mirrored
-to the git-tracked `Assets/Databases/enc_districts.backup.json`) holds any number of district models at once:
+The runtime side is data-driven: `BepInEx/config/haf_districts.json` (written by the District Factory window, mirrored
+to the git-tracked `Assets/Databases/haf_districts.backup.json`) holds any number of district models at once:
 
 ```json
 { "districts": [
@@ -99,7 +99,7 @@ FxMesh verts + bounds) and each mesh-manager layer's fill (`verts used / size`).
 |---|---|
 | `DistrictRepoint` | master enable (for the registry AND the legacy keys) |
 | `DistrictBufferHeadroom` | extra verts for the Visual buffer at init (0 = off; 2000000 = +~96 MB VRAM) |
-| `DistrictName` | LEGACY fallback — target `ConstructibleDefinitionName`; used only when `enc_districts.json` has no entries |
+| `DistrictName` | LEGACY fallback — target `ConstructibleDefinitionName`; used only when `haf_districts.json` has no entries |
 | `DistrictFxMeshGuid` | LEGACY fallback — the baked FxMesh GUID `a,b,c,d` for `DistrictName` |
 | `DistrictIsolate` | LEGACY fallback — scope the legacy entry to its own tiles (registry entries carry their own `isolate`) |
 | `DistrictAffinityOverride` / `DistrictEvolverGuid` | earlier proof/experiment modes (superseded) |
@@ -185,6 +185,17 @@ shows in the preview after Bake.
   albedo-only shortcut let the donor's maps tint the whole composed model blue — falsified same evening.)
 - **Known cosmetic**: the game's shadow pass does NOT alpha-test, so a dense leaf-card crown casts a merged
   solid shadow blob (the color pass cuts the leaves correctly; preview clean, measured in-game).
+
+## Ground material — the maintained field (per district, verified)
+
+A district also paints the **terrain** under it — `PresentationDistrict.UpdateGroundMaterial` resolves a
+`GroundMaterialDefinition` from `(Biome × ConstructibleVisualAffinity)` and calls `ApplyGroundMaterialDefinition`.
+A custom wonder's native affinity has no row → index 0 → **bare terrain** (the temple stood on raw desert). The
+plugin postfixes `UpdateGroundMaterial` and **forces a chosen ground index** for our districts — the game's own
+terrain paint, blended at the cell edges, not a flat mesh. Each entry carries its own **Ground** field in the
+District Factory (a dropdown of the game's vocabulary: `Prairie_*` grass fields, `Constructible_*` paved
+precincts, `Sterile_*` sparse); a global `DistrictGroundMaterial` config is the fallback default. Verified: the
+Oracle on `Prairie_Grassland` (index 16) — a lush maintained field under the temple and its grove.
 - **Foliage toolkit** (per part, verified on the beech): **Leaf fullness** = alpha gain + dilation rounds
   (needed because many leaf sheets have BINARY alpha — a plain gain is a no-op; measured), and **Leaf size ×**
   = geometric scaling of the leaf cards, selected by characteristic (≤4-tri islands; a twig is a many-tri

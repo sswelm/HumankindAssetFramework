@@ -34,8 +34,8 @@ namespace HumankindAssetFramework
     //  - bumping AttackFSM.Start's delayDuration once at Start computed 0: the facing snap lands AFTER Start,
     //    so at that instant the pawn still reads aligned. Holds must be dynamic or transform-based.
     //
-    // Live dial BepInEx/config/enc_battleturn.txt (~1/s poll): hold= (battle experiment), diag= (forensics).
-    // The map-bombard chain needs no dial: it keys off turn ease itself (per-model turnRate / enc_turnease.txt).
+    // Live dial BepInEx/config/haf_battleturn.txt (~1/s poll): hold= (battle experiment), diag= (forensics).
+    // The map-bombard chain needs no dial: it keys off turn ease itself (per-model turnRate / haf_turnease.txt).
     internal static class BattleTurn
     {
         internal static bool holdFire = false;  // EXPERIMENTAL battle path: delay PawnActionRangedStartAttack until the turn completes
@@ -50,7 +50,7 @@ namespace HumankindAssetFramework
             nextPoll = UnityEngine.Time.realtimeSinceStartup + 1f;
             try
             {
-                var path = Path.Combine(Paths.ConfigPath, "enc_battleturn.txt");
+                var path = Path.Combine(Paths.ConfigPath, "haf_battleturn.txt");
                 string txt = File.Exists(path) ? File.ReadAllText(path) : "";
                 if (txt == sig) return;
                 sig = txt;
