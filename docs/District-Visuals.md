@@ -109,23 +109,27 @@ FxMesh verts + bounds) and each mesh-manager layer's fill (`verts used / size`).
 
 ---
 
-## Scoping to one tile — SOLVED (`DistrictIsolate`)
+## Scoping to the district's own tiles — SOLVED (`DistrictIsolate`, multi-instance since 2026-08-08)
 
 The leaf Elements are *shared across every district of a culture*, so the raw swap turns **every** matching building on
-the map into our mesh. `DistrictIsolate` fixes that by giving only the target district a **private** leaf:
+the map into our mesh. `DistrictIsolate` fixes that by giving the target district a **private** leaf:
 
-1. On the target district's channel-0 selector, `CollectLeaves` to a source leaf; `UnityEngine.Object.Instantiate` it
-   (a private copy — mutating it can't touch the shared leaf).
+1. On a target district instance's channel-0 selector, `CollectLeaves` to a source leaf; `UnityEngine.Object.Instantiate`
+   it (a private copy — mutating it can't touch the shared leaf).
 2. Set the clone's `fxMesh` to our GUID, reset its `loadingStatus`, and call `LoadIFN(fxManager)` + `Load(fxManager,
    doublon)` so it gets a valid `MaterialIndex` and re-resolves `meshIndex` from our mesh.
-3. Per-frame: set that district's `channels[layer].evolverMaterial` = the private leaf (**write the boxed struct back**
+3. Per-frame: set each instance's `channels[layer].evolverMaterial` = the private leaf (**write the boxed struct back**
    into the array) and call the public `RefreshChannel(int, EventNameEnum)` so the Shuriken particle re-spawns and
    `PatchParticle` picks up the private leaf's `MaterialIndex`.
 
-Because each `PresentationLevelBuildComponent` has its **own** channel + particle, this scopes the mesh to that one
-tile. Build lazily (sub-materials load async → retry) and re-apply every frame (the game reloads the shared selector
-into the channel on each `UpdateLevelBuild`). **Verified in-game: the reactor tile shows our mesh, the rest of the city
-is untouched.**
+**Multi-instance (2026-08-08, verified with a second reactor):** a district can be built on many tiles — one
+`PresentationDistrict` each. Each registry entry tracks a **list of live instances** (added by the `UpdateLevelBuild`
+postfix, pruned via Unity fake-null when razed), and the tick repoints **every** instance's channel at the entry's
+**one shared private leaf** — a leaf is just a material, and vanilla's shared selectors serve many channels the same
+way. (The first implementation held a single instance slot per entry; a second copy of the district made ownership
+ping-pong, and only the most recently updated tile showed the custom model.) Build lazily (sub-materials load async →
+retry), re-apply every frame (the game reloads the shared selector into the channel on each `UpdateLevelBuild`).
+**Verified in-game: two reactors in different cities both show the custom plant; the rest of the map is untouched.**
 
 ## Placement: orientation, facing, position, grounding & preview
 

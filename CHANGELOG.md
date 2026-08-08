@@ -207,6 +207,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Districts
 
+- **DISTRICTS GO MULTI-INSTANCE (2026-08-08, verified with a second reactor).** A critical review of the
+  district axis found its one architectural flaw: each registry entry held ONE component slot, overwritten by
+  whichever district instance last refreshed — build the same district in two cities and ownership ping-ponged,
+  only one tile showing the custom model. Fixed by splitting targeting from assets: each entry now tracks a
+  **list of live instances** (added per `UpdateLevelBuild`, pruned via fake-null when razed) while the private
+  leaf, layer clone, and texture bindings stay **one per entry, shared by every tile** — a leaf is just a
+  material, and vanilla's shared selectors serve many channels the same way. The same review also flattened the
+  per-frame hot path (cached reflection handles, cached texture bind slots — twenty districts now cost what two
+  used to) and collapsed a drifted hand-rolled copy of the session reset into the canonical one.
 - **SURFACE MAPS GO PER-ENTRY — the reactor regression (2026-08-08, same day).** The stability pass had bound
   flat neutral surface maps on *every* custom district; the temple then earned real baked maps, but the Breeder
   Reactor silently kept the neutrals — which turned its verified look (albedo over the donor silo's vanilla

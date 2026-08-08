@@ -39,7 +39,7 @@ bake and nothing to undo but a deleted line. Each is proven in-game with a shipp
 | Axis | What it does | Assets? | Deep dive |
 |---|---|---|---|
 | **Units** | Replace a unit's whole 3D model — static or **animated**, with per-model runtime behaviors | bake | [Factory-Manual](docs/Factory-Manual.md) · [Animated-Models](docs/Animated-Models.md) |
-| **Districts** | A district's on-map building — own model **and texture**, scoped to **one tile**, auto-leveled | bake | [District-Visuals](docs/District-Visuals.md) |
+| **Districts** | A district's on-map building — own model **and texture**, on **every tile it's built** (other districts untouched), auto-leveled | bake | [District-Visuals](docs/District-Visuals.md) |
 | **Wonders** | A player-authored **Artificial Wonder** with a custom model, rendered through the game's **native wonder pipeline** (no donor district) | bake | [Wonder-Spike](docs/Wonder-Spike.md) |
 | **Pawn props** | Weapons & gear on a pawn's **attachment slots** — no whole-model replacement | bake | [Pawn-Props](docs/Pawn-Props.md) |
 | **Projectiles** | The **munition mesh** a unit fires | bake | [Projectiles](docs/Projectiles.md) |
