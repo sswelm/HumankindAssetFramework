@@ -67,7 +67,11 @@ namespace HumankindAssetFramework
                     {
                         var mat = tryLoad.Invoke(null, new object[] { guid });
                         if (mat == null) { if (wonderRowLogged.Add(wname + ":noasset")) Plugin.Log.LogWarning($"[WonderRow] '{wname}': template material not loadable"); continue; }
-                        var fxm = distFxManager ?? EarlyFxManager();    // district-tracked, or the render context's own (available during load)
+                        // NOTE: gate on distFxManager (world already rendering). Loading the template EARLIER (behind the
+                        // loading screen) via EarlyFxManager() DEADLOCKED the load: TryLoad is a SYNCHRONOUS bundle load,
+                        // and running it while the game async-streams the same bundles hangs the main thread. A
+                        // behind-the-screen load needs the TryLoadAsync path instead — future refinement.
+                        var fxm = distFxManager;
                         if (fxm == null) continue;                      // not up yet — retry next tick
                         var loadIfn = mat.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(x => x.Name == "LoadIFN" && x.GetParameters().Length == 2);
                         loadIfn?.Invoke(mat, new object[] { fxm, nextIdx.Invoke(null, null) });
