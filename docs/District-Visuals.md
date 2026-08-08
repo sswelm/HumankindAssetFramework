@@ -190,8 +190,18 @@ shows in the preview after Bake.
   = geometric scaling of the leaf cards, selected by characteristic (≤4-tri islands; a twig is a many-tri
   cylinder — size-only selection turned the tree into a spiked bush) and scaled **around each card's stem**
   (the vertex nearest the branch cloud — centroid scaling detached the leaves).
+- **Per-mesh primitive ceiling — raised, not worked around** (verified). A district mesh draws as *sub-particles*
+  (`count = ceil(primitives / outputLayer.PrimitivePerParticleCount)`), and that count is an 8-bit field →
+  **hard-clamped at 255**. A high-poly composed model (a temple + a grove) exceeds it and the excess is silently
+  not drawn (the four-tree grove first showed temple + 1 tree, the rest dropped). Crucially the mesh is fully
+  *stored* — the encoder ignores PPC — so only the render clamp bites. Since the private layer is ours to clone,
+  the plugin **multiplies `PrimitivePerParticleCount`** on it (`DistrictMeshDensityBoost`, default 8): the ceiling
+  (255 × PPC) rises for the *same* GPU work — fewer particles, each covering more primitives — and no re-bake is
+  needed. Verified: PPC 64 → 512, ceiling ~130k primitives, the full grove renders. (A first guess of a 16-bit
+  vertex limit was decompiled and disproved — the index buffer is 32-bit.)
 - **Grove copies** (a part placed multiple times, verified): one bake, one atlas slot, geometry appended per
-  copy, each auto-rotated by the golden angle. **Placement is literal and deterministic** — an offset places
+  copy, each auto-rotated by the golden angle. A **per-part Target triangles** budget keeps grove trees lean
+  independently of the detailed base. **Placement is literal and deterministic** — an offset places
   the part's own footprint center measured from the tile center, and facing spins it in place. Three
   coordinate-shift bugs were hunted out to earn that: the golden-angle rotation orbited a model's arbitrary
   origin (→ rotate around the footprint center), the auto-level centered the base+parts *union* so a side-heavy
