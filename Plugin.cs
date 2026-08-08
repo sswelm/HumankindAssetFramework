@@ -283,6 +283,7 @@ namespace HumankindAssetFramework
                 UniversalInject.PollTerrainHug();       // live terrain-hug dial (enc_hugterrain.txt): fly low over open ground, climb for districts (spike)
                 UniversalInject.PollClassScan();        // category turn ease: sample live units for the Hover ability + azimuth turrets (~3s; only while category rates are active)
                 UniversalInject.TickDistrictMeshSwap(); // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
+                UniversalInject.PollRepoDump();         // SPIKE wip-wonder-affinity: one-shot AssetReferenceRepository dump (DistrictDebug-gated)
             }
             BattleTurn.Poll();                          // live battle-turn dial (enc_battleturn.txt): turn rate + hold-fire for ALL units — independent of model injection, so outside the UniversalInject gate (spike)
             Hk_BombardAnimHold.Tick();                  // replay deferred bombard attack poses once their turn-hold elapses (muzzle flash + shot sound timing)
