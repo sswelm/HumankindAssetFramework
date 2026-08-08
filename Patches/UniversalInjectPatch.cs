@@ -953,12 +953,11 @@ namespace HumankindAssetFramework
             respawnBase.Clear(); respawnCount.Clear();               // keyed by session-1 unit objects
             knownManagers.Clear();                                   // dead session's pawn managers (the stray-slot sweep re-learns live ones)
             _silencedEmitterIds.Clear();                             // static: grew per silenced AudioEmitter ever seen, never reset — session-scoped instance ids
-            // DISTRICT axis session state (same bug class): the FxManager and each entry's leaves/private clone were
+            // DISTRICT axis session state (same bug class): the FxManager and each entry's tiles/private clone were
             // captured from session-1 presentation objects — reusing them in a second game points at torn-down GPU
-            // state. Null everything; DistrictApplyEntries re-derives per district instance as the new session loads.
-            distFxManager = null;
-            foreach (var d in distModels)
-            { d.plbc = null; d.privateLeaf = null; d.leaves.Clear(); d.collected = false; d.wait = 0; d.matchLogged = false; d.pointedLogged = false; }
+            // state. ONE canonical reset (a hand-rolled copy here had already drifted: it missed the texture bindings
+            // and cached bind slots) — DistrictApplyEntries re-derives per district instance as the new session loads.
+            ResetDistrictSessionState();
         }
 
     }
