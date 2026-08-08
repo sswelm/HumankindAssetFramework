@@ -74,6 +74,18 @@ Verified: the temple renders on the native chain, and an in-session reload plays
 **bottom-to-roof level-build reveal** on the custom mesh — native wonder theatrics for free. Donor roulette
 (silo / holy site / natural reserve) is over; en route it produced the donor laws below, kept for reference.
 
+**Reveal-on-load (KNOWN COSMETIC, open):** every session load replays the game's bottom-to-roof level-build
+reveal on the wonder a few seconds after the loading screen lifts. Mechanism: the reveal is the level-build
+material's spawn ramp — vanilla wonders play the *same ramp on load*, it just finishes behind the loading
+screen; our swap lands after the screen lifts because the template load can't start until the district
+machinery tracks an FxManager. **FALSIFIED (two clean deadlocks): loading the template earlier.** Reaching for
+`RenderContextAccess.GetInstance<IFxManager>` from a plugin Update tick during the load sequence hangs the
+loading screen — with the synchronous AND the async loader; the game's own coroutine may do it only because it
+runs at a controlled point in the load order. LAW: never touch the render context before `distFxManager` is
+tracked. The designed fix (next increment): postfix `PresentationDistrict.UpdateLevelBuild(eventName)` — the
+game itself says `None` on load vs `Build`/`Upgrade` on genuine construction — and suppress the ramp only on
+the load path (the clone's build-animation fields are the candidate lever).
+
 **Swap-first sequencing (VERIFIED — the template is never visible):** the first build filled the cell up
 front, which raced the walker's swap against the native reveal — on a cold cache the template (Artemis) showed
 for a few seconds before the swap landed. Now the template material is loaded *plugin-side* into a stash
