@@ -190,6 +190,15 @@ shows in the preview after Bake.
   = geometric scaling of the leaf cards, selected by characteristic (≤4-tri islands; a twig is a many-tri
   cylinder — size-only selection turned the tree into a spiked bush) and scaled **around each card's stem**
   (the vertex nearest the branch cloud — centroid scaling detached the leaves).
+- **Grove copies** (a part placed multiple times, verified): one bake, one atlas slot, geometry appended per
+  copy, each auto-rotated by the golden angle. **Placement is literal and deterministic** — an offset places
+  the part's own footprint center measured from the tile center, and facing spins it in place. Three
+  coordinate-shift bugs were hunted out to earn that: the golden-angle rotation orbited a model's arbitrary
+  origin (→ rotate around the footprint center), the auto-level centered the base+parts *union* so a side-heavy
+  grove shoved the base into a corner (→ base-anchored leveling), and parts placed vs the raw origin were then
+  silently shifted by the base center (→ measure offsets from the tile center). The bake banner prints a
+  **receipt** (parts/copies/atlas/center) and a per-placement log line, so a knob that didn't take effect is
+  visible before launch — no tuning-into-a-gamble.
 
 ## Texture — SOLVED (2026-08-06): the private output layer
 
