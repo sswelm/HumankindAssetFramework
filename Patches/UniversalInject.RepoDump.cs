@@ -96,6 +96,34 @@ namespace HumankindAssetFramework
             catch (Exception ex) { if (wonderRowLogged.Add("ex")) Plugin.Log.LogError("[WonderRow] " + ex); }
         }
 
+        // Leaf source for wonder entries: the loaded FxEvolverMaterial in the entry's own 'ArtificialWonder' DB cell.
+        // Returns null until the cell's asset is loaded (the repoint loop simply retries next frame).
+        internal static object WonderDbMaterial(string wonderName)
+        {
+            try
+            {
+                var repoType = AccessTools.TypeByName("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");
+                var inst = repoType?.GetMethod("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.Invoke(null, null);
+                if (inst == null) return null;
+                if (!(AccessTools.Field(inst.GetType(), "databaseMatrices1D")?.GetValue(inst) is Array arr)) return null;
+                foreach (var m in arr)
+                {
+                    if (m == null || AccessTools.Field(m.GetType(), "Name")?.GetValue(m)?.ToString() != "ArtificialWonder") continue;
+                    if (!(AccessTools.Property(m.GetType(), "CriteriaNames")?.GetValue(m) is Array axis)) return null;
+                    if (!(AccessTools.Field(m.GetType(), "cells")?.GetValue(m) is Array cells)) return null;
+                    for (int i = 0; i < axis.Length; i++)
+                    {
+                        if (axis.GetValue(i)?.ToString() != wonderName) continue;
+                        var cell = cells.GetValue(i);
+                        return AccessTools.Field(cell.GetType(), "Asset")?.GetValue(cell);
+                    }
+                    return null;
+                }
+            }
+            catch { }
+            return null;
+        }
+
         internal static void PollRepoDump()
         {
             if (repoDumped || Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;
