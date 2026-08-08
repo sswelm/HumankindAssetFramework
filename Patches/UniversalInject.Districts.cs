@@ -372,7 +372,7 @@ namespace HumankindAssetFramework
         // ISOLATION: instead of mutating the shared building leaves globally, give ONLY the target district a PRIVATE leaf.
         // Each PresentationLevelBuildComponent has its own channel + Shuriken particle, so pointing just this district's
         // channel at a private (Instantiated) leaf — and re-spawning its particle — scopes our mesh to this tile alone.
-        static object BuildPrivateLeaf(object channelSelector, object fxGuid, object atlasGuid)
+        static object BuildPrivateLeaf(object channelSelector, object fxGuid, object atlasGuid, bool instantAppear = false)
         {
             try
             {
@@ -383,6 +383,14 @@ namespace HumankindAssetFramework
                 var clone = UnityEngine.Object.Instantiate(src);   // a private copy — mutating it won't touch the shared leaf
                 var t = clone.GetType();
                 (GF(t, "fxMesh") ?? GF(t, "mesh"))?.SetValue(clone, fxGuid);
+                // REVEAL-RAMP lever (wonder path): fadeInOutMode {Stepped, Smooth, Instant} is the element's
+                // appearance transition, encoded into its GPU data — Instant skips the bottom-to-roof build ramp.
+                // Set BEFORE the Load below so the first GPU write already carries it.
+                if (instantAppear)
+                {
+                    var fm = GF(t, "fadeInOutMode");
+                    if (fm != null) { fm.SetValue(clone, Enum.Parse(fm.FieldType, "Instant")); Plugin.Diag("[District] private leaf fadeInOutMode -> Instant (reveal ramp skipped)"); }
+                }
                 // TEXTURE INJECTION step 1: point the leaf's texture at the LAYER's own missing-texture slot. That slot's
                 // atlas rect is never rendered by vanilla content (everything real is bound), so its pixels are ours to
                 // paint (step 2, DistrictApplyTexture). The Load below then resolves textureIndex to that rect via the
@@ -436,6 +444,7 @@ namespace HumankindAssetFramework
                 if (load != null && load.GetParameters().Length == 2 && distFxManager != null)
                     load.Invoke(clone, new object[] { distFxManager, fxNextDoublon != null ? fxNextDoublon.Invoke(null, null) : (uint)0 });
                 Plugin.Diag($"[District] built PRIVATE leaf '{t.Name}': MaterialIndex={GF(t, "materialIndex")?.GetValue(clone)} meshIndex={GF(t, "meshIndex")?.GetValue(clone)} textureIndex={GF(t, "textureIndex")?.GetValue(clone)}");
+                DumpLeafFields(clone);   // reveal-ramp hunt: what timing/growth levers does the clone carry?
                 return clone;
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] build private leaf: " + ex); return null; }
@@ -463,7 +472,7 @@ namespace HumankindAssetFramework
                     if (e.privateLeaf == null)
                     {
                         var wm = WonderTemplate(e.district);
-                        if (wm != null) e.privateLeaf = BuildPrivateLeaf(wm, e.fxMeshGuid, e.atlasGuid);
+                        if (wm != null) e.privateLeaf = BuildPrivateLeaf(wm, e.fxMeshGuid, e.atlasGuid, instantAppear: true);
                     }
                     if (e.privateLeaf == null) { if (e.wait++ % 300 == 0) Plugin.Diag($"[District] '{e.district}': waiting for leaves to load..."); return; }
                 }
@@ -477,6 +486,36 @@ namespace HumankindAssetFramework
                 if (!e.pointedLogged) { e.pointedLogged = true; Plugin.Diag($"[District] '{e.district}' ISOLATED: channel {e.layer} -> its private leaf (this tile only)."); }
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] point channel: " + ex); }
+        }
+
+        // Diagnostic (DistrictDebug): dump every serializable field of the cloned leaf — the hunt for the
+        // level-build reveal-ramp levers (duration/speed/curve fields we could zero on the load path).
+        static bool leafFieldsDumped;
+        static void DumpLeafFields(object clone)
+        {
+            try
+            {
+                if (leafFieldsDumped || Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;
+                leafFieldsDumped = true;
+                var t = clone.GetType();
+                Plugin.Log.LogInfo($"[LeafDump] === {t.FullName} (base {t.BaseType?.Name}) ===");
+                for (var ct = t; ct != null && ct.Name != "Object" && ct.Name != "ScriptableObject"; ct = ct.BaseType)
+                {
+                    foreach (var f in ct.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+                    {
+                        object v = null; try { v = f.GetValue(clone); } catch { }
+                        string vs;
+                        var ft = f.FieldType;
+                        if (v == null) vs = "<null>";
+                        else if (ft.IsPrimitive || ft.IsEnum || ft == typeof(string)) vs = v.ToString();
+                        else if (ft.IsValueType) vs = v.ToString();
+                        else if (ft.IsArray) vs = $"{ft.GetElementType()?.Name}[{((Array)v).Length}]";
+                        else vs = ft.Name;
+                        Plugin.Log.LogInfo($"[LeafDump] {ct.Name}.{f.Name} : {ft.Name} = {vs}");
+                    }
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[LeafDump] " + ex); }
         }
 
         // GLOBAL mode, per entry: collect the shared leaves once and re-point them all (affects every district sharing them).
