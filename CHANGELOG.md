@@ -207,6 +207,12 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Districts
 
+- **SURFACE MAPS GO PER-ENTRY — the reactor regression (2026-08-08, same day).** The stability pass had bound
+  flat neutral surface maps on *every* custom district; the temple then earned real baked maps, but the Breeder
+  Reactor silently kept the neutrals — which turned its verified look (albedo over the donor silo's vanilla
+  maps) into chrome domes and near-black walls, unnoticed for two days until its city was next visited. Fix,
+  verified on both districts: entries with baked normal/rough atlases bind them; entries without keep the donor
+  material's own maps. Lesson: a shared-code change verified on one district is not verified on the axis.
 - **THE REVEAL-RAMP LEVER — wonders load complete (2026-08-08, same day).** Every session load replayed the
   bottom-to-roof level-build reveal on the custom wonder — vanilla plays the same ramp, the loading screen just
   hides it, and our swap necessarily lands after the screen lifts. Racing the loading screen was **falsified

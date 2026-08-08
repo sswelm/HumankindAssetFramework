@@ -178,11 +178,17 @@ wrong pick). The mesh's own 0..1 UVs sample the albedo exactly; no other buildin
 
 **Stability (2026-08-07, the Oracle arc):** the private layer **opts out of texture streaming** (its mid/hi-res
 material GUIDs are nulled at clone time, so the reduction system never loads a material over our binding — the cause
-of a "perfect → brown → corrupt" degradation), and **neutral surface maps** (flat normal, matte roughness, black
-metallic, white AO) are bound alongside the albedo so the donor sheet's bricks can't ghost through. District session
-state fully resets on new games *and* in-session save-reloads (`Sandbox.Load`), so leaves and bindings always rebuild
-against the living world. All verified in-game, incl. reload survival. Wonders ride the same machinery — see
-[Wonder-Spike.md](Wonder-Spike.md).
+of a "perfect → brown → corrupt" degradation). District session state fully resets on new games *and* in-session
+save-reloads (`Sandbox.Load`), so leaves and bindings always rebuild against the living world. All verified
+in-game, incl. reload survival. Wonders ride the same machinery — see [Wonder-Spike.md](Wonder-Spike.md).
+
+**Surface maps are per-entry, not blanket (2026-08-08 regression + fix, verified on both districts):** entries
+whose bake shipped **normal/rough atlases** bind them (plus neutral metallic/AO) — the temple's verified combo.
+Entries **without** baked maps keep the **donor material's own vanilla maps** under the injected albedo — the
+reactor's verified look. The stability pass briefly bound flat neutral maps on *every* entry; on the reactor's
+grey industrial palette that read as chrome domes and near-black walls ("texture got scrambled") while the temple,
+which had real maps, was unaffected — a reminder that a shared-code change verified on one district is not
+verified on the axis.
 
 ---
 
