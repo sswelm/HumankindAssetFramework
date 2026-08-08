@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using HarmonyLib;
@@ -14,6 +15,86 @@ namespace HumankindAssetFramework
     internal static partial class UniversalInject
     {
         static bool repoDumped;
+        static int wonderRowTick;
+        static readonly HashSet<string> wonderRowLogged = new HashSet<string>();
+
+        // SPIKE step 2: fill a wonder's empty cell in the 'ArtificialWonder' database (name -> FxEvolverMaterial guid).
+        // The dump proved our wonder's name is already in the criteria axis with a NULL guid — the whole reason the
+        // native ArtificialWonder affinity rendered nothing. Config format: "WonderName=a,b,c,d;Other=..." .
+        // Re-arms itself: the repository rebuilds its matrices on session reload, wiping late-added cells.
+        internal static void PollWonderRows()
+        {
+            var cfg = Plugin.WonderNativeRows?.Value?.Trim();
+            if (string.IsNullOrEmpty(cfg)) return;
+            if (++wonderRowTick % 30 != 1) return;   // ~2x/second is plenty; the fill is idempotent
+            try
+            {
+                var repoType = AccessTools.TypeByName("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");
+                var inst = repoType?.GetMethod("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.Invoke(null, null);
+                if (inst == null) return;
+                if (!(AccessTools.Property(inst.GetType(), "Loaded")?.GetValue(inst) is bool b) || !b) return;
+                if (!(AccessTools.Field(inst.GetType(), "databaseMatrices1D")?.GetValue(inst) is Array arr)) return;
+
+                // find the 'ArtificialWonder' 1D matrix (boxed struct copy — its cells/criterionNames arrays are shared,
+                // so Add() on the box mutates the real matrix; only value-type fields would be lost, and we touch none)
+                object matrix = null;
+                foreach (var m in arr)
+                    if (m != null && AccessTools.Field(m.GetType(), "Name")?.GetValue(m)?.ToString() == "ArtificialWonder") { matrix = m; break; }
+                if (matrix == null) return;
+                var mt = matrix.GetType();
+                if (!(AccessTools.Property(mt, "CriteriaNames")?.GetValue(matrix) is Array axis)) return;
+                var cells = AccessTools.Field(mt, "cells")?.GetValue(matrix) as Array;
+                var ssType = AccessTools.TypeByName("Amplitude.StaticString");
+                var addM = mt.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(x => x.Name == "Add" && x.GetParameters().Length == 3);
+                if (cells == null || ssType == null || addM == null) return;
+
+                foreach (var part in cfg.Split(';'))
+                {
+                    var eq = part.IndexOf('=');
+                    if (eq <= 0) continue;
+                    string wname = part.Substring(0, eq).Trim();
+                    var guid = ParseGuid4(part.Substring(eq + 1).Trim());
+                    if (guid == null) { if (wonderRowLogged.Add(wname + ":badguid")) Plugin.Log.LogWarning($"[WonderRow] '{wname}': unparseable guid"); continue; }
+
+                    int idx = -1;
+                    for (int i = 0; i < axis.Length; i++) if (axis.GetValue(i)?.ToString() == wname) { idx = i; break; }
+                    if (idx < 0) { if (wonderRowLogged.Add(wname + ":noaxis")) Plugin.Log.LogWarning($"[WonderRow] '{wname}': not in the criteria axis (definition not loaded?)"); continue; }
+
+                    // already filled with our guid AND loaded? then nothing to do this tick
+                    var cell = cells.GetValue(idx);
+                    var ct = cell.GetType();
+                    var curGuid = AccessTools.Field(ct, "Guid")?.GetValue(cell);
+                    var curAsset = AccessTools.Field(ct, "Asset")?.GetValue(cell);
+                    bool guidSet = curGuid != null && curGuid.Equals(guid);
+                    if (guidSet && curAsset != null) continue;
+
+                    if (!guidSet)
+                        addM.Invoke(matrix, new object[] { Activator.CreateInstance(ssType, wname), guid, null });
+
+                    // force the cell's asset load — the repo's own LoadAssets coroutine has long finished by now
+                    var fxm = distFxManager;   // the terrain FxManager the district machinery already tracks
+                    if (fxm != null)
+                    {
+                        var loadM = ct.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(x => x.Name == "LoadAssets" && x.GetParameters().Length == 5);
+                        var next = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxEvolverMaterial")?.GetMethod("NextDoublonAvoidanceIndex", BindingFlags.Public | BindingFlags.Static);
+                        var contentType = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxEvolverMaterial");
+                        if (loadM != null && next != null)
+                        {
+                            cell = cells.GetValue(idx);   // re-read: Add mutated it
+                            var args = new object[] { AccessTools.Field(mt, "Name").GetValue(matrix), axis.GetValue(idx), fxm, next.Invoke(null, null), contentType };
+                            var ok = loadM.Invoke(cell, args);
+                            cells.SetValue(cell, idx);    // write the boxed struct (Asset/loadingStatus) back
+                            var asset = AccessTools.Field(ct, "Asset")?.GetValue(cell);
+                            if (wonderRowLogged.Add(wname + ":filled"))
+                                Plugin.Log.LogInfo($"[WonderRow] '{wname}' cell filled -> loaded={ok} asset={(asset != null ? asset.GetType().Name + " '" + asset + "'" : "<null>")}");
+                        }
+                    }
+                    else if (wonderRowLogged.Add(wname + ":nofxm"))
+                        Plugin.Log.LogInfo($"[WonderRow] '{wname}' guid set; waiting for FxManager to force the asset load");
+                }
+            }
+            catch (Exception ex) { if (wonderRowLogged.Add("ex")) Plugin.Log.LogError("[WonderRow] " + ex); }
+        }
 
         internal static void PollRepoDump()
         {

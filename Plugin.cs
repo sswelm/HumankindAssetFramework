@@ -39,6 +39,7 @@ namespace HumankindAssetFramework
         internal static ConfigEntry<int>    DistrictBufferHeadroom; // extra vertices to add to the big (Visual) GPU mesh buffer at init, so custom district meshes fit even in a full late-game city. 0 = off (leave the buffer as the game sizes it).
         internal static ConfigEntry<bool>   DistrictIsolate;         // scope the mesh-swap to only the target district's own tile (private per-instance leaf) instead of the shared-global swap
         internal static ConfigEntry<bool>   DistrictDebug;           // investigation diagnostics ([District] saw / [DistrictMat] / [DistrictSub] dumps) — off in normal play, they reflect on every district update
+        internal static ConfigEntry<string> WonderNativeRows;        // SPIKE wip-wonder-affinity: fill empty cells in the ArtificialWonder repo database, "WonderName=a,b,c,d;..." (FxEvolverMaterial guid)
         // --- EXPERIMENTAL: generic GPU mesh-buffer overrides (units, districts, any content layer) ---
         internal static ConfigEntry<string> BufferOverrides;     // per-layer overrides "<nameSubstr>:verts=+N,idx=+N,meshes=+N,maxtris=N;..." applied at layer creation
         internal static ConfigEntry<int>    SkeletonBoneBudget;  // shared per-frame animated-bone pool size (vanilla 65,535; high-bone customs overflow it -> spike plague)
@@ -124,6 +125,10 @@ namespace HumankindAssetFramework
                                   "Verbose district-investigation diagnostics: log every district name seen ([District] saw), each district's " +
                                   "resolved material GUID ([DistrictMat]) and the target's sub-material table ([DistrictSub]). These reflect on " +
                                   "every district update — leave OFF in normal play; turn on only when mapping a new district's material chain.");
+            WonderNativeRows    = Config.Bind("District", "WonderNativeRows", "",
+                                  "SPIKE (wip-wonder-affinity): fill a custom Artificial Wonder's EMPTY cell in the game's 'ArtificialWonder' " +
+                                  "visual database so the NATIVE wonder affinity renders a completed model. Format: 'WonderName=a,b,c,d;...' " +
+                                  "where the guid is an FxEvolverMaterial (vanilla wonder material for a zero-bake proof, or our own baked one).");
             DistrictBufferHeadroom = Config.Bind("District", "DistrictBufferHeadroom", 0,
                                   "Extra VERTICES to add to the game's big 'Visual' GPU mesh buffer (the shared building buffer, ~3,000,000 by default) " +
                                   "at startup, so custom district meshes fit even when a built-up late-game city has nearly filled it. 0 = off. " +
@@ -284,6 +289,7 @@ namespace HumankindAssetFramework
                 UniversalInject.PollClassScan();        // category turn ease: sample live units for the Hover ability + azimuth turrets (~3s; only while category rates are active)
                 UniversalInject.TickDistrictMeshSwap(); // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
                 UniversalInject.PollRepoDump();         // SPIKE wip-wonder-affinity: one-shot AssetReferenceRepository dump (DistrictDebug-gated)
+                UniversalInject.PollWonderRows();       // SPIKE wip-wonder-affinity: fill configured wonder cells in the ArtificialWonder visual DB
             }
             BattleTurn.Poll();                          // live battle-turn dial (enc_battleturn.txt): turn rate + hold-fire for ALL units — independent of model injection, so outside the UniversalInject gate (spike)
             Hk_BombardAnimHold.Tick();                  // replay deferred bombard attack poses once their turn-hold elapses (muzzle flash + shot sound timing)
