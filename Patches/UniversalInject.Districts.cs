@@ -458,11 +458,11 @@ namespace HumankindAssetFramework
                     if (sel == null) return;
                     e.privateLeaf = BuildPrivateLeaf(sel, e.fxMeshGuid, e.atlasGuid);
                     // WONDER path: a database-fed selector (fillMode LevelBuildDatabase) has no inline leaves to walk —
-                    // source them from the entry's own cell asset in the 'ArtificialWonder' repository database instead
-                    // (filled natively for vanilla wonders; via [WonderRow] for ours). Same clone/swap downstream.
+                    // source them from the PLUGIN-LOADED template material instead (swap-first sequencing: the wonder's
+                    // repository cell stays empty until this swap is live, so the template is never drawn on the tile).
                     if (e.privateLeaf == null)
                     {
-                        var wm = WonderDbMaterial(e.district);
+                        var wm = WonderTemplate(e.district);
                         if (wm != null) e.privateLeaf = BuildPrivateLeaf(wm, e.fxMeshGuid, e.atlasGuid);
                     }
                     if (e.privateLeaf == null) { if (e.wait++ % 300 == 0) Plugin.Diag($"[District] '{e.district}': waiting for leaves to load..."); return; }
@@ -546,6 +546,7 @@ namespace HumankindAssetFramework
                 d.matchLogged = d.pointedLogged = false; d.wait = 0;
                 d.texApplied = false; d.texWait = 0; d.texAlbedo = null; d.texNormal = null; d.texRough = null;
             }
+            ResetWonderTemplates();   // plugin-loaded wonder templates are corpses after a reload; re-load + re-fill swap-first
             Plugin.Diag("[District] session state reset (new game or save-reload) — leaves + texture bindings rebuild");
         }
 
