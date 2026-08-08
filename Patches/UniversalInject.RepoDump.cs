@@ -25,10 +25,12 @@ namespace HumankindAssetFramework
         // model, every load. Config format: "WonderName=a,b,c,d;Other=..." .
         // Re-arms itself: the repository rebuilds its matrices on session reload, wiping late-added cells.
         static readonly Dictionary<string, object> wonderTemplates = new Dictionary<string, object>();
+        static readonly Dictionary<string, object> wonderTemplateReqs = new Dictionary<string, object>();   // pending AssetBundleRequest per name
 
         internal static void ResetWonderTemplates()   // called from ResetDistrictSessionState — assets are corpses after a reload
         {
             wonderTemplates.Clear();
+            wonderTemplateReqs.Clear();
             wonderRowLogged.Clear();
         }
 
@@ -46,9 +48,9 @@ namespace HumankindAssetFramework
             try
             {
                 var fxmType = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxEvolverMaterial");
-                var tryLoad = fxmType?.GetMethods(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(x => x.Name == "TryLoad" && x.GetParameters().Length == 1);
+                var tryLoadAsync = fxmType?.GetMethods(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(x => x.Name == "TryLoadAsync" && x.GetParameters().Length == 2);
                 var nextIdx = fxmType?.GetMethod("NextDoublonAvoidanceIndex", BindingFlags.Public | BindingFlags.Static);
-                if (tryLoad == null || nextIdx == null) return;
+                if (tryLoadAsync == null || nextIdx == null) return;
 
                 foreach (var part in cfg.Split(';'))
                 {
@@ -58,18 +60,27 @@ namespace HumankindAssetFramework
                     var guid = ParseGuid4(part.Substring(eq + 1).Trim());
                     if (guid == null) { if (wonderRowLogged.Add(wname + ":badguid")) Plugin.Log.LogWarning($"[WonderRow] '{wname}': unparseable guid"); continue; }
 
-                    // 1) load the template material ourselves and stash it once fully Loaded
+                    // 1) load the template material ourselves and stash it once fully Loaded.
+                    // HARD-WON LAW (two deadlocks): DO NOT reach for the render context / FxManager before the
+                    // district machinery has tracked one (distFxManager) — RenderContextAccess.GetInstance from a
+                    // plugin Update tick during the load sequence deadlocks the loading screen, with EITHER load
+                    // variant. Behind-the-screen template loading is falsified; the reveal-on-load is handled
+                    // elsewhere (event capture), not by racing the loading screen.
                     if (!wonderTemplates.ContainsKey(wname))
                     {
-                        var mat = tryLoad.Invoke(null, new object[] { guid });
-                        if (mat == null) { if (wonderRowLogged.Add(wname + ":noasset")) Plugin.Log.LogWarning($"[WonderRow] '{wname}': template material not loadable"); continue; }
-                        var fxm = distFxManager;                        // the FxManager the district machinery already tracks
+                        var fxm = distFxManager;                        // the FxManager the district machinery tracks — never earlier
                         if (fxm == null) continue;                      // not up yet — retry next tick
+                        wonderTemplateReqs.TryGetValue(wname, out var pending);
+                        var asyncArgs = new object[] { guid, pending };
+                        var mat = tryLoadAsync.Invoke(null, asyncArgs);
+                        wonderTemplateReqs[wname] = asyncArgs[1];       // keep the AssetBundleRequest for the next poll
+                        if (mat == null) continue;                      // still streaming — retry next tick
                         var loadIfn = mat.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(x => x.Name == "LoadIFN" && x.GetParameters().Length == 2);
                         loadIfn?.Invoke(mat, new object[] { fxm, nextIdx.Invoke(null, null) });
                         if (!(AccessTools.Property(mat.GetType(), "Loaded")?.GetValue(mat) is bool ld) || !ld) continue;   // still loading — retry
                         wonderTemplates[wname] = mat;
-                        Plugin.Diag($"[WonderRow] '{wname}': template loaded plugin-side ({mat.GetType().Name})");
+                        wonderTemplateReqs.Remove(wname);
+                        Plugin.Diag($"[WonderRow] '{wname}': template loaded plugin-side ({mat.GetType().Name}, async)");
                     }
 
                     // 2) fill the repository cell ONLY once the entry's swap is live (the player never sees the template)
