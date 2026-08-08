@@ -185,6 +185,11 @@ shows in the preview after Bake.
   albedo-only shortcut let the donor's maps tint the whole composed model blue — falsified same evening.)
 - **Known cosmetic**: the game's shadow pass does NOT alpha-test, so a dense leaf-card crown casts a merged
   solid shadow blob (the color pass cuts the leaves correctly; preview clean, measured in-game).
+- **Foliage toolkit** (per part, verified on the beech): **Leaf fullness** = alpha gain + dilation rounds
+  (needed because many leaf sheets have BINARY alpha — a plain gain is a no-op; measured), and **Leaf size ×**
+  = geometric scaling of the leaf cards, selected by characteristic (≤4-tri islands; a twig is a many-tri
+  cylinder — size-only selection turned the tree into a spiked bush) and scaled **around each card's stem**
+  (the vertex nearest the branch cloud — centroid scaling detached the leaves).
 
 ## Texture — SOLVED (2026-08-06): the private output layer
 
