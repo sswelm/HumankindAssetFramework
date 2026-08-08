@@ -434,6 +434,24 @@ namespace HumankindAssetFramework
                                     var gf2 = ro?.GetType().GetField(gn, BF);
                                     if (gf2 != null) { gf2.SetValue(ro, Activator.CreateInstance(gf2.FieldType)); cleared++; }
                                 }
+                        // RAISE THE PER-MESH PRIMITIVE CEILING (the grove fix). A district mesh renders as sub-particles:
+                        // count = ceil(primitiveCount / PrimitivePerParticleCount), packed into 8 bits -> HARD-CLAMPED at
+                        // 255 (GetEncodedMeshAndVisualParticleCount). Above it the extra primitives are silently NOT DRAWN
+                        // (the 4-tree grove: temple + 1 tree rendered, the rest dropped). The mesh is fully STORED
+                        // (FillMeshVertexAndBufferContent ignores PPC — encoding is complete); only the render clamp bites.
+                        // PPC is a per-LAYER value and this is our private clone, so multiplying it lifts the ceiling
+                        // (255 x PPC) with the SAME total GPU work — fewer particles, each covering more primitives. No
+                        // re-bake needed. Config DistrictMeshDensityBoost (default 8 -> ~8x headroom); 0/1 = vanilla.
+                        int boost = Plugin.DistrictMeshDensityBoost != null ? Plugin.DistrictMeshDensityBoost.Value : 8;
+                        if (boost > 1)
+                        {
+                            var ppcF = layerClone.GetType().GetField("primitivePerParticleCount", BF);
+                            if (ppcF?.GetValue(layerClone) is int ppc && ppc > 0)
+                            {
+                                ppcF.SetValue(layerClone, ppc * boost);
+                                Plugin.Diag($"[DistrictTex] private layer primitivePerParticleCount {ppc} -> {ppc * boost} (per-mesh ceiling now ~{255L * ppc * boost} primitives; the grove fix)");
+                            }
+                        }
                         olF.SetValue(clone, layerClone);
                         Plugin.Diag($"[DistrictTex] private output layer '{layerClone.name}' cloned from '{srcLayer.name}' (streaming opted out: {cleared} reduction guid(s) nulled)");
                     }

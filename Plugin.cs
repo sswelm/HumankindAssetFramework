@@ -37,6 +37,7 @@ namespace HumankindAssetFramework
         internal static ConfigEntry<string> DistrictEvolverGuid; // CUSTOM MODEL: an FxEvolverMaterial GUID (our baked quarry) as 4 ints "a,b,c,d"; SetChannel points the district's mesh channel at it
         internal static ConfigEntry<string> DistrictFxMeshGuid;  // MESH-SWAP: our baked FxMesh GUID; keep the district's own working material, swap only its mesh to ours (best render odds)
         internal static ConfigEntry<int>    DistrictBufferHeadroom; // extra vertices to add to the big (Visual) GPU mesh buffer at init, so custom district meshes fit even in a full late-game city. 0 = off (leave the buffer as the game sizes it).
+        internal static ConfigEntry<int>    DistrictMeshDensityBoost; // multiplier on the private layer's PrimitivePerParticleCount — raises the per-mesh 255-sub-particle render ceiling so high-poly composed districts (grove pizzas) draw fully. 0/1 = vanilla.
         internal static ConfigEntry<bool>   DistrictIsolate;         // scope the mesh-swap to only the target district's own tile (private per-instance leaf) instead of the shared-global swap
         internal static ConfigEntry<bool>   DistrictDebug;           // investigation diagnostics ([District] saw / [DistrictMat] / [DistrictSub] dumps) — off in normal play, they reflect on every district update
         internal static ConfigEntry<string> WonderNativeRows;        // SPIKE wip-wonder-affinity: fill empty cells in the ArtificialWonder repo database, "WonderName=a,b,c,d;..." (FxEvolverMaterial guid)
@@ -133,6 +134,12 @@ namespace HumankindAssetFramework
                                   "Extra VERTICES to add to the game's big 'Visual' GPU mesh buffer (the shared building buffer, ~3,000,000 by default) " +
                                   "at startup, so custom district meshes fit even when a built-up late-game city has nearly filled it. 0 = off. " +
                                   "e.g. 1000000 = +~48MB VRAM. Applied once at buffer creation; takes effect on the next launch.");
+            DistrictMeshDensityBoost = Config.Bind("District", "DistrictMeshDensityBoost", 8,
+                                  "Multiplier on a custom district's private-layer PrimitivePerParticleCount, raising the PER-MESH primitive ceiling. " +
+                                  "A district mesh renders as sub-particles whose count is hard-clamped at 255 (an 8-bit field): a high-poly composed " +
+                                  "model (e.g. a temple + a grove of trees) exceeds it and the excess is silently not drawn. The mesh is fully stored; " +
+                                  "only the render clamp bites, so multiplying PPC repacks it under the ceiling with the same GPU work. Default 8 (~8x " +
+                                  "headroom). 0/1 = vanilla. Applied per district on our private layer clone only.");
 
             SilenceAudioEvents  = Config.Bind("Audio", "SilenceAudioEvents", "",
                                   "Comma-separated Wwise event-name SUBSTRINGS to SILENCE — any sound whose event name contains one is dropped at the " +
