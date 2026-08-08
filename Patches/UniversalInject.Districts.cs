@@ -24,11 +24,16 @@ namespace HumankindAssetFramework
             public object normalAtlasGuid;   // baked normal atlas (null = neutral flat) — same rects as the albedo
             public object roughAtlasGuid;    // baked roughness atlas (null = neutral matte)
             public bool isolate = true;      // true = private per-instance leaf (this tile only); false = global shared-leaf swap
-            // runtime
-            public object plbc; public int layer;
-            public object privateLeaf;                                   // isolate mode: the Instantiated leaf
+            // runtime — PER-INSTANCE targeting: a district can be BUILT ON MANY TILES (one PresentationDistrict each);
+            // the old single plbc slot made ownership ping-pong between instances (only the most recently updated tile
+            // showed the custom model — the review's architectural finding). The private leaf + layer clone + texture
+            // bindings stay ONE PER ENTRY and are shared: a leaf is just a material, and the game's own shared
+            // selectors are pointed to by many channels at once. Only the channels we repoint are per-tile.
+            public class TileState { public object plbc; public int layer; public bool pointedLogged; public int wait; }
+            public readonly List<TileState> tiles = new List<TileState>();
+            public object privateLeaf;                                   // isolate mode: the Instantiated leaf (SHARED by all tiles)
             public readonly List<object> leaves = new List<object>();    // global mode: collected shared leaves
-            public bool collected, matchLogged, pointedLogged; public int wait;
+            public bool collected, matchLogged;
             // texture injection runtime (isolate mode)
             public UnityEngine.Texture2D texAlbedo;                      // our baked albedo, bound on the PRIVATE output layer
             public UnityEngine.Texture2D texNormal, texRough;            // baked surface maps (null = the neutral stand-ins)
@@ -346,7 +351,7 @@ namespace HumankindAssetFramework
                     }
                     var leaf = e.privateLeaf ?? (e.leaves.Count > 0 ? e.leaves[0] : null);
                     var mi = leaf != null ? GF(leaf.GetType(), "meshIndex")?.GetValue(leaf) : null;
-                    lines.Add($"  '{e.district}' isolate={e.isolate} matched={(e.plbc != null)} leaf={(leaf != null ? "meshIndex=" + mi : "not built")} | {meshInfo}");
+                    lines.Add($"  '{e.district}' isolate={e.isolate} tiles={e.tiles.Count} leaf={(leaf != null ? "meshIndex=" + mi : "not built")} | {meshInfo}");
                     anyLeaf = anyLeaf ?? leaf;
                 }
                 // walk to the district mesh content manager and dump each layer's fill
@@ -459,16 +464,17 @@ namespace HumankindAssetFramework
         static FieldInfo fiPlbcChannels, fiChanEvolverMaterial;
         static MethodInfo miRefreshChannel; static object[] refreshArgs;
 
-        // ISOLATE mode, per entry: keep this district's channel pointed at ITS private leaf + re-spawned particle.
-        // Re-applied each frame (the game reloads the shared selector into the channel on UpdateLevelBuild).
-        static void PointEntryAtPrivateLeaf(DistrictModel e)
+        // ISOLATE mode, per TILE: keep this instance's channel pointed at the entry's (shared) private leaf +
+        // re-spawned particle. Re-applied each frame (the game reloads the shared selector into the channel on
+        // UpdateLevelBuild). The leaf builds lazily ONCE per entry, sourced from whichever tile's selector loads first.
+        static void PointTileAtPrivateLeaf(DistrictModel e, DistrictModel.TileState t)
         {
             try
             {
-                if (e.plbc == null) return;
-                if (fiPlbcChannels == null) fiPlbcChannels = AccessTools.Field(e.plbc.GetType(), "channels");
-                if (!(fiPlbcChannels?.GetValue(e.plbc) is Array channels) || e.layer >= channels.Length) return;
-                var box = channels.GetValue(e.layer);
+                if (t.plbc == null) return;
+                if (fiPlbcChannels == null) fiPlbcChannels = AccessTools.Field(t.plbc.GetType(), "channels");
+                if (!(fiPlbcChannels?.GetValue(t.plbc) is Array channels) || t.layer >= channels.Length) return;
+                var box = channels.GetValue(t.layer);
                 if (fiChanEvolverMaterial == null) fiChanEvolverMaterial = GF(box.GetType(), "evolverMaterial");
                 var evf = fiChanEvolverMaterial;
                 if (evf == null) return;
@@ -486,21 +492,21 @@ namespace HumankindAssetFramework
                         var wm = WonderTemplate(e.district);
                         if (wm != null) e.privateLeaf = BuildPrivateLeaf(wm, e.fxMeshGuid, e.atlasGuid, instantAppear: true);
                     }
-                    if (e.privateLeaf == null) { if (e.wait++ % 300 == 0) Plugin.Diag($"[District] '{e.district}': waiting for leaves to load..."); return; }
+                    if (e.privateLeaf == null) { if (t.wait++ % 300 == 0) Plugin.Diag($"[District] '{e.district}': waiting for leaves to load..."); return; }
                 }
                 if (ReferenceEquals(evf.GetValue(box), e.privateLeaf)) return;   // already ours this frame
                 evf.SetValue(box, e.privateLeaf);
-                channels.SetValue(box, e.layer);   // write the mutated struct back into the array
+                channels.SetValue(box, t.layer);   // write the mutated struct back into the array
                 // re-spawn the particle so PatchParticle picks up the private leaf's MaterialIndex
                 if (miRefreshChannel == null)
                 {
-                    miRefreshChannel = e.plbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                    miRefreshChannel = t.plbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
                         .FirstOrDefault(m => m.Name == "RefreshChannel" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
                     if (miRefreshChannel != null)
                         refreshArgs = new object[] { 0, System.Enum.ToObject(miRefreshChannel.GetParameters()[1].ParameterType, 0) };
                 }
-                if (miRefreshChannel != null) { refreshArgs[0] = e.layer; miRefreshChannel.Invoke(e.plbc, refreshArgs); }
-                if (!e.pointedLogged) { e.pointedLogged = true; Plugin.Diag($"[District] '{e.district}' ISOLATED: channel {e.layer} -> its private leaf (this tile only)."); }
+                if (miRefreshChannel != null) { refreshArgs[0] = t.layer; miRefreshChannel.Invoke(t.plbc, refreshArgs); }
+                if (!t.pointedLogged) { t.pointedLogged = true; Plugin.Diag($"[District] '{e.district}' ISOLATED: channel {t.layer} -> the private leaf (this tile only)."); }
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] point channel: " + ex); }
         }
@@ -540,11 +546,13 @@ namespace HumankindAssetFramework
         {
             try
             {
-                if (e.plbc == null) return;
+                if (e.tiles.Count == 0) return;
+                var plbc = e.tiles[0].plbc; int layer = e.tiles[0].layer;   // shared leaves: any live instance's channel will do
+                if (plbc == null) return;
                 if (!e.collected)
                 {
-                    if (!(AccessTools.Field(e.plbc.GetType(), "channels")?.GetValue(e.plbc) is Array channels) || e.layer >= channels.Length) return;
-                    var mat = GF(channels.GetValue(e.layer).GetType(), "evolverMaterial")?.GetValue(channels.GetValue(e.layer));
+                    if (!(AccessTools.Field(plbc.GetType(), "channels")?.GetValue(plbc) is Array channels) || layer >= channels.Length) return;
+                    var mat = GF(channels.GetValue(layer).GetType(), "evolverMaterial")?.GetValue(channels.GetValue(layer));
                     if (mat == null) return;
                     e.leaves.Clear();
                     CollectLeaves(mat, e.leaves, 0, new HashSet<object>());
@@ -585,8 +593,15 @@ namespace HumankindAssetFramework
                         var lf = district.GetType().GetField("mainLevelBuildComponantLayer", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.FlattenHierarchy);
                         mainLayerCached = lf?.GetValue(null) is int li ? li : 0;
                     }
-                    e.plbc = plbc; e.layer = mainLayerCached;
-                    if (!e.matchLogged) { e.matchLogged = true; Plugin.Diag($"[District] registry matched '{e.district}' (isolate={e.isolate})."); }
+                    // one TileState per live district INSTANCE — never overwrite (a district can be built in many cities)
+                    bool known = false;
+                    for (int i = 0; i < e.tiles.Count && !known; i++) known = ReferenceEquals(e.tiles[i].plbc, plbc);
+                    if (!known)
+                    {
+                        e.tiles.Add(new DistrictModel.TileState { plbc = plbc, layer = mainLayerCached });
+                        Plugin.Diag($"[District] registry matched '{e.district}' — tile #{e.tiles.Count} (isolate={e.isolate}).");
+                        e.matchLogged = true;
+                    }
                 }
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] apply entries: " + ex); }
@@ -603,8 +618,8 @@ namespace HumankindAssetFramework
             distFxManager = null;
             foreach (var d in distModels)
             {
-                d.plbc = null; d.privateLeaf = null; d.leaves.Clear(); d.collected = false;
-                d.matchLogged = d.pointedLogged = false; d.wait = 0;
+                d.tiles.Clear(); d.privateLeaf = null; d.leaves.Clear(); d.collected = false;
+                d.matchLogged = false;
                 d.texApplied = false; d.texWait = 0; d.texAlbedo = null; d.texNormal = null; d.texRough = null;
                 d.boundSlots.Clear();   // the cached (material, property) bind slots are corpses with the old layer
             }
@@ -612,13 +627,21 @@ namespace HumankindAssetFramework
             Plugin.Diag("[District] session state reset (new game or save-reload) — leaves + texture bindings rebuild");
         }
 
-        // Per-frame (Plugin.Update): drive every registry entry.
+        // Per-frame (Plugin.Update): drive every registry entry, each across ALL of its live tiles.
         internal static void TickDistrictMeshSwap()
         {
             if (distModels.Count == 0) return;
             foreach (var e in distModels)
             {
-                if (e.isolate) { PointEntryAtPrivateLeaf(e); DistrictApplyTexture(e); }
+                // prune tiles whose component died (razed district / recycled entity) — Unity fake-null on the Component
+                for (int i = e.tiles.Count - 1; i >= 0; i--)
+                    if (e.tiles[i].plbc is UnityEngine.Object uo && uo == null)
+                    { e.tiles.RemoveAt(i); Plugin.Diag($"[District] '{e.district}': tile component destroyed — pruned ({e.tiles.Count} left)."); }
+                if (e.isolate)
+                {
+                    for (int i = 0; i < e.tiles.Count; i++) PointTileAtPrivateLeaf(e, e.tiles[i]);
+                    DistrictApplyTexture(e);
+                }
                 else GlobalSwapEntry(e);
             }
         }
@@ -672,7 +695,9 @@ namespace HumankindAssetFramework
                 // flush: mark the descriptor's material data changed (re-writes the element GPU data, incl. our
                 // textureIndex + layer index) and re-spawn this district's particle so nothing keeps a stale index
                 if (desc != null) AccessTools.Field(desc.GetType(), "materialDataHasChanged")?.SetValue(desc, true);
-                if (e.plbc != null && miRefreshChannel != null) { refreshArgs[0] = e.layer; miRefreshChannel.Invoke(e.plbc, refreshArgs); }
+                if (miRefreshChannel != null)
+                    foreach (var t2 in e.tiles)   // every live instance re-spawns its particle with the fresh texture index
+                        if (t2.plbc != null) { refreshArgs[0] = t2.layer; miRefreshChannel.Invoke(t2.plbc, refreshArgs); }
             }
             catch (Exception ex) { Plugin.Log.LogError("[DistrictTex] apply: " + ex); e.texApplied = true; }   // fail once, loudly — don't spam per frame
         }
