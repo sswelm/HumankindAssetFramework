@@ -1,11 +1,12 @@
 # Wonder Spike — custom 3D models on (artificial) wonders
 
-*Research spike, 2026-08-07 — the Oracle arc. Status: SHIPPED — the Oracle (a custom Greek temple on a
-player-authored Artificial Wonder) is stable in-game with its own textures, surface maps, and card portraits,
-and was publicly announced. The native wonder visual chain is a measured dead end; two session bugs were found
-and fixed en route. This page records what was proven, what was falsified, and what remains.*
+*Research spike, 2026-08-07/08 — the Oracle arc. Status: SHIPPED, and upgraded to the NATIVE chain — the
+Oracle (a custom Greek temple on a player-authored Artificial Wonder) renders through the game's own
+Artificial Wonder pipeline: native affinity, its own row in the wonder visual database, the vanilla
+bottom-to-roof level-build reveal on reload, custom mesh + marble surface maps + card portraits. Publicly
+announced. This page records the recipe, the decompile that cracked the native chain, and what remains.*
 
-## The working recipe (proven in-game on `ArtificialWonderDefinition`)
+## The original donor recipe (proven in-game; superseded by the native chain below)
 
 A custom wonder is just a district with better press. The district axis
 ([District-Visuals.md](District-Visuals.md)) carries it unchanged — the swap machinery never asks what a
@@ -37,21 +38,52 @@ entry (e.g. in a `ConstructibleArtificialWonderUIMappers` asset) has an `Images`
 Inspector (the serialized reference is Amplitude's `{a,b,c,d}` GUID encoding — assignment via Inspector handles
 it). The Oracle ships a 512×366 card and a 512² small/tooltip portrait this way.
 
-## Falsified: the native wonder affinity (measured, don't re-attempt blindly)
+## THE NATIVE CHAIN — solved by decompile (2026-08-08, verified in-game incl. reload)
 
-Setting `ConstructibleVisualAffinity = DistrictVisualAffinity_ArtificialWonder` — the affinity the class is
-*designed* for — was the obvious-better idea and produced a clean negative:
+The July/early-spike verdict — "the native `DistrictVisualAffinity_ArtificialWonder` affinity gives a custom
+wonder nothing to see and nothing to swap; game-core data a mod can't extend" — was **wrong**, and the way it
+was wrong is the best news of the axis. Decompiling the visual-resolution chain
+(`FxEvolverMaterialLevelBuildSelector` → `AssetReferenceRepository` → `AssetReferenceDatabaseContent`, in
+`Amplitude.Mercury.Terrain.dll` / `Amplitude.Mercury.Data.dll`) showed:
 
-- The tile resolves to the **shared wonder-scaffolding material family** (`-1382607685,…` — the same GUID the
-  July mapping recorded for every wonder's scaffolding).
-- That family is a different composite from the district selector chain: the plugin's leaf walk finds **zero
-  swappable mesh leaves** (`waiting for leaves to load...` forever), and the walk logs `FxEvolverMaterialLevelBuildDecal`
-  members it has no fields for — a structure the walker doesn't know.
-- A *custom* wonder gets **no completed-model visual at all** through this chain (vanilla artificial wonders map
-  affinity+definition to their built model in game-core data a mod can't extend) — the tile renders bare terrain.
+- A district tile's visual resolves through **criteria-matrix databases** (`*/District/Main` and friends) in
+  `AssetReferenceRepository`, keyed by ConstructibleVisualAffinity, culture, era, district state, health… and —
+  crucially — **`CriteriaEnum.ArtificialWonder`: completed wonders key their model by wonder definition NAME**
+  in a dedicated 1D **`ArtificialWonder` database** (name → `FxEvolverMaterial`).
+- Selectors with `fillMode = LevelBuildDatabase(WithKey)` have legitimately **empty inline `pairs`** — their
+  variants live in the repository. That's why the leaf walker starved on wonder (and Holy Site) families: it
+  only knew inline tables. Nothing was broken; the data lives elsewhere.
+- The repository's rows are **plain `AssetReferenceDatabaseContent` datatable elements** — moddable data, not
+  engine core.
+- A `[RepoDump]` diagnostic launch delivered the punchline: **our wonder's name was already in the database's
+  criteria axis** (indexed from the ENC definition) **with a NULL guid**. The July "material 0,0,0,0" and the
+  scaffolding-only tile were never a dead end — just an *empty cell waiting to be filled*.
 
-Net: the native affinity gives a custom wonder *nothing to see and nothing to swap*. The renderable-district donor
-(step 2 above) remains the path.
+**The working native recipe (replaces the donor-district hack entirely):**
+
+1. `ConstructibleVisualAffinity = DistrictVisualAffinity_ArtificialWonder` — the native one.
+2. The plugin's `[WonderRow]` poll (`WonderNativeRows = "WonderName=a,b,c,d;..."` in config) fills the wonder's
+   cell in the `ArtificialWonder` database with an `FxEvolverMaterial` GUID and force-loads the cell asset. A
+   vanilla wonder's material (the Oracle used the Temple of Artemis) is a zero-bake proof AND the loaded
+   template for step 3. Re-arms after session reloads.
+3. The district walker sources its swap template **from that database cell** when the channel selector has no
+   inline leaves — then the proven isolate machinery runs unchanged: private leaf clone, custom mesh, albedo +
+   surface-map atlases on the private layer.
+
+Verified: the temple renders on the native chain, and an in-session reload plays the game's own
+**bottom-to-roof level-build reveal** on the custom mesh — native wonder theatrics for free. Donor roulette
+(silo / holy site / natural reserve) is over; en route it produced the donor laws below, kept for reference.
+
+**Known cosmetic race (fix in progress):** on load, the native selector can start revealing the *template*
+material (Artemis) for the seconds before the walker's swap lands — the swap and the native reveal race, and
+either can win. The refinement is swap-first sequencing: load the template plugin-side, repoint the channel
+first, fill the cell last, so the template is never drawable on the tile.
+
+**Donor-family laws (measured 2026-08-08, now historical):** a donor affinity only worked if its family was a
+**culture-agnostic building-model family** with inline variant pairs (Missile Silo: works). Holy Site's table
+is empty for a foreign constructible (culture+era criteria live in the repository), and Natural Reserve's
+leaves are *scatter* drawers — the swap lands but draws with scatter semantics (terrain-keyed pairs, 15
+variants, one leaf lottery).
 
 ## Bugs found en route (both in the plugin's session lifecycle, not the wonder class)
 
@@ -98,7 +130,12 @@ Stale-bundle note stands: re-bakes reshuffle atlas packing — ALWAYS rebuild th
 
 ## Open items
 
-- **Participation-phase skinning** (construction site as a second registry entry) — untested.
+- **Auto-derive the cell fill from the district registry** — today `WonderNativeRows` is a hand-authored config
+  line; wonder-typed registry entries should register their own cell (and pick a template) without it.
+- **Fully-native route**: bake a real `FxEvolverMaterial` asset in the editor and point the cell straight at it —
+  no template clone, no runtime swap, no first-frames template flash.
+- **Participation-phase skinning** (construction site) — untested; note the `ArtificialWonder` database also
+  indexes `...Participation...` names, so the same cell-fill likely covers it.
 
 *Related: [District-Visuals.md](District-Visuals.md) (the axis this rides), the July wonder-material mapping in
 that page's History section.*

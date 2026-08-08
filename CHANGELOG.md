@@ -207,6 +207,20 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Districts
 
+- **NATIVE WONDER VISUALS — the empty-cell revelation (2026-08-08).** One day after shipping, the Oracle's
+  donor-district hack died of obsolescence. Three donor swaps failed in a row (Holy Site: bare tile; Natural
+  Reserve: swap landed but drew nothing visible), so instead of donor roulette the visual-resolution chain got
+  decompiled — and the "mod can't extend this" verdict of July collapsed: district visuals resolve through
+  **criteria-matrix databases** whose rows are **plain datatable elements**, and completed wonders key their
+  model **by wonder name** in a dedicated `ArtificialWonder` database. A `[RepoDump]` launch delivered the
+  punchline — *our wonder's name was already indexed there, with a NULL guid*. July's `material 0,0,0,0` was
+  never a dead end, just an **empty cell waiting to be filled**. Now `[WonderRow]` fills it (Temple of Artemis
+  material as zero-bake proof + loaded template), the walker sources its swap template from the cell, and the
+  proven isolate machinery does the rest: the Oracle renders its custom temple through the **game's own wonder
+  pipeline** — native affinity, no donor anywhere, and the vanilla **bottom-to-roof level-build reveal** plays
+  on the custom mesh after a reload. Donor laws measured en route (building-model + culture-agnostic families
+  only; scatter families draw wrong; repository-fed families have no inline leaves) are kept in
+  [docs/Wonder-Spike.md](docs/Wonder-Spike.md) as history.
 - **THE ORACLE — first custom Artificial Wonder, shipped & announced (2026-08-07).** A Sketchfab Greek temple
   became a fully playable custom wonder in one arc: the district swap machinery carries `ArtificialWonderDefinition`
   unchanged (donor = a renderable district affinity; the *designed-for* native wonder affinity was measured a
