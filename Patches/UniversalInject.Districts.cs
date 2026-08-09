@@ -811,18 +811,24 @@ namespace HumankindAssetFramework
                         if (GetMember(ro, fld) is UnityEngine.Material mat && mat != null)
                         {
                             string pick = null; UnityEngine.Texture2D biggest = null; string biggestProp = null;
-                            string alreadyProp = null;
+                            string alreadyProp = null; bool hasMainTex = false, hasVisualContent = false;
                             foreach (var pn in mat.GetTexturePropertyNames())
                             {
                                 var cur = mat.GetTexture(pn);
                                 if (dump) Plugin.Diag($"[DistrictTex]   {fld}('{mat.shader?.name}').{pn} = {(cur != null ? $"'{cur.name}' {cur.width}x{cur.height}" : "null")}");
                                 if (ReferenceEquals(cur, e.texAlbedo)) { alreadyProp = pn; continue; }
+                                if (pn == "_MainTex") hasMainTex = true; else if (pn == "_VisualContent") hasVisualContent = true;
                                 if (!(cur is UnityEngine.Texture2D t2)) continue;
                                 if (pn == "_MainTex") pick = pn;
                                 if (biggest == null || t2.width * t2.height > biggest.width * biggest.height) { biggest = t2; biggestProp = pn; }
                             }
                             if (alreadyProp != null) { n++; NeutralizeSurfaceMaps(e, mat); e.boundSlots.Add((mat, alreadyProp)); continue; }
                             if (pick == null) pick = biggestProp;
+                            // ATLAS-managed layer (the Base_Industry city building): ALL material texture slots are null —
+                            // nothing to replace. Bind our sheet on the shader's own albedo slot anyway; with the full-
+                            // texture path (textureIndex=1) already forced, the mesh UVs then sample it.
+                            if (pick == null && hasMainTex) pick = "_MainTex";
+                            if (pick == null && hasVisualContent) pick = "_VisualContent";
                             if (pick != null)
                             {
                                 mat.SetTexture(pick, e.texAlbedo); n++;
