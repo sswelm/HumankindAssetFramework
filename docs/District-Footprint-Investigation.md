@@ -1,6 +1,8 @@
 # District Strategic Footprint — Investigation (spike)
 
-**Status:** OPEN. Mechanism identified (city-map decal system); wiring a custom district to a decal is unsolved.
+**Status:** ROOT CAUSE FOUND. The footprint is the city-map decal system, present in the reactor's native tree — our
+isolate injection was deleting it by replacing the whole selector with a single leaf. Fix identified (clone the selector,
+not a leaf); implementation pending.
 **Branch:** `spike/district-footprint`. **Not on master** — master carries only the shipped wins below.
 
 The goal: a custom district (the breeder reactor) should show a **persistent top-down footprint silhouette** at
@@ -36,18 +38,36 @@ The decal:
 **So the vanilla footprint assets exist and are named** — the footprint is a strategic-map decal a district selects by
 **biome × category** and draws when it demotes.
 
-### Why ours has none (working theory)
-The reactor is a **national-project constructible** (`Extension_Base_BreederReactor`). Normal city districts get a
-city-map decal wired into their presentation; national projects don't — and the `Base_Industry` **visual affinity** we
-set changes the *building* visual, not the *decal* selection (which keys on the constructible/category). Our plbc simply
-has no decal channel.
+### ROOT CAUSE — our injection DELETES the footprint (DEFINITIVE)
 
-### Next steps (concrete)
-1. **Vanilla-vs-reactor plbc diff.** Dump a *neighboring vanilla district's* channels and compare to the reactor's — if
-   vanilla carries a decal channel/material we lack, that's the exact gap to fill.
-2. **Selection mechanism.** The `FxEvolverMaterialLevelBuildMatching` in channel `[1]`'s emitter is the prime suspect
-   for the strategic/city-map layer — find how it maps a district → a `Decal_CityMap_*`.
-3. **Goal:** give the reactor an Industry city-map decal like a normal district has.
+Dumping **every district's** plbc material tree (`DumpAnyDistrictTree` — recurses emitter items + selector cache) settled
+it beyond doubt:
+
+- **Vanilla district** (e.g. `Extension_Base_Industry`) = **1 channel**, whose top `FxEvolverMaterialLevelBuildSelector`
+  holds a **deep tree** of nested Selectors/Emitters that **includes the `FxEvolverMaterialLevelBuildDecal` drawers** —
+  the footprints.
+- **Reactor NATIVE** (`DistrictRepoint=false`, affinity `Base_Industry`) = **identical** to vanilla Industry: 1 channel,
+  the same deep tree, **19 decal nodes present.** The footprint was there all along.
+- **Reactor WITH our isolate injection** = **4 channels, ZERO decals.**
+
+`PointTileAtPrivateLeaf` does `CollectLeaves(selector) → clone ONE building leaf → force that leaf onto the channel`. It
+**replaces the entire selector** — deep tree, decals and all — **with a single building leaf**, every frame. We were
+amputating the footprint subtree ourselves. It was never a missing asset or an unreachable system.
+
+### THE FIX — clone the selector, not a leaf
+
+1. **Clone the *selector*** (`Instantiate`). Its `NonSerialized` runtime cache resets, so on `Load` it re-builds its full
+   tree **fresh and private** — decals included.
+2. **Swap only the building leaves' `fxMesh`** inside the clone. Building `Element` leaves carry `fxMesh`; `Decal` leaves
+   carry `decalMesh` — `CollectLeaves` already keys on `fxMesh`, so decals are untouched by construction.
+3. **Force the cloned *selector*** onto the channel (instead of a lone leaf).
+
+Result: custom building up close, vanilla footprint decals survive and draw at strategic zoom, still scoped to our tile
+(private clone). This is a change to the injection core (`BuildPrivateLeaf`/`PointTileAtPrivateLeaf` — clone one level up).
+
+Note: global mode (`DistrictIsolate=false`) keeps the shared selector and swaps only building meshes, so it *should*
+preserve decals too — but one test showed no footprint; re-verify. The private-selector-clone is the clean scoped path
+regardless.
 
 ---
 

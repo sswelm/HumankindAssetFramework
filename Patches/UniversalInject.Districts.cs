@@ -607,6 +607,7 @@ namespace HumankindAssetFramework
         {
             try
             {
+                DumpAnyDistrictTree(district);   // spike: dump vanilla + our districts' presentation trees to diff the footprint decal
                 EnsureDistrictConfig();
                 if (!distOn || distModels.Count == 0) return;
                 var name = GetMember(district, "ConstructibleDefinitionName")?.ToString();
@@ -728,32 +729,40 @@ namespace HumankindAssetFramework
         // inject) AND a DECAL channel (FxEvolverMaterialLevelBuildDecal = decalMesh + texture layers = the footprint).
         // Dump every channel's evolverMaterial type, and for any Decal one its decalMesh GUID — that names the vanilla
         // footprint asset. This shows whether the decal channel exists for our district and what it holds.
-        static bool distChannelsDumped;
-        internal static void DumpDistrictChannels()
+        // Dump the channel + material tree of ANY district by name — call for vanilla AND ours to diff what a normal
+        // district's presentation has (a decal drawer for the footprint?) that the reactor's lacks. First ~12 distinct.
+        static readonly HashSet<string> treeDumpedNames = new HashSet<string>();
+        internal static void DumpAnyDistrictTree(object district)
         {
             try
             {
-                if (distChannelsDumped || Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;
-                foreach (var e in distModels)
-                {
-                    if (e.tiles.Count == 0 || e.tiles[0].plbc == null) continue;
-                    var plbc = e.tiles[0].plbc;
-                    if (fiPlbcChannels == null) fiPlbcChannels = AccessTools.Field(plbc.GetType(), "channels");
-                    if (!(fiPlbcChannels?.GetValue(plbc) is Array channels)) continue;
-                    distChannelsDumped = true;
-                    Plugin.Log.LogInfo($"[Chan] '{e.district}' plbc has {channels.Length} channel(s):");
-                    var seen = new HashSet<object>();
-                    for (int i = 0; i < channels.Length; i++)
-                    {
-                        var box = channels.GetValue(i);
-                        var mat = box != null ? GF(box.GetType(), "evolverMaterial")?.GetValue(box) : null;
-                        Plugin.Log.LogInfo($"[Chan]  [{i}] {(mat?.GetType().Name ?? "null")}");
-                        DumpMatTree(mat, 2, seen);   // recurse emitters/selectors to find a nested DECAL
-                    }
-                    return;   // one district's channel layout is enough
-                }
+                if (Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;
+                var name = GetMember(district, "ConstructibleDefinitionName")?.ToString();
+                if (string.IsNullOrEmpty(name) || treeDumpedNames.Contains(name)) return;
+                // ALWAYS dump the reactor (so we can compare its native tree to vanilla); cap the others.
+                if (!name.Contains("BreederReactor") && !name.Contains("Industry") && treeDumpedNames.Count >= 14) return;
+                if (fiDistrictPlbc == null) fiDistrictPlbc = AccessTools.Field(district.GetType(), "presentationLevelBuildComponent");
+                var plbc = fiDistrictPlbc?.GetValue(district);
+                if (plbc == null) return;   // no plbc yet — retry a later frame (don't mark seen)
+                treeDumpedNames.Add(name);
+                DumpPlbcTree(plbc, name);
             }
-            catch (Exception ex) { distChannelsDumped = true; Plugin.Log.LogWarning("[Chan] " + ex.Message); }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Tree] " + ex.Message); }
+        }
+
+        static void DumpPlbcTree(object plbc, string label)
+        {
+            if (fiPlbcChannels == null) fiPlbcChannels = AccessTools.Field(plbc.GetType(), "channels");
+            if (!(fiPlbcChannels?.GetValue(plbc) is Array channels)) return;
+            Plugin.Log.LogInfo($"[Tree] '{label}' plbc: {channels.Length} channel(s)");
+            var seen = new HashSet<object>();
+            for (int i = 0; i < channels.Length; i++)
+            {
+                var box = channels.GetValue(i);
+                var mat = box != null ? GF(box.GetType(), "evolverMaterial")?.GetValue(box) : null;
+                Plugin.Log.LogInfo($"[Tree]  [{i}] {(mat?.GetType().Name ?? "null")}");
+                DumpMatTree(mat, 2, seen);
+            }
         }
 
         // recurse a level-build material tree (emitter items + selector cache entries), logging each material type and
@@ -769,7 +778,7 @@ namespace HumankindAssetFramework
                 var l0 = GF(t, "layer0")?.GetValue(mat);
                 extra = $"  <<< DECAL decalMesh={dm} layer0={l0}";
             }
-            Plugin.Log.LogInfo($"[Chan] {new string(' ', depth * 2)}{t.Name}{extra}");
+            Plugin.Log.LogInfo($"[Tree] {new string(' ', depth * 2)}{t.Name}{extra}");
             if (AccessTools.Field(t, "levelBuildItems")?.GetValue(mat) is Array items)
                 foreach (var it in items) if (it != null) DumpMatTree(GF(it.GetType(), "loadedEvolverMaterial")?.GetValue(it), depth + 1, seen);
             var cache = AccessTools.Field(t, "fxMaterialCacheEntries")?.GetValue(mat);
