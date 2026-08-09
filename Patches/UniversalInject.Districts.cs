@@ -774,9 +774,25 @@ namespace HumankindAssetFramework
             string extra = "";
             if (t.Name.Contains("Decal"))
             {
-                var dm = GF(t, "decalMesh")?.GetValue(mat);
-                var dmi = GF(t, "decalMeshIndex")?.GetValue(mat);   // uint.MaxValue (4294967295) = decal mesh NOT registered (evicted?)
-                extra = $"  <<< DECAL decalMesh={dm} decalMeshIndex={dmi}";
+                // The decal renders only if its visualOutput resolves: OutputLayerIndex>=0 AND LoadedOutputLayer.Atlas!=null
+                // (FxEvolverMaterialLevelBuildDecal.ResolveDependencies / AddDataTo). If our injection nulls this on the
+                // reactor's decals while Food/Science keep it, the gate is C#-fixable; if identical, it's GPU-shader only.
+                var vo = GF(t, "visualOutput")?.GetValue(mat);
+                string vos = "visualOutput=null";
+                if (vo != null)
+                {
+                    var vt = vo.GetType();
+                    object OliGet(string p) => vt.GetProperty(p, BF)?.GetValue(vo) ?? GF(vt, p)?.GetValue(vo);
+                    var oli = OliGet("OutputLayerIndex") ?? OliGet("outputLayerIndex");
+                    object lol = null; try { lol = vt.GetProperty("LoadedOutputLayer", BF)?.GetValue(vo); } catch { }
+                    object atlas = null;
+                    if (lol != null) { try { atlas = lol.GetType().GetProperty("Atlas", BF)?.GetValue(lol) ?? lol.GetType().GetField("atlas", BF)?.GetValue(lol); } catch { } }
+                    vos = $"outLayerIdx={oli} loadedLayer={(lol != null)} atlas={(atlas != null)}";
+                }
+                var lec = GF(t, "layerEntryCount")?.GetValue(mat);
+                var rdi = GF(t, "levelBuildDecalRenderDataEntryIndex")?.GetValue(mat);
+                var ld = GF(t, "loadingStatus")?.GetValue(mat) ?? GF(t, "loadedStatus")?.GetValue(mat);
+                extra = $"  <<< DECAL {vos} layerEntryCount={lec} renderDataIdx={rdi} load={ld}";
             }
             Plugin.Log.LogInfo($"[Tree] {new string(' ', depth * 2)}{t.Name}{extra}");
             if (AccessTools.Field(t, "levelBuildItems")?.GetValue(mat) is Array items)

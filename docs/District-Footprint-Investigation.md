@@ -1,8 +1,10 @@
 # District Strategic Footprint — Investigation (spike)
 
-**Status:** ROOT CAUSE FOUND. The footprint is the city-map decal system, present in the reactor's native tree — our
-isolate injection was deleting it by replacing the whole selector with a single leaf. Fix identified (clone the selector,
-not a leaf); implementation pending.
+**Status:** ROOT CAUSE FOUND + LOCALIZED TO THE GPU. The footprint is the city-map decal system, present in the reactor's
+native tree. C# investigation is now EXHAUSTED: the reactor's gated decals are byte-identical to a working district's
+(fully loaded, atlas-resolved, render-data written) — so the gate is below C#, in the GPU per-hexagon element-vs-decal
+selection shader (BBox/size + zoom driven). Clone-the-selector preserves the decals but is not sufficient; the missing
+half is the BBox/selection fix. Next route: the ShaderDump dig + the Element BBox lever (see end of doc).
 **Branch:** `spike/district-footprint`. **Not on master** — master carries only the shipped wins below.
 
 The goal: a custom district (the breeder reactor) should show a **persistent top-down footprint silhouette** at
@@ -92,6 +94,48 @@ demotion state so the decal draw isn't gated off.
 **Bottom line:** the footprint is definitively the city-map decal system, present in the reactor's native tree; our
 injection breaks its *rendering* (not its presence in global mode). The remaining work is understanding the render gate,
 not finding the footprint.
+
+### CONCLUSIVE — the gate is BELOW C#, in the GPU per-hexagon selection shader
+
+A three-way A/B settled it. In global mode (Industry selector swapped; Food/Science untouched), zoom out and compare
+tiles: **Food/Science show a footprint, the reactor does not** — so the decals *are* the footprint, and the swap gates
+*only* the swapped districts. Then we dumped each decal's full render-readiness state (`visualOutput.OutputLayerIndex`,
+`LoadedOutputLayer`, its `Atlas`, the `layerEntryCount`/`levelBuildDecalRenderDataEntryIndex` it wrote). Result — the
+reactor's gated decals are **byte-identical** to Food/Science's working ones:
+
+```
+reactor (GATED):  outLayerIdx=792 loadedLayer=True atlas=True layerEntryCount=1 renderDataIdx=1044
+Food    (WORKS):  outLayerIdx=792 loadedLayer=True atlas=True layerEntryCount=1 renderDataIdx=913
+Science (WORKS):  outLayerIdx=792 loadedLayer=True atlas=True layerEntryCount=1 renderDataIdx=1127
+```
+
+The reactor's decals are **fully loaded, atlas-resolved, and have written their render-data entries** — indistinguishable
+from a working district. So **no C#-reachable state differs** between footprint-renders and footprint-gated. The decal is
+render-ready; something below C# just doesn't *place* it at the reactor's hexagon.
+
+That something is the **GPU evolve compute shader**. Per-hexagon content lives in `FxComponentLevelBuildContent`'s
+`levelBuildContentCB` (per-hexagon × `layerOutputCount*2`=16 layers); the selector's evolve dispatch
+(`FxComponentLevelBuildParticleAdder` → `AddFIMSParticle` / `FxComponentTerrain.AfterOneEvolveDelegate`) reads each
+element/selector's **`BBoxMin`/`BBoxMax`** (`FxLevelBuildSelectorGPUData`, written in `WriteToGPUData` ~41792) against the
+camera to decide, per hexagon, whether to place the **building element** or demote to the sibling **decal**. Our custom
+reactor mesh has a very different bounding box than the donor missile silo, so the size-driven element↔decal switch lands
+differently — the building fades out (affinity opacity), but the selector still doesn't hand the hexagon to the decal.
+
+**This is the C#/GPU boundary. C# reflection is exhausted** — every reachable field is identical between the two cases.
+
+### Next route (fresh session): the ShaderDump / BBox dig
+
+- **Confirm the BBox lever.** `FxEvolverMaterialLevelBuildElement.BBox` feeds the selection buffer (41162-41163) and the
+  selector's own `BBox` (default `0.1³`, overridable) is uploaded per-entry. Find where the Element material's BBox is
+  sourced (its own dll — not `Amplitude.Mercury.Terrain`; likely `Firstpass`/`Amplitude.dll`). If it's a settable field
+  rather than derived from mesh bounds, forcing our element's BBox to match the donor's may restore the element↔decal
+  switch — a C# fix after all.
+- **Reverse-engineer the evolve/selection compute shader** with the ShaderDump toolchain (`ENCAccessProof/tools/ShaderDump`,
+  see [[shaderdump-toolchain]]) — dump `AddFIMSParticle` / the level-build evolve kernels and read exactly how
+  `BBoxMin/BBoxMax` + zoom pick element-vs-decal. That is ground truth below the C# decompile and settles whether the
+  switch is BBox-only or also keys on something our swap changes (LOD data, particle count).
+- The clone-the-selector fix (preserve decals) is *necessary but not sufficient* — global mode already preserves the
+  decals and still gates them. The BBox/selection fix is the missing half.
 
 ---
 
