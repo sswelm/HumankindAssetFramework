@@ -147,14 +147,16 @@ namespace HumankindAssetFramework
 
                 // 24 = GroundMaterialDefinitionCriteriaIndex — dump the vocabulary once so the user can pick a grass name
                 const int GroundCriteria = 24;
-                if (!groundNamesDumped && Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value)
+                if (!groundNamesDumped)
                 {
                     groundNamesDumped = true;
                     var namesM = repoType.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(m => m.Name == "Names" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(int));
                     if (namesM?.Invoke(inst, new object[] { GroundCriteria }) is Array arr)
                     {
                         var list = new List<string>(); foreach (var s in arr) list.Add(s?.ToString());
-                        Plugin.Log.LogInfo($"[Ground] GroundMaterialDefinition names ({list.Count}): {string.Join(", ", list)}");
+                        if (Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value)
+                            Plugin.Log.LogInfo($"[Ground] GroundMaterialDefinition names ({list.Count}): {string.Join(", ", list)}");
+                        DumpGroundColors(list);   // write haf_ground_colors.json for the editor preview (each material's true tint)
                     }
                 }
 
@@ -181,6 +183,138 @@ namespace HumankindAssetFramework
                 }
             }
             catch (Exception ex) { if (groundLogged.Add("ex")) Plugin.Log.LogError("[Ground] " + ex); }
+        }
+
+        // Dump each GroundMaterialDefinition's representative Color (from its GroundMaterialAuthoringData) to
+        // BepInEx/config/haf_ground_colors.json — the District Factory tints its preview tile with the TRUE per-
+        // material colour instead of a guessed family colour. Chain: Databases<GroundMaterialDefinition>.GetValue(name)
+        // -> .GroundMaterialAuthoringData (Guid) -> AssetDatabase.TryLoadAsset<GroundMaterialAuthoringData> -> .Color.
+        static bool groundColorsDumped;
+        static void DumpGroundColors(List<string> names)
+        {
+            if (groundColorsDumped) return; groundColorsDumped = true;
+            try
+            {
+                var gmdType = AccessTools.TypeByName("Amplitude.Mercury.Terrain.GroundMaterialDefinition");
+                var gmadType = AccessTools.TypeByName("Amplitude.Mercury.Terrain.GroundMaterialAuthoringData");
+                var dbType = AccessTools.TypeByName("Amplitude.Framework.Databases");
+                if (gmdType == null || gmadType == null || dbType == null) { Plugin.Log.LogWarning($"[Ground] color dump: type(s) not found (def={gmdType != null}, auth={gmadType != null}, db={dbType != null})"); return; }
+                // non-generic GetDatabase(Type) — avoids the generic overload's optional-bool-param signature mismatch
+                var getDb = dbType.GetMethods(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(m => m.Name == "GetDatabase" && !m.IsGenericMethodDefinition && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(Type));
+                var db = getDb?.Invoke(null, new object[] { gmdType });
+                if (db == null) { Plugin.Log.LogWarning("[Ground] color dump: GroundMaterialDefinition database null"); return; }
+                var getVal = db.GetType().GetMethods().FirstOrDefault(m => m.Name == "GetValue" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(string))
+                          ?? db.GetType().GetMethods().FirstOrDefault(m => m.Name == "GetValue" && m.GetParameters().Length == 1);
+                var ssType = AccessTools.TypeByName("Amplitude.StaticString");
+                var authGuidP = AccessTools.Property(gmdType, "GroundMaterialAuthoringData");
+                var colorP = AccessTools.Property(gmadType, "Color");
+                var texType = AccessTools.TypeByName("Amplitude.Mercury.Terrain.GroundMaterialAuthoringData+GroundMaterialTextureData") ?? AccessTools.TypeByName("Amplitude.Mercury.Terrain.GroundMaterialTextureData");
+                var oneLayerP = AccessTools.Property(gmadType, "GroundMaterialOneLayer");
+                var layer0P = AccessTools.Property(gmadType, "GroundMaterialLayer0");
+                var atlasElemF = texType?.GetField("AtlasElement", BindingFlags.Public | BindingFlags.Instance);
+                var atlasF = texType?.GetField("Atlas", BindingFlags.Public | BindingFlags.Instance);
+                var defAtlasType = AccessTools.TypeByName("Amplitude.Graphics.Atlas.DefaultTextureAtlas");
+                var texDir = System.IO.Path.Combine(BepInEx.Paths.ConfigPath, "haf_ground_tex");
+                System.IO.Directory.CreateDirectory(texDir);
+
+                var sb = new System.Text.StringBuilder("{\n");
+                int n = 0, tn = 0;
+                var inv = System.Globalization.CultureInfo.InvariantCulture;   // dot decimals — the system locale (e.g. nl-NL) writes commas, breaking the JSON
+                foreach (var name in names)
+                {
+                    if (string.IsNullOrEmpty(name) || name == "None") continue;
+                    object key = getVal.GetParameters()[0].ParameterType == typeof(string) ? (object)name : Activator.CreateInstance(ssType, name);
+                    var def = getVal.Invoke(db, new[] { key });
+                    if (def == null) continue;
+                    var guid = authGuidP?.GetValue(def);
+                    if (guid == null) continue;
+                    var auth = LoadAmpliAsset(gmadType, guid);   // the proven 1-arg Amplitude asset loader
+                    if (auth == null) continue;
+
+                    // COLOUR (fallback tint)
+                    if (colorP?.GetValue(auth) is UnityEngine.Color c)
+                    {
+                        if (n++ > 0) sb.Append(",\n");
+                        sb.Append($"  \"{name}\": [{c.r.ToString("0.###", inv)}, {c.g.ToString("0.###", inv)}, {c.b.ToString("0.###", inv)}]");
+                    }
+
+                    // TEXTURE — the actual ground image is a TILE inside a shared DefaultTextureAtlas. Chain: pick a
+                    // layer (oneLayer, else layer0) with a non-null Atlas + AtlasElement; load the atlas; GUIDToIndex
+                    // (AtlasElement) -> tile index; GetElementData(index) -> the tile's UV rect (Vector4); grab the
+                    // atlas page from OutputEntries[0].GetTexture; blit-crop that UV region -> the material's tile.
+                    bool diag = n <= 4 && Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value;
+                    if (atlasElemF != null && atlasF != null && defAtlasType != null)
+                    {
+                        object elemGuid = null, atlasGuid = null; string via = "";
+                        foreach (var (lp, ln) in new[] { (oneLayerP, "oneLayer"), (layer0P, "layer0") })
+                        {
+                            var td = lp?.GetValue(auth); if (td == null) continue;
+                            var eg = atlasElemF.GetValue(td); var ag = atlasF.GetValue(td);
+                            if (eg != null && !GuidIsNull4(eg) && ag != null && !GuidIsNull4(ag)) { elemGuid = eg; atlasGuid = ag; via = ln; break; }
+                        }
+                        if (elemGuid != null)
+                        {
+                            var atlas = LoadAmpliAsset(defAtlasType, atlasGuid);
+                            var agt = atlasGuid.GetType();
+                            if (diag) Plugin.Log.LogInfo($"[GroundTex] '{name}' via {via}: atlasGuid={agt.GetField("a", BF)?.GetValue(atlasGuid)},{agt.GetField("d", BF)?.GetValue(atlasGuid)} atlas={(atlas == null ? "NULL" : atlas.GetType().Name)}");
+                            if (atlas != null)
+                            {
+                                var g2i = defAtlasType.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(m => m.Name == "GUIDToIndex" && m.GetParameters().Length == 1);
+                                int idx = g2i != null ? (int)g2i.Invoke(atlas, new[] { elemGuid }) : -1;
+                                var getElem = atlas.GetType().GetMethod("GetElementData", BindingFlags.Public | BindingFlags.Instance);
+                                var outsP = AccessTools.Property(atlas.GetType(), "OutputEntries");
+                                var outs = outsP?.GetValue(atlas) as Array;
+                                if (diag) Plugin.Log.LogInfo($"[GroundTex]   index={idx} outputEntries={(outs?.Length ?? -1)}");
+                                if (idx >= 0 && getElem != null && outs != null && outs.Length > 0)
+                                {
+                                    var uv = getElem.Invoke(atlas, new object[] { idx });   // Vector4 rect (offset.xy, scale.zw)
+                                    var getTex = outs.GetValue(0).GetType().GetMethod("GetTexture", BindingFlags.Public | BindingFlags.Instance);
+                                    var page = getTex?.Invoke(outs.GetValue(0), new object[] { (uint)256 }) as UnityEngine.Texture2D;
+                                    if (diag) Plugin.Log.LogInfo($"[GroundTex]   uv={uv} page={(page == null ? "NULL" : page.width + "x" + page.height)}");
+                                    if (page != null && uv is UnityEngine.Vector4 r)
+                                    {
+                                        var png = CropAtlasTile(page, r);
+                                        if (png != null) { System.IO.File.WriteAllBytes(System.IO.Path.Combine(texDir, name + ".png"), png); tn++; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                sb.Append("\n}\n");
+                System.IO.File.WriteAllText(System.IO.Path.Combine(BepInEx.Paths.ConfigPath, "haf_ground_colors.json"), sb.ToString());
+                Plugin.Log.LogInfo($"[Ground] wrote {n} colour(s) + {tn} texture PNG(s) -> haf_ground_colors.json + haf_ground_tex/ (editor preview)");
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Ground] color dump: " + ex.Message); }
+        }
+
+        static bool GuidIsNull4(object g)
+        { var t = g.GetType(); return (int)(t.GetField("a", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(g) ?? 0) == 0 && (int)(t.GetField("b", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(g) ?? 0) == 0 && (int)(t.GetField("c", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(g) ?? 0) == 0 && (int)(t.GetField("d", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(g) ?? 0) == 0; }
+
+        // Crop one atlas tile (its UV rect within the shared page) to a readable 256² PNG. The rect is a Vector4
+        // (offsetU, offsetV, scaleU, scaleV); Graphics.Blit with a scale/offset samples exactly that sub-region.
+        static byte[] CropAtlasTile(UnityEngine.Texture2D page, UnityEngine.Vector4 uv)
+        {
+            try
+            {
+                // the Vector4 is a MIN/MAX UV rect (minU, minV, maxU, maxV) — scale = extent, offset = min. (The
+                // first pass read it as offset/scale, so V sampled past 1.0 and wrapped: black + several tiles.)
+                var scale = new UnityEngine.Vector2(uv.z - uv.x, uv.w - uv.y);
+                var offset = new UnityEngine.Vector2(uv.x, uv.y);
+                if (scale.x <= 0f || scale.y <= 0f) { scale = new UnityEngine.Vector2(1, 1); offset = UnityEngine.Vector2.zero; }   // degenerate rect -> whole page
+                int sz = 256;
+                var rt = UnityEngine.RenderTexture.GetTemporary(sz, sz, 0, UnityEngine.RenderTextureFormat.ARGB32, UnityEngine.RenderTextureReadWrite.sRGB);
+                var prev = UnityEngine.RenderTexture.active;
+                UnityEngine.Graphics.Blit(page, rt, scale, offset);
+                UnityEngine.RenderTexture.active = rt;
+                var t = new UnityEngine.Texture2D(sz, sz, UnityEngine.TextureFormat.RGBA32, false);
+                t.ReadPixels(new UnityEngine.Rect(0, 0, sz, sz), 0, 0); t.Apply();
+                UnityEngine.RenderTexture.active = prev; UnityEngine.RenderTexture.ReleaseTemporary(rt);
+                var png = UnityEngine.ImageConversion.EncodeToPNG(t);
+                UnityEngine.Object.Destroy(t);
+                return png;
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[GroundTex] crop: " + ex.Message); return null; }
         }
 
         internal static void PollRepoDump()
