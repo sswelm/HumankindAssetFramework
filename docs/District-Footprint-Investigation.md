@@ -1,5 +1,60 @@
 # District Strategic Footprint — Investigation (spike)
 
+## TL;DR — what we learned (read this first)
+
+**Goal:** a custom district (the breeder reactor) should show a persistent top-down **footprint** at strategic zoom, the way
+vanilla districts do, instead of shrinking away awkwardly.
+
+**What the footprint actually is:** the vanilla **city-map decal system** — texture decals (`Decal_CityMap_<biome>_*`, a
+1194-material global `FxEvolverDescriptorLevelBuildDecal`). For a district they live **inside channel [0]'s
+`FxEvolverMaterialLevelBuildSelector`, interleaved with the building geometry** — not a separate channel. The plbc has
+effectively **one** composited level-build content channel (`mainLevelBuildComponantLayer`), so building + footprint share it.
+
+**Why it was missing on the reactor:** our **isolate injection replaces channel [0]'s whole selector with one private leaf**,
+amputating the decal subtree. It was never a missing asset, an unreachable system, or a GPU gate (that conclusion came from
+pre-swap dumps + the reactor's `isolate=true` registry flag silently overriding every "global" test — see the audit log below).
+
+**What renders the footprint:** keeping the selector. **Global mode keeps it → footprint renders** (verified in-game + dump:
+231 decals / 120 rendering, identical to native). But global swaps the *shared* Industry selector, so every Industry tile
+becomes a reactor.
+
+**Per-tile fix (built, on the spike branch):** a **private deep-clone** of channel [0]'s selector (`DeepCloneMat` +
+`PointTileAtClonedSelector`). It **works** for close-zoom + far-zoom: footprint renders on **only the reactor tile**, our
+reactor mesh wears our albedo (one shared private `FxOutputLayer`), and the dome count is tunable. Every reusable building
+block exists (`BuildPrivateLeaf`, `CollectLeaves`, `LoadFxMaterial`, `ClonePrivateOutputLayer`, the texture path).
+
+**The wall — mid-zoom LOD.** A district renders different geometry per zoom band: close = detailed buildings (per-tile
+cache/emitter-items — **cloneable**), mid = a lower-detail LOD set that resolves through the selector's **`pairs` table into
+SHARED materials** (**not** cloneable), far = the decals. A post-swap dump proved it: of 483 visible elements only **75 were
+ours**, ~408 were shared donor. Those shared LOD elements can't be privatized — repointing is impossible (GUIDs), a per-frame
+catch tanked perf and still missed them, and global-swapping them would reactor-ify every Industry district's mid-zoom. So
+**close-zoom is per-tile-controllable; mid-zoom LOD is shared and is not.** That's the architectural limit of runtime
+injection here.
+
+## Roadmap — clean reactor + footprint at ALL zoom levels
+
+A clean cross-zoom result cannot come from more runtime selector surgery (the mid-zoom LOD is shared). It needs the reactor
+to **own its geometry at every LOD band** via the content pipeline, not borrow Industry's shared selector:
+
+1. **Dedicated district visual for the reactor** — its own selector/affinity so it is NOT sharing Industry's `pairs`/LOD
+   materials. This is new authoring capability the framework does not have yet (today the DistrictFactory *injects* a mesh
+   into an existing selector; it does not author a new affinity/selector). Feasibility spike: can we clone an affinity's
+   selector **per district-type** (shared by all reactors, not per-tile) and register it as the reactor's own visual, so a
+   one-time global swap on it stays scoped to reactors AND covers the LOD bands?
+2. **Reactor LOD meshes** — the game's LOD system needs our geometry at close/mid/far. Either bake real LOD levels, or make
+   every LOD band resolve to our single mesh (acceptable for a wonder). This is where the mid-zoom donor is truly fixed —
+   the LOD assets are *ours*, not shared donor GUIDs.
+3. **Footprint via the affinity** — keep the city-map decals from the borrowed affinity (they're per-hex, tile-agnostic), or
+   author a decal set for the dedicated affinity.
+4. **Fallback that already ships:** the plain isolate reactor (one clean building) + `ConstructibleVisualAffinity =
+   Base_Industry` makes it **disappear cleanly** at strategic zoom — which resolved the *original* complaint (the awkward
+   shrink). The footprint is the enhancement on top.
+
+**Current state:** `UseDeepClone=false` → the shipped clean single reactor (playable, no footprint). The deep-clone is parked
+on the spike branch with all knobs, for whoever builds the content-pipeline path above.
+
+---
+
 **Status:** ⭐ SOLVED (mechanism). The footprint is the city-map decal system living **in channel [0]'s Selector alongside
 the building**. **ISOLATE mode was deleting it** — it replaces the whole channel-[0] selector with our single private leaf,
 so the decal subtree (231 drawers, 120 rendering) is amputated. **GLOBAL mode keeps the selector and the footprint
