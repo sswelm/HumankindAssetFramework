@@ -37,6 +37,12 @@ namespace HumankindAssetFramework
             public readonly List<TileState> tiles = new List<TileState>();
             public object privateLeaf;                                   // isolate mode: the Instantiated leaf (SHARED by all tiles)
             public System.Type selectorType;                             // the close-up level-build selector's type; defensive: only re-assert our leaf over THAT, don't fight a foreign material the game may put on the channel
+            // FOOTPRINT preservation (isolate mode): isolate replaces channel [0]'s selector (building + decals) with our
+            // single leaf, amputating the footprint decals. Re-host a CLONE of the original selector on an empty channel so
+            // its decals draw at strategic zoom. origSelector captured when the leaf is first built (pre-replacement).
+            public object origSelector;                                  // the native channel-[0] selector, captured before we replaced it
+            public object decalSelector;                                 // the clone re-hosted on a free channel to keep the footprint
+            public int decalChannel = -1; public bool decalLogged, decalGaveUp;
             public readonly List<object> leaves = new List<object>();    // global mode: collected shared leaves
             public bool collected, matchLogged;
             // texture injection runtime (isolate mode)
@@ -517,6 +523,7 @@ namespace HumankindAssetFramework
                     var sel = evf.GetValue(box);
                     if (sel == null) return;
                     if (e.selectorType == null) e.selectorType = sel.GetType();   // the close-up selector we're allowed to override
+                    if (e.origSelector == null && sel is UnityEngine.Object) e.origSelector = sel;   // capture BEFORE we replace it (footprint source)
                     e.privateLeaf = BuildPrivateLeaf(sel, e.fxMeshGuid, e.atlasGuid);
                     // WONDER path: a database-fed selector (fillMode LevelBuildDatabase) has no inline leaves to walk —
                     // source them from the PLUGIN-LOADED template material instead (swap-first sequencing: the wonder's
@@ -549,6 +556,74 @@ namespace HumankindAssetFramework
                 if (!t.pointedLogged) { t.pointedLogged = true; Plugin.Diag($"[District] '{e.district}' ISOLATED: channel {t.layer} -> the private leaf (this tile only)."); }
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] point channel: " + ex); }
+        }
+
+        // Load a freshly-Instantiated FxEvolverMaterial (reset load state so LoadIFN actually re-runs and rebuilds its
+        // private runtime tree). Mirrors the load tail of BuildPrivateLeaf.
+        static void LoadFxMaterial(object mat)
+        {
+            if (mat == null || distFxManager == null) return;
+            var t = mat.GetType();
+            var ls = GF(t, "loadingStatus"); if (ls != null) ls.SetValue(mat, System.Enum.ToObject(ls.FieldType, 0));
+            if (fxNextDoublon == null) fxNextDoublon = GameBinding.FxEvolverMaterial?.GetMethod("NextDoublonAvoidanceIndex", BindingFlags.Static | BindingFlags.Public);
+            uint doublon = fxNextDoublon != null ? (uint)fxNextDoublon.Invoke(null, null) : 0u;
+            var loadIFN = t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(m => m.Name == "LoadIFN" && m.GetParameters().Length >= 1 && m.GetParameters()[0].ParameterType.Name.Contains("FxManager"));
+            if (loadIFN != null)
+            {
+                var pars = loadIFN.GetParameters();
+                var args = pars.Length == 1 ? new[] { distFxManager } : new object[] { distFxManager, doublon };
+                loadIFN.Invoke(mat, args);
+            }
+        }
+
+        // FOOTPRINT preservation (isolate mode): our private leaf on channel [0] loses the decal subtree the native
+        // selector carried. Re-host a CLONE of that native selector on a FREE (null) channel so its decals still draw —
+        // at strategic zoom the clone's building elements demote and only the footprint decals remain. (First cut: the
+        // clone still carries its buildings, so close-up may show the donor buildings behind our reactor; if so, the next
+        // step neutralizes the clone's building leaves and keeps only the decals.)
+        static void PreserveFootprintChannel(DistrictModel e, DistrictModel.TileState t)
+        {
+            try
+            {
+                if (e.decalGaveUp || e.origSelector == null || t.plbc == null) return;
+                if (fiPlbcChannels == null) fiPlbcChannels = AccessTools.Field(t.plbc.GetType(), "channels");
+                if (!(fiPlbcChannels?.GetValue(t.plbc) is Array channels)) return;
+                if (e.decalSelector == null)
+                {
+                    if (!(e.origSelector is UnityEngine.Object selUO) || selUO == null) { e.decalGaveUp = true; return; }
+                    var clone = UnityEngine.Object.Instantiate(selUO);
+                    clone.name = selUO.name + "_HAFfoot";
+                    LoadFxMaterial(clone);
+                    e.decalSelector = clone;
+                    Plugin.Diag($"[District] '{e.district}': cloned footprint selector '{clone.name}'.");
+                }
+                // pick a free (null-material) channel to host the footprint, once
+                if (e.decalChannel < 0)
+                {
+                    for (int i = 0; i < channels.Length; i++)
+                    {
+                        var b = channels.GetValue(i); if (b == null) continue;
+                        if (fiChanEvolverMaterial == null) fiChanEvolverMaterial = GF(b.GetType(), "evolverMaterial");
+                        if (fiChanEvolverMaterial?.GetValue(b) == null) { e.decalChannel = i; break; }
+                    }
+                    if (e.decalChannel < 0) { e.decalGaveUp = true; Plugin.Diag($"[District] '{e.district}': no free channel for footprint — gave up."); return; }
+                }
+                var box = channels.GetValue(e.decalChannel); if (box == null) { e.decalGaveUp = true; return; }
+                var ef = fiChanEvolverMaterial; if (ef == null) return;
+                if (ReferenceEquals(ef.GetValue(box), e.decalSelector)) return;   // already hosted this frame
+                ef.SetValue(box, e.decalSelector);
+                channels.SetValue(box, e.decalChannel);
+                if (miRefreshChannel == null)
+                {
+                    miRefreshChannel = t.plbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                        .FirstOrDefault(m => m.Name == "RefreshChannel" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
+                    if (miRefreshChannel != null) refreshArgs = new object[] { 0, System.Enum.ToObject(miRefreshChannel.GetParameters()[1].ParameterType, 0) };
+                }
+                if (miRefreshChannel != null) { refreshArgs[0] = e.decalChannel; miRefreshChannel.Invoke(t.plbc, refreshArgs); }
+                if (!e.decalLogged) { e.decalLogged = true; Plugin.Diag($"[District] '{e.district}': footprint selector hosted on channel {e.decalChannel}."); }
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[District] preserve footprint: " + ex); }
         }
 
         // Diagnostic (DistrictDebug): dump every serializable field of the cloned leaf — the hunt for the
@@ -661,6 +736,7 @@ namespace HumankindAssetFramework
             {
                 d.tiles.Clear(); d.privateLeaf = null; d.leaves.Clear(); d.collected = false;
                 d.matchLogged = false;
+                d.origSelector = null; d.decalSelector = null; d.decalChannel = -1; d.decalLogged = false; d.decalGaveUp = false;
                 d.texApplied = false; d.texWait = 0; d.texErrors = 0; d.texAlbedo = null; d.texNormal = null; d.texRough = null;
                 d.boundSlots.Clear();   // the cached (material, property) bind slots are corpses with the old layer
                 d.groundIdx = int.MinValue;   // re-resolve the ground-material index against the new session's repository
@@ -687,6 +763,10 @@ namespace HumankindAssetFramework
                     { e.tiles.RemoveAt(i); Plugin.Diag($"[District] '{e.district}': tile component destroyed — pruned ({e.tiles.Count} left)."); }
                 if (e.isolate)
                 {
+                    // PreserveFootprintChannel FALSIFIED (08-09): hosting a decal-selector clone on a free channel renders
+                    // nothing — the plbc has ONE composited level-build content channel (mainLevelBuildComponantLayer; the
+                    // native reactor dump shows "1 channel(s)"). Decals can't live on a separate channel; building + decals
+                    // must share the main selector. So the footprint needs the deep-clone/privatize path, not a side channel.
                     for (int i = 0; i < e.tiles.Count; i++) PointTileAtPrivateLeaf(e, e.tiles[i]);
                     DistrictApplyTexture(e);
                 }

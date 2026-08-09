@@ -130,6 +130,18 @@ differently — the building fades out (affinity opacity), but the selector stil
 
 **This is the C#/GPU boundary. C# reflection is exhausted** — every reachable field is identical between the two cases.
 
+### Falsified fix attempt: decals on a separate channel (08-09)
+
+Tried the cheap version first — keep isolate's clean single reactor on the main channel and re-host a **clone of the native
+selector on a free channel** so its decals still draw. Built (`PreserveFootprintChannel` + `LoadFxMaterial`), verified it
+cloned the right source (`CityMapSelector_Industry_00`) and hosted it on channel 2. **Result: renders nothing** — close-up
+shows no donor buildings from it either. Reason: the plbc has effectively **one composited level-build content channel**
+(`mainLevelBuildComponantLayer`; the native reactor dump reads **"1 channel(s)"** — the extra channels seen post-swap are
+not composited level-build layers). **Decals cannot live on a separate channel; the building and the decals must share the
+one main selector.** Code left in place but **disabled** (call commented in `TickDistrictMeshSwap`); `LoadFxMaterial` is
+reusable for the real fix. So the footprint genuinely needs the deep-clone/privatize path below — there is no side-channel
+shortcut.
+
 ### THE FIX (now that the mechanism is solved): private cloned selector
 
 Verified structure: the reactor's plbc channel **[0]** is an `FxEvolverMaterialLevelBuildSelector` that holds **both** the
