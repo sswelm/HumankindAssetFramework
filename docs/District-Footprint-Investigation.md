@@ -125,17 +125,20 @@ differently — the building fades out (affinity opacity), but the selector stil
 
 ### Next route (fresh session): the ShaderDump / BBox dig
 
-- **Confirm the BBox lever.** `FxEvolverMaterialLevelBuildElement.BBox` feeds the selection buffer (41162-41163) and the
-  selector's own `BBox` (default `0.1³`, overridable) is uploaded per-entry. Find where the Element material's BBox is
-  sourced (its own dll — not `Amplitude.Mercury.Terrain`; likely `Firstpass`/`Amplitude.dll`). If it's a settable field
-  rather than derived from mesh bounds, forcing our element's BBox to match the donor's may restore the element↔decal
-  switch — a C# fix after all.
+- **~~Confirm the BBox lever~~ — DONE, ruled out** (falsified lead 13). Forcing a small element bbox did not summon the
+  footprint. `lodData` (lead 12) is out too. **The C#-settable per-element levers are exhausted.**
 - **Reverse-engineer the evolve/selection compute shader** with the ShaderDump toolchain (`ENCAccessProof/tools/ShaderDump`,
-  see [[shaderdump-toolchain]]) — dump `AddFIMSParticle` / the level-build evolve kernels and read exactly how
-  `BBoxMin/BBoxMax` + zoom pick element-vs-decal. That is ground truth below the C# decompile and settles whether the
-  switch is BBox-only or also keys on something our swap changes (LOD data, particle count).
+  see [[shaderdump-toolchain]]) — dump `AddFIMSParticle` / the level-build evolve kernels (`FxComponentLevelBuildParticleAdder`,
+  `FxComponentTerrain.AfterOneEvolveDelegate`, the `ResolveElevationQueryMaterial`/`GeoDBQueryMaterial` dispatches) and read
+  exactly how a hexagon's element-vs-decal winner is chosen, and which per-entry field our swap perturbs. This is the only
+  route left below the C# decompile — every reachable C# field is either identical between gated/working or has been
+  falsified. **This is where a fresh session must start.**
+- **First, fix the probe** so the next element diff is trustworthy: extend `DumpMatTree` to recurse the selector's `pairs`
+  variant table + `defaultMaterial` (mirror `CollectLeaves`), then dump the reactor's building element **native vs
+  swapped** (per-district `seen`, no truncation) to see precisely which GPU-uploaded field our `Load`+swap changes on the
+  *actual building* (not the shared props the current dump catches).
 - The clone-the-selector fix (preserve decals) is *necessary but not sufficient* — global mode already preserves the
-  decals and still gates them. The BBox/selection fix is the missing half.
+  decals and still gates them. The GPU-selection fix is the missing half.
 
 ---
 
@@ -170,6 +173,21 @@ Every one of these was a plausible suspect, checked and ruled out in-game or by 
     (verified in the asset). **Dead runtime path**: the consumer `fxMeshContentLods` is *never assigned anywhere in the
     code* — declared + read, zero writes — so it's null for everyone, and the LOD chain is never used
     (`meshIndexLod0 = uint.MaxValue`, `lodData = 0` on our leaf). Reverted.
+12. **`FxEvolverMaterialLevelBuildElement.lodData`** — our swap re-resolves `lodData` from our LOD-less FxMesh
+    (`lodType=0`) to **0**. But a live dump showed **working** Food/Science building elements *also* run `lodData=0`
+    (only a shared decorative prop, meshIdx 547, carries `lodData=3`). So `lodData=0` is normal and renders footprints.
+    Not the gate.
+13. **Element `BBox` (the "cheap shot")** — the element uploads `BBoxMin/BBoxMax` to the GPU selection
+    (`FxLevelBuildElementGPUData`, `WriteToGPUData` ~43350) and `bbox` is a settable field (`useCustomBBox` + `Bounds`).
+    Directly tested: forced `useCustomBBox=true` + `Bounds(0, 0.15³)` on every swapped leaf in `ApplyLeaves`, global mode,
+    zoomed out — **no footprint appeared.** So the element→decal selection is **not** driven by the element bbox the way
+    we hoped. Ruled out. (Reverted.)
+
+**Probe limitation discovered:** `DumpMatTree` only recurses `levelBuildItems` + `fxMaterialCacheEntries.Entries`, but a
+selector's main building lives in its **`pairs` variant table / `defaultMaterial`** (which `CollectLeaves` handles and the
+dump does not). So the `[Tree]` element dumps show shared props, **not** the district building — a future clean element
+diff (reactor-native vs reactor-swapped) must extend `DumpMatTree` to the `pairs`/`defaultMaterial` path like
+`CollectLeaves`.
 
 The footprint works for the donor mesh and not ours, and none of these reachable, settable differences reproduces it —
 because it was never in any of them. It's the decal.

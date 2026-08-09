@@ -303,6 +303,9 @@ namespace HumankindAssetFramework
                 if (lf == null) continue;
                 lf.SetValue(leaf, fxGuid);   // persists our GUID so any game re-Load also uses ours
                 n++;
+                // FALSIFIED (footprint cheap shot, 08-09): forcing a small bbox (useCustomBBox + Bounds 0.15^3) on the
+                // swapped leaves did NOT summon the footprint at strategic zoom. So the element->decal selection is NOT
+                // driven by the element's BBoxMin/BBoxMax the way we hoped — bbox is ruled out as the gate.
                 if (resolve && distFxManager != null)
                 {
                     try
@@ -793,6 +796,21 @@ namespace HumankindAssetFramework
                 var rdi = GF(t, "levelBuildDecalRenderDataEntryIndex")?.GetValue(mat);
                 var ld = GF(t, "loadingStatus")?.GetValue(mat) ?? GF(t, "loadedStatus")?.GetValue(mat);
                 extra = $"  <<< DECAL {vos} layerEntryCount={lec} renderDataIdx={rdi} load={ld}";
+            }
+            else if (t.Name.Contains("BuildElement"))
+            {
+                // The building Element uploads BBoxMin/Max + LodData to the GPU selection shader (WriteToGPUData ~43350).
+                // In global mode we keep the donor's bbox but our Load re-resolves lodData/meshIndexLod from our LOD-less
+                // mesh. Dump both so we can see empirically what our swap changes vs an untouched (Food) element.
+                object bbox = GF(t, "bbox")?.GetValue(mat);
+                string bs = "?"; object useC = GF(t, "useCustomBBox")?.GetValue(mat);
+                if (bbox != null) { try { var bt = bbox.GetType(); bs = $"{bt.GetProperty("min", BF)?.GetValue(bbox)}..{bt.GetProperty("max", BF)?.GetValue(bbox)}"; } catch { } }
+                var lodD = GF(t, "lodData")?.GetValue(mat);
+                var mi = GF(t, "meshIndex")?.GetValue(mat);
+                var mi0 = GF(t, "meshIndexLod0")?.GetValue(mat);
+                var mi1 = GF(t, "meshIndexLod1")?.GetValue(mat);
+                var sz = GF(t, "size")?.GetValue(mat);
+                extra = $"  <<< ELEMENT bbox={bs} useCustomBBox={useC} lodData={lodD} meshIdx={mi} lod0={mi0} lod1={mi1} size={sz}";
             }
             Plugin.Log.LogInfo($"[Tree] {new string(' ', depth * 2)}{t.Name}{extra}");
             if (AccessTools.Field(t, "levelBuildItems")?.GetValue(mat) is Array items)
