@@ -196,6 +196,12 @@ empty → index 0 (`None`) → flat ground. **The fourth empty-cell fix:** `Hk_D
 global `DistrictHexSculpt` config; a **live dial** `haf_hexsculpt.txt` re-carves every sculpted district without a
 relaunch (cycle the ~40 shapes fast, then ship the winner in the Factory).
 
+**Global vs per-entry (a footgun):** the global `DistrictHexSculpt` / `DistrictGroundMaterial` configs apply to
+**every** registry district at once (a district with a blank per-entry field falls back to the global). Handy for
+a quick test, but it will raise/repaint districts you didn't mean to — e.g. a global platform floated the flat-based
+Breeder Reactor. For shipping, leave the globals **blank** and set each district's **Factory fields**, so every
+district configures itself and nothing bleeds onto its neighbours.
+
 **Which shape?** Measured (`[HexSculpt] NATIVE` dump): most districts resolve to **`None`** — the city center,
 administrative center, camp center, and cultivated tiles carve *no* platform. The districts with the raised plinth
 are the **emblematic quarters**; e.g. `Extension_Era1_OlmecCivilization` → **`EmblematicAndCityCenter26`**. So to
