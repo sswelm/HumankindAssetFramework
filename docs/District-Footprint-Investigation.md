@@ -1,10 +1,17 @@
 # District Strategic Footprint — Investigation (spike)
 
-**Status:** ROOT CAUSE FOUND + LOCALIZED TO THE GPU. The footprint is the city-map decal system, present in the reactor's
-native tree. C# investigation is now EXHAUSTED: the reactor's gated decals are byte-identical to a working district's
-(fully loaded, atlas-resolved, render-data written) — so the gate is below C#, in the GPU per-hexagon element-vs-decal
-selection shader (BBox/size + zoom driven). Clone-the-selector preserves the decals but is not sufficient; the missing
-half is the BBox/selection fix. Next route: the ShaderDump dig + the Element BBox lever (see end of doc).
+**Status:** ⭐ SOLVED (mechanism). The footprint is the city-map decal system living **in channel [0]'s Selector alongside
+the building**. **ISOLATE mode was deleting it** — it replaces the whole channel-[0] selector with our single private leaf,
+so the decal subtree (231 drawers, 120 rendering) is amputated. **GLOBAL mode keeps the selector and the footprint
+renders** — verified in-game (zoom out → footprint visible) AND by post-swap dump (231 decals / 120 rendering preserved,
+identical to native). The earlier "GPU selection gate" conclusion was WRONG: the reactor's registry entry is `isolate=true`,
+which silently overrode every `DistrictIsolate=false` "global" test, so global was never actually tested on the reactor
+until now. The fix is the original instinct — **clone the selector (private to the tile), swap the building mesh inside
+the clone, keep the decals** — giving per-tile scope (not "all Industry became reactors") WITH the footprint.
+
+**Superseded below:** the "CONCLUSIVE — gate is BELOW C#" and "ShaderDump next route" sections were built on pre-swap dumps
+(the [Tree] dump fired before the per-frame swap) and the isolate override — both artifacts. The decals were *removed*, not
+*gated*. Kept for the audit trail; do not act on them.
 **Branch:** `spike/district-footprint`. **Not on master** — master carries only the shipped wins below.
 
 The goal: a custom district (the breeder reactor) should show a **persistent top-down footprint silhouette** at

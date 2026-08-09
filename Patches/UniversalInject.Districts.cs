@@ -94,7 +94,10 @@ namespace HumankindAssetFramework
                                 atlasGuid = ParseGuid4((string)d["atlasGuid"] ?? ""),   // optional: entries baked before texture injection have none
                                 normalAtlasGuid = ParseGuid4((string)d["normalAtlasGuid"] ?? ""),
                                 roughAtlasGuid = ParseGuid4((string)d["roughAtlasGuid"] ?? ""),
-                                isolate = (bool?)d["isolate"] ?? true,
+                                // SPIKE: DistrictIsolate config (default true) now OVERRIDES the JSON when set false, so we
+                                // can force a registry entry into TRUE global mode for the footprint test. Without this the
+                                // reactor's JSON isolate=true silently won every "global" test. Otherwise honour the JSON.
+                                isolate = (Plugin.DistrictIsolate != null && !Plugin.DistrictIsolate.Value) ? false : ((bool?)d["isolate"] ?? true),
                                 groundMaterial = (string)d["groundMaterial"] ?? "",
                                 hexSculpt = (string)d["hexSculpt"] ?? "",
                             };
@@ -663,6 +666,7 @@ namespace HumankindAssetFramework
                 d.groundIdx = int.MinValue;   // re-resolve the ground-material index against the new session's repository
                 d.hexIdx = int.MinValue;
             }
+            postSwapTicks = 0; postSwapDumped = false;   // re-arm the post-swap tree dump for the new session
             ResetWonderTemplates();   // plugin-loaded wonder templates are corpses after a reload; re-load + re-fill swap-first
             // re-parse the registry too: a reload then picks up haf_districts.json edits (new/changed entries) without
             // a game restart. NOTE the honest limit: baked ASSETS ship in the mod bundle, which the game loads once per
@@ -689,6 +693,33 @@ namespace HumankindAssetFramework
                 else GlobalSwapEntry(e);
             }
             DumpDecalDescriptor();
+            DumpPostSwapTrees();
+        }
+
+        // POST-SWAP tree dump (spike, DistrictDebug): the [Tree] dump from DistrictApplyEntries fires on UpdateLevelBuild
+        // BEFORE this per-frame swap, so it only ever captured the PRE-swap (native) tree — a "native vs swapped" diff came
+        // back byte-identical purely from timing. Re-dump here ONCE, ~300 ticks (~5 s at 60 fps, past respawnAfterLoad) after
+        // the swap has settled, tagged [TreePost] so it's separable in the log. Answers: does the swap keep the 231 decal
+        // drawers or drop them, and which elements now carry our mesh.
+        static int postSwapTicks; static bool postSwapDumped; static string treeTag = "Tree";
+        static void DumpPostSwapTrees()
+        {
+            if (postSwapDumped || Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;
+            if (++postSwapTicks < 300) return;
+            postSwapDumped = true;
+            treeTag = "TreePost";
+            try
+            {
+                foreach (var e in distModels)
+                {
+                    if (e.tiles.Count == 0) { Plugin.Log.LogInfo($"[TreePost] '{e.district}': no live tile to dump"); continue; }
+                    var plbc = e.tiles[0].plbc;
+                    if (plbc is UnityEngine.Object uo && uo == null) continue;
+                    DumpPlbcTree(plbc, e.district + " POSTSWAP (isolate=" + e.isolate + ")");
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[TreePost] " + ex.Message); }
+            finally { treeTag = "Tree"; }
         }
 
         // FOOTPRINT probe (gated DistrictDebug): the DECAL isn't in the district's plbc (dumped: Element/Emitter/Matching/
@@ -757,13 +788,13 @@ namespace HumankindAssetFramework
         {
             if (fiPlbcChannels == null) fiPlbcChannels = AccessTools.Field(plbc.GetType(), "channels");
             if (!(fiPlbcChannels?.GetValue(plbc) is Array channels)) return;
-            Plugin.Log.LogInfo($"[Tree] '{label}' plbc: {channels.Length} channel(s)");
+            Plugin.Log.LogInfo($"[{treeTag}] '{label}' plbc: {channels.Length} channel(s)");
             var seen = new HashSet<object>();
             for (int i = 0; i < channels.Length; i++)
             {
                 var box = channels.GetValue(i);
                 var mat = box != null ? GF(box.GetType(), "evolverMaterial")?.GetValue(box) : null;
-                Plugin.Log.LogInfo($"[Tree]  [{i}] {(mat?.GetType().Name ?? "null")}");
+                Plugin.Log.LogInfo($"[{treeTag}]  [{i}] {(mat?.GetType().Name ?? "null")}");
                 DumpMatTree(mat, 2, seen);
             }
         }
@@ -812,7 +843,7 @@ namespace HumankindAssetFramework
                 var sz = GF(t, "size")?.GetValue(mat);
                 extra = $"  <<< ELEMENT bbox={bs} useCustomBBox={useC} lodData={lodD} meshIdx={mi} lod0={mi0} lod1={mi1} size={sz}";
             }
-            Plugin.Log.LogInfo($"[Tree] {new string(' ', depth * 2)}{t.Name}{extra}");
+            Plugin.Log.LogInfo($"[{treeTag}] {new string(' ', depth * 2)}{t.Name}{extra}");
             // emitter: levelBuildItems[].loadedEvolverMaterial   (GF, not AccessTools.Field — the latter warn-spams on miss)
             if (GF(t, "levelBuildItems")?.GetValue(mat) is Array items)
                 foreach (var it in items) if (it != null) DumpMatTree(GF(it.GetType(), "loadedEvolverMaterial")?.GetValue(it), depth + 1, seen);
