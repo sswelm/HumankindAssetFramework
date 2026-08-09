@@ -130,7 +130,31 @@ differently — the building fades out (affinity opacity), but the selector stil
 
 **This is the C#/GPU boundary. C# reflection is exhausted** — every reachable field is identical between the two cases.
 
-### Next route (fresh session): the ShaderDump / BBox dig
+### THE FIX (now that the mechanism is solved): private cloned selector
+
+Verified structure: the reactor's plbc channel **[0]** is an `FxEvolverMaterialLevelBuildSelector` that holds **both** the
+building elements **and** all 231 decals (the footprint). Isolate replaces that whole channel material with our one private
+leaf → decals amputated. Global keeps the selector but swaps the **shared** leaves → footprint works but every Industry
+tile becomes a reactor. The fix threads the needle:
+
+1. **Clone channel [0]'s selector** (`UnityEngine.Object.Instantiate` — private copy; NonSerialized runtime cache resets,
+   rebuilds on Load). Its serialized `pairs`/`defaultMaterial` GUIDs and the decal subtree come along.
+2. **Privatize the building leaves inside the clone.** Cloning the selector alone is NOT enough — its element leaves resolve
+   by GUID through the shared `FxEvolverMaterial.TryLoad` cache, so mutating them is still global. For each building
+   **Element** leaf the clone resolves (via `CollectLeaves`, which keys on `fxMesh` and already skips `decalMesh` decals),
+   `Instantiate` a private copy (exactly `BuildPrivateLeaf` line 407: "a private copy — mutating it won't touch the shared
+   leaf"), set its `fxMesh` to ours (+ the private-`FxOutputLayer` texture treatment), and repoint the clone's cache/pairs
+   entry at our private leaf. **Leave the decal leaves as-is** — shared is fine, they're unmodified.
+3. **Force the cloned selector onto this tile's channel [0]** (like `PointTileAtPrivateLeaf` does with the leaf), re-assert
+   per frame, RefreshChannel. Reset on save-reload (`ResetDistrictSessionState`).
+
+Result: only the reactor's tile uses the private clone → our building mesh + the surviving footprint decals; other Industry
+tiles untouched. This is a real implementation (clone + per-leaf privatize + texture + load + per-frame + reload), but every
+building block already exists (`BuildPrivateLeaf`, `CollectLeaves`, `ApplyLeaves`, the private-layer texture path). Design
+note: the reactor tile will show our mesh at each building slot the selector picks (the "reactor-ified district" look from
+the global test, but scoped to one tile) — confirm that reads well, or restrict the swap to the primary element.
+
+### (SUPERSEDED) Old next route — the ShaderDump / BBox dig
 
 - **~~Confirm the BBox lever~~ — DONE, ruled out** (falsified lead 13). Forcing a small element bbox did not summon the
   footprint. `lodData` (lead 12) is out too. **The C#-settable per-element levers are exhausted.**
