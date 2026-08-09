@@ -65,9 +65,19 @@ amputating the footprint subtree ourselves. It was never a missing asset or an u
 Result: custom building up close, vanilla footprint decals survive and draw at strategic zoom, still scoped to our tile
 (private clone). This is a change to the injection core (`BuildPrivateLeaf`/`PointTileAtPrivateLeaf` — clone one level up).
 
-Note: global mode (`DistrictIsolate=false`) keeps the shared selector and swaps only building meshes, so it *should*
-preserve decals too — but one test showed no footprint; re-verify. The private-selector-clone is the clean scoped path
-regardless.
+### The fix is subtler than expected — the mesh swap ITSELF drops the decals
+
+Re-verified global mode (`DistrictIsolate=false`, Industry affinity, zoomed out): **still no footprint.** This is a key
+refinement: `ApplyLeaves` only swaps `fxMesh` on building leaves, and `CollectLeaves` skips decals (they carry
+`decalMesh`), so **our swap never touches the decal leaves** — yet they stop rendering. So it's **not** merely the
+selector-replacement; **swapping the building mesh drops the decals indirectly.** Prime suspects:
+- **GPU mesh buffer eviction/collision** — registering our large custom mesh (via the building leaf's `Load` →
+  `GetMeshIndex`) evicts or reindexes the decal meshes (the shared 100k-vert / 256-mesh per-layer buffer).
+- **A presentation-state gate** — the decal renders only when the building is in a native state our swap changes.
+
+**Next probe:** after the swap, read each decal leaf's `meshIndex` — `uint.MaxValue`/invalid = evicted (buffer problem);
+still valid = present-but-gated (state problem). That fork decides the fix. So the clone-the-selector plan still stands,
+but it must swap the building mesh **without** triggering whatever the swap does to the decal indices.
 
 ---
 

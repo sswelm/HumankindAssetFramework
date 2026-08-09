@@ -775,8 +775,8 @@ namespace HumankindAssetFramework
             if (t.Name.Contains("Decal"))
             {
                 var dm = GF(t, "decalMesh")?.GetValue(mat);
-                var l0 = GF(t, "layer0")?.GetValue(mat);
-                extra = $"  <<< DECAL decalMesh={dm} layer0={l0}";
+                var dmi = GF(t, "decalMeshIndex")?.GetValue(mat);   // uint.MaxValue (4294967295) = decal mesh NOT registered (evicted?)
+                extra = $"  <<< DECAL decalMesh={dm} decalMeshIndex={dmi}";
             }
             Plugin.Log.LogInfo($"[Tree] {new string(' ', depth * 2)}{t.Name}{extra}");
             if (AccessTools.Field(t, "levelBuildItems")?.GetValue(mat) is Array items)
