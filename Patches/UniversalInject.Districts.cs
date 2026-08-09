@@ -43,6 +43,13 @@ namespace HumankindAssetFramework
             public object origSelector;                                  // the native channel-[0] selector, captured before we replaced it
             public object decalSelector;                                 // the clone re-hosted on a free channel to keep the footprint
             public int decalChannel = -1; public bool decalLogged, decalGaveUp;
+            // DEEP-CLONE mode (footprint fix): a fully-private copy of channel [0]'s selector tree — every non-decal node
+            // Instantiated once (memoized), building ELEMENT leaves' fxMesh swapped to ours, DECAL leaves left shared. Put
+            // on channel [0] so our mesh + the surviving footprint decals both render, scoped to this tile only.
+            public object clonedSelector; public System.Collections.Generic.Dictionary<object, object> cloneMap;
+            public bool cloneLogged; public int cloneReassert;
+            public object deepLayer;   // deep-clone: ONE private FxOutputLayer shared by every swapped reactor element (our albedo bound on it)
+            public int domeCounter;    // deep-clone: running count of building-slot emissions, for thinning the reactor-dome count
             public readonly List<object> leaves = new List<object>();    // global mode: collected shared leaves
             public bool collected, matchLogged;
             // texture injection runtime (isolate mode)
@@ -272,6 +279,9 @@ namespace HumankindAssetFramework
         // The leaf that holds geometry is FxEvolverMaterialLevelBuildElement with an `fxMesh` Guid field. Reached via:
         //   Selector.pairs[culture] -> Emitter.levelBuildItems[].loadedEvolverMaterial -> Element(.fxMesh)  (Emitters nest).
         static readonly List<object> distLeaves = new List<object>();   // legacy shared list (single-model path)
+        static bool UseDeepClone = false;   // SPIKE: deep-clone footprint fix — parked (mid-zoom LOD elements resolve via shared `pairs`, can't privatize cleanly; per-frame catch tanked perf). false = shipped clean reactor.
+        static float DeepCloneBuildingMinSize = 0.35f;   // deep-clone: swap building slots this big (bbox max dim) to our mesh; hide smaller props
+        static int DeepCloneKeepEvery = 4;               // deep-clone: keep 1 in N large building slots as our reactor (rest hidden) — thins the dome count proportionally
         static FieldInfo GF(Type t, string n) => t.GetField(n, BF);      // no AccessTools warning-on-miss (probing spams the log)
         static void CollectLeaves(object mat, List<object> outLeaves, int depth, HashSet<object> visited)
         {
@@ -626,6 +636,165 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogError("[District] preserve footprint: " + ex); }
         }
 
+        // Clone an FxOutputLayer private (the texture-injection layer): opt out of hi-res streaming (null the mid/high
+        // material GUIDs so the game never stomps our binding) and raise the per-mesh primitive ceiling. Same recipe as
+        // BuildPrivateLeaf's inline layer clone, factored out so the deep-clone reactor elements can share ONE such layer.
+        static UnityEngine.Object ClonePrivateOutputLayer(UnityEngine.Object srcLayer)
+        {
+            var layerClone = UnityEngine.Object.Instantiate(srcLayer);
+            layerClone.name = srcLayer.name + "_HAF";
+            if (GetMember(layerClone, "RenderOutputs") is Array ros)
+                foreach (var ro in ros)
+                    foreach (var gn in new[] { "midResMaterialGuid", "highResMaterialGuid" })
+                    { var gf2 = ro?.GetType().GetField(gn, BF); if (gf2 != null) gf2.SetValue(ro, Activator.CreateInstance(gf2.FieldType)); }
+            int boost = Plugin.DistrictMeshDensityBoost != null ? Plugin.DistrictMeshDensityBoost.Value : 8;
+            if (boost > 1)
+            {
+                var ppcF = layerClone.GetType().GetField("primitivePerParticleCount", BF);
+                if (ppcF?.GetValue(layerClone) is int ppc && ppc > 0) ppcF.SetValue(layerClone, ppc * boost);
+            }
+            return layerClone;
+        }
+
+        // DEEP CLONE (footprint fix): recursively Instantiate a fully-private copy of the selector tree. Every non-decal
+        // node is cloned once (memoized by original, so a leaf shared N times → one private clone repointed everywhere);
+        // building ELEMENT leaves get our fxMesh; DECAL leaves are kept SHARED (unmodified — that's the footprint). Loaded
+        // child references (selector cache Entries[].FxMaterial, emitter levelBuildItems[].loadedEvolverMaterial) are
+        // repointed at the clones. Load runs per node so element meshIndex re-resolves and selector caches build first.
+        static object DeepCloneMat(DistrictModel e, object mat, object fxGuid, System.Collections.Generic.Dictionary<object, object> map, int depth)
+        {
+            if (mat == null || depth > 10) return mat;
+            if (map.TryGetValue(mat, out var done)) return done;
+            if (!(mat is UnityEngine.Object uo) || uo == null) { map[mat] = mat; return mat; }
+            if (mat.GetType().Name.Contains("Decal")) { map[mat] = mat; return mat; }   // keep the footprint decals shared/unmodified
+            var clone = UnityEngine.Object.Instantiate(uo);
+            map[mat] = clone;
+            var t = clone.GetType();
+            bool swappedReactor = false;
+            if (t.Name.Contains("BuildElement"))
+            {
+                // The donor district emits MANY building slots (factory sprawl). Swap the LARGE slots (main buildings) to
+                // our reactor mesh, HIDE the small props (size -> 0). Reactor slots share ONE private output layer so our
+                // albedo (bound by DistrictApplyTexture) textures them all — otherwise they'd wear the donor's sheet (the
+                // garbled multi-colour look).
+                float maxDim = 0f;
+                var bboxV = GF(t, "bbox")?.GetValue(clone);
+                if (bboxV != null) { try { if (bboxV.GetType().GetProperty("size", BF)?.GetValue(bboxV) is UnityEngine.Vector3 sz) maxDim = Math.Max(sz.x, Math.Max(sz.y, sz.z)); } catch { } }
+                // Thin the reactor count PROPORTIONALLY: the ~349 distinct donor slots are spread across the district, so a
+                // walk-order cap kept the wrong (off-hex) ones. Instead keep every DeepCloneKeepEvery-th LARGE slot as our
+                // reactor and HIDE the rest (size -> 0) — the visible subset thins evenly. Small props always hidden.
+                bool bigEnough = maxDim >= DeepCloneBuildingMinSize;
+                if (bigEnough && (++e.domeCounter % DeepCloneKeepEvery) == 0)
+                {
+                    (GF(t, "fxMesh") ?? GF(t, "mesh"))?.SetValue(clone, fxGuid);
+                    swappedReactor = true;
+                    if (e.atlasGuid != null)
+                    {
+                        var olF = GF(t, "outputLayer");
+                        if (e.deepLayer == null && olF?.GetValue(clone) is UnityEngine.Object src && src != null) e.deepLayer = ClonePrivateOutputLayer(src);
+                        if (e.deepLayer != null) olF?.SetValue(clone, e.deepLayer);
+                        if (e.privateLeaf == null) e.privateLeaf = clone;   // representative leaf: DistrictApplyTexture/BindAlbedo bind our albedo on e.deepLayer
+                    }
+                }
+                else GF(t, "size")?.SetValue(clone, UnityEngine.Vector3.zero);   // thinned-out large slot, or a small prop -> hide
+            }
+            LoadFxMaterial(clone);   // element: re-resolve meshIndex from our mesh; selector/emitter: build the cache from GUIDs
+            if (swappedReactor && e.deepLayer != null) GF(t, "textureIndex")?.SetValue(clone, 1);   // sample the full-texture slot [0,1] -> our bound sheet
+            var cache = GF(t, "fxMaterialCacheEntries")?.GetValue(clone);
+            if (cache != null && GF(cache.GetType(), "Entries")?.GetValue(cache) is Array entries)
+                for (int i = 0; i < entries.Length; i++)
+                {
+                    var en = entries.GetValue(i); if (en == null) continue;
+                    var fmF = GF(en.GetType(), "FxMaterial"); var child = fmF?.GetValue(en);
+                    if (child != null) { fmF.SetValue(en, DeepCloneMat(e, child, fxGuid, map, depth + 1)); entries.SetValue(en, i); }
+                }
+            if (GF(t, "levelBuildItems")?.GetValue(clone) is Array items)
+                for (int i = 0; i < items.Length; i++)
+                {
+                    var it = items.GetValue(i); if (it == null) continue;
+                    var lmF = GF(it.GetType(), "loadedEvolverMaterial"); var child = lmF?.GetValue(it);
+                    if (child != null) { lmF.SetValue(it, DeepCloneMat(e, child, fxGuid, map, depth + 1)); items.SetValue(it, i); }
+                }
+            return clone;
+        }
+
+        // Reload/async defense: the selector resolves its `pairs` variants into the cache ASYNCHRONOUSLY — many building
+        // elements land AFTER the initial DeepCloneMat walk, so they stay shared donor (the mid-zoom LOD leak: 408 donor
+        // meshes vs 75 of ours). Walk the clone and for EVERY resolved child, ensure it's our private clone: memoized ones
+        // are repointed instantly, newcomers are DeepCloneMat'd on the spot (clone + swap/hide + thin, all memoized so each
+        // distinct element is done once). Also re-asserts if the game rebuilds a cache from GUIDs.
+        static void EnsurePrivate(DistrictModel e, object mat, object fxGuid, System.Collections.Generic.Dictionary<object, object> map, HashSet<object> visited, int depth)
+        {
+            if (mat == null || depth > 10 || !visited.Add(mat)) return;
+            var t = mat.GetType();
+            var cache = GF(t, "fxMaterialCacheEntries")?.GetValue(mat);
+            if (cache != null && GF(cache.GetType(), "Entries")?.GetValue(cache) is Array entries)
+                for (int i = 0; i < entries.Length; i++)
+                {
+                    var en = entries.GetValue(i); if (en == null) continue;
+                    var fmF = GF(en.GetType(), "FxMaterial"); var child = fmF?.GetValue(en);
+                    if (child == null) continue;
+                    var repl = map.TryGetValue(child, out var cl) ? cl : DeepCloneMat(e, child, fxGuid, map, depth + 1);
+                    if (repl != null && !ReferenceEquals(child, repl)) { fmF.SetValue(en, repl); entries.SetValue(en, i); }
+                    EnsurePrivate(e, repl ?? child, fxGuid, map, visited, depth + 1);
+                }
+            if (GF(t, "levelBuildItems")?.GetValue(mat) is Array items)
+                for (int i = 0; i < items.Length; i++)
+                {
+                    var it = items.GetValue(i); if (it == null) continue;
+                    var lmF = GF(it.GetType(), "loadedEvolverMaterial"); var child = lmF?.GetValue(it);
+                    if (child == null) continue;
+                    var repl = map.TryGetValue(child, out var cl) ? cl : DeepCloneMat(e, child, fxGuid, map, depth + 1);
+                    if (repl != null && !ReferenceEquals(child, repl)) { lmF.SetValue(it, repl); items.SetValue(it, i); }
+                    EnsurePrivate(e, repl ?? child, fxGuid, map, visited, depth + 1);
+                }
+        }
+
+        // ISOLATE + deep-clone: point this tile's channel [0] at a fully-private clone of the selector (our building mesh +
+        // the surviving footprint decals), re-asserted per frame; periodic RepointFromMemo defends against reloads.
+        static void PointTileAtClonedSelector(DistrictModel e, DistrictModel.TileState t)
+        {
+            try
+            {
+                if (t.plbc == null) return;
+                if (fiPlbcChannels == null) fiPlbcChannels = AccessTools.Field(t.plbc.GetType(), "channels");
+                if (!(fiPlbcChannels?.GetValue(t.plbc) is Array channels) || t.layer >= channels.Length) return;
+                var box = channels.GetValue(t.layer);
+                if (fiChanEvolverMaterial == null) fiChanEvolverMaterial = GF(box.GetType(), "evolverMaterial");
+                var evf = fiChanEvolverMaterial; if (evf == null) return;
+                if (e.clonedSelector == null)
+                {
+                    var sel = evf.GetValue(box); if (sel == null) return;
+                    if (e.selectorType == null) e.selectorType = sel.GetType();
+                    if (!(sel is UnityEngine.Object)) return;
+                    e.cloneMap = new System.Collections.Generic.Dictionary<object, object>();
+                    var cl = DeepCloneMat(e, sel, e.fxMeshGuid, e.cloneMap, 0);
+                    if (cl == null || ReferenceEquals(cl, sel)) { if (t.wait++ % 300 == 0) Plugin.Diag($"[District] '{e.district}': deep-clone not ready, retry..."); return; }
+                    e.clonedSelector = cl;
+                    Plugin.Diag($"[District] '{e.district}': deep-cloned selector — {e.cloneMap.Count} node(s) privatized.");
+                }
+                var curMat = evf.GetValue(box);
+                if (!ReferenceEquals(curMat, e.clonedSelector))
+                {
+                    if (curMat != null && e.selectorType != null && curMat.GetType() != e.selectorType) return;   // don't fight a foreign material
+                    evf.SetValue(box, e.clonedSelector);
+                    channels.SetValue(box, t.layer);
+                    if (miRefreshChannel == null)
+                    {
+                        miRefreshChannel = t.plbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                            .FirstOrDefault(m => m.Name == "RefreshChannel" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
+                        if (miRefreshChannel != null) refreshArgs = new object[] { 0, System.Enum.ToObject(miRefreshChannel.GetParameters()[1].ParameterType, 0) };
+                    }
+                    if (miRefreshChannel != null) { refreshArgs[0] = t.layer; miRefreshChannel.Invoke(t.plbc, refreshArgs); }
+                    if (!e.cloneLogged) { e.cloneLogged = true; Plugin.Diag($"[District] '{e.district}' DEEP-CLONE: channel {t.layer} -> private selector (footprint preserved)."); }
+                }
+                // frequent early (async variants still resolving), then sparse once stable
+                int every = e.cloneReassert < 900 ? 15 : 120;
+                if (++e.cloneReassert % every == 0) EnsurePrivate(e, e.clonedSelector, e.fxMeshGuid, e.cloneMap, new HashSet<object>(), 0);
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[District] cloned selector: " + ex); }
+        }
+
         // Diagnostic (DistrictDebug): dump every serializable field of the cloned leaf — the hunt for the
         // level-build reveal-ramp levers (duration/speed/curve fields we could zero on the load path).
         static bool leafFieldsDumped;
@@ -737,6 +906,7 @@ namespace HumankindAssetFramework
                 d.tiles.Clear(); d.privateLeaf = null; d.leaves.Clear(); d.collected = false;
                 d.matchLogged = false;
                 d.origSelector = null; d.decalSelector = null; d.decalChannel = -1; d.decalLogged = false; d.decalGaveUp = false;
+                d.clonedSelector = null; d.cloneMap = null; d.cloneLogged = false; d.cloneReassert = 0; d.deepLayer = null; d.domeCounter = 0;
                 d.texApplied = false; d.texWait = 0; d.texErrors = 0; d.texAlbedo = null; d.texNormal = null; d.texRough = null;
                 d.boundSlots.Clear();   // the cached (material, property) bind slots are corpses with the old layer
                 d.groundIdx = int.MinValue;   // re-resolve the ground-material index against the new session's repository
@@ -767,8 +937,12 @@ namespace HumankindAssetFramework
                     // nothing — the plbc has ONE composited level-build content channel (mainLevelBuildComponantLayer; the
                     // native reactor dump shows "1 channel(s)"). Decals can't live on a separate channel; building + decals
                     // must share the main selector. So the footprint needs the deep-clone/privatize path, not a side channel.
-                    for (int i = 0; i < e.tiles.Count; i++) PointTileAtPrivateLeaf(e, e.tiles[i]);
-                    DistrictApplyTexture(e);
+                    for (int i = 0; i < e.tiles.Count; i++)
+                    {
+                        if (UseDeepClone) PointTileAtClonedSelector(e, e.tiles[i]);
+                        else PointTileAtPrivateLeaf(e, e.tiles[i]);
+                    }
+                    DistrictApplyTexture(e);   // both paths: e.privateLeaf points at a reactor element sharing e.deepLayer, so our albedo binds to all swapped slots
                 }
                 else GlobalSwapEntry(e);
             }

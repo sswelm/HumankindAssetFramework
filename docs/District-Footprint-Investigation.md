@@ -142,7 +142,30 @@ one main selector.** Code left in place but **disabled** (call commented in `Tic
 reusable for the real fix. So the footprint genuinely needs the deep-clone/privatize path below — there is no side-channel
 shortcut.
 
-### THE FIX (now that the mechanism is solved): private cloned selector
+### The deep-clone build — got far, parked on a mid-zoom LOD wall (08-09)
+
+Implemented the private deep-clone (`DeepCloneMat` + `PointTileAtClonedSelector`, `UseDeepClone`). It **worked** for the
+hard goals and is a real result:
+- **Footprint renders** at strategic zoom, scoped to only the reactor tile (1657 nodes privatized, other Industry untouched).
+- **Texture correct**: all swapped reactor slots share ONE private `FxOutputLayer` (`e.deepLayer`, `ClonePrivateOutputLayer`)
+  with our albedo bound via the existing `DistrictApplyTexture`/`BindAlbedo` path — coherent reactor sheet, no donor garble.
+- **Count tunable**: swap large slots (bbox ≥ `DeepCloneBuildingMinSize`), hide small props (`size→0`), thin the rest
+  (`DeepCloneKeepEvery`, keep 1-in-N proportionally so the visible subset thins evenly, not a broken walk-order cap).
+
+**The wall — mid-zoom shows the donor.** The district renders different geometry per zoom band (close = detailed buildings,
+mid = a lower-detail LOD set, far = footprint decals). A post-swap element dump proved it: of 483 visible elements only **75
+were ours** (`meshIdx=4607`); **~408 were donor** meshes we never swapped. Those mid-LOD elements resolve through the
+selector's **`pairs` variant table into SHARED materials**, not the per-tile cache/emitter-items we clone. They cannot be
+privatized: repointing them is impossible (pairs are GUIDs, not instances), a per-frame catch (`EnsurePrivate`) walking the
+1657-node tree **tanked performance** and still missed them (they're not in the cache/items paths), and global-swapping the
+shared LOD materials would turn **every** Industry district's mid-zoom into reactors. That's an architectural wall for the
+runtime-injection approach: close-zoom is per-tile (cloneable), mid-zoom LOD is shared (not).
+
+**Status: parked** (`UseDeepClone=false`, back to the shipped clean single reactor). The deep-clone code is committed for
+whoever picks this up. A clean cross-zoom result likely needs a real content-pipeline district (custom mesh with its own
+baked LODs + a dedicated affinity), not runtime selector surgery.
+
+### (earlier fix sketch, superseded by the build above) private cloned selector
 
 Verified structure: the reactor's plbc channel **[0]** is an `FxEvolverMaterialLevelBuildSelector` that holds **both** the
 building elements **and** all 231 decals (the footprint). Isolate replaces that whole channel material with our one private
