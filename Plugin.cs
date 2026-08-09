@@ -39,6 +39,7 @@ namespace HumankindAssetFramework
         internal static ConfigEntry<int>    DistrictBufferHeadroom; // extra vertices to add to the big (Visual) GPU mesh buffer at init, so custom district meshes fit even in a full late-game city. 0 = off (leave the buffer as the game sizes it).
         internal static ConfigEntry<int>    DistrictMeshDensityBoost; // multiplier on the private layer's PrimitivePerParticleCount — raises the per-mesh 255-sub-particle render ceiling so high-poly composed districts (grove pizzas) draw fully. 0/1 = vanilla.
         internal static ConfigEntry<string> DistrictGroundMaterial; // force a GroundMaterialDefinition (grass field) under custom districts — the terrain paint a wonder's affinity lacks. Blank = off. DistrictDebug logs the valid names.
+        internal static ConfigEntry<string> DistrictHexSculpt; // force a HexagonSculptingDefinition (raised platform + strategic footprint) under custom wonders. Blank = off. Per-entry field overrides.
         internal static ConfigEntry<bool>   DistrictIsolate;         // scope the mesh-swap to only the target district's own tile (private per-instance leaf) instead of the shared-global swap
         internal static ConfigEntry<bool>   DistrictDebug;           // investigation diagnostics ([District] saw / [DistrictMat] / [DistrictSub] dumps) — off in normal play, they reflect on every district update
         internal static ConfigEntry<string> WonderNativeRows;        // SPIKE wip-wonder-affinity: fill empty cells in the ArtificialWonder repo database, "WonderName=a,b,c,d;..." (FxEvolverMaterial guid)
@@ -140,6 +141,11 @@ namespace HumankindAssetFramework
                                   "so a custom wonder gets a maintained field instead of bare terrain. The value is a GroundMaterialDefinition " +
                                   "NAME; set DistrictDebug=true and check the log for '[Ground] GroundMaterialDefinition names (...)' to see the " +
                                   "valid options (pick a grass one). Blank = off (vanilla terrain). Uses the game's own terrain paint, blended.");
+            DistrictHexSculpt = Config.Bind("District", "DistrictHexSculpt", "",
+                                  "Force a HexagonSculptingDefinition under custom districts — the raised terrain PLATFORM a district carves, " +
+                                  "which is also its top-down FOOTPRINT at strategic zoom / in battle. A custom wonder's affinity has none, so it " +
+                                  "sits flat with no footprint. The value is a HexagonSculptingDefinition NAME; set DistrictDebug=true and check the " +
+                                  "log for '[HexSculpt] HexagonSculptingDefinition names (...)' to see the options. Blank = off. Per-entry field overrides.");
             DistrictMeshDensityBoost = Config.Bind("District", "DistrictMeshDensityBoost", 8,
                                   "Multiplier on a custom district's private-layer PrimitivePerParticleCount, raising the PER-MESH primitive ceiling. " +
                                   "A district mesh renders as sub-particles whose count is hard-clamped at 255 (an 8-bit field): a high-poly composed " +
@@ -240,6 +246,7 @@ namespace HumankindAssetFramework
                 typeof(Hk_DistrictRepoint),   // EXPERIMENTAL: replace one district's on-map visual (docs/District-Visuals.md)
                 typeof(Hk_DistrictBufferHeadroom), // EXPERIMENTAL: enlarge the shared 'Visual' mesh buffer so custom district meshes fit (opt-in)
                 typeof(Hk_DistrictGroundMaterial), // EXPERIMENTAL: force a ground material (grass field) under a custom district
+                typeof(Hk_DistrictHexSculpt),      // EXPERIMENTAL: force hexagon sculpting (raised platform + strategic footprint) under a custom wonder
                 typeof(Hk_AnimatedBonePoolHeadroom), // enlarge the shared per-frame animated-bone pool (65,535 vanilla) — the spike-plague fix
                 typeof(Hk_PropRegister),           // EXPERIMENTAL: register our prop MeshCollections at AnimationLoad, before pawn resolution (opt-in)
                 typeof(Hk_ProjectileOverride),     // EXPERIMENTAL: re-point a unit's Projectile at our baked ProjectileAsset (kamikaze drone) at AnimationLoad (opt-in)
@@ -304,6 +311,7 @@ namespace HumankindAssetFramework
                 UniversalInject.TickDistrictMeshSwap(); // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
                 UniversalInject.PollRepoDump();         // SPIKE wip-wonder-affinity: one-shot AssetReferenceRepository dump (DistrictDebug-gated)
                 UniversalInject.PollWonderRows();       // SPIKE wip-wonder-affinity: fill configured wonder cells in the ArtificialWonder visual DB
+                UniversalInject.PollHexSculptDial();     // live dial (haf_hexsculpt.txt): re-carve every sculpted district's platform without a relaunch
             }
             BattleTurn.Poll();                          // live battle-turn dial (haf_battleturn.txt): turn rate + hold-fire for ALL units — independent of model injection, so outside the UniversalInject gate (spike)
             Hk_BombardAnimHold.Tick();                  // replay deferred bombard attack poses once their turn-hold elapses (muzzle flash + shot sound timing)

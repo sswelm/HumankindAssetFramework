@@ -26,6 +26,8 @@ namespace HumankindAssetFramework
             public bool isolate = true;      // true = private per-instance leaf (this tile only); false = global shared-leaf swap
             public string groundMaterial = ""; // per-entry terrain paint (GroundMaterialDefinition name, e.g. Prairie_Grassland) — "" falls back to the global DistrictGroundMaterial config
             public int groundIdx = int.MinValue; // resolved ground-material index cache (MinValue = unresolved, -1 = name not found)
+            public string hexSculpt = "";    // per-entry hexagon sculpting (HexagonSculptingDefinition name) — the raised platform + strategic footprint; "" falls back to the global DistrictHexSculpt config
+            public int hexIdx = int.MinValue; // resolved hexagon-sculpting index cache
             // runtime — PER-INSTANCE targeting: a district can be BUILT ON MANY TILES (one PresentationDistrict each);
             // the old single plbc slot made ownership ping-pong between instances (only the most recently updated tile
             // showed the custom model — the review's architectural finding). The private leaf + layer clone + texture
@@ -93,6 +95,7 @@ namespace HumankindAssetFramework
                                 roughAtlasGuid = ParseGuid4((string)d["roughAtlasGuid"] ?? ""),
                                 isolate = (bool?)d["isolate"] ?? true,
                                 groundMaterial = (string)d["groundMaterial"] ?? "",
+                                hexSculpt = (string)d["hexSculpt"] ?? "",
                             };
                             if (e.district.Length > 0 && e.fxMeshGuid != null) distModels.Add(e);
                             else Plugin.Log.LogWarning($"[District] registry entry skipped (district='{e.district}', bad fxMeshGuid?)");
@@ -645,6 +648,7 @@ namespace HumankindAssetFramework
                 d.texApplied = false; d.texWait = 0; d.texErrors = 0; d.texAlbedo = null; d.texNormal = null; d.texRough = null;
                 d.boundSlots.Clear();   // the cached (material, property) bind slots are corpses with the old layer
                 d.groundIdx = int.MinValue;   // re-resolve the ground-material index against the new session's repository
+                d.hexIdx = int.MinValue;
             }
             ResetWonderTemplates();   // plugin-loaded wonder templates are corpses after a reload; re-load + re-fill swap-first
             // re-parse the registry too: a reload then picks up haf_districts.json edits (new/changed entries) without

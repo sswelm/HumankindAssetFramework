@@ -288,6 +288,102 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogWarning("[Ground] color dump: " + ex.Message); }
         }
 
+        // HEXAGON SCULPTING under a custom wonder (the raised platform + strategic-zoom footprint). Vanilla resolves
+        // a HexagonSculptingDefinition from the ArtificialWonder database and calls ApplyHexagonSculptingDefinition;
+        // our wonder's cell is empty -> index -1 -> flat terrain, no footprint. This postfix forces a chosen index.
+        // Mirrors DistrictApplyGroundMaterial. Criteria 27 = HexagonSculptingDefinitionCriteriaIndex.
+        static bool hexNamesDumped; static readonly HashSet<string> hexLogged = new HashSet<string>();
+        static readonly List<object> hexDistricts = new List<object>();   // districts we've sculpted — re-applied by the live dial
+        static string lastHexDial; static int hexDialTick;
+
+        // LIVE dial: edit BepInEx/config/haf_hexsculpt.txt with a HexagonSculptingDefinition name and every sculpted
+        // district re-carves to it WITHOUT a relaunch — cycle the ~40 shapes in seconds to find the right footprint,
+        // then set the winner in the Factory's Footprint field to ship it. (Mirrors the turnease/hugterrain dials.)
+        internal static void PollHexSculptDial()
+        {
+            if (++hexDialTick % 20 != 1) return;   // ~3x/second
+            try
+            {
+                var path = System.IO.Path.Combine(BepInEx.Paths.ConfigPath, "haf_hexsculpt.txt");
+                if (!System.IO.File.Exists(path)) return;
+                var want = System.IO.File.ReadAllText(path).Trim();
+                if (want == lastHexDial) return;
+                lastHexDial = want;
+                if (string.IsNullOrEmpty(want)) return;
+
+                var repoType = AccessTools.TypeByName("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");
+                var inst = repoType?.GetMethod("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.Invoke(null, null);
+                if (inst == null || !(AccessTools.Property(inst.GetType(), "Loaded")?.GetValue(inst) is bool ld) || !ld) return;
+                var ssType = AccessTools.TypeByName("Amplitude.StaticString");
+                var idxM = repoType.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(m => m.Name == "IndexOf" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
+                if (idxM == null || ssType == null) return;
+                int idx = (int)idxM.Invoke(inst, new object[] { 27, Activator.CreateInstance(ssType, want) });
+                if (idx <= 0) { Plugin.Log.LogWarning($"[HexSculpt] dial '{want}' not found in the vocabulary (index {idx})."); return; }
+
+                int applied = 0;
+                for (int i = hexDistricts.Count - 1; i >= 0; i--)
+                {
+                    var d = hexDistricts[i];
+                    if (d is UnityEngine.Object uo && uo == null) { hexDistricts.RemoveAt(i); continue; }   // razed
+                    var apply = d.GetType().GetMethod("ApplyHexagonSculptingDefinition", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    apply?.Invoke(d, new object[] { idx }); applied++;
+                }
+                Plugin.Log.LogInfo($"[HexSculpt] dial -> '{want}' (index {idx}) live-applied to {applied} district(s).");
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[HexSculpt] dial: " + ex.Message); }
+        }
+        internal static void DistrictApplyHexSculpt(object district)
+        {
+            try
+            {
+                EnsureDistrictConfig();
+                if (!distOn) return;
+                var name = GetMember(district, "ConstructibleDefinitionName")?.ToString();
+                if (string.IsNullOrEmpty(name)) return;
+                DistrictModel entry = null; foreach (var e in distModels) if (e.district == name) { entry = e; break; }
+                if (entry == null) return;
+
+                var repoType = AccessTools.TypeByName("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");
+                var inst = repoType?.GetMethod("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.Invoke(null, null);
+                if (inst == null) return;
+                if (!(AccessTools.Property(inst.GetType(), "Loaded")?.GetValue(inst) is bool ld) || !ld) return;
+
+                const int HexCriteria = 27;
+                if (!hexNamesDumped && Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value)
+                {
+                    hexNamesDumped = true;
+                    var namesM = repoType.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(m => m.Name == "Names" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(int));
+                    if (namesM?.Invoke(inst, new object[] { HexCriteria }) is Array arr)
+                    {
+                        var list = new List<string>(); foreach (var s in arr) list.Add(s?.ToString());
+                        Plugin.Log.LogInfo($"[HexSculpt] HexagonSculptingDefinition names ({list.Count}): {string.Join(", ", list)}");
+                    }
+                }
+
+                var want = !string.IsNullOrEmpty(entry.hexSculpt) ? entry.hexSculpt : Plugin.DistrictHexSculpt?.Value?.Trim();
+                if (string.IsNullOrEmpty(want)) return;
+
+                if (entry.hexIdx == int.MinValue)
+                {
+                    var ssType = AccessTools.TypeByName("Amplitude.StaticString");
+                    var idxM = repoType.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(m => m.Name == "IndexOf" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
+                    if (idxM == null || ssType == null) { entry.hexIdx = -1; return; }
+                    entry.hexIdx = (int)idxM.Invoke(inst, new object[] { HexCriteria, Activator.CreateInstance(ssType, want) });
+                    if (entry.hexIdx <= 0) Plugin.Log.LogWarning($"[HexSculpt] '{want}' not in the HexagonSculptingDefinition vocabulary (index {entry.hexIdx}) — set DistrictDebug=true to log valid names.");
+                }
+                if (entry.hexIdx <= 0) return;
+
+                var apply = district.GetType().GetMethod("ApplyHexagonSculptingDefinition", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (apply != null && apply.GetParameters().Length == 1)
+                {
+                    apply.Invoke(district, new object[] { entry.hexIdx });
+                    if (!hexDistricts.Contains(district)) hexDistricts.Add(district);   // remember it for the live dial
+                    if (hexLogged.Add(name)) Plugin.Diag($"[HexSculpt] '{name}': forced hexagon sculpting '{want}' (index {entry.hexIdx}) — raised platform + strategic footprint.");
+                }
+            }
+            catch (Exception ex) { if (hexLogged.Add("ex")) Plugin.Log.LogError("[HexSculpt] " + ex); }
+        }
+
         static bool GuidIsNull4(object g)
         { var t = g.GetType(); return (int)(t.GetField("a", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(g) ?? 0) == 0 && (int)(t.GetField("b", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(g) ?? 0) == 0 && (int)(t.GetField("c", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(g) ?? 0) == 0 && (int)(t.GetField("d", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(g) ?? 0) == 0; }
 

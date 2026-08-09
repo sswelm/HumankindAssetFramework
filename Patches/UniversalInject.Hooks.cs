@@ -174,6 +174,21 @@ namespace HumankindAssetFramework
         static void Postfix(object __instance) { UniversalInject.DistrictApplyGroundMaterial(__instance); }
     }
 
+    // EXPERIMENTAL — HEXAGON SCULPTING under a custom wonder (the raised platform + strategic-zoom footprint).
+    // PresentationDistrict.UpdateHexagonSculpting resolves the sculpt from the ArtificialWonder database; a custom
+    // wonder's cell is empty -> flat, no footprint. Postfix forces a chosen index for our districts.
+    [HarmonyPatch]
+    internal static class Hk_DistrictHexSculpt
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = GameBinding.PresentationDistrict;
+            return t?.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+                    .FirstOrDefault(m => m.Name == "UpdateHexagonSculpting");
+        }
+        static void Postfix(object __instance) { UniversalInject.DistrictApplyHexSculpt(__instance); }
+    }
+
     // THE SPIKE PLAGUE (2026-07-26, first seen the day the 242-bone tank-destroyer shipped): every VISIBLE pawn
     // gets a per-frame slice of ONE shared animated-bone pool (PawnManager.animatedSkeletonEntry buffers, sized
     // from AnimationManager.skeletonBufferSize = 65,535 entries). High-bone custom skeletons (tread links: 242
