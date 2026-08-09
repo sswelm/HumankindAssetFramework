@@ -183,11 +183,27 @@ Every one of these was a plausible suspect, checked and ruled out in-game or by 
     zoomed out — **no footprint appeared.** So the element→decal selection is **not** driven by the element bbox the way
     we hoped. Ruled out. (Reverted.)
 
-**Probe limitation discovered:** `DumpMatTree` only recurses `levelBuildItems` + `fxMaterialCacheEntries.Entries`, but a
-selector's main building lives in its **`pairs` variant table / `defaultMaterial`** (which `CollectLeaves` handles and the
-dump does not). So the `[Tree]` element dumps show shared props, **not** the district building — a future clean element
-diff (reactor-native vs reactor-swapped) must extend `DumpMatTree` to the `pairs`/`defaultMaterial` path like
-`CollectLeaves`.
+**Probe limitation discovered — and FIXED (commit `ae5cf25`):** `DumpMatTree` only recursed `levelBuildItems` +
+`fxMaterialCacheEntries.Entries`, but a selector's main building lives in its **`pairs` variant table / `defaultMaterial`**
+(which `CollectLeaves` handles and the dump did not). Extended the recursion to mirror `CollectLeaves` (`TryLoadMaterial`
+per pair guid — cached, no explosion), switched to `GF` (silences the `AccessTools.Field` warn-spam), raised depth 6→10.
+
+**Result — the real native composition (footprint working):** the reactor's native `Extension_Base_BreederReactor` tree is
+**408 building element leaves (349 distinct meshes) + 231 decals (120 writing render data)** — vs the **1** the old probe
+caught. That is the full footprint machinery, present and rich in the native district.
+
+**SECOND methodology catch (blocks the swapped diff):** the `[Tree]` dump fires from `DistrictApplyEntries` (on
+`UpdateLevelBuild`), which **only dumps + caches the tile — it does NOT swap.** The swap runs per-frame in
+`TickDistrictMeshSwap`. `UpdateLevelBuild` fires before the tick swap settles, so **every dump so far captured the
+PRE-swap (native) tree** — which is why a "native vs global-swapped" reactor dump came back *byte-identical* (0 mesh
+diffs, 231/231 common decals). That identical result is a **timing artifact, not evidence about the swapped state.** To
+capture the true post-swap tree, the dump must be invoked from `TickDistrictMeshSwap` **after** `ApplyLeaves`, or dump
+`e.leaves`/`e.privateLeaf` directly. Do this first next session — then the swapped decal/element counts are finally
+trustworthy.
+
+Note this doesn't change the verdict: the decals' *render-readiness* was already proven byte-identical gated-vs-working,
+and every per-element field is falsified. The swapped-tree diff would only tell us whether the swap drops or keeps the
+decal drawers — the *selection* gate remains in the GPU kernel regardless.
 
 The footprint works for the donor mesh and not ours, and none of these reachable, settable differences reproduces it —
 because it was never in any of them. It's the decal.
