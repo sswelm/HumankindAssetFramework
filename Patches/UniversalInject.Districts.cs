@@ -772,7 +772,7 @@ namespace HumankindAssetFramework
         // any DECAL's mesh — the nested footprint drawer.
         static void DumpMatTree(object mat, int depth, HashSet<object> seen)
         {
-            if (mat == null || depth > 6 || !seen.Add(mat)) return;
+            if (mat == null || depth > 10 || !seen.Add(mat)) return;
             var t = mat.GetType();
             string extra = "";
             if (t.Name.Contains("Decal"))
@@ -813,11 +813,19 @@ namespace HumankindAssetFramework
                 extra = $"  <<< ELEMENT bbox={bs} useCustomBBox={useC} lodData={lodD} meshIdx={mi} lod0={mi0} lod1={mi1} size={sz}";
             }
             Plugin.Log.LogInfo($"[Tree] {new string(' ', depth * 2)}{t.Name}{extra}");
-            if (AccessTools.Field(t, "levelBuildItems")?.GetValue(mat) is Array items)
+            // emitter: levelBuildItems[].loadedEvolverMaterial   (GF, not AccessTools.Field — the latter warn-spams on miss)
+            if (GF(t, "levelBuildItems")?.GetValue(mat) is Array items)
                 foreach (var it in items) if (it != null) DumpMatTree(GF(it.GetType(), "loadedEvolverMaterial")?.GetValue(it), depth + 1, seen);
-            var cache = AccessTools.Field(t, "fxMaterialCacheEntries")?.GetValue(mat);
+            // selector: loaded cache entries
+            var cache = GF(t, "fxMaterialCacheEntries")?.GetValue(mat);
             if (cache != null && GF(cache.GetType(), "Entries")?.GetValue(cache) is Array entries)
                 foreach (var en in entries) if (en != null) DumpMatTree(GF(en.GetType(), "FxMaterial")?.GetValue(en), depth + 1, seen);
+            // selector: the pairs VARIANT TABLE + defaultMaterial/invalidNameMaterial — where the district's MAIN BUILDING
+            // element actually lives (CollectLeaves walks this; the old dump didn't, so it only caught shared props).
+            if (GF(t, "pairs")?.GetValue(mat) is Array pairs)
+                foreach (var pr in pairs) if (pr != null) { var g = PairGuid(pr); if (!GuidIsNull(g)) DumpMatTree(TryLoadMaterial(g), depth + 1, seen); }
+            foreach (var fn in new[] { "defaultMaterial", "invalidNameMaterial" })
+            { var g = GF(t, fn)?.GetValue(mat); if (g != null && !GuidIsNull(g)) DumpMatTree(TryLoadMaterial(g), depth + 1, seen); }
         }
 
         // ---- district TEXTURE injection (docs/District-Visuals.md) --------------------------------------------------
