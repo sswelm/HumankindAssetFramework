@@ -684,6 +684,97 @@ namespace HumankindAssetFramework
                 }
                 else GlobalSwapEntry(e);
             }
+            DumpDecalDescriptor();
+        }
+
+        // FOOTPRINT probe (gated DistrictDebug): the DECAL isn't in the district's plbc (dumped: Element/Emitter/Matching/
+        // Selector, no Decal). Like the impostor, it's a GLOBAL FxEvolverDescriptorLevelBuildDecal singleton holding decal
+        // materials per district type — each with a decalMesh (the footprint geometry) + texture layers. Reach it via its
+        // static GetInstance(bool) and dump the registry: that names the vanilla footprint assets and whether ours is there.
+        static bool decalDumped;
+        internal static void DumpDecalDescriptor()
+        {
+            try
+            {
+                if (decalDumped || distFxManager == null || Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;
+                var tDesc = HarmonyLib.AccessTools.TypeByName("Amplitude.Mercury.Terrain.Fx.FxEvolverDescriptorLevelBuildDecal");
+                if (tDesc == null) { decalDumped = true; Plugin.Log.LogWarning("[Decal] FxEvolverDescriptorLevelBuildDecal not found"); return; }
+                var getInst = tDesc.GetMethod("GetInstance", BindingFlags.Static | BindingFlags.Public, null, new[] { typeof(bool) }, null);
+                if (getInst == null) { decalDumped = true; Plugin.Log.LogWarning("[Decal] GetInstance(bool) not found"); return; }
+                var desc = getInst.Invoke(null, new object[] { true });
+                if (desc == null) return;   // not ready — retry
+                var dt = desc.GetType();
+                object matsObj = null;
+                for (var ct = dt; ct != null && matsObj == null; ct = ct.BaseType)
+                    matsObj = ct.GetProperty("EvolverMaterials", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(desc)
+                            ?? AccessTools.Field(ct, "EvolverMaterials")?.GetValue(desc)
+                            ?? AccessTools.Field(ct, "evolverMaterials")?.GetValue(desc);
+                if (!(matsObj is System.Collections.IList mats)) { decalDumped = true; Plugin.Log.LogWarning($"[Decal] EvolverMaterials list not found on {dt.FullName}"); return; }
+                decalDumped = true;
+                Plugin.Log.LogInfo($"[Decal] {dt.Name}: {mats.Count} decal material(s):");
+                for (int i = 0; i < mats.Count; i++)
+                {
+                    var m = mats[i]; if (m == null) continue;
+                    var mt = m.GetType();
+                    var dm = GF(mt, "decalMesh")?.GetValue(m);
+                    var nm = GetMember(m, "Name") ?? GetMember(m, "name");
+                    Plugin.Log.LogInfo($"[Decal]  [{i}] {mt.Name} name='{nm}' decalMesh={dm}");
+                }
+            }
+            catch (Exception ex) { decalDumped = true; Plugin.Log.LogWarning("[Decal] " + ex.Message); }
+        }
+
+        // FOOTPRINT probe (gated DistrictDebug): the district's plbc has MULTIPLE channels — the building (the one we
+        // inject) AND a DECAL channel (FxEvolverMaterialLevelBuildDecal = decalMesh + texture layers = the footprint).
+        // Dump every channel's evolverMaterial type, and for any Decal one its decalMesh GUID — that names the vanilla
+        // footprint asset. This shows whether the decal channel exists for our district and what it holds.
+        static bool distChannelsDumped;
+        internal static void DumpDistrictChannels()
+        {
+            try
+            {
+                if (distChannelsDumped || Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;
+                foreach (var e in distModels)
+                {
+                    if (e.tiles.Count == 0 || e.tiles[0].plbc == null) continue;
+                    var plbc = e.tiles[0].plbc;
+                    if (fiPlbcChannels == null) fiPlbcChannels = AccessTools.Field(plbc.GetType(), "channels");
+                    if (!(fiPlbcChannels?.GetValue(plbc) is Array channels)) continue;
+                    distChannelsDumped = true;
+                    Plugin.Log.LogInfo($"[Chan] '{e.district}' plbc has {channels.Length} channel(s):");
+                    var seen = new HashSet<object>();
+                    for (int i = 0; i < channels.Length; i++)
+                    {
+                        var box = channels.GetValue(i);
+                        var mat = box != null ? GF(box.GetType(), "evolverMaterial")?.GetValue(box) : null;
+                        Plugin.Log.LogInfo($"[Chan]  [{i}] {(mat?.GetType().Name ?? "null")}");
+                        DumpMatTree(mat, 2, seen);   // recurse emitters/selectors to find a nested DECAL
+                    }
+                    return;   // one district's channel layout is enough
+                }
+            }
+            catch (Exception ex) { distChannelsDumped = true; Plugin.Log.LogWarning("[Chan] " + ex.Message); }
+        }
+
+        // recurse a level-build material tree (emitter items + selector cache entries), logging each material type and
+        // any DECAL's mesh — the nested footprint drawer.
+        static void DumpMatTree(object mat, int depth, HashSet<object> seen)
+        {
+            if (mat == null || depth > 6 || !seen.Add(mat)) return;
+            var t = mat.GetType();
+            string extra = "";
+            if (t.Name.Contains("Decal"))
+            {
+                var dm = GF(t, "decalMesh")?.GetValue(mat);
+                var l0 = GF(t, "layer0")?.GetValue(mat);
+                extra = $"  <<< DECAL decalMesh={dm} layer0={l0}";
+            }
+            Plugin.Log.LogInfo($"[Chan] {new string(' ', depth * 2)}{t.Name}{extra}");
+            if (AccessTools.Field(t, "levelBuildItems")?.GetValue(mat) is Array items)
+                foreach (var it in items) if (it != null) DumpMatTree(GF(it.GetType(), "loadedEvolverMaterial")?.GetValue(it), depth + 1, seen);
+            var cache = AccessTools.Field(t, "fxMaterialCacheEntries")?.GetValue(mat);
+            if (cache != null && GF(cache.GetType(), "Entries")?.GetValue(cache) is Array entries)
+                foreach (var en in entries) if (en != null) DumpMatTree(GF(en.GetType(), "FxMaterial")?.GetValue(en), depth + 1, seen);
         }
 
         // ---- district TEXTURE injection (docs/District-Visuals.md) --------------------------------------------------
