@@ -75,9 +75,23 @@ selector-replacement; **swapping the building mesh drops the decals indirectly.*
   `GetMeshIndex`) evicts or reindexes the decal meshes (the shared 100k-vert / 256-mesh per-layer buffer).
 - **A presentation-state gate** — the decal renders only when the building is in a native state our swap changes.
 
-**Next probe:** after the swap, read each decal leaf's `meshIndex` — `uint.MaxValue`/invalid = evicted (buffer problem);
-still valid = present-but-gated (state problem). That fork decides the fix. So the clone-the-selector plan still stands,
-but it must swap the building mesh **without** triggering whatever the swap does to the decal indices.
+**Refined again — the decals are PRESENT but GATED, and texture-based.** In global mode (swap active) the reactor's tree
+**still has all 19 decal nodes** (identical count to vanilla Industry) — so the swap doesn't remove or evict the decal
+*drawers*; they're right there and still don't render. And every decal's `decalMesh` is **Null** — these are
+**texture-based** decals (the footprint is the `layer0` decal texture on a shared quad, not a per-decal mesh). So the
+building-mesh swap **gates off the decals' rendering** while leaving them in the tree.
+
+**Open — the gating mechanism.** Why do present, texture-based decals stop drawing when we swap the building mesh? Leading
+suspects: (a) the decals share the building's **output layer** / render pass, and swapping the building mesh (+ `Load`)
+disturbs the shared layer's state; (b) the decal draw is gated by the building's **demotion/LOD state**, which our custom
+mesh (`lodData=0`, no LOD chain) never reaches; (c) our mesh's `Load` re-registers content in a way that invalidates the
+decals' render data (`FxComponentBlobDecalRenderDataBuffer`). This is a deeper rendering interaction than a data edit and
+warrants a focused implementation session — the clone-the-selector fix must preserve the building's native LOD/layer/
+demotion state so the decal draw isn't gated off.
+
+**Bottom line:** the footprint is definitively the city-map decal system, present in the reactor's native tree; our
+injection breaks its *rendering* (not its presence in global mode). The remaining work is understanding the render gate,
+not finding the footprint.
 
 ---
 
