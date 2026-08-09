@@ -36,7 +36,7 @@ namespace HumankindAssetFramework
             public class TileState { public object plbc; public int layer; public bool pointedLogged; public int wait; }
             public readonly List<TileState> tiles = new List<TileState>();
             public object privateLeaf;                                   // isolate mode: the Instantiated leaf (SHARED by all tiles)
-            public System.Type selectorType;                             // the CLOSE-UP level-build selector's type — re-assert our leaf ONLY over this; if the channel holds a different material (the game's strategic/footprint representation at zoom-out), back off so the footprint shows
+            public System.Type selectorType;                             // the close-up level-build selector's type; defensive: only re-assert our leaf over THAT, don't fight a foreign material the game may put on the channel
             public readonly List<object> leaves = new List<object>();    // global mode: collected shared leaves
             public bool collected, matchLogged;
             // texture injection runtime (isolate mode)
@@ -524,14 +524,11 @@ namespace HumankindAssetFramework
                 }
                 var curMat = evf.GetValue(box);
                 if (ReferenceEquals(curMat, e.privateLeaf)) return;   // already ours this frame
-                // BACK OFF from a FOREIGN material: at zoom-out the game repoints the channel to its own strategic /
-                // footprint representation (a different material type). Only re-assert over the CLOSE-UP selector it
-                // resets to during normal play — otherwise we'd slam our leaf back over the footprint and suppress it.
-                if (curMat != null && e.selectorType != null && curMat.GetType() != e.selectorType)
-                {
-                    if (distBackoffLogged.Add(e.district)) Plugin.Diag($"[District] '{e.district}': channel holds '{curMat.GetType().Name}' (not the close-up selector) — backing off so the strategic footprint shows");
-                    return;
-                }
+                // DEFENSIVE: only re-assert our leaf over the close-up SELECTOR the game resets to; never fight a foreign
+                // material it might put on the channel. (Measured on the reactor: its channel is only ever selector ->
+                // our leaf and never swaps at zoom, so this doesn't fire there — the clean zoom-out disappear comes from
+                // the Base_Industry AFFINITY, not this. Kept as a safe guard for districts whose channel DOES swap.)
+                if (curMat != null && e.selectorType != null && curMat.GetType() != e.selectorType) return;
                 evf.SetValue(box, e.privateLeaf);
                 channels.SetValue(box, t.layer);   // write the mutated struct back into the array
                 // re-spawn the particle so PatchParticle picks up the private leaf's MaterialIndex
