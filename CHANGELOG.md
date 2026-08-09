@@ -207,6 +207,23 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Districts
 
+- **FOUNDATION PLINTH — planting on a cliff (2026-08-09).** A district on a coastal cliff/uneven tile
+  overhung into empty air (the breeder reactor floated off the ledge). A bake-time **Foundation depth** knob
+  now extrudes the building's footprint **straight down into the earth** (true world −Y, taken in drawn space
+  post-rotation so it's independent of the model's import angles, then inverse-rotated back) as a solid
+  concrete plinth — four walls + a floor, wound outward, cap omitted under the building. Districts render one
+  atlas, so the plinth needs concrete *in* it: `AppendConcreteStrip` grows the atlas set by a fresh strip
+  (noised grey albedo / neutral normal / rough concrete), slides existing content down and remaps the mesh UVs
+  — **no existing texel is overwritten**. Purely bake-time: the runtime still gets one FxMesh + atlas. Two
+  preview fixes rode along: re-point the preview material after the strip rewrites the atlas asset, and frame
+  the camera on the **above-ground** building so plinth depth doesn't shift the view center. The health panel
+  also stopped false-warning "typo" on **base-game (`Extension_*`) targets** — their definitions live in the
+  game, not the project, so it stays silent (only a non-namespaced miss is a real typo). Verified in-game on
+  the reactor's cliff tile. **Known limit**: a Z-fight shimmer where the plinth meets the building's own walls
+  at map distance — measured to be **depth-buffer precision** (far from world origin under a huge far plane),
+  not geometry; a small gap is invisible to the buffer and a large one shows a visible slot, so it's deferred
+  with the shape intact (the fix path is to inset the plinth behind the building wall so a depth-beating gap
+  hides).
 - **HEXAGON SCULPTING — the raised platform (2026-08-09).** A district carves a raised terrain plinth
   (`UpdateHexagonSculpting` → `HexagonSculptingDefinition` → `ApplyHexagonSculptingDefinition`); a custom
   wonder's cell is empty, so the Oracle sat flat. The **fourth empty-cell fix**: a postfix forces a chosen

@@ -166,6 +166,40 @@ GUIDs vs the assets on disk (drift = the silent "waiting for leaves" launch, now
 asset vs the newest built Community assetbundle (**STALE BUNDLE** — re-bakes reshuffle atlas packing, the
 mesh/atlas halves must ship from the same bake), and the definition's data prerequisites (non-empty
 Additional Visual Levels = a guaranteed empty tile; missing ConstructibleVisualAffinity = nothing to swap).
+A **base-game target** (named `Extension_*` — its definition lives in the *game*, not this project) is not a
+project asset, so the panel can't inspect it and **stays silent** rather than false-warning "typo" (2026-08-09);
+only a non-namespaced name that also isn't a project asset is flagged. Info-level notes never count as "issues".
+
+## Foundation plinth — planting on a cliff (per district, verified in-game)
+
+A district on a coastal cliff or uneven tile **overhangs into empty air** — the reactor floated off the ledge.
+The **Foundation depth** bake knob (registry `foundationDepth`, 0 = off) fixes it: it extrudes the building's
+footprint **straight down into the earth** as a solid concrete plinth, so the building plants on a base that
+runs down past the drop.
+
+- **Geometry** (`DistrictBaker.BakeFxMesh`): after the auto-level/hex-clip, the footprint is measured in
+  *drawn* space (post-rotation, so "down" is true world −Y regardless of the model's import angles), a box is
+  built from the surface down to −depth, then inverse-rotated into stored space so the draw-time rotation lands
+  it straight down. Four walls + a floor, wound so faces point outward/−Y; the cap is omitted (hidden under the
+  building).
+- **Concrete texture** (`AppendConcreteStrip`): districts render one atlas, so the plinth needs concrete *in*
+  it. The bake grows the atlas set by a fresh strip along the top — lightly-noised grey albedo, neutral (flat)
+  normal, rough-concrete roughness — slides the existing content down and remaps the mesh UVs to match, so **no
+  existing texel is overwritten**. The plinth faces sample that strip.
+- **Purely bake-time**: the runtime still receives one FxMesh + one atlas trio, so isolation / wonders /
+  multi-instance are untouched. The plinth shows in the **preview** (below the model, going into the ground);
+  the camera frames on the above-ground building so plinth depth doesn't shift the view center.
+- **Tuning**: ~8–12 for a coastal cliff (the slider goes to 30). The footprint is the building's bounding box —
+  a rectangular plinth; on a normal tile it's simply hidden underground.
+- **Known limit — a Z-fight at the seam on cliff tiles.** Where the plinth walls meet the building's own
+  perimeter walls, a shimmer can appear at map distance. It's **depth-buffer precision**, not geometry: the
+  plinth and building share one mesh/transform and can't physically overlap (every building vertex sits at or
+  above the plinth top), but a district sits far from the world origin under a huge far plane, so the depth
+  *step* at that range is coarser than a few cm and the near-coplanar walls round to the same depth. A small
+  separation (0.001) is invisible to the buffer; a large one (~0.15) clears it but shows as a visible slot
+  between the building and its base — the two ends of the same trade-off (measured, both tried). Deferred with
+  the shape intact. The path to solve it without a visible slot: **inset** the plinth a little behind the
+  building's outer wall so a depth-beating gap stays hidden (at the cost of an invisible sub-decimeter overhang).
 
 ## The pizza bakery — multi-model composition (2026-08-08, verified: temple + beech tree)
 
