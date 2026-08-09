@@ -36,6 +36,7 @@ namespace HumankindAssetFramework
             public class TileState { public object plbc; public int layer; public bool pointedLogged; public int wait; }
             public readonly List<TileState> tiles = new List<TileState>();
             public object privateLeaf;                                   // isolate mode: the Instantiated leaf (SHARED by all tiles)
+            public System.Type selectorType;                             // the CLOSE-UP level-build selector's type — re-assert our leaf ONLY over this; if the channel holds a different material (the game's strategic/footprint representation at zoom-out), back off so the footprint shows
             public readonly List<object> leaves = new List<object>();    // global mode: collected shared leaves
             public bool collected, matchLogged;
             // texture injection runtime (isolate mode)
@@ -488,6 +489,7 @@ namespace HumankindAssetFramework
         // once and reuse (AccessTools.Field/GetMethods re-walk the type's members on every call otherwise).
         static FieldInfo fiPlbcChannels, fiChanEvolverMaterial;
         static MethodInfo miRefreshChannel; static object[] refreshArgs;
+        static readonly HashSet<string> distBackoffLogged = new HashSet<string>();   // one-shot log per district when we back off a foreign channel material
 
         // ISOLATE mode, per TILE: keep this instance's channel pointed at the entry's (shared) private leaf +
         // re-spawned particle. Re-applied each frame (the game reloads the shared selector into the channel on
@@ -508,6 +510,7 @@ namespace HumankindAssetFramework
                 {
                     var sel = evf.GetValue(box);
                     if (sel == null) return;
+                    if (e.selectorType == null) e.selectorType = sel.GetType();   // the close-up selector we're allowed to override
                     e.privateLeaf = BuildPrivateLeaf(sel, e.fxMeshGuid, e.atlasGuid);
                     // WONDER path: a database-fed selector (fillMode LevelBuildDatabase) has no inline leaves to walk —
                     // source them from the PLUGIN-LOADED template material instead (swap-first sequencing: the wonder's
@@ -519,7 +522,16 @@ namespace HumankindAssetFramework
                     }
                     if (e.privateLeaf == null) { if (t.wait++ % 300 == 0) Plugin.Diag($"[District] '{e.district}': waiting for leaves to load..."); return; }
                 }
-                if (ReferenceEquals(evf.GetValue(box), e.privateLeaf)) return;   // already ours this frame
+                var curMat = evf.GetValue(box);
+                if (ReferenceEquals(curMat, e.privateLeaf)) return;   // already ours this frame
+                // BACK OFF from a FOREIGN material: at zoom-out the game repoints the channel to its own strategic /
+                // footprint representation (a different material type). Only re-assert over the CLOSE-UP selector it
+                // resets to during normal play — otherwise we'd slam our leaf back over the footprint and suppress it.
+                if (curMat != null && e.selectorType != null && curMat.GetType() != e.selectorType)
+                {
+                    if (distBackoffLogged.Add(e.district)) Plugin.Diag($"[District] '{e.district}': channel holds '{curMat.GetType().Name}' (not the close-up selector) — backing off so the strategic footprint shows");
+                    return;
+                }
                 evf.SetValue(box, e.privateLeaf);
                 channels.SetValue(box, t.layer);   // write the mutated struct back into the array
                 // re-spawn the particle so PatchParticle picks up the private leaf's MaterialIndex
