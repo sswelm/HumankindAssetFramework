@@ -196,6 +196,13 @@ terrain paint, blended at the cell edges, not a flat mesh. Each entry carries it
 District Factory (a dropdown of the game's vocabulary: `Prairie_*` grass fields, `Constructible_*` paved
 precincts, `Sterile_*` sparse); a global `DistrictGroundMaterial` config is the fallback default. Verified: the
 Oracle on `Prairie_Grassland` (index 16) — a lush maintained field under the temple and its grove.
+
+The Factory **preview textures its tile with the real terrain image** — the ground texture is a tile inside a
+shared `DefaultTextureAtlas`, so the plugin resolves the authoring data → texture layer (`Atlas` + `AtlasElement`
+GUIDs) → loads the atlas → `GUIDToIndex(AtlasElement)` → `GetElementData(index)` (the tile's min/max UV rect) →
+`OutputEntries[0].GetTexture` (the 4096² page) → blit-crops that UV region → one PNG per material in
+`haf_ground_tex/` (the material's true `Color` is dumped alongside as a fallback). The tile hex gained planar
+UVs so it maps; so a terrain-paint choice reads as real grass/pavement/sand in the preview before launch.
 - **Foliage toolkit** (per part, verified on the beech): **Leaf fullness** = alpha gain + dilation rounds
   (needed because many leaf sheets have BINARY alpha — a plain gain is a no-op; measured), and **Leaf size ×**
   = geometric scaling of the leaf cards, selected by characteristic (≤4-tri islands; a twig is a many-tri

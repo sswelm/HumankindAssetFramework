@@ -213,7 +213,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   chosen ground index** — the game's own blended terrain paint, not a flat mesh. It's a **per-district** field
   in the Factory (dropdown of the game's vocabulary — grass / paved / sparse), with a global config fallback.
   Verified: `Prairie_Grassland` under the Oracle's temple and grove — the same empty-cell insight as the wonder
-  visual, applied a third time, now to the terrain layer.
+  visual, applied a third time, now to the terrain layer. The Factory **preview textures its tile with the real
+  terrain image** — extracted from the game's shared `DefaultTextureAtlas` (resolve authoring data → atlas +
+  element GUID → `GUIDToIndex` → `GetElementData` UV rect → crop the page tile → PNG per material), plus the
+  material's true colour as a fallback — so the terrain-paint choice reads as real grass/pavement/sand before
+  launch.
 - **DE-ENC — framework filenames dropped the pack prefix (2026-08-08).** HAF is a universal framework, so its
   registry and tuning files shed the `enc_` badge of one pack: `enc_districts.json` → `haf_districts.json`,
   and likewise `haf_models` / `haf_formations` / `haf_sounds` / `haf_props` and the live-tuning `haf_*.txt`
