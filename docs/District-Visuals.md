@@ -186,6 +186,30 @@ shows in the preview after Bake.
 - **Known cosmetic**: the game's shadow pass does NOT alpha-test, so a dense leaf-card crown casts a merged
   solid shadow blob (the color pass cuts the leaves correctly; preview clean, measured in-game).
 
+## Hexagon sculpting — the raised platform (per district, verified in 3D)
+
+A district carves a **raised terrain platform** — the plinth you see the building stand on. It's resolved in
+`PresentationDistrict.UpdateHexagonSculpting` (for wonders from the dedicated `*/District/ArtificialWonder/HexagonSculpting`
+database) → a `HexagonSculptingDefinition` index → `ApplyHexagonSculptingDefinition`. A custom wonder's cell is
+empty → index 0 (`None`) → flat ground. **The fourth empty-cell fix:** `Hk_DistrictHexSculpt` postfixes it and
+**forces a chosen index**. Per-entry **Footprint (hex sculpting)** field in the Factory (registry `hexSculpt`) +
+global `DistrictHexSculpt` config; a **live dial** `haf_hexsculpt.txt` re-carves every sculpted district without a
+relaunch (cycle the ~40 shapes fast, then ship the winner in the Factory).
+
+**Which shape?** Measured (`[HexSculpt] NATIVE` dump): most districts resolve to **`None`** — the city center,
+administrative center, camp center, and cultivated tiles carve *no* platform. The districts with the raised plinth
+are the **emblematic quarters**; e.g. `Extension_Era1_OlmecCivilization` → **`EmblematicAndCityCenter26`**. So to
+match a real district's platform, use `EmblematicAndCityCenter26` (the `01`–`33` variants are different footprint
+shapes; `POI_*` are for natural/resource tiles). Verified in 3D: the Oracle carves the emblematic platform.
+
+**Two honest limits.** (1) The **preview can't show the platform** — hex sculpting is a *runtime terrain
+deformation* the game applies with its own terrain engine + the shape's height data; the preview tile is a flat
+quad and the FxMesh carries no sculpt. Like final PBR shading, it's judged in-game, not in preview. (2) The
+raised 3D platform is **NOT** the top-down **strategic-zoom footprint** (the grey building silhouette on the
+strategic map) — measured with a full zoom-out: the platform appears in 3D but no strategic silhouette. That
+silhouette is a separate **render-mode / strategic-representation** path (very likely a fifth empty cell), still
+**OPEN** — its own focused spike.
+
 ## Ground material — the maintained field (per district, verified)
 
 A district also paints the **terrain** under it — `PresentationDistrict.UpdateGroundMaterial` resolves a

@@ -186,7 +186,7 @@ namespace HumankindAssetFramework
             return t?.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
                     .FirstOrDefault(m => m.Name == "UpdateHexagonSculpting");
         }
-        static void Postfix(object __instance) { UniversalInject.DistrictApplyHexSculpt(__instance); }
+        static void Postfix(object __instance) { UniversalInject.DumpNativeHexSculpt(__instance); UniversalInject.DistrictApplyHexSculpt(__instance); }
     }
 
     // THE SPIKE PLAGUE (2026-07-26, first seen the day the 242-bone tank-destroyer shipped): every VISIBLE pawn

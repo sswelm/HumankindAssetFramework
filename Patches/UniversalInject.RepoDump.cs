@@ -293,6 +293,27 @@ namespace HumankindAssetFramework
         // our wonder's cell is empty -> index -1 -> flat terrain, no footprint. This postfix forces a chosen index.
         // Mirrors DistrictApplyGroundMaterial. Criteria 27 = HexagonSculptingDefinitionCriteriaIndex.
         static bool hexNamesDumped; static readonly HashSet<string> hexLogged = new HashSet<string>();
+        static readonly HashSet<string> hexNativeLogged = new HashSet<string>();
+        // Diagnostic (DistrictDebug): log the hexagon-sculpting shape each district NATIVELY resolves to — so a modder
+        // can read which EmblematicAndCityCenter* a real district/city-center uses and copy it to a custom wonder.
+        internal static void DumpNativeHexSculpt(object district)
+        {
+            try
+            {
+                if (Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;
+                var name = GetMember(district, "ConstructibleDefinitionName")?.ToString();
+                if (string.IsNullOrEmpty(name) || !hexNativeLogged.Add(name)) return;
+                var idxObj = AccessTools.Field(district.GetType(), "hexagonSculptingDefinitionIndex")?.GetValue(district);
+                if (!(idxObj is int idx)) return;
+                string shape = "?";
+                var repoType = AccessTools.TypeByName("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");
+                var inst = repoType?.GetMethod("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.Invoke(null, null);
+                var namesM = repoType?.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(m => m.Name == "Names" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(int));
+                if (inst != null && namesM?.Invoke(inst, new object[] { 27 }) is Array arr && idx >= 0 && idx < arr.Length) shape = arr.GetValue(idx)?.ToString();
+                Plugin.Log.LogInfo($"[HexSculpt] NATIVE '{name}' -> index {idx} = '{shape}'");
+            }
+            catch { }
+        }
         static readonly List<object> hexDistricts = new List<object>();   // districts we've sculpted — re-applied by the live dial
         static string lastHexDial; static int hexDialTick;
 

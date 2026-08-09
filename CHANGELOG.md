@@ -207,6 +207,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Districts
 
+- **HEXAGON SCULPTING — the raised platform (2026-08-09).** A district carves a raised terrain plinth
+  (`UpdateHexagonSculpting` → `HexagonSculptingDefinition` → `ApplyHexagonSculptingDefinition`); a custom
+  wonder's cell is empty, so the Oracle sat flat. The **fourth empty-cell fix**: a postfix forces a chosen
+  index — per-entry Factory **Footprint** field + global config + a `haf_hexsculpt.txt` **live dial** (re-carve
+  without relaunch, cycle ~40 shapes fast). Measured which shape to use: most districts resolve to `None`; the
+  raised plinth belongs to the **emblematic quarters** (`Extension_Era1_OlmecCivilization` →
+  `EmblematicAndCityCenter26`). Verified in 3D on the Oracle. Two honest limits documented: the **preview can't
+  show it** (runtime terrain deformation, not baked geometry — judged in-game like PBR shading), and the raised
+  platform is **not** the top-down **strategic-zoom footprint** (a separate render-mode path, still open).
 - **GROUND MATERIAL — the maintained field (2026-08-08).** A district paints the terrain under it via
   `UpdateGroundMaterial` (a `(Biome × affinity)` → `GroundMaterialDefinition` resolve); a custom wonder's
   affinity has no row, so the Oracle stood on bare desert. The plugin postfixes the resolve and **forces a
