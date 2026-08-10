@@ -226,16 +226,28 @@ produces broken cross-bundle references** that the mod bundle build (`[Worker0]`
   can't be persisted or resolved. This is the exact asset the runtime plugin had to **clone live** (`ClonePrivateOutputLayer`)
   precisely because it isn't authorable in the project.
 
-**Implication — pure-data authoring is blocked by the output layer.** A district element must reference an `FxOutputLayer`,
-and that layer is not exposed to modding. Options for the next focused session:
-1. **Bake/clone the FxOutputLayer into the mod project** (author a project asset for it) so the element can reference it —
-   the real "pure data" fix, but the layer is a complex game asset (streaming render-outputs, atlas) to reproduce.
-2. **Hybrid:** author the structure + footprint in data (this works), and bind only the *output layer/texture* at runtime
-   with a minimal plugin hook (a fraction of the old injection) — pragmatic, not 100% plugin-free.
-3. Confirm whether the game re-resolves a null `outputLayer` from the element's descriptor at load (would remove the wall).
+**Implication — this blocks the 100%-PURE-DATA path only, NOT the goal.** The output layer is the *one* piece that can't be
+authored in the project. Everything that mattered — the building geometry, reduce-to-one, the footprint decals, and the
+**native LOD** (the exact thing the runtime deep-clone couldn't fix at mid-zoom) — is data-authored and works. So the clean
+result is reachable via a **HYBRID**, which is a good outcome, not a fallback:
 
-**Net:** the approach, tooling, reduce-to-one, and footprint preservation are all proven; the blocker is one specific
-un-authorable game asset (the output layer). That's the crux to crack next.
+- **Data-authored (the hard, now-solved part):** the selector structure + footprint + native LOD. No mid-zoom donor,
+  because the geometry is the engine's own, resolved natively.
+- **Tiny runtime hook (the small part):** set the output layer/texture on our ONE reactor element at load, reusing the
+  already-working `ClonePrivateOutputLayer` / `BindAlbedo`. A few lines targeting one element — NOT the 1657-node deep-clone.
+  Critically, it does **not** reintroduce the mid-zoom problem (that was geometry/LOD, now native).
+
+**Escape routes, cheapest first (next session):**
+1. **Verify** whether the game re-resolves a null/broken `outputLayer` from the element descriptor at load (would remove even
+   the tiny hook). Unverified — inferred "not drawn" from the decompile (`outputLayerIndex = -1`), not tested end-to-end.
+2. **Fix `m_Script`** so the asset bundles cleanly: create via `ScriptableObject.CreateInstance(type)` + field-copy instead
+   of `Instantiate` (the mod's own assets use `guid: b310e23…, type: 3`).
+3. **Wire the data** (`*/District/Main.Level1+Level2` rows → our selector GUID; dedicated affinity; point the definition).
+4. **Add the output-layer hook** — the minimal runtime bind for our element's texture.
+
+**Net:** the approach, tooling, reduce-to-one, footprint, and native LOD are all proven. The goal (clean reactor + footprint
+at every zoom) is **not blocked** — it's a data selector + a tiny texture hook. The "wall" framing was about zero-plugin
+purity, not the deliverable.
 
 ---
 
