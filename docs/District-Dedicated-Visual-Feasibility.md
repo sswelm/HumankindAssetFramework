@@ -170,6 +170,28 @@ Traced it end to end in the ENCReload mod's data:
 into a shippable asset with a stable GUID. Everything downstream (2-5) is verified data edits following patterns the mod
 already uses.
 
+### Step 1 investigation — findings (editor probe, `DistrictBaker` → Tools/HAF/District/Probe)
+
+Built an editor probe that loads a native `*/District/Main` visual by its Amplitude GUID and dumps its material tree
+(`district_visual_dump_*.txt`). Results:
+
+- **✅ CRUX RESOLVED — templates load in-editor.** `FxEvolverMaterial.TryLoad(guid, true)` works in the editor (not just at
+  runtime). So we CAN reach and clone the native selector assets. (Committed: ENCReload `spike/district-dedicated-visual`.)
+- **Both candidate templates are MULTI-building, not single:**
+  - `NationalProject_NuclearTest` → `LvlBuild_Brick_Main_NationalProject_NuclearTest_01` (an emitter): **13** building
+    `Element`s (distinct `fxMesh` each) + footprint decals + particle emitters.
+  - `DistrictVisualAffinity_MissileSilo` → `CityMapSelector_MissileSilo`: **26** elements / **98** decals — and it **shares
+    the same building-mesh family** as NuclearTest (identical `fxMesh` GUIDs). One military building set, reused.
+- **Implication:** there is no clean one-building template to clone-and-swap. Districts are inherently multi-building
+  compositions. So authoring the reactor's visual is **clone a template + reduce its building items down to ONE** (our
+  reactor element, at the central position) **while keeping the decal/footprint subtree**, rather than a 1:1 mesh swap.
+- **Structure shape** (from the dump): a root emitter whose `levelBuildItems` are the positioned building `Element`s plus
+  nested `Selector`s that carry the footprint `Decal`s. So the reduction is: in the cloned root emitter, keep one
+  Element item (point it at our baked reactor element), null the other Element items, leave the decal-bearing items intact.
+
+**Next investigation (in progress):** dump each build item's `Position`/`LocalScale`/`Probability` and each element's
+`bbox`/`size`, to identify the CENTRAL/main building slot to keep — so the reduce-to-one is principled, not arbitrary.
+
 ---
 
 ## Appendix — falsified initial hypothesis (audit trail)
