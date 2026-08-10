@@ -207,6 +207,36 @@ principled (bbox rule). Remaining build = the authoring command: (a) bake our re
 asset (its own GUID), (b) clone the NuclearTest template, (c) apply the reduce-to-one (repoint one big slot → our element,
 null props, keep decals), (d) save → the reactor's CityMapSelector GUID for the `*/District/Main` data rows.
 
+### Step 1 BUILD — implemented, and it hit a serialization WALL (the honest blocker)
+
+Built the baker commands (ENCReload `DistrictBaker`, branch `spike/district-dedicated-visual`):
+- **`1b. Bake Reactor District Element`** — clones the template's largest building element, swaps `fxMesh` to
+  `BreederReactor_FxMesh`, clears the donor LOD chain. Produces `BreederReactor_Element.asset`.
+- **`1c. Bake Reactor District Selector`** — clones the template emitter, edits the CLONE's own `levelBuildItems`
+  (repoint one big slot → our element, null the 34 prop slots, **keep all 104 decal/emitter items = the footprint**),
+  nulls the broken `companion`. Produces `CityMapSelector_BreederReactor` (`BreederReactor_Selector.asset`).
+
+Both **load and edit correctly in-editor** (reduce-to-one works, footprint preserved) — but **saving them as project assets
+produces broken cross-bundle references** that the mod bundle build (`[Worker0]`) rejects:
+- **`m_Script` zero-guid** (both assets) — `Instantiate` of a runtime-loaded DLL ScriptableObject loses the script GUID.
+  **FIXABLE:** create via `ScriptableObject.CreateInstance(type)` (valid `m_Script`, like the mod's own assets which use
+  `guid: b310e23…, type: 3`) and copy fields, instead of `Instantiate`.
+- **`outputLayer` zero-guid** (the element) — **THE WALL.** The element's `outputLayer` points to a game-bundle
+  `FxOutputLayer` (`LevelBuild_Brick_01OutputLayer`) that exists **nowhere in the mod project** (not in `~References`), so it
+  can't be persisted or resolved. This is the exact asset the runtime plugin had to **clone live** (`ClonePrivateOutputLayer`)
+  precisely because it isn't authorable in the project.
+
+**Implication — pure-data authoring is blocked by the output layer.** A district element must reference an `FxOutputLayer`,
+and that layer is not exposed to modding. Options for the next focused session:
+1. **Bake/clone the FxOutputLayer into the mod project** (author a project asset for it) so the element can reference it —
+   the real "pure data" fix, but the layer is a complex game asset (streaming render-outputs, atlas) to reproduce.
+2. **Hybrid:** author the structure + footprint in data (this works), and bind only the *output layer/texture* at runtime
+   with a minimal plugin hook (a fraction of the old injection) — pragmatic, not 100% plugin-free.
+3. Confirm whether the game re-resolves a null `outputLayer` from the element's descriptor at load (would remove the wall).
+
+**Net:** the approach, tooling, reduce-to-one, and footprint preservation are all proven; the blocker is one specific
+un-authorable game asset (the output layer). That's the crux to crack next.
+
 ---
 
 ## Appendix — falsified initial hypothesis (audit trail)
