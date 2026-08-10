@@ -4,11 +4,41 @@
 **Goal:** a clean single reactor **+ footprint at ALL zoom levels** — which the runtime deep-clone cannot deliver (its
 mid-zoom LOD geometry is shared across all Industry districts; see `District-Footprint-Investigation.md`).
 
-## Verdict: PLAUSIBLE via a dedicated `BuildingVisualAffinity` — hinges on ONE unverified question
+## Verdict: the RUNTIME dedicated-affinity path is DEAD — a criteria axis cannot grow at runtime
 
-The idea is sound: give the reactor its **own** criteria-resolved selector so the **game's own resolution + LOD system**
-draws it at every zoom band — no runtime swap, so no perf hit and no mid-zoom donor. The open risk is whether we can add a
-**new value to a criteria axis** at runtime. That single yes/no decides the whole path.
+The idea is sound in principle (give the reactor its **own** criteria-resolved selector so the game draws it natively at
+every zoom band, no runtime swap). But it hinged on one unverified question — can we add a **new value to a criteria axis**
+at runtime? — and a probe answered **NO, decisively.**
+
+### The axis-growth probe (`ProbeAxisGrowth`, DistrictDebug-gated)
+Called `matrix.Add(new StaticString("HAF_AxisProbe"), guid, null)` on two live 1D matrices and measured the axis before/after
+(same box, a fresh box read from the array, and after writing the box back):
+```
+'ArtificialWonder'        : before=760 afterBox=760 afterFresh=760(found=False) afterWriteback=760(found=False)
+'*/District/Construction' : before=34  afterBox=34  afterFresh=34(found=False)  afterWriteback=34(found=False)
+```
+**`Add` does not grow the `CriteriaNames` axis at all** — not on the box, not persisted, and the new value is never found.
+It only fills the cell of a name **already on the axis** (which is exactly why the wonder work succeeded — every wonder name
+pre-existed). The axis is fixed at data-load time. So a **custom affinity value cannot be introduced at runtime**, and the
+reactor (whose name isn't on the `ArtificialWonder` axis either) cannot be given a dedicated criteria-resolved selector by
+the plugin.
+
+### What's left (all data/content, not runtime)
+- **Define the reactor as a real `ArtificialWonder` in the mod's DATA** so its name lands on the axis at load time (then
+  `FillWonderCell` could point its cell at a dedicated selector). This is a definition-level change to the mod's databases
+  (authored data — a design decision for the user), and it **still** needs the dedicated selector asset built.
+- **Author the dedicated selector + register it via data** through the game's own datatable pipeline (not runtime `Add`).
+- **Accept the runtime deep-clone's close+far result** (footprint at strategic, reactor complex up close), or the shipped
+  clean single reactor (no footprint — original complaint already solved by clean-disappear).
+
+**Bottom line:** there is no runtime path to a clean cross-zoom footprint. Every runtime avenue is now walled (deep-clone
+mid-zoom LOD is shared; criteria axes can't grow). A clean result requires **authoring the reactor as a data-level wonder /
+district with its own baked selector** — a content-pipeline effort, outside runtime injection.
+
+---
+### (original framing, now falsified by the probe)
+The idea was: give the reactor its own criteria-resolved selector so the game's own resolution + LOD draws it at every zoom
+band. The blocker turned out to be that criteria axes are immutable at runtime (above).
 
 ### Why a native dedicated selector dodges the deep-clone wall
 

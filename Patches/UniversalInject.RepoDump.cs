@@ -16,7 +16,58 @@ namespace HumankindAssetFramework
     {
         static bool repoDumped;
         static int wonderRowTick;
+        static bool axisProbed;
         static readonly HashSet<string> wonderRowLogged = new HashSet<string>();
+
+        // SPIKE (dedicated-visual, axis-growth probe): the dedicated-selector path needs a NEW BuildingVisualAffinity value
+        // added to a criteria axis. The wonder work only ever FILLED existing empty cells (every wonder name pre-existed on
+        // the axis). This probe answers the make-or-break question: does matrix.Add GROW a 1D criteria axis with a brand-new
+        // value, and does it PERSIST to the real matrix? (The matrix is a boxed struct; a resize on the box could be lost
+        // unless written back — so we compare a fresh box read vs a written-back box.) One-shot, DistrictDebug-gated,
+        // mutates only a throwaway test value. Tests the known 'ArtificialWonder' matrix + an affinity matrix.
+        internal static void ProbeAxisGrowth()
+        {
+            if (axisProbed || Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;
+            try
+            {
+                var repoType = AccessTools.TypeByName("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");
+                var inst = repoType?.GetMethod("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.Invoke(null, null);
+                if (inst == null) return;
+                if (!(AccessTools.Property(inst.GetType(), "Loaded")?.GetValue(inst) is bool b) || !b) return;
+                if (!(AccessTools.Field(inst.GetType(), "databaseMatrices1D")?.GetValue(inst) is Array arr)) return;
+                axisProbed = true;
+                var ssType = AccessTools.TypeByName("Amplitude.StaticString");
+                var testGuid = ParseGuid4("1,2,3,4");
+                int Axis(object mm) => (AccessTools.Property(mm.GetType(), "CriteriaNames")?.GetValue(mm) as Array)?.Length ?? -1;
+                bool Has(object mm, string nm) { if (AccessTools.Property(mm.GetType(), "CriteriaNames")?.GetValue(mm) is Array ax) foreach (var v in ax) if (v?.ToString() == nm) return true; return false; }
+                foreach (var target in new[] { "ArtificialWonder", "*/District/Construction" })
+                {
+                    bool hit = false;
+                    for (int i = 0; i < arr.Length; i++)
+                    {
+                        var m = arr.GetValue(i);
+                        if (m == null || AccessTools.Field(m.GetType(), "Name")?.GetValue(m)?.ToString() != target) continue;
+                        hit = true;
+                        var mt = m.GetType();
+                        var addM = mt.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(x => x.Name == "Add" && x.GetParameters().Length == 3);
+                        if (addM == null || ssType == null) { Plugin.Log.LogWarning($"[AxisProbe] '{target}': no Add(3)/StaticString — can't probe"); break; }
+                        string testName = "HAF_AxisProbe";
+                        int before = Axis(m);
+                        addM.Invoke(m, new object[] { Activator.CreateInstance(ssType, testName), testGuid, null });
+                        int afterBox = Axis(m);                                   // same box (Add mutated it)
+                        var mFresh = arr.GetValue(i);                             // fresh box — did Add persist to the real matrix?
+                        int afterFresh = Axis(mFresh); bool foundFresh = Has(mFresh, testName);
+                        arr.SetValue(m, i);                                       // write the mutated box back
+                        var mWB = arr.GetValue(i);
+                        int afterWB = Axis(mWB); bool foundWB = Has(mWB, testName);
+                        Plugin.Log.LogInfo($"[AxisProbe] '{target}': before={before} afterBox={afterBox} afterFresh={afterFresh}(found={foundFresh}) afterWriteback={afterWB}(found={foundWB})");
+                        break;
+                    }
+                    if (!hit) Plugin.Log.LogWarning($"[AxisProbe] '{target}': matrix not found in databaseMatrices1D");
+                }
+            }
+            catch (Exception ex) { axisProbed = true; Plugin.Log.LogError("[AxisProbe] " + ex); }
+        }
 
         // SPIKE step 2, SWAP-FIRST sequencing (the "wipe Artemis clean" rule): the template material is loaded
         // PLUGIN-SIDE (never via the repository cell), the walker builds the private leaf from the stash and
@@ -32,6 +83,7 @@ namespace HumankindAssetFramework
             wonderTemplates.Clear();
             wonderTemplateReqs.Clear();
             wonderRowLogged.Clear();
+            axisProbed = false;   // re-probe the axis-growth question each session (the matrix rebuilds on reload)
         }
 
         // Leaf source for wonder entries: the plugin-loaded template material (never the repository cell).
