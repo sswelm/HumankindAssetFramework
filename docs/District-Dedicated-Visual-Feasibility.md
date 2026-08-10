@@ -103,6 +103,43 @@ the axis grows and the tile resolves to it. If yes → build the selector asset.
 
 ---
 
+## The proper native-style path (concrete) — data-authored district visual
+
+"Configure it like a native district" means giving the reactor its **own** district-visual, in **data**, the way every
+native type (Industry, Science, MissileSilo…) has one. Located the exact wiring:
+
+- **Where the reactor is configured:** `ENCReload/Assets/Databases/Settlement/ConstructibleCommonExtensionDefinitionENC.asset`
+  → `Extension_Base_BreederReactor` (m_Name ~601) → **`ConstructibleVisualAffinity: DistrictVisualAffinity_Base_Industry`**
+  (~680). That one line is why it borrows the Industry factory selector.
+- **The affinity vocabulary** is a fixed axis of ~34 native district *types* (`DistrictVisualAffinity_Base_Industry`,
+  `_Base_Science`, `_Base_LuxuryExtractor`, `_MissileSilo`, …), each mapping to its own authored `CityMapSelector_*` (which
+  carries that type's building geometry + LODs + city-map footprint decals). All are in use; none is spare.
+- **Runtime can't add a new axis value** (probe proved it), so a dedicated affinity must be introduced at **data-load** via
+  the mod's datatables, not by the plugin.
+
+### The build (a real content-pipeline chapter, in order)
+1. **Author a district-visual selector asset for the reactor** — a `FxEvolverMaterialLevelBuildSelector` (or the minimal
+   tree the engine renders) referencing our baked `BreederReactor_FxMesh` as its building element + a city-map decal drawer
+   for the footprint + our texture layer. New baker capability: `DistrictBaker` today bakes only the `FxMesh`; it (or a
+   Unity-authored asset) must emit a *selector* asset with a GUID. Likely approach: clone a native single-building selector
+   at bake time and swap in our mesh, rather than build from scratch.
+2. **Introduce a dedicated affinity + mapping in data** — add `DistrictVisualAffinity_Base_BreederReactor` (or similar) to
+   the criteria vocabulary and a district-visual datatable row mapping it → our selector GUID, through the game's datatable
+   modding pipeline (so the axis grows at load). **Open:** confirm the exact datatable(s) the native `Base_Industry →
+   CityMapSelector_Industry_00` mapping lives in, and that a mod can extend the affinity axis at load.
+3. **Point the reactor at it** — change `ConstructibleVisualAffinity` in the definition asset above to the new value
+   (authored data — the user's call).
+4. **Drop the runtime injection for the reactor** — no plugin swap needed; the engine resolves + LODs our selector
+   natively, giving one clean reactor + footprint at every zoom, like any native district.
+
+### Honest scope
+This is a genuine content-pipeline + framework chapter (baker emits a selector; datatable authoring to grow the affinity
+axis at load), not a config tweak. The next concrete investigative step is #2's open question: **find the native datatable
+that maps a `DistrictVisualAffinity` value to its `CityMapSelector`, and verify a mod can add a row + a new axis value at
+data-load.** That gates the whole proper path, the same way the runtime axis-growth probe gated the runtime path.
+
+---
+
 ## Appendix — falsified initial hypothesis (audit trail)
 
 The study first assumed the reactor was a **wonder**, registerable by name in the `ArtificialWonder` matrix via the existing
