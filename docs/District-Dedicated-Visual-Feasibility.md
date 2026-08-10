@@ -189,8 +189,23 @@ Built an editor probe that loads a native `*/District/Main` visual by its Amplit
   nested `Selector`s that carry the footprint `Decal`s. So the reduction is: in the cloned root emitter, keep one
   Element item (point it at our baked reactor element), null the other Element items, leave the decal-bearing items intact.
 
-**Next investigation (in progress):** dump each build item's `Position`/`LocalScale`/`Probability` and each element's
-`bbox`/`size`, to identify the CENTRAL/main building slot to keep — so the reduce-to-one is principled, not arbitrary.
+**Composition mapped (NuclearTest, with positions + bboxes):** the elements are cleanly separable by bbox size —
+- Root emitter bbox `9.09×2.00×9.48` = the whole district footprint envelope.
+- A nested sub-emitter at `pos(0,0,0)`: the flat **ground slab** (`fxMesh=0d34b7b9`, bbox `5.98×0.05×6.91`) + its
+  **footprint decal** + a stack of **particle FxEmitters** (steam/smoke).
+- **One large main building** (`c57a539c` at `(0.51,0.88)`, bbox `4.43×0.68×2.56`).
+- **~11 small props** (bbox `0.10–0.45`) scattered at various positions — pipes/details.
+- Several `Selector → Decal` sub-trees = the city-map **footprint** decals.
+
+So **large bbox = main structure, small bbox = prop** — a clean rule to reduce by. **Reduce-to-one recipe (verified by the
+layout):** in the cloned template, keep ONE large-bbox Element slot → point it at our baked reactor element (centered),
+**null the small-prop Element items**, and **leave every Decal / decal-Selector item intact** (the footprint). Optionally
+keep the ground slab + steam emitters for flavor. This is the principled reduction the authoring command will apply.
+
+**Step 1 status:** fully investigated. Templates load in-editor; structure + composition mapped; the reduce-to-one is
+principled (bbox rule). Remaining build = the authoring command: (a) bake our reactor as an `FxEvolverMaterialLevelBuildElement`
+asset (its own GUID), (b) clone the NuclearTest template, (c) apply the reduce-to-one (repoint one big slot → our element,
+null props, keep decals), (d) save → the reactor's CityMapSelector GUID for the `*/District/Main` data rows.
 
 ---
 
