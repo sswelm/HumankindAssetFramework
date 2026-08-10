@@ -58,7 +58,36 @@ needs) containing:
 - **Affinity vs. wonder-name precedence:** the reactor currently also sets `ConstructibleVisualAffinity = Base_Industry`.
   Confirm the `ArtificialWonder` name cell wins (or clear the affinity) so our selector is the one resolved.
 
+## ⚠️ CORRECTION (build spike, first check) — the reactor is NOT a wonder
+
+The wonder-name premise above is **FALSE for the breeder reactor.** A `[RepoDump]` of the live `AssetReferenceRepository`
+shows the `ArtificialWonder` name axis is 760 entries — all real wonders (`Extension_ArtificialWonder_Era*_*`), HolySites,
+and participations. **`Extension_Base_BreederReactor` is not in it.** The reactor is a **base extension district**; its
+visual is resolved by the **`BuildingVisualAffinity`** criterion (currently `DistrictVisualAffinity_Base_Industry`), on a
+**34-value** affinity axis — not the wonder-name matrix. So `FillWonderCell` / `WonderNativeRows` (which only fills the
+`ArtificialWonder` matrix, and today only carries the Oracle) can never register the reactor. Good news: the spike caught
+this before any asset was built.
+
+### The path that actually applies: a dedicated BuildingVisualAffinity
+
+Same idea (native criteria-resolved selector, no runtime swap), different axis:
+1. **Add a custom affinity value** (e.g. `DistrictVisualAffinity_BreederReactor`) to the `DistrictVisualAffinity` matrix
+   via the same `matrix.Add(StaticString, guid, null)` mechanism `FillWonderCell` uses — pointing at our dedicated selector
+   GUID. Open: does adding a NEW value to a criteria axis take (vs. only overwriting existing cells)?
+2. **Make the reactor resolve to it** — set its criteria value to the custom affinity. The affinity is written at
+   `SetCriteriaValue(BuildingVisualAffinityCriteriaIndex, value)` (terrain ~35161) from the district's
+   `ConstructibleVisualAffinity`. Either change the reactor's definition data to the custom affinity, or intercept and
+   override that criteria value at runtime for the reactor's tile. Open: which is workable.
+3. **Build the dedicated selector asset** — unchanged from above (reactor element + footprint decal + baked texture layer).
+4. Since the custom affinity is used ONLY by the reactor, the selector is dedicated — other Industry unaffected, and the
+   engine resolves + LODs it natively.
+
+**Risk:** whether a criteria axis accepts a brand-new value at runtime is unverified (the wonder matrix work only ever
+*filled existing empty cells* — every wonder name was already an axis entry). If new axis values don't take, the fallback is
+to make the reactor a real `ArtificialWonder` in data (bigger change) or accept the runtime deep-clone's close+far result.
+
 ## Status
-Feasibility confirmed at the mechanism level: the criteria-resolution + wonder-cell registration path is real, already
-wired, and renders natively (no runtime swap). Next step is a build spike: produce a minimal dedicated selector asset and
-point `WonderNativeRows` at it, with the runtime deep-clone/isolate swap disabled for the reactor.
+Feasibility premise **corrected**: the reactor is affinity-resolved, not wonder-named. The dedicated-visual path is still
+plausible but now hinges on **adding a new `BuildingVisualAffinity` value** (unverified) plus building the selector asset.
+Next concrete step: a tiny probe — try `matrix.Add` on the `DistrictVisualAffinity` matrix with a test value and see if the
+axis grows and resolves, before investing in the selector asset build.
