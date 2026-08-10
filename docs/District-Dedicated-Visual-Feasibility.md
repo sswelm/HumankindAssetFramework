@@ -132,11 +132,43 @@ native type (Industry, Science, MissileSilo…) has one. Located the exact wirin
 4. **Drop the runtime injection for the reactor** — no plugin swap needed; the engine resolves + LODs our selector
    natively, giving one clean reactor + footprint at every zoom, like any native district.
 
-### Honest scope
-This is a genuine content-pipeline + framework chapter (baker emits a selector; datatable authoring to grow the affinity
-axis at load), not a config tweak. The next concrete investigative step is #2's open question: **find the native datatable
-that maps a `DistrictVisualAffinity` value to its `CityMapSelector`, and verify a mod can add a row + a new axis value at
-data-load.** That gates the whole proper path, the same way the runtime axis-growth probe gated the runtime path.
+### ✅ GATING QUESTION ANSWERED — the data path is VIABLE (verified in the mod's own data)
+
+Traced it end to end in the ENCReload mod's data:
+- **Mods CAN add an affinity value at data-load** — proven: the mod already defines a custom one,
+  `NationalProject_NuclearTest`, in `Assets/Databases/SettlementPresentation/ConstructibleVisualAffinityDefinition.asset`
+  (game defines 26; the mod adds its own). Runtime can't grow the axis, but **data-load can.**
+- **The affinity → visual mapping datatable** is `*/District/Main.Level1` (and `.Level2`) inside
+  `Assets/~References/WorldPresentation/DistrictDefinition_ContentCollection.asset`. Each row is exactly:
+  ```
+  - Name: NationalProject_NuclearTest        # the affinity value
+    Value: { a: -1883953677, b: 1215187674, c: -1533191005, d: -2060159479 }   # GUID of that type's CityMapSelector
+    NameColor: {r:0,g:0,b:0,a:0}
+    Comment:
+    NameLocked: 0
+  ```
+- **`NationalProject_NuclearTest` maps to a SINGLE-BUILDING national-project visual WITH a footprint** — the clean shape we
+  want (one building + footprint, native LODs), not the Industry multi-building factory. And because it's data-authored,
+  **no plugin is needed** → the missile-silo fallback that forced the Base_Industry switch is a non-issue.
+
+### The verified build recipe (this is the plan)
+1. **Author the reactor's CityMapSelector asset** — bake/clone a single-building selector (the NuclearTest/MissileSilo one
+   is the ideal template: single building + footprint) with our `BreederReactor_FxMesh` + our texture as its building
+   element, keeping its decal/footprint. Get its GUID. (Baker capability: clone the template selector at bake time and
+   swap the mesh, rather than authoring from scratch.)
+2. **Define a dedicated affinity** — add `DistrictVisualAffinity_Base_BreederReactor` (or `NationalProject_BreederReactor`)
+   to the mod's `ConstructibleVisualAffinityDefinition.asset`, mirroring the existing `NationalProject_NuclearTest` entry.
+3. **Map affinity → our selector** — add a mod content row to `*/District/Main.Level1` **and** `.Level2` (via the mod's own
+   `DistrictDefinition_ContentCollection`-style asset that the game merges): `Name: <new affinity>` → `Value: <our selector
+   GUID>`.
+4. **Point the reactor at it** — set `ConstructibleVisualAffinity` in `ConstructibleCommonExtensionDefinitionENC.asset`
+   (`Extension_Base_BreederReactor`) to the new affinity.
+5. **Drop the runtime injection** for the reactor — the engine now resolves + LODs our selector natively: one clean reactor
+   + footprint at every zoom, like any native district, with no plugin.
+
+**Only real unknown left:** step 1's authoring — whether the baker can cleanly clone the template selector and swap the mesh
+into a shippable asset with a stable GUID. Everything downstream (2-5) is verified data edits following patterns the mod
+already uses.
 
 ---
 
