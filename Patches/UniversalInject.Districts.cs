@@ -279,9 +279,9 @@ namespace HumankindAssetFramework
         // The leaf that holds geometry is FxEvolverMaterialLevelBuildElement with an `fxMesh` Guid field. Reached via:
         //   Selector.pairs[culture] -> Emitter.levelBuildItems[].loadedEvolverMaterial -> Element(.fxMesh)  (Emitters nest).
         static readonly List<object> distLeaves = new List<object>();   // legacy shared list (single-model path)
-        static bool UseDeepClone = false;   // SPIKE: deep-clone footprint fix — parked (mid-zoom LOD elements resolve via shared `pairs`, can't privatize cleanly; per-frame catch tanked perf). false = shipped clean reactor.
+        static bool UseDeepClone = true;    // SPIKE: deep-clone footprint fix (re-enabled for the un-thinned mid-zoom test)
         static float DeepCloneBuildingMinSize = 0.35f;   // deep-clone: swap building slots this big (bbox max dim) to our mesh; hide smaller props
-        static int DeepCloneKeepEvery = 4;               // deep-clone: keep 1 in N large building slots as our reactor (rest hidden) — thins the dome count proportionally
+        static int DeepCloneKeepEvery = 1;               // deep-clone: keep 1 in N large building slots as our reactor (1 = swap ALL large, no thinning → no mid-zoom gaps)
         static FieldInfo GF(Type t, string n) => t.GetField(n, BF);      // no AccessTools warning-on-miss (probing spams the log)
         static void CollectLeaves(object mat, List<object> outLeaves, int depth, HashSet<object> visited)
         {
@@ -790,7 +790,10 @@ namespace HumankindAssetFramework
                 }
                 // frequent early (async variants still resolving), then sparse once stable
                 int every = e.cloneReassert < 900 ? 15 : 120;
-                if (++e.cloneReassert % every == 0) EnsurePrivate(e, e.clonedSelector, e.fxMeshGuid, e.cloneMap, new HashSet<object>(), 0);
+                // EnsurePrivate DISABLED for the un-thinned mid-zoom test: it tanked perf and didn't reach the pairs-resolved
+                // mid-LOD anyway. This isolates whether the mid-zoom donor is inherent (pairs LOD) or was a thinning artifact.
+                // if (++e.cloneReassert % every == 0) EnsurePrivate(e, e.clonedSelector, e.fxMeshGuid, e.cloneMap, new HashSet<object>(), 0);
+                _ = every;
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] cloned selector: " + ex); }
         }
