@@ -279,7 +279,7 @@ namespace HumankindAssetFramework
         // The leaf that holds geometry is FxEvolverMaterialLevelBuildElement with an `fxMesh` Guid field. Reached via:
         //   Selector.pairs[culture] -> Emitter.levelBuildItems[].loadedEvolverMaterial -> Element(.fxMesh)  (Emitters nest).
         static readonly List<object> distLeaves = new List<object>();   // legacy shared list (single-model path)
-        static bool UseDeepClone = true;    // SPIKE: deep-clone footprint fix (re-enabled for the un-thinned mid-zoom test)
+        static bool UseDeepClone = false;   // SPIKE: deep-clone footprint hack — PARKED. The proper path is a data-authored district visual (see District-Dedicated-Visual-Feasibility.md), not runtime selector surgery.
         static float DeepCloneBuildingMinSize = 0.35f;   // deep-clone: swap building slots this big (bbox max dim) to our mesh; hide smaller props
         static int DeepCloneKeepEvery = 1;               // deep-clone: keep 1 in N large building slots as our reactor (1 = swap ALL large, no thinning → no mid-zoom gaps)
         static FieldInfo GF(Type t, string n) => t.GetField(n, BF);      // no AccessTools warning-on-miss (probing spams the log)
