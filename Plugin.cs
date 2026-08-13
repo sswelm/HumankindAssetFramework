@@ -43,6 +43,9 @@ namespace HumankindAssetFramework
         internal static ConfigEntry<bool>   DistrictIsolate;         // scope the mesh-swap to only the target district's own tile (private per-instance leaf) instead of the shared-global swap
         internal static ConfigEntry<bool>   DistrictDebug;           // investigation diagnostics ([District] saw / [DistrictMat] / [DistrictSub] dumps) — off in normal play, they reflect on every district update
         internal static ConfigEntry<string> WonderNativeRows;        // SPIKE wip-wonder-affinity: fill empty cells in the ArtificialWonder repo database, "WonderName=a,b,c,d;..." (FxEvolverMaterial guid)
+        internal static ConfigEntry<string> DistrictMainRows;        // SPIKE dedicated-visual (hybrid register): fill */District/Main.Level1+2 cells for an affinity -> our baked CityMapSelector, "AffinityName=a,b,c,d;..."
+        internal static ConfigEntry<string> DistrictSelectorTile;    // SCOPED dedicated-visual: put our baked selector on ONLY the named district's tile (keeps shared affinity + fallback), "ConstructibleDefinitionName=a,b,c,d;..."
+        internal static ConfigEntry<string> DistrictFootprint;       // RUNTIME footprint choice: graft a chosen donor selector's DECALS onto the scoped district (building stays ours), "ConstructibleDefinitionName=a,b,c,d;..." (donor = any */District/Main selector GUID)
         // --- EXPERIMENTAL: generic GPU mesh-buffer overrides (units, districts, any content layer) ---
         internal static ConfigEntry<string> BufferOverrides;     // per-layer overrides "<nameSubstr>:verts=+N,idx=+N,meshes=+N,maxtris=N;..." applied at layer creation
         internal static ConfigEntry<int>    SkeletonBoneBudget;  // shared per-frame animated-bone pool size (vanilla 65,535; high-bone customs overflow it -> spike plague)
@@ -132,6 +135,24 @@ namespace HumankindAssetFramework
                                   "SPIKE (wip-wonder-affinity): fill a custom Artificial Wonder's EMPTY cell in the game's 'ArtificialWonder' " +
                                   "visual database so the NATIVE wonder affinity renders a completed model. Format: 'WonderName=a,b,c,d;...' " +
                                   "where the guid is an FxEvolverMaterial (vanilla wonder material for a zero-bake proof, or our own baked one).");
+            DistrictMainRows    = Config.Bind("District", "DistrictMainRows", "",
+                                  "SPIKE (dedicated-visual hybrid): register a DATA-AUTHORED district selector by filling the */District/Main." +
+                                  "Level1+Level2 cells for an affinity with our baked CityMapSelector's GUID. Format: 'AffinityName=a,b,c,d;...' " +
+                                  "(e.g. DistrictVisualAffinity_Base_Industry=...). The game then resolves + LODs our selector natively.");
+            DistrictFootprint = Config.Bind("District", "DistrictFootprint", "",
+                                  "RUNTIME footprint choice for a scoped district (DistrictSelectorTile). Grafts the DECALS of a chosen donor selector " +
+                                  "onto the reactor's tile — the building stays ours, only the strategic footprint changes. Format: " +
+                                  "'ConstructibleDefinitionName=a,b,c,d;...' where the guid is any */District/Main selector (e.g. Base_Industry = " +
+                                  "149945011,1306056350,1706429623,-368887441; MissileSilo = -1158439761,1096327552,-1625448046,-477384506). Blank = " +
+                                  "keep the footprint baked into the selector. Change it + relaunch to switch footprints, no re-bake. (Note: the strategic " +
+                                  "footprint still lazy-builds ~1s on first zoom-out — engine limitation, independent of which footprint.)");
+            DistrictSelectorTile = Config.Bind("District", "DistrictSelectorTile", "",
+                                  "SCOPED dedicated-visual: put a DATA-AUTHORED district selector on ONLY the named district's own tile(s) " +
+                                  "(matched by ConstructibleDefinitionName), leaving the shared visual affinity — and every other district using " +
+                                  "it — untouched. Unlike DistrictMainRows (which fills the shared affinity cell → hits ALL districts of that " +
+                                  "affinity), this overrides just the one tile at runtime and keeps the non-plugin fallback intact. The building " +
+                                  "element's output layer is bound automatically. Format: 'ConstructibleDefinitionName=a,b,c,d;...' " +
+                                  "(e.g. Extension_Base_BreederReactor=...).");
             DistrictBufferHeadroom = Config.Bind("District", "DistrictBufferHeadroom", 0,
                                   "Extra VERTICES to add to the game's big 'Visual' GPU mesh buffer (the shared building buffer, ~3,000,000 by default) " +
                                   "at startup, so custom district meshes fit even when a built-up late-game city has nearly filled it. 0 = off. " +
@@ -311,6 +332,8 @@ namespace HumankindAssetFramework
                 UniversalInject.TickDistrictMeshSwap(); // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
                 UniversalInject.PollRepoDump();         // SPIKE wip-wonder-affinity: one-shot AssetReferenceRepository dump (DistrictDebug-gated)
                 UniversalInject.PollWonderRows();       // SPIKE wip-wonder-affinity: fill configured wonder cells in the ArtificialWonder visual DB
+                UniversalInject.PollDistrictMainRows(); // SPIKE dedicated-visual (hybrid): register our baked selector in */District/Main for an affinity
+                UniversalInject.PollDistrictSelectorTile(); // SCOPED dedicated-visual: put our selector on ONLY the named district's tile (keeps shared affinity + fallback)
                 UniversalInject.ProbeAxisGrowth();      // SPIKE dedicated-visual: one-shot — can matrix.Add grow a criteria axis with a NEW value? (DistrictDebug-gated)
                 UniversalInject.PollHexSculptDial();     // live dial (haf_hexsculpt.txt): re-carve every sculpted district's platform without a relaunch
             }

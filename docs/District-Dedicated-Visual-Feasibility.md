@@ -1,5 +1,9 @@
 # Dedicated District Visual — Feasibility Study
 
+> **✅ SOLVED & SHIPPED (2026-08-12).** This study's hybrid is done and verified in-game. The working recipe,
+> config, and runtime steps live in **[District-Dedicated-Visual.md](District-Dedicated-Visual.md)** — read that
+> first. What follows is the investigation that got there.
+
 **Branch:** `spike/district-dedicated-visual` (off `spike/district-footprint`).
 **Goal:** a clean single reactor **+ footprint at ALL zoom levels** — which the runtime deep-clone cannot deliver (its
 mid-zoom LOD geometry is shared across all Industry districts; see `District-Footprint-Investigation.md`).

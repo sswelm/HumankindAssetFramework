@@ -83,6 +83,7 @@ namespace HumankindAssetFramework
             wonderTemplates.Clear();
             wonderTemplateReqs.Clear();
             wonderRowLogged.Clear();
+            districtMainLogged.Clear(); districtMainTick = 0; districtReresolved = false;   // re-arm the */District/Main registration + re-resolve on reload
             axisProbed = false;   // re-probe the axis-growth question each session (the matrix rebuilds on reload)
         }
 
@@ -175,18 +176,416 @@ namespace HumankindAssetFramework
             }
         }
 
+        // DEDICATED-VISUAL hybrid (register step): fill the cell for `criteriaName` -> `guid` in every 1D matrix whose Name
+        // CONTAINS `nameContains`. Generalizes FillWonderCell (ArtificialWonder-only). matrix.Add fills an EXISTING axis
+        // value's cell (proven — the axis-growth probe showed Add only fills, never grows), which is exactly what we want:
+        // the reactor's affinity already exists on the */District/Main axis; we point its cell at our baked selector.
+        static int Contains(Array axis, string val) { if (axis != null) for (int i = 0; i < axis.Length; i++) if (axis.GetValue(i)?.ToString() == val) return i; return -1; }
+        static int FillMatrixCells(object inst, string nameContains, string criteriaName, object guid)
+        {
+            int filled = 0;
+            var ssType = AccessTools.TypeByName("Amplitude.StaticString");
+            if (ssType == null) return 0;
+            // matrices live across databaseMatrices1D + databaseMatrices2D (the main visual db is 2D: DistrictState x affinity)
+            foreach (var fieldName in new[] { "databaseMatrices1D", "databaseMatrices2D" })
+            {
+                if (!(AccessTools.Field(inst.GetType(), fieldName)?.GetValue(inst) is Array arr)) continue;
+                for (int mi = 0; mi < arr.Length; mi++)
+                {
+                    var m = arr.GetValue(mi); if (m == null) continue;
+                    var mt = m.GetType();
+                    var name = AccessTools.Field(mt, "Name")?.GetValue(m)?.ToString();
+                    if (name == null || !name.Contains(nameContains)) continue;
+
+                    // 1D: CriteriaNames + Add(StaticString, guid, comment)
+                    if (AccessTools.Property(mt, "CriteriaNames")?.GetValue(m) is Array axis1 && axis1.Length > 0)
+                    {
+                        int idx = Contains(axis1, criteriaName);
+                        var add3 = mt.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(x => x.Name == "Add" && x.GetParameters().Length == 3);
+                        if (idx >= 0 && add3 != null) { add3.Invoke(m, new object[] { Activator.CreateInstance(ssType, criteriaName), guid, null }); filled++; }
+                        else if (districtMainLogged.Add(name + ":1d")) Plugin.Log.LogWarning($"[DistrictMain] 1D '{name}': affinity idx={idx} add3={(add3 != null)} — skipped");
+                        continue;
+                    }
+                    // 2D: FirstCriteriaNames x SecondCriteriaNames — the affinity is one axis, DistrictState the other.
+                    var firstAxis = AccessTools.Property(mt, "FirstCriteriaNames")?.GetValue(m) as Array;
+                    var secondAxis = AccessTools.Property(mt, "SecondCriteriaNames")?.GetValue(m) as Array;
+                    // DatabaseMatrix2D.AddCell(ref StaticString first, ref StaticString second, Guid guid, AssetReferenceDatabaseContent element)
+                    var add4 = mt.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(x => x.Name == "AddCell" && x.GetParameters().Length == 4);
+                    if (firstAxis == null || secondAxis == null || add4 == null)
+                    { if (districtMainLogged.Add(name + ":2dshape")) Plugin.Log.LogWarning($"[DistrictMain] 2D '{name}': first={(firstAxis != null)} second={(secondAxis != null)} add4={(add4 != null)} — can't fill"); continue; }
+                    bool affinityIsSecond = Contains(secondAxis, criteriaName) >= 0;
+                    bool affinityIsFirst = Contains(firstAxis, criteriaName) >= 0;
+                    if (!affinityIsSecond && !affinityIsFirst)
+                    { if (districtMainLogged.Add(name + ":noaff")) Plugin.Log.LogWarning($"[DistrictMain] 2D '{name}': '{criteriaName}' on neither axis (first[0]={firstAxis.GetValue(0)}, second[0]={secondAxis.GetValue(0)})"); continue; }
+                    // fill (state, affinity) for EVERY state on the OTHER axis
+                    var otherAxis = affinityIsSecond ? firstAxis : secondAxis;
+                    for (int oi = 0; oi < otherAxis.Length; oi++)
+                    {
+                        var otherName = otherAxis.GetValue(oi)?.ToString();
+                        var a = Activator.CreateInstance(ssType, otherName);
+                        var b = Activator.CreateInstance(ssType, criteriaName);
+                        // param order = (first, second, guid, comment)
+                        add4.Invoke(m, affinityIsSecond ? new object[] { a, b, guid, null } : new object[] { b, a, guid, null });
+                        filled++;
+                    }
+                }
+            }
+            return filled;
+        }
+
+        // Register our data-authored district selector by filling the */District/Main.Level1+Level2 cells for an affinity.
+        // Config DistrictMainRows: "AffinityName=a,b,c,d;...". Re-armed on reload (matrices rebuild); idempotent.
+        static int districtMainTick;
+        static bool districtReresolved;   // force the post-fill re-resolve only once per session
+        static readonly HashSet<string> districtMainLogged = new HashSet<string>();
+        internal static void PollDistrictMainRows()
+        {
+            var cfg = Plugin.DistrictMainRows?.Value?.Trim();
+            if (string.IsNullOrEmpty(cfg)) return;
+            if (++districtMainTick % 30 != 1) return;
+            if (distFxManager == null) return;   // wait until the district machinery is up (repository loaded)
+            try
+            {
+                var repoType = AccessTools.TypeByName("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");
+                var inst = repoType?.GetMethod("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.Invoke(null, null);
+                if (inst == null) return;
+                if (!(AccessTools.Property(inst.GetType(), "Loaded")?.GetValue(inst) is bool b) || !b) return;
+                int totalFilled = 0;
+                foreach (var part in cfg.Split(';'))
+                {
+                    var eq = part.IndexOf('='); if (eq <= 0) continue;
+                    string affinity = part.Substring(0, eq).Trim();
+                    var guid = ParseGuid4(part.Substring(eq + 1).Trim());
+                    if (guid == null) { if (districtMainLogged.Add(affinity + ":badguid")) Plugin.Log.LogWarning($"[DistrictMain] '{affinity}': unparseable guid"); continue; }
+                    int n = FillMatrixCells(inst, "District/Main", affinity, guid);
+                    totalFilled += n;
+                    if (districtMainLogged.Add(affinity + ":n" + n)) Plugin.Log.LogInfo($"[DistrictMain] '{affinity}': filled {n} */District/Main cell(s) -> our selector");
+                    // VERIFY the selector GUID actually loads from the bundle (else the cell points at nothing and the game
+                    // keeps the cached vanilla visual — the classic "mod not rebuilt after the GUID changed").
+                    if (districtMainLogged.Add(affinity + ":load"))
+                    {
+                        var mat = TryLoadMaterial(guid);
+                        if (mat == null) Plugin.Log.LogWarning($"[DistrictMain] our selector GUID does NOT load — rebuild the mod bundle (the selector asset / its GUID isn't in it).");
+                        else Plugin.Log.LogInfo($"[DistrictMain] our selector GUID loads OK: {mat.GetType().Name} '{GetMember(mat, "name")}'");
+                    }
+                }
+                // The cell now points at our selector, but districts already built resolved+cached the vanilla visual
+                // BEFORE this fill could run. Replay UpdateLevelBuild on them ONCE so they re-read the filled cell.
+                // Districts built AFTER this point resolve the filled cell natively and need no replay.
+                if (totalFilled > 0 && !districtReresolved) { districtReresolved = true; ForceDistrictReresolve(); }
+                // Then bind a real building output layer onto our (null-outputLayer) element so the reactor mesh draws on
+                // top of the footprint. Selectors load async after the re-resolve, so retry each poll until it binds once.
+                if (districtReresolved) BindReactorBuilding();
+            }
+            catch (Exception ex) { if (districtMainLogged.Add("ex")) Plugin.Log.LogError("[DistrictMain] " + ex); }
+        }
+
+        // SCOPED dedicated-visual: put our DATA-AUTHORED selector on ONLY the named district's own tile, matched by
+        // ConstructibleDefinitionName — leaving the shared visual affinity (Base_Industry) and every other district
+        // using it untouched, so a player WITHOUT the plugin still sees the vanilla fallback. Runs every frame with a
+        // cheap ReferenceEquals guard (the game re-resolves the channel on its own UpdateLevelBuild; we re-assert). The
+        // building element's output layer is bound via the shared BindReactorBuilding once our selector is on a channel.
+        static readonly Dictionary<string, object> selectorTileGuid = new Dictionary<string, object>();   // districtName -> parsed guid
+        static string selectorTileParsedFrom;                                                             // config string we parsed
+        static readonly Dictionary<string, object> loadedSelectorByKey = new Dictionary<string, object>();// guidKey -> loaded+Loaded selector
+        static readonly HashSet<string> selectorTileLogged = new HashSet<string>();
+        internal static void PollDistrictSelectorTile()
+        {
+            var cfg = Plugin.DistrictSelectorTile?.Value?.Trim();
+            if (string.IsNullOrEmpty(cfg)) return;
+            if (distFxManager == null || trackedDistricts.Count == 0) return;
+            try
+            {
+                EnsureDistrictConfig();   // populates distModels (for the per-district atlasGuid) even with DistrictRepoint off
+                if (selectorTileParsedFrom != cfg)   // (re)parse only when the config text changes
+                {
+                    selectorTileGuid.Clear();
+                    foreach (var part in cfg.Split(';'))
+                    {
+                        var eq = part.IndexOf('='); if (eq <= 0) continue;
+                        var name = part.Substring(0, eq).Trim();
+                        var g = ParseGuid4(part.Substring(eq + 1).Trim());
+                        if (g != null) selectorTileGuid[name] = g;
+                        else if (selectorTileLogged.Add(name + ":badguid")) Plugin.Log.LogWarning($"[DistrictTile] '{name}': unparseable guid");
+                    }
+                    selectorTileParsedFrom = cfg;
+                }
+                if (selectorTileGuid.Count == 0) return;
+                bool anySet = false;
+                foreach (var d in trackedDistricts)
+                {
+                    if (d is UnityEngine.Object duo && duo == null) continue;
+                    var name = GetMember(d, "ConstructibleDefinitionName")?.ToString();
+                    if (string.IsNullOrEmpty(name) || !selectorTileGuid.TryGetValue(name, out var guid)) continue;
+                    // resolve THIS district's own baked albedo atlas from the registry (for the scoped texture bind)
+                    if (scopedAtlasGuid == null)
+                        foreach (var dm in distModels) if (dm.district == name && dm.atlasGuid != null) { scopedAtlasGuid = dm.atlasGuid; break; }
+                    // RE-ASSERT the ground paint on the scoped tick: the game applies it once then reverts, and
+                    // UpdateGroundMaterial doesn't re-fire on the scoped path (it did on the old isolate path, which is why
+                    // the paint held before). Throttled so it's not every frame. DistrictApplyGroundMaterial no-ops when the
+                    // entry has no groundMaterial, and is itself try/caught.
+                    if (UnityEngine.Time.frameCount % 30 == 7) DistrictApplyGroundMaterial(d);
+                    // load + fully Load our selector once (cached), so its decal subtree + element are live
+                    string key = name;
+                    if (!loadedSelectorByKey.TryGetValue(key, out var sel) || (sel is UnityEngine.Object suo && suo == null))
+                    {
+                        sel = TryLoadMaterial(guid);
+                        if (sel == null) { if (selectorTileLogged.Add(name + ":noload")) Plugin.Log.LogWarning($"[DistrictTile] '{name}': selector GUID does NOT load — rebuild the mod bundle."); continue; }
+                        LoadFxMaterial(sel);
+                        CenterScopedBuilding(sel, name);   // our reactor sits in the template's off-center slot — re-center to tile origin (match the preview)
+                        GraftFootprint(sel, name);         // RUNTIME footprint choice: swap our selector's decals for a chosen donor's
+                        loadedSelectorByKey[key] = sel;
+                        Plugin.Log.LogInfo($"[DistrictTile] '{name}': loaded our selector {sel.GetType().Name} '{GetMember(sel, "name")}'.");
+                    }
+                    var plbc = (fiDistrictPlbc ?? (fiDistrictPlbc = AccessTools.Field(d.GetType(), "presentationLevelBuildComponent")))?.GetValue(d);
+                    if (plbc == null) continue;
+                    DumpPlbcLevers(plbc);   // one-shot (DistrictDebug): the real channel/refresh/content methods + EventNameEnum values
+                    if (fiPlbcChannels == null) fiPlbcChannels = AccessTools.Field(plbc.GetType(), "channels");
+                    if (!(fiPlbcChannels?.GetValue(plbc) is Array channels)) continue;
+                    int layer = ResolveMainLayer(d);
+                    if (layer < 0 || layer >= channels.Length) continue;
+                    var box = channels.GetValue(layer);
+                    if (box == null) continue;
+                    if (fiChanEvolverMaterial == null) fiChanEvolverMaterial = GF(box.GetType(), "evolverMaterial");
+                    if (fiChanEvolverMaterial == null) continue;
+                    if (ReferenceEquals(fiChanEvolverMaterial.GetValue(box), sel)) { anySet = true; continue; }   // already ours this frame
+                    fiChanEvolverMaterial.SetValue(box, sel);
+                    channels.SetValue(box, layer);   // write the mutated struct back into the array
+                    if (miRefreshChannel == null)
+                        miRefreshChannel = plbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                            .FirstOrDefault(m => m.Name == "RefreshChannel" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
+                    if (miRefreshChannel != null)
+                    {
+                        var ra = new object[] { layer, System.Enum.ToObject(miRefreshChannel.GetParameters()[1].ParameterType, 0) };
+                        try { miRefreshChannel.Invoke(plbc, ra); } catch { }
+                    }
+                    anySet = true;
+                    if (selectorTileLogged.Add(name + ":set")) Plugin.Log.LogInfo($"[DistrictTile] '{name}': our selector placed on channel {layer} (this tile only; shared affinity untouched).");
+                }
+                // once our selector is on a channel, bind its null-outputLayer element's building layer (reuses the walk)
+                if (anySet) BindReactorBuilding();
+                // then bind the district's OWN albedo atlas onto that layer so the reactor wears its texture, not brick
+                ApplyScopedAlbedo();
+            }
+            catch (Exception ex) { if (selectorTileLogged.Add("ex")) Plugin.Log.LogError("[DistrictTile] " + ex); }
+        }
+
+        // Prepare our selector before it goes on the tile: (1) CENTER — our reactor sits in the NuclearTest template's
+        // MAIN-building slot, placed OFF-CENTER within its multi-building layout (LevelBuildItem.Position); a single
+        // reactor belongs at tile origin like the preview, so zero that item's Position (the only root item whose child
+        // is an Element with an `fxMesh` field). (2) INSTANT APPEAR — every node's `fadeInOutMode` is the reveal-ramp
+        // (Stepped/Smooth ramp in over ~1 s); set the whole tree (building + footprint decals) to Instant so the
+        // footprint shows the moment the tile draws, not a second later. One re-emit applies both. Runs once at load.
+        static void CenterScopedBuilding(object sel, string name)
+        {
+            try
+            {
+                bool changed = false;
+                changed |= SetInstantAppear(sel, 0, new HashSet<object>());   // kill the ~1s reveal ramp across the whole tree
+                var itemsF = GF(sel.GetType(), "levelBuildItems");
+                if (itemsF?.GetValue(sel) is Array items)
+                    for (int i = 0; i < items.Length; i++)
+                    {
+                        var it = items.GetValue(i); if (it == null) continue;
+                        var itt = it.GetType();
+                        var child = GF(itt, "loadedEvolverMaterial")?.GetValue(it);
+                        if (child == null || GF(child.GetType(), "fxMesh") == null) continue;   // not our building Element
+                        var pf = GF(itt, "Position");
+                        if (pf?.GetValue(it) is UnityEngine.Vector3 p && p != UnityEngine.Vector3.zero)
+                        {
+                            pf.SetValue(it, UnityEngine.Vector3.zero);
+                            items.SetValue(it, i);   // write the mutated struct back into the array
+                            changed = true;
+                            if (selectorTileLogged.Add(name + ":center")) Plugin.Log.LogInfo($"[DistrictTile] '{name}': centered reactor on the tile (template slot was at pos={p}).");
+                        }
+                    }
+                if (changed) LoadFxMaterial(sel);   // re-emit so the child is centered + the ramp is Instant
+            }
+            catch (Exception ex) { if (selectorTileLogged.Add(name + ":centerex")) Plugin.Log.LogWarning("[DistrictTile] center: " + ex.Message); }
+        }
+
+        // Recursively set every node's fadeInOutMode -> Instant (building elements + footprint decals + nested selectors/
+        // emitters), so the strategic footprint appears the instant the tile draws instead of ramping in over ~1 s. Walks
+        // the same child links as CollectLeaves (levelBuildItems -> loadedEvolverMaterial, selector cache Entries).
+        static bool SetInstantAppear(object mat, int depth, HashSet<object> visited)
+        {
+            if (mat == null || depth > 8 || !visited.Add(mat)) return false;
+            bool changed = false;
+            var t = mat.GetType();
+            var fm = GF(t, "fadeInOutMode");
+            if (fm != null)
+            {
+                try { var inst = Enum.Parse(fm.FieldType, "Instant"); if (!Equals(fm.GetValue(mat), inst)) { fm.SetValue(mat, inst); changed = true; } }
+                catch { }
+            }
+            if (AccessTools.Field(t, "levelBuildItems")?.GetValue(mat) is Array items)
+                foreach (var it in items) if (it != null) changed |= SetInstantAppear(AccessTools.Field(it.GetType(), "loadedEvolverMaterial")?.GetValue(it), depth + 1, visited);
+            var cache = AccessTools.Field(t, "fxMaterialCacheEntries")?.GetValue(mat);
+            if (cache != null && AccessTools.Field(cache.GetType(), "Entries")?.GetValue(cache) is Array entries)
+                foreach (var e in entries) if (e != null) changed |= SetInstantAppear(AccessTools.Field(e.GetType(), "FxMaterial")?.GetValue(e), depth + 1, visited);
+            return changed;
+        }
+
+        // One-shot: dump the live plbc's channel/refresh/content methods + the EventNameEnum values, so we can find a
+        // HEAVIER refresh than RefreshChannel(0) that trips the decal content rebuild (pre-warm the footprint).
+        static bool plbcDumped;
+        static readonly HashSet<string> plbcEnumsSeen = new HashSet<string>();
+        static void DumpPlbcLevers(object plbc)
+        {
+            if (plbcDumped || Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;
+            plbcDumped = true;
+            try
+            {
+                var t = plbc.GetType();
+                Plugin.Log.LogInfo($"[PlbcLevers] type = {t.FullName}");
+                foreach (var m in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                {
+                    var n = m.Name;
+                    if (n.IndexOf("Channel", StringComparison.OrdinalIgnoreCase) < 0 && n.IndexOf("Refresh", StringComparison.OrdinalIgnoreCase) < 0
+                        && n.IndexOf("Content", StringComparison.OrdinalIgnoreCase) < 0 && n.IndexOf("Rebuild", StringComparison.OrdinalIgnoreCase) < 0
+                        && n.IndexOf("Invalidate", StringComparison.OrdinalIgnoreCase) < 0 && n.IndexOf("Dirty", StringComparison.OrdinalIgnoreCase) < 0
+                        && n.IndexOf("SetChannel", StringComparison.OrdinalIgnoreCase) < 0 && n.IndexOf("Ask", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    var pars = m.GetParameters();
+                    var ps = string.Join(", ", pars.Select(p => p.ParameterType.Name + " " + p.Name));
+                    Plugin.Log.LogInfo($"[PlbcLevers]   {m.ReturnType.Name} {n}({ps})");
+                    // dump any enum param's values (RefreshChannel/SetChannel's event/mode enums = the lever candidates)
+                    foreach (var p in pars)
+                        if (p.ParameterType.IsEnum && plbcEnumsSeen.Add(p.ParameterType.FullName))
+                            Plugin.Log.LogInfo($"[PlbcLevers]     enum {p.ParameterType.Name} = {string.Join(", ", Enum.GetNames(p.ParameterType))}");
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[PlbcLevers] " + ex.Message); }
+        }
+
+        // RUNTIME footprint choice: replace our selector's DECAL items with a chosen donor selector's decals, so the
+        // strategic footprint can be picked in-game (config DistrictFootprint) without a re-bake — the building stays
+        // ours. Keeps our building-Element item(s) (child has an `fxMesh`), drops our decal items, appends the donor's
+        // decal items (collected recursively, skipping the donor's BUILDINGS). Then re-emits. Best-effort: some donors'
+        // nested decals may not transfer cleanly — logged, and the un-grafted selector still renders its baked footprint.
+        static readonly Dictionary<string, object> footprintDonor = new Dictionary<string, object>();
+        static string footprintParsedFrom;
+        static readonly HashSet<string> graftDedup = new HashSet<string>();        // (decal name|position) dedup across culture variants
+        static readonly HashSet<string> graftDecalNames = new HashSet<string>();   // distinct decal names grafted (for the log)
+        static void GraftFootprint(object sel, string name)
+        {
+            try
+            {
+                // REGISTRY first: a distModels entry's footprintDonor (picked in the District Factory) wins over the config.
+                object donorGuid = null;
+                foreach (var e in distModels) if (e.district == name && e.footprintDonor != null) { donorGuid = e.footprintDonor; break; }
+                // Fallback: the global DistrictFootprint config ("name=a,b,c,d;name=..."), parsed once and cached.
+                if (donorGuid == null)
+                {
+                    var cfg = Plugin.DistrictFootprint?.Value?.Trim();
+                    if (!string.IsNullOrEmpty(cfg))
+                    {
+                        if (footprintParsedFrom != cfg)
+                        {
+                            footprintDonor.Clear();
+                            foreach (var part in cfg.Split(';'))
+                            {
+                                var eq = part.IndexOf('='); if (eq <= 0) continue;
+                                var g = ParseGuid4(part.Substring(eq + 1).Trim());
+                                if (g != null) footprintDonor[part.Substring(0, eq).Trim()] = g;
+                            }
+                            footprintParsedFrom = cfg;
+                        }
+                        footprintDonor.TryGetValue(name, out donorGuid);
+                    }
+                }
+                if (donorGuid == null) return;
+                var donor = TryLoadMaterial(donorGuid);
+                if (donor == null) { if (selectorTileLogged.Add(name + ":fpnoload")) Plugin.Log.LogWarning($"[DistrictTile] '{name}': footprint donor GUID does NOT load."); return; }
+                LoadFxMaterial(donor);
+                var donorDecals = new List<object>();
+                graftDedup.Clear(); graftDecalNames.Clear();
+                CollectDecalItems(donor, donorDecals, 0, new HashSet<object>());
+                if (donorDecals.Count == 0) { if (selectorTileLogged.Add(name + ":fpnodecals")) Plugin.Log.LogWarning($"[DistrictTile] '{name}': footprint donor has no collectable decal items."); return; }
+                if (selectorTileLogged.Add(name + ":fpnames"))
+                    Plugin.Log.LogInfo($"[DistrictTile] '{name}': footprint decals ({graftDecalNames.Count} distinct): {string.Join(", ", System.Linq.Enumerable.Take(graftDecalNames, 16))}");
+                var itemsF = GF(sel.GetType(), "levelBuildItems");
+                if (!(itemsF?.GetValue(sel) is Array items)) return;
+                var kept = new List<object>();   // our building-element item(s) only — drop our own decals/emitters
+                foreach (var it in items)
+                {
+                    if (it == null) continue;
+                    var child = GF(it.GetType(), "loadedEvolverMaterial")?.GetValue(it);
+                    if (child != null && GF(child.GetType(), "fxMesh") != null) kept.Add(it);   // building Element = our reactor
+                }
+                var elemType = items.GetType().GetElementType();
+                var arr = Array.CreateInstance(elemType, kept.Count + donorDecals.Count);
+                int k = 0;
+                foreach (var it in kept) arr.SetValue(it, k++);
+                foreach (var it in donorDecals) arr.SetValue(it, k++);
+                itemsF.SetValue(sel, arr);
+                LoadFxMaterial(sel);   // re-emit with our building + the donor's footprint
+                if (selectorTileLogged.Add(name + ":fpgraft")) Plugin.Log.LogInfo($"[DistrictTile] '{name}': grafted {donorDecals.Count} footprint decal item(s) from the chosen donor (kept {kept.Count} building slot(s)).");
+            }
+            catch (Exception ex) { if (selectorTileLogged.Add(name + ":fpex")) Plugin.Log.LogError("[DistrictTile] footprint graft: " + ex); }
+        }
+
+        // Collect a donor selector's DECAL items (the footprint), skipping BuildElement (building) items. Walks the FULL
+        // tree like CollectLeaves — donors are either flat EMITTERs (NuclearTest: decals in levelBuildItems) OR SELECTORs
+        // (MissileSilo/city districts: decals reached via pairs / fxMaterialCacheEntries → nested emitters). A child whose
+        // type name contains "Decal" → collect the ITEM; anything else is recursed into. `visited` dedups shared sub-trees
+        // (so a culture-agnostic national project's one shared emitter isn't collected per culture).
+        static void CollectDecalItems(object mat, List<object> outItems, int depth, HashSet<object> visited)
+        {
+            if (mat == null || depth > 12 || !visited.Add(mat)) return;
+            var t = mat.GetType();
+            // EMITTER: levelBuildItems — collect decal items, recurse into non-decal children (emitters/selectors)
+            if (GF(t, "levelBuildItems")?.GetValue(mat) is Array items)
+                foreach (var it in items)
+                {
+                    if (it == null) continue;
+                    var itt = it.GetType();
+                    var child = GF(itt, "loadedEvolverMaterial")?.GetValue(it) ?? TryLoadMaterial(GF(itt, "EvolverMaterialGuid")?.GetValue(it));
+                    if (child == null) continue;
+                    if (child.GetType().Name.IndexOf("Decal", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        // DEDUP by decal name + position — a CityMapSelector repeats the same footprint decals across
+                        // every culture variant (why MissileSilo collected 207); keep one per distinct (name, position).
+                        var nm = GetMember(child, "name")?.ToString() ?? "?";
+                        var pos = GF(itt, "Position")?.GetValue(it);
+                        if (graftDedup.Add(nm + "|" + (pos?.ToString() ?? ""))) { outItems.Add(it); graftDecalNames.Add(nm); }
+                    }
+                    else CollectDecalItems(child, outItems, depth + 1, visited);
+                }
+            // SELECTOR: loaded cache entries + the pairs variant table + default/invalid fallbacks (reach nested emitters)
+            var cache = GF(t, "fxMaterialCacheEntries")?.GetValue(mat);
+            if (cache != null && AccessTools.Field(cache.GetType(), "Entries")?.GetValue(cache) is Array entries)
+                foreach (var e in entries) if (e != null) CollectDecalItems(AccessTools.Field(e.GetType(), "FxMaterial")?.GetValue(e), outItems, depth + 1, visited);
+            if (GF(t, "pairs")?.GetValue(mat) is Array pairs)
+                foreach (var pr in pairs) if (pr != null) { var g = PairGuid(pr); if (!GuidIsNull(g)) CollectDecalItems(TryLoadMaterial(g), outItems, depth + 1, visited); }
+            foreach (var fn in new[] { "defaultMaterial", "invalidNameMaterial" })
+            { var g = GF(t, fn)?.GetValue(mat); if (g != null && !GuidIsNull(g)) CollectDecalItems(TryLoadMaterial(g), outItems, depth + 1, visited); }
+        }
+
+        // Resolve a district's main level-build channel index (static field mainLevelBuildComponantLayer; the shared
+        // mainLayerCached is only set on the injection path, so compute it here for the scoped path too).
+        static int ResolveMainLayer(object district)
+        {
+            if (mainLayerCached >= 0) return mainLayerCached;
+            var lf = district.GetType().GetField("mainLevelBuildComponantLayer", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.FlattenHierarchy);
+            mainLayerCached = lf?.GetValue(null) is int li ? li : 0;
+            return mainLayerCached;
+        }
+
         // GROUND MATERIAL under a custom district (the "maintained grass field"): vanilla resolves a
         // GroundMaterialDefinition from (Biome × ConstructibleVisualAffinity) and calls ApplyGroundMaterialDefinition
         // (index into criteria 24). Our wonder's affinity has no row for this biome → index 0 → bare sand. This
         // postfix forces a chosen ground-material index for our registry districts — the game's own terrain paint,
         // blended, not a flat mesh. Also dumps the ground-material vocabulary once (DistrictDebug) so a name can be picked.
-        static bool groundNamesDumped; static readonly HashSet<string> groundLogged = new HashSet<string>();
+        static bool groundNamesDumped; static int groundApplyCount; static readonly HashSet<string> groundLogged = new HashSet<string>();
         internal static void DistrictApplyGroundMaterial(object district)
         {
             try
             {
                 EnsureDistrictConfig();
-                if (!distOn) return;
+                // NOT gated by distOn (DistrictRepoint) any more: this per-district registry setting must apply for the
+                // SCOPED path (DistrictSelectorTile, DistrictRepoint=false) too — otherwise the preview honors the registry
+                // but in-game the district sits on bare terrain. The entry==null guard keeps it to our registered districts.
+                if (distModels.Count == 0) return;
                 var name = GetMember(district, "ConstructibleDefinitionName")?.ToString();
                 if (string.IsNullOrEmpty(name)) return;
                 DistrictModel entry = null; foreach (var e in distModels) if (e.district == name) { entry = e; break; }
@@ -231,6 +630,10 @@ namespace HumankindAssetFramework
                 if (apply != null && apply.GetParameters().Length == 1)
                 {
                     apply.Invoke(district, new object[] { entry.groundIdx });
+                    // DIAGNOSTIC (DistrictDebug): log the first ~90 applies with frame numbers — a BURST of consecutive
+                    // frames = we're re-applying every frame (oscillation); sparse/one = it's settling. Tells us the real cause.
+                    if (Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value && groundApplyCount < 90)
+                    { groundApplyCount++; Plugin.Log.LogInfo($"[Ground] '{name}': applied '{want}' idx={entry.groundIdx} @ frame {UnityEngine.Time.frameCount} (call #{groundApplyCount})"); }
                     if (groundLogged.Add(name)) Plugin.Diag($"[Ground] '{name}': forced ground material '{want}' (index {entry.groundIdx}) — maintained field under the district.");
                 }
             }
@@ -410,7 +813,10 @@ namespace HumankindAssetFramework
             try
             {
                 EnsureDistrictConfig();
-                if (!distOn) return;
+                // NOT gated by distOn (DistrictRepoint) any more: this per-district registry setting must apply for the
+                // SCOPED path (DistrictSelectorTile, DistrictRepoint=false) too — otherwise the preview honors the registry
+                // but in-game the district sits on bare terrain. The entry==null guard keeps it to our registered districts.
+                if (distModels.Count == 0) return;
                 var name = GetMember(district, "ConstructibleDefinitionName")?.ToString();
                 if (string.IsNullOrEmpty(name)) return;
                 DistrictModel entry = null; foreach (var e in distModels) if (e.district == name) { entry = e; break; }
