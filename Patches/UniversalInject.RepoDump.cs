@@ -275,7 +275,7 @@ namespace HumankindAssetFramework
                 if (totalFilled > 0 && !districtReresolved) { districtReresolved = true; ForceDistrictReresolve(); }
                 // Then bind a real building output layer onto our (null-outputLayer) element so the reactor mesh draws on
                 // top of the footprint. Selectors load async after the re-resolve, so retry each poll until it binds once.
-                if (districtReresolved) BindReactorBuilding();
+                if (districtReresolved) BindReactorBuilding(null);   // legacy shared DistrictMainRows path (no per-district S)
             }
             catch (Exception ex) { if (districtMainLogged.Add("ex")) Plugin.Log.LogError("[DistrictMain] " + ex); }
         }
@@ -364,30 +364,34 @@ namespace HumankindAssetFramework
                     // DIAGNOSTIC: the channel still holds the NATIVE Industry selector the first frame — dump its element
                     // tree next to ours so we can see the ground element the old (isolate) path kept and we lost.
                     if (curMat != null && !ReferenceEquals(curMat, sel)) { DumpSelectorElements(curMat, "NATIVE", name); DumpSelectorElements(sel, "OURS", name); DumpNativeGroundCandidates(curMat, name); }
-                    if (ReferenceEquals(curMat, sel)) { anySet = true; continue; }   // already ours this frame
-                    // TWITCH DIAG: we only reach here when the channel ISN'T ours — i.e. the game reset it and we're re-emitting
-                    // (RefreshChannel re-renders the whole selector incl. footprint). If this logs steadily, the footprint
-                    // structure is re-emitting every frame = the twitch the user spotted.
-                    if (Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value && scopedReemitLog < 40)
-                    { scopedReemitLog++; Plugin.Log.LogInfo($"[TwitchDiag] '{name}': channel wasn't ours ('{GetMember(curMat, "name")}') — re-emitting selector @ frame {UnityEngine.Time.frameCount} (re-emit #{scopedReemitLog})"); }
-                    fiChanEvolverMaterial.SetValue(box, sel);
-                    channels.SetValue(box, layer);   // write the mutated struct back into the array
-                    if (miRefreshChannel == null)
-                        miRefreshChannel = plbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
-                            .FirstOrDefault(m => m.Name == "RefreshChannel" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
-                    if (miRefreshChannel != null)
+                    if (ReferenceEquals(curMat, sel)) anySet = true;   // already ours this frame
+                    else
                     {
-                        var ra = new object[] { layer, System.Enum.ToObject(miRefreshChannel.GetParameters()[1].ParameterType, 0) };
-                        try { miRefreshChannel.Invoke(plbc, ra); } catch { }
+                        // TWITCH DIAG: the channel ISN'T ours — the game reset it and we're re-emitting (RefreshChannel
+                        // re-renders the whole selector incl. footprint). Steady logging here = the footprint re-emitting
+                        // every frame = the twitch the user spotted.
+                        if (Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value && scopedReemitLog < 40)
+                        { scopedReemitLog++; Plugin.Log.LogInfo($"[TwitchDiag] '{name}': channel wasn't ours ('{GetMember(curMat, "name")}') — re-emitting selector @ frame {UnityEngine.Time.frameCount} (re-emit #{scopedReemitLog})"); }
+                        fiChanEvolverMaterial.SetValue(box, sel);
+                        channels.SetValue(box, layer);   // write the mutated struct back into the array
+                        if (miRefreshChannel == null)
+                            miRefreshChannel = plbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                                .FirstOrDefault(m => m.Name == "RefreshChannel" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
+                        if (miRefreshChannel != null)
+                        {
+                            var ra = new object[] { layer, System.Enum.ToObject(miRefreshChannel.GetParameters()[1].ParameterType, 0) };
+                            try { miRefreshChannel.Invoke(plbc, ra); } catch { }
+                        }
+                        anySet = true;
+                        if (selectorTileLogged.Add(name + ":set")) Plugin.Log.LogInfo($"[DistrictTile] '{name}': our selector placed on channel {layer} (this tile only; shared affinity untouched).");
                     }
-                    anySet = true;
-                    if (selectorTileLogged.Add(name + ":set")) Plugin.Log.LogInfo($"[DistrictTile] '{name}': our selector placed on channel {layer} (this tile only; shared affinity untouched).");
+                    // PER-DISTRICT (S = this district's state): bind its element to its OWN donor-layer clone, then bind its
+                    // albedo + drive its flatten. These ran AFTER the loop before — so only the LAST scoped district got
+                    // processed (a 2nd district rendered untextured / shared the first's layer). Now each owns its state.
+                    BindReactorBuilding(name);
+                    ApplyScopedAlbedo();
+                    UpdateMeshFlatness();
                 }
-                // once our selector is on a channel, bind its null-outputLayer element's building layer (reuses the walk)
-                if (anySet) BindReactorBuilding();
-                // then bind the district's OWN albedo atlas onto that layer so the reactor wears its texture, not brick
-                ApplyScopedAlbedo();
-                UpdateMeshFlatness();   // FLAT footprint: squash the mesh flat on the strategic map (config DistrictFootprintMeshFlat)
             }
             catch (Exception ex) { if (selectorTileLogged.Add("ex")) Plugin.Log.LogError("[DistrictTile] " + ex); }
         }

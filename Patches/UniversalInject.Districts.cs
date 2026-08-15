@@ -907,16 +907,20 @@ namespace HumankindAssetFramework
             finally { inForcedReresolve = false; }
         }
 
-        static bool reactorBound;   // the building output-layer bind succeeded this session (stop re-scanning)
         // DEDICATED-VISUAL HYBRID, final piece: our data-authored selector renders its footprint DECALS (they carry
         // bundle output-layers) but its ONE building element was baked with outputLayer=null (FxOutputLayer is an
-        // un-authorable bundle asset — we could not serialize a reference). So the reactor mesh draws nothing. Here we
-        // walk every tracked district's live channel, find our element (the ONLY leaf with a null outputLayer — every
-        // vanilla leaf has one), borrow a real BUILDING output layer from a vanilla leaf, clone it private, bind it onto
-        // our element, and re-Load so meshIndex + outputLayerIndex resolve. Runs on the poll until it binds once.
-        internal static bool BindReactorBuilding()
+        // un-authorable bundle asset — we could not serialize a reference). So the mesh draws nothing. Here we find our
+        // element (the ONLY leaf with a null outputLayer — every vanilla leaf has one), borrow a real BUILDING output
+        // layer from a vanilla leaf, clone it PRIVATE, bind it on, and re-Load so meshIndex + outputLayerIndex resolve.
+        // PER-DISTRICT (onlyName != null): targets come ONLY from `onlyName`'s tiles and bind to THIS district's own clone
+        // (S.donorClone), so a 2nd scoped district gets its own layer instead of sharing the first's. `onlyName` is the
+        // current S's district; gated by S.donorClone (bound once per district). onlyName == null = the legacy shared
+        // DistrictMainRows path (one selector for a whole affinity, no per-district S) — bind all targets once. The donor
+        // layer is borrowed from ANY vanilla building (our scoped selector has none — its leaves are our element + decals).
+        static bool reactorBoundGlobal;   // legacy DistrictMainRows (onlyName==null) once-flag
+        internal static bool BindReactorBuilding(string onlyName)
         {
-            if (reactorBound || distFxManager == null || trackedDistricts.Count == 0) return false;
+            if ((onlyName == null ? reactorBoundGlobal : S.donorClone != null) || distFxManager == null || trackedDistricts.Count == 0) return false;
             try
             {
                 object donorLayer = null;                          // a vanilla building's outputLayer (non-null)
@@ -931,6 +935,7 @@ namespace HumankindAssetFramework
                 foreach (var d in trackedDistricts)
                 {
                     if (d is UnityEngine.Object duo && duo == null) continue;
+                    var nm = GetMember(d, "ConstructibleDefinitionName")?.ToString();   // only THIS district contributes targets
                     var plbc = (fiDistrictPlbc ?? (fiDistrictPlbc = AccessTools.Field(d.GetType(), "presentationLevelBuildComponent")))?.GetValue(d);
                     if (plbc == null || !(fiPlbcChannels?.GetValue(plbc) is Array channels)) continue;
                     int layer = mainLayerCached >= 0 ? mainLayerCached : 0;
@@ -946,8 +951,8 @@ namespace HumankindAssetFramework
                     {
                         var olF = GF(leaf.GetType(), "outputLayer"); if (olF == null) continue;
                         var ol = olF.GetValue(leaf) as UnityEngine.Object;
-                        if (ol == null) { targets.Add(leaf); thisPlbcHasTarget = true; }
-                        else if (donorLayer == null) donorLayer = ol;   // first real building output layer we see
+                        if (ol == null) { if (onlyName == null || nm == onlyName) { targets.Add(leaf); thisPlbcHasTarget = true; } }   // OUR element (this district's, or all in the legacy path)
+                        else if (donorLayer == null) donorLayer = ol;   // borrow the first real building output layer from ANY district
                     }
                     if (thisPlbcHasTarget) refreshPlbcs.Add(plbc);
                 }
@@ -987,11 +992,14 @@ namespace HumankindAssetFramework
                         try { miRefreshChannel.Invoke(plbc, ra); } catch { }
                     }
                 }
-                scopedDonorClone = donorClone;                      // keep the private layer so we can bind OUR albedo on it
-                scopedElements.Clear(); scopedElements.AddRange(targets);
-                scopedRefreshPlbcs.Clear(); scopedRefreshPlbcs.AddRange(refreshPlbcs);
-                reactorBound = true;
-                Plugin.Log.LogInfo($"[DistrictMain] bound our reactor building output layer onto {bound} element(s) across {refreshPlbcs.Count} tile(s) (donor='{donorLayer}') — the reactor should now render on the footprint.");
+                if (onlyName != null)
+                {
+                    scopedDonorClone = donorClone;                  // THIS district's own private layer (S.donorClone) — bind OUR albedo on it
+                    scopedElements.Clear(); scopedElements.AddRange(targets);
+                    scopedRefreshPlbcs.Clear(); scopedRefreshPlbcs.AddRange(refreshPlbcs);
+                }
+                else reactorBoundGlobal = true;                    // legacy shared path: elements hold the clone via their outputLayer; no per-district S
+                Plugin.Log.LogInfo($"[DistrictMain] '{onlyName ?? "MainRows(shared)"}': bound {bound} building element(s) across {refreshPlbcs.Count} tile(s) (donor='{donorLayer}') — renders on the footprint.");
                 return true;
             }
             catch (Exception ex) { Plugin.Log.LogError("[DistrictMain] bind reactor building: " + ex); return false; }
@@ -1414,10 +1422,10 @@ namespace HumankindAssetFramework
         {
             distFxManager = null;
             trackedDistricts.Clear(); lastLevelBuildEvent = null; haveLevelBuildEvent = false;   // instances/args reference the dead session
-            reactorBound = false; bindLog.Clear();   // re-bind the building output layer against the new session's leaves
+            bindLog.Clear();   // re-bind the building output layers against the new session's leaves
             loadedSelectorByKey.Clear(); selectorTileLogged.Clear();   // loaded selectors reference the dead session's FxManager
-            scopedDonorClone = null; scopedElements.Clear(); scopedRefreshPlbcs.Clear(); scopedAtlasGuid = null;
-            scopedAlbedo = null; scopedBoundSlots.Clear(); scopedTexApplied = false; scopedTexWait = 0; scopedTexErrors = 0; scopedTexLog.Clear();
+            scopedStates.Clear(); S = new ScopedState();   // ALL per-district scoped state (donorClone/albedo/elements/B&W/flatten) referenced the dead session
+            reactorBoundGlobal = false; scopedTexLog.Clear(); scopedShaderDumped.Clear();   // legacy once-flag + global diag throttles
             foreach (var d in distModels)
             {
                 d.tiles.Clear(); d.privateLeaf = null; d.leaves.Clear(); d.collected = false;
