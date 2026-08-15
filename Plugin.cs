@@ -55,6 +55,7 @@ namespace HumankindAssetFramework
         internal static ConfigEntry<string> DistrictFootprintMeshBW;       // "true" = when the persistent mesh footprint is on the STRATEGIC map (zoomed out), bind a GREYSCALE copy of its albedo so the reactor reads black-and-white; full colour up close. Needs DistrictFootprintMesh=true
         internal static ConfigEntry<string> DistrictFootprintMeshFlat;     // "true" = SQUASH the persistent mesh flat (size.y -> ~0) while on the strategic map, so the footprint reads as a FLAT reactor-shaped sheet instead of a 3D model; full height up close. Needs DistrictFootprintMesh=true
         internal static ConfigEntry<string> DistrictFootprintMeshHideDecal; // "true" (default) = when the mesh footprint is on, DROP the template's baked footprint DECAL item(s) (the inherited donor outline that shows beneath the mesh). Needs DistrictFootprintMesh=true
+        internal static ConfigEntry<string> DistrictFootprintMeshFlatHeight; // flatten HEIGHT (size.y multiplier) on the strategic map: ~0.02 = paper-flat (edges can drown in rising terrain), up toward 1 = full 3D. Tune in the F8 window until it reads flat yet clears the ground
         // --- EXPERIMENTAL: generic GPU mesh-buffer overrides (units, districts, any content layer) ---
         internal static ConfigEntry<string> BufferOverrides;     // per-layer overrides "<nameSubstr>:verts=+N,idx=+N,meshes=+N,maxtris=N;..." applied at layer creation
         internal static ConfigEntry<int>    SkeletonBoneBudget;  // shared per-frame animated-bone pool size (vanilla 65,535; high-bone customs overflow it -> spike plague)
@@ -195,6 +196,11 @@ namespace HumankindAssetFramework
                                   "into its selector (inherited from the donor/template it was built from, e.g. a MissileSilo outline) is redundant and shows " +
                                   "THROUGH/beneath the mesh. 'true' (default) drops those footprint decal item(s) so only the mesh reads. Set 'false' to keep " +
                                   "the decal. Needs DistrictFootprintMesh=true.");
+            DistrictFootprintMeshFlatHeight = Config.Bind("District", "DistrictFootprintMeshFlatHeight", "0.17",
+                                  "Tuning for DistrictFootprintMeshFlat: the flatten HEIGHT = the size.y multiplier applied on the strategic map. ~0.02 is " +
+                                  "paper-flat, but the sheet is then coplanar with the ground so its edges drown where the tile's terrain rises over them; up " +
+                                  "toward 1.0 is full 3D. The sweet spot reads flat yet still pokes clear of the terrain. Tune it LIVE in the F8 window " +
+                                  "(vertical placement is terrain-owned, so this — not a lift — is the lever). Default 0.08.");
             DistrictSelectorTile = Config.Bind("District", "DistrictSelectorTile", "",
                                   "SCOPED dedicated-visual: put a DATA-AUTHORED district selector on ONLY the named district's own tile(s) " +
                                   "(matched by ConstructibleDefinitionName), leaving the shared visual affinity — and every other district using " +
@@ -449,6 +455,20 @@ namespace HumankindAssetFramework
             // and each ruled unit's composed size here is what makes an authoring pass verifiable without the log.
             GUILayout.Label("Unit resize — Resize Lab rules x Global Era Lab grid:");
             foreach (var l in UniversalInject.ResizeStatusLines()) GUILayout.Label(l);
+            GUILayout.Space(4);
+            // Strategic footprint — live-tune the flatten HEIGHT (zoom out to the reactor to see it change).
+            GUILayout.Label("Strategic footprint — flatten height (zoom out to see; 0.02 = flat, 1 = full 3D):");
+            using (new GUILayout.HorizontalScope())
+            {
+                float h = UniversalInject.FlatHeightValue();
+                GUILayout.Label($"height = {h:0.00}", GUILayout.Width(110));
+                if (GUILayout.Button("-0.05", GUILayout.Width(55))) UniversalInject.NudgeFlatHeight(-0.05f);
+                if (GUILayout.Button("-0.01", GUILayout.Width(55))) UniversalInject.NudgeFlatHeight(-0.01f);
+                if (GUILayout.Button("+0.01", GUILayout.Width(55))) UniversalInject.NudgeFlatHeight(+0.01f);
+                if (GUILayout.Button("+0.05", GUILayout.Width(55))) UniversalInject.NudgeFlatHeight(+0.05f);
+                float nv = GUILayout.HorizontalSlider(h, 0.02f, 1f, GUILayout.Width(160));
+                if (Mathf.Abs(nv - h) > 0.001f) UniversalInject.SetFlatHeight(nv);
+            }
             GUILayout.Space(4);
             GUILayout.Label("GPU mesh buffer (live) — Shift+F8 also logs it:");
             foreach (var l in UniversalInject.MeshBudgetLines()) GUILayout.Label(l);

@@ -1161,14 +1161,33 @@ namespace HumankindAssetFramework
         // swap. `size` scales the element (the scoped setup already uses size=0 to HIDE props — line ~702), so size.y->~0
         // collapses the mesh into a flat sheet. size feeds GPU via WriteToGPUData, so re-emit on the crossover only.
         static bool? meshFlatState;
+        static float lastFlatHeight = float.NaN;
+        static float runtimeFlatHeight = float.NaN;   // in-game F8-window override; NaN = use the config value
+        internal static object scopedFlatSel;   // the reactor's selector (set by KeepDistrictMeshAtStrategicZoom)
         static readonly Dictionary<object, UnityEngine.Vector3> meshOrigSize = new Dictionary<object, UnityEngine.Vector3>();
+        // Flatten HEIGHT = the size.y multiplier used on the strategic map: ~0.02 = paper-flat (but coplanar with terrain,
+        // so its edges drown when the tile's ground rises over them), up toward 1 = full 3D. The sweet spot reads flat yet
+        // still pokes clear of the terrain. This is the lever that actually reaches the GPU (unlike item Position.y).
+        internal static float FlatHeightValue()
+        {
+            if (!float.IsNaN(runtimeFlatHeight)) return runtimeFlatHeight;
+            float v = 0.17f; float.TryParse(Plugin.DistrictFootprintMeshFlatHeight?.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v); return v;
+        }
+        internal static void NudgeFlatHeight(float delta) => SetFlatHeight(FlatHeightValue() + delta);
+        internal static void SetFlatHeight(float value)
+        {
+            runtimeFlatHeight = UnityEngine.Mathf.Clamp(value, 0.02f, 1f);
+            Plugin.Log.LogInfo($"[FootprintMesh] flat height -> {runtimeFlatHeight:0.00}");
+        }
         internal static void UpdateMeshFlatness()
         {
             if (Plugin.DistrictFootprintMeshFlat == null || Plugin.DistrictFootprintMeshFlat.Value != "true" || scopedElements.Count == 0) return;
             float topoVis = SchematicVis();
             if (topoVis < 0f) return;                                    // provider not ready
             bool flat = topoVis >= 0.5f;
-            if (meshFlatState.HasValue && meshFlatState.Value == flat) return;   // no change since last apply
+            float height = FlatHeightValue();
+            // re-apply on a band change OR (while flat) a live height-tuning change
+            if (meshFlatState.HasValue && meshFlatState.Value == flat && !(flat && height != lastFlatHeight)) return;
             try
             {
                 int changed = 0;
@@ -1179,12 +1198,13 @@ namespace HumankindAssetFramework
                     if (sizeF == null) continue;
                     if (!meshOrigSize.ContainsKey(el)) { if (sizeF.GetValue(el) is UnityEngine.Vector3 os) meshOrigSize[el] = os; else continue; }
                     var orig = meshOrigSize[el];
-                    sizeF.SetValue(el, flat ? new UnityEngine.Vector3(orig.x, orig.y * 0.02f, orig.z) : orig);
+                    sizeF.SetValue(el, flat ? new UnityEngine.Vector3(orig.x, orig.y * height, orig.z) : orig);   // squash to `height` (tunable) on the strategic map
                     var desc = GetMember(el, "FxEvolverDescriptor");
                     if (desc != null) AccessTools.Field(desc.GetType(), "materialDataHasChanged")?.SetValue(desc, true);
                     InvokeNoArg(el, "OnEditionChange");
                     changed++;
                 }
+                lastFlatHeight = height;
                 // re-spawn the hosting channels so the new size reaches the render data
                 foreach (var plbc in scopedRefreshPlbcs)
                 {

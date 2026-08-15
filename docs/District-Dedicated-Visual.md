@@ -206,10 +206,15 @@ stays on well past the schematic crossover, so the reactor kept its colour zoome
 `Resources.FindObjectsOfTypeAll`.
 
 **Flat when zoomed out (`DistrictFootprintMeshFlat`).** A 3D model on the flat map still reads as a model; squash it.
-`UpdateMeshFlatness()` (same Topographic signal) sets each element's `size.y → ~2%` on the schematic map, restores full
-height up close, re-emitting via `materialDataHasChanged` + `RefreshChannel` on the crossover only. (`size` is the
-element scale the scoped setup already uses `size = 0` to *hide* props with — so `size.y ≈ 0` collapses the mesh into a
-flat, grey, reactor-shaped sheet.) Result: full 3D colour building up close, flat grayscale footprint zoomed out.
+`UpdateMeshFlatness()` (same Topographic signal) scales each element's **`size.y`** by a tunable **flatten height** on the
+schematic map, restores full height up close, re-emitting via `materialDataHasChanged` + `RefreshChannel` on the crossover
+only. (`size` is the element scale the scoped setup already uses `size = 0` to *hide* props with.) **The vertical is
+terrain-owned** — the item's `Position.y` does NOT lift a level-build mesh (the selector GPU write never reads it; height
+comes from the terrain adaptation), so a lift lever is a dead end. Instead, `size.y ≈ 0.02` is paper-flat but coplanar with
+the ground and its edges drown where the tile's terrain rises over them; **`DistrictFootprintMeshFlatHeight`** (default
+**0.17**) is the sweet spot that reads flat yet pokes clear of the terrain — **live-tunable in the F8 window** (slider +
+±0.01/±0.05 buttons; `FlatHeightValue`/`SetFlatHeight`). Result: full 3D colour building up close, flat grayscale footprint
+zoomed out.
 
 **Config** (`[District]`, all need `DistrictFootprintMesh = true`): `DistrictFootprintMesh`, `DistrictFootprintMeshBW`,
 `DistrictFootprintMeshFlat`, `DistrictFootprintMeshHideDecal` (default true). Leave `DistrictFootprintMask` blank (the

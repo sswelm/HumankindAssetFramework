@@ -1060,6 +1060,7 @@ namespace HumankindAssetFramework
             if (!meshPersistLogged.Add(name)) return;   // once per district
             try
             {
+                scopedFlatSel = sel;   // remember our selector so UpdateMeshFlatness can lift its mesh items when flat
                 var elements = new List<object>();
                 CollectMeshElements(sel, elements, 0, new HashSet<object>());
                 int changed = 0;
