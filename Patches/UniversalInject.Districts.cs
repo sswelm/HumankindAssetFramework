@@ -21,13 +21,21 @@ namespace HumankindAssetFramework
             public string district = "";     // ConstructibleDefinitionName to match
             public object fxMeshGuid;        // parsed Amplitude Guid of the baked FxMesh
             public object atlasGuid;         // parsed Amplitude Guid of the baked albedo atlas (null = untextured, pre-2.0 entries)
+            public object footprintDonor;   // parsed Guid of the runtime strategic-footprint donor selector (registry-driven), null = none
+            public object selectorGuid;      // parsed Guid of this district's baked SCOPED CityMapSelector (data-authored path). Non-null -> routed through the scoped path (like the reactor), NOT the isolate/repoint path.
             public object normalAtlasGuid;   // baked normal atlas (null = neutral flat) — same rects as the albedo
             public object roughAtlasGuid;    // baked roughness atlas (null = neutral matte)
             public bool isolate = true;      // true = private per-instance leaf (this tile only); false = global shared-leaf swap
             public string groundMaterial = ""; // per-entry terrain paint (GroundMaterialDefinition name, e.g. Prairie_Grassland) — "" falls back to the global DistrictGroundMaterial config
             public int groundIdx = int.MinValue; // resolved ground-material index cache (MinValue = unresolved, -1 = name not found)
+            public bool groundApplied;           // ground paint applied once this session (re-applying restarts the blend → never settles)
             public string hexSculpt = "";    // per-entry hexagon sculpting (HexagonSculptingDefinition name) — the raised platform + strategic footprint; "" falls back to the global DistrictHexSculpt config
             public int hexIdx = int.MinValue; // resolved hexagon-sculpting index cache
+            // MESH strategic footprint (per-entry, authored in the District Factory). footprintMesh=false -> the global
+            // DistrictFootprintMesh… config stays in charge for the scoped district; true -> these values are authoritative.
+            public bool footprintMesh, footprintMeshBW, footprintMeshFlat;
+            public bool footprintMeshHideDecal = true;
+            public float footprintMeshFlatHeight = 0.17f;
             // runtime — PER-INSTANCE targeting: a district can be BUILT ON MANY TILES (one PresentationDistrict each);
             // the old single plbc slot made ownership ping-pong between instances (only the most recently updated tile
             // showed the custom model — the review's architectural finding). The private leaf + layer clone + texture
@@ -37,6 +45,19 @@ namespace HumankindAssetFramework
             public readonly List<TileState> tiles = new List<TileState>();
             public object privateLeaf;                                   // isolate mode: the Instantiated leaf (SHARED by all tiles)
             public System.Type selectorType;                             // the close-up level-build selector's type; defensive: only re-assert our leaf over THAT, don't fight a foreign material the game may put on the channel
+            // FOOTPRINT preservation (isolate mode): isolate replaces channel [0]'s selector (building + decals) with our
+            // single leaf, amputating the footprint decals. Re-host a CLONE of the original selector on an empty channel so
+            // its decals draw at strategic zoom. origSelector captured when the leaf is first built (pre-replacement).
+            public object origSelector;                                  // the native channel-[0] selector, captured before we replaced it
+            public object decalSelector;                                 // the clone re-hosted on a free channel to keep the footprint
+            public int decalChannel = -1; public bool decalLogged, decalGaveUp;
+            // DEEP-CLONE mode (footprint fix): a fully-private copy of channel [0]'s selector tree — every non-decal node
+            // Instantiated once (memoized), building ELEMENT leaves' fxMesh swapped to ours, DECAL leaves left shared. Put
+            // on channel [0] so our mesh + the surviving footprint decals both render, scoped to this tile only.
+            public object clonedSelector; public System.Collections.Generic.Dictionary<object, object> cloneMap;
+            public bool cloneLogged; public int cloneReassert;
+            public object deepLayer;   // deep-clone: ONE private FxOutputLayer shared by every swapped reactor element (our albedo bound on it)
+            public int domeCounter;    // deep-clone: running count of building-slot emissions, for thinning the reactor-dome count
             public readonly List<object> leaves = new List<object>();    // global mode: collected shared leaves
             public bool collected, matchLogged;
             // texture injection runtime (isolate mode)
@@ -94,9 +115,19 @@ namespace HumankindAssetFramework
                                 atlasGuid = ParseGuid4((string)d["atlasGuid"] ?? ""),   // optional: entries baked before texture injection have none
                                 normalAtlasGuid = ParseGuid4((string)d["normalAtlasGuid"] ?? ""),
                                 roughAtlasGuid = ParseGuid4((string)d["roughAtlasGuid"] ?? ""),
-                                isolate = (bool?)d["isolate"] ?? true,
+                                footprintDonor = ParseGuid4((string)d["footprintDonor"] ?? ""),   // registry-driven strategic-footprint donor (null = none)
+                                // SPIKE: DistrictIsolate config (default true) now OVERRIDES the JSON when set false, so we
+                                // can force a registry entry into TRUE global mode for the footprint test. Without this the
+                                // reactor's JSON isolate=true silently won every "global" test. Otherwise honour the JSON.
+                                isolate = (Plugin.DistrictIsolate != null && !Plugin.DistrictIsolate.Value) ? false : ((bool?)d["isolate"] ?? true),
                                 groundMaterial = (string)d["groundMaterial"] ?? "",
                                 hexSculpt = (string)d["hexSculpt"] ?? "",
+                                footprintMesh = (bool?)d["footprintMesh"] ?? false,
+                                footprintMeshBW = (bool?)d["footprintMeshBW"] ?? false,
+                                footprintMeshFlat = (bool?)d["footprintMeshFlat"] ?? false,
+                                footprintMeshFlatHeight = (float?)d["footprintMeshFlatHeight"] ?? 0.17f,
+                                footprintMeshHideDecal = (bool?)d["footprintMeshHideDecal"] ?? true,
+                                selectorGuid = ParseGuid4((string)d["selectorGuid"] ?? ""),   // baked scoped CityMapSelector -> the scoped rendering path
                             };
                             if (e.district.Length > 0 && e.fxMeshGuid != null) distModels.Add(e);
                             else Plugin.Log.LogWarning($"[District] registry entry skipped (district='{e.district}', bad fxMeshGuid?)");
@@ -263,6 +294,9 @@ namespace HumankindAssetFramework
         // The leaf that holds geometry is FxEvolverMaterialLevelBuildElement with an `fxMesh` Guid field. Reached via:
         //   Selector.pairs[culture] -> Emitter.levelBuildItems[].loadedEvolverMaterial -> Element(.fxMesh)  (Emitters nest).
         static readonly List<object> distLeaves = new List<object>();   // legacy shared list (single-model path)
+        static bool UseDeepClone = false;   // SPIKE: deep-clone footprint hack — PARKED. The proper path is a data-authored district visual (see District-Dedicated-Visual-Feasibility.md), not runtime selector surgery.
+        static float DeepCloneBuildingMinSize = 0.35f;   // deep-clone: swap building slots this big (bbox max dim) to our mesh; hide smaller props
+        static int DeepCloneKeepEvery = 1;               // deep-clone: keep 1 in N large building slots as our reactor (1 = swap ALL large, no thinning → no mid-zoom gaps)
         static FieldInfo GF(Type t, string n) => t.GetField(n, BF);      // no AccessTools warning-on-miss (probing spams the log)
         static void CollectLeaves(object mat, List<object> outLeaves, int depth, HashSet<object> visited)
         {
@@ -303,6 +337,9 @@ namespace HumankindAssetFramework
                 if (lf == null) continue;
                 lf.SetValue(leaf, fxGuid);   // persists our GUID so any game re-Load also uses ours
                 n++;
+                // FALSIFIED (footprint cheap shot, 08-09): forcing a small bbox (useCustomBBox + Bounds 0.15^3) on the
+                // swapped leaves did NOT summon the footprint at strategic zoom. So the element->decal selection is NOT
+                // driven by the element's BBoxMin/BBoxMax the way we hoped — bbox is ruled out as the gate.
                 if (resolve && distFxManager != null)
                 {
                     try
@@ -511,6 +548,7 @@ namespace HumankindAssetFramework
                     var sel = evf.GetValue(box);
                     if (sel == null) return;
                     if (e.selectorType == null) e.selectorType = sel.GetType();   // the close-up selector we're allowed to override
+                    if (e.origSelector == null && sel is UnityEngine.Object) e.origSelector = sel;   // capture BEFORE we replace it (footprint source)
                     e.privateLeaf = BuildPrivateLeaf(sel, e.fxMeshGuid, e.atlasGuid);
                     // WONDER path: a database-fed selector (fillMode LevelBuildDatabase) has no inline leaves to walk —
                     // source them from the PLUGIN-LOADED template material instead (swap-first sequencing: the wonder's
@@ -543,6 +581,236 @@ namespace HumankindAssetFramework
                 if (!t.pointedLogged) { t.pointedLogged = true; Plugin.Diag($"[District] '{e.district}' ISOLATED: channel {t.layer} -> the private leaf (this tile only)."); }
             }
             catch (Exception ex) { Plugin.Log.LogError("[District] point channel: " + ex); }
+        }
+
+        // Load a freshly-Instantiated FxEvolverMaterial (reset load state so LoadIFN actually re-runs and rebuilds its
+        // private runtime tree). Mirrors the load tail of BuildPrivateLeaf.
+        static void LoadFxMaterial(object mat)
+        {
+            if (mat == null || distFxManager == null) return;
+            var t = mat.GetType();
+            var ls = GF(t, "loadingStatus"); if (ls != null) ls.SetValue(mat, System.Enum.ToObject(ls.FieldType, 0));
+            if (fxNextDoublon == null) fxNextDoublon = GameBinding.FxEvolverMaterial?.GetMethod("NextDoublonAvoidanceIndex", BindingFlags.Static | BindingFlags.Public);
+            uint doublon = fxNextDoublon != null ? (uint)fxNextDoublon.Invoke(null, null) : 0u;
+            var loadIFN = t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(m => m.Name == "LoadIFN" && m.GetParameters().Length >= 1 && m.GetParameters()[0].ParameterType.Name.Contains("FxManager"));
+            if (loadIFN != null)
+            {
+                var pars = loadIFN.GetParameters();
+                var args = pars.Length == 1 ? new[] { distFxManager } : new object[] { distFxManager, doublon };
+                loadIFN.Invoke(mat, args);
+            }
+        }
+
+        // FOOTPRINT preservation (isolate mode): our private leaf on channel [0] loses the decal subtree the native
+        // selector carried. Re-host a CLONE of that native selector on a FREE (null) channel so its decals still draw —
+        // at strategic zoom the clone's building elements demote and only the footprint decals remain. (First cut: the
+        // clone still carries its buildings, so close-up may show the donor buildings behind our reactor; if so, the next
+        // step neutralizes the clone's building leaves and keeps only the decals.)
+        static void PreserveFootprintChannel(DistrictModel e, DistrictModel.TileState t)
+        {
+            try
+            {
+                if (e.decalGaveUp || e.origSelector == null || t.plbc == null) return;
+                if (fiPlbcChannels == null) fiPlbcChannels = AccessTools.Field(t.plbc.GetType(), "channels");
+                if (!(fiPlbcChannels?.GetValue(t.plbc) is Array channels)) return;
+                if (e.decalSelector == null)
+                {
+                    if (!(e.origSelector is UnityEngine.Object selUO) || selUO == null) { e.decalGaveUp = true; return; }
+                    var clone = UnityEngine.Object.Instantiate(selUO);
+                    clone.name = selUO.name + "_HAFfoot";
+                    LoadFxMaterial(clone);
+                    e.decalSelector = clone;
+                    Plugin.Diag($"[District] '{e.district}': cloned footprint selector '{clone.name}'.");
+                }
+                // pick a free (null-material) channel to host the footprint, once
+                if (e.decalChannel < 0)
+                {
+                    for (int i = 0; i < channels.Length; i++)
+                    {
+                        var b = channels.GetValue(i); if (b == null) continue;
+                        if (fiChanEvolverMaterial == null) fiChanEvolverMaterial = GF(b.GetType(), "evolverMaterial");
+                        if (fiChanEvolverMaterial?.GetValue(b) == null) { e.decalChannel = i; break; }
+                    }
+                    if (e.decalChannel < 0) { e.decalGaveUp = true; Plugin.Diag($"[District] '{e.district}': no free channel for footprint — gave up."); return; }
+                }
+                var box = channels.GetValue(e.decalChannel); if (box == null) { e.decalGaveUp = true; return; }
+                var ef = fiChanEvolverMaterial; if (ef == null) return;
+                if (ReferenceEquals(ef.GetValue(box), e.decalSelector)) return;   // already hosted this frame
+                ef.SetValue(box, e.decalSelector);
+                channels.SetValue(box, e.decalChannel);
+                if (miRefreshChannel == null)
+                {
+                    miRefreshChannel = t.plbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                        .FirstOrDefault(m => m.Name == "RefreshChannel" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
+                    if (miRefreshChannel != null) refreshArgs = new object[] { 0, System.Enum.ToObject(miRefreshChannel.GetParameters()[1].ParameterType, 0) };
+                }
+                if (miRefreshChannel != null) { refreshArgs[0] = e.decalChannel; miRefreshChannel.Invoke(t.plbc, refreshArgs); }
+                if (!e.decalLogged) { e.decalLogged = true; Plugin.Diag($"[District] '{e.district}': footprint selector hosted on channel {e.decalChannel}."); }
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[District] preserve footprint: " + ex); }
+        }
+
+        // Clone an FxOutputLayer private (the texture-injection layer): opt out of hi-res streaming (null the mid/high
+        // material GUIDs so the game never stomps our binding) and raise the per-mesh primitive ceiling. Same recipe as
+        // BuildPrivateLeaf's inline layer clone, factored out so the deep-clone reactor elements can share ONE such layer.
+        static UnityEngine.Object ClonePrivateOutputLayer(UnityEngine.Object srcLayer)
+        {
+            var layerClone = UnityEngine.Object.Instantiate(srcLayer);
+            layerClone.name = srcLayer.name + "_HAF";
+            if (GetMember(layerClone, "RenderOutputs") is Array ros)
+                foreach (var ro in ros)
+                    foreach (var gn in new[] { "midResMaterialGuid", "highResMaterialGuid" })
+                    { var gf2 = ro?.GetType().GetField(gn, BF); if (gf2 != null) gf2.SetValue(ro, Activator.CreateInstance(gf2.FieldType)); }
+            int boost = Plugin.DistrictMeshDensityBoost != null ? Plugin.DistrictMeshDensityBoost.Value : 8;
+            if (boost > 1)
+            {
+                var ppcF = layerClone.GetType().GetField("primitivePerParticleCount", BF);
+                if (ppcF?.GetValue(layerClone) is int ppc && ppc > 0) ppcF.SetValue(layerClone, ppc * boost);
+            }
+            return layerClone;
+        }
+
+        // DEEP CLONE (footprint fix): recursively Instantiate a fully-private copy of the selector tree. Every non-decal
+        // node is cloned once (memoized by original, so a leaf shared N times → one private clone repointed everywhere);
+        // building ELEMENT leaves get our fxMesh; DECAL leaves are kept SHARED (unmodified — that's the footprint). Loaded
+        // child references (selector cache Entries[].FxMaterial, emitter levelBuildItems[].loadedEvolverMaterial) are
+        // repointed at the clones. Load runs per node so element meshIndex re-resolves and selector caches build first.
+        static object DeepCloneMat(DistrictModel e, object mat, object fxGuid, System.Collections.Generic.Dictionary<object, object> map, int depth)
+        {
+            if (mat == null || depth > 10) return mat;
+            if (map.TryGetValue(mat, out var done)) return done;
+            if (!(mat is UnityEngine.Object uo) || uo == null) { map[mat] = mat; return mat; }
+            if (mat.GetType().Name.Contains("Decal")) { map[mat] = mat; return mat; }   // keep the footprint decals shared/unmodified
+            var clone = UnityEngine.Object.Instantiate(uo);
+            map[mat] = clone;
+            var t = clone.GetType();
+            bool swappedReactor = false;
+            if (t.Name.Contains("BuildElement"))
+            {
+                // The donor district emits MANY building slots (factory sprawl). Swap the LARGE slots (main buildings) to
+                // our reactor mesh, HIDE the small props (size -> 0). Reactor slots share ONE private output layer so our
+                // albedo (bound by DistrictApplyTexture) textures them all — otherwise they'd wear the donor's sheet (the
+                // garbled multi-colour look).
+                float maxDim = 0f;
+                var bboxV = GF(t, "bbox")?.GetValue(clone);
+                if (bboxV != null) { try { if (bboxV.GetType().GetProperty("size", BF)?.GetValue(bboxV) is UnityEngine.Vector3 sz) maxDim = Math.Max(sz.x, Math.Max(sz.y, sz.z)); } catch { } }
+                // Thin the reactor count PROPORTIONALLY: the ~349 distinct donor slots are spread across the district, so a
+                // walk-order cap kept the wrong (off-hex) ones. Instead keep every DeepCloneKeepEvery-th LARGE slot as our
+                // reactor and HIDE the rest (size -> 0) — the visible subset thins evenly. Small props always hidden.
+                bool bigEnough = maxDim >= DeepCloneBuildingMinSize;
+                if (bigEnough && (++e.domeCounter % DeepCloneKeepEvery) == 0)
+                {
+                    (GF(t, "fxMesh") ?? GF(t, "mesh"))?.SetValue(clone, fxGuid);
+                    swappedReactor = true;
+                    if (e.atlasGuid != null)
+                    {
+                        var olF = GF(t, "outputLayer");
+                        if (e.deepLayer == null && olF?.GetValue(clone) is UnityEngine.Object src && src != null) e.deepLayer = ClonePrivateOutputLayer(src);
+                        if (e.deepLayer != null) olF?.SetValue(clone, e.deepLayer);
+                        if (e.privateLeaf == null) e.privateLeaf = clone;   // representative leaf: DistrictApplyTexture/BindAlbedo bind our albedo on e.deepLayer
+                    }
+                }
+                else GF(t, "size")?.SetValue(clone, UnityEngine.Vector3.zero);   // thinned-out large slot, or a small prop -> hide
+            }
+            LoadFxMaterial(clone);   // element: re-resolve meshIndex from our mesh; selector/emitter: build the cache from GUIDs
+            if (swappedReactor && e.deepLayer != null) GF(t, "textureIndex")?.SetValue(clone, 1);   // sample the full-texture slot [0,1] -> our bound sheet
+            var cache = GF(t, "fxMaterialCacheEntries")?.GetValue(clone);
+            if (cache != null && GF(cache.GetType(), "Entries")?.GetValue(cache) is Array entries)
+                for (int i = 0; i < entries.Length; i++)
+                {
+                    var en = entries.GetValue(i); if (en == null) continue;
+                    var fmF = GF(en.GetType(), "FxMaterial"); var child = fmF?.GetValue(en);
+                    if (child != null) { fmF.SetValue(en, DeepCloneMat(e, child, fxGuid, map, depth + 1)); entries.SetValue(en, i); }
+                }
+            if (GF(t, "levelBuildItems")?.GetValue(clone) is Array items)
+                for (int i = 0; i < items.Length; i++)
+                {
+                    var it = items.GetValue(i); if (it == null) continue;
+                    var lmF = GF(it.GetType(), "loadedEvolverMaterial"); var child = lmF?.GetValue(it);
+                    if (child != null) { lmF.SetValue(it, DeepCloneMat(e, child, fxGuid, map, depth + 1)); items.SetValue(it, i); }
+                }
+            return clone;
+        }
+
+        // Reload/async defense: the selector resolves its `pairs` variants into the cache ASYNCHRONOUSLY — many building
+        // elements land AFTER the initial DeepCloneMat walk, so they stay shared donor (the mid-zoom LOD leak: 408 donor
+        // meshes vs 75 of ours). Walk the clone and for EVERY resolved child, ensure it's our private clone: memoized ones
+        // are repointed instantly, newcomers are DeepCloneMat'd on the spot (clone + swap/hide + thin, all memoized so each
+        // distinct element is done once). Also re-asserts if the game rebuilds a cache from GUIDs.
+        static void EnsurePrivate(DistrictModel e, object mat, object fxGuid, System.Collections.Generic.Dictionary<object, object> map, HashSet<object> visited, int depth)
+        {
+            if (mat == null || depth > 10 || !visited.Add(mat)) return;
+            var t = mat.GetType();
+            var cache = GF(t, "fxMaterialCacheEntries")?.GetValue(mat);
+            if (cache != null && GF(cache.GetType(), "Entries")?.GetValue(cache) is Array entries)
+                for (int i = 0; i < entries.Length; i++)
+                {
+                    var en = entries.GetValue(i); if (en == null) continue;
+                    var fmF = GF(en.GetType(), "FxMaterial"); var child = fmF?.GetValue(en);
+                    if (child == null) continue;
+                    var repl = map.TryGetValue(child, out var cl) ? cl : DeepCloneMat(e, child, fxGuid, map, depth + 1);
+                    if (repl != null && !ReferenceEquals(child, repl)) { fmF.SetValue(en, repl); entries.SetValue(en, i); }
+                    EnsurePrivate(e, repl ?? child, fxGuid, map, visited, depth + 1);
+                }
+            if (GF(t, "levelBuildItems")?.GetValue(mat) is Array items)
+                for (int i = 0; i < items.Length; i++)
+                {
+                    var it = items.GetValue(i); if (it == null) continue;
+                    var lmF = GF(it.GetType(), "loadedEvolverMaterial"); var child = lmF?.GetValue(it);
+                    if (child == null) continue;
+                    var repl = map.TryGetValue(child, out var cl) ? cl : DeepCloneMat(e, child, fxGuid, map, depth + 1);
+                    if (repl != null && !ReferenceEquals(child, repl)) { lmF.SetValue(it, repl); items.SetValue(it, i); }
+                    EnsurePrivate(e, repl ?? child, fxGuid, map, visited, depth + 1);
+                }
+        }
+
+        // ISOLATE + deep-clone: point this tile's channel [0] at a fully-private clone of the selector (our building mesh +
+        // the surviving footprint decals), re-asserted per frame; periodic RepointFromMemo defends against reloads.
+        static void PointTileAtClonedSelector(DistrictModel e, DistrictModel.TileState t)
+        {
+            try
+            {
+                if (t.plbc == null) return;
+                if (fiPlbcChannels == null) fiPlbcChannels = AccessTools.Field(t.plbc.GetType(), "channels");
+                if (!(fiPlbcChannels?.GetValue(t.plbc) is Array channels) || t.layer >= channels.Length) return;
+                var box = channels.GetValue(t.layer);
+                if (fiChanEvolverMaterial == null) fiChanEvolverMaterial = GF(box.GetType(), "evolverMaterial");
+                var evf = fiChanEvolverMaterial; if (evf == null) return;
+                if (e.clonedSelector == null)
+                {
+                    var sel = evf.GetValue(box); if (sel == null) return;
+                    if (e.selectorType == null) e.selectorType = sel.GetType();
+                    if (!(sel is UnityEngine.Object)) return;
+                    e.cloneMap = new System.Collections.Generic.Dictionary<object, object>();
+                    var cl = DeepCloneMat(e, sel, e.fxMeshGuid, e.cloneMap, 0);
+                    if (cl == null || ReferenceEquals(cl, sel)) { if (t.wait++ % 300 == 0) Plugin.Diag($"[District] '{e.district}': deep-clone not ready, retry..."); return; }
+                    e.clonedSelector = cl;
+                    Plugin.Diag($"[District] '{e.district}': deep-cloned selector — {e.cloneMap.Count} node(s) privatized.");
+                }
+                var curMat = evf.GetValue(box);
+                if (!ReferenceEquals(curMat, e.clonedSelector))
+                {
+                    if (curMat != null && e.selectorType != null && curMat.GetType() != e.selectorType) return;   // don't fight a foreign material
+                    evf.SetValue(box, e.clonedSelector);
+                    channels.SetValue(box, t.layer);
+                    if (miRefreshChannel == null)
+                    {
+                        miRefreshChannel = t.plbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                            .FirstOrDefault(m => m.Name == "RefreshChannel" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
+                        if (miRefreshChannel != null) refreshArgs = new object[] { 0, System.Enum.ToObject(miRefreshChannel.GetParameters()[1].ParameterType, 0) };
+                    }
+                    if (miRefreshChannel != null) { refreshArgs[0] = t.layer; miRefreshChannel.Invoke(t.plbc, refreshArgs); }
+                    if (!e.cloneLogged) { e.cloneLogged = true; Plugin.Diag($"[District] '{e.district}' DEEP-CLONE: channel {t.layer} -> private selector (footprint preserved)."); }
+                }
+                // frequent early (async variants still resolving), then sparse once stable
+                int every = e.cloneReassert < 900 ? 15 : 120;
+                // EnsurePrivate DISABLED for the un-thinned mid-zoom test: it tanked perf and didn't reach the pairs-resolved
+                // mid-LOD anyway. This isolates whether the mid-zoom donor is inherent (pairs LOD) or was a thinning artifact.
+                // if (++e.cloneReassert % every == 0) EnsurePrivate(e, e.clonedSelector, e.fxMeshGuid, e.cloneMap, new HashSet<object>(), 0);
+                _ = every;
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[District] cloned selector: " + ex); }
         }
 
         // Diagnostic (DistrictDebug): dump every serializable field of the cloned leaf — the hunt for the
@@ -600,6 +868,479 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogError("[District] global swap: " + ex); }
         }
 
+        // ---- DEDICATED-VISUAL HYBRID: force a district re-resolve after the */District/Main cell fill lands ----
+        static readonly List<object> trackedDistricts = new List<object>();   // live district instances (for the replay)
+        static object lastLevelBuildEvent;            // the real HgFxAnchorComponent.EventNameEnum arg the game passes
+        static bool haveLevelBuildEvent;              // guard: only replay once we've captured a genuine arg value
+        static bool inForcedReresolve;                // re-entry guard while WE re-invoke UpdateLevelBuild
+        static MethodInfo miUpdateLevelBuild;         // cached UpdateLevelBuild(EventNameEnum)
+        internal static void CaptureLevelBuildEvent(object ev)
+        {
+            if (inForcedReresolve || ev == null) return;   // don't capture our own replayed arg (identical, but be safe)
+            lastLevelBuildEvent = ev; haveLevelBuildEvent = true;
+        }
+
+        // Replay UpdateLevelBuild on every tracked district so the game re-reads the now-filled */District/Main cell and
+        // loads OUR selector. Called ONCE after PollDistrictMainRows reports a successful fill. Uses the captured real
+        // event arg so we drive the exact resolution path the game uses itself. Re-entrant-safe via inForcedReresolve.
+        internal static void ForceDistrictReresolve()
+        {
+            if (inForcedReresolve || !haveLevelBuildEvent || trackedDistricts.Count == 0) return;
+            try
+            {
+                inForcedReresolve = true;
+                var snapshot = trackedDistricts.ToArray();   // Postfix re-adds are skipped by the guard, but snapshot anyway
+                int ok = 0, dead = 0;
+                foreach (var d in snapshot)
+                {
+                    if (d is UnityEngine.Object uo && uo == null) { dead++; continue; }
+                    if (miUpdateLevelBuild == null)
+                        miUpdateLevelBuild = d.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                            .FirstOrDefault(m => m.Name == "UpdateLevelBuild" && m.GetParameters().Length == 1);
+                    if (miUpdateLevelBuild == null) break;
+                    try { miUpdateLevelBuild.Invoke(d, new[] { lastLevelBuildEvent }); ok++; }
+                    catch (Exception ex) { Plugin.Diag("[DistrictMain] re-resolve invoke failed: " + ex.Message); }
+                }
+                Plugin.Log.LogInfo($"[DistrictMain] forced re-resolve on {ok} district(s) ({dead} dead) via UpdateLevelBuild({lastLevelBuildEvent}) — cells re-read, our selector should load now.");
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[DistrictMain] force re-resolve: " + ex); }
+            finally { inForcedReresolve = false; }
+        }
+
+        // DEDICATED-VISUAL HYBRID, final piece: our data-authored selector renders its footprint DECALS (they carry
+        // bundle output-layers) but its ONE building element was baked with outputLayer=null (FxOutputLayer is an
+        // un-authorable bundle asset — we could not serialize a reference). So the mesh draws nothing. Here we find our
+        // element (the ONLY leaf with a null outputLayer — every vanilla leaf has one), borrow a real BUILDING output
+        // layer from a vanilla leaf, clone it PRIVATE, bind it on, and re-Load so meshIndex + outputLayerIndex resolve.
+        // PER-DISTRICT (onlyName != null): targets come ONLY from `onlyName`'s tiles and bind to THIS district's own clone
+        // (S.donorClone), so a 2nd scoped district gets its own layer instead of sharing the first's. `onlyName` is the
+        // current S's district; gated by S.donorClone (bound once per district). onlyName == null = the legacy shared
+        // DistrictMainRows path (one selector for a whole affinity, no per-district S) — bind all targets once. The donor
+        // layer is borrowed from ANY vanilla building (our scoped selector has none — its leaves are our element + decals).
+        static bool reactorBoundGlobal;   // legacy DistrictMainRows (onlyName==null) once-flag
+        internal static bool BindReactorBuilding(string onlyName)
+        {
+            if ((onlyName == null ? reactorBoundGlobal : S.donorClone != null) || distFxManager == null || trackedDistricts.Count == 0) return false;
+            try
+            {
+                object donorLayer = null;                          // a vanilla building's outputLayer (non-null)
+                var targets = new List<object>();                  // our null-outputLayer element(s)
+                var refreshPlbcs = new List<object>();             // plbcs hosting a target, for RefreshChannel
+                var visited = new HashSet<object>();
+                if (fiPlbcChannels == null && trackedDistricts.Count > 0)
+                {
+                    var p0 = (fiDistrictPlbc ?? (fiDistrictPlbc = AccessTools.Field(trackedDistricts[0].GetType(), "presentationLevelBuildComponent")))?.GetValue(trackedDistricts[0]);
+                    if (p0 != null) fiPlbcChannels = AccessTools.Field(p0.GetType(), "channels");
+                }
+                foreach (var d in trackedDistricts)
+                {
+                    if (d is UnityEngine.Object duo && duo == null) continue;
+                    var nm = GetMember(d, "ConstructibleDefinitionName")?.ToString();   // only THIS district contributes targets
+                    var plbc = (fiDistrictPlbc ?? (fiDistrictPlbc = AccessTools.Field(d.GetType(), "presentationLevelBuildComponent")))?.GetValue(d);
+                    if (plbc == null || !(fiPlbcChannels?.GetValue(plbc) is Array channels)) continue;
+                    int layer = mainLayerCached >= 0 ? mainLayerCached : 0;
+                    if (layer >= channels.Length) continue;
+                    var box = channels.GetValue(layer);
+                    if (fiChanEvolverMaterial == null) fiChanEvolverMaterial = GF(box.GetType(), "evolverMaterial");
+                    var sel = fiChanEvolverMaterial?.GetValue(box);
+                    if (sel == null) continue;
+                    var leaves = new List<object>();
+                    CollectLeaves(sel, leaves, 0, visited);
+                    bool thisPlbcHasTarget = false;
+                    foreach (var leaf in leaves)
+                    {
+                        var olF = GF(leaf.GetType(), "outputLayer"); if (olF == null) continue;
+                        var ol = olF.GetValue(leaf) as UnityEngine.Object;
+                        if (ol == null) { if (onlyName == null || nm == onlyName) { targets.Add(leaf); thisPlbcHasTarget = true; } }   // OUR element (this district's, or all in the legacy path)
+                        else if (donorLayer == null) donorLayer = ol;   // borrow the first real building output layer from ANY district
+                    }
+                    if (thisPlbcHasTarget) refreshPlbcs.Add(plbc);
+                }
+                if (targets.Count == 0) { if (bindLog.Add("notgt")) Plugin.Diag("[DistrictMain] bind: no null-outputLayer element found yet (selectors still loading?)."); return false; }
+                if (donorLayer == null) { if (bindLog.Add("nodonor")) Plugin.Diag("[DistrictMain] bind: found our element(s) but no vanilla building output layer to borrow yet."); return false; }
+                var donorClone = ClonePrivateOutputLayer((UnityEngine.Object)donorLayer);
+                int bound = 0;
+                foreach (var leaf in targets)
+                {
+                    var olF = GF(leaf.GetType(), "outputLayer");
+                    olF.SetValue(leaf, donorClone);
+                    try
+                    {
+                        var load = leaf.GetType().GetMethod("Load", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                        if (load != null && load.GetParameters().Length == 2)
+                        {
+                            if (fxNextDoublon == null) fxNextDoublon = GameBinding.FxEvolverMaterial?.GetMethod("NextDoublonAvoidanceIndex", BindingFlags.Static | BindingFlags.Public);
+                            uint doublon = fxNextDoublon != null ? (uint)fxNextDoublon.Invoke(null, null) : 0u;
+                            load.Invoke(leaf, new object[] { distFxManager, doublon });
+                            var mi = AccessTools.Field(leaf.GetType(), "meshIndex")?.GetValue(leaf);
+                            var oli = AccessTools.Field(leaf.GetType(), "outputLayerIndex")?.GetValue(leaf);
+                            if (bound < 3) Plugin.Diag($"[DistrictMain]   bound element '{GetMember(leaf, "Name")}' -> meshIndex={mi} outputLayerIndex={oli}");
+                        }
+                        bound++;
+                    }
+                    catch (Exception ex) { Plugin.Diag("[DistrictMain] bind Load failed: " + ex.Message); }
+                }
+                // re-spawn each hosting channel so the render re-reads the now-resolved element indices
+                foreach (var plbc in refreshPlbcs)
+                {
+                    if (miRefreshChannel == null)
+                        miRefreshChannel = plbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                            .FirstOrDefault(m => m.Name == "RefreshChannel" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
+                    if (miRefreshChannel != null)
+                    {
+                        var ra = new object[] { mainLayerCached >= 0 ? mainLayerCached : 0, System.Enum.ToObject(miRefreshChannel.GetParameters()[1].ParameterType, 0) };
+                        try { miRefreshChannel.Invoke(plbc, ra); } catch { }
+                    }
+                }
+                if (onlyName != null)
+                {
+                    scopedDonorClone = donorClone;                  // THIS district's own private layer (S.donorClone) — bind OUR albedo on it
+                    scopedElements.Clear(); scopedElements.AddRange(targets);
+                    scopedRefreshPlbcs.Clear(); scopedRefreshPlbcs.AddRange(refreshPlbcs);
+                }
+                else reactorBoundGlobal = true;                    // legacy shared path: elements hold the clone via their outputLayer; no per-district S
+                Plugin.Log.LogInfo($"[DistrictMain] '{onlyName ?? "MainRows(shared)"}': bound {bound} building element(s) across {refreshPlbcs.Count} tile(s) (donor='{donorLayer}') — renders on the footprint.");
+                return true;
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[DistrictMain] bind reactor building: " + ex); return false; }
+        }
+        static readonly HashSet<string> bindLog = new HashSet<string>();
+
+        // ---- SCOPED texture: bind the district's OWN baked albedo onto the borrowed (brick) donor output-layer clone,
+        // so the reactor wears its own texture instead of the donor's. Mirrors DistrictApplyTexture/BindAlbedo but drives
+        // the scoped element(s) + their shared donorClone (this path has no DistrictModel/privateLeaf). ----
+        // PER-DISTRICT scoped state. The scoped path was first built for ONE district (the reactor) with these as global
+        // statics; once a SECOND district is scoped (the Oracle, migrated off the isolate path) they'd clash (each would
+        // wear the last-processed district's texture / B&W / flatten). So the state now lives per-district in ScopedState,
+        // and `S` is the CURRENT district's state — set once per district in PollDistrictSelectorTile before any scoped
+        // work runs. Every `scopedX`/`fpX`/`mesh*` name below is a PROXY property onto `S`, so all the function bodies that
+        // read/write them stay byte-identical; only which ScopedState they hit changes with `S`.
+        internal class ScopedState
+        {
+            public UnityEngine.Object donorClone;
+            public readonly List<object> elements = new List<object>();
+            public readonly List<object> refreshPlbcs = new List<object>();
+            public object atlasGuid;
+            public UnityEngine.Texture2D albedo, albedoGray;
+            public readonly List<(UnityEngine.Material mat, string prop)> boundSlots = new List<(UnityEngine.Material, string)>();
+            public bool texApplied; public int texWait, texErrors;
+            public bool fpResolved, fpMesh, fpBW, fpFlat, fpHideDecal;
+            public float fpFlatHeight = 0.17f;
+            public bool? flatState; public float lastFlatHeight = float.NaN;
+            public object flatSel;
+            public readonly Dictionary<object, UnityEngine.Vector3> origSize = new Dictionary<object, UnityEngine.Vector3>();
+        }
+        static readonly Dictionary<string, ScopedState> scopedStates = new Dictionary<string, ScopedState>();
+        static ScopedState S = new ScopedState();   // current scoped district's state (never null)
+        static ScopedState ScopedFor(string name) { if (!scopedStates.TryGetValue(name, out var s)) scopedStates[name] = s = new ScopedState(); return s; }
+
+        static UnityEngine.Object scopedDonorClone { get => S.donorClone; set => S.donorClone = value; }   // the private layer we bound on the element(s)
+        static List<object> scopedElements => S.elements;                  // our element(s) sharing that layer
+        static List<object> scopedRefreshPlbcs => S.refreshPlbcs;          // tiles to re-spawn after a texture flush
+        static object scopedAtlasGuid { get => S.atlasGuid; set => S.atlasGuid = value; }   // the district's baked albedo atlas (from the registry)
+        static UnityEngine.Texture2D scopedAlbedo { get => S.albedo; set => S.albedo = value; }   // loaded atlas texture
+        static List<(UnityEngine.Material mat, string prop)> scopedBoundSlots => S.boundSlots;
+        static bool scopedTexApplied { get => S.texApplied; set => S.texApplied = value; }
+        static int scopedTexWait { get => S.texWait; set => S.texWait = value; }
+        static int scopedTexErrors { get => S.texErrors; set => S.texErrors = value; }
+        static bool HasAlpha(UnityEngine.TextureFormat f) => f == UnityEngine.TextureFormat.DXT5 || f == UnityEngine.TextureFormat.RGBA32 || f == UnityEngine.TextureFormat.ARGB32 || f == UnityEngine.TextureFormat.BC7 || f == UnityEngine.TextureFormat.RGBAHalf || f == UnityEngine.TextureFormat.RGBAFloat;
+        internal static int scopedRebindLog;   // TWITCH DIAG counter (albedo rebinds = game resetting our texture)
+        static readonly HashSet<string> scopedTexLog = new HashSet<string>();
+        internal static void ApplyScopedAlbedo()
+        {
+            if (scopedDonorClone == null || scopedElements.Count == 0 || scopedAtlasGuid == null) return;
+            try
+            {
+                // fast re-assert once applied — a res switch rebuilds the layer's runtime materials + drops our binding
+                if (scopedTexApplied)
+                {
+                    if ((++scopedTexWait % 15) != 0) return;
+                    BindScopedSheet(false); return;
+                }
+                // load OUR albedo atlas by GUID (retry until the bundle asset resolves)
+                if (scopedAlbedo == null)
+                {
+                    scopedAlbedo = LoadAmpliAsset(typeof(UnityEngine.Texture2D), scopedAtlasGuid) as UnityEngine.Texture2D;
+                    if (scopedAlbedo == null) { if ((++scopedTexWait % 300) == 1) Plugin.Diag("[DistrictTile] albedo atlas not loadable by GUID yet"); return; }
+                }
+                // for each element: force the full-texture path so mesh UVs sample our sheet [0,1], and register a null
+                // atlas-info slot so the game's own re-resolve keeps returning full-texture for our layer
+                foreach (var leaf in scopedElements)
+                {
+                    var t = leaf.GetType();
+                    int layerIdx = GF(t, "outputLayerIndex")?.GetValue(leaf) is int li ? li : -1;
+                    if (layerIdx < 0) { if ((++scopedTexWait % 300) == 1) Plugin.Diag("[DistrictTile] element layer not registered yet"); return; }
+                    var desc = GetMember(leaf, "FxEvolverDescriptor");
+                    var texMgr = desc != null ? AccessTools.Field(desc.GetType(), "assetContentManagerTexture")?.GetValue(desc) : null;
+                    texMgr?.GetType().GetMethod("AddNullAtlasInfo", BindingFlags.Instance | BindingFlags.Public)?.Invoke(texMgr, new object[] { layerIdx });
+                    GF(t, "textureIndex")?.SetValue(leaf, 1);
+                }
+                if (!BindScopedSheet(true)) { if ((++scopedTexWait % 300) == 1) Plugin.Diag("[DistrictTile] donor layer has no runtime materials yet"); return; }
+                scopedTexApplied = true;
+                // flush: mark material data changed + re-spawn each hosting tile so nothing keeps a stale texture index
+                foreach (var leaf in scopedElements)
+                {
+                    var desc = GetMember(leaf, "FxEvolverDescriptor");
+                    if (desc != null) AccessTools.Field(desc.GetType(), "materialDataHasChanged")?.SetValue(desc, true);
+                }
+                foreach (var plbc in scopedRefreshPlbcs)
+                    if (miRefreshChannel != null)
+                    {
+                        var ra = new object[] { ResolveMainLayerFromPlbc(plbc), System.Enum.ToObject(miRefreshChannel.GetParameters()[1].ParameterType, 0) };
+                        try { miRefreshChannel.Invoke(plbc, ra); } catch { }
+                    }
+                Plugin.Log.LogInfo("[DistrictTile] bound the district's OWN albedo atlas onto the reactor — it should now be textured, not white brick.");
+            }
+            catch (Exception ex)
+            {
+                if (++scopedTexErrors >= 3) { scopedTexApplied = true; Plugin.Log.LogError("[DistrictTile] texture apply failed 3x — giving up until reload: " + ex); }
+                else Plugin.Log.LogWarning("[DistrictTile] texture apply (will retry): " + ex.Message);
+            }
+        }
+        static int ResolveMainLayerFromPlbc(object plbc) => mainLayerCached >= 0 ? mainLayerCached : 0;
+
+        // Bind scopedAlbedo onto the donor layer clone's runtime materials (same _MainTex/largest-sheet pick as BindAlbedo,
+        // minus the DistrictModel surface-map handling — this district ships no baked normal/rough, so keep the donor maps).
+        static bool BindScopedSheet(bool log)
+        {
+            if (scopedAlbedo == null || scopedDonorClone == null) return false;
+            var desired = DesiredScopedAlbedo();   // colour normally; a greyscale copy when the mesh footprint is on the strategic map (DistrictFootprintMeshBW)
+            if (!log && scopedBoundSlots.Count > 0)
+            {
+                bool stale = false;
+                for (int i = 0; i < scopedBoundSlots.Count && !stale; i++)
+                {
+                    var (mat, prop) = scopedBoundSlots[i];
+                    if (mat == null) { stale = true; break; }
+                    if (!ReferenceEquals(mat.GetTexture(prop), desired))
+                    {
+                        mat.SetTexture(prop, desired);
+                        // TWITCH DIAG: a rebind here means the GAME reset our albedo since last tick — if this logs steadily,
+                        // the model/base ("rock") texture is alternating game<->ours = the twitch.
+                        if (Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value && scopedRebindLog < 40)
+                        { scopedRebindLog++; Plugin.Log.LogInfo($"[TwitchDiag] scoped albedo REBOUND (game had reset it) @ frame {UnityEngine.Time.frameCount} on '{prop}' (rebind #{scopedRebindLog})"); }
+                    }
+                }
+                if (!stale) return true;
+                scopedBoundSlots.Clear();
+            }
+            if (!(GetMember(scopedDonorClone, "RenderOutputs") is Array ros)) return false;
+            bool dump = log && Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value;
+            int n = 0; scopedBoundSlots.Clear();
+            foreach (var ro in ros)
+                foreach (var fld in new[] { "currentRenderMaterial", "runTimeRenderMaterial", "highResRunTimeRenderMaterial" })
+                    if (GetMember(ro, fld) is UnityEngine.Material mat && mat != null)
+                    {
+                        // FOLIAGE ALPHA FIX (guarded): the scoped path borrows an OPAQUE building material (base 'Particle
+                        // Implementation' shader, _Mode=0, no _ALPHATEST_ON, queue 2000) so composed foliage leaf-cards
+                        // render SOLID. It exposes the Standard cutout API (_Cutoff/_Mode), so flip it to CUTOUT exactly like
+                        // the bake's preview does. Scoped to alpha atlases (foliage) so the opaque reactor is untouched.
+                        if (scopedAlbedo != null && HasAlpha(scopedAlbedo.format) && mat.HasProperty("_Cutoff") && !mat.IsKeywordEnabled("_ALPHATEST_ON"))
+                        {
+                            mat.SetFloat("_Mode", 1f);                 // Standard: Cutout
+                            mat.EnableKeyword("_ALPHATEST_ON");
+                            mat.SetFloat("_Cutoff", 0.5f);
+                            mat.renderQueue = 2450;                    // AlphaTest queue
+                            if (log) Plugin.Log.LogInfo($"[FootprintMesh] '{fld}' -> alpha-cutout foliage (Cutout mode + _ALPHATEST_ON, queue 2450)");
+                        }
+                        string pick = null; UnityEngine.Texture2D biggest = null; string biggestProp = null, alreadyProp = null;
+                        bool hasMainTex = false, hasVisualContent = false;
+                        foreach (var pn in mat.GetTexturePropertyNames())
+                        {
+                            var cur = mat.GetTexture(pn);
+                            if (dump) Plugin.Diag($"[DistrictTile]   {fld}('{mat.shader?.name}').{pn} = {(cur != null ? $"'{cur.name}' {cur.width}x{cur.height}" : "null")}");
+                            if (ReferenceEquals(cur, desired)) { alreadyProp = pn; continue; }
+                            if (pn == "_MainTex") hasMainTex = true; else if (pn == "_VisualContent") hasVisualContent = true;
+                            if (!(cur is UnityEngine.Texture2D t2)) continue;
+                            if (pn == "_MainTex") pick = pn;
+                            if (biggest == null || t2.width * t2.height > biggest.width * biggest.height) { biggest = t2; biggestProp = pn; }
+                        }
+                        if (alreadyProp != null) { n++; scopedBoundSlots.Add((mat, alreadyProp)); continue; }
+                        if (pick == null) pick = biggestProp;
+                        if (pick == null && hasMainTex) pick = "_MainTex";
+                        if (pick == null && hasVisualContent) pick = "_VisualContent";
+                        if (pick != null)
+                        {
+                            mat.SetTexture(pick, desired); n++;
+                            scopedBoundSlots.Add((mat, pick));
+                            if (log) Plugin.Diag($"[DistrictTile] albedo bound on {fld}.{pick}");
+                        }
+                    }
+            if (log) Plugin.Diag($"[DistrictTile] albedo bound on {n} material slot(s) of the donor layer clone");
+            return n > 0;
+        }
+
+        // ---- B&W footprint (config DistrictFootprintMeshBW): when the persistent MESH footprint is on the STRATEGIC map
+        // (zoomed out), bind a greyscale copy of the reactor albedo instead of the colour one; full colour up close.
+        // "Am I on the strategic map?" is answered EXACTLY (no zoom-threshold guessing) by asking the engine's
+        // RenderFeatureProvider for the CURRENT 0..1 visibility of the TOPOGRAPHIC band (SelectionFlags0 = 2 =
+        // TopographicTerrain = the schematic/strategic look): ~0 while zoomed in, rises to ~1 as the schematic map
+        // takes over. (First cut keyed the RealisticTerrain/close band, but it stays "on" well past the schematic
+        // crossover, so the reactor kept its colour zoomed out — Topographic is the band that tracks the schematic map.)
+        // EFFECTIVE footprint-mesh settings for the scoped district: the per-entry registry values when the entry authored
+        // footprintMesh=true, otherwise the plugin's global DistrictFootprintMesh… config (back-compat — a district works
+        // before it's authored per-entry). Resolved once by KeepDistrictMeshAtStrategicZoom; the pollers read these.
+        internal static bool fpResolved { get => S.fpResolved; set => S.fpResolved = value; }
+        internal static bool fpMesh { get => S.fpMesh; set => S.fpMesh = value; }
+        internal static bool fpBW { get => S.fpBW; set => S.fpBW = value; }
+        internal static bool fpFlat { get => S.fpFlat; set => S.fpFlat = value; }
+        internal static bool fpHideDecal { get => S.fpHideDecal; set => S.fpHideDecal = value; }
+        static float fpFlatHeight { get => S.fpFlatHeight; set => S.fpFlatHeight = value; }
+        internal static void ResolveScopedFootprint(string name)
+        {
+            DistrictModel e = null;
+            foreach (var dm in distModels) if (dm.district == name) { e = dm; break; }
+            if (e != null && e.footprintMesh)   // the entry is authoritative
+            {
+                fpMesh = true; fpBW = e.footprintMeshBW; fpFlat = e.footprintMeshFlat;
+                fpFlatHeight = e.footprintMeshFlatHeight > 0f ? e.footprintMeshFlatHeight : 0.17f; fpHideDecal = e.footprintMeshHideDecal;
+            }
+            else   // fall back to the global config
+            {
+                fpMesh = Plugin.DistrictFootprintMesh != null && Plugin.DistrictFootprintMesh.Value == "true";
+                fpBW = Plugin.DistrictFootprintMeshBW != null && Plugin.DistrictFootprintMeshBW.Value == "true";
+                fpFlat = Plugin.DistrictFootprintMeshFlat != null && Plugin.DistrictFootprintMeshFlat.Value == "true";
+                fpHideDecal = Plugin.DistrictFootprintMeshHideDecal == null || Plugin.DistrictFootprintMeshHideDecal.Value != "false";
+                float h = 0.17f; float.TryParse(Plugin.DistrictFootprintMeshFlatHeight?.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out h); fpFlatHeight = h;
+            }
+            fpResolved = true;
+        }
+        static UnityEngine.Texture2D scopedAlbedoGray { get => S.albedoGray; set => S.albedoGray = value; }
+        static object rfpInstance; static MethodInfo miComputeRenderState; static object topoSelectorBox;
+        static int bwDiagThrottle;
+        // Current 0..1 visibility of the TOPOGRAPHIC (schematic/strategic) band — ~0 zoomed in, ~1 on the strategic map.
+        // Returns -1 if the RenderFeatureProvider isn't loaded yet. Shared by the B&W and FLAT footprint options.
+        static float SchematicVis()
+        {
+            try
+            {
+                if (rfpInstance == null || (rfpInstance is UnityEngine.Object ruo && ruo == null))
+                {
+                    var rfpType = AccessTools.TypeByName("Amplitude.Mercury.Fx.RenderFeatureProvider");
+                    var selType = AccessTools.TypeByName("Amplitude.Mercury.Fx.RenderFeatureSelector");
+                    if (rfpType == null || selType == null) return -1f;
+                    var found = UnityEngine.Resources.FindObjectsOfTypeAll(rfpType);
+                    if (found == null || found.Length == 0) return -1f;   // not loaded yet
+                    rfpInstance = found[0];
+                    miComputeRenderState = rfpType.GetMethod("ComputeRenderState", new[] { selType });
+                    var box = Activator.CreateInstance(selType);
+                    selType.GetField("SelectionFlags0").SetValue(box, 2u);   // TopographicTerrain (the schematic/strategic band)
+                    selType.GetField("FadingOptions").SetValue(box, 1u);
+                    topoSelectorBox = box;
+                }
+                if (miComputeRenderState == null || topoSelectorBox == null) return -1f;
+                return (float)miComputeRenderState.Invoke(rfpInstance, new[] { topoSelectorBox });
+            }
+            catch { return -1f; }
+        }
+        static UnityEngine.Texture2D DesiredScopedAlbedo()
+        {
+            bool bw = fpResolved ? fpBW : (Plugin.DistrictFootprintMeshBW != null && Plugin.DistrictFootprintMeshBW.Value == "true");
+            if (!bw || scopedAlbedo == null) return scopedAlbedo;
+            float topoVis = SchematicVis();
+            if (topoVis < 0f) return scopedAlbedo;                       // provider not ready -> colour
+            if (Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value && (++bwDiagThrottle % 30) == 1)
+                Plugin.Log.LogInfo($"[FootprintMesh] topographic band vis = {topoVis:0.00} -> {(topoVis >= 0.5f ? "GREY" : "colour")}");
+            if (topoVis < 0.5f) return scopedAlbedo;                     // schematic not active yet -> colour
+            if (scopedAlbedoGray == null) scopedAlbedoGray = MakeGrayCopy(scopedAlbedo);   // build once, lazily
+            return scopedAlbedoGray ?? scopedAlbedo;
+        }
+        // FLAT footprint (config DistrictFootprintMeshFlat): squash the reactor mesh element(s) to ~0 height while the
+        // schematic map is active, restore full height up close. Driven by the same Topographic-band signal as the B&W
+        // swap. `size` scales the element (the scoped setup already uses size=0 to HIDE props — line ~702), so size.y->~0
+        // collapses the mesh into a flat sheet. size feeds GPU via WriteToGPUData, so re-emit on the crossover only.
+        static bool? meshFlatState { get => S.flatState; set => S.flatState = value; }
+        static float lastFlatHeight { get => S.lastFlatHeight; set => S.lastFlatHeight = value; }
+        static float runtimeFlatHeight = float.NaN;   // in-game F8-window override; NaN = use the config value (GLOBAL — one manual tuning knob)
+        internal static object scopedFlatSel { get => S.flatSel; set => S.flatSel = value; }   // the scoped district's selector (set by KeepDistrictMeshAtStrategicZoom)
+        static Dictionary<object, UnityEngine.Vector3> meshOrigSize => S.origSize;
+        // Flatten HEIGHT = the size.y multiplier used on the strategic map: ~0.02 = paper-flat (but coplanar with terrain,
+        // so its edges drown when the tile's ground rises over them), up toward 1 = full 3D. The sweet spot reads flat yet
+        // still pokes clear of the terrain. This is the lever that actually reaches the GPU (unlike item Position.y).
+        internal static float FlatHeightValue()   // PER-DISTRICT: reads S — only valid with S set (called from UpdateMeshFlatness). NOT for the F8 window.
+        {
+            if (!float.IsNaN(runtimeFlatHeight)) return runtimeFlatHeight;   // live F8 override wins (global, all scoped districts)
+            if (fpResolved) return fpFlatHeight;                             // THIS district's per-entry value (or its config fallback)
+            float v = 0.17f; float.TryParse(Plugin.DistrictFootprintMeshFlatHeight?.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v); return v;
+        }
+        // F8-window (S-INDEPENDENT) accessors: the flat-height slider is a GLOBAL live override across every scoped district
+        // (the window has no per-district selection). These never touch S, so the readout/tuning stays meaningful with two
+        // or more scoped districts. Overriding is opt-in — Reset clears it and each district falls back to its own value.
+        internal static bool FlatHeightOverriding() => !float.IsNaN(runtimeFlatHeight);
+        internal static float FlatHeightOverrideValue() => float.IsNaN(runtimeFlatHeight) ? 0.17f : runtimeFlatHeight;
+        internal static void ClearFlatHeightOverride() { runtimeFlatHeight = float.NaN; Plugin.Log.LogInfo("[FootprintMesh] flat-height override cleared — each district uses its own value again."); }
+        internal static void NudgeFlatHeight(float delta) => SetFlatHeight(FlatHeightOverrideValue() + delta);
+        internal static void SetFlatHeight(float value)
+        {
+            runtimeFlatHeight = UnityEngine.Mathf.Clamp(value, 0.02f, 1f);
+            Plugin.Log.LogInfo($"[FootprintMesh] flat-height override -> {runtimeFlatHeight:0.00} (all scoped districts)");
+        }
+        internal static void UpdateMeshFlatness()
+        {
+            bool flatOn = fpResolved ? fpFlat : (Plugin.DistrictFootprintMeshFlat != null && Plugin.DistrictFootprintMeshFlat.Value == "true");
+            if (!flatOn || scopedElements.Count == 0) return;
+            float topoVis = SchematicVis();
+            if (topoVis < 0f) return;                                    // provider not ready
+            bool flat = topoVis >= 0.5f;
+            float height = FlatHeightValue();
+            // re-apply on a band change OR (while flat) a live height-tuning change
+            if (meshFlatState.HasValue && meshFlatState.Value == flat && !(flat && height != lastFlatHeight)) return;
+            try
+            {
+                int changed = 0;
+                foreach (var el in scopedElements)
+                {
+                    var t = el.GetType();
+                    var sizeF = GF(t, "size");
+                    if (sizeF == null) continue;
+                    if (!meshOrigSize.ContainsKey(el)) { if (sizeF.GetValue(el) is UnityEngine.Vector3 os) meshOrigSize[el] = os; else continue; }
+                    var orig = meshOrigSize[el];
+                    sizeF.SetValue(el, flat ? new UnityEngine.Vector3(orig.x, orig.y * height, orig.z) : orig);   // squash to `height` (tunable) on the strategic map
+                    var desc = GetMember(el, "FxEvolverDescriptor");
+                    if (desc != null) AccessTools.Field(desc.GetType(), "materialDataHasChanged")?.SetValue(desc, true);
+                    InvokeNoArg(el, "OnEditionChange");
+                    changed++;
+                }
+                lastFlatHeight = height;
+                // re-spawn the hosting channels so the new size reaches the render data
+                foreach (var plbc in scopedRefreshPlbcs)
+                {
+                    if (plbc == null) continue;
+                    if (miRefreshChannel == null)
+                        miRefreshChannel = plbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                            .FirstOrDefault(m => m.Name == "RefreshChannel" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
+                    if (miRefreshChannel != null)
+                    {
+                        var ra = new object[] { mainLayerCached >= 0 ? mainLayerCached : 0, System.Enum.ToObject(miRefreshChannel.GetParameters()[1].ParameterType, 0) };
+                        try { miRefreshChannel.Invoke(plbc, ra); } catch { }
+                    }
+                }
+                meshFlatState = flat;
+                Plugin.Log.LogInfo($"[FootprintMesh] reactor mesh -> {(flat ? "FLAT (strategic footprint)" : "3D (close-up)")} on {changed} element(s)");
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[FootprintMesh] flatten: " + ex.Message); }
+        }
+        // Blit the (possibly non-CPU-readable) albedo through a RenderTexture, read it back, and desaturate it fully
+        // (AdjustSkin desat=1 = luminance greyscale). Same readback pattern as BuildAdjustedAtlas.
+        static UnityEngine.Texture2D MakeGrayCopy(UnityEngine.Texture2D src)
+        {
+            try
+            {
+                int w = src.width, h = src.height;
+                var rt = UnityEngine.RenderTexture.GetTemporary(w, h, 0, UnityEngine.RenderTextureFormat.ARGB32, UnityEngine.RenderTextureReadWrite.sRGB);
+                var prev = UnityEngine.RenderTexture.active;
+                UnityEngine.Graphics.Blit(src, rt);
+                UnityEngine.RenderTexture.active = rt;
+                var t = new UnityEngine.Texture2D(w, h, UnityEngine.TextureFormat.RGBA32, false) { name = "ReactorAlbedo_Gray" };
+                t.ReadPixels(new UnityEngine.Rect(0, 0, w, h), 0, 0); t.Apply();
+                UnityEngine.RenderTexture.active = prev; UnityEngine.RenderTexture.ReleaseTemporary(rt);
+                AdjustSkin(t, 1f, 1f, 0f, 0f, 0f);   // full greyscale, no brightness/tint change
+                Plugin.Log.LogInfo($"[FootprintMesh] built greyscale albedo {w}x{h} for the strategic-zoom B&W footprint.");
+                return t;
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[FootprintMesh] grey copy failed: " + e.Message); return null; }
+        }
+
         // Postfix (per district UpdateLevelBuild): match against the registry and cache each entry's component + layer.
         // PERF: this fires for EVERY district on the map (city refreshes touch dozens) — cache the reflection handles.
         static FieldInfo fiDistrictPlbc; static int mainLayerCached = -1;
@@ -607,10 +1348,34 @@ namespace HumankindAssetFramework
         {
             try
             {
+                DumpAnyDistrictTree(district);   // spike: dump vanilla + our districts' presentation trees to diff the footprint decal
                 EnsureDistrictConfig();
+                // Track the FxManager for ANY district, even with injection off (distOn=false) — the dedicated-visual
+                // hybrid (PollDistrictMainRows) and wonder rows need it to run without the runtime swap fighting them.
+                if (distFxManager == null)
+                {
+                    if (fiDistrictPlbc == null) fiDistrictPlbc = AccessTools.Field(district.GetType(), "presentationLevelBuildComponent");
+                    var plbc0 = fiDistrictPlbc?.GetValue(district);
+                    var fm0 = plbc0 != null ? GetMember(plbc0, "FxManager") : null;
+                    if (fm0 != null) distFxManager = fm0;
+                }
+                // DEDICATED-VISUAL HYBRID: track every live district INSTANCE (even with injection off) so, once the
+                // */District/Main cell fill lands, we can replay UpdateLevelBuild on them to force a re-resolve of the
+                // now-filled cell. The game resolves the selector ONCE at district build (before our fill can run, since
+                // distFxManager only comes up AT the first district's build) and caches it — the cell edit alone is inert
+                // until something re-reads it. Skip while WE are the ones re-invoking (guard against re-entry/recursion).
+                bool wantTrack = (Plugin.DistrictMainRows != null && !string.IsNullOrEmpty(Plugin.DistrictMainRows.Value))
+                              || (Plugin.DistrictSelectorTile != null && !string.IsNullOrEmpty(Plugin.DistrictSelectorTile.Value));
+                if (!inForcedReresolve && wantTrack)
+                {
+                    bool seen = false;
+                    for (int i = 0; i < trackedDistricts.Count && !seen; i++) seen = ReferenceEquals(trackedDistricts[i], district);
+                    if (!seen) trackedDistricts.Add(district);
+                }
                 if (!distOn || distModels.Count == 0) return;
                 var name = GetMember(district, "ConstructibleDefinitionName")?.ToString();
                 if (string.IsNullOrEmpty(name)) return;
+                if (IsScopedDistrict(name)) return;   // handled by the SCOPED path (DistrictSelectorTile) — don't also isolate-inject it
                 foreach (var e in distModels)
                 {
                     if (e.district != name || e.fxMeshGuid == null) continue;
@@ -650,15 +1415,23 @@ namespace HumankindAssetFramework
         internal static void ResetDistrictSessionState()
         {
             distFxManager = null;
+            trackedDistricts.Clear(); lastLevelBuildEvent = null; haveLevelBuildEvent = false;   // instances/args reference the dead session
+            bindLog.Clear();   // re-bind the building output layers against the new session's leaves
+            loadedSelectorByKey.Clear(); selectorTileLogged.Clear();   // loaded selectors reference the dead session's FxManager
+            scopedStates.Clear(); S = new ScopedState();   // ALL per-district scoped state (donorClone/albedo/elements/B&W/flatten) referenced the dead session
+            reactorBoundGlobal = false; scopedTexLog.Clear();   // legacy once-flag + global diag throttle
             foreach (var d in distModels)
             {
                 d.tiles.Clear(); d.privateLeaf = null; d.leaves.Clear(); d.collected = false;
                 d.matchLogged = false;
+                d.origSelector = null; d.decalSelector = null; d.decalChannel = -1; d.decalLogged = false; d.decalGaveUp = false;
+                d.clonedSelector = null; d.cloneMap = null; d.cloneLogged = false; d.cloneReassert = 0; d.deepLayer = null; d.domeCounter = 0;
                 d.texApplied = false; d.texWait = 0; d.texErrors = 0; d.texAlbedo = null; d.texNormal = null; d.texRough = null;
                 d.boundSlots.Clear();   // the cached (material, property) bind slots are corpses with the old layer
-                d.groundIdx = int.MinValue;   // re-resolve the ground-material index against the new session's repository
+                d.groundIdx = int.MinValue; d.groundApplied = false;   // re-resolve + re-apply the ground paint once against the new session
                 d.hexIdx = int.MinValue;
             }
+            postSwapTicks = 0; postSwapDumped = false;   // re-arm the post-swap tree dump for the new session
             ResetWonderTemplates();   // plugin-loaded wonder templates are corpses after a reload; re-load + re-fill swap-first
             // re-parse the registry too: a reload then picks up haf_districts.json edits (new/changed entries) without
             // a game restart. NOTE the honest limit: baked ASSETS ship in the mod bundle, which the game loads once per
@@ -667,23 +1440,213 @@ namespace HumankindAssetFramework
             Plugin.Diag("[District] session state reset (new game or save-reload) — registry re-parses, leaves + texture bindings rebuild");
         }
 
+        // A district named in DistrictSelectorTile is rendered by the SCOPED path (our data-authored selector on its
+        // channel). The old ISOLATE path (this file's per-frame private-leaf swap) must leave those alone or the two
+        // fight for channel[0]. Lets DistrictRepoint stay ON for isolate-path districts (e.g. the Oracle wonder) while a
+        // scoped district (the reactor) coexists in the same registry.
+        static bool IsScopedDistrict(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return false;
+            var cfg = Plugin.DistrictSelectorTile?.Value;
+            if (!string.IsNullOrEmpty(cfg))
+                foreach (var part in cfg.Split(';'))
+                { var eq = part.IndexOf('='); if (eq > 0 && part.Substring(0, eq).Trim() == name) return true; }
+            foreach (var dm in distModels)   // registry-authored scoped districts (selectorGuid baked in the District Factory)
+                if (dm.district == name && dm.selectorGuid != null) return true;
+            return false;
+        }
+
         // Per-frame (Plugin.Update): drive every registry entry, each across ALL of its live tiles.
         internal static void TickDistrictMeshSwap()
         {
             if (distModels.Count == 0) return;
             foreach (var e in distModels)
             {
+                if (IsScopedDistrict(e.district)) continue;   // the SCOPED path owns this district's channel — don't fight it with an isolate leaf
                 // prune tiles whose component died (razed district / recycled entity) — Unity fake-null on the Component
                 for (int i = e.tiles.Count - 1; i >= 0; i--)
                     if (e.tiles[i].plbc is UnityEngine.Object uo && uo == null)
                     { e.tiles.RemoveAt(i); Plugin.Diag($"[District] '{e.district}': tile component destroyed — pruned ({e.tiles.Count} left)."); }
                 if (e.isolate)
                 {
-                    for (int i = 0; i < e.tiles.Count; i++) PointTileAtPrivateLeaf(e, e.tiles[i]);
-                    DistrictApplyTexture(e);
+                    // PreserveFootprintChannel FALSIFIED (08-09): hosting a decal-selector clone on a free channel renders
+                    // nothing — the plbc has ONE composited level-build content channel (mainLevelBuildComponantLayer; the
+                    // native reactor dump shows "1 channel(s)"). Decals can't live on a separate channel; building + decals
+                    // must share the main selector. So the footprint needs the deep-clone/privatize path, not a side channel.
+                    for (int i = 0; i < e.tiles.Count; i++)
+                    {
+                        if (UseDeepClone) PointTileAtClonedSelector(e, e.tiles[i]);
+                        else PointTileAtPrivateLeaf(e, e.tiles[i]);
+                    }
+                    DistrictApplyTexture(e);   // both paths: e.privateLeaf points at a reactor element sharing e.deepLayer, so our albedo binds to all swapped slots
                 }
                 else GlobalSwapEntry(e);
             }
+            DumpDecalDescriptor();
+            DumpPostSwapTrees();
+        }
+
+        // POST-SWAP tree dump (spike, DistrictDebug): the [Tree] dump from DistrictApplyEntries fires on UpdateLevelBuild
+        // BEFORE this per-frame swap, so it only ever captured the PRE-swap (native) tree — a "native vs swapped" diff came
+        // back byte-identical purely from timing. Re-dump here ONCE, ~300 ticks (~5 s at 60 fps, past respawnAfterLoad) after
+        // the swap has settled, tagged [TreePost] so it's separable in the log. Answers: does the swap keep the 231 decal
+        // drawers or drop them, and which elements now carry our mesh.
+        static int postSwapTicks; static bool postSwapDumped; static string treeTag = "Tree";
+        static void DumpPostSwapTrees()
+        {
+            if (postSwapDumped || Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;
+            if (++postSwapTicks < 300) return;
+            postSwapDumped = true;
+            treeTag = "TreePost";
+            try
+            {
+                foreach (var e in distModels)
+                {
+                    if (e.tiles.Count == 0) { Plugin.Log.LogInfo($"[TreePost] '{e.district}': no live tile to dump"); continue; }
+                    var plbc = e.tiles[0].plbc;
+                    if (plbc is UnityEngine.Object uo && uo == null) continue;
+                    DumpPlbcTree(plbc, e.district + " POSTSWAP (isolate=" + e.isolate + ")");
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[TreePost] " + ex.Message); }
+            finally { treeTag = "Tree"; }
+        }
+
+        // FOOTPRINT probe (gated DistrictDebug): the DECAL isn't in the district's plbc (dumped: Element/Emitter/Matching/
+        // Selector, no Decal). Like the impostor, it's a GLOBAL FxEvolverDescriptorLevelBuildDecal singleton holding decal
+        // materials per district type — each with a decalMesh (the footprint geometry) + texture layers. Reach it via its
+        // static GetInstance(bool) and dump the registry: that names the vanilla footprint assets and whether ours is there.
+        static bool decalDumped;
+        internal static void DumpDecalDescriptor()
+        {
+            try
+            {
+                if (decalDumped || distFxManager == null || Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;
+                var tDesc = HarmonyLib.AccessTools.TypeByName("Amplitude.Mercury.Terrain.Fx.FxEvolverDescriptorLevelBuildDecal");
+                if (tDesc == null) { decalDumped = true; Plugin.Log.LogWarning("[Decal] FxEvolverDescriptorLevelBuildDecal not found"); return; }
+                var getInst = tDesc.GetMethod("GetInstance", BindingFlags.Static | BindingFlags.Public, null, new[] { typeof(bool) }, null);
+                if (getInst == null) { decalDumped = true; Plugin.Log.LogWarning("[Decal] GetInstance(bool) not found"); return; }
+                var desc = getInst.Invoke(null, new object[] { true });
+                if (desc == null) return;   // not ready — retry
+                var dt = desc.GetType();
+                object matsObj = null;
+                for (var ct = dt; ct != null && matsObj == null; ct = ct.BaseType)
+                    matsObj = ct.GetProperty("EvolverMaterials", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(desc)
+                            ?? AccessTools.Field(ct, "EvolverMaterials")?.GetValue(desc)
+                            ?? AccessTools.Field(ct, "evolverMaterials")?.GetValue(desc);
+                if (!(matsObj is System.Collections.IList mats)) { decalDumped = true; Plugin.Log.LogWarning($"[Decal] EvolverMaterials list not found on {dt.FullName}"); return; }
+                decalDumped = true;
+                Plugin.Log.LogInfo($"[Decal] {dt.Name}: {mats.Count} decal material(s):");
+                for (int i = 0; i < mats.Count; i++)
+                {
+                    var m = mats[i]; if (m == null) continue;
+                    var mt = m.GetType();
+                    var dm = GF(mt, "decalMesh")?.GetValue(m);
+                    var nm = GetMember(m, "Name") ?? GetMember(m, "name");
+                    Plugin.Log.LogInfo($"[Decal]  [{i}] {mt.Name} name='{nm}' decalMesh={dm}");
+                }
+            }
+            catch (Exception ex) { decalDumped = true; Plugin.Log.LogWarning("[Decal] " + ex.Message); }
+        }
+
+        // FOOTPRINT probe (gated DistrictDebug): the district's plbc has MULTIPLE channels — the building (the one we
+        // inject) AND a DECAL channel (FxEvolverMaterialLevelBuildDecal = decalMesh + texture layers = the footprint).
+        // Dump every channel's evolverMaterial type, and for any Decal one its decalMesh GUID — that names the vanilla
+        // footprint asset. This shows whether the decal channel exists for our district and what it holds.
+        // Dump the channel + material tree of ANY district by name — call for vanilla AND ours to diff what a normal
+        // district's presentation has (a decal drawer for the footprint?) that the reactor's lacks. First ~12 distinct.
+        static readonly HashSet<string> treeDumpedNames = new HashSet<string>();
+        internal static void DumpAnyDistrictTree(object district)
+        {
+            try
+            {
+                if (Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;
+                var name = GetMember(district, "ConstructibleDefinitionName")?.ToString();
+                if (string.IsNullOrEmpty(name) || treeDumpedNames.Contains(name)) return;
+                // ALWAYS dump the reactor (so we can compare its native tree to vanilla); cap the others.
+                if (!name.Contains("BreederReactor") && !name.Contains("Industry") && treeDumpedNames.Count >= 14) return;
+                if (fiDistrictPlbc == null) fiDistrictPlbc = AccessTools.Field(district.GetType(), "presentationLevelBuildComponent");
+                var plbc = fiDistrictPlbc?.GetValue(district);
+                if (plbc == null) return;   // no plbc yet — retry a later frame (don't mark seen)
+                treeDumpedNames.Add(name);
+                DumpPlbcTree(plbc, name);
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Tree] " + ex.Message); }
+        }
+
+        static void DumpPlbcTree(object plbc, string label)
+        {
+            if (fiPlbcChannels == null) fiPlbcChannels = AccessTools.Field(plbc.GetType(), "channels");
+            if (!(fiPlbcChannels?.GetValue(plbc) is Array channels)) return;
+            Plugin.Log.LogInfo($"[{treeTag}] '{label}' plbc: {channels.Length} channel(s)");
+            var seen = new HashSet<object>();
+            for (int i = 0; i < channels.Length; i++)
+            {
+                var box = channels.GetValue(i);
+                var mat = box != null ? GF(box.GetType(), "evolverMaterial")?.GetValue(box) : null;
+                Plugin.Log.LogInfo($"[{treeTag}]  [{i}] {(mat?.GetType().Name ?? "null")}");
+                DumpMatTree(mat, 2, seen);
+            }
+        }
+
+        // recurse a level-build material tree (emitter items + selector cache entries), logging each material type and
+        // any DECAL's mesh — the nested footprint drawer.
+        static void DumpMatTree(object mat, int depth, HashSet<object> seen)
+        {
+            if (mat == null || depth > 10 || !seen.Add(mat)) return;
+            var t = mat.GetType();
+            string extra = "";
+            if (t.Name.Contains("Decal"))
+            {
+                // The decal renders only if its visualOutput resolves: OutputLayerIndex>=0 AND LoadedOutputLayer.Atlas!=null
+                // (FxEvolverMaterialLevelBuildDecal.ResolveDependencies / AddDataTo). If our injection nulls this on the
+                // reactor's decals while Food/Science keep it, the gate is C#-fixable; if identical, it's GPU-shader only.
+                var vo = GF(t, "visualOutput")?.GetValue(mat);
+                string vos = "visualOutput=null";
+                if (vo != null)
+                {
+                    var vt = vo.GetType();
+                    object OliGet(string p) => vt.GetProperty(p, BF)?.GetValue(vo) ?? GF(vt, p)?.GetValue(vo);
+                    var oli = OliGet("OutputLayerIndex") ?? OliGet("outputLayerIndex");
+                    object lol = null; try { lol = vt.GetProperty("LoadedOutputLayer", BF)?.GetValue(vo); } catch { }
+                    object atlas = null;
+                    if (lol != null) { try { atlas = lol.GetType().GetProperty("Atlas", BF)?.GetValue(lol) ?? lol.GetType().GetField("atlas", BF)?.GetValue(lol); } catch { } }
+                    vos = $"outLayerIdx={oli} loadedLayer={(lol != null)} atlas={(atlas != null)}";
+                }
+                var lec = GF(t, "layerEntryCount")?.GetValue(mat);
+                var rdi = GF(t, "levelBuildDecalRenderDataEntryIndex")?.GetValue(mat);
+                var ld = GF(t, "loadingStatus")?.GetValue(mat) ?? GF(t, "loadedStatus")?.GetValue(mat);
+                extra = $"  <<< DECAL {vos} layerEntryCount={lec} renderDataIdx={rdi} load={ld}";
+            }
+            else if (t.Name.Contains("BuildElement"))
+            {
+                // The building Element uploads BBoxMin/Max + LodData to the GPU selection shader (WriteToGPUData ~43350).
+                // In global mode we keep the donor's bbox but our Load re-resolves lodData/meshIndexLod from our LOD-less
+                // mesh. Dump both so we can see empirically what our swap changes vs an untouched (Food) element.
+                object bbox = GF(t, "bbox")?.GetValue(mat);
+                string bs = "?"; object useC = GF(t, "useCustomBBox")?.GetValue(mat);
+                if (bbox != null) { try { var bt = bbox.GetType(); bs = $"{bt.GetProperty("min", BF)?.GetValue(bbox)}..{bt.GetProperty("max", BF)?.GetValue(bbox)}"; } catch { } }
+                var lodD = GF(t, "lodData")?.GetValue(mat);
+                var mi = GF(t, "meshIndex")?.GetValue(mat);
+                var mi0 = GF(t, "meshIndexLod0")?.GetValue(mat);
+                var mi1 = GF(t, "meshIndexLod1")?.GetValue(mat);
+                var sz = GF(t, "size")?.GetValue(mat);
+                extra = $"  <<< ELEMENT bbox={bs} useCustomBBox={useC} lodData={lodD} meshIdx={mi} lod0={mi0} lod1={mi1} size={sz}";
+            }
+            Plugin.Log.LogInfo($"[{treeTag}] {new string(' ', depth * 2)}{t.Name}{extra}");
+            // emitter: levelBuildItems[].loadedEvolverMaterial   (GF, not AccessTools.Field — the latter warn-spams on miss)
+            if (GF(t, "levelBuildItems")?.GetValue(mat) is Array items)
+                foreach (var it in items) if (it != null) DumpMatTree(GF(it.GetType(), "loadedEvolverMaterial")?.GetValue(it), depth + 1, seen);
+            // selector: loaded cache entries
+            var cache = GF(t, "fxMaterialCacheEntries")?.GetValue(mat);
+            if (cache != null && GF(cache.GetType(), "Entries")?.GetValue(cache) is Array entries)
+                foreach (var en in entries) if (en != null) DumpMatTree(GF(en.GetType(), "FxMaterial")?.GetValue(en), depth + 1, seen);
+            // selector: the pairs VARIANT TABLE + defaultMaterial/invalidNameMaterial — where the district's MAIN BUILDING
+            // element actually lives (CollectLeaves walks this; the old dump didn't, so it only caught shared props).
+            if (GF(t, "pairs")?.GetValue(mat) is Array pairs)
+                foreach (var pr in pairs) if (pr != null) { var g = PairGuid(pr); if (!GuidIsNull(g)) DumpMatTree(TryLoadMaterial(g), depth + 1, seen); }
+            foreach (var fn in new[] { "defaultMaterial", "invalidNameMaterial" })
+            { var g = GF(t, fn)?.GetValue(mat); if (g != null && !GuidIsNull(g)) DumpMatTree(TryLoadMaterial(g), depth + 1, seen); }
         }
 
         // ---- district TEXTURE injection (docs/District-Visuals.md) --------------------------------------------------

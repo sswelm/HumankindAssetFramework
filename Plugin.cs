@@ -43,6 +43,19 @@ namespace HumankindAssetFramework
         internal static ConfigEntry<bool>   DistrictIsolate;         // scope the mesh-swap to only the target district's own tile (private per-instance leaf) instead of the shared-global swap
         internal static ConfigEntry<bool>   DistrictDebug;           // investigation diagnostics ([District] saw / [DistrictMat] / [DistrictSub] dumps) — off in normal play, they reflect on every district update
         internal static ConfigEntry<string> WonderNativeRows;        // SPIKE wip-wonder-affinity: fill empty cells in the ArtificialWonder repo database, "WonderName=a,b,c,d;..." (FxEvolverMaterial guid)
+        internal static ConfigEntry<string> DistrictMainRows;        // SPIKE dedicated-visual (hybrid register): fill */District/Main.Level1+2 cells for an affinity -> our baked CityMapSelector, "AffinityName=a,b,c,d;..."
+        internal static ConfigEntry<string> DistrictSelectorTile;    // SCOPED dedicated-visual: put our baked selector on ONLY the named district's tile (keeps shared affinity + fallback), "ConstructibleDefinitionName=a,b,c,d;..."
+        internal static ConfigEntry<string> DistrictFootprint;       // RUNTIME footprint choice: graft a chosen donor selector's DECALS onto the scoped district (building stays ours), "ConstructibleDefinitionName=a,b,c,d;..." (donor = any */District/Main selector GUID)
+        internal static ConfigEntry<string> DistrictFootprintDrop;   // comma-separated decal NAME substrings to DROP from the grafted footprint (the rock/rubble "surface texture" layers); blank = keep ALL donor decals
+        internal static ConfigEntry<string> DistrictFootprintMask;   // EXPERIMENTAL: path to a PNG silhouette mask -> a UNIQUE strategic footprint matching the district's own layout (injected into a private clone of the SchematicView mask atlas)
+        internal static ConfigEntry<string> DistrictFootprintMaskSize; // tuning: world size (units) of the injected silhouette footprint decal; default 3.0
+        internal static ConfigEntry<string> DistrictFootprintMaskRotation; // tuning: rotate the footprint decal N degrees clockwise; default 0
+        internal static ConfigEntry<string> DistrictFootprintMaskCut;      // "true" = cut the footprint to the PNG's shape (may render faint via SchematicView); default false = solid block (skip mask)
+        internal static ConfigEntry<string> DistrictFootprintMesh;         // "true" = keep the district's own 3D BUILDING MESH rendering at strategic zoom (RenderFeatureSelector.SelectionFlags0=0 -> AlwaysEnabled) so the footprint IS the real geometry, not a flat decal
+        internal static ConfigEntry<string> DistrictFootprintMeshBW;       // "true" = when the persistent mesh footprint is on the STRATEGIC map (zoomed out), bind a GREYSCALE copy of its albedo so the reactor reads black-and-white; full colour up close. Needs DistrictFootprintMesh=true
+        internal static ConfigEntry<string> DistrictFootprintMeshFlat;     // "true" = SQUASH the persistent mesh flat (size.y -> ~0) while on the strategic map, so the footprint reads as a FLAT reactor-shaped sheet instead of a 3D model; full height up close. Needs DistrictFootprintMesh=true
+        internal static ConfigEntry<string> DistrictFootprintMeshHideDecal; // "true" (default) = when the mesh footprint is on, DROP the template's baked footprint DECAL item(s) (the inherited donor outline that shows beneath the mesh). Needs DistrictFootprintMesh=true
+        internal static ConfigEntry<string> DistrictFootprintMeshFlatHeight; // flatten HEIGHT (size.y multiplier) on the strategic map: ~0.02 = paper-flat (edges can drown in rising terrain), up toward 1 = full 3D. Tune in the F8 window until it reads flat yet clears the ground
         // --- EXPERIMENTAL: generic GPU mesh-buffer overrides (units, districts, any content layer) ---
         internal static ConfigEntry<string> BufferOverrides;     // per-layer overrides "<nameSubstr>:verts=+N,idx=+N,meshes=+N,maxtris=N;..." applied at layer creation
         internal static ConfigEntry<int>    SkeletonBoneBudget;  // shared per-frame animated-bone pool size (vanilla 65,535; high-bone customs overflow it -> spike plague)
@@ -132,6 +145,69 @@ namespace HumankindAssetFramework
                                   "SPIKE (wip-wonder-affinity): fill a custom Artificial Wonder's EMPTY cell in the game's 'ArtificialWonder' " +
                                   "visual database so the NATIVE wonder affinity renders a completed model. Format: 'WonderName=a,b,c,d;...' " +
                                   "where the guid is an FxEvolverMaterial (vanilla wonder material for a zero-bake proof, or our own baked one).");
+            DistrictMainRows    = Config.Bind("District", "DistrictMainRows", "",
+                                  "SPIKE (dedicated-visual hybrid): register a DATA-AUTHORED district selector by filling the */District/Main." +
+                                  "Level1+Level2 cells for an affinity with our baked CityMapSelector's GUID. Format: 'AffinityName=a,b,c,d;...' " +
+                                  "(e.g. DistrictVisualAffinity_Base_Industry=...). The game then resolves + LODs our selector natively.");
+            DistrictFootprint = Config.Bind("District", "DistrictFootprint", "",
+                                  "RUNTIME footprint choice for a scoped district (DistrictSelectorTile). Grafts the DECALS of a chosen donor selector " +
+                                  "onto the reactor's tile — the building stays ours, only the strategic footprint changes. Format: " +
+                                  "'ConstructibleDefinitionName=a,b,c,d;...' where the guid is any */District/Main selector (e.g. Base_Industry = " +
+                                  "149945011,1306056350,1706429623,-368887441; MissileSilo = -1158439761,1096327552,-1625448046,-477384506). Blank = " +
+                                  "keep the footprint baked into the selector. Change it + relaunch to switch footprints, no re-bake. (Note: the strategic " +
+                                  "footprint still lazy-builds ~1s on first zoom-out — engine limitation, independent of which footprint.)");
+            DistrictFootprintDrop = Config.Bind("District", "DistrictFootprintDrop", "Gravel,CityBricks,Battlement,Destroyed,Dammaged,Damaged",
+                                  "SURFACE-TEXTURE filter: comma-separated decal NAME substrings to DROP from the grafted footprint. The default set " +
+                                  "removes the gravel + battlement-rubble 'rocks' layers that render at close 3D zoom and TWITCH at the strategic<->3D " +
+                                  "zoom boundary (from donors like MissileSilo), leaving only the clean SchematicView footprint. Set BLANK to keep ALL " +
+                                  "donor decals (rock texture included), or list your own substrings (case-insensitive). Matches by decal material name.");
+            DistrictFootprintMask = Config.Bind("District", "DistrictFootprintMask", "",
+                                  "EXPERIMENTAL — UNIQUE footprint: path to a PNG mask (white-on-transparent top-down silhouette of the district's own " +
+                                  "layout, e.g. from the model). When set, we build a private 1-entry mask atlas from it, clone the SchematicView output " +
+                                  "layer to point its mask atlas at ours, and re-point one of the scoped district's SchematicView decals at it — so the " +
+                                  "strategic footprint shows the district's ACTUAL shape instead of a generic donor outline. Blank = off (generic footprint).");
+            DistrictFootprintMaskSize = Config.Bind("District", "DistrictFootprintMaskSize", "3.0",
+                                  "Tuning for DistrictFootprintMask: the world size (in tile units) of the injected silhouette footprint decal. " +
+                                  "Raise if the silhouette is too small on the strategic map, lower if it overflows the hex. Default 3.0.");
+            DistrictFootprintMaskRotation = Config.Bind("District", "DistrictFootprintMaskRotation", "0",
+                                  "Tuning for DistrictFootprintMask: rotate the footprint decal N degrees CLOCKWISE about the vertical axis. " +
+                                  "Negative = counter-clockwise. Default 0.");
+            DistrictFootprintMaskCut = Config.Bind("District", "DistrictFootprintMaskCut", "false",
+                                  "false (default) = draw a SOLID BLOCK (the decal's full quad — bold, instant). 'true' = CUT the " +
+                                  "footprint to the PNG mask's shape (e.g. a circle) — but the SchematicView shader tends to render a " +
+                                  "cut shape faintly/sketchily. Toggle to compare.");
+            DistrictFootprintMesh = Config.Bind("District", "DistrictFootprintMesh", "false",
+                                  "EXPERIMENTAL — MESH footprint: 'true' keeps the district's own 3D building mesh visible when you zoom out to the " +
+                                  "strategic map (instead of it fading to a flat decal). Works by zeroing each building element's RenderFeatureSelector " +
+                                  "(AlwaysEnabled), so the same geometry renders in every zoom band. The footprint is then the ACTUAL reactor buildings, " +
+                                  "solid and shaped — no sketchy decal. Default false.");
+            DistrictFootprintMeshBW = Config.Bind("District", "DistrictFootprintMeshBW", "false",
+                                  "EXPERIMENTAL — B&W footprint: 'true' makes the persistent MESH footprint render BLACK-AND-WHITE while you're on the " +
+                                  "strategic (zoomed-out) map, and full colour up close. Works by binding a greyscale copy of the reactor's albedo whenever " +
+                                  "the engine reports the close-up zoom band has faded out (RenderFeatureProvider.ComputeRenderState). Needs " +
+                                  "DistrictFootprintMesh=true (there's nothing to grey if the mesh isn't kept at strategic zoom). Default false.");
+            DistrictFootprintMeshFlat = Config.Bind("District", "DistrictFootprintMeshFlat", "false",
+                                  "EXPERIMENTAL — FLAT footprint: 'true' squashes the persistent mesh footprint FLAT (vertical size -> ~0) while you're on the " +
+                                  "strategic (zoomed-out) map, so it reads as a flat reactor-shaped sheet on the ground instead of a 3D model poking up; full " +
+                                  "height up close. Same schematic-band signal as the B&W option drives the swap (re-emits the element on the crossover). Needs " +
+                                  "DistrictFootprintMesh=true. Default false.");
+            DistrictFootprintMeshHideDecal = Config.Bind("District", "DistrictFootprintMeshHideDecal", "true",
+                                  "When the MESH footprint is on, the district's own mesh IS the strategic footprint — so the flat DECAL footprint baked " +
+                                  "into its selector (inherited from the donor/template it was built from, e.g. a MissileSilo outline) is redundant and shows " +
+                                  "THROUGH/beneath the mesh. 'true' (default) drops those footprint decal item(s) so only the mesh reads. Set 'false' to keep " +
+                                  "the decal. Needs DistrictFootprintMesh=true.");
+            DistrictFootprintMeshFlatHeight = Config.Bind("District", "DistrictFootprintMeshFlatHeight", "0.17",
+                                  "Tuning for DistrictFootprintMeshFlat: the flatten HEIGHT = the size.y multiplier applied on the strategic map. ~0.02 is " +
+                                  "paper-flat, but the sheet is then coplanar with the ground so its edges drown where the tile's terrain rises over them; up " +
+                                  "toward 1.0 is full 3D. The sweet spot reads flat yet still pokes clear of the terrain. Tune it LIVE in the F8 window " +
+                                  "(vertical placement is terrain-owned, so this — not a lift — is the lever). Default 0.08.");
+            DistrictSelectorTile = Config.Bind("District", "DistrictSelectorTile", "",
+                                  "SCOPED dedicated-visual: put a DATA-AUTHORED district selector on ONLY the named district's own tile(s) " +
+                                  "(matched by ConstructibleDefinitionName), leaving the shared visual affinity — and every other district using " +
+                                  "it — untouched. Unlike DistrictMainRows (which fills the shared affinity cell → hits ALL districts of that " +
+                                  "affinity), this overrides just the one tile at runtime and keeps the non-plugin fallback intact. The building " +
+                                  "element's output layer is bound automatically. Format: 'ConstructibleDefinitionName=a,b,c,d;...' " +
+                                  "(e.g. Extension_Base_BreederReactor=...).");
             DistrictBufferHeadroom = Config.Bind("District", "DistrictBufferHeadroom", 0,
                                   "Extra VERTICES to add to the game's big 'Visual' GPU mesh buffer (the shared building buffer, ~3,000,000 by default) " +
                                   "at startup, so custom district meshes fit even when a built-up late-game city has nearly filled it. 0 = off. " +
@@ -246,6 +322,7 @@ namespace HumankindAssetFramework
                 typeof(Hk_DistrictRepoint),   // EXPERIMENTAL: replace one district's on-map visual (docs/District-Visuals.md)
                 typeof(Hk_DistrictBufferHeadroom), // EXPERIMENTAL: enlarge the shared 'Visual' mesh buffer so custom district meshes fit (opt-in)
                 typeof(Hk_DistrictGroundMaterial), // EXPERIMENTAL: force a ground material (grass field) under a custom district
+                typeof(Hk_GroundApplyProbe),       // DIAGNOSTIC: log the ground index each district resolves (find the Industry "deadzone")
                 typeof(Hk_DistrictHexSculpt),      // EXPERIMENTAL: force hexagon sculpting (raised platform + strategic footprint) under a custom wonder
                 typeof(Hk_AnimatedBonePoolHeadroom), // enlarge the shared per-frame animated-bone pool (65,535 vanilla) — the spike-plague fix
                 typeof(Hk_PropRegister),           // EXPERIMENTAL: register our prop MeshCollections at AnimationLoad, before pawn resolution (opt-in)
@@ -311,6 +388,9 @@ namespace HumankindAssetFramework
                 UniversalInject.TickDistrictMeshSwap(); // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
                 UniversalInject.PollRepoDump();         // SPIKE wip-wonder-affinity: one-shot AssetReferenceRepository dump (DistrictDebug-gated)
                 UniversalInject.PollWonderRows();       // SPIKE wip-wonder-affinity: fill configured wonder cells in the ArtificialWonder visual DB
+                UniversalInject.PollDistrictMainRows(); // SPIKE dedicated-visual (hybrid): register our baked selector in */District/Main for an affinity
+                UniversalInject.PollDistrictSelectorTile(); // SCOPED dedicated-visual: put our selector on ONLY the named district's tile (keeps shared affinity + fallback)
+                UniversalInject.ProbeAxisGrowth();      // SPIKE dedicated-visual: one-shot — can matrix.Add grow a criteria axis with a NEW value? (DistrictDebug-gated)
                 UniversalInject.PollHexSculptDial();     // live dial (haf_hexsculpt.txt): re-carve every sculpted district's platform without a relaunch
             }
             BattleTurn.Poll();                          // live battle-turn dial (haf_battleturn.txt): turn rate + hold-fire for ALL units — independent of model injection, so outside the UniversalInject gate (spike)
@@ -375,6 +455,23 @@ namespace HumankindAssetFramework
             // and each ruled unit's composed size here is what makes an authoring pass verifiable without the log.
             GUILayout.Label("Unit resize — Resize Lab rules x Global Era Lab grid:");
             foreach (var l in UniversalInject.ResizeStatusLines()) GUILayout.Label(l);
+            GUILayout.Space(4);
+            // Strategic footprint — flatten-height LIVE OVERRIDE across all scoped districts (per-district values are
+            // authored in the District Factory; this is a session-wide quick-tune. Reset returns to per-district values).
+            GUILayout.Label("Strategic footprint — flatten height (live override, all scoped districts; 0.02 = flat, 1 = full 3D):");
+            using (new GUILayout.HorizontalScope())
+            {
+                bool overriding = UniversalInject.FlatHeightOverriding();
+                float h = UniversalInject.FlatHeightOverrideValue();
+                GUILayout.Label(overriding ? $"override = {h:0.00}" : "per-district", GUILayout.Width(110));
+                if (GUILayout.Button("-0.05", GUILayout.Width(55))) UniversalInject.NudgeFlatHeight(-0.05f);
+                if (GUILayout.Button("-0.01", GUILayout.Width(55))) UniversalInject.NudgeFlatHeight(-0.01f);
+                if (GUILayout.Button("+0.01", GUILayout.Width(55))) UniversalInject.NudgeFlatHeight(+0.01f);
+                if (GUILayout.Button("+0.05", GUILayout.Width(55))) UniversalInject.NudgeFlatHeight(+0.05f);
+                float nv = GUILayout.HorizontalSlider(h, 0.02f, 1f, GUILayout.Width(160));
+                if (Mathf.Abs(nv - h) > 0.001f) UniversalInject.SetFlatHeight(nv);
+                if (overriding && GUILayout.Button("Reset", GUILayout.Width(55))) UniversalInject.ClearFlatHeightOverride();
+            }
             GUILayout.Space(4);
             GUILayout.Label("GPU mesh buffer (live) — Shift+F8 also logs it:");
             foreach (var l in UniversalInject.MeshBudgetLines()) GUILayout.Label(l);

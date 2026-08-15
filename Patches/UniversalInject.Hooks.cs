@@ -154,7 +154,9 @@ namespace HumankindAssetFramework
                     .FirstOrDefault(m => m.Name == "UpdateLevelBuild" && m.GetParameters().Length == 1);
         }
         // Prefix runs before the request is built, so the affinity swap feeds FillRequest.
-        static void Prefix(object __instance) { UniversalInject.DistrictDiag(__instance); UniversalInject.DistrictAffinitySwap(__instance); }
+        // __0 = the HgFxAnchorComponent.EventNameEnum arg. We stash the last real value so a forced re-resolve
+        // (after the */District/Main cell fill lands) can replay a KNOWN-GOOD call instead of guessing the enum.
+        static void Prefix(object __instance, object __0) { UniversalInject.CaptureLevelBuildEvent(__0); UniversalInject.DistrictDiag(__instance); UniversalInject.DistrictAffinitySwap(__instance); }
         // Postfix: after UpdateLevelBuild built the request/material — dumps + the registry-driven apply act here.
         static void Postfix(object __instance) { UniversalInject.DistrictDumpMaterial(__instance); UniversalInject.DistrictDumpSubMaterials(__instance); UniversalInject.DistrictApplyEntries(__instance); UniversalInject.DistrictGuidOverride(__instance); }
     }
@@ -172,6 +174,26 @@ namespace HumankindAssetFramework
                     .FirstOrDefault(m => m.Name == "UpdateGroundMaterial");
         }
         static void Postfix(object __instance) { UniversalInject.DistrictApplyGroundMaterial(__instance); }
+    }
+
+    // Ground-material index rewrite at the SINGLE choke point. UpdateGroundMaterial isn't the only caller of
+    // ApplyGroundMaterialDefinition — deposit tiles re-resolve directly to natural terrain, reverting the postfix. This
+    // PREFIX rewrites the index for our registered districts on EVERY call, so the paint holds (no re-assert, no twitch).
+    // Also carries the DistrictDebug probe (what native tiles resolve to — the "deadzone" we wanted to match).
+    [HarmonyPatch]
+    internal static class Hk_GroundApplyProbe
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = GameBinding.PresentationDistrict;
+            return t?.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+                    .FirstOrDefault(m => m.Name == "ApplyGroundMaterialDefinition" && m.GetParameters().Length == 1);
+        }
+        static bool Prefix(object __instance, ref int __0)
+        {
+            UniversalInject.GroundApplyProbe(__instance, __0);            // log the ORIGINAL resolve first (native/deadzone)
+            return UniversalInject.GroundApplyOverride(__instance, ref __0); // rewrite+run once, then SKIP redundant calls (false) so the blend settles
+        }
     }
 
     // EXPERIMENTAL — HEXAGON SCULPTING under a custom wonder (the raised platform + strategic-zoom footprint).
