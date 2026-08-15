@@ -174,6 +174,47 @@ renders the result faint (above), so it's not shipped. The experiments are stash
 the crisp version would need a **different, solid-rendering output layer** (the CityMap/gravel one — which reintroduces
 the close-zoom twitch we removed, see [District-Footprint-Investigation.md]).
 
+## MESH footprint (`DistrictFootprintMesh`) — the district's REAL geometry at strategic zoom ← the winner
+
+The decal routes above are flat *textures*, and shapes rendered through SchematicView come out sketchy. The clean
+answer is to skip the decal entirely and **keep the district's own 3D building mesh visible at strategic zoom**, so
+the footprint literally *is* the model. Verified in-game on the Breeder Reactor (2026-08-15).
+
+**The fade is a per-element GPU gate, not a camera switch.** There is no separate "strategic camera" — building meshes
+and SchematicView decals both render in the `Default` render context. Each `FxEvolverMaterialLevelBuildElement` carries
+a `RenderFeatureSelector` whose `SelectionFlags0` bitmask says which camera **zoom-bands** ("render features") draw it.
+`PresentationCameraController.OnCameraLayerChanged` enables a band's `TerrainRenderFeatureFlags` via
+`RenderFeatureProvider.SetRenderFeatureState`, which animates a shader buffer 0↔1 (the smooth fade). The reactor's
+element was gated to `SelectionFlags0 = 1` (`RealisticTerrain` = close band only) → it vanished at strategic zoom.
+**`SelectionFlags0 == 0` = `AlwaysEnabled` → the same geometry renders in EVERY band, strategic included.** No re-bake,
+no LOD hack. (`RenderFeatures` bits: `RealisticTerrain=1`, `TopographicTerrain=2`, `DiplomaticTerrain=4`, …)
+
+**`KeepDistrictMeshAtStrategicZoom` (once per district):** walk the selector for every mesh-bearing element
+(`CollectMeshElements`), read-modify-write its boxed `renderFeatureSelector.SelectionFlags0 = 0`, `OnEditionChange()`,
+then `LoadFxMaterial(sel)`. Scoped + safe — the reactor's element is its own asset, and AlwaysEnabled only *adds* the
+strategic band (close zoom unchanged). Bonus: like the block, it appears **instantly** (no ~1s reveal — no per-hex
+decal render-data). Also drops the template's baked footprint **decal** items (`DistrictFootprintMeshHideDecal`, default
+on) so the inherited donor outline (e.g. the MissileSilo silhouette) doesn't show beneath the mesh.
+
+**B&W when zoomed out (`DistrictFootprintMeshBW`).** The reactor's skin is a runtime-bound `Texture2D` (`scopedAlbedo`
+on `scopedDonorClone`, re-asserted every ~15 ticks by `BindScopedSheet`), so `DesiredScopedAlbedo()` just picks
+colour-vs-grey each re-assert — no second element. Grey copy = `MakeGrayCopy` (Blit→RenderTexture→ReadPixels handles
+the non-readable atlas, then `AdjustSkin(t,1,1,0,0,0)` = luminance desaturate). **Zoom signal (the crux):** ask
+`RenderFeatureProvider.ComputeRenderState(RenderFeatureSelector)` for the current 0..1 visibility of the **Topographic**
+band (`SelectionFlags0 = 2`, the schematic look) — grey when `≥ 0.5`. **Do NOT key the Realistic/close band (`=1`): it
+stays on well past the schematic crossover, so the reactor kept its colour zoomed out.** Get the single provider via
+`Resources.FindObjectsOfTypeAll`.
+
+**Flat when zoomed out (`DistrictFootprintMeshFlat`).** A 3D model on the flat map still reads as a model; squash it.
+`UpdateMeshFlatness()` (same Topographic signal) sets each element's `size.y → ~2%` on the schematic map, restores full
+height up close, re-emitting via `materialDataHasChanged` + `RefreshChannel` on the crossover only. (`size` is the
+element scale the scoped setup already uses `size = 0` to *hide* props with — so `size.y ≈ 0` collapses the mesh into a
+flat, grey, reactor-shaped sheet.) Result: full 3D colour building up close, flat grayscale footprint zoomed out.
+
+**Config** (`[District]`, all need `DistrictFootprintMesh = true`): `DistrictFootprintMesh`, `DistrictFootprintMeshBW`,
+`DistrictFootprintMeshFlat`, `DistrictFootprintMeshHideDecal` (default true). Leave `DistrictFootprintMask` blank (the
+decal route and the mesh route are mutually exclusive).
+
 ## Ground under the district (`DistrictApplyGroundMaterial` + the `ApplyGroundMaterialDefinition` **prefix**)
 
 The per-entry **ground paint** (`groundMaterial` in `haf_districts.json`, e.g. `Constructible_Temperate_03`) is

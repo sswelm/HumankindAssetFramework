@@ -50,6 +50,11 @@ namespace HumankindAssetFramework
         internal static ConfigEntry<string> DistrictFootprintMask;   // EXPERIMENTAL: path to a PNG silhouette mask -> a UNIQUE strategic footprint matching the district's own layout (injected into a private clone of the SchematicView mask atlas)
         internal static ConfigEntry<string> DistrictFootprintMaskSize; // tuning: world size (units) of the injected silhouette footprint decal; default 3.0
         internal static ConfigEntry<string> DistrictFootprintMaskRotation; // tuning: rotate the footprint decal N degrees clockwise; default 0
+        internal static ConfigEntry<string> DistrictFootprintMaskCut;      // "true" = cut the footprint to the PNG's shape (may render faint via SchematicView); default false = solid block (skip mask)
+        internal static ConfigEntry<string> DistrictFootprintMesh;         // "true" = keep the district's own 3D BUILDING MESH rendering at strategic zoom (RenderFeatureSelector.SelectionFlags0=0 -> AlwaysEnabled) so the footprint IS the real geometry, not a flat decal
+        internal static ConfigEntry<string> DistrictFootprintMeshBW;       // "true" = when the persistent mesh footprint is on the STRATEGIC map (zoomed out), bind a GREYSCALE copy of its albedo so the reactor reads black-and-white; full colour up close. Needs DistrictFootprintMesh=true
+        internal static ConfigEntry<string> DistrictFootprintMeshFlat;     // "true" = SQUASH the persistent mesh flat (size.y -> ~0) while on the strategic map, so the footprint reads as a FLAT reactor-shaped sheet instead of a 3D model; full height up close. Needs DistrictFootprintMesh=true
+        internal static ConfigEntry<string> DistrictFootprintMeshHideDecal; // "true" (default) = when the mesh footprint is on, DROP the template's baked footprint DECAL item(s) (the inherited donor outline that shows beneath the mesh). Needs DistrictFootprintMesh=true
         // --- EXPERIMENTAL: generic GPU mesh-buffer overrides (units, districts, any content layer) ---
         internal static ConfigEntry<string> BufferOverrides;     // per-layer overrides "<nameSubstr>:verts=+N,idx=+N,meshes=+N,maxtris=N;..." applied at layer creation
         internal static ConfigEntry<int>    SkeletonBoneBudget;  // shared per-frame animated-bone pool size (vanilla 65,535; high-bone customs overflow it -> spike plague)
@@ -166,6 +171,30 @@ namespace HumankindAssetFramework
             DistrictFootprintMaskRotation = Config.Bind("District", "DistrictFootprintMaskRotation", "0",
                                   "Tuning for DistrictFootprintMask: rotate the footprint decal N degrees CLOCKWISE about the vertical axis. " +
                                   "Negative = counter-clockwise. Default 0.");
+            DistrictFootprintMaskCut = Config.Bind("District", "DistrictFootprintMaskCut", "false",
+                                  "false (default) = draw a SOLID BLOCK (the decal's full quad — bold, instant). 'true' = CUT the " +
+                                  "footprint to the PNG mask's shape (e.g. a circle) — but the SchematicView shader tends to render a " +
+                                  "cut shape faintly/sketchily. Toggle to compare.");
+            DistrictFootprintMesh = Config.Bind("District", "DistrictFootprintMesh", "false",
+                                  "EXPERIMENTAL — MESH footprint: 'true' keeps the district's own 3D building mesh visible when you zoom out to the " +
+                                  "strategic map (instead of it fading to a flat decal). Works by zeroing each building element's RenderFeatureSelector " +
+                                  "(AlwaysEnabled), so the same geometry renders in every zoom band. The footprint is then the ACTUAL reactor buildings, " +
+                                  "solid and shaped — no sketchy decal. Default false.");
+            DistrictFootprintMeshBW = Config.Bind("District", "DistrictFootprintMeshBW", "false",
+                                  "EXPERIMENTAL — B&W footprint: 'true' makes the persistent MESH footprint render BLACK-AND-WHITE while you're on the " +
+                                  "strategic (zoomed-out) map, and full colour up close. Works by binding a greyscale copy of the reactor's albedo whenever " +
+                                  "the engine reports the close-up zoom band has faded out (RenderFeatureProvider.ComputeRenderState). Needs " +
+                                  "DistrictFootprintMesh=true (there's nothing to grey if the mesh isn't kept at strategic zoom). Default false.");
+            DistrictFootprintMeshFlat = Config.Bind("District", "DistrictFootprintMeshFlat", "false",
+                                  "EXPERIMENTAL — FLAT footprint: 'true' squashes the persistent mesh footprint FLAT (vertical size -> ~0) while you're on the " +
+                                  "strategic (zoomed-out) map, so it reads as a flat reactor-shaped sheet on the ground instead of a 3D model poking up; full " +
+                                  "height up close. Same schematic-band signal as the B&W option drives the swap (re-emits the element on the crossover). Needs " +
+                                  "DistrictFootprintMesh=true. Default false.");
+            DistrictFootprintMeshHideDecal = Config.Bind("District", "DistrictFootprintMeshHideDecal", "true",
+                                  "When the MESH footprint is on, the district's own mesh IS the strategic footprint — so the flat DECAL footprint baked " +
+                                  "into its selector (inherited from the donor/template it was built from, e.g. a MissileSilo outline) is redundant and shows " +
+                                  "THROUGH/beneath the mesh. 'true' (default) drops those footprint decal item(s) so only the mesh reads. Set 'false' to keep " +
+                                  "the decal. Needs DistrictFootprintMesh=true.");
             DistrictSelectorTile = Config.Bind("District", "DistrictSelectorTile", "",
                                   "SCOPED dedicated-visual: put a DATA-AUTHORED district selector on ONLY the named district's own tile(s) " +
                                   "(matched by ConstructibleDefinitionName), leaving the shared visual affinity — and every other district using " +

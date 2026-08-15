@@ -1056,6 +1056,7 @@ namespace HumankindAssetFramework
         static bool BindScopedSheet(bool log)
         {
             if (scopedAlbedo == null || scopedDonorClone == null) return false;
+            var desired = DesiredScopedAlbedo();   // colour normally; a greyscale copy when the mesh footprint is on the strategic map (DistrictFootprintMeshBW)
             if (!log && scopedBoundSlots.Count > 0)
             {
                 bool stale = false;
@@ -1063,9 +1064,9 @@ namespace HumankindAssetFramework
                 {
                     var (mat, prop) = scopedBoundSlots[i];
                     if (mat == null) { stale = true; break; }
-                    if (!ReferenceEquals(mat.GetTexture(prop), scopedAlbedo))
+                    if (!ReferenceEquals(mat.GetTexture(prop), desired))
                     {
-                        mat.SetTexture(prop, scopedAlbedo);
+                        mat.SetTexture(prop, desired);
                         // TWITCH DIAG: a rebind here means the GAME reset our albedo since last tick — if this logs steadily,
                         // the model/base ("rock") texture is alternating game<->ours = the twitch.
                         if (Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value && scopedRebindLog < 40)
@@ -1088,7 +1089,7 @@ namespace HumankindAssetFramework
                         {
                             var cur = mat.GetTexture(pn);
                             if (dump) Plugin.Diag($"[DistrictTile]   {fld}('{mat.shader?.name}').{pn} = {(cur != null ? $"'{cur.name}' {cur.width}x{cur.height}" : "null")}");
-                            if (ReferenceEquals(cur, scopedAlbedo)) { alreadyProp = pn; continue; }
+                            if (ReferenceEquals(cur, desired)) { alreadyProp = pn; continue; }
                             if (pn == "_MainTex") hasMainTex = true; else if (pn == "_VisualContent") hasVisualContent = true;
                             if (!(cur is UnityEngine.Texture2D t2)) continue;
                             if (pn == "_MainTex") pick = pn;
@@ -1100,13 +1101,127 @@ namespace HumankindAssetFramework
                         if (pick == null && hasVisualContent) pick = "_VisualContent";
                         if (pick != null)
                         {
-                            mat.SetTexture(pick, scopedAlbedo); n++;
+                            mat.SetTexture(pick, desired); n++;
                             scopedBoundSlots.Add((mat, pick));
                             if (log) Plugin.Diag($"[DistrictTile] albedo bound on {fld}.{pick}");
                         }
                     }
             if (log) Plugin.Diag($"[DistrictTile] albedo bound on {n} material slot(s) of the donor layer clone");
             return n > 0;
+        }
+
+        // ---- B&W footprint (config DistrictFootprintMeshBW): when the persistent MESH footprint is on the STRATEGIC map
+        // (zoomed out), bind a greyscale copy of the reactor albedo instead of the colour one; full colour up close.
+        // "Am I on the strategic map?" is answered EXACTLY (no zoom-threshold guessing) by asking the engine's
+        // RenderFeatureProvider for the CURRENT 0..1 visibility of the TOPOGRAPHIC band (SelectionFlags0 = 2 =
+        // TopographicTerrain = the schematic/strategic look): ~0 while zoomed in, rises to ~1 as the schematic map
+        // takes over. (First cut keyed the RealisticTerrain/close band, but it stays "on" well past the schematic
+        // crossover, so the reactor kept its colour zoomed out — Topographic is the band that tracks the schematic map.)
+        static UnityEngine.Texture2D scopedAlbedoGray;
+        static object rfpInstance; static MethodInfo miComputeRenderState; static object topoSelectorBox;
+        static int bwDiagThrottle;
+        // Current 0..1 visibility of the TOPOGRAPHIC (schematic/strategic) band — ~0 zoomed in, ~1 on the strategic map.
+        // Returns -1 if the RenderFeatureProvider isn't loaded yet. Shared by the B&W and FLAT footprint options.
+        static float SchematicVis()
+        {
+            try
+            {
+                if (rfpInstance == null || (rfpInstance is UnityEngine.Object ruo && ruo == null))
+                {
+                    var rfpType = AccessTools.TypeByName("Amplitude.Mercury.Fx.RenderFeatureProvider");
+                    var selType = AccessTools.TypeByName("Amplitude.Mercury.Fx.RenderFeatureSelector");
+                    if (rfpType == null || selType == null) return -1f;
+                    var found = UnityEngine.Resources.FindObjectsOfTypeAll(rfpType);
+                    if (found == null || found.Length == 0) return -1f;   // not loaded yet
+                    rfpInstance = found[0];
+                    miComputeRenderState = rfpType.GetMethod("ComputeRenderState", new[] { selType });
+                    var box = Activator.CreateInstance(selType);
+                    selType.GetField("SelectionFlags0").SetValue(box, 2u);   // TopographicTerrain (the schematic/strategic band)
+                    selType.GetField("FadingOptions").SetValue(box, 1u);
+                    topoSelectorBox = box;
+                }
+                if (miComputeRenderState == null || topoSelectorBox == null) return -1f;
+                return (float)miComputeRenderState.Invoke(rfpInstance, new[] { topoSelectorBox });
+            }
+            catch { return -1f; }
+        }
+        static UnityEngine.Texture2D DesiredScopedAlbedo()
+        {
+            if (Plugin.DistrictFootprintMeshBW == null || Plugin.DistrictFootprintMeshBW.Value != "true" || scopedAlbedo == null) return scopedAlbedo;
+            float topoVis = SchematicVis();
+            if (topoVis < 0f) return scopedAlbedo;                       // provider not ready -> colour
+            if (Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value && (++bwDiagThrottle % 30) == 1)
+                Plugin.Log.LogInfo($"[FootprintMesh] topographic band vis = {topoVis:0.00} -> {(topoVis >= 0.5f ? "GREY" : "colour")}");
+            if (topoVis < 0.5f) return scopedAlbedo;                     // schematic not active yet -> colour
+            if (scopedAlbedoGray == null) scopedAlbedoGray = MakeGrayCopy(scopedAlbedo);   // build once, lazily
+            return scopedAlbedoGray ?? scopedAlbedo;
+        }
+        // FLAT footprint (config DistrictFootprintMeshFlat): squash the reactor mesh element(s) to ~0 height while the
+        // schematic map is active, restore full height up close. Driven by the same Topographic-band signal as the B&W
+        // swap. `size` scales the element (the scoped setup already uses size=0 to HIDE props — line ~702), so size.y->~0
+        // collapses the mesh into a flat sheet. size feeds GPU via WriteToGPUData, so re-emit on the crossover only.
+        static bool? meshFlatState;
+        static readonly Dictionary<object, UnityEngine.Vector3> meshOrigSize = new Dictionary<object, UnityEngine.Vector3>();
+        internal static void UpdateMeshFlatness()
+        {
+            if (Plugin.DistrictFootprintMeshFlat == null || Plugin.DistrictFootprintMeshFlat.Value != "true" || scopedElements.Count == 0) return;
+            float topoVis = SchematicVis();
+            if (topoVis < 0f) return;                                    // provider not ready
+            bool flat = topoVis >= 0.5f;
+            if (meshFlatState.HasValue && meshFlatState.Value == flat) return;   // no change since last apply
+            try
+            {
+                int changed = 0;
+                foreach (var el in scopedElements)
+                {
+                    var t = el.GetType();
+                    var sizeF = GF(t, "size");
+                    if (sizeF == null) continue;
+                    if (!meshOrigSize.ContainsKey(el)) { if (sizeF.GetValue(el) is UnityEngine.Vector3 os) meshOrigSize[el] = os; else continue; }
+                    var orig = meshOrigSize[el];
+                    sizeF.SetValue(el, flat ? new UnityEngine.Vector3(orig.x, orig.y * 0.02f, orig.z) : orig);
+                    var desc = GetMember(el, "FxEvolverDescriptor");
+                    if (desc != null) AccessTools.Field(desc.GetType(), "materialDataHasChanged")?.SetValue(desc, true);
+                    InvokeNoArg(el, "OnEditionChange");
+                    changed++;
+                }
+                // re-spawn the hosting channels so the new size reaches the render data
+                foreach (var plbc in scopedRefreshPlbcs)
+                {
+                    if (plbc == null) continue;
+                    if (miRefreshChannel == null)
+                        miRefreshChannel = plbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                            .FirstOrDefault(m => m.Name == "RefreshChannel" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
+                    if (miRefreshChannel != null)
+                    {
+                        var ra = new object[] { mainLayerCached >= 0 ? mainLayerCached : 0, System.Enum.ToObject(miRefreshChannel.GetParameters()[1].ParameterType, 0) };
+                        try { miRefreshChannel.Invoke(plbc, ra); } catch { }
+                    }
+                }
+                meshFlatState = flat;
+                Plugin.Log.LogInfo($"[FootprintMesh] reactor mesh -> {(flat ? "FLAT (strategic footprint)" : "3D (close-up)")} on {changed} element(s)");
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[FootprintMesh] flatten: " + ex.Message); }
+        }
+        // Blit the (possibly non-CPU-readable) albedo through a RenderTexture, read it back, and desaturate it fully
+        // (AdjustSkin desat=1 = luminance greyscale). Same readback pattern as BuildAdjustedAtlas.
+        static UnityEngine.Texture2D MakeGrayCopy(UnityEngine.Texture2D src)
+        {
+            try
+            {
+                int w = src.width, h = src.height;
+                var rt = UnityEngine.RenderTexture.GetTemporary(w, h, 0, UnityEngine.RenderTextureFormat.ARGB32, UnityEngine.RenderTextureReadWrite.sRGB);
+                var prev = UnityEngine.RenderTexture.active;
+                UnityEngine.Graphics.Blit(src, rt);
+                UnityEngine.RenderTexture.active = rt;
+                var t = new UnityEngine.Texture2D(w, h, UnityEngine.TextureFormat.RGBA32, false) { name = "ReactorAlbedo_Gray" };
+                t.ReadPixels(new UnityEngine.Rect(0, 0, w, h), 0, 0); t.Apply();
+                UnityEngine.RenderTexture.active = prev; UnityEngine.RenderTexture.ReleaseTemporary(rt);
+                AdjustSkin(t, 1f, 1f, 0f, 0f, 0f);   // full greyscale, no brightness/tint change
+                Plugin.Log.LogInfo($"[FootprintMesh] built greyscale albedo {w}x{h} for the strategic-zoom B&W footprint.");
+                return t;
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[FootprintMesh] grey copy failed: " + e.Message); return null; }
         }
 
         // Postfix (per district UpdateLevelBuild): match against the registry and cache each entry's component + layer.

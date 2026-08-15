@@ -336,6 +336,7 @@ namespace HumankindAssetFramework
                         DumpDecalBinding(sel, name);       // DIAGNOSTIC: are the gravel decals' visualOutput layers bound? masked by terrain?
                         DumpSchematicAtlas(sel, name);     // DE-RISK: dump the SchematicView output layer's atlas structure (can we inject our silhouette?)
                         InjectReactorFootprint(sel, name); // UNIQUE footprint: inject our model silhouette as the SchematicView mask (config DistrictFootprintMask)
+                        KeepDistrictMeshAtStrategicZoom(sel, name); // MESH footprint: keep the 3D building mesh visible at strategic zoom (config DistrictFootprintMesh)
                         // UnmaskPavingDecals refuted: decals are bound AND unmasked yet still don't draw close-zoom — the
                         // cause is elsewhere (render-pass / emitter-vs-selector), so we no longer mutate the shared decals.
                         loadedSelectorByKey[key] = sel;
@@ -381,6 +382,7 @@ namespace HumankindAssetFramework
                 if (anySet) BindReactorBuilding();
                 // then bind the district's OWN albedo atlas onto that layer so the reactor wears its texture, not brick
                 ApplyScopedAlbedo();
+                UpdateMeshFlatness();   // FLAT footprint: squash the mesh flat on the strategic map (config DistrictFootprintMeshFlat)
             }
             catch (Exception ex) { if (selectorTileLogged.Add("ex")) Plugin.Log.LogError("[DistrictTile] " + ex); }
         }
@@ -920,7 +922,10 @@ namespace HumankindAssetFramework
                 var structType = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxTextureAtlasStruct");
                 var entryType = absType.GetNestedType("AtlasEntry");
                 var outEntryType = absType.GetNestedType("OutputEntry");
-                const string maskGuidStr = "reactorfootprintmask000000000001";
+                // GUID decides block-vs-shape. INVALID -> new Guid()->Null -> FillLayerData skips the mask -> solid quad
+                // block (default). VALID hex (DistrictFootprintMaskCut=true) -> the mask cuts to the PNG's shape (e.g. circle).
+                string maskGuidStr = (Plugin.DistrictFootprintMaskCut != null && Plugin.DistrictFootprintMaskCut.Value == "true")
+                    ? "deadbeef000000000000000000000001" : "reactorfootprintmask000000000001";
                 var ourAtlas = UnityEngine.ScriptableObject.CreateInstance(atlasType);
                 ourAtlas.name = "ReactorFootprint_MaskAtlas";
                 // atlasEntries[1]  (GUID -> Index 0)
@@ -1039,6 +1044,97 @@ namespace HumankindAssetFramework
                 Plugin.Log.LogInfo("[Footprint] done — zoom out to see the reactor silhouette footprint.");
             }
             catch (Exception ex) { if (selectorTileLogged.Add(name + ":fpex")) Plugin.Log.LogError("[Footprint] " + ex); }
+        }
+        // MESH footprint (config DistrictFootprintMesh): keep the district's own 3D building mesh rendering at strategic zoom
+        // instead of demoting to a flat decal. The fade is a per-element GPU gate: FxEvolverMaterialLevelBuildElement carries a
+        // RenderFeatureSelector whose SelectionFlags0 bitmask decides which camera zoom-bands ("render features") draw it. The
+        // reactor's building elements carry a close-band-only mask, so they vanish at strategic zoom. SelectionFlags0 == 0 means
+        // AlwaysEnabled (RenderFeatureFlags.AlwaysEnabled) -> the SAME geometry renders in every band, strategic included. The
+        // value only reaches the GPU via WriteToGPUData, so we nudge OnEditionChange() then re-emit the selector (LoadFxMaterial).
+        // Scoped + safe: the reactor's element is its own custom asset (unique to this district); AlwaysEnabled only ADDS the
+        // strategic band, close zoom is unchanged. No mesh re-bake, no LOD change.
+        static readonly HashSet<string> meshPersistLogged = new HashSet<string>();
+        internal static void KeepDistrictMeshAtStrategicZoom(object sel, string name)
+        {
+            if (Plugin.DistrictFootprintMesh == null || Plugin.DistrictFootprintMesh.Value != "true" || sel == null) return;
+            if (!meshPersistLogged.Add(name)) return;   // once per district
+            try
+            {
+                var elements = new List<object>();
+                CollectMeshElements(sel, elements, 0, new HashSet<object>());
+                int changed = 0;
+                foreach (var el in elements)
+                {
+                    var rfsF = GF(el.GetType(), "renderFeatureSelector");
+                    if (rfsF == null) continue;
+                    var rfs = rfsF.GetValue(el);                              // boxed RenderFeatureSelector struct
+                    if (rfs == null) continue;
+                    var flagsF = rfs.GetType().GetField("SelectionFlags0");
+                    if (flagsF == null) continue;
+                    uint cur = (uint)flagsF.GetValue(rfs);
+                    if (cur == 0u) { continue; }                             // already AlwaysEnabled
+                    flagsF.SetValue(rfs, 0u);                                 // 0 = AlwaysEnabled -> render in EVERY zoom band
+                    rfsF.SetValue(el, rfs);                                   // write the struct back onto the element
+                    InvokeNoArg(el, "OnEditionChange");                       // game's "field changed, rebuild GPU data" signal
+                    changed++;
+                    Plugin.Log.LogInfo($"[FootprintMesh] '{name}': element '{GetMember(el, "name")}' SelectionFlags0 {cur} -> 0 (AlwaysEnabled)");
+                }
+                bool dirty = changed > 0;
+                // The mesh is now the footprint, so drop the template's baked footprint DECAL item(s) — the inherited
+                // donor outline (e.g. the MissileSilo silhouette) that otherwise shows THROUGH/beneath our flat mesh.
+                if (Plugin.DistrictFootprintMeshHideDecal == null || Plugin.DistrictFootprintMeshHideDecal.Value != "false")
+                {
+                    var itemsF = GF(sel.GetType(), "levelBuildItems");
+                    if (itemsF?.GetValue(sel) is Array allItems)
+                    {
+                        var keep = new List<object>(); int dropped = 0;
+                        foreach (var it in allItems)
+                        {
+                            if (it == null) continue;
+                            var child = GF(it.GetType(), "loadedEvolverMaterial")?.GetValue(it) ?? TryLoadMaterial(GF(it.GetType(), "EvolverMaterialGuid")?.GetValue(it));
+                            if (child != null && child.GetType().Name.IndexOf("Decal", StringComparison.OrdinalIgnoreCase) >= 0) { dropped++; continue; }   // drop footprint decals
+                            keep.Add(it);
+                        }
+                        if (dropped > 0)
+                        {
+                            var elemType = allItems.GetType().GetElementType();
+                            var arr = Array.CreateInstance(elemType, keep.Count);
+                            for (int i = 0; i < keep.Count; i++) arr.SetValue(keep[i], i);
+                            itemsF.SetValue(sel, arr);
+                            dirty = true;
+                            Plugin.Log.LogInfo($"[FootprintMesh] '{name}': dropped {dropped} template footprint decal item(s) — the mesh is the footprint now.");
+                        }
+                    }
+                }
+                if (dirty) LoadFxMaterial(sel);                               // re-emit so WriteToGPUData pushes the new selector + dropped items
+                if (meshPersistLogged.Add(name + ":done")) Plugin.Log.LogInfo($"[FootprintMesh] '{name}': {changed} building element(s) now render at strategic zoom ({elements.Count} element(s) scanned).");
+            }
+            catch (Exception ex) { if (meshPersistLogged.Add(name + ":ex")) Plugin.Log.LogWarning("[FootprintMesh] " + ex); }
+        }
+        // Recursively gather every FxEvolverMaterialLevelBuildElement (mesh-bearing leaf) under a selector. Mirrors
+        // CollectDecalMaterials' traversal (levelBuildItems + cache entries + pairs).
+        static void CollectMeshElements(object mat, List<object> outEls, int depth, HashSet<object> visited)
+        {
+            if (mat == null || depth > 10 || !visited.Add(mat)) return;
+            var t = mat.GetType();
+            if (GF(t, "renderFeatureSelector") != null && GF(t, "fxMesh") != null) { outEls.Add(mat); return; }
+            if (GF(t, "levelBuildItems")?.GetValue(mat) is Array items)
+                foreach (var it in items) if (it != null)
+                    CollectMeshElements(GF(it.GetType(), "loadedEvolverMaterial")?.GetValue(it) ?? TryLoadMaterial(GF(it.GetType(), "EvolverMaterialGuid")?.GetValue(it)), outEls, depth + 1, visited);
+            var cache = GF(t, "fxMaterialCacheEntries")?.GetValue(mat);
+            if (cache != null && AccessTools.Field(cache.GetType(), "Entries")?.GetValue(cache) is Array entries)
+                foreach (var e in entries) if (e != null) CollectMeshElements(AccessTools.Field(e.GetType(), "FxMaterial")?.GetValue(e), outEls, depth + 1, visited);
+            if (GF(t, "pairs")?.GetValue(mat) is Array pairs)
+                foreach (var pr in pairs) if (pr != null) { var g = PairGuid(pr); if (!GuidIsNull(g)) CollectMeshElements(TryLoadMaterial(g), outEls, depth + 1, visited); }
+        }
+        // Invoke a 0-arg method by name anywhere in the type hierarchy (public or non-public); silent no-op if absent.
+        static void InvokeNoArg(object obj, string method)
+        {
+            for (var ty = obj?.GetType(); ty != null; ty = ty.BaseType)
+            {
+                var m = ty.GetMethod(method, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly, null, Type.EmptyTypes, null);
+                if (m != null) { try { m.Invoke(obj, null); } catch { } return; }
+            }
         }
         static void CollectDecalMaterials(object mat, List<object> outDecals, int depth, HashSet<object> visited)
         {
