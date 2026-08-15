@@ -221,6 +221,10 @@ entry (`footprintMesh` / `footprintMeshBW` / `footprintMeshFlat` / `footprintMes
 edited under **Mesh footprint** in the District Factory window and saved to `haf_districts.json` (Save settings, no re-bake).
 When an entry sets `footprintMesh = true` its values are **authoritative**; otherwise the global config below stays in charge
 (so a district keeps working before it's authored per-entry). The plugin resolves this in `ResolveScopedFootprint`.
+**Foot-gun guarded:** because an authoritative entry *replaces* the global config, an entry with the master toggle on but the
+sub-options off would regress the district to 3D colour — so ticking **Mesh footprint** in the window pre-fills B&W + Flatten +
+Hide-decal (height 0.17). The decal-donor field is greyed out (`(superseded by Mesh footprint)`) while the mesh footprint is on,
+since the two are mutually exclusive.
 
 **Global config fallback** (`[District]`, all need `DistrictFootprintMesh = true`): `DistrictFootprintMesh`,
 `DistrictFootprintMeshBW`, `DistrictFootprintMeshFlat`, `DistrictFootprintMeshFlatHeight` (default 0.17),
