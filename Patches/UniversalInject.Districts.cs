@@ -1035,6 +1035,8 @@ namespace HumankindAssetFramework
         static bool scopedTexApplied { get => S.texApplied; set => S.texApplied = value; }
         static int scopedTexWait { get => S.texWait; set => S.texWait = value; }
         static int scopedTexErrors { get => S.texErrors; set => S.texErrors = value; }
+        static readonly HashSet<string> scopedShaderDumped = new HashSet<string>();   // ALPHA DIAG: dump each scoped material shader/keywords once
+        static bool HasAlpha(UnityEngine.TextureFormat f) => f == UnityEngine.TextureFormat.DXT5 || f == UnityEngine.TextureFormat.RGBA32 || f == UnityEngine.TextureFormat.ARGB32 || f == UnityEngine.TextureFormat.BC7 || f == UnityEngine.TextureFormat.RGBAHalf || f == UnityEngine.TextureFormat.RGBAFloat;
         internal static int scopedRebindLog;   // TWITCH DIAG counter (albedo rebinds = game resetting our texture)
         static readonly HashSet<string> scopedTexLog = new HashSet<string>();
         internal static void ApplyScopedAlbedo()
@@ -1122,6 +1124,29 @@ namespace HumankindAssetFramework
                 foreach (var fld in new[] { "currentRenderMaterial", "runTimeRenderMaterial", "highResRunTimeRenderMaterial" })
                     if (GetMember(ro, fld) is UnityEngine.Material mat && mat != null)
                     {
+                        // ALPHA-CUTOUT DIAG: the scoped path borrows an opaque building layer, so foliage leaf-cards render
+                        // SOLID (no alpha test). Dump the material's shader + keywords + alpha-ish props once so we can find
+                        // the exact lever to enable cutout (vs the wonder's own material the isolate path inherited).
+                        if (Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value && mat.shader != null && scopedShaderDumped.Add(mat.shader.name))
+                        {
+                            var kw = string.Join(",", mat.shaderKeywords ?? new string[0]);
+                            string props = "";
+                            foreach (var pn in new[] { "_Cutoff", "_Mode", "_AlphaClip", "_Surface", "_Blend", "_ZWrite", "_AlphaToMask", "_AlphaTestRef", "_AlphaCutoffEnable", "_AlphaCutoff", "_UseAlphaTest", "_BlendMode" })
+                                if (mat.HasProperty(pn)) props += $" {pn}={mat.GetFloat(pn):0.###}";
+                            Plugin.Log.LogInfo($"[ScopedShader] '{mat.shader.name}' queue={mat.renderQueue} keywords=[{kw}] props:{props} | atlas={(scopedAlbedo != null ? scopedAlbedo.format + " hasAlpha=" + HasAlpha(scopedAlbedo.format) : "null")}");
+                        }
+                        // FOLIAGE ALPHA FIX (guarded): the borrowed building material renders OPAQUE (_Mode=0, no
+                        // _ALPHATEST_ON keyword, queue 2000) so foliage leaf-cards show SOLID. The diagnostic proved it
+                        // exposes the Standard cutout API (_Cutoff/_Mode), so flip it to CUTOUT exactly like the bake's
+                        // preview does. Scoped to alpha atlases (foliage) so the opaque reactor's material is untouched.
+                        if (scopedAlbedo != null && HasAlpha(scopedAlbedo.format) && mat.HasProperty("_Cutoff") && !mat.IsKeywordEnabled("_ALPHATEST_ON"))
+                        {
+                            mat.SetFloat("_Mode", 1f);                 // Standard: Cutout
+                            mat.EnableKeyword("_ALPHATEST_ON");
+                            mat.SetFloat("_Cutoff", 0.5f);
+                            mat.renderQueue = 2450;                    // AlphaTest queue
+                            if (log) Plugin.Log.LogInfo($"[ScopedShader] '{fld}' -> alpha-cutout (Cutout mode + _ALPHATEST_ON, queue 2450) for foliage");
+                        }
                         string pick = null; UnityEngine.Texture2D biggest = null; string biggestProp = null, alreadyProp = null;
                         bool hasMainTex = false, hasVisualContent = false;
                         foreach (var pn in mat.GetTexturePropertyNames())
