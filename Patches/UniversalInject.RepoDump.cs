@@ -954,7 +954,10 @@ namespace HumankindAssetFramework
 
                 // CLONE the SchematicView decal so we mutate a PRIVATE copy — modifying the SHARED game material leaked our
                 // silhouette to EVERY district's footprint. Rebind + size on the clone; point our tile's item at it.
-                var hostClone = host;   // BIG-footprint state: operate on the decal directly (defaultSize drives size); scoping deferred
+                // PRIVATE: clone the SchematicView decal so our silhouette + size stay on THIS district only (mutating the
+                // shared decal leaked to every district's footprint).
+                var hostClone = UnityEngine.Object.Instantiate((UnityEngine.Object)host);
+                hostClone.name = "ReactorFootprint_Decal";
                 var voT = voBox.GetType();
                 var voBox2 = GF(hostClone.GetType(), "visualOutput").GetValue(hostClone);
                 GF(voT, "loadedOutputLayer").SetValue(voBox2, olClone);
@@ -970,17 +973,25 @@ namespace HumankindAssetFramework
                 l0Field.SetValue(hostClone, l0);
                 float fpSize = 3.0f; float.TryParse(Plugin.DistrictFootprintMaskSize?.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out fpSize);
                 if (fpSize <= 0f) fpSize = 3.0f;
-                GF(hostClone.GetType(), "defaultSize")?.SetValue(hostClone, new UnityEngine.Vector3(fpSize, 0.25f, fpSize));
+                GF(hostClone.GetType(), "defaultSize")?.SetValue(hostClone, new UnityEngine.Vector3(1f, 0.25f, 1f));
                 GF(hostClone.GetType(), "bboxOverride")?.SetValue(hostClone, new UnityEngine.Bounds(UnityEngine.Vector3.zero, new UnityEngine.Vector3(fpSize * 2f, fpSize * 2f, fpSize * 2f)));
                 Plugin.Log.LogInfo($"[Footprint] step4: cloned decal + rebound private copy (size {fpSize})");
 
-                // re-Load the CLONE so LoadIFN resolves outputLayerIndex against our output-layer clone
-                var loadM = hostClone.GetType().GetMethod("Load", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                if (loadM != null && loadM.GetParameters().Length == 2 && distFxManager != null)
+                // Instantiate did NOT copy the [NonSerialized] descriptor, so the clone has no resolved outputLayerIndex and
+                // AddDataTo writes NO render data (-> a pixel). Resolve the clone's dependencies (descriptor + visualOutput)
+                // THEN Load — same order the game's own load pipeline uses.
+                if (distFxManager != null)
                 {
                     if (fxNextDoublon == null) fxNextDoublon = GameBinding.FxEvolverMaterial?.GetMethod("NextDoublonAvoidanceIndex", BindingFlags.Static | BindingFlags.Public);
                     uint doublon = fxNextDoublon != null ? (uint)fxNextDoublon.Invoke(null, null) : 0u;
-                    try { loadM.Invoke(hostClone, new object[] { distFxManager, doublon }); } catch (Exception le) { Plugin.Log.LogWarning("[Footprint] clone re-Load: " + le.Message); }
+                    // Instantiate didn't copy the base [NonSerialized] evolverDescriptorInstance -> ResolveDependencies NREs.
+                    // Copy it from the original (it's the shared descriptor singleton) so resolve/load succeed.
+                    var ediF = AccessTools.Field(hostClone.GetType(), "evolverDescriptorInstance");
+                    if (ediF != null) { ediF.SetValue(hostClone, ediF.GetValue(host)); Plugin.Log.LogInfo("[Footprint] copied evolverDescriptorInstance to clone"); }
+                    var resolveM = hostClone.GetType().GetMethod("ResolveDependencies", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                    if (resolveM != null && resolveM.GetParameters().Length == 2) { try { resolveM.Invoke(hostClone, new object[] { distFxManager, doublon }); } catch (Exception re) { Plugin.Log.LogWarning("[Footprint] clone Resolve INNER: " + (re.InnerException ?? re)); } }
+                    var loadM = hostClone.GetType().GetMethod("Load", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                    if (loadM != null && loadM.GetParameters().Length == 2) { try { loadM.Invoke(hostClone, new object[] { distFxManager, doublon }); } catch (Exception le) { Plugin.Log.LogWarning("[Footprint] clone Load INNER: " + (le.InnerException ?? le)); } }
                 }
 
                 // make our clone THE footprint: keep building item(s) + ONE decal item repointed at our clone (centred), drop the rest
@@ -1000,11 +1011,10 @@ namespace HumankindAssetFramework
                             var itBox = it;
                             GF(it.GetType(), "loadedEvolverMaterial")?.SetValue(itBox, hostClone);          // point at our private clone
                             var egF = GF(it.GetType(), "EvolverMaterialGuid"); if (egF != null && guidNull != null) egF.SetValue(itBox, guidNull);   // don't reload the shared decal
+                            var lgF = GF(it.GetType(), "loadedEvolverMaterialGuid"); if (lgF != null && guidNull != null) lgF.SetValue(itBox, guidNull);   // stop the emit reloading the ORIGINAL over our clone
                             var pf = GF(it.GetType(), "Position"); if (pf != null) pf.SetValue(itBox, UnityEngine.Vector3.zero);
-                            // DIAGNOSTIC: the item carries a Scale/Size that shrinks our decal — dump its fields so we see the driver
-                            if (Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value)
-                                foreach (var fld in it.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-                                    Plugin.Log.LogInfo($"[Footprint] item.{fld.Name} ({fld.FieldType.Name}) = {fld.GetValue(itBox)}");
+                            var lsF = GF(it.GetType(), "LocalScale"); if (lsF != null) lsF.SetValue(itBox, new UnityEngine.Vector3(fpSize, 1f, fpSize));   // was 0.04 = shrink; drive size here (per-item, scoped)
+                            Plugin.Log.LogInfo($"[Footprint] item set: LocalScale={lsF?.GetValue(itBox)}, loadedGuid nulled, material={GetMember(GF(it.GetType(), "loadedEvolverMaterial")?.GetValue(itBox), "name")}");
                             keep.Add(itBox); placed = true;
                         }
                         else dropped++;
