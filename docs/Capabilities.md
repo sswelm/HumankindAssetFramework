@@ -19,6 +19,14 @@ see the [Factory Manual](Factory-Manual.md).
   rest; the whole clip re-derived as pure rotations, in-bake verified), plus unit-clean export, topological bone
   renaming (the engine sorts bones alphabetically and needs parents first), and no-op root collapse. Verified with a
   **litmus rig** (12-deep chain of cubes) that exonerates the runtime for clean rigs.
+- **A district's building — model, texture, AND its own strategic footprint (2026-08-15).** A custom district renders
+  your 3D building on every tile it's built (other districts untouched), and — zoomed out to the strategic map — shows
+  **that same building as its footprint** instead of a generic decal, optionally **black-and-white** and **flattened to a
+  sheet**. The close-up↔strategic fade is a per-element GPU render-feature gate (not a camera swap), so the mesh is simply
+  kept drawing in every zoom band. Any district **migrates onto the scoped render path with one Bake**, multiple custom
+  districts **coexist independently**, and composed "pizza" districts (a building + a grove) render with **alpha-cutout
+  foliage** past the 255-primitive cap. All settings are authored per-district in the **District Factory**. Deep dive:
+  [District-Dedicated-Visual.md](District-Dedicated-Visual.md).
 - **Deploy-when-stopped — a model that reacts to *movement*.** Tick **Deploy when stopped** and the model **plays its deploy
   clip forward** when the unit stops (e.g. an M114 howitzer's trail legs spread + barrel elevates) and **snaps folded** while it
   travels — a per-unit *held state* driven by movement, not an event. It reuses the fire-on-attack sim→presentation bridge but

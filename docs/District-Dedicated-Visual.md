@@ -249,6 +249,49 @@ Caveats learned the hard way: the ground paint only covers the district **perime
 (Prairie_Mediterranean reads tan in data, renders green grass); the value is the user's **Factory** choice — propose,
 don't hand-edit their registry.
 
+## Migrating a district onto the scoped path (`BakeScopedSelector`) + multi-district coexistence
+
+Every district can render via the **scoped path** (its own data-authored `CityMapSelector` on the tile — the route that
+carries the mesh footprint) instead of the legacy per-frame isolate/repoint swap. The **District Factory's Bake** button
+bakes this automatically: `BakeScopedSelector(resourceName)` clones a single-building footprint template, swaps in the
+district's baked `FxMesh` (`<name>_Element`), reduces the template's building slots to that one while **keeping its
+decals** (`CityMapSelector_<name>`), and stores the selector GUID on the registry entry (`selectorGuid`). The plugin
+routes any entry with a `selectorGuid` through the scoped path (`IsScopedDistrict` + `PollDistrictSelectorTile` merge the
+registry GUIDs with the `DistrictSelectorTile` config), so the legacy isolate path skips it. **Trap:** the footprint
+template's building elements load **lazily** — a cold bake makes `FindLargestElement` return "no building Element found",
+so `BakeScopedSelector` does a warm pass first (equivalent to running `Tools/HAF/District/Probe`). Only **single-building**
+templates reduce cleanly (NuclearTest, MissileSilo).
+
+**Two scoped districts coexist independently** — verified with the Breeder Reactor + a Greek-temple Oracle in one game,
+each wearing its own texture and footprint. This needed a real fix. The scoped path first held texture/B&W/flatten in
+**global statics** (built for one district); subtler still, its three driving calls (`BindReactorBuilding` /
+`ApplyScopedAlbedo` / `UpdateMeshFlatness`) ran **after** the per-district loop, so they executed with the state of the
+*last* district only, and `BindReactorBuilding` bound *every* district's element to *one* shared layer clone. The fix has
+two halves: (1) the scoped state lives in a per-district `ScopedState` (a name-keyed dict; the `scopedX`/`fpX`/`mesh*`
+names are **proxy properties** onto the current `S`, so every function body stayed byte-identical); (2) the three calls
+moved **inside** the loop (per-district `S` set first), and `BindReactorBuilding(onlyName)` binds only that district's
+element to its **own** layer clone, gated by `S.donorClone`. **Lesson: a "per-district state" refactor is incomplete
+until the *call sites* are per-district too — check where the drivers are invoked, not just where the state lives.**
+
+## Composed districts & alpha-cutout foliage
+
+A district model can be a composed **"pizza"** — a base building plus extra parts (a grove of trees), each baked with its
+own knobs and merged into one mesh + one super-atlas (the runtime still ships a single `FxMesh`/atlas). Two traps on the
+scoped path:
+
+- **Grove renders partially** — a district mesh draws as sub-particles hard-clamped at **255** (an 8-bit field); a
+  tree-heavy pizza exceeds it and only *temple + 1 tree* draw. `DistrictMeshDensityBoost` multiplies the cloned layer's
+  `PrimitivePerParticleCount` to raise the ceiling (`255 × PPC × boost`) with the same GPU work. The scoped path borrows
+  the low-PPC `LevelBuild_Brick` layer, so the default **8** wasn't enough — **32** drew all four trees.
+- **Foliage renders SOLID** — the borrowed building material is the opaque base `Amplitude/Standard PBR Particle
+  Implementation` shader (`_Mode=0`, no `_ALPHATEST_ON`, queue 2000), so leaf-cards show as solid triangles. It exposes
+  the Standard cutout API, so `BindScopedSheet` flips it to **Cutout** (`_Mode=1` + `_ALPHATEST_ON` + `_Cutoff=0.5`,
+  queue 2450) exactly like the bake's preview material — guarded to alpha atlases so opaque districts stay untouched.
+- **Beech-tree leaf tuning** — a source authored for a low alpha cutoff erodes to slivers against the game's fixed ~0.5
+  threshold; **Leaf fullness** (`alphaBoost` ≈ 2.5) restores the leaves and **Leaf size ×** (`leafScale` ≈ 1.5) keeps
+  them from going spiky. Composed parts ground to the base floor, so a tree whose pivot sits above its trunk base
+  **hovers** — sink it with a small negative Position-offset Y per part + copy.
+
 ## Dead ends (do **not** re-walk — all falsified 2026-08-15)
 
 - **No "exploitation → rock" terrain-matcher rule.** Scanning all 690 loaded `FxEvolverMaterialLevelBuildMatching`

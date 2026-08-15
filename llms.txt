@@ -43,6 +43,7 @@ so an agent can crawl the whole doc set from here with no authentication. The hu
 
 ## The injection axes
 - [docs/District-Visuals.md](docs/District-Visuals.md): a custom building on a single district tile (District Factory).
+- [docs/District-Dedicated-Visual.md](docs/District-Dedicated-Visual.md): a district's own strategic-map footprint (the real 3D building at strategic zoom, B&W + flattened), migrating a district onto the scoped render path, multi-district coexistence, and composed/alpha-cutout foliage.
 - [docs/Pawn-Props.md](docs/Pawn-Props.md): custom weapons and gear on a pawn's attachment slots (Prop Lab).
 - [docs/Projectiles.md](docs/Projectiles.md): a custom model as a unit's fired munition (Projectile Lab).
 - [docs/Formations.md](docs/Formations.md): how many models a unit fields and how they're arranged (data only, no bake).

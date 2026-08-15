@@ -207,6 +207,24 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Districts
 
+- **STRATEGIC MESH FOOTPRINT + scoped-path migration (2026-08-15).** A district's zoomed-out strategic footprint is now
+  its **own 3D building**, not a flat decal. The strategic fade turned out to be a **per-element GPU render-feature gate**
+  (`FxEvolverMaterialLevelBuildElement.RenderFeatureSelector.SelectionFlags0`), not a camera swap — zeroing it (AlwaysEnabled)
+  keeps the mesh drawing in every zoom band. On top of it: **black-and-white when zoomed out** (bind a greyscale albedo
+  keyed to `RenderFeatureProvider.ComputeRenderState` of the *Topographic* band) and **flatten to a sheet** (a `size.y`
+  multiplier — vertical placement is terrain-owned, so a "lift" was a proven dead end). All five settings are authored
+  **per-district in the District Factory** (`footprintMesh`/BW/Flat/FlatHeight/HideDecal), falling back to the plugin
+  config. Any district **migrates onto the scoped render path with one Bake** (`BakeScopedSelector` clones a
+  single-building footprint template, swaps in the district's FxMesh, keeps the decals → a data-authored
+  `CityMapSelector`), retiring the legacy isolate/repoint route. **Two custom districts now coexist independently**
+  (breeder reactor + a Greek-temple Oracle in one game, each with its own texture + footprint) — which needed a
+  per-district `ScopedState` refactor *and* moving the driving calls inside the per-district loop (they had run for the
+  *last* district only). Composed **grove foliage** rendered partially (255 sub-particle cap → raise
+  `DistrictMeshDensityBoost` to 32) and solid (opaque borrowed material → flip it to alpha-cutout, `_Mode=1` +
+  `_ALPHATEST_ON`). Also fixed early in the session: the reactor's long-hunted "center rock" + ground twitch were
+  **grafted footprint decals**, not terrain (filtered in `GraftFootprint`). Full write-up:
+  [District-Dedicated-Visual.md](docs/District-Dedicated-Visual.md).
+
 - **FOUNDATION PLINTH — planting on a cliff (2026-08-09).** A district on a coastal cliff/uneven tile
   overhung into empty air (the breeder reactor floated off the ledge). A bake-time **Foundation depth** knob
   now extrudes the building's footprint **straight down into the earth** (true world −Y, taken in drawn space

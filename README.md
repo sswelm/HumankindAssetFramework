@@ -39,7 +39,7 @@ bake and nothing to undo but a deleted line. Each is proven in-game with a shipp
 | Axis | What it does | Assets? | Deep dive |
 |---|---|---|---|
 | **Units** | Replace a unit's whole 3D model — static or **animated**, with per-model runtime behaviors | bake | [Factory-Manual](docs/Factory-Manual.md) · [Animated-Models](docs/Animated-Models.md) |
-| **Districts** | A district's on-map building — own model **and texture**, on **every tile it's built** (other districts untouched), auto-leveled | bake | [District-Visuals](docs/District-Visuals.md) |
+| **Districts** | A district's on-map building — own model, **texture**, and its own **strategic-map footprint** (the real 3D building, B&W + flattened when zoomed out), on **every tile it's built** (others untouched), auto-leveled | bake | [District-Visuals](docs/District-Visuals.md) · [District-Dedicated-Visual](docs/District-Dedicated-Visual.md) |
 | **Wonders** | A player-authored **Artificial Wonder** with a custom model, rendered through the game's **native wonder pipeline** (no donor district) | bake | [Wonder-Spike](docs/Wonder-Spike.md) |
 | **Pawn props** | Weapons & gear on a pawn's **attachment slots** — no whole-model replacement | bake | [Pawn-Props](docs/Pawn-Props.md) |
 | **Projectiles** | The **munition mesh** a unit fires | bake | [Projectiles](docs/Projectiles.md) |
@@ -60,6 +60,19 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
 - **Heavy, single-sided, and multi-material meshes handled** — a built-in vertex reducer, a winding fix + double-sided
   fallback for CAD "sketch" meshes, height-based UVs, and an N-material atlas packer.
 - **Strip parts at bake time** — delete named objects (and children) from your source mesh before baking.
+
+**Custom districts**
+- **A district's building is your own model + texture**, on every tile it's built (the rest of the map's districts
+  untouched) — auto-leveled onto the tile, with per-entry ground paint and a raised platform.
+- **Its own strategic-map footprint** — zoomed out, the district shows **its actual 3D building** as the footprint
+  instead of a generic decal, optionally rendered **black-and-white** and **flattened to a sheet** to sit in the
+  schematic map (the fade between close-up and strategic is a per-element GPU render-feature gate, not a camera swap).
+  Authored per-district in the **District Factory** (one *Mesh footprint* toggle).
+- **Composed "pizza" districts** — merge several source models (a temple + a grove of trees) into one district mesh and
+  a single atlas, with **alpha-cutout foliage** that renders correctly at both zooms.
+- **Any district migrates onto the modern (scoped) render path with one Bake** — the District Factory bakes a
+  data-authored selector for it — and **multiple custom districts render fully independently** side by side.
+  See [District-Dedicated-Visual](docs/District-Dedicated-Visual.md).
 
 **Animation**
 - **A model plays its own baked animation** — tick *Animated*, press *Bake*. A drone spins its own propellers; the M114
