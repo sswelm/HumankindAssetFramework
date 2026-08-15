@@ -30,6 +30,11 @@ namespace HumankindAssetFramework
             public bool groundApplied;           // ground paint applied once this session (re-applying restarts the blend → never settles)
             public string hexSculpt = "";    // per-entry hexagon sculpting (HexagonSculptingDefinition name) — the raised platform + strategic footprint; "" falls back to the global DistrictHexSculpt config
             public int hexIdx = int.MinValue; // resolved hexagon-sculpting index cache
+            // MESH strategic footprint (per-entry, authored in the District Factory). footprintMesh=false -> the global
+            // DistrictFootprintMesh… config stays in charge for the scoped district; true -> these values are authoritative.
+            public bool footprintMesh, footprintMeshBW, footprintMeshFlat;
+            public bool footprintMeshHideDecal = true;
+            public float footprintMeshFlatHeight = 0.17f;
             // runtime — PER-INSTANCE targeting: a district can be BUILT ON MANY TILES (one PresentationDistrict each);
             // the old single plbc slot made ownership ping-pong between instances (only the most recently updated tile
             // showed the custom model — the review's architectural finding). The private leaf + layer clone + texture
@@ -116,6 +121,11 @@ namespace HumankindAssetFramework
                                 isolate = (Plugin.DistrictIsolate != null && !Plugin.DistrictIsolate.Value) ? false : ((bool?)d["isolate"] ?? true),
                                 groundMaterial = (string)d["groundMaterial"] ?? "",
                                 hexSculpt = (string)d["hexSculpt"] ?? "",
+                                footprintMesh = (bool?)d["footprintMesh"] ?? false,
+                                footprintMeshBW = (bool?)d["footprintMeshBW"] ?? false,
+                                footprintMeshFlat = (bool?)d["footprintMeshFlat"] ?? false,
+                                footprintMeshFlatHeight = (float?)d["footprintMeshFlatHeight"] ?? 0.17f,
+                                footprintMeshHideDecal = (bool?)d["footprintMeshHideDecal"] ?? true,
                             };
                             if (e.district.Length > 0 && e.fxMeshGuid != null) distModels.Add(e);
                             else Plugin.Log.LogWarning($"[District] registry entry skipped (district='{e.district}', bad fxMeshGuid?)");
@@ -1117,6 +1127,30 @@ namespace HumankindAssetFramework
         // TopographicTerrain = the schematic/strategic look): ~0 while zoomed in, rises to ~1 as the schematic map
         // takes over. (First cut keyed the RealisticTerrain/close band, but it stays "on" well past the schematic
         // crossover, so the reactor kept its colour zoomed out — Topographic is the band that tracks the schematic map.)
+        // EFFECTIVE footprint-mesh settings for the scoped district: the per-entry registry values when the entry authored
+        // footprintMesh=true, otherwise the plugin's global DistrictFootprintMesh… config (back-compat — a district works
+        // before it's authored per-entry). Resolved once by KeepDistrictMeshAtStrategicZoom; the pollers read these.
+        internal static bool fpResolved, fpMesh, fpBW, fpFlat, fpHideDecal;
+        static float fpFlatHeight = 0.17f;
+        internal static void ResolveScopedFootprint(string name)
+        {
+            DistrictModel e = null;
+            foreach (var dm in distModels) if (dm.district == name) { e = dm; break; }
+            if (e != null && e.footprintMesh)   // the entry is authoritative
+            {
+                fpMesh = true; fpBW = e.footprintMeshBW; fpFlat = e.footprintMeshFlat;
+                fpFlatHeight = e.footprintMeshFlatHeight > 0f ? e.footprintMeshFlatHeight : 0.17f; fpHideDecal = e.footprintMeshHideDecal;
+            }
+            else   // fall back to the global config
+            {
+                fpMesh = Plugin.DistrictFootprintMesh != null && Plugin.DistrictFootprintMesh.Value == "true";
+                fpBW = Plugin.DistrictFootprintMeshBW != null && Plugin.DistrictFootprintMeshBW.Value == "true";
+                fpFlat = Plugin.DistrictFootprintMeshFlat != null && Plugin.DistrictFootprintMeshFlat.Value == "true";
+                fpHideDecal = Plugin.DistrictFootprintMeshHideDecal == null || Plugin.DistrictFootprintMeshHideDecal.Value != "false";
+                float h = 0.17f; float.TryParse(Plugin.DistrictFootprintMeshFlatHeight?.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out h); fpFlatHeight = h;
+            }
+            fpResolved = true;
+        }
         static UnityEngine.Texture2D scopedAlbedoGray;
         static object rfpInstance; static MethodInfo miComputeRenderState; static object topoSelectorBox;
         static int bwDiagThrottle;
@@ -1147,7 +1181,8 @@ namespace HumankindAssetFramework
         }
         static UnityEngine.Texture2D DesiredScopedAlbedo()
         {
-            if (Plugin.DistrictFootprintMeshBW == null || Plugin.DistrictFootprintMeshBW.Value != "true" || scopedAlbedo == null) return scopedAlbedo;
+            bool bw = fpResolved ? fpBW : (Plugin.DistrictFootprintMeshBW != null && Plugin.DistrictFootprintMeshBW.Value == "true");
+            if (!bw || scopedAlbedo == null) return scopedAlbedo;
             float topoVis = SchematicVis();
             if (topoVis < 0f) return scopedAlbedo;                       // provider not ready -> colour
             if (Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value && (++bwDiagThrottle % 30) == 1)
@@ -1170,7 +1205,8 @@ namespace HumankindAssetFramework
         // still pokes clear of the terrain. This is the lever that actually reaches the GPU (unlike item Position.y).
         internal static float FlatHeightValue()
         {
-            if (!float.IsNaN(runtimeFlatHeight)) return runtimeFlatHeight;
+            if (!float.IsNaN(runtimeFlatHeight)) return runtimeFlatHeight;   // live F8 override wins
+            if (fpResolved) return fpFlatHeight;                             // per-entry (or its config fallback)
             float v = 0.17f; float.TryParse(Plugin.DistrictFootprintMeshFlatHeight?.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v); return v;
         }
         internal static void NudgeFlatHeight(float delta) => SetFlatHeight(FlatHeightValue() + delta);
@@ -1181,7 +1217,8 @@ namespace HumankindAssetFramework
         }
         internal static void UpdateMeshFlatness()
         {
-            if (Plugin.DistrictFootprintMeshFlat == null || Plugin.DistrictFootprintMeshFlat.Value != "true" || scopedElements.Count == 0) return;
+            bool flatOn = fpResolved ? fpFlat : (Plugin.DistrictFootprintMeshFlat != null && Plugin.DistrictFootprintMeshFlat.Value == "true");
+            if (!flatOn || scopedElements.Count == 0) return;
             float topoVis = SchematicVis();
             if (topoVis < 0f) return;                                    // provider not ready
             bool flat = topoVis >= 0.5f;

@@ -1056,7 +1056,8 @@ namespace HumankindAssetFramework
         static readonly HashSet<string> meshPersistLogged = new HashSet<string>();
         internal static void KeepDistrictMeshAtStrategicZoom(object sel, string name)
         {
-            if (Plugin.DistrictFootprintMesh == null || Plugin.DistrictFootprintMesh.Value != "true" || sel == null) return;
+            ResolveScopedFootprint(name);   // per-entry registry values, or the global config fallback — always resolve so the B&W/flat pollers have them
+            if (!fpMesh || sel == null) return;
             if (!meshPersistLogged.Add(name)) return;   // once per district
             try
             {
@@ -1083,7 +1084,7 @@ namespace HumankindAssetFramework
                 bool dirty = changed > 0;
                 // The mesh is now the footprint, so drop the template's baked footprint DECAL item(s) — the inherited
                 // donor outline (e.g. the MissileSilo silhouette) that otherwise shows THROUGH/beneath our flat mesh.
-                if (Plugin.DistrictFootprintMeshHideDecal == null || Plugin.DistrictFootprintMeshHideDecal.Value != "false")
+                if (fpHideDecal)
                 {
                     var itemsF = GF(sel.GetType(), "levelBuildItems");
                     if (itemsF?.GetValue(sel) is Array allItems)

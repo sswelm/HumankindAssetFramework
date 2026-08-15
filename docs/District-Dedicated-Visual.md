@@ -216,9 +216,16 @@ the ground and its edges drown where the tile's terrain rises over them; **`Dist
 ±0.01/±0.05 buttons; `FlatHeightValue`/`SetFlatHeight`). Result: full 3D colour building up close, flat grayscale footprint
 zoomed out.
 
-**Config** (`[District]`, all need `DistrictFootprintMesh = true`): `DistrictFootprintMesh`, `DistrictFootprintMeshBW`,
-`DistrictFootprintMeshFlat`, `DistrictFootprintMeshHideDecal` (default true). Leave `DistrictFootprintMask` blank (the
-decal route and the mesh route are mutually exclusive).
+**Authoring — per district in the District Factory (preferred).** These settings are registry fields on the district
+entry (`footprintMesh` / `footprintMeshBW` / `footprintMeshFlat` / `footprintMeshFlatHeight` / `footprintMeshHideDecal`),
+edited under **Mesh footprint** in the District Factory window and saved to `haf_districts.json` (Save settings, no re-bake).
+When an entry sets `footprintMesh = true` its values are **authoritative**; otherwise the global config below stays in charge
+(so a district keeps working before it's authored per-entry). The plugin resolves this in `ResolveScopedFootprint`.
+
+**Global config fallback** (`[District]`, all need `DistrictFootprintMesh = true`): `DistrictFootprintMesh`,
+`DistrictFootprintMeshBW`, `DistrictFootprintMeshFlat`, `DistrictFootprintMeshFlatHeight` (default 0.17),
+`DistrictFootprintMeshHideDecal` (default true). Leave `DistrictFootprintMask` blank (the decal route and the mesh route
+are mutually exclusive).
 
 ## Ground under the district (`DistrictApplyGroundMaterial` + the `ApplyGroundMaterialDefinition` **prefix**)
 
