@@ -996,6 +996,7 @@ namespace HumankindAssetFramework
         static UnityEngine.Texture2D scopedAlbedo;                         // loaded atlas texture
         static readonly List<(UnityEngine.Material mat, string prop)> scopedBoundSlots = new List<(UnityEngine.Material, string)>();
         static bool scopedTexApplied; static int scopedTexWait, scopedTexErrors;
+        internal static int scopedRebindLog;   // TWITCH DIAG counter (albedo rebinds = game resetting our texture)
         static readonly HashSet<string> scopedTexLog = new HashSet<string>();
         internal static void ApplyScopedAlbedo()
         {
@@ -1062,7 +1063,14 @@ namespace HumankindAssetFramework
                 {
                     var (mat, prop) = scopedBoundSlots[i];
                     if (mat == null) { stale = true; break; }
-                    if (!ReferenceEquals(mat.GetTexture(prop), scopedAlbedo)) mat.SetTexture(prop, scopedAlbedo);
+                    if (!ReferenceEquals(mat.GetTexture(prop), scopedAlbedo))
+                    {
+                        mat.SetTexture(prop, scopedAlbedo);
+                        // TWITCH DIAG: a rebind here means the GAME reset our albedo since last tick — if this logs steadily,
+                        // the model/base ("rock") texture is alternating game<->ours = the twitch.
+                        if (Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value && scopedRebindLog < 40)
+                        { scopedRebindLog++; Plugin.Log.LogInfo($"[TwitchDiag] scoped albedo REBOUND (game had reset it) @ frame {UnityEngine.Time.frameCount} on '{prop}' (rebind #{scopedRebindLog})"); }
+                    }
                 }
                 if (!stale) return true;
                 scopedBoundSlots.Clear();

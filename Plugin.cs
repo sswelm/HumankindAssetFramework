@@ -46,6 +46,7 @@ namespace HumankindAssetFramework
         internal static ConfigEntry<string> DistrictMainRows;        // SPIKE dedicated-visual (hybrid register): fill */District/Main.Level1+2 cells for an affinity -> our baked CityMapSelector, "AffinityName=a,b,c,d;..."
         internal static ConfigEntry<string> DistrictSelectorTile;    // SCOPED dedicated-visual: put our baked selector on ONLY the named district's tile (keeps shared affinity + fallback), "ConstructibleDefinitionName=a,b,c,d;..."
         internal static ConfigEntry<string> DistrictFootprint;       // RUNTIME footprint choice: graft a chosen donor selector's DECALS onto the scoped district (building stays ours), "ConstructibleDefinitionName=a,b,c,d;..." (donor = any */District/Main selector GUID)
+        internal static ConfigEntry<string> DistrictFootprintDrop;   // comma-separated decal NAME substrings to DROP from the grafted footprint (the rock/rubble "surface texture" layers); blank = keep ALL donor decals
         // --- EXPERIMENTAL: generic GPU mesh-buffer overrides (units, districts, any content layer) ---
         internal static ConfigEntry<string> BufferOverrides;     // per-layer overrides "<nameSubstr>:verts=+N,idx=+N,meshes=+N,maxtris=N;..." applied at layer creation
         internal static ConfigEntry<int>    SkeletonBoneBudget;  // shared per-frame animated-bone pool size (vanilla 65,535; high-bone customs overflow it -> spike plague)
@@ -146,6 +147,11 @@ namespace HumankindAssetFramework
                                   "149945011,1306056350,1706429623,-368887441; MissileSilo = -1158439761,1096327552,-1625448046,-477384506). Blank = " +
                                   "keep the footprint baked into the selector. Change it + relaunch to switch footprints, no re-bake. (Note: the strategic " +
                                   "footprint still lazy-builds ~1s on first zoom-out — engine limitation, independent of which footprint.)");
+            DistrictFootprintDrop = Config.Bind("District", "DistrictFootprintDrop", "Gravel,CityBricks,Battlement,Destroyed,Dammaged,Damaged",
+                                  "SURFACE-TEXTURE filter: comma-separated decal NAME substrings to DROP from the grafted footprint. The default set " +
+                                  "removes the gravel + battlement-rubble 'rocks' layers that render at close 3D zoom and TWITCH at the strategic<->3D " +
+                                  "zoom boundary (from donors like MissileSilo), leaving only the clean SchematicView footprint. Set BLANK to keep ALL " +
+                                  "donor decals (rock texture included), or list your own substrings (case-insensitive). Matches by decal material name.");
             DistrictSelectorTile = Config.Bind("District", "DistrictSelectorTile", "",
                                   "SCOPED dedicated-visual: put a DATA-AUTHORED district selector on ONLY the named district's own tile(s) " +
                                   "(matched by ConstructibleDefinitionName), leaving the shared visual affinity — and every other district using " +
@@ -267,6 +273,7 @@ namespace HumankindAssetFramework
                 typeof(Hk_DistrictRepoint),   // EXPERIMENTAL: replace one district's on-map visual (docs/District-Visuals.md)
                 typeof(Hk_DistrictBufferHeadroom), // EXPERIMENTAL: enlarge the shared 'Visual' mesh buffer so custom district meshes fit (opt-in)
                 typeof(Hk_DistrictGroundMaterial), // EXPERIMENTAL: force a ground material (grass field) under a custom district
+                typeof(Hk_GroundApplyProbe),       // DIAGNOSTIC: log the ground index each district resolves (find the Industry "deadzone")
                 typeof(Hk_DistrictHexSculpt),      // EXPERIMENTAL: force hexagon sculpting (raised platform + strategic footprint) under a custom wonder
                 typeof(Hk_AnimatedBonePoolHeadroom), // enlarge the shared per-frame animated-bone pool (65,535 vanilla) — the spike-plague fix
                 typeof(Hk_PropRegister),           // EXPERIMENTAL: register our prop MeshCollections at AnimationLoad, before pawn resolution (opt-in)

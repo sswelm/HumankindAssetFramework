@@ -349,6 +349,21 @@ The footprint chase kept dragging us down untested paths, and those paths paid o
 **Design rule banked:** pick each custom district's `ConstructibleVisualAffinity` for the best non-plugin fallback
 (closest vanilla building), not just whatever renders.
 
+### 2026-08-15 — the "centre rock" + ground twitch: it was the grafted decals all along
+
+A multi-hour hunt for a *"rocky texture in the centre"* that also **twitched**. Chased (and falsified) terrain
+biome, district land-clearing, exploitation-tile rendering, the terrain **matcher** (no exploitation→rock rule
+exists — 690 matchers scanned, only 3 POI ones, all `Exploitation=ShouldNotBe`), a solid **model base-slab** (fails:
+ground conforms to terrain + cliffs), and the **ground material** (holds now, but only paints the perimeter; a DEPOSIT
+tile reverts a postfix-only override — fixed with an `ApplyGroundMaterialDefinition` **prefix** that rewrites+skips).
+
+**Actual root cause (user's instinct was right — "it came along with the footprint"):** the MissileSilo footprint
+donor grafts `Decal_CityBricks_Industry_Gravel_*` **and** `Decal_Destroyed/Dammaged_Battlement_*` (rubble on
+`PointOfInterest_Curiosities_OutputLayer`). The rubble/POI layer draws at **close 3D zoom** and **toggles at the
+strategic↔3D boundary** = the twitch. Fix: `GraftFootprint` filters out Gravel/CityBricks/Battlement/Destroyed/Damaged,
+keeping only `SchematicView`. Full write-up in [District-Dedicated-Visual.md](District-Dedicated-Visual.md).
+**Lesson: on close-zoom ground artifacts, dump the grafted decals (`[DecalBind]`) BEFORE theorising about terrain.**
+
 ---
 
 ## Diagnostic probes (in this branch, `DistrictDebug`-gated)

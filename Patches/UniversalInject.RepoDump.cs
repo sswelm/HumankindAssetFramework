@@ -320,11 +320,10 @@ namespace HumankindAssetFramework
                     // resolve THIS district's own baked albedo atlas from the registry (for the scoped texture bind)
                     if (scopedAtlasGuid == null)
                         foreach (var dm in distModels) if (dm.district == name && dm.atlasGuid != null) { scopedAtlasGuid = dm.atlasGuid; break; }
-                    // RE-ASSERT the ground paint on the scoped tick: the game applies it once then reverts, and
-                    // UpdateGroundMaterial doesn't re-fire on the scoped path (it did on the old isolate path, which is why
-                    // the paint held before). Throttled so it's not every frame. DistrictApplyGroundMaterial no-ops when the
-                    // entry has no groundMaterial, and is itself try/caught.
-                    if (UnityEngine.Time.frameCount % 30 == 7) DistrictApplyGroundMaterial(d);
+                    // NOTE: no ground-paint re-assert here. Fighting the game's native GroundMaterialDefinition every N
+                    // frames just flickers the surface (Dry_03 <-> native = a visible twitch), and the ground index was
+                    // never the lever for the Industry look anyway — that comes from the native selector's paving, which
+                    // we address by grafting, not by overriding ApplyGroundMaterialDefinition.
                     // load + fully Load our selector once (cached), so its decal subtree + element are live
                     string key = name;
                     if (!loadedSelectorByKey.TryGetValue(key, out var sel) || (sel is UnityEngine.Object suo && suo == null))
@@ -334,6 +333,9 @@ namespace HumankindAssetFramework
                         LoadFxMaterial(sel);
                         CenterScopedBuilding(sel, name);   // our reactor sits in the template's off-center slot — re-center to tile origin (match the preview)
                         GraftFootprint(sel, name);         // RUNTIME footprint choice: swap our selector's decals for a chosen donor's
+                        DumpDecalBinding(sel, name);       // DIAGNOSTIC: are the gravel decals' visualOutput layers bound? masked by terrain?
+                        // UnmaskPavingDecals refuted: decals are bound AND unmasked yet still don't draw close-zoom — the
+                        // cause is elsewhere (render-pass / emitter-vs-selector), so we no longer mutate the shared decals.
                         loadedSelectorByKey[key] = sel;
                         Plugin.Log.LogInfo($"[DistrictTile] '{name}': loaded our selector {sel.GetType().Name} '{GetMember(sel, "name")}'.");
                     }
@@ -342,13 +344,24 @@ namespace HumankindAssetFramework
                     DumpPlbcLevers(plbc);   // one-shot (DistrictDebug): the real channel/refresh/content methods + EventNameEnum values
                     if (fiPlbcChannels == null) fiPlbcChannels = AccessTools.Field(plbc.GetType(), "channels");
                     if (!(fiPlbcChannels?.GetValue(plbc) is Array channels)) continue;
+                    DumpAllChannels(channels, name);   // DIAGNOSTIC: is the rocky exploitation ground on a separate channel we can swap?
+                    DumpGroundMatchers();              // DIAGNOSTIC: find the terrain match entries keyed on Exploitation + what they render
                     int layer = ResolveMainLayer(d);
                     if (layer < 0 || layer >= channels.Length) continue;
                     var box = channels.GetValue(layer);
                     if (box == null) continue;
                     if (fiChanEvolverMaterial == null) fiChanEvolverMaterial = GF(box.GetType(), "evolverMaterial");
                     if (fiChanEvolverMaterial == null) continue;
-                    if (ReferenceEquals(fiChanEvolverMaterial.GetValue(box), sel)) { anySet = true; continue; }   // already ours this frame
+                    var curMat = fiChanEvolverMaterial.GetValue(box);
+                    // DIAGNOSTIC: the channel still holds the NATIVE Industry selector the first frame — dump its element
+                    // tree next to ours so we can see the ground element the old (isolate) path kept and we lost.
+                    if (curMat != null && !ReferenceEquals(curMat, sel)) { DumpSelectorElements(curMat, "NATIVE", name); DumpSelectorElements(sel, "OURS", name); DumpNativeGroundCandidates(curMat, name); }
+                    if (ReferenceEquals(curMat, sel)) { anySet = true; continue; }   // already ours this frame
+                    // TWITCH DIAG: we only reach here when the channel ISN'T ours — i.e. the game reset it and we're re-emitting
+                    // (RefreshChannel re-renders the whole selector incl. footprint). If this logs steadily, the footprint
+                    // structure is re-emitting every frame = the twitch the user spotted.
+                    if (Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value && scopedReemitLog < 40)
+                    { scopedReemitLog++; Plugin.Log.LogInfo($"[TwitchDiag] '{name}': channel wasn't ours ('{GetMember(curMat, "name")}') — re-emitting selector @ frame {UnityEngine.Time.frameCount} (re-emit #{scopedReemitLog})"); }
                     fiChanEvolverMaterial.SetValue(box, sel);
                     channels.SetValue(box, layer);   // write the mutated struct back into the array
                     if (miRefreshChannel == null)
@@ -381,7 +394,7 @@ namespace HumankindAssetFramework
             try
             {
                 bool changed = false;
-                changed |= SetInstantAppear(sel, 0, new HashSet<object>());   // kill the ~1s reveal ramp across the whole tree
+                changed |= SetInstantAppear(sel, 0, new HashSet<object>());   // kill the ~1s reveal ramp across the whole tree (twitch-test ruled this out)
                 var itemsF = GF(sel.GetType(), "levelBuildItems");
                 if (itemsF?.GetValue(sel) is Array items)
                     for (int i = 0; i < items.Length; i++)
@@ -500,6 +513,25 @@ namespace HumankindAssetFramework
                 var donorDecals = new List<object>();
                 graftDedup.Clear(); graftDecalNames.Clear();
                 CollectDecalItems(donor, donorDecals, 0, new HashSet<object>());
+                // SURFACE-TEXTURE filter (configurable, DistrictFootprintDrop): drop decals whose name contains any of the
+                // listed substrings — by default the gravel + battlement-rubble "rocks" layers that render at close 3D zoom
+                // and TWITCH at the strategic<->3D boundary. Blank config = keep ALL donor decals (rock texture included).
+                var dropCfg = Plugin.DistrictFootprintDrop?.Value?.Trim();
+                if (!string.IsNullOrEmpty(dropCfg))
+                {
+                    var pats = dropCfg.Split(',').Select(p => p.Trim()).Where(p => p.Length > 0).ToArray();
+                    int beforeFilter = donorDecals.Count;
+                    donorDecals.RemoveAll(it =>
+                    {
+                        var child = GF(it.GetType(), "loadedEvolverMaterial")?.GetValue(it) ?? TryLoadMaterial(GF(it.GetType(), "EvolverMaterialGuid")?.GetValue(it));
+                        var nm = child != null ? GetMember(child, "name")?.ToString() : null;
+                        if (nm == null) return false;
+                        foreach (var p in pats) if (nm.IndexOf(p, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                        return false;
+                    });
+                    if (beforeFilter != donorDecals.Count && selectorTileLogged.Add(name + ":norocks"))
+                        Plugin.Log.LogInfo($"[DistrictTile] '{name}': dropped {beforeFilter - donorDecals.Count} footprint decal(s) matching DistrictFootprintDrop='{dropCfg}' (surface-texture filter).");
+                }
                 if (donorDecals.Count == 0) { if (selectorTileLogged.Add(name + ":fpnodecals")) Plugin.Log.LogWarning($"[DistrictTile] '{name}': footprint donor has no collectable decal items."); return; }
                 if (selectorTileLogged.Add(name + ":fpnames"))
                     Plugin.Log.LogInfo($"[DistrictTile] '{name}': footprint decals ({graftDecalNames.Count} distinct): {string.Join(", ", System.Linq.Enumerable.Take(graftDecalNames, 16))}");
@@ -561,6 +593,249 @@ namespace HumankindAssetFramework
             { var g = GF(t, fn)?.GetValue(mat); if (g != null && !GuidIsNull(g)) CollectDecalItems(TryLoadMaterial(g), outItems, depth + 1, visited); }
         }
 
+        // DIAGNOSTIC (DistrictDebug): dump a selector's element tree — each child's type + name + whether it carries an
+        // fxMesh (a building or GROUND mesh) or is a Decal. Comparing the NATIVE Industry selector (which had the paved
+        // ground the old isolate path kept) with OUR scoped template selector reveals the exact ground element to graft.
+        static readonly HashSet<string> selDumpLogged = new HashSet<string>();
+        static void DumpSelectorElements(object mat, string label, string name)
+        {
+            if (Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value || mat == null) return;
+            string key = name + "|" + label;
+            if (selDumpLogged.Contains(key)) return;
+            try
+            {
+                var lines = new List<string>();
+                WalkSelectorElements(mat, 0, new HashSet<object>(), lines);
+                if (lines.Count == 0) return;   // still loading — try again next frame (don't lock the one-shot yet)
+                selDumpLogged.Add(key);
+                Plugin.Log.LogInfo($"[SelDump] '{name}' {label}: {mat.GetType().Name} '{GetMember(mat, "name")}' ({lines.Count} elems)");
+                foreach (var ln in lines) Plugin.Log.LogInfo("[SelDump]   " + ln);
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[SelDump] " + ex.Message); }
+        }
+        static void WalkSelectorElements(object mat, int depth, HashSet<object> visited, List<string> outLines)
+        {
+            if (mat == null || depth > 8 || !visited.Add(mat)) return;
+            var t = mat.GetType();
+            if (GF(t, "levelBuildItems")?.GetValue(mat) is Array items)
+                foreach (var it in items)
+                {
+                    if (it == null) continue;
+                    var itt = it.GetType();
+                    var child = GF(itt, "loadedEvolverMaterial")?.GetValue(it) ?? TryLoadMaterial(GF(itt, "EvolverMaterialGuid")?.GetValue(it));
+                    if (child == null) continue;
+                    var ct = child.GetType();
+                    bool hasMesh = GF(ct, "fxMesh") != null;
+                    bool isDecal = ct.Name.IndexOf("Decal", StringComparison.OrdinalIgnoreCase) >= 0;
+                    var pos = GF(itt, "Position")?.GetValue(it);
+                    outLines.Add($"{new string(' ', depth * 2)}{ct.Name} '{GetMember(child, "name")}' mesh={hasMesh} decal={isDecal} pos={pos}");
+                    if (!isDecal) WalkSelectorElements(child, depth + 1, visited, outLines);
+                }
+            var cache = GF(t, "fxMaterialCacheEntries")?.GetValue(mat);
+            if (cache != null && AccessTools.Field(cache.GetType(), "Entries")?.GetValue(cache) is Array entries)
+                foreach (var e in entries) if (e != null) WalkSelectorElements(AccessTools.Field(e.GetType(), "FxMaterial")?.GetValue(e), depth + 1, visited, outLines);
+            if (GF(t, "pairs")?.GetValue(mat) is Array pairs)
+                foreach (var pr in pairs) if (pr != null) { var g = PairGuid(pr); if (!GuidIsNull(g)) WalkSelectorElements(TryLoadMaterial(g), depth + 1, visited, outLines); }
+        }
+
+        // DIAGNOSTIC (DistrictDebug): for each distinct decal in our selector, report whether its visualOutput FxOutputLayer
+        // is bound (OutputLayerIndex / LoadedOutputLayer) and whether it's maskedByTerrain. A gravel decal with an unbound
+        // visualOutput writes NO render data (FxEvolverMaterialLevelBuildDecal.AddDataTo early-outs on OutputLayerIndex<0),
+        // which would explain why the Industry paving never draws at close zoom while the schematic footprint does.
+        static readonly HashSet<string> decalBindLogged = new HashSet<string>();
+        static void DumpDecalBinding(object sel, string name)
+        {
+            if (Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value || sel == null) return;
+            if (!decalBindLogged.Add(name)) return;
+            try
+            {
+                var decals = new List<object>();
+                CollectDecalMaterials(sel, decals, 0, new HashSet<object>());
+                var seen = new HashSet<string>(); int shown = 0;
+                Plugin.Log.LogInfo($"[DecalBind] '{name}': {decals.Count} decal material(s) in our selector");
+                foreach (var dc in decals)
+                {
+                    var nm = GetMember(dc, "name")?.ToString() ?? "?";
+                    if (!seen.Add(nm) || shown >= 16) continue;
+                    shown++;
+                    var vo = GF(dc.GetType(), "visualOutput")?.GetValue(dc);
+                    var oli = vo != null ? GetMember(vo, "OutputLayerIndex") : null;
+                    var loaded = vo != null ? GetMember(vo, "LoadedOutputLayer") : null;
+                    bool loadedNull = loaded == null || (loaded is UnityEngine.Object luo && luo == null);
+                    var layerName = loadedNull ? "NULL" : (GetMember(loaded, "name")?.ToString() ?? "?");
+                    var masked = GF(dc.GetType(), "maskedByTerrain")?.GetValue(dc);
+                    Plugin.Log.LogInfo($"[DecalBind]   {nm}: OutputLayerIndex={oli} layer='{layerName}' maskedByTerrain={masked}");
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[DecalBind] " + ex.Message); }
+        }
+        // EXPERIMENT: the Industry gravel/paving decals are maskedByTerrain=True — they draw only where the tile terrain is
+        // "cleared" (a normal city tile). A native Industry tile is cleared, so its identical gravel shows; our reactor is a
+        // DEPOSIT district whose tile keeps its natural terrain, so the mask hides the gravel and bare rock shows through.
+        // Clearing the mask on our paving (CityBricks_*) decals forces them to draw regardless of the terrain-clear state.
+        // NOTE: these decal materials are shared game assets — this mutates them process-wide, but forcing false on gravel
+        // that already shows on cleared tiles is visually a no-op there. If this proves the fix, switch to private clones.
+        static readonly HashSet<string> unmaskLogged = new HashSet<string>();
+        static void UnmaskPavingDecals(object sel, string name)
+        {
+            try
+            {
+                var decals = new List<object>();
+                CollectDecalMaterials(sel, decals, 0, new HashSet<object>());
+                int changed = 0;
+                foreach (var dc in decals)
+                {
+                    var nm = GetMember(dc, "name")?.ToString() ?? "";
+                    if (nm.IndexOf("CityBricks", StringComparison.OrdinalIgnoreCase) < 0) continue;   // only the paving decals
+                    var f = GF(dc.GetType(), "maskedByTerrain");
+                    if (f != null && f.GetValue(dc) is bool b && b) { f.SetValue(dc, false); changed++; }
+                }
+                if (changed > 0)
+                {
+                    LoadFxMaterial(sel);   // re-emit so the cleared mask flag reaches the GPU render data
+                    if (unmaskLogged.Add(name)) Plugin.Log.LogInfo($"[DistrictTile] '{name}': cleared maskedByTerrain on {changed} paving decal(s) so the Industry gravel draws over the deposit terrain.");
+                }
+            }
+            catch (Exception ex) { if (unmaskLogged.Add(name + ":ex")) Plugin.Log.LogWarning("[DistrictTile] unmask: " + ex.Message); }
+        }
+        // DIAGNOSTIC (DistrictDebug): dump EVERY channel on the reactor's plbc + the evolver material each holds. The rocky
+        // exploitation ground may render on a channel other than the main level-build one; if so we can swap/clear it the way
+        // we swap the main channel's selector. Prints channel index, evolver type + name.
+        static readonly HashSet<string> chanDumpLogged = new HashSet<string>();
+        static void DumpAllChannels(Array channels, string name)
+        {
+            if (Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value || !chanDumpLogged.Add(name)) return;
+            try
+            {
+                Plugin.Log.LogInfo($"[Chans] '{name}': {channels.Length} channel(s)");
+                for (int i = 0; i < channels.Length; i++)
+                {
+                    var box = channels.GetValue(i);
+                    if (box == null) { Plugin.Log.LogInfo($"[Chans]   [{i}] <null box>"); continue; }
+                    if (fiChanEvolverMaterial == null) fiChanEvolverMaterial = GF(box.GetType(), "evolverMaterial");
+                    var em = fiChanEvolverMaterial?.GetValue(box);
+                    var emName = em == null ? null : GetMember(em, "name")?.ToString();
+                    Plugin.Log.LogInfo($"[Chans]   [{i}] {(em == null ? "<null evolver>" : em.GetType().Name + " '" + emName + "'")}");
+                    // dump the tree of the SMALL side channels (fence / additional layers) — a ground element would live here
+                    if (em != null && emName != null && emName != "CityMapSelector_Industry_00")
+                    {
+                        var lines = new List<string>();
+                        WalkSelectorElements(em, 0, new HashSet<object>(), lines);
+                        foreach (var ln in System.Linq.Enumerable.Take(lines, 24)) Plugin.Log.LogInfo("[Chans]       " + ln);
+                    }
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Chans] " + ex.Message); }
+        }
+        // DIAGNOSTIC (DistrictDebug): enumerate every loaded FxEvolverMaterialLevelBuildMatching and print the LevelBuildMatch
+        // entries whose conditions set Exploitation / District (ChoiceEnum != NotSet), plus what emitter each renders. This
+        // locates the exact terrain match rule that draws the rocky exploitation ground — the rule we'd override to clear it.
+        static bool matchDumped;
+        static int scopedReemitLog;   // TWITCH DIAG counter (scoped channel re-emits = game resetting the channel)
+        internal static void DumpGroundMatchers()
+        {
+            if (matchDumped || Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;
+            matchDumped = true;
+            try
+            {
+                var matchType = AccessTools.TypeByName("Amplitude.Mercury.Terrain.Fx.FxEvolverMaterialLevelBuildMatching");
+                if (matchType == null) { Plugin.Log.LogWarning("[Match] FxEvolverMaterialLevelBuildMatching type not found"); return; }
+                var all = UnityEngine.Resources.FindObjectsOfTypeAll(matchType);
+                Plugin.Log.LogInfo($"[Match] {all.Length} loaded matching material(s); scanning for Exploitation/District entries");
+                var fElements = GF(matchType, "elements");
+                int reported = 0;
+                foreach (var mm in all)
+                {
+                    if (!(fElements?.GetValue(mm) is Array elems)) continue;
+                    var mmName = GetMember(mm, "name")?.ToString();
+                    foreach (var lbm in elems)
+                    {
+                        if (lbm == null) continue;
+                        var lt = lbm.GetType();
+                        if (!(GF(lt, "levelBuildMatchElements")?.GetValue(lbm) is Array conds)) continue;
+                        string flags = "";
+                        foreach (var c in conds)
+                        {
+                            if (c == null) continue;
+                            var ct = c.GetType();
+                            var expl = GF(ct, "Exploitation")?.GetValue(c)?.ToString();
+                            var dist = GF(ct, "District")?.GetValue(c)?.ToString();
+                            if (!string.IsNullOrEmpty(expl) && expl != "NotSet") flags += $" Exploitation={expl}";
+                            if (!string.IsNullOrEmpty(dist) && dist != "NotSet") flags += $" District={dist}";
+                        }
+                        if (flags.IndexOf("Exploitation", StringComparison.Ordinal) < 0) continue;
+                        var nm = GF(lt, "name")?.GetValue(lbm)?.ToString();
+                        var emitterGuid = GF(lt, "emitter")?.GetValue(lbm);
+                        string emName = "?";
+                        try { var em = TryLoadMaterial(emitterGuid); if (em != null) emName = GetMember(em, "name")?.ToString(); } catch { }
+                        if (reported++ < 50)
+                            Plugin.Log.LogInfo($"[Match] mat='{mmName}' entry='{nm}'{flags} -> emitter='{emName}'");
+                    }
+                }
+                Plugin.Log.LogInfo($"[Match] done — {reported} entry(ies) reference Exploitation");
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Match] " + ex); }
+        }
+        // DIAGNOSTIC (DistrictDebug): scan the NATIVE industry selector for terrain-conforming GROUND/paving MESH elements
+        // (fxMesh != null AND a ground-ish name) — the close-zoom cover we discard when we swap the selector. Deduped by name,
+        // with position, so we can identify the exact element to graft back into our reactor selector.
+        static readonly HashSet<string> nativeGroundLogged = new HashSet<string>();
+        static readonly string[] groundHints = { "Brick", "Ground", "Floor", "Pave", "Concrete", "Asphalt", "Gravel", "Dirt", "Terrain", "Plaza", "Road", "Tarmac", "Slab", "Cobble", "Bricks" };
+        static void DumpNativeGroundCandidates(object mat, string name)
+        {
+            if (Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value || mat == null || !nativeGroundLogged.Add(name)) return;
+            try
+            {
+                var found = new Dictionary<string, string>();
+                WalkGroundCandidates(mat, 0, new HashSet<object>(), found);
+                Plugin.Log.LogInfo($"[NativeGround] '{name}': {found.Count} ground-candidate mesh element(s) in the native selector");
+                int shown = 0;
+                foreach (var kv in found) { if (shown++ >= 40) break; Plugin.Log.LogInfo($"[NativeGround]   {kv.Key} {kv.Value}"); }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[NativeGround] " + ex.Message); }
+        }
+        static void WalkGroundCandidates(object mat, int depth, HashSet<object> visited, Dictionary<string, string> found)
+        {
+            if (mat == null || depth > 10 || !visited.Add(mat)) return;
+            var t = mat.GetType();
+            if (GF(t, "levelBuildItems")?.GetValue(mat) is Array items)
+                foreach (var it in items)
+                {
+                    if (it == null) continue;
+                    var itt = it.GetType();
+                    var child = GF(itt, "loadedEvolverMaterial")?.GetValue(it) ?? TryLoadMaterial(GF(itt, "EvolverMaterialGuid")?.GetValue(it));
+                    if (child == null) continue;
+                    bool hasMesh = GF(child.GetType(), "fxMesh") != null;
+                    var nm = GetMember(child, "name")?.ToString() ?? "?";
+                    if (hasMesh && !found.ContainsKey(nm))
+                    {
+                        bool isGround = false;
+                        foreach (var h in groundHints) if (nm.IndexOf(h, StringComparison.OrdinalIgnoreCase) >= 0) { isGround = true; break; }
+                        if (isGround) found[nm] = "pos=" + (GF(itt, "Position")?.GetValue(it)?.ToString() ?? "?");
+                    }
+                    WalkGroundCandidates(child, depth + 1, visited, found);
+                }
+            var cache = GF(t, "fxMaterialCacheEntries")?.GetValue(mat);
+            if (cache != null && AccessTools.Field(cache.GetType(), "Entries")?.GetValue(cache) is Array entries)
+                foreach (var e in entries) if (e != null) WalkGroundCandidates(AccessTools.Field(e.GetType(), "FxMaterial")?.GetValue(e), depth + 1, visited, found);
+            if (GF(t, "pairs")?.GetValue(mat) is Array pairs)
+                foreach (var pr in pairs) if (pr != null) { var g = PairGuid(pr); if (!GuidIsNull(g)) WalkGroundCandidates(TryLoadMaterial(g), depth + 1, visited, found); }
+        }
+        static void CollectDecalMaterials(object mat, List<object> outDecals, int depth, HashSet<object> visited)
+        {
+            if (mat == null || depth > 10 || !visited.Add(mat)) return;
+            var t = mat.GetType();
+            if (t.Name.IndexOf("Decal", StringComparison.OrdinalIgnoreCase) >= 0) { outDecals.Add(mat); return; }
+            if (GF(t, "levelBuildItems")?.GetValue(mat) is Array items)
+                foreach (var it in items) if (it != null)
+                    CollectDecalMaterials(GF(it.GetType(), "loadedEvolverMaterial")?.GetValue(it) ?? TryLoadMaterial(GF(it.GetType(), "EvolverMaterialGuid")?.GetValue(it)), outDecals, depth + 1, visited);
+            var cache = GF(t, "fxMaterialCacheEntries")?.GetValue(mat);
+            if (cache != null && AccessTools.Field(cache.GetType(), "Entries")?.GetValue(cache) is Array entries)
+                foreach (var e in entries) if (e != null) CollectDecalMaterials(AccessTools.Field(e.GetType(), "FxMaterial")?.GetValue(e), outDecals, depth + 1, visited);
+            if (GF(t, "pairs")?.GetValue(mat) is Array pairs)
+                foreach (var pr in pairs) if (pr != null) { var g = PairGuid(pr); if (!GuidIsNull(g)) CollectDecalMaterials(TryLoadMaterial(g), outDecals, depth + 1, visited); }
+        }
+
         // Resolve a district's main level-build channel index (static field mainLevelBuildComponantLayer; the shared
         // mainLayerCached is only set on the injection path, so compute it here for the scoped path too).
         static int ResolveMainLayer(object district)
@@ -577,6 +852,26 @@ namespace HumankindAssetFramework
         // postfix forces a chosen ground-material index for our registry districts — the game's own terrain paint,
         // blended, not a flat mesh. Also dumps the ground-material vocabulary once (DistrictDebug) so a name can be picked.
         static bool groundNamesDumped; static int groundApplyCount; static readonly HashSet<string> groundLogged = new HashSet<string>();
+        static string[] groundNames;   // GroundMaterialDefinition vocabulary, indexed (from the criteria-24 dump)
+        static string GroundNameForIndex(int idx) => (groundNames != null && idx >= 0 && idx < groundNames.Length) ? groundNames[idx] : ("idx" + idx);
+
+        // GROUND PROBE (DistrictDebug): log what ground index each district hands to ApplyGroundMaterialDefinition — the
+        // NATIVE resolve for non-registry districts (e.g. what a normal Industry tile uses = the "deadzone" we want to
+        // match), and our override for registry ones. Answers "which GroundMaterialDefinition is the Industry cleared look".
+        static readonly HashSet<string> groundProbeLogged = new HashSet<string>();
+        internal static void GroundApplyProbe(object district, object idxObj)
+        {
+            if (Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value || groundProbeLogged.Count > 120) return;
+            try
+            {
+                var name = GetMember(district, "ConstructibleDefinitionName")?.ToString();
+                if (string.IsNullOrEmpty(name)) return;
+                int idx = idxObj is int i ? i : -1;
+                if (groundProbeLogged.Add(name + "=" + idx))
+                    Plugin.Log.LogInfo($"[GroundProbe] '{name}' -> ApplyGroundMaterialDefinition(idx={idx}) = '{GroundNameForIndex(idx)}'");
+            }
+            catch { }
+        }
         internal static void DistrictApplyGroundMaterial(object district)
         {
             try
@@ -605,6 +900,7 @@ namespace HumankindAssetFramework
                     if (namesM?.Invoke(inst, new object[] { GroundCriteria }) is Array arr)
                     {
                         var list = new List<string>(); foreach (var s in arr) list.Add(s?.ToString());
+                        groundNames = list.ToArray();   // index -> name, so the ground probe can name what native tiles resolve to
                         if (Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value)
                             Plugin.Log.LogInfo($"[Ground] GroundMaterialDefinition names ({list.Count}): {string.Join(", ", list)}");
                         DumpGroundColors(list);   // write haf_ground_colors.json for the editor preview (each material's true tint)
@@ -627,9 +923,13 @@ namespace HumankindAssetFramework
                 if (entry.groundIdx <= 0) return;
 
                 var apply = district.GetType().GetMethod("ApplyGroundMaterialDefinition", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (apply != null && apply.GetParameters().Length == 1)
+                // APPLY-ONCE: the prefix (GroundApplyOverride) now rewrites every ApplyGroundMaterialDefinition call to our
+                // index, so it HOLDS without this postfix re-applying. Re-applying each UpdateGroundMaterial just restarts the
+                // terrain blend => the slight twitch. So apply once for the initial set, then leave it to the prefix.
+                if (apply != null && apply.GetParameters().Length == 1 && !entry.groundApplied)
                 {
                     apply.Invoke(district, new object[] { entry.groundIdx });
+                    entry.groundApplied = true;
                     // DIAGNOSTIC (DistrictDebug): log the first ~90 applies with frame numbers — a BURST of consecutive
                     // frames = we're re-applying every frame (oscillation); sparse/one = it's settling. Tells us the real cause.
                     if (Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value && groundApplyCount < 90)
@@ -638,6 +938,46 @@ namespace HumankindAssetFramework
                 }
             }
             catch (Exception ex) { if (groundLogged.Add("ex")) Plugin.Log.LogError("[Ground] " + ex); }
+        }
+
+        // PREFIX companion to DistrictApplyGroundMaterial's postfix. The postfix sets our ground AFTER UpdateGroundMaterial,
+        // but the game also calls ApplyGroundMaterialDefinition DIRECTLY (a DEPOSIT tile like the reactor re-resolves to its
+        // natural terrain) with no postfix to follow — so we get reverted to rock. Rewriting the index in the PREFIX makes
+        // EVERY caller land on our material: the paint holds with no per-frame re-assert and no blend twitch. Uses the index
+        // the postfix already resolved+cached (entry.groundIdx); until that first resolve we pass through (postfix applies once).
+        static readonly HashSet<string> groundOverrideLogged = new HashSet<string>();
+        // Returns TRUE to let the original ApplyGroundMaterialDefinition run, FALSE to SKIP it. For our districts: rewrite the
+        // index to our paint the FIRST time (let it run to set it), then on every subsequent call SKIP — because the game
+        // re-calls this every frame on a deposit tile, and each real call restarts the terrain blend (the twitch). Once our
+        // paint is set (groundApplied, flipped by the postfix's one apply) we drop the redundant calls so the blend settles.
+        internal static bool GroundApplyOverride(object district, ref int idx)
+        {
+            try
+            {
+                if (distModels.Count == 0) return true;
+                var name = GetMember(district, "ConstructibleDefinitionName")?.ToString();
+                if (string.IsNullOrEmpty(name)) return true;
+                foreach (var e in distModels)
+                    if (e.district == name)
+                    {
+                        if (string.IsNullOrEmpty(e.groundMaterial) || e.groundIdx <= 0) return true;   // no override yet (unresolved/none)
+                        if (e.groundApplied)
+                        {
+                            if (Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value && groundOverrideLogged.Add(name + ":skip"))
+                                Plugin.Log.LogInfo($"[Ground] '{name}': holding idx {e.groundIdx} — skipping the game's redundant ApplyGroundMaterialDefinition calls (no blend restart / twitch).");
+                            return false;   // already holding our paint — skip so the blend doesn't restart
+                        }
+                        if (idx != e.groundIdx)
+                        {
+                            if (Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value && groundOverrideLogged.Add(name))
+                                Plugin.Log.LogInfo($"[Ground] '{name}': prefix set idx {idx} -> {e.groundIdx} ('{e.groundMaterial}'); further calls will be skipped so it holds without twitch.");
+                            idx = e.groundIdx;
+                        }
+                        return true;   // let this one run to actually set our material
+                    }
+            }
+            catch { }
+            return true;
         }
 
         // Dump each GroundMaterialDefinition's representative Color (from its GroundMaterialAuthoringData) to

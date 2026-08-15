@@ -44,6 +44,8 @@ plant outlines), *not* something derived from your mesh.
 DistrictRepoint = false          # the old forced mesh-swap path stays OFF
 DistrictMainRows =               # the shared-cell path stays OFF (see "Two paths" below)
 DistrictSelectorTile = Extension_Base_BreederReactor=1734045847,1174137851,-1040006991,1418115374
+DistrictFootprint =              # optional: graft a donor's decals (blank = keep the baked footprint)
+DistrictFootprintDrop = Gravel,CityBricks,Battlement,Destroyed,Dammaged,Damaged   # surface-texture filter; blank = keep the rock layers
 ```
 
 `DistrictSelectorTile` = `ConstructibleDefinitionName=a,b,c,d` (semicolon-separated for several districts).
@@ -108,7 +110,64 @@ the rest of the session. This is an **engine limitation, not a fixable bug** —
 Forcing it would require running the strategic decal evolve out of its render context (or poking the per-hex GPU
 revision buffer directly) — high risk, low odds, not proportionate to a one-time cosmetic reveal. **Banked.**
 
+## Footprint graft + the "rocks layer" trap (`GraftFootprint`)  ← read before touching donor footprints
+
+The footprint is **configurable at runtime**: `GraftFootprint` swaps our selector's decal items for a chosen
+**donor** district's decals (registry `footprintDonor`, or the `DistrictFootprint` config), keeping our building
+Element item(s) and re-emitting. `CollectDecalItems` walks the **full** donor tree (levelBuildItems +
+`fxMaterialCacheEntries` + `pairs` + default/invalid), deduped by name+position — a `CityMapSelector` repeats the
+same decals per culture (MissileSilo collected 207 → ~81 distinct).
+
+**THE TRAP (cost us a full day, 2026-08-15):** the reactor's long-blamed *"rocky texture in the centre"* and a
+*ground **twitch*** were **neither terrain, model base, nor ground material** — they were **decals the graft
+brought in**. The MissileSilo donor carries `Decal_CityBricks_Industry_Gravel_*` (gravel) **and**
+`Decal_Destroyed_Battlement_*` / `Decal_Dammaged_Battlement_*` (rubble, on `PointOfInterest_Curiosities_OutputLayer`).
+The rubble/POI layer **renders at close 3D zoom** (unlike the SchematicView/CityMap decals) **and toggles on/off at
+the strategic↔3D zoom boundary** = the flicker. Fix: `GraftFootprint` **drops** donor decals by name via the
+**`DistrictFootprintDrop`** config (comma-separated, case-insensitive substrings) — default
+`Gravel,CityBricks,Battlement,Destroyed,Dammaged,Damaged`, so only `Decal_SchematicView_*` survives (clean strategic
+footprint, zero close-zoom rock, zero twitch). Set it **blank to keep the full rock texture**, or list your own
+substrings to tune which layers show. This is the "surface texture" knob.
+
+**Rule:** when a district shows unexpected close-zoom ground artifacts or flicker, **suspect the grafted decals
+first.** Dump them with the `[DecalBind]` probe (name · `OutputLayerIndex` · layer name · `maskedByTerrain`) before
+theorising about terrain.
+
+## Ground under the district (`DistrictApplyGroundMaterial` + the `ApplyGroundMaterialDefinition` **prefix**)
+
+The per-entry **ground paint** (`groundMaterial` in `haf_districts.json`, e.g. `Constructible_Temperate_03`) is
+the game's own terrain material, resolved from the criteria-24 `GroundMaterialDefinition` vocabulary and forced
+onto the district's tile. Two mechanisms, because a postfix alone doesn't hold:
+
+- **Postfix** on `PresentationDistrict.UpdateGroundMaterial` → `DistrictApplyGroundMaterial` **resolves + applies
+  once** (`groundApplied`). Re-applying every frame restarts the terrain blend (a second twitch), so it's one-shot.
+- **Prefix** on `PresentationDistrict.ApplyGroundMaterialDefinition` (`GroundApplyOverride`) rewrites the index to
+  ours on the first call, then **returns `false` to SKIP** the game's redundant per-frame calls. Needed because a
+  **DEPOSIT** district (the reactor *"Creates a Deposit of Uranium"*) re-resolves its ground to natural terrain
+  **directly**, reverting any postfix-only override. The prefix makes it hold with no blend restart.
+
+Caveats learned the hard way: the ground paint only covers the district **perimeter**, never the built centre
+(that's the model/decals); `GroundMaterialDefinition` reps in `haf_ground_colors.json` are **not** the rendered look
+(Prairie_Mediterranean reads tan in data, renders green grass); the value is the user's **Factory** choice — propose,
+don't hand-edit their registry.
+
+## Dead ends (do **not** re-walk — all falsified 2026-08-15)
+
+- **No "exploitation → rock" terrain-matcher rule.** Scanning all 690 loaded `FxEvolverMaterialLevelBuildMatching`
+  found only 3 `POIMatchingExploitationCondition_*`, all `Exploitation = ShouldNotBe` (they *suppress* POI
+  decoration on exploitation tiles; nothing draws rock). The matching criteria have **no per-constructible key** —
+  only Biome/TerrainType/POI + District/Exploitation/River/Road choices + `GroundMaterialDefinition`/`HexSculpt`.
+- **A solid model base-slab fails** — the ground conforms to terrain undulation and **steps into cliffs**; a rigid
+  flat plate floats/shears.
+- **The native conforming paving isn't graftable** — it's modular `LvlBuild_Brick_City_*` meshes tiled by the block
+  system, interleaved with the buildings; no liftable ground plane.
+- **The gravel footprint decals are strategic-only** (`SchematicView_Albedo_01OutputLayer` 776,
+  `Decal_CityMap_Library_CityBricks_OutputLayer` 785) — they never draw in the close 3D pass.
+
 ## Open / next
 
-- **Configurable footprint** — a runtime knob to graft a chosen donor template's decals onto the selector, so
-  the footprint can be swapped without re-baking. Chosen, not yet built.
+- Footprint graft is **built and shipping** (registry `footprintDonor` + `DistrictFootprint` config; the District
+  Factory has a "Strategic footprint (decals)" dropdown). The rubble/gravel filter above is part of it.
+- **Hybrid ground (deferred)** — to pave the built *centre* at close zoom (currently the model base covers it, with
+  natural terrain in any gaps) we'd restore the old isolate technique's native selector under the scoped footprint.
+  Not needed after the rocks-layer fix; parked.
