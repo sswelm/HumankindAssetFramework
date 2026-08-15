@@ -1269,17 +1269,23 @@ namespace HumankindAssetFramework
         // Flatten HEIGHT = the size.y multiplier used on the strategic map: ~0.02 = paper-flat (but coplanar with terrain,
         // so its edges drown when the tile's ground rises over them), up toward 1 = full 3D. The sweet spot reads flat yet
         // still pokes clear of the terrain. This is the lever that actually reaches the GPU (unlike item Position.y).
-        internal static float FlatHeightValue()
+        internal static float FlatHeightValue()   // PER-DISTRICT: reads S — only valid with S set (called from UpdateMeshFlatness). NOT for the F8 window.
         {
-            if (!float.IsNaN(runtimeFlatHeight)) return runtimeFlatHeight;   // live F8 override wins
-            if (fpResolved) return fpFlatHeight;                             // per-entry (or its config fallback)
+            if (!float.IsNaN(runtimeFlatHeight)) return runtimeFlatHeight;   // live F8 override wins (global, all scoped districts)
+            if (fpResolved) return fpFlatHeight;                             // THIS district's per-entry value (or its config fallback)
             float v = 0.17f; float.TryParse(Plugin.DistrictFootprintMeshFlatHeight?.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v); return v;
         }
-        internal static void NudgeFlatHeight(float delta) => SetFlatHeight(FlatHeightValue() + delta);
+        // F8-window (S-INDEPENDENT) accessors: the flat-height slider is a GLOBAL live override across every scoped district
+        // (the window has no per-district selection). These never touch S, so the readout/tuning stays meaningful with two
+        // or more scoped districts. Overriding is opt-in — Reset clears it and each district falls back to its own value.
+        internal static bool FlatHeightOverriding() => !float.IsNaN(runtimeFlatHeight);
+        internal static float FlatHeightOverrideValue() => float.IsNaN(runtimeFlatHeight) ? 0.17f : runtimeFlatHeight;
+        internal static void ClearFlatHeightOverride() { runtimeFlatHeight = float.NaN; Plugin.Log.LogInfo("[FootprintMesh] flat-height override cleared — each district uses its own value again."); }
+        internal static void NudgeFlatHeight(float delta) => SetFlatHeight(FlatHeightOverrideValue() + delta);
         internal static void SetFlatHeight(float value)
         {
             runtimeFlatHeight = UnityEngine.Mathf.Clamp(value, 0.02f, 1f);
-            Plugin.Log.LogInfo($"[FootprintMesh] flat height -> {runtimeFlatHeight:0.00}");
+            Plugin.Log.LogInfo($"[FootprintMesh] flat-height override -> {runtimeFlatHeight:0.00} (all scoped districts)");
         }
         internal static void UpdateMeshFlatness()
         {

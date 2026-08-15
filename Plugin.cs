@@ -456,18 +456,21 @@ namespace HumankindAssetFramework
             GUILayout.Label("Unit resize — Resize Lab rules x Global Era Lab grid:");
             foreach (var l in UniversalInject.ResizeStatusLines()) GUILayout.Label(l);
             GUILayout.Space(4);
-            // Strategic footprint — live-tune the flatten HEIGHT (zoom out to the reactor to see it change).
-            GUILayout.Label("Strategic footprint — flatten height (zoom out to see; 0.02 = flat, 1 = full 3D):");
+            // Strategic footprint — flatten-height LIVE OVERRIDE across all scoped districts (per-district values are
+            // authored in the District Factory; this is a session-wide quick-tune. Reset returns to per-district values).
+            GUILayout.Label("Strategic footprint — flatten height (live override, all scoped districts; 0.02 = flat, 1 = full 3D):");
             using (new GUILayout.HorizontalScope())
             {
-                float h = UniversalInject.FlatHeightValue();
-                GUILayout.Label($"height = {h:0.00}", GUILayout.Width(110));
+                bool overriding = UniversalInject.FlatHeightOverriding();
+                float h = UniversalInject.FlatHeightOverrideValue();
+                GUILayout.Label(overriding ? $"override = {h:0.00}" : "per-district", GUILayout.Width(110));
                 if (GUILayout.Button("-0.05", GUILayout.Width(55))) UniversalInject.NudgeFlatHeight(-0.05f);
                 if (GUILayout.Button("-0.01", GUILayout.Width(55))) UniversalInject.NudgeFlatHeight(-0.01f);
                 if (GUILayout.Button("+0.01", GUILayout.Width(55))) UniversalInject.NudgeFlatHeight(+0.01f);
                 if (GUILayout.Button("+0.05", GUILayout.Width(55))) UniversalInject.NudgeFlatHeight(+0.05f);
                 float nv = GUILayout.HorizontalSlider(h, 0.02f, 1f, GUILayout.Width(160));
                 if (Mathf.Abs(nv - h) > 0.001f) UniversalInject.SetFlatHeight(nv);
+                if (overriding && GUILayout.Button("Reset", GUILayout.Width(55))) UniversalInject.ClearFlatHeightOverride();
             }
             GUILayout.Space(4);
             GUILayout.Label("GPU mesh buffer (live) — Shift+F8 also logs it:");
