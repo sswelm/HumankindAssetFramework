@@ -47,6 +47,8 @@ namespace HumankindAssetFramework
         internal static ConfigEntry<string> DistrictSelectorTile;    // SCOPED dedicated-visual: put our baked selector on ONLY the named district's tile (keeps shared affinity + fallback), "ConstructibleDefinitionName=a,b,c,d;..."
         internal static ConfigEntry<string> DistrictFootprint;       // RUNTIME footprint choice: graft a chosen donor selector's DECALS onto the scoped district (building stays ours), "ConstructibleDefinitionName=a,b,c,d;..." (donor = any */District/Main selector GUID)
         internal static ConfigEntry<string> DistrictFootprintDrop;   // comma-separated decal NAME substrings to DROP from the grafted footprint (the rock/rubble "surface texture" layers); blank = keep ALL donor decals
+        internal static ConfigEntry<string> DistrictFootprintMask;   // EXPERIMENTAL: path to a PNG silhouette mask -> a UNIQUE strategic footprint matching the district's own layout (injected into a private clone of the SchematicView mask atlas)
+        internal static ConfigEntry<string> DistrictFootprintMaskSize; // tuning: world size (units) of the injected silhouette footprint decal; default 3.0
         // --- EXPERIMENTAL: generic GPU mesh-buffer overrides (units, districts, any content layer) ---
         internal static ConfigEntry<string> BufferOverrides;     // per-layer overrides "<nameSubstr>:verts=+N,idx=+N,meshes=+N,maxtris=N;..." applied at layer creation
         internal static ConfigEntry<int>    SkeletonBoneBudget;  // shared per-frame animated-bone pool size (vanilla 65,535; high-bone customs overflow it -> spike plague)
@@ -152,6 +154,14 @@ namespace HumankindAssetFramework
                                   "removes the gravel + battlement-rubble 'rocks' layers that render at close 3D zoom and TWITCH at the strategic<->3D " +
                                   "zoom boundary (from donors like MissileSilo), leaving only the clean SchematicView footprint. Set BLANK to keep ALL " +
                                   "donor decals (rock texture included), or list your own substrings (case-insensitive). Matches by decal material name.");
+            DistrictFootprintMask = Config.Bind("District", "DistrictFootprintMask", "",
+                                  "EXPERIMENTAL — UNIQUE footprint: path to a PNG mask (white-on-transparent top-down silhouette of the district's own " +
+                                  "layout, e.g. from the model). When set, we build a private 1-entry mask atlas from it, clone the SchematicView output " +
+                                  "layer to point its mask atlas at ours, and re-point one of the scoped district's SchematicView decals at it — so the " +
+                                  "strategic footprint shows the district's ACTUAL shape instead of a generic donor outline. Blank = off (generic footprint).");
+            DistrictFootprintMaskSize = Config.Bind("District", "DistrictFootprintMaskSize", "3.0",
+                                  "Tuning for DistrictFootprintMask: the world size (in tile units) of the injected silhouette footprint decal. " +
+                                  "Raise if the silhouette is too small on the strategic map, lower if it overflows the hex. Default 3.0.");
             DistrictSelectorTile = Config.Bind("District", "DistrictSelectorTile", "",
                                   "SCOPED dedicated-visual: put a DATA-AUTHORED district selector on ONLY the named district's own tile(s) " +
                                   "(matched by ConstructibleDefinitionName), leaving the shared visual affinity — and every other district using " +

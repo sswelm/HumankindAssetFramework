@@ -334,6 +334,8 @@ namespace HumankindAssetFramework
                         CenterScopedBuilding(sel, name);   // our reactor sits in the template's off-center slot — re-center to tile origin (match the preview)
                         GraftFootprint(sel, name);         // RUNTIME footprint choice: swap our selector's decals for a chosen donor's
                         DumpDecalBinding(sel, name);       // DIAGNOSTIC: are the gravel decals' visualOutput layers bound? masked by terrain?
+                        DumpSchematicAtlas(sel, name);     // DE-RISK: dump the SchematicView output layer's atlas structure (can we inject our silhouette?)
+                        InjectReactorFootprint(sel, name); // UNIQUE footprint: inject our model silhouette as the SchematicView mask (config DistrictFootprintMask)
                         // UnmaskPavingDecals refuted: decals are bound AND unmasked yet still don't draw close-zoom — the
                         // cause is elsewhere (render-pass / emitter-vs-selector), so we no longer mutate the shared decals.
                         loadedSelectorByKey[key] = sel;
@@ -820,6 +822,204 @@ namespace HumankindAssetFramework
                 foreach (var e in entries) if (e != null) WalkGroundCandidates(AccessTools.Field(e.GetType(), "FxMaterial")?.GetValue(e), depth + 1, visited, found);
             if (GF(t, "pairs")?.GetValue(mat) is Array pairs)
                 foreach (var pr in pairs) if (pr != null) { var g = PairGuid(pr); if (!GuidIsNull(g)) WalkGroundCandidates(TryLoadMaterial(g), depth + 1, visited, found); }
+        }
+        // DE-RISK PROBE (DistrictDebug): dump the SchematicView decal's output layer + atlas structure, so we know whether we
+        // can clone it and inject our own silhouette texture at runtime (step 4 of the custom-footprint plan). Generic member
+        // walk (fields+props, recursing into anything named *Atlas*) — reveals the backing Texture + the element/UV table.
+        static bool schematicAtlasDumped;
+        static void DumpSchematicAtlas(object sel, string name)
+        {
+            if (schematicAtlasDumped || Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value || sel == null) return;
+            try
+            {
+                var decals = new List<object>();
+                CollectDecalMaterials(sel, decals, 0, new HashSet<object>());
+                object schem = null;
+                foreach (var d in decals) { var nm = GetMember(d, "name")?.ToString(); if (nm != null && nm.IndexOf("SchematicView", StringComparison.OrdinalIgnoreCase) >= 0) { schem = d; break; } }
+                if (schem == null) { Plugin.Log.LogWarning("[SchematicAtlas] no SchematicView decal in our selector yet"); return; }
+                var vo = GF(schem.GetType(), "visualOutput")?.GetValue(schem);
+                var ol = vo != null ? GetMember(vo, "LoadedOutputLayer") : null;
+                if (ol == null || (ol is UnityEngine.Object ou && ou == null)) { Plugin.Log.LogWarning("[SchematicAtlas] output layer not loaded yet — retry"); return; }
+                schematicAtlasDumped = true;
+                Plugin.Log.LogInfo($"[SchematicAtlas] decal='{GetMember(schem, "name")}' outputLayer={ol.GetType().FullName} '{GetMember(ol, "name")}'");
+                DumpMembersShallow(ol, "  ", 0);
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[SchematicAtlas] " + ex); }
+        }
+        static string DescribeVal(object v)
+        {
+            if (v == null) return "null";
+            if (v is UnityEngine.Object uo && uo == null) return "null(destroyed)";
+            if (v is UnityEngine.Texture tex) return $"Texture '{tex.name}' {tex.width}x{tex.height}";
+            if (v is Array a) return $"{v.GetType().GetElementType()?.Name}[{a.Length}]";
+            var t = v.GetType();
+            if (t.IsPrimitive || v is string || t.IsEnum) return v.ToString();
+            return t.Name;
+        }
+        static void DumpMembersShallow(object obj, string indent, int depth)
+        {
+            if (obj == null || depth > 2) return;
+            var t = obj.GetType();
+            foreach (var f in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                object v = null; try { v = f.GetValue(obj); } catch { }
+                Plugin.Log.LogInfo($"[SchematicAtlas] {indent}f {f.FieldType.Name} {f.Name} = {DescribeVal(v)}");
+                if (v != null && f.Name.IndexOf("tlas", StringComparison.OrdinalIgnoreCase) >= 0 && depth < 2)
+                {
+                    if (v is Array arr) { for (int i = 0; i < Math.Min(arr.Length, 2); i++) DumpMembersShallow(arr.GetValue(i), indent + "    ", depth + 1); }
+                    else DumpMembersShallow(v, indent + "    ", depth + 1);
+                }
+            }
+            foreach (var p in t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (p.GetIndexParameters().Length > 0) continue;
+                object v = null; try { v = p.GetValue(obj); } catch { }
+                Plugin.Log.LogInfo($"[SchematicAtlas] {indent}p {p.PropertyType.Name} {p.Name} = {DescribeVal(v)}");
+                if (v != null && p.Name.IndexOf("tlas", StringComparison.OrdinalIgnoreCase) >= 0 && depth < 2)
+                {
+                    if (v is Array arr) { for (int i = 0; i < Math.Min(arr.Length, 2); i++) DumpMembersShallow(arr.GetValue(i), indent + "    ", depth + 1); }
+                    else DumpMembersShallow(v, indent + "    ", depth + 1);
+                }
+            }
+        }
+        // UNIQUE footprint (config DistrictFootprintMask): build a private 1-entry mask atlas from our silhouette PNG, clone the
+        // SchematicView output layer to point its mask atlas (atlases[0]) at ours, and re-bind one SchematicView decal's
+        // visualOutput + maskTexture at it — so the strategic footprint shows the district's OWN top-down shape. Per-step
+        // logging so a failed reflection point is obvious. Runs once.
+        static bool footprintMaskInjected; static UnityEngine.Texture2D reactorMaskTex;
+        internal static void InjectReactorFootprint(object sel, string name)
+        {
+            var maskPath = Plugin.DistrictFootprintMask?.Value?.Trim();
+            if (string.IsNullOrEmpty(maskPath) || footprintMaskInjected || sel == null) return;
+            try
+            {
+                if (reactorMaskTex == null)
+                {
+                    if (!System.IO.File.Exists(maskPath)) { if (selectorTileLogged.Add(name + ":masknofile")) Plugin.Log.LogWarning($"[Footprint] mask PNG not found: {maskPath}"); return; }
+                    reactorMaskTex = new UnityEngine.Texture2D(2, 2, UnityEngine.TextureFormat.RGBA32, false);
+                    var loadImg = AccessTools.TypeByName("UnityEngine.ImageConversion")?.GetMethod("LoadImage", new[] { typeof(UnityEngine.Texture2D), typeof(byte[]) });
+                    bool ok = loadImg != null && (bool)loadImg.Invoke(null, new object[] { reactorMaskTex, System.IO.File.ReadAllBytes(maskPath) });
+                    if (!ok) { Plugin.Log.LogWarning("[Footprint] LoadImage failed (ImageConversion missing?)"); reactorMaskTex = null; return; }
+                    reactorMaskTex.name = "ReactorFootprintMask"; reactorMaskTex.wrapMode = UnityEngine.TextureWrapMode.Clamp;
+                    Plugin.Log.LogInfo($"[Footprint] step1: loaded mask {reactorMaskTex.width}x{reactorMaskTex.height}");
+                }
+                // host SchematicView decal + its loaded output layer
+                var decals = new List<object>();
+                CollectDecalMaterials(sel, decals, 0, new HashSet<object>());
+                object host = null;
+                foreach (var d in decals) { var nm = GetMember(d, "name")?.ToString(); if (nm != null && nm.IndexOf("SchematicView", StringComparison.OrdinalIgnoreCase) >= 0) { host = d; break; } }
+                if (host == null) { if (selectorTileLogged.Add(name + ":fpnohost")) Plugin.Log.LogWarning("[Footprint] no SchematicView decal to host our mask"); return; }
+                var voField = GF(host.GetType(), "visualOutput");
+                var voBox = voField?.GetValue(host);
+                var ol = voBox != null ? GetMember(voBox, "LoadedOutputLayer") : null;
+                if (ol == null || (ol is UnityEngine.Object olu && olu == null)) { if (selectorTileLogged.Add(name + ":fpnool")) Plugin.Log.LogWarning("[Footprint] host output layer not loaded yet — retry"); return; }
+
+                // build our private mask atlas (FxTextureAtlas : GenericTextureAtlas<FxTextureAtlasStruct> : AbstractTextureAtlas)
+                var atlasType = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxTextureAtlas");
+                var absType = AccessTools.TypeByName("Amplitude.Graphics.Atlas.AbstractTextureAtlas");
+                var structType = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxTextureAtlasStruct");
+                var entryType = absType.GetNestedType("AtlasEntry");
+                var outEntryType = absType.GetNestedType("OutputEntry");
+                const string maskGuidStr = "reactorfootprintmask000000000001";
+                var ourAtlas = UnityEngine.ScriptableObject.CreateInstance(atlasType);
+                ourAtlas.name = "ReactorFootprint_MaskAtlas";
+                // atlasEntries[1]  (GUID -> Index 0)
+                var entryArr = Array.CreateInstance(entryType, 1);
+                var entry = Activator.CreateInstance(entryType);
+                entryType.GetField("Guid").SetValue(entry, maskGuidStr); entryType.GetField("FullPath").SetValue(entry, ""); entryType.GetField("ShortPath").SetValue(entry, "ReactorFootprint"); entryType.GetField("Index").SetValue(entry, 0);
+                entryArr.SetValue(entry, 0);
+                AccessTools.Field(atlasType, "atlasEntries").SetValue(ourAtlas, entryArr);
+                // elementData[1]  (Uvs = full texture)
+                var edArr = Array.CreateInstance(structType, 1);
+                var ed = Activator.CreateInstance(structType);
+                structType.GetField("Uvs").SetValue(ed, new UnityEngine.Vector4(0f, 0f, 1f, 1f));
+                edArr.SetValue(ed, 0);
+                AccessTools.Field(atlasType, "elementData").SetValue(ourAtlas, edArr);
+                // outputEntries[1]  (our silhouette texture)
+                var outArr = Array.CreateInstance(outEntryType, 1);
+                var outE = Activator.CreateInstance(outEntryType);
+                outEntryType.GetField("Name").SetValue(outE, "ReactorFootprint");
+                AccessTools.Field(outEntryType, "unityTextureRef").SetValue(outE, reactorMaskTex);
+                outArr.SetValue(outE, 0);
+                AccessTools.Field(atlasType, "outputEntries").SetValue(ourAtlas, outArr);
+                AccessTools.Field(atlasType, "owner").SetValue(ourAtlas, "reactorfootprint");
+                Plugin.Log.LogInfo("[Footprint] step2: built private mask atlas (1 entry, uv 0..1)");
+
+                // clone the output layer; point its mask atlas array at ours (keep main 'atlas' for the fill)
+                var olClone = ClonePrivateOutputLayer((UnityEngine.Object)ol);
+                if (olClone == null) { if (selectorTileLogged.Add(name + ":fpnoclone")) Plugin.Log.LogWarning("[Footprint] output-layer clone failed"); return; }
+                var atlasesArr = Array.CreateInstance(atlasType, 1); atlasesArr.SetValue(ourAtlas, 0);
+                AccessTools.Field(olClone.GetType(), "atlases").SetValue(olClone, atlasesArr);
+                Plugin.Log.LogInfo("[Footprint] step3: cloned output layer, mask atlas -> ours");
+
+                // CLONE the SchematicView decal so we mutate a PRIVATE copy — modifying the SHARED game material leaked our
+                // silhouette to EVERY district's footprint. Rebind + size on the clone; point our tile's item at it.
+                var hostClone = host;   // BIG-footprint state: operate on the decal directly (defaultSize drives size); scoping deferred
+                var voT = voBox.GetType();
+                var voBox2 = GF(hostClone.GetType(), "visualOutput").GetValue(hostClone);
+                GF(voT, "loadedOutputLayer").SetValue(voBox2, olClone);
+                GF(voT, "loadedOutputLayerGUID").SetValue(voBox2, GF(voT, "outputLayer").GetValue(voBox2));
+                GF(hostClone.GetType(), "visualOutput").SetValue(hostClone, voBox2);
+                var l0Field = GF(hostClone.GetType(), "layer0");
+                var l0 = l0Field.GetValue(hostClone);
+                var guidType = AccessTools.TypeByName("Amplitude.Framework.Guid");
+                var ourGuid = Activator.CreateInstance(guidType, new object[] { maskGuidStr });
+                GF(l0.GetType(), "maskTexture").SetValue(l0, ourGuid);
+                var maskModeType = l0.GetType().GetField("maskOption", BindingFlags.Instance | BindingFlags.NonPublic)?.FieldType;
+                if (maskModeType != null) GF(l0.GetType(), "maskOption").SetValue(l0, Enum.Parse(maskModeType, "Alpha"));
+                l0Field.SetValue(hostClone, l0);
+                float fpSize = 3.0f; float.TryParse(Plugin.DistrictFootprintMaskSize?.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out fpSize);
+                if (fpSize <= 0f) fpSize = 3.0f;
+                GF(hostClone.GetType(), "defaultSize")?.SetValue(hostClone, new UnityEngine.Vector3(fpSize, 0.25f, fpSize));
+                GF(hostClone.GetType(), "bboxOverride")?.SetValue(hostClone, new UnityEngine.Bounds(UnityEngine.Vector3.zero, new UnityEngine.Vector3(fpSize * 2f, fpSize * 2f, fpSize * 2f)));
+                Plugin.Log.LogInfo($"[Footprint] step4: cloned decal + rebound private copy (size {fpSize})");
+
+                // re-Load the CLONE so LoadIFN resolves outputLayerIndex against our output-layer clone
+                var loadM = hostClone.GetType().GetMethod("Load", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                if (loadM != null && loadM.GetParameters().Length == 2 && distFxManager != null)
+                {
+                    if (fxNextDoublon == null) fxNextDoublon = GameBinding.FxEvolverMaterial?.GetMethod("NextDoublonAvoidanceIndex", BindingFlags.Static | BindingFlags.Public);
+                    uint doublon = fxNextDoublon != null ? (uint)fxNextDoublon.Invoke(null, null) : 0u;
+                    try { loadM.Invoke(hostClone, new object[] { distFxManager, doublon }); } catch (Exception le) { Plugin.Log.LogWarning("[Footprint] clone re-Load: " + le.Message); }
+                }
+
+                // make our clone THE footprint: keep building item(s) + ONE decal item repointed at our clone (centred), drop the rest
+                var itemsF2 = GF(sel.GetType(), "levelBuildItems");
+                if (itemsF2?.GetValue(sel) is Array allItems)
+                {
+                    var guidNull = guidType.GetField("Null", BindingFlags.Static | BindingFlags.Public)?.GetValue(null);
+                    var keep = new List<object>(); int dropped = 0; bool placed = false;
+                    foreach (var it in allItems)
+                    {
+                        if (it == null) continue;
+                        var child = GF(it.GetType(), "loadedEvolverMaterial")?.GetValue(it);
+                        if (child == null) { keep.Add(it); continue; }
+                        if (GF(child.GetType(), "fxMesh") != null) { keep.Add(it); continue; }   // building element
+                        if (!placed && child.GetType().Name.IndexOf("Decal", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            var itBox = it;
+                            GF(it.GetType(), "loadedEvolverMaterial")?.SetValue(itBox, hostClone);          // point at our private clone
+                            var egF = GF(it.GetType(), "EvolverMaterialGuid"); if (egF != null && guidNull != null) egF.SetValue(itBox, guidNull);   // don't reload the shared decal
+                            var pf = GF(it.GetType(), "Position"); if (pf != null) pf.SetValue(itBox, UnityEngine.Vector3.zero);
+                            // DIAGNOSTIC: the item carries a Scale/Size that shrinks our decal — dump its fields so we see the driver
+                            if (Plugin.DistrictDebug != null && Plugin.DistrictDebug.Value)
+                                foreach (var fld in it.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                                    Plugin.Log.LogInfo($"[Footprint] item.{fld.Name} ({fld.FieldType.Name}) = {fld.GetValue(itBox)}");
+                            keep.Add(itBox); placed = true;
+                        }
+                        else dropped++;
+                    }
+                    var elemType = allItems.GetType().GetElementType();
+                    var arr = Array.CreateInstance(elemType, keep.Count);
+                    for (int i = 0; i < keep.Count; i++) arr.SetValue(keep[i], i);
+                    itemsF2.SetValue(sel, arr);
+                    Plugin.Log.LogInfo($"[Footprint] step5: silhouette is THE footprint (placed={placed}, dropped {dropped}, private clone — other districts untouched).");
+                }
+                footprintMaskInjected = true;
+                LoadFxMaterial(sel);
+                Plugin.Log.LogInfo("[Footprint] done — zoom out to see the reactor silhouette footprint.");
+            }
+            catch (Exception ex) { if (selectorTileLogged.Add(name + ":fpex")) Plugin.Log.LogError("[Footprint] " + ex); }
         }
         static void CollectDecalMaterials(object mat, List<object> outDecals, int depth, HashSet<object> visited)
         {
