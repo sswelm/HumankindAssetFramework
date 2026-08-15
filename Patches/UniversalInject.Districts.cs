@@ -1001,13 +1001,40 @@ namespace HumankindAssetFramework
         // ---- SCOPED texture: bind the district's OWN baked albedo onto the borrowed (brick) donor output-layer clone,
         // so the reactor wears its own texture instead of the donor's. Mirrors DistrictApplyTexture/BindAlbedo but drives
         // the scoped element(s) + their shared donorClone (this path has no DistrictModel/privateLeaf). ----
-        static UnityEngine.Object scopedDonorClone;                        // the private layer we bound on the element(s)
-        static readonly List<object> scopedElements = new List<object>();  // our element(s) sharing that layer
-        static readonly List<object> scopedRefreshPlbcs = new List<object>(); // tiles to re-spawn after a texture flush
-        static object scopedAtlasGuid;                                     // the district's baked albedo atlas (from the registry)
-        static UnityEngine.Texture2D scopedAlbedo;                         // loaded atlas texture
-        static readonly List<(UnityEngine.Material mat, string prop)> scopedBoundSlots = new List<(UnityEngine.Material, string)>();
-        static bool scopedTexApplied; static int scopedTexWait, scopedTexErrors;
+        // PER-DISTRICT scoped state. The scoped path was first built for ONE district (the reactor) with these as global
+        // statics; once a SECOND district is scoped (the Oracle, migrated off the isolate path) they'd clash (each would
+        // wear the last-processed district's texture / B&W / flatten). So the state now lives per-district in ScopedState,
+        // and `S` is the CURRENT district's state — set once per district in PollDistrictSelectorTile before any scoped
+        // work runs. Every `scopedX`/`fpX`/`mesh*` name below is a PROXY property onto `S`, so all the function bodies that
+        // read/write them stay byte-identical; only which ScopedState they hit changes with `S`.
+        internal class ScopedState
+        {
+            public UnityEngine.Object donorClone;
+            public readonly List<object> elements = new List<object>();
+            public readonly List<object> refreshPlbcs = new List<object>();
+            public object atlasGuid;
+            public UnityEngine.Texture2D albedo, albedoGray;
+            public readonly List<(UnityEngine.Material mat, string prop)> boundSlots = new List<(UnityEngine.Material, string)>();
+            public bool texApplied; public int texWait, texErrors;
+            public bool fpResolved, fpMesh, fpBW, fpFlat, fpHideDecal;
+            public float fpFlatHeight = 0.17f;
+            public bool? flatState; public float lastFlatHeight = float.NaN;
+            public object flatSel;
+            public readonly Dictionary<object, UnityEngine.Vector3> origSize = new Dictionary<object, UnityEngine.Vector3>();
+        }
+        static readonly Dictionary<string, ScopedState> scopedStates = new Dictionary<string, ScopedState>();
+        static ScopedState S = new ScopedState();   // current scoped district's state (never null)
+        static ScopedState ScopedFor(string name) { if (!scopedStates.TryGetValue(name, out var s)) scopedStates[name] = s = new ScopedState(); return s; }
+
+        static UnityEngine.Object scopedDonorClone { get => S.donorClone; set => S.donorClone = value; }   // the private layer we bound on the element(s)
+        static List<object> scopedElements => S.elements;                  // our element(s) sharing that layer
+        static List<object> scopedRefreshPlbcs => S.refreshPlbcs;          // tiles to re-spawn after a texture flush
+        static object scopedAtlasGuid { get => S.atlasGuid; set => S.atlasGuid = value; }   // the district's baked albedo atlas (from the registry)
+        static UnityEngine.Texture2D scopedAlbedo { get => S.albedo; set => S.albedo = value; }   // loaded atlas texture
+        static List<(UnityEngine.Material mat, string prop)> scopedBoundSlots => S.boundSlots;
+        static bool scopedTexApplied { get => S.texApplied; set => S.texApplied = value; }
+        static int scopedTexWait { get => S.texWait; set => S.texWait = value; }
+        static int scopedTexErrors { get => S.texErrors; set => S.texErrors = value; }
         internal static int scopedRebindLog;   // TWITCH DIAG counter (albedo rebinds = game resetting our texture)
         static readonly HashSet<string> scopedTexLog = new HashSet<string>();
         internal static void ApplyScopedAlbedo()
@@ -1132,8 +1159,12 @@ namespace HumankindAssetFramework
         // EFFECTIVE footprint-mesh settings for the scoped district: the per-entry registry values when the entry authored
         // footprintMesh=true, otherwise the plugin's global DistrictFootprintMesh… config (back-compat — a district works
         // before it's authored per-entry). Resolved once by KeepDistrictMeshAtStrategicZoom; the pollers read these.
-        internal static bool fpResolved, fpMesh, fpBW, fpFlat, fpHideDecal;
-        static float fpFlatHeight = 0.17f;
+        internal static bool fpResolved { get => S.fpResolved; set => S.fpResolved = value; }
+        internal static bool fpMesh { get => S.fpMesh; set => S.fpMesh = value; }
+        internal static bool fpBW { get => S.fpBW; set => S.fpBW = value; }
+        internal static bool fpFlat { get => S.fpFlat; set => S.fpFlat = value; }
+        internal static bool fpHideDecal { get => S.fpHideDecal; set => S.fpHideDecal = value; }
+        static float fpFlatHeight { get => S.fpFlatHeight; set => S.fpFlatHeight = value; }
         internal static void ResolveScopedFootprint(string name)
         {
             DistrictModel e = null;
@@ -1153,7 +1184,7 @@ namespace HumankindAssetFramework
             }
             fpResolved = true;
         }
-        static UnityEngine.Texture2D scopedAlbedoGray;
+        static UnityEngine.Texture2D scopedAlbedoGray { get => S.albedoGray; set => S.albedoGray = value; }
         static object rfpInstance; static MethodInfo miComputeRenderState; static object topoSelectorBox;
         static int bwDiagThrottle;
         // Current 0..1 visibility of the TOPOGRAPHIC (schematic/strategic) band — ~0 zoomed in, ~1 on the strategic map.
@@ -1197,11 +1228,11 @@ namespace HumankindAssetFramework
         // schematic map is active, restore full height up close. Driven by the same Topographic-band signal as the B&W
         // swap. `size` scales the element (the scoped setup already uses size=0 to HIDE props — line ~702), so size.y->~0
         // collapses the mesh into a flat sheet. size feeds GPU via WriteToGPUData, so re-emit on the crossover only.
-        static bool? meshFlatState;
-        static float lastFlatHeight = float.NaN;
-        static float runtimeFlatHeight = float.NaN;   // in-game F8-window override; NaN = use the config value
-        internal static object scopedFlatSel;   // the reactor's selector (set by KeepDistrictMeshAtStrategicZoom)
-        static readonly Dictionary<object, UnityEngine.Vector3> meshOrigSize = new Dictionary<object, UnityEngine.Vector3>();
+        static bool? meshFlatState { get => S.flatState; set => S.flatState = value; }
+        static float lastFlatHeight { get => S.lastFlatHeight; set => S.lastFlatHeight = value; }
+        static float runtimeFlatHeight = float.NaN;   // in-game F8-window override; NaN = use the config value (GLOBAL — one manual tuning knob)
+        internal static object scopedFlatSel { get => S.flatSel; set => S.flatSel = value; }   // the scoped district's selector (set by KeepDistrictMeshAtStrategicZoom)
+        static Dictionary<object, UnityEngine.Vector3> meshOrigSize => S.origSize;
         // Flatten HEIGHT = the size.y multiplier used on the strategic map: ~0.02 = paper-flat (but coplanar with terrain,
         // so its edges drown when the tile's ground rises over them), up toward 1 = full 3D. The sweet spot reads flat yet
         // still pokes clear of the terrain. This is the lever that actually reaches the GPU (unlike item Position.y).

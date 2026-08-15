@@ -321,6 +321,7 @@ namespace HumankindAssetFramework
                     if (d is UnityEngine.Object duo && duo == null) continue;
                     var name = GetMember(d, "ConstructibleDefinitionName")?.ToString();
                     if (string.IsNullOrEmpty(name) || !selectorTileGuid.TryGetValue(name, out var guid)) continue;
+                    S = ScopedFor(name);   // PER-DISTRICT: point the scoped-state proxies at THIS district before any scoped work (texture / B&W / flatten no longer clash between the reactor and the Oracle)
                     // resolve THIS district's own baked albedo atlas from the registry (for the scoped texture bind)
                     if (scopedAtlasGuid == null)
                         foreach (var dm in distModels) if (dm.district == name && dm.atlasGuid != null) { scopedAtlasGuid = dm.atlasGuid; break; }
