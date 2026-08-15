@@ -1014,6 +1014,15 @@ namespace HumankindAssetFramework
                             var lgF = GF(it.GetType(), "loadedEvolverMaterialGuid"); if (lgF != null && guidNull != null) lgF.SetValue(itBox, guidNull);   // stop the emit reloading the ORIGINAL over our clone
                             var pf = GF(it.GetType(), "Position"); if (pf != null) pf.SetValue(itBox, UnityEngine.Vector3.zero);
                             var lsF = GF(it.GetType(), "LocalScale"); if (lsF != null) lsF.SetValue(itBox, new UnityEngine.Vector3(fpSize, 1f, fpSize));   // was 0.04 = shrink; drive size here (per-item, scoped)
+                            // ROTATE: spin the decal's orientation (AxeY up, AxeZ forward) by DistrictFootprintMaskRotation° clockwise about vertical
+                            float fpRot = 0f; float.TryParse(Plugin.DistrictFootprintMaskRotation?.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out fpRot);
+                            if (fpRot != 0f)
+                            {
+                                var q = UnityEngine.Quaternion.AngleAxis(fpRot, UnityEngine.Vector3.up);
+                                var azF = GF(it.GetType(), "AxeZ"); if (azF != null) azF.SetValue(itBox, q * new UnityEngine.Vector3(0f, 0f, 1f));
+                                var ayF = GF(it.GetType(), "AxeY"); if (ayF != null) ayF.SetValue(itBox, UnityEngine.Vector3.up);
+                                Plugin.Log.LogInfo($"[Footprint] rotated footprint {fpRot}° (AxeZ -> {q * new UnityEngine.Vector3(0f, 0f, 1f)})");
+                            }
                             Plugin.Log.LogInfo($"[Footprint] item set: LocalScale={lsF?.GetValue(itBox)}, loadedGuid nulled, material={GetMember(GF(it.GetType(), "loadedEvolverMaterial")?.GetValue(itBox), "name")}");
                             keep.Add(itBox); placed = true;
                         }

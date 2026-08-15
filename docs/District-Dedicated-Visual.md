@@ -133,37 +133,46 @@ substrings to tune which layers show. This is the "surface texture" knob.
 first.** Dump them with the `[DecalBind]` probe (name · `OutputLayerIndex` · layer name · `maskedByTerrain`) before
 theorising about terrain.
 
-## Unique footprint from a model silhouette (`DistrictFootprintMask`) — spike, private + loading
+## Unique footprint (`DistrictFootprintMask`) — a private SOLID BLOCK, sized + rotated
 
-Instead of a generic donor outline, render the district's **own** top-down shape as its strategic footprint.
+Give the district its **own** strategic footprint instead of a generic donor outline. **Shipping form: a solid
+tinted block** (the decal's full quad), sized and rotated to sit over the model's square base — verified in-game on
+the Breeder Reactor.
 
-**Author the mask** (`baker/reactor_silhouette.py`, headless Blender): renders the model GLB top-down (orthographic),
-**strips the flat base plane** (faces below `mn.z + 0.06·height`) so the silhouette is the buildings (domes/halls),
-not a rectangle, and writes a **white-on-transparent PNG** (alpha = shape). Deploy the PNG anywhere the plugin can
-read it.
+**Bonus: it appears INSTANTLY.** Because the block is the decal's own quad (no per-hex strategic decal render-data to
+evolve), it sidesteps the **~1s first-zoom-out reveal** that the graft footprint has (the engine limit banked under
+"Known limitation" above). The block draws the moment the tile does.
+
+**Why a block and not a silhouette:** we built the full silhouette pipeline (below) and it works mechanically, but
+the **SchematicView shader renders any injected mask as faint, sketchy hand-drawn strokes** — a crisp reactor outline
+(or even two bold domes) dissolves into an unreadable smudge at strategic zoom. That's a property of the game's
+schematic-map rendering, not a bug we can tune out. The **solid block reads cleanly**, so that's what ships.
 
 **Config** (`[District]`):
-- `DistrictFootprintMask` = path to the PNG (blank = off, keep the generic graft footprint).
-- `DistrictFootprintMaskSize` = the size (drives the **item `LocalScale`**, NOT `defaultSize`); **~3 ≈ one tile**.
+- `DistrictFootprintMask` = path to a PNG. Its **content is ignored** for the block (see below) — a non-empty path
+  just **enables** the injection. Blank = off (generic graft footprint).
+- `DistrictFootprintMaskSize` = size, drives the item's **`LocalScale`** (NOT `defaultSize`); **~3 ≈ one tile**.
+- `DistrictFootprintMaskRotation` = degrees **clockwise** about vertical (rotates the item's `AxeZ`); negative = CCW.
 
-**Runtime** (`InjectReactorFootprint`, once): load the PNG → `Texture2D`; build a **private 1-entry `FxTextureAtlas`**
-(`atlasEntries` GUID→0, `elementData[0].Uvs = (0,0,1,1)` full-texture, `outputEntries[0].unityTextureRef` = our mask);
-**clone the SchematicView output layer** and set its **mask atlas** (`atlases[0]`) to ours; **clone the decal**
-(`Instantiate`) so the mask/size are private; **repoint one footprint item** at the clone, set `LocalScale` = size,
-centre it, **null `loadedEvolverMaterialGuid`** (else the emit reloads the original over the clone), and drop the
-other footprint decals.
+**Runtime** (`InjectReactorFootprint`, once): **clone the SchematicView decal** into a private copy; repoint one
+footprint item at it, `LocalScale` = size, `AxeZ` rotated by the config angle, centre it, **null
+`loadedEvolverMaterialGuid`**, drop the other footprint decals. The decal's `maskTexture` GUID is left **invalid**,
+so `FillLayerData` sees `maskTexture.IsNull`, **skips the mask, and draws the full solid quad** = the block.
 
-**THE TWO TRAPS (cost hours):**
-1. **Modifying the SHARED decal leaks to EVERY district's footprint.** Must clone the decal (private copy).
-2. **`Instantiate` does not copy the base `[NonSerialized] evolverDescriptorInstance`** → `FxEvolverMaterial.Resolve­Dependencies`
-   **NREs** and the clone writes no render data (renders as a **pixel**). Fix: copy `evolverDescriptorInstance` from
-   the original (it's the shared descriptor singleton) **before** `ResolveDependencies` + `Load`. Also: size is the
-   item's **`LocalScale`** (the host "Tiny" brick's `0.04` was the shrink), not the decal's `defaultSize`/`bboxOverride`.
+**THE TWO TRAPS (cost hours — still apply to the private clone):**
+1. **Mutating the SHARED SchematicView decal leaks to EVERY district's footprint.** Must clone it (private copy).
+2. **`Instantiate` does not copy the base `[NonSerialized] evolverDescriptorInstance`** → `FxEvolverMaterial.ResolveDependencies`
+   **NREs** and the clone writes no render data (renders as a single **pixel**). Fix: copy `evolverDescriptorInstance`
+   from the original (shared descriptor singleton) **before** `ResolveDependencies` + `Load`. And size is the item's
+   **`LocalScale`** (the host "Tiny" brick's `0.04` was the shrink), not the decal's `defaultSize`/`bboxOverride`.
 
-**KNOWN / open:** it currently renders as a **solid square** (the decal quad), **not yet cut to the silhouette** — the
-mask **alpha isn't shaping it**. Next: try `maskOption = DistanceField` vs `Alpha`, or feed the shape as **luminance**
-(the decal may sample the mask's colour, not alpha). Everything else (private, tile-sized, loads correctly) is verified
-in-game and committed on `spike/district-unique-footprint`.
+**The silhouette pipeline (parked, reusable).** `baker/reactor_silhouette.py` (headless Blender) renders the GLB
+top-down, **strips the base plane** (`mn.z + frac·height`), **fills enclosed holes** (numpy flood) into solid shapes,
+and writes the mask. A **valid hex** `maskGuidStr` + binding our texture as the decal's **mask atlas** (`atlases[0]`,
+`elementData[0].Uvs=(0,0,1,1)`) makes the decal actually cut to that shape — proven — but the SchematicView shader
+renders the result faint (above), so it's not shipped. The experiments are stashed on `spike/district-unique-footprint`;
+the crisp version would need a **different, solid-rendering output layer** (the CityMap/gravel one — which reintroduces
+the close-zoom twitch we removed, see [District-Footprint-Investigation.md]).
 
 ## Ground under the district (`DistrictApplyGroundMaterial` + the `ApplyGroundMaterialDefinition` **prefix**)
 

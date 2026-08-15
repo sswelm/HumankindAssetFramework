@@ -49,6 +49,7 @@ namespace HumankindAssetFramework
         internal static ConfigEntry<string> DistrictFootprintDrop;   // comma-separated decal NAME substrings to DROP from the grafted footprint (the rock/rubble "surface texture" layers); blank = keep ALL donor decals
         internal static ConfigEntry<string> DistrictFootprintMask;   // EXPERIMENTAL: path to a PNG silhouette mask -> a UNIQUE strategic footprint matching the district's own layout (injected into a private clone of the SchematicView mask atlas)
         internal static ConfigEntry<string> DistrictFootprintMaskSize; // tuning: world size (units) of the injected silhouette footprint decal; default 3.0
+        internal static ConfigEntry<string> DistrictFootprintMaskRotation; // tuning: rotate the footprint decal N degrees clockwise; default 0
         // --- EXPERIMENTAL: generic GPU mesh-buffer overrides (units, districts, any content layer) ---
         internal static ConfigEntry<string> BufferOverrides;     // per-layer overrides "<nameSubstr>:verts=+N,idx=+N,meshes=+N,maxtris=N;..." applied at layer creation
         internal static ConfigEntry<int>    SkeletonBoneBudget;  // shared per-frame animated-bone pool size (vanilla 65,535; high-bone customs overflow it -> spike plague)
@@ -162,6 +163,9 @@ namespace HumankindAssetFramework
             DistrictFootprintMaskSize = Config.Bind("District", "DistrictFootprintMaskSize", "3.0",
                                   "Tuning for DistrictFootprintMask: the world size (in tile units) of the injected silhouette footprint decal. " +
                                   "Raise if the silhouette is too small on the strategic map, lower if it overflows the hex. Default 3.0.");
+            DistrictFootprintMaskRotation = Config.Bind("District", "DistrictFootprintMaskRotation", "0",
+                                  "Tuning for DistrictFootprintMask: rotate the footprint decal N degrees CLOCKWISE about the vertical axis. " +
+                                  "Negative = counter-clockwise. Default 0.");
             DistrictSelectorTile = Config.Bind("District", "DistrictSelectorTile", "",
                                   "SCOPED dedicated-visual: put a DATA-AUTHORED district selector on ONLY the named district's own tile(s) " +
                                   "(matched by ConstructibleDefinitionName), leaving the shared visual affinity — and every other district using " +
