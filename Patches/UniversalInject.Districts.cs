@@ -22,6 +22,7 @@ namespace HumankindAssetFramework
             public object fxMeshGuid;        // parsed Amplitude Guid of the baked FxMesh
             public object atlasGuid;         // parsed Amplitude Guid of the baked albedo atlas (null = untextured, pre-2.0 entries)
             public object footprintDonor;   // parsed Guid of the runtime strategic-footprint donor selector (registry-driven), null = none
+            public object selectorGuid;      // parsed Guid of this district's baked SCOPED CityMapSelector (data-authored path). Non-null -> routed through the scoped path (like the reactor), NOT the isolate/repoint path.
             public object normalAtlasGuid;   // baked normal atlas (null = neutral flat) — same rects as the albedo
             public object roughAtlasGuid;    // baked roughness atlas (null = neutral matte)
             public bool isolate = true;      // true = private per-instance leaf (this tile only); false = global shared-leaf swap
@@ -126,6 +127,7 @@ namespace HumankindAssetFramework
                                 footprintMeshFlat = (bool?)d["footprintMeshFlat"] ?? false,
                                 footprintMeshFlatHeight = (float?)d["footprintMeshFlatHeight"] ?? 0.17f,
                                 footprintMeshHideDecal = (bool?)d["footprintMeshHideDecal"] ?? true,
+                                selectorGuid = ParseGuid4((string)d["selectorGuid"] ?? ""),   // baked scoped CityMapSelector -> the scoped rendering path
                             };
                             if (e.district.Length > 0 && e.fxMeshGuid != null) distModels.Add(e);
                             else Plugin.Log.LogWarning($"[District] registry entry skipped (district='{e.district}', bad fxMeshGuid?)");
@@ -1386,10 +1388,13 @@ namespace HumankindAssetFramework
         // scoped district (the reactor) coexists in the same registry.
         static bool IsScopedDistrict(string name)
         {
+            if (string.IsNullOrEmpty(name)) return false;
             var cfg = Plugin.DistrictSelectorTile?.Value;
-            if (string.IsNullOrEmpty(cfg) || string.IsNullOrEmpty(name)) return false;
-            foreach (var part in cfg.Split(';'))
-            { var eq = part.IndexOf('='); if (eq > 0 && part.Substring(0, eq).Trim() == name) return true; }
+            if (!string.IsNullOrEmpty(cfg))
+                foreach (var part in cfg.Split(';'))
+                { var eq = part.IndexOf('='); if (eq > 0 && part.Substring(0, eq).Trim() == name) return true; }
+            foreach (var dm in distModels)   // registry-authored scoped districts (selectorGuid baked in the District Factory)
+                if (dm.district == name && dm.selectorGuid != null) return true;
             return false;
         }
 

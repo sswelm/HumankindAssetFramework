@@ -287,17 +287,19 @@ namespace HumankindAssetFramework
         // building element's output layer is bound via the shared BindReactorBuilding once our selector is on a channel.
         static readonly Dictionary<string, object> selectorTileGuid = new Dictionary<string, object>();   // districtName -> parsed guid
         static string selectorTileParsedFrom;                                                             // config string we parsed
+        static int selectorTileRegCount = -1;                                                             // distModels count at last (re)build — rebuild the map when the registry changes
         static readonly Dictionary<string, object> loadedSelectorByKey = new Dictionary<string, object>();// guidKey -> loaded+Loaded selector
         static readonly HashSet<string> selectorTileLogged = new HashSet<string>();
         internal static void PollDistrictSelectorTile()
         {
-            var cfg = Plugin.DistrictSelectorTile?.Value?.Trim();
-            if (string.IsNullOrEmpty(cfg)) return;
             if (distFxManager == null || trackedDistricts.Count == 0) return;
             try
             {
-                EnsureDistrictConfig();   // populates distModels (for the per-district atlasGuid) even with DistrictRepoint off
-                if (selectorTileParsedFrom != cfg)   // (re)parse only when the config text changes
+                EnsureDistrictConfig();   // populates distModels (per-entry atlasGuid + selectorGuid) even with DistrictRepoint off
+                var cfg = Plugin.DistrictSelectorTile?.Value?.Trim() ?? "";
+                // (re)build the scoped map from the CONFIG **and** any registry entry that baked a selectorGuid (editor-driven,
+                // no config line needed) — rebuild when the config text OR the registry set changes.
+                if (selectorTileParsedFrom != cfg || selectorTileRegCount != distModels.Count)
                 {
                     selectorTileGuid.Clear();
                     foreach (var part in cfg.Split(';'))
@@ -308,7 +310,9 @@ namespace HumankindAssetFramework
                         if (g != null) selectorTileGuid[name] = g;
                         else if (selectorTileLogged.Add(name + ":badguid")) Plugin.Log.LogWarning($"[DistrictTile] '{name}': unparseable guid");
                     }
-                    selectorTileParsedFrom = cfg;
+                    foreach (var dm in distModels)   // registry-authored scoped districts (the migration path)
+                        if (dm.selectorGuid != null && dm.district.Length > 0 && !selectorTileGuid.ContainsKey(dm.district)) selectorTileGuid[dm.district] = dm.selectorGuid;
+                    selectorTileParsedFrom = cfg; selectorTileRegCount = distModels.Count;
                 }
                 if (selectorTileGuid.Count == 0) return;
                 bool anySet = false;
