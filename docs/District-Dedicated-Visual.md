@@ -133,6 +133,38 @@ substrings to tune which layers show. This is the "surface texture" knob.
 first.** Dump them with the `[DecalBind]` probe (name · `OutputLayerIndex` · layer name · `maskedByTerrain`) before
 theorising about terrain.
 
+## Unique footprint from a model silhouette (`DistrictFootprintMask`) — spike, private + loading
+
+Instead of a generic donor outline, render the district's **own** top-down shape as its strategic footprint.
+
+**Author the mask** (`baker/reactor_silhouette.py`, headless Blender): renders the model GLB top-down (orthographic),
+**strips the flat base plane** (faces below `mn.z + 0.06·height`) so the silhouette is the buildings (domes/halls),
+not a rectangle, and writes a **white-on-transparent PNG** (alpha = shape). Deploy the PNG anywhere the plugin can
+read it.
+
+**Config** (`[District]`):
+- `DistrictFootprintMask` = path to the PNG (blank = off, keep the generic graft footprint).
+- `DistrictFootprintMaskSize` = the size (drives the **item `LocalScale`**, NOT `defaultSize`); **~3 ≈ one tile**.
+
+**Runtime** (`InjectReactorFootprint`, once): load the PNG → `Texture2D`; build a **private 1-entry `FxTextureAtlas`**
+(`atlasEntries` GUID→0, `elementData[0].Uvs = (0,0,1,1)` full-texture, `outputEntries[0].unityTextureRef` = our mask);
+**clone the SchematicView output layer** and set its **mask atlas** (`atlases[0]`) to ours; **clone the decal**
+(`Instantiate`) so the mask/size are private; **repoint one footprint item** at the clone, set `LocalScale` = size,
+centre it, **null `loadedEvolverMaterialGuid`** (else the emit reloads the original over the clone), and drop the
+other footprint decals.
+
+**THE TWO TRAPS (cost hours):**
+1. **Modifying the SHARED decal leaks to EVERY district's footprint.** Must clone the decal (private copy).
+2. **`Instantiate` does not copy the base `[NonSerialized] evolverDescriptorInstance`** → `FxEvolverMaterial.Resolve­Dependencies`
+   **NREs** and the clone writes no render data (renders as a **pixel**). Fix: copy `evolverDescriptorInstance` from
+   the original (it's the shared descriptor singleton) **before** `ResolveDependencies` + `Load`. Also: size is the
+   item's **`LocalScale`** (the host "Tiny" brick's `0.04` was the shrink), not the decal's `defaultSize`/`bboxOverride`.
+
+**KNOWN / open:** it currently renders as a **solid square** (the decal quad), **not yet cut to the silhouette** — the
+mask **alpha isn't shaping it**. Next: try `maskOption = DistanceField` vs `Alpha`, or feed the shape as **luminance**
+(the decal may sample the mask's colour, not alpha). Everything else (private, tile-sized, loads correctly) is verified
+in-game and committed on `spike/district-unique-footprint`.
+
 ## Ground under the district (`DistrictApplyGroundMaterial` + the `ApplyGroundMaterialDefinition` **prefix**)
 
 The per-entry **ground paint** (`groundMaterial` in `haf_districts.json`, e.g. `Constructible_Temperate_03`) is
