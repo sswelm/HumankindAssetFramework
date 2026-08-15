@@ -315,7 +315,6 @@ namespace HumankindAssetFramework
                     selectorTileParsedFrom = cfg; selectorTileRegCount = distModels.Count;
                 }
                 if (selectorTileGuid.Count == 0) return;
-                bool anySet = false;
                 foreach (var d in trackedDistricts)
                 {
                     if (d is UnityEngine.Object duo && duo == null) continue;
@@ -364,8 +363,7 @@ namespace HumankindAssetFramework
                     // DIAGNOSTIC: the channel still holds the NATIVE Industry selector the first frame — dump its element
                     // tree next to ours so we can see the ground element the old (isolate) path kept and we lost.
                     if (curMat != null && !ReferenceEquals(curMat, sel)) { DumpSelectorElements(curMat, "NATIVE", name); DumpSelectorElements(sel, "OURS", name); DumpNativeGroundCandidates(curMat, name); }
-                    if (ReferenceEquals(curMat, sel)) anySet = true;   // already ours this frame
-                    else
+                    if (!ReferenceEquals(curMat, sel))   // not ours yet — (re)place our selector on this district's channel
                     {
                         // TWITCH DIAG: the channel ISN'T ours — the game reset it and we're re-emitting (RefreshChannel
                         // re-renders the whole selector incl. footprint). Steady logging here = the footprint re-emitting
@@ -382,7 +380,6 @@ namespace HumankindAssetFramework
                             var ra = new object[] { layer, System.Enum.ToObject(miRefreshChannel.GetParameters()[1].ParameterType, 0) };
                             try { miRefreshChannel.Invoke(plbc, ra); } catch { }
                         }
-                        anySet = true;
                         if (selectorTileLogged.Add(name + ":set")) Plugin.Log.LogInfo($"[DistrictTile] '{name}': our selector placed on channel {layer} (this tile only; shared affinity untouched).");
                     }
                     // PER-DISTRICT (S = this district's state): bind its element to its OWN donor-layer clone, then bind its
