@@ -43,6 +43,7 @@ Each axis adds custom content in a different place, from the same JSON registry.
 ## Understand the internals
 How the runtime actually works, for anyone extending the plugin.
 - [**Code-Map.md**](Code-Map.md) — where everything lives in the plugin source.
+- [**Shared-Schema.md**](Shared-Schema.md) — the `Haf.Schema` library: the ~64 fields `ModelDef` and `ModelEntry` share, defined once and inherited by both; what's shared vs divergent, and how to add a field.
 - [**Animated-Runtime.md**](Animated-Runtime.md) — the decompiled animation runtime: clip registration, the per-session re-arm (why `AnimationLoad` fires once per process and how HAF re-registers on `PawnManager.Load` / `Sandbox.Load` for save-loads and New Games), the per-frame pose hook, the GPU pose math, and the engine contracts (rotation-only, scale-1, name-ordered bones).
 - [**Unit-Combat-Behavior.md**](Unit-Combat-Behavior.md) — how the game drives combat animation and how HAF hooks it.
 - [**Firing-On-Attack.md**](Firing-On-Attack.md) — the one-shot fire trigger (Humankind's `SimulationEvent` bus).
@@ -60,7 +61,6 @@ Development-facing docs — status, review, testing, and the wider ecosystem.
 - [**Ecosystem-Survey.md**](Ecosystem-Survey.md) — every Humankind BepInEx plugin on GitHub and the techniques worth borrowing.
 - [**Wonder-Spike.md**](Wonder-Spike.md) — the wonder research spike: a custom model on a player-authored **Artificial Wonder** (proven recipe, the falsified native-affinity path, the session-lifecycle bugs it surfaced, open items).
 - [**Pack-Validator-Design.md**](Pack-Validator-Design.md) — design note for the planned pack pre-flight validator (author-facing content validation); designed, not built.
-- [**Schema-Library-Migration.md**](Schema-Library-Migration.md) — plan to collapse the duplicated `ModelDef`/`ModelEntry` schema into one shared netstandard2.0 library (kills the 4-place drift, deletes the parity guard); **POC-proven**, not yet built.
 - [**Headless-CLI.md**](Headless-CLI.md) — the **headless CLI**: run model re-bake and the full Humankind mod **build + deploy** from the command line (Unity batch mode), so scripts / CI / an AI agent can drive HAF without the editor GUI. Built + verified.
 - [**Headless-CLI-Design.md**](Headless-CLI-Design.md) — the original design note behind it (superseded by the reference above).
 - [**Audit-2026-07-31.md**](Audit-2026-07-31.md) — a point-in-time project audit.

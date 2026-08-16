@@ -48,7 +48,7 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   dependency + injects all 22 units unchanged; the editor compiles and a Save round-trips all 64 fields (0 wiped).
   `tools/deploy-plugin.sh` ships both DLLs (a redeploy can't drop the dependency). **Deliberately partial:** the GUID
   fields are stored in different shapes (`int[]` vs `sa/sb/..`, a runtime choice) so they stay divergent under the
-  parity guard — the worth-it slice, not a forced full merge. See docs/Schema-Library-Migration.md.
+  parity guard — the worth-it slice, not a forced full merge. See docs/Shared-Schema.md.
 
 - **HEADLESS BINDING DRIFT CHECK — reflection-drift net, step 3 (2026-08-16).** The in-game `haf_bindings_report.txt`
   still needed a launch to read. `bindcheck` (a net8 tool, `Tools/bindcheck/`, using `MetadataLoadContext`) now validates
