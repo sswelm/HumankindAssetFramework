@@ -372,8 +372,12 @@ dismissed.
 
 ## Data contract — low (editor ⇄ plugin)
 
-- **`rotorSpinBones` / `rotorSpinSpeed`** are plugin-only fields with no editor `ModelDef` field → a hand-authored
-  pack.json value is silently wiped on the next Factory Save (JsonUtility drops unknown keys). Latent (ENC unused).
+- **`rotorSpinBones` / `rotorSpinSpeed`** are plugin-only fields with no editor `ModelDef` field. *Partly addressed
+  2026-08-16:* the schema-parity guard now **allowlists** them as intentional runtime-only keys (like `scale`), so the
+  gate is green — but the underlying risk stands: a hand-authored pack.json value is silently wiped on the next Factory
+  Save (JsonUtility serializes only `ModelDef`'s fields → unknown keys dropped). Same wipe hits every allowlisted
+  runtime-only key. The real fix is a round-trip that preserves unknown keys (or promoting these to `ModelDef`); latent
+  (ENC unused), so deferred.
 - **`idleAltInterval` default mismatch** (editor 25f / plugin 0f) — a pack.json missing the key gets idle-alt
   disabled instead of the documented 25s cadence.
 - **`haf_districts.json` has no regex fallback** — one malformed char disables ALL custom districts (the model
@@ -384,7 +388,15 @@ dismissed.
 
 ## GameBinding — remaining catalog gaps (extend the "make drift loud" template)
 
-District-ground/hex support types resolved reflectively but off-catalog: `AssetReferenceRepository`,
-`Amplitude.StaticString`, `GroundMaterialDefinition`, `AnimationVariableNames`, `HgFxAnchorComponent`. A rename
-there degrades silently. (The `SimulationEvent_*` combat types resolve with their own local warnings, so they're
-loud-but-off-catalog.)
+**Progress (2026-08-16, reflection-fragility A5):** the catalog now also writes a machine-readable
+`haf_bindings_report.txt` every launch, the last raw `Type.GetType` site was migrated onto an accessor, and a
+member audit took coverage from 31 types / ~49 members to **49 types / ~124 members** (verified `missing_members=0`).
+See CHANGELOG + Framework-Review A5. What remains:
+
+- **District-ground/hex support types resolved reflectively but off-catalog:** `AssetReferenceRepository`,
+  `Amplitude.StaticString`, `GroundMaterialDefinition`, `AnimationVariableNames`, `HgFxAnchorComponent`. A rename
+  there degrades silently. (The `SimulationEvent_*` combat types resolve with their own local warnings, so they're
+  loud-but-off-catalog.)
+- **Members read off types not yet in `GameBinding` at all** — the `Skeleton`, pawn-entry / `GPUPawnDescriptorEntry` /
+  fragment **structs**, `FxOneMeshStruct`, `PresentationLevelBuildComponent` on the hottest injection path (the
+  member audit surfaced these; structs need new accessors + a different resolution, so it's a distinct batch).

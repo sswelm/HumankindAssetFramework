@@ -38,6 +38,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   still over the real **128** wall, so bones 128–222 (the arm chains = the "wings") were always going to
   collapse. No engine-import decompile needed; the culprit was the GPU skin's per-vertex bone-index ceiling.
 
+- **DECISIONS (ADR) LOG + backlog triage — shrinking the bus factor (2026-08-16).** The maintainability review's #4.
+  Added [`docs/Decisions.md`](docs/Decisions.md) — short records of the *settled* decisions and the *why* behind them
+  (pack order follows HK's mod order & why the base-flag was rejected; make-drift-loud over removing reflection; the
+  Factory/Lab ownership split; the declined `ModelEntry` POCO split; pair-merge vs slimming for >127-bone rigs;
+  rotation-only animation; framework-neutral naming; first-loaded-wins conflicts; the focused-test stance) — so the
+  tribal knowledge that would otherwise be reverse-engineered from the code has one home, linked from the docs index +
+  `llms.txt`. Also triaged the backlog: recorded the reflection-fragility A5 progress against the GameBinding-gaps item
+  (narrowing it to the off-catalog district types + the struct-typed surface), and gave the `rotorSpin` item an honest
+  status (parity now allowlists it, but the Save-wipe of hand-authored runtime-only keys is the real open concern).
+
 - **ONE PRE-PUSH GATE — the fast guards are now un-forgettable (2026-08-16).** The maintainability review's #2: the good
   guards (`dotnet build`, `dotnet test` ×59, the Roslyn editor compile-check, the 4-path registry schema-parity) existed
   but ran manually, one at a time, across two repos, with no enforcement. Now one **`Tools/check.sh`** per repo runs its

@@ -53,6 +53,7 @@ How the runtime actually works, for anyone extending the plugin.
 
 ## Project & roadmap
 Development-facing docs — status, review, testing, and the wider ecosystem.
+- [**Decisions.md**](Decisions.md) — the **ADR log**: settled decisions and the *why* behind them (pack ordering, reflection strategy, the Factory/Lab ownership split, rotation-only animation, …). Check here before proposing a change to any of them.
 - [**Framework-Review.md**](Framework-Review.md) — verified code-review findings (prioritized) and the hardening order.
 - [**Review-Backlog.md**](Review-Backlog.md) — the open review backlog.
 - [**Testing.md**](Testing.md) — the testing strategy: what's unit-tested, what's covered by in-editor instruments, and why.
