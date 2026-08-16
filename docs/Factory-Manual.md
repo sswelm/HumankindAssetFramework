@@ -99,7 +99,7 @@ their settings and work together**:
 ### Mesh / shading *(ignored in Animated mode)*
 - **Normals** — `KeepModel` (artist's normals) / `Recalculate` (hard edges via the **Smoothing angle** slider) /
   `Faceted` (fully flat).
-- **Height-based UVs** — override UVs with V = normalized height, so a vertical-gradient albedo maps by height (black
+- **Height-gradient UVs** — override UVs with V = normalized height, so a vertical-gradient albedo maps by height (black
   skirt low, grey hull high). For untextured CAD models that just need a simple gradient skin.
 - **Winding fix (CAD/convex)** — rewind faces outward so single-sided / CAD "sketch" meshes render instead of culling to
   invisible. Lightest fix; assumes a roughly convex hull (vehicles/ships).
@@ -129,7 +129,7 @@ their settings and work together**:
   could be 128 MB. DXT1 sizes: 2048 ≈ 2 MB, 1024 ≈ 0.5 MB, 512 ≈ 0.1 MB, 256 ≈ 32 KB.) Re-bake to apply.
 - **Reduce to ~tris (0 = off)** — quadric-decimate a heavy model to about this many triangles (via Blender) to fit the
   engine's shared mesh buffer (~25k per model is the practical ceiling). It's a **ceiling, not a quota**: a model already
-  under it passes through untouched. No Blender? Use **Convert grid** instead (below).
+  under it passes through untouched. No Blender? Use **Weld & simplify** instead (below).
 - **Strip parts (names)** *(Pick)* — comma-separated object-name substrings to **DELETE from *your* model** before baking
   (each match takes its children too). The **mirror of Hide-donor**, but on your source mesh: use it to drop a part you
   don't want baked in — most importantly a **helicopter's own rotor(s)**, so the **donor's animated rotor spins through** in
@@ -160,7 +160,7 @@ their settings and work together**:
   clip; if that frame isn't a neutral pose the model may rest at a slight static offset (no wobble, just held) — report it if
   so. It lives in **Runtime** (not the Animation section) because it's a runtime flag that acts on the *donor*, and the
   Animation section is disabled for the static models that use it.
-- **Convert grid** — GLB/glTF only. `0` = faithful (keeps UV seams — use for textured models). `>0` = vertex-cluster
+- **Weld & simplify** — GLB/glTF only. `0` = faithful (keeps UV seams — use for textured models). `>0` = vertex-cluster
   decimation **without Blender** (coarser; averages UVs across seams, so only for heavy *untextured* meshes).
 
 ### Texture / import
@@ -188,8 +188,8 @@ lowest triangle count with no visible loss: drop the count → Bake → watch th
 
 1. Pawn description (Pick) + Resource name.
 2. Model file (Browse).
-3. **Textured model?** leave **Convert grid = 0** (preserves UV seams). Untextured CAD model? consider **Height-based
-   UVs** or a **Convert grid > 0**.
+3. **Textured model?** leave **Weld & simplify = 0** (preserves UV seams). Untextured CAD model? consider **Height-based
+   UVs** or a **Weld & simplify > 0**.
 4. **Renders invisible / see-through in-game?** it's a single-sided/CAD mesh — enable **Winding fix**, or **Double-sided**
    for non-convex shells.
 5. **Heavy model?** set **Reduce to ~tris** (default 24000). Overflowing the shared buffer drops geometry silently.
@@ -301,10 +301,10 @@ strategic map.
 | **A donor part shows through** (rotor, extra mesh) | **Hide donor meshes → Pick** it (after one launch so it's logged). If it's an *animated* donor sub-part, it can't be hidden — pick a cleaner donor. |
 | **Model bobs / wiggles / wobbles** (a rigid model on a hovering donor — e.g. an airship on the Recon-Drone donor) | Your static mesh is inheriting the **donor's** idle/move animation. Tick **Freeze donor animation** (Runtime section) — the plugin pins the donor's pose so the mesh holds rigid, and it still glides tile-to-tile. Static models only; no re-bake. Different from the "unbalanced flywheel" row (that's a model's *own* clip animating its whole body — use **Animate only bones**). |
 | **First unit's borrowed rotor sits ~1 low** (after a load, or on a freshly built/spawned unit; other instances fine) | An engine spawn race on the first pawn of the model, at creation. Tick **Re-spawn after load** on that model — the plugin rebuilds the unit's pawns right after it renders and the rotor comes out right (tune `Factory/RespawnDelayFrames` in the plugin cfg if it's briefly visible). Registry flag, no re-bake. |
-| **Bake fails: "needs Blender"** | Install Blender or set its path in **Settings**. For static decimation without Blender, use **Convert grid** instead of Reduce-to-tris. |
+| **Bake fails: "needs Blender"** | Install Blender or set its path in **Settings**. For static decimation without Blender, use **Weld & simplify** instead of Reduce-to-tris. |
 | **Re-baked static model is 90° off / tipped up in-game** (preview looks fine) | An older Factory shipped a **stale skeleton** on re-bake (the static outputs were overwritten in place, so the skeleton baked from cached geometry). Fixed now — the static path deletes its outputs and force-reimports before baking the skeleton, so a re-bake matches a first bake. Just **re-bake → rebuild → relaunch**. |
 | **Texture looks stale in the editor** | A Unity texture-residency quirk after a multi-material bake — open the source textures in the Project view and back. The in-game result is correct. |
-| **Multi-material GLB comes out untextured / grey** | Fixed — `glbconv` now emits `usemtl` groups + a `.mtl` (and solid-colour swatches for flat parts), so a multi-material GLB atlases like FBX. **Re-bake** an older GLB model to pick this up (it was baked before the converter preserved materials). Keep **Convert grid = 0** (faithful mode; material grouping only runs there). |
+| **Multi-material GLB comes out untextured / grey** | Fixed — `glbconv` now emits `usemtl` groups + a `.mtl` (and solid-colour swatches for flat parts), so a multi-material GLB atlases like FBX. **Re-bake** an older GLB model to pick this up (it was baked before the converter preserved materials). Keep **Weld & simplify = 0** (faithful mode; material grouping only runs there). |
 | **Baked skin is flat / missing in-game but looks perfect in Blender** (no error) | The model UV-maps into a **non-[0,1] tile** (e.g. the whole hull sits in V 1→2) and leans on the shader's texture **wrap** to repeat the skin. Blender wraps, so it looks right there; the atlas baker packs each texture into a fixed rect and **can't wrap**, so out-of-range UVs sample *outside* the rect and the skin vanishes. Fixed — `glbconv` now **integer-shifts** each island's UVs back into [0,1] before the V-flip (integer shift, so it never tears tile-crossing triangles). **Re-bake** with **"Keep extracted texture" unticked** (static path: that also re-extracts the OBJ) to pick it up. Diagnose by checking the extracted `FactorySource/<name>/<name>.obj` `vt` range — if U/V aren't within [0,1], that was it. Note: genuine *repeat*-tiling (a small texture meant to span [0,N] and repeat N×) still isn't atlas-supportable — none of the shipped models need it. |
 | **Multi-material model bakes all-grey (at 512) or near-black (Keep black on)** — camo/markings gone (no error) | Same non-[0,1] UV cause as the row above, but the materials each sit in a *different* tile, so `glbconv`'s single **global** shift can't gather them. The atlas remapper now also **folds per-vertex** (`u -= floor(u)`) when placing each sub-mesh into its rect, which does cover the per-material case. **Re-bake** to pick it up. (If you saw *grey* it was the near-black→grey neutralize masking the miss; *black* is the raw miss with **Keep black** on.) Proven on the AH-1 Cobra (51 materials, U 0→23). Diagnose per-material with `awk` grouping the OBJ's `vt` by `usemtl`. Once mapped correctly, remaining softness is just **Atlas size** — bump 512→1024/2048 for crisp markings. |
 | **Bake FAILED: `IndexOutOfRangeException` in `MeshCollection.ImportMeshes`** (any animated model) | The animated **skeleton bake** (`Skeleton.Reimport`) reads **tangents** off the skinned mesh; with none, Amplitude indexes an empty tangent array and throws. Fixed: the animated path **always keeps tangents** (`importTangents = CalculateMikk`), regardless of material count — the tangent-strip size optimization is **static-path-only**. (It bit twice: the multi-material howitzer, then the single-material drone.) The baker now also dumps a `SKMESH … bones=/bindposes=/maxBoneIdxUsed=/tangents=` line before the bake and flags a bone-index mismatch, so the opaque crash becomes a readable cause. Related: the **weld pre-pass** is single-material **and single-bone** only (welding across bone-part seams corrupts skinning). If you hit this after a baker change, check the `SKMESH` line — `tangents=0` on an animated model is the tell. |

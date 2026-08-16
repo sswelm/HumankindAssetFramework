@@ -25,7 +25,7 @@ root causes, which is why the failure catalog below leads with symptoms.
 | **Keep black (glass/cockpit)** | OFF (default) replaces every near-black texel (<32,32,32) with pale grey-blue (160,160,168) — a rescue for models whose "glass" is solid black. | **Dark/camo models MUST turn this ON** — otherwise every shadow, dark camo spot and rubber part paints pale grey-blue ("the washed-out tank"). |
 | **Albedo brightness / saturation** | Post-multipliers on the packed atlas. | Leave 1/1 unless the source is uniformly too dark/garish; they cannot fix mapping problems. |
 | **Keep extracted texture (reuseExtracted)** | The Blender step does NOT regenerate the extracted albedos. | **Required whenever you hand-edit an extracted file** (e.g. the white-swatch recipe below) — otherwise the next bake overwrites your edit. |
-| **Height-based UVs / Convert grid** | Static-path shading/import options. | Static models only; see Factory-Manual. |
+| **Height-gradient UVs / Weld & simplify** | Static-path shading/import options. | Static models only; see Factory-Manual. |
 | **Texture file** (Unit Retexture) | Runtime hot-loaded PNG replacing the baked atlas. | See "Runtime re-skins" below. |
 
 ## Failure catalog — match your symptom

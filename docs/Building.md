@@ -25,7 +25,7 @@ and copy `bin\Release\HumankindAssetFramework.dll` → `<Humankind>\BepInEx\plug
 **Blender** is needed for `.blend` import, **animated-model import**, **Strip parts**, and Reduce-to-tris decimation —
 auto-detected under `Program Files`, or point the Factory Settings override / `EditorPrefs 'ENC.blenderPath'` at
 `blender.exe`. Static GLB/OBJ/FBX bakes with neither Strip nor Reduce need **no** Blender: the GLB path uses the
-self-contained `Tools/glbconv/glbconv.exe` (no .NET install required, and its `Convert grid` option decimates without
+self-contained `Tools/glbconv/glbconv.exe` (no .NET install required, and its `Weld & simplify` option decimates without
 Blender). A `dotnet glbconv.dll` fallback exists for local dev.
 
 ### Why Blender does the geometry work (design rationale)
@@ -36,7 +36,7 @@ decimation/import/export executes inside Blender's C/C++ core:
 
 - **Quadric edge-collapse decimation is hard to write well** (error quadrics, topology preservation, UV/normal
   attribute handling). Blender's Decimate modifier is a battle-tested implementation; the script that drives it is
-  ~15 lines. The C# alternative that predates it — `glbconv`'s `Convert grid` vertex clustering — survives as the
+  ~15 lines. The C# alternative that predates it — `glbconv`'s `Weld & simplify` vertex clustering — survives as the
   Blender-free fallback, but clustering averages UVs across seams (scrambles textured skins) and eats thin features,
   which is exactly why the COLLAPSE path was added.
 - **Blender was already a hard dependency** for `.blend` conversion and the animated pipeline (armature slimming,
