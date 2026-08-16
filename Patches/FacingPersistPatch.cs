@@ -57,10 +57,16 @@ namespace HumankindAssetFramework
         static void Postfix(object __0)
         {
             try { FacingPersist.OnLoad(__0); } catch (Exception ex) { Plugin.Log.LogError("[Facing] load hook: " + ex); }
-            // an IN-SESSION save-reload rebuilds the world without the AnimationLoad rearm — the district machinery
-            // must drop its session-scoped leaves/bindings here or it forces the new channels onto corpse leaves
-            // (the Oracle's empty tile). Cheap and idempotent; the per-frame tick rebuilds everything lazily.
-            try { UniversalInject.ResetDistrictSessionState(); } catch (Exception ex) { Plugin.Log.LogError("[District] load reset: " + ex); }
+            // an IN-SESSION save-reload rebuilds the world WITHOUT re-firing AnimationManager.AnimationLoad (proven
+            // 2026-08-16: AnimationLoad fires once per PROCESS, not per save-load), so the whole model+district re-arm
+            // that hangs off it never runs on the 2nd load. Districts already re-armed here; the UNIT-MODEL axis did
+            // NOT — leaving our custom skeletons bound to the FIRST save's AnimationManager (stale skeleton/mesh slots
+            // vs the freshly-rebuilt manager) → animated custom units (the Organ Gun) skinned against a mismatched
+            // slot and tore. Request a full re-arm; it runs on the MAIN thread next Update (this hook may be off it,
+            // and RearmModelRegistration destroys session-1 Unity clones), then RepointMatch lazily re-registers into
+            // the new manager as each unit's addon loads. RearmModelRegistration also resets the district axis, so the
+            // one deferred call covers both — replacing the old immediate district-only reset. Idempotent + fail-soft.
+            UniversalInject.RequestReloadRearm();
         }
     }
 

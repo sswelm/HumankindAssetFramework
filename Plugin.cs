@@ -371,6 +371,7 @@ namespace HumankindAssetFramework
                 else
                     show = !show;                       // F8 = toggle the feedback window
             }
+            UniversalInject.ConsumePendingReloadRearm();  // main-thread re-arm after an in-session save-reload (Sandbox.Load requested it off-thread); covers BOTH the model + district axes, so it runs regardless of the injection gate below
             if (UniversalInjectOn.Value)
             {
                 UniversalInject.TickTexture();          // keep registry-driven model atlases applied

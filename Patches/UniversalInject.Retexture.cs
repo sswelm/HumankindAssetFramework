@@ -26,13 +26,14 @@ namespace HumankindAssetFramework
                     if (!string.IsNullOrEmpty(e.textureFile))
                     {
                         e.tex = LoadSkinPng(e.textureFile, e.resourceName, e.assetDir);
+                        e.texOwned = e.tex != null;   // a PNG we loaded into a fresh Texture2D — ours to Destroy on re-arm
                         if (e.tex != null && NeedsAdjust(e))
                         {
                             AdjustSkin(e.tex, e.brightness, e.desaturate, e.tintR, e.tintG, e.tintB);
                             Plugin.Diag($"[Skin] {e.resourceName}: adjustments applied to retexture (gamma {e.brightness:0.00}, desat {UnityEngine.Mathf.Clamp01(e.desaturate):0.00}, rgb {e.tintR:+0;-0;0}/{e.tintG:+0;-0;0}/{e.tintB:+0;-0;0})");
                         }
                     }
-                    if (e.tex == null) e.tex = LoadAtlas(e.ta, e.tb, e.tc, e.td, e.resourceName);
+                    if (e.tex == null) { e.tex = LoadAtlas(e.ta, e.tb, e.tc, e.td, e.resourceName); e.texOwned = false; }   // raw shared bundle atlas — NEVER Destroy it (would unload the asset)
                 }
                 // isolated path: paint ONLY our private clone (the host layer + real units keep their own skin)
                 if (e.isolatedLayer != null) { e.hostOutputLayer = e.isolatedLayer; TickOne(e); return; }
@@ -76,6 +77,7 @@ namespace HumankindAssetFramework
                 if (!string.IsNullOrEmpty(e.textureFile) && e.tex == null)
                 {
                     e.tex = LoadSkinPng(e.textureFile, e.resourceName, e.assetDir);
+                    e.texOwned = e.tex != null;   // ours to Destroy on re-arm
                     if (e.tex != null && NeedsAdjust(e)) AdjustSkin(e.tex, e.brightness, e.desaturate, e.tintR, e.tintG, e.tintB);   // brighten/desaturate/tint the loaded PNG too
                 }
                 GreyIsolate(addon, animMgr, e);    // clone the body fragment's output layer (+ build the desaturated atlas if desaturate>0)
@@ -135,7 +137,7 @@ namespace HumankindAssetFramework
                     var mn = mnField?.GetValue(item) as string;
                     if (string.IsNullOrEmpty(e.layerHint) || mn != e.layerHint) continue;   // only the body layer
                     var host = folField.GetValue(item);
-                    if (e.tex == null && host != null && NeedsAdjust(e)) e.tex = BuildAdjustedAtlas(host, e.brightness, e.desaturate, e.tintR, e.tintG, e.tintB, e.resourceName);   // adjust the ORIGINAL skin, once (skipped when a custom PNG already set e.tex)
+                    if (e.tex == null && host != null && NeedsAdjust(e)) { e.tex = BuildAdjustedAtlas(host, e.brightness, e.desaturate, e.tintR, e.tintG, e.tintB, e.resourceName); e.texOwned = e.tex != null; }   // adjust the ORIGINAL skin, once (skipped when a custom PNG already set e.tex); a texture we built — ours to Destroy
                     if (e.isolatedLayer == null && host is UnityEngine.Object ho && ho != null)
                     {
                         var clone = UnityEngine.Object.Instantiate(ho); clone.name = e.resourceName + "_GreyLayer"; e.isolatedLayer = clone;

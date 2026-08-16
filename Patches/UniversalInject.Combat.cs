@@ -920,7 +920,7 @@ namespace HumankindAssetFramework
             // GREY retry: if the skin wasn't ready when ApplyGrey ran (build returned null), build it now from the
             // isolated layer's still-original _MainTex. Runs at most until the first successful build (then e.tex latches).
             if (NeedsAdjust(e) && e.tex == null && e.isolatedLayer != null)
-                e.tex = BuildAdjustedAtlas(e.isolatedLayer, e.brightness, e.desaturate, e.tintR, e.tintG, e.tintB, e.resourceName);
+                { e.tex = BuildAdjustedAtlas(e.isolatedLayer, e.brightness, e.desaturate, e.tintR, e.tintG, e.tintB, e.resourceName); e.texOwned = e.tex != null; }   // a texture we built — ours to Destroy on re-arm
             if (e.hostOutputLayer == null || e.tex == null) return;
             try
             {

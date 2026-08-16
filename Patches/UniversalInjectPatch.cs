@@ -26,6 +26,7 @@ namespace HumankindAssetFramework
         public object skeleton;
         public object hostOutputLayer;
         public UnityEngine.Texture2D tex;
+        public bool texOwned;            // true only when `tex` is a texture WE created (LoadSkinPng / BuildAdjustedAtlas) and may Destroy on re-arm. FALSE when `tex` is the raw bundle atlas from LoadAtlas — Destroying that unloads the shared asset so AssetDatabase.LoadAsset then returns NULL (the organ-gun-goes-red-on-reload bug).
         public string layerHint = "";
         public object isolatedLayer;     // our private clone of the host output layer (texture isolation)
         public string hideMeshes = "";   // comma-separated donor-FRAGMENT name substrings to hide (works for fragment-based extras; a donor's animated skinned sub-parts, e.g. a helicopter rotor, are encoded at pawn-spawn and cannot be hidden this late — pick a rotor-free donor instead)
@@ -197,6 +198,7 @@ namespace HumankindAssetFramework
         static List<ModelEntry> entries;
         static bool loaded, registered, repointActiveLogged, stLogged, greyWaitLogged;
         static int loadAttempts;   // failed-load counter: latch `loaded` only after a success or a few tries, so a TRANSIENT read/parse error (AV scan, sharing violation at startup) retries instead of disabling injection for the whole session
+        static volatile bool reloadRearmPending;   // set by the (possibly off-main-thread) Sandbox.Load hook; consumed on the main-thread Update tick so RearmModelRegistration's Unity Destroys run safely
         static UnityEngine.Texture2D _flatN, _white, _black, _grey;   // neutral overlay maps (kill the host's detail/camo)
 
         // A discovered mod PACK: one registry file's wrapper metadata + its models. HAF (Humankind Asset Framework)
@@ -906,6 +908,20 @@ namespace HumankindAssetFramework
         // once per PROCESS: load a second game in the same app run and EnsureRegistered no-ops, leaving our skeletons
         // unregistered and every learned id (skeletonId/animId/descId) stale against the new session's assignments.
         // Called from the AnimationLoad postfix, right before EnsureRegistered re-registers into the fresh manager.
+        // Sandbox.Load (in-session save-reload) asks for a re-arm here — thread-safe flag only. The heavy work
+        // (RearmModelRegistration destroys session-1 Unity clones) is deferred to ConsumePendingReloadRearm on the
+        // main-thread Update tick. See the Hk_SandboxLoad hook + the AnimationLoad-fires-once-per-process finding.
+        internal static void RequestReloadRearm() => reloadRearmPending = true;
+
+        // Main thread (Plugin.Update). Runs the deferred full re-arm requested by an in-session save-reload.
+        internal static void ConsumePendingReloadRearm()
+        {
+            if (!reloadRearmPending) return;
+            reloadRearmPending = false;
+            try { RearmModelRegistration(); }
+            catch (Exception ex) { Plugin.Log.LogError("[Uni] deferred load re-arm: " + ex); }
+        }
+
         internal static void RearmModelRegistration()
         {
             registered = false;
@@ -940,7 +956,10 @@ namespace HumankindAssetFramework
                     if (e.isolatedLayer is UnityEngine.Object iso && iso) UnityEngine.Object.Destroy(iso);
                     if (e.handPropLayer is UnityEngine.Object hpl && hpl) UnityEngine.Object.Destroy(hpl);
                     e.isolatedLayer = null; e.hostOutputLayer = null; e.handPropLayer = null; e.propAtlasTex = null;
-                    if (e.tex != null) { try { UnityEngine.Object.Destroy(e.tex); } catch { } e.tex = null; }
+                    // ONLY destroy a texture WE created (PNG skin / adjusted atlas). A raw bundle atlas (LoadAtlas)
+                    // is a shared game asset — Destroying it makes AssetDatabase.LoadAsset return NULL on the next
+                    // save-reload, so the model loses its skin and falls back to the donor look (organ gun turned red).
+                    if (e.tex != null) { if (e.texOwned) { try { UnityEngine.Object.Destroy(e.tex); } catch { } } e.tex = null; e.texOwned = false; }
                     // Per-instance state keyed by session-scoped ids (unit GUIDs / sub-pawn instance ids): a new game
                     // can REUSE those ids, so stale entries would feed the first poll wrong moving/deploy decisions,
                     // and the maps otherwise only ever grow. The AudioSources rode session-1 pawn objects (destroyed
