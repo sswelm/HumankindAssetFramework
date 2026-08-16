@@ -113,6 +113,13 @@ namespace HumankindAssetFramework
         internal static Type ContentLayer        => Cached("Amplitude.Graphics.Fx.FxComponentMeshContentManager+ContentLayer");
         internal static Type PresentationPawnDefinition => Cached("Amplitude.Mercury.Data.World.PresentationPawnDefinition");
         internal static Type ProjectileAsset     => Cached("Amplitude.Mercury.Data.World.ProjectileAsset");
+        // ---- district scoped-visual (mesh footprint + strategic footprint) — the newest + most reflection-heavy subsystem ----
+        internal static Type FxEvolverMaterialLevelBuildElement  => Cached("Amplitude.Mercury.Terrain.Fx.FxEvolverMaterialLevelBuildElement");
+        internal static Type FxEvolverMaterialLevelBuildSelector => Cached("Amplitude.Mercury.Terrain.Fx.FxEvolverMaterialLevelBuildSelector");
+        internal static Type FxEvolverMaterialLevelBuildEmitter  => Cached("Amplitude.Mercury.Terrain.Fx.FxEvolverMaterialLevelBuildEmitter");   // our scoped selectors ARE emitters; levelBuildItems lives here
+        internal static Type RenderFeatureSelector => Cached("Amplitude.Mercury.Fx.RenderFeatureSelector");
+        internal static Type RenderFeatureProvider => Cached("Amplitude.Mercury.Fx.RenderFeatureProvider");
+        internal static Type FxOutputLayer         => Cached("Amplitude.Graphics.Fx.FxOutputLayer");
         // ---- formation ----
         internal static Type PresentationFormationDefinition => Cached("Amplitude.Mercury.Data.PresentationFormationDefinition", "Amplitude.Mercury.Data.World.PresentationFormationDefinition", "PresentationFormationDefinition");
         internal static Type FormationHelper     => Cached("Amplitude.Mercury.Data.World.FormationHelper", "FormationHelper");
@@ -154,6 +161,12 @@ namespace HumankindAssetFramework
                 : $" [game {ver} — UNTESTED; catalog verified against {VerifiedGameVersion}, so warnings are likely this update]";
         }
 
+        // Last startup-report result, surfaced in the F8 window so a player SEES a break instead of it hiding in the log.
+        // null = all resolved (or not yet run); non-null = a one-line "what's missing" summary. `HealthMissing` is the count.
+        internal static string HealthSummary;
+        internal static int HealthMissing;
+        internal static readonly List<string> HealthDetail = new List<string>();
+
         internal static void ValidateAndLog(IEnumerable<Dep> deps)
         {
             try
@@ -161,16 +174,20 @@ namespace HumankindAssetFramework
                 var results = Validate(deps);
                 int typesMissing = results.Count(r => !r.TypeFound);
                 int membersMissing = results.Where(r => r.TypeFound).Sum(r => r.MissingMembers.Count);
+                HealthDetail.Clear();
                 if (typesMissing == 0 && membersMissing == 0)
                 {
+                    HealthSummary = null; HealthMissing = 0;
                     Plugin.Log.LogInfo($"[GameBinding] OK — {results.Count} game type(s) + their members all resolved.{VersionNote()}");
                     return;
                 }
-                Plugin.Log.LogWarning($"[GameBinding] {typesMissing} type(s) + {membersMissing} member(s) NOT FOUND (game update?) — features using them may misbehave:{VersionNote()}");
+                HealthMissing = typesMissing + membersMissing;
+                HealthSummary = $"{typesMissing} type(s) + {membersMissing} member(s) NOT FOUND (game update?) — features using them may misbehave.{VersionNote()}";
+                Plugin.Log.LogWarning($"[GameBinding] {HealthSummary}");
                 foreach (var r in results)
                 {
-                    if (!r.TypeFound) Plugin.Log.LogWarning($"[GameBinding]   MISSING TYPE: {r.Type}");
-                    else if (r.MissingMembers.Count > 0) Plugin.Log.LogWarning($"[GameBinding]   {r.Type}: missing member(s) {string.Join(", ", r.MissingMembers)}");
+                    if (!r.TypeFound) { HealthDetail.Add($"MISSING TYPE: {r.Type}"); Plugin.Log.LogWarning($"[GameBinding]   MISSING TYPE: {r.Type}"); }
+                    else if (r.MissingMembers.Count > 0) { HealthDetail.Add($"{r.Type}: {string.Join(", ", r.MissingMembers)}"); Plugin.Log.LogWarning($"[GameBinding]   {r.Type}: missing member(s) {string.Join(", ", r.MissingMembers)}"); }
                 }
             }
             catch (Exception ex) { Plugin.Log.LogError("[GameBinding] validate: " + ex); }
@@ -206,7 +223,7 @@ namespace HumankindAssetFramework
             new Dep(PresentationPawn, nameof(PresentationPawn)),
             new Dep(PresentationUnit, nameof(PresentationUnit), "UnitDefinition", "GUID", "Pawns", "Formation"),
             new Dep(PresentationUnitHolder, nameof(PresentationUnitHolder)),
-            new Dep(PresentationDistrict, nameof(PresentationDistrict)),
+            new Dep(PresentationDistrict, nameof(PresentationDistrict), "presentationLevelBuildComponent", "ApplyGroundMaterialDefinition", "ConstructibleDefinitionName"),
             // animation / pawn
             new Dep(PawnManager, nameof(PawnManager), "Load", "AddPawnEntry", "gpuPawnDescriptorEntries"),
             new Dep(AnimationManager, nameof(AnimationManager), "Instance", "skeletonBufferSize", "FxComponentRenderer", "FxComponentMeshContentManager", "FXMeshLayerIndex"),
@@ -221,6 +238,13 @@ namespace HumankindAssetFramework
             new Dep(ContentLayer, nameof(ContentLayer)),
             new Dep(PresentationPawnDefinition, nameof(PresentationPawnDefinition)),
             new Dep(ProjectileAsset, nameof(ProjectileAsset)),
+            // district scoped-visual — the mesh strategic footprint (render-feature gate, B&W, flatten) + composed foliage
+            new Dep(FxEvolverMaterialLevelBuildElement, nameof(FxEvolverMaterialLevelBuildElement), "renderFeatureSelector", "size", "outputLayer", "fxMesh", "WriteToGPUData"),
+            new Dep(FxEvolverMaterialLevelBuildEmitter, nameof(FxEvolverMaterialLevelBuildEmitter), "levelBuildItems"),   // the scoped selector we walk for building elements + decals
+            new Dep(FxEvolverMaterialLevelBuildSelector, nameof(FxEvolverMaterialLevelBuildSelector), "fxMaterialCacheEntries"),   // nested sub-selectors (pizza compose) — traversed via cache entries
+            new Dep(RenderFeatureSelector, nameof(RenderFeatureSelector), "SelectionFlags0"),
+            new Dep(RenderFeatureProvider, nameof(RenderFeatureProvider), "ComputeRenderState"),
+            new Dep(FxOutputLayer, nameof(FxOutputLayer), "primitivePerParticleCount", "RenderOutputs"),
             // formation (EntityFactoryControllerSettings / GameObjectPoolController resolve by SIMPLE name — see ResolveType)
             new Dep(PresentationFormationDefinition, nameof(PresentationFormationDefinition)),
             new Dep(FormationHelper, nameof(FormationHelper)),

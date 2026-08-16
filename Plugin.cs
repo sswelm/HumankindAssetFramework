@@ -411,6 +411,17 @@ namespace HumankindAssetFramework
 
         private void DrawWindow(int id)
         {
+            // FRAGILITY BANNER: HAF binds to the game by reflection, so a game update can silently break a feature. The
+            // startup GameBinding report resolves the critical types/members; if any are missing, shout it HERE (top of the
+            // window a player actually opens) — not just in the log — with exactly what broke.
+            if (GameBinding.HealthMissing > 0)
+            {
+                var prev = GUI.color; GUI.color = new Color(1f, 0.55f, 0.55f);
+                GUILayout.Label($"⚠ GAME BINDING: {GameBinding.HealthSummary}");
+                foreach (var d in GameBinding.HealthDetail) GUILayout.Label($"    • {d}");
+                GUI.color = prev;
+                GUILayout.Space(4);
+            }
             GUILayout.Label($"Target mod: {TargetMod.Value}     Filter: \"{AssetNameFilter.Value}\"");
             using (new GUILayout.HorizontalScope())
             {
