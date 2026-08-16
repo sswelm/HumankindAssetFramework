@@ -38,6 +38,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   still over the real **128** wall, so bones 128–222 (the arm chains = the "wings") were always going to
   collapse. No engine-import decompile needed; the culprit was the GPU skin's per-vertex bone-index ceiling.
 
+- **ONE PRE-PUSH GATE — the fast guards are now un-forgettable (2026-08-16).** The maintainability review's #2: the good
+  guards (`dotnet build`, `dotnet test` ×59, the Roslyn editor compile-check, the 4-path registry schema-parity) existed
+  but ran manually, one at a time, across two repos, with no enforcement. Now one **`Tools/check.sh`** per repo runs its
+  fast guards and prints an aggregate PASS/FAIL, wired as a version-controlled **pre-push hook** (`git config
+  core.hooksPath Tools/git-hooks`) so a broken build / failing test / drifted schema can't be pushed. Standing it up
+  **immediately caught three latent schema drifts** (exactly the "forgotten check" problem): a wrapper field the plugin
+  read but the baker never wrote (`module`/`moduleGuid` — added to `RegistryFile`), two runtime-only keys the guard should
+  allowlist (`rotorSpinBones`/`rotorSpinSpeed`), and a `float?` read-cast the parity script mis-classified as a type
+  mismatch (its nullable handler covered `bool?`/`int?` but not `float?`) — all fixed to green. Heavy guards
+  (deploy golden-master, in-editor Feature Test, the in-game binding report) stay out of the sub-minute gate.
+
 - **MACHINE-READABLE BINDING REPORT — reflection-drift net, step 1 (2026-08-16, verified in-game).** The maintainability
   review flagged game-update fragility as the top structural risk: ~1,475 reflection bindings that fail at *runtime*, found
   by squinting at the log. `GameBinding` already cataloged ~47 game types + their members and validated them at startup

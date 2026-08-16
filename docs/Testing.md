@@ -9,6 +9,28 @@ where bugs have actually hidden, and stops there on purpose.
 dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release
 ```
 
+## The pre-push gate (`Tools/check.sh`)
+
+The fast guards used to be separate scripts you had to remember to run. They're now one command per repo, wired as a
+**pre-push hook** so a push can't land a broken build, a failing test, or a drifted schema:
+
+| Repo | `Tools/check.sh` runs | ~time |
+|---|---|---|
+| **ENCAccessProof** (plugin) | `dotnet build` · `dotnet test` (59) · registry schema parity | seconds |
+| **ENCReload** (editor) | Roslyn editor compile-check · registry schema parity | ~30 s |
+
+Run it any time by hand: `bash Tools/check.sh`. **Enable the hook once per clone:**
+
+```
+git config core.hooksPath Tools/git-hooks
+```
+
+The hook (`Tools/git-hooks/pre-push`, version-controlled) then blocks a failing push; bypass only in a real emergency
+with `git push --no-verify`. Deliberately **not** in the gate (too slow / need Unity, Blender, or the game): the Blender
+golden-master `deploy_regression.sh`, the in-editor Feature Test, and the in-game binding report — those stay manual. The
+gate earned its keep on day one: standing it up surfaced three latent schema drifts (a wrapper field the plugin read but
+the baker never wrote, two runtime-only keys, and a `float?`-cast the parity script mis-classified), all fixed to green.
+
 ## What it covers
 
 | Function | Lives in | What's asserted |
