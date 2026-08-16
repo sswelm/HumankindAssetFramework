@@ -42,7 +42,7 @@ Each axis adds custom content in a different place, from the same JSON registry.
 ## Understand the internals
 How the runtime actually works, for anyone extending the plugin.
 - [**Code-Map.md**](Code-Map.md) — where everything lives in the plugin source.
-- [**Animated-Runtime.md**](Animated-Runtime.md) — the decompiled animation runtime: clip registration, the per-frame pose hook, the GPU pose math, and the engine contracts (rotation-only, scale-1, name-ordered bones).
+- [**Animated-Runtime.md**](Animated-Runtime.md) — the decompiled animation runtime: clip registration, the per-session re-arm (why `AnimationLoad` fires once per process and how HAF re-registers on `PawnManager.Load` / `Sandbox.Load` for save-loads and New Games), the per-frame pose hook, the GPU pose math, and the engine contracts (rotation-only, scale-1, name-ordered bones).
 - [**Unit-Combat-Behavior.md**](Unit-Combat-Behavior.md) — how the game drives combat animation and how HAF hooks it.
 - [**Firing-On-Attack.md**](Firing-On-Attack.md) — the one-shot fire trigger (Humankind's `SimulationEvent` bus).
 - [**Facing-Persistence.md**](Facing-Persistence.md) — how unit facing survives save/load.

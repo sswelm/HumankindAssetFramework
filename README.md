@@ -135,6 +135,15 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
   mode), reusing the exact code the editor buttons call — so scripts, CI, or an AI agent can drive HAF without the GUI.
   See [Headless-CLI.md](docs/Headless-CLI.md).
 
+**Reliability**
+- **Custom content survives every session change** — units and districts re-arm correctly across a **save-load**, an
+  **in-session reload**, and starting a **New Game** in the same app run, not just a fresh launch. (The game's animation
+  registration loads once per *process*, so HAF re-registers on the universal per-session seam; skipping this used to
+  leave a reloaded custom unit skinning against stale GPU slots — torn geometry or the wrong skin.) See
+  [Animated-Runtime.md](docs/Animated-Runtime.md).
+- **Skins are never destroyed out from under a reload** — the re-arm only frees textures HAF creates, never the shared
+  baked atlas asset.
+
 > **Polishing:** moving **caterpillar tracks** (treadize) run in-game, with a remaining idle micro-twitch to smooth out;
 > the **death / battle-start war-cry** creature voices are built and awaiting in-game verification. See [CHANGELOG.md](CHANGELOG.md).
 
