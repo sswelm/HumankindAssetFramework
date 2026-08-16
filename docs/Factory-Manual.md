@@ -142,7 +142,7 @@ their settings and work together**:
   leftover rotor). **Pick** reads the donor fragment names the plugin logged to `BepInEx\LogOutput.log` — so **launch the
   game once** with the model injected, then Pick. Runtime-only (takes effect on reload, no re-bake). *Can't* hide a
   donor's animated sub-parts (a rotor, spinning wheels) — those are baked at pawn spawn; pick a cleaner donor instead.
-- **Re-spawn after load (borrowed rotor fix)** — fixes a spawn quirk: the engine draws the **first** borrowed-rotor pawn of
+- **Respawn after load** — fixes a spawn quirk: the engine draws the **first** borrowed-rotor pawn of
   a model, *when it's created*, with its rotor ~1 unit low (every other instance is fine). Tick this and the plugin watches
   for any such unit appearing — on a save-load, built in a city, or dev-spawned — and near-instantly re-runs the game's own
   pawn rebuild on it, so the rotor comes out right every time (a brief one-time flicker as it rebuilds, no unit affected).
@@ -300,7 +300,7 @@ strategic map.
 | **Body wobbles / "unbalanced flywheel"** | The clip animates the whole body → set **Animate only bones** to just the spinning group (e.g. `prop`). |
 | **A donor part shows through** (rotor, extra mesh) | **Hide donor meshes → Pick** it (after one launch so it's logged). If it's an *animated* donor sub-part, it can't be hidden — pick a cleaner donor. |
 | **Model bobs / wiggles / wobbles** (a rigid model on a hovering donor — e.g. an airship on the Recon-Drone donor) | Your static mesh is inheriting the **donor's** idle/move animation. Tick **Freeze donor animation** (Runtime section) — the plugin pins the donor's pose so the mesh holds rigid, and it still glides tile-to-tile. Static models only; no re-bake. Different from the "unbalanced flywheel" row (that's a model's *own* clip animating its whole body — use **Animate only bones**). |
-| **First unit's borrowed rotor sits ~1 low** (after a load, or on a freshly built/spawned unit; other instances fine) | An engine spawn race on the first pawn of the model, at creation. Tick **Re-spawn after load** on that model — the plugin rebuilds the unit's pawns right after it renders and the rotor comes out right (tune `Factory/RespawnDelayFrames` in the plugin cfg if it's briefly visible). Registry flag, no re-bake. |
+| **First unit's borrowed rotor sits ~1 low** (after a load, or on a freshly built/spawned unit; other instances fine) | An engine spawn race on the first pawn of the model, at creation. Tick **Respawn after load** on that model — the plugin rebuilds the unit's pawns right after it renders and the rotor comes out right (tune `Factory/RespawnDelayFrames` in the plugin cfg if it's briefly visible). Registry flag, no re-bake. |
 | **Bake fails: "needs Blender"** | Install Blender or set its path in **Settings**. For static decimation without Blender, use **Weld & simplify** instead of Reduce-to-tris. |
 | **Re-baked static model is 90° off / tipped up in-game** (preview looks fine) | An older Factory shipped a **stale skeleton** on re-bake (the static outputs were overwritten in place, so the skeleton baked from cached geometry). Fixed now — the static path deletes its outputs and force-reimports before baking the skeleton, so a re-bake matches a first bake. Just **re-bake → rebuild → relaunch**. |
 | **Texture looks stale in the editor** | A Unity texture-residency quirk after a multi-material bake — open the source textures in the Project view and back. The in-game result is correct. |

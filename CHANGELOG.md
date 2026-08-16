@@ -38,6 +38,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   still over the real **128** wall, so bones 128–222 (the arm chains = the "wings") were always going to
   collapse. No engine-import decompile needed; the culprit was the GPU skin's per-vertex bone-index ceiling.
 
+- **MODEL FACTORY UI clarity + compaction pass (2026-08-16, editor).** Renamed two implementation-leaky labels
+  to what the modder actually gets — **"Convert grid" → "Weld & simplify (0 = keep exact)"** (it's glbconv's
+  vertex-weld resolution, not a grid; tooltip now points a textured model at "Reduce to ~tris") and
+  **"Height-based UVs" → "Height-gradient UVs (untextured)"**; shortened **"Re-spawn after load (borrowed rotor
+  fix)" → "Respawn after load"** (the rotor-fix detail stays in the tooltip). Display labels only — the fields and
+  registry keys are unchanged, so every existing `pack.json` keeps working. Also compacted the layout: the two
+  geometry-reduction knobs share one row; the three shading toggles and the four runtime donor toggles each
+  collapse to a single right-aligned row; and both transform vectors render label + X/Y/Z on one line (a custom
+  `EditorWindow` defaults `EditorGUIUtility.wideMode` to false, which had wrapped them). Docs synced.
+
 - **glbconv warns on multi-tile / UDIM UVs (2026-08-16, tool).** The OBJ tile-shift normalizes UVs by a single
   integer offset (`floor(min U/V)`), which only rescues a ONE-tile island (the Zeppelin envelope in V 1..2). A
   model that tiles across >1 UV tile (a `.1001-.1005` UDIM camo set) left the other tiles outside [0,1]; the
