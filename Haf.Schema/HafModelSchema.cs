@@ -1,4 +1,5 @@
 using System;
+using UnityEngine;   // Vector3 (the shared `position` field)
 
 namespace Haf.Schema
 {
@@ -10,6 +11,8 @@ namespace Haf.Schema
     public class HafModelSchema
     {
         public string resourceName = "";
+        public string pawnDescription = "";
+        public Vector3 position;               // position offset (z = waterline); static: baked into the mesh, animated: applied at runtime
         public float scale = 1f;            // RUNTIME multiplier on the pawn's ObjectSpace.Scale (Resize Lab; no re-bake). The plugin already parsed this config-only field — now surfaced. 1 = unchanged.
         public string hideMeshes = "";      // RUNTIME (not baked): comma-separated donor-FRAGMENT name substrings the plugin hides on this unit — e.g. hide a fragment-based extra. NOTE: a donor's animated skinned sub-parts (a helicopter rotor, spinning wheels) are encoded at pawn-spawn and CANNOT be hidden this late — choose a donor without such parts. Find fragment names in the BepInEx log: "[Uni] <name> donor fragment[i] mesh='...'".
         public bool animStateDriven = false; // ANIMATED only (Phase 2, 2026-07-19): STATE-DRIVEN mode — the unit plays the IDLE clip (animClip) when standing, the MOVEMENT clip (animClipMove) while moving, and optionally the AFTER-MOVEMENT clip (animClipAfter) once on stopping. Mutually exclusive with the single-clip behaviors (fireOnAttack/deployOnStop) — a model is EITHER a single always-loop/behavior clip OR state-driven. Off = today's single-clip path, so old registries are byte-identical.

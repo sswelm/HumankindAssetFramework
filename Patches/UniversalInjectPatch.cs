@@ -20,7 +20,6 @@ namespace HumankindAssetFramework
 
     internal class ModelEntry : Haf.Schema.HafModelSchema   // the ~64 shared behavioral/sound/prop fields live in Haf.Schema now (one definition, inherited); only GUID (sa/sb/..), runtime-state, and non-shared fields stay below
     {
-        public string pawnDescription = "";   // resourceName now inherited from Haf.Schema.HafModelSchema
         public string coreDesc = "";     // pawnDescription minus the trailing _NN instance suffix, computed ONCE at registry publish. The per-frame movement polls + the sim-thread FindEntryForUnitDefinition matched units by re-running Regex.Replace(pawnDescription,"_[0-9]+$","") per entry per unit — pure garbage since it's a load-time constant. Read-only after publish (safe from any thread).
         public int sa, sb, sc, sd, ta, tb, tc, td;   // skeleton + atlas Amplitude guid components
         public object skeleton;
@@ -29,7 +28,6 @@ namespace HumankindAssetFramework
         public bool texOwned;            // true only when `tex` is a texture WE created (LoadSkinPng / BuildAdjustedAtlas) and may Destroy on re-arm. FALSE when `tex` is the raw bundle atlas from LoadAtlas — Destroying that unloads the shared asset so AssetDatabase.LoadAsset then returns NULL (the organ-gun-goes-red-on-reload bug).
         public string layerHint = "";
         public object isolatedLayer;     // our private clone of the host output layer (texture isolation)
-        public UnityEngine.Vector3 position;  // ANIMATED models: applied as a runtime world offset in the pose hook (z = height/up). Static models bake position into the mesh at Bake time instead, so this is only read for animated entries.
         public int ca, cb, cc, cd;       // ANIMATED models: our baked ClipCollection Amplitude guid (its own clip, e.g. a drone's spinning-prop 'hover'). 0,0,0,0 = static model (no pose override).
         public object clipColl;          // loaded ClipCollection asset
         public int animId = -1;          // resolved animation id of our clip (after it's registered in AnimationManager.Apply)

@@ -9,4 +9,13 @@
     <AssemblyName>Haf.Schema</AssemblyName>
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
+
+  <!-- Vector3 (the shared `position` field). Both consumers already provide UnityEngine at runtime (the net471 plugin
+       and the Unity editor), so Private=false — the shared lib compiles against the type but doesn't ship it. -->
+  <ItemGroup>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>..\References\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
 </Project>
