@@ -919,12 +919,14 @@ in the Animation Lab.
   the wrapper survived to export as a scaled root node — Unity folds it into the mesh but Amplitude reads bind poses
   *without* it, leaving the skeleton ~100× off the mesh (rigid verts fling into a "wing"). The rig is un-parented with
   the transform kept and the empties deleted, so export nodes are identity.
-- **Bone cap ≤ 240** *(both paths; only fires over the limit)*. Amplitude's GPU crowd-skinning caps at **256 bones**;
-  verts weighted to a higher bone index get garbage transforms (huge stretch spikes in-game, invisible in Blender —
-  the mech had 332 bones, 4084 verts flung). Zero-weight **leaf** bones (IK targets, `_end` markers, detail nodes) are
-  removed iteratively until under budget — removing an unweighted bone never moves a vertex, and weighted limb/gun
-  bones are never leaves, so the animation is untouched. Proven rigs under the limit (soldier 62, howitzer ~27) stay
-  byte-identical.
+- **Bone-index wall = 128** *(both paths; only fires over the limit)*. Amplitude's GPU crowd-skinning breaks past bone
+  **index 127** — NOT 256 (that figure is stale; see *The 128-bone-index GPU wall* in Animation-Pitfalls). Verts
+  weighted to a higher index get garbage transforms (huge stretch spikes in-game, invisible in Blender — the mech's
+  **222** bones put its wing verts past index 127 and flung them). Zero-weight **leaf** bones (IK targets, `_end`
+  markers, detail nodes) are removed iteratively, and the deploy path additionally pair-merges instanced link chains
+  (→ ≤126), until every vert's bone index is under the wall — removing an unweighted bone never moves a vertex, and
+  weighted limb/gun bones are never leaves, so the animation is untouched. Proven rigs under the wall (soldier 62,
+  howitzer ~27) stay byte-identical.
 
 Then the conversion proper:
 
@@ -971,7 +973,7 @@ every bone** — verify with a text editor on `Assets/Resources/<name>_Skeleton.
 | Deep chains (fingers, head) scrambled, shallow parts fine | Bone-name sort order | Automatic (topological rename) on the conversion path |
 | Model collapses flat onto one point, limbs flung; Unity console warns "verts with no weight → bone #0" | Rig has NO skin weights — parts rigidly bone-parented (common downloaded mech/vehicle rigs) | Automatic on the conversion path (bone-parenting → full-weight groups) |
 | Skeleton ~100× off the mesh; rigid parts fling into a "wing" | Wrapper empty with non-identity scale survives to export | Automatic on the conversion path (wrapper-empty flatten) |
-| Huge stretch spikes on a detailed rig (fine in Blender's preview) | Over Amplitude's 256-bone GPU skinning cap | Automatic (zero-weight leaf bones removed to ≤240) |
+| Huge stretch spikes on a detailed rig (fine in Blender's preview) | Over the 128-bone-INDEX GPU wall (bone index >127; NOT 256) | Automatic (zero-weight leaf bones removed; deploy path pair-merges link chains to ≤126) |
 | Model won't turn with movement | The plugin was clearing the game's facing layer | Fixed globally — cleared only for artillery models now |
 | "Is it my model or the pipeline?" | — | Bake `Tools/make_litmus.py`'s chain-of-cubes rig; if it renders straight in-game, the pipeline is fine — it's the model |
 

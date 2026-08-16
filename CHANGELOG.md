@@ -28,6 +28,22 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   repro. Bonus: the model-axis session cleanup (audio/deploy/state maps) now runs on *every* reload, not just
   the first.
 
+- **128-vs-256 BONE WALL — doc reconciliation + a cold case closed (2026-08-16).** A documentation critical
+  review found the bone-limit stated as *both* "256" and "128" across three docs. The **128-bone-INDEX wall is
+  correct** (per-vertex bone indices break past 127; T-62-proven, deploy code uses a 124-bone wall) — the "256"
+  figure is stale. Reconciled `Animation-Pitfalls`, `Factory-Manual`, and `Animated-Models` to 128 (index 127),
+  the mech's count to **222**, and the fit mechanism to the deploy path's **pair-merge to ≤126**. This
+  retroactively **closed the 26-day "mech wings UNSOLVED" cold case**: rig_anim had slimmed the mech to 222
+  bones (under 256) and the wings *persisted*, which was read as "256 disproven, cause unknown" — but 222 is
+  still over the real **128** wall, so bones 128–222 (the arm chains = the "wings") were always going to
+  collapse. No engine-import decompile needed; the culprit was the GPU skin's per-vertex bone-index ceiling.
+
+- **DISTRICT selectorGuid guard (2026-08-16, editor).** A re-bake minted a fresh `fxMesh` (delete+create) but
+  only *set* `selectorGuid` on selector-bake success and never cleared a stale one, so a selector failure left
+  the district Upserting as "Baked ✓" while routing through the scoped path with an old selector against the
+  new mesh — a broken district reporting success. Fix (ENCReload `9584b23`): clear `selectorGuid` before the
+  (re-)bake so a failure genuinely falls to the legacy path, as the code already promised.
+
 - **DISTRICT CLONE LEAK — critical-review follow-up (2026-08-16).** A full-framework critical review (plugin +
   editor) surfaced that the district axis had the *same* leak class just fixed on the model axis:
   `ResetDistrictSessionState` only **nulled** its runtime `Object.Instantiate` clones (private leaves, cloned

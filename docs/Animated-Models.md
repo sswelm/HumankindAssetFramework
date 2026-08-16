@@ -152,10 +152,12 @@ is invisible); the rear idler targets the same speed but snaps to ITS OWN spoke-
 point (a wheel restarting mid-pattern pops visibly — Jagdpanzer: 14-fold, 60→51.4°); road wheels and return
 rollers get **belt-continuity speed** (rim surface = the belt's advance), each snapped to its own detected
 symmetry (angular autocorrelation of rim verts). Only *Spin degrees* and *Tread speed* are exposed.
-Bone budget: quarter-link cells put the Jagdpanzer at **248 bones** — link mode deletes the unused legacy
-tread bones to fit. The 256 wall is Amplitude's GPU crowd-skinning vertex format (per-vertex bone indices
-break past 255 — proven on the 332-bone mech) and is engine-side, not stretchable; a further cell halving is
-off the table.
+Bone budget: quarter-link cells push the Jagdpanzer well past the wall (~108 bones/track, both tracks ≈ 216) —
+link mode deletes the unused legacy tread bones and the deploy path **pair-merges** instanced link chains (a
+dropped link rides its numeric neighbor's bone rigidly) down to **≤126** to fit. The wall is Amplitude's GPU
+crowd-skinning vertex format: per-vertex bone **indices break past 127 — NOT 256** (proven on the 222-bone mech;
+see *The 128-bone-index GPU wall* in Animation-Pitfalls), engine-side and not stretchable, so a further cell
+halving is off the table.
 
 **Lab dials:** *Tread speed (cells/loop)* — belt advance; *Tread detail (cells/link)* — THE BONES dial
 (4 = quarter-link ≈ 108 bones/track, 1 = one bone per molded link ≈ 27); *Static tracks* — rig the loops
