@@ -425,11 +425,6 @@ namespace HumankindAssetFramework
             GUILayout.Label($"Target mod: {TargetMod.Value}     Filter: \"{AssetNameFilter.Value}\"");
             using (new GUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Re-scan now")) Prober.RunScan();
-                if (GUILayout.Button("Clear")) Prober.Report.Clear();
-            }
-            using (new GUILayout.HorizontalScope())
-            {
                 if (GUILayout.Button("Dump Atlases")) UniversalInject.DumpOutputLayerAtlases(atlasFilter);   // Unit Retexture workflow: dump a unit's atlas to paint
                 if (GUILayout.Button("Turn Ease")) { Prober.Report.Clear(); foreach (var l in UniversalInject.TurnEaseCensusLines()) { Prober.Report.Add(l); Plugin.Log.LogInfo("[TurnEase] " + l); } }
                 if (GUILayout.Button("Smoke Test")) UniversalInject.RunSmokeTest();   // runtime integration check: bindings + registry + injection health -> [SmokeTest] PASS/FAIL
@@ -480,7 +475,7 @@ namespace HumankindAssetFramework
             GUILayout.Space(4);
             scroll = GUILayout.BeginScrollView(scroll, GUILayout.Height(320));
             if (Prober.Report.Count == 0)
-                GUILayout.Label("No scan yet — load a game (auto-scans on load), or press Re-scan.");
+                GUILayout.Label("No scan yet — load a game (auto-scans on load).");
             foreach (var line in Prober.Report)
                 GUILayout.Label(line);
             GUILayout.EndScrollView();
