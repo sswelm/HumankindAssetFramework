@@ -80,6 +80,13 @@ namespace HumankindAssetFramework
         static string pendingFile;
         static readonly Dictionary<ulong, int> pendingMap = new Dictionary<ulong, int>();
         static readonly HashSet<ulong> applied = new HashSet<ulong>();   // per-army: handled ONCE (restored / released / already-correct), then NEVER touched again this load — the single-shot model, so no continuous re-apply can fight a move
+        // RESPAWN RE-ARM (2026-08-16): a respawnAfterLoad unit (helicopters) re-runs UpdatePawns ~a few frames post-load, which
+        // recomputes FormationAngle to neutral AFTER the single-shot restore above already fired + closed — so its heading was
+        // lost while non-respawn units (organ gun) kept theirs. MaybeRespawnPostLoad calls OnArmyRespawned right after each
+        // UpdatePawns; we then re-apply the saved angle once the rebuilt unit is loaded + stationary, independent of the
+        // initial restore window. savedFacing keeps this load's angles for the whole session (pendingMap gets cleared on close).
+        static readonly Dictionary<ulong, int> savedFacing = new Dictionary<ulong, int>();
+        static readonly HashSet<ulong> respawnReapply = new HashSet<ulong>();
         static bool mapLoaded;
         static int applyStart = -1;
         static int frame;
@@ -124,15 +131,28 @@ namespace HumankindAssetFramework
             Plugin.Diag($"[Facing] load '{name}' — will restore facing if a side-file exists");
         }
 
+        // Called by MaybeRespawnPostLoad right after a respawnAfterLoad unit's UpdatePawns rebuild (which recomputes its
+        // heading to neutral). Queues the army so Walk re-applies its saved facing once it's loaded + stationary. Main
+        // thread. No-op if facing persistence is off or this army carried no saved facing.
+        internal static void OnArmyRespawned(object army)
+        {
+            if (!Plugin.PersistUnitFacing.Value || army == null) return;
+            ulong guid;
+            try { guid = Convert.ToUInt64(UniversalInject.GetMember(UniversalInject.GetMember(army, "ArmyInfo"), "SimulationEntityGUID")); }
+            catch { return; }
+            if (guid == 0) return;
+            lock (gate) { if (savedFacing.ContainsKey(guid)) respawnReapply.Add(guid); }
+        }
+
         // ---------------- MAIN THREAD (Plugin.Update) ----------------
         internal static void Tick()
         {
             if (!Plugin.PersistUnitFacing.Value) return;
             frame++;
-            bool pend; lock (gate) pend = pendingFile != null;
+            bool pend, rearm; lock (gate) { pend = pendingFile != null; rearm = respawnReapply.Count > 0; }
             // During a restore run EVERY frame so we turn the unit the instant its pawn exists (no neutral flash);
-            // in steady state throttle to ~4x/s (capture freshness only).
-            if (!pend && frame % 15 != 0) return;
+            // likewise while a respawn re-arm is pending; in steady state throttle to ~4x/s (capture freshness only).
+            if (!pend && !rearm && frame % 15 != 0) return;
             try { Walk(); } catch (Exception ex) { Plugin.Log.LogError("[Facing] tick: " + ex); }
         }
 
@@ -145,14 +165,14 @@ namespace HumankindAssetFramework
             if (applying && !mapLoaded)
             {
                 mapLoaded = true; applyStart = frame;
-                lock (gate) pendingMap.Clear();
+                lock (gate) { pendingMap.Clear(); savedFacing.Clear(); respawnReapply.Clear(); }   // new load — drop the previous save's angles + any pending re-arm
                 if (File.Exists(pf))
                 {
                     foreach (var line in File.ReadAllLines(pf))
                     {
                         var p = line.Split(',');
                         if (p.Length == 2 && ulong.TryParse(p[0].Trim(), out var g) && int.TryParse(p[1].Trim(), out var a))
-                            lock (gate) pendingMap[g] = a;
+                            lock (gate) { pendingMap[g] = a; savedFacing[g] = a; }   // keep a session-long copy for respawn re-arm
                     }
                     Plugin.Diag($"[Facing] restoring {pendingMap.Count} army facings");
                 }
@@ -195,6 +215,23 @@ namespace HumankindAssetFramework
                         int d = ((angle - want) % 360 + 360) % 360;      // circular difference; ~0 or ~360 == already there
                         if (d > 2 && d < 358) { if (ApplyFacing(unit, want)) { applied.Add(guid); Plugin.Diag($"[Facing] restored army {guid} -> {want}°"); } }
                         else applied.Add(guid);                          // already at the saved heading -> done
+                    }
+                }
+
+                // RESPAWN RE-ARM: this unit's UpdatePawns rebuild wiped its heading — re-apply the saved angle once it's
+                // loaded + stationary (same guard as the initial restore, so a unit the player is moving is left alone).
+                bool wantsRearm; int savedAngle = 0;
+                lock (gate) { wantsRearm = respawnReapply.Contains(guid) && savedFacing.TryGetValue(guid, out savedAngle); }
+                if (wantsRearm)
+                {
+                    bool moving = false;
+                    try { if (UniversalInject.GetMember(unit, "IsAnyPawnMoving") is bool mv && mv) moving = true; } catch { }
+                    if (moving) { lock (gate) respawnReapply.Remove(guid); }   // player is moving it — leave the heading to the game
+                    else
+                    {
+                        int d2 = ((angle - savedAngle) % 360 + 360) % 360;
+                        if (d2 <= 2 || d2 >= 358) { lock (gate) respawnReapply.Remove(guid); }   // already back at the saved heading -> done
+                        else if (ApplyFacing(unit, savedAngle)) { lock (gate) respawnReapply.Remove(guid); Plugin.Diag($"[Facing] re-applied army {guid} -> {savedAngle}° after respawn"); }
                     }
                 }
             }

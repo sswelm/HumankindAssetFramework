@@ -51,6 +51,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   first (distinguishes `_01`/`_02`) and falls back to `coreDesc` (never regresses a working bind). Latent for the
   reference pack (no stem collisions) but a real correctness gap for third-party packs.
 
+- **FACING SURVIVES RESPAWN (2026-08-16).** `respawnAfterLoad` units (the helicopters) lost their saved heading on
+  load: the ~3-frame post-load `UpdatePawns` rebuild recomputes `FormationAngle` to neutral *after* the single-shot
+  facing-restore already fired and closed (non-respawn units like the organ gun kept theirs). Fixed by coordinating
+  the two systems — `MaybeRespawnPostLoad` re-arms `FacingPersist` right after each respawn, which re-applies the
+  saved angle once the rebuilt unit is loaded + stationary (same frame, no neutral flash; still skips units the
+  player is moving, so no crab-walk). Verified: a helicopter saved facing east holds its heading across a reload
+  (`[Facing] re-applied army … after respawn`).
+
 - **BATTLE GUNNERY — the Jagdpanzer arc (2026-08-06).** A casemate tank destroyer exposed, one shot at a
   time, that vanilla **never rotates a vehicle's hull in battle** (vehicles aim only via a turret bone slot —
   invalid on custom rigs), and grew the full gunnery chain in a day: **battle hull-aim** (the map bombard's

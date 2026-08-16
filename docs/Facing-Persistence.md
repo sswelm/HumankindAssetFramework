@@ -43,8 +43,17 @@ key, not a tile position); `angleDegrees` = its `FormationAngle`.
   > catch a `respawnAfterLoad` rebuild. But it couldn't tell a load/respawn reset from **the player moving the unit**,
   > so it snapped the heading back every frame and the unit **crab-walked sideways** for the first ~5 s after a load.
   > Single-shot restore + skip-if-moving removes that entirely (and drops the per-frame walk + a per-tick dictionary
-  > allocation — it was a real perf cost too). Trade-off: a `respawnAfterLoad` unit that resets *after* the one pass
-  > isn't re-corrected — an acceptable rarity versus fighting every unit's movement.
+  > allocation — it was a real perf cost too).
+  >
+  > **Respawn re-arm (2026-08-16):** the "trade-off" above turned out to bite every `respawnAfterLoad` unit — the
+  > helicopters. Their `UpdatePawns` rebuild fires a few frames post-load and recomputes `FormationAngle` to neutral
+  > *after* the single-shot restore already closed, so they lost their heading while the organ gun (no respawn) kept
+  > it. Fixed by **coordinating the two systems instead of re-widening the window**: `MaybeRespawnPostLoad` calls
+  > `FacingPersist.OnArmyRespawned(army)` right after each respawn `UpdatePawns`, which queues that army to have its
+  > saved angle re-applied once it's loaded + stationary (the respawn runs before the facing tick in the same
+  > `Update`, so there's no neutral flash). A session-long `savedFacing` map keeps the angles available after the
+  > initial window closes, and the same skip-if-moving guard means a unit the player is moving is still left alone —
+  > so respawn units get their heading back without reintroducing the crab-walk.
 
 ## Config
 

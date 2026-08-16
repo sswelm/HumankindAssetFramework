@@ -65,6 +65,7 @@ namespace HumankindAssetFramework
                     respawnCount[unit] = done + 1;                                                     // bump first so a throwing unit isn't stuck
                     bool naval = false; try { naval = Convert.ToBoolean(GetMember(unit, "IsNaval")); } catch { }
                     AccessTools.Method(unit.GetType(), "UpdatePawns", new[] { typeof(bool) })?.Invoke(unit, new object[] { naval });
+                    FacingPersist.OnArmyRespawned(army);   // the rebuild just wiped this unit's heading — re-arm facing restore (respawnAfterLoad units otherwise lose their saved facing)
                     Plugin.Diag($"[Uni][RESPAWN] re-spawned '{uname}' shortly after it rendered (clears the first-instance rotor race)");
                 }
                 // Drop bookkeeping for units that are gone (destroyed, or the previous game's units after a reload) so the
