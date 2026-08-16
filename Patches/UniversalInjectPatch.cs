@@ -18,9 +18,9 @@ namespace HumankindAssetFramework
     // (ProcessAnimStates), read by the per-frame pose hook via nearest-position match (the deploy poll's approximation).
     internal struct StateSample { public UnityEngine.Vector3 pos; public bool moving; public float stoppedAt; public float moveStartedAt; public bool combat; }
 
-    internal class ModelEntry
+    internal class ModelEntry : Haf.Schema.HafModelSchema   // the ~64 shared behavioral/sound/prop fields live in Haf.Schema now (one definition, inherited); only GUID (sa/sb/..), runtime-state, and non-shared fields stay below
     {
-        public string resourceName = "", pawnDescription = "";
+        public string pawnDescription = "";   // resourceName now inherited from Haf.Schema.HafModelSchema
         public string coreDesc = "";     // pawnDescription minus the trailing _NN instance suffix, computed ONCE at registry publish. The per-frame movement polls + the sim-thread FindEntryForUnitDefinition matched units by re-running Regex.Replace(pawnDescription,"_[0-9]+$","") per entry per unit — pure garbage since it's a load-time constant. Read-only after publish (safe from any thread).
         public int sa, sb, sc, sd, ta, tb, tc, td;   // skeleton + atlas Amplitude guid components
         public object skeleton;
@@ -29,21 +29,12 @@ namespace HumankindAssetFramework
         public bool texOwned;            // true only when `tex` is a texture WE created (LoadSkinPng / BuildAdjustedAtlas) and may Destroy on re-arm. FALSE when `tex` is the raw bundle atlas from LoadAtlas — Destroying that unloads the shared asset so AssetDatabase.LoadAsset then returns NULL (the organ-gun-goes-red-on-reload bug).
         public string layerHint = "";
         public object isolatedLayer;     // our private clone of the host output layer (texture isolation)
-        public string hideMeshes = "";   // comma-separated donor-FRAGMENT name substrings to hide (works for fragment-based extras; a donor's animated skinned sub-parts, e.g. a helicopter rotor, are encoded at pawn-spawn and cannot be hidden this late — pick a rotor-free donor instead)
         public UnityEngine.Vector3 position;  // ANIMATED models: applied as a runtime world offset in the pose hook (z = height/up). Static models bake position into the mesh at Bake time instead, so this is only read for animated entries.
-        public float scale = 1f;              // ANIMATED models: runtime multiplier on the pawn's ObjectSpace.Scale (default 1 = unchanged). Lets us fix an animated model baked at the wrong scale WITHOUT a re-bake (e.g. the howitzer's 100x FBX unit-conversion oversize -> set 0.01). Config-only field; absent = 1.
-        public float desaturate = 0f;         // TEXTURE-ONLY GREY variant: 0 = off. >0 = DON'T repoint the mesh; isolate this unit's output layer and paint a DESATURATED copy of its OWN atlas (1 = full grey) while the civ-colour tint is neutralised. Makes a Common copy read as a bland grey version of an emblematic unit; the original is untouched (they share the layer, so the isolation clone is essential). No bake / no custom model needed.
-        public float brightness = 1f;         // UNIVERSAL skin brightness GAMMA (1 = unchanged, >1 lighter, <1 darker). Applied FIRST (before desaturate/tint) to whatever skin the unit gets. Multiplicative in the dark range, so a near-black atlas actually lightens — the additive tint tops out (+30 lifts 18 to only 48; gamma 1.5 lifts it ~2.4x). Managed by the Unit Retexture window.
-        public string textureFile = "";       // TEXTURE-ONLY RETEXTURE: a PNG filename in BepInEx/config/haf_skins/. When set, the plugin loads that PNG and paints it onto the unit's ISOLATED output layer (same isolation as desaturate — original untouched, vanilla mesh kept). Hot-loaded at runtime, no bake/rebuild. Takes precedence over desaturate. Painted on a dump of the unit's own atlas (round-trips via PNG). Managed by the Unit Retexture editor window.
-        public float tintR = 0f;              // UNIVERSAL skin colour offset, red channel (-255..+255, 0 = none). Added AFTER desaturate to whatever skin this unit ends up with — the loaded textureFile PNG, OR a copy of its own atlas. Equal negative R/G/B = darken; equal positive = brighten; one channel tints.
-        public float tintG = 0f;              // ... green channel (-255..+255).
-        public float tintB = 0f;              // ... blue channel (-255..+255).
         public int ca, cb, cc, cd;       // ANIMATED models: our baked ClipCollection Amplitude guid (its own clip, e.g. a drone's spinning-prop 'hover'). 0,0,0,0 = static model (no pose override).
         public object clipColl;          // loaded ClipCollection asset
         public int animId = -1;          // resolved animation id of our clip (after it's registered in AnimationManager.Apply)
         // STATE-DRIVEN (Phase 2, 2026-07-19): idle = the primary clip above; MOVE plays while the unit travels;
         // optional AFTER plays once on stopping. Each role is its own baked ClipCollection sharing the one skeleton.
-        public bool animStateDriven;
         public int mca, mcb, mcc, mcd;   // MOVEMENT ClipCollection Amplitude guid
         public int aca, acb, acc, acd;   // AFTER-MOVEMENT ClipCollection Amplitude guid (0,0,0,0 = none)
         public int ata, atb, atc, atd;   // ATTACK ClipCollection Amplitude guid (0,0,0,0 = none) — played once when the pawn ranged-attacks
@@ -59,8 +50,6 @@ namespace HumankindAssetFramework
         // model (idle+attack, no move clip) armed fires that never animated — StatePose was never entered (critical-review #8).
         public bool AnyStateRole => moveAnimId >= 0 || attackAnimId >= 0 || afterAnimId >= 0 || combatAnimId >= 0 || preMoveAnimId >= 0 || idleAltAnimId >= 0 || idleAlt2AnimId >= 0 || idleAnimId >= 0;
         public float moveDur = 1f, afterDur = 1f, attackDur = 1f, combatDur = 1f, preMoveDur = 1f, idleDur = 1f, idleAltDur = 1f, idleAlt2Dur = 1f;
-        public float idleAltInterval = 0f;   // avg SECONDS between idle-alt one-shots (jittered 0.6-1.4x, like the idle growl); <=0 disables even when clips are baked
-        public float animPhaseSpread = 0.5f; // DEFAULT 0.5 (2026-07-31): spread this model's pawns over half the clip so a multi-pawn unit stops moving as ONE BODY — twelve canoes rocking as a rigid raft, eight monsters swinging their heads in unison. 1 = the whole clip, 0 = lockstep (the old behaviour). Applies to LOOPING poses only; one-shots stay tied to their trigger. This default also governs registries written before the field existed, so every animated model gains the desync without an edit.
         // Per-pawn phase, TRACKED BY POSITION. The pawn entry carries no stable identity (only poses, bone
         // rotations and ObjectSpace), and its array slot is NOT stable: changing camera zoom swaps LODs, the
         // engine re-adds every pawn, and slot-derived phases jump — the animation visibly snapped on every zoom.
@@ -72,32 +61,16 @@ namespace HumankindAssetFramework
         public float idleAltNextAt, idleAltStart = -1f, idleAltChosenDur = 1f;   // session cadence state (per entry = one voice per unit type)
         public int idleAltChosenId = -1;
         public UnityEngine.Vector3 idleAltPos;   // which pawn is performing this firing (nearest-match, same 4u radius class)
-        public int attackRepeats = 1;    // how many times the ATTACK clip replays per trigger (the fire window = repeats x clip duration; the GPU sampler's Repeat(Time,1) wraps each pass). For short recoil-pop source clips (shootAR2s = 0.17s) that should read as sustained fire. Runtime-only knob — no re-bake.
         // HAND PROP (weapon axis, 2026-07-19): a rigid Prop-Lab mesh glued to a bone of OUR skeleton — the soldier's
         // gun. The donor (an APC) has no weapon slots, so the plugin CONSTRUCTS the FragmentEntry itself at repoint
         // time instead of riding the vanilla slot path. All four are runtime-only registry strings.
-        public string handPropName = "";  // the Prop Lab resource name (assets <name>_Collection / mesh <name>_DistrictMesh)
-        public string handPropGuid = "";  // the <name>_Collection Amplitude guid "a,b,c,d" (Prop Lab prints + clipboards it)
-        public string handPropMat = "";   // borrowed material guid "a,b,c,d"; "" = the shared EQ_DLC04_Weapons material
-        public string handPropBone = "";  // bone-name SUBSTRING on OUR skeleton (bones are renamed b###_<orig>); "" = "R_Hand"
-        public string handPropAngles = "";// draw-time rotation "x,y,z" (deg) stamped onto the FxMesh asset BEFORE encoding; "" stamps ZERO (neutralizes the engine's -90X class default — baked angle values don't survive the bundle). Hand-edited escape hatch: change + relaunch, no bake/rebuild.
-        public bool disabled;             // DEBUG toggle: skip this override entirely so the ORIGINAL vanilla unit renders (compare against the custom model, observe the donor's own animation). Runtime-only — Save (no bake) + relaunch. The entry is dropped at load, so it doesn't even claim its pawn.
-        public bool silenceDonorVfx;      // suppress the donor's MecanimEvent VFX (muzzle flashes, animator-driven puffs) for THIS unit. The donor's flash anchors are DONOR bone names (ParentNameToLaunchVFXPosition) that don't exist on our replaced skeleton, so inherited flashes render misplaced — this drops them at the StartVFXEvent chokepoint (the audio-silence pattern). Runtime-only.
-        public bool useDonorClip;         // let the DONOR clip drive this unit (skip our Pose0 override): restores the donor body animation (helicopter hover-bob/pitch) on an animated bake. The donor clip channels land on OUR bones by INDEX (donor Helix -> our rotor hub), so rotors may spin from it too. The Cobra proof: static bakes play the donor clip and move like helicopters.
         public string rotorSpinBones = "";  // reclaim rotor bones the donor clip hijacks: "BoneName@axis;BoneName@axis" (axis 0/1/2, per-model like turretAxis). Each named bone gets a BoneRotation slot with a constantly-advancing angle — the aim-layer override outranks the clip's channel, so the rotor spins flat about the chosen axis while the donor clip drives the body.
         public float rotorSpinSpeed = 720f; // rotor spin rate, degrees/second (720 = 120 RPM)
         public int[] rotorIdx; public int[] rotorAxis;   // resolved bone indices + axes (cached once)
         public bool vfxSilencedLogged;    // session flag: log the first suppressed event once per entry
-        public bool clearAimLayer;        // clear the game's procedural BoneRotation layer for THIS model (artillery: the donor streams aim/wheel junk that twists the rig). Replaces the old blanket fire/deploy rule for STATE-DRIVEN artillery — characters need the layer (facing), a migrated howitzer needs it cleared. Runtime-only.
-        public string turretBone = "";    // TURRETIZE (2026-07-24): bone-name SUBSTRING (renamed b###_<orig>) of a turret to aim at the target. The game already streams its aim/heading angle into a BoneRotation slot on an INVALID bone index — we retarget that slot's SkeletonBoneIndex to THIS bone so the engine's own aim yaws our turret. "" = no turret aim. Runtime-only (no re-bake).
         public int turretBoneIdx = -2;    // cached bone index for turretBone (-2 = not resolved yet, -1 = not found). Resolved once from e.skeleton.BoneInfos.
-        public int turretAxis = -1;       // aim-axis override for the turret bone: -1 = keep the game's streamed axis (1 = "up" in ITS frame, which on a bone pointing along its own length reads as PITCH); 0/1/2 = force the bone's local X/Y/Z. A vehicle TURRET needs its YAW axis; a mechanized HOWITZER/ARTILLERY barrel needs its PITCH axis — hence per-model.
-        public float gunElevMax;          // GUN ELEVATION (2026-08-06): max barrel raise, degrees, during a bombard — DISTANCE-proportional (full at ~3 tiles); 0 = off; negative flips direction. Applies to turretBone else muzzleBone. Runtime-only.
-        public int gunElevAxis;           // local axis index the elevation rotates about (0=X pitch usual, 1=Y, 2=Z)
         public int gunElevBoneIdx = -2;   // cached bone index (-2 = unresolved, -1 = not found)
-        public string muzzleBone = "";    // MUZZLE-RELOCATE (2026-07-24): bone-name SUBSTRING (renamed b###_<orig>) that the weapon muzzle-flash should fire FROM. The donor's fire clip names ITS weapon socket (e.g. an AA gun's "Canon") in the FireProjectile mecanim event; that name is absent on our renamed rig, so AlterationFireProjectile falls back to the pawn's ROOT + the donor's socket-local offset -> the flash lands off-side. We hook PresentationSubPawn.GetBoneTRS and, when the requested bone isn't on our skeleton, redirect the lookup to THIS bone (e.g. the turret/gun) so the flash anchors on our unit. "" = leave the vanilla behavior. Runtime-only (no re-bake).
         public string muzzleBoneName;     // cached FULL bone name resolved from muzzleBone (null = not resolved yet, "" = not found on our skeleton).
-        public string muzzleOffset = "";  // RUNTIME dial: "x,y,z" WORLD-units added to the pinned fire origin (flash + tracer start). The empirical fix for a rig whose gun-bone head sits at the base (the Ehrhardt): raise the origin without re-baking. "" = none.
         public UnityEngine.Vector3 muzzleOffsetV; public bool muzzleOffsetParsed;   // parsed once per session
         public bool muzzlePinLogged;      // session flag: log the first StartVFXEvent pin once per entry
         public object handPropLayer;      // session-scoped: our PRIVATE clone of the borrowed weapon output layer, painted with the prop's own atlas (<prop>_Atlas)
@@ -112,19 +85,12 @@ namespace HumankindAssetFramework
         public int descId = -1;          // runtime PawnDescriptorId of our unit (learned from the correctly-skinned pawn), to spot the wrong-skeleton twin the game spawns for the same unit
         public bool fragsLogged;         // one-shot: dump the donor's fragment mesh names once, so the modder can find hide targets
         public bool repointed;
-        public bool respawnAfterLoad;    // FIX for the save-load first-instance rotor race: when true, the plugin re-runs the game's own PresentationUnit.UpdatePawns (ReleasePawns+InstantiatePawns) on this model's units ~3s after load, so the first instance's borrowed donor rotor is rebuilt correctly. Set ONLY for models that borrow a donor's animated sub-part (e.g. the helicopter's rotor); harmless-but-pointless flicker otherwise, so default off.
-        public bool freezeDonorAnim;     // FREEZE the donor's idle/move animation: a STATIC borrowed mesh inherits the donor's pose bob (e.g. a drone donor's hover wiggle looks wrong on a large airship). When true, the pose hook pins every pawn pose's Time to 0 each frame so the donor animation can't advance — the mesh holds rigid while the pawn still glides tile-to-tile. Static models only (animated models drive their own clip).
-        public bool fireOnAttack;        // ANIMATED: play the clip ONCE when the unit attacks (ArtilleryStrikeStarted), resting at frame 0 otherwise — instead of the default continuous loop (a drone's spinning prop). Set for a howitzer's barrel-elevation-on-fire. See docs/Firing-On-Attack.md.
         // PER-INSTANCE fire, so only the howitzer that actually bombarded animates (not every howitzer of the type):
         public readonly System.Collections.Concurrent.ConcurrentQueue<long> fireGuidQueue = new System.Collections.Concurrent.ConcurrentQueue<long>();  // SIM thread enqueues the firing unit's SimulationEntityGUID; Plugin.Update (main thread) drains it (no Unity access on the sim thread).
         public readonly List<FireInstance> activeFires = new List<FireInstance>();  // MAIN/render thread only (locked): each firing pawn's render position + start time; the pose hook plays the clip on the pawn nearest an active fire.
         // DEPLOY-ON-STOP (a HELD state, not a one-shot): the clip rests at the DEPLOYED pose by default and snaps to the
         // UNDEPLOYED pose while the unit is moving. Pure function of "is this pawn's unit moving right now" — no state machine,
         // AI/concurrency-safe. Plugin.Update polls PresentationUnit.IsAnyPawnMoving and records the moving pawns' positions.
-        public bool deployOnStop;             // hold the deployed pose when idle, undeploy (frame 0) while moving
-        public float deployPoseTime = 1f;     // normalized clip time of the DEPLOYED pose (1 = a real deploy clip's end; 0.5 = the barrel-fire clip's raised plateau, used to prove the plumbing without a deploy clip)
-        public float deploySpeed = 1f;        // multiplier on the gradual-deploy ramp speed (1 = the clip's authored speed; 2 = twice as fast). Only affects the forward deploy-on-stop; folding on move is always instant.
-        public float recoilSpeed = 1f;        // multiplier on the recoil-on-fire (kickback) playback speed (1 = the tail's authored speed; 3 = the kick plays 3x faster). Only affects deployOnStop+fireOnAttack models.
         // GRADUAL deploy: instead of snapping, ramp each unit's pose time toward its target (0 while moving, deployPoseTime
         // when stopped) at the clip's authored speed, so the legs visibly spread/fold. Progress is per-unit (stateful) so it
         // survives across polls and units entering/leaving view; the pose hook reads the ramped value matched by position.
@@ -136,40 +102,11 @@ namespace HumankindAssetFramework
         // rides the service path tied to the vanilla unit's move state, which our re-loaded units don't trigger. When set,
         // the plugin detects each instance starting/stopping (render-position delta, like deployOnStop) and posts the
         // captured Start/Stop AudioEventHandle onto that pawn's AudioEmitter, restoring the missing engine sound.
-        public bool engineSound;
-        public bool hideSubPawns;        // strip the donor definition's SubPawnDefinitions at injection — kills secondary attachments like the helicopter gunship's independent rotor pawn (the "GPU rotor" a mesh swap can't remove)
         public int lastPawnFrame = -1;   // duplicate-pawn hide (hideSubPawns): Time.frameCount of the last pawn add for this entry
         public readonly List<UnityEngine.Vector3> pawnKeptPos = new List<UnityEngine.Vector3>();   // hideSubPawns: positions of the pawns KEPT this frame — one per distinct UNIT (a unit's stacked squadron duplicates share a position; different units are tiles apart). Keeping per-position, not a per-type count, lets two units of the same model coexist.
         public float rendererCensusNextAt;   // next Unity-renderer census time for this entry (the ghost-rotor hunt)
-        public float moveTilt;               // degrees of nose-down pitch while MOVING (helicopter forward-flight attitude); 0 = off. Runtime-only, eased in/out.
-        public float turnRate;               // TURN EASE: deg/s toward a new heading; 0 = off -> category default -> dial `rate` (precedence, docs/Turn-Ease.md).
-        public float turnBank;               // TURN EASE: max roll INTO the turn, degrees; negative flips the lean. 0 -> dial `bank` (air category / rate-eased models).
         public int profCat = -1;             // runtime: the unit's TYPE category (human/land/turret/air/ship) off its capability profile at addon load — drives the category default rates.
-        public float hugDrop;                // TERRAIN HUG: how much LOWER over open ground (negative units); 0 = off. Live override: haf_hugterrain.txt `drop`.
-        public float hugLookahead = 1.5f;    // TERRAIN HUG: probe distance AHEAD along the movement vector, so the climb anticipates the skyline.
         public UnityEngine.Vector3 tiltLastPos; public float tiltCur; public float tiltLastTime;   // move-tilt runtime state
-        public bool silenceDonorAudio;         // SUPPRESS all of the borrowed donor's Wwise sound on this unit's pawns (idle growl + combat maul/scratch that ride in on the reused animator/description). Reusable: any unit that inherits an unwanted donor sound can set it. Silences ONLY Wwise (AudioEmitter.PostEvent) — our own custom WAVs (Unity AudioSource) still play, so it composes with soundIdleFile/soundFile.
-        public string engineStartEvent = "";  // Wwise event NAME posted on move-START (e.g. Play_UNIT_Vehicles_StealthCorvette_Start). Set => posted BY NAME (works for the FIRST unit, no live capture); empty => fall back to the auto-captured handle.
-        public string engineStopEvent = "";   // ... move-STOP (..._Stop). Extract names via the F8 "Dump Sound Catalog"; assign per unit in the registry.
-        public string soundFile = "";          // CUSTOM audio, LOOP while moving: a WAV filename in BepInEx/config/haf_sounds/. Unity AudioSource, 3D. For units the game has NO sound for (drones, zeppelins) or a bespoke engine.
-        public string soundStartFile = "";     // CUSTOM one-shot on move-START (spool-up): a WAV in haf_sounds/.
-        public string soundStopFile = "";      // CUSTOM one-shot on move-STOP (spool-down): a WAV in haf_sounds/.
-        public float soundVolume = 1f;         // travel-loop volume
-        public float soundStartVolume = 1f;    // move-start one-shot volume
-        public float soundStopVolume = 1f;     // move-stop one-shot volume
-        public string soundIdleFile = "";      // CUSTOM one-shot growl played OCCASIONALLY WHILE IDLE (not moving): a WAV in haf_sounds/. Replaces a donor's periodic idle vocalization (pair with silenceDonorAudio). Fired on a randomized timer per pawn.
-        public float soundIdleVolume = 1f;     // idle-growl one-shot volume
-        public float soundIdleInterval = 11f;  // AVERAGE seconds between idle growls (jittered 0.6..1.4x per pawn so a pack doesn't chorus). <=0 disables.
-        public float soundIdleGroupRadius = 10f; // GROUP de-dup: growls suppressed within this radius of another recent growl, so a clustered unit (many pawns) snarls with ONE voice per interval instead of all at once. <=0 = per-pawn (no de-dup).
-        public string soundAttackFile = "";    // CUSTOM one-shot played ON ATTACK (each swing/shot) — a WAV in haf_sounds/. A DISTINCT, more violent sound than the idle growl; fired from OnPawnAttack with a per-pawn min-gap so rapid multi-swing fights don't machine-gun it.
-        public float soundAttackVolume = 1f;   // attack one-shot volume
-        public float soundAttackOffset = 0f;   // seconds INTO the attack WAV where playback starts (skip a silent/windup lead-in so the impact lands on the swing); 0 = from the top
-        public string soundDeathFile = "";     // CUSTOM one-shot on a pawn's DEATH (PresentationPawn.TriggerDeath) — the rattle/scream that closes the unit's audio arc. Per-entry min-gap so a wiped stack doesn't chorus five at once.
-        public float soundDeathVolume = 1f;    // death one-shot volume
-        public float soundDeathOffset = 0f;    // seconds into the death WAV (same semantics as the attack offset)
-        public string soundBattleFile = "";    // CUSTOM one-shot WAR CRY when a battle STARTS with this unit in it (SimulationEvent_BattleStarted; sim thread -> queued, played camera-anchored on the main thread). One cry per entry per battle.
-        public float soundBattleVolume = 1f;   // war-cry volume
-        public float soundBattleOffset = 0f;   // seconds into the war-cry WAV
         public UnityEngine.AudioClip customClip, customStartClip, customStopClip, customIdleClip, customAttackClip, customDeathClip, customBattleClip;    // loaded once from the files
         public float deathSoundNextAt, battleCryNextAt;   // per-entry min-gap clocks (a wiped stack / double battle shouldn't chorus)
         public readonly Dictionary<long, float> attackSoundNextAt = new Dictionary<long, float>();   // attacking-pawn id -> earliest Time.time it may play the attack sound again (min-gap)

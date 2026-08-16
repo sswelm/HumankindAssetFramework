@@ -20,6 +20,12 @@
   <!-- baker/ is the Unity *editor* mesh baker (needs UnityEditor); it ships in the mod, not this plugin. -->
   <ItemGroup>
     <Compile Remove="baker\**\*.cs" />
+    <Compile Remove="Haf.Schema\**\*.cs" />   <!-- referenced as a built DLL (ProjectReference below), not compiled in -->
+  </ItemGroup>
+
+  <!-- the shared model schema (netstandard2.0). Ships alongside the plugin to BepInEx/plugins (Private=true). -->
+  <ItemGroup>
+    <ProjectReference Include="Haf.Schema\Haf.Schema.csproj" />
   </ItemGroup>
 
   <!-- net471 builds with just the .NET SDK (this package IS on nuget.org). -->

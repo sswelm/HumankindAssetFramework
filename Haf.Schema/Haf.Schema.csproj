@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- THE shared model schema. netstandard2.0 is consumable by BOTH the Unity editor (a managed plugin DLL in
+       Assets/Plugins) and the net471 BepInEx plugin (referenced + shipped to BepInEx/plugins). No dependencies —
+       the shared fields are all primitives (string/bool/float/int), so no UnityEngine reference is needed. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>Haf.Schema</AssemblyName>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+</Project>
