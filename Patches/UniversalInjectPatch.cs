@@ -608,88 +608,33 @@ namespace HumankindAssetFramework
                         float Fp(JToken o, string k) => o?[k] != null ? (float)o[k] : 0f;
                         foreach (var m in models)
                         {
-                            var s = m["skel"]; var t = m["atlas"]; var c = m["clip"]; var p = m["position"];
+                            // position is a UnityEngine.Vector3: Newtonsoft chokes deserializing it (its `normalized`
+                            // property self-references Vector3), so pull the key OUT of the object before the generic map
+                            // and re-pin it by hand below — otherwise ToObject throws and the whole model drops to the
+                            // fragile index-aligned regex fallback. Read it first, then remove.
+                            var p = m["position"]; (m as JObject)?.Remove("position");
+                            // The name-matching config (every string/bool/float/int field, inherited from the shared
+                            // HafModelSchema + ModelEntry's own) deserializes generically — one mapping, no hand-list to
+                            // drift against the editor. Absent keys fall to each field's initializer (the shared defaults);
+                            // ModelEntry's runtime-state fields have no matching JSON key so they stay at their defaults.
+                            var e = m.ToObject<ModelEntry>();
+                            // The GUID arrays also DON'T map by name (one JSON array skel[] -> four ints sa/sb/sc/sd, etc.),
+                            // so they're extracted explicitly here.
+                            var s = m["skel"]; var t = m["atlas"]; var c = m["clip"];
                             var cmv = m["clipMove"]; var cfa = m["clipAfter"]; var cat = m["clipAttack"]; var ccb = m["clipCombat"]; var cpv = m["clipPreMove"]; var cid = m["clipIdle"]; var cAlt = m["clipIdleAlt"]; var ca2 = m["clipIdleAlt2"];
-                            entries.Add(new ModelEntry
-                            {
-                                resourceName = (string)m["resourceName"] ?? "", pawnDescription = (string)m["pawnDescription"] ?? "", hideMeshes = (string)m["hideMeshes"] ?? "",
-                                sa = A(s, 0), sb = A(s, 1), sc = A(s, 2), sd = A(s, 3),
-                                ta = A(t, 0), tb = A(t, 1), tc = A(t, 2), td = A(t, 3),
-                                ca = A(c, 0), cb = A(c, 1), cc = A(c, 2), cd = A(c, 3),
-                                animStateDriven = (bool?)m["animStateDriven"] ?? false,
-                                mca = A(cmv, 0), mcb = A(cmv, 1), mcc = A(cmv, 2), mcd = A(cmv, 3),
-                                aca = A(cfa, 0), acb = A(cfa, 1), acc = A(cfa, 2), acd = A(cfa, 3),
-                                ata = A(cat, 0), atb = A(cat, 1), atc = A(cat, 2), atd = A(cat, 3),
-                                cba = A(ccb, 0), cbb = A(ccb, 1), cbc = A(ccb, 2), cbd = A(ccb, 3),
-                                pva = A(cpv, 0), pvb = A(cpv, 1), pvc = A(cpv, 2), pvd = A(cpv, 3),
-                                iea = A(cid, 0), ieb = A(cid, 1), iec = A(cid, 2), ied = A(cid, 3),
-                                ala = A(cAlt, 0), alb = A(cAlt, 1), alc = A(cAlt, 2), ald = A(cAlt, 3),
-                                a2a = A(ca2, 0), a2b = A(ca2, 1), a2c = A(ca2, 2), a2d = A(ca2, 3),
-                                idleAltInterval = m["idleAltInterval"] != null ? (float)m["idleAltInterval"] : 0f,
-                                animPhaseSpread = m["animPhaseSpread"] != null ? (float)m["animPhaseSpread"] : 0.5f,
-                                position = new UnityEngine.Vector3(Fp(p, "x"), Fp(p, "y"), Fp(p, "z")),
-                                scale = m["scale"] != null ? (float)m["scale"] : 1f,
-                                brightness = m["brightness"] != null ? (float)m["brightness"] : 1f,
-                                desaturate = m["desaturate"] != null ? (float)m["desaturate"] : 0f,
-                                tintR = m["tintR"] != null ? (float)m["tintR"] : 0f,
-                                tintG = m["tintG"] != null ? (float)m["tintG"] : 0f,
-                                tintB = m["tintB"] != null ? (float)m["tintB"] : 0f,
-                                textureFile = (string)m["textureFile"] ?? "",
-                                handPropName = (string)m["handPropName"] ?? "",
-                                handPropGuid = (string)m["handPropGuid"] ?? "",
-                                handPropMat = (string)m["handPropMat"] ?? "",
-                                handPropBone = (string)m["handPropBone"] ?? "",
-                                handPropAngles = (string)m["handPropAngles"] ?? "",
-                                respawnAfterLoad = (bool?)m["respawnAfterLoad"] ?? false,
-                                freezeDonorAnim = (bool?)m["freezeDonorAnim"] ?? false,
-                                disabled = (bool?)m["disabled"] ?? false,
-                                clearAimLayer = (bool?)m["clearAimLayer"] ?? false,
-                                silenceDonorVfx = (bool?)m["silenceDonorVfx"] ?? false,
-                                useDonorClip = (bool?)m["useDonorClip"] ?? false,
-                                rotorSpinBones = (string)m["rotorSpinBones"] ?? "",
-                                rotorSpinSpeed = (float?)m["rotorSpinSpeed"] ?? 720f,
-                                turretBone = (string)m["turretBone"] ?? "",
-                                turretAxis = (int?)m["turretAxis"] ?? -1,
-                                muzzleBone = (string)m["muzzleBone"] ?? "",
-                                gunElevMax = (float?)m["gunElevMax"] ?? 0f,
-                                gunElevAxis = (int?)m["gunElevAxis"] ?? 0,
-                                muzzleOffset = (string)m["muzzleOffset"] ?? "",
-                                fireOnAttack = (bool?)m["fireOnAttack"] ?? false,
-                                deployOnStop = (bool?)m["deployOnStop"] ?? false,
-                                engineSound = (bool?)m["engineSound"] ?? false,
-                                hideSubPawns = (bool?)m["hideSubPawns"] ?? false,
-                                moveTilt = (float?)m["moveTilt"] ?? 0f,
-                                turnRate = (float?)m["turnRate"] ?? 0f,
-                                turnBank = (float?)m["turnBank"] ?? 0f,
-                                hugDrop = (float?)m["hugDrop"] ?? 0f,
-                                hugLookahead = (float?)m["hugLookahead"] ?? 1.5f,
-                                silenceDonorAudio = (bool?)m["silenceDonorAudio"] ?? false,
-                                engineStartEvent = (string)m["engineStartEvent"] ?? "",
-                                engineStopEvent = (string)m["engineStopEvent"] ?? "",
-                                soundFile = (string)m["soundFile"] ?? "",
-                                soundStartFile = (string)m["soundStartFile"] ?? "",
-                                soundStopFile = (string)m["soundStopFile"] ?? "",
-                                soundVolume = m["soundVolume"] != null ? (float)m["soundVolume"] : 1f,
-                                soundStartVolume = m["soundStartVolume"] != null ? (float)m["soundStartVolume"] : 1f,
-                                soundStopVolume = m["soundStopVolume"] != null ? (float)m["soundStopVolume"] : 1f,
-                                soundIdleFile = (string)m["soundIdleFile"] ?? "",
-                                soundIdleVolume = m["soundIdleVolume"] != null ? (float)m["soundIdleVolume"] : 1f,
-                                soundIdleInterval = m["soundIdleInterval"] != null ? (float)m["soundIdleInterval"] : 11f,
-                                soundIdleGroupRadius = m["soundIdleGroupRadius"] != null ? (float)m["soundIdleGroupRadius"] : 10f,
-                                soundAttackFile = (string)m["soundAttackFile"] ?? "",
-                                soundAttackVolume = m["soundAttackVolume"] != null ? (float)m["soundAttackVolume"] : 1f,
-                                soundAttackOffset = m["soundAttackOffset"] != null ? (float)m["soundAttackOffset"] : 0f,
-                                soundDeathFile = (string)m["soundDeathFile"] ?? "",
-                                soundDeathVolume = m["soundDeathVolume"] != null ? (float)m["soundDeathVolume"] : 1f,
-                                soundDeathOffset = m["soundDeathOffset"] != null ? (float)m["soundDeathOffset"] : 0f,
-                                soundBattleFile = (string)m["soundBattleFile"] ?? "",
-                                soundBattleVolume = m["soundBattleVolume"] != null ? (float)m["soundBattleVolume"] : 1f,
-                                soundBattleOffset = m["soundBattleOffset"] != null ? (float)m["soundBattleOffset"] : 0f,
-                                deployPoseTime = m["deployPoseTime"] != null ? (float)m["deployPoseTime"] : 1f,
-                                attackRepeats = m["attackRepeats"] != null ? (int)m["attackRepeats"] : 1,
-                                deploySpeed = m["deploySpeed"] != null ? (float)m["deploySpeed"] : 1f,
-                                recoilSpeed = m["recoilSpeed"] != null ? (float)m["recoilSpeed"] : 1f,
-                            });
+                            e.sa = A(s, 0); e.sb = A(s, 1); e.sc = A(s, 2); e.sd = A(s, 3);
+                            e.ta = A(t, 0); e.tb = A(t, 1); e.tc = A(t, 2); e.td = A(t, 3);
+                            e.ca = A(c, 0); e.cb = A(c, 1); e.cc = A(c, 2); e.cd = A(c, 3);
+                            e.mca = A(cmv, 0); e.mcb = A(cmv, 1); e.mcc = A(cmv, 2); e.mcd = A(cmv, 3);
+                            e.aca = A(cfa, 0); e.acb = A(cfa, 1); e.acc = A(cfa, 2); e.acd = A(cfa, 3);
+                            e.ata = A(cat, 0); e.atb = A(cat, 1); e.atc = A(cat, 2); e.atd = A(cat, 3);
+                            e.cba = A(ccb, 0); e.cbb = A(ccb, 1); e.cbc = A(ccb, 2); e.cbd = A(ccb, 3);
+                            e.pva = A(cpv, 0); e.pvb = A(cpv, 1); e.pvc = A(cpv, 2); e.pvd = A(cpv, 3);
+                            e.iea = A(cid, 0); e.ieb = A(cid, 1); e.iec = A(cid, 2); e.ied = A(cid, 3);
+                            e.ala = A(cAlt, 0); e.alb = A(cAlt, 1); e.alc = A(cAlt, 2); e.ald = A(cAlt, 3);
+                            e.a2a = A(ca2, 0); e.a2b = A(ca2, 1); e.a2c = A(ca2, 2); e.a2d = A(ca2, 3);
+                            e.position = new UnityEngine.Vector3(Fp(p, "x"), Fp(p, "y"), Fp(p, "z"));
+                            entries.Add(e);
                         }
                         Plugin.Log.LogInfo($"[Uni] parsed {entries.Count} model(s) via Newtonsoft [" + string.Join(", ", entries.Select(e => e.resourceName + "->" + e.pawnDescription)) + "]");
                         return entries;
