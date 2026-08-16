@@ -38,6 +38,25 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   still over the real **128** wall, so bones 128–222 (the arm chains = the "wings") were always going to
   collapse. No engine-import decompile needed; the culprit was the GPU skin's per-vertex bone-index ceiling.
 
+- **glbconv warns on multi-tile / UDIM UVs (2026-08-16, tool).** The OBJ tile-shift normalizes UVs by a single
+  integer offset (`floor(min U/V)`), which only rescues a ONE-tile island (the Zeppelin envelope in V 1..2). A
+  model that tiles across >1 UV tile (a `.1001-.1005` UDIM camo set) left the other tiles outside [0,1]; the
+  single-tile atlas can't wrap them, so part of the skin sampled outside the rect and **silently vanished**. Full
+  UDIM consumption stays a deliberately-deferred feature (manual Blender texture-transfer workaround), so this
+  doesn't add it — it makes the failure LOUD: a stderr `WARNING` (glbconv stderr surfaces as a Unity warning) with
+  the U/V spans + the fix, emitted only when the shifted UVs still reach past one tile. Verified: no false-positive
+  on a real single-tile multi-material model; fires on a synthesized 2-tile GLB (`U 0..2`). Critical-review #6
+  (source `baker/glbconv/Program.cs`; rebuilt exe deployed to ENCReload `d6017cb`).
+
+- **STATIC bake re-extracts on a changed input (2026-08-16, editor).** The static path's extraction gate skipped
+  the whole prep+convert block whenever the OBJ merely existed and 'Reuse extracted' was on (`!reuseExtracted ||
+  !haveObj`), so changing the source file, the converter, or a convert arg (grid / strip / reduce / double-sided —
+  all of which shape the OBJ) was silently ignored and a stale OBJ re-baked (the "rotation doesn't respond" trap).
+  The ANIMATED path already guarded this; the static path didn't. Fix (ENCReload `e85e6c5`): mirror the animated
+  path's three busters — `glbconv`/`prep_model.py` mtime, source-file mtime, and a settings fingerprint in a
+  `<name>.extract.args.txt` sidecar. No-op when nothing changed. Critical-review #5; editor-verified in-Factory on
+  StealthCruiser (tool-newer + args-changed busters both fired on a grid change).
+
 - **MODEL FACTORY rename is a real rename now (2026-08-16, editor).** Editing the Resource-name field of a
   loaded entry and then Save / Save-settings / Bake keyed the ownership rebase + GUID-carry on the *new* name,
   which matched nothing — the rebase early-returned, the carry was skipped, and `Upsert` **added a second entry**
