@@ -38,6 +38,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   still over the real **128** wall, so bones 128–222 (the arm chains = the "wings") were always going to
   collapse. No engine-import decompile needed; the culprit was the GPU skin's per-vertex bone-index ceiling.
 
+- **HEADLESS BINDING DRIFT CHECK — reflection-drift net, step 3 (2026-08-16).** The in-game `haf_bindings_report.txt`
+  still needed a launch to read. `bindcheck` (a net8 tool, `Tools/bindcheck/`, using `MetadataLoadContext`) now validates
+  the whole `GameBinding` catalog against a Humankind build's assemblies **without launching the game** — it reads
+  `Patches/GameBinding.cs` directly (always in sync, no manifest to stale) and inspects the game DLLs reflection-only, so
+  Unity's native deps and static ctors are irrelevant. `Tools/check-bindings.sh [<Managed>]` builds it once and runs it;
+  a game patch's binding breakage is now named **headlessly** (CI-able on a version bump) instead of found by launching.
+  Separate trigger from the pre-push gate on purpose: that guards HAF *code* changes, this guards *game* changes.
+  **Verified both ways:** `49/49` clean on the pinned `1.30` build, and it correctly flags an injected fake binding
+  (exit 1). Closes the maintainability review's #3 (binding half).
+
 - **DECISIONS (ADR) LOG + backlog triage — shrinking the bus factor (2026-08-16).** The maintainability review's #4.
   Added [`docs/Decisions.md`](docs/Decisions.md) — short records of the *settled* decisions and the *why* behind them
   (pack order follows HK's mod order & why the base-flag was rejected; make-drift-loud over removing reflection; the

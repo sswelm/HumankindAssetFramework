@@ -31,6 +31,23 @@ golden-master `deploy_regression.sh`, the in-editor Feature Test, and the in-gam
 gate earned its keep on day one: standing it up surfaced three latent schema drifts (a wrapper field the plugin read but
 the baker never wrote, two runtime-only keys, and a `float?`-cast the parity script mis-classified), all fixed to green.
 
+## Headless binding drift check (`Tools/check-bindings.sh` — for game updates)
+
+A **different trigger** from the push gate: that guards HAF *code* changes; this guards *game* changes. After a Humankind
+update, run:
+
+```
+bash Tools/check-bindings.sh [<…/Humankind_Data/Managed>]
+```
+
+The `bindcheck` tool (net8, `System.Reflection.MetadataLoadContext`) validates **every `GameBinding` catalog binding
+against the build's assemblies without launching the game** — it reads `Patches/GameBinding.cs` directly (always in sync,
+no manifest to stale) and inspects the game DLLs reflection-only (Unity's native deps don't matter). It prints
+`bindcheck: N/N types | M member(s) missing` and exits non-zero on any drift, so a game patch's binding breakage is named
+**headlessly** (CI-able on a version bump) instead of found by launching and reading `haf_bindings_report.txt`. Verified
+both ways: `49/49` clean on the pinned build, and it correctly flags an injected fake binding. It's the headless twin of
+the in-game report — same catalog, no game needed.
+
 ## What it covers
 
 | Function | Lives in | What's asserted |
