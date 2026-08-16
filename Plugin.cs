@@ -426,8 +426,7 @@ namespace HumankindAssetFramework
             using (new GUILayout.HorizontalScope())
             {
                 if (GUILayout.Button("Dump Atlases")) UniversalInject.DumpOutputLayerAtlases(atlasFilter);   // Unit Retexture workflow: dump a unit's atlas to paint
-                if (GUILayout.Button("Turn Ease")) { Prober.Report.Clear(); foreach (var l in UniversalInject.TurnEaseCensusLines()) { Prober.Report.Add(l); Plugin.Log.LogInfo("[TurnEase] " + l); } }
-                if (GUILayout.Button("Smoke Test")) UniversalInject.RunSmokeTest();   // runtime integration check: bindings + registry + injection health -> [SmokeTest] PASS/FAIL
+                if (GUILayout.Button("Smoke Test")) UniversalInject.RunSmokeTest();   // adopter check: bindings + registry + injection health -> [SmokeTest] PASS/FAIL
             }
             using (new GUILayout.HorizontalScope())
             {
