@@ -48,6 +48,12 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   pattern for the rest: `GetRuntimeModules()` (pack order) now resolves via `GameBinding.FrameworkServices` /
   `RuntimeService` instead of a raw `Type.GetType`, and both are in the Catalog (47 → 49). **Verified in-game:**
   `resolved=49/49  missing_types=0  missing_members=0`, both new bindings `[ok]` (no late-loader false positive).
+  **Coverage batch 1 (same day):** an evidenced audit of the load-bearing injection path added ~60 reflected members to
+  the Catalog (49 → ~124) — `AnimationManager` gained `AnimationLoad`/`RegisterMeshCollection`/`GetPoseTRS` + the
+  `gpu*Buffer` fields (re-arm + pose), `PawnManager` its descriptor buffers + `pawnEntries`, the empty `ContentLayer` its
+  mesh-buffer + compute-buffer members, and the district Element/Selector/District their level-build members. The report
+  validated the lot on 1.30 in one launch (`missing_members=0`) — the self-correcting property: a mis-attribution would
+  have surfaced as `[MISSING MEMBER]` on the known-good build.
 
 - **PACK ORDER FOLLOWS HUMANKIND'S MOD ORDER (2026-08-16, verified in-game).** A HAF pack is the content-extension
   of a Humankind runtime module, so packs should load in the SAME order the game loaded their modules — the player's
