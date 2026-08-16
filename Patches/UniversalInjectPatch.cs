@@ -895,13 +895,22 @@ namespace HumankindAssetFramework
             return best;
         }
 
+        // THE ONE unit→entry matcher. Every per-unit path (repoint, combat/sound, and the movement/deploy/state polls)
+        // resolves a unit to its entry through longest-match here, so they never disagree about which entry drives a unit.
+        //  1) FULL pawnDescription first (same key the repoint path uses, Inject.cs LongestMatch on pawnDescription): this
+        //     distinguishes entries that differ ONLY in the trailing _NN (e.g. Foo_01 vs Foo_02 = two distinct models) —
+        //     coreDesc strips _NN, so on its own it collapses them and the winner was registry-order-arbitrary.
+        //  2) coreDesc fallback (pawnDescription minus _NN; >4 floor keeps a too-short key from matching everything): a
+        //     single entry still covers a unit whose runtime definition name lacks the suffix — the historical behavior.
+        // Strictly more precise than the old coreDesc-only match with a safe fallback, so it never regresses a working bind.
         internal static ModelEntry FindEntryForUnitDefinition(string unitDefText)
         {
             // Snapshot the reference: this runs on the SIM thread (combat hook) while the main thread may republish
             // `entries` (LoadRegistry retry). The published list is never mutated after publish, so iterating a
             // snapshot is safe; iterating the field directly was not (review 2026-07-19).
-            // coreDesc = pawnDescription minus the _NN suffix; the >4 floor keeps a too-short key from matching everything.
-            return LongestMatch(entries, unitDefText, x => x.coreDesc.Length > 4 ? x.coreDesc : "");
+            var snap = entries;
+            return LongestMatch(snap, unitDefText, x => x.pawnDescription)
+                ?? LongestMatch(snap, unitDefText, x => x.coreDesc.Length > 4 ? x.coreDesc : "");
         }
 
         // SESSION RE-ARM (review 2026-07-19): AnimationLoad fires per game-session and the manager's collection list is

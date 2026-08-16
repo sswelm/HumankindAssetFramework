@@ -43,6 +43,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   kept this frame" on unit *position* (a unit's stack shares a spot; a different unit is tiles away). Verified
   in-game with several gunship helicopters on screen at once, each a single clean model.
 
+- **UNIT→ENTRY MATCH UNIFIED — critical-review follow-up (2026-08-16).** Repoint resolved a unit to its entry by
+  longest-match on the full `pawnDescription`, but the movement/deploy/state polls used *first-in-registry*
+  substring on `coreDesc` (the `_NN`-stripped stem) — so two entries sharing a stem (`Foo_01`/`Foo_02` = distinct
+  models) repointed to distinct models but animated/deployed/sounded from whichever sorted first. Fixed by routing
+  every per-unit path through one matcher (`FindEntryForUnitDefinition`) that tries the full `pawnDescription`
+  first (distinguishes `_01`/`_02`) and falls back to `coreDesc` (never regresses a working bind). Latent for the
+  reference pack (no stem collisions) but a real correctness gap for third-party packs.
+
 - **BATTLE GUNNERY — the Jagdpanzer arc (2026-08-06).** A casemate tank destroyer exposed, one shot at a
   time, that vanilla **never rotates a vehicle's hull in battle** (vehicles aim only via a turret bone slot —
   invalid on custom rigs), and grew the full gunnery chain in a day: **battle hull-aim** (the map bombard's

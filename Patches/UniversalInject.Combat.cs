@@ -50,9 +50,9 @@ namespace HumankindAssetFramework
                     if (unit == null) continue;
                     string uname = GetMember(GetMember(unit, "UnitDefinition"), "Name")?.ToString() ?? "";
                     if (uname.Length == 0) continue;
-                    // Is this unit one of our opted-in models? (name match, minus the entry's trailing _NN suffix)
-                    if (!entries.Any(x => x.respawnAfterLoad && x.pawnDescription.Length > 0
-                            && uname.IndexOf(x.coreDesc, StringComparison.OrdinalIgnoreCase) >= 0)) continue;
+                    // Is this unit one of our opted-in models? Resolve its ONE entry (longest-match) and check the flag on
+                    // THAT entry — not "any respawn entry whose stem is a substring", which could match a wrong shorter entry.
+                    if (FindEntryForUnitDefinition(uname)?.respawnAfterLoad != true) continue;
                     present.Add(unit);
                     // Only start the clock once the unit is actually rendered (IsLoaded) — before that there's nothing to fix
                     // and the 1s marks would be wasted during the load.
@@ -758,11 +758,8 @@ namespace HumankindAssetFramework
                     if (unit == null) return;
                     string uname = GetMember(GetMember(unit, "UnitDefinition"), "Name")?.ToString() ?? "";
                     if (uname.Length == 0) return;
-                    ModelEntry e = null;
-                    foreach (var x in list)
-                        if (x.animStateDriven && x.moveAnimId >= 0 && x.pawnDescription.Length > 0
-                            && uname.IndexOf(x.coreDesc, StringComparison.OrdinalIgnoreCase) >= 0) { e = x; break; }
-                    if (e == null) return;
+                    var e = FindEntryForUnitDefinition(uname);   // the unit's ONE entry (longest-match), then gate on its flags
+                    if (e == null || !e.animStateDriven || e.moveAnimId < 0) return;
                     long guid = GuidToLong(GetMember(unit, "GUID"));
                     if (guid == 0) return;
                     guid = unchecked(guid ^ keySalt);
@@ -863,11 +860,8 @@ namespace HumankindAssetFramework
                         if (unit == null) continue;
                         string uname = GetMember(GetMember(unit, "UnitDefinition"), "Name")?.ToString() ?? "";
                         if (uname.Length == 0) continue;
-                        ModelEntry e = null;   // plain loop, not entries.FirstOrDefault — no per-unit closure allocation at 20x/s
-                        foreach (var x in entries)
-                            if (x.deployOnStop && x.pawnDescription.Length > 0
-                                && uname.IndexOf(x.coreDesc, StringComparison.OrdinalIgnoreCase) >= 0) { e = x; break; }
-                        if (e == null) continue;
+                        var e = FindEntryForUnitDefinition(uname);   // the unit's ONE entry (longest-match), then gate on deployOnStop
+                        if (e == null || !e.deployOnStop) continue;
                         long guid = GuidToLong(GetMember(unit, "GUID"));
                         if (guid == 0) continue;
                         // Movement per PAWN via IsMoving(ignoreWaitToIdle: TRUE, isMovingAlongTilesOnly: TRUE). The unit-level
