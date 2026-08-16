@@ -436,6 +436,7 @@ namespace HumankindAssetFramework
                 if (found.Count == 0) return null;
                 if (!(found[0] is UnityEngine.Object src) || src == null) return null;
                 var clone = UnityEngine.Object.Instantiate(src);   // a private copy — mutating it won't touch the shared leaf
+                TrackDistrictClone(clone);   // OWN it — freed on the next session reset (leak fix)
                 var t = clone.GetType();
                 (GF(t, "fxMesh") ?? GF(t, "mesh"))?.SetValue(clone, fxGuid);
                 // REVEAL-RAMP lever (wonder path): fadeInOutMode {Stepped, Smooth, Instant} is the element's
@@ -464,6 +465,7 @@ namespace HumankindAssetFramework
                     if (olF?.GetValue(clone) is UnityEngine.Object srcLayer && srcLayer != null)
                     {
                         var layerClone = UnityEngine.Object.Instantiate(srcLayer);
+                        TrackDistrictClone(layerClone);   // the leaf's private output-layer clone — OWN it (leak fix)
                         layerClone.name = srcLayer.name + "_HAF";
                         // OPT OUT OF TEXTURE STREAMING (the perfect->brown->corrupt fix, measured on the Oracle): the
                         // reduction system keeps loading proxy/mid/hi-res materials into the layer's RenderOutputs and
@@ -618,6 +620,7 @@ namespace HumankindAssetFramework
                 {
                     if (!(e.origSelector is UnityEngine.Object selUO) || selUO == null) { e.decalGaveUp = true; return; }
                     var clone = UnityEngine.Object.Instantiate(selUO);
+                    TrackDistrictClone(clone);   // footprint decal-selector clone — OWN it (leak fix)
                     clone.name = selUO.name + "_HAFfoot";
                     LoadFxMaterial(clone);
                     e.decalSelector = clone;
@@ -657,6 +660,7 @@ namespace HumankindAssetFramework
         static UnityEngine.Object ClonePrivateOutputLayer(UnityEngine.Object srcLayer)
         {
             var layerClone = UnityEngine.Object.Instantiate(srcLayer);
+            TrackDistrictClone(layerClone);   // deepLayer / scoped donorClone — OWN it (leak fix)
             layerClone.name = srcLayer.name + "_HAF";
             if (GetMember(layerClone, "RenderOutputs") is Array ros)
                 foreach (var ro in ros)
@@ -683,6 +687,7 @@ namespace HumankindAssetFramework
             if (!(mat is UnityEngine.Object uo) || uo == null) { map[mat] = mat; return mat; }
             if (mat.GetType().Name.Contains("Decal")) { map[mat] = mat; return mat; }   // keep the footprint decals shared/unmodified
             var clone = UnityEngine.Object.Instantiate(uo);
+            TrackDistrictClone(clone);   // deep-clone material node — OWN it (leak fix)
             map[mat] = clone;
             var t = clone.GetType();
             bool swappedReactor = false;
@@ -1335,6 +1340,7 @@ namespace HumankindAssetFramework
                 t.ReadPixels(new UnityEngine.Rect(0, 0, w, h), 0, 0); t.Apply();
                 UnityEngine.RenderTexture.active = prev; UnityEngine.RenderTexture.ReleaseTemporary(rt);
                 AdjustSkin(t, 1f, 1f, 0f, 0f, 0f);   // full greyscale, no brightness/tint change
+                TrackDistrictClone(t);   // our runtime gray copy — OWN it, freed on session reset (leak fix)
                 Plugin.Log.LogInfo($"[FootprintMesh] built greyscale albedo {w}x{h} for the strategic-zoom B&W footprint.");
                 return t;
             }
@@ -1412,8 +1418,44 @@ namespace HumankindAssetFramework
         // AnimationLoad rearm (measured: the Oracle tile came up EMPTY because the per-frame repoint kept forcing the
         // NEW channel onto the SESSION-1 corpse leaf — stale meshIndex = draws nothing). Called from the rearm AND
         // from the Sandbox.Load postfix, so both full loads and in-session reloads rebuild fresh.
+        // DISTRICT RUNTIME-CLONE OWNERSHIP (leak fix, 2026-08-16). Every runtime Object.Instantiate / new Texture2D on
+        // the district axis (private leaves, cloned selectors, cloned output layers, deep-clone material nodes, the B&W
+        // gray albedo) is tracked here as it is CREATED — never a LoadAmpliAsset'd bundle asset (those are shared game
+        // assets; Destroying one would unload it, the red-skin class of bug). On a session reset we move the whole owned
+        // set to a pending-destroy queue and free it on the MAIN thread (ResetDistrictSessionState can run off the main
+        // thread via the Sandbox.Load hook; UnityEngine.Object.Destroy is main-thread-only). Mirrors the model axis's
+        // texOwned/isolatedLayer discipline — before this, ResetDistrictSessionState only NULLED these clones, and Unity's
+        // unused-asset sweep does not collect them, so each in-session reload leaked a native FxOutputLayer + N cloned
+        // FxEvolverMaterials + a gray texture per scoped district.
+        static readonly object districtDestroyGate = new object();
+        static readonly List<UnityEngine.Object> districtOwnedClones = new List<UnityEngine.Object>();   // live clones this session
+        static readonly List<UnityEngine.Object> districtPendingDestroy = new List<UnityEngine.Object>(); // moved here on reset, freed on Update
+        static void TrackDistrictClone(UnityEngine.Object o) { if (o) lock (districtDestroyGate) districtOwnedClones.Add(o); }
+
+        // Main thread (Plugin.Update). Free the district clones queued by a session reset.
+        internal static void DrainDistrictDestroys()
+        {
+            UnityEngine.Object[] batch = null;
+            lock (districtDestroyGate)
+            {
+                if (districtPendingDestroy.Count == 0) return;
+                batch = districtPendingDestroy.ToArray();
+                districtPendingDestroy.Clear();
+            }
+            int n = 0;
+            foreach (var o in batch)
+                if (o) { try { UnityEngine.Object.Destroy(o); n++; } catch { } }
+            if (n > 0) Plugin.Diag($"[District] freed {n} runtime clone(s) from the previous session (leak fix).");
+        }
+
         internal static void ResetDistrictSessionState()
         {
+            // hand this session's runtime clones to the main-thread destroy queue (this method may run off the main thread)
+            lock (districtDestroyGate)
+            {
+                districtPendingDestroy.AddRange(districtOwnedClones);
+                districtOwnedClones.Clear();
+            }
             distFxManager = null;
             trackedDistricts.Clear(); lastLevelBuildEvent = null; haveLevelBuildEvent = false;   // instances/args reference the dead session
             bindLog.Clear();   // re-bind the building output layers against the new session's leaves
