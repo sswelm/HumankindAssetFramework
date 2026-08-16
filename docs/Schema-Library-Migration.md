@@ -89,11 +89,20 @@ The POC was an isolated serialization test; against the real projects, two reali
    also requires switching the parse to `DeserializeObject<ModelEntry>` — a bigger change with its own edge cases
    (defaults, coercion, the malformed-JSON regex fallback).
 
-**Honest read:** the payoff (one field definition; eventually deleting the guard) is real but **smaller than the cost it
-now demands** — and the drift it prevents is *already* caught by the now-**enforced** parity gate. So the pragmatic
-call is to **keep the enforced guard** as the cheap mitigation and do this refactor **with the 2.0 packaging**, where the
-plugin↔editor DLL boundary and the neutral-schema split are being drawn anyway — not to pay the workflow cost now for a
-marginal gain. The POC stands: when the boundary is being cut for 2.0, this is the de-risked, step-by-step way to cut it.
+3. **The two classes store the schema in structurally DIFFERENT shapes** (found reading `ModelEntry`'s construction,
+   `UniversalInjectPatch.cs` ~676). `ModelDef` holds each GUID as an `int[]` (`skel`/`atlas`/`clip` + ~7 more);
+   `ModelEntry` holds each as **four separate ints** (`sa,sb,sc,sd`, `ta,tb,tc,td`, …) — a deliberate no-per-entry-array
+   runtime choice. `size` and the bake-time fields aren't on `ModelEntry` at all. So a shared base can only cleanly
+   cover the **~40–50 verbatim behavioral fields** (strings/bools/floats stored by the same name+type); the GUID fields
+   — *where drift is most dangerous* — and the editor-only/runtime fields cannot share a type without ALSO unifying the
+   GUID representation (touching the hot path, possibly a per-entry alloc regression).
+
+**Honest read:** the de-dup is **partial** (~half the schema), the GUID fields still need the parity guard, the payoff
+is smaller than the DLL + workflow + hot-path cost, and the drift it prevents is *already* caught by the now-**enforced**
+parity gate. So the pragmatic call is to **keep the enforced guard** and, IF this is ever revisited (with the 2.0
+packaging, where the plugin↔editor DLL boundary is being drawn anyway), to treat **unifying the GUID representation** as
+the real prerequisite — not to pay the cost now for a half-measure. The POC stands (the mechanism works); the *value*,
+against the real classes, doesn't clear the bar today.
 
 ## Sequencing & payoff
 Pairs naturally with the **2.0 packaging / editor-ENC decoupling** (#5) — both touch project structure and build/deploy,
