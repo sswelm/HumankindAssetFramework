@@ -59,6 +59,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   player is moving, so no crab-walk). Verified: a helicopter saved facing east holds its heading across a reload
   (`[Facing] re-applied army … after respawn`).
 
+- **FORMATION PURE-REPOINT REFORM — critical-review follow-up (2026-08-16).** The catch-up that re-instantiates
+  units which spawned *before* a formation override landed only fired for entries carrying dummy data — a
+  **pure-repoint link** (points a unit at a formation already in the DB, no authored dummies) was excluded by the
+  `dummies.Count > 0` gate, and its "already full?" test compared against `e.dummies.Count` (= 0), so its
+  pre-override units kept the old pawn count until a reload. Fixed with a new `Entry.targetCount` (the target
+  formation's real `Dummies.Length`), computed in `ApplyOne`, and by including unit links in the reform selector.
+  Zero change for ENC (all its entries carry dummy data → same inject/overwrite path); protects third-party packs
+  that repoint a unit to a vanilla formation.
+
 - **BATTLE GUNNERY — the Jagdpanzer arc (2026-08-06).** A casemate tank destroyer exposed, one shot at a
   time, that vanilla **never rotates a vehicle's hull in battle** (vehicles aim only via a turret bone slot —
   invalid on custom rigs), and grew the full gunnery chain in a day: **battle hull-aim** (the map bombard's

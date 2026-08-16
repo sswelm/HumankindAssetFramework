@@ -53,6 +53,10 @@ namespace HumankindAssetFramework
             public string scaleMode = "transform";   // "transform" = pawn root localScale (v1: simple, decent bodies/spacing; rigid gear mis-anchors on humans) | "data" = cloned skeleton with scaled binds+meshes (v2: deep; humans WIP — procedural bone layers ignore it)
             public readonly List<KeyValuePair<float, string>> sizeForms = new List<KeyValuePair<float, string>>();   // formation-by-size rows (sorted asc): era ageing swaps this unit's formation when effective scale <= threshold
             public bool done;      // this session: injected (if data) + repointed, or dropped after a permanent error
+            public int targetCount;  // max pawns a fresh spawn produces = the TARGET formation's Dummies.Length. For an
+                                     // inject/overwrite entry that's e.dummies.Count; for a PURE-REPOINT link (no dummy
+                                     // data, points at a formation already in the DB) it's that existing formation's count —
+                                     // the reform catch-up compares against THIS, not e.dummies.Count (which is 0 for a repoint).
         }
 
         static bool parsed;
@@ -309,7 +313,7 @@ namespace HumankindAssetFramework
                 catch { }
                 Entry e = null;                                     // plain loop, not entries.FirstOrDefault — no per-army closure allocation at 12x/s
                 foreach (var x in entries)
-                    if (x.done && x.dummies.Count > 0
+                    if (x.done && (x.dummies.Count > 0 || x.unit.Length > 0)   // include PURE-REPOINT links (no dummy data) — they also need pre-override units re-instantiated
                         && (string.Equals(x.unit, pdn, StringComparison.OrdinalIgnoreCase)
                             || (x.unit.Length == 0 && string.Equals(x.formation, fref ?? "", StringComparison.OrdinalIgnoreCase))))
                     { e = x; break; }
@@ -325,13 +329,13 @@ namespace HumankindAssetFramework
                 object dc = Mem(fo, "DummyCount");
                 int pawns = (Mem(unit, "Pawns") as ICollection)?.Count ?? -1;
                 reformed.Add(unit); handledAny = true;               // handle/log each unit once; mark BEFORE any call so a throw isn't retried forever
-                if (pawns >= e.dummies.Count)                        // already full — spawned after the override won the race
-                { Plugin.Diag($"[Formation] '{pdn}' already {pawns}/{e.dummies.Count} (formation='{fn}' dummyCount={dc}) — no re-form needed"); continue; }
+                if (e.targetCount <= 0 || pawns >= e.targetCount)     // no known target, or already full (spawned after the override won the race)
+                { Plugin.Diag($"[Formation] '{pdn}' already {pawns}/{e.targetCount} (formation='{fn}' dummyCount={dc}) — no re-form needed"); continue; }
                 bool naval = false; try { naval = Convert.ToBoolean(Mem(unit, "IsNaval")); } catch { }
                 AccessTools.Method(unit.GetType(), "UpdatePawns", new[] { typeof(bool) })?.Invoke(unit, new object[] { naval });
                 int after = (Mem(unit, "Pawns") as ICollection)?.Count ?? -1;
                 object dc2 = Mem(Mem(unit, "Formation"), "DummyCount");
-                Plugin.Diag($"[Formation] re-instantiated '{pdn}': pawns {pawns} -> {after} (formation='{fn}', dummyCount {dc} -> {dc2}, target {e.dummies.Count}) — spawned before the override.");
+                Plugin.Diag($"[Formation] re-instantiated '{pdn}': pawns {pawns} -> {after} (formation='{fn}', dummyCount {dc} -> {dc2}, target {e.targetCount}) — spawned before the override.");
             }
             reformed.RemoveWhere(u => !reformPresent.Contains(u));   // drop gone units so a genuinely new instance is handled again
             // TERMINATION: the catch-up only ever targets units that spawned BEFORE the override (all present within a few
@@ -376,6 +380,11 @@ namespace HumankindAssetFramework
                 Plugin.Log.LogWarning($"[Formation] '{e.formation}' already existed in the database — its data was OVERWRITTEN in place " +
                                       $"from the registry ({e.dummies.Count} dummies). If that name is a vanilla formation, every unit using it is affected.");
             }
+
+            // The count a fresh spawn of the target formation produces — used by the reform catch-up to decide whether a
+            // pre-override unit needs re-instantiating. For an inject/overwrite it's e.dummies.Count; for a pure-repoint
+            // (no dummy data) it's the existing target formation's own Dummies.Length.
+            e.targetCount = e.dummies.Count > 0 ? e.dummies.Count : FormationDummyCount(existing);
 
             // MACRO REPLACEMENT entry (no unit): the in-place overwrite above IS the whole job — every unit of
             // every mod whose definition references this name (resolved lazily by name at spawn) now gets this
@@ -428,6 +437,15 @@ namespace HumankindAssetFramework
 
         // Stamp the registry's formation data onto a PresentationFormationDefinition instance (fresh OR an existing
         // database element being overwritten in place).
+        // The target formation's max pawn count = its Dummies array length (what FillFormationFields sets; "Dummies.Length
+        // IS the max pawn count" per the header notes). 0 if unreadable — the caller then skips reform for that entry.
+        static int FormationDummyCount(object formationDef)
+        {
+            try { if (formationDef != null && AccessTools.Field(formationDef.GetType(), "Dummies")?.GetValue(formationDef) is Array arr) return arr.Length; }
+            catch { }
+            return 0;
+        }
+
         static void FillFormationFields(object so, Type fdType, Entry e)
         {
             var dummyType = fdType.GetNestedType("DummyData");

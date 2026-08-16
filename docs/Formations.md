@@ -126,7 +126,7 @@ to keep whatever count a unit had when it first rendered.
 | Key (`[Formations]`) | Default | Effect |
 |---|---|---|
 | `FormationOverride` | `true` | Master switch. Reads `haf_formations.json`, injects + repoints. Inert if the file is absent/empty. |
-| `FormationReinstantiate` | `true` | After apply, re-form already-spawned under-count units (load-race catch-up). Costs a one-time visible re-form pop. |
+| `FormationReinstantiate` | `true` | After apply, re-form already-spawned under-count units (load-race catch-up). Costs a one-time visible re-form pop. Covers both **inject/overwrite** entries and **pure-repoint** links (a unit pointed at a formation already in the DB) — the catch-up targets the resolved *target* formation's dummy count, so a repoint-only link's pre-override units are re-formed too. |
 
 ## Troubleshooting (read `BepInEx/LogOutput.log`)
 
