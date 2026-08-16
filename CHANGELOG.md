@@ -106,6 +106,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   StaticRoot-only rig and shipped a static single-bone model; now aborts. Verified: the OrganGun re-baked clean
   (residual `0.000000` asserted OK, rotation+scale applied, `ANIMATED DONE`, no false abort).
 
+- **MODEL FACTORY — Remove flow fixed (2026-08-16, ENCReload editor).** Critical-review #1 + a follow-on: (a) the
+  Remove button reset `selected` but not `sel`, so the popup-apply reloaded the stale index on the shrunken list —
+  jumping to a different entry, or `IndexOutOfRangeException` when the removed entry was the alphabetically last
+  (Clone already reset both). (b) The "delete baked assets?" prompt was a second sequential modal that could be
+  missed, and once the entry was gone it could never be re-triggered (orphan assets, no cleanup). Both replaced by
+  one `DisplayDialogComplex` on Remove — **Remove + delete files / Cancel / Remove, keep files** — so the delete
+  question is always asked once, reliably; deletion still uses the exact `OutputSuffixes` whitelist (never a glob).
+
 - **BATTLE GUNNERY — the Jagdpanzer arc (2026-08-06).** A casemate tank destroyer exposed, one shot at a
   time, that vanilla **never rotates a vehicle's hull in battle** (vehicles aim only via a turret bone slot —
   invalid on custom rigs), and grew the full gunnery chain in a day: **battle hull-aim** (the map bombard's
