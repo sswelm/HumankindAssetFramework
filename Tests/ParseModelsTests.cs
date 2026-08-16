@@ -60,6 +60,34 @@ namespace HumankindAssetFramework.Tests
             Assert.Equal(3f, e[1].scale);
         }
 
+        // The generic ToObject path deserializes the `position` Vector3 from its {x,y,z} object (the parse then re-pins it
+        // from the same read, so it's immune to any struct-deserialization quirk). Proves the Vector3 field round-trips.
+        [Fact]
+        public void ParseModels_ParsesPositionVector()
+        {
+            var e = Assert.Single(UniversalInject.ParseModels(
+                @"{ ""models"": [ { ""resourceName"": ""P"", ""position"": { ""x"": 1.5, ""y"": -2.0, ""z"": 0.25 } } ] }"));
+            Assert.Equal(1.5f, e.position.x);
+            Assert.Equal(-2f, e.position.y);
+            Assert.Equal(0.25f, e.position.z);
+        }
+
+        // A field omitted from the JSON falls to the SHARED HafModelSchema initializer (not a hand-listed parse default):
+        // idleAltInterval -> 25f (the editor default), turretAxis -> -1. A present value still wins. Locks the generic
+        // deserialize's default behavior to the one authoritative declaration.
+        [Fact]
+        public void ParseModels_OmittedFields_UseSharedSchemaDefaults()
+        {
+            var def = Assert.Single(UniversalInject.ParseModels(@"{ ""models"": [ { ""resourceName"": ""D"" } ] }"));
+            Assert.Equal(25f, def.idleAltInterval);
+            Assert.Equal(-1, def.turretAxis);
+
+            var set = Assert.Single(UniversalInject.ParseModels(
+                @"{ ""models"": [ { ""resourceName"": ""S"", ""idleAltInterval"": 4.0, ""turretAxis"": 2 } ] }"));
+            Assert.Equal(4f, set.idleAltInterval);
+            Assert.Equal(2, set.turretAxis);
+        }
+
         // When JObject.Parse rejects the document (here: truncated), the regex fallback still recovers the fields.
         // NOTE: the fallback keys the entry count on Min(pawnDescription, skel, atlas) — a recoverable model needs all
         // three (line ~729). That's the fallback's documented shape, so the test carries an atlas too.
