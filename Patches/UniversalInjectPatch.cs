@@ -215,6 +215,8 @@ namespace HumankindAssetFramework
             public string modId = "", file = "";
             public string assetDir = "";              // per-pack ASSET ROOT (2026-07-19): file-based assets (WAVs in sounds/, PNGs in skins/) resolve here FIRST, then fall back to the legacy shared haf_sounds/haf_skins — so a third-party pack ships self-contained instead of feeling like an ENC extension. "" (the base pack) = legacy folders only.
             public int schemaVersion;
+            public string moduleName = "";           // HK LOAD ORDER (2026-08-16): the Humankind runtime module this pack extends. Packs load in the SAME order the game loads their modules. Defaults to the pack's own folder (subdir pack) / filename (flat) — == the module Name by convention, INDEPENDENT of modId (ENC's modId is "enc" but its folder/module is "ENCReload"); an explicit "module" key overrides.
+            public string moduleGuid = "";           // optional explicit HK module GUID; wins over moduleName when it matches (stable across a module rename/retitle).
             public List<string> dependsOn = new List<string>();
             public List<string> loadAfter = new List<string>();
             public List<PackOverride> overrides = new List<PackOverride>();   // ENFORCED since 2026-07-19: an explicit, declared replacement of another pack's entry
@@ -234,9 +236,11 @@ namespace HumankindAssetFramework
             var built = new List<ModelEntry>();
             try
             {
-                // DISCOVERY: the ENC base registry (haf_models.json) + every *.json a third-party mod drops in haf_packs/.
-                // Each file is a PACK; a joining modder ships their own pack instead of editing ours. The base loads FIRST,
-                // so ENC's own models are protected from an accidental clash (first-loaded wins — see the merge below).
+                // DISCOVERY: every *.json / <mod>/pack.json a modder drops in haf_packs/ (+ a legacy haf_models.json base
+                // file if present). Each file is a PACK — the content-extension of a Humankind runtime MODULE; a joining
+                // modder ships their own pack instead of editing ours. Packs are then ORDERED to match the game's own
+                // module load order (see the HK-ORDER step below), so first-loaded-wins conflicts resolve exactly as the
+                // player's mod order dictates — the framework borrows HK's ordering instead of inventing one.
                 var basePath = Path.Combine(Paths.ConfigPath, "haf_models.json");
                 var files = new List<string>();
                 if (File.Exists(basePath)) files.Add(basePath);
@@ -268,6 +272,36 @@ namespace HumankindAssetFramework
                 // topologically sorted over dependsOn + loadAfter (stable — no declared constraints = the old
                 // base-first + filename order, byte-identical), cycles fall back loudly. See ResolvePacks.
                 var resolution = new List<string>();
+
+                // HK-ORDER (2026-08-16): a HAF pack is the content-extension of a Humankind runtime module, so packs load
+                // in the SAME order the game loaded their modules (the player's mod order). Match each pack to its module
+                // by explicit moduleGuid, else explicit/auto moduleName (== the pack's folder/file name by convention);
+                // matched packs sort by the module's load-order INDEX, unmatched packs keep alphabetical order after them.
+                // OrderBy is a STABLE sort, so the alphabetical seed order is preserved within an equal key. If the game's
+                // module list can't be read (called too early, game update), packs stay alphabetical — the prior behavior.
+                var rawMods = GetRuntimeModulesRaw();
+                if (rawMods != null && rawMods.Length > 0)
+                {
+                    var nameIdx = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                    var guidIdx = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                    for (int i = 0; i < rawMods.Length; i++)
+                    {
+                        var parts = (rawMods[i] ?? "").Split('\\');   // "Name\GUID\Version\CRC32\UID\GameVersion"
+                        if (parts.Length > 0 && parts[0].Length > 0 && !nameIdx.ContainsKey(parts[0])) nameIdx[parts[0]] = i;
+                        if (parts.Length > 1 && parts[1].Length > 0 && !guidIdx.ContainsKey(parts[1])) guidIdx[parts[1]] = i;
+                    }
+                    Func<Pack, int> orderOf = p =>
+                    {
+                        if (!string.IsNullOrEmpty(p.moduleGuid) && guidIdx.TryGetValue(p.moduleGuid, out var gi)) return gi;
+                        if (!string.IsNullOrEmpty(p.moduleName) && nameIdx.TryGetValue(p.moduleName, out var ni)) return ni;
+                        return int.MaxValue;   // unmatched -> alphabetical tail after all module-matched packs
+                    };
+                    packs = packs.OrderBy(orderOf).ToList();
+                    resolution.Add("HK module order: " + string.Join(" → ", packs.Select(p =>
+                        { int o = orderOf(p); return p.modId + (o == int.MaxValue ? " (no matching module — alphabetical)" : " #" + o + "→" + p.moduleName); })));
+                }
+                else resolution.Add("Humankind module order unavailable — packs kept alphabetical");
+
                 packs = ResolvePacks(packs, resolution);
                 if (packs.Count == 0) throw new Exception("no packs survived resolution (see haf_load_report.txt)");
 
@@ -421,6 +455,26 @@ namespace HumankindAssetFramework
             }
         }
 
+        // Read Humankind's ordered ACTIVE runtime-module list — one encoded string per module IN LOAD ORDER
+        // ("Name\GUID\Version\CRC32\UID\GameVersion"). Path: Amplitude.Framework.Services.GetService(IRuntimeService)
+        // -> Amplitude.Mercury.Runtime.IRuntimeService.GetRuntimeModules(). Fully reflected + guarded: returns null if
+        // the API can't be reached (game update, or called before the runtime is up) so the caller falls back to
+        // alphabetical pack order. The game sorts modules Standalone→Conversion→Extension, stable within the player's
+        // selection, so index 0 is vanilla and higher indices are later-loaded mods.
+        static string[] GetRuntimeModulesRaw()
+        {
+            try
+            {
+                var servicesT = Type.GetType("Amplitude.Framework.Services, Amplitude.Framework");
+                var iRuntime  = Type.GetType("Amplitude.Mercury.Runtime.IRuntimeService, Amplitude.Mercury.Firstpass");
+                if (servicesT == null || iRuntime == null) return null;
+                var svc = servicesT.GetMethod("GetService", new[] { typeof(Type) })?.Invoke(null, new object[] { iRuntime });
+                if (svc == null) return null;
+                return iRuntime.GetMethod("GetRuntimeModules")?.Invoke(svc, null) as string[];
+            }
+            catch (Exception ex) { Plugin.Diag("[Uni] runtime-module order unavailable (" + ex.Message + ") — packs stay alphabetical."); return null; }
+        }
+
         // Parse one pack file into its wrapper metadata + models. The wrapper is OPTIONAL: a legacy bare { "models": [...] }
         // yields default metadata (modId = "enc" for the base file, else the filename). Throws only if the file can't be read.
         static Pack ParsePack(string file, bool isBase)
@@ -438,12 +492,18 @@ namespace HumankindAssetFramework
                 // shared folders); the base pack keeps the legacy haf_sounds/haf_skins.
                 assetDir = isBase ? "" : isDirPack ? Path.GetDirectoryName(file)
                                                    : Path.Combine(Path.GetDirectoryName(file), Path.GetFileNameWithoutExtension(file)),
+                // module match key (auto): the pack's own folder (subdir pack) or filename (flat) — the HK module Name
+                // by convention. Computed INDEPENDENTLY of modId so ENC (modId "enc", folder "ENCReload") still maps.
+                moduleName = isBase ? "" : isDirPack ? Path.GetFileName(Path.GetDirectoryName(file))
+                                                     : Path.GetFileNameWithoutExtension(file),
             };
             try
             {
                 var root = JObject.Parse(text);
                 if (root["modId"] != null) pk.modId = (string)root["modId"];
                 if (root["schemaVersion"] != null) pk.schemaVersion = (int)root["schemaVersion"];
+                if (root["module"] != null) pk.moduleName = (string)root["module"];        // explicit override of the folder-name auto-match
+                if (root["moduleGuid"] != null) pk.moduleGuid = (string)root["moduleGuid"];
                 pk.dependsOn = StrList(root["dependsOn"]);
                 pk.loadAfter = StrList(root["loadAfter"]);
                 if (root["overrides"] is JArray ovs)
@@ -465,6 +525,10 @@ namespace HumankindAssetFramework
                 if (mid.Success && mid.Groups[1].Value.Length > 0) pk.modId = mid.Groups[1].Value;
                 var sv = Regex.Match(text, "\"schemaVersion\"\\s*:\\s*(\\d+)");
                 if (sv.Success && int.TryParse(sv.Groups[1].Value, out var svi)) pk.schemaVersion = svi;
+                var mm = Regex.Match(text, "\"module\"\\s*:\\s*\"([^\"]*)\"");
+                if (mm.Success && mm.Groups[1].Value.Length > 0) pk.moduleName = mm.Groups[1].Value;
+                var mg = Regex.Match(text, "\"moduleGuid\"\\s*:\\s*\"([^\"]*)\"");
+                if (mg.Success && mg.Groups[1].Value.Length > 0) pk.moduleGuid = mg.Groups[1].Value;
                 pk.dependsOn = RegexStrArray(text, "dependsOn");
                 pk.loadAfter = RegexStrArray(text, "loadAfter");
                 var ovBlock = Regex.Match(text, "\"overrides\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
