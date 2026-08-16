@@ -422,7 +422,6 @@ namespace HumankindAssetFramework
                 GUI.color = prev;
                 GUILayout.Space(4);
             }
-            GUILayout.Label($"Target mod: {TargetMod.Value}     Filter: \"{AssetNameFilter.Value}\"");
             using (new GUILayout.HorizontalScope())
             {
                 if (GUILayout.Button("Dump Atlases")) UniversalInject.DumpOutputLayerAtlases(atlasFilter);   // Unit Retexture workflow: dump a unit's atlas to paint
@@ -474,7 +473,7 @@ namespace HumankindAssetFramework
             GUILayout.Space(4);
             scroll = GUILayout.BeginScrollView(scroll, GUILayout.Height(320));
             if (Prober.Report.Count == 0)
-                GUILayout.Label("No scan yet — load a game (auto-scans on load).");
+                GUILayout.Label("Press \"Smoke Test\" to check HAF loaded + injected your mod (result shows here).");
             foreach (var line in Prober.Report)
                 GUILayout.Label(line);
             GUILayout.EndScrollView();
