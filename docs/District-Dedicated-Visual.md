@@ -72,7 +72,12 @@ For each live district whose `ConstructibleDefinitionName` matches:
    full-texture path (`textureIndex = 1` + `AddNullAtlasInfo`), re-asserted every 15 ticks (resolution switches
    rebuild the layer's materials). Keeps the donor's normal/rough maps when the district ships none.
 
-All of it re-arms on save/reload via `ResetDistrictSessionState`.
+All of it re-arms on save/reload via `ResetDistrictSessionState`, which drops every session-scoped binding and
+**frees the session's runtime clones** — the private leaves, cloned selectors/output-layers, deep-clone material
+nodes and the B&W gray albedo are all `Object.Instantiate`/`new Texture2D` copies that Unity's unused-asset
+sweep never collects, so they're tracked as they're created (never a `LoadAsset`'d bundle atlas) and `Destroy`ed
+on the main-thread `Update` after a reset (the reset itself can run off-thread via `Sandbox.Load`). Without this,
+each in-session reload leaked one FxOutputLayer + N cloned materials + a gray texture per scoped district.
 
 ## Preview fidelity (District Factory)
 

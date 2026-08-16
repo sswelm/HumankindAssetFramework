@@ -143,6 +143,9 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
   [Animated-Runtime.md](docs/Animated-Runtime.md).
 - **Skins are never destroyed out from under a reload** — the re-arm only frees textures HAF creates, never the shared
   baked atlas asset.
+- **No per-reload leak** — the runtime clones both axes make (the model isolated layers/skins, the district private
+  leaves / cloned layers / B&W footprint texture) are freed on each session reset, so a long play session with many
+  reloads doesn't accumulate orphaned GPU objects.
 
 > **Polishing:** moving **caterpillar tracks** (treadize) run in-game, with a remaining idle micro-twitch to smooth out;
 > the **death / battle-start war-cry** creature voices are built and awaiting in-game verification. See [CHANGELOG.md](CHANGELOG.md).
