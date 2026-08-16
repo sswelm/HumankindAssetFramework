@@ -128,6 +128,9 @@ namespace HumankindAssetFramework
         internal static Type GameObjectPoolController        => Cached("PresentationGameObjectPoolController");
         // ---- world state ----
         internal static Type Sandbox             => Cached("Amplitude.Mercury.Sandbox.Sandbox");
+        // ---- runtime module order (pack load order follows the game's own mod order — docs/Multi-Mod.md) ----
+        internal static Type FrameworkServices   => Cached("Amplitude.Framework.Services");
+        internal static Type RuntimeService      => Cached("Amplitude.Mercury.Runtime.IRuntimeService");
 
         // Resolve each dep. Unit-testable against known .NET types (the game types simply aren't present in a test host,
         // which exercises the "missing type" path).
@@ -168,6 +171,34 @@ namespace HumankindAssetFramework
         internal static int HealthMissing;
         internal static readonly List<string> HealthDetail = new List<string>();
 
+        static string SafeVersion() { try { return UnityEngine.Application.version ?? "?"; } catch { return "?"; } }
+
+        // Machine-readable sibling of the startup log line: a full PASS/MISSING listing written to
+        // BepInEx/config/haf_bindings_report.txt every launch, right next to haf_load_report.txt. A game update — or a
+        // headless CI launch on a new build — then yields ONE diffable file that names exactly which bindings broke,
+        // instead of hunting the log or waiting for a feature to misbehave in-game. This is the machine-readable half of
+        // the reflection-drift net: as more raw Type.GetType/GetMethod sites migrate onto GameBinding accessors + this
+        // Catalog, they each show up here for free (the first migration was GetRuntimeModules — FrameworkServices/RuntimeService).
+        static void WriteReport(List<DepResult> results, int typesMissing, int membersMissing)
+        {
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine("HAF binding report  (regenerated every launch)");
+                sb.AppendLine($"game={SafeVersion()}  verified={(string.IsNullOrEmpty(VerifiedGameVersion) ? "-" : VerifiedGameVersion)}  " +
+                              $"resolved={results.Count - typesMissing}/{results.Count} type(s)  missing_types={typesMissing}  missing_members={membersMissing}");
+                sb.AppendLine();
+                foreach (var r in results)
+                {
+                    if (!r.TypeFound) sb.AppendLine($"[MISSING TYPE]    {r.Type}");
+                    else if (r.MissingMembers.Count > 0) sb.AppendLine($"[MISSING MEMBER]  {r.Type}: {string.Join(", ", r.MissingMembers)}");
+                    else sb.AppendLine($"[ok]              {r.Type}");
+                }
+                System.IO.File.WriteAllText(System.IO.Path.Combine(BepInEx.Paths.ConfigPath, "haf_bindings_report.txt"), sb.ToString());
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[GameBinding] binding report write failed: " + ex.Message); }
+        }
+
         internal static void ValidateAndLog(IEnumerable<Dep> deps)
         {
             try
@@ -176,6 +207,7 @@ namespace HumankindAssetFramework
                 int typesMissing = results.Count(r => !r.TypeFound);
                 int membersMissing = results.Where(r => r.TypeFound).Sum(r => r.MissingMembers.Count);
                 HealthDetail.Clear();
+                WriteReport(results, typesMissing, membersMissing);   // always write the full machine-readable report, pass or fail
                 if (typesMissing == 0 && membersMissing == 0)
                 {
                     HealthSummary = null; HealthMissing = 0;
@@ -254,6 +286,10 @@ namespace HumankindAssetFramework
             new Dep(GameObjectPoolController, nameof(GameObjectPoolController)),
             // world
             new Dep(Sandbox, nameof(Sandbox), "MajorEmpires", "NumberOfMajorEmpires", "Timeline"),
+            // runtime module order — the ordered active-mod list HAF sorts packs by (docs/Multi-Mod.md). First reflection
+            // site migrated onto the catalog (was a raw Type.GetType in GetRuntimeModulesRaw); a rename now shows here.
+            new Dep(FrameworkServices, nameof(FrameworkServices), "GetService"),
+            new Dep(RuntimeService, nameof(RuntimeService), "GetRuntimeModules"),
             // NOTE: AudioEventHandle has an accessor but is NOT in this startup catalog — it's a genuine LATE-LOADER (the
             // Wwise event-handle type loads after the menu), so it can't resolve at this report's Awake time and would
             // false-positive. Its accessor re-resolves on first use (the audio catalog dump / audition) in a loaded game.

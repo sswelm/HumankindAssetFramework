@@ -465,8 +465,11 @@ namespace HumankindAssetFramework
         {
             try
             {
-                var servicesT = Type.GetType("Amplitude.Framework.Services, Amplitude.Framework");
-                var iRuntime  = Type.GetType("Amplitude.Mercury.Runtime.IRuntimeService, Amplitude.Mercury.Firstpass");
+                // Types resolved via GameBinding accessors — the ONE place their names live, and the startup binding
+                // report validates them (haf_bindings_report.txt). This is the reflection-drift-net migration pattern:
+                // no raw Type.GetType at the call site, so a game rename surfaces in the report instead of silently here.
+                var servicesT = GameBinding.FrameworkServices;
+                var iRuntime  = GameBinding.RuntimeService;
                 if (servicesT == null || iRuntime == null) return null;
                 var svc = servicesT.GetMethod("GetService", new[] { typeof(Type) })?.Invoke(null, new object[] { iRuntime });
                 if (svc == null) return null;
