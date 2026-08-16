@@ -25,7 +25,18 @@ rendered pawn: `SkeletonId`, `ObjectSpace` TRS, `Pose0..Pose8` blend slots, the 
 **The plugin (`UniversalInject`):** a Harmony postfix at registration time (`AnimationLoad`) and one on
 `PawnManager.AddPawnEntry` — the per-frame pose write.
 
-## 2. Registration (once per session, at AnimationLoad)
+## 2. Registration (at AnimationLoad + every save-reload)
+
+> **`AnimationLoad` fires once per PROCESS, not per save-load** (proven 2026-08-16: a two-save load-order
+> repro logged `EnsureRegistered` exactly once). So the plugin **cannot** rely on it to re-arm when you load a
+> *second* save in the same app run — the game rebuilds its `AnimationManager` (fresh skeleton/mesh slots),
+> but our registration would stay bound to the first save's manager. Left unfixed, an animated custom unit
+> present in both saves skins against stale slots and **tears** on the second load (clean on a fresh load).
+> The re-arm therefore ALSO hangs off the per-save-load seam — `Sandbox.Load` (the same hook the district axis
+> and facing-persistence use). That hook may run off the main thread, so it only sets a flag
+> (`RequestReloadRearm`); the flag is consumed on the next main-thread `Update` tick
+> (`ConsumePendingReloadRearm → RearmModelRegistration`), which unlatches `registered` and drops session-scoped
+> state, and `RepointMatch` then lazily re-registers into the new manager as each unit's addon loads. See §5.
 
 1. The plugin loads each registry model's ClipCollection by GUID and **appends it to the private
    `loadedAnimationClipCollections` array *before* `Apply()` runs** — Apply's builder then bakes our clip into the
@@ -74,8 +85,9 @@ one-off. There is **no managed per-frame per-bone loop** — a common wrong assu
   ramps (`ProcessDeployState`), formation/respawn scans, and movement audio each run behind a frame-modulo gate —
   ~10–20×/s, not every frame (`Combat.cs`: `stateFrame % 3` / `deployFrame % 3` ≈ 20×/s; era re-scale polls every
   2 s). The per-frame hook only *consumes* their published result.
-- **Registration is once per session** (§2): clips and skeletons resolve to cached `AnimationId`s at `AnimationLoad`,
-  never per frame — so there are no string-keyed clip lookups in the hot path.
+- **Registration is once per load** (§2): clips and skeletons resolve to cached `AnimationId`s at `AnimationLoad`
+  (and re-resolve on each save-reload via the `Sandbox.Load` re-arm), never per frame — so there are no
+  string-keyed clip lookups in the hot path.
 - **Cost scales by model *type*, not instance.** The GPU mesh buffer is the real ceiling, spent per distinct model
   type — see [Vertex-Budget](Vertex-Budget.md). A hundred *instances* of one animated model is cheap; a hundred
   distinct animated *types* would exhaust the buffer long before CPU mattered.
@@ -171,6 +183,17 @@ Per bone, per pose slot (`ApplyPose` → `GetPoseTRS`):
   instance left on a vanilla skeleton renders mis-skinned).
 - **Save-load spawn race** (models borrowing a donor's animated sub-part, e.g. a rotor): fixed by re-running the
   game's own `PresentationUnit.UpdatePawns` shortly after load (`respawnAfterLoad`, per model).
+- **In-session save-reload re-arm** (2026-08-16): loading a *second* save in one app run does NOT re-fire
+  `AnimationLoad`, so registration is re-armed on `Sandbox.Load` as well (§2). Skipping this left our skeletons
+  bound to the first save's `AnimationManager` — an animated unit in both saves (the organ gun) **tore** on the
+  second load, clean on a fresh load. The re-arm reset also re-runs the whole model-axis session cleanup (audio
+  sources, deploy/state maps, textures) that previously only ran at `AnimationLoad`, so other second-load
+  glitches clear with it.
+- **Never `Destroy` a `LoadAsset`'d skin.** The re-arm cleanup destroys textures the plugin *creates*
+  (`LoadSkinPng` / `BuildAdjustedAtlas`, tracked by `ModelEntry.texOwned`) but **never** the raw bundle atlas
+  from `LoadAtlas` (`AssetDatabase.LoadAsset<Texture2D>`) — that is a *shared* game asset, and destroying it
+  makes the next `LoadAsset` return `null`, so the model loses its skin and falls back to the donor look (the
+  organ gun rendered **red** for exactly this reason once the re-arm began running every load).
 - A corrupted skeleton state can disrupt **more than the pose**: while the soldier's rig was broken, the unit's
   projectile visual also vanished (attack sim + audio unaffected); it returned with the clean rig.
 

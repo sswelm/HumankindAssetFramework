@@ -918,11 +918,13 @@ namespace HumankindAssetFramework
         {
             if (!reloadRearmPending) return;
             reloadRearmPending = false;
-            try { RearmModelRegistration(); }
+            // resetDistricts:false — the Sandbox.Load hook already reset the district axis SYNCHRONOUSLY (it must beat
+            // the district presentation hooks); re-running it here would just churn a needless second reset+rebuild.
+            try { RearmModelRegistration(resetDistricts: false); }
             catch (Exception ex) { Plugin.Log.LogError("[Uni] deferred load re-arm: " + ex); }
         }
 
-        internal static void RearmModelRegistration()
+        internal static void RearmModelRegistration(bool resetDistricts = true)
         {
             registered = false;
             anyAnimated = null; anyMuzzle = null; anyFreeze = null; anyRescuable = null;                    // recomputed on the next pawn-add
@@ -933,7 +935,7 @@ namespace HumankindAssetFramework
             // DISTRICT runtime state is session-scoped too (the Oracle incident): the cached FxManager, each entry's
             // matched component, its private leaf (a clone of a SESSION-1 material whose cloned output layer registered
             // into the OLD renderer) and the texture-injection state all reference dead objects after a new game loads.
-            ResetDistrictSessionState();
+            if (resetDistricts) ResetDistrictSessionState();
             var list = entries;
             if (list != null)
                 foreach (var e in list)
@@ -976,7 +978,7 @@ namespace HumankindAssetFramework
             // captured from session-1 presentation objects — reusing them in a second game points at torn-down GPU
             // state. ONE canonical reset (a hand-rolled copy here had already drifted: it missed the texture bindings
             // and cached bind slots) — DistrictApplyEntries re-derives per district instance as the new session loads.
-            ResetDistrictSessionState();
+            if (resetDistricts) ResetDistrictSessionState();
         }
 
     }

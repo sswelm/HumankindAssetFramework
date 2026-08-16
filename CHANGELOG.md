@@ -10,6 +10,21 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Units & animation
 
+- **SAVE-RELOAD ISOLATION — the organ-gun load-order bug (2026-08-16).** Loading a heavy save then another in
+  one app run tore an animated custom unit (the organ gun) and, once the mesh bound, painted it the wrong donor
+  **red**; a fresh load was always clean. The F8 GPU-mesh-buffer readout (a `+1 mesh / +4.7k verts` diff on the
+  second load) ruled out buffer overflow and pointed at stale isolation, and a per-load registration dump found
+  the cause: **`AnimationManager.AnimationLoad` fires once per PROCESS, not per save-load** — the whole
+  model-axis re-arm hung off it, so the second load never re-registered our skeletons into the game's rebuilt
+  `AnimationManager` (the district axis already re-armed on `Sandbox.Load`; the unit axis just never did). Fix:
+  re-arm on `Sandbox.Load` too (thread-safe flag → main-thread `Update` consume, since the load hook may be off
+  the main thread). That exposed a second, older trap: the re-arm cleanup `Destroy()`'d `e.tex` unconditionally,
+  but for a normally-textured model that is the **shared bundle atlas** from `AssetDatabase.LoadAsset` —
+  destroying it made the reload's `LoadAsset` return `null` (the red skin). Fix: `ModelEntry.texOwned` — only
+  destroy textures the plugin creates, never a `LoadAsset`'d asset. Both verified in-game on the load-order
+  repro. Bonus: the model-axis session cleanup (audio/deploy/state maps) now runs on *every* reload, not just
+  the first.
+
 - **BATTLE GUNNERY — the Jagdpanzer arc (2026-08-06).** A casemate tank destroyer exposed, one shot at a
   time, that vanilla **never rotates a vehicle's hull in battle** (vehicles aim only via a turret bone slot —
   invalid on custom rigs), and grew the full gunnery chain in a day: **battle hull-aim** (the map bombard's
