@@ -322,3 +322,69 @@ that could never arm itself). Recorded separately with file:line, in-game sympto
 
 Top item (now FIXED in `c6154a6`, pending in-game verification) — the wrong-skeleton rescue was gated on `Hooked` (animated-or-freeze), so eight shipped STATIC models have
 no rescue path at all: the same failure `0c0b12f` fixed, still live for them.
+
+# 2026-08-16 critical review — whole framework (plugin + editor)
+
+A full multi-agent review of the plugin and editor. **All CONFIRMED findings were fixed, verified in-game/at-bake,
+and merged** — district clone leak, `hideSubPawns` coexistence, `coreDesc` matcher unification, formation
+pure-repoint reform, GameBinding army-walk-root coverage, audio death/battle gate, three runtime-clone leaks,
+state-machine gate mismatch, the facing-after-respawn interaction, and the three bake silent-mis-bake guards (4A/2A/4B).
+See the dated CHANGELOG entries. What remains below is the **PLAUSIBLE / low-confidence tail** — deferred, not
+dismissed.
+
+## Bake scripts — PLAUSIBLE (ENCReload `Tools/`, needs a failing repro before touching gating)
+
+- **1A — `convert_rig` vs `clean_units` gating asymmetry** (`rig_anim.py`: topological bone rename gated on
+  `convert_rig` alone, but the clean-unit export + rest/scale fold on `convert_rig OR clean_units_input`). A
+  `DeployArmV2` FBX with argv[8] absent/`0` + zero rotation → `convert_rig=False`, `clean_units_input=True` → clean
+  export runs but bones keep raw part names → Amplitude's alphabetical sort can put a child before its parent →
+  ParentIndex ≥ own → model explodes. **Fix candidate:** make the two gates the same flag. **RISK:** changing bake
+  gating without a failing repro can break a verified path — get a repro first.
+- **4C — empty/constant primary action → frozen clip with exit 0** (`rig_anim.py` ~510-520): the `kept == 0`
+  hard-fail only runs when a bone-prefix filter is supplied; a no-prefix bake of a constant action bakes frozen.
+- **1B — ordinal vs culture sort** (`rig_anim.py` ~1038): the socket-order guard uses Python ordinal `>`, but it is
+  predicting C# `string.Compare` (culture-sensitive) — a donor name whose culture order differs from ordinal order
+  passes the guard yet sorts the socket before its parent. Narrow (uppercase donors agree).
+- **1C — `%03d` bone-index width** (`rig_anim.py` ~998): `A1000_` sorts before `A999_`, inverting order above 999
+  bones. Unreachable under the 240-bone cap today; a hard assumption worth a comment.
+
+## Plugin — low-risk hardening (Tier 4)
+
+- **Harmony `TargetMethod` param-count filters**: `Hk_DistrictGroundMaterial` / `Hk_DistrictHexSculpt`
+  (`UniversalInject.Hooks.cs`) resolve by method name with no `GetParameters().Length` filter (unlike their
+  siblings) — a future overload could be patched silently. `Hk_BattleTurnProbe` (`BattleTurnPatch.cs`) indexes
+  `GetParameters()[0]` without a length check.
+- **`Hk_SilenceEvents.Prefix`** (`Hooks.cs`) reads `eo.name` (native marshal alloc) on every Wwise `PostEvent`
+  before its gate; mirror `Hk_AudioTrace`'s early-out. (Both also patch the same `PostEvent` = two detours/sound.)
+- **Belt-and-braces `try/catch`** on the multi-call postfix bodies of `UniRegisterHook` / `UniRepointHook` /
+  `Hk_DistrictRepoint` — they sit inside core loading methods and rely entirely on every callee being self-guarded.
+- **`LongestMatch` equal-length tiebreak** (`UniversalInjectPatch.cs` ~889): among equal-length key matches the
+  first in registry order wins; the `count>1` warning fires but the (possibly wrong) bind still proceeds.
+- **`TryLearnClass`** (`UniversalInject.Clips.cs` ~198): takes the FIRST class-sample within 2u (not nearest) and
+  caches it permanently — a stacked neighbour of a different class can mis-categorise a unit's turn-ease for the session.
+- **Diagnostic-map growth**: `deployMoveState` (`Combat.cs`) is nulled cross-session but never pruned within a
+  session (siblings are).
+- **Muzzle-compensation stash** (`Combat.cs` ~605-624): module statics assume `StartEvent→GetBoneTRS→EndEvent` is
+  atomic; nested/interleaved fires of coexisting shooters could cross offsets. Confidence limited (needs the engine
+  to actually nest these).
+- **`BoneRotation` slot clobber** (`UniversalInject.Pose.cs`): on the `useDonorClip` path `ApplyRotorSpin` /
+  `ApplyRotorTrim` / `ApplyGunElevation` write overlapping low slots — a rotor-spin + trim combo can clobber.
+
+## Data contract — low (editor ⇄ plugin)
+
+- **`rotorSpinBones` / `rotorSpinSpeed`** are plugin-only fields with no editor `ModelDef` field → a hand-authored
+  pack.json value is silently wiped on the next Factory Save (JsonUtility drops unknown keys). Latent (ENC unused).
+- **`idleAltInterval` default mismatch** (editor 25f / plugin 0f) — a pack.json missing the key gets idle-alt
+  disabled instead of the documented 25s cadence.
+- **`haf_districts.json` has no regex fallback** — one malformed char disables ALL custom districts (the model
+  registry has a fallback; districts don't).
+- **`animated` flag written but not read** — the plugin infers animation from the clip-GUID presence, so the field
+  is a silently-ignored authored value.
+- Regex-fallback float fields can't parse exponent notation (`1E-05`); narrow (malformed-JSON path only).
+
+## GameBinding — remaining catalog gaps (extend the "make drift loud" template)
+
+District-ground/hex support types resolved reflectively but off-catalog: `AssetReferenceRepository`,
+`Amplitude.StaticString`, `GroundMaterialDefinition`, `AnimationVariableNames`, `HgFxAnchorComponent`. A rename
+there degrades silently. (The `SimulationEvent_*` combat types resolve with their own local warnings, so they're
+loud-but-off-catalog.)
