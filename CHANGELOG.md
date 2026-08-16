@@ -38,6 +38,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   still over the real **128** wall, so bones 128–222 (the arm chains = the "wings") were always going to
   collapse. No engine-import decompile needed; the culprit was the GPU skin's per-vertex bone-index ceiling.
 
+- **MODEL FACTORY rename is a real rename now (2026-08-16, editor).** Editing the Resource-name field of a
+  loaded entry and then Save / Save-settings / Bake keyed the ownership rebase + GUID-carry on the *new* name,
+  which matched nothing — the rebase early-returned, the carry was skipped, and `Upsert` **added a second entry**
+  while the old one and its baked assets orphaned. A rename silently made a duplicate. Fix (ENCReload `170e329`):
+  resolve the source by the name the form was LOADED under (`existing[selected]` — the same reliable signal the
+  Remove button keys on; null/`<New>` for a fresh or cloned form, so a Clone is never a rename). The rebase +
+  carry key on that, so the renamed entry inherits the source's Lab-owned fields + baked GUIDs (Unity GUIDs are
+  filename-independent → a no-bake rename resolves in-game with no re-bake); the old entry is dropped after a
+  successful Upsert, and a rename onto a name a DIFFERENT model owns is refused rather than clobbering it. Also
+  collapses the case-only-rename twin-entry case into one entry. Editor-verified with a `SiegeHowitzersCar` ↔
+  `SiegeHowitzersCar2` round-trip: one entry each way, `git diff` of the registry was a single renamed line.
+
 - **DISTRICT selectorGuid guard (2026-08-16, editor).** A re-bake minted a fresh `fxMesh` (delete+create) but
   only *set* `selectorGuid` on selector-bake success and never cleared a stale one, so a selector failure left
   the district Upserting as "Baked ✓" while routing through the scoped path with an old selector against the
