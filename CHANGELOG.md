@@ -38,6 +38,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   still over the real **128** wall, so bones 128–222 (the arm chains = the "wings") were always going to
   collapse. No engine-import decompile needed; the culprit was the GPU skin's per-vertex bone-index ceiling.
 
+- **MACHINE-READABLE BINDING REPORT — reflection-drift net, step 1 (2026-08-16, verified in-game).** The maintainability
+  review flagged game-update fragility as the top structural risk: ~1,475 reflection bindings that fail at *runtime*, found
+  by squinting at the log. `GameBinding` already cataloged ~47 game types + their members and validated them at startup
+  (A1), but only logged + fed F8. Now `ValidateAndLog` also writes **`BepInEx/config/haf_bindings_report.txt`** every
+  launch — game version, verified version, `resolved N/N`, then one `[ok]` / `[MISSING TYPE]` / `[MISSING MEMBER]` line per
+  binding — a diffable file (next to `haf_load_report.txt`) that a game patch, or a headless CI launch on a new build,
+  turns into one report naming exactly what broke. Also migrated the **first raw-reflection site** onto the catalog as the
+  pattern for the rest: `GetRuntimeModules()` (pack order) now resolves via `GameBinding.FrameworkServices` /
+  `RuntimeService` instead of a raw `Type.GetType`, and both are in the Catalog (47 → 49). **Verified in-game:**
+  `resolved=49/49  missing_types=0  missing_members=0`, both new bindings `[ok]` (no late-loader false positive).
+
 - **PACK ORDER FOLLOWS HUMANKIND'S MOD ORDER (2026-08-16, verified in-game).** A HAF pack is the content-extension
   of a Humankind runtime module, so packs should load in the SAME order the game loaded their modules — the player's
   own mod order — not an invented alphabetical/base rule. This also retired a dead guarantee: the loader still claimed
