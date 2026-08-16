@@ -1329,22 +1329,33 @@ namespace HumankindAssetFramework
         // (AdjustSkin desat=1 = luminance greyscale). Same readback pattern as BuildAdjustedAtlas.
         static UnityEngine.Texture2D MakeGrayCopy(UnityEngine.Texture2D src)
         {
+            // try/finally: a throw in ReadPixels/Apply must not leak the pooled RT + the half-built texture or leave
+            // RenderTexture.active dangling (see BuildAdjustedAtlas — same pattern). On success t is tracked + returned,
+            // so it's nulled before finally; on failure finally frees it.
+            var prevActive = UnityEngine.RenderTexture.active;
+            UnityEngine.RenderTexture rt = null;
+            UnityEngine.Texture2D t = null;
             try
             {
                 int w = src.width, h = src.height;
-                var rt = UnityEngine.RenderTexture.GetTemporary(w, h, 0, UnityEngine.RenderTextureFormat.ARGB32, UnityEngine.RenderTextureReadWrite.sRGB);
-                var prev = UnityEngine.RenderTexture.active;
+                rt = UnityEngine.RenderTexture.GetTemporary(w, h, 0, UnityEngine.RenderTextureFormat.ARGB32, UnityEngine.RenderTextureReadWrite.sRGB);
                 UnityEngine.Graphics.Blit(src, rt);
                 UnityEngine.RenderTexture.active = rt;
-                var t = new UnityEngine.Texture2D(w, h, UnityEngine.TextureFormat.RGBA32, false) { name = "ReactorAlbedo_Gray" };
+                t = new UnityEngine.Texture2D(w, h, UnityEngine.TextureFormat.RGBA32, false) { name = "ReactorAlbedo_Gray" };
                 t.ReadPixels(new UnityEngine.Rect(0, 0, w, h), 0, 0); t.Apply();
-                UnityEngine.RenderTexture.active = prev; UnityEngine.RenderTexture.ReleaseTemporary(rt);
                 AdjustSkin(t, 1f, 1f, 0f, 0f, 0f);   // full greyscale, no brightness/tint change
                 TrackDistrictClone(t);   // our runtime gray copy — OWN it, freed on session reset (leak fix)
                 Plugin.Log.LogInfo($"[FootprintMesh] built greyscale albedo {w}x{h} for the strategic-zoom B&W footprint.");
-                return t;
+                var result = t; t = null;   // success — tracked + returned; don't let finally free it
+                return result;
             }
             catch (Exception e) { Plugin.Log.LogWarning("[FootprintMesh] grey copy failed: " + e.Message); return null; }
+            finally
+            {
+                UnityEngine.RenderTexture.active = prevActive;
+                if (rt != null) UnityEngine.RenderTexture.ReleaseTemporary(rt);
+                if (t != null) UnityEngine.Object.Destroy(t);   // non-null only on the failure path
+            }
         }
 
         // Postfix (per district UpdateLevelBuild): match against the registry and cache each entry's component + layer.

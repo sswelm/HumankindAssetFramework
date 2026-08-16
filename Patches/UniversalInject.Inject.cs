@@ -1647,6 +1647,9 @@ namespace HumankindAssetFramework
                 { var a2 = b.LoadAsset(propName + "_Atlas"); if (a2 is UnityEngine.Texture2D t2) { propAtlas = t2; break; } }
                 if (propAtlas != null && fol is UnityEngine.Object folObj)
                 {
+                    // free a prior clone first: a LOD/save-load/respawn rebuild can drop the prop fragment, so InjectHandProp
+                    // re-runs and would orphan the previous handPropLayer (RearmModelRegistration only frees the CURRENT one).
+                    if (e.handPropLayer is UnityEngine.Object oldHpl && oldHpl) UnityEngine.Object.Destroy(oldHpl);
                     var clone = UnityEngine.Object.Instantiate(folObj);
                     clone.name = propName + "_PropLayer";
                     e.handPropLayer = clone;

@@ -88,6 +88,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   all three gates, plus a guard on the `moving` pose branch so a move-less model that moves falls back to idle.
   Zero change for ENC (all its state-driven models have a move clip); protective for a stationary-turret-style unit.
 
+- **RUNTIME-CLONE LEAKS — critical-review #7 (2026-08-16).** Three more leaks in the district-clone family:
+  (1) `InjectHandProp` overwrote `e.handPropLayer` with a fresh `Instantiate` clone on every re-inject (LOD /
+  save-load / respawn drops the prop fragment), orphaning the previous native FxOutputLayer — now the old clone is
+  Destroyed first (affects ENC's hand-prop units, no visible change). (2) `BuildAdjustedAtlas` and (3) `MakeGrayCopy`
+  (the B&W footprint) returned `null` on a `ReadPixels`/`Apply` throw without releasing the pooled RenderTexture,
+  restoring `RenderTexture.active`, or freeing the half-built texture — and `TickOne` retries every frame. Both now
+  use try/finally so the RT + active are always cleaned up and the partial texture is freed on failure. Normal
+  rendering unchanged; verified no-regression in-game.
+
 - **BATTLE GUNNERY — the Jagdpanzer arc (2026-08-06).** A casemate tank destroyer exposed, one shot at a
   time, that vanilla **never rotates a vehicle's hull in battle** (vehicles aim only via a turret bone slot —
   invalid on custom rigs), and grew the full gunnery chain in a day: **battle hull-aim** (the map bombard's

@@ -159,6 +159,13 @@ namespace HumankindAssetFramework
         // CPU-readable). The civ-colour tint is killed separately by TickOne (_ColorMask -> black).
         static UnityEngine.Texture2D BuildAdjustedAtlas(object hostLayer, float brightness, float desat, float tR, float tG, float tB, string tag)
         {
+            // NOTE the try/finally: TickOne retries this EVERY frame until the layer's atlas loads, so a throw in
+            // ReadPixels/Apply must NOT leak the pooled RT + the half-built Texture2D or leave RenderTexture.active
+            // dangling (which corrupts the next draw). finally always releases the RT, restores active, and frees the
+            // texture unless we succeeded (then it's nulled so the returned one survives).
+            var prevActive = UnityEngine.RenderTexture.active;
+            UnityEngine.RenderTexture rt = null;
+            UnityEngine.Texture2D t = null;
             try
             {
                 UnityEngine.Texture src = null;
@@ -173,18 +180,23 @@ namespace HumankindAssetFramework
                 // used to flood the BepInEx log with one warning per frame (perf pass 2026-07-19)
                 if (src == null) { if (!greyWaitLogged) { greyWaitLogged = true; Plugin.Log.LogWarning($"[Grey] {tag}: no _MainTex on the output layer yet (will keep retrying silently)"); } return null; }
                 int w = src.width, h = src.height;
-                var rt = UnityEngine.RenderTexture.GetTemporary(w, h, 0, UnityEngine.RenderTextureFormat.ARGB32, UnityEngine.RenderTextureReadWrite.sRGB);
-                var prev = UnityEngine.RenderTexture.active;
+                rt = UnityEngine.RenderTexture.GetTemporary(w, h, 0, UnityEngine.RenderTextureFormat.ARGB32, UnityEngine.RenderTextureReadWrite.sRGB);
                 UnityEngine.Graphics.Blit(src, rt);
                 UnityEngine.RenderTexture.active = rt;
-                var t = new UnityEngine.Texture2D(w, h, UnityEngine.TextureFormat.RGBA32, false) { name = tag + "_Grey" };
+                t = new UnityEngine.Texture2D(w, h, UnityEngine.TextureFormat.RGBA32, false) { name = tag + "_Grey" };
                 t.ReadPixels(new UnityEngine.Rect(0, 0, w, h), 0, 0); t.Apply();
-                UnityEngine.RenderTexture.active = prev; UnityEngine.RenderTexture.ReleaseTemporary(rt);
                 AdjustSkin(t, brightness, desat, tR, tG, tB);
                 Plugin.Diag($"[Grey] {tag}: adjusted atlas {w}x{h} (gamma {brightness:0.00}, desat {UnityEngine.Mathf.Clamp01(desat):0.00}, rgb {tR:+0;-0;0}/{tG:+0;-0;0}/{tB:+0;-0;0})");
-                return t;
+                var result = t; t = null;   // success — don't let finally free the texture we're returning
+                return result;
             }
             catch (Exception e) { Plugin.Log.LogError("[Grey] build atlas: " + e); return null; }
+            finally
+            {
+                UnityEngine.RenderTexture.active = prevActive;
+                if (rt != null) UnityEngine.RenderTexture.ReleaseTemporary(rt);
+                if (t != null) UnityEngine.Object.Destroy(t);   // non-null only on the failure path
+            }
         }
 
         // Apply the universal skin adjustments in place, in this order: (1) BRIGHTNESS — a gamma lift (1 = unchanged;
