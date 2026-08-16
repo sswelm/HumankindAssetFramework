@@ -108,6 +108,23 @@ What finally broke the debugging loop was not a cleverer theory — it was a **m
 4. **Bytes over eyes.** Every "the file is corrupt!" accusation this day was wrong; every byte/pose diff was
    right. Measure chirality, don't eyeball crossed legs; measure pose rows, don't squint at stances.
 
+## The bake fails LOUDLY now (2026-08-16)
+
+Three long-standing traps used to ship a **broken rig with exit 0** — a silent bad bake you'd only catch in-game.
+The bake scripts (`Tools/rig_anim.py`, `Tools/deploy_convert.py`) now **abort with a clear error** instead:
+
+- **`RIGANIM ERROR: rest-fold did NOT converge …`** — the rest-normalization left a bone displaced (the "head off
+  shoulders" class). If you hit this, the source rig's rest pose and frame-0 pose genuinely disagree — check the
+  bind poses / parent scales, don't just re-run.
+- **`RIGANIM ERROR: transform_apply(rotation+scale) failed …`** — the conversion path couldn't fold object scale
+  into the data (the skeleton would ship ~100× off the mesh). Usually multi-user mesh data or a locked object.
+- **`DEPLOY ERROR: no animated parts to convert …`** — you ran the deploy conversion on a source with no per-part
+  TRS animation (node/matrix-level animation is unsupported), so there was nothing to rig. Either it's the wrong
+  source, or the parts were all culled.
+
+A green bake (`ANIMATED DONE` with `residual = 0.000000` and, on deploy models, `DEPLOY baked N bones` for N > 0)
+means all three guards passed. They never trip a valid bake — a converged fold reads ~1e-4, ~1000× under the floor.
+
 ## Symptom index
 
 | Symptom (in-game unless said otherwise) | Cause | Fix |
