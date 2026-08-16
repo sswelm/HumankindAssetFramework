@@ -47,8 +47,10 @@ That's the whole loop. Everything below is detail and the animated workflow.
 
 ### 3D resource
 - Dropdown of existing baked models (or `<New>`). Picking one **loads its settings** so you can re-bake with tweaks.
-- **Refresh** re-reads the registry. **Remove** drops the selected entry from the registry (the baked assets stay in the
-  project; the plugin just stops injecting it).
+- **Refresh** re-reads the registry. **Remove** drops the selected entry from the registry — one dialog offers
+  **Remove + delete files** / **Cancel** / **Remove, keep files**, so you either delete its baked assets in the same
+  step (whitelisted outputs only — unit portraits and other unit-side files are never touched) or keep them on disk;
+  the plugin stops injecting it either way.
 
 ### Resource name / Pawn description / Model file
 - **Resource name** — unique id; names all the baked assets (`<name>_Skeleton`, `<name>_Atlas`, …).
@@ -808,7 +810,7 @@ one clip per role folder, and the game loads the resulting ClipCollections by GU
   the registry entry.
 - **Save (no bake)** — write the registry entry only (assets untouched): the way to tweak Behavior flags/sliders.
   Relaunch the game to see it; the mod bundle is unchanged.
-- **Remove** — drop the entry from the registry (baked assets stay on disk).
+- **Remove** — drop the entry from the registry; the dialog lets you also delete its baked assets (whitelisted outputs only) or keep them on disk.
 
 ### Safety nets
 The `animated` flag is **derived, not trusted**: an entry carrying animation config (named clip, behaviors, bone
