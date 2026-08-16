@@ -97,6 +97,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   use try/finally so the RT + active are always cleaned up and the partial texture is freed on failure. Normal
   rendering unchanged; verified no-regression in-game.
 
+- **BAKE-SCRIPT SILENT-MIS-BAKE GUARDS — critical-review Tier 3 (2026-08-16, in the ENCReload `Tools/`).** Three
+  bake foot-guns that shipped a broken rig with **exit 0** are now loud aborts: (4A) `rig_anim.py` printed the
+  rest-fold frame-0 residual (`should be ~0`) but never asserted it — a fold that completes yet leaves a bone
+  displaced (the "head off shoulders" class) shipped silently; now aborts on NaN or a residual > 25% of the rig's
+  bone scale. (2A) a failed `transform_apply(rotation+scale)` on the conversion path was swallowed with a warning,
+  shipping a skeleton ~100× off the mesh; now hard-fails. (4B) `deploy_convert.py` with zero animated parts built a
+  StaticRoot-only rig and shipped a static single-bone model; now aborts. Verified: the OrganGun re-baked clean
+  (residual `0.000000` asserted OK, rotation+scale applied, `ANIMATED DONE`, no false abort).
+
 - **BATTLE GUNNERY — the Jagdpanzer arc (2026-08-06).** A casemate tank destroyer exposed, one shot at a
   time, that vanilla **never rotates a vehicle's hull in battle** (vehicles aim only via a turret bone slot —
   invalid on custom rigs), and grew the full gunnery chain in a day: **battle hull-aim** (the map bombard's
