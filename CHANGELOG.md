@@ -38,6 +38,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   still over the real **128** wall, so bones 128–222 (the arm chains = the "wings") were always going to
   collapse. No engine-import decompile needed; the culprit was the GPU skin's per-vertex bone-index ceiling.
 
+- **SHARED SCHEMA — 64 duplicated fields de-duplicated into one library (2026-08-16, verified end-to-end).** The
+  `ModelDef` (editor, 128 fields) / `ModelEntry` (plugin, 148) god-object stored ~64 behavioral/sound/prop/tint fields
+  IDENTICALLY, hand-synced across two repos + two parse paths (the drift the schema-parity guard exists for). Those 64
+  now live once in a shared netstandard2.0 `Haf.Schema.HafModelSchema` that both classes **inherit** — so the field
+  can't drift, and (because they inherit) the hundreds of `e.<field>` hot-path uses + object-initializers didn't change.
+  A POC first proved the mechanism (Newtonsoft + Unity `JsonUtility` both serialize inherited-from-DLL fields); then it
+  was executed and **verified end-to-end**: plugin builds + 59 tests + loads in-game with the new `Haf.Schema.dll`
+  dependency + injects all 22 units unchanged; the editor compiles and a Save round-trips all 64 fields (0 wiped).
+  `tools/deploy-plugin.sh` ships both DLLs (a redeploy can't drop the dependency). **Deliberately partial:** the GUID
+  fields are stored in different shapes (`int[]` vs `sa/sb/..`, a runtime choice) so they stay divergent under the
+  parity guard — the worth-it slice, not a forced full merge. See docs/Schema-Library-Migration.md.
+
 - **HEADLESS BINDING DRIFT CHECK — reflection-drift net, step 3 (2026-08-16).** The in-game `haf_bindings_report.txt`
   still needed a launch to read. `bindcheck` (a net8 tool, `Tools/bindcheck/`, using `MetadataLoadContext`) now validates
   the whole `GameBinding` catalog against a Humankind build's assemblies **without launching the game** — it reads

@@ -1,8 +1,15 @@
 # Shared schema library — migration plan
 
-**Status: designed + POC-proven, not yet built.** A plan to collapse the duplicated model schema into one shared
-definition. This addresses the **duplication** half of the `ModelEntry`/`ModelDef` god-object (finding A3, the 4-place
-schema drift) — *not* the size half (that's the separately-declined POCO decomposition).
+**Status: EXECUTED for the shared fields (2026-08-16), verified end-to-end.** The **64 fields stored identically** by
+both classes now live once in `Haf.Schema.HafModelSchema` (netstandard2.0), which `ModelDef` (editor) and `ModelEntry`
+(plugin) both **inherit** — de-duplicated, no hot-path churn. Verified: plugin builds + 59 tests + loads in-game +
+injects all 22 units; editor compiles + a Save round-trips all 64 fields (0 wiped) through `JsonUtility`; `Haf.Schema.dll`
+ships via `tools/deploy-plugin.sh`. This addresses the **duplication** half of finding A3 for the shared fields.
+
+**Deliberately NOT done** (the "two costs" section below documents why): the GUID / bake-only / runtime-state fields
+stay divergent — they're stored in different shapes (`int[]` vs `sa/sb/..`), so unifying them would need a hot-path
+change; the parity guard still covers those (updated to union the shared class's fields). The *size* half of the
+god-object (nested-group decomposition) also stays out of scope. So this was the **worth-it slice**, not the full merge.
 
 ## The problem
 The model schema is written in **three** hand-synced places that drift silently:
