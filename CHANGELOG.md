@@ -75,6 +75,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   `PresentationArmyEntities` next hop): catalog 46 → 47 types, report clean (`OK — 47 game type(s)`). The
   fragility-plan "make drift loud" template applied to exactly the code the recent respawn/facing fixes touch.
 
+- **AUDIO DEATH/BATTLE GATE (2026-08-16).** Critical-review finding #6: the `_audioOn` poll gate omitted
+  `soundDeathFile`/`soundBattleFile` while the loader right below it (and `OnPawnDeath`/`ProcessBattleCries`)
+  consume them — so an entry with *only* a death rattle or *only* a battle cry never entered the poll, its clip
+  never loaded (silent death cue), and `ProcessBattleCries` re-enqueued the cry every frame forever. One-line fix:
+  add both fields to the gate, mirroring the loader's own check. Zero change for ENC (no death/battle entries);
+  protective for its built-but-unshipped creature voices and third-party packs.
+
 - **BATTLE GUNNERY — the Jagdpanzer arc (2026-08-06).** A casemate tank destroyer exposed, one shot at a
   time, that vanilla **never rotates a vehicle's hull in battle** (vehicles aim only via a turret bone slot —
   invalid on custom rigs), and grew the full gunnery chain in a day: **battle hull-aim** (the map bombard's

@@ -359,7 +359,7 @@ namespace HumankindAssetFramework
             {
                 var built = new List<ModelEntry>();
                 foreach (var x in list)
-                    if ((x.engineSound || x.silenceDonorAudio || !string.IsNullOrEmpty(x.soundFile) || !string.IsNullOrEmpty(x.soundStartFile) || !string.IsNullOrEmpty(x.soundStopFile) || !string.IsNullOrEmpty(x.soundIdleFile) || !string.IsNullOrEmpty(x.soundAttackFile)) && !string.IsNullOrEmpty(x.pawnDescription))
+                    if ((x.engineSound || x.silenceDonorAudio || !string.IsNullOrEmpty(x.soundFile) || !string.IsNullOrEmpty(x.soundStartFile) || !string.IsNullOrEmpty(x.soundStopFile) || !string.IsNullOrEmpty(x.soundIdleFile) || !string.IsNullOrEmpty(x.soundAttackFile) || !string.IsNullOrEmpty(x.soundDeathFile) || !string.IsNullOrEmpty(x.soundBattleFile)) && !string.IsNullOrEmpty(x.pawnDescription))   // MUST include death/battle — the loader below (and OnPawnDeath/ProcessBattleCries) consume them; omitting them here starved a death-only/battle-cry-only entry (its clip never loaded, and ProcessBattleCries re-enqueued forever)
                         built.Add(x);
                 _audioOn = built; _audioOnSrc = list;
             }
