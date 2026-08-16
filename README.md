@@ -129,7 +129,8 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
   `dependsOn` validation, load order that follows **Humankind's own mod order**, declared overrides, and a `haf_load_report.txt` of every decision.
 - **Guided authoring** — Pick-driven clip/bone/hide fields, an embedded interactive 3D preview, auto-detected game and
   Blender paths, and an in-game **F8** status window (compatibility health, a Smoke Test, the live GPU-budget readout,
-  and the audio/texture authoring aids).
+  and the audio/texture authoring aids). Every launch also writes a machine-readable `haf_bindings_report.txt` — a
+  diffable list of the ~124 reflection bindings that names any game-update drift in one line, headless-checkable.
 - **Backup & Restore** — a guarded, additive snapshot of everything ENCReload's git doesn't track.
 - **Headless CLI** — re-bake a model and run the full Humankind mod **build + deploy** from the command line (Unity batch
   mode), reusing the exact code the editor buttons call — so scripts, CI, or an AI agent can drive HAF without the GUI.

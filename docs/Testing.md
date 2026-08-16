@@ -21,7 +21,7 @@ dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release
 | `GuidToLong` | `UniversalInject.Combat.cs` | null / non-numeric → 0; numeric string parses |
 | `EraFromName` | `UniversalInject.ScaleEra.cs` | extract `EraN` (case-insensitive, multi-digit); none/null → −1 |
 | `EraAnchorFor` | `UniversalInject.ScaleEra.cs` | the Global Era Lab anchor rule — **a unit stays at 1.0 unless an authored grid cell says otherwise** (own-age-or-earlier → 1.0; later-but-unauthored → 1.0; non-positive eras clamp cleanly) |
-| `GameBinding.Validate` / `Cached` | `Patches/GameBinding.cs` | the startup **reflection compatibility report** — type/member resolution, incl. the simple-name (`Type.Name`) fallback scan; a game-update rename is *reported*, not silently absorbed |
+| `GameBinding.Validate` / `Cached` | `Patches/GameBinding.cs` | the startup **reflection compatibility report** — resolves the catalog (~124 type + member bindings across the load-bearing injection path) incl. the simple-name (`Type.Name`) fallback scan, and writes a diffable `haf_bindings_report.txt` every launch; a game-update rename is *reported* (one `[MISSING]` line, headless-checkable), not silently absorbed. The report is self-validating: an added binding that isn't a real game member shows `[MISSING]` on the known-good build. |
 | `SmokeVerdict` | `Patches/UniversalInject.SmokeTest.cs` | the **in-game smoke harness's** PASS/FAIL rule — PASS iff every catalogued binding resolved, zero injection errors, and the registry loaded ≥1 model; each fail reason surfaced; `repointed`-zero still passes (no units on the map isn't a failure) |
 
 These map directly to the registry bugs this codebase has actually hit — the `ParseGuidCsv` sign bug, `LongestMatch`

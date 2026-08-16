@@ -9,7 +9,7 @@ tooling is a separate project (`C:\Repo\ENCReload\Assets\Scripts\Editor\`); this
 |---|---|
 | `Plugin.cs` | BepInEx entry point. Config binds, the Harmony hook **registration list** (every `Hk_*` / `Uni*Hook` must be listed here or it silently never patches), the per-frame `Update()` pump, and the F8 diagnostic window. |
 | `Prober.cs` | Standalone reflection prober / dev spelunking. |
-| `Patches/GameBinding.cs` | Startup compatibility report: resolves a catalog of the game types/members HAF binds to and logs `[GameBinding] OK` or a specific `NOT FOUND` warning (makes reflection drift loud). Plain `System.Reflection`, unit-tested. |
+| `Patches/GameBinding.cs` | Startup compatibility report + the one place each game-type NAME lives (call sites bind via `GameBinding.<Type>`, not a scattered `Type.GetType`). Resolves a catalog of the game types/members HAF binds to (~124 members), logs `[GameBinding] OK` or a specific `NOT FOUND`, **and** writes a machine-readable `haf_bindings_report.txt` (next to `haf_load_report.txt`) every launch — a diffable `[ok]`/`[MISSING TYPE]`/`[MISSING MEMBER]` line per binding, so a game-update rename surfaces as one report line (headless-checkable) instead of a feature silently misbehaving. Plain `System.Reflection`, unit-tested. |
 | `Patches/` | The injection engine + Harmony patches (below). |
 | `Tests/` | xUnit suite over the pure registry/parse/era layer. See `docs/Testing.md`. |
 | `baker/` | STALE editor snapshot (do not edit/bake here) + LIVE `glbconv`/`Tools`. See `baker/README.md`. |
