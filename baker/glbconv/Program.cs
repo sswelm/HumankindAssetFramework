@@ -125,9 +125,22 @@ class Program
         // (unlike per-vertex frac(), which would tear any triangle that straddles a tile boundary).
         float uOff = 0f, vOff = 0f;
         {
-            float minU = float.MaxValue, minV = float.MaxValue; bool any = false;
-            foreach (var t in outU) { any = true; if (t.X < minU) minU = t.X; if (t.Y < minV) minV = t.Y; }
-            if (any) { uOff = MathF.Floor(minU); vOff = MathF.Floor(minV); }
+            float minU = float.MaxValue, minV = float.MaxValue, maxU = float.MinValue, maxV = float.MinValue; bool any = false;
+            foreach (var t in outU) { any = true; if (t.X < minU) minU = t.X; if (t.Y < minV) minV = t.Y; if (t.X > maxU) maxU = t.X; if (t.Y > maxV) maxV = t.Y; }
+            if (any)
+            {
+                uOff = MathF.Floor(minU); vOff = MathF.Floor(minV);
+                // MULTI-TILE / UDIM DETECTION: a single integer shift only normalizes a ONE-tile island. If the UVs
+                // still reach past [0,1] after the shift, the model tiles across >1 UV tile (e.g. a .1001-.1005 UDIM
+                // set) — the single-tile atlas cannot wrap that, so those UVs sample OUTSIDE the rect and part of the
+                // skin VANISHES. This was silent; warn on stderr (the Factory surfaces glbconv stderr as a Unity
+                // warning) so the modder knows to texture-transfer-bake onto single-tile (0-1) UVs in Blender.
+                if (maxU - uOff > 1.001f || maxV - vOff > 1.001f)
+                    Console.Error.WriteLine($"WARNING: UVs span more than one tile after normalization " +
+                        $"(U {minU:0.###}..{maxU:0.###}, V {minV:0.###}..{maxV:0.###}). This model uses multi-tile / UDIM " +
+                        "UVs the single-tile atlas cannot wrap — part of the skin will sample outside the texture and " +
+                        "vanish. Fix: bake the texture onto single-tile (0-1) UVs in Blender before converting.");
+            }
         }
         // Flip V: glTF/GLB store texture coords with V=0 at the TOP; OBJ (and Unity) use V=0 at the BOTTOM. Without
         // this, the skin maps upside-down in V and lands on the wrong faces in-engine (deck markings on the
