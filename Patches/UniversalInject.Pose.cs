@@ -230,24 +230,34 @@ namespace HumankindAssetFramework
                 // FIRST pawn added each frame and hide the rest with the engine's own HideFactor (fog-of-war mechanism).
                 if (e.hideSubPawns)
                 {
+                    // Keep the FIRST pawn per UNIT each frame, hide the squadron duplicates. A gunship unit's stacked
+                    // copies share a position; a DIFFERENT unit of the same model sits tiles away — so we key "already
+                    // kept" by POSITION, not a per-entry count. (The old per-entry counter kept only one pawn across
+                    // ALL units of the type, so a 2nd coexisting unit rendered nothing — critical-review fix 2026-08-16.)
                     int fr = UnityEngine.Time.frameCount;
-                    if (e.lastPawnFrame == fr && ++e.pawnsThisFrame > 1)
+                    if (e.lastPawnFrame != fr) { e.lastPawnFrame = fr; e.pawnKeptPos.Clear(); }
+                    var os = GetMember(ctx.entry, "ObjectSpace");
+                    var tpObj = os != null ? GetMember(os, "Translation") : null;
+                    UnityEngine.Vector3 pos = tpObj is UnityEngine.Vector3 tv ? tv : UnityEngine.Vector3.zero;
+                    bool keptHere = false;
+                    if (tpObj is UnityEngine.Vector3)
+                        for (int k = 0; k < e.pawnKeptPos.Count; k++)
+                            if ((e.pawnKeptPos[k] - pos).sqrMagnitude < 0.25f) { keptHere = true; break; }   // within 0.5u = same unit's stack
+                    if (keptHere)
                     {
+                        // a duplicate of a unit we already kept this frame → hide + bury it. HideFactor hides the mesh
+                        // draw, but the ghost overlay samples a pawn slot's data — if it rides a duplicate slot, dropping
+                        // that slot 1000u under the world takes the ghost with it. The real mesh is hidden anyway.
                         SetMember(ctx.entry, "HideFactor", 1f);
-                        // AND bury it (user's call): HideFactor hides the pawn's own mesh draw, but the ghost overlay
-                        // demonstrably samples a pawn slot's data — if it rides a duplicate slot, dropping that slot
-                        // 1000 units under the world takes the ghost with it. The duplicate's real mesh is hidden
-                        // anyway, so mangling its position costs nothing.
-                        var os = GetMember(ctx.entry, "ObjectSpace");
-                        if (os != null && GetMember(os, "Translation") is UnityEngine.Vector3 tp)
+                        if (os != null)
                         {
-                            SetMember(os, "Translation", new UnityEngine.Vector3(tp.x, tp.y - 1000f, tp.z));
+                            SetMember(os, "Translation", new UnityEngine.Vector3(pos.x, pos.y - 1000f, pos.z));
                             SetMember(ctx.entry, "ObjectSpace", os);
                         }
                         ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
                         return;   // hidden + buried duplicate — no pose work
                     }
-                    if (e.lastPawnFrame != fr) { e.lastPawnFrame = fr; e.pawnsThisFrame = 1; }
+                    if (tpObj is UnityEngine.Vector3) e.pawnKeptPos.Add(pos);   // first pawn for this unit this frame — remember its spot
                     // the KEPT pawn: un-hide every frame — the cached struct posts HideFactor=1 (the sandwich that
                     // starves the ghost's pre-hook draw); the real post-hook state must render.
                     SetMember(ctx.entry, "HideFactor", 0f);

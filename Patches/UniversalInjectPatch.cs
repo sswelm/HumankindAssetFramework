@@ -135,7 +135,7 @@ namespace HumankindAssetFramework
         public bool engineSound;
         public bool hideSubPawns;        // strip the donor definition's SubPawnDefinitions at injection — kills secondary attachments like the helicopter gunship's independent rotor pawn (the "GPU rotor" a mesh swap can't remove)
         public int lastPawnFrame = -1;   // duplicate-pawn hide (hideSubPawns): Time.frameCount of the last pawn add for this entry
-        public int pawnsThisFrame;       // how many pawns this entry added this frame — every one after the first gets HideFactor=1
+        public readonly List<UnityEngine.Vector3> pawnKeptPos = new List<UnityEngine.Vector3>();   // hideSubPawns: positions of the pawns KEPT this frame — one per distinct UNIT (a unit's stacked squadron duplicates share a position; different units are tiles apart). Keeping per-position, not a per-type count, lets two units of the same model coexist.
         public float rendererCensusNextAt;   // next Unity-renderer census time for this entry (the ghost-rotor hunt)
         public float moveTilt;               // degrees of nose-down pitch while MOVING (helicopter forward-flight attitude); 0 = off. Runtime-only, eased in/out.
         public float turnRate;               // TURN EASE: deg/s toward a new heading; 0 = off -> category default -> dial `rate` (precedence, docs/Turn-Ease.md).
