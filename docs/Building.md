@@ -18,7 +18,12 @@ Then:
 dotnet build -c Release
 ```
 
-and copy `bin\Release\HumankindAssetFramework.dll` → `<Humankind>\BepInEx\plugins\`.
+and copy **both** `bin\Release\HumankindAssetFramework.dll` **and** `bin\Release\Haf.Schema.dll` → `<Humankind>\BepInEx\plugins\`
+— or just run `bash Tools/deploy-plugin.sh`, which copies both. `Haf.Schema.dll` (netstandard2.0) is the **shared model
+schema** that `ModelDef` (editor) and `ModelEntry` (plugin) both inherit — the build produces it automatically via a
+`ProjectReference`, but the plugin **won't load without it** (BepInEx reports the missing dependency), so the two ship
+together. The editor half consumes the same DLL from `ENCReload/Assets/Plugins/HafSchema/Haf.Schema.dll` (drop it there
+after a build, like the other managed plugins in `Assets/Plugins`).
 
 ## Blender (optional dependency)
 
