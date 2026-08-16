@@ -13,7 +13,7 @@ This folder inside the **plugin** repo holds two very different kinds of thing. 
   runtime fields the plugin actually reads (`scale`, `animPhaseSpread`) plus several bake-time ones (`staticParts`,
   `localNodeAnim`, `bakeLocked`, `deployStripExtra`). Writing a `pack.json` from this stale `ModelDef` would silently
   **omit** those fields, so the affected models would render at default scale / default phase-spread with no error.
-- **It is inert in this repo anyway.** `ENCAccessProof` is a plain .NET project, not a Unity project, so these
+- **It is inert in this repo anyway.** `HumankindAssetFramework` (this repo) is a plain .NET project, not a Unity project, so these
   `UnityEditor`-dependent scripts don't compile or run here. The plugin build excludes them
   (`HumankindAssetFramework.csproj` → `<Compile Remove="baker\**\*.cs" />`). They exist only as a rough reference.
 

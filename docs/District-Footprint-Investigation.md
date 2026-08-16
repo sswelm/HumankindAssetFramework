@@ -248,7 +248,7 @@ the global test, but scoped to one tile) — confirm that reads well, or restric
 
 - **~~Confirm the BBox lever~~ — DONE, ruled out** (falsified lead 13). Forcing a small element bbox did not summon the
   footprint. `lodData` (lead 12) is out too. **The C#-settable per-element levers are exhausted.**
-- **Reverse-engineer the evolve/selection compute shader** with the ShaderDump toolchain (`ENCAccessProof/tools/ShaderDump`,
+- **Reverse-engineer the evolve/selection compute shader** with the ShaderDump toolchain (`HumankindAssetFramework/tools/ShaderDump`,
   see [[shaderdump-toolchain]]) — dump `AddFIMSParticle` / the level-build evolve kernels (`FxComponentLevelBuildParticleAdder`,
   `FxComponentTerrain.AfterOneEvolveDelegate`, the `ResolveElevationQueryMaterial`/`GeoDBQueryMaterial` dispatches) and read
   exactly how a hexagon's element-vs-decal winner is chosen, and which per-entry field our swap perturbs. This is the only

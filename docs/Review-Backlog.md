@@ -111,7 +111,7 @@ by when they'll bite.
   `haf_sounds` / `haf_skins` are ENC-the-PACK's files — packs are branded, only the framework is neutral, and a
   third-party pack never touches an `haf_*` path. **Verified in-game same day** (first session clean: new identity
   loads, settings carried, units/districts/audio normal). Still open for the package release: hardcoded paths,
-  package scaffolding. (The `ENCAccessProof` C# namespace + project filename were renamed to `HumankindAssetFramework` on 2026-08-01; the local repo FOLDER is the last leftover — a manual `git mv`/reclone when convenient.)
+  package scaffolding. (The `ENCAccessProof` C# namespace + project filename were renamed to `HumankindAssetFramework` on 2026-08-01; the local repo FOLDER followed on 2026-08-16 — nothing left of the old name.)
 - **Pack pre-flight validator (third-party author DX)** — *legitimate gap, not yet built.* Today pack **structure**
   resolution is loud and human-readable (malformed JSON, duplicate `modId`, missing `dependsOn`, cycles, conflicts →
   clear warnings + `haf_load_report.txt`), and bad input fails *soft* (never crashes). But there's **no entry-level

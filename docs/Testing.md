@@ -16,7 +16,7 @@ The fast guards used to be separate scripts you had to remember to run. They're 
 
 | Repo | `Tools/check.sh` runs | ~time |
 |---|---|---|
-| **ENCAccessProof** (plugin) | `dotnet build` · `dotnet test` (61) · registry schema parity | seconds |
+| **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` (61) · registry schema parity | seconds |
 | **ENCReload** (editor) | Roslyn editor compile-check · registry schema parity | ~30 s |
 
 Run it any time by hand: `bash Tools/check.sh`. **Enable the hook once per clone:**

@@ -1,6 +1,6 @@
 # Code map — the HAF runtime plugin
 
-Where things live in the plugin (`C:\Repo\ENCAccessProof`, the BepInEx runtime half). The Unity editor/baker
+Where things live in the plugin (`C:\Repo\HumankindAssetFramework`, the BepInEx runtime half). The Unity editor/baker
 tooling is a separate project (`C:\Repo\ENCReload\Assets\Scripts\Editor\`); this map is the runtime only.
 
 ## Top level
