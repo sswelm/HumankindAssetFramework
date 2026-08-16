@@ -1,6 +1,6 @@
 # Testing
 
-The plugin has a focused unit-test suite (**59 tests as of 2026-08-02**) over the **pure logic that can run outside the
+The plugin has a focused unit-test suite (**61 tests as of 2026-08-16**) over the **pure logic that can run outside the
 game** — the registry/parse/era layer, the reflection **compatibility report** (`GameBinding`), and the **in-game smoke
 harness's verdict** (`SmokeVerdict`). It is a deliberate, bounded suite, not a coverage target: it guards the functions
 where bugs have actually hidden, and stops there on purpose.
@@ -16,7 +16,7 @@ The fast guards used to be separate scripts you had to remember to run. They're 
 
 | Repo | `Tools/check.sh` runs | ~time |
 |---|---|---|
-| **ENCAccessProof** (plugin) | `dotnet build` · `dotnet test` (59) · registry schema parity | seconds |
+| **ENCAccessProof** (plugin) | `dotnet build` · `dotnet test` (61) · registry schema parity | seconds |
 | **ENCReload** (editor) | Roslyn editor compile-check · registry schema parity | ~30 s |
 
 Run it any time by hand: `bash Tools/check.sh`. **Enable the hook once per clone:**
@@ -52,7 +52,7 @@ the in-game report — same catalog, no game needed.
 
 | Function | Lives in | What's asserted |
 |---|---|---|
-| `ParseModels` | `UniversalInjectPatch.cs` | JSON→`ModelEntry` field mapping; defaults (`animPhaseSpread` 0.5, `scale`/`brightness` 1); signed GUID components; **per-object isolation** (an omitted field doesn't shift onto another model); **robustness** — garbage/empty input → empty *without throwing*; the regex fallback recovery when `JObject.Parse` rejects the document (keys entry count on `Min(pawnDescription, skel, atlas)`) |
+| `ParseModels` | `UniversalInjectPatch.cs` | JSON→`ModelEntry` mapping via the generic `ToObject<ModelEntry>()`; omitted keys fall to the **shared `HafModelSchema` initializers** (`idleAltInterval` 25, `turretAxis` -1, `scale`/`brightness` 1); the **`position` Vector3** parses (Newtonsoft chokes on raw Vector3 — the strip-then-repin path is what's under test); signed GUID components; **per-object isolation** (an omitted field doesn't shift onto another model); **robustness** — garbage/empty input → empty *without throwing*; the regex fallback recovery when `JObject.Parse` rejects the document (keys entry count on `Min(pawnDescription, skel, atlas)`) |
 | `ResolvePacks` | `UniversalInjectPatch.cs` | duplicate-modId reject (first file kept); `dependsOn`/`loadAfter` ordering; missing-dep skip + **transitive strand** (fixpoint); cycle → file-order + note; soft `loadAfter` to an absent modId; **stable seed order** (the invariant that keeps today's single-pack setup byte-identical) |
 | `LongestMatch` | `UniversalInjectPatch.cs` | most-specific substring wins (not first-in-order); single-match fallback; no-match → null |
 | `RegexStrArray` | `UniversalInjectPatch.cs` | wrapper string-array extraction; empty-item filtering; missing field → empty |

@@ -56,13 +56,14 @@ its own small field-only cache, `CachedField`, for its self-contained use.)
 
 - **A new Harmony hook only fires if it's added to the `hooks[]` list in `Plugin.cs`** — a missed registration
   is silent. The load line reports `patched/total` counting the methods actually patched (not "didn't throw").
-- Adding a **registry field**: the ~66 fields stored identically by both classes are now the **shared
-  `Haf.Schema.HafModelSchema`** — add it there ONCE and both `ModelDef` (editor) and `ModelEntry` (plugin) inherit it
-  (compiler-enforced, can't drift). Fields that DIVERGE (a GUID as `int[]` editor-side vs `sa/sb/..` plugin-side, or a
-  bake-only/runtime-state field) still touch their own class + the plugin's two read paths (Newtonsoft object parse +
-  regex fallback in `ParseModels`, `UniversalInjectPatch.cs`) — miss one and the feature silently dies. **After a
-  divergent-field edit, run the drift guard:** `bash ../ENCReload/Tools/check_schema_parity.sh` — it unions the shared
-  class's fields, then asserts Newtonsoft == regex keys, every read key is a written field, and the casts agree.
+- Adding a **registry field**: the ~66 fields stored identically by both classes are the **shared
+  `Haf.Schema.HafModelSchema`** — add it there ONCE (default = the field initializer) and both `ModelDef` (editor) and
+  `ModelEntry` (plugin) inherit it (compiler-enforced, can't drift). The plugin's primary parse is **generic**
+  (`m.ToObject<ModelEntry>()` in `ParseModels`), so a name-matching field maps automatically; only the GUID arrays
+  (`skel[]` → `sa/sb/..`) and `position` (Vector3 — Newtonsoft chokes on it, stripped + re-pinned by hand) are explicit.
+  What still hand-syncs: the **regex fallback** (malformed-JSON path) hand-lists every field — add the matching
+  `Regex.Matches` line there. **Then run the drift guard:** `bash ../ENCReload/Tools/check_schema_parity.sh` — it fails
+  loudly if the fallback lags the shared schema or the GUID hand-lists, or reads a key the baker never writes.
 - `ModelEntry` **inherits** `Haf.Schema.HafModelSchema` for the shared fields (de-duplicated via inheritance, no
   hot-path churn); the POCO *decomposition* split is still declined. Keep runtime-state / divergent-GUID fields on
   `ModelEntry` itself.

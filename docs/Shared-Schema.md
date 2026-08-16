@@ -23,18 +23,28 @@ call-site changes.
 | Bake-time-only (`size`, `convertGrid`, `stripParts`, …) | `ModelDef` only |
 | Runtime state (resolved handles, `*AnimId`, session flags, poll dicts) | `ModelEntry` only |
 
-The **divergent** fields (GUIDs + the two class-specific sets) are still hand-synced across the plugin's two parse paths
-(Newtonsoft object parse + regex fallback in `ParseModels`) and checked by `check_schema_parity.sh`, which unions
-`HafModelSchema`'s fields into the write set before asserting *plugin-reads ⊆ writes* and *cast-types agree*.
+The plugin's **primary parse is generic**: `ParseModels` deserializes each model with `m.ToObject<ModelEntry>()`, so every
+name-matching field (all 66 shared + any plugin-own config) maps automatically — no hand-list. Only two shapes stay
+explicit: the **GUID arrays** (one JSON array `skel[]` → four ints `sa/sb/sc/sd`, etc.) and **`position`** (a
+`UnityEngine.Vector3`, which Newtonsoft can't deserialize — its `normalized` property self-references — so the key is
+stripped from the object before `ToObject` and re-pinned by hand). The index-aligned **regex fallback** (for malformed
+JSON) still hand-lists every field; `check_schema_parity.sh` asserts it covers the GUID hand-list + every shared field,
+and that everything it reads is a field the baker writes. A **missing key** falls to the field's initializer in
+`HafModelSchema` — the one authoritative default for both halves.
 
 ## Adding a field
-- **Shared** (both read it, same type) — add it to `HafModelSchema` once. Both inherit it; nothing else to touch.
+- **Shared** (both read it, same type) — add it to `HafModelSchema` once (with its default as the initializer). Both
+  inherit it and the plugin's primary parse maps it automatically; add the matching `Regex.Matches` line to the fallback,
+  then run `check_schema_parity.sh` (it fails loudly if the fallback lags).
 - **Editor-only** (bake-time) — add to `ModelDef`.
-- **Plugin-only** (runtime) — add to `ModelEntry` + both parse paths, then run `check_schema_parity.sh`.
+- **Plugin-only** (runtime) — add to `ModelEntry`; the primary parse maps it by name automatically. If it must survive
+  malformed JSON too, add it to the regex fallback + the parity allowlist.
 
 ## Serialization
-- **Editor** writes `pack.json` via Unity `JsonUtility`, which serializes inherited public fields.
-- **Plugin** reads via Newtonsoft (with a regex fallback), deserializing into `ModelEntry` — inherited fields fill by name.
+- **Editor** writes `pack.json` via Unity `JsonUtility`, which serializes inherited public fields (and always writes
+  every field — no omitted keys).
+- **Plugin** reads via Newtonsoft's generic `ToObject<ModelEntry>()` (inherited fields fill by name; GUID arrays and
+  `position` extracted by hand), with the index-aligned regex fallback for malformed JSON.
 
 ## Build & deploy
 `HafModelSchema` builds to **`Haf.Schema.dll`** (netstandard2.0), referenced by the plugin via a `ProjectReference`
