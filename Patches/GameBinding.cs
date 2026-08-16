@@ -232,7 +232,7 @@ namespace HumankindAssetFramework
         internal static readonly Dep[] Catalog =
         {
             // audio
-            new Dep(PresentationSubPawn, nameof(PresentationSubPawn), "AudioEmitter", "Transform", "PresentationPawnDescription"),
+            new Dep(PresentationSubPawn, nameof(PresentationSubPawn), "AudioEmitter", "Transform", "PresentationPawnDescription", "GetBoneTRS", "PresentationPawnDefinition"),
             new Dep(AudioEmitter, nameof(AudioEmitter), "AudioEntityGUID", "PostEvent"),
             new Dep(AudioManager, nameof(AudioManager), "PostEvent"),
             new Dep(AkSoundEngine, nameof(AkSoundEngine), "PostEvent", "StopAll"),
@@ -252,31 +252,40 @@ namespace HumankindAssetFramework
             new Dep(MecanimEventInterpreter, nameof(MecanimEventInterpreter)),
             new Dep(AlterationFireProjectile, nameof(AlterationFireProjectile)),
             // presentation core
-            new Dep(Presentation, nameof(Presentation), "PresentationEntityFactoryController"),   // the STATIC army-walk root — read by respawn / facing / class-scan / census; a rename silently no-ops all four (was uncatalogued: critical-review #5)
+            new Dep(Presentation, nameof(Presentation), "PresentationEntityFactoryController", "PresentationBattleReportController"),   // the STATIC army-walk root — read by respawn / facing / class-scan / census; a rename silently no-ops all four (was uncatalogued: critical-review #5)
             new Dep(PresentationEntityFactoryController, nameof(PresentationEntityFactoryController), "PresentationArmyEntities"),   // the next hop off that root — the army array every walk enumerates
             new Dep(PresentationPawn, nameof(PresentationPawn)),
             new Dep(PresentationUnit, nameof(PresentationUnit), "UnitDefinition", "GUID", "Pawns", "Formation"),
             new Dep(PresentationUnitHolder, nameof(PresentationUnitHolder)),
-            new Dep(PresentationDistrict, nameof(PresentationDistrict), "presentationLevelBuildComponent", "ApplyGroundMaterialDefinition", "ConstructibleDefinitionName"),
+            new Dep(PresentationDistrict, nameof(PresentationDistrict), "presentationLevelBuildComponent", "ApplyGroundMaterialDefinition", "ConstructibleDefinitionName",
+                "UpdateLevelBuild", "UpdateGroundMaterial", "UpdateHexagonSculpting", "mainLevelBuildComponantLayer", "visualAffinityName", "initialVisualAffinityName"),
             // animation / pawn
-            new Dep(PawnManager, nameof(PawnManager), "Load", "AddPawnEntry", "gpuPawnDescriptorEntries"),
-            new Dep(AnimationManager, nameof(AnimationManager), "Instance", "skeletonBufferSize", "FxComponentRenderer", "FxComponentMeshContentManager", "FXMeshLayerIndex"),
-            new Dep(PresentationPawnDefinitionAddOn, nameof(PresentationPawnDefinitionAddOn), "FragmentEntries", "Skeleton", "MeshCollection"),
+            new Dep(PawnManager, nameof(PawnManager), "Load", "AddPawnEntry", "gpuPawnDescriptorEntries",
+                "Instance", "gpuPawnDescriptorFragmentEntries", "descriptorBufferDirty", "persistentFragmentEntryCount", "pawnDefinitions", "pawnEntries", "pawnCount"),
+            new Dep(AnimationManager, nameof(AnimationManager), "Instance", "skeletonBufferSize", "FxComponentRenderer", "FxComponentMeshContentManager", "FXMeshLayerIndex",
+                "AnimationLoad", "RegisterMeshCollection", "Apply", "loadedAnimationClipCollections", "GetAnimationId", "GetAnimationDuration", "GetPoseTRS",
+                "gpuAnimationEntryBuffer", "gpuSkeletonEntriesBuffer", "gpuSkeletonBoneEntiesBuffer"),
+            new Dep(PresentationPawnDefinitionAddOn, nameof(PresentationPawnDefinitionAddOn), "FragmentEntries", "Skeleton", "MeshCollection",
+                "Load", "Definition", "GetOrCreateAddOn"),
             new Dep(ClipCollection, nameof(ClipCollection)),
             new Dep(MeshCollection, nameof(MeshCollection)),
             // data / assets / graphics
             new Dep(AssetDatabase, nameof(AssetDatabase)),
             new Dep(Guid, nameof(Guid), "a", "b", "c", "d"),
-            new Dep(FxEvolverMaterial, nameof(FxEvolverMaterial)),
-            new Dep(FxMesh, nameof(FxMesh)),
-            new Dep(ContentLayer, nameof(ContentLayer)),
-            new Dep(PresentationPawnDefinition, nameof(PresentationPawnDefinition)),
+            new Dep(FxEvolverMaterial, nameof(FxEvolverMaterial), "NextDoublonAvoidanceIndex", "TryLoad"),
+            new Dep(FxMesh, nameof(FxMesh), "Mesh"),
+            new Dep(ContentLayer, nameof(ContentLayer),
+                "LoadEncodingVertexAndBuffer", "baseVertexBufferSize", "baseIndexBufferSize", "maxMeshCount", "maxMeshTriangleCount",
+                "vertexBuffer", "HxFxOneMeshComputeBufferData", "hxFxOneMeshComputeBuffer", "FindGuidAssociatedToIndex"),
+            new Dep(PresentationPawnDefinition, nameof(PresentationPawnDefinition), "Projectile"),
             new Dep(ProjectileAsset, nameof(ProjectileAsset)),
             // district scoped-visual — the mesh strategic footprint (render-feature gate, B&W, flatten) + composed foliage
-            new Dep(FxEvolverMaterialLevelBuildElement, nameof(FxEvolverMaterialLevelBuildElement), "renderFeatureSelector", "size", "outputLayer", "fxMesh", "WriteToGPUData"),
+            new Dep(FxEvolverMaterialLevelBuildElement, nameof(FxEvolverMaterialLevelBuildElement), "renderFeatureSelector", "size", "outputLayer", "fxMesh", "WriteToGPUData",
+                "meshIndex", "outputLayerIndex", "materialIndex", "textureIndex", "loadingStatus", "Load", "LoadIFN", "Name", "FxEvolverDescriptor", "OnEditionChange"),
             new Dep(FxEvolverMaterialLevelBuildEmitter, nameof(FxEvolverMaterialLevelBuildEmitter), "levelBuildItems"),   // the scoped selector we walk for building elements + decals
-            new Dep(FxEvolverMaterialLevelBuildSelector, nameof(FxEvolverMaterialLevelBuildSelector), "fxMaterialCacheEntries"),   // nested sub-selectors (pizza compose) — traversed via cache entries
-            new Dep(RenderFeatureSelector, nameof(RenderFeatureSelector), "SelectionFlags0"),
+            new Dep(FxEvolverMaterialLevelBuildSelector, nameof(FxEvolverMaterialLevelBuildSelector), "fxMaterialCacheEntries",   // nested sub-selectors (pizza compose) — traversed via cache entries
+                "pairs", "defaultMaterial", "invalidNameMaterial", "deferredName", "deferredTable"),
+            new Dep(RenderFeatureSelector, nameof(RenderFeatureSelector), "SelectionFlags0", "FadingOptions"),
             new Dep(RenderFeatureProvider, nameof(RenderFeatureProvider), "ComputeRenderState"),
             new Dep(FxOutputLayer, nameof(FxOutputLayer), "primitivePerParticleCount", "RenderOutputs"),
             // formation (EntityFactoryControllerSettings / GameObjectPoolController resolve by SIMPLE name — see ResolveType)
