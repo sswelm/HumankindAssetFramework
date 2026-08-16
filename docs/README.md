@@ -13,6 +13,7 @@ then come back here to go deep.
 ---
 
 ## Get started
+- [**Getting-Started.md**](Getting-Started.md) — **new here? start here.** The ordered path from nothing to a custom unit on the map (bake → build & deploy → launch & verify), with each step linked to its deep doc.
 - [**Building.md**](Building.md) — build the plugin and set up the Blender dependency.
 - [**Backup.md**](Backup.md) — snapshot and restore the un-versioned assets (source & baked models, tooling, runtime config).
 

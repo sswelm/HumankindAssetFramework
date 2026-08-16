@@ -233,6 +233,7 @@ site, generated from [`/docs`](docs/).
 The full documentation set, grouped by task (get started · author · ship a pack · internals · project), is indexed in
 [**docs/README.md**](docs/README.md). The fastest starting points:
 
+- **New here?** [Getting-Started.md](docs/Getting-Started.md) — the ordered path from nothing to a custom unit on the map (bake → build & deploy → launch & verify).
 - **Find the right tool:** [Editor-Tools.md](docs/Editor-Tools.md) — every authoring window under `Tools ▸ HAF`, what it does, and what it writes.
 - **Add a model:** [Factory-Manual.md](docs/Factory-Manual.md) — every field, the static + animated workflows, troubleshooting.
 - **Animate a model:** [Animated-Models.md](docs/Animated-Models.md) — can HAF import *your* model? The plain-language answer.

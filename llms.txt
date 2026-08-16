@@ -25,11 +25,13 @@ so an agent can crawl the whole doc set from here with no authentication. The hu
 - For authoring instructions start with Factory-Manual.md; for current status consult Capabilities.md and CHANGELOG.md.
 
 ## Common questions → where to look
+- **First time — where do I start?** docs/Getting-Started.md (the ordered zero-to-in-game path).
 - **Add a static unit model?** docs/Factory-Manual.md (static workflow).
 - **Add an animated vehicle or character?** docs/Animated-Models.md (what's importable), then docs/Factory-Manual.md §16.
 - **Ship a separate HAF asset pack?** docs/Multi-Mod.md (pack format + the `haf_packs/` drop folder).
 
 ## Start here
+- [docs/Getting-Started.md](docs/Getting-Started.md): the ordered zero-to-in-game path (bake → build & deploy → launch & verify), each step linked to its deep doc. New authors start here.
 - [README.md](README.md): project overview — what HAF is, the six axes, the full feature list, tech stack, and status.
 - [docs/README.md](docs/README.md): the documentation index, grouped by task.
 - [docs/Building.md](docs/Building.md): build the plugin and set up the Blender dependency.
