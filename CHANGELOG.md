@@ -28,6 +28,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   repro. Bonus: the model-axis session cleanup (audio/deploy/state maps) now runs on *every* reload, not just
   the first.
 
+- **DISTRICT CLONE LEAK — critical-review follow-up (2026-08-16).** A full-framework critical review (plugin +
+  editor) surfaced that the district axis had the *same* leak class just fixed on the model axis:
+  `ResetDistrictSessionState` only **nulled** its runtime `Object.Instantiate` clones (private leaves, cloned
+  selectors/output-layers, deep-clone material nodes, the B&W gray albedo), which Unity's unused-asset sweep
+  never collects — so every in-session reload leaked a native FxOutputLayer + N cloned FxEvolverMaterials + a
+  gray texture per scoped district. Fixed with explicit ownership tracking (never touching `LoadAsset`'d bundle
+  assets) and a main-thread destroy queue (the reset runs off-thread via `Sandbox.Load`). In-game verified across
+  reloads (`[District] freed N runtime clone(s)`, no district errors).
+
 - **BATTLE GUNNERY — the Jagdpanzer arc (2026-08-06).** A casemate tank destroyer exposed, one shot at a
   time, that vanilla **never rotates a vehicle's hull in battle** (vehicles aim only via a turret bone slot —
   invalid on custom rigs), and grew the full gunnery chain in a day: **battle hull-aim** (the map bombard's
