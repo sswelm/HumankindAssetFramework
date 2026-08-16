@@ -143,9 +143,10 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
   [Animated-Runtime.md](docs/Animated-Runtime.md).
 - **Skins are never destroyed out from under a reload** — the re-arm only frees textures HAF creates, never the shared
   baked atlas asset.
-- **No per-reload leak** — the runtime clones both axes make (the model isolated layers/skins, the district private
-  leaves / cloned layers / B&W footprint texture) are freed on each session reset, so a long play session with many
-  reloads doesn't accumulate orphaned GPU objects.
+- **No leaked GPU objects** — every runtime clone HAF makes (model isolated layers/skins, hand-prop layers, the
+  district private leaves / cloned layers / B&W footprint texture) is freed — on session reset, before a re-inject
+  overwrites it, and even if a texture bake throws mid-frame — so a long session with many reloads never accumulates
+  orphaned native layers or textures.
 - **Unit facing survives save/load** — a HAF side-file restores each unit's heading on load (the game save has none),
   including `respawnAfterLoad` units (helicopters) whose post-load pawn rebuild would otherwise reset it to neutral.
 
