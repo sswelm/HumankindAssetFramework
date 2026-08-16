@@ -185,7 +185,7 @@ hang — the danger was malformed skeletons, not custom ones per se.*
 | Editor tooling ([ENCReload](https://github.com/sswelm/ENCReload)) | **Unity 2021.3.1f1** (Humankind's own engine version) + the **official Amplitude modding SDK**, which bakes the native `Skeleton` / `ClipCollection` / mesh / atlas assets; editor scripts mirrored here in `baker/` |
 | `glbconv` converter | Standalone C# console app on **.NET 8** (self-contained single-file exe — adopters need no .NET install), built on **SharpGLTF** |
 | Model-prep scripts | **Python** run headless inside **Blender** (`blender -b --python …`, `bpy` API) — rigging, decimation, clip extraction |
-| Editor ↔ runtime contract | A plain **JSON** registry (the pack's `pack.json`) — the only thing the two halves share |
+| Editor ↔ runtime contract | A plain **JSON** registry (the pack's `pack.json`), its ~64 shared fields defined once in a **`Haf.Schema`** netstandard2.0 DLL both halves inherit — so the schema can't drift |
 
 ## Zero-config adoption
 Built to work on a stranger's machine, not just the author's:
