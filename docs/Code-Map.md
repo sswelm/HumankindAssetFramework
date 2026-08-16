@@ -9,7 +9,7 @@ tooling is a separate project (`C:\Repo\ENCReload\Assets\Scripts\Editor\`); this
 |---|---|
 | `Plugin.cs` | BepInEx entry point. Config binds, the Harmony hook **registration list** (every `Hk_*` / `Uni*Hook` must be listed here or it silently never patches), the per-frame `Update()` pump, and the F8 diagnostic window. |
 | `Prober.cs` | Standalone reflection prober / dev spelunking. |
-| `Haf.Schema/HafModelSchema.cs` | The **shared model schema** (netstandard2.0 DLL): the ~64 fields stored identically by the editor's `ModelDef` and the plugin's `ModelEntry`, defined ONCE. Both classes **inherit** it (de-duplicated, no hot-path churn); ships next to the plugin (`ProjectReference`) — deploy both via `tools/deploy-plugin.sh`. GUID/bake/runtime-state fields stay on the two classes (divergent by design). |
+| `Haf.Schema/HafModelSchema.cs` | The **shared model schema** (netstandard2.0 DLL): the ~66 fields stored identically by the editor's `ModelDef` and the plugin's `ModelEntry`, defined ONCE. Both classes **inherit** it (de-duplicated, no hot-path churn); ships next to the plugin (`ProjectReference`) — deploy both via `tools/deploy-plugin.sh`. GUID/bake/runtime-state fields stay on the two classes (divergent by design). |
 | `Patches/GameBinding.cs` | Startup compatibility report + the one place each game-type NAME lives (call sites bind via `GameBinding.<Type>`, not a scattered `Type.GetType`). Resolves a catalog of the game types/members HAF binds to (~124 members), logs `[GameBinding] OK` or a specific `NOT FOUND`, **and** writes a machine-readable `haf_bindings_report.txt` (next to `haf_load_report.txt`) every launch — a diffable `[ok]`/`[MISSING TYPE]`/`[MISSING MEMBER]` line per binding, so a game-update rename surfaces as one report line (headless-checkable) instead of a feature silently misbehaving. Plain `System.Reflection`, unit-tested. |
 | `Patches/` | The injection engine + Harmony patches (below). |
 | `Tests/` | xUnit suite over the pure registry/parse/era layer. See `docs/Testing.md`. |
@@ -56,7 +56,7 @@ its own small field-only cache, `CachedField`, for its self-contained use.)
 
 - **A new Harmony hook only fires if it's added to the `hooks[]` list in `Plugin.cs`** — a missed registration
   is silent. The load line reports `patched/total` counting the methods actually patched (not "didn't throw").
-- Adding a **registry field**: the ~64 fields stored identically by both classes are now the **shared
+- Adding a **registry field**: the ~66 fields stored identically by both classes are now the **shared
   `Haf.Schema.HafModelSchema`** — add it there ONCE and both `ModelDef` (editor) and `ModelEntry` (plugin) inherit it
   (compiler-enforced, can't drift). Fields that DIVERGE (a GUID as `int[]` editor-side vs `sa/sb/..` plugin-side, or a
   bake-only/runtime-state field) still touch their own class + the plugin's two read paths (Newtonsoft object parse +

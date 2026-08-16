@@ -4,10 +4,11 @@ The model schema's shared fields are defined **once**, in a netstandard2.0 libra
 and the plugin can't drift on them.
 
 ## Shape
-- **`Haf.Schema.HafModelSchema`** (`Haf.Schema/HafModelSchema.cs`, netstandard2.0, no dependencies) holds the **64 fields
-  stored identically** by the editor and the plugin — the behavioral / sound / prop / tint config.
+- **`Haf.Schema.HafModelSchema`** (`Haf.Schema/HafModelSchema.cs`, netstandard2.0; references `UnityEngine.CoreModule`
+  for the shared `Vector3`) holds the **66 fields stored identically** by the editor and the plugin — the behavioral /
+  sound / prop / tint config, plus `resourceName`, `pawnDescription`, and the `position` offset (`Vector3`).
 - **`ModelDef`** (editor, `ENCReload/Assets/Scripts/Editor/ModelRegistry.cs`) `: HafModelSchema` — adds its bake-time,
-  GUID (`int[]`), and `Vector3` fields.
+  GUID (`int[]`), and editor-only `Vector3` (`rotation`) fields.
 - **`ModelEntry`** (plugin, `Patches/UniversalInjectPatch.cs`) `: HafModelSchema` — adds its runtime-state and GUID
   (`sa/sb/..`) fields.
 
@@ -17,7 +18,7 @@ call-site changes.
 ## What's shared, what isn't
 | Fields | Where |
 |---|---|
-| ~64 identical fields (string/bool/float/int) | **`HafModelSchema`** — one definition, compiler-enforced |
+| 66 identical fields (string/bool/float/int + the `position` `Vector3`) | **`HafModelSchema`** — one definition, compiler-enforced |
 | GUIDs | **not shared** — `int[] skel/atlas/clip` (editor) vs `sa,sb,sc,sd` (plugin): different runtime shapes |
 | Bake-time-only (`size`, `convertGrid`, `stripParts`, …) | `ModelDef` only |
 | Runtime state (resolved handles, `*AnimId`, session flags, poll dicts) | `ModelEntry` only |
