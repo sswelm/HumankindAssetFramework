@@ -172,6 +172,24 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
 - **Suppressed Console Noise** — `Tools ▸ HAF ▸ Suppressed Console Noise — open/clear log`. An `[InitializeOnLoad]` filter
   that hides known-harmless vanilla SDK console spam and re-logs matches to `Logs/SuppressedConsoleNoise.log`.
 
+### In-game F8 window (runtime — part of the plugin, not `Tools ▸ HAF`)
+
+Press **F8** in a loaded game for HAF's runtime panel. It's trimmed to what a mod author needs while testing a build —
+"is HAF working, did it pick up *my* mod, do my models fit, and the live audio/texture/footprint authoring aids":
+
+- **Game-binding health banner** — a red banner at the top naming any reflected game type/member that didn't resolve on
+  your game version, so a compatibility break is loud and specific instead of a silent misbehave (from the `GameBinding`
+  startup report). **Nothing shown = all bindings resolved OK.**
+- **Smoke Test** — one-click **PASS/FAIL**: are the game bindings resolved, did your registry load models, and did
+  injection run without errors? The fastest *"why isn't my asset showing?"* check.
+- **GPU mesh buffer (live)** — per-layer vertex/index/mesh fill, so you can see whether your models fit the shared budget
+  ([Vertex-Budget.md](Vertex-Budget.md)); **Shift+F8** also logs it.
+- **Dump Atlases** — dump a unit's atlas to paint (the Unit Retexture workflow; [Textures.md](Textures.md)).
+- **Game Sound Lab** — **Audio Trace** (live Wwise event trace), **Dump Sound Catalog** (list every event name), and
+  **Play Event / Stop** (audition an event before you override it; [Game-Sound-Lab.md](Game-Sound-Lab.md)).
+- **Live readouts** — **Unit resize** (Resize Lab × Global Era grid) and the **strategic-footprint flatten-height**
+  override ([Unit-Size.md](Unit-Size.md), [District-Dedicated-Visual.md](District-Dedicated-Visual.md)).
+
 ## Tests & gates — `Tools ▸ HAF ▸ Tests ▸ …`
 
 Non-destructive (throwaway resource names). Run before committing baker/pipeline changes. See [Testing.md](Testing.md).

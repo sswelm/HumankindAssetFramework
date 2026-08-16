@@ -26,7 +26,7 @@ records what that buffer actually is, measured live, and how to budget against i
   every layer** (verified live), so a single unit's practical limit is simply the free space left in
   the shared pool.
 
-## Measured live (F8 window ▸ "Mesh Budget", a Contemporary-era save)
+## Measured live (F8 window — the always-on "GPU mesh buffer (live)" readout, a Contemporary-era save)
 
 Three layers exist; custom models land in the pawn layer (`FXMeshLayerIndex = 2`):
 
@@ -98,9 +98,9 @@ meshes, regardless of era. Consequences:
 
 The plugin exposes the live buffer usage:
 
-- **F8 window ▸ "Mesh Budget"** — dumps every layer's fill (verts/idx/meshes/maxTris) into the window
-  *and* to `BepInEx/LogOutput.log` (`[Budget]` lines). (Shift+F8 logs the same but proved flaky on
-  some keyboard layouts — prefer the button.)
+- **F8 window — the "GPU mesh buffer (live)" readout** shows every layer's fill (verts/idx/meshes/maxTris),
+  updating live in the panel (no button needed). **Shift+F8** also logs the same to `BepInEx/LogOutput.log`
+  (`[Budget]` lines).
 
 Spawning 10 more of the same unit won't move the numbers (instancing — copies are free).
 

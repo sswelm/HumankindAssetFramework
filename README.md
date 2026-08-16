@@ -128,7 +128,8 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
 - **Pack merging** — the runtime merges any number of third-party packs from `haf_packs/`: duplicate-`modId` rejection,
   `dependsOn` validation, topological load order, declared overrides, and a `haf_load_report.txt` of every decision.
 - **Guided authoring** — Pick-driven clip/bone/hide fields, an embedded interactive 3D preview, auto-detected game and
-  Blender paths, and an in-game **F8** scan/feedback window.
+  Blender paths, and an in-game **F8** status window (compatibility health, a Smoke Test, the live GPU-budget readout,
+  and the audio/texture authoring aids).
 - **Backup & Restore** — a guarded, additive snapshot of everything ENCReload's git doesn't track.
 - **Headless CLI** — re-bake a model and run the full Humankind mod **build + deploy** from the command line (Unity batch
   mode), reusing the exact code the editor buttons call — so scripts, CI, or an AI agent can drive HAF without the GUI.
@@ -201,7 +202,9 @@ skeleton + atlas GUIDs, transform, shading flags; animated entries add `clip` + 
 wrapped with pack metadata (`schemaVersion`/`modId`). It then merges any additional packs in `BepInEx/config/haf_packs/*.json`
 and writes a `haf_load_report.txt` of what loaded. The Factory writes ENC's registry and auto-detects the path; the
 field-by-field breakdown is in the [Factory Manual](docs/Factory-Manual.md) and the pack format in [Multi-Mod.md](docs/Multi-Mod.md).
-The plugin's own cfg (`…\community.humankind.haf.cfg`) — press **F8** in-game for a scan/feedback window.
+The plugin's own cfg (`…\community.humankind.haf.cfg`) — press **F8** in-game for the status/authoring window
+(binding-health banner, Smoke Test, live GPU-budget readout, retexture/sound aids; see
+[Editor-Tools.md](docs/Editor-Tools.md#in-game-f8-window-runtime--part-of-the-plugin-not-tools--haf)).
 
 ## Documentation
 
