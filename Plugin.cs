@@ -426,19 +426,12 @@ namespace HumankindAssetFramework
             using (new GUILayout.HorizontalScope())
             {
                 if (GUILayout.Button("Re-scan now")) Prober.RunScan();
-                if (GUILayout.Button("Scan Models")) Prober.ScanModels();
-                if (GUILayout.Button("Test Write")) Prober.TestWrite();
                 if (GUILayout.Button("Clear")) Prober.Report.Clear();
             }
             using (new GUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Dump UnitDef")) Prober.DumpUnitDef();
-                if (GUILayout.Button("Dump Formation")) Prober.DumpFormation();
-                if (GUILayout.Button("Dump Atlases")) UniversalInject.DumpOutputLayerAtlases(atlasFilter);
-                if (GUILayout.Button("Dump Audio")) UniversalInject.DumpAudioState(atlasFilter);
-                if (GUILayout.Button("Dump District")) { Prober.Report.Clear(); foreach (var l in UniversalInject.DumpDistrictState()) Prober.Report.Add(l); }
+                if (GUILayout.Button("Dump Atlases")) UniversalInject.DumpOutputLayerAtlases(atlasFilter);   // Unit Retexture workflow: dump a unit's atlas to paint
                 if (GUILayout.Button("Turn Ease")) { Prober.Report.Clear(); foreach (var l in UniversalInject.TurnEaseCensusLines()) { Prober.Report.Add(l); Plugin.Log.LogInfo("[TurnEase] " + l); } }
-                if (GUILayout.Button("Mesh Budget")) { Prober.Report.Clear(); foreach (var l in UniversalInject.MeshBudgetLines()) { Prober.Report.Add(l); Plugin.Log.LogInfo("[Budget] " + l); } }
                 if (GUILayout.Button("Smoke Test")) UniversalInject.RunSmokeTest();   // runtime integration check: bindings + registry + injection health -> [SmokeTest] PASS/FAIL
             }
             using (new GUILayout.HorizontalScope())
@@ -448,11 +441,9 @@ namespace HumankindAssetFramework
             }
             using (new GUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Play Audio (test) on filtered units")) UniversalInject.PlayAudioTest(atlasFilter);
                 if (GUILayout.Button(UniversalInject.AudioTraceOn ? "Audio Trace: ON" : "Audio Trace: OFF"))
                 { UniversalInject.AudioTraceOn = !UniversalInject.AudioTraceOn; UniversalInject.AudioTraceFilter = atlasFilter; }
                 if (GUILayout.Button("Dump Sound Catalog")) UniversalInject.DumpSoundCatalog();
-                if (GUILayout.Button("Play Sound Test (WAV)")) UniversalInject.PlaySoundTest();
             }
             using (new GUILayout.HorizontalScope())
             {
