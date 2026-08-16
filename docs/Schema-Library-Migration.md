@@ -74,6 +74,27 @@ It removes **duplication**, not **size** — one shared 128-ish-field class is s
 Reducing size means grouping the schema into nested POCOs by concern (geometry / animation / deploy / sound / …) inside
 `Haf.Schema` — optional, separable, and closer to the declined split, so out of scope here.
 
+## Two costs the POC didn't surface (found on attempting execution, 2026-08-16)
+The POC was an isolated serialization test; against the real projects, two realities change the calculus:
+
+1. **Where the schema lives = a real daily-workflow cost.** The plugin must stay **distributable** — it builds and ships
+   *without* the ENCReload editor project. So the schema can't be a source file the plugin `<Compile Include>`s from
+   `..\ENCReload\…` (that couples the plugin build to ENC — breaks a standalone/CI build). It must be a **DLL** the
+   plugin owns and ships (`Haf.Schema.dll` → `BepInEx/plugins/`), which the Unity editor then *consumes*. Consequence:
+   adding a schema field becomes **edit `Haf.Schema` → rebuild → redeploy the DLL into `ENCReload/Assets/Plugins/`**,
+   instead of today's "just edit `ModelDef`." That's friction on the single most common editor edit.
+2. **Deleting the parity guard needs more than sharing fields.** The plugin doesn't POCO-deserialize — it **hand-maps**
+   ~79 `m["key"]` assignments (+ a regex fallback). Sharing the field *definitions* stops a field existing in one class
+   and not the other, but the **parse** still hand-lists the keys, so the guard is still doing real work. Retiring it
+   also requires switching the parse to `DeserializeObject<ModelEntry>` — a bigger change with its own edge cases
+   (defaults, coercion, the malformed-JSON regex fallback).
+
+**Honest read:** the payoff (one field definition; eventually deleting the guard) is real but **smaller than the cost it
+now demands** — and the drift it prevents is *already* caught by the now-**enforced** parity gate. So the pragmatic
+call is to **keep the enforced guard** as the cheap mitigation and do this refactor **with the 2.0 packaging**, where the
+plugin↔editor DLL boundary and the neutral-schema split are being drawn anyway — not to pay the workflow cost now for a
+marginal gain. The POC stands: when the boundary is being cut for 2.0, this is the de-risked, step-by-step way to cut it.
+
 ## Sequencing & payoff
 Pairs naturally with the **2.0 packaging / editor-ENC decoupling** (#5) — both touch project structure and build/deploy,
 and a neutral shared schema is a step toward the distributable framework. Payoff: **one** place to add a field, the
