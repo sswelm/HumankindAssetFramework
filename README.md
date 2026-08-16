@@ -146,6 +146,8 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
 - **No per-reload leak** — the runtime clones both axes make (the model isolated layers/skins, the district private
   leaves / cloned layers / B&W footprint texture) are freed on each session reset, so a long play session with many
   reloads doesn't accumulate orphaned GPU objects.
+- **Unit facing survives save/load** — a HAF side-file restores each unit's heading on load (the game save has none),
+  including `respawnAfterLoad` units (helicopters) whose post-load pawn rebuild would otherwise reset it to neutral.
 
 > **Polishing:** moving **caterpillar tracks** (treadize) run in-game, with a remaining idle micro-twitch to smooth out;
 > the **death / battle-start war-cry** creature voices are built and awaiting in-game verification. See [CHANGELOG.md](CHANGELOG.md).
