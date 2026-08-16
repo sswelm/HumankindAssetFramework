@@ -37,6 +37,12 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   assets) and a main-thread destroy queue (the reset runs off-thread via `Sandbox.Load`). In-game verified across
   reloads (`[District] freed N runtime clone(s)`, no district errors).
 
+- **`hideSubPawns` COEXISTENCE — critical-review follow-up (2026-08-16).** The gunship duplicate-pawn hide (keeps
+  one pawn, buries the stacked squadron copies) counted per model *type*, not per unit — so a second coexisting
+  unit of the same model (yours + an enemy's, or two of yours) rendered **nothing**. Fixed by keying "already
+  kept this frame" on unit *position* (a unit's stack shares a spot; a different unit is tiles away). Verified
+  in-game with several gunship helicopters on screen at once, each a single clean model.
+
 - **BATTLE GUNNERY — the Jagdpanzer arc (2026-08-06).** A casemate tank destroyer exposed, one shot at a
   time, that vanilla **never rotates a vehicle's hull in battle** (vehicles aim only via a turret bone slot —
   invalid on custom rigs), and grew the full gunnery chain in a day: **battle hull-aim** (the map bombard's
