@@ -30,10 +30,12 @@ A copy-ready starting point is [`haf-pack.example.json`](haf-pack.example.json).
 | `models` | Your model entries — identical to what the Factory bakes. Runtime-only entries (a retexture/tint/sound with no baked mesh) need no GUIDs. |
 | `dependsOn` | modIds your pack **requires**. A missing dependency means your pack is **skipped** (loudly, in the log + report). Also orders you after them. |
 | `loadAfter` | modIds your pack must load **after** (soft: an absent modId is ignored, your pack still loads). |
+| `module` / `moduleGuid` | *(optional)* the Humankind runtime **module** your pack extends — packs load in the game's own mod order (see below). Defaults to your pack's **folder/file name** (== the module Name by convention), so you usually set nothing. Declare `module` (the module Name) only if your pack folder differs from your mod's name; `moduleGuid` is the stable key that survives a retitle. |
 | `overrides` | explicit `{modId, pawnDescription}` replacements: your entry **replaces** that pack's entry on that pawn. Declared = consensual; without it, the clash is a conflict and the first-loaded entry wins. |
 
 **Backward compatible:** a legacy bare `{ "models": [...] }` with no wrapper still loads — it just gets default metadata
-(`modId` = the filename, `schemaVersion` = 0). ENC's own `haf_models.json` is treated as the base pack `enc`.
+(`modId` = the filename, `schemaVersion` = 0). A legacy `haf_models.json` base file, if one exists, still loads too;
+ENC itself now ships as a normal pack at `haf_packs/ENCReload/pack.json` (`modId` `enc`, module `ENCReload`).
 
 > **Naming — framework vs packs (deliberate):** everything FRAMEWORK-level is `haf_*` (`haf_packs/`,
 > `haf_load_report.txt`); everything `haf_*` (`haf_models.json`, `haf_sounds/`, `haf_skins/`) belongs to **ENC the
@@ -43,7 +45,7 @@ A copy-ready starting point is [`haf-pack.example.json`](haf-pack.example.json).
 
 ## Where it goes
 
-- **ENC's base registry:** `BepInEx/config/haf_models.json` (loaded first, as `modId` `enc`).
+- **ENC (the reference pack):** `BepInEx/config/haf_packs/ENCReload/pack.json` (`modId` `enc`) — a normal self-contained pack, ordered by its `ENCReload` Humankind module like any other. *(A legacy `haf_models.json` base file is still read if one exists.)*
 - **Your pack, self-contained (recommended, since 2026-07-19):** one directory in `haf_packs/`:
 
   ```
@@ -65,18 +67,22 @@ A copy-ready starting point is [`haf-pack.example.json`](haf-pack.example.json).
 
 ## How packs merge (resolution ENFORCED since 2026-07-19)
 
-1. **Discovery** — the base registry, then every `haf_packs/*.json` (filename order).
+1. **Discovery** — a legacy `haf_models.json` base file (if any), then every `haf_packs/*.json` and `haf_packs/<mod>/pack.json`.
 2. **Duplicate `modId`s** — the first file keeps the id; later same-id packs are **skipped** (log + report).
 3. **`dependsOn` validation** — a pack whose dependency isn't loaded is **skipped** (iterated: skipping one pack can
    invalidate a pack that depended on it).
-4. **Load order** — a **stable topological sort** over `dependsOn` + `loadAfter`: with no declared constraints the
-   order is exactly the old base-first + filename order; a dependency **cycle** is broken loudly by falling back to
-   file order for its members.
-5. **Merge** — all `models` are combined. A model's identity is its **`pawnDescription`** (the physical pawn slot — two skins
+4. **Humankind load order** — packs are ordered to match **the game's own mod load order**. Each pack is matched to its
+   Humankind runtime **module** (by `moduleGuid`, else `module`, else the pack's folder/file name == the module Name),
+   and packs sort by that module's load-order index. A pack with **no matching module** — or when the game's module list
+   can't be read — keeps alphabetical order after the matched packs. *HAF borrows Humankind's ordering instead of
+   inventing one, so your mod manager decides who loads first.*
+5. **`dependsOn` + `loadAfter`** — a **stable topological sort** layers your declared constraints *on top of* the HK
+   order; a dependency **cycle** is broken loudly (its members fall back to the HK/file order).
+6. **Merge** — all `models` are combined. A model's identity is its **`pawnDescription`** (the physical pawn slot — two skins
    can't ride one pawn).
-6. **Declared overrides** — an entry whose pack declares `{modId, pawnDescription}` for the current owner **replaces**
+7. **Declared overrides** — an entry whose pack declares `{modId, pawnDescription}` for the current owner **replaces**
    that entry (logged + reported as an override, not a conflict).
-7. **Undeclared conflicts** — the **first-loaded pack wins** (so ENC's own units are protected), and it's logged loud.
+8. **Undeclared conflicts** — the **first-loaded pack wins** (first = earlier in Humankind's mod order), logged loud.
    *No implicit overrides* — declare it in `overrides` if the replacement is intentional.
 
 **Not built (deliberately):** a `patches` concept — field-level modification of another pack's entry, as opposed to
@@ -91,10 +97,16 @@ Every load writes **`BepInEx/config/haf_load_report.txt`** — the first thing t
 HAF load report  (regenerated every load)
 packs=2  models=14  conflicts=0  overrides applied=0
 
-[enc]      schemaVersion=1  models=13  file=haf_models.json
+[enc]      schemaVersion=1  models=13  file=pack.json
 [yourmod]  schemaVersion=1  models=1   file=yourmod.json
-    loadAfter: enc
+
+RESOLUTION:
+  HK module order: enc #1→ENCReload → yourmod #4→YourMod
 ```
+
+The `RESOLUTION` line shows the resolved order and how each pack matched its Humankind module (`enc #1→ENCReload` = the
+`enc` pack matched module `ENCReload` at load-order index 1). `yourmod (no matching module — alphabetical)` there would
+mean HAF couldn't tie your pack to a game module — check that your pack folder matches your mod's name, or set `module`.
 
 If your pack isn't listed, it wasn't discovered (wrong folder, a parse error — check the BepInEx log), **or it was
 skipped by resolution** (duplicate `modId`, missing `dependsOn` — the `RESOLUTION` section says which and why). An

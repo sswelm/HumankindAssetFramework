@@ -38,6 +38,20 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   still over the real **128** wall, so bones 128–222 (the arm chains = the "wings") were always going to
   collapse. No engine-import decompile needed; the culprit was the GPU skin's per-vertex bone-index ceiling.
 
+- **PACK ORDER FOLLOWS HUMANKIND'S MOD ORDER (2026-08-16, verified in-game).** A HAF pack is the content-extension
+  of a Humankind runtime module, so packs should load in the SAME order the game loaded their modules — the player's
+  own mod order — not an invented alphabetical/base rule. This also retired a dead guarantee: the loader still claimed
+  "the base registry loads first, so ENC is protected," but ENC left the `haf_models.json` base slot for
+  `haf_packs/ENCReload/pack.json` long ago, so that protection had silently lapsed (zero impact today at one pack, but
+  wrong the moment a second pack sorted before `ENCReload`). Fix: read the game's ordered active-module list via
+  `Amplitude.Framework.Services.GetService(Amplitude.Mercury.Runtime.IRuntimeService).GetRuntimeModules()` (a `string[]`
+  of `Name\GUID\…` in load order; fully reflected + guarded), match each pack to its module (by `moduleGuid`, else
+  `module`, else the pack's **folder/file name == the module Name** by convention — computed independently of `modId`,
+  since ENC's `modId` is `enc` but its folder/module is `ENCReload`), and sort packs by the module's load-order index.
+  `dependsOn`/`loadAfter` still layer on top; an unmatched pack or an unreachable API falls back to alphabetical. No
+  pack.json or editor change — ENC maps automatically via its folder. **Verified in-game:** `haf_load_report.txt` reads
+  `HK module order: enc #1→ENCReload` (matched its module at load-order index 1, right after vanilla). Critical-review #7.
+
 - **MODEL FACTORY UI clarity + compaction pass (2026-08-16, editor).** Renamed two implementation-leaky labels
   to what the modder actually gets — **"Convert grid" → "Weld & simplify (0 = keep exact)"** (it's glbconv's
   vertex-weld resolution, not a grid; tooltip now points a textured model at "Reduce to ~tris") and
