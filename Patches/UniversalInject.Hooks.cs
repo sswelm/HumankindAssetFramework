@@ -228,6 +228,11 @@ namespace HumankindAssetFramework
         }
         static void Prefix()
         {
+            // PawnManager.Load is the UNIVERSAL per-session seam: it fires on EVERY game session — save-load, in-session
+            // reload, AND a New Game — unlike AnimationLoad (once per process) and Sandbox.Load (save-deserialize only).
+            // Requesting the model re-arm here closes the New-Game gap: a new game after a load otherwise never
+            // re-registers our skeletons into the rebuilt manager. Idempotent flag; coalesces with Sandbox.Load.
+            UniversalInject.RequestReloadRearm();
             try
             {
                 int target = Plugin.SkeletonBoneBudget != null ? Plugin.SkeletonBoneBudget.Value : 0;

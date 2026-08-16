@@ -198,7 +198,8 @@ namespace HumankindAssetFramework
         static List<ModelEntry> entries;
         static bool loaded, registered, repointActiveLogged, stLogged, greyWaitLogged;
         static int loadAttempts;   // failed-load counter: latch `loaded` only after a success or a few tries, so a TRANSIENT read/parse error (AV scan, sharing violation at startup) retries instead of disabling injection for the whole session
-        static volatile bool reloadRearmPending;   // set by the (possibly off-main-thread) Sandbox.Load hook; consumed on the main-thread Update tick so RearmModelRegistration's Unity Destroys run safely
+        static volatile bool reloadRearmPending;   // set by the per-session seams (Sandbox.Load / PawnManager.Load, possibly off the main thread); consumed on the main-thread Update tick so RearmModelRegistration's Unity Destroys run safely
+        static volatile bool districtResetSync;    // Sandbox.Load reset the district axis synchronously for the pending rearm — the deferred consume then skips a redundant district reset (a New Game leaves this false so the consume does it)
         static UnityEngine.Texture2D _flatN, _white, _black, _grey;   // neutral overlay maps (kill the host's detail/camo)
 
         // A discovered mod PACK: one registry file's wrapper metadata + its models. HAF (Humankind Asset Framework)
@@ -908,19 +909,33 @@ namespace HumankindAssetFramework
         // once per PROCESS: load a second game in the same app run and EnsureRegistered no-ops, leaving our skeletons
         // unregistered and every learned id (skeletonId/animId/descId) stale against the new session's assignments.
         // Called from the AnimationLoad postfix, right before EnsureRegistered re-registers into the fresh manager.
-        // Sandbox.Load (in-session save-reload) asks for a re-arm here — thread-safe flag only. The heavy work
-        // (RearmModelRegistration destroys session-1 Unity clones) is deferred to ConsumePendingReloadRearm on the
-        // main-thread Update tick. See the Hk_SandboxLoad hook + the AnimationLoad-fires-once-per-process finding.
+        // A new game session (new game OR save-load) rebuilds the AnimationManager, but AnimationLoad — where the
+        // eager re-arm hangs — fires only ONCE PER PROCESS (proven 2026-08-16 by [SessionProbe]). So the re-arm is
+        // also requested from the two seams that DO fire per session: Sandbox.Load (save-load only) and
+        // PawnManager.Load (EVERY session, incl. a New Game — the seam that closes the new-game gap). Thread-safe
+        // flag only; the heavy work (RearmModelRegistration destroys session-1 Unity clones) runs on the main-thread
+        // Update tick in ConsumePendingReloadRearm. Multiple triggers per load coalesce into one consume.
         internal static void RequestReloadRearm() => reloadRearmPending = true;
 
-        // Main thread (Plugin.Update). Runs the deferred full re-arm requested by an in-session save-reload.
+        // Sandbox.Load (save-load): reset the district axis SYNCHRONOUSLY here — it's pure reference-nulling
+        // (thread-safe) and MUST land before the district presentation hooks fire during the world rebuild, or they
+        // bind onto corpse leaves (the Oracle incident). Then request the model re-arm, flagging that districts were
+        // already reset so the deferred consume won't churn a second reset. A NEW GAME does NOT reach this (no save
+        // deserialize) — there the deferred consume resets districts itself (districtResetSync stays false).
+        internal static void RequestSaveLoadRearm()
+        {
+            ResetDistrictSessionState();
+            districtResetSync = true;
+            reloadRearmPending = true;
+        }
+
+        // Main thread (Plugin.Update). Runs the deferred full re-arm requested by any per-session seam above.
         internal static void ConsumePendingReloadRearm()
         {
             if (!reloadRearmPending) return;
             reloadRearmPending = false;
-            // resetDistricts:false — the Sandbox.Load hook already reset the district axis SYNCHRONOUSLY (it must beat
-            // the district presentation hooks); re-running it here would just churn a needless second reset+rebuild.
-            try { RearmModelRegistration(resetDistricts: false); }
+            bool distDone = districtResetSync; districtResetSync = false;   // Sandbox.Load already reset districts (save-load)? then skip the redundant reset; a New Game needs it done here.
+            try { RearmModelRegistration(resetDistricts: !distDone); }
             catch (Exception ex) { Plugin.Log.LogError("[Uni] deferred load re-arm: " + ex); }
         }
 

@@ -57,19 +57,14 @@ namespace HumankindAssetFramework
         static void Postfix(object __0)
         {
             try { FacingPersist.OnLoad(__0); } catch (Exception ex) { Plugin.Log.LogError("[Facing] load hook: " + ex); }
-            // An IN-SESSION save-reload rebuilds the world WITHOUT re-firing AnimationManager.AnimationLoad (proven
-            // 2026-08-16: AnimationLoad fires once per PROCESS, not per save-load), so the model+district re-arm that
-            // hangs off it never runs on the 2nd load. Two axes, two timings:
-            //  • DISTRICT reset stays SYNCHRONOUS here — it's pure reference-nulling (thread-safe) and MUST land before
-            //    the district presentation hooks fire during the world rebuild, or they force the new channels onto
-            //    corpse leaves (the Oracle incident). Do NOT defer this.
-            try { UniversalInject.ResetDistrictSessionState(); } catch (Exception ex) { Plugin.Log.LogError("[District] load reset: " + ex); }
-            //  • MODEL axis: same reload gap (our skeletons stayed bound to the FIRST save's AnimationManager → the
-            //    Organ Gun tore). But RearmModelRegistration destroys session-1 Unity clones (main-thread only) and
-            //    THIS hook may be off the main thread — so only request here; it runs on the next main-thread Update
-            //    (ConsumePendingReloadRearm), then RepointMatch lazily re-registers into the new manager as each unit's
-            //    addon loads. (Its own ResetDistrictSessionState re-run is a harmless idempotent repeat.)
-            UniversalInject.RequestReloadRearm();
+            // A save-load rebuilds the world WITHOUT re-firing AnimationManager.AnimationLoad (proven 2026-08-16:
+            // AnimationLoad fires once per PROCESS), so the model+district re-arm that hangs off it never runs on the
+            // 2nd load. Re-arm here instead: RequestSaveLoadRearm resets the DISTRICT axis SYNCHRONOUSLY (pure
+            // reference-nulling, thread-safe — it must beat the district presentation hooks or they bind onto corpse
+            // leaves, the Oracle incident) and requests the MODEL re-arm on the next main-thread Update (its Destroys
+            // are main-thread-only and this hook may be off it). RepointMatch then lazily re-registers into the new
+            // manager. (A New Game doesn't reach this seam — PawnManager.Load covers it, see Hk_AnimatedBonePoolHeadroom.)
+            try { UniversalInject.RequestSaveLoadRearm(); } catch (Exception ex) { Plugin.Log.LogError("[Uni] save-load re-arm: " + ex); }
         }
     }
 

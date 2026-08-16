@@ -28,15 +28,22 @@ rendered pawn: `SkeletonId`, `ObjectSpace` TRS, `Pose0..Pose8` blend slots, the 
 ## 2. Registration (at AnimationLoad + every save-reload)
 
 > **`AnimationLoad` fires once per PROCESS, not per save-load** (proven 2026-08-16: a two-save load-order
-> repro logged `EnsureRegistered` exactly once). So the plugin **cannot** rely on it to re-arm when you load a
-> *second* save in the same app run — the game rebuilds its `AnimationManager` (fresh skeleton/mesh slots),
-> but our registration would stay bound to the first save's manager. Left unfixed, an animated custom unit
-> present in both saves skins against stale slots and **tears** on the second load (clean on a fresh load).
-> The re-arm therefore ALSO hangs off the per-save-load seam — `Sandbox.Load` (the same hook the district axis
-> and facing-persistence use). That hook may run off the main thread, so it only sets a flag
-> (`RequestReloadRearm`); the flag is consumed on the next main-thread `Update` tick
-> (`ConsumePendingReloadRearm → RearmModelRegistration`), which unlatches `registered` and drops session-scoped
-> state, and `RepointMatch` then lazily re-registers into the new manager as each unit's addon loads. See §5.
+> repro logged `EnsureRegistered` exactly once, even across a **main-menu** round trip). So the plugin **cannot**
+> rely on it to re-arm when a *second* game session starts in the same app run — the game rebuilds its
+> `AnimationManager` (fresh skeleton/mesh slots), but our registration would stay bound to the first session's
+> manager. Left unfixed, an animated custom unit skins against stale slots and **tears** (a save-load), or a
+> unit built in a **New Game** after a load repoints onto stale registration.
+>
+> The re-arm therefore also hangs off the seams that DO fire per session:
+> - **`PawnManager.Load`** — the **universal** seam: fires on *every* session (save-load, in-session reload,
+>   **and a New Game**). This is what closes the new-game gap. (Piggybacks the `Hk_AnimatedBonePoolHeadroom` hook.)
+> - **`Sandbox.Load`** — save-load only; used additionally so the **district** axis gets its reset
+>   *synchronously* (it must beat the district presentation hooks — see §5 and the district docs).
+>
+> All triggers just set a flag (`RequestReloadRearm`; the hooks may run off the main thread) that is consumed on
+> the next main-thread `Update` (`ConsumePendingReloadRearm → RearmModelRegistration`), which unlatches
+> `registered` and drops session-scoped state; `RepointMatch` then lazily re-registers into the new manager as
+> each unit's addon loads. Multiple triggers per load coalesce into one consume. See §5.
 
 1. The plugin loads each registry model's ClipCollection by GUID and **appends it to the private
    `loadedAnimationClipCollections` array *before* `Apply()` runs** — Apply's builder then bakes our clip into the
@@ -183,12 +190,16 @@ Per bone, per pose slot (`ApplyPose` → `GetPoseTRS`):
   instance left on a vanilla skeleton renders mis-skinned).
 - **Save-load spawn race** (models borrowing a donor's animated sub-part, e.g. a rotor): fixed by re-running the
   game's own `PresentationUnit.UpdatePawns` shortly after load (`respawnAfterLoad`, per model).
-- **In-session save-reload re-arm** (2026-08-16): loading a *second* save in one app run does NOT re-fire
-  `AnimationLoad`, so registration is re-armed on `Sandbox.Load` as well (§2). Skipping this left our skeletons
-  bound to the first save's `AnimationManager` — an animated unit in both saves (the organ gun) **tore** on the
-  second load, clean on a fresh load. The re-arm reset also re-runs the whole model-axis session cleanup (audio
-  sources, deploy/state maps, textures) that previously only ran at `AnimationLoad`, so other second-load
-  glitches clear with it.
+- **Per-session re-arm** (2026-08-16): `AnimationLoad` fires only ONCE per process (even across a main-menu
+  round trip), so a second game session doesn't re-arm through it. Registration is therefore re-armed on
+  `PawnManager.Load` (the universal per-session seam — save-load, reload, *and* New Game) and additionally on
+  `Sandbox.Load` (so the district axis resets synchronously) — see §2. Skipping this left our skeletons bound to
+  the first session's `AnimationManager`: an animated unit in both saves (the organ gun) **tore** on the second
+  save-load, and a New Game after a load repointed units onto stale registration. The re-arm reset also re-runs
+  the whole model-axis session cleanup (audio sources, deploy/state maps, textures), so other second-session
+  glitches clear with it. (Minor known cost: each re-arm re-registers our skeletons at fresh manager slots
+  without unregistering the old ones, so the skeleton list grows ~21/session — benign within buffer headroom,
+  same as the long-standing save-load behavior.)
 - **Never `Destroy` a `LoadAsset`'d skin.** The re-arm cleanup destroys textures the plugin *creates*
   (`LoadSkinPng` / `BuildAdjustedAtlas`, tracked by `ModelEntry.texOwned`) but **never** the raw bundle atlas
   from `LoadAtlas` (`AssetDatabase.LoadAsset<Texture2D>`) — that is a *shared* game asset, and destroying it

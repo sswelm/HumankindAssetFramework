@@ -15,10 +15,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   **red**; a fresh load was always clean. The F8 GPU-mesh-buffer readout (a `+1 mesh / +4.7k verts` diff on the
   second load) ruled out buffer overflow and pointed at stale isolation, and a per-load registration dump found
   the cause: **`AnimationManager.AnimationLoad` fires once per PROCESS, not per save-load** — the whole
-  model-axis re-arm hung off it, so the second load never re-registered our skeletons into the game's rebuilt
-  `AnimationManager` (the district axis already re-armed on `Sandbox.Load`; the unit axis just never did). Fix:
-  re-arm on `Sandbox.Load` too (thread-safe flag → main-thread `Update` consume, since the load hook may be off
-  the main thread). That exposed a second, older trap: the re-arm cleanup `Destroy()`'d `e.tex` unconditionally,
+  model-axis re-arm hung off it, so a second session never re-registered our skeletons into the game's rebuilt
+  `AnimationManager`. Fix: re-arm on the seams that *do* fire per session — **`PawnManager.Load`** (the universal
+  one: save-load, reload, *and* a New Game) plus `Sandbox.Load` (so the district axis resets synchronously) —
+  all via a thread-safe flag consumed on the main-thread `Update` (the hooks may be off it). A `[SessionProbe]`
+  proved the whole thing: `AnimationLoad` fired only once even across a main-menu trip, and a New Game after a
+  load re-registered (fresh skel ids) only once `PawnManager.Load` was wired in. That exposed a second, older
+  trap: the re-arm cleanup `Destroy()`'d `e.tex` unconditionally,
   but for a normally-textured model that is the **shared bundle atlas** from `AssetDatabase.LoadAsset` —
   destroying it made the reload's `LoadAsset` return `null` (the red skin). Fix: `ModelEntry.texOwned` — only
   destroy textures the plugin creates, never a `LoadAsset`'d asset. Both verified in-game on the load-order
