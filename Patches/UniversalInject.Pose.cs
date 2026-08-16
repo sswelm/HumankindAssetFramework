@@ -826,7 +826,7 @@ namespace HumankindAssetFramework
             // stance at the time. A Pose1 weight-switching attempt rendered the pawn INVISIBLE while moving — the
             // secondary slots misbehave on the GPU pass in some unmapped way — so the state machine deliberately
             // uses only the battle-tested Pose0.)
-            if (e.animStateDriven && e.moveAnimId >= 0)
+            if (e.animStateDriven && e.AnyStateRole)   // ANY state role (move/attack/after/combat/preMove/idleAlt/idle), not just move — else a move-less model's attacks arm but never play
             {
                 StatePose(e, entry, out bool moving, out bool inAfter, out float afterT, out bool inAttack, out float attackT, out bool inCombat, out bool inPreMove, out float preMoveT, out bool inIdleAlt, out float idleAltT, out int idleAltId);
                 if (inAttack)
@@ -843,7 +843,7 @@ namespace HumankindAssetFramework
                     SetMember(pose0, "AnimationId", (uint)e.preMoveAnimId);
                     SetMember(pose0, "Time", preMoveT);
                 }
-                else if (moving)
+                else if (moving && e.moveAnimId >= 0)   // guard: a move-less state-driven model (idle+attack only) that moves falls through to idle rather than a bad -1 anim id
                 {
                     float md = e.moveDur > 0.001f ? e.moveDur : 1f;
                     SetMember(pose0, "AnimationId", (uint)e.moveAnimId);

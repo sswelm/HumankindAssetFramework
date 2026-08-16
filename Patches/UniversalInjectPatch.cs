@@ -54,6 +54,10 @@ namespace HumankindAssetFramework
         public int a2a, a2b, a2c, a2d;   // IDLE-ALT 2 ClipCollection Amplitude guid (0,0,0,0 = none) — optional second flavor clip (eat/groom); each firing picks randomly between the two
         public object moveClipColl, afterClipColl, attackClipColl, combatClipColl, preMoveClipColl, idleClipColl, idleAltClipColl, idleAlt2ClipColl;
         public int moveAnimId = -1, afterAnimId = -1, attackAnimId = -1, combatAnimId = -1, preMoveAnimId = -1, idleAnimId = -1, idleAltAnimId = -1, idleAlt2AnimId = -1;
+        // The state machine (StatePose / ProcessAnimStates) must run whenever ANY state role resolved — NOT just moveAnimId.
+        // Gating those two on moveAnimId while the attack-arming paths gate on attackAnimId meant a move-less state-driven
+        // model (idle+attack, no move clip) armed fires that never animated — StatePose was never entered (critical-review #8).
+        public bool AnyStateRole => moveAnimId >= 0 || attackAnimId >= 0 || afterAnimId >= 0 || combatAnimId >= 0 || preMoveAnimId >= 0 || idleAltAnimId >= 0 || idleAlt2AnimId >= 0 || idleAnimId >= 0;
         public float moveDur = 1f, afterDur = 1f, attackDur = 1f, combatDur = 1f, preMoveDur = 1f, idleDur = 1f, idleAltDur = 1f, idleAlt2Dur = 1f;
         public float idleAltInterval = 0f;   // avg SECONDS between idle-alt one-shots (jittered 0.6-1.4x, like the idle growl); <=0 disables even when clips are baked
         public float animPhaseSpread = 0.5f; // DEFAULT 0.5 (2026-07-31): spread this model's pawns over half the clip so a multi-pawn unit stops moving as ONE BODY — twelve canoes rocking as a rigid raft, eight monsters swinging their heads in unison. 1 = the whole clip, 0 = lockstep (the old behaviour). Applies to LOOPING poses only; one-shots stay tied to their trigger. This default also governs registries written before the field existed, so every animated model gains the desync without an edit.

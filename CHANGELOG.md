@@ -82,6 +82,12 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   add both fields to the gate, mirroring the loader's own check. Zero change for ENC (no death/battle entries);
   protective for its built-but-unshipped creature voices and third-party packs.
 
+- **STATE-MACHINE GATE (2026-08-16).** Critical-review #8: `StatePose`/`ProcessAnimStates` ran only when
+  `moveAnimId >= 0`, but attacks armed on `attackAnimId >= 0` — so a move-less state-driven model (idle+attack,
+  no move clip) armed fires that never animated. Fixed with a shared `ModelEntry.AnyStateRole` predicate driving
+  all three gates, plus a guard on the `moving` pose branch so a move-less model that moves falls back to idle.
+  Zero change for ENC (all its state-driven models have a move clip); protective for a stationary-turret-style unit.
+
 - **BATTLE GUNNERY — the Jagdpanzer arc (2026-08-06).** A casemate tank destroyer exposed, one shot at a
   time, that vanilla **never rotates a vehicle's hull in battle** (vehicles aim only via a turret bone slot —
   invalid on custom rigs), and grew the full gunnery chain in a day: **battle hull-aim** (the map bombard's

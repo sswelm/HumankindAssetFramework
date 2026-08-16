@@ -737,7 +737,7 @@ namespace HumankindAssetFramework
             var list = entries;
             if (list == null || !Plugin.UniversalInjectOn.Value) return;
             bool any = false;
-            foreach (var e in list) if (e.animStateDriven && e.moveAnimId >= 0) { any = true; break; }
+            foreach (var e in list) if (e.animStateDriven && e.AnyStateRole) { any = true; break; }   // any state role, not just move — a move-less state-driven model still needs moving/stopped samples for its attack/idle machine (#8)
             if (!any) return;
             if (++stateFrame % 3 != 0) return;   // ~20x/s, like the deploy poll
             try
@@ -749,7 +749,7 @@ namespace HumankindAssetFramework
                 if (armies == null) return;
                 var fresh = new Dictionary<ModelEntry, List<StateSample>>();
                 var seen = new Dictionary<ModelEntry, HashSet<long>>();
-                foreach (var e in list) if (e.animStateDriven && e.moveAnimId >= 0) { fresh[e] = new List<StateSample>(); seen[e] = new HashSet<long>(); }
+                foreach (var e in list) if (e.animStateDriven && e.AnyStateRole) { fresh[e] = new List<StateSample>(); seen[e] = new HashSet<long>(); }
                 // One sampler for BOTH walks below. keySalt separates the map-army and battle bookkeeping for the
                 // same sim unit: during a battle the army's PresentationUnit still exists at the STACK position while
                 // the battle deploys a SECOND PresentationUnit on its combat tile — same GUID, different objects. A
