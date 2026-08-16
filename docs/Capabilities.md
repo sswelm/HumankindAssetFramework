@@ -88,7 +88,7 @@ see the [Factory Manual](Factory-Manual.md).
   so thin parts survive) shrinks oversized models to fit the engine's shared mesh buffer. A **winding fix** rewinds
   faces outward so single-sided / CAD "sketch" meshes render single-sided instead of culling to invisible (e.g. a
   hovercraft skirt); a **double-sided** toggle is the heavier fallback for genuinely non-convex thin shells (a mixed
-  model — convex hull + non-convex fans — can use both). And **height-based UVs** map a simple vertical-gradient albedo by
+  model — convex hull + non-convex fans — can use both). And **height-gradient UVs** map a simple vertical-gradient albedo by
   height (black skirt low, grey hull high) so an untextured CAD model gets a usable skin without UV-unwrapping.
 - **Know the ceiling — it's vertices, not megabytes.** Custom meshes pack into a shared per-layer GPU buffer; the pawn
   layer (`MeshWithSkeletonParticleIndexBuffer`) is **~1,000,000 vertices / 6,500,000 indices / 2,500 meshes** as
