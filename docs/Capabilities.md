@@ -190,7 +190,8 @@ the mechanics are detailed in [Animated-Runtime §3b](Animated-Runtime.md#3b-run
   been stress-tested across asymmetric host/client pack setups.
 - **Game updates fail loud, not silent.** HAF binds to the game's types by name via reflection (the cost of no source
   access), so a game update *could* rename one. Rather than misbehave silently, a startup **compatibility report**
-  (`GameBinding`) resolves a catalog of **31 core types/members** and logs exactly what's missing —
+  (`GameBinding`) resolves a catalog of **47 core game types + their hot-path members** (including the army-walk
+  root that respawn / facing / class-scan / census all hang off) and logs exactly what's missing —
   `[GameBinding] … type(s) + member(s) NOT FOUND (game update?)`, naming each one — stamped with the running game
   version against the last **verified** build (currently `1.30`). With per-hook fail-soft degradation on top, a
   game-update break is *localized and named*: the log tells you which binding drifted, instead of a silent malfunction.

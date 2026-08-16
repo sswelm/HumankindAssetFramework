@@ -99,6 +99,7 @@ namespace HumankindAssetFramework
         internal static Type PresentationUnit    => Cached("Amplitude.Mercury.Presentation.PresentationUnit", "PresentationUnit");
         internal static Type PresentationUnitHolder => Cached("Amplitude.Mercury.Presentation.PresentationUnitHolder");
         internal static Type PresentationDistrict => Cached("Amplitude.Mercury.Presentation.PresentationDistrict");
+        internal static Type PresentationEntityFactoryController => Cached("Amplitude.Mercury.Presentation.PresentationEntityFactoryController", "PresentationEntityFactoryController");   // the army-walk root; read as a STATIC field off Presentation by respawn/facing/class-scan/census
         // ---- animation / pawn ----
         internal static Type PawnManager         => Cached("Amplitude.Mercury.Animation.PawnManager");
         internal static Type AnimationManager    => Cached("Amplitude.Mercury.Animation.AnimationManager");
@@ -219,7 +220,8 @@ namespace HumankindAssetFramework
             new Dep(MecanimEventInterpreter, nameof(MecanimEventInterpreter)),
             new Dep(AlterationFireProjectile, nameof(AlterationFireProjectile)),
             // presentation core
-            new Dep(Presentation, nameof(Presentation)),
+            new Dep(Presentation, nameof(Presentation), "PresentationEntityFactoryController"),   // the STATIC army-walk root — read by respawn / facing / class-scan / census; a rename silently no-ops all four (was uncatalogued: critical-review #5)
+            new Dep(PresentationEntityFactoryController, nameof(PresentationEntityFactoryController), "PresentationArmyEntities"),   // the next hop off that root — the army array every walk enumerates
             new Dep(PresentationPawn, nameof(PresentationPawn)),
             new Dep(PresentationUnit, nameof(PresentationUnit), "UnitDefinition", "GUID", "Pawns", "Formation"),
             new Dep(PresentationUnitHolder, nameof(PresentationUnitHolder)),

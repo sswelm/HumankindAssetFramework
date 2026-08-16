@@ -68,6 +68,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   Zero change for ENC (all its entries carry dummy data → same inject/overwrite path); protects third-party packs
   that repoint a unit to a vanilla formation.
 
+- **GAMEBINDING COVERAGE — the army-walk root (2026-08-16).** Critical-review finding #5: the `Presentation`
+  Dep was catalogued with *zero members*, so `PresentationEntityFactoryController` — the static army-walk root
+  that respawn, facing-persistence, class-scan and the descriptor census all read — wasn't validated. A game
+  rename there would silently no-op all four with nothing in the health report. Added it (plus the factory's
+  `PresentationArmyEntities` next hop): catalog 46 → 47 types, report clean (`OK — 47 game type(s)`). The
+  fragility-plan "make drift loud" template applied to exactly the code the recent respawn/facing fixes touch.
+
 - **BATTLE GUNNERY — the Jagdpanzer arc (2026-08-06).** A casemate tank destroyer exposed, one shot at a
   time, that vanilla **never rotates a vehicle's hull in battle** (vehicles aim only via a turret bone slot —
   invalid on custom rigs), and grew the full gunnery chain in a day: **battle hull-aim** (the map bombard's
