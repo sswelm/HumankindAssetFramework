@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# pre-push hook — blocks a push if the fast check gate fails, so a broken build / failing test / drifted schema
+# can't land. Version-controlled: enabled once per clone with
+#     git config core.hooksPath Tools/git-hooks
+# Runs Tools/check.sh (sub-minute). Bypass ONLY in a genuine emergency:  git push --no-verify
+exec bash "$(git rev-parse --show-toplevel)/tools/check.sh"
