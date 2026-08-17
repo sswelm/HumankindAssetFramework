@@ -133,10 +133,10 @@ namespace HumankindAssetFramework.Tests
         {
             // "checked 47 roles" is auditable; "clean" alone is not — the PASS line must carry the counters
             var f = Healthy();
-            f.RolesChecked = 47; f.AssetsChecked = 17; f.SoundsChecked = 12; f.LayersChecked = 3;
+            f.RolesChecked = 47; f.AssetsChecked = 17; f.SoundsChecked = 12; f.FilesChecked = 9; f.LayersChecked = 3;
             var r = UniversalInject.SmokeVerdict(f);
             Assert.True(r.Pass);
-            Assert.Contains("verified 47 clip role(s), 17 asset(s), 12 sound(s), 3 GPU layer(s)", r.Summary);
+            Assert.Contains("verified 47 clip role(s), 17 asset(s), 12 sound(s), 9 file(s) on disk, 3 GPU layer(s)", r.Summary);
         }
 
         [Fact]
@@ -194,6 +194,33 @@ namespace HumankindAssetFramework.Tests
             var r2 = UniversalInject.SmokeVerdict(ok);
             Assert.True(r2.Pass);
             Assert.Contains("2 district(s) [5 tile(s) live]", r2.Summary);
+        }
+
+        [Fact]
+        public void LooseFiles_MissingIsNamed_PresentInEitherDirIsClean_CheckedWithoutInjection()
+        {
+            var tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "haf-loosefile-" + System.Guid.NewGuid().ToString("N"));
+            var shared = System.IO.Path.Combine(tmp, "haf_sounds"); var skins = System.IO.Path.Combine(tmp, "haf_skins");
+            var packDir = System.IO.Path.Combine(tmp, "pack"); var packSounds = System.IO.Path.Combine(packDir, "sounds");
+            System.IO.Directory.CreateDirectory(shared); System.IO.Directory.CreateDirectory(skins); System.IO.Directory.CreateDirectory(packSounds);
+            try
+            {
+                System.IO.File.WriteAllText(System.IO.Path.Combine(shared, "inShared.wav"), "x");
+                System.IO.File.WriteAllText(System.IO.Path.Combine(packSounds, "inPack.wav"), "x");
+
+                // NOT repointed, NOT customClipTried — the sweep must still check (the whole point: units absent
+                // from the current save get their files verified too)
+                var e = new ModelEntry { resourceName = "Z", assetDir = packDir,
+                                         soundFile = "inPack.wav", soundIdleFile = "inShared.wav", soundAttackFile = "gone.wav",
+                                         textureFile = "gone.png" };
+                var f = new UniversalInject.SmokeFacts();
+                UniversalInject.CheckLooseFiles(e, f, shared, skins);
+                Assert.Equal(4, f.FilesChecked);
+                Assert.Contains("Z attack 'gone.wav'", f.MissingFiles);
+                Assert.Contains("Z skin 'gone.png'", f.MissingFiles);
+                Assert.Equal(2, f.MissingFiles.Count);   // the two present files (pack dir + shared dir) are clean
+            }
+            finally { System.IO.Directory.Delete(tmp, true); }
         }
 
         [Fact]

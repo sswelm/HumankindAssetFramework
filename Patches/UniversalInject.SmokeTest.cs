@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using BepInEx;
 
 namespace HumankindAssetFramework
 {
@@ -35,9 +37,10 @@ namespace HumankindAssetFramework
             public List<string> FailedSounds = new List<string>();
             public List<string> BudgetAlarms = new List<string>();
             public List<string> DistrictIssues = new List<string>();
+            public List<string> MissingFiles = new List<string>();   // referenced loose files absent from disk — checked for ALL entries, injected or not
             // Coverage counters — how many facts the deep pass actually verified, so a PASS line SHOWS its work
             // instead of asking to be believed ("checked 47 roles" is auditable; "clean" is not).
-            public int RolesChecked, AssetsChecked, SoundsChecked, LayersChecked, DistrictsChecked, TilesActive;
+            public int RolesChecked, AssetsChecked, SoundsChecked, LayersChecked, DistrictsChecked, TilesActive, FilesChecked;
         }
 
         // Back-compat convenience: the original four-signal verdict (deep-check lists empty).
@@ -58,6 +61,7 @@ namespace HumankindAssetFramework
             if (f.FailedSounds.Count > 0) fails.Add($"{f.FailedSounds.Count} sound file(s) failed to load: {string.Join(", ", f.FailedSounds)}");
             if (f.BudgetAlarms.Count > 0) fails.Add($"GPU mesh budget near the wall: {string.Join(", ", f.BudgetAlarms)}");
             if (f.DistrictIssues.Count > 0) fails.Add($"{f.DistrictIssues.Count} district issue(s): {string.Join(", ", f.DistrictIssues)}");
+            if (f.MissingFiles.Count > 0) fails.Add($"{f.MissingFiles.Count} referenced file(s) missing on disk: {string.Join(", ", f.MissingFiles)}");
             bool pass = fails.Count == 0;
             string head = pass ? "PASS" : "FAIL (" + string.Join("; ", fails) + ")";
             return new SmokeResult
@@ -66,7 +70,7 @@ namespace HumankindAssetFramework
                 Summary = $"{head} — bindings {(f.GbMissing == 0 ? "ok" : f.GbMissing + " MISSING")}, {f.Models} model(s) loaded " +
                           $"({f.Repointed} injected so far), {f.InjectionErrors} injection error(s)" +
                           (pass ? $"; deep checks clean on {f.Repointed} injected — verified {f.RolesChecked} clip role(s), " +
-                                  $"{f.AssetsChecked} asset(s), {f.SoundsChecked} sound(s), {f.LayersChecked} GPU layer(s)" +
+                                  $"{f.AssetsChecked} asset(s), {f.SoundsChecked} sound(s), {f.FilesChecked} file(s) on disk, {f.LayersChecked} GPU layer(s)" +
                                   (f.DistrictsChecked > 0 ? $", {f.DistrictsChecked} district(s) [{f.TilesActive} tile(s) live]" : "") : "")
             };
         }
@@ -126,6 +130,27 @@ namespace HumankindAssetFramework
             Role(e.a2a, e.a2b, e.a2c, e.a2d, e.idleAlt2AnimId, "idleAlt2");
         }
 
+        // LOOSE-FILE sweep (2026-08-17, "basically any loose file"): every disk file a registry entry references must
+        // EXIST — checked for ALL entries, injected or not, so a missing WAV/PNG for a unit that isn't in the current
+        // save is still named. Search order mirrors the loaders exactly (LoadCustom / LoadSkinPng): the owning pack's
+        // <assetDir>/sounds|skins/ first, then the legacy shared dir. Shared dirs are parameters for testability.
+        internal static void CheckLooseFiles(ModelEntry e, SmokeFacts f, string soundsShared, string skinsShared)
+        {
+            void FileCk(string file, string sub, string shared, string role)
+            {
+                if (string.IsNullOrEmpty(file)) return;
+                f.FilesChecked++;
+                bool found = (!string.IsNullOrEmpty(e.assetDir) && File.Exists(Path.Combine(e.assetDir, sub, file)))
+                          || (!string.IsNullOrEmpty(shared) && File.Exists(Path.Combine(shared, file)));
+                if (!found) f.MissingFiles.Add($"{e.resourceName} {role} '{file}'");
+            }
+            FileCk(e.soundFile, "sounds", soundsShared, "loop");     FileCk(e.soundStartFile, "sounds", soundsShared, "start");
+            FileCk(e.soundStopFile, "sounds", soundsShared, "stop"); FileCk(e.soundIdleFile, "sounds", soundsShared, "idle");
+            FileCk(e.soundAttackFile, "sounds", soundsShared, "attack"); FileCk(e.soundDeathFile, "sounds", soundsShared, "death");
+            FileCk(e.soundBattleFile, "sounds", soundsShared, "battle");
+            FileCk(e.textureFile, "skins", skinsShared, "skin");
+        }
+
         // Per-district deep checks — pure over the DistrictModel's fields (2026-08-17, smoke scale-out). Data-driven:
         // every district in haf_districts.json is covered the day it's added, like the unit checks.
         internal static void GatherDistrictFacts(DistrictModel d, SmokeFacts f)
@@ -154,8 +179,15 @@ namespace HumankindAssetFramework
 
                 var snapshot = entries;   // published-once list; snapshot read like every other consumer
                 if (snapshot != null)
-                    foreach (var e in snapshot) GatherEntryFacts(e, f);
+                    foreach (var e in snapshot)
+                    {
+                        GatherEntryFacts(e, f);
+                        CheckLooseFiles(e, f, Path.Combine(Paths.ConfigPath, "haf_sounds"), Path.Combine(Paths.ConfigPath, "haf_skins"));
+                    }
                 foreach (var d in distModels) GatherDistrictFacts(d, f);   // main-thread state, read on the main thread (F8)
+                // A file that's missing on disk also shows as a failed load once tried — one cause, one report:
+                // the missing-on-disk line wins, the derived load-failure line is dropped (same "<name> <role> '<file>'" key).
+                f.FailedSounds.RemoveAll(s => f.MissingFiles.Contains(s));
 
                 // GPU wall alarm — same structured read the F8 display uses. A read error (no game loaded yet) is not
                 // a failure; the budget check simply has nothing to say.

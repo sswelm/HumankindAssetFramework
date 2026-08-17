@@ -89,7 +89,7 @@ loud; a replacement must be **declared** in the pack's `overrides`. No implicit 
 overrides make a multi-pack setup undebuggable.
 
 ## A focused unit suite, not broad coverage or an in-game test framework (settled)
-The plugin has a bounded suite (**89 tests**) over the **pure logic that runs outside the game** (parse / schema /
+The plugin has a bounded suite (**90 tests**) over the **pure logic that runs outside the game** (parse / schema /
 reflection-resolution / the smoke-verdict rule); everything engine-coupled is verified by in-editor instruments (Feature
 Test, smoke test) plus in-game. **Why:** the game can't run in a test host, so a coverage *target* over engine-coupled
 code would be theatre — the suite guards where bugs have actually hidden and stops there. Broad automated testing is

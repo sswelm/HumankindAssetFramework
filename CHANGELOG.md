@@ -34,7 +34,12 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   live tile count in the PASS line), **texture-only retexture skins**, and **hand props** (authored →
   layer + atlas must exist). All data-driven off the registries, so every future unit AND district is covered
   the day it's added, no test code. Fault-injection round proven live the same day: a flipped atlas-GUID digit
-  and a renamed WAV both came back as named FAILs on the first F8. Suite 63 → **89**.
+  and a renamed WAV both came back as named FAILs on the first F8. **Loose-file sweep (same day, user: "basically
+  any loose file"):** every disk file any entry references (all 7 sound roles + the skin PNG) is now
+  existence-checked for ALL entries — injected or not — with the loaders' exact search order (pack `assetDir`
+  first, legacy shared dir second), closing the hole where a missing WAV for a unit absent from the current save
+  smoke-tested green; a missing-on-disk file reports once (the derived load-failure line is deduped). Suite
+  63 → **90**.
 
 - **CI — every push now builds + runs the full suite, with zero game files (2026-08-17).** The blocker was
   always the gitignored `References\` DLLs; the unlock was discovering the `Amplitude.Mercury.Animation.dll`
