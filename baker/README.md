@@ -20,11 +20,24 @@ This folder inside the **plugin** repo holds two very different kinds of thing. 
 If you want the current editor behaviour, read/run it in **ENCReload**, not here. (The plugin runtime — `Plugin.cs`,
 `Patches/`, at the repo root — is the code that actually ships in this repo and is kept current.)
 
-## ✅ Live tools (these ARE used — leave them alone)
+## ✅ `baker/glbconv/` — LIVE: the single source of truth for glbconv (2026-08-17)
 
-- **`baker/glbconv/`** — the GLB→OBJ converter, a self-contained .NET console tool with its own `glbconv.csproj`
-  and a built `publish/glbconv.exe`. Part of the bake pipeline.
-- **`baker/Tools/`** — Blender scripts (`rig_anim.py`, `prep_model.py`, `vehicle_rig.py`, `deploy_convert.py`, …).
+The GLB→OBJ converter: `Program.cs` + `glbconv.csproj` + the pinned `SharpGLTF.Core.dll`. **This is the only copy
+of the source anywhere.** ENCReload's `Program.cs.src` snapshot was deleted after the two copies split-brained —
+each had accumulated a verified fix the other lacked, and the 2026-08-16 exe rebuild shipped with the T5
+mirrored-winding fix regressed (CHANGELOG 2026-08-17). Build with `dotnet publish -c Release`, then copy the
+published exe over `<ENCReload>/Tools/glbconv/glbconv.exe` — and **A/B-diff old-vs-new OBJ output before
+deploying** (procedure in ENCReload's `Tools/glbconv/BUILD.md`).
+
+`baker/reactor_silhouette.py` is also live-from-here: the district-silhouette helper documented in
+`docs/District-Dedicated-Visual.md`.
+
+## Blender scripts — deleted from here (2026-08-17), live ONLY in `<ENCReload>/Tools/`
+
+The pipeline's Blender scripts (`rig_anim.py`, `prep_model.py`, `vehicle_rig.py`, `deploy_convert.py`, …) run from
+`<UnityProjectRoot>/Tools/` — the copies that used to sit at `baker/` root and in `baker/Tools/` were **never
+executed by anything** and had drifted weeks behind while this README labelled them "live". That's the same
+two-copies disease that caused the glbconv regression, so they were deleted outright rather than documented.
 
 ## Why not just delete the stale `.cs` files?
 
