@@ -62,8 +62,11 @@ never used as a restore's safety snapshot nor zipped offsite.
 **The group checkboxes scope Restore exactly as they scope Backup** (2026-08-17, closing the all-or-nothing gap:
 recovering one thing from an older snapshot used to roll every other group back to snapshot time). Tick only
 "Baked assets" + "Runtime config" and a restore touches nothing else — the confirm dialog states the scope.
-`_deleted` and `_prerestore` snapshots restore whole (they are single-purpose by nature). Restore reads the
-backup's manifest and copies each selected source back to its original path, never at the cost of current work:
+`_deleted` and `_prerestore` snapshots restore whole (they are single-purpose by nature). Restore is also
+**smart**: only files that are *missing* or *actually different* (byte-compared) are written — identical files
+are left untouched (so Unity doesn't re-import hundreds of unchanged assets) — and the status reports all three
+counts ("Restored X missing + Y changed; Z identical untouched"). Restore reads the backup's manifest and copies
+each selected source back to its original path, never at the cost of current work:
 
 1. **Auto pre-restore snapshot.** Before touching anything, the *current* state of exactly the paths about to be
    overwritten is saved to a `_prerestore_<timestamp>` backup. A wrong restore is always undoable — just restore

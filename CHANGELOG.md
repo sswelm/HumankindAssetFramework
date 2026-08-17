@@ -35,7 +35,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   window exists and having a backup that happened to cover the moment — Remove is now **recycle-bin semantics**:
   it snapshots the entry JSON + the exact baked-output whitelist to `_removed_<ts>_<name>/` BEFORE deleting
   (aborts if the snapshot fails — never destroy what can't be restored), and an **Undo remove** button appears
-  right where Remove is (user-designed placement), restoring registry entry + baked assets in one click.
+  right where Remove is (user-designed placement), restoring registry entry + baked assets in one click. **And a
+  third: "restored 1628 files!!!!"** — the blanket copy alarmed exactly the person it was reassuring. Restore is
+  now **smart**: byte-compares each file and writes only the missing + actually-changed ones (identical files
+  untouched — also sparing Unity ~1,600 pointless re-imports), reporting all three counts.
 
 - **OFFSITE BACKUP — the last total-loss scenario closed (2026-08-17).** The Backup window gains an optional
   *Offsite folder*: every backup is also written there as ONE `HAF_<timestamp>.zip` — silent (background thread,
