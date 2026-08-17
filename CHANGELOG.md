@@ -38,7 +38,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   right where Remove is (user-designed placement), restoring registry entry + baked assets in one click. **And a
   third: "restored 1628 files!!!!"** — the blanket copy alarmed exactly the person it was reassuring. Restore is
   now **smart**: byte-compares each file and writes only the missing + actually-changed ones (identical files
-  untouched — also sparing Unity ~1,600 pointless re-imports), reporting all three counts.
+  untouched — also sparing Unity ~1,600 pointless re-imports), reporting all three counts. **And the drill's
+  biggest catch, found the hard way ("the restore FAILED!!!"): the backup NEVER CONTAINED the model registry.**
+  The config group still captured the pre-multi-pack `haf_*.json` root files; the registry moved to
+  `haf_packs/<mod>/pack.json` and the group was never updated — so the restore brought back all 28 baked files
+  but had no registry entry to restore. Recovered by re-inserting the entry verbatim from the git-tracked
+  project registry copy (both registries re-validated: 22 models, parse-clean); `haf_packs/` added to the
+  Runtime-config group so every future backup carries the real registry. The honest lesson: a backup's contents
+  were asserted from its group NAME, not verified — the same claim-vs-check gap the smoke test was built to
+  close, now closed for backups too.
 
 - **OFFSITE BACKUP — the last total-loss scenario closed (2026-08-17).** The Backup window gains an optional
   *Offsite folder*: every backup is also written there as ONE `HAF_<timestamp>.zip` — silent (background thread,

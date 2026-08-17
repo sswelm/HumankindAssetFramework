@@ -32,7 +32,7 @@ Each group is an independent toggle with a live size readout (the daily auto-ver
 | Baked assets | `Assets/Resources` (skeletons, atlases, clip collections, PNGs) |
 | ENC Databases | `Assets/Databases` |
 | Tools | `Tools/` (Blender rig/convert scripts, `glbconv`) |
-| Runtime config | `BepInEx/config/haf_*.json` + `haf_skins/` + `haf_sounds/` (the regenerable `haf_atlas_dump/` is skipped) |
+| Runtime config | `BepInEx/config/haf_*.json` + **`haf_packs/` (the model registry — MISSING until 2026-08-17, found mid recovery-drill)** + `haf_skins/` + `haf_sounds/` (the regenerable `haf_atlas_dump/` is skipped) |
 
 ## The delete guard
 
