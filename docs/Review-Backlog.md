@@ -429,8 +429,10 @@ deferred**:
 - **`cb` vs `cbb` GUID-component naming** (clip vs combat-clip; also `ca`/`cba`/`aca`/`a2a`) — a one-character typo
   in the 44-int wiring compiles clean and mis-wires a clip role; nothing tests the field→`InjectClipCollections`
   wiring. Rename or add a wiring test when next touching the schema.
-- **Ghost-hunt log tags bypass the quiet-by-default `Diag` gate** (`[REND]`/`[SRCFIX]`/`[CRUSH]`/`[GHOST]`/`[DESC]`,
+- ~~**Ghost-hunt log tags bypass the quiet-by-default `Diag` gate** (`[REND]`/`[SRCFIX]`/`[CRUSH]`/`[GHOST]`/`[DESC]`,
   added 08-03/04 after the Phase-3 quiet-logging pass; most are change-gated or one-shot, but the `[REND]` census can
-  log ~26 `LogInfo` lines / 15 s per `hideSubPawns` entry). Gate on `VerboseLog` when next in `Inject.cs`.
-- **Stale comment** — `Plugin.cs:83` still names `community.humankind.encaccessproof.cfg`; the live config is
-  `community.humankind.haf.cfg`.
+  log ~26 `LogInfo` lines / 15 s per `hideSubPawns` entry).~~ **FIXED 2026-08-17**: the 15 automatic lines (incl.
+  `[HIER]`/`[LAYER]`/`[FX]`) now go through `Plugin.Diag`; the operator-driven `[BISECT]`/`[REND2]` command responses
+  deliberately stay loud (they answer a typed `haf_ghostbisect.txt` command).
+- ~~**Stale comment** — `Plugin.cs:83` still names `community.humankind.encaccessproof.cfg`; the live config is
+  `community.humankind.haf.cfg`.~~ **FIXED 2026-08-17.**

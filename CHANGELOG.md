@@ -42,7 +42,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   Blender-script copies (`rig_anim.py` / `vehicle_rig.py` / `deploy_convert.py` + all of `baker/Tools/` — labelled
   "live", never executed by the pipeline, weeks behind `ENCReload/Tools/`) were **deleted** — same disease, same
   cure: one home per file. Verified end-to-end same day: Bake Smoke Test 5/5 (both static paths through the new
-  exe), F8 in-game smoke PASS (0 injection errors), tank + Cobra visuals clean.
+  exe), F8 in-game smoke PASS (0 injection errors), tank + Cobra visuals clean. **CLI hardening (same day):**
+  a usage error and a non-numeric grid arg now exit 2 with a named error (the old `void Main` returned exit 0
+  on bad usage — "success" to any caller); rebuilt, A/B-verified byte-identical on 3 models + the mirrored-node
+  winding probe, redeployed.
 
 - **SAVE-RELOAD ISOLATION — the organ-gun load-order bug (2026-08-16).** Loading a heavy save then another in
   one app run tore an animated custom unit (the organ gun) and, once the mesh bound, painted it the wrong donor

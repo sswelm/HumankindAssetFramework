@@ -484,7 +484,7 @@ namespace HumankindAssetFramework
                                     SetMember(pe, "Pose0", p0);
                                 }
                                 peF.SetValue(c, pe);
-                                Plugin.Log.LogInfo($"[Uni][SRCFIX] '{e.resourceName}' sub-pawn '{c.gameObject.name}': cached PawnEntry poisoned (skel {cachedSkel} -> {e.skeletonId}, HideFactor 1, Pose0 -> {e.animId})");
+                                Plugin.Diag($"[Uni][SRCFIX] '{e.resourceName}' sub-pawn '{c.gameObject.name}': cached PawnEntry poisoned (skel {cachedSkel} -> {e.skeletonId}, HideFactor 1, Pose0 -> {e.animId})");
                             }
                         }
                     }
@@ -510,14 +510,14 @@ namespace HumankindAssetFramework
                             string mat = r.sharedMaterial != null ? r.sharedMaterial.name : "-";
                             string hay = path + "|" + mesh + "|" + mat;
                             bool donorish = new[] { "Gunship", "Helix", "Rotor", "Blur" }.Any(k => hay.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0);
-                            Plugin.Log.LogInfo($"[Uni][REND] '{e.resourceName}' {r.GetType().Name} '{path}' mesh='{mesh}' mat='{mat}' size={r.bounds.size} {(donorish ? "<<< DONOR-ISH — DISABLING" : "")}");
+                            Plugin.Diag($"[Uni][REND] '{e.resourceName}' {r.GetType().Name} '{path}' mesh='{mesh}' mat='{mat}' size={r.bounds.size} {(donorish ? "<<< DONOR-ISH — DISABLING" : "")}");
                             if (donorish) r.enabled = false;
                             if (++found >= 25) break;
                         }
-                        Plugin.Log.LogInfo($"[Uni][REND] '{e.resourceName}': {found} renderer(s) within 15 units");
+                        Plugin.Diag($"[Uni][REND] '{e.resourceName}': {found} renderer(s) within 15 units");
                     }
                     if (!hierDumped.Add(e.resourceName)) continue;
-                    Plugin.Log.LogInfo($"[Uni][HIER] '{e.resourceName}' pawn GO '{c.gameObject.name}' hierarchy:");
+                    Plugin.Diag($"[Uni][HIER] '{e.resourceName}' pawn GO '{c.gameObject.name}' hierarchy:");
                     DumpTransformTree(c.transform, 0);
                     // OUTPUT-LAYER AUTOPSY (2026-08-03, endgame): the donor mesh carries a 53-prim TRANSPARENT slice in
                     // ContentLayer 0 (the rotor blur disc) drawn via the output layer's visual-particle channel — and our
@@ -525,7 +525,7 @@ namespace HumankindAssetFramework
                     // ourselves. Dump every field of the clone so the disc channel can be identified and cut.
                     if (e.isolatedLayer != null)
                     {
-                        Plugin.Log.LogInfo($"[Uni][LAYER] '{e.resourceName}' cloned output layer '{(e.isolatedLayer as UnityEngine.Object)?.name}' fields:");
+                        Plugin.Diag($"[Uni][LAYER] '{e.resourceName}' cloned output layer '{(e.isolatedLayer as UnityEngine.Object)?.name}' fields:");
                         DumpFields(e.isolatedLayer, e.resourceName + " outputLayer");
                     }
                 }
@@ -543,7 +543,7 @@ namespace HumankindAssetFramework
                             : t.GetComponent<UnityEngine.MeshFilter>()?.sharedMesh?.name ?? "?";
                 rinfo = $"  <{rend.GetType().Name} enabled={rend.enabled} mesh='{mesh}' mat='{rend.sharedMaterial?.name}'>";
             }
-            Plugin.Log.LogInfo($"[Uni][HIER] {new string(' ', depth * 2)}{t.name} (active={t.gameObject.activeSelf}){rinfo}");
+            Plugin.Diag($"[Uni][HIER] {new string(' ', depth * 2)}{t.name} (active={t.gameObject.activeSelf}){rinfo}");
             for (int i = 0; i < t.childCount; i++) DumpTransformTree(t.GetChild(i), depth + 1);
         }
 
@@ -580,7 +580,7 @@ namespace HumankindAssetFramework
                 for (uint v = sv + 1; v < sv + vc && v < verts.Length; v++)
                     verts.SetValue(first, (int)v);
                 AccessTools.Method(vertBufObj.GetType(), "Apply", Type.EmptyTypes)?.Invoke(vertBufObj, null);
-                Plugin.Log.LogInfo($"[Uni][CRUSH] '{e.resourceName}': DEGENERATED donor mesh {donorFxIdx}'s layer-0 slice ({vc} verts @ {sv}, format {verts.GetType().GetElementType().Name}) — every triangle is now zero-area");
+                Plugin.Diag($"[Uni][CRUSH] '{e.resourceName}': DEGENERATED donor mesh {donorFxIdx}'s layer-0 slice ({vc} verts @ {sv}, format {verts.GetType().GetElementType().Name}) — every triangle is now zero-area");
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[Uni] CrushGhostSlice: " + ex.Message); }
         }
@@ -835,16 +835,16 @@ namespace HumankindAssetFramework
             {
                 var roF = AccessTools.Field(clone.GetType(), "renderOutputs");
                 var ros = roF?.GetValue(clone) as Array;
-                if (ros == null || ros.Length <= 1) { Plugin.Log.LogInfo($"[Uni][LAYER] '{e.resourceName}': clone has {(ros?.Length ?? -1)} renderOutput(s) — nothing to prune"); return; }
+                if (ros == null || ros.Length <= 1) { Plugin.Diag($"[Uni][LAYER] '{e.resourceName}': clone has {(ros?.Length ?? -1)} renderOutput(s) — nothing to prune"); return; }
                 for (int i = 0; i < ros.Length; i++)
                 {
-                    Plugin.Log.LogInfo($"[Uni][LAYER] '{e.resourceName}' renderOutput[{i}]:");
+                    Plugin.Diag($"[Uni][LAYER] '{e.resourceName}' renderOutput[{i}]:");
                     DumpFields(ros.GetValue(i), $"{e.resourceName} renderOutput[{i}]");
                 }
                 var kept = Array.CreateInstance(ros.GetType().GetElementType(), 1);
                 kept.SetValue(ros.GetValue(0), 0);
                 roF.SetValue(clone, kept);
-                Plugin.Log.LogInfo($"[Uni][LAYER] '{e.resourceName}': PRUNED clone renderOutputs {ros.Length} -> 1 (kept [0] — the opaque body pass; the transparent blur pass is gone)");
+                Plugin.Diag($"[Uni][LAYER] '{e.resourceName}': PRUNED clone renderOutputs {ros.Length} -> 1 (kept [0] — the opaque body pass; the transparent blur pass is gone)");
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[Uni] PruneCloneRenderOutputs: " + ex.Message); }
         }
@@ -876,7 +876,7 @@ namespace HumankindAssetFramework
                 uint dStart = 0, oStart = 0;
                 try { if (dIdx != null) dStart = ReadFxStart(animMgr, Convert.ToUInt32(dIdx)); } catch { }
                 try { if (oIdx != null) oStart = ReadFxStart(animMgr, Convert.ToUInt32(oIdx)); } catch { }
-                Plugin.Log.LogInfo($"[Uni][FX] '{e.resourceName}': FxMeshIndex for '{bodyName}' — donor={dIdx} (start=0x{dStart:X6}) ours={oIdx} (start=0x{oStart:X6})");
+                Plugin.Diag($"[Uni][FX] '{e.resourceName}': FxMeshIndex for '{bodyName}' — donor={dIdx} (start=0x{dStart:X6}) ours={oIdx} (start=0x{oStart:X6})");
                 if (e.hideSubPawns)
                 {
                     ghostNeedle = dStart; ghostOurStart = oStart; ghostEntryName = e.resourceName;
@@ -890,7 +890,7 @@ namespace HumankindAssetFramework
                         if (dIdx != null)
                             foreach (var t in ReadFxStartsAllLayers(animMgr, Convert.ToUInt32(dIdx)))
                             {
-                                Plugin.Log.LogInfo($"[Uni][FX]   donor mesh {dIdx} in layer {t.Item1}: start=0x{t.Item2:X6} prim={t.Item3}");
+                                Plugin.Diag($"[Uni][FX]   donor mesh {dIdx} in layer {t.Item1}: start=0x{t.Item2:X6} prim={t.Item3}");
                                 if (t.Item2 != 0 && t.Item2 != oStart) ghostNeedles.Add(t.Item2);
                             }
                     }
@@ -1031,7 +1031,7 @@ namespace HumankindAssetFramework
                         if (enc == 0) continue;
                         uint lo = enc & 0xFFFFFF;
                         if (lo != ghostNeedle && !ghostNeedles.Contains(lo)) continue;
-                        Plugin.Log.LogInfo($"[Uni][GHOST] descriptor[{d}] frag[{fi}] encodes the DONOR mesh (0x{enc:X8}, needle start=0x{ghostNeedle:X6}, '{ghostEntryName}') — ZEROED");
+                        Plugin.Diag($"[Uni][GHOST] descriptor[{d}] frag[{fi}] encodes the DONOR mesh (0x{enc:X8}, needle start=0x{ghostNeedle:X6}, '{ghostEntryName}') — ZEROED");
                         encF.SetValue(ge, 0u);
                         gfrags.SetValue(ge, (int)(sf + fi));
                         dirty = true;
@@ -1498,12 +1498,12 @@ namespace HumankindAssetFramework
                                 uint ourMeshIdx = 0;
                                 if (GetMember(skel, "skinnedMeshInfos") is Array smi && smi.Length > 0)
                                     try { ourMeshIdx = Convert.ToUInt32(GetMember(smi.GetValue(0), "MeshIndex")); } catch { }
-                                Plugin.Log.LogInfo($"[Uni][DESC] '{e?.resourceName}' descriptor[{defId}]: StartFragment={start} FragmentCount={count} BonesCount={dT.GetField("BonesCount")?.GetValue(dEntry)} ourMeshIndex={ourMeshIdx}");
+                                Plugin.Diag($"[Uni][DESC] '{e?.resourceName}' descriptor[{defId}]: StartFragment={start} FragmentCount={count} BonesCount={dT.GetField("BonesCount")?.GetValue(dEntry)} ourMeshIndex={ourMeshIdx}");
                                 for (uint fi = 0; fi < count && fi < 8; fi++)
                                 {
                                     var ge = gfrags.GetValue((int)(start + fi));
                                     uint enc = (uint)encGpuF.GetValue(ge);
-                                    Plugin.Log.LogInfo($"[Uni][DESC]   frag[{fi}] encoded=0x{enc:X8} (lo16={enc & 0xFFFF} hi16={enc >> 16})");
+                                    Plugin.Diag($"[Uni][DESC]   frag[{fi}] encoded=0x{enc:X8} (lo16={enc & 0xFFFF} hi16={enc >> 16})");
                                 }
                             }
                             catch (Exception dex) { Plugin.Log.LogWarning("[Uni] descriptor dump: " + dex.Message); }

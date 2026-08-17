@@ -19,12 +19,18 @@ class Program
 {
     static CultureInfo C = CultureInfo.InvariantCulture;
 
-    static void Main(string[] args)
+    static int Main(string[] args)
     {
-        if (args.Length < 2) { Console.WriteLine("usage: <glb> <outdir> [basename] [grid]"); return; }
+        // CLI hardening (2026-08-17 review): a usage error must exit NON-ZERO — the baker's caller treats
+        // ExitCode==0 as success, so the old `return` reported a bad invocation as a good conversion. Same for a
+        // non-numeric grid arg: name the problem instead of a raw FormatException ("Attack Helicopter" once made
+        // args[3]="Helicopter" — now rejected upstream by name validation, but the tool must hold its own).
+        if (args.Length < 2) { Console.Error.WriteLine("usage: <glb> <outdir> [basename] [grid]"); return 2; }
         string glbPath = args[0], outDir = args[1];
         string baseName = args.Length > 2 ? args[2] : "model";
-        int grid = args.Length > 3 ? int.Parse(args[3]) : 140;
+        int grid = 140;
+        if (args.Length > 3 && !int.TryParse(args[3], NumberStyles.Integer, C, out grid))
+        { Console.Error.WriteLine($"ERROR: grid must be an integer, got '{args[3]}' (usage: <glb> <outdir> [basename] [grid])"); return 2; }
         Directory.CreateDirectory(outDir);
 
         var model = ModelRoot.Load(glbPath);
@@ -219,6 +225,7 @@ class Program
             }
         }
         Console.WriteLine($"WROTE {baseName}.obj  ({outV.Length} verts, {outTri.Count} tris)  bbox=({F(size.X)},{F(size.Y)},{F(size.Z)})");
+        return 0;
     }
 
     // usemtl / newmtl name for a material index. Index-prefixed so duplicate material names stay unique.

@@ -80,7 +80,7 @@ namespace HumankindAssetFramework
         {
             Log = Logger;
 
-            // --- the config file (auto-written to BepInEx/config/community.humankind.encaccessproof.cfg) ---
+            // --- the config file (auto-written to BepInEx/config/community.humankind.haf.cfg) ---
             TargetMod       = Config.Bind("General", "TargetMod", "ENCReload",
                                   "Name of the mod whose assets this plugin should access.");
             AssetNameFilter = Config.Bind("General", "AssetNameFilter", "Zeppelin",
