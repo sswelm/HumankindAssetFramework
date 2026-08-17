@@ -10,6 +10,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **AUTO-VERSIONING + DELETE GUARD (2026-08-17, user: "auto backup, especially when I remove assets… also
+  configuration… go back versions").** Two silent, optional guards in `BackupAuto.cs`, both feeding the same
+  restorable backups list: a **delete guard** (an `AssetModificationProcessor` snapshots any asset under the
+  protected roots to `_deleted_<timestamp>/` BEFORE any deletion — Factory Remove, Project-window, script — then
+  lets the delete proceed) and a **daily auto-version** (first editor load of the day runs the full backup — assets
+  AND configuration — through the same core as the button, so it gets a Restore button like any manual version;
+  newest 3 kept, rotation logged; manual/_deleted/_prerestore never auto-deleted). Stricter side effect: a
+  COUNT-MISMATCH backup now aborts a restore's pre-snapshot and skips the offsite zip instead of proceeding on a
+  suspect archive. Headless-compile-checked (Roslyn gate).
+
 - **OFFSITE BACKUP — the last total-loss scenario closed (2026-08-17).** The Backup window gains an optional
   *Offsite folder*: every backup is also written there as ONE `HAF_<timestamp>.zip` — silent (background thread,
   a multi-GB FactorySource snapshot no longer freezes the editor), atomic (`.partial` → rename), never

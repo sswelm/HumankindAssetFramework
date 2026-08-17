@@ -21,6 +21,18 @@ Each group is an independent toggle with a live size readout:
 | Tools | `Tools/` (Blender rig/convert scripts, `glbconv`) |
 | Runtime config | `BepInEx/config/haf_*.json` + `haf_skins/` + `haf_sounds/` (the regenerable `haf_atlas_dump/` is skipped) |
 
+## Automatic (2026-08-17) — both silent, both optional, both feeding the same restorable list
+
+- **Delete guard** (default ON): before *anything* under `FactorySource` / `Resources` / `Databases` /
+  `Scripts/Editor` is deleted — the Factory's Remove flow, a Project-window delete, a script — it is first copied
+  to a `_deleted_<timestamp>` folder in the backup root (with a manifest naming the original path). The delete
+  then proceeds normally; the guard never blocks anything, it only makes every deletion undoable.
+- **Daily auto-version** (default ON): on the first editor load of a day, a full silent backup of ALL groups —
+  assets *and* configuration — runs through the same core as the button, so it appears in the backups list with
+  its own **Restore** button like any manual version ("go back versions"). The offsite zip rides along if
+  configured. **Retention:** only the newest **3** `_auto_` versions are kept (rotation is logged); manual
+  backups, `_prerestore` and `_deleted_` snapshots are never auto-deleted.
+
 ## How a backup is stored
 
 **Back up now** writes a new folder `D:\HAF_Backups\<yyyy-MM-dd_HHmmss>\` (destination is configurable and
