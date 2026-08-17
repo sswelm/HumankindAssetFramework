@@ -10,6 +10,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **F8 WINDOW: no more click-through or reflowing text (2026-08-17).** Left-dragging the window panned the map
+  under it — the game reads mouse input independently of IMGUI. Fixed WITHOUT camera surgery by speaking the
+  game's own language: type-hunting the Managed DLLs (bindcheck-style MetadataLoadContext) found
+  `Amplitude.UI.Interactables.UIInteractivityManager.IsMouseCovered` — the public static the game's own windows
+  set so map input ignores covered drags. `Hk_MouseCoverExtend` postfixes `SpecificUpdate` (where the game
+  recomputes the flag each frame) and ORs in "or over the HAF window" — every consumer that respects the game's
+  windows now respects ours. Binding catalogued (bindcheck `50/50`). Also pinned the window to a fixed 520px
+  width: GUILayout re-measured width from content every repaint, so the verdict text visibly re-wrapped while
+  dragging — deterministic wrap now.
+
 - **F8 SMOKE TEST DEPTH PASS — per-entry assertions, each earned by a shipped bug class (2026-08-17).** The
   in-game smoke verdict was a coarse gate (bindings ok / error count / models > 0); user verdict: "add more tests
   to make it really meaningful." It now also asserts, per INJECTED entry: **dead clip roles** (a role GUID

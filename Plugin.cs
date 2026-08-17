@@ -71,7 +71,10 @@ namespace HumankindAssetFramework
         internal static ConfigEntry<bool>   FormationReinstantiateOn; // FORMATION axis: after apply, re-instantiate already-spawned units of a repointed type so they reach the new pawn count (fixes the load-race undercount)
 
         private bool show;
-        private Rect winRect = new Rect(60, 60, 480, 420);
+        private Rect winRect = new Rect(60, 60, 520, 420);
+        // True while the cursor is over the (open) F8 window, in GUI coordinates — read by Hk_MouseCoverExtend so the
+        // game treats our window like one of its own (map input suppressed under it). Written every OnGUI event.
+        internal static bool WindowHovered;
         private Vector2 scroll;
         private string atlasFilter = "";   // Dump Atlases: only layers whose name contains this (blank = all)
         private string previewEvent = "";  // F8 audition: Wwise event name to post via Play Event
@@ -342,6 +345,7 @@ namespace HumankindAssetFramework
                 typeof(Hk_BattleAttackGate),  // BATTLE TURN experimental (hold=1): dynamic gate on the attack FSM's delay step for battle volleys (2026-08-05)
                 typeof(Hk_BattleTurnProbe),   // BATTLE TURN forensics (diag=1): log RotationFSM turn starts (2026-08-05)
                 typeof(Hk_BattleTurnStep),    // BATTLE TURN forensics (diag=1): log StepTurning route (animated vs unanimated) + start/end angles (2026-08-05)
+                typeof(Hk_MouseCoverExtend),  // F8 window click-through fix: hovering our window counts as the game's own mouse-covered (map stops panning under it) (2026-08-17)
             };
             int skipped = 0;
             foreach (var t in hooks)
@@ -407,8 +411,11 @@ namespace HumankindAssetFramework
 
         private void OnGUI()
         {
+            WindowHovered = show && winRect.Contains(Event.current.mousePosition);
             if (!show) return;
-            winRect = GUILayout.Window(GUID.GetHashCode(), winRect, DrawWindow, "Humankind Asset Framework");
+            // Fixed width: GUILayout.Window otherwise re-measures width from content every repaint, so the label
+            // word-wrap "breathed" while dragging — the verdict text visibly reflowing read as instability.
+            winRect = GUILayout.Window(GUID.GetHashCode(), winRect, DrawWindow, "Humankind Asset Framework", GUILayout.Width(520));
         }
 
         private void DrawWindow(int id)

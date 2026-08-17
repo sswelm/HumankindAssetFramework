@@ -106,6 +106,8 @@ namespace HumankindAssetFramework
         internal static Type PresentationPawnDefinitionAddOn => Cached("Amplitude.Mercury.Animation.PresentationPawnDefinitionAddOn");
         internal static Type ClipCollection      => Cached("Amplitude.Mercury.Animation.ClipCollection");
         internal static Type MeshCollection      => Cached("Amplitude.Mercury.Animation.MeshCollection");
+        // ---- UI / input ----
+        internal static Type UIInteractivityManager => Cached("Amplitude.UI.Interactables.UIInteractivityManager");   // F8 click-through fix: its static IsMouseCovered is the game's own "pointer is over UI" flag
         // ---- data / assets / graphics ----
         internal static Type AssetDatabase       => Cached("Amplitude.Framework.Asset.AssetDatabase");
         internal static Type Guid                => Cached("Amplitude.Framework.Guid");
@@ -236,6 +238,7 @@ namespace HumankindAssetFramework
             new Dep(AudioEmitter, nameof(AudioEmitter), "AudioEntityGUID", "PostEvent"),
             new Dep(AudioManager, nameof(AudioManager), "PostEvent"),
             new Dep(AkSoundEngine, nameof(AkSoundEngine), "PostEvent", "StopAll"),
+            new Dep(UIInteractivityManager, nameof(UIInteractivityManager), "IsMouseCovered", "SpecificUpdate"),
             // combat / fight
             new Dep(PawnRangedFightSequence, nameof(PawnRangedFightSequence)),
             new Dep(PawnActionMeleeStartFight, nameof(PawnActionMeleeStartFight)),

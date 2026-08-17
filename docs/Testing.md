@@ -47,7 +47,7 @@ against the build's assemblies without launching the game** — it reads `Patche
 no manifest to stale) and inspects the game DLLs reflection-only (Unity's native deps don't matter). It prints
 `bindcheck: N/N types | M member(s) missing` and exits non-zero on any drift, so a game patch's binding breakage is named
 **headlessly** (CI-able on a version bump) instead of found by launching and reading `haf_bindings_report.txt`. Verified
-both ways: `49/49` clean on the pinned build, and it correctly flags an injected fake binding. It's the headless twin of
+both ways: `50/50` clean on the pinned build, and it correctly flags an injected fake binding. It's the headless twin of
 the in-game report — same catalog, no game needed.
 
 ## What it covers

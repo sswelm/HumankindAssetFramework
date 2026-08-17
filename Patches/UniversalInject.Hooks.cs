@@ -370,4 +370,34 @@ namespace HumankindAssetFramework
             catch (System.Exception ex) { Plugin.Log.LogError("[Projectile] AnimationLoad postfix: " + ex); }
         }
     }
+
+    // F8 WINDOW CLICK-THROUGH FIX (2026-08-17, user report: left-dragging the window panned the map under it). The
+    // game's own windows stop map input via the public static UIInteractivityManager.IsMouseCovered — the input
+    // pipeline stamps it onto events as Modifiers.MouseCovered and the camera ignores covered drags. SpecificUpdate
+    // recomputes the flag every frame from the game's OWN responders (our IMGUI window isn't one), so this postfix
+    // ORs in "or over the HAF window" right after that computation: every consumer that respects the game's windows
+    // then respects ours — no camera-controller surgery, no input-event swallowing.
+    [HarmonyPatch]
+    internal static class Hk_MouseCoverExtend
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = GameBinding.UIInteractivityManager;
+            return t != null ? AccessTools.Method(t, "SpecificUpdate") : null;
+        }
+        static FieldInfo covered;
+        static bool armLogged;
+        static void Postfix()
+        {
+            try
+            {
+                if (!Plugin.WindowHovered) return;
+                if (covered == null) covered = AccessTools.Field(GameBinding.UIInteractivityManager, "IsMouseCovered");
+                if (covered == null) return;
+                covered.SetValue(null, true);
+                if (!armLogged) { armLogged = true; Plugin.Diag("[Uni] Hk_MouseCoverExtend: HAF window hover now counts as mouse-covered (map input suppressed under the window)"); }
+            }
+            catch { }   // patch body must never break the game's input update
+        }
+    }
 }
