@@ -88,6 +88,40 @@ namespace HumankindAssetFramework.Tests
             Assert.Equal(2, set.turretAxis);
         }
 
+        // VERIFIED-REVIEW GUARD (2026-08-17): runtime-STATE fields are public on ModelEntry, and the generic
+        // ToObject would bind ANY name-matching key — a third-party pack carrying "repointed": true (or a typo'd
+        // key landing on state) would poison the session before the re-arm ever runs. The parse now strips every
+        // non-whitelisted key first; this pins that hostile state keys land on DEFAULTS, not the JSON values.
+        [Fact]
+        public void ParseModels_RuntimeStateKeys_AreStripped_NotBound()
+        {
+            var e = Assert.Single(UniversalInject.ParseModels(@"{ ""models"": [ { ""resourceName"": ""H"",
+                ""repointed"": true, ""descId"": 999, ""animId"": 7, ""skeletonId"": 5, ""assetDir"": ""evil"" } ] }"));
+            Assert.False(e.repointed);
+            Assert.Equal(-1, e.descId);
+            Assert.Equal(-1, e.animId);
+            Assert.Equal(-1, e.skeletonId);
+            Assert.Equal("", e.assetDir);
+        }
+
+        // The nastier corner of the same finding: a key colliding with a READONLY collection (phaseTracks) made
+        // ToObject THROW, silently demoting the whole pack to the index-aligned regex fallback. With the strip the
+        // object parse survives — proven by the per-model isolation ONLY the object parse provides (the fallback
+        // would zip the single `scale` onto model A, and would not even yield two entries for this document).
+        [Fact]
+        public void ParseModels_ReadonlyCollectionCollision_StaysOnObjectParse()
+        {
+            var json = @"{ ""models"": [
+                { ""resourceName"": ""A"", ""phaseTracks"": [ { ""phase"": 1.0 } ], ""stateSamples"": [ 1, 2 ] },
+                { ""resourceName"": ""B"", ""scale"": 3.0 }
+            ] }";
+            var e = UniversalInject.ParseModels(json);
+            Assert.Equal(2, e.Count);
+            Assert.Empty(e[0].phaseTracks);   // the colliding key was stripped, never bound
+            Assert.Equal(1f, e[0].scale);     // A omitted scale -> shared default, NOT B's value
+            Assert.Equal(3f, e[1].scale);
+        }
+
         // When JObject.Parse rejects the document (here: truncated), the regex fallback still recovers the fields.
         // NOTE: the fallback keys the entry count on Min(pawnDescription, skel, atlas) — a recoverable model needs all
         // three (line ~729). That's the fallback's documented shape, so the test carries an atlas too.

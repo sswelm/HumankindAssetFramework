@@ -37,8 +37,13 @@ and that everything it reads is a field the baker writes. A **missing key** fall
   inherit it and the plugin's primary parse maps it automatically; add the matching `Regex.Matches` line to the fallback,
   then run `check_schema_parity.sh` (it fails loudly if the fallback lags).
 - **Editor-only** (bake-time) — add to `ModelDef`.
-- **Plugin-only** (runtime) — add to `ModelEntry`; the primary parse maps it by name automatically. If it must survive
-  malformed JSON too, add it to the regex fallback + the parity allowlist.
+- **Plugin-only CONFIG** (pack-authored, like `rotorSpinBones`) — add to `ModelEntry` **and to the
+  `registryConfigKeys` whitelist** in `ParseModels`: since 2026-08-17 the primary parse strips every
+  non-whitelisted key before the generic map (so pack JSON can never bind runtime-STATE fields like `repointed` —
+  test-pinned). A forgotten whitelist entry fails loud (the key is stripped and Diag names it). If the field must
+  survive malformed JSON too, add it to the regex fallback + the parity allowlist.
+- **Plugin-only runtime STATE** — just add the field to `ModelEntry`; it is protected from JSON automatically
+  (not whitelisted = stripped). No attribute, no list to remember.
 
 ## Serialization
 - **Editor** writes `pack.json` via Unity `JsonUtility`, which serializes inherited public fields (and always writes

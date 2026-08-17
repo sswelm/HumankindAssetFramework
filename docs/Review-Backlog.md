@@ -409,11 +409,14 @@ A full-framework review, adversarially verified finding-by-finding against the c
 CHANGELOG). Most findings were already admitted here or ADR-settled. What survived as **new and deliberately
 deferred**:
 
-- **Generic parse binds runtime-state fields from pack JSON** — `ModelEntry`'s public `repointed` / `descId` /
+- ~~**Generic parse binds runtime-state fields from pack JSON** — `ModelEntry`'s public `repointed` / `descId` /
   `animId` bind from any name-matching key (the old hand-list parse was an implicit whitelist), and a key colliding
   with a readonly collection (`phaseTracks`) throws inside `ToObject` → the whole pack silently drops to the regex
-  fallback. The parse-site comment assumes no matching keys exist; nothing guards it. Planned fix: `[JsonIgnore]`
-  on non-schema fields + a pinning test. Minor while every pack is first-party; real for the multi-pack goal.
+  fallback. The parse-site comment assumes no matching keys exist; nothing guards it.~~ **FIXED 2026-08-17** with a
+  config-key **whitelist strip** before the generic map (`registryConfigKeys`: shared-schema fields by reflection +
+  the GUID arrays + plugin-only config) — fail-safe for new runtime-state fields, chosen over per-field
+  `[JsonIgnore]` (fail-open: one forgotten attribute reopens the hole). Two pinning tests (hostile state keys →
+  defaults; readonly-collection collision → stays on the object parse). Suite 61 → **63**.
 - ~~**No CI service** — the entire automated gate is the per-clone opt-in pre-push hook on one machine; the docs say
   "CI-able" three times but nothing runs the build/tests/bindcheck automatically. A GitHub Actions workflow closes
   it (the gitignored `References\` DLLs need a strategy first).~~ **FIXED 2026-08-17**: `.github/workflows/ci.yml`

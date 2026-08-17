@@ -11,10 +11,10 @@ jobs:
   build-test:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Fetch reference DLLs (public sources)
         run: pwsh tools/fetch-refs.ps1
       - name: Build plugin
         run: dotnet build HumankindAssetFramework.csproj -c Release --nologo
-      - name: Run tests (61)
+      - name: Run tests
         run: dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release --nologo

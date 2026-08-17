@@ -592,6 +592,31 @@ namespace HumankindAssetFramework
         // missing/reordered field). FALLBACK: field-by-field regex (index-aligned). Semantics identical to the original
         // single-file loader; lifted into a helper so every pack shares it. The local `entries` intentionally shadows the
         // field to keep the large per-field Add blocks below verbatim.
+        // CONFIG-KEY WHITELIST for the generic parse (2026-08-17, verified-review finding): ToObject<ModelEntry>
+        // binds ANY name-matching public field — including runtime-state (`repointed`/`descId`/`animId`/`assetDir`/
+        // the per-session dictionaries), which a hostile or typo'd pack key could poison before the session re-arm
+        // ever runs; worse, a key colliding with a READONLY collection (`phaseTracks`) makes ToObject THROW,
+        // silently demoting the whole pack to the fragile index-aligned regex fallback. So every model object is
+        // stripped to declared config BEFORE the generic map. Fail-safe by default: a NEW shared field is
+        // whitelisted by reflection automatically, and a NEW runtime-state field is protected without anyone
+        // remembering an attribute. Plugin-only CONFIG keys (rare — rotorSpin*) must be added here; a new one
+        // that's forgotten fails LOUD (the feature's key is stripped, Diag names it). Bake-time-only editor keys
+        // (targetTris, convertRig, …) are stripped too — the plugin never read them; Diag-logged, not warned,
+        // because every real pack carries ~50 of them by design.
+        static readonly HashSet<string> registryConfigKeys = BuildRegistryConfigKeys();
+        static HashSet<string> BuildRegistryConfigKeys()
+        {
+            var keys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var f in typeof(Haf.Schema.HafModelSchema).GetFields(BindingFlags.Public | BindingFlags.Instance))
+                keys.Add(f.Name);
+            keys.UnionWith(new[] {
+                "rotorSpinBones", "rotorSpinSpeed",   // plugin-only config (no editor field; parity-allowlisted runtime-only keys)
+                "skel", "atlas", "clip", "clipMove", "clipAfter", "clipAttack", "clipCombat",
+                "clipPreMove", "clipIdle", "clipIdleAlt", "clipIdleAlt2",   // GUID arrays — hand-pinned after ToObject, so they must survive the strip
+            });
+            return keys;
+        }
+
         internal static List<ModelEntry> ParseModels(string text)
         {
             var entries = new List<ModelEntry>();
@@ -613,10 +638,21 @@ namespace HumankindAssetFramework
                             // and re-pin it by hand below — otherwise ToObject throws and the whole model drops to the
                             // fragile index-aligned regex fallback. Read it first, then remove.
                             var p = m["position"]; (m as JObject)?.Remove("position");
+                            // Strip every non-config key (see registryConfigKeys above) so the generic map below can
+                            // only ever touch declared config — runtime-state fields are unreachable from pack JSON.
+                            if (m is JObject mo)
+                            {
+                                List<string> stripped = null;
+                                foreach (var prop in mo.Properties().ToList())
+                                    if (!registryConfigKeys.Contains(prop.Name))
+                                    { (stripped ?? (stripped = new List<string>())).Add(prop.Name); prop.Remove(); }
+                                if (stripped != null)
+                                    Plugin.Diag("[Uni] stripped " + stripped.Count + " non-config key(s) pre-parse: " + string.Join(", ", stripped));
+                            }
                             // The name-matching config (every string/bool/float/int field, inherited from the shared
-                            // HafModelSchema + ModelEntry's own) deserializes generically — one mapping, no hand-list to
-                            // drift against the editor. Absent keys fall to each field's initializer (the shared defaults);
-                            // ModelEntry's runtime-state fields have no matching JSON key so they stay at their defaults.
+                            // HafModelSchema + ModelEntry's own whitelisted keys) deserializes generically — one mapping,
+                            // no hand-list to drift against the editor. Absent keys fall to each field's initializer
+                            // (the shared defaults); runtime-state fields CANNOT bind — the strip above removed them.
                             var e = m.ToObject<ModelEntry>();
                             // The GUID arrays also DON'T map by name (one JSON array skel[] -> four ints sa/sb/sc/sd, etc.),
                             // so they're extracted explicitly here.
