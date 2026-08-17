@@ -7,7 +7,16 @@ check before proposing a change to any of them.
 
 ---
 
-## glbconv has ONE source: `baker/glbconv/` in the plugin repo (2026-08-17)
+## A tool is not trusted until it is DRILLED — review alone earns nothing (2026-08-17)
+The backup system passed a critical review (4 defects found and fixed) and was declared trustworthy — then its
+FIRST live recovery drill surfaced a fatal gap (the backup never contained the model registry) plus eight more
+product defects the review could not see (all-or-nothing restore, stale windows, confusing list, churn noise, …).
+**Why the review missed them:** it reviewed the day's diff, not the system it stood on; and it never EXECUTED the
+feature once — static reading finds code defects, only use finds product defects. **Rule:** for any user-facing
+tool, the ladder is written → reviewed → **drilled** (at least one real execution of the primary scenario, e.g.
+remove-and-recover on live data) → trusted. A review may claim "reviewed", never "trustworthy". Same lesson at
+framework scale: the 08-17 verified review named "zero external validation" as HAF's blind spot — the drill is
+the internal substitute until real adopters exist.
 The converter's source, csproj, and pinned `SharpGLTF.Core.dll` live ONLY in this repo; ENCReload holds just the
 deployed `glbconv.exe` + BUILD.md. **Why:** the previous two-copies arrangement split-brained — each copy accumulated
 a verified fix the other lacked, and the 2026-08-16 rebuild shipped the deployed exe with the T5 mirrored-winding fix
