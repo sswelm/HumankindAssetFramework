@@ -16,6 +16,7 @@ thing" up to "the machine burned down."
 | **Daily auto-version** | First editor load of a day (>24 h since last; toggle, default ON) | Full backup of ALL groups — assets *and* configuration — on a background thread, same core as the button | Newest **3** `_auto_` versions kept; rotation logged |
 | **Delete guard** | Any asset deletion under a protected root (toggle, default ON) | `_deleted_<timestamp>_<name>/` copy of the asset (+ `.meta`) *before* the delete proceeds | Never auto-deleted (prune by hand via *Delete*) |
 | **Offsite zip** | Rides along with any manual/auto backup (optional: set the *Offsite folder*) | ONE `HAF_<timestamp>.zip` per backup, in a second — ideally cloud-synced — folder | Never overwritten |
+| **Factory remove-undo** | The Model Factory's **Remove** (always) | `_removed_<timestamp>_<name>/` with the entry's JSON + the exact baked-output whitelist, taken BEFORE anything is deleted; an **Undo remove** button appears next to Remove and restores both in one click | Never auto-deleted |
 
 Every layer feeds the **same restorable list**: each entry, whether manual, auto, or delete-guard, has a
 **Restore** button and the same safety guards.

@@ -29,7 +29,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   fifth, user-spotted during the recovery drill: restore was ALL-OR-NOTHING** — recovering one group from an
   older snapshot rolled every other group back to snapshot time (an old backup got more dangerous to restore the
   older it grew). Fixed with **selective restore**: the same group checkboxes that scope a backup scope a
-  restore; the confirm dialog states the scope; `_deleted`/`_prerestore` snapshots still restore whole.
+  restore; the confirm dialog states the scope; `_deleted`/`_prerestore` snapshots still restore whole. **The
+  drill kept giving: two more user-found issues, fixed live.** (a) Remove left the PREVIEW rendering the removed
+  model (stale-state, same family as the sel-reset bug) — cleared. (b) Recovery required knowing the Backup
+  window exists and having a backup that happened to cover the moment — Remove is now **recycle-bin semantics**:
+  it snapshots the entry JSON + the exact baked-output whitelist to `_removed_<ts>_<name>/` BEFORE deleting
+  (aborts if the snapshot fails — never destroy what can't be restored), and an **Undo remove** button appears
+  right where Remove is (user-designed placement), restoring registry entry + baked assets in one click.
 
 - **OFFSITE BACKUP — the last total-loss scenario closed (2026-08-17).** The Backup window gains an optional
   *Offsite folder*: every backup is also written there as ONE `HAF_<timestamp>.zip` — silent (background thread,
