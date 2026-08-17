@@ -51,6 +51,11 @@ That's the whole loop. Everything below is detail and the animated workflow.
   **Remove + delete files** / **Cancel** / **Remove, keep files**, so you either delete its baked assets in the same
   step (whitelisted outputs only — unit portraits and other unit-side files are never touched) or keep them on disk;
   the plugin stops injecting it either way.
+- **Remove is a recycle bin (2026-08-17)**: before anything is touched, the entry's JSON + the exact baked-output
+  whitelist are snapshotted to `_removed_<timestamp>_<name>/` in the backup root (the remove ABORTS if the snapshot
+  can't be taken). An **Undo remove** button then appears next to Remove — one click restores the registry entry +
+  baked assets and selects the restored entry. The same snapshots are also fully restorable from the
+  **Backup & Restore** window's "Factory remove snapshots" section (see [Backup.md](Backup.md)).
 
 ### Resource name / Pawn description / Model file
 - **Resource name** — unique id; names all the baked assets (`<name>_Skeleton`, `<name>_Atlas`, …).
@@ -810,7 +815,7 @@ one clip per role folder, and the game loads the resulting ClipCollections by GU
   the registry entry.
 - **Save (no bake)** — write the registry entry only (assets untouched): the way to tweak Behavior flags/sliders.
   Relaunch the game to see it; the mod bundle is unchanged.
-- **Remove** — drop the entry from the registry; the dialog lets you also delete its baked assets (whitelisted outputs only) or keep them on disk.
+- **Remove** — drop the entry from the registry; the dialog lets you also delete its baked assets (whitelisted outputs only) or keep them on disk. Every Remove first snapshots the entry + outputs to `_removed_<ts>/` — undo via the **Undo remove** button that appears, or from the Backup & Restore window.
 
 ### Safety nets
 The `animated` flag is **derived, not trusted**: an entry carrying animation config (named clip, behaviors, bone

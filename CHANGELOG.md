@@ -46,7 +46,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   project registry copy (both registries re-validated: 22 models, parse-clean); `haf_packs/` added to the
   Runtime-config group so every future backup carries the real registry. The honest lesson: a backup's contents
   were asserted from its group NAME, not verified — the same claim-vs-check gap the smoke test was built to
-  close, now closed for backups too.
+  close, now closed for backups too. **The drill's final round (same evening):** critical-content verify (a
+  backup missing the registry marks itself NOT ok; green says "registry verified in snapshot"); `_removed_`
+  snapshots fully restorable from the window itself (shared core with the Factory's Undo button, which now also
+  selects + loads the restored entry); the list grouped into counted foldouts with date-time-first rows
+  (delete-guard open by default, user-tuned); preview-scratch churn (`_PropFit`/`_Preview*`) excluded from the
+  delete guard; restores auto-refresh open Factory windows (the restore "didn't work" — it had; the dropdown was
+  stale); tooltips on every button; the list fills the window height. **Thirteen user-driven fixes in one
+  drilling session — and the process lesson became an ADR: a tool is not trusted until it is DRILLED.**
 
 - **OFFSITE BACKUP — the last total-loss scenario closed (2026-08-17).** The Backup window gains an optional
   *Offsite folder*: every backup is also written there as ONE `HAF_<timestamp>.zip` — silent (background thread,

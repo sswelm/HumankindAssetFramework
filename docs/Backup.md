@@ -16,7 +16,7 @@ thing" up to "the machine burned down."
 | **Daily auto-version** | First editor load of a day (>24 h since last; toggle, default ON) | Full backup of ALL groups — assets *and* configuration — on a background thread, same core as the button | Newest **3** `_auto_` versions kept; rotation logged |
 | **Delete guard** | Any asset deletion under a protected root (toggle, default ON) | `_deleted_<timestamp>_<name>/` copy of the asset (+ `.meta`) *before* the delete proceeds | Never auto-deleted (prune by hand via *Delete*) |
 | **Offsite zip** | Rides along with any manual/auto backup (optional: set the *Offsite folder*) | ONE `HAF_<timestamp>.zip` per backup, in a second — ideally cloud-synced — folder | Never overwritten |
-| **Factory remove-undo** | The Model Factory's **Remove** (always) | `_removed_<timestamp>_<name>/` with the entry's JSON + the exact baked-output whitelist, taken BEFORE anything is deleted; an **Undo remove** button appears next to Remove and restores both in one click | Never auto-deleted |
+| **Factory remove-undo** | The Model Factory's **Remove** (always) | `_removed_<timestamp>_<name>/` with the entry's JSON + the exact baked-output whitelist, taken BEFORE anything is deleted; restore via the **Undo remove** button next to Remove OR the window's *Factory remove snapshots* section — both do the full restore (baked assets + registry entry) through one shared implementation | Never auto-deleted |
 
 Every layer feeds the **same restorable list**: each entry, whether manual, auto, or delete-guard, has a
 **Restore** button and the same safety guards.
@@ -46,7 +46,10 @@ folders (no silent merge).
 `Assets/Resources` is deliberately **not** guarded: the bake pipeline delete-firsts baked assets on every
 re-bake (~30 delete sites), so guarding them would flood the backup root with churn within days — and bakes are
 regenerable from FactorySource + config anyway. The daily auto-version still snapshots Resources for
-go-back-a-version.
+go-back-a-version. **Preview-scratch files are excluded too** (`*_PropFit.prefab`, `*_Preview.prefab`,
+`*_PreviewMesh/_PreviewMat`): the Lab's fit preview delete-first *rebuilds* them constantly ("NOT shipped;
+preview-only"), and logging that churn as deletions alarmed exactly the person the guard should reassure — the
+guard protects what can't be rebuilt, not what rebuilds itself.
 
 ## How a backup is stored
 
@@ -55,7 +58,16 @@ prefixed `_auto_`, guard snapshots `_deleted_`, pre-restore safety snapshots `_p
 is copied under `<group>/<name>`, alongside a **`manifest.txt`** recording every source's *original absolute
 path*, file count, and byte size. Backups are **never overwritten** (each is a fresh timestamp). After copying,
 the file count is re-verified against the manifest — a mismatch is flagged loudly, and a mismatched backup is
-never used as a restore's safety snapshot nor zipped offsite.
+never used as a restore's safety snapshot nor zipped offsite. **Critical-content verify**: a snapshot that took
+the config group must actually CONTAIN every live pack registry (`haf_packs/*/pack.json`) or the whole backup is
+marked not-ok with a loud message — a green backup literally says *"registry verified in snapshot"* (the recovery
+drill found the registry silently absent from every backup for weeks; that failure mode is now structurally
+impossible).
+
+**The list** is grouped, every row starting with its date-time, newest first: *Full backups* (manual + daily
+auto), then *Pre-restore*, *Delete-guard* (open by default — the section you check after an "oops"), and
+*Factory remove* sections as counted foldouts. Restoring anything **auto-refreshes every open Model Factory
+window** — no manual Refresh after a restore.
 
 ## Restore — selective, and guarded three ways
 
