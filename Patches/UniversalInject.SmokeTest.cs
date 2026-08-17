@@ -64,6 +64,43 @@ namespace HumankindAssetFramework
             };
         }
 
+        // Per-entry deep-check gathering — PURE over the entry's fields, so it's unit-testable (the first in-game run
+        // proved why: the skeleton check fired on a RETEXTURE-ONLY entry, which legitimately has no skeleton — every
+        // asset requirement must gate on "was one AUTHORED", exactly like the roles do).
+        internal static void GatherEntryFacts(ModelEntry e, SmokeFacts f)
+        {
+            // Sounds: judgeable for EVERY entry once the audio poll has tried loading (skip = still pending).
+            if (e.customClipTried)
+            {
+                void Snd(string file, UnityEngine.AudioClip clip, string role)
+                { if (!string.IsNullOrEmpty(file) && clip == null) f.FailedSounds.Add($"{e.resourceName} {role} '{file}'"); }
+                Snd(e.soundFile, e.customClip, "loop");     Snd(e.soundStartFile, e.customStartClip, "start");
+                Snd(e.soundStopFile, e.customStopClip, "stop"); Snd(e.soundIdleFile, e.customIdleClip, "idle");
+                Snd(e.soundAttackFile, e.customAttackClip, "attack"); Snd(e.soundDeathFile, e.customDeathClip, "death");
+                Snd(e.soundBattleFile, e.customBattleClip, "battle");
+            }
+
+            if (!e.repointed) return;   // deep checks only where the full pipeline provably ran
+            // Asset checks gate on AUTHORED GUIDs: a retexture-only entry has no skeleton/atlas of its own and is healthy without them.
+            if ((e.sa | e.sb | e.sc | e.sd) != 0 && e.skeleton == null) f.MissingAssets.Add($"{e.resourceName} skeleton");
+            if ((e.ta | e.tb | e.tc | e.td) != 0 && e.tex == null) f.MissingAssets.Add($"{e.resourceName} atlas");
+
+            // Every role's animId resolves at registration (EnsureRegistered), which precedes any repoint —
+            // so an authored GUID still at -1 on a repointed entry is genuinely dead (asset failed to load
+            // or the collection didn't resolve), not merely "not yet".
+            void Role(int a, int b, int c, int d, int animId, string role)
+            { if ((a | b | c | d) != 0 && animId < 0) f.DeadRoles.Add($"{e.resourceName} {role}"); }
+            Role(e.ca, e.cb, e.cc, e.cd, e.animId, "primary");
+            Role(e.mca, e.mcb, e.mcc, e.mcd, e.moveAnimId, "move");
+            Role(e.aca, e.acb, e.acc, e.acd, e.afterAnimId, "after");
+            Role(e.ata, e.atb, e.atc, e.atd, e.attackAnimId, "attack");
+            Role(e.cba, e.cbb, e.cbc, e.cbd, e.combatAnimId, "combat");
+            Role(e.pva, e.pvb, e.pvc, e.pvd, e.preMoveAnimId, "preMove");
+            Role(e.iea, e.ieb, e.iec, e.ied, e.idleAnimId, "idleOverride");
+            Role(e.ala, e.alb, e.alc, e.ald, e.idleAltAnimId, "idleAlt");
+            Role(e.a2a, e.a2b, e.a2c, e.a2d, e.idleAlt2AnimId, "idleAlt2");
+        }
+
         internal static void RunSmokeTest()
         {
             try
@@ -79,38 +116,7 @@ namespace HumankindAssetFramework
 
                 var snapshot = entries;   // published-once list; snapshot read like every other consumer
                 if (snapshot != null)
-                    foreach (var e in snapshot)
-                    {
-                        // Sounds: judgeable for EVERY entry once the audio poll has tried loading (skip = still pending).
-                        if (e.customClipTried)
-                        {
-                            void Snd(string file, UnityEngine.AudioClip clip, string role)
-                            { if (!string.IsNullOrEmpty(file) && clip == null) f.FailedSounds.Add($"{e.resourceName} {role} '{file}'"); }
-                            Snd(e.soundFile, e.customClip, "loop");     Snd(e.soundStartFile, e.customStartClip, "start");
-                            Snd(e.soundStopFile, e.customStopClip, "stop"); Snd(e.soundIdleFile, e.customIdleClip, "idle");
-                            Snd(e.soundAttackFile, e.customAttackClip, "attack"); Snd(e.soundDeathFile, e.customDeathClip, "death");
-                            Snd(e.soundBattleFile, e.customBattleClip, "battle");
-                        }
-
-                        if (!e.repointed) continue;   // deep checks only where the full pipeline provably ran
-                        if (e.skeleton == null) f.MissingAssets.Add($"{e.resourceName} skeleton");
-                        if ((e.ta | e.tb | e.tc | e.td) != 0 && e.tex == null) f.MissingAssets.Add($"{e.resourceName} atlas");
-
-                        // Every role's animId resolves at registration (EnsureRegistered), which precedes any repoint —
-                        // so an authored GUID still at -1 on a repointed entry is genuinely dead (asset failed to load
-                        // or the collection didn't resolve), not merely "not yet".
-                        void Role(int a, int b, int c, int d, int animId, string role)
-                        { if ((a | b | c | d) != 0 && animId < 0) f.DeadRoles.Add($"{e.resourceName} {role}"); }
-                        Role(e.ca, e.cb, e.cc, e.cd, e.animId, "primary");
-                        Role(e.mca, e.mcb, e.mcc, e.mcd, e.moveAnimId, "move");
-                        Role(e.aca, e.acb, e.acc, e.acd, e.afterAnimId, "after");
-                        Role(e.ata, e.atb, e.atc, e.atd, e.attackAnimId, "attack");
-                        Role(e.cba, e.cbb, e.cbc, e.cbd, e.combatAnimId, "combat");
-                        Role(e.pva, e.pvb, e.pvc, e.pvd, e.preMoveAnimId, "preMove");
-                        Role(e.iea, e.ieb, e.iec, e.ied, e.idleAnimId, "idleOverride");
-                        Role(e.ala, e.alb, e.alc, e.ald, e.idleAltAnimId, "idleAlt");
-                        Role(e.a2a, e.a2b, e.a2c, e.a2d, e.idleAlt2AnimId, "idleAlt2");
-                    }
+                    foreach (var e in snapshot) GatherEntryFacts(e, f);
 
                 // GPU wall alarm — same structured read the F8 display uses. A read error (no game loaded yet) is not
                 // a failure; the budget check simply has nothing to say.

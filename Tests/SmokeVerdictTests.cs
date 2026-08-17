@@ -127,5 +127,76 @@ namespace HumankindAssetFramework.Tests
             Assert.True(r.Pass);
             Assert.Contains("deep checks clean", r.Summary);
         }
+
+        // ---- GatherEntryFacts (pure over ModelEntry) — pinned after the FIRST live run caught a false positive:
+        // ---- the skeleton check fired on a retexture-only entry, which legitimately has no skeleton. ----
+
+        [Fact]
+        public void Gather_RetexOnlyEntry_NoSkeletonAuthored_IsHealthy()
+        {
+            var e = new ModelEntry { resourceName = "Retex_X", repointed = true };   // no skel/atlas GUIDs authored
+            var f = new UniversalInject.SmokeFacts();
+            UniversalInject.GatherEntryFacts(e, f);
+            Assert.Empty(f.MissingAssets);
+            Assert.Empty(f.DeadRoles);
+        }
+
+        [Fact]
+        public void Gather_AuthoredSkeletonNotLoaded_IsMissing()
+        {
+            var e = new ModelEntry { resourceName = "X", repointed = true, sa = 1 };
+            var f = new UniversalInject.SmokeFacts();
+            UniversalInject.GatherEntryFacts(e, f);
+            Assert.Contains("X skeleton", f.MissingAssets);
+        }
+
+        [Fact]
+        public void Gather_NotRepointed_SkipsDeepChecks()
+        {
+            var e = new ModelEntry { resourceName = "P", sa = 1 };   // authored but never injected this session
+            var f = new UniversalInject.SmokeFacts();
+            UniversalInject.GatherEntryFacts(e, f);
+            Assert.Empty(f.MissingAssets);
+        }
+
+        [Fact]
+        public void Gather_ConfiguredSound_FailsOnceTried_PendingBeforeThat()
+        {
+            var tried = new ModelEntry { resourceName = "S", soundFile = "engine.wav", customClipTried = true };
+            var f = new UniversalInject.SmokeFacts();
+            UniversalInject.GatherEntryFacts(tried, f);
+            Assert.Contains("S loop 'engine.wav'", f.FailedSounds);
+
+            var pending = new ModelEntry { resourceName = "S2", soundFile = "engine.wav" };   // audio poll hasn't tried yet
+            var f2 = new UniversalInject.SmokeFacts();
+            UniversalInject.GatherEntryFacts(pending, f2);
+            Assert.Empty(f2.FailedSounds);
+        }
+
+        // The 36-int wiring guard (the `cb`/`cbb` typo class the review flagged — and which the FIRST DRAFT of
+        // GatherEntryFacts actually shipped: `Role(e.ala, e.alb, e.ald, e.ald, ...)` dropped `alc`). Every single
+        // GUID component of every role must arm its role's dead-role check on its own.
+        [Theory]
+        [InlineData("ca", "cb", "cc", "cd", "primary")]
+        [InlineData("mca", "mcb", "mcc", "mcd", "move")]
+        [InlineData("aca", "acb", "acc", "acd", "after")]
+        [InlineData("ata", "atb", "atc", "atd", "attack")]
+        [InlineData("cba", "cbb", "cbc", "cbd", "combat")]
+        [InlineData("pva", "pvb", "pvc", "pvd", "preMove")]
+        [InlineData("iea", "ieb", "iec", "ied", "idleOverride")]
+        [InlineData("ala", "alb", "alc", "ald", "idleAlt")]
+        [InlineData("a2a", "a2b", "a2c", "a2d", "idleAlt2")]
+        public void Gather_DeadRole_EveryGuidComponentArmsItsRole(string fa, string fb, string fc, string fd, string role)
+        {
+            foreach (var fieldName in new[] { fa, fb, fc, fd })
+            {
+                var e = new ModelEntry { resourceName = "T", repointed = true };
+                typeof(ModelEntry).GetField(fieldName).SetValue(e, 1);
+                var f = new UniversalInject.SmokeFacts();
+                UniversalInject.GatherEntryFacts(e, f);
+                Assert.True(f.DeadRoles.Count == 1 && f.DeadRoles[0] == "T " + role,
+                    $"GUID component '{fieldName}' did not arm the '{role}' dead-role check (wiring typo?)");
+            }
+        }
     }
 }

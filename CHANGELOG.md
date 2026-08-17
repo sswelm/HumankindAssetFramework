@@ -19,7 +19,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   once the audio poll has tried), and a **GPU-wall alarm** (any mesh layer ≥95% verts/indices — the silent
   skin-vanish wall, alarmed before it hits, via a structured `ReadMeshBudget` now shared with the F8 display).
   The verdict stays a pure function (`SmokeFacts` → `SmokeVerdict`) so every new fail class is unit-pinned —
-  suite 63 → **69**; a PASS now states what it checked ("deep checks clean on N injected").
+  a PASS now states what it checked ("deep checks clean on N injected"). **The first live run earned its keep
+  twice**: it flagged `Retex_…StealthCorvettes` "missing skeleton" — a FALSE POSITIVE (a retexture-only entry
+  legitimately has no skeleton; corvettes verified fine in-game), which forced the per-entry gathering into a
+  pure `GatherEntryFacts` with every asset check gated on *authored* GUIDs — and the refactor's first draft
+  itself shipped the exact `cb`/`cbb`-class wiring typo the review had warned about (`e.ald` doubled, `e.alc`
+  dropped). Both are now test-pinned: a retexture-entry case plus a **36-component wiring theory** asserting
+  every GUID component of every role arms its dead-role check alone. Suite 63 → **82**.
 
 - **CI — every push now builds + runs the full suite, with zero game files (2026-08-17).** The blocker was
   always the gitignored `References\` DLLs; the unlock was discovering the `Amplitude.Mercury.Animation.dll`
