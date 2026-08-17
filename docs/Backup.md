@@ -50,7 +50,12 @@ current work:
 - The window itself lives in `Assets/Scripts/Editor` (git-tracked in ENCReload since 2026-07-03), so its own
   **Editor scripts** group is belt-and-braces — it still captures uncommitted editor-tool edits.
 - `D:` is a second disk in the **same machine** — a machine-level event (theft, fire, surge) takes the backups
-  with the originals. The tracked code is safe on GitHub; the source models and bakes are **not** — periodically
-  copy a snapshot folder to offsite/cloud storage.
+  with the originals. The tracked code is safe on GitHub; the source models and bakes are **not**. That gap is
+  closed by the **offsite copy** (2026-08-17): set the *Offsite folder* (ideally a cloud-synced folder like
+  OneDrive/Drive) and each backup is also written there as ONE `HAF_<timestamp>.zip` — **optional** (blank = off)
+  and **silent** (zipped on a background thread so a multi-GB snapshot never freezes the editor; the result lands
+  in the status line). Zips are atomic (`.partial` then rename), never overwritten, and **verified** (the zip is
+  re-opened and its file count compared to the snapshot's — a mismatch deletes the partial and says so loudly).
+  A *Zip latest backup → offsite now* button covers pre-existing snapshots.
 - Unity `.meta` files are copied with their assets, so restored assets keep their GUIDs/import settings.
 - Directory sizes are cached; hit **↻ sizes** to recompute after big changes.

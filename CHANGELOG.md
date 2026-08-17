@@ -10,6 +10,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **OFFSITE BACKUP — the last total-loss scenario closed (2026-08-17).** The Backup window gains an optional
+  *Offsite folder*: every backup is also written there as ONE `HAF_<timestamp>.zip` — silent (background thread,
+  a multi-GB FactorySource snapshot no longer freezes the editor), atomic (`.partial` → rename), never
+  overwritten, and self-verifying (the zip is re-opened and its entry count compared against the snapshot; a
+  mismatch deletes the partial loudly). Point it at a cloud-synced folder and the licensed source models + bakes
+  — the only irreplaceable, un-git-able half of the project — survive a machine-level event. Auto-zip toggle for
+  set-and-forget; a manual button covers pre-existing snapshots; `_prerestore` safety snapshots deliberately stay
+  local. (Editor-side; compile-checked headlessly via the Roslyn gate, whose `.rsp` gained the
+  `System.IO.Compression` pair + a defensive `Assets/csc.rsp`.)
+
 - **SHARED-SEAM CENSUS — the first mod-conflict guard (2026-08-17).** Pack-vs-pack conflicts were always guarded
   (declared overrides, first-loaded-wins, loud logs — ADR'd and test-pinned); HAF-vs-OTHER-MODS had hygiene
   (postfix-first, conditional prefixes) but zero visibility. The smoke test now walks every method Harmony knows
