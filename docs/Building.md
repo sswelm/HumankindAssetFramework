@@ -7,7 +7,9 @@ you're changing the plugin.
 
 Needs the **.NET SDK**. The project file is `HumankindAssetFramework.csproj`. Put a `References\` folder next to the `.csproj` containing:
 
-- `BepInEx.dll` + `0Harmony.dll` — from `<Humankind>\BepInEx\core\`
+- `BepInEx.dll` + `0Harmony.dll` + `MonoMod.RuntimeDetour.dll` + `MonoMod.Utils.dll` + `Mono.Cecil.dll` — from
+  `<Humankind>\BepInEx\core\` (the MonoMod/Cecil trio are Harmony's own runtime deps — the unit suite EXECUTES
+  patches for the shared-seam census tests)
 - `UnityEngine*.dll` + `Newtonsoft.Json.dll` — from `<Humankind>\Humankind_Data\Managed\`
   (Newtonsoft is provided by the game at runtime — used for robust registry parsing, since `UnityEngine.JsonUtility`
   silently returns empty in the game's Mono runtime; `Private=false`, so it's not copied into the built plugin.

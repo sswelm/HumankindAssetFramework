@@ -1,6 +1,6 @@
 # Testing
 
-The plugin has a focused unit-test suite (**90 tests as of 2026-08-17**) over the **pure logic that can run outside the
+The plugin has a focused unit-test suite (**92 tests as of 2026-08-17**) over the **pure logic that can run outside the
 game** — the registry/parse/era layer, the reflection **compatibility report** (`GameBinding`), and the **in-game smoke
 harness's verdict** (`SmokeVerdict`). It is a deliberate, bounded suite, not a coverage target: it guards the functions
 where bugs have actually hidden, and stops there on purpose.
@@ -16,7 +16,7 @@ The fast guards used to be separate scripts you had to remember to run. They're 
 
 | Repo | the `check.sh` gate runs | ~time |
 |---|---|---|
-| **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` (90) · registry schema parity | seconds |
+| **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` (92) · registry schema parity | seconds |
 | **ENCReload** (editor) | Roslyn editor compile-check · registry schema parity | ~30 s |
 
 Run it any time by hand: `bash tools/check.sh`. **Enable the hook once per clone:**

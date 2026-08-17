@@ -10,6 +10,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **SHARED-SEAM CENSUS — the first mod-conflict guard (2026-08-17).** Pack-vs-pack conflicts were always guarded
+  (declared overrides, first-loaded-wins, loud logs — ADR'd and test-pinned); HAF-vs-OTHER-MODS had hygiene
+  (postfix-first, conditional prefixes) but zero visibility. The smoke test now walks every method Harmony knows
+  is patched, keeps OURS, and names any that another owner also patches — `"AnimationLoad (also com.other.mod)"`.
+  Informational by design (a neighbor isn't an error; Harmony stacks safely) but it's the pre-printed suspect
+  list for the day an interaction bug appears. The PASS line gains `N patched seam(s) [M shared]`. Tested for
+  REAL: the suite patches a dummy method with two live Harmony instances and asserts the foreign owner is named
+  (which pulled Harmony's MonoMod/Cecil runtime deps into `References\` + `fetch-refs.ps1`). Suite → **92**.
+
 - **F8 WINDOW: no more click-through or reflowing text (2026-08-17).** Left-dragging the window panned the map
   under it — the game reads mouse input independently of IMGUI. Fixed WITHOUT camera surgery by speaking the
   game's own language: type-hunting the Managed DLLs (bindcheck-style MetadataLoadContext) found

@@ -38,6 +38,8 @@ namespace HumankindAssetFramework
             public List<string> BudgetAlarms = new List<string>();
             public List<string> DistrictIssues = new List<string>();
             public List<string> MissingFiles = new List<string>();   // referenced loose files absent from disk — checked for ALL entries, injected or not
+            public List<string> SharedSeams = new List<string>();    // OUR patched methods that another mod ALSO patches — informational, never a FAIL (a neighbor isn't an error), but the suspect list for interaction bugs
+            public int SeamsChecked;
             // Coverage counters — how many facts the deep pass actually verified, so a PASS line SHOWS its work
             // instead of asking to be believed ("checked 47 roles" is auditable; "clean" is not).
             public int RolesChecked, AssetsChecked, SoundsChecked, LayersChecked, DistrictsChecked, TilesActive, FilesChecked;
@@ -71,7 +73,11 @@ namespace HumankindAssetFramework
                           $"({f.Repointed} injected so far), {f.InjectionErrors} injection error(s)" +
                           (pass ? $"; deep checks clean on {f.Repointed} injected — verified {f.RolesChecked} clip role(s), " +
                                   $"{f.AssetsChecked} asset(s), {f.SoundsChecked} sound(s), {f.FilesChecked} file(s) on disk, {f.LayersChecked} GPU layer(s)" +
-                                  (f.DistrictsChecked > 0 ? $", {f.DistrictsChecked} district(s) [{f.TilesActive} tile(s) live]" : "") : "")
+                                  (f.DistrictsChecked > 0 ? $", {f.DistrictsChecked} district(s) [{f.TilesActive} tile(s) live]" : "") +
+                                  (f.SeamsChecked > 0 ? $", {f.SeamsChecked} patched seam(s) [{f.SharedSeams.Count} shared]" : "") : "") +
+                          // Shared seams are informational on PASS and FAIL alike: another mod on our method isn't an
+                          // error, but it IS the first place to look when an interaction bug appears — so name it.
+                          (f.SharedSeams.Count > 0 ? $"; shared with other mods: {string.Join(", ", f.SharedSeams)}" : "")
             };
         }
 
@@ -151,6 +157,28 @@ namespace HumankindAssetFramework
             FileCk(e.textureFile, "skins", skinsShared, "skin");
         }
 
+        // SHARED-SEAM census (2026-08-17, "are there any guards for conflicts?"): walk every method Harmony knows is
+        // patched, keep the ones WE patch, and name any that another owner also patches. Informational by design —
+        // Harmony stacks patches safely and a neighbor isn't an error — but when a mod-interaction bug appears, this
+        // is the pre-printed suspect list. Testable for real: the suite patches a dummy method with two Harmony ids
+        // and asserts the foreign owner is named.
+        internal static void GatherSharedSeams(SmokeFacts f, string ownId)
+        {
+            try
+            {
+                foreach (var m in HarmonyLib.Harmony.GetAllPatchedMethods().ToList())
+                {
+                    var info = HarmonyLib.Harmony.GetPatchInfo(m);
+                    if (info == null || !info.Owners.Contains(ownId)) continue;   // not one of OUR seams
+                    f.SeamsChecked++;
+                    var foreign = info.Owners.Where(o => o != ownId).Distinct().ToList();
+                    if (foreign.Count > 0)
+                        f.SharedSeams.Add($"{m.DeclaringType?.Name}.{m.Name} (also {string.Join("+", foreign)})");
+                }
+            }
+            catch (Exception ex) { Plugin.Diag("[SmokeTest] shared-seam census failed: " + ex.Message); }
+        }
+
         // Per-district deep checks — pure over the DistrictModel's fields (2026-08-17, smoke scale-out). Data-driven:
         // every district in haf_districts.json is covered the day it's added, like the unit checks.
         internal static void GatherDistrictFacts(DistrictModel d, SmokeFacts f)
@@ -185,6 +213,7 @@ namespace HumankindAssetFramework
                         CheckLooseFiles(e, f, Path.Combine(Paths.ConfigPath, "haf_sounds"), Path.Combine(Paths.ConfigPath, "haf_skins"));
                     }
                 foreach (var d in distModels) GatherDistrictFacts(d, f);   // main-thread state, read on the main thread (F8)
+                GatherSharedSeams(f, Plugin.GUID);
                 // A file that's missing on disk also shows as a failed load once tried — one cause, one report:
                 // the missing-on-disk line wins, the derived load-failure line is dropped (same "<name> <role> '<file>'" key).
                 f.FailedSounds.RemoveAll(s => f.MissingFiles.Contains(s));

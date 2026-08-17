@@ -25,6 +25,7 @@ $ErrorActionPreference = "Stop"
 
 $required = @(
     "Newtonsoft.Json.dll", "BepInEx.dll", "0Harmony.dll",
+    "MonoMod.RuntimeDetour.dll", "MonoMod.Utils.dll", "Mono.Cecil.dll",   # Harmony's own runtime deps — the test suite EXECUTES patches (shared-seam census tests)
     "UnityEngine.dll", "UnityEngine.CoreModule.dll", "UnityEngine.IMGUIModule.dll",
     "UnityEngine.InputLegacyModule.dll", "UnityEngine.JSONSerializeModule.dll",
     "UnityEngine.ImageConversionModule.dll", "UnityEngine.AudioModule.dll",
@@ -56,10 +57,10 @@ try {
         $p = Get-Zip "https://api.nuget.org/v3-flatcontainer/newtonsoft.json/11.0.1/newtonsoft.json.11.0.1.nupkg" "newtonsoft"
         Place (Join-Path $p "lib\net45\Newtonsoft.Json.dll") "Newtonsoft.Json.dll"
     }
-    if (($missing -contains "BepInEx.dll") -or ($missing -contains "0Harmony.dll")) {
+    $fromBepInEx = @("BepInEx.dll", "0Harmony.dll", "MonoMod.RuntimeDetour.dll", "MonoMod.Utils.dll", "Mono.Cecil.dll")
+    if ($missing | Where-Object { $fromBepInEx -contains $_ }) {
         $p = Get-Zip "https://github.com/BepInEx/BepInEx/releases/download/v5.4.21/BepInEx_x64_5.4.21.0.zip" "bepinex"
-        Place (Join-Path $p "BepInEx\core\BepInEx.dll") "BepInEx.dll"
-        Place (Join-Path $p "BepInEx\core\0Harmony.dll") "0Harmony.dll"
+        foreach ($dll in $fromBepInEx) { if ($missing -contains $dll) { Place (Join-Path $p "BepInEx\core\$dll") $dll } }
     }
     $unityMissing = $missing | Where-Object { $_ -like "UnityEngine*" }
     if ($unityMissing) {

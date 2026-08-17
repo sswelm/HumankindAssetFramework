@@ -223,6 +223,54 @@ namespace HumankindAssetFramework.Tests
             finally { System.IO.Directory.Delete(tmp, true); }
         }
 
+        // ---- shared-seam census: REAL Harmony patches in the test host, two owners on one method ----
+
+        public static void SeamDummy() { }          // patch target
+        static void SeamNoop() { }                   // patch implementation
+
+        [Fact]
+        public void SharedSeams_ForeignOwnerOnOurMethod_IsNamed_ButNeverFails()
+        {
+            var ours = new HarmonyLib.Harmony("test.haf");
+            var other = new HarmonyLib.Harmony("test.neighbor");
+            var target = typeof(SmokeVerdictTests).GetMethod(nameof(SeamDummy));
+            var noop = new HarmonyLib.HarmonyMethod(typeof(SmokeVerdictTests).GetMethod(nameof(SeamNoop), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static));
+            try
+            {
+                ours.Patch(target, postfix: noop);
+                other.Patch(target, postfix: noop);
+
+                var f = new UniversalInject.SmokeFacts { Models = 22, Repointed = 1 };
+                UniversalInject.GatherSharedSeams(f, "test.haf");
+                Assert.True(f.SeamsChecked >= 1);
+                Assert.Contains(f.SharedSeams, s => s.Contains("SeamDummy") && s.Contains("test.neighbor"));
+
+                // a shared seam is information, NOT a failure — and both the census and the sharers show in the summary
+                var r = UniversalInject.SmokeVerdict(f);
+                Assert.True(r.Pass);
+                Assert.Contains($"{f.SeamsChecked} patched seam(s) [{f.SharedSeams.Count} shared]", r.Summary);
+                Assert.Contains("test.neighbor", r.Summary);
+            }
+            finally { ours.UnpatchSelf(); other.UnpatchSelf(); }
+        }
+
+        [Fact]
+        public void SharedSeams_OurSeamAlone_CountsButListsNothing()
+        {
+            var ours = new HarmonyLib.Harmony("test.haf.solo");
+            var target = typeof(SmokeVerdictTests).GetMethod(nameof(SeamDummy));
+            var noop = new HarmonyLib.HarmonyMethod(typeof(SmokeVerdictTests).GetMethod(nameof(SeamNoop), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static));
+            try
+            {
+                ours.Patch(target, postfix: noop);
+                var f = new UniversalInject.SmokeFacts();
+                UniversalInject.GatherSharedSeams(f, "test.haf.solo");
+                Assert.True(f.SeamsChecked >= 1);
+                Assert.DoesNotContain(f.SharedSeams, s => s.Contains("SeamDummy"));
+            }
+            finally { ours.UnpatchSelf(); }
+        }
+
         [Fact]
         public void Gather_CountsWhatItChecks()
         {
