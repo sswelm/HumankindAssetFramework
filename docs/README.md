@@ -15,7 +15,8 @@ then come back here to go deep.
 ## Get started
 - [**Getting-Started.md**](Getting-Started.md) — **new here? start here.** The ordered path from nothing to a custom unit on the map (bake → build & deploy → launch & verify), with each step linked to its deep doc.
 - [**Building.md**](Building.md) — build the plugin and set up the Blender dependency.
-- [**Backup.md**](Backup.md) — snapshot and restore the un-versioned assets (source & baked models, tooling, runtime config).
+- [**Backup.md**](Backup.md) — four-layer safety net for the un-versioned assets: manual versions, daily
+  auto-versions, a delete guard (every deletion undoable), and offsite zips — all restorable from one list.
 
 ## Author content
 The core authoring workflows — bake a model, animate it, texture it, add sound.
