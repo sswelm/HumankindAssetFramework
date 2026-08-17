@@ -25,7 +25,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   pure `GatherEntryFacts` with every asset check gated on *authored* GUIDs — and the refactor's first draft
   itself shipped the exact `cb`/`cbb`-class wiring typo the review had warned about (`e.ald` doubled, `e.alc`
   dropped). Both are now test-pinned: a retexture-entry case plus a **36-component wiring theory** asserting
-  every GUID component of every role arms its dead-role check alone. Suite 63 → **82**.
+  every GUID component of every role arms its dead-role check alone. And because an instant PASS "didn't feel
+  like real testing" (fair — the deep pass reads outcomes the load pipeline already established, so speed is
+  inherent), the PASS line now **shows its work**: it prints how many facts it verified ("verified 47 clip
+  role(s), 17 asset(s), 12 sound(s), 3 GPU layer(s)") — auditable against the registry instead of asking to be
+  believed. Suite 63 → **84**.
 
 - **CI — every push now builds + runs the full suite, with zero game files (2026-08-17).** The blocker was
   always the gitignored `References\` DLLs; the unlock was discovering the `Amplitude.Mercury.Animation.dll`
