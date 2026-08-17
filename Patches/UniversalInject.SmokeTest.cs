@@ -11,27 +11,56 @@ namespace HumankindAssetFramework
     //
     // The VERDICT is a pure function (SmokeVerdict) so it's unit-tested; RunSmokeTest just gathers the live numbers via
     // reflection/state and calls it. That keeps the quality (the assertion logic) testable and the untestable part thin.
+    //
+    // DEPTH PASS (2026-08-17, user: "add more tests to make it really meaningful"): beyond bindings/errors/counts, the
+    // harness now asserts PER INJECTED ENTRY — each check earned by a shipped bug class:
+    //   - dead clip roles: a role GUID authored in the registry whose animation never resolved (the howitzer's
+    //     "shipped a dead idle-override GUID" — was invisible until the unit failed to deploy on screen)
+    //   - missing assets: an injected entry without its skeleton, or with an authored atlas that didn't load
+    //     (the organ-gun-goes-red class — a red/wrong skin has a named cause instead of a visual hunt)
+    //   - failed sounds: a configured sound file that didn't load (checked once the audio poll has tried)
+    //   - GPU budget: any mesh layer at >=95% verts/indices — the silent skin-vanish wall, alarmed BEFORE it hits
     internal static partial class UniversalInject
     {
         internal static int InjectionErrors;   // bumped in the injection-path catch blocks (RepointMatch / register / fragments / pose)
 
         internal struct SmokeResult { public bool Pass; public string Summary; }
 
-        // PASS = every catalogued game binding resolved, no injection errors, and the registry actually loaded models.
-        // `repointed` is informational only (how many entry types have injected so far — depends which units are present).
+        // Everything the verdict judges, gathered by the thin runtime side. Empty lists = healthy.
+        internal class SmokeFacts
+        {
+            public int GbMissing, InjectionErrors, Models, Repointed;
+            public List<string> DeadRoles = new List<string>();
+            public List<string> MissingAssets = new List<string>();
+            public List<string> FailedSounds = new List<string>();
+            public List<string> BudgetAlarms = new List<string>();
+        }
+
+        // Back-compat convenience: the original four-signal verdict (deep-check lists empty).
         internal static SmokeResult SmokeVerdict(int gbMissing, int injectionErrors, int models, int repointed)
+            => SmokeVerdict(new SmokeFacts { GbMissing = gbMissing, InjectionErrors = injectionErrors, Models = models, Repointed = repointed });
+
+        // PASS = every catalogued game binding resolved, no injection errors, the registry loaded models, AND the deep
+        // checks are clean. `repointed` is informational only (how many entry types have injected so far — depends
+        // which units are present). ALL fail reasons surface at once (test-pinned rule).
+        internal static SmokeResult SmokeVerdict(SmokeFacts f)
         {
             var fails = new List<string>();
-            if (gbMissing > 0) fails.Add($"{gbMissing} game type/member(s) missing");
-            if (injectionErrors > 0) fails.Add($"{injectionErrors} injection error(s)");
-            if (models <= 0) fails.Add("no models loaded from the registry");
+            if (f.GbMissing > 0) fails.Add($"{f.GbMissing} game type/member(s) missing");
+            if (f.InjectionErrors > 0) fails.Add($"{f.InjectionErrors} injection error(s)");
+            if (f.Models <= 0) fails.Add("no models loaded from the registry");
+            if (f.DeadRoles.Count > 0) fails.Add($"{f.DeadRoles.Count} dead clip role(s): {string.Join(", ", f.DeadRoles)}");
+            if (f.MissingAssets.Count > 0) fails.Add($"{f.MissingAssets.Count} missing asset(s): {string.Join(", ", f.MissingAssets)}");
+            if (f.FailedSounds.Count > 0) fails.Add($"{f.FailedSounds.Count} sound file(s) failed to load: {string.Join(", ", f.FailedSounds)}");
+            if (f.BudgetAlarms.Count > 0) fails.Add($"GPU mesh budget near the wall: {string.Join(", ", f.BudgetAlarms)}");
             bool pass = fails.Count == 0;
             string head = pass ? "PASS" : "FAIL (" + string.Join("; ", fails) + ")";
             return new SmokeResult
             {
                 Pass = pass,
-                Summary = $"{head} — bindings {(gbMissing == 0 ? "ok" : gbMissing + " MISSING")}, {models} model(s) loaded " +
-                          $"({repointed} injected so far), {injectionErrors} injection error(s)"
+                Summary = $"{head} — bindings {(f.GbMissing == 0 ? "ok" : f.GbMissing + " MISSING")}, {f.Models} model(s) loaded " +
+                          $"({f.Repointed} injected so far), {f.InjectionErrors} injection error(s)" +
+                          (pass ? $"; deep checks clean on {f.Repointed} injected (roles/assets/sounds/budget)" : "")
             };
         }
 
@@ -40,10 +69,61 @@ namespace HumankindAssetFramework
             try
             {
                 var gb = GameBinding.Validate(GameBinding.Catalog);
-                int gbMissing = gb.Count(r => !r.TypeFound) + gb.Where(r => r.TypeFound).Sum(r => r.MissingMembers.Count);
-                int models = entries?.Count ?? 0;
-                int repointed = entries?.Count(e => e.repointed) ?? 0;
-                var res = SmokeVerdict(gbMissing, InjectionErrors, models, repointed);
+                var f = new SmokeFacts
+                {
+                    GbMissing = gb.Count(r => !r.TypeFound) + gb.Where(r => r.TypeFound).Sum(r => r.MissingMembers.Count),
+                    InjectionErrors = InjectionErrors,
+                    Models = entries?.Count ?? 0,
+                    Repointed = entries?.Count(e => e.repointed) ?? 0,
+                };
+
+                var snapshot = entries;   // published-once list; snapshot read like every other consumer
+                if (snapshot != null)
+                    foreach (var e in snapshot)
+                    {
+                        // Sounds: judgeable for EVERY entry once the audio poll has tried loading (skip = still pending).
+                        if (e.customClipTried)
+                        {
+                            void Snd(string file, UnityEngine.AudioClip clip, string role)
+                            { if (!string.IsNullOrEmpty(file) && clip == null) f.FailedSounds.Add($"{e.resourceName} {role} '{file}'"); }
+                            Snd(e.soundFile, e.customClip, "loop");     Snd(e.soundStartFile, e.customStartClip, "start");
+                            Snd(e.soundStopFile, e.customStopClip, "stop"); Snd(e.soundIdleFile, e.customIdleClip, "idle");
+                            Snd(e.soundAttackFile, e.customAttackClip, "attack"); Snd(e.soundDeathFile, e.customDeathClip, "death");
+                            Snd(e.soundBattleFile, e.customBattleClip, "battle");
+                        }
+
+                        if (!e.repointed) continue;   // deep checks only where the full pipeline provably ran
+                        if (e.skeleton == null) f.MissingAssets.Add($"{e.resourceName} skeleton");
+                        if ((e.ta | e.tb | e.tc | e.td) != 0 && e.tex == null) f.MissingAssets.Add($"{e.resourceName} atlas");
+
+                        // Every role's animId resolves at registration (EnsureRegistered), which precedes any repoint —
+                        // so an authored GUID still at -1 on a repointed entry is genuinely dead (asset failed to load
+                        // or the collection didn't resolve), not merely "not yet".
+                        void Role(int a, int b, int c, int d, int animId, string role)
+                        { if ((a | b | c | d) != 0 && animId < 0) f.DeadRoles.Add($"{e.resourceName} {role}"); }
+                        Role(e.ca, e.cb, e.cc, e.cd, e.animId, "primary");
+                        Role(e.mca, e.mcb, e.mcc, e.mcd, e.moveAnimId, "move");
+                        Role(e.aca, e.acb, e.acc, e.acd, e.afterAnimId, "after");
+                        Role(e.ata, e.atb, e.atc, e.atd, e.attackAnimId, "attack");
+                        Role(e.cba, e.cbb, e.cbc, e.cbd, e.combatAnimId, "combat");
+                        Role(e.pva, e.pvb, e.pvc, e.pvd, e.preMoveAnimId, "preMove");
+                        Role(e.iea, e.ieb, e.iec, e.ied, e.idleAnimId, "idleOverride");
+                        Role(e.ala, e.alb, e.alc, e.ald, e.idleAltAnimId, "idleAlt");
+                        Role(e.a2a, e.a2b, e.a2c, e.a2d, e.idleAlt2AnimId, "idleAlt2");
+                    }
+
+                // GPU wall alarm — same structured read the F8 display uses. A read error (no game loaded yet) is not
+                // a failure; the budget check simply has nothing to say.
+                var layers = ReadMeshBudget(out string budgetErr, out int _);
+                for (int i = 0; i < layers.Count; i++)
+                {
+                    var b = layers[i];
+                    if (b.Name == null || b.VertsMax <= 0) continue;
+                    int vp = Pct(b.Verts, b.VertsMax), xp = Pct(b.Idx, b.IdxMax);
+                    if (vp >= 95 || xp >= 95) f.BudgetAlarms.Add($"L{i} '{b.Name}' verts {vp}% / idx {xp}%");
+                }
+
+                var res = SmokeVerdict(f);
                 if (res.Pass) Plugin.Log.LogInfo("[SmokeTest] " + res.Summary);
                 else Plugin.Log.LogWarning("[SmokeTest] " + res.Summary);
                 Prober.Report.Clear();

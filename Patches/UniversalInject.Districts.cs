@@ -2080,35 +2080,55 @@ namespace HumankindAssetFramework
         // fixed buffer sized 100k verts / 250k indices / 256 meshes PER ContentLayer, tracked by running cursors. Reading
         // those cursors tells us exactly how full each layer is and whether the mod's models are all resident at once or
         // only the active unit types. Bound to a hotkey — press in-game with custom units on the map.
-        // Build the live budget readout as lines (shared by the F8 window and the Shift+F8 log dump).
-        internal static System.Collections.Generic.List<string> MeshBudgetLines()
+        // Structured live budget read — ONE source shared by the F8 window, the Shift+F8 log dump, and the smoke
+        // test's near-the-wall alarm (2026-08-17). Name == null marks a null layer slot.
+        internal struct LayerBudget { public string Name; public int Verts, VertsMax, Idx, IdxMax, Meshes, MeshesMax, MaxTris; }
+        internal static System.Collections.Generic.List<LayerBudget> ReadMeshBudget(out string error, out int pawnLayer)
         {
-            var lines = new System.Collections.Generic.List<string>();
+            var list = new System.Collections.Generic.List<LayerBudget>(); error = null; pawnLayer = -1;
             try
             {
                 var amType = GameBinding.AnimationManager;
                 var inst = amType != null ? AccessTools.Property(amType, "Instance")?.GetValue(null) : null;
-                if (inst == null) { lines.Add("AnimationManager.Instance is null — load a game first."); return lines; }
+                if (inst == null) { error = "AnimationManager.Instance is null — load a game first."; return list; }
                 var fxMgr = GetMember(inst, "FxComponentMeshContentManager");
-                if (fxMgr == null) { lines.Add("FxComponentMeshContentManager is null."); return lines; }
-                int pawnLayer = GetMember(inst, "FXMeshLayerIndex") is int pl ? pl : -1;
-                if (!(GetMember(fxMgr, "Layers") is Array layers)) { lines.Add("Layers array not found."); return lines; }
-                lines.Add($"GPU mesh buffer — {layers.Length} layer(s), pawn layer = {pawnLayer}:");
+                if (fxMgr == null) { error = "FxComponentMeshContentManager is null."; return list; }
+                pawnLayer = GetMember(inst, "FXMeshLayerIndex") is int pl ? pl : -1;
+                if (!(GetMember(fxMgr, "Layers") is Array layers)) { error = "Layers array not found."; return list; }
                 for (int i = 0; i < layers.Length; i++)
                 {
                     var L = layers.GetValue(i);
-                    if (L == null) { lines.Add($"  layer {i}: <null>"); continue; }
-                    string nm = GetMember(L, "name") as string ?? "?";
-                    int v = ToInt(GetMember(L, "currentVertexIndex")),   vMax = ToInt(GetMember(L, "baseVertexBufferSize"));
-                    int x = ToInt(GetMember(L, "currentIndexIndex")),    xMax = ToInt(GetMember(L, "baseIndexBufferSize"));
-                    int m = ToInt(GetMember(L, "currentMeshAddedCount")), mMax = ToInt(GetMember(L, "maxMeshCount"));
-                    // the PER-MESH ceiling: quads beyond this are SILENTLY dropped at encode (holes in the model). 0 = unlimited.
-                    int mt = ToInt(GetMember(L, "maxMeshTriangleCount"));
-                    string tag = i == pawnLayer ? "  <-- your models" : "";
-                    lines.Add($"  L{i} '{nm}': verts {v:n0}/{vMax:n0} ({Pct(v, vMax)}%) | idx {Pct(x, xMax)}% | meshes {m}/{mMax} | maxTris/mesh {(mt == 0 ? "unlimited" : mt.ToString("n0"))}{tag}");
+                    if (L == null) { list.Add(new LayerBudget()); continue; }   // Name stays null = null slot
+                    list.Add(new LayerBudget
+                    {
+                        Name = GetMember(L, "name") as string ?? "?",
+                        Verts = ToInt(GetMember(L, "currentVertexIndex")),    VertsMax = ToInt(GetMember(L, "baseVertexBufferSize")),
+                        Idx = ToInt(GetMember(L, "currentIndexIndex")),       IdxMax = ToInt(GetMember(L, "baseIndexBufferSize")),
+                        Meshes = ToInt(GetMember(L, "currentMeshAddedCount")), MeshesMax = ToInt(GetMember(L, "maxMeshCount")),
+                        // the PER-MESH ceiling: quads beyond this are SILENTLY dropped at encode (holes in the model). 0 = unlimited.
+                        MaxTris = ToInt(GetMember(L, "maxMeshTriangleCount"))
+                    });
                 }
             }
-            catch (Exception ex) { lines.Add("budget read failed: " + ex.Message); }
+            catch (Exception ex) { error = "budget read failed: " + ex.Message; }
+            return list;
+        }
+
+        // Build the live budget readout as lines (shared by the F8 window and the Shift+F8 log dump).
+        internal static System.Collections.Generic.List<string> MeshBudgetLines()
+        {
+            var lines = new System.Collections.Generic.List<string>();
+            var layers = ReadMeshBudget(out string err, out int pawnLayer);
+            if (layers.Count == 0) { lines.Add(err ?? "budget read returned nothing"); return lines; }
+            lines.Add($"GPU mesh buffer — {layers.Count} layer(s), pawn layer = {pawnLayer}:");
+            for (int i = 0; i < layers.Count; i++)
+            {
+                var b = layers[i];
+                if (b.Name == null) { lines.Add($"  layer {i}: <null>"); continue; }
+                string tag = i == pawnLayer ? "  <-- your models" : "";
+                lines.Add($"  L{i} '{b.Name}': verts {b.Verts:n0}/{b.VertsMax:n0} ({Pct(b.Verts, b.VertsMax)}%) | idx {Pct(b.Idx, b.IdxMax)}% | meshes {b.Meshes}/{b.MeshesMax} | maxTris/mesh {(b.MaxTris == 0 ? "unlimited" : b.MaxTris.ToString("n0"))}{tag}");
+            }
+            if (err != null) lines.Add(err);
             return lines;
         }
 

@@ -10,6 +10,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **F8 SMOKE TEST DEPTH PASS — per-entry assertions, each earned by a shipped bug class (2026-08-17).** The
+  in-game smoke verdict was a coarse gate (bindings ok / error count / models > 0); user verdict: "add more tests
+  to make it really meaningful." It now also asserts, per INJECTED entry: **dead clip roles** (a role GUID
+  authored in the registry whose animation never resolved — the howitzer's "shipped a dead idle-override GUID"
+  becomes a named FAIL instead of a unit quietly failing to deploy), **missing assets** (skeleton, or an authored
+  atlas that didn't load — the organ-gun-red class gets a named cause), **failed configured sounds** (checked
+  once the audio poll has tried), and a **GPU-wall alarm** (any mesh layer ≥95% verts/indices — the silent
+  skin-vanish wall, alarmed before it hits, via a structured `ReadMeshBudget` now shared with the F8 display).
+  The verdict stays a pure function (`SmokeFacts` → `SmokeVerdict`) so every new fail class is unit-pinned —
+  suite 63 → **69**; a PASS now states what it checked ("deep checks clean on N injected").
+
 - **CI — every push now builds + runs the full suite, with zero game files (2026-08-17).** The blocker was
   always the gitignored `References\` DLLs; the unlock was discovering the `Amplitude.Mercury.Animation.dll`
   reference was **vestigial** — every Amplitude touch in the plugin is string-based reflection, so the csproj
