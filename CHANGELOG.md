@@ -10,6 +10,21 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Units & animation
 
+- **GLBCONV SPLIT-BRAIN — a verified fix silently regressed out of the deployed exe (2026-08-17).** A verified
+  critical review found glbconv had TWO sources of truth that had each grown a fix the other lacked: ENCReload's
+  `Program.cs.src` (Jul 12) alone held the **T5 mirrored-winding fix** (`GetDeterminant() < 0` → swap B/C so
+  scale-(-1,1,1) vehicle halves wind outward), while this repo's `baker/glbconv/Program.cs` alone held the
+  **multi-tile UV warning** (critical-review #6). The 2026-08-16 exe rebuild (ENCReload d6017cb) was made from the
+  baker copy — so the deployed converter shipped with **T5 regressed**: mirrored halves of symmetric vehicles would
+  render inside-out again. No gate caught it because nothing compared the two sources. Fix: T5 merged into
+  `baker/glbconv/Program.cs` verbatim; rebuilt against the same committed `SharpGLTF.Core.dll`; **A/B-verified** —
+  byte-identical OBJs on 4 FactorySource models (no mirrored nodes → no side effects) and a synthetic
+  two-node mirrored .gltf proving the deployed exe kept inward winding (`f 4 5 6`) where the merged build swaps
+  B/C on exactly the mirrored node (`f 4 6 5`); redeployed to `ENCReload/Tools/glbconv/`. **Structural fix:
+  `Program.cs.src` deleted — `baker/glbconv/` in this repo is now the ONLY source** (BUILD.md rewritten to say so,
+  with the A/B-verify-before-deploy procedure). Lesson for the record: every cross-repo file copy without a sync
+  guard eventually ships a regression; this was the one that did.
+
 - **SAVE-RELOAD ISOLATION — the organ-gun load-order bug (2026-08-16).** Loading a heavy save then another in
   one app run tore an animated custom unit (the organ gun) and, once the mesh bound, painted it the wrong donor
   **red**; a fresh load was always clean. The F8 GPU-mesh-buffer readout (a `+1 mesh / +4.7k verts` diff on the

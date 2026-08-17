@@ -38,6 +38,11 @@ class Program
         {
             if (node.Mesh == null) continue;
             var M = node.WorldMatrix;
+            // A MIRRORED node (negative-determinant world matrix, e.g. a symmetric vehicle whose right half is the left
+            // half under scale (-1,1,1)) flips the geometry but NOT the triangle index order, so that half winds inward
+            // and renders inside-out — invisible under backface culling. Swap two indices per triangle to rewind it
+            // outward when the node is mirrored. (Normals still use TransformNormal; inverse-transpose is a separate low.)
+            bool mirrored = M.GetDeterminant() < 0f;
             foreach (var p in node.Mesh.Primitives)
             {
                 var pos = p.GetVertexAccessor("POSITION")?.AsVector3Array();
@@ -52,7 +57,11 @@ class Program
                     N.Add(nrm != null ? SafeNorm(Vector3.TransformNormal(nrm[i], M)) : Vector3.UnitY);
                     U.Add(uv != null ? uv[i] : Vector2.Zero);
                 }
-                foreach (var t in p.GetTriangleIndices()) { Tri.Add((t.A + b, t.B + b, t.C + b)); TriMat.Add(mi); }
+                foreach (var t in p.GetTriangleIndices())
+                {
+                    Tri.Add(mirrored ? (t.A + b, t.C + b, t.B + b) : (t.A + b, t.B + b, t.C + b));   // swap B/C to rewind mirrored halves outward
+                    TriMat.Add(mi);
+                }
             }
         }
         Console.WriteLine($"collected: verts={V.Count} tris={Tri.Count}");
