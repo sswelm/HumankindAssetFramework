@@ -7,6 +7,23 @@ check before proposing a change to any of them.
 
 ---
 
+## glbconv has ONE source: `baker/glbconv/` in the plugin repo (2026-08-17)
+The converter's source, csproj, and pinned `SharpGLTF.Core.dll` live ONLY in this repo; ENCReload holds just the
+deployed `glbconv.exe` + BUILD.md. **Why:** the previous two-copies arrangement split-brained — each copy accumulated
+a verified fix the other lacked, and the 2026-08-16 rebuild shipped the deployed exe with the T5 mirrored-winding fix
+silently regressed. A cross-repo file copy without a sync guard eventually ships a regression. **Rule:** never
+reintroduce a second source copy; after any rebuild, A/B-diff old-vs-new OBJ output before deploying (procedure in
+ENCReload `Tools/glbconv/BUILD.md`).
+
+## A cross-repo copy is either authoritative or it doesn't exist (2026-08-01 / 2026-08-17)
+The editor `.cs` files in `baker/` are a **deliberately stale reference snapshot** (2026-08-01: entangled with the
+live glbconv + csproj packaging note, so documented loudly in `baker/README.md` instead of deleted); the
+authoritative, runnable copies live in ENCReload (`Assets/Scripts/Editor/`, git-tracked). The Blender-script copies
+(`baker/*.py` + `baker/Tools/`) got the opposite treatment on 2026-08-17 — **deleted** — because unlike the `.cs`
+snapshot they were labelled "live" while the pipeline never executed them (it resolves `<UnityProjectRoot>/Tools/`):
+a drift trap, not documentation. **Rule:** "stale but documented" is reserved for the `.cs` snapshot alone; every
+other file has exactly one home.
+
 ## Pack load order follows Humankind's mod order (2026-08-16)
 HAF packs load in the same order Humankind loaded their runtime **modules** — not alphabetical, and not a base-priority
 flag. **Why:** a HAF pack is the content-extension of a HK mod, so borrowing the platform's own order makes conflicts

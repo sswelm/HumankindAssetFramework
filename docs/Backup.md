@@ -2,10 +2,11 @@
 
 **Menu:** `Tools ▸ HAF ▸ Backup and Restore` (window title *Backup &amp; Restore*).
 
-A safety net for everything the ENCReload git repo does **not** track. That repo versions only
-`Assets/Databases`; the rest of the working set — the editor tooling, the licensed source models, the baked
-assets, the `Tools/` scripts, and the **live BepInEx runtime config the plugin reads** — otherwise lives on
-disk with no version control. This window snapshots all of it to a timestamped folder on `D:`.
+A safety net for the working set git does **not** cover. The ENCReload repo tracks its code — including
+`Assets/Scripts/Editor` and `Tools/`, since 2026-07-03 — and `Assets/Databases`; but the heavyweight rest — the
+licensed source models, the baked assets, and the **live BepInEx runtime config the plugin reads** — lives on
+disk with no version control. This window snapshots all of it (tracked code included, so one folder restores
+everything together) to a timestamped folder on `D:`.
 
 ## What it captures
 
@@ -46,7 +47,10 @@ current work:
 
 ## Notes
 
-- The window itself lives in the un-tracked `Assets/Scripts/Editor`, so its own **Editor scripts** group backs
-  *itself* up — and captures any other unversioned editor-tool edits along with it.
+- The window itself lives in `Assets/Scripts/Editor` (git-tracked in ENCReload since 2026-07-03), so its own
+  **Editor scripts** group is belt-and-braces — it still captures uncommitted editor-tool edits.
+- `D:` is a second disk in the **same machine** — a machine-level event (theft, fire, surge) takes the backups
+  with the originals. The tracked code is safe on GitHub; the source models and bakes are **not** — periodically
+  copy a snapshot folder to offsite/cloud storage.
 - Unity `.meta` files are copied with their assets, so restored assets keep their GUIDs/import settings.
 - Directory sizes are cached; hit **↻ sizes** to recompute after big changes.

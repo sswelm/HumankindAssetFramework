@@ -14,18 +14,20 @@ dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release
 The fast guards used to be separate scripts you had to remember to run. They're now one command per repo, wired as a
 **pre-push hook** so a push can't land a broken build, a failing test, or a drifted schema:
 
-| Repo | `Tools/check.sh` runs | ~time |
+| Repo | the `check.sh` gate runs | ~time |
 |---|---|---|
 | **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` (61) · registry schema parity | seconds |
 | **ENCReload** (editor) | Roslyn editor compile-check · registry schema parity | ~30 s |
 
-Run it any time by hand: `bash Tools/check.sh`. **Enable the hook once per clone:**
+Run it any time by hand: `bash tools/check.sh`. **Enable the hook once per clone:**
 
 ```
-git config core.hooksPath Tools/git-hooks
+git config core.hooksPath tools/git-hooks
 ```
 
-The hook (`Tools/git-hooks/pre-push`, version-controlled) then blocks a failing push; bypass only in a real emergency
+(Casing matters on case-sensitive filesystems: this repo's folder is lowercase `tools/`; ENCReload's is `Tools/` —
+the mismatch has already eaten files once, commit `db40e73`.) The hook (`tools/git-hooks/pre-push`,
+version-controlled) then blocks a failing push; bypass only in a real emergency
 with `git push --no-verify`. Deliberately **not** in the gate (too slow / need Unity, Blender, or the game): the Blender
 golden-master `deploy_regression.sh`, the in-editor Feature Test, and the in-game binding report — those stay manual. The
 gate earned its keep on day one: standing it up surfaced three latent schema drifts (a wrapper field the plugin read but
@@ -37,7 +39,7 @@ A **different trigger** from the push gate: that guards HAF *code* changes; this
 update, run:
 
 ```
-bash Tools/check-bindings.sh [<…/Humankind_Data/Managed>]
+bash tools/check-bindings.sh [<…/Humankind_Data/Managed>]
 ```
 
 The `bindcheck` tool (net8, `System.Reflection.MetadataLoadContext`) validates **every `GameBinding` catalog binding

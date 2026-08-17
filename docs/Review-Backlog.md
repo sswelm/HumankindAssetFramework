@@ -378,8 +378,9 @@ dismissed.
   Save (JsonUtility serializes only `ModelDef`'s fields → unknown keys dropped). Same wipe hits every allowlisted
   runtime-only key. The real fix is a round-trip that preserves unknown keys (or promoting these to `ModelDef`); latent
   (ENC unused), so deferred.
-- **`idleAltInterval` default mismatch** (editor 25f / plugin 0f) — a pack.json missing the key gets idle-alt
-  disabled instead of the documented 25s cadence.
+- ~~**`idleAltInterval` default mismatch** (editor 25f / plugin 0f) — a pack.json missing the key gets idle-alt
+  disabled instead of the documented 25s cadence.~~ **FIXED 2026-08-16** by the shared-schema field initializers
+  (one authoritative default = 25f, test-pinned; see the Framework-Review generic-parse row).
 - **`haf_districts.json` has no regex fallback** — one malformed char disables ALL custom districts (the model
   registry has a fallback; districts don't).
 - **`animated` flag written but not read** — the plugin infers animation from the clip-GUID presence, so the field
@@ -400,3 +401,30 @@ See CHANGELOG + Framework-Review A5. What remains:
 - **Members read off types not yet in `GameBinding` at all** — the `Skeleton`, pawn-entry / `GPUPawnDescriptorEntry` /
   fragment **structs**, `FxOneMeshStruct`, `PresentationLevelBuildComponent` on the hottest injection path (the
   member audit surfaced these; structs need new accessors + a different resolution, so it's a distinct batch).
+
+## 2026-08-17 verified critical review — surviving deferrals
+
+A full-framework review, adversarially verified finding-by-finding against the code and this project's own record
+(see the Framework-Review 08-17 row; the fixed-same-day HIGH — the glbconv source split-brain — is in the
+CHANGELOG). Most findings were already admitted here or ADR-settled. What survived as **new and deliberately
+deferred**:
+
+- **Generic parse binds runtime-state fields from pack JSON** — `ModelEntry`'s public `repointed` / `descId` /
+  `animId` bind from any name-matching key (the old hand-list parse was an implicit whitelist), and a key colliding
+  with a readonly collection (`phaseTracks`) throws inside `ToObject` → the whole pack silently drops to the regex
+  fallback. The parse-site comment assumes no matching keys exist; nothing guards it. Planned fix: `[JsonIgnore]`
+  on non-schema fields + a pinning test. Minor while every pack is first-party; real for the multi-pack goal.
+- **No CI service** — the entire automated gate is the per-clone opt-in pre-push hook on one machine; the docs say
+  "CI-able" three times but nothing runs the build/tests/bindcheck automatically. A GitHub Actions workflow closes
+  it (the gitignored `References\` DLLs need a strategy first).
+- **No offsite copy of the unversioned working set** — all code is on public GitHub, but the licensed source models
+  and baked assets exist only on this machine plus same-machine `D:\HAF_Backups` (now noted in Backup.md). One disk
+  event loses the un-reproducible half of the project.
+- **`cb` vs `cbb` GUID-component naming** (clip vs combat-clip; also `ca`/`cba`/`aca`/`a2a`) — a one-character typo
+  in the 44-int wiring compiles clean and mis-wires a clip role; nothing tests the field→`InjectClipCollections`
+  wiring. Rename or add a wiring test when next touching the schema.
+- **Ghost-hunt log tags bypass the quiet-by-default `Diag` gate** (`[REND]`/`[SRCFIX]`/`[CRUSH]`/`[GHOST]`/`[DESC]`,
+  added 08-03/04 after the Phase-3 quiet-logging pass; most are change-gated or one-shot, but the `[REND]` census can
+  log ~26 `LogInfo` lines / 15 s per `hideSubPawns` entry). Gate on `VerboseLog` when next in `Inject.cs`.
+- **Stale comment** — `Plugin.cs:83` still names `community.humankind.encaccessproof.cfg`; the live config is
+  `community.humankind.haf.cfg`.

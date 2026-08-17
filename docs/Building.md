@@ -19,7 +19,7 @@ dotnet build -c Release
 ```
 
 and copy **both** `bin\Release\HumankindAssetFramework.dll` **and** `bin\Release\Haf.Schema.dll` → `<Humankind>\BepInEx\plugins\`
-— or just run `bash Tools/deploy-plugin.sh`, which copies both. `Haf.Schema.dll` (netstandard2.0) is the **shared model
+— or just run `bash tools/deploy-plugin.sh`, which copies both. `Haf.Schema.dll` (netstandard2.0) is the **shared model
 schema** that `ModelDef` (editor) and `ModelEntry` (plugin) both inherit — the build produces it automatically via a
 `ProjectReference`, but the plugin **won't load without it** (BepInEx reports the missing dependency), so the two ship
 together. The editor half consumes the same DLL from `ENCReload/Assets/Plugins/HafSchema/Haf.Schema.dll` (drop it there
@@ -68,6 +68,10 @@ into the test bin). Full detail — what's covered, what's deliberately out of s
 
 ## Editor tooling (`baker/`)
 
-The Model Factory editor scripts are mirrored in `baker/` (the live copies compile inside the ENCReload Unity
-project, which tracks only its `Databases` in git). Drop them into a Unity project that has the Humankind SDK to get the
-**Tools ▸ Model Factory** window.
+The Model Factory editor scripts live — and are edited, compiled, and run — **only in the ENCReload Unity project**
+(`Assets/Scripts/Editor/`, git-tracked there since 2026-07-03). To get the **Tools ▸ Model Factory** window, use
+that project. The `baker/` folder here is NOT a working copy: it holds a **deliberately stale reference snapshot**
+of those scripts (do not drop it into a Unity project or bake from it — see `baker/README.md`; it silently omits
+fields and preserves since-fixed bugs, and must be re-synced from ENCReload before it could ever ship) plus the one
+live exception: **`baker/glbconv/` is the single source of truth for the GLB→OBJ converter** (2026-08-17), built
+here and deployed to `<ENCReload>/Tools/glbconv/`.

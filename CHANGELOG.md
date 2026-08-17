@@ -23,7 +23,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   B/C on exactly the mirrored node (`f 4 6 5`); redeployed to `ENCReload/Tools/glbconv/`. **Structural fix:
   `Program.cs.src` deleted — `baker/glbconv/` in this repo is now the ONLY source** (BUILD.md rewritten to say so,
   with the A/B-verify-before-deploy procedure). Lesson for the record: every cross-repo file copy without a sync
-  guard eventually ships a regression; this was the one that did.
+  guard eventually ships a regression; this was the one that did. **Same-day follow-up:** the stale `baker/`
+  Blender-script copies (`rig_anim.py` / `vehicle_rig.py` / `deploy_convert.py` + all of `baker/Tools/` — labelled
+  "live", never executed by the pipeline, weeks behind `ENCReload/Tools/`) were **deleted** — same disease, same
+  cure: one home per file. Verified end-to-end same day: Bake Smoke Test 5/5 (both static paths through the new
+  exe), F8 in-game smoke PASS (0 injection errors), tank + Cobra visuals clean.
 
 - **SAVE-RELOAD ISOLATION — the organ-gun load-order bug (2026-08-16).** Loading a heavy save then another in
   one app run tore an animated custom unit (the organ gun) and, once the mesh bound, painted it the wrong donor

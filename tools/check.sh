@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # check.sh — the one fast pre-push gate for the HAF plugin. Runs every quick guard so a push can't land a broken
-# build, a failing unit test, or a drifted registry schema. Wired as the pre-push hook (Tools/git-hooks/pre-push);
-# also runnable by hand any time:  bash Tools/check.sh
+# build, a failing unit test, or a drifted registry schema. Wired as the pre-push hook (tools/git-hooks/pre-push);
+# also runnable by hand any time:  bash tools/check.sh   (lowercase tools/ — this repo, unlike ENCReload's Tools/)
 #
 # Deliberately NOT here (too slow / need Unity or the game): deploy_regression.sh (Blender golden-master), the
 # in-editor Feature Test, and the in-game binding report (haf_bindings_report.txt). This is the sub-minute gate.
