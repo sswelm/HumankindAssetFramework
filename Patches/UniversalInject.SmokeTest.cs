@@ -34,6 +34,9 @@ namespace HumankindAssetFramework
             public List<string> MissingAssets = new List<string>();
             public List<string> FailedSounds = new List<string>();
             public List<string> BudgetAlarms = new List<string>();
+            // Coverage counters — how many facts the deep pass actually verified, so a PASS line SHOWS its work
+            // instead of asking to be believed ("checked 47 roles" is auditable; "clean" is not).
+            public int RolesChecked, AssetsChecked, SoundsChecked, LayersChecked;
         }
 
         // Back-compat convenience: the original four-signal verdict (deep-check lists empty).
@@ -60,7 +63,8 @@ namespace HumankindAssetFramework
                 Pass = pass,
                 Summary = $"{head} — bindings {(f.GbMissing == 0 ? "ok" : f.GbMissing + " MISSING")}, {f.Models} model(s) loaded " +
                           $"({f.Repointed} injected so far), {f.InjectionErrors} injection error(s)" +
-                          (pass ? $"; deep checks clean on {f.Repointed} injected (roles/assets/sounds/budget)" : "")
+                          (pass ? $"; deep checks clean on {f.Repointed} injected — verified {f.RolesChecked} clip role(s), " +
+                                  $"{f.AssetsChecked} asset(s), {f.SoundsChecked} sound(s), {f.LayersChecked} GPU layer(s)" : "")
             };
         }
 
@@ -73,7 +77,11 @@ namespace HumankindAssetFramework
             if (e.customClipTried)
             {
                 void Snd(string file, UnityEngine.AudioClip clip, string role)
-                { if (!string.IsNullOrEmpty(file) && clip == null) f.FailedSounds.Add($"{e.resourceName} {role} '{file}'"); }
+                {
+                    if (string.IsNullOrEmpty(file)) return;
+                    f.SoundsChecked++;
+                    if (clip == null) f.FailedSounds.Add($"{e.resourceName} {role} '{file}'");
+                }
                 Snd(e.soundFile, e.customClip, "loop");     Snd(e.soundStartFile, e.customStartClip, "start");
                 Snd(e.soundStopFile, e.customStopClip, "stop"); Snd(e.soundIdleFile, e.customIdleClip, "idle");
                 Snd(e.soundAttackFile, e.customAttackClip, "attack"); Snd(e.soundDeathFile, e.customDeathClip, "death");
@@ -82,14 +90,18 @@ namespace HumankindAssetFramework
 
             if (!e.repointed) return;   // deep checks only where the full pipeline provably ran
             // Asset checks gate on AUTHORED GUIDs: a retexture-only entry has no skeleton/atlas of its own and is healthy without them.
-            if ((e.sa | e.sb | e.sc | e.sd) != 0 && e.skeleton == null) f.MissingAssets.Add($"{e.resourceName} skeleton");
-            if ((e.ta | e.tb | e.tc | e.td) != 0 && e.tex == null) f.MissingAssets.Add($"{e.resourceName} atlas");
+            if ((e.sa | e.sb | e.sc | e.sd) != 0) { f.AssetsChecked++; if (e.skeleton == null) f.MissingAssets.Add($"{e.resourceName} skeleton"); }
+            if ((e.ta | e.tb | e.tc | e.td) != 0) { f.AssetsChecked++; if (e.tex == null) f.MissingAssets.Add($"{e.resourceName} atlas"); }
 
             // Every role's animId resolves at registration (EnsureRegistered), which precedes any repoint —
             // so an authored GUID still at -1 on a repointed entry is genuinely dead (asset failed to load
             // or the collection didn't resolve), not merely "not yet".
             void Role(int a, int b, int c, int d, int animId, string role)
-            { if ((a | b | c | d) != 0 && animId < 0) f.DeadRoles.Add($"{e.resourceName} {role}"); }
+            {
+                if ((a | b | c | d) == 0) return;
+                f.RolesChecked++;
+                if (animId < 0) f.DeadRoles.Add($"{e.resourceName} {role}");
+            }
             Role(e.ca, e.cb, e.cc, e.cd, e.animId, "primary");
             Role(e.mca, e.mcb, e.mcc, e.mcd, e.moveAnimId, "move");
             Role(e.aca, e.acb, e.acc, e.acd, e.afterAnimId, "after");
@@ -125,6 +137,7 @@ namespace HumankindAssetFramework
                 {
                     var b = layers[i];
                     if (b.Name == null || b.VertsMax <= 0) continue;
+                    f.LayersChecked++;
                     int vp = Pct(b.Verts, b.VertsMax), xp = Pct(b.Idx, b.IdxMax);
                     if (vp >= 95 || xp >= 95) f.BudgetAlarms.Add($"L{i} '{b.Name}' verts {vp}% / idx {xp}%");
                 }

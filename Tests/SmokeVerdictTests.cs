@@ -128,6 +128,29 @@ namespace HumankindAssetFramework.Tests
             Assert.Contains("deep checks clean", r.Summary);
         }
 
+        [Fact]
+        public void Pass_ShowsItsWork_WithCoverageCounts()
+        {
+            // "checked 47 roles" is auditable; "clean" alone is not — the PASS line must carry the counters
+            var f = Healthy();
+            f.RolesChecked = 47; f.AssetsChecked = 17; f.SoundsChecked = 12; f.LayersChecked = 3;
+            var r = UniversalInject.SmokeVerdict(f);
+            Assert.True(r.Pass);
+            Assert.Contains("verified 47 clip role(s), 17 asset(s), 12 sound(s), 3 GPU layer(s)", r.Summary);
+        }
+
+        [Fact]
+        public void Gather_CountsWhatItChecks()
+        {
+            var e = new ModelEntry { resourceName = "C", repointed = true, sa = 1, ta = 1, mca = 1, moveAnimId = 4,
+                                     soundFile = "a.wav", customClipTried = true };
+            var f = new UniversalInject.SmokeFacts();
+            UniversalInject.GatherEntryFacts(e, f);
+            Assert.Equal(1, f.RolesChecked);    // one authored role (move)
+            Assert.Equal(2, f.AssetsChecked);   // skeleton + atlas authored
+            Assert.Equal(1, f.SoundsChecked);   // one configured sound
+        }
+
         // ---- GatherEntryFacts (pure over ModelEntry) — pinned after the FIRST live run caught a false positive:
         // ---- the skeleton check fired on a retexture-only entry, which legitimately has no skeleton. ----
 
