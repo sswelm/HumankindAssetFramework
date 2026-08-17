@@ -18,7 +18,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   AND configuration — through the same core as the button, so it gets a Restore button like any manual version;
   newest 3 kept, rotation logged; manual/_deleted/_prerestore never auto-deleted). Stricter side effect: a
   COUNT-MISMATCH backup now aborts a restore's pre-snapshot and skips the offsite zip instead of proceeding on a
-  suspect archive. Headless-compile-checked (Roslyn gate).
+  suspect archive. Headless-compile-checked (Roslyn gate). **Critically reviewed the same hour, four real
+  defects fixed pre-ship:** (1) guarding `Assets/Resources` would have FLOODED the backup root — the bake
+  pipeline delete-firsts baked assets on every re-bake (~30 `AssetDatabase.DeleteAsset` sites) — dropped from the
+  protected roots (bakes are regenerable; the daily auto still versions them); (2) same-second deletes of
+  `Tank.png` + `Tank.mat` collided into one folder, silently overwriting the first manifest — extension kept +
+  counter-uniquified; (3) the 1+ GB daily auto copied synchronously on editor load (~30-60 s "hang") — moved
+  wholesale to a worker thread (pure file IO); (4) delete-guard snapshots had no `SRC` manifest, so their Restore
+  button was dead — now a one-click restore incl. the `.meta` (GUID preserved, references survive).
 
 - **OFFSITE BACKUP — the last total-loss scenario closed (2026-08-17).** The Backup window gains an optional
   *Offsite folder*: every backup is also written there as ONE `HAF_<timestamp>.zip` — silent (background thread,

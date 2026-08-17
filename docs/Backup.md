@@ -23,10 +23,13 @@ Each group is an independent toggle with a live size readout:
 
 ## Automatic (2026-08-17) — both silent, both optional, both feeding the same restorable list
 
-- **Delete guard** (default ON): before *anything* under `FactorySource` / `Resources` / `Databases` /
-  `Scripts/Editor` is deleted — the Factory's Remove flow, a Project-window delete, a script — it is first copied
-  to a `_deleted_<timestamp>` folder in the backup root (with a manifest naming the original path). The delete
-  then proceeds normally; the guard never blocks anything, it only makes every deletion undoable.
+- **Delete guard** (default ON): before *anything* under `FactorySource` / `Databases` / `Scripts/Editor` is
+  deleted — the Factory's Remove flow, a Project-window delete, a script — it is first copied to a
+  `_deleted_<timestamp>` folder in the backup root with a REAL manifest, so the window's **Restore** button puts
+  it back in one click (incl. the `.meta`, keeping the GUID). The delete then proceeds normally; the guard never
+  blocks anything. `Assets/Resources` is deliberately **not** guarded: the bake pipeline delete-firsts baked
+  assets on every re-bake (~30 delete sites) — guarding them would flood the backup root with churn within days,
+  and bakes are regenerable anyway (the daily auto-version still snapshots them).
 - **Daily auto-version** (default ON): on the first editor load of a day, a full silent backup of ALL groups —
   assets *and* configuration — runs through the same core as the button, so it appears in the backups list with
   its own **Restore** button like any manual version ("go back versions"). The offsite zip rides along if
