@@ -8,9 +8,16 @@ you're changing the plugin.
 Needs the **.NET SDK**. The project file is `HumankindAssetFramework.csproj`. Put a `References\` folder next to the `.csproj` containing:
 
 - `BepInEx.dll` + `0Harmony.dll` — from `<Humankind>\BepInEx\core\`
-- `UnityEngine*.dll` + `Amplitude.Mercury.Animation.dll` + `Newtonsoft.Json.dll` — from `<Humankind>\Humankind_Data\Managed\`
+- `UnityEngine*.dll` + `Newtonsoft.Json.dll` — from `<Humankind>\Humankind_Data\Managed\`
   (Newtonsoft is provided by the game at runtime — used for robust registry parsing, since `UnityEngine.JsonUtility`
-  silently returns empty in the game's Mono runtime; `Private=false`, so it's not copied into the built plugin)
+  silently returns empty in the game's Mono runtime; `Private=false`, so it's not copied into the built plugin.
+  No Amplitude DLL is needed — the plugin's only compile-time game surface is string-based reflection; the vestigial
+  `Amplitude.Mercury.Animation.dll` reference was dropped 2026-08-17.)
+
+**No game installed?** `pwsh tools/fetch-refs.ps1` collects every reference DLL from public sources
+(nuget.org, the BepInEx release, BepInEx's unstripped-Unity mirror) — this is what CI uses; it never overwrites
+DLLs you already copied from the game. GitHub Actions builds + runs the full test suite on every push
+(`.github/workflows/ci.yml`).
 
 Then:
 

@@ -1,0 +1,20 @@
+# CI — build + full test suite on every push, from PUBLIC sources only (no game files on the runner).
+# tools/fetch-refs.ps1 collects the reference DLLs (Newtonsoft/BepInEx/Harmony/Unity — see its header);
+# the game's own DLLs are not needed: the plugin's only compile-time game surface is string-based reflection.
+# NOT here (need the game or Unity): bindcheck (game DLLs), the editor Feature/Smoke tests, in-game verification.
+name: CI
+on:
+  push:
+    branches: [master]
+  pull_request:
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch reference DLLs (public sources)
+        run: pwsh tools/fetch-refs.ps1
+      - name: Build plugin
+        run: dotnet build HumankindAssetFramework.csproj -c Release --nologo
+      - name: Run tests (61)
+        run: dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release --nologo

@@ -8,6 +8,21 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ---
 
+## Infrastructure
+
+- **CI — every push now builds + runs the full suite, with zero game files (2026-08-17).** The blocker was
+  always the gitignored `References\` DLLs; the unlock was discovering the `Amplitude.Mercury.Animation.dll`
+  reference was **vestigial** — every Amplitude touch in the plugin is string-based reflection, so the csproj
+  reference was simply dropped and the build stayed green. Every remaining reference has a public home:
+  Newtonsoft 11.0.1 (nuget.org), `BepInEx.dll`+`0Harmony.dll` (the official BepInEx 5.4.21 release zip), and
+  the UnityEngine modules from **unity.bepinex.dev** — BepInEx's mirror of *runnable* unstripped Unity
+  assemblies, version-exact 2021.3.1 (the nuget `UnityEngine.Modules` reference assemblies compile but throw
+  `TypeLoadException: internal call with non-NULL RVA` the moment tests load them — found the hard way, 52/61
+  red). `tools/fetch-refs.ps1` collects all 12 DLLs (never overwriting game-copied ones; game copies win), and
+  `.github/workflows/ci.yml` runs fetch → build → 61 tests on a clean runner. Proven by full local simulation
+  first: fresh clone, no References, fetch, build green, **61/61 pass**. bindcheck stays manual — validating
+  bindings genuinely needs the game's own DLLs.
+
 ## Units & animation
 
 - **GLBCONV SPLIT-BRAIN — a verified fix silently regressed out of the deployed exe (2026-08-17).** A verified

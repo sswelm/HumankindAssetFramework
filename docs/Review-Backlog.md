@@ -414,9 +414,12 @@ deferred**:
   with a readonly collection (`phaseTracks`) throws inside `ToObject` → the whole pack silently drops to the regex
   fallback. The parse-site comment assumes no matching keys exist; nothing guards it. Planned fix: `[JsonIgnore]`
   on non-schema fields + a pinning test. Minor while every pack is first-party; real for the multi-pack goal.
-- **No CI service** — the entire automated gate is the per-clone opt-in pre-push hook on one machine; the docs say
+- ~~**No CI service** — the entire automated gate is the per-clone opt-in pre-push hook on one machine; the docs say
   "CI-able" three times but nothing runs the build/tests/bindcheck automatically. A GitHub Actions workflow closes
-  it (the gitignored `References\` DLLs need a strategy first).
+  it (the gitignored `References\` DLLs need a strategy first).~~ **FIXED 2026-08-17**: `.github/workflows/ci.yml`
+  builds + runs all 61 tests on every push, using `tools/fetch-refs.ps1` (reference DLLs from public sources — the
+  vestigial Amplitude reference turned out removable, so no game files are needed). bindcheck stays manual (needs
+  the game's DLLs).
 - **No offsite copy of the unversioned working set** — all code is on public GitHub, but the licensed source models
   and baked assets exist only on this machine plus same-machine `D:\HAF_Backups` (now noted in Backup.md). One disk
   event loses the un-reproducible half of the project.
