@@ -34,9 +34,10 @@ namespace HumankindAssetFramework
             public List<string> MissingAssets = new List<string>();
             public List<string> FailedSounds = new List<string>();
             public List<string> BudgetAlarms = new List<string>();
+            public List<string> DistrictIssues = new List<string>();
             // Coverage counters — how many facts the deep pass actually verified, so a PASS line SHOWS its work
             // instead of asking to be believed ("checked 47 roles" is auditable; "clean" is not).
-            public int RolesChecked, AssetsChecked, SoundsChecked, LayersChecked;
+            public int RolesChecked, AssetsChecked, SoundsChecked, LayersChecked, DistrictsChecked, TilesActive;
         }
 
         // Back-compat convenience: the original four-signal verdict (deep-check lists empty).
@@ -56,6 +57,7 @@ namespace HumankindAssetFramework
             if (f.MissingAssets.Count > 0) fails.Add($"{f.MissingAssets.Count} missing asset(s): {string.Join(", ", f.MissingAssets)}");
             if (f.FailedSounds.Count > 0) fails.Add($"{f.FailedSounds.Count} sound file(s) failed to load: {string.Join(", ", f.FailedSounds)}");
             if (f.BudgetAlarms.Count > 0) fails.Add($"GPU mesh budget near the wall: {string.Join(", ", f.BudgetAlarms)}");
+            if (f.DistrictIssues.Count > 0) fails.Add($"{f.DistrictIssues.Count} district issue(s): {string.Join(", ", f.DistrictIssues)}");
             bool pass = fails.Count == 0;
             string head = pass ? "PASS" : "FAIL (" + string.Join("; ", fails) + ")";
             return new SmokeResult
@@ -64,7 +66,8 @@ namespace HumankindAssetFramework
                 Summary = $"{head} — bindings {(f.GbMissing == 0 ? "ok" : f.GbMissing + " MISSING")}, {f.Models} model(s) loaded " +
                           $"({f.Repointed} injected so far), {f.InjectionErrors} injection error(s)" +
                           (pass ? $"; deep checks clean on {f.Repointed} injected — verified {f.RolesChecked} clip role(s), " +
-                                  $"{f.AssetsChecked} asset(s), {f.SoundsChecked} sound(s), {f.LayersChecked} GPU layer(s)" : "")
+                                  $"{f.AssetsChecked} asset(s), {f.SoundsChecked} sound(s), {f.LayersChecked} GPU layer(s)" +
+                                  (f.DistrictsChecked > 0 ? $", {f.DistrictsChecked} district(s) [{f.TilesActive} tile(s) live]" : "") : "")
             };
         }
 
@@ -89,9 +92,19 @@ namespace HumankindAssetFramework
             }
 
             if (!e.repointed) return;   // deep checks only where the full pipeline provably ran
-            // Asset checks gate on AUTHORED GUIDs: a retexture-only entry has no skeleton/atlas of its own and is healthy without them.
+            // Asset checks gate on AUTHORED config: a retexture-only entry has no skeleton/atlas of its own and is healthy without them.
             if ((e.sa | e.sb | e.sc | e.sd) != 0) { f.AssetsChecked++; if (e.skeleton == null) f.MissingAssets.Add($"{e.resourceName} skeleton"); }
             if ((e.ta | e.tb | e.tc | e.td) != 0) { f.AssetsChecked++; if (e.tex == null) f.MissingAssets.Add($"{e.resourceName} atlas"); }
+            // Skin PNG (texture-only retexture): when authored, SOME texture must have landed. (If the PNG fails but the
+            // entry also has a baked atlas, tex falls back to that — a wrong-but-present skin this check can't separate.)
+            if (!string.IsNullOrEmpty(e.textureFile)) { f.AssetsChecked++; if (e.tex == null) f.MissingAssets.Add($"{e.resourceName} skin '{e.textureFile}'"); }
+            // Hand prop: authored guid -> the constructed layer + its atlas must exist after repoint.
+            if (!string.IsNullOrEmpty(e.handPropGuid))
+            {
+                f.AssetsChecked++;
+                if (e.handPropLayer == null) f.MissingAssets.Add($"{e.resourceName} hand-prop layer");
+                else if (e.propAtlasTex == null) f.MissingAssets.Add($"{e.resourceName} hand-prop atlas");
+            }
 
             // Every role's animId resolves at registration (EnsureRegistered), which precedes any repoint —
             // so an authored GUID still at -1 on a repointed entry is genuinely dead (asset failed to load
@@ -113,6 +126,19 @@ namespace HumankindAssetFramework
             Role(e.a2a, e.a2b, e.a2c, e.a2d, e.idleAlt2AnimId, "idleAlt2");
         }
 
+        // Per-district deep checks — pure over the DistrictModel's fields (2026-08-17, smoke scale-out). Data-driven:
+        // every district in haf_districts.json is covered the day it's added, like the unit checks.
+        internal static void GatherDistrictFacts(DistrictModel d, SmokeFacts f)
+        {
+            f.DistrictsChecked++;
+            f.TilesActive += d.tiles.Count;
+            if (d.fxMeshGuid == null) f.DistrictIssues.Add($"'{d.district}' fxMesh GUID unparsed");
+            // groundIdx: int.MinValue = not yet resolved (pending — the district may not be on screen), -1 = the
+            // authored GroundMaterialDefinition NAME was looked up and NOT FOUND (a real authoring error).
+            if (!string.IsNullOrEmpty(d.groundMaterial) && d.groundIdx == -1)
+                f.DistrictIssues.Add($"'{d.district}' ground material '{d.groundMaterial}' not found");
+        }
+
         internal static void RunSmokeTest()
         {
             try
@@ -129,6 +155,7 @@ namespace HumankindAssetFramework
                 var snapshot = entries;   // published-once list; snapshot read like every other consumer
                 if (snapshot != null)
                     foreach (var e in snapshot) GatherEntryFacts(e, f);
+                foreach (var d in distModels) GatherDistrictFacts(d, f);   // main-thread state, read on the main thread (F8)
 
                 // GPU wall alarm — same structured read the F8 display uses. A read error (no game loaded yet) is not
                 // a failure; the budget check simply has nothing to say.

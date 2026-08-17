@@ -29,7 +29,12 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   like real testing" (fair — the deep pass reads outcomes the load pipeline already established, so speed is
   inherent), the PASS line now **shows its work**: it prints how many facts it verified ("verified 47 clip
   role(s), 17 asset(s), 12 sound(s), 3 GPU layer(s)") — auditable against the registry instead of asking to be
-  believed. Suite 63 → **84**.
+  believed. **Scale-out (same day):** the deep pass now also covers the axes the smoke test never looked at —
+  **districts** (per `haf_districts.json` entry: fxMesh GUID parsed, authored ground-material NAME resolves;
+  live tile count in the PASS line), **texture-only retexture skins**, and **hand props** (authored →
+  layer + atlas must exist). All data-driven off the registries, so every future unit AND district is covered
+  the day it's added, no test code. Fault-injection round proven live the same day: a flipped atlas-GUID digit
+  and a renamed WAV both came back as named FAILs on the first F8. Suite 63 → **89**.
 
 - **CI — every push now builds + runs the full suite, with zero game files (2026-08-17).** The blocker was
   always the gitignored `References\` DLLs; the unlock was discovering the `Amplitude.Mercury.Animation.dll`

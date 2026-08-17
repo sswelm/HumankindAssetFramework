@@ -140,6 +140,63 @@ namespace HumankindAssetFramework.Tests
         }
 
         [Fact]
+        public void Gather_AuthoredSkinPng_NoTextureLanded_IsMissing()
+        {
+            var e = new ModelEntry { resourceName = "R", repointed = true, textureFile = "camo.png" };
+            var f = new UniversalInject.SmokeFacts();
+            UniversalInject.GatherEntryFacts(e, f);
+            Assert.Contains("R skin 'camo.png'", f.MissingAssets);
+        }
+
+        [Fact]
+        public void Gather_AuthoredHandProp_MissingLayer_IsMissing()
+        {
+            var e = new ModelEntry { resourceName = "M60", repointed = true, handPropGuid = "1,2,3,4" };
+            var f = new UniversalInject.SmokeFacts();
+            UniversalInject.GatherEntryFacts(e, f);
+            Assert.Contains("M60 hand-prop layer", f.MissingAssets);
+        }
+
+        [Fact]
+        public void GatherDistrict_GroundMaterialNameNotFound_IsIssue_UnresolvedIsPending()
+        {
+            var bad = new UniversalInject.DistrictModel { district = "Reactor", fxMeshGuid = new object(), groundMaterial = "Prairie_Grasland", groundIdx = -1 };
+            var f = new UniversalInject.SmokeFacts();
+            UniversalInject.GatherDistrictFacts(bad, f);
+            Assert.Contains("'Reactor' ground material 'Prairie_Grasland' not found", f.DistrictIssues);
+
+            var pending = new UniversalInject.DistrictModel { district = "R2", fxMeshGuid = new object(), groundMaterial = "Prairie_Grassland", groundIdx = int.MinValue };
+            var f2 = new UniversalInject.SmokeFacts();
+            UniversalInject.GatherDistrictFacts(pending, f2);
+            Assert.Empty(f2.DistrictIssues);   // not-yet-resolved is pending, never a failure
+            Assert.Equal(1, f2.DistrictsChecked);
+        }
+
+        [Fact]
+        public void GatherDistrict_UnparsedFxMeshGuid_IsIssue()
+        {
+            var d = new UniversalInject.DistrictModel { district = "Silo", fxMeshGuid = null };
+            var f = new UniversalInject.SmokeFacts();
+            UniversalInject.GatherDistrictFacts(d, f);
+            Assert.Contains("'Silo' fxMesh GUID unparsed", f.DistrictIssues);
+        }
+
+        [Fact]
+        public void Verdict_DistrictIssues_FailAndAreNamed_CountersInPassLine()
+        {
+            var f = Healthy();
+            f.DistrictIssues.Add("'Reactor' ground material 'X' not found");
+            var r = UniversalInject.SmokeVerdict(f);
+            Assert.False(r.Pass);
+            Assert.Contains("district issue", r.Summary);
+
+            var ok = Healthy(); ok.DistrictsChecked = 2; ok.TilesActive = 5;
+            var r2 = UniversalInject.SmokeVerdict(ok);
+            Assert.True(r2.Pass);
+            Assert.Contains("2 district(s) [5 tile(s) live]", r2.Summary);
+        }
+
+        [Fact]
         public void Gather_CountsWhatItChecks()
         {
             var e = new ModelEntry { resourceName = "C", repointed = true, sa = 1, ta = 1, mca = 1, moveAnimId = 4,
