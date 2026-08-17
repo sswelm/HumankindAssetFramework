@@ -25,7 +25,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   `Tank.png` + `Tank.mat` collided into one folder, silently overwriting the first manifest — extension kept +
   counter-uniquified; (3) the 1+ GB daily auto copied synchronously on editor load (~30-60 s "hang") — moved
   wholesale to a worker thread (pure file IO); (4) delete-guard snapshots had no `SRC` manifest, so their Restore
-  button was dead — now a one-click restore incl. the `.meta` (GUID preserved, references survive).
+  button was dead — now a one-click restore incl. the `.meta` (GUID preserved, references survive). **And a
+  fifth, user-spotted during the recovery drill: restore was ALL-OR-NOTHING** — recovering one group from an
+  older snapshot rolled every other group back to snapshot time (an old backup got more dangerous to restore the
+  older it grew). Fixed with **selective restore**: the same group checkboxes that scope a backup scope a
+  restore; the confirm dialog states the scope; `_deleted`/`_prerestore` snapshots still restore whole.
 
 - **OFFSITE BACKUP — the last total-loss scenario closed (2026-08-17).** The Backup window gains an optional
   *Offsite folder*: every backup is also written there as ONE `HAF_<timestamp>.zip` — silent (background thread,

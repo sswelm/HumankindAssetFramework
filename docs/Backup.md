@@ -56,10 +56,13 @@ path*, file count, and byte size. Backups are **never overwritten** (each is a f
 the file count is re-verified against the manifest — a mismatch is flagged loudly, and a mismatched backup is
 never used as a restore's safety snapshot nor zipped offsite.
 
-## Restore — guarded three ways
+## Restore — selective, and guarded three ways
 
-Restore reads a backup's manifest and copies each source back to its original path, but never at the cost of
-current work:
+**The group checkboxes scope Restore exactly as they scope Backup** (2026-08-17, closing the all-or-nothing gap:
+recovering one thing from an older snapshot used to roll every other group back to snapshot time). Tick only
+"Baked assets" + "Runtime config" and a restore touches nothing else — the confirm dialog states the scope.
+`_deleted` and `_prerestore` snapshots restore whole (they are single-purpose by nature). Restore reads the
+backup's manifest and copies each selected source back to its original path, never at the cost of current work:
 
 1. **Auto pre-restore snapshot.** Before touching anything, the *current* state of exactly the paths about to be
    overwritten is saved to a `_prerestore_<timestamp>` backup. A wrong restore is always undoable — just restore
