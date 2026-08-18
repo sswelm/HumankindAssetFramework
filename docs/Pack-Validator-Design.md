@@ -1,6 +1,11 @@
 # Design note — pack pre-flight validator (third-party author DX)
 
-**Status: BUILT 2026-08-18 (Phases 1 + 2), per this design.** The pure rule core lives in the shared schema DLL
+**Status: BUILT + DRILLED 2026-08-18 (Phases 1 + 2), per this design and the drill ADR.** The fault-injection
+drill (a `"Turrret"` bone typo, a misspelled WAV, a volume of 5, planted in the live pack) caught a real defect
+before passing: the editor's Validate button could **fail silently** (no try/catch — "validate detects nothing"
+while a headless run of the same core on the same file found the fault). Fixed — the button now reports
+exceptions loudly, names the registry path it validated even when clean, and shows its results in a dialog
+(drill feedback). Drill passed: all three faults named with field, entry, and reason. The pure rule core lives in the shared schema DLL
 (`Haf.Schema.PackValidator` — one rule set, ~30 rules over files/bones/pawn/formats/ranges/exclusions, 19 unit
 tests) with the tri-state `IValidationContext` exactly as specified (null = "this host can't check" → skipped,
 never guessed). The two thin hosts: the **Model Factory's "Validate pack" button** (editor context: the Pick

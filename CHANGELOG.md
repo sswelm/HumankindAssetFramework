@@ -42,8 +42,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   deployed pack, bones from each entry's baked skeleton asset) and the plugin's **boot-time pass** (once per
   process after registration: bones against the LOADED skeleton, files on the *player's* disk, authored GUIDs
   that didn't resolve — appended as `## Pre-flight` to `haf_load_report.txt` with one summary log line).
-  Warnings EXPLAIN, nothing is blocked — the fail-soft rule stands. 19 rule tests; suite 92 → **111**. Built
-  review-and-drill per the new ADR: fault-injection drill pending.
+  Warnings EXPLAIN, nothing is blocked — the fail-soft rule stands. 19 rule tests; suite 92 → **111**.
+  **DRILLED same day, and the drill earned its keep before passing:** three faults planted in the live pack (the
+  design's own `"Turrret"` bone typo, a misspelled WAV, a volume of 5) → first result "validate detects nothing" —
+  a **silent failure in the Validate button itself** (no try/catch), exposed by running the same core on the same
+  file headlessly (which named the fault instantly). The validator failing invisibly is the exact disease it
+  exists to cure; fixed with loud exceptions, the validated registry path printed even on clean runs, and (drill
+  feedback) results in a dialog instead of only the Console. Second run: **all three faults named with field,
+  entry, and reason — drill passed**, pack restored byte-identical. The ladder held again: written → reviewed →
+  drilled → trusted.
 
 - **AUTO-VERSIONING + DELETE GUARD (2026-08-17, user: "auto backup, especially when I remove assets… also
   configuration… go back versions").** Two silent, optional guards in `BackupAuto.cs`, both feeding the same
