@@ -35,7 +35,12 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   index, and the banner's Reload uses it too (a half-typed rename reloads the ORIGINAL entry). Verified by
   re-drill; a per-reload Console evidence line (`loadedName` + differs) now makes any future missing-banner
   report diagnosable instead of guessable. The ADR's lesson, proven a second time in one week: the defect was
-  in the interaction between two reviewed-correct parts — only executing the scenario finds those.
+  in the interaction between two reviewed-correct parts — only executing the scenario finds those. **Drill
+  follow-ups:** the Refresh button is now the on-demand coherence check (user design — re-reads the registry
+  and raises/clears the banner immediately, no recompile needed; the form is still never touched without the
+  explicit Reload choice), and the post-drill diff review caught that the drill-1 test edit (pawn `…_01a`, a
+  nonexistent unit) had been SAVED during the drill flows — reverted in both registry copies, Bears restored,
+  both copies verified to hold the same 23 models. Drills leave fingerprints; always sweep the registry after.
 
 - **FIRST-SELECT PREVIEW FINALLY TEXTURE-CORRECT (2026-08-18)** — the user's "number one problem with this
   editor," deferred since 08-01: selecting a model showed it mis-textured until the next bake. **The root cause,
