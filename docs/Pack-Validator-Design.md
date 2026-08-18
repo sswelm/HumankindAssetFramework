@@ -1,8 +1,14 @@
 # Design note — pack pre-flight validator (third-party author DX)
 
-**Status: designed, not built.** Scoped for the package-release phase. Raised by an external review (2026-08-02); the
-pack *structure* half already exists (see below). This note fixes what to validate, where the checks live, and the
-message format, so the eventual build is a straight implementation.
+**Status: BUILT 2026-08-18 (Phases 1 + 2), per this design.** The pure rule core lives in the shared schema DLL
+(`Haf.Schema.PackValidator` — one rule set, ~30 rules over files/bones/pawn/formats/ranges/exclusions, 19 unit
+tests) with the tri-state `IValidationContext` exactly as specified (null = "this host can't check" → skipped,
+never guessed). The two thin hosts: the **Model Factory's "Validate pack" button** (editor context: the Pick
+list's pawn names, deployed-pack + legacy file dirs, bones from each entry's baked skeleton asset) and the
+**plugin's boot-time pass** (`UniversalInject.RunPreflight`, once per process after registration — bones against
+the LOADED skeleton, files on the player's disk, plus the plugin-only authored-GUID-didn't-resolve checks —
+appending `## Pre-flight` to `haf_load_report.txt`). Severity semantics as designed: warnings explain, nothing is
+blocked. Phase 3 (vertex-budget hints, JSON-schema file) remains open. Original design below.
 
 ## The gap this closes
 

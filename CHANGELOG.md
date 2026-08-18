@@ -10,6 +10,20 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **PACK PRE-FLIGHT VALIDATOR — silent content failures become named messages (2026-08-18).** The
+  designed-not-built tool from the 08-02 external review, built exactly per
+  [Pack-Validator-Design](docs/Pack-Validator-Design.md): a wrong bone name (`muzzleBone: "Turrret"`), a missing
+  WAV, an unbaked clip GUID, or an out-of-range dial used to just… not happen. ONE pure rule set in the shared
+  schema DLL (`Haf.Schema.PackValidator`: ~30 rules — file existence + format, bone-name existence, pawn-name
+  reality, `x,y,z`/`a,b,c,d` formats, every documented numeric range, the state-driven mutual exclusions — with a
+  tri-state context: a host that can't answer a lookup SKIPS the check, never guesses), consumed by two thin
+  hosts: the Model Factory's **"Validate pack"** button (pre-ship: pawn names from the Pick list, files in the
+  deployed pack, bones from each entry's baked skeleton asset) and the plugin's **boot-time pass** (once per
+  process after registration: bones against the LOADED skeleton, files on the *player's* disk, authored GUIDs
+  that didn't resolve — appended as `## Pre-flight` to `haf_load_report.txt` with one summary log line).
+  Warnings EXPLAIN, nothing is blocked — the fail-soft rule stands. 19 rule tests; suite 92 → **111**. Built
+  review-and-drill per the new ADR: fault-injection drill pending.
+
 - **AUTO-VERSIONING + DELETE GUARD (2026-08-17, user: "auto backup, especially when I remove assets… also
   configuration… go back versions").** Two silent, optional guards in `BackupAuto.cs`, both feeding the same
   restorable backups list: a **delete guard** (an `AssetModificationProcessor` snapshots any asset under the

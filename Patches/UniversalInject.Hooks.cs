@@ -19,7 +19,7 @@ namespace HumankindAssetFramework
             return t != null ? AccessTools.Method(t, "AnimationLoad") : null;
         }
         static bool hookLogged;
-        static void Postfix(object __instance) { if (!hookLogged) { hookLogged = true; Plugin.Diag("[Uni] UniRegisterHook POSTFIX fired"); } Prober.AnimMgr = __instance; UniversalInject.RearmModelRegistration(); UniversalInject.EnsureRegistered(__instance); FormationOverride.OnAnimationLoad(); }
+        static void Postfix(object __instance) { if (!hookLogged) { hookLogged = true; Plugin.Diag("[Uni] UniRegisterHook POSTFIX fired"); } Prober.AnimMgr = __instance; UniversalInject.RearmModelRegistration(); UniversalInject.EnsureRegistered(__instance); FormationOverride.OnAnimationLoad(); UniversalInject.RunPreflight(); }   // pre-flight AFTER registration: skeletons + clip ids exist to validate against
     }
 
     [HarmonyPatch]
