@@ -18,8 +18,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   newest build (BAKED-NOT-BUILT / BAKE-MISSING / ORPHANED-BAKE / shipped / no-bake-needed), both driven by one
   shared core that reuses the baker's own output whitelist so it can never drift. Bonus finding from the same
   scan design: orphaned bakes (outputs left by renamed/removed entries) still ship as dead bundle weight — the
-  window lists those too. Same day: the preview's tile hex went **double-sided**, so a boat's waterline stays
-  visible from below the surface — user-verified as the way to judge how deep a vessel should sit.
+  window lists those too. **Its first run was its own drill**: the scan knew only the unit registry and accused
+  every district and prop bake of being an orphan (user screenshot) — fixed by teaching it all three registries
+  (units, districts, props) + hand-prop references, each row labelled with its kind; ConversionGateTest's
+  `__convgate__` debris got its own TEST ARTIFACT label. Then, per three user requests in one sitting, the list
+  became a cleanup tool: any row with baked outputs is selectable (plain click / Ctrl-toggle / Shift-range, the
+  checkbox and Tick all drive the same state), and **Delete selected** sweeps via the baker's whitelist with the
+  delete-guard snapshotting every file — owned entries are only un-baked, never removed. Full page:
+  docs/Ship-Status.md. Same day: the preview's tile hex went **double-sided**, so a boat's waterline stays
+  visible from below the surface — user-verified as the way to judge how deep a vessel should sit. (And a
+  floating tank destroyer that looked like a grounding bug turned out to be the live-offset display working
+  exactly as designed: a forgotten Position-offset Z of 0.5 — the waterline axis — shown in the preview the way
+  the game would apply it.)
 
 - **ENTRY-STATE COHERENCE (2026-08-18) — the "serious configuration bug" of 2026-07-26, structurally addressed.**
   An entry's config lives in four places (two window forms, the deployed registry, the project dual-write copy)

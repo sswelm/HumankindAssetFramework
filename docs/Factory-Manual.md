@@ -70,7 +70,7 @@ change), with an explicit choice: *↻ Reload entry* (take the registry) or *Sav
 right away — so after e.g. Browsing a model file you don't want, press Refresh → banner → ↻ Reload entry to
 revert. The form itself is never overwritten without that explicit choice.
 
-### Baked ≠ built: Ship Status
+### Baked ≠ built: Ship Status ([full page](Ship-Status.md))
 
 Baked assets (the `_Skeleton/_Atlas/_ModelMesh/_Mat/_Model` outputs in `Assets/Resources`) reach the game **only
 through a mod build** — the registry, skins and sounds are read directly from `BepInEx/config` and are always
