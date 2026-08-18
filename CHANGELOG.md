@@ -10,6 +10,24 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **ENTRY-STATE COHERENCE (2026-08-18) — the "serious configuration bug" of 2026-07-26, structurally addressed.**
+  An entry's config lives in four places (two window forms, the deployed registry, the project dual-write copy)
+  and the reconciliation ambushed the user for weeks. Built per the backlog's recorded impact order: (1) the
+  Factory gets the **Lab's Form ≠ registry banner** — surviving form compared on every reload, explicit choice
+  (↻ Reload entry / Save / Bake), never a silent resync — and the cross-window nudge is now **coherence-aware**
+  (a Backup-window restore raises the banner instead of silently reloading an edited form); (2) the **bake-time
+  model-file confirm** — a stale form file that differs from the saved entry's asks loudly with both paths shown
+  (the translation-cube-over-Jagdpanzer ambush, dead); (3) the **SelectEntry funnel** — every selection change
+  (popup, Remove, Undo, banner-reload) routes through ONE path updating dropdown + form + preview + coherence
+  flag atomically, structurally retiring the 08-16..18 stale-window family (whose four bugs were each one
+  forgotten surface at one bypassing site; Clone is the one documented deliberate bypass). **Self-review before
+  ship caught three defects**: the Lab's own spurious-banner lesson unlearned (OnGUI's `animated` self-heal must
+  be mirrored onto the registry copy before comparing), an entry *removed* under the window reporting "no
+  difference" (now maximal difference), and Clone inheriting a stale banner whose Reload would wipe it. The
+  two-pack.json design is now documented in Factory-Manual; "Make static…" already covers the animated→static
+  path. Status per the ADR: **reviewed, not yet drilled** — drill plan: edit-compile-banner, external-edit
+  banner, remove-under-window, clone-then-recompile, and the model-file-mismatch bake.
+
 - **FIRST-SELECT PREVIEW FINALLY TEXTURE-CORRECT (2026-08-18)** — the user's "number one problem with this
   editor," deferred since 08-01: selecting a model showed it mis-textured until the next bake. **The root cause,
   finally pinned to a line:** `BuildMultiAtlasAndRemap` remaps the rig FBX's skinned-mesh UVs into the packed

@@ -57,6 +57,16 @@ That's the whole loop. Everything below is detail and the animated workflow.
   baked assets and selects the restored entry. The same snapshots are also fully restorable from the
   **Backup & Restore** window's "Factory remove snapshots" section (see [Backup.md](Backup.md)).
 
+### The registry lives in TWO files (know this once, never be surprised)
+
+The editor's source of truth is the **DEPLOYED** registry — `<Humankind>\BepInEx\config\haf_packs\ENCReload\pack.json`
+(shown in the footer). Every Save/Bake **dual-writes** it and the git-tracked project copy
+(`Assets/Pack/ENCReload/pack.json`); the project copy is the versioned backup and auto-restore source, *not* what
+the editor reads. External tools editing the project copy won't affect the editor until the next dual-write; edits
+to the deployed copy are picked up on the next load — and since 2026-08-18 the Factory shows the same yellow
+**Form ≠ registry** banner the Lab has when its form and the registry disagree (after a compile or an outside
+change), with an explicit choice: *↻ Reload entry* (take the registry) or *Save/Bake* (keep the form).
+
 ### Resource name / Pawn description / Model file
 - **Resource name** — unique id; names all the baked assets (`<name>_Skeleton`, `<name>_Atlas`, …).
 - **Pawn description** — the target unit. **Pick** opens a searchable list of every `PresentationPawnDefinition`.
