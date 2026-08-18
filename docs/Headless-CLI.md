@@ -39,8 +39,12 @@ Deploy-only (no Unity): `Tools\haf-deploy.bat`. Each Unity verb prints one `[HAF
 scoped to GUID `cd3480e932114f8084db755ddd65f2d8`). It removes the **live** deployed mod — a pre-build cleanup.
 
 ### `build-mod` ✅ (full build + deploy)
-`-executeMethod HAF.Cli.BuildMod`. Reproduces, via reflection, exactly what clicking **Build** in the Mod Editor does —
-but headless. It does **not** call the top-level `BuildModification` wrapper (that method's first act is a database gate
+`-executeMethod HAF.Cli.BuildMod [-strict]`. Reproduces, via reflection, exactly what clicking **Build** in the Mod
+Editor does — but headless. **Pre-ship validation first (2026-08-18):** before any build step, the shared
+pack-validator rule core (see [Pack-Validator-Design](Pack-Validator-Design.md)) runs over the FULL registry —
+the last gate before the pack leaves the machine. Default: issues are logged and the build continues (fail-soft,
+matching in-game behaviour); with **`-strict`** any issue FAILS the build with **exit 4** — the CI-able stop-ship
+mode. It does **not** call the top-level `BuildModification` wrapper (that method's first act is a database gate
 that hard-aborts in batch mode — see [Database validation](#database-validation)). Instead it calls the three private
 build steps that sit *past* the gate, in order:
 

@@ -8,7 +8,11 @@ list's pawn names, deployed-pack + legacy file dirs, bones from each entry's bak
 **plugin's boot-time pass** (`UniversalInject.RunPreflight`, once per process after registration — bones against
 the LOADED skeleton, files on the player's disk, plus the plugin-only authored-GUID-didn't-resolve checks —
 appending `## Pre-flight` to `haf_load_report.txt`). Severity semantics as designed: warnings explain, nothing is
-blocked. Phase 3 (vertex-budget hints, JSON-schema file) remains open. Original design below.
+blocked. **Two user-designed surfaces beyond the original two (same day): pre-bake** (every Bake runs the rules
+on the current form first — the mistake is named while the model is on screen) **and the mod build**
+(`HAF.Cli.BuildMod` validates the full registry before the SDK build steps; `-strict` makes any issue fail the
+build with exit 4 — the CI-able stop-ship gate). Phase 3 (vertex-budget hints, JSON-schema file) remains open.
+Original design below.
 
 ## The gap this closes
 
