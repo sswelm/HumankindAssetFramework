@@ -28,11 +28,11 @@ by when they'll bite.
   pipeline then hard-fails on an unrigged file; (c) "Reduce to ~tris (0 = off)" silently substituted 12,000 on the
   animated path for years (FIXED same day); (d) external registry edits are detected by the Lab (yellow banner)
   but not by the Factory. Proposed fixes, in impact order: ~~(1) Factory gets the Lab's outside-change banner +
-  a bake-time confirm when its Model file differs from the registry's~~ **DONE 2026-08-18** (banner + explicit
-  Reload-entry choice, coherence-aware cross-window nudge — a Backup-window restore now raises the banner instead
-  of silently reloading — and the bake-time model-file confirm with both paths shown; plus the **SelectEntry
+  a bake-time confirm when its Model file differs from the registry's~~ **DONE + DRILLED 2026-08-18** (banner +
+  explicit Reload-entry choice, coherence-aware cross-window nudge — a Backup-window restore now raises the banner
+  instead of silently reloading — and the bake-time model-file confirm with both paths shown; plus the **SelectEntry
   funnel**: every selection change routes through one path, structurally retiring the 08-16..18 stale-window
-  family); ~~(2) a real animated→static path~~ **largely covered** by the "Make static…" button (strips the
+  family. All five drills passed; drill 3 caught a real unreachable-banner defect — see CHANGELOG); ~~(2) a real animated→static path~~ **largely covered** by the "Make static…" button (strips the
   animation config from the saved registry; the offer-on-armature-less-failure variant remains nice-to-have);
   (3) document (or collapse) the two-pack.json design — the DEPLOYED copy being the editor's source of truth
   surprises every external tool — *documented in Factory-Manual 2026-08-18; collapse still open*; (4) audit

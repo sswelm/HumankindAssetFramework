@@ -25,8 +25,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   be mirrored onto the registry copy before comparing), an entry *removed* under the window reporting "no
   difference" (now maximal difference), and Clone inheriting a stale banner whose Reload would wipe it. The
   two-pack.json design is now documented in Factory-Manual; "Make static…" already covers the animated→static
-  path. Status per the ADR: **reviewed, not yet drilled** — drill plan: edit-compile-banner, external-edit
-  banner, remove-under-window, clone-then-recompile, and the model-file-mismatch bake.
+  path. **DRILLED same day — all five drills passed, and the drill caught a fourth defect the review could not:**
+  the vanished-entry banner (drill 3: Bears hand-removed from pack.json) never fired, because `RefreshList()`
+  re-derives the dropdown index by name and resets it to 0 when the entry is gone — so the compare's
+  `selected <= 0` guard swallowed EXACTLY the case the review-fixed `reg == null` rule existed for. Two
+  individually-correct mechanisms cancelling each other: structurally unreachable, invisible to reading,
+  instant under fire. Fix: the form carries its own serialized identity (`loadedName` — which registry entry
+  it was loaded from / last saved as; empty for `<New>`/clone), the compare keys on it instead of the volatile
+  index, and the banner's Reload uses it too (a half-typed rename reloads the ORIGINAL entry). Verified by
+  re-drill; a per-reload Console evidence line (`loadedName` + differs) now makes any future missing-banner
+  report diagnosable instead of guessable. The ADR's lesson, proven a second time in one week: the defect was
+  in the interaction between two reviewed-correct parts — only executing the scenario finds those.
 
 - **FIRST-SELECT PREVIEW FINALLY TEXTURE-CORRECT (2026-08-18)** — the user's "number one problem with this
   editor," deferred since 08-01: selecting a model showed it mis-textured until the next bake. **The root cause,
