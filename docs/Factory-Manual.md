@@ -72,16 +72,19 @@ revert. The form itself is never overwritten without that explicit choice.
 
 ### Vessels and the waterline (calibrated 2026-08-18)
 
-The game floats naval pawns with the **mean water surface ~0.05u above the model origin** — measured stepwise
-(0.5 → 0.1 → 0.05) against a cruiser whose hull paint marks the waterline, the same way the 6.93u tile spacing
-was measured. The vessel preview draws its water plane at a calibrated height (the **water @** dial next to
-the preview; stored once), and the preview header shows a numeric **keel/top readout** — the drawn geometry's
-lowest/highest point vs the waterline — so depth is dialed by numbers, not eyeballs.
+The game floats naval pawns with the water surface **above the model origin** (its own ship meshes anchor at
+the waterline; HAF bakes anchor at the keel — two conventions meeting at the water). The vessel preview draws
+its water plane at the calibrated height, and the preview header shows a numeric **keel/top readout** — the
+drawn geometry's lowest/highest point vs the waterline — so depth is dialed by numbers, not eyeballs.
 
-**The working standard is `water @ 0.16`** — the 0.05 mean *plus* the ~0.11 wave allowance — and every
-vessel's registry Z is calibrated against it, verified in-game the same evening (cruiser: water on the
-boot-topping; submarine: deck-awash, swell claiming the deck). Calibrate new vessels at 0.16; if you ever
-change the standard, every vessel's Z needs recalibrating with it.
+**The HAF water standard is `waterLevel: 0.16`** — mean surface ~0.05 plus ~0.11 wave allowance, measured
+stepwise (0.5 → 0.1 → 0.05 → +waves) against a cruiser whose hull paint marks the waterline, the way the
+6.93u tile spacing was measured. It is **pack configuration**: `waterLevel` in the registry header (next to
+`unitScales`/`eraGrid`) — versioned, dual-written, backed up; the preview shows it read-only and no editor UI
+can change it (an earlier same-day dial was retired: three copies of one number is the split-brain pattern).
+Every vessel's position Z is calibrated against it and was verified in-game (cruiser: water on the
+boot-topping; submarine: deck-awash, swell claiming the deck). Changing the standard = a deliberate pack.json
+edit **plus recalibrating every vessel's Z**.
 
 Two things the flat preview plane cannot show:
 
