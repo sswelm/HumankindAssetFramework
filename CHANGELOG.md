@@ -28,8 +28,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   docs/Ship-Status.md. Same day: the preview's tile hex went **double-sided**, so a boat's waterline stays
   visible from below the surface — user-verified as the way to judge how deep a vessel should sit. (And a
   floating tank destroyer that looked like a grounding bug turned out to be the live-offset display working
-  exactly as designed: a forgotten Position-offset Z of 0.5 — the waterline axis — shown in the preview the way
-  the game would apply it.)
+  exactly as designed: a Position-offset Z of 0.5 — the waterline axis — authored back when the bake sat SUNK
+  in the ground, i.e. a manual compensation that auto-ground later made redundant and turned into a float.
+  **The compensating dial outlives the defect it compensated for** — same family as the 2×-height helicopter
+  offset of 08-07; when a bake-level fix lands, every manual dial compensating the old behavior becomes a live
+  error with no alarm. The ground/waterline reference + live-offset preview is what makes this class visible
+  at a glance now — a registry-wide offset audit found all remaining verticals deliberate: flyers at altitude,
+  vessels below the waterline.)
 
 - **ENTRY-STATE COHERENCE (2026-08-18) — the "serious configuration bug" of 2026-07-26, structurally addressed.**
   An entry's config lives in four places (two window forms, the deployed registry, the project dual-write copy)
