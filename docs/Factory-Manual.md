@@ -66,6 +66,9 @@ the editor reads. External tools editing the project copy won't affect the edito
 to the deployed copy are picked up on the next load — and since 2026-08-18 the Factory shows the same yellow
 **Form ≠ registry** banner the Lab has when its form and the registry disagree (after a compile or an outside
 change), with an explicit choice: *↻ Reload entry* (take the registry) or *Save/Bake* (keep the form).
+**Refresh** checks on demand: it re-reads the registry, updates the dropdown, and raises (or clears) the banner
+right away — so after e.g. Browsing a model file you don't want, press Refresh → banner → ↻ Reload entry to
+revert. The form itself is never overwritten without that explicit choice.
 
 ### Resource name / Pawn description / Model file
 - **Resource name** — unique id; names all the baked assets (`<name>_Skeleton`, `<name>_Atlas`, …).
