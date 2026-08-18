@@ -19,10 +19,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   (preferring the bake's `_Preview.prefab`) was reverted within the hour** — user drill: "why is it heading up
   without a surface?" — that prefab is a display-flipped bind pose with no ground plane. **The real fix:** the
   bake already persists the remapped clone (`_PreviewMesh.asset` — same FBX-space geometry, atlas-remapped UVs);
-  `LoadPreview` now *substitutes* it for the renderer it was cloned from (matched by mesh name) **inside the
-  upright, grounded FBX route** — correct texture, same faithful view. **Ship-safety re-confirmed:** display-only
-  either way — the shipped GPU mesh always carries the remapped UVs (`draw_mats.txt` proof, 08-01, and every
-  in-game verification since). The preview was lying; the mod never was.
+  `LoadPreview` now *substitutes* it for the renderer it was cloned from **inside the upright, grounded FBX
+  route** — correct texture, same faithful view. **Second attempt also drill-caught within minutes** (still
+  corrupt): the name-based match could never fire — `CreateAsset` renames the persisted mesh to its filename —
+  so the substitution silently did nothing. Final version matches by **geometry identity** (identical vertex
+  count on a skinned renderer, used once) and prints a loud `APPLIED` / `NO MATCH` Console line per preview
+  load, because a silent no-match is exactly how the first two versions hid their failures. **Drill-verified by
+  the user: "finally it looks correct."** Three versions, two caught by drills — the ADR working as written.
+  **Ship-safety re-confirmed throughout:** display-only either way — the shipped GPU mesh always carries the
+  remapped UVs (`draw_mats.txt` proof, 08-01, and every in-game verification since). The preview was lying; the
+  mod never was.
 
 - **PACK PRE-FLIGHT VALIDATOR — silent content failures become named messages (2026-08-18).** The
   designed-not-built tool from the 08-02 external review, built exactly per
