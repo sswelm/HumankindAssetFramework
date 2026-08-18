@@ -70,6 +70,28 @@ change), with an explicit choice: *↻ Reload entry* (take the registry) or *Sav
 right away — so after e.g. Browsing a model file you don't want, press Refresh → banner → ↻ Reload entry to
 revert. The form itself is never overwritten without that explicit choice.
 
+### Vessels and the waterline (calibrated 2026-08-18)
+
+The game floats naval pawns with the **mean water surface ~0.05u above the model origin** — measured stepwise
+(0.5 → 0.1 → 0.05) against a cruiser whose hull paint marks the waterline, the same way the 6.93u tile spacing
+was measured. The vessel preview draws its water plane at that calibrated height (the **water @** dial next to
+the preview refines it; stored once), and the preview header shows a numeric **keel/top readout** — the drawn
+geometry's lowest/highest point vs the waterline — so depth is dialed by numbers, not eyeballs.
+
+Two things the flat preview plane cannot show:
+
+- **Waves.** The game's chop and long swell ride roughly ±0.1 around the mean. Tall hulls don't care; a
+  low-riding hull (submarine, canoe) visibly loses that much freeboard at crests. Trick: temporarily set
+  *water @* ~0.1 higher to preview the crest state, then set it back.
+- **Position-offset semantics differ by entry type.** For *animated* entries the offset is runtime-applied
+  (preview shows it live, no bake needed). For *static* entries it is **baked into the mesh** — editing Z does
+  nothing anywhere until you **Bake**. (The runtime-fields help text says "applies on load"; for static
+  entries' position that is wrong — a known label lie, on the audit list.)
+
+Also remember the tank-destroyer lesson: **a compensating dial outlives the defect it compensated for.** If a
+model was dialed up/down to fix a sinking bake in the past, a later bake-level fix (auto-ground) turns that
+dial into a float. The keel readout + ground/water reference makes such stale dials visible at a glance.
+
 ### Baked ≠ built: Ship Status ([full page](Ship-Status.md))
 
 Baked assets (the `_Skeleton/_Atlas/_ModelMesh/_Mat/_Model` outputs in `Assets/Resources`) reach the game **only

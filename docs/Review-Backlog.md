@@ -36,7 +36,10 @@ by when they'll bite.
   animation config from the saved registry; the offer-on-armature-less-failure variant remains nice-to-have);
   (3) document (or collapse) the two-pack.json design — the DEPLOYED copy being the editor's source of truth
   surprises every external tool — *documented in Factory-Manual 2026-08-18; collapse still open*; (4) audit
-  remaining "label lies" like the tris slider (grep defaults substituted behind explicit user values) — *open*.
+  remaining "label lies" like the tris slider (grep defaults substituted behind explicit user values) — *open;
+  second confirmed instance 2026-08-18: the "Runtime — applied on load, no re-bake" section header covers
+  Position offset, which for STATIC entries is baked into the mesh and silently needs a re-bake (found via the
+  submarine waterline hunt — the field should state which mode applies to the current entry)*.
 
 - ~~**`deploy_convert.py` recoil block**~~ — FIXED 2026-07-19: (a) the tube's parent is now sampled into `src_w` when
   its name isn't barrel/cannon (was a guaranteed `KeyError` on non-M114 naming); (b) the RecoilArm holds now key an

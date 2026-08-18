@@ -10,6 +10,23 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE WATERLINE, CALIBRATED (2026-08-18) — vessels now preview at the game's true water level.** The submarine
+  that "looked right in preview, near-invisible in game" unravelled into a measured constant: the game floats
+  naval pawns with the mean water surface **~0.05u above the model origin**, while the preview's plane sat at
+  origin height — every vessel previewed slightly high. Chased methodically: bake logs proved the −0.2 offset
+  was in the shipped mesh; the runtime was exonerated (static offsets bake into the mesh, no runtime add); a
+  false start blamed a stray builder part (the "floating strips" were the hull top — a real Jagdpanzer is 2m
+  tall); unit scaling was ruled out by the era grid (Era5+ rows all 1.0). The decisive instrument was built
+  mid-hunt: a **keel/top numeric readout** in the preview header (stale bake reads keel 0.00; wrong plane reads
+  the right keel under the wrong picture) plus the user's calibrated cruiser — hull paint marking the true
+  waterline — converged the constant stepwise (0.5 → 0.1 → **0.05**, the *water @* dial, EditorPrefs-stored,
+  measured-on-the-map tradition like the 6.93u tile). The residual: the sub "matched only at 0.15" — that 0.1
+  is **wave amplitude**, confirmed in-game (long swell dynamically claims the deck); low hulls lose real
+  freeboard to crests that a flat plane can't render — the dial doubles as a crest-state preview. Verified
+  in-game: the sub now rides deck-awash, superstructure clear, matching the preview. Discovered en route, on
+  the audit list: the runtime-fields help text says position "applies on load" — for STATIC entries it is
+  baked and silently needs a re-bake (label lie, the backlog #4 family).
+
 - **SHIP STATUS — "baked but not built" made visible (2026-08-18).** The boot pre-flight's first real run caught
   it live: the HandCrankedSubmarine re-bake (19:34) postdated the last mod build (19:29) by five minutes, so the
   game resolved a dead skeleton GUID — the exact "was it baked and shipped?" trap the validator names. Nothing
