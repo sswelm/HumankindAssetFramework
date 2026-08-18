@@ -10,6 +10,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **FIRST-SELECT PREVIEW FINALLY TEXTURE-CORRECT (2026-08-18)** — the user's "number one problem with this
+  editor," deferred since the 08-01 investigation: selecting a model showed it mis-textured until the next bake.
+  Root cause unchanged from 08-01: the preview drew the raw rig FBX (ORIGINAL, often multi-tile UVs) against the
+  PACKED atlas. The deferred "real fix" already half-existed — every multi-material bake writes `_PreviewMesh`
+  (the same rest geometry with atlas-REMAPPED UVs) wrapped in `_Preview.prefab` — but `LoadPreview` ranked the
+  raw FBX above it. Now the remapped pairing is preferred wherever it exists (9 of the current models); the FBX
+  route remains for single-material rigs, whose original UVs wrap the source-image atlas correctly. **Ship-safety
+  re-confirmed:** display-only either way — the shipped GPU mesh always carries the remapped UVs (`draw_mats.txt`
+  proof, 08-01, plus every in-game verification since). The preview was lying; the mod never was.
+
 - **PACK PRE-FLIGHT VALIDATOR — silent content failures become named messages (2026-08-18).** The
   designed-not-built tool from the 08-02 external review, built exactly per
   [Pack-Validator-Design](docs/Pack-Validator-Design.md): a wrong bone name (`muzzleBone: "Turrret"`), a missing
