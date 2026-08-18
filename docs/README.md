@@ -65,6 +65,9 @@ Development-facing docs — status, review, testing, and the wider ecosystem.
 - [**Headless-CLI.md**](Headless-CLI.md) — the **headless CLI**: run model re-bake and the full Humankind mod **build + deploy** from the command line (Unity batch mode), so scripts / CI / an AI agent can drive HAF without the editor GUI. Built + verified.
 - [**Headless-CLI-Design.md**](Headless-CLI-Design.md) — the original design note behind it (superseded by the reference above).
 - [**Audit-2026-07-31.md**](Audit-2026-07-31.md) — a point-in-time project audit.
+- [**Preview-Texture-Postmortem.md**](Preview-Texture-Postmortem.md) — why the editor's #1 chronic bug (the lying
+  first-select preview) survived six weeks of fixes: six protective mechanisms, three fix versions, and the
+  general lessons.
 
 ---
 

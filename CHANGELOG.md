@@ -28,7 +28,8 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   the user: "finally it looks correct."** Three versions, two caught by drills — the ADR working as written.
   **Ship-safety re-confirmed throughout:** display-only either way — the shipped GPU mesh always carries the
   remapped UVs (`draw_mats.txt` proof, 08-01, and every in-game verification since). The preview was lying; the
-  mod never was.
+  mod never was. **Why it survived six weeks of fixes — the full retrospective (six protective mechanisms,
+  general lessons): [Preview-Texture-Postmortem](docs/Preview-Texture-Postmortem.md).**
 
 - **PACK PRE-FLIGHT VALIDATOR — silent content failures become named messages (2026-08-18).** The
   designed-not-built tool from the 08-02 external review, built exactly per
