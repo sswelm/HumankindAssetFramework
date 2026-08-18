@@ -79,10 +79,18 @@ the next build. Two surfaces keep this honest (2026-08-18, born from a real catc
 minutes *after* the last mod build):
 
 - the Factory shows an inline **"Baked, but NOT in the mod build yet"** notice on the selected entry;
-- **Tools ▸ HAF ▸ Ship Status** lists every entry's state — *BAKED, NOT BUILT* / *BAKE MISSING* / *ORPHANED
-  BAKE* (outputs left behind by renamed/removed entries — dead weight that still ships) / *shipped* / *no bake
-  needed* (retex/borrow) — against the newest build's timestamp. Problems sort to the top; hover any row for
-  the explanation. Fix is always the same: run the mod build, then relaunch the game.
+- **Tools ▸ HAF ▸ Ship Status** lists every baked thing across **all three registries** — units, districts
+  (`haf_districts.json`), props (`haf_props.json`) and hand-prop references, each row labelled with its kind —
+  against the newest build's timestamp: *BAKED, NOT BUILT* / *BAKE MISSING* / *ORPHANED BAKE* (outputs no
+  registry owns — dead weight that still ships) / *TEST ARTIFACT* (`__convgate__` scratch) / *shipped* / *no
+  bake needed*. Problems sort to the top; hover any row for the explanation. Fix is always the same: run the
+  mod build, then relaunch the game.
+
+The list is also a cleanup tool: every row with baked outputs is selectable — plain click selects one,
+**Ctrl-click** toggles, **Shift-click** selects a range, the checkbox and **Tick all** drive the same state —
+and **Delete selected** removes the ticked rows' baked outputs. The delete-guard snapshots every file first
+(restorable from Backup & Restore), and a registry-owned entry is only *un-baked*: the entry stays and shows
+as bake-missing until re-baked. Removing an entry itself remains the Factory's **Remove**.
 
 ### Resource name / Pawn description / Model file
 - **Resource name** — unique id; names all the baked assets (`<name>_Skeleton`, `<name>_Atlas`, …).
