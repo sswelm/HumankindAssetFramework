@@ -70,6 +70,20 @@ change), with an explicit choice: *↻ Reload entry* (take the registry) or *Sav
 right away — so after e.g. Browsing a model file you don't want, press Refresh → banner → ↻ Reload entry to
 revert. The form itself is never overwritten without that explicit choice.
 
+### Baked ≠ built: Ship Status
+
+Baked assets (the `_Skeleton/_Atlas/_ModelMesh/_Mat/_Model` outputs in `Assets/Resources`) reach the game **only
+through a mod build** — the registry, skins and sounds are read directly from `BepInEx/config` and are always
+current. A fresh bake is therefore invisible in-game (the boot pre-flight warns about its unresolved GUIDs) until
+the next build. Two surfaces keep this honest (2026-08-18, born from a real catch: a submarine re-baked five
+minutes *after* the last mod build):
+
+- the Factory shows an inline **"Baked, but NOT in the mod build yet"** notice on the selected entry;
+- **Tools ▸ HAF ▸ Ship Status** lists every entry's state — *BAKED, NOT BUILT* / *BAKE MISSING* / *ORPHANED
+  BAKE* (outputs left behind by renamed/removed entries — dead weight that still ships) / *shipped* / *no bake
+  needed* (retex/borrow) — against the newest build's timestamp. Problems sort to the top; hover any row for
+  the explanation. Fix is always the same: run the mod build, then relaunch the game.
+
 ### Resource name / Pawn description / Model file
 - **Resource name** — unique id; names all the baked assets (`<name>_Skeleton`, `<name>_Atlas`, …).
 - **Pawn description** — the target unit. **Pick** opens a searchable list of every `PresentationPawnDefinition`.

@@ -10,6 +10,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **SHIP STATUS — "baked but not built" made visible (2026-08-18).** The boot pre-flight's first real run caught
+  it live: the HandCrankedSubmarine re-bake (19:34) postdated the last mod build (19:29) by five minutes, so the
+  game resolved a dead skeleton GUID — the exact "was it baked and shipped?" trap the validator names. Nothing
+  in the editor surfaced which bakes the game hadn't seen, so now two things do: an inline notice in the Model
+  Factory on the selected entry, and a **Tools ▸ HAF ▸ Ship Status** window listing every entry against the
+  newest build (BAKED-NOT-BUILT / BAKE-MISSING / ORPHANED-BAKE / shipped / no-bake-needed), both driven by one
+  shared core that reuses the baker's own output whitelist so it can never drift. Bonus finding from the same
+  scan design: orphaned bakes (outputs left by renamed/removed entries) still ship as dead bundle weight — the
+  window lists those too. Same day: the preview's tile hex went **double-sided**, so a boat's waterline stays
+  visible from below the surface — user-verified as the way to judge how deep a vessel should sit.
+
 - **ENTRY-STATE COHERENCE (2026-08-18) — the "serious configuration bug" of 2026-07-26, structurally addressed.**
   An entry's config lives in four places (two window forms, the deployed registry, the project dual-write copy)
   and the reconciliation ambushed the user for weeks. Built per the backlog's recorded impact order: (1) the
