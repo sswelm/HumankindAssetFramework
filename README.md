@@ -132,6 +132,14 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
   and the audio/texture authoring aids). Every launch also writes a machine-readable `haf_bindings_report.txt` — a
   diffable list of the ~124 reflection bindings that names any game-update drift in one line, headless-checkable.
 - **Backup & Restore** — a guarded, additive snapshot of everything ENCReload's git doesn't track.
+- **Pack validator, four surfaces** — one rule set (~30 content checks: bones, files, pawns, formats, ranges) runs
+  pre-bake, on the **Validate pack** button, in the mod build (`-strict` fails CI), and as a boot-time pre-flight that
+  explains silent failures in `haf_load_report.txt`. See [Pack-Validator-Design.md](docs/Pack-Validator-Design.md).
+- **Ship Status** — "baked ≠ built" made visible: which bakes the game hasn't seen yet, orphaned bakes that ship as
+  dead weight, and a guard-snapshotted multi-select cleanup. See [Ship-Status.md](docs/Ship-Status.md).
+- **Entry-state coherence** — the form-vs-registry banner (drilled), a bake-time model-file confirm, and a calibrated
+  vessel waterline (`waterLevel` pack config + a numeric keel readout in the preview). See
+  [Factory-Manual.md](docs/Factory-Manual.md).
 - **Headless CLI** — re-bake a model and run the full Humankind mod **build + deploy** from the command line (Unity batch
   mode), reusing the exact code the editor buttons call — so scripts, CI, or an AI agent can drive HAF without the GUI.
   See [Headless-CLI.md](docs/Headless-CLI.md).

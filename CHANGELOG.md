@@ -25,7 +25,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   freeboard to crests that a flat plane can't render — the dial doubles as a crest-state preview. Verified
   in-game: the sub now rides deck-awash, superstructure clear, matching the preview. Discovered en route, on
   the audit list: the runtime-fields help text says position "applies on load" — for STATIC entries it is
-  baked and silently needs a re-bake (label lie, the backlog #4 family).
+  baked and silently needs a re-bake (label lie, the backlog #4 family). **Epilogue — one number, one home:**
+  the constant lived in three places within an hour (EditorPrefs dial / code default / docs — the glbconv
+  split-brain in miniature, user-spotted), so it landed as **pack configuration**: `waterLevel` in the
+  registry header next to `unitScales`/`eraGrid` — versioned, dual-written, backed up, shown read-only in the
+  preview, no UI can change it; the dial was retired the same day it was born. Mechanism explained too: the
+  game's own ship meshes anchor at the WATERLINE while HAF bakes anchor at the KEEL — every vessel's negative
+  Z has been re-creating the draft that convention difference removes; 0.16 = rendered-surface offset + wave
+  crest. All three affected vessels' Z recalibrated (sub −0.04, cruiser −0.23, tank destroyer 0) and verified.
 
 - **SHIP STATUS — "baked but not built" made visible (2026-08-18).** The boot pre-flight's first real run caught
   it live: the HandCrankedSubmarine re-bake (19:34) postdated the last mod build (19:29) by five minutes, so the
