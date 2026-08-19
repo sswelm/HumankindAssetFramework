@@ -10,6 +10,21 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE STRUCT BATCH (2026-08-19) — derived bindings close the drift net's last silent surface.** The bindings
+  census covered 50 named types, but the structs HAF pokes hardest — `PawnEntry` and its `ObjectSpace`/pose/
+  bone-rotation slots (the GPU seam written every frame), `Skeleton`/`BoneInfo` (preflight + injection), the
+  army/battle walk (the state sampler) — were absent, because the code reaches them STRUCTURALLY (array
+  elements, field values) and their names never appear anywhere. The fix follows that fact: each struct is
+  **derived from its anchor member** — `PawnEntry` = element type of `PawnManager.pawnEntries`, `ObjectSpace` =
+  that struct's field type, and so on — the exact path the runtime walks, so the census has zero name-guessing
+  and zero false-positive risk. Nine derived entries (+ widened members on three existing ones; inventory was
+  mechanical — every `GetMember`/`SetMember` literal grouped by receiver). A game update that renames an anchor
+  reads `[MISSING TYPE]`; a reshuffled struct member reads `[MISSING MEMBER]` — one named line in
+  `haf_bindings_report.txt` instead of torn skinning or a silently dead offset (the combatZ write-back's own
+  seam is now censused). Host-proven with 3 new tests (115 total): derivation across field/array/generic/
+  non-public/property anchors, broken-anchor → null-not-throw, derived types flag members like any Dep.
+  **In-game verification pending**: one launch should show the report grow ~50 → 59 types, all `[ok]`.
+
 - **v0.1.0 — THE FIRST TAGGED RELEASE (2026-08-19; withdrawn to draft the same day).** Both repos tagged
   `v0.1.0`; a GitHub release with an extract-into-game-root zip (plugin + schema DLL under `BepInEx/plugins/`
   + INSTALL.txt) and release notes distilled from this changelog. Everything the preceding weeks built made
