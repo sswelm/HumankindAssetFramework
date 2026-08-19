@@ -133,6 +133,15 @@ namespace HumankindAssetFramework.Tests
         }
 
         [Fact]
+        public void CombatZ_SaneRangePasses_ExtremeWarns()
+        {
+            var ok = Valid(); ok.combatZ = -0.5f;   // the submarine combat dive
+            Assert.DoesNotContain(PackValidator.ValidateEntry(ok, new Ctx()), i => i.Field == "combatZ");
+            var bad = Valid(); bad.combatZ = -12f;
+            Assert.Contains(PackValidator.ValidateEntry(bad, new Ctx()), i => i.Field == "combatZ" && i.Severity == ValidationSeverity.Warning);
+        }
+
+        [Fact]
         public void EveryIssue_NamesItsField_AndRendersOneLine()
         {
             var e = new HafModelSchema { soundFile = "x.ogg", scale = -1f };

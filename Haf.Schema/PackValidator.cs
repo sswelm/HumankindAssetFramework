@@ -102,6 +102,7 @@ namespace Haf.Schema
             if (e.turretAxis < -1 || e.turretAxis > 2) Warn("turretAxis", $"{e.turretAxis} — -1 = game's axis, or 0/1/2 for local X/Y/Z");
             if (e.gunElevMax != 0f && (e.gunElevAxis < 0 || e.gunElevAxis > 2)) Warn("gunElevAxis", $"{e.gunElevAxis} — 0/1/2 for the gun bone's local X/Y/Z pitch axis");
             if (e.hugDrop > 0f) Warn("hugDrop", $"{F(e.hugDrop)} — terrain hug expects a NEGATIVE drop (e.g. -2); positive lifts the unit further");
+            if (e.combatZ < -5f || e.combatZ > 5f) Warn("combatZ", $"{F(e.combatZ)} — combat height offset beyond ±5 units (a submarine combat dive is around -0.5)");
 
             // ---- mutual exclusions the schema documents ----
             if (e.animStateDriven && e.fireOnAttack)

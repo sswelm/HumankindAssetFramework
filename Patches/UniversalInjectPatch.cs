@@ -16,7 +16,7 @@ namespace HumankindAssetFramework
     // rename ours to match, resolve, skin via <bodyMesh>_OutputLayer). One patch handles any number of models.
     // One pawn's published movement state (STATE-DRIVEN models, Phase 2): written by the main-thread poll
     // (ProcessAnimStates), read by the per-frame pose hook via nearest-position match (the deploy poll's approximation).
-    internal struct StateSample { public UnityEngine.Vector3 pos; public bool moving; public float stoppedAt; public float moveStartedAt; public bool combat; }
+    internal struct StateSample { public UnityEngine.Vector3 pos; public bool moving; public float stoppedAt; public float moveStartedAt; public bool combat; public float combatChangedAt; }
 
     internal class ModelEntry : Haf.Schema.HafModelSchema   // the ~64 shared behavioral/sound/prop fields live in Haf.Schema now (one definition, inherited); only GUID (sa/sb/..), runtime-state, and non-shared fields stay below
     {
@@ -77,6 +77,8 @@ namespace HumankindAssetFramework
         public readonly Dictionary<long, bool> stateMoving = new Dictionary<long, bool>();                                 // unit GUID -> was moving last poll (detects the moving->stopped flip)
         public readonly Dictionary<long, float> stateStoppedAt = new Dictionary<long, float>();                            // unit GUID -> Time.time the unit stopped moving
         public readonly Dictionary<long, float> stateMoveStartedAt = new Dictionary<long, float>();                       // unit GUID -> Time.time the unit STARTED moving (the PRE-MOVEMENT one-shot window, e.g. the howitzer folding)
+        public readonly Dictionary<long, bool> stateCombat = new Dictionary<long, bool>();                               // unit GUID -> was battle-locked last poll (detects the combat flip)
+        public readonly Dictionary<long, float> stateCombatChangedAt = new Dictionary<long, float>();                    // unit GUID -> Time.time combat last FLIPPED (the combatZ ease ramp start)
         public readonly List<StateSample> stateSamples = new List<StateSample>();   // published for the pose hook (lock on it); pos = pawn render position
         public float animDuration = 1f;  // clip duration (s); PawnEntryPose.Time is NORMALIZED (Mathf.Repeat(Time,1) = one loop), so Time = seconds/duration plays it at real speed with every frame
         public int skeletonId = -1;      // runtime AnimationManager skeleton index of our registered skeleton (to match PawnManager.PawnEntry.SkeletonId)
@@ -715,6 +717,7 @@ namespace HumankindAssetFramework
                 var gea = Regex.Matches(text, "\"gunElevAxis\"\\s*:\\s*(-?[0-9]+)");       // parity: elevation local axis index
                 var hgd = Regex.Matches(text, "\"hugDrop\"\\s*:\\s*(-?[0-9.]+)");          // parity: terrain hug drop, units
                 var hgl = Regex.Matches(text, "\"hugLookahead\"\\s*:\\s*(-?[0-9.]+)");     // parity: terrain hug probe lead, units
+                var cbz = Regex.Matches(text, "\"combatZ\"\\s*:\\s*(-?[0-9.]+)");          // parity: combat height offset, units (− submerges)
                 var sda = Regex.Matches(text, "\"silenceDonorAudio\"\\s*:\\s*(true|false)"); // parity: suppress the borrowed donor's Wwise sound (idle + combat)
                 var svx = Regex.Matches(text, "\"silenceDonorVfx\"\\s*:\\s*(true|false)");   // parity: suppress the donor's MecanimEvent VFX (misplaced muzzle flashes)
                 var udc = Regex.Matches(text, "\"useDonorClip\"\\s*:\\s*(true|false)");   // parity: donor clip drives the unit
@@ -801,6 +804,7 @@ namespace HumankindAssetFramework
                         gunElevAxis = i < gea.Count && int.TryParse(gea[i].Groups[1].Value, out var gav) ? gav : 0,
                         hugDrop = i < hgd.Count && float.TryParse(hgd[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hdv) ? hdv : 0f,
                         hugLookahead = i < hgl.Count && float.TryParse(hgl[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hlv) ? hlv : 1.5f,
+                        combatZ = i < cbz.Count && float.TryParse(cbz[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cbv) ? cbv : 0f,
                         silenceDonorAudio = i < sda.Count && sda[i].Groups[1].Value == "true",
                         silenceDonorVfx = i < svx.Count && svx[i].Groups[1].Value == "true",
                         useDonorClip = i < udc.Count && udc[i].Groups[1].Value == "true",
@@ -955,6 +959,7 @@ namespace HumankindAssetFramework
                     e.moveAnimId = -1; e.afterAnimId = -1; e.attackAnimId = -1; e.combatAnimId = -1; e.preMoveAnimId = -1; e.idleAnimId = -1; e.idleAltAnimId = -1; e.idleAlt2AnimId = -1;   // state-role ids re-resolve
                     e.idleAltNextAt = 0f; e.idleAltStart = -1f; e.idleAltChosenId = -1;   // idle-alt cadence is session-scoped (Time.time resets)
                     e.stateLastPos.Clear(); e.stateMoving.Clear(); e.stateStoppedAt.Clear(); e.stateMoveStartedAt.Clear();
+                    e.stateCombat.Clear(); e.stateCombatChangedAt.Clear();
                     lock (e.stateSamples) e.stateSamples.Clear();
                     lock (e.activeFires) e.activeFires.Clear();                              // session-1 fire windows (positions + Time.time) are meaningless in the new session
                     // Retexture/isolation state is session-scoped too: the isolated layer is a clone of a SESSION-1

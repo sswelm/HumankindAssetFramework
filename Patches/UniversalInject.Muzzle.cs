@@ -341,6 +341,43 @@ namespace HumankindAssetFramework
         // WORLD axes, which pointed a fixed compass direction — the offset visibly drifted around the model as the
         // unit turned ("works for static, inconsistent in all directions when moving" bug). z (height) stays world-up
         // (Y). Re-applied each frame on the game's fresh world position, so it never accumulates. Logged once.
+        // COMBAT HEIGHT OFFSET (2026-08-19, user design: "in combat they would be actually submerged"): while the
+        // unit's army is battle-locked (deployment→resolution; the same per-pawn proximity samples the state-driven
+        // clip machine reads), add combatZ to world height — negative dives a submarine, positive lifts. Eased over
+        // CombatZEaseSecs BOTH ways via the sampler's flip timestamp (no per-pawn identity needed at this seam).
+        // Runs for STATIC and animated entries alike: statics bake their Position offset into the mesh, but a
+        // state-dependent offset can only ever be runtime — this is the one legitimate runtime translate they get.
+        // Re-applied each frame on the game's fresh world position, so it never accumulates. Logged once.
+        const float CombatZEaseSecs = 2f;
+        static bool combatZLogged;
+        static void ApplyCombatZ(ModelEntry e, object entry)
+        {
+            if (e.combatZ == 0f) return;
+            var os = GetMember(entry, "ObjectSpace");
+            UnityEngine.Vector3 tr;
+            try { tr = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return; }
+            bool combat = false; float changedAt = -1f; bool matched = false;
+            lock (e.stateSamples)
+            {
+                const float R2 = 4f * 4f;   // same match radius class as the state/fire hooks
+                float best = float.MaxValue;
+                for (int i = 0; i < e.stateSamples.Count; i++)
+                {
+                    var s = e.stateSamples[i];
+                    float d = (s.pos - tr).sqrMagnitude;
+                    if (d >= R2 || d >= best) continue;
+                    best = d; combat = s.combat; changedAt = s.combatChangedAt; matched = true;
+                }
+            }
+            if (!matched) return;   // no sample near this pawn — no stance information, add nothing
+            float t = changedAt > 0f ? UnityEngine.Mathf.Clamp01((UnityEngine.Time.time - changedAt) / CombatZEaseSecs) : 1f;
+            float off = combat ? e.combatZ * t : e.combatZ * (1f - t);   // never-flipped: changedAt<0 → t=1 → in-combat full, out-of-combat exactly 0
+            if (off == 0f) return;
+            tr.y += off;
+            SetMember(os, "Translation", tr);
+            if (!combatZLogged) { combatZLogged = true; Plugin.Diag($"[Uni] {e.resourceName} combatZ {e.combatZ} engaged (combat={combat}, eased {CombatZEaseSecs}s)"); }
+        }
+
         static void ApplyPositionOffset(ModelEntry e, object entry)
         {
             if (e.position == UnityEngine.Vector3.zero) return;

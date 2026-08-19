@@ -737,7 +737,10 @@ namespace HumankindAssetFramework
             var list = entries;
             if (list == null || !Plugin.UniversalInjectOn.Value) return;
             bool any = false;
-            foreach (var e in list) if (e.animStateDriven && e.AnyStateRole) { any = true; break; }   // any state role, not just move — a move-less state-driven model still needs moving/stopped samples for its attack/idle machine (#8)
+            // any state role, not just move — a move-less state-driven model still needs moving/stopped samples for
+            // its attack/idle machine (#8). combatZ entries (2026-08-19: the diving submarine) need the samples too —
+            // combat stance is per-pawn, so even a STATIC entry with a combat height offset joins the sampling.
+            foreach (var e in list) if ((e.animStateDriven && e.AnyStateRole) || e.combatZ != 0f) { any = true; break; }
             if (!any) return;
             if (++stateFrame % 3 != 0) return;   // ~20x/s, like the deploy poll
             try
@@ -749,7 +752,7 @@ namespace HumankindAssetFramework
                 if (armies == null) return;
                 var fresh = new Dictionary<ModelEntry, List<StateSample>>();
                 var seen = new Dictionary<ModelEntry, HashSet<long>>();
-                foreach (var e in list) if (e.animStateDriven && e.AnyStateRole) { fresh[e] = new List<StateSample>(); seen[e] = new HashSet<long>(); }
+                foreach (var e in list) if ((e.animStateDriven && e.AnyStateRole) || e.combatZ != 0f) { fresh[e] = new List<StateSample>(); seen[e] = new HashSet<long>(); }
                 // One sampler for BOTH walks below. keySalt separates the map-army and battle bookkeeping for the
                 // same sim unit: during a battle the army's PresentationUnit still exists at the STACK position while
                 // the battle deploys a SECOND PresentationUnit on its combat tile — same GUID, different objects. A
@@ -760,7 +763,8 @@ namespace HumankindAssetFramework
                     string uname = GetMember(GetMember(unit, "UnitDefinition"), "Name")?.ToString() ?? "";
                     if (uname.Length == 0) return;
                     var e = FindEntryForUnitDefinition(uname);   // the unit's ONE entry (longest-match), then gate on its flags
-                    if (e == null || !e.animStateDriven || e.moveAnimId < 0) return;
+                    if (e == null || !((e.animStateDriven && e.moveAnimId >= 0) || e.combatZ != 0f)) return;
+                    if (!fresh.ContainsKey(e)) return;   // gate parity guard: only entries the dicts were built for
                     long guid = GuidToLong(GetMember(unit, "GUID"));
                     if (guid == 0) return;
                     guid = unchecked(guid ^ keySalt);
@@ -782,13 +786,19 @@ namespace HumankindAssetFramework
                         if (!wasMoving && moving) e.stateMoveStartedAt[guid] = now;    // the PRE-MOVEMENT one-shot window starts here
                     }
                     e.stateMoving[guid] = moving;
+                    // combat FLIP timestamp (2026-08-19, combatZ): the ease ramp for the combat height offset starts
+                    // when battle-lock changes state — either direction (dive at deployment, surface at resolution).
+                    if (!e.stateCombat.TryGetValue(guid, out bool wasCombat)) wasCombat = false;
+                    if (wasCombat != combat) e.stateCombatChangedAt[guid] = now;
+                    e.stateCombat[guid] = combat;
                     float stoppedAt = e.stateStoppedAt.TryGetValue(guid, out var sAt) ? sAt : -1f;
                     float moveStartedAt = e.stateMoveStartedAt.TryGetValue(guid, out var mAt) ? mAt : -1f;
+                    float combatChangedAt = e.stateCombatChangedAt.TryGetValue(guid, out var cAt) ? cAt : -1f;
                     seen[e].Add(guid);
                     if (pawnList != null)
                         foreach (var pawn in pawnList)
                             if (GetMember(pawn, "Transform") is UnityEngine.Transform tr)
-                                fresh[e].Add(new StateSample { pos = tr.position, moving = moving, stoppedAt = stoppedAt, moveStartedAt = moveStartedAt, combat = combat });
+                                fresh[e].Add(new StateSample { pos = tr.position, moving = moving, stoppedAt = stoppedAt, moveStartedAt = moveStartedAt, combat = combat, combatChangedAt = combatChangedAt });
                 }
                 foreach (var army in armies)
                 {
@@ -816,6 +826,7 @@ namespace HumankindAssetFramework
                     lock (e.stateSamples) { e.stateSamples.Clear(); e.stateSamples.AddRange(fresh[e]); }
                     var sn = seen[e];   // drop gone units from all four per-unit maps
                     PruneGone(e.stateLastPos, sn); PruneGone(e.stateMoving, sn); PruneGone(e.stateStoppedAt, sn); PruneGone(e.stateMoveStartedAt, sn);
+                    PruneGone(e.stateCombat, sn); PruneGone(e.stateCombatChangedAt, sn);
                 }
             }
             catch (Exception ex) { Plugin.Log.LogError("[State] ProcessAnimStates: " + ex); }

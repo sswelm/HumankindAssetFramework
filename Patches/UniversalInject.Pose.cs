@@ -282,7 +282,7 @@ namespace HumankindAssetFramework
                 // Donor-clip path: the donor's clip drives the pose, but the pawn-level adjusters must still run —
                 // they live in ApplyAnimatedPose, which this branch bypasses, and without them Position offset
                 // (hover height!), moveTilt and runtime scale are silently dead on donor-clip models.
-                if (e.useDonorClip) { DumpDonorChannels(ctx.entry, e); ApplyRotorSpin(ctx.entry, e); ApplyRotorTrim(ctx.entry, e); ApplyPositionOffset(e, ctx.entry); ApplyTerrainHug(e, ctx.entry); ApplyTurnEase(e, ctx.entry); ApplyMoveTilt(e, ctx.entry); ApplyGunElevation(e, ctx.entry); ApplyScale(e, ctx.entry); ctx.pawnEntries.SetValue(ctx.entry, ctx.idx); }
+                if (e.useDonorClip) { DumpDonorChannels(ctx.entry, e); ApplyRotorSpin(ctx.entry, e); ApplyRotorTrim(ctx.entry, e); ApplyPositionOffset(e, ctx.entry); ApplyCombatZ(e, ctx.entry); ApplyTerrainHug(e, ctx.entry); ApplyTurnEase(e, ctx.entry); ApplyMoveTilt(e, ctx.entry); ApplyGunElevation(e, ctx.entry); ApplyScale(e, ctx.entry); ctx.pawnEntries.SetValue(ctx.entry, ctx.idx); }
                 else
                 {
                     // TURN EASE for every non-donor entry too (battle-turn spike): a map attack SNAPS the unit's
@@ -292,6 +292,7 @@ namespace HumankindAssetFramework
                     // Runs before the pose handlers; they mutate the same boxed entry and write it back.
                     ApplyTurnEase(e, ctx.entry);
                     ApplyGunElevation(e, ctx.entry);   // distance-proportional barrel raise during a bombard (BR slot — independent of the pose)
+                    ApplyCombatZ(e, ctx.entry);        // combat height offset — for EVERY non-donor entry (a STATIC submarine dives too); mutates the same boxed entry the branches below write back
                     if (e.freezeDonorAnim && e.animId < 0) ApplyFreeze(ctx, e);
                     else if (e.animId >= 0) ApplyAnimatedPose(ctx, e);
                     else ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
