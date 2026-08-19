@@ -10,6 +10,22 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE LOGGING AUDIT — and the two real holes its questions exposed (2026-08-19).** Asked "how good is our
+  logging?", the survey said: 707 plugin log calls, 264 editor calls, 10 machine-readable files, 12 one-shot
+  guards — runtime logging excellent and battle-proven, with three gaps, all filled: (1) **invariant
+  formatting** as infrastructure + policy (`Plugin.Inv`; a wrapper can't retro-fix current-culture
+  interpolation, so the combatZ line is the live exemplar; config parses audited culture-safe already); (2)
+  **`Plugin.Once(key)`** — a keyed one-shot gate so log-once stops being hand-rolled statics (15 legacy guards
+  stay — several are load-bearing state; the dead one deleted, making the build warning-clean); (3) a
+  **durable editor action log** — every HAF-prefixed Console line appended timestamped to
+  `Logs/haf_editor_actions.log` (5 MB rotation), because Editor.log is per-session and unstamped. Then two
+  follow-up questions found real holes: **"are the logs backed up?"** exposed that the backup config group's
+  `*.json` glob silently missed every hand-tuned runtime file (hug/turn/battle/rotor tuning, the plugin .cfg,
+  ground-tex/state dirs — not regenerable, not in git, in NO backup; now included), and the fix trail exposed
+  that the **compile gate's hand-listed sources had drifted** — three editor files (GameSoundLab, HafCli,
+  SoundOverrideRegistry) were NEVER compile-checked; sources are now discovered at run time, retiring that
+  hand-list for good. Questions are drills too.
+
 - **CORRUPT-SOURCE PINPOINT + ONE-CLICK RECOVERY (2026-08-19, user design: "not only a try/catch but recovery
   functionality") — DRILLED.** A hand-edit that breaks pack.json now gets: a **pinpointed error** (Newtonsoft
   re-parse purely for diagnosis — the drill's planted missing comma reported as "line 19, position 12, path
