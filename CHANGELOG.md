@@ -10,6 +10,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **v0.1.0 — THE FIRST TAGGED RELEASE (2026-08-19).** Both repos tagged `v0.1.0`; a GitHub release with an
+  extract-into-game-root zip (plugin + schema DLL under `BepInEx/plugins/` + INSTALL.txt) and release notes
+  distilled from this changelog: https://github.com/sswelm/HumankindAssetFramework/releases/tag/v0.1.0 .
+  Everything the preceding weeks built made this shippable: CI from public sources, the four-surface pack
+  validator, Ship Status, drilled entry-state coherence and backups, the bindings drift net, 112 tests. HAF is
+  installable by a third party for the first time.
+
 - **THE HAND-LIST & LABEL-LIES AUDIT (2026-08-19)** — backlog #4, the last open entry-state coherence item,
   executed mechanically rather than by eyeball: every field the Factory/Lab UI edits was extracted by pattern
   and diffed against every hand-maintained list (the Factory ownership rebase, the Lab ownership rebase, the
