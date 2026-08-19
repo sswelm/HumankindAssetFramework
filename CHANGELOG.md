@@ -10,6 +10,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **SMOKE TEST, FIVE-POINT UPGRADE (2026-08-19; user call: "can we apply all?").** The F8 harness closed its
+  five known gaps in one pass: (1) an **ObjectSpace write-back self-test** — one live pawn entry is mutated
+  and re-read through the exact boxed-struct chain every runtime offset uses, so the combatZ died-in-the-box
+  class (previously findable only by a battle drill) is now a hard FAIL from one F8 press; (2) the silent
+  19-of-22 delta is **named** — uninjected entries are listed with a diagnosis (disabled vs no unit on the
+  map); (3) the verdict is written to **`haf_smoke_report.txt`** next to the load and bindings reports — a
+  headless/CI launch can now assert all three files clean; (4) **sampler health** — entries whose features
+  need the state/combat sampler but hold zero samples are noted (a gate regression is visible without a
+  battle); (5) **vacuous-coverage notes** — a green segment that verified nothing says so ("districts authored
+  but 0 tiles live — UNTESTED this session"), keeping PASS honest per the silence-is-not-success rule. The
+  verdict stays a pure function; 4 new tests (120). In-game re-verification pending (one F8 press).
+
 - **THE STRUCT BATCH (2026-08-19) — derived bindings close the drift net's last silent surface.** The bindings
   census covered 50 named types, but the structs HAF pokes hardest — `PawnEntry` and its `ObjectSpace`/pose/
   bone-rotation slots (the GPU seam written every frame), `Skeleton`/`BoneInfo` (preflight + injection), the
