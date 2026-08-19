@@ -55,6 +55,10 @@ button.
 *Writes:* `pack.json`, same `UniversalBaker.BuildAnimated` pipeline. **Deep dive:** [Animated-Models.md](Animated-Models.md), [Factory-Manual.md](Factory-Manual.md) §16.
 
 ### Vehicle Lab — `Tools ▸ HAF ▸ Vehicle Lab`
+
+> Tracked vehicles: the Spin section leads with **Static tracks (no movement)** — the isolation switch that rigs
+> the tread loops rigid (wheels still spin, far fewer bones); the tread speed/detail dials below it are only
+> live when the tracks actually run. Rig options apply through **Generate rig → Bake → mod build**.
 Turn a **raw static** vehicle model into a rigged, animated GLB (Root + per-wheel/turret bones, a procedural *Spin*
 action, optional rolling tracks and wave-rock) that the animated bake path then consumes — no Blender knowledge needed.
 *Key controls:* raw model + output GLB, **Probe parts**, per-part role assignment, use-source-skeleton (for pre-rigged

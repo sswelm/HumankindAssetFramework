@@ -10,6 +10,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **VEHICLE LAB POLISH (2026-08-19, both user finds).** (1) The **Static tracks** isolation switch moved to the
+  top of the Spin section and now gates the tread dials (speed/detail gray out when the tracks won't run —
+  decision before dials). (2) **Save recipe… kept reverting to the raw model's name**: saved as `prod3`, the
+  next save suggested `prod2` again — the dialog default derived from the source file every time, while the
+  window already tracked the current recipe name for its combobox. It now defaults to the tracked name,
+  falling back to the source-derived name only for a never-saved session.
+
 - **ANIMATION LAB PREVIEW TEXTURE-CORRECT (2026-08-19)** — the user caught the day-old Factory first-select
   texture fix stopping at the Factory's window: the Lab's fit preview has its own copy of the renderer-flattening
   loop and still paired original FBX UVs with the packed atlas on load. The substitution was ported — and the
