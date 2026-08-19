@@ -18,7 +18,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   model. The build was its own three-round drill: hand-rolled winding culled every face ("I don't see any
   man"), shared-vertex double-siding zeroed the normals, and the final form — flat-shaded triangles in both
   windings via one shared box-prop builder — is now the house pattern for preview props. Rendering hand-built
-  meshes joins the lesson list: emit both windings with per-face vertices, always.
+  meshes joins the lesson list: emit both windings with per-face vertices, always. **Art-direction rounds
+  (same evening, user-driven)**: classical figure proportions (head ~1/7, legs half with a gap, arms to
+  mid-thigh), slimmed depth, and a sphere head — itself converged by bisection (0.072 too big, 0.055 too
+  small, 0.063 landed) at 14×20 tessellation so flat shading still reads round. Every dimension is now a
+  named parameter; further taste changes are one-liners.
 
 - **VEHICLE LAB: RECIPE FORENSICS + THE SPIN MASTER SWITCH (2026-08-19).** The canoe's recipe "lost" its wave
   configuration — actually never had it: the recipe predates the wave fields, and absent JSON fields load as
