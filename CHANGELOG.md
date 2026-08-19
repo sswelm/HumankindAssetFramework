@@ -10,6 +10,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **OFFSITE BACKUP: VERIFIED END-TO-END — AND SELF-RECOVERING (2026-08-19).** The one backup layer never
+  watched succeed finally got its drill: a manual "Back up now" produced a registry-verified snapshot AND its
+  count-verified offsite zip (1.06 GB, atomic rename completed). The verify also caught a real gap: the
+  morning's daily auto backup's zip had **died mid-write when a recompile killed the background thread**,
+  leaving a stale `.partial` and no final zip — silently, with no retry (the atomic design prevented
+  corruption but not absence). Fixed: on every editor load, before the daily-auto pass, stale partials are
+  deleted and any backup folder missing its final zip is **re-zipped automatically** (count-verified by the
+  same core; a reload can never race a live writer because the reload is what killed it). The stale 21:01
+  partial doubles as the fix's natural drill: the next reload must recover it.
+
 - **THE HAND-LIST GATE (2026-08-19) — the audit's residual risk, closed.** The Factory/Lab ownership-rebase
   lists were guarded only by MAINTENANCE-TRAP comments — a future UI field could still be silently reset on
   Save (the combatZ class). `Tools/check_handlists.sh` now runs the audit's exact mechanics on every push:

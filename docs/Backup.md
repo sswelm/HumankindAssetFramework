@@ -99,7 +99,11 @@ the originals. The code is safe on GitHub; the source models and bakes are not. 
 
 - **Optional** — blank folder = off — and **silent**: zipped on a background thread, so a multi-GB snapshot never
   freezes the editor; the result lands in the status line (or the Console if the window was closed meanwhile).
-- **Atomic** (`.partial` then rename) and **never overwritten**.
+- **Atomic** (`.partial` then rename) and **never overwritten** — and **self-recovering** (2026-08-19, found
+  by the first end-to-end offsite verify): a domain reload (any recompile) kills the background zip thread
+  mid-write, which used to leave a stale `.partial` and a backup silently missing its offsite copy. On every
+  editor load, stale partials are cleaned up and any backup folder without its final zip is re-zipped
+  automatically (logged in the Console).
 - **Verified**: the finished zip is re-opened and its file count compared to the snapshot's — a mismatch deletes
   the partial and says so loudly rather than leaving a corrupt archive to be discovered the day it's needed.
 - *Zip latest backup → offsite now* covers pre-existing snapshots; the daily auto-version zips itself when the
