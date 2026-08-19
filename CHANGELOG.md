@@ -23,7 +23,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   `haf_bindings_report.txt` instead of torn skinning or a silently dead offset (the combatZ write-back's own
   seam is now censused). Host-proven with 3 new tests (115 total): derivation across field/array/generic/
   non-public/property anchors, broken-anchor → null-not-throw, derived types flag members like any Dep.
-  **In-game verification pending**: one launch should show the report grow ~50 → 59 types, all `[ok]`.
+  **GAME-VERIFIED same day — and the first launch was its own drill:** all nine derived structs resolved
+  (`missing_types=0`), while the report flagged **three members I had attributed to the wrong receivers** — the
+  A1 lesson relearned live, caught by the report's self-validation exactly as designed (`OutputLayerInstance`
+  belongs to the atlas-dump walk's content entries, not `PawnEntry`; `AttackerGroup`/`DefenderGroup` to the
+  SIMULATION battle the war-cry hook receives, not the presentation battle). Re-homed via three more derived
+  accessors — including a method-parameter derivation for hook types — plus the war-cry chain censused. Final
+  verified state on game 1.30: **`resolved=63/63  missing_types=0  missing_members=0`**, F8 Smoke Test PASS
+  with `bindings ok` folded into its verdict. 116 tests. From this launch on, a Humankind patch touching any of
+  these structs announces itself by name at boot.
 
 - **v0.1.0 — THE FIRST TAGGED RELEASE (2026-08-19; withdrawn to draft the same day).** Both repos tagged
   `v0.1.0`; a GitHub release with an extract-into-game-root zip (plugin + schema DLL under `BepInEx/plugins/`
