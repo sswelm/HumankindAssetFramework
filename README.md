@@ -130,7 +130,8 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
 - **Guided authoring** — Pick-driven clip/bone/hide fields, an embedded interactive 3D preview, auto-detected game and
   Blender paths, and an in-game **F8** status window (compatibility health, a Smoke Test, the live GPU-budget readout,
   and the audio/texture authoring aids). Every launch also writes a machine-readable `haf_bindings_report.txt` — a
-  diffable list of the ~124 reflection bindings that names any game-update drift in one line, headless-checkable.
+  diffable list of the ~160 reflection bindings — 59 game types including the hot-path structs, derived
+  structurally so there are no name-guess false positives — that names any game-update drift in one line, headless-checkable.
 - **Backup & Restore** — a guarded, additive snapshot of everything ENCReload's git doesn't track.
 - **Pack validator, four surfaces** — one rule set (~30 content checks: bones, files, pawns, formats, ranges) runs
   pre-bake, on the **Validate pack** button, in the mod build (`-strict` fails CI), and as a boot-time pre-flight that
