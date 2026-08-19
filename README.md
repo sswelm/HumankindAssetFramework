@@ -4,8 +4,6 @@
 executable patching, no per-model code.** *(Formerly **ENC Access Proof**.)*
 
 HAF augments [Humankind](https://www.games2gether.com/amplitude-studios/humankind) with custom assets. You **bake**
-> **Download:** [v0.1.0 — the first release](https://github.com/sswelm/HumankindAssetFramework/releases/tag/v0.1.0) — extract into the Humankind folder (needs BepInEx 5.4.x), then see [Getting Started](docs/Getting-Started.md).
-
 an ordinary model (`.glb` / `.fbx` / `.obj` / `.blend`) in the **HAF Authoring Tools** — a suite of Unity editor
 windows: the **Model Factory** (the model itself), the **Animation Lab** (clips + behaviors), the **District
 Factory**, **Prop Lab**, **Projectile Lab**, and **Unit Retexture / Sound Studio** — and a data-driven BepInEx plugin
