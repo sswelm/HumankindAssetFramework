@@ -39,7 +39,10 @@ by when they'll bite.
   remaining "label lies" like the tris slider (grep defaults substituted behind explicit user values) — *open;
   second confirmed instance 2026-08-18: the "Runtime — applied on load, no re-bake" section header covers
   Position offset, which for STATIC entries is baked into the mesh and silently needs a re-bake (found via the
-  submarine waterline hunt — the field should state which mode applies to the current entry)*.
+  submarine waterline hunt — the field should state which mode applies to the current entry). Third specimen,
+  adjacent family, 2026-08-19: the Factory-owned hand-list in `RebaseLabOwnedOnRegistry` silently RESETS any
+  new Factory field that isn't added to it (combatZ, drill-caught the day it landed) — the audit should cover
+  every hand-list that must track the schema, not just labels*.
 
 - ~~**`deploy_convert.py` recoil block**~~ — FIXED 2026-07-19: (a) the tube's parent is now sampled into `src_w` when
   its name isn't barrel/cannon (was a guaranteed `KeyError` on non-M114 naming); (b) the RecoilArm holds now key an

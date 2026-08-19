@@ -140,6 +140,9 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
 - **Entry-state coherence** — the form-vs-registry banner (drilled), a bake-time model-file confirm, and a calibrated
   vessel waterline (`waterLevel` pack config + a numeric keel readout in the preview). See
   [Factory-Manual.md](docs/Factory-Manual.md).
+- **Combat height offset** (`combatZ`) — a unit rides higher or *lower* while battle-locked, eased both ways: the
+  submarine fights submerged (snorkel-only) and resurfaces after the battle. Calibrated numerically via the
+  preview's "In combat" toggle; works for static and animated models. Drilled in-game.
 - **Headless CLI** — re-bake a model and run the full Humankind mod **build + deploy** from the command line (Unity batch
   mode), reusing the exact code the editor buttons call — so scripts, CI, or an AI agent can drive HAF without the GUI.
   See [Headless-CLI.md](docs/Headless-CLI.md).
