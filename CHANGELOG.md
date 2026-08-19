@@ -10,6 +10,20 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE PACK.JSON COLLAPSE (2026-08-19) — one registry, one truth (backlog #3 closed).** The deployed/project
+  pair — deployed authoritative, project a dual-written shadow — surprised every external tool and fed the
+  coherence-drill era. Flipped to the honest model: the **git-tracked project file is THE registry** (the
+  editor reads/writes only it), and the deployed copy is a **build artifact** like the DLLs — regenerated
+  atomically on every Save, recreated on load after a game reinstall, never read back. Hand-edits to the
+  artifact are detected and warned about once per session (the next Save overwrites them); a one-time
+  per-machine migration adopts pre-collapse deployed state into the source, and a missing source adopts the
+  artifact (a fresh clone against a live install loses nothing). Artifact-refresh failure is loud but never
+  fails a Save — the source is safe, the game just runs stale until the next success. Scope: the model
+  registry; districts/formations keep the old pattern as follow-up candidates. **Built, NOT drilled** — the
+  drill: (1) recompile → migration marker set; (2) Save an entry → both files' timestamps advance; (3)
+  hand-edit the DEPLOYED file → Refresh → Console warns "build artifact"; (4) delete the deployed file →
+  Refresh → recreated + logged; (5) the external-edit coherence drill now targets the SOURCE file → banner.
+
 - **OFFSITE BACKUP: VERIFIED END-TO-END — AND SELF-RECOVERING (2026-08-19).** The one backup layer never
   watched succeed finally got its drill: a manual "Back up now" produced a registry-verified snapshot AND its
   count-verified offsite zip (1.06 GB, atomic rename completed). The verify also caught a real gap: the

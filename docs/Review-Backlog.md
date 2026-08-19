@@ -34,8 +34,9 @@ by when they'll bite.
   funnel**: every selection change routes through one path, structurally retiring the 08-16..18 stale-window
   family. All five drills passed; drill 3 caught a real unreachable-banner defect — see CHANGELOG); ~~(2) a real animated→static path~~ **largely covered** by the "Make static…" button (strips the
   animation config from the saved registry; the offer-on-armature-less-failure variant remains nice-to-have);
-  (3) document (or collapse) the two-pack.json design — the DEPLOYED copy being the editor's source of truth
-  surprises every external tool — *documented in Factory-Manual 2026-08-18; collapse still open*; ~~(4) audit
+  ~~(3) document (or collapse) the two-pack.json design~~ **COLLAPSED 2026-08-19**: the git-tracked project
+  file is the single source; the deployed copy is a regenerated build artifact with hand-edit drift warnings
+  and a one-time migration (districts/formations keep the old pattern — follow-up candidates); ~~(4) audit
   remaining "label lies" like the tris slider~~ **DONE 2026-08-19** — swept both families mechanically
   (UI-field extraction diffed against every hand-list; every runtime/no-re-bake claim read against its code
   path). Hand-lists: the Factory rebase (34 fields), the Lab rebase (56) and the bake-config capture are all

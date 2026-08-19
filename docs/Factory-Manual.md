@@ -57,15 +57,18 @@ That's the whole loop. Everything below is detail and the animated workflow.
   baked assets and selects the restored entry. The same snapshots are also fully restorable from the
   **Backup & Restore** window's "Factory remove snapshots" section (see [Backup.md](Backup.md)).
 
-### The registry lives in TWO files (know this once, never be surprised)
+### The registry is ONE file (collapsed 2026-08-19)
 
-The editor's source of truth is the **DEPLOYED** registry — `<Humankind>\BepInEx\config\haf_packs\ENCReload\pack.json`
-(shown in the footer). Every Save/Bake **dual-writes** it and the git-tracked project copy
-(`Assets/Pack/ENCReload/pack.json`); the project copy is the versioned backup and auto-restore source, *not* what
-the editor reads. External tools editing the project copy won't affect the editor until the next dual-write; edits
-to the deployed copy are picked up on the next load — and since 2026-08-18 the Factory shows the same yellow
-**Form ≠ registry** banner the Lab has when its form and the registry disagree (after a compile or an outside
-change), with an explicit choice: *↻ Reload entry* (take the registry) or *Save/Bake* (keep the form).
+**The source** — git-tracked, the one you (or any tool) edit — is `Assets/Pack/ENCReload/pack.json`. The
+**deployed copy** under `<Humankind>\BepInEx\config\haf_packs\ENCReload\pack.json` is a **build artifact**,
+exactly like the deployed DLLs: regenerated atomically on every Save/Bake, recreated on load if the game was
+reinstalled, and never read by the editor. A hand-edit to the deployed copy is detected and warned about in the
+Console — it will be overwritten by the next Save; edit the source instead. (Historically the deployed copy was
+authoritative with the project file as a dual-written shadow; the split surprised every external tool and is
+gone. A one-time migration adopts a machine's deployed state into the source on first load after the change.)
+The Factory shows the same yellow **Form ≠ registry** banner the Lab has when its form and the registry
+disagree (after a compile or an outside edit *of the source*), with an explicit choice: *↻ Reload entry* (take
+the registry) or *Save/Bake* (keep the form).
 **Refresh** checks on demand: it re-reads the registry, updates the dropdown, and raises (or clears) the banner
 right away — so after e.g. Browsing a model file you don't want, press Refresh → banner → ↻ Reload entry to
 revert. The form itself is never overwritten without that explicit choice.
