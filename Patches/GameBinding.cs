@@ -163,6 +163,23 @@ namespace HumankindAssetFramework
         internal static Type PresentationArmy   => CachedDerived("PresentationArmy",   () => ElementType(FieldOrPropType(PresentationEntityFactoryController, "PresentationArmyEntities")));
         internal static Type BattleReportController => CachedDerived("BattleReportController", () => FieldOrPropType(Presentation, "PresentationBattleReportController"));
         internal static Type PresentationBattle => CachedDerived("PresentationBattle", () => ElementType(FieldOrPropType(BattleReportController, "Battles")));
+        // 2026-08-19 first-launch self-validation: the report flagged three members I had attributed to the WRONG
+        // receivers (the A1 lesson, relearned live). Their true homes, derived along the paths the code walks:
+        // OutputLayerInstance is on elements of AnimationManager.Content.OutputLayerEntries (the atlas dump +
+        // retexture walk), and AttackerGroup/DefenderGroup are on the SIMULATION battle handed to
+        // SimulationEvent_BattleStarted.Raise (the war-cry hook) — not the presentation battle.
+        internal static Type MethodParamType(Type t, string method, int paramIndex)
+        {
+            for (var cur = t; cur != null; cur = cur.BaseType)
+                foreach (var m in cur.GetMethods(MemberFlags))
+                    if (m.Name == method && m.GetParameters().Length > paramIndex) return m.GetParameters()[paramIndex].ParameterType;
+            return null;
+        }
+        internal static Type AnimationContent        => CachedDerived("AnimationContent",        () => FieldOrPropType(AnimationManager, "Content"));
+        internal static Type ContentOutputLayerEntry => CachedDerived("ContentOutputLayerEntry", () => ElementType(FieldOrPropType(AnimationContent, "OutputLayerEntries")));
+        internal static Type SimulationEventBattleStarted => Cached("Amplitude.Mercury.Simulation.SimulationEvent_BattleStarted", "SimulationEvent_BattleStarted");
+        internal static Type SimulationBattle        => CachedDerived("SimulationBattle",        () => MethodParamType(SimulationEventBattleStarted, "Raise", 1));
+        internal static Type SimulationBattleGroup   => CachedDerived("SimulationBattleGroup",   () => FieldOrPropType(SimulationBattle, "AttackerGroup"));
         // ---- runtime module order (pack load order follows the game's own mod order — docs/Multi-Mod.md) ----
         internal static Type FrameworkServices   => Cached("Amplitude.Framework.Services");
         internal static Type RuntimeService      => Cached("Amplitude.Mercury.Runtime.IRuntimeService");
@@ -341,7 +358,7 @@ namespace HumankindAssetFramework
             // army/battle walk the state sampler enumerates. A [MISSING TYPE] on a derived entry means its ANCHOR
             // member was renamed (the derivation chain broke); a [MISSING MEMBER] means the struct itself changed.
             // Pose0/Pose8 + BoneRotation0/BoneRotation3 are the ENDPOINTS of the slot ranges the code indexes.
-            new Dep(PawnEntry, nameof(PawnEntry), "ObjectSpace", "HideFactor", "SkeletonId", "PawnDescriptorId", "OutputLayerInstance", "Pose0", "Pose8", "BoneRotation0", "BoneRotation3"),
+            new Dep(PawnEntry, nameof(PawnEntry), "ObjectSpace", "HideFactor", "SkeletonId", "PawnDescriptorId", "Pose0", "Pose8", "BoneRotation0", "BoneRotation3"),
             new Dep(PawnObjectSpace, nameof(PawnObjectSpace), "Translation", "Rotation", "Scale"),
             new Dep(PawnEntryPose, nameof(PawnEntryPose), "AnimationId", "Time", "Weight"),
             new Dep(PawnBoneRotation, nameof(PawnBoneRotation), "Angle", "SkeletonBoneIndex", "AxisIndex"),
@@ -349,7 +366,12 @@ namespace HumankindAssetFramework
             new Dep(SkeletonBoneInfo, nameof(SkeletonBoneInfo), "Name", "Local", "BindPose", "ParentIndex"),
             new Dep(PresentationArmy, nameof(PresentationArmy), "PresentationUnit", "ArmyInfo", "IsLockedByBattle"),
             new Dep(BattleReportController, nameof(BattleReportController), "Battles"),
-            new Dep(PresentationBattle, nameof(PresentationBattle), "AllUnits", "AttackerGroup", "DefenderGroup"),
+            new Dep(PresentationBattle, nameof(PresentationBattle), "AllUnits"),
+            // the launch-flagged members, re-homed on their TRUE receivers (both derived — see the accessors)
+            new Dep(ContentOutputLayerEntry, nameof(ContentOutputLayerEntry), "OutputLayerInstance"),
+            new Dep(SimulationEventBattleStarted, nameof(SimulationEventBattleStarted), "Raise"),
+            new Dep(SimulationBattle, nameof(SimulationBattle), "AttackerGroup", "DefenderGroup"),
+            new Dep(SimulationBattleGroup, nameof(SimulationBattleGroup), "Contenders"),
             // NOTE: AudioEventHandle has an accessor but is NOT in this startup catalog — it's a genuine LATE-LOADER (the
             // Wwise event-handle type loads after the menu), so it can't resolve at this report's Awake time and would
             // false-positive. Its accessor re-resolves on first use (the audio catalog dump / audition) in a loaded game.

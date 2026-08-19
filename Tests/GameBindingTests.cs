@@ -120,6 +120,16 @@ namespace HumankindAssetFramework.Tests
         }
 
         [Fact]
+        public void Derived_MethodParamType_ResolvesAndNullsafe()
+        {
+            // int.Parse(string) — param 0 is string; a bogus method or out-of-range index yields null, never a throw.
+            Assert.Same(typeof(string), GameBinding.MethodParamType(typeof(int), "Parse", 0));
+            Assert.Null(GameBinding.MethodParamType(typeof(int), "Parse", 99));
+            Assert.Null(GameBinding.MethodParamType(typeof(int), "NoSuchMethod", 0));
+            Assert.Null(GameBinding.MethodParamType(null, "Parse", 0));
+        }
+
+        [Fact]
         public void Derived_MissingStructMember_FlagsLikeAnyDep()
         {
             // End-to-end: a derived type feeding a Dep behaves identically — a renamed struct member is flagged.
