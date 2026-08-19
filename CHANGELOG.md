@@ -25,9 +25,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   the new field to 0 — `RebaseLabOwnedOnRegistry` re-applies only a hand-maintained Factory-owned field list,
   and the new field wasn't on it. Fixed, and the list now carries a MAINTENANCE TRAP warning (a new Factory
   field needs: schema, regex fallback, UI, and that list — the parity gate does not check it; same silent-reset
-  family as the label lies). **In-game: built, NOT yet drilled** — the drill is one battle: dive on deployment,
-  fight submerged, resurface at resolution, one `[Uni] … combatZ engaged` log line. Also same day: preview
-  zoom-in deepened 5× (0.1 → 0.02 minimum distance factor) for close-up trim inspection.
+  family as the label lies). **DRILLED same day — and the in-game drill caught the third
+  last-line-of-the-pattern omission in two days:** the first battle showed NO dive despite the engaged log,
+  because `ApplyCombatZ` copied `ApplyPositionOffset`'s boxed-struct pattern but dropped its final
+  `SetMember(entry, "ObjectSpace", os)` write-back — the offset was computed and logged, then died in the box
+  (the log proved the COMPUTATION, not the WRITE; the user's flat "I did not see any change!!" was the accurate
+  instrument). One line fixed it; second battle verified: snorkel-only above the swell, hull a shadow beneath,
+  eased dive and resurface. The pattern now has three drill-caught members (the Lab-port call site, the
+  restore-path substitute, this write-back) — when copying a working pattern, its LAST line is the one you
+  drop, and only executing the scenario notices. Also same day: preview zoom-in deepened 5× (0.1 → 0.02
+  minimum distance factor) for close-up trim inspection.
 
 - **VEHICLE LAB POLISH (2026-08-19, both user finds).** (1) The **Static tracks** isolation switch moved to the
   top of the Spin section and now gates the tread dials (speed/detail gray out when the tracks won't run —
