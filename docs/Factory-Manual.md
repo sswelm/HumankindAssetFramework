@@ -99,6 +99,10 @@ Two things the flat preview plane cannot show:
   nothing anywhere until you **Bake**. (The runtime-fields help text says "applies on load"; for static
   entries' position that is wrong — a known label lie, on the audit list.)
 
+**Ref man** (preview toggle, Factory and Animation Lab alike): a figure at in-game human pawn height beside
+the model — the size reference. Its height (0.9u) is a calibration constant like the water level: pin it once
+by comparing against a real infantry pawn in-game.
+
 **Combat height offset** (Flight character section): raise or *lower* the unit while its army is locked in a
 battle, eased ~2s both ways — a submarine with a negative value fights submerged and resurfaces afterwards
 (the ENCReload sub runs −0.13: snorkel-only). Runtime field — Save settings + relaunch, no re-bake — and it
