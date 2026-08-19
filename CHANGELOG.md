@@ -10,6 +10,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE HAND-LIST GATE (2026-08-19) — the audit's residual risk, closed.** The Factory/Lab ownership-rebase
+  lists were guarded only by MAINTENANCE-TRAP comments — a future UI field could still be silently reset on
+  Save (the combatZ class). `Tools/check_handlists.sh` now runs the audit's exact mechanics on every push:
+  UI-edited fields diffed against each window's re-apply list, any miss failing the push by name with the fix
+  pointed at. **Drilled at birth**: planting the historical combatZ omission produced the named FAIL; the
+  restore went green; the very push that shipped the gate ran through it. Factory 30/30 covered, Lab 40/40.
+  The silent-reset class is now structurally impossible, not merely documented.
+
 - **MULTI-SMR PREVIEW SLICE (2026-08-19) — the known future ambush, closed before it fired.** The preview-
   texture fix persisted ONE atlas-remapped clone while the bake remaps *every* skinned renderer's mesh — a
   single out-param the loop overwrote, so the first multi-renderer rig baked would have replayed the corrupt-

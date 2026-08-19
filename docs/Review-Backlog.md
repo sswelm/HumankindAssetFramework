@@ -44,8 +44,10 @@ by when they'll bite.
   elevating: the cursed-leftover class MakeStatic exists to kill); the Save-settings status claimed Position
   offset/Size "apply on load" unconditionally (false for statics — now entry-type-conditional); Browse's
   animUnitFix auto-set is discarded by Save settings (animation-owned — the status now says so). The original
-  tris-slider example was already clean (tooltip + bake log disclose the double-sided halving). Residual risk
-  is the MAINTENANCE-TRAP comments at each hand-list — no gate enforces them.
+  tris-slider example was already clean (tooltip + bake log disclose the double-sided halving). ~~Residual risk
+  is the MAINTENANCE-TRAP comments at each hand-list — no gate enforces them.~~ **Gated 2026-08-19**:
+  `Tools/check_handlists.sh` (pre-push, drilled at birth on the planted combatZ omission) — the silent-reset
+  class is structurally impossible now.
 
 - ~~**`deploy_convert.py` recoil block**~~ — FIXED 2026-07-19: (a) the tube's parent is now sampled into `src_w` when
   its name isn't barrel/cannon (was a guaranteed `KeyError` on non-M114 naming); (b) the RecoilArm holds now key an
