@@ -19,10 +19,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   per-machine migration adopts pre-collapse deployed state into the source, and a missing source adopts the
   artifact (a fresh clone against a live install loses nothing). Artifact-refresh failure is loud but never
   fails a Save — the source is safe, the game just runs stale until the next success. Scope: the model
-  registry; districts/formations keep the old pattern as follow-up candidates. **Built, NOT drilled** — the
-  drill: (1) recompile → migration marker set; (2) Save an entry → both files' timestamps advance; (3)
-  hand-edit the DEPLOYED file → Refresh → Console warns "build artifact"; (4) delete the deployed file →
-  Refresh → recreated + logged; (5) the external-edit coherence drill now targets the SOURCE file → banner.
+  registry; districts/formations keep the old pattern as follow-up candidates. **DRILLED same evening, all
+  five steps**: Save advanced both files in the same second, byte-identical; a planted hand-edit in the
+  DEPLOYED file drew the build-artifact Console warning; deleting the deployed file had it recreated on the
+  next Refresh **from the edited source** (proving authority — the artifact hand-edit was wiped exactly as
+  promised); and a planted external edit of the SOURCE raised the coherence banner, closed by ↻ Reload. The
+  drill also caught one label straggler: the Lab's footer still named the deployed path — fixed to name the
+  source.
 
 - **OFFSITE BACKUP: VERIFIED END-TO-END — AND SELF-RECOVERING (2026-08-19).** The one backup layer never
   watched succeed finally got its drill: a manual "Back up now" produced a registry-verified snapshot AND its
