@@ -375,7 +375,11 @@ namespace HumankindAssetFramework
             if (off == 0f) return;
             tr.y += off;
             SetMember(os, "Translation", tr);
-            if (!combatZLogged) { combatZLogged = true; Plugin.Diag($"[Uni] {e.resourceName} combatZ {e.combatZ} engaged (combat={combat}, eased {CombatZEaseSecs}s)"); }
+            SetMember(entry, "ObjectSpace", os);   // ObjectSpace is a BOXED STRUCT: without this write-back the mutation
+                                                   // dies in the box — drill-caught 2026-08-19 ("I did not see any change!!"
+                                                   // while the engaged log fired: the log proved the COMPUTATION, not the
+                                                   // write). Same last-line-of-the-pattern omission family as the Lab port.
+            if (!combatZLogged) { combatZLogged = true; Plugin.Diag(string.Format(System.Globalization.CultureInfo.InvariantCulture, "[Uni] {0} combatZ {1} engaged (combat={2}, eased {3}s)", e.resourceName, e.combatZ, combat, CombatZEaseSecs)); }
         }
 
         static void ApplyPositionOffset(ModelEntry e, object entry)
