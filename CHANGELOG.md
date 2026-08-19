@@ -10,6 +10,25 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **COMBAT HEIGHT OFFSET — the diving submarine (2026-08-19, user-designed).** "It would be cool that in combat
+  they would be actually submerged": new shared field **`combatZ`** (schema field 67; 0 = off) — world units
+  added to a unit's height while its army is battle-locked (deployment → resolution), negative dives, positive
+  lifts, **eased 2s both ways** via a combat-flip timestamp carried in the state samples. Works for STATIC and
+  animated entries alike: statics bake their Position offset into the mesh, but a state-dependent offset can
+  only ever be runtime — this is their one legitimate runtime translate, applied at the same proven per-frame
+  ObjectSpace seam as everything else. Combat stance comes per-pawn from the battle-lock sampler the
+  state-driven clips already read; its gate now admits `combatZ` entries, so a plain static sub joins sampling.
+  Authoring: a Flight-character slider plus an **"In combat" preview toggle** — the model drawn at battle-locked
+  height with the keel/top readout following, which is how the submarine was calibrated to snorkel-only trim
+  (top +0.05u vs the crest-inclusive waterline; `combatZ` −0.13). Validator range rule + test (112 tests);
+  parity green at 67 fields/80 parsed keys. **Editor-side drill caught a real bug the same hour:** Save reset
+  the new field to 0 — `RebaseLabOwnedOnRegistry` re-applies only a hand-maintained Factory-owned field list,
+  and the new field wasn't on it. Fixed, and the list now carries a MAINTENANCE TRAP warning (a new Factory
+  field needs: schema, regex fallback, UI, and that list — the parity gate does not check it; same silent-reset
+  family as the label lies). **In-game: built, NOT yet drilled** — the drill is one battle: dive on deployment,
+  fight submerged, resurface at resolution, one `[Uni] … combatZ engaged` log line. Also same day: preview
+  zoom-in deepened 5× (0.1 → 0.02 minimum distance factor) for close-up trim inspection.
+
 - **VEHICLE LAB POLISH (2026-08-19, both user finds).** (1) The **Static tracks** isolation switch moved to the
   top of the Spin section and now gates the tread dials (speed/detail gray out when the tracks won't run —
   decision before dials). (2) **Save recipe… kept reverting to the raw model's name**: saved as `prod3`, the

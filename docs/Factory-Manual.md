@@ -96,6 +96,13 @@ Two things the flat preview plane cannot show:
   nothing anywhere until you **Bake**. (The runtime-fields help text says "applies on load"; for static
   entries' position that is wrong — a known label lie, on the audit list.)
 
+**Combat height offset** (Flight character section): raise or *lower* the unit while its army is locked in a
+battle, eased ~2s both ways — a submarine with a negative value fights submerged and resurfaces afterwards
+(the ENCReload sub runs −0.13: snorkel-only). Runtime field — Save settings + relaunch, no re-bake — and it
+works for static and animated models alike. Calibrate with the preview's **"In combat"** checkbox: the model
+draws at its battle-locked height and the keel/top readout follows, so "only the snorkel above the waves" is a
+number (top +0.05u), not a squint.
+
 Also remember the tank-destroyer lesson: **a compensating dial outlives the defect it compensated for.** If a
 model was dialed up/down to fix a sinking bake in the past, a later bake-level fix (auto-ground) turns that
 dial into a float. The keel readout + ground/water reference makes such stale dials visible at a glance.
