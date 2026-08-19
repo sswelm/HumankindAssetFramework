@@ -10,6 +10,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **ANIMATION LAB PREVIEW TEXTURE-CORRECT (2026-08-19)** — the user caught the day-old Factory first-select
+  texture fix stopping at the Factory's window: the Lab's fit preview has its own copy of the renderer-flattening
+  loop and still paired original FBX UVs with the packed atlas on load. The substitution was ported — and the
+  port itself was drilled into a second finding: it landed in the rebuild path while the domain-reload *restore*
+  path (the one that runs right after a compile) still drew unsubstituted. Both fixed, user-verified. Postmortem
+  epilogue added: a fix in copied code needs grepping for the copies, and a fix has as many deployment points as
+  its code has call sites.
+
 - **THE WATERLINE, CALIBRATED (2026-08-18) — vessels now preview at the game's true water level.** The submarine
   that "looked right in preview, near-invisible in game" unravelled into a measured constant: the game floats
   naval pawns with the mean water surface **~0.05u above the model origin**, while the preview's plane sat at

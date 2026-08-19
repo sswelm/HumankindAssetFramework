@@ -73,3 +73,17 @@ declared successful under review-only.
   `APPLIED / NO MATCH` log line is the difference between six weeks and six minutes.
 - **"Cosmetic" is not a severity when it is chronic.** Price display bugs by the trust they burn, not the data
   they risk.
+
+## Epilogue (2026-08-19): the fix was correct, its deployment was incomplete — twice
+
+The day after "finally it looks correct," the user caught the **Animation Lab** showing the same corrupt pairing
+on load: the substitution fix was surgical to the Factory's `LoadPreview`, and the Lab has its own *copy* of the
+same renderer-flattening loop. Porting it took minutes — and then the port itself missed a call site: it landed
+in the Lab's *rebuild* path while the *domain-reload restore* path (the one that actually runs right after a
+compile — precisely when the user looks) still drew unsubstituted. Two more lessons for the list:
+
+- **When a fix lands in copied code, grep for the copies.** The identical `sharedMesh`-flattening loop existed
+  in two windows; fixing the one you're looking at is half a fix.
+- **A fix has as many deployment points as the code has call sites** — the one-forgotten-call-site pattern (the
+  same one the Factory's SelectEntry funnel was built to kill) applies to fixes too. The loud `APPLIED / NO
+  MATCH` log earned its keep again: it separated "wrong path ran" from "fix is wrong" in one Console glance.
