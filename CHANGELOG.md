@@ -10,6 +10,20 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **CORRUPT-SOURCE PINPOINT + ONE-CLICK RECOVERY (2026-08-19, user design: "not only a try/catch but recovery
+  functionality") — DRILLED.** A hand-edit that breaks pack.json now gets: a **pinpointed error** (Newtonsoft
+  re-parse purely for diagnosis — the drill's planted missing comma reported as "line 19, position 12, path
+  models[0].scale"); a **timestamped preserved copy** (a second corruption never overwrites the first's
+  evidence); and a **red recovery banner** in the Factory with one-click paths, each validated (must parse and
+  hold models) before writing: *Restore last deploy* (the artifact — freshest valid copy, no git needed),
+  *Restore last commit* (git checkout, then validated like any candidate), *Open broken file* (fix the named
+  line by hand). Save/Bake stay locked until recovered — the no-wipe guarantee unchanged. Drill: planted comma
+  → banner named the exact line → Restore-last-deploy brought all 22 models back with the corrupt copy
+  preserved. Drill finding fixed same hour: the corrupt error logged on EVERY Load poll (dozens of Console
+  lines for one broken file) — now once per corruption; the banner is the persistent surface. Also from this
+  exchange, a process lesson recorded: the editor already logs its actions — the drills' narration burden was
+  the operator not reading Editor.log.
+
 - **THE PACK.JSON COLLAPSE (2026-08-19) — one registry, one truth (backlog #3 closed).** The deployed/project
   pair — deployed authoritative, project a dual-written shadow — surprised every external tool and fed the
   coherence-drill era. Flipped to the honest model: the **git-tracked project file is THE registry** (the
