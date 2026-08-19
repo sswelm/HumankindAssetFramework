@@ -35,14 +35,17 @@ by when they'll bite.
   family. All five drills passed; drill 3 caught a real unreachable-banner defect — see CHANGELOG); ~~(2) a real animated→static path~~ **largely covered** by the "Make static…" button (strips the
   animation config from the saved registry; the offer-on-armature-less-failure variant remains nice-to-have);
   (3) document (or collapse) the two-pack.json design — the DEPLOYED copy being the editor's source of truth
-  surprises every external tool — *documented in Factory-Manual 2026-08-18; collapse still open*; (4) audit
-  remaining "label lies" like the tris slider (grep defaults substituted behind explicit user values) — *open;
-  second confirmed instance 2026-08-18: the "Runtime — applied on load, no re-bake" section header covers
-  Position offset, which for STATIC entries is baked into the mesh and silently needs a re-bake (found via the
-  submarine waterline hunt — the field should state which mode applies to the current entry). Third specimen,
-  adjacent family, 2026-08-19: the Factory-owned hand-list in `RebaseLabOwnedOnRegistry` silently RESETS any
-  new Factory field that isn't added to it (combatZ, drill-caught the day it landed) — the audit should cover
-  every hand-list that must track the schema, not just labels*.
+  surprises every external tool — *documented in Factory-Manual 2026-08-18; collapse still open*; ~~(4) audit
+  remaining "label lies" like the tris slider~~ **DONE 2026-08-19** — swept both families mechanically
+  (UI-field extraction diffed against every hand-list; every runtime/no-re-bake claim read against its code
+  path). Hand-lists: the Factory rebase (34 fields), the Lab rebase (56) and the bake-config capture are all
+  COMPLETE — zero UI-edited fields uncovered. Three findings, all fixed same day: MakeStatic left
+  gunElevMax/gunElevAxis/animPhaseSpread uncleared (gunElev is runtime-applied — a made-static gun kept
+  elevating: the cursed-leftover class MakeStatic exists to kill); the Save-settings status claimed Position
+  offset/Size "apply on load" unconditionally (false for statics — now entry-type-conditional); Browse's
+  animUnitFix auto-set is discarded by Save settings (animation-owned — the status now says so). The original
+  tris-slider example was already clean (tooltip + bake log disclose the double-sided halving). Residual risk
+  is the MAINTENANCE-TRAP comments at each hand-list — no gate enforces them.
 
 - ~~**`deploy_convert.py` recoil block**~~ — FIXED 2026-07-19: (a) the tube's parent is now sampled into `src_w` when
   its name isn't barrel/cannon (was a guaranteed `KeyError` on non-M114 naming); (b) the RecoilArm holds now key an

@@ -10,6 +10,20 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE HAND-LIST & LABEL-LIES AUDIT (2026-08-19)** — backlog #4, the last open entry-state coherence item,
+  executed mechanically rather than by eyeball: every field the Factory/Lab UI edits was extracted by pattern
+  and diffed against every hand-maintained list (the Factory ownership rebase, the Lab ownership rebase, the
+  bake-config capture), and every "runtime / no re-bake / applies on load" claim was read against its actual
+  code path. The lists came back **complete** (34/56/29 fields, zero uncovered) — the combatZ drill-catch the
+  day before had already fixed the one real hole. Three findings, fixed same day: **Make static left
+  gunElevMax/gunElevAxis/animPhaseSpread alive** (gun elevation is runtime-applied to every non-donor entry, so
+  a made-static gun kept its elevation behavior — precisely the "cursed leftover" class Make static was built
+  to kill); the **Save-settings status** claimed Position offset/Size apply on load — false for static entries
+  (now says which fields are baked, per entry type); **Browse's auto-set of animUnitFix** is discarded by Save
+  settings (animation-owned) — the status now discloses it. One stale specimen retired: the tris slider already
+  discloses its double-sided halving in tooltip and bake log. Residual, accepted: the hand-lists are guarded by
+  MAINTENANCE-TRAP comments, not by a gate.
+
 - **COMBAT HEIGHT OFFSET — the diving submarine (2026-08-19, user-designed).** "It would be cool that in combat
   they would be actually submerged": new shared field **`combatZ`** (schema field 67; 0 = off) — world units
   added to a unit's height while its army is battle-locked (deployment → resolution), negative dives, positive
