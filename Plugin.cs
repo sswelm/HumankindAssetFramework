@@ -22,6 +22,23 @@ namespace HumankindAssetFramework
         // normal run. OFF by default -> quiet. Summaries ("loaded N models"), warnings and errors stay on Log directly.
         internal static void Diag(string msg) { if (VerboseLog != null && VerboseLog.Value) Log?.LogInfo(msg); }
 
+        // ---- LOGGING HYGIENE (2026-08-19 logging audit) ----
+        // LOG-ONCE, systematized: the codebase had grown 16 hand-rolled `static bool xLogged` guards, and the
+        // pattern's failure mode is forgetting one (the corrupt-source error spammed dozens of Console lines the
+        // day it shipped). One keyed gate replaces them: Once(key) is true exactly once per process per key.
+        static readonly System.Collections.Generic.HashSet<string> onceKeys = new System.Collections.Generic.HashSet<string>();
+        internal static bool Once(string key) { lock (onceKeys) return onceKeys.Add(key); }
+        internal static void DiagOnce(string key, string msg) { if (Once(key)) Diag(msg); }
+        internal static void LogOnceInfo(string key, string msg) { if (Once(key)) Log?.LogInfo(msg); }
+        internal static void LogOnceWarning(string key, string msg) { if (Once(key)) Log?.LogWarning(msg); }
+        // INVARIANT FORMATTING, by policy: C# string interpolation formats with the CURRENT culture at the call
+        // site, so a wrapper cannot retro-fix `$"…{someFloat}…"` (the combatZ line printed "-0,13" on a Dutch
+        // locale). POLICY: any log line or file that interpolates a float/double/Vector uses Inv($"…") — it
+        // formats the whole interpolation invariantly. Files HAF machine-reads are already invariant (verified
+        // in the audit: config parses all pass InvariantCulture; the report writers emit ints or pre-formatted
+        // strings). Console lines migrate opportunistically as they're touched.
+        internal static string Inv(System.FormattableString f) => System.FormattableString.Invariant(f);
+
         internal static ConfigEntry<string> TargetMod;       // which mod's assets to access
         internal static ConfigEntry<string> AssetNameFilter; // substring that identifies that mod's assets
         internal static ConfigEntry<KeyCode> ToggleKey;      // open/close the feedback window (Shift+ToggleKey = dump GPU mesh-buffer usage)

@@ -553,7 +553,6 @@ namespace HumankindAssetFramework
         // layer's CPU WriteContent (the mesh-scale engine's proven write path) and Apply. A degenerate point renders
         // as nothing regardless of who draws it. Self-verifying probe (first vertex) makes it idempotent and
         // reload-resilient; re-run from the NEAR tick. Affects ONLY the layer-0 blur slice — bodies live in layer 2.
-        static bool ghostCrushLogged;
         internal static void CrushGhostSlice(object animMgr, ModelEntry e, uint donorFxIdx)
         {
             try

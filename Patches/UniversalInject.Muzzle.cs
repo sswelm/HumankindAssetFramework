@@ -349,7 +349,6 @@ namespace HumankindAssetFramework
         // state-dependent offset can only ever be runtime — this is the one legitimate runtime translate they get.
         // Re-applied each frame on the game's fresh world position, so it never accumulates. Logged once.
         const float CombatZEaseSecs = 2f;
-        static bool combatZLogged;
         static void ApplyCombatZ(ModelEntry e, object entry)
         {
             if (e.combatZ == 0f) return;
@@ -379,7 +378,9 @@ namespace HumankindAssetFramework
                                                    // dies in the box — drill-caught 2026-08-19 ("I did not see any change!!"
                                                    // while the engaged log fired: the log proved the COMPUTATION, not the
                                                    // write). Same last-line-of-the-pattern omission family as the Lab port.
-            if (!combatZLogged) { combatZLogged = true; Plugin.Diag(string.Format(System.Globalization.CultureInfo.InvariantCulture, "[Uni] {0} combatZ {1} engaged (combat={2}, eased {3}s)", e.resourceName, e.combatZ, combat, CombatZEaseSecs)); }
+            // the Once/Inv exemplar (2026-08-19 logging audit): keyed one-shot + invariant interpolation — the
+            // pattern for NEW log-once sites (the 15 legacy static-bool guards stay: several are load-bearing state)
+            Plugin.DiagOnce("combatZ", Plugin.Inv($"[Uni] {e.resourceName} combatZ {e.combatZ} engaged (combat={combat}, eased {CombatZEaseSecs}s)"));
         }
 
         static void ApplyPositionOffset(ModelEntry e, object entry)
