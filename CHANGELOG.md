@@ -10,6 +10,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE SIZE-REFERENCE KIT (2026-08-19, user-designed piece by piece).** "A default humankind man as a
+  reference would really help assess size" → both previews (Factory + Lab) gained a **Ref man** — a stylized
+  figure at game human height with X/Y position dials — and a **Ruler** (vertical stick, 0.5u ticks, long
+  ticks at whole units; units not meters, since every bake picks its own world scale). His height was
+  **calibrated 0.9 → 1.1 → 1.85** the waterline way and verified head-to-head against a human-scale soldier
+  model. The build was its own three-round drill: hand-rolled winding culled every face ("I don't see any
+  man"), shared-vertex double-siding zeroed the normals, and the final form — flat-shaded triangles in both
+  windings via one shared box-prop builder — is now the house pattern for preview props. Rendering hand-built
+  meshes joins the lesson list: emit both windings with per-face vertices, always.
+
 - **VEHICLE LAB: RECIPE FORENSICS + THE SPIN MASTER SWITCH (2026-08-19).** The canoe's recipe "lost" its wave
   configuration — actually never had it: the recipe predates the wave fields, and absent JSON fields load as
   C# defaults (the honest choice; inferring "wave on" from the `_Wave.glb` filename would be guessing). The

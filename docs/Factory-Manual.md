@@ -99,9 +99,11 @@ Two things the flat preview plane cannot show:
   nothing anywhere until you **Bake**. (The runtime-fields help text says "applies on load"; for static
   entries' position that is wrong — a known label lie, on the audit list.)
 
-**Ref man** (preview toggle, Factory and Animation Lab alike): a figure at in-game human pawn height beside
-the model — the size reference. Its height (0.9u) is a calibration constant like the water level: pin it once
-by comparing against a real infantry pawn in-game.
+**Ref man & Ruler** (preview toggles, Factory and Animation Lab alike): a human figure at game pawn height
+beside the model — **1.85u**, calibrated stepwise (0.9 → 1.1 → 1.85) against a human-scale soldier model and
+verified head-to-head — with X/Y position fields to walk him around, plus a vertical **measuring stick**
+(ticks every 0.5 game units, long ticks at whole units). Deliberately in *units*, not meters: every bake
+picks its own world scale, so units are the one honest common measure; the man is the human anchor beside it.
 
 **Combat height offset** (Flight character section): raise or *lower* the unit while its army is locked in a
 battle, eased ~2s both ways — a submarine with a negative value fights submerged and resurfaces afterwards
