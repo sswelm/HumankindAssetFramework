@@ -84,5 +84,49 @@ namespace HumankindAssetFramework.Tests
             // and this is what Hk_FormationPrefabExtend needs (it broke when ResolveType only did full names).
             Assert.Same(typeof(System.Text.StringBuilder), GameBinding.Cached("StringBuilder"));
         }
+
+        // ---- A5, the struct batch: DERIVED bindings — a struct type resolved structurally from an anchor member
+        // (field type / array element), the same path the runtime code walks, so no name-guess false positives.
+        class DerivationDummy
+        {
+#pragma warning disable 0649, 0169
+            public DummyElement[] items;                       // array-element derivation (pawnEntries[] shape)
+            public System.Collections.Generic.List<DummyElement> listItems;   // generic-arg derivation (Battles shape)
+            DummyElement single;                               // NON-public field-type derivation (game fields are often private)
+            public string PropTyped { get; set; }              // property-type derivation
+#pragma warning restore 0649, 0169
+        }
+        class DummyElement { public int X; }
+
+        [Fact]
+        public void Derived_FieldArrayGenericAndProperty_AllResolve()
+        {
+            var t = typeof(DerivationDummy);
+            Assert.Same(typeof(DummyElement), GameBinding.ElementType(GameBinding.FieldOrPropType(t, "items")));
+            Assert.Same(typeof(DummyElement), GameBinding.ElementType(GameBinding.FieldOrPropType(t, "listItems")));
+            Assert.Same(typeof(DummyElement), GameBinding.FieldOrPropType(t, "single"));   // non-public reached
+            Assert.Same(typeof(string), GameBinding.FieldOrPropType(t, "PropTyped"));
+        }
+
+        [Fact]
+        public void Derived_BrokenAnchor_YieldsNullNotThrow()
+        {
+            // A renamed anchor member = the derivation chain breaks = null type = a [MISSING TYPE] line in the
+            // report, never an exception at boot (the drift must be LOUD, not fatal).
+            Assert.Null(GameBinding.FieldOrPropType(typeof(DerivationDummy), "renamedByGameUpdate"));
+            Assert.Null(GameBinding.ElementType(GameBinding.FieldOrPropType(typeof(DerivationDummy), "renamedByGameUpdate")));
+            Assert.Null(GameBinding.ElementType(typeof(string)));   // non-array, non-generic → null
+            Assert.Null(GameBinding.FieldOrPropType(null, "items"));
+        }
+
+        [Fact]
+        public void Derived_MissingStructMember_FlagsLikeAnyDep()
+        {
+            // End-to-end: a derived type feeding a Dep behaves identically — a renamed struct member is flagged.
+            var derived = GameBinding.ElementType(GameBinding.FieldOrPropType(typeof(DerivationDummy), "items"));
+            var r = GameBinding.Validate(new[] { new GameBinding.Dep(derived, "DummyElement", "X", "RenamedByUpdate") }).Single();
+            Assert.True(r.TypeFound);
+            Assert.Equal(new[] { "RenamedByUpdate" }, r.MissingMembers.ToArray());
+        }
     }
 }

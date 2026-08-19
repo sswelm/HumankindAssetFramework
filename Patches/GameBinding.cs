@@ -130,6 +130,39 @@ namespace HumankindAssetFramework
         internal static Type GameObjectPoolController        => Cached("PresentationGameObjectPoolController");
         // ---- world state ----
         internal static Type Sandbox             => Cached("Amplitude.Mercury.Sandbox.Sandbox");
+
+        // ---- A5, the STRUCT BATCH (2026-08-19): game structs HAF reaches STRUCTURALLY — as array elements and
+        // field values off the types above — so their NAMES never appear in code and a name-based catalog entry
+        // would be a guess (false-positive risk). Each is DERIVED from its anchor member instead: the same path
+        // the runtime code walks. A renamed anchor OR a renamed struct member both surface as one named line in
+        // the report. These are the members whose silent drift previously meant torn skinning / dead offsets. ----
+        internal static Type FieldOrPropType(Type t, string member)
+        {
+            for (var cur = t; cur != null; cur = cur.BaseType)
+            {
+                var f = cur.GetField(member, MemberFlags); if (f != null) return f.FieldType;
+                var p = cur.GetProperty(member, MemberFlags); if (p != null) return p.PropertyType;
+            }
+            return null;
+        }
+        internal static Type ElementType(Type t) =>
+            t == null ? null : t.IsArray ? t.GetElementType() : t.IsGenericType ? t.GetGenericArguments().FirstOrDefault() : null;
+        static Type CachedDerived(string key, Func<Type> derive)
+        {
+            if (_typeCache.TryGetValue(key, out var c) && c != null) return c;
+            Type t = null; try { t = derive(); } catch { }
+            if (t != null) _typeCache[key] = t;
+            return t;
+        }
+        internal static Type PawnEntry          => CachedDerived("PawnEntry",          () => ElementType(FieldOrPropType(PawnManager, "pawnEntries")));
+        internal static Type PawnObjectSpace    => CachedDerived("PawnObjectSpace",    () => FieldOrPropType(PawnEntry, "ObjectSpace"));
+        internal static Type PawnEntryPose      => CachedDerived("PawnEntryPose",      () => FieldOrPropType(PawnEntry, "Pose0"));
+        internal static Type PawnBoneRotation   => CachedDerived("PawnBoneRotation",   () => FieldOrPropType(PawnEntry, "BoneRotation0"));
+        internal static Type SkeletonAsset      => CachedDerived("SkeletonAsset",      () => FieldOrPropType(PresentationPawnDefinitionAddOn, "Skeleton"));
+        internal static Type SkeletonBoneInfo   => CachedDerived("SkeletonBoneInfo",   () => ElementType(FieldOrPropType(SkeletonAsset, "BoneInfos")));
+        internal static Type PresentationArmy   => CachedDerived("PresentationArmy",   () => ElementType(FieldOrPropType(PresentationEntityFactoryController, "PresentationArmyEntities")));
+        internal static Type BattleReportController => CachedDerived("BattleReportController", () => FieldOrPropType(Presentation, "PresentationBattleReportController"));
+        internal static Type PresentationBattle => CachedDerived("PresentationBattle", () => ElementType(FieldOrPropType(BattleReportController, "Battles")));
         // ---- runtime module order (pack load order follows the game's own mod order — docs/Multi-Mod.md) ----
         internal static Type FrameworkServices   => Cached("Amplitude.Framework.Services");
         internal static Type RuntimeService      => Cached("Amplitude.Mercury.Runtime.IRuntimeService");
@@ -257,9 +290,10 @@ namespace HumankindAssetFramework
             // presentation core
             new Dep(Presentation, nameof(Presentation), "PresentationEntityFactoryController", "PresentationBattleReportController"),   // the STATIC army-walk root — read by respawn / facing / class-scan / census; a rename silently no-ops all four (was uncatalogued: critical-review #5)
             new Dep(PresentationEntityFactoryController, nameof(PresentationEntityFactoryController), "PresentationArmyEntities"),   // the next hop off that root — the army array every walk enumerates
-            new Dep(PresentationPawn, nameof(PresentationPawn)),
-            new Dep(PresentationUnit, nameof(PresentationUnit), "UnitDefinition", "GUID", "Pawns", "Formation"),
-            new Dep(PresentationUnitHolder, nameof(PresentationUnitHolder)),
+            new Dep(PresentationPawn, nameof(PresentationPawn), "Transform", "PresentationUnit"),   // struct batch: the two members every walk reads off a pawn
+            new Dep(PresentationUnit, nameof(PresentationUnit), "UnitDefinition", "GUID", "Pawns", "Formation",
+                "PresentationUnitDefinition", "IsLoaded", "IsNaval", "IsAnyPawnMoving"),   // struct batch: the rest of what the walks read
+            new Dep(PresentationUnitHolder, nameof(PresentationUnitHolder), "PresentationUnit"),
             new Dep(PresentationDistrict, nameof(PresentationDistrict), "presentationLevelBuildComponent", "ApplyGroundMaterialDefinition", "ConstructibleDefinitionName",
                 "UpdateLevelBuild", "UpdateGroundMaterial", "UpdateHexagonSculpting", "mainLevelBuildComponantLayer", "visualAffinityName", "initialVisualAffinityName"),
             // animation / pawn
@@ -302,6 +336,20 @@ namespace HumankindAssetFramework
             // site migrated onto the catalog (was a raw Type.GetType in GetRuntimeModulesRaw); a rename now shows here.
             new Dep(FrameworkServices, nameof(FrameworkServices), "GetService"),
             new Dep(RuntimeService, nameof(RuntimeService), "GetRuntimeModules"),
+            // THE STRUCT BATCH (A5, 2026-08-19) — derived types (see the accessors): the GPU-facing pawn structs the
+            // pose seam writes every frame, the skeleton/bone structs the preflight + injection read, and the
+            // army/battle walk the state sampler enumerates. A [MISSING TYPE] on a derived entry means its ANCHOR
+            // member was renamed (the derivation chain broke); a [MISSING MEMBER] means the struct itself changed.
+            // Pose0/Pose8 + BoneRotation0/BoneRotation3 are the ENDPOINTS of the slot ranges the code indexes.
+            new Dep(PawnEntry, nameof(PawnEntry), "ObjectSpace", "HideFactor", "SkeletonId", "PawnDescriptorId", "OutputLayerInstance", "Pose0", "Pose8", "BoneRotation0", "BoneRotation3"),
+            new Dep(PawnObjectSpace, nameof(PawnObjectSpace), "Translation", "Rotation", "Scale"),
+            new Dep(PawnEntryPose, nameof(PawnEntryPose), "AnimationId", "Time", "Weight"),
+            new Dep(PawnBoneRotation, nameof(PawnBoneRotation), "Angle", "SkeletonBoneIndex", "AxisIndex"),
+            new Dep(SkeletonAsset, nameof(SkeletonAsset), "BoneInfos"),
+            new Dep(SkeletonBoneInfo, nameof(SkeletonBoneInfo), "Name", "Local", "BindPose", "ParentIndex"),
+            new Dep(PresentationArmy, nameof(PresentationArmy), "PresentationUnit", "ArmyInfo", "IsLockedByBattle"),
+            new Dep(BattleReportController, nameof(BattleReportController), "Battles"),
+            new Dep(PresentationBattle, nameof(PresentationBattle), "AllUnits", "AttackerGroup", "DefenderGroup"),
             // NOTE: AudioEventHandle has an accessor but is NOT in this startup catalog — it's a genuine LATE-LOADER (the
             // Wwise event-handle type loads after the menu), so it can't resolve at this report's Awake time and would
             // false-positive. Its accessor re-resolves on first use (the audio catalog dump / audition) in a loaded game.
