@@ -56,9 +56,14 @@ button.
 
 ### Vehicle Lab — `Tools ▸ HAF ▸ Vehicle Lab`
 
-> Tracked vehicles: the Spin section leads with **Static tracks (no movement)** — the isolation switch that rigs
-> the tread loops rigid (wheels still spin, far fewer bones); the tread speed/detail dials below it are only
-> live when the tracks actually run. Rig options apply through **Generate rig → Bake → mod build**.
+> The Spin section leads with **Enable spin animation** — the master switch: off, the rig generates with zero
+> wheel/rotor rotation and static tracks, keeping every bone, marking and dial for re-enabling (no more
+> unmarking every wheel to still a vehicle). With no wheel/rotor/turret marked at all the section reads
+> **inert** and grays out — except that *Spin frames* still floors the generated clip length (the one
+> spin↔wave coupling, stated in the UI). Tracked vehicles then get **Static tracks (no movement)** — tread
+> loops rigid, wheels still spin, far fewer bones — gating the tread speed/detail dials. Recipes that predate
+> newer fields load them at defaults (absent JSON = the field's default — the Lab never guesses a config the
+> recipe doesn't state). Rig options apply through **Generate rig → Bake → mod build**.
 Turn a **raw static** vehicle model into a rigged, animated GLB (Root + per-wheel/turret bones, a procedural *Spin*
 action, optional rolling tracks and wave-rock) that the animated bake path then consumes — no Blender knowledge needed.
 *Key controls:* raw model + output GLB, **Probe parts**, per-part role assignment, use-source-skeleton (for pre-rigged

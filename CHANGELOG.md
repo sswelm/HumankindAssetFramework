@@ -10,6 +10,21 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **VEHICLE LAB: RECIPE FORENSICS + THE SPIN MASTER SWITCH (2026-08-19).** The canoe's recipe "lost" its wave
+  configuration — actually never had it: the recipe predates the wave fields, and absent JSON fields load as
+  C# defaults (the honest choice; inferring "wave on" from the `_Wave.glb` filename would be guessing). The
+  values were **recovered by forensics on the shipped GLB** — decoding the 361-key quaternion track gave pitch
+  2.4° × 1 swing, roll ≈ 0, over a **15-frame** cycle — which also caught the restore's own first error: the
+  modern default of 120 rock-frames would have slowed the shipped bob 8× (at generation time the rock-frames
+  argument didn't exist and fell back to Spin frames = 15; the rig script's clip length is
+  `max(spin frames, rock frames)`, the one real spin↔wave coupling, now named in the UI instead of hidden).
+  Then two UX rounds on the Spin section: it **grays out as "inert"** when no wheel/rotor/turret is marked
+  (with the clip-length exception disclosed), and — the user's follow-up exposing the gating's blind spot —
+  an **"Enable spin animation" master switch**: disabling spin on a *wheeled* vehicle used to mean unmarking
+  every wheel (the wave-checkbox lesson of 08-01, relearned). Off = zero spin degrees + forced-static tracks
+  at Generate; bones, markings and dials all survive toggling; the recipe field defaults TRUE so old recipes
+  keep their motion. Recipe save/load hand-lists updated on both sides.
+
 - **THE LOGGING AUDIT — and the two real holes its questions exposed (2026-08-19).** Asked "how good is our
   logging?", the survey said: 707 plugin log calls, 264 editor calls, 10 machine-readable files, 12 one-shot
   guards — runtime logging excellent and battle-proven, with three gaps, all filled: (1) **invariant
