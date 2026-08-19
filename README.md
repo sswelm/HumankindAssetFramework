@@ -129,7 +129,9 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
   `dependsOn` validation, load order that follows **Humankind's own mod order**, declared overrides, and a `haf_load_report.txt` of every decision.
 - **Guided authoring** — Pick-driven clip/bone/hide fields, an embedded interactive 3D preview, auto-detected game and
   Blender paths, and an in-game **F8** status window (compatibility health, a Smoke Test, the live GPU-budget readout,
-  and the audio/texture authoring aids). Every launch also writes a machine-readable `haf_bindings_report.txt` — a
+  and the audio/texture authoring aids). The Smoke Test runs deep per-entry checks *plus* a live **seam write-back
+  self-test**, names uninjected entries with a diagnosis, flags untested coverage instead of staying silently green,
+  and writes its verdict to `haf_smoke_report.txt`. Every launch also writes a machine-readable `haf_bindings_report.txt` — a
   diffable list of the ~160 reflection bindings — 59 game types including the hot-path structs, derived
   structurally so there are no name-guess false positives — that names any game-update drift in one line, headless-checkable.
 - **Backup & Restore** — a guarded, additive snapshot of everything ENCReload's git doesn't track.
