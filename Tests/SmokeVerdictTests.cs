@@ -314,6 +314,60 @@ namespace HumankindAssetFramework.Tests
             Assert.Empty(f.MissingAssets);
         }
 
+        // ---- 2026-08-19 five-point upgrade ----
+
+        [Fact]
+        public void SeamWriteBack_Failed_FailsTheSmoke_SkippedAndOkDoNot()
+        {
+            var bad = UniversalInject.SmokeVerdict(new UniversalInject.SmokeFacts { Models = 1, SeamWriteBack = "FAILED (died in the box)" });
+            Assert.False(bad.Pass);
+            Assert.Contains("write-back self-test FAILED", bad.Summary);
+            var ok = UniversalInject.SmokeVerdict(new UniversalInject.SmokeFacts { Models = 1, SeamWriteBack = "ok" });
+            Assert.True(ok.Pass);
+            Assert.Contains("seam write-back ok", ok.Summary);
+            var skipped = UniversalInject.SmokeVerdict(new UniversalInject.SmokeFacts { Models = 1, SeamWriteBack = "skipped (no live pawns)" });
+            Assert.True(skipped.Pass);   // nothing to probe is not a failure — but it says so
+            Assert.Contains("skipped (no live pawns)", skipped.Summary);
+        }
+
+        [Fact]
+        public void Gather_NotRepointed_IsNamedWithReason_ButInformational()
+        {
+            var f = new UniversalInject.SmokeFacts { Models = 2, Repointed = 1 };
+            UniversalInject.GatherEntryFacts(new ModelEntry { resourceName = "P", sa = 1 }, f);
+            UniversalInject.GatherEntryFacts(new ModelEntry { resourceName = "D", disabled = true }, f);
+            Assert.Contains("P (no unit on the map this session)", f.Uninjected);
+            Assert.Contains("D (disabled)", f.Uninjected);
+            var res = UniversalInject.SmokeVerdict(f);
+            Assert.True(res.Pass);   // never a failure — but the delta is NAMED
+            Assert.Contains("awaiting injection: P (no unit on the map this session), D (disabled)", res.Summary);
+        }
+
+        [Fact]
+        public void VacuousCoverage_IsNoted_NeverFailed()
+        {
+            var f = new UniversalInject.SmokeFacts { Models = 3, Repointed = 1, DistrictsChecked = 2, TilesActive = 0 };
+            var res = UniversalInject.SmokeVerdict(f);
+            Assert.True(res.Pass);
+            Assert.Contains("NOTE: districts authored but 0 tiles live", res.Summary);
+            var f2 = new UniversalInject.SmokeFacts { Models = 3, Repointed = 0 };
+            var res2 = UniversalInject.SmokeVerdict(f2);
+            Assert.True(res2.Pass);
+            Assert.Contains("NOTE: no entries injected", res2.Summary);
+        }
+
+        [Fact]
+        public void Gather_SamplerStarved_IsNoted_NeverFailed()
+        {
+            var e = new ModelEntry { resourceName = "Sub", repointed = true, combatZ = -0.13f };   // needs the sampler, has no samples
+            var f = new UniversalInject.SmokeFacts { Models = 1, Repointed = 1 };
+            UniversalInject.GatherEntryFacts(e, f);
+            Assert.Single(f.SamplerNotes);
+            var res = UniversalInject.SmokeVerdict(f);
+            Assert.True(res.Pass);
+            Assert.Contains("NOTE: state sampler has no samples for 'Sub'", res.Summary);
+        }
+
         [Fact]
         public void Gather_ConfiguredSound_FailsOnceTried_PendingBeforeThat()
         {

@@ -43,6 +43,10 @@ namespace HumankindAssetFramework
             // Coverage counters — how many facts the deep pass actually verified, so a PASS line SHOWS its work
             // instead of asking to be believed ("checked 47 roles" is auditable; "clean" is not).
             public int RolesChecked, AssetsChecked, SoundsChecked, LayersChecked, DistrictsChecked, TilesActive, FilesChecked;
+            // 2026-08-19 five-point upgrade (user: "can't we apply all?"):
+            public string SeamWriteBack = "";                        // "" = not run; "ok"; "skipped (…)"; "FAILED (…)" — the ObjectSpace round-trip (the combatZ died-in-the-box class), FAILED fails the smoke
+            public List<string> Uninjected = new List<string>();     // "loaded but not injected" entries WITH the reason — the silent 19-of-22 delta, named (informational)
+            public List<string> SamplerNotes = new List<string>();   // state/combat sampler starvation per entry — informational (samples legitimately empty when the unit left the map)
         }
 
         // Back-compat convenience: the original four-signal verdict (deep-check lists empty).
@@ -64,6 +68,15 @@ namespace HumankindAssetFramework
             if (f.BudgetAlarms.Count > 0) fails.Add($"GPU mesh budget near the wall: {string.Join(", ", f.BudgetAlarms)}");
             if (f.DistrictIssues.Count > 0) fails.Add($"{f.DistrictIssues.Count} district issue(s): {string.Join(", ", f.DistrictIssues)}");
             if (f.MissingFiles.Count > 0) fails.Add($"{f.MissingFiles.Count} referenced file(s) missing on disk: {string.Join(", ", f.MissingFiles)}");
+            // The seam self-test: a computed-but-never-written offset (the combatZ box bug) is a hard FAIL — it means
+            // EVERY runtime offset feature is silently dead. "skipped" is not a failure (no pawns to probe).
+            if (f.SeamWriteBack.StartsWith("FAILED")) fails.Add("ObjectSpace write-back self-test " + f.SeamWriteBack);
+            // VACUOUS-COVERAGE notes (silence is not success): a green segment that verified NOTHING says so out loud.
+            // Notes never fail the smoke — they keep the PASS honest about what it did NOT test this session.
+            var notes = new List<string>();
+            if (f.DistrictsChecked > 0 && f.TilesActive == 0) notes.Add("districts authored but 0 tiles live — district path UNTESTED this session");
+            if (f.Models > 0 && f.Repointed == 0) notes.Add("no entries injected — deep checks vacuous (load a save containing your units)");
+            notes.AddRange(f.SamplerNotes);
             bool pass = fails.Count == 0;
             string head = pass ? "PASS" : "FAIL (" + string.Join("; ", fails) + ")";
             return new SmokeResult
@@ -75,9 +88,14 @@ namespace HumankindAssetFramework
                                   $"{f.AssetsChecked} asset(s), {f.SoundsChecked} sound(s), {f.FilesChecked} file(s) on disk, {f.LayersChecked} GPU layer(s)" +
                                   (f.DistrictsChecked > 0 ? $", {f.DistrictsChecked} district(s) [{f.TilesActive} tile(s) live]" : "") +
                                   (f.SeamsChecked > 0 ? $", {f.SeamsChecked} patched seam(s) [{f.SharedSeams.Count} shared]" : "") : "") +
+                          (f.SeamWriteBack.Length > 0 && !f.SeamWriteBack.StartsWith("FAILED") ? $"; seam write-back {f.SeamWriteBack}" : "") +
+                          // The 19-of-22 delta, NAMED: which entries loaded but haven't injected, and why — informational
+                          // ("no unit on map" is normal; a name here you EXPECTED on the map is your lead).
+                          (f.Uninjected.Count > 0 ? $"; awaiting injection: {string.Join(", ", f.Uninjected)}" : "") +
                           // Shared seams are informational on PASS and FAIL alike: another mod on our method isn't an
                           // error, but it IS the first place to look when an interaction bug appears — so name it.
-                          (f.SharedSeams.Count > 0 ? $"; shared with other mods: {string.Join(", ", f.SharedSeams)}" : "")
+                          (f.SharedSeams.Count > 0 ? $"; shared with other mods: {string.Join(", ", f.SharedSeams)}" : "") +
+                          (notes.Count > 0 ? $"; NOTE: {string.Join("; NOTE: ", notes)}" : "")
             };
         }
 
@@ -101,7 +119,22 @@ namespace HumankindAssetFramework
                 Snd(e.soundBattleFile, e.customBattleClip, "battle");
             }
 
-            if (!e.repointed) return;   // deep checks only where the full pipeline provably ran
+            // STATE-SAMPLER health (informational): an entry whose features need the battle-lock/movement sampler
+            // (state clips, combatZ) should have samples while its units are on the map. Empty is legitimate when the
+            // unit left the map (PruneGone clears), so this is a NOTE, not a failure — but a note on a unit you can
+            // SEE on screen means the sampler gate regressed (the combatZ gate-widening class).
+            if (e.repointed && ((e.animStateDriven && e.AnyStateRole) || e.combatZ != 0f))
+            {
+                int sc; lock (e.stateSamples) sc = e.stateSamples.Count;
+                if (sc == 0) f.SamplerNotes.Add($"state sampler has no samples for '{e.resourceName}' (fine if its units left the map; a regression if one is on screen)");
+            }
+
+            if (!e.repointed)
+            {
+                // The silent 19-of-22 delta, named per entry with its diagnosis (informational, never a failure):
+                f.Uninjected.Add($"{e.resourceName} ({(e.disabled ? "disabled" : "no unit on the map this session")})");
+                return;   // deep checks only where the full pipeline provably ran
+            }
             // Asset checks gate on AUTHORED config: a retexture-only entry has no skeleton/atlas of its own and is healthy without them.
             if ((e.sa | e.sb | e.sc | e.sd) != 0) { f.AssetsChecked++; if (e.skeleton == null) f.MissingAssets.Add($"{e.resourceName} skeleton"); }
             if ((e.ta | e.tb | e.tc | e.td) != 0) { f.AssetsChecked++; if (e.tex == null) f.MissingAssets.Add($"{e.resourceName} atlas"); }
@@ -192,6 +225,37 @@ namespace HumankindAssetFramework
                 f.DistrictIssues.Add($"'{d.district}' ground material '{d.groundMaterial}' not found");
         }
 
+        // SEAM WRITE-BACK SELF-TEST (2026-08-19): mutate-and-read-back one live pawn entry's ObjectSpace through the
+        // EXACT boxed-struct chain every runtime offset uses (GetMember os → SetMember Translation → SetMember
+        // entry.ObjectSpace → array SetValue → re-read). The combatZ dive shipped computing AND logging its offset
+        // while the write died in the box — a class no unit test can reach (game structs) and only a battle drill
+        // caught. This makes that class one F8 press. The probe is +1mm on one entry, restored immediately — and the
+        // game rewrites every pawn entry every frame regardless.
+        internal static void GatherWriteBackFact(SmokeFacts f)
+        {
+            try
+            {
+                var pmType = GameBinding.PawnManager;
+                var pm = pmType != null ? HarmonyLib.AccessTools.Property(pmType, "Instance")?.GetValue(null) : null;
+                var arr = pm != null ? GetMember(pm, "pawnEntries") as Array : null;
+                int n = 0; try { if (pm != null) n = Convert.ToInt32(GetMember(pm, "pawnCount")); } catch { }
+                if (arr == null || n <= 0 || arr.Length == 0) { f.SeamWriteBack = "skipped (no live pawns)"; return; }
+                int idx = Math.Min(n, arr.Length) - 1;
+                var entry = arr.GetValue(idx);
+                var os = GetMember(entry, "ObjectSpace");
+                if (os == null) { f.SeamWriteBack = "skipped (no ObjectSpace)"; return; }
+                var orig = (UnityEngine.Vector3)GetMember(os, "Translation");
+                var probe = new UnityEngine.Vector3(orig.x, orig.y + 0.001f, orig.z);
+                SetMember(os, "Translation", probe); SetMember(entry, "ObjectSpace", os); arr.SetValue(entry, idx);
+                var read = (UnityEngine.Vector3)GetMember(GetMember(arr.GetValue(idx), "ObjectSpace"), "Translation");
+                SetMember(os, "Translation", orig); SetMember(entry, "ObjectSpace", os); arr.SetValue(entry, idx);   // restore BEFORE judging
+                f.SeamWriteBack = UnityEngine.Mathf.Abs(read.y - probe.y) < 1e-5f
+                    ? "ok"
+                    : "FAILED (mutation did not persist through the boxed-struct chain — every runtime offset is dead)";
+            }
+            catch (Exception ex) { f.SeamWriteBack = "FAILED (" + ex.Message + ")"; }
+        }
+
         internal static void RunSmokeTest()
         {
             try
@@ -230,18 +294,37 @@ namespace HumankindAssetFramework
                     if (vp >= 95 || xp >= 95) f.BudgetAlarms.Add($"L{i} '{b.Name}' verts {vp}% / idx {xp}%");
                 }
 
+                GatherWriteBackFact(f);   // the seam self-test — after the reads, before the verdict
+
                 var res = SmokeVerdict(f);
                 if (res.Pass) Plugin.Log.LogInfo("[SmokeTest] " + res.Summary);
                 else Plugin.Log.LogWarning("[SmokeTest] " + res.Summary);
                 Prober.Report.Clear();
                 Prober.Report.Add("Smoke Test — " + res.Summary);
+                WriteSmokeReport(res.Summary);
             }
             catch (Exception ex)
             {
                 Plugin.Log.LogError("[SmokeTest] " + ex);
                 Prober.Report.Clear();
                 Prober.Report.Add("Smoke Test — ERROR (see log): " + ex.Message);
+                WriteSmokeReport("ERROR: " + ex);
             }
+        }
+
+        // Machine-readable sibling of the F8 verdict (2026-08-19) — the smoke result as a file next to
+        // haf_load_report.txt and haf_bindings_report.txt, so a headless/CI launch can assert all three clean
+        // and a human can diff runs. Regenerated on every smoke run.
+        static void WriteSmokeReport(string summary)
+        {
+            try
+            {
+                File.WriteAllText(Path.Combine(Paths.ConfigPath, "haf_smoke_report.txt"),
+                    "HAF smoke report  (regenerated every Smoke Test run)\n" +
+                    "ranAt=" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) + "\n\n" +
+                    summary + "\n");
+            }
+            catch (Exception ex) { Plugin.Diag("[SmokeTest] report write failed: " + ex.Message); }
         }
     }
 }
