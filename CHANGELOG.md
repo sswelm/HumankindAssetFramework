@@ -18,7 +18,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   corruption but not absence). Fixed: on every editor load, before the daily-auto pass, stale partials are
   deleted and any backup folder missing its final zip is **re-zipped automatically** (count-verified by the
   same core; a reload can never race a live writer because the reload is what killed it). The stale 21:01
-  partial doubles as the fix's natural drill: the next reload must recover it.
+  partial doubled as the fix's natural drill — **DRILLED same evening**: the next reload deleted the stale
+  partial, re-zipped in the background, and the count-verified final zip (1.06 GB) landed by atomic rename at
+  21:10 with zero partials left. Every layer of the backup system has now been watched succeed.
 
 - **THE HAND-LIST GATE (2026-08-19) — the audit's residual risk, closed.** The Factory/Lab ownership-rebase
   lists were guarded only by MAINTENANCE-TRAP comments — a future UI field could still be silently reset on
