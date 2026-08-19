@@ -10,6 +10,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **MULTI-SMR PREVIEW SLICE (2026-08-19) — the known future ambush, closed before it fired.** The preview-
+  texture fix persisted ONE atlas-remapped clone while the bake remaps *every* skinned renderer's mesh — a
+  single out-param the loop overwrote, so the first multi-renderer rig baked would have replayed the corrupt-
+  texture saga on its other parts. Now: the baker persists one clone per renderer (`_PreviewMesh`,
+  `_PreviewMesh1`, … — index 0 keeps the historical name so existing bakes stay valid, and the numbered set is
+  swept on every re-bake and in the static-over-animated cleanup); **one shared loader** feeds BOTH preview
+  windows and all call paths (the pattern-copy lesson applied up front this time — copies grepped, none left);
+  each renderer match-and-consumes its clone by vertex count, and the loud log reads `APPLIED n/m` with any
+  unmatched clones named. The list-of-one path is exercised by every existing multi-material model; the true
+  multi-clone path awaits the first multi-SMR bake.
+
 - **SMOKE TEST, FIVE-POINT UPGRADE (2026-08-19; user call: "can we apply all?").** The F8 harness closed its
   five known gaps in one pass: (1) an **ObjectSpace write-back self-test** — one live pawn entry is mutated
   and re-read through the exact boxed-struct chain every runtime offset uses, so the combatZ died-in-the-box
