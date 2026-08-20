@@ -73,7 +73,8 @@ combined mesh is split into loose parts; roles auto-guessed from names) → mark
 **Vehicleize**. The GLB path lands on your clipboard; bake settings are printed on success. The review scales to
 real game-rips (the Ehrhardt probes into 3,350 shards):
 
-- **Review UI** — click a row to zoom + yellow-highlight that part in the turntable; **↑/↓** walk the list;
+- **Review UI** — click a row to zoom + yellow-highlight that part in the turntable (on the source-skeleton fast
+  path a **bone** row highlights every shard weighted to that bone — since 2026-08-20; bone rows never could before); **↑/↓** walk the list;
   **W/T/B/I** mark Wheel/Turret/Body/Ignore, **C** = Caterpillar (tread loop — see the treadize section below),
   **G** = Gun (one bone for the barrel assembly, rides the Turret when there is one), **D** = Default
   (undecided), **E** = Edgecase ("not sure, revisit later" — rigs static like Body and stays visible in the

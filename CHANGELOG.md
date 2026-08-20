@@ -19,7 +19,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   LoadRecipeFromPath, or the push fails naming the field — drilled by planting a field, caught on both sides
   (23 fields round-trip green). The canoe-style silent field loss is now structurally impossible, the same
   treatment the Factory/Lab ownership lists got on 08-19. Same evening: the **Edit existing** dropdown shows
-  each recipe's last-modified stamp — a bare name list can't tell you which one you worked on yesterday.
+  each recipe's last-modified stamp — a bare name list can't tell you which one you worked on yesterday. And a
+  drill-by-use catch: "the Ehrhardt stopped highlighting" — it never had: a rigged SKM source defaults to the
+  fast path whose rows are BONES, and the highlighter matched renderers by name. Bone rows now tint every shard
+  whose skin weights point at that bone (tallied once per preview); shard rows match exact-before-prefix.
 
 - **THE BAKE TESTS WINDOW (2026-08-20, "this looks ridiculous").** The test pyramid had grown one guard at a
   time into seven bare menu items — "Bake Conversion Gate Test (litmus)"? — each talking to its own dialog,
