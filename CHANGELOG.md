@@ -18,7 +18,8 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   hand-list gate grew a third block*: every `Recipe` DTO field must be written by SaveRecipe AND restored by
   LoadRecipeFromPath, or the push fails naming the field — drilled by planting a field, caught on both sides
   (23 fields round-trip green). The canoe-style silent field loss is now structurally impossible, the same
-  treatment the Factory/Lab ownership lists got on 08-19.
+  treatment the Factory/Lab ownership lists got on 08-19. Same evening: the **Edit existing** dropdown shows
+  each recipe's last-modified stamp — a bare name list can't tell you which one you worked on yesterday.
 
 - **THE BAKE TESTS WINDOW (2026-08-20, "this looks ridiculous").** The test pyramid had grown one guard at a
   time into seven bare menu items — "Bake Conversion Gate Test (litmus)"? — each talking to its own dialog,
