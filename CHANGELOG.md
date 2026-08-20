@@ -25,7 +25,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   pose-stream floor predated the one-frame `Spin[0..0]` idle pattern, whose real shipped pose streams run
   48–960 bytes. The test would have failed the live, in-game-working assets; the boundary (every failure a
   one-frame idle, every pass a multi-frame clip) convicted the test, not the bakes. Floor recalibrated to 32
-  bytes (smallest legitimate asset: 48) with the conviction recorded in a comment.
+  bytes (smallest legitimate asset: 48) with the conviction recorded in a comment. First-sight drill catch by
+  the user: the two smoke scopes could both be checked (baking every model twice) — they're now mutually
+  exclusive radio rows, and the Everything preset picks the thorough one.
 
 - **THE SIZE-REFERENCE KIT (2026-08-19, user-designed piece by piece).** "A default humankind man as a
   reference would really help assess size" → both previews (Factory + Lab) gained a **Ref man** — a stylized
