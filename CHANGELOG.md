@@ -27,7 +27,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   one-frame idle, every pass a multi-frame clip) convicted the test, not the bakes. Floor recalibrated to 32
   bytes (smallest legitimate asset: 48) with the conviction recorded in a comment. First-sight drill catch by
   the user: the two smoke scopes could both be checked (baking every model twice) — they're now mutually
-  exclusive radio rows, and the Everything preset picks the thorough one.
+  exclusive radio rows, and the Everything preset picks the thorough one. The user then drove three more UX
+  rounds: row titles became the plain question each test answers ("Is rig conversion still correct?" — the
+  jargon 'litmus'/'smoke'/'golden' demoted to the descriptions), and a two-round layout fight (titles clipped
+  to "…(c", then cramped into a ~180px column) unearthed a real Unity gotcha — `ToggleLeft` with a
+  word-wrapping style mis-sizes itself; the fix is a checkbox + label-skinned button that takes the full row
+  width. **DRILLED 2026-08-20**: the full Everything run — all seven rows, smoke-ALL through deploy goldens —
+  came back 54 passed, 0 failed, 1 skipped (the texture-only corvette) in 6.3 min, one report file.
 
 - **THE SIZE-REFERENCE KIT (2026-08-19, user-designed piece by piece).** "A default humankind man as a
   reference would really help assess size" → both previews (Factory + Lab) gained a **Ref man** — a stylized
