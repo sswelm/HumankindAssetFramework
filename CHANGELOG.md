@@ -25,7 +25,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   git a rename; `SourcePath` is the honest accessor. Backlog #3 follow-up closed. **DRILLED the same evening**: a
   comma deleted from the district source → banner pinpointing *line 22, position 16* (`districts[0].rotation.y`),
   one Console error, the corrupt copy preserved timestamped → **Restore last deploy** recovered 2 entries eleven
-  seconds after the break.
+  seconds after the break. Drill 3 (deployed `haf_formations.json` deleted, Refresh pressed): the artifact was
+  recreated at the exact second of the click — but the user saw nothing and called it "proof that it does not
+  work", which is its own finding: a self-healing event that only speaks in the Console is invisible to the
+  person who triggered it. The engine now records a notice (artifact recreated / source adopted) that the window
+  shows in its status line on Refresh.
 
 - **PROBE PARTS 116 s → 7 s (2026-08-20, "can you optimize it?").** The Ehrhardt probe had crept from half a
   minute to two. Per-phase timers (now permanent `VEHICLE timing:` lines) convicted two phases, neither the
