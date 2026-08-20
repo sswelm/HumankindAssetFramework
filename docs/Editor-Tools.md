@@ -63,7 +63,11 @@ button.
 > spin↔wave coupling, stated in the UI). Tracked vehicles then get **Static tracks (no movement)** — tread
 > loops rigid, wheels still spin, far fewer bones — gating the tread speed/detail dials. Recipes that predate
 > newer fields load them at defaults (absent JSON = the field's default — the Lab never guesses a config the
-> recipe doesn't state). Rig options apply through **Generate rig → Bake → mod build**.
+> recipe doesn't state) **and say so**: since 2026-08-20 the load status names the features the recipe
+> predates ("recipe predates: wave rock, spin switch — loaded as safe defaults; Save to modernize"). The
+> recipe round-trip is also gated: `Tools/check_handlists.sh` fails the push if any Recipe field isn't both
+> written by Save and restored by Load (the canoe wave-config loss, made structurally impossible). Rig
+> options apply through **Generate rig → Bake → mod build**.
 Turn a **raw static** vehicle model into a rigged, animated GLB (Root + per-wheel/turret bones, a procedural *Spin*
 action, optional rolling tracks and wave-rock) that the animated bake path then consumes — no Blender knowledge needed.
 *Key controls:* raw model + output GLB, **Probe parts**, per-part role assignment, use-source-skeleton (for pre-rigged

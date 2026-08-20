@@ -10,6 +10,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **VEHICLE-LAB CLOSERS (2026-08-20).** The two loose ends from the canoe forensics, closed in one pass.
+  (1) *The recipe-predates honesty note*: loading a recipe now names the features it predates ("recipe
+  predates: wave rock, spin switch — loaded as safe defaults; Save to modernize"), detected by key-presence
+  in the raw JSON since JsonUtility can't tell absent from default — the invisible fallback that cost GLB
+  forensics to diagnose now announces itself (7 of the 9 recipes on disk trigger it today). (2) *The
+  hand-list gate grew a third block*: every `Recipe` DTO field must be written by SaveRecipe AND restored by
+  LoadRecipeFromPath, or the push fails naming the field — drilled by planting a field, caught on both sides
+  (23 fields round-trip green). The canoe-style silent field loss is now structurally impossible, the same
+  treatment the Factory/Lab ownership lists got on 08-19.
+
 - **THE BAKE TESTS WINDOW (2026-08-20, "this looks ridiculous").** The test pyramid had grown one guard at a
   time into seven bare menu items — "Bake Conversion Gate Test (litmus)"? — each talking to its own dialog,
   with no way to tell what a test did without reading source. The user called it: *"we need a specialized
