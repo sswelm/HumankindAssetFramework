@@ -65,7 +65,7 @@ button.
 > newer fields load them at defaults (absent JSON = the field's default — the Lab never guesses a config the
 > recipe doesn't state) **and say so**: since 2026-08-20 the load status names the features the recipe
 > predates ("recipe predates: wave rock, spin switch — loaded as safe defaults; Save to modernize"). The
-> **Edit existing** dropdown shows each recipe's last-modified stamp, so the one you worked on yesterday is
+> **Edit existing** dropdown leads each entry with its last-modified stamp, newest first, so the one you worked on yesterday is
 > obvious. The
 > recipe round-trip is also gated: `Tools/check_handlists.sh` fails the push if any Recipe field isn't both
 > written by Save and restored by Load (the canoe wave-config loss, made structurally impossible). Rig
