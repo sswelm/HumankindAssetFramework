@@ -1,5 +1,11 @@
 # Animated Runtime — how an injected model is driven, frame by frame
 
+> **Which animation page do I want?**
+> - **Can HAF import *my* model, and how do I bake it?** → [**Animated-Models.md**](Animated-Models.md) *(start here)*
+> - **It baked, but it looks wrong / broke** → [**Animation-Pitfalls.md**](Animation-Pitfalls.md) — the failure catalogue
+> - **How the engine drives the pose frame by frame** (extending the plugin) → [**Animated-Runtime.md**](Animated-Runtime.md)
+> - **Fly the donor's own clip on your rig** → [Donor-Clip-Flight.md](Donor-Clip-Flight.md) · **turn, aim, fire** → [Turn-Ease.md](Turn-Ease.md)
+
 The runtime companion to [Factory-Manual §16](Factory-Manual.md) (which covers converting a model into Amplitude's
 dialect). This documents **what happens after the bake**: how the game's animation system consumes our Skeleton +
 ClipCollection and how the plugin steers it. Everything here is grounded in decompiled, behavior-verified engine code
@@ -292,4 +298,4 @@ helicopters, submarine, organ/volley gun). Which RIG a pawn binds to is independ
 the gate is now `Rescuable(x) = x.skeletonId >= 0 && x.repointed`, with the pose decision left at the dispatch (a
 third branch forces the skeleton and persists the entry without touching the pose). The per-pawn early-out gained
 `anyRescuable` for the same reason — a purely static pack has both pose flags false and used to return before
-reaching the rescue. See [Audit-2026-07-31](Audit-2026-07-31.md) finding 1.
+reaching the rescue. See [Audit-2026-07-31](notes/Audit-2026-07-31.md) finding 1.

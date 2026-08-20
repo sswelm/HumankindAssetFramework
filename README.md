@@ -137,7 +137,7 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
 - **Backup & Restore** — a guarded, additive snapshot of everything ENCReload's git doesn't track.
 - **Pack validator, four surfaces** — one rule set (~30 content checks: bones, files, pawns, formats, ranges) runs
   pre-bake, on the **Validate pack** button, in the mod build (`-strict` fails CI), and as a boot-time pre-flight that
-  explains silent failures in `haf_load_report.txt`. See [Pack-Validator-Design.md](docs/Pack-Validator-Design.md).
+  explains silent failures in `haf_load_report.txt`. See [Pack-Validator-Design.md](docs/notes/Pack-Validator-Design.md).
 - **Ship Status** — "baked ≠ built" made visible: which bakes the game hasn't seen yet, orphaned bakes that ship as
   dead weight, and a guard-snapshotted multi-select cleanup. See [Ship-Status.md](docs/Ship-Status.md).
 - **Entry-state coherence** — the form-vs-registry banner (drilled), a bake-time model-file confirm, and a calibrated
@@ -199,7 +199,7 @@ hang — the danger was malformed skeletons, not custom ones per se.*
 | Editor tooling ([ENCReload](https://github.com/sswelm/ENCReload)) | **Unity 2021.3.1f1** (Humankind's own engine version) + the **official Amplitude modding SDK**, which bakes the native `Skeleton` / `ClipCollection` / mesh / atlas assets; editor scripts mirrored here in `baker/` |
 | `glbconv` converter | Standalone C# console app on **.NET 8** (self-contained single-file exe — adopters need no .NET install), built on **SharpGLTF** |
 | Model-prep scripts | **Python** run headless inside **Blender** (`blender -b --python …`, `bpy` API) — rigging, decimation, clip extraction |
-| Editor ↔ runtime contract | A plain **JSON** registry (the pack's `pack.json`), its ~66 shared fields defined once in a **`Haf.Schema`** netstandard2.0 DLL both halves inherit — so the schema can't drift |
+| Editor ↔ runtime contract | A plain **JSON** registry (the pack's `pack.json`), its shared fields (see [Shared-Schema](docs/Shared-Schema.md) for the exact count) defined once in a **`Haf.Schema`** netstandard2.0 DLL both halves inherit — so the schema can't drift |
 
 ## Zero-config adoption
 Built to work on a stranger's machine, not just the author's:

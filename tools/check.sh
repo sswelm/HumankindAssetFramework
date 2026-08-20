@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # check.sh — the one fast pre-push gate for the HAF plugin. Runs every quick guard so a push can't land a broken
-# build, a failing unit test, or a drifted registry schema. Wired as the pre-push hook (tools/git-hooks/pre-push);
+# build, a failing unit test, a broken doc link, or a drifted registry schema. Wired as the pre-push hook (tools/git-hooks/pre-push);
 # also runnable by hand any time:  bash tools/check.sh   (lowercase tools/ — this repo, unlike ENCReload's Tools/)
 #
 # Deliberately NOT here (too slow / need Unity or the game): deploy_regression.sh (Blender golden-master), the
@@ -20,7 +20,11 @@ run "plugin build (dotnet build -c Release)" dotnet build "$ROOT/HumankindAssetF
 # 2) unit tests — the pure logic that runs outside Unity (parse/schema/reflection-resolution/smoke rule).
 run "plugin unit tests (dotnet test)" dotnet test "$ROOT/Tests/HumankindAssetFramework.Tests.csproj" -c Release --nologo -v q
 
-# 3) registry schema parity — cross-repo: the guard lives in the ENCReload editor checkout and compares the plugin's
+# 3) docs guard — relative links resolve, docs/notes/ banners present, no flat-wiki basename collisions. The docs
+#    publish to the repo, the Pages site AND the wiki, all resolving relative links, so one bad move breaks three.
+run "docs guard (links + notes convention)" bash "$ROOT/tools/check-docs.sh"
+
+# 4) registry schema parity — cross-repo: the guard lives in the ENCReload editor checkout and compares the plugin's
 #    Newtonsoft + regex parse against the editor's ModelDef. Best-effort: a plugin parse change is one half of that
 #    drift, so run it here too when the sibling checkout is present; skip with a note otherwise.
 PARITY=""

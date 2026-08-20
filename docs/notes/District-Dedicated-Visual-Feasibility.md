@@ -1,7 +1,10 @@
 # Dedicated District Visual — Feasibility Study
 
+> **📁 ARCHIVED NOTE — frozen 2026-08-13, not maintained.** The investigation that produced the shipped recipe.
+> **Current reference: [District-Dedicated-Visual.md](../District-Dedicated-Visual.md).** Nothing below is current instructions.
+
 > **✅ SOLVED & SHIPPED (2026-08-12).** This study's hybrid is done and verified in-game. The working recipe,
-> config, and runtime steps live in **[District-Dedicated-Visual.md](District-Dedicated-Visual.md)** — read that
+> config, and runtime steps live in **[District-Dedicated-Visual.md](../District-Dedicated-Visual.md)** — read that
 > first. What follows is the investigation that got there.
 
 **Branch:** `spike/district-dedicated-visual` (off `spike/district-footprint`).

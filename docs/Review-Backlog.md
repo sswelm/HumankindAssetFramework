@@ -137,7 +137,7 @@ by when they'll bite.
   each entry's referenced assets/bones and reports mismatches in plain language before render. Fits the "guided, not
   guessy" design goal; scoped for the package phase. (Raised by an external review 2026-08-02; the structure half was
   already done in the 07-14/07-19 multi-mod work.) **Designed** — see
-  [Pack-Validator-Design.md](Pack-Validator-Design.md) (what to validate, editor vs boot-time surfaces, message format,
+  [Pack-Validator-Design.md](notes/Pack-Validator-Design.md) (what to validate, editor vs boot-time surfaces, message format,
   phasing); build remains.
 
 ## Future feature seams (mapped, not built — the discovery is done, only the build remains)
@@ -334,7 +334,7 @@ re-entrancy; district bake+registry editor flow; Plugin.cs config wiring.
 
 Ten open findings from the pass that followed the Abomination spike-geometry incident (root cause: a safety net
 that could never arm itself). Recorded separately with file:line, in-game symptom, trigger and suggested fix:
-**[Audit-2026-07-31.md](Audit-2026-07-31.md)**.
+**[Audit-2026-07-31.md](notes/Audit-2026-07-31.md)**.
 
 Top item (now FIXED in `c6154a6`, pending in-game verification) — the wrong-skeleton rescue was gated on `Hooked` (animated-or-freeze), so eight shipped STATIC models have
 no rescue path at all: the same failure `0c0b12f` fixed, still live for them.

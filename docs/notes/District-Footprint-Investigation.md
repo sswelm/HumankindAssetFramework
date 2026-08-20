@@ -1,5 +1,8 @@
 # District Strategic Footprint — Investigation (spike)
 
+> **📁 ARCHIVED NOTE — frozen 2026-08-16, not maintained.** The footprint spike, kept for the mechanism it maps.
+> **Current reference: [District-Dedicated-Visual.md](../District-Dedicated-Visual.md).** Nothing below is current instructions.
+
 ## TL;DR — what we learned (read this first)
 
 **Goal:** a custom district (the breeder reactor) should show a persistent top-down **footprint** at strategic zoom, the way
@@ -361,7 +364,7 @@ tile reverts a postfix-only override — fixed with an `ApplyGroundMaterialDefin
 donor grafts `Decal_CityBricks_Industry_Gravel_*` **and** `Decal_Destroyed/Dammaged_Battlement_*` (rubble on
 `PointOfInterest_Curiosities_OutputLayer`). The rubble/POI layer draws at **close 3D zoom** and **toggles at the
 strategic↔3D boundary** = the twitch. Fix: `GraftFootprint` filters out Gravel/CityBricks/Battlement/Destroyed/Damaged,
-keeping only `SchematicView`. Full write-up in [District-Dedicated-Visual.md](District-Dedicated-Visual.md).
+keeping only `SchematicView`. Full write-up in [District-Dedicated-Visual.md](../District-Dedicated-Visual.md).
 **Lesson: on close-zoom ground artifacts, dump the grafted decals (`[DecalBind]`) BEFORE theorising about terrain.**
 
 ---

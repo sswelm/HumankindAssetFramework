@@ -1,5 +1,8 @@
 # Postmortem — the preview that lied for six weeks
 
+> **📁 ARCHIVED NOTE — frozen 2026-08-19, not maintained.** A postmortem on a fixed bug, kept for its lessons about
+> why a defect survives repeated fixes. **Current texture reference: [Textures.md](../Textures.md).**
+
 **The bug:** selecting a multi-material model in the Model Factory showed it mis-textured (scrambled/checkerboard
 skin) until the next bake "fixed" it. First reported as preview weirdness in July, investigated 2026-08-01,
 partially patched, and finally killed 2026-08-18. The user's own words at the end: *"my number one problem with
@@ -58,7 +61,7 @@ The fix took **three versions in one evening**, and the failure modes of the fir
 
 What broke the six-week pattern was not better debugging of symptoms — it was (a) reading the bake's mechanism
 until the transient state was found, and (b) a user drilling every version immediately, per the
-"[a tool is not trusted until it is DRILLED](Decisions.md)" rule. Both earlier fix attempts would have been
+"[a tool is not trusted until it is DRILLED](../Decisions.md)" rule. Both earlier fix attempts would have been
 declared successful under review-only.
 
 ## Lessons (each one general)

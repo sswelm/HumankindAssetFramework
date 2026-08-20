@@ -3,9 +3,14 @@
 The model schema's shared fields are defined **once**, in a netstandard2.0 library both halves inherit — so the editor
 and the plugin can't drift on them.
 
+> **This page owns the field count.** It is the only doc that states a number — the count drifted to three different
+> values across four docs before 2026-08-20; everywhere else now says "the shared fields" and links here. Re-check it
+> with `grep -cE '^\s+public ' Haf.Schema/HafModelSchema.cs` (minus the class declaration line). The *real* guard is
+> `check_schema_parity.sh`, not the number written here.
+
 ## Shape
 - **`Haf.Schema.HafModelSchema`** (`Haf.Schema/HafModelSchema.cs`, netstandard2.0; references `UnityEngine.CoreModule`
-  for the shared `Vector3`) holds the **66 fields stored identically** by the editor and the plugin — the behavioral /
+  for the shared `Vector3`) holds the **67 fields stored identically** by the editor and the plugin — the behavioral /
   sound / prop / tint config, plus `resourceName`, `pawnDescription`, and the `position` offset (`Vector3`).
 - **`ModelDef`** (editor, `ENCReload/Assets/Scripts/Editor/ModelRegistry.cs`) `: HafModelSchema` — adds its bake-time,
   GUID (`int[]`), and editor-only `Vector3` (`rotation`) fields.

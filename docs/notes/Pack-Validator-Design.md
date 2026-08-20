@@ -1,5 +1,9 @@
 # Design note — pack pre-flight validator (third-party author DX)
 
+> **📁 ARCHIVED NOTE — frozen 2026-08-18, not maintained.** The design note; the validator was built and drilled.
+> **Current reference:** the Validate button in [Editor-Tools.md](../Editor-Tools.md) and `haf validate` in
+> [Headless-CLI.md](../Headless-CLI.md). Kept for the rule catalogue and the fault-injection drill record.
+
 **Status: BUILT + DRILLED 2026-08-18 (Phases 1 + 2), per this design and the drill ADR.** The fault-injection
 drill (a `"Turrret"` bone typo, a misspelled WAV, a volume of 5, planted in the live pack) caught a real defect
 before passing: the editor's Validate button could **fail silently** (no try/catch — "validate detects nothing"
@@ -84,7 +88,7 @@ One line per problem, always naming pack + entry + the specific fault + (where c
 - **Phase 2:** the boot-time pass — GUID resolution + bone-against-loaded-skeleton + on-disk file existence → load
   report. Catches what only the end user's machine can (a bad shipped GUID, a case-wrong path).
 - **Phase 3 (optional):** vertex-budget hints (warn when a pack's model types approach the mesh-buffer ceiling — see
-  [Vertex-Budget](Vertex-Budget.md)) and a JSON-schema file authors can validate against in their own editor.
+  [Vertex-Budget](../Vertex-Budget.md)) and a JSON-schema file authors can validate against in their own editor.
 
 ## Non-goals / relationship to existing tools
 
@@ -92,5 +96,5 @@ One line per problem, always naming pack + entry + the specific fault + (where c
   two repos. This validator is *author-side*, against a concrete pack's data.
 - **Not** a replacement for fail-soft — it *explains* failures; the runtime still degrades gracefully on anything it
   misses.
-- Fits the "guided, not guessy" design goal and the [Multi-Mod](Multi-Mod.md) pack contract; it's the author-facing
+- Fits the "guided, not guessy" design goal and the [Multi-Mod](../Multi-Mod.md) pack contract; it's the author-facing
   bookend to the load report.

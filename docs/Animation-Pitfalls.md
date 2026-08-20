@@ -1,5 +1,11 @@
 # Animation Pitfalls — a field guide to the woes
 
+> **Which animation page do I want?**
+> - **Can HAF import *my* model, and how do I bake it?** → [**Animated-Models.md**](Animated-Models.md) *(start here)*
+> - **It baked, but it looks wrong / broke** → [**Animation-Pitfalls.md**](Animation-Pitfalls.md) — the failure catalogue
+> - **How the engine drives the pose frame by frame** (extending the plugin) → [**Animated-Runtime.md**](Animated-Runtime.md)
+> - **Fly the donor's own clip on your rig** → [Donor-Clip-Flight.md](Donor-Clip-Flight.md) · **turn, aim, fire** → [Turn-Ease.md](Turn-Ease.md)
+
 Every trap in this document was hit for real, cost hours, and is now either fixed in the tooling or has a
 one-field recipe answer.
 

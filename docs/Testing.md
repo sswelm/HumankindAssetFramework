@@ -16,8 +16,23 @@ The fast guards used to be separate scripts you had to remember to run. They're 
 
 | Repo | the `check.sh` gate runs | ~time |
 |---|---|---|
-| **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` (120) · registry schema parity | seconds |
+| **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` (120) · **docs guard** · registry schema parity | seconds |
 | **ENCReload** (editor) | Roslyn editor compile-check · registry schema parity | ~30 s |
+
+### The docs guard (`tools/check-docs.sh`)
+
+The docs publish **three** ways — the repo, the [Pages site](https://sswelm.github.io/HumankindAssetFramework/)
+(which rewrites relative `.md` links via `jekyll-relative-links`), and the wiki (`tools/sync_wiki.sh`) — and all
+three resolve *relative* links. So one moved page breaks three surfaces at once, silently. The guard checks:
+
+1. **every relative Markdown link resolves** to a file that exists (anchors are not checked, only the path);
+2. **every page in `docs/notes/` opens with the `ARCHIVED NOTE` banner** — the convention that makes the
+   maintained-vs-archived split mean something rather than being a folder name;
+3. **no basename collides across `docs/` and `docs/notes/`** — the wiki page namespace is flat, so a collision
+   would have one page silently overwrite the other.
+
+Fault-injected on the day it was written (2026-08-20): a planted dead link, a banner-less note, and a planted
+`docs/notes/Textures.md` collision were each caught with a named failure, and the baseline returned to green.
 
 Run it any time by hand: `bash tools/check.sh`. **Enable the hook once per clone:**
 

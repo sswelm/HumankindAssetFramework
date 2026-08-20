@@ -1,6 +1,9 @@
 # Design note — headless CLI (make HAF *operable* by AI/automation)
 
-> **BUILT — see [Headless-CLI.md](Headless-CLI.md) for the real, current reference.** `rebuild-model` + `clean` verified;
+> **📁 ARCHIVED NOTE — frozen 2026-08-08, not maintained.** The original design note; it was built, and parts of the
+> speculation below were superseded by the build. **Current reference: [Headless-CLI.md](../Headless-CLI.md).**
+
+> **BUILT — see [Headless-CLI.md](../Headless-CLI.md) for the real, current reference.** `rebuild-model` + `clean` verified;
 > `build-mod` wired to the game's own `ModuleEditor.BuildModification` (full build+deploy, headless). This file is the
 > original design/reasoning; the "build-mod needs discovery / build stays in the editor" speculation below was superseded
 > once the `Mercury ▸ Mod Editor` build method was found and called via reflection.
@@ -38,7 +41,7 @@ Two different targets hide behind this:
   pragmatic path, full-fidelity, no RE.
 - **The Amplitude asset format** (to bake with *zero* Unity) — HAF already understands the *data* side deeply from
   decompiling the runtime (Skeleton/ClipCollection buffers, bone TRS, pose data, atlas layout — see
-  [Animated-Runtime.md](Animated-Runtime.md)). But the part that ties baking to Unity isn't the data — it's Unity's
+  [Animated-Runtime.md](../Animated-Runtime.md)). But the part that ties baking to Unity isn't the data — it's Unity's
   **serialization + asset-bundle envelope**: emitting valid `.asset` files with correct meta-GUIDs and packaging them
   into the loadable Resources/bundle the game reads. That envelope is what the SDK importers do; replicating it
   standalone is large, version-fragile, and duplicates working tooling for the sole benefit of removing a dependency the
@@ -116,5 +119,5 @@ MeshCollection"). So the CLI needs both, and they differ sharply in difficulty:
   the registry classes — don't hand-roll a third schema — and extend `check_schema_parity.sh` to cover the request shape.
 - **Maintenance:** a new surface to keep in step with the GUI. Mitigated by reusing `ConfigFor` and the registries rather
   than reimplementing.
-- Complements, doesn't replace, the editor windows ([Editor-Tools.md](Editor-Tools.md)) — the GUI stays the human path;
+- Complements, doesn't replace, the editor windows ([Editor-Tools.md](../Editor-Tools.md)) — the GUI stays the human path;
   the CLI is the scriptable/agent path to the same pipeline.

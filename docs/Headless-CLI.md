@@ -2,7 +2,7 @@
 
 Makes HAF **operable** without the GUI: the editor's authoring functions run from the command line via Unity batch
 mode, so an agent, a script, or CI can do what a human does in `Tools ▸ HAF` — including the **full mod build + deploy**.
-Rationale/scoping in [Headless-CLI-Design.md](Headless-CLI-Design.md).
+Rationale/scoping in [Headless-CLI-Design.md](notes/Headless-CLI-Design.md).
 
 **Status (2026-08-02):**
 - ✅ **`rebuild-model`** — re-bake a model headless (Unity batch). **Verified** (`AttackHelicopter`: assets written, registry updated, exit 0).
@@ -41,7 +41,7 @@ scoped to GUID `cd3480e932114f8084db755ddd65f2d8`). It removes the **live** depl
 ### `build-mod` ✅ (full build + deploy)
 `-executeMethod HAF.Cli.BuildMod [-strict]`. Reproduces, via reflection, exactly what clicking **Build** in the Mod
 Editor does — but headless. **Pre-ship validation first (2026-08-18):** before any build step, the shared
-pack-validator rule core (see [Pack-Validator-Design](Pack-Validator-Design.md)) runs over the FULL registry —
+pack-validator rule core (see [Pack-Validator-Design](notes/Pack-Validator-Design.md)) runs over the FULL registry —
 the last gate before the pack leaves the machine. Default: issues are logged and the build continues (fail-soft,
 matching in-game behaviour); with **`-strict`** any issue FAILS the build with **exit 4** — the CI-able stop-ship
 mode. It does **not** call the top-level `BuildModification` wrapper (that method's first act is a database gate

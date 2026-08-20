@@ -1,5 +1,11 @@
 # What kinds of animated models can HAF import?
 
+> **Which animation page do I want?**
+> - **Can HAF import *my* model, and how do I bake it?** → [**Animated-Models.md**](Animated-Models.md) *(start here)*
+> - **It baked, but it looks wrong / broke** → [**Animation-Pitfalls.md**](Animation-Pitfalls.md) — the failure catalogue
+> - **How the engine drives the pose frame by frame** (extending the plugin) → [**Animated-Runtime.md**](Animated-Runtime.md)
+> - **Fly the donor's own clip on your rig** → [Donor-Clip-Flight.md](Donor-Clip-Flight.md) · **turn, aim, fire** → [Turn-Ease.md](Turn-Ease.md)
+
 The short answer: **more than the community thinks is possible.** The public consensus is still "anything moving is
 not possible" in Humankind modding — HAF has shipped a spinning-prop drone, a folding/firing howitzer, and a full
 humanoid character (a raw Sketchfab auto-rig) that **idles standing and runs while moving** as working in-game units.

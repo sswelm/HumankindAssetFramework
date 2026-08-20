@@ -386,11 +386,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   **Ship-safety re-confirmed throughout:** display-only either way — the shipped GPU mesh always carries the
   remapped UVs (`draw_mats.txt` proof, 08-01, and every in-game verification since). The preview was lying; the
   mod never was. **Why it survived six weeks of fixes — the full retrospective (six protective mechanisms,
-  general lessons): [Preview-Texture-Postmortem](docs/Preview-Texture-Postmortem.md).**
+  general lessons): [Preview-Texture-Postmortem](docs/notes/Preview-Texture-Postmortem.md).**
 
 - **PACK PRE-FLIGHT VALIDATOR — silent content failures become named messages (2026-08-18).** The
   designed-not-built tool from the 08-02 external review, built exactly per
-  [Pack-Validator-Design](docs/Pack-Validator-Design.md): a wrong bone name (`muzzleBone: "Turrret"`), a missing
+  [Pack-Validator-Design](docs/notes/Pack-Validator-Design.md): a wrong bone name (`muzzleBone: "Turrret"`), a missing
   WAV, an unbaked clip GUID, or an out-of-range dial used to just… not happen. ONE pure rule set in the shared
   schema DLL (`Haf.Schema.PackValidator`: ~30 rules — file existence + format, bone-name existence, pawn-name
   reality, `x,y,z`/`a,b,c,d` formats, every documented numeric range, the state-driven mutual exclusions — with a

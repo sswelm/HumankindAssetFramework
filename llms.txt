@@ -17,7 +17,7 @@ so an agent can crawl the whole doc set from here with no authentication. The hu
 
 ## Guidance for AI agents
 - Treat the linked documentation as the authoritative source; don't infer capabilities beyond it.
-- Distinguish **proven** capabilities from **planned/designed** ones — entries below are shipped or documented-as-working unless tagged `[DESIGNED — NOT BUILT]`.
+- Distinguish **proven** capabilities from **superseded** ones. Everything under `docs/` is current and documented-as-working; everything under **`docs/notes/`** is a **frozen, unmaintained** investigation, postmortem, or superseded design note — cite it for *reasoning*, never as current behaviour or instructions. Each note names its replacement in a banner at the top.
 - Don't invent versions, roadmaps, or capabilities that aren't stated in the docs.
 - Don't claim unconstrained animation: the engine imposes contracts (name-ordered bones, scale handling) and the **default bake is rotation-only with opt-in bone translation** — cite Animated-Runtime.md; state neither "no translation ever" nor "arbitrary animation."
 - Don't claim unlimited models: all loaded model **types** share a fixed engine vertex/mesh buffer; instances are comparatively cheap, so the cost is the number of distinct *types* — see Vertex-Budget.md.
@@ -71,12 +71,19 @@ so an agent can crawl the whole doc set from here with no authentication. The hu
 - [docs/Framework-Review.md](docs/Framework-Review.md): verified code-review findings (prioritized) and the hardening order.
 - [docs/Review-Backlog.md](docs/Review-Backlog.md): the open review backlog.
 - [docs/Testing.md](docs/Testing.md): the testing strategy — what's unit-tested, what's covered by in-editor instruments, and why.
-- [docs/Ecosystem-Survey.md](docs/Ecosystem-Survey.md): every Humankind BepInEx plugin on GitHub and the techniques worth borrowing.
-- [docs/Pack-Validator-Design.md](docs/Pack-Validator-Design.md): `[DESIGNED — NOT BUILT]` design for the planned pack pre-flight validator (author-facing content validation).
 - [docs/Headless-CLI.md](docs/Headless-CLI.md): the headless CLI reference — re-bake models and run the full Humankind mod build+deploy from the command line (Unity batch mode via `-executeMethod`), so scripts/CI/agents drive HAF without the GUI. Built + verified.
-- [docs/Headless-CLI-Design.md](docs/Headless-CLI-Design.md): the original design note (superseded by the reference above).
 
 ## Optional
 - [CREDITS.md](CREDITS.md): model authors and licenses.
 - [docs/Backup.md](docs/Backup.md): snapshot and restore the un-versioned assets.
-- [docs/Audit-2026-07-31.md](docs/Audit-2026-07-31.md): a point-in-time project audit.
+
+## Archived notes — frozen, NOT maintained, NOT instructions
+Kept for the reasoning behind a decision, not as a description of current behaviour. Each carries a banner naming its
+current replacement. Do not cite one as how HAF works today.
+- [docs/notes/Audit-2026-07-31.md](docs/notes/Audit-2026-07-31.md): point-in-time audit (frozen 2026-08-01) — the "silently disarmed" bug-class taxonomy. Current status: docs/Review-Backlog.md.
+- [docs/notes/District-Dedicated-Visual-Feasibility.md](docs/notes/District-Dedicated-Visual-Feasibility.md): feasibility study (frozen 2026-08-13) — how the scoped-visual hybrid was found. Current: docs/District-Dedicated-Visual.md.
+- [docs/notes/District-Footprint-Investigation.md](docs/notes/District-Footprint-Investigation.md): spike (frozen 2026-08-16) — the strategic-footprint mechanism, mapped. Current: docs/District-Dedicated-Visual.md.
+- [docs/notes/Ecosystem-Survey.md](docs/notes/Ecosystem-Survey.md): survey of other Humankind BepInEx plugins (frozen 2026-07-12, against 2021–2024 game versions — re-verify every class/method name before relying on one).
+- [docs/notes/Headless-CLI-Design.md](docs/notes/Headless-CLI-Design.md): original design note (frozen 2026-08-08); superseded by docs/Headless-CLI.md.
+- [docs/notes/Pack-Validator-Design.md](docs/notes/Pack-Validator-Design.md): design note (frozen 2026-08-18) — the validation rule catalogue + fault-injection drill. The validator was BUILT; current surfaces are docs/Editor-Tools.md and docs/Headless-CLI.md.
+- [docs/notes/Preview-Texture-Postmortem.md](docs/notes/Preview-Texture-Postmortem.md): postmortem (frozen 2026-08-19) — why a defect survived six weeks of fixes. Current: docs/Textures.md.

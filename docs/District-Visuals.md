@@ -1,5 +1,10 @@
 # District Visuals — replacing a district's on-map model
 
+> **Which district page do I want?**
+> - **A custom building model + texture on a district's tile**, auto-leveled — the common case → [**District-Visuals.md**](District-Visuals.md) *(start here)*
+> - **…and its own strategic-zoom footprint**, the scoped render path, multiple custom districts side by side → [**District-Dedicated-Visual.md**](District-Dedicated-Visual.md)
+> - *How it was figured out* (archived, not instructions) → [Feasibility study](notes/District-Dedicated-Visual-Feasibility.md) · [Footprint investigation](notes/District-Footprint-Investigation.md)
+
 **Status: SOLVED (2026-07-16; textured 2026-08-06) — a custom 3D model renders on a *single* district tile in-game,
 with its own baked texture.** Render, fit, scope, grounding and color are all working: the plant mesh sits level on the
 reactor tile wearing its own albedo, and the rest of the city is untouched. This was long thought impossible (see the

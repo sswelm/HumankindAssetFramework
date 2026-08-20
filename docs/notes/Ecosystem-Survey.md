@@ -1,5 +1,8 @@
 # Ecosystem Survey — what other Humankind BepInEx plugins solve, and what we can learn
 
+> **📁 ARCHIVED NOTE — frozen 2026-07-12, not maintained.** A point-in-time survey of other Humankind plugins against
+> 2021–2024 game versions. Re-verify every class/method name against current game DLLs before relying on one.
+
 *Compiled 2026-07-12 from a GitHub-wide search (repo/code/README search + walking each known modder's
 account), then reading each repo's README and key sources. Everything below was verified against the
 actual code, not just descriptions. Class/method names are as they appear in those repos (2021–2024

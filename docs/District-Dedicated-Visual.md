@@ -1,5 +1,10 @@
 # Dedicated District Visual — custom model **with a strategic footprint**
 
+> **Which district page do I want?**
+> - **A custom building model + texture on a district's tile**, auto-leveled — the common case → [**District-Visuals.md**](District-Visuals.md) *(start here)*
+> - **…and its own strategic-zoom footprint**, the scoped render path, multiple custom districts side by side → [**District-Dedicated-Visual.md**](District-Dedicated-Visual.md)
+> - *How it was figured out* (archived, not instructions) → [Feasibility study](notes/District-Dedicated-Visual-Feasibility.md) · [Footprint investigation](notes/District-Footprint-Investigation.md)
+
 Give a single district its own building model **and** the persistent top-down *footprint* that vanilla
 districts show at strategic zoom — scoped to that one district, with the shared visual affinity (and the
 non-plugin fallback) left intact. Verified in-game 2026-08-12 on ENC's Breeder Reactor (a
@@ -8,8 +13,8 @@ non-plugin fallback) left intact. Verified in-game 2026-08-12 on ENC's Breeder R
 This is the successor to the old isolate mesh-swap ([District-Visuals.md](District-Visuals.md)), which could
 render a custom building but **deleted the footprint** (it replaced the whole selector with a single leaf).
 The full investigation that led here is in
-[District-Footprint-Investigation.md](District-Footprint-Investigation.md) and
-[District-Dedicated-Visual-Feasibility.md](District-Dedicated-Visual-Feasibility.md).
+[District-Footprint-Investigation.md](notes/District-Footprint-Investigation.md) and
+[District-Dedicated-Visual-Feasibility.md](notes/District-Dedicated-Visual-Feasibility.md).
 
 ## The idea
 
@@ -177,7 +182,7 @@ and writes the mask. A **valid hex** `maskGuidStr` + binding our texture as the 
 `elementData[0].Uvs=(0,0,1,1)`) makes the decal actually cut to that shape — proven — but the SchematicView shader
 renders the result faint (above), so it's not shipped. The experiments are stashed on `spike/district-unique-footprint`;
 the crisp version would need a **different, solid-rendering output layer** (the CityMap/gravel one — which reintroduces
-the close-zoom twitch we removed, see [District-Footprint-Investigation.md]).
+the close-zoom twitch we removed, see [District-Footprint-Investigation.md](notes/District-Footprint-Investigation.md)).
 
 ## MESH footprint (`DistrictFootprintMesh`) — the district's REAL geometry at strategic zoom ← the winner
 

@@ -6,69 +6,114 @@ pawn props, projectiles, textures, sounds, formations, and unit scaling, all fro
 model** (a licensed download, a commission, or your own build); HAF bakes and injects it, coexisting with other mods'
 asset packs. Within engine bounds (rotation-only animation, a shared GPU budget).
 
-Everything HAF documents is below, grouped by what you're trying to do. New here? This index is the map; the
-[project overview and feature list](https://github.com/sswelm/HumankindAssetFramework#readme) live on the repo home,
-then come back here to go deep.
+The [project overview and feature list](https://github.com/sswelm/HumankindAssetFramework#readme) live on the repo home.
+This page is the map of the docs themselves.
 
 ---
 
-## Get started
-- [**Getting-Started.md**](Getting-Started.md) — **new here? start here.** The ordered path from nothing to a custom unit on the map (bake → build & deploy → launch & verify), with each step linked to its deep doc.
-- [**Building.md**](Building.md) — build the plugin and set up the Blender dependency.
-- [**Backup.md**](Backup.md) — four-layer safety net for the un-versioned assets: manual versions, daily
-  auto-versions, a delete guard (every deletion undoable), and offsite zips — all restorable from one list.
+## Start from what you're trying to do
 
-## Author content
-The core authoring workflows — bake a model, animate it, texture it, add sound.
-- [**Editor-Tools.md**](Editor-Tools.md) — the **editor reference**: every window under `Tools ▸ HAF`, its menu path, what it does, and which registry it writes. Start here to find the right tool.
-- [**Factory-Manual.md**](Factory-Manual.md) — the main guide. Every field, the static and animated workflows, and a troubleshooting table. **Start here to add a model.**
-- [**Ship-Status.md**](Ship-Status.md) — baked ≠ built: the window (and Factory notice) that shows which bakes the game has not seen yet, plus list-style select + guard-snapshotted delete of stale/orphaned bakes.
-- [**Animated-Models.md**](Animated-Models.md) — can HAF import *your* model? The plain-language answer in three levels (clean rigs → rigid-part machines → full character rigs). **Start here for animation.**
-- [**Donor-Clip-Flight.md**](Donor-Clip-Flight.md) — play the **donor's own animation on your custom rig** (`useDonorClip`): the measured engine contract (channels-by-index, rest∘delta, axle frames), the workflow, and the failure catalog. Proven on the helicopter.
-- [**Turn-Ease.md**](Turn-Ease.md) — **turn first, aim true, fire second**: eased facing per unit TYPE (human/land/turret/hover/ship) or per unit/model, the attack hold that keeps every effect of the shot on one clock, true-bearing aim, **battle hull-aim** for turretless vehicles, distance-proportional **gun elevation**, the gun-local muzzle dial, and post-shot facing that settles toward the shot. Includes the choreography-seam map + graveyard for maintainers.
-- [**Textures.md**](Textures.md) — the atlas pipeline: every knob, the complete failure catalog, and runtime re-skins.
-- **Unit & creature audio** — engine/movement sounds, custom WAVs (the Sound Studio), and creature voices live in [Factory-Manual.md](Factory-Manual.md) §13–14.
-- [**Game-Sound-Lab.md**](Game-Sound-Lab.md) — game-*wide* sound overrides: silence or replace any vanilla Wwise event (music, UI, ambience) by name, with in-game F8 audition.
+| I want to… | Go to |
+|---|---|
+| **Put my first model on a unit** | [**Getting-Started.md**](Getting-Started.md) — the ordered path, bake → build → launch |
+| **Look up a Factory field, or fix a bad bake** | [Factory-Manual.md](Factory-Manual.md) — the main guide, every field + troubleshooting |
+| **Find the right authoring window** | [Editor-Tools.md](Editor-Tools.md) — every window under `Tools ▸ HAF`, and what each one writes |
+| **Make my model move** | [Animated-Models.md](Animated-Models.md) — can HAF import *your* rig? |
+| **Understand why my animation looks wrong** | [Animation-Pitfalls.md](Animation-Pitfalls.md) — the failure catalogue |
+| **Ship my own pack, without touching ENC** | [Multi-Mod.md](Multi-Mod.md) — the pack format + the `haf_packs/` drop folder |
+| **Know if HAF can do X at all** | [Capabilities.md](Capabilities.md) — the full list, with known limitations |
+| **Build or extend the plugin** | [Building.md](Building.md) → [Code-Map.md](Code-Map.md) |
+| **Automate HAF from a script or CI** | [Headless-CLI.md](Headless-CLI.md) |
+
+---
+
+## Doc status — read this first
+
+Every page in `docs/` is one of two things, and the folder tells you which:
+
+| Status | Where | Means |
+|---|---|---|
+| 🟢 **Maintained** | `docs/*.md` | Current. Kept true as the code changes. Safe to follow as instructions. |
+| 📁 **Archived note** | `docs/notes/` | **Frozen, not maintained.** Investigations, postmortems, superseded design notes. Kept for the *reasoning* — how something was found, and why it is the way it is. Every one carries a banner naming its current replacement. **Do not follow one as instructions.** |
+
+When a page stops being true, it moves to `notes/` with a frozen-date banner rather than being quietly left to rot in
+the main list. That split is the whole point of this folder — the main list is a promise, the archive is a record.
+
+---
+
+## 🟢 Maintained
+
+### Get started
+- [**Getting-Started.md**](Getting-Started.md) — **new here? start here.** Nothing → a custom unit on the map, each step linked to its deep doc.
+- [**Building.md**](Building.md) — build the plugin; the Blender dependency.
+- [**Backup.md**](Backup.md) — the four-layer safety net for the un-versioned working set: manual versions, daily auto-versions, an undoable delete guard, offsite zips.
+
+### Author content
+- [**Editor-Tools.md**](Editor-Tools.md) — the **editor reference**: every window under `Tools ▸ HAF`, its menu path, and which registry it writes. *Start here to find the right tool.*
+- [**Factory-Manual.md**](Factory-Manual.md) — the main guide: every field, the static + animated workflows, the troubleshooting table. *Start here to add a model.*
+- [**Ship-Status.md**](Ship-Status.md) — baked ≠ built. Which bakes the game hasn't seen yet, plus guarded delete of stale/orphaned output.
+- [**Textures.md**](Textures.md) — the atlas pipeline: every knob, the complete failure catalogue, runtime re-skins.
+- [**Game-Sound-Lab.md**](Game-Sound-Lab.md) — game-*wide* audio overrides: silence or replace any vanilla Wwise event, with in-game F8 audition.
+- *Unit & creature audio* (engine sounds, custom WAVs, creature voices) lives in [Factory-Manual.md](Factory-Manual.md) §13–14.
+
+#### Animation — four pages, in reading order
+1. [**Animated-Models.md**](Animated-Models.md) — *can HAF import my model?* The plain-language answer in three levels (clean rigs → rigid-part machines → full character rigs). **Start here.**
+2. [**Animation-Pitfalls.md**](Animation-Pitfalls.md) — it baked but looks wrong: the field guide to every trap, each hit for real.
+3. [**Donor-Clip-Flight.md**](Donor-Clip-Flight.md) — play the **donor's own animation on your rig** (`useDonorClip`): the measured engine contract and the failure catalogue. Proven on the helicopter.
+4. [**Turn-Ease.md**](Turn-Ease.md) — turn first, aim true, fire second: eased facing per unit or category, the attack hold, true-bearing aim, gun elevation.
+
+*(Extending the plugin rather than authoring? The engine-side companion is [Animated-Runtime.md](Animated-Runtime.md), under Internals.)*
 
 ### The injection axes
 Each axis adds custom content in a different place, from the same JSON registry.
-- [**District-Visuals.md**](District-Visuals.md) — a custom building on a single district tile, with its own texture, auto-leveled (the District Factory).
-- [**District-Dedicated-Visual.md**](District-Dedicated-Visual.md) — a district's own **strategic-map footprint**: the real 3D building at strategic zoom (B&W + flattened), migrating a district onto the scoped render path, multi-district coexistence, and composed/alpha-cutout foliage.
-- [**Pawn-Props.md**](Pawn-Props.md) — weapons and gear on a pawn's attachment slots (the Prop Lab).
-- [**Projectiles.md**](Projectiles.md) — a custom model as a unit's fired munition (the Projectile Lab).
-- [**Formations.md**](Formations.md) — how many models a unit fields and how they're arranged (data only, no bake).
-- [**Unit-Size.md**](Unit-Size.md) — resize any unit, vanilla included, incl. era-based scaling (data only, no bake).
 
-## Ship a pack
-- [**Multi-Mod.md**](Multi-Mod.md) — the HAF pack format, the `haf_packs/` drop folder, how packs merge and conflict, and the load report. Read this to add assets **without touching ENC**. Template: [haf-pack.example.json](haf-pack.example.json).
+| Axis | Page | Bake? |
+|---|---|---|
+| **Units** | the Factory pages above | yes |
+| **Districts** | [District-Visuals.md](District-Visuals.md) — a custom building on a district tile, auto-leveled. **Start here.** | yes |
+| **Districts, strategic zoom** | [District-Dedicated-Visual.md](District-Dedicated-Visual.md) — …plus its own strategic-map footprint, the scoped render path, multi-district coexistence. | yes |
+| **Wonders** | [Wonder-Spike.md](Wonder-Spike.md) — a custom model on a player-authored Artificial Wonder, through the game's native wonder pipeline. | yes |
+| **Pawn props** | [Pawn-Props.md](Pawn-Props.md) — weapons and gear on a pawn's attachment slots. | yes |
+| **Projectiles** | [Projectiles.md](Projectiles.md) — a custom model as a unit's fired munition. | yes |
+| **Formations** | [Formations.md](Formations.md) — how many models a unit fields, and their layout. | data only |
+| **Unit size** | [Unit-Size.md](Unit-Size.md) — how big any unit renders, vanilla included, incl. era scaling. | data only |
 
-## Understand the internals
-How the runtime actually works, for anyone extending the plugin.
+### Ship a pack
+- [**Multi-Mod.md**](Multi-Mod.md) — the pack format, the `haf_packs/` drop folder, how packs merge and conflict, and the load report. Read this to add assets **without touching ENC**. Template: [haf-pack.example.json](haf-pack.example.json).
+
+### Internals — for anyone extending the plugin
 - [**Code-Map.md**](Code-Map.md) — where everything lives in the plugin source.
-- [**Shared-Schema.md**](Shared-Schema.md) — the `Haf.Schema` library: the ~64 fields `ModelDef` and `ModelEntry` share, defined once and inherited by both; what's shared vs divergent, and how to add a field.
-- [**Animated-Runtime.md**](Animated-Runtime.md) — the decompiled animation runtime: clip registration, the per-session re-arm (why `AnimationLoad` fires once per process and how HAF re-registers on `PawnManager.Load` / `Sandbox.Load` for save-loads and New Games), the per-frame pose hook, the GPU pose math, and the engine contracts (rotation-only, scale-1, name-ordered bones).
-- [**Unit-Combat-Behavior.md**](Unit-Combat-Behavior.md) — how the game drives combat animation and how HAF hooks it.
-- [**Firing-On-Attack.md**](Firing-On-Attack.md) — the one-shot fire trigger (Humankind's `SimulationEvent` bus).
-- [**Facing-Persistence.md**](Facing-Persistence.md) — how unit facing survives save/load.
-- [**Vertex-Budget.md**](Vertex-Budget.md) — the shared GPU mesh-buffer ceiling and how to budget by model *type*.
-- [**Capabilities.md**](Capabilities.md) — the full capability list and known limitations, in reference form.
-- [**Animation-Pitfalls.md**](Animation-Pitfalls.md) — the hard-won post-mortems: what broke, why, and the fix.
+- [**Shared-Schema.md**](Shared-Schema.md) — the `Haf.Schema` library both halves inherit: what's shared, what's divergent, how to add a field. *(Owns the field count.)*
+- [**Animated-Runtime.md**](Animated-Runtime.md) — the decompiled animation runtime: clip registration, the per-session re-arm, the per-frame pose hook, the GPU pose math, the engine contracts.
+- [**Unit-Combat-Behavior.md**](Unit-Combat-Behavior.md) — how the game drives combat animation, and what's data-driven vs hardcoded.
+- [**Firing-On-Attack.md**](Firing-On-Attack.md) — the one-shot fire trigger, off Humankind's `SimulationEvent` bus.
+- [**Facing-Persistence.md**](Facing-Persistence.md) — how unit facing survives save/load, given the save has no facing field.
+- [**Vertex-Budget.md**](Vertex-Budget.md) — the shared GPU mesh-buffer ceiling, and how to budget by model *type*.
+- [**Capabilities.md**](Capabilities.md) — the full capability list + known limitations, in reference form.
+- [**Headless-CLI.md**](Headless-CLI.md) — run re-bake and the full mod build + deploy from the command line, so a script, CI, or an agent can drive HAF without the GUI.
 
-## Project & roadmap
-Development-facing docs — status, review, testing, and the wider ecosystem.
-- [**Decisions.md**](Decisions.md) — the **ADR log**: settled decisions and the *why* behind them (pack ordering, reflection strategy, the Factory/Lab ownership split, rotation-only animation, …). Check here before proposing a change to any of them.
-- [**Framework-Review.md**](Framework-Review.md) — verified code-review findings (prioritized) and the hardening order.
-- [**Review-Backlog.md**](Review-Backlog.md) — the open review backlog.
-- [**Testing.md**](Testing.md) — the testing strategy: what's unit-tested, what's covered by in-editor instruments, and why.
-- [**Ecosystem-Survey.md**](Ecosystem-Survey.md) — every Humankind BepInEx plugin on GitHub and the techniques worth borrowing.
-- [**Wonder-Spike.md**](Wonder-Spike.md) — the wonder research spike: a custom model on a player-authored **Artificial Wonder** (proven recipe, the falsified native-affinity path, the session-lifecycle bugs it surfaced, open items).
-- [**Pack-Validator-Design.md**](Pack-Validator-Design.md) — design note for the planned pack pre-flight validator (author-facing content validation); designed, not built.
-- [**Headless-CLI.md**](Headless-CLI.md) — the **headless CLI**: run model re-bake and the full Humankind mod **build + deploy** from the command line (Unity batch mode), so scripts / CI / an AI agent can drive HAF without the editor GUI. Built + verified.
-- [**Headless-CLI-Design.md**](Headless-CLI-Design.md) — the original design note behind it (superseded by the reference above).
-- [**Audit-2026-07-31.md**](Audit-2026-07-31.md) — a point-in-time project audit.
-- [**Preview-Texture-Postmortem.md**](Preview-Texture-Postmortem.md) — why the editor's #1 chronic bug (the lying
-  first-select preview) survived six weeks of fixes: six protective mechanisms, three fix versions, and the
-  general lessons.
+### Project & process — maintainer-facing
+- [**Decisions.md**](Decisions.md) — the **ADR log**: settled decisions and the *why*. Check here before proposing a change to any of them.
+- [**Testing.md**](Testing.md) — the testing strategy: what's unit-tested, what's covered by in-editor instruments, and what deliberately isn't.
+- [**Framework-Review.md**](Framework-Review.md) — the living hardening roadmap: verified review findings, prioritized, with what was done when.
+- [**Review-Backlog.md**](Review-Backlog.md) — findings verified real and deliberately deferred, ranked by when they'll bite.
+
+---
+
+## 📁 Archived notes — `docs/notes/`
+
+**Frozen. Not maintained. Not instructions.** Kept because the reasoning is worth more than the conclusion — each says
+what replaced it.
+
+| Note | Frozen | Read it for | Current page |
+|---|---|---|---|
+| [Audit-2026-07-31](notes/Audit-2026-07-31.md) | 2026-08-01 | the "silently disarmed" bug-class taxonomy | [Review-Backlog](Review-Backlog.md) |
+| [District-Dedicated-Visual-Feasibility](notes/District-Dedicated-Visual-Feasibility.md) | 2026-08-13 | how the scoped-visual hybrid was found | [District-Dedicated-Visual](District-Dedicated-Visual.md) |
+| [District-Footprint-Investigation](notes/District-Footprint-Investigation.md) | 2026-08-16 | the strategic-footprint mechanism, mapped | [District-Dedicated-Visual](District-Dedicated-Visual.md) |
+| [Ecosystem-Survey](notes/Ecosystem-Survey.md) | 2026-07-12 | what other Humankind plugins solved (2021–2024 game versions — re-verify every signature) | — |
+| [Headless-CLI-Design](notes/Headless-CLI-Design.md) | 2026-08-08 | the original scoping; parts superseded by the build | [Headless-CLI](Headless-CLI.md) |
+| [Pack-Validator-Design](notes/Pack-Validator-Design.md) | 2026-08-18 | the validation rule catalogue + the fault-injection drill | [Editor-Tools](Editor-Tools.md), [Headless-CLI](Headless-CLI.md) |
+| [Preview-Texture-Postmortem](notes/Preview-Texture-Postmortem.md) | 2026-08-19 | why a defect survived six weeks of fixes | [Textures](Textures.md) |
 
 ---
 
@@ -76,5 +121,5 @@ Development-facing docs — status, review, testing, and the wider ecosystem.
 [`llms.txt`](https://raw.githubusercontent.com/sswelm/HumankindAssetFramework/master/llms.txt) (public raw Markdown, no
 auth, fully crawlable), or the browsable site at <https://sswelm.github.io/HumankindAssetFramework/>.
 
-**Project history** — the dated milestone log (what was proven when, and the war stories behind it) lives in
-[../CHANGELOG.md](../CHANGELOG.md).
+**Project history** — the dated milestone log (what was proven when, and the war stories behind it) is the
+[CHANGELOG](../CHANGELOG.md).

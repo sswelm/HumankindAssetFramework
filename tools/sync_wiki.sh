@@ -3,8 +3,10 @@
 # first sync — this is now actually it). Usage:
 #   git clone https://github.com/sswelm/HumankindAssetFramework.wiki.git <dir>
 #   tools/sync_wiki.sh <dir>     # then commit+push inside <dir>
-# Mapping: docs/README.md -> Home, repo README.md -> Overview, CHANGELOG.md -> Changelog, docs/X.md -> X.
-# Links: docs/ prefixes stripped, .md suffixes stripped (GitHub wiki page names), repo-home deep link -> Overview.
+# Mapping: docs/README.md -> Home, repo README.md -> Overview, CHANGELOG.md -> Changelog, docs/X.md -> X,
+#          docs/notes/X.md -> X  (the wiki page namespace is FLAT — see the collision guard below).
+# Links: docs/, docs/notes/, notes/ and ../ prefixes stripped, .md suffixes stripped (GitHub wiki page names),
+#        repo-home deep link -> Overview.
 # _Sidebar.md is CURATED BY HAND in the wiki repo — new pages must be added there deliberately; this
 # script never touches it.
 set -euo pipefail
@@ -17,6 +19,14 @@ WIKI="$(cd "$WIKI" 2>/dev/null && pwd)" || { echo "FAIL: wiki dir does not exist
 REPO_ROOT="$(pwd)"
 case "$WIKI/" in "$REPO_ROOT"/*) echo "FAIL: wiki dir resolves inside the repo ($WIKI) — pass the wiki CLONE dir" >&2; exit 1;; esac
 [ -d "$WIKI/.git" ] || { echo "FAIL: $WIKI is not a git clone (no .git) — clone the wiki repo there first" >&2; exit 1; }
+
+# COLLISION GUARD (2026-08-20, added with the docs/notes/ archive split): the wiki namespace is flat, so
+# docs/Foo.md and docs/notes/Foo.md would emit the SAME page and one would silently overwrite the other.
+# Fail loudly instead — rename one of the two source files.
+dupes="$(for f in docs/*.md docs/notes/*.md; do basename "$f"; done | sort | uniq -d || true)"
+[ -z "$dupes" ] || { echo "FAIL: duplicate basename(s) across docs/ and docs/notes/ — the wiki namespace is flat:" >&2
+                     printf '  %s\n' $dupes >&2; exit 1; }
+
 HDR='> _Auto-generated from the repo docs by `tools/sync_wiki.sh` — edit the source Markdown in the repo, not this wiki page._'
 REPO='https://github.com/sswelm/HumankindAssetFramework'   # repo-only files (CREDITS/LICENSE/llms.txt/examples) can't be wiki pages
 
@@ -24,7 +34,12 @@ emit() {  # emit <src> <dst-basename>
   { echo "$HDR"; echo; cat "$1"; } | sed \
     -e 's|](https://github\.com/sswelm/HumankindAssetFramework#readme)|](Overview)|g' \
     -e 's#](docs/README\.md#](Home#g' \
+    -e 's#](\.\./README\.md#](Overview#g' \
+    -e 's#](\.\./CHANGELOG\.md#](Changelog#g' \
+    -e 's#](docs/notes/#](#g' \
     -e 's#](docs/#](#g' \
+    -e 's#](notes/#](#g' \
+    -e 's#](\.\./#](#g' \
     -e 's#](README\.md#](Overview#g' \
     -e 's#](CHANGELOG\.md#](Changelog#g' \
     -e "s#](\(CREDITS\.md\|LICENSE\|llms\.txt\|haf-pack\.example\.json\))#]($REPO/blob/master/\1)#g" \
@@ -36,9 +51,11 @@ emit() {  # emit <src> <dst-basename>
 emit README.md Overview.md
 emit CHANGELOG.md Changelog.md
 emit docs/README.md Home.md
-for f in docs/*.md; do
+n=0
+for f in docs/*.md docs/notes/*.md; do
   b="$(basename "$f")"
   [ "$b" = "README.md" ] && continue
   emit "$f" "$b"
+  n=$((n + 1))
 done
-echo "Synced README + CHANGELOG + $(ls docs/*.md | grep -vc 'README') doc page(s) -> $WIKI"
+echo "Synced README + CHANGELOG + $n doc page(s) (incl. $(ls docs/notes/*.md | wc -l) archived note(s)) -> $WIKI"
