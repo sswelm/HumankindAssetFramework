@@ -2190,23 +2190,36 @@ namespace HumankindAssetFramework
         // Blit any (possibly non-readable / compressed) texture through a RenderTexture into a readable Texture2D and
         // PNG-encode it. PNG (vs TGA) round-trips cleanly with LoadImage — paint on the dumped canvas and the retexture
         // maps back exactly. Uses UnityEngine.ImageConversionModule (also referenced for the retexture skin-load).
+        // try/finally, matching BuildAdjustedAtlas and MakeGrayCopy — the third readback site, missed when the other
+        // two were hardened (2026-08-21). It restored RenderTexture.active on the SUCCESS path only, so a throw in
+        // ReadPixels / Apply / EncodeToPNG left the active target pointing at our temporary RT and never released it.
+        // A dangling active target "corrupts the next draw" (BuildAdjustedAtlas's own words) — a whole-screen artifact
+        // from a diagnostic dump. Reachable only via the operator-triggered atlas dump, so it has never fired in
+        // practice, but it is the same defect class its two siblings were already fixed for.
+        // Not unit-testable (RenderTexture/Blit need a live Unity render loop); the guard is that all three readback
+        // sites now share one shape — if you add a fourth, copy this one.
         static byte[] ToReadablePng(UnityEngine.Texture src)
         {
+            var prev = UnityEngine.RenderTexture.active;
+            UnityEngine.RenderTexture rt = null;
+            UnityEngine.Texture2D t = null;
             try
             {
                 int w = src.width, h = src.height;
-                var rt = UnityEngine.RenderTexture.GetTemporary(w, h, 0, UnityEngine.RenderTextureFormat.ARGB32, UnityEngine.RenderTextureReadWrite.sRGB);
-                var prev = UnityEngine.RenderTexture.active;
+                rt = UnityEngine.RenderTexture.GetTemporary(w, h, 0, UnityEngine.RenderTextureFormat.ARGB32, UnityEngine.RenderTextureReadWrite.sRGB);
                 UnityEngine.Graphics.Blit(src, rt);
                 UnityEngine.RenderTexture.active = rt;
-                var t = new UnityEngine.Texture2D(w, h, UnityEngine.TextureFormat.RGBA32, false);
+                t = new UnityEngine.Texture2D(w, h, UnityEngine.TextureFormat.RGBA32, false);
                 t.ReadPixels(new UnityEngine.Rect(0, 0, w, h), 0, 0); t.Apply();
-                UnityEngine.RenderTexture.active = prev; UnityEngine.RenderTexture.ReleaseTemporary(rt);
-                var png = UnityEngine.ImageConversion.EncodeToPNG(t);   // static form: no `using UnityEngine;` in this file
-                UnityEngine.Object.DestroyImmediate(t);
-                return png;
+                return UnityEngine.ImageConversion.EncodeToPNG(t);   // static form: no `using UnityEngine;` in this file
             }
             catch (Exception e) { Plugin.Log.LogWarning("[AtlasDump] readable copy failed for '" + (src != null ? src.name : "?") + "': " + e.Message); return null; }
+            finally
+            {
+                UnityEngine.RenderTexture.active = prev;   // FIRST: a dangling active target corrupts the next draw
+                if (rt != null) UnityEngine.RenderTexture.ReleaseTemporary(rt);
+                if (t != null) UnityEngine.Object.DestroyImmediate(t);   // the readback copy is always temporary here
+            }
         }
 
         static string SanitizeFile(string s)

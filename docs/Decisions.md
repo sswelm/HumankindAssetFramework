@@ -7,6 +7,22 @@ check before proposing a change to any of them.
 
 ---
 
+## Every RenderTexture readback restores `active` in a `finally` — no exceptions (2026-08-21)
+HAF reads pixels back off the GPU in three places (`BuildAdjustedAtlas`, `MakeGrayCopy`, `ToReadablePng`): take a
+temporary RT, `Blit` into it, set `RenderTexture.active`, `ReadPixels`, restore. If a throw escapes between setting
+`active` and restoring it, the active render target is left pointing at our temporary — which **corrupts the next
+draw**, i.e. a whole-screen artifact produced by an off-screen texture utility. The RT and the half-built `Texture2D`
+leak with it.
+**Rule:** capture `prevActive` *before* the try, null-init the RT and the texture, and restore/release/free in a
+`finally` — restoring `active` FIRST. Never on the success path only.
+**Why it is written down:** this has now happened three times and been noticed twice. Two sites were hardened when
+the bug was first understood; `ToReadablePng` was missed and sat unfixed until 2026-08-21, found while chasing an
+unrelated visual artifact that turned out not to be HAF at all. It never fired in practice (its only caller is the
+operator-triggered atlas dump) — which is exactly why nobody looked.
+**Not testable:** `RenderTexture`/`Blit` need a live Unity render loop, so there is no unit test and no gate check
+for this (a regex guard over method bodies was considered and rejected as too fragile to be worth the false
+positives). The guard is that all three sites now have one shape — **if you add a fourth, copy an existing one.**
+
 ## To test the untestable, move the DECISION out of the method that does the I/O (2026-08-20)
 Most of the plugin is reflection against a live game inside Unity and cannot be unit-tested. The decisions buried
 in it usually can be. **Rule:** when a method mixes I/O, engine access and a *decision*, move the decision to a pure
