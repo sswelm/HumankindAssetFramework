@@ -22,7 +22,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   artifact), and content comparisons are **CRLF-normalized** — found necessary on the spot: the live district
   source and deploy differed by exactly 143 carriage returns and nothing else, which would have fired a false
   "hand-edited" warning on the first load. Source files keep their historical `.backup.json` names to spare
-  git a rename; `SourcePath` is the honest accessor. Backlog #3 follow-up closed.
+  git a rename; `SourcePath` is the honest accessor. Backlog #3 follow-up closed. **DRILLED the same evening**: a
+  comma deleted from the district source → banner pinpointing *line 22, position 16* (`districts[0].rotation.y`),
+  one Console error, the corrupt copy preserved timestamped → **Restore last deploy** recovered 2 entries eleven
+  seconds after the break.
 
 - **PROBE PARTS 116 s → 7 s (2026-08-20, "can you optimize it?").** The Ehrhardt probe had crept from half a
   minute to two. Per-phase timers (now permanent `VEHICLE timing:` lines) convicted two phases, neither the
