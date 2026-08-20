@@ -963,73 +963,28 @@ namespace HumankindAssetFramework
             try { pos = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return; }
             if (e.attackAnimId >= 0)
             {
-                float atd = e.attackDur > 0.001f ? e.attackDur : 1f;
-                // attackRepeats: the window spans N passes of the clip; Time is fed UNCLAMPED (dt/clipDur) and the
-                // sampler's Repeat(Time,1) wraps it, so the clip replays each pass — sustained fire from a
-                // single-pop source clip. repeats=1 degenerates to the original clamped one-shot.
-                int rep = e.attackRepeats > 0 ? e.attackRepeats : 1;
-                float win = atd * rep;
-                float nowT = UnityEngine.Time.time;
+                // PURE decision — Patches/PoseMath.cs, unit-tested. The lock stays here: the list is shared.
                 lock (e.activeFires)
-                    for (int i = 0; i < e.activeFires.Count; i++)
-                    {
-                        float dtF = nowT - e.activeFires[i].startTime;
-                        if (dtF < 0f || dtF >= win) continue;
-                        if ((e.activeFires[i].pos - pos).sqrMagnitude < 4f * 4f)
-                        { inAttack = true; attackT = UnityEngine.Mathf.Min(dtF / atd, rep - 0.001f); break; }
-                    }
+                    inAttack = PoseMath.AttackWindow(e.activeFires, pos, UnityEngine.Time.time,
+                                                     e.attackDur, e.attackRepeats, out attackT);
             }
-            float stoppedAt = -1f, moveStartedAt = -1f; bool matched = false;
-            lock (e.stateSamples)
-            {
-                // Proximity-weighted MAJORITY over the samples in the 4u radius, NOT the single nearest. Samples are
-                // pooled per model TYPE (there is no per-unit id — the pawn entry's array slot reshuffles on LOD), so
-                // two SAME-TYPE units within the radius (one moving, one idle) could have a pawn match the NEIGHBOUR's
-                // nearest sample and play the wrong clip. Weighting by proximity (w = R^2 - d^2) lets a pawn deep in
-                // its own formation be carried by its mates instead of flipped by a single closer neighbour sample.
-                // IDENTICAL to the old nearest-sample pick whenever the in-radius samples AGREE (the common case:
-                // one non-zero side, whose nearest sample IS the overall nearest).
-                const float R2 = 4f * 4f;   // same 4u match radius class as the fire/deploy hooks
-                float wMove = 0f, wIdle = 0f, dMove = float.MaxValue, dIdle = float.MaxValue;
-                StateSample sMove = default, sIdle = default;
-                for (int i = 0; i < e.stateSamples.Count; i++)
-                {
-                    var s = e.stateSamples[i];
-                    float d = (s.pos - pos).sqrMagnitude;
-                    if (d >= R2) continue;
-                    float w = R2 - d;   // proximity weight (0 at the radius edge, heaviest at the pawn's own position)
-                    if (s.moving) { wMove += w; if (d < dMove) { dMove = d; sMove = s; } }
-                    else          { wIdle += w; if (d < dIdle) { dIdle = d; sIdle = s; } }
-                }
-                if (wMove > 0f || wIdle > 0f)
-                {
-                    matched = true;
-                    // representative = the winning state's NEAREST sample (carries that unit's stoppedAt/combat); tie -> nearest overall
-                    var pick = wMove > wIdle ? sMove : wIdle > wMove ? sIdle : (dMove <= dIdle ? sMove : sIdle);
-                    moving = pick.moving; stoppedAt = pick.stoppedAt; moveStartedAt = pick.moveStartedAt; inCombat = pick.combat;
-                }
-            }
-            if (!matched)
+            PoseMath.StatePick pick;
+            lock (e.stateSamples) pick = PoseMath.PickState(e.stateSamples, pos);
+            if (!pick.Matched)
             {
                 moving = false;
                 return;
             }
+            moving = pick.Moving; inCombat = pick.Combat;
+            float stoppedAt = pick.StoppedAt, moveStartedAt = pick.MoveStartedAt;
             // BAKE-ONLY pacing (user decision 2026-07-19): the runtime plays every clip at its authored length —
             // pacing belongs in the DATA. A fold that outlasts a map move is authored shorter via a slice STEP
             // (deploy[179..0/3] = every 3rd frame = 3x faster), not scaled here.
-            if (!moving && e.afterAnimId >= 0 && stoppedAt > 0f)
-            {
-                float ad = e.afterDur > 0.001f ? e.afterDur : 1f;
-                float dt = UnityEngine.Time.time - stoppedAt;
-                if (dt >= 0f && dt < ad) { inAfter = true; afterT = UnityEngine.Mathf.Min(dt / ad, 0.999f); }   // one pass, hold the last frame until it elapses
-            }
+            if (!moving && e.afterAnimId >= 0)   // one pass, holding the last frame until it elapses
+                inAfter = PoseMath.OneShot(stoppedAt, UnityEngine.Time.time, e.afterDur, out afterT);
             // PRE-MOVEMENT one-shot: just STARTED moving (e.g. a howitzer folding its legs) — plays once, then the Move loop
-            if (moving && e.preMoveAnimId >= 0 && moveStartedAt > 0f)
-            {
-                float pd = e.preMoveDur > 0.001f ? e.preMoveDur : 1f;
-                float dtp = UnityEngine.Time.time - moveStartedAt;
-                if (dtp >= 0f && dtp < pd) { inPreMove = true; preMoveT = UnityEngine.Mathf.Min(dtp / pd, 0.999f); }
-            }
+            if (moving && e.preMoveAnimId >= 0)
+                inPreMove = PoseMath.OneShot(moveStartedAt, UnityEngine.Time.time, e.preMoveDur, out preMoveT);
             bool combatIdle = inCombat && e.combatAnimId >= 0 && !moving && !inAfter && !inAttack;
             // IDLE-ALT (2026-07-23, the tiger's howl): an OCCASIONAL flavor one-shot while PLAIN idle — never during
             // move/attack/after/combat. One cadence per ENTRY (unit type): the pawn evaluated at due time becomes the
@@ -1070,14 +1025,9 @@ namespace HumankindAssetFramework
             var osD = GetMember(entry, "ObjectSpace");
             UnityEngine.Vector3 dpos;
             try { dpos = (UnityEngine.Vector3)GetMember(osD, "Translation"); } catch { return e.deployPoseTime; }   // member renamed by a game update -> degrade to the default pose instead of throwing per pawn per frame
-            float poseTime = e.deployPoseTime;
-            float bestSqD = 3f * 3f;
-            lock (e.deploySamples)
-                for (int i = 0; i < e.deploySamples.Count; i++)
-                {
-                    float d = (e.deploySamples[i].pos - dpos).sqrMagnitude;
-                    if (d < bestSqD) { bestSqD = d; poseTime = e.deploySamples[i].poseTime; }
-                }
+            float poseTime;
+            // PURE decision — Patches/PoseMath.cs, unit-tested (note the 3u radius, tighter than the fire match).
+            lock (e.deploySamples) poseTime = PoseMath.NearestDeployPose(e.deploySamples, dpos, e.deployPoseTime);
             // RECOIL-ON-FIRE overlay: when this howitzer is DEPLOYED (held near deployPoseTime) AND it just fired, sweep the
             // pose time up through the recoil tail once. The clip's tail after deployPoseTime is the extracted kickback.
             if (e.fireOnAttack && poseTime >= e.deployPoseTime * 0.9f) poseTime = RecoilOverlay(e, dpos, dur, poseTime);
@@ -1088,23 +1038,16 @@ namespace HumankindAssetFramework
         // fall back to the deployed hold. Same per-instance fire match as fire-once (nearest active fire by render position).
         static float RecoilOverlay(ModelEntry e, UnityEngine.Vector3 dpos, float dur, float poseTime)
         {
-            float bestSqF = 4f * 4f, bestStartF = -1f;
-            lock (e.activeFires)
-                for (int i = 0; i < e.activeFires.Count; i++)
-                {
-                    float d = (e.activeFires[i].pos - dpos).sqrMagnitude;
-                    if (d < bestSqF) { bestSqF = d; bestStartF = e.activeFires[i].startTime; }
-                }
+            float bestStartF;
+            lock (e.activeFires) bestStartF = PoseMath.NearestFireStart(e.activeFires, dpos, PoseMath.FireMatchRadiusSq);
             if (bestStartF < 0f) return poseTime;
-            const float recoilMax = 0.999f;                            // stay below 1.0 (Mathf.Repeat wraps 1.0 -> frame 0 = folded)
-            float rspd = e.recoilSpeed > 0f ? e.recoilSpeed : 1f;
-            float recoilDur = dur * (recoilMax - e.deployPoseTime) / rspd;   // tail duration at authored speed, sped up by recoilSpeed
-            float elapsedF = UnityEngine.Time.time - bestStartF;
-            if (recoilDur > 0.0001f && elapsedF < recoilDur)
+            // PURE decision — Patches/PoseMath.cs, unit-tested.
+            if (PoseMath.RecoilSweep(UnityEngine.Time.time - bestStartF, dur, e.deployPoseTime, e.recoilSpeed,
+                                     out float swept, out float recoilDur))
             {
-                poseTime = e.deployPoseTime + (elapsedF / recoilDur) * (recoilMax - e.deployPoseTime);
+                poseTime = swept;
                 if (recoilLogStart != bestStartF)
-                { recoilLogStart = bestStartF; Plugin.Diag($"[Deploy-Fire] '{e.resourceName}' RECOIL sweep (dur={recoilDur:0.00}s, poseTime {e.deployPoseTime:0.00}->{recoilMax}, matchDist={UnityEngine.Mathf.Sqrt(bestSqF):0.0}u)"); }
+                { recoilLogStart = bestStartF; Plugin.Diag($"[Deploy-Fire] '{e.resourceName}' RECOIL sweep (dur={recoilDur:0.00}s, poseTime {e.deployPoseTime:0.00}->{PoseMath.RecoilMax})"); }
             }
             return poseTime;
         }
@@ -1118,21 +1061,13 @@ namespace HumankindAssetFramework
             var osT = GetMember(entry, "ObjectSpace");
             UnityEngine.Vector3 tpos;
             try { tpos = (UnityEngine.Vector3)GetMember(osT, "Translation"); } catch { return 0f; }   // renamed member -> rest at frame 0 instead of throwing per pawn per frame
-            float bestSq = float.MaxValue, bestStart = -1f;
-            lock (e.activeFires)
-            {
-                for (int i = 0; i < e.activeFires.Count; i++)
-                {
-                    float d = (e.activeFires[i].pos - tpos).sqrMagnitude;
-                    if (d < bestSq) { bestSq = d; bestStart = e.activeFires[i].startTime; }
-                }
-            }
-            const float matchRadiusSq = 4f * 4f;                       // a pawn within 4u of a fire is the firer (tiles are spaced wider)
-            if (bestStart >= 0f && bestSq <= matchRadiusSq)
-            {
-                float elapsed = UnityEngine.Time.time - bestStart;
-                poseTime = elapsed >= dur ? 0f : elapsed / dur;        // one pass, then rest (Update prunes finished fires)
-            }
+            // PURE decision — Patches/PoseMath.cs, unit-tested. A pawn within 4u of a fire is the firer (tiles are
+            // spaced wider). This used to seed `best` with float.MaxValue and range-check afterwards, where the
+            // recoil overlay seeded it with the radius; the two are equivalent and PoseMathTests pins that.
+            float bestStart;
+            lock (e.activeFires) bestStart = PoseMath.NearestFireStart(e.activeFires, tpos, PoseMath.FireMatchRadiusSq);
+            if (bestStart >= 0f)
+                poseTime = PoseMath.FireOncePose(UnityEngine.Time.time - bestStart, dur);   // one pass, then rest
             return poseTime;
         }
 
