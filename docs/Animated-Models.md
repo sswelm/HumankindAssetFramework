@@ -71,7 +71,8 @@ legs, landing gear, a crane, turrets. Very common for Sketchfab vehicles.
 Lab-generated rig.** Browse the static model → **Probe parts** (headless Blender lists the mesh parts; a single
 combined mesh is split into loose parts; roles auto-guessed from names) → mark the **Wheels** (and Turret) →
 **Vehicleize**. The GLB path lands on your clipboard; bake settings are printed on success. The review scales to
-real game-rips (the Ehrhardt probes into 3,350 shards):
+real game-rips (the Ehrhardt probes into 3,350 shards in ~7 s since 2026-08-20 — it was 2 minutes: the
+escape-ray visibility pass now shoots through one combined BVH and the preview exports unskinned):
 
 - **Review UI** — click a row to zoom + yellow-highlight that part in the turntable (on the source-skeleton fast
   path a **bone** row highlights every shard weighted to that bone — since 2026-08-20; bone rows never could before); **↑/↓** walk the list;

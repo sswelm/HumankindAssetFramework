@@ -10,6 +10,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **PROBE PARTS 116 s → 7 s (2026-08-20, "can you optimize it?").** The Ehrhardt probe had crept from half a
+  minute to two. Per-phase timers (now permanent `VEHICLE timing:` lines) convicted two phases, neither the
+  split nor the import: the escape-ray **visibility** pass (31 s — `scene.ray_cast` walked all 3,350 objects per
+  ray) and the **preview export** (86 s — the FBX exporter writing 3,350 *skinned* objects, 58 MB). Fixes: one
+  `BVHTree.FromPolygons` over the world-space scene (0.3 s, same verdicts ±3 parts at the eps edge) and an
+  unskinned meshes-only preview (2.1 s, 11 MB). Because the bone-row highlight had just been built on the
+  preview's skin weights, the probe now emits each shard's dominant bone as a 7th `PART` field and the Lab
+  maps bone → shards from the part list — which also made visible what the user had been hunting: the Turret
+  bone owns **567 shards**. Plus a sentinel + flush after the PART lines, because Blender's late-flushed
+  version banner glued itself onto the last row during verification.
+
 - **VEHICLE-LAB CLOSERS (2026-08-20).** The two loose ends from the canoe forensics, closed in one pass.
   (1) *The recipe-predates honesty note*: loading a recipe now names the features it predates ("recipe
   predates: wave rock, spin switch — loaded as safe defaults; Save to modernize"), detected by key-presence
