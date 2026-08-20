@@ -10,6 +10,23 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE BAKE TESTS WINDOW (2026-08-20, "this looks ridiculous").** The test pyramid had grown one guard at a
+  time into seven bare menu items — "Bake Conversion Gate Test (litmus)"? — each talking to its own dialog,
+  with no way to tell what a test did without reading source. The user called it: *"we need a specialized
+  testing dialog with clear explanation what we are testing… the center testing suite with clear UI
+  feedback."* All seven items collapsed into **one window** (`Tools ▸ HAF ▸ Bake Tests…`): every test is a row
+  with a plain-language what-it-tests and what-it-costs, Quick/Everything presets, one Run button, LIVE
+  per-row PASS/FAIL (a delayCall queue runs one test per editor tick so rows turn green/red as they finish;
+  failures unfold their detail lines), and a durable `Logs/haf_bake_tests_report.txt` per run — the editor
+  twin of the runtime's `haf_smoke_report.txt`. The tests themselves (`BakeSmokeTest` / `BakeFeatureTest` /
+  `ConversionGateTest`) now return a `BakeTestSection` instead of popping dialogs — and SKIPs are counted
+  honestly instead of being smuggled into the pass count. Same day, the suite's first ALL-models run earned
+  its keep in reverse: 6 "failures" that were actually a **stale assertion** — the smoke test's 1 KB
+  pose-stream floor predated the one-frame `Spin[0..0]` idle pattern, whose real shipped pose streams run
+  48–960 bytes. The test would have failed the live, in-game-working assets; the boundary (every failure a
+  one-frame idle, every pass a multi-frame clip) convicted the test, not the bakes. Floor recalibrated to 32
+  bytes (smallest legitimate asset: 48) with the conviction recorded in a comment.
+
 - **THE SIZE-REFERENCE KIT (2026-08-19, user-designed piece by piece).** "A default humankind man as a
   reference would really help assess size" → both previews (Factory + Lab) gained a **Ref man** — a stylized
   figure at game human height with X/Y position dials — and a **Ruler** (vertical stick, 0.5u ticks, long

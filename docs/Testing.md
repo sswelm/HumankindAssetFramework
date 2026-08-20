@@ -29,7 +29,10 @@ git config core.hooksPath tools/git-hooks
 the mismatch has already eaten files once, commit `db40e73`.) The hook (`tools/git-hooks/pre-push`,
 version-controlled) then blocks a failing push; bypass only in a real emergency
 with `git push --no-verify`. Deliberately **not** in the gate (too slow / need Unity, Blender, or the game): the Blender
-golden-master `deploy_regression.sh`, the in-editor Feature Test, and the in-game binding report — those stay manual. The
+golden-master `deploy_regression.sh`, the in-editor bake tests, and the in-game binding report — those stay manual.
+The in-editor tests all run from **one window** — `Tools ▸ HAF ▸ Bake Tests…` (Smoke / Features / Conversion rows,
+each with a plain-language explanation, live per-row PASS/FAIL, and a durable `Logs/haf_bake_tests_report.txt` per
+run; see [Factory-Manual.md](Factory-Manual.md) §11). The
 gate earned its keep on day one: standing it up surfaced three latent schema drifts (a wrapper field the plugin read but
 the baker never wrote, two runtime-only keys, and a `float?`-cast the parity script mis-classified), all fixed to green.
 

@@ -199,16 +199,21 @@ Press **F8** in a loaded game for HAF's runtime panel. It's trimmed to what a mo
 - **Live readouts** — **Unit resize** (Resize Lab × Global Era grid) and the **strategic-footprint flatten-height**
   override ([Unit-Size.md](Unit-Size.md), [District-Dedicated-Visual.md](District-Dedicated-Visual.md)).
 
-## Tests & gates — `Tools ▸ HAF ▸ Tests ▸ …`
+## Tests — `Tools ▸ HAF ▸ Bake Tests…`
 
-Non-destructive (throwaway resource names). Run before committing baker/pipeline changes. See [Testing.md](Testing.md).
+One window is the whole in-editor test suite (it replaced seven bare menu items on 2026-08-20). Every bake
+integration test is a row with a plain-language explanation of what it tests and what it costs, a checkbox, and
+Quick/Everything presets; one Run button executes the selection with live per-row PASS/FAIL (failures unfold their
+detail), and each run writes a durable report to `Logs/haf_bake_tests_report.txt`. All tests are non-destructive
+(throwaway resource names — your assets and registry are untouched). The rows:
 
-- **Bake Smoke Test** (`… (one per path)` / `… (ALL models)`) — re-bakes one model per bake path and asserts the assets
-  are produced.
-- **Bake Feature Test** (`…` / `… (Tier 2 — Blender + animated)`) — bakes synthetic cubes toggling one baker feature at a
-  time and asserts a per-feature invariant.
-- **Bake Conversion Gate Test** (`(litmus)` / `(registry converted models)` / `(deploy golden diff)`) — asserts raw-rig
-  conversion invariants (scale==1, parent<child index, rotation-only curves) and the deploy-convert golden bone snapshots.
+- **Smoke** (one per bake path / ALL models) — re-bakes models and asserts the output assets exist and aren't stubs.
+- **Features** (synthetic / Blender + animated) — bakes fixtures toggling one baker option at a time and asserts a
+  per-option invariant.
+- **Conversion** (litmus rig / real registry rigs / deploy golden diff) — asserts raw-rig conversion invariants
+  (scale==1, parent<child index, rotation-only curves) and the deploy-convert golden bone snapshots.
+
+Run before committing baker/pipeline changes. See [Testing.md](Testing.md) and [Factory-Manual.md](Factory-Manual.md) §11.
 
 ## Under the hood (non-window)
 
