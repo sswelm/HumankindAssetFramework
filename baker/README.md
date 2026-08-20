@@ -1,46 +1,53 @@
-# `baker/` — what is and isn't authoritative here
+# `baker/` — the live pipeline pieces that live in THIS repo
 
-This folder inside the **plugin** repo holds two very different kinds of thing. Read this before touching anything in it.
+Everything in this folder has exactly one home, and it is here. There is no snapshot, no mirror, and nothing
+"kept for reference" — see the history at the bottom for why that rule exists.
 
-## ⚠ The editor `.cs` files are a STALE REFERENCE COPY — do not edit or bake from them
+## ✅ `glbconv/` — the GLB→OBJ converter (single source of truth)
 
-`ModelRegistry.cs`, `ModelFactoryWindow.cs`, `AnimationLabWindow.cs`, `UniversalBaker.cs`, `VehicleLabWindow.cs`,
-`SoundWindow.cs`, `RetextureWindow.cs`, `ClipRangeDialog.cs`, `BackupWindow.cs`, `SocketBonesDialog.cs`,
-`PawnRigDumpWindow.cs`, `BakeSmokeTest.cs`, `ConversionGateTest.cs` are a **snapshot** of the Unity editor tooling.
+`Program.cs` + `glbconv.csproj` + the pinned `SharpGLTF.Core.dll`. **This is the only copy of the source
+anywhere.** ENCReload holds just the deployed `glbconv.exe` and its `BUILD.md`.
 
-- **Authoritative source:** the Unity project at `C:\Repo\ENCReload\Assets\Scripts\Editor\`. Always edit and **bake there.**
-- **This copy is NOT kept in sync.** It drifts behind ENCReload — e.g. this `ModelDef` (`ModelRegistry.cs`) is missing
-  runtime fields the plugin actually reads (`scale`, `animPhaseSpread`) plus several bake-time ones (`staticParts`,
-  `localNodeAnim`, `bakeLocked`, `deployStripExtra`). Writing a `pack.json` from this stale `ModelDef` would silently
-  **omit** those fields, so the affected models would render at default scale / default phase-spread with no error.
-- **It is inert in this repo anyway.** `HumankindAssetFramework` (this repo) is a plain .NET project, not a Unity project, so these
-  `UnityEditor`-dependent scripts don't compile or run here. The plugin build excludes them
-  (`HumankindAssetFramework.csproj` → `<Compile Remove="baker\**\*.cs" />`). They exist only as a rough reference.
+Build with `dotnet publish -c Release`, then copy the published exe over `<ENCReload>/Tools/glbconv/glbconv.exe`
+— and **A/B-diff old-vs-new OBJ output before deploying** (procedure in ENCReload's `Tools/glbconv/BUILD.md`).
+That diff is not optional: the 2026-08-16 rebuild shipped with the T5 mirrored-winding fix silently regressed,
+and the A/B is what would have caught it.
 
-If you want the current editor behaviour, read/run it in **ENCReload**, not here. (The plugin runtime — `Plugin.cs`,
-`Patches/`, at the repo root — is the code that actually ships in this repo and is kept current.)
+## ✅ `reactor_silhouette.py` — the district-silhouette helper
 
-## ✅ `baker/glbconv/` — LIVE: the single source of truth for glbconv (2026-08-17)
+Headless Blender; documented in [`docs/District-Dedicated-Visual.md`](../docs/District-Dedicated-Visual.md).
+Also lives only here.
 
-The GLB→OBJ converter: `Program.cs` + `glbconv.csproj` + the pinned `SharpGLTF.Core.dll`. **This is the only copy
-of the source anywhere.** ENCReload's `Program.cs.src` snapshot was deleted after the two copies split-brained —
-each had accumulated a verified fix the other lacked, and the 2026-08-16 exe rebuild shipped with the T5
-mirrored-winding fix regressed (CHANGELOG 2026-08-17). Build with `dotnet publish -c Release`, then copy the
-published exe over `<ENCReload>/Tools/glbconv/glbconv.exe` — and **A/B-diff old-vs-new OBJ output before
-deploying** (procedure in ENCReload's `Tools/glbconv/BUILD.md`).
+## Where the editor tooling actually is
 
-`baker/reactor_silhouette.py` is also live-from-here: the district-silhouette helper documented in
-`docs/District-Dedicated-Visual.md`.
+The **HAF Authoring Tools** (Model Factory, Animation Lab, District Factory, Prop Lab, Projectile Lab, Vehicle
+Lab, Sound Studio, Backup & Restore, Ship Status) are Unity editor scripts and live **only** in the
+[ENCReload](https://github.com/sswelm/ENCReload) project, under `Assets/Scripts/Editor/`. Edit and bake there.
 
-## Blender scripts — deleted from here (2026-08-17), live ONLY in `<ENCReload>/Tools/`
+They cannot run from this repo in any case: `HumankindAssetFramework` is a plain .NET project, not a Unity
+project, so `UnityEditor`-dependent scripts do not compile here.
 
-The pipeline's Blender scripts (`rig_anim.py`, `prep_model.py`, `vehicle_rig.py`, `deploy_convert.py`, …) run from
-`<UnityProjectRoot>/Tools/` — the copies that used to sit at `baker/` root and in `baker/Tools/` were **never
-executed by anything** and had drifted weeks behind while this README labelled them "live". That's the same
-two-copies disease that caused the glbconv regression, so they were deleted outright rather than documented.
+## Why there is no snapshot of them here any more (2026-08-21)
 
-## Why not just delete the stale `.cs` files?
+There used to be one — 13 files, ~7,000 lines, mirrored from ENCReload and labelled a "deliberately stale
+reference snapshot". It was deleted, and the reasoning is worth keeping because it reverses an earlier call:
 
-They were left documented rather than deleted (2026-08-01, general-review finding) because the folder is entangled with
-the live `glbconv`/`Tools` above and the csproj notes `baker/` "ships in the mod". If the stale editor snapshot is ever
-formally distributed as tooling, it must be **re-synced from ENCReload first** — never shipped as-is.
+- **It was documented as dangerous rather than made safe.** Its own README warned that this copy's `ModelDef`
+  was missing fields the plugin reads (`scale`, `animPhaseSpread`) plus bake-time ones (`staticParts`,
+  `localNodeAnim`, `bakeLocked`, `deployStripExtra`), so writing a `pack.json` from it would **silently omit**
+  them and the affected models would render at default scale and phase with no error anywhere.
+- **The same disease had already cost a shipped regression** — glbconv's two diverged sources, where each copy
+  held a fix the other lacked (CHANGELOG 2026-08-17). A copy without a sync guard eventually ships a bug.
+- **The original reason to keep it no longer applied.** In 2026-08-01 a *blanket* delete of `baker/` was
+  genuinely unsafe: the folder also held the live `glbconv/` and a `Tools/` Blender-script copy, so the
+  snapshot was documented loudly instead. The Blender copies were deleted on 2026-08-17, and a **targeted**
+  delete of just the editor `.cs` — leaving `glbconv/` and the `.py` untouched — carries none of that risk.
+- **It gets more dangerous the moment strangers arrive.** Today it is a hazard a maintainer knows about. After
+  a public release it is plausible-looking editor source that an adopter finds, drops into Unity, bakes from,
+  and produces quietly broken packs with.
+
+Nothing was lost: the files remain in git history, and the authoritative versions are in ENCReload.
+
+The `HumankindAssetFramework.csproj` exclusions (`DefaultItemExcludes` + `Compile Remove="baker\**\*.cs"`) are
+still required — they keep glbconv's `Program.cs` and its self-contained .NET 8 publish output out of the
+plugin build.

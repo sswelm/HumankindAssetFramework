@@ -172,7 +172,7 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
 The complete capability list and known limitations are in [**Capabilities.md**](docs/Capabilities.md).
 
 ## How it works
-**Editor — the Model Factory** (`baker/`, *Tools ▸ HAF ▸ Model Factory*): pick a target unit + a model file, set
+**Editor — the Model Factory** (*Tools ▸ HAF ▸ Model Factory*, in [ENCReload](https://github.com/sswelm/ENCReload)): pick a target unit + a model file, set
 transform / size / shading, **Bake**. Static models bake an Amplitude `Skeleton` on the proven single-bone vehicle rig +
 a packed atlas; ticking **Animated** takes a parallel path (`UniversalBaker.BuildAnimated`) that keeps the model's **own
 armature + clip** (Blender slims it, then bakes `Skeleton` + `ClipCollection` + atlas, with the clip isolated in a
@@ -196,7 +196,7 @@ hang — the danger was malformed skeletons, not custom ones per se.*
 | Runtime plugin (this repo) | **BepInEx 5.4** plugin in C#, targeting **.NET Framework 4.7.1** (the game's Mono runtime); builds with just the .NET SDK (`dotnet build`, no Unity needed) |
 | Game patching | **Harmony** (`0Harmony`) runtime patches against the game's **`Amplitude.Mercury`** assemblies — no executable modification |
 | Registry parsing | **Newtonsoft.Json** (shipped with the game, via mod.io) — `UnityEngine.JsonUtility` silently returns empty objects under the game's Mono runtime |
-| Editor tooling ([ENCReload](https://github.com/sswelm/ENCReload)) | **Unity 2021.3.1f1** (Humankind's own engine version) + the **official Amplitude modding SDK**, which bakes the native `Skeleton` / `ClipCollection` / mesh / atlas assets; editor scripts mirrored here in `baker/` |
+| Editor tooling ([ENCReload](https://github.com/sswelm/ENCReload)) | **Unity 2021.3.1f1** (Humankind's own engine version) + the **official Amplitude modding SDK**, which bakes the native `Skeleton` / `ClipCollection` / mesh / atlas assets; editor scripts live only there (the stale `baker/` mirror was deleted 2026-08-21) |
 | `glbconv` converter | Standalone C# console app on **.NET 8** (self-contained single-file exe — adopters need no .NET install), built on **SharpGLTF** |
 | Model-prep scripts | **Python** run headless inside **Blender** (`blender -b --python …`, `bpy` API) — rigging, decimation, clip extraction |
 | Editor ↔ runtime contract | A plain **JSON** registry (the pack's `pack.json`), its shared fields (see [Shared-Schema](docs/Shared-Schema.md) for the exact count) defined once in a **`Haf.Schema`** netstandard2.0 DLL both halves inherit — so the schema can't drift |

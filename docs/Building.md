@@ -75,12 +75,21 @@ and where the bugs have historically been. Needs the same gitignored `References
 into the test bin). Full detail — what's covered, what's deliberately out of scope and why, how to add a test — is in
 **[Testing.md](Testing.md)**.
 
-## Editor tooling (`baker/`)
+## Editor tooling — in ENCReload, not here
 
-The Model Factory editor scripts live — and are edited, compiled, and run — **only in the ENCReload Unity project**
-(`Assets/Scripts/Editor/`, git-tracked there since 2026-07-03). To get the **Tools ▸ Model Factory** window, use
-that project. The `baker/` folder here is NOT a working copy: it holds a **deliberately stale reference snapshot**
-of those scripts (do not drop it into a Unity project or bake from it — see `baker/README.md`; it silently omits
-fields and preserves since-fixed bugs, and must be re-synced from ENCReload before it could ever ship) plus the one
-live exception: **`baker/glbconv/` is the single source of truth for the GLB→OBJ converter** (2026-08-17), built
-here and deployed to `<ENCReload>/Tools/glbconv/`.
+The Model Factory and the other authoring windows live — and are edited, compiled, and run — **only in the
+ENCReload Unity project** (`Assets/Scripts/Editor/`, git-tracked there since 2026-07-03). To get the
+**Tools ▸ HAF ▸ Model Factory** window, use that project. There is no copy of them in this repo: the stale
+reference snapshot that used to sit in `baker/` was **deleted on 2026-08-21** (~7,000 lines) because it silently
+omitted fields the plugin reads, so anything baked from it produced quietly wrong packs — reasoning in
+`baker/README.md` and [Decisions.md](Decisions.md).
+
+## What `baker/` still holds
+
+Two live things that exist **only** here, and are built from here:
+
+- **`baker/glbconv/`** — the single source of truth for the GLB→OBJ converter (2026-08-17). Build with
+  `dotnet publish -c Release`, deploy the exe to `<ENCReload>/Tools/glbconv/`, and **A/B-diff the OBJ output
+  before deploying** (procedure in ENCReload's `Tools/glbconv/BUILD.md`).
+- **`baker/reactor_silhouette.py`** — the headless-Blender district silhouette helper
+  ([District-Dedicated-Visual.md](District-Dedicated-Visual.md)).

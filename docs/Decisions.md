@@ -57,14 +57,26 @@ silently regressed. A cross-repo file copy without a sync guard eventually ships
 reintroduce a second source copy; after any rebuild, A/B-diff old-vs-new OBJ output before deploying (procedure in
 ENCReload `Tools/glbconv/BUILD.md`).
 
-## A cross-repo copy is either authoritative or it doesn't exist (2026-08-01 / 2026-08-17)
-The editor `.cs` files in `baker/` are a **deliberately stale reference snapshot** (2026-08-01: entangled with the
-live glbconv + csproj packaging note, so documented loudly in `baker/README.md` instead of deleted); the
-authoritative, runnable copies live in ENCReload (`Assets/Scripts/Editor/`, git-tracked). The Blender-script copies
-(`baker/*.py` + `baker/Tools/`) got the opposite treatment on 2026-08-17 — **deleted** — because unlike the `.cs`
-snapshot they were labelled "live" while the pipeline never executed them (it resolves `<UnityProjectRoot>/Tools/`):
-a drift trap, not documentation. **Rule:** "stale but documented" is reserved for the `.cs` snapshot alone; every
-other file has exactly one home.
+## A cross-repo copy is either authoritative or it doesn't exist (2026-08-01 / 2026-08-17 / **2026-08-21: no exceptions**)
+Every file has exactly one home. The authoritative editor scripts live in ENCReload (`Assets/Scripts/Editor/`); the
+converter source lives only in `baker/glbconv/`.
+
+**2026-08-21 — the last exception was removed.** The editor `.cs` files in `baker/` had been carved out as a
+"deliberately stale reference snapshot": documented loudly in `baker/README.md` rather than deleted, because in
+2026-08-01 a *blanket* delete of `baker/` was genuinely unsafe (the folder also held the live `glbconv/` and a
+`Tools/` Blender-script copy). All 13 files, ~7,000 lines, are now **deleted**. What changed:
+- the entanglement is gone — the Blender copies went on 2026-08-17, so a **targeted** delete of just the editor
+  `.cs`, leaving `glbconv/` and `reactor_silhouette.py`, carries none of the 08-01 risk;
+- the carve-out was documenting a hazard instead of removing it. The snapshot's `ModelDef` was missing fields the
+  plugin reads, so baking from it **silently omits** them — default scale, default phase spread, no error;
+- the same disease had already shipped a regression once (the glbconv split-brain, CHANGELOG 08-17). "Documented"
+  is not a sync guard;
+- and it gets worse on release day. A maintainer knows the snapshot is a trap; an adopter finds plausible-looking
+  editor source in the repo, bakes from it, and ships a quietly broken pack.
+
+**Rule (now unqualified):** a cross-repo copy is either authoritative or it does not exist. If keeping one seems
+necessary, the honest options are a submodule or a link — never a snapshot with a warning on it. Nothing is lost to
+a delete: git history keeps the bytes, and the authoritative copy is one repo away.
 
 ## Pack load order follows Humankind's mod order (2026-08-16)
 HAF packs load in the same order Humankind loaded their runtime **modules** — not alphabetical, and not a base-priority

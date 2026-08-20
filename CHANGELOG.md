@@ -10,6 +10,26 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE STALE `baker/` EDITOR SNAPSHOT IS GONE — the last cross-repo copy (2026-08-21).** 13 files, **~7,000
+  lines**, mirrored from ENCReload and carried since 08-01 as a "deliberately stale reference snapshot" with a
+  warning header instead of a fix. Deleted. Its own README admitted the copy's `ModelDef` was missing fields the
+  plugin reads (`scale`, `animPhaseSpread`) plus bake-time ones (`staticParts`, `localNodeAnim`, `bakeLocked`,
+  `deployStripExtra`), so a `pack.json` written from it **silently omits** them — the affected models render at
+  default scale and default phase spread with no error anywhere. That is a documented hazard, not a guarded one,
+  and this project had already paid for the same disease once: the glbconv split-brain that shipped the T5
+  mirrored-winding fix regressed (08-17).
+  **Why now, when 08-01 decided otherwise.** That decision was against a *blanket* delete of `baker/`, which was
+  genuinely unsafe then — the folder also held the live `glbconv/` and a `Tools/` Blender-script copy. Those
+  Blender copies went on 08-17, so a **targeted** delete of just the editor `.cs`, leaving `glbconv/` and
+  `reactor_silhouette.py` untouched, carries none of the original risk. And the calculus changes at release: today
+  the snapshot is a trap a maintainer knows about; after ENCReload 2 ships it is plausible-looking editor source
+  that an adopter finds, drops into Unity, bakes from, and produces quietly broken packs with.
+  Nothing lost — git history keeps the bytes and ENCReload holds the authoritative copies. The csproj exclusions
+  stay (they keep glbconv's `Program.cs` and its .NET 8 publish output out of the plugin build); build clean,
+  383/383. The [Decisions](docs/Decisions.md) rule is now unqualified: **a cross-repo copy is either authoritative
+  or it does not exist** — if one seems necessary, the honest options are a submodule or a link, never a snapshot
+  with a warning on it.
+
 - **THE PER-FRAME POSE DECISIONS BECOME TESTABLE — and the oracle catches what reading could not (2026-08-21).**
   `StatePose` / `DeployPoseTime` / `FireOncePoseTime` / `RecoilOverlay` decide, every frame for every pawn, WHICH
   clip plays and WHERE in it — the thing the player actually sees — and did it tangled with `GetMember` reflection,

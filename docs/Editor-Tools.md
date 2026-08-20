@@ -3,7 +3,7 @@
 The **HAF Authoring Tools** are a suite of Unity editor windows under **`Tools ▸ HAF`**. They are the *bake* half of HAF —
 you author custom content here, and the runtime plugin injects it in-game; the two halves talk only through the JSON pack
 registry. (The editor scripts live in the [ENCReload](https://github.com/sswelm/ENCReload) repo, under
-`Assets/Scripts/Editor/`; a stale snapshot is mirrored in this repo's `baker/`.)
+`Assets/Scripts/Editor/` — the only copy; the stale mirror that used to sit in this repo's `baker/` was deleted 2026-08-21.)
 
 This page is the **map** — every tool, its exact menu path, what it does, and what it writes. For the deep, field-by-field
 workflows, follow the *Deep dive* links; this reference deliberately doesn't duplicate them.

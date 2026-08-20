@@ -15,7 +15,7 @@ tooling is a separate project (`C:\Repo\ENCReload\Assets\Scripts\Editor\`); this
 | `Patches/PoseMath.cs` | The **pure per-frame pose decisions**: which clip a pawn plays and where in it. The proximity-weighted state vote (`PickState`), the attack/after/pre-move windows, the nearest-fire match, the deploy ramp and the recoil sweep. No reflection, no `Time.time`, no locking — the `Poll`/`Pose` callers still take the lock and pass the list in. **The three match radii are NOT the same** (state 4u, fire 4u, deploy 3u); read the constants before touching a call site. Unit-tested (`Tests/PoseMathTests.cs`) with a legacy-parity oracle (`Tests/PoseMathLegacyParityTests.cs`). |
 | `Patches/` | The injection engine + Harmony patches (below). |
 | `Tests/` | xUnit suite over the pure registry/parse/era layer. See `docs/Testing.md`. |
-| `baker/` | STALE editor snapshot (do not edit/bake here) + LIVE `glbconv`/`Tools`. See `baker/README.md`. |
+| `baker/` | LIVE pipeline pieces that live ONLY here: `glbconv/` (the GLB→OBJ converter — single source of truth) and `reactor_silhouette.py`. The editor-script snapshot that used to sit alongside them was deleted 2026-08-21 (see `baker/README.md`); the authoritative editor tooling is in ENCReload. |
 
 ## The injection engine — `UniversalInject` (one `partial class`, split by concern)
 
