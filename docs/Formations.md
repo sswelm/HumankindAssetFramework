@@ -262,5 +262,6 @@ per-unit), so ~18 is a good roster default.
 - Plugin: `Patches/FormationOverridePatch.cs` (`FormationOverride` + the `Hk_FormationPrefabExtend` /
   `Hk_FormationInstanceCapacity` / `Hk_FormationSpawnDiag` / `Hk_FormationPawnScale` hooks; the `data` scale mode
   also rides `UniRepointHook`'s AddOn.Load postfix via `MaybeScaleFragments`). Registered in `Plugin.cs`.
-- Registry lives in the game's `BepInEx/config/haf_formations.json` (the editor writes there directly — same file the
-  plugin reads, no source/deployed split).
+- Registry: the editor reads and writes the git-tracked `Assets/Databases/haf_formations.backup.json` (the source —
+  historical name) and regenerates the game's `BepInEx/config/haf_formations.json` on every Save (a build artifact,
+  since the 2026-08-20 collapse; pinpointed corruption + one-click recovery in the window).

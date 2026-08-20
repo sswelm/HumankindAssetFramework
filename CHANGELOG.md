@@ -10,6 +10,20 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **DISTRICTS + FORMATIONS INHERIT THE COLLAPSE (2026-08-20).** Units got the ONE-file registry on 08-19; the
+  district and formation registries still ran the old two-file pattern with none of its protection. Rather than
+  two more hand-copies, the machinery moved into a shared `SingleSourceRegistry<TFile>` engine — git-tracked
+  source, deployed build artifact regenerated on every Save, one-time migration, artifact recreation + drift
+  warning, pinpointed corruption (line/column), timestamped preservation, once-only logging, Save lock, and
+  one-click recovery from the last deploy or the last commit — and `DistrictRegistry` / `FormationRegistry`
+  became thin typed shells (188→137, 181→133 lines; public API unchanged). The District Factory and Formation
+  Override windows carry the Factory's red recovery banner. Two rules the shared engine adds over the first
+  cut: migration **never overwrites a newer source with an older deploy** (the loser is preserved beside the
+  artifact), and content comparisons are **CRLF-normalized** — found necessary on the spot: the live district
+  source and deploy differed by exactly 143 carriage returns and nothing else, which would have fired a false
+  "hand-edited" warning on the first load. Source files keep their historical `.backup.json` names to spare
+  git a rename; `SourcePath` is the honest accessor. Backlog #3 follow-up closed.
+
 - **PROBE PARTS 116 s → 7 s (2026-08-20, "can you optimize it?").** The Ehrhardt probe had crept from half a
   minute to two. Per-phase timers (now permanent `VEHICLE timing:` lines) convicted two phases, neither the
   split nor the import: the escape-ray **visibility** pass (31 s — `scene.ray_cast` walked all 3,350 objects per

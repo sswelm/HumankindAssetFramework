@@ -36,7 +36,7 @@ by when they'll bite.
   animation config from the saved registry; the offer-on-armature-less-failure variant remains nice-to-have);
   ~~(3) document (or collapse) the two-pack.json design~~ **COLLAPSED 2026-08-19**: the git-tracked project
   file is the single source; the deployed copy is a regenerated build artifact with hand-edit drift warnings
-  and a one-time migration (districts/formations keep the old pattern — follow-up candidates); ~~(4) audit
+  and a one-time migration (districts/formations inherited it 2026-08-20 via the shared `SingleSourceRegistry`); ~~(4) audit
   remaining "label lies" like the tris slider~~ **DONE 2026-08-19** — swept both families mechanically
   (UI-field extraction diffed against every hand-list; every runtime/no-re-bake claim read against its code
   path). Hand-lists: the Factory rebase (34 fields), the Lab rebase (56) and the bake-config capture are all

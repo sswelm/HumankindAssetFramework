@@ -54,8 +54,11 @@ Then rebuild the mod (ships the FxMesh) and launch. The reactor renders.
 
 ## The district registry — `haf_districts.json`
 
-The runtime side is data-driven: `BepInEx/config/haf_districts.json` (written by the District Factory window, mirrored
-to the git-tracked `Assets/Databases/haf_districts.backup.json`) holds any number of district models at once:
+The runtime side is data-driven: `BepInEx/config/haf_districts.json` holds any number of district models at once. Since
+2026-08-20 it is a **build artifact**: the District Factory reads and writes the git-tracked
+`Assets/Databases/haf_districts.backup.json` (the source — the name is historical) and regenerates the deployed copy on
+every Save; a corrupt source is pinpointed and recoverable in one click from the window (see [Factory-Manual.md](Factory-Manual.md),
+the ONE-file registry section). The entries:
 
 ```json
 { "districts": [

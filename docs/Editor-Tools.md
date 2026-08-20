@@ -10,14 +10,16 @@ workflows, follow the *Deep dive* links; this reference deliberately doesn't dup
 
 ## Where the tools write — the registries
 
-All registries live in the game's `BepInEx/config` (auto-detected by `ModelRegistry.ConfigDir`), most with a git-tracked
-backup mirror. The runtime plugin reads them on launch.
+Every registry is **ONE file**: the git-tracked project file is the source the editor reads and writes; the copy in the
+game's `BepInEx/config` (auto-detected by `ModelRegistry.ConfigDir`) is a **build artifact** regenerated on every Save
+(units since 2026-08-19, districts and formations since 2026-08-20 via the shared `SingleSourceRegistry` engine — with
+pinpointed corruption and one-click recovery in each window). The runtime plugin reads the deployed copies on launch.
 
 | Registry | Live path | Repo backup | Written by |
 |---|---|---|---|
 | **Model registry** (`pack.json`) | `config/haf_packs/ENCReload/pack.json` | `Assets/Pack/ENCReload/pack.json` | Model Factory, Animation Lab, Resize Lab, Unit Retexture, Sound Studio, Global Era Lab |
-| **Districts** (`haf_districts.json`) | `config/haf_districts.json` | `Assets/Databases/haf_districts.backup.json` | District Factory |
-| **Formations** (`haf_formations.json`) | `config/haf_formations.json` | project backup | Formation Override |
+| **Districts** (`haf_districts.json`) | `config/haf_districts.json` (artifact) | `Assets/Databases/haf_districts.backup.json` (THE source — historical name) | District Factory |
+| **Formations** (`haf_formations.json`) | `config/haf_formations.json` (artifact) | `Assets/Databases/haf_formations.backup.json` (THE source — historical name) | Formation Override |
 | **Sound overrides** (`haf_sounds.json`) | `config/haf_sounds.json` | project backup | Game Sound Lab |
 | **Props** (`haf_props.json`) | `Assets/Databases/haf_props.json` | — | Prop Lab (editor-side recipe store; the runtime reads the baked GUIDs, not this file) |
 
