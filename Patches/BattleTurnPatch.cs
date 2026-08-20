@@ -54,21 +54,10 @@ namespace HumankindAssetFramework
                 string txt = File.Exists(path) ? File.ReadAllText(path) : "";
                 if (txt == sig) return;
                 sig = txt;
-                float h = 0f, dg = 0f;
-                foreach (var raw in txt.Split('\n'))
-                {
-                    var line = raw.Trim();
-                    if (line.Length == 0 || line.StartsWith("#")) continue;
-                    var eq = line.Split('=');
-                    if (eq.Length != 2 || !float.TryParse(eq[1].Trim(), System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out var v)) continue;
-                    switch (eq[0].Trim().ToLowerInvariant())
-                    {
-                        case "hold": h = v; break;
-                        case "diag": dg = v; break;
-                    }
-                }
-                holdFire = h > 0f; diag = dg > 0f;
+                var problems = new List<string>();
+                var d = BattleTurnDial.Parse(txt, problems);         // PURE parse — Patches/DialConfig.cs, unit-tested
+                UniversalInject.LogDialProblems("haf_battleturn.txt", problems);
+                holdFire = d.HoldFire; diag = d.Diag;
                 Plugin.Log.LogInfo($"[BattleTurn] hold={(holdFire ? 1 : 0)} (battle experiment), diag={(diag ? 1 : 0)}");
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] " + ex.Message); }

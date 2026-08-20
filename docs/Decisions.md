@@ -7,6 +7,23 @@ check before proposing a change to any of them.
 
 ---
 
+## To test the untestable, move the DECISION out of the method that does the I/O (2026-08-20)
+Most of the plugin is reflection against a live game inside Unity and cannot be unit-tested. The decisions buried
+in it usually can be. **Rule:** when a method mixes I/O, engine access and a *decision*, move the decision to a pure
+static that takes plain data and returns plain data; leave the I/O where it is; test the pure half. `SmokeVerdict`
+was the first of these; `DialConfig` (the four `haf_*.txt` dials) the second, which deleted 85 lines of duplicated
+hand-rolled parsing from four `Poll*` methods and took the suite 120 → 329.
+**What the extraction must carry with it:** a pure function that *reports* what it could not understand. All four
+dials silently `continue`d past any line they did not recognise, so a typo produced a working plugin that ignored
+the setting — the "silently disarmed" class, in the one part of HAF a user hand-edits mid-session.
+**Rejected:** testing through the `Poll*` methods with a fake filesystem. It would have pinned the I/O, not the
+decision, and left the parser just as tangled.
+**The guard rails, because extracting SHIPPED code can change it:** keep the original inline loop as a *legacy
+parity oracle* in the tests (values compared over a corpus; diagnostics excluded, since adding them is the point),
+and *mutate* the new code to prove the suite bites. Both earned their keep immediately — the oracle found a latent
+bug (an empty bone name matched bone 0, because `IndexOf("") == 0`), and one of six mutations correctly *passed*,
+being a genuinely equivalent implementation rather than a gap. See [Testing.md](Testing.md).
+
 ## A tool is not trusted until it is DRILLED — review alone earns nothing (2026-08-17)
 The backup system passed a critical review (4 defects found and fixed) and was declared trustworthy — then its
 FIRST live recovery drill surfaced a fatal gap (the backup never contained the model registry) plus eight more

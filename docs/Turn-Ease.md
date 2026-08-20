@@ -73,6 +73,13 @@ Live dials (`BepInEx/config/`, polled ~1/s, no restart):
 - **`haf_battleturn.txt`** — `hold=1` enables the **experimental, untested** battle-side hold (ranged attacks in
   deployed battles wait for the rotation FSM); `diag=1` turns on choreography forensics logging.
 
+> **A typo is now reported, not swallowed (2026-08-20).** Every dial line the parser cannot understand produces a
+> `[Dial] <file>: line N: …` **warning** in the BepInEx log, naming the line, the offending token, and the valid
+> keys — an unknown key (`hoverbanks`), a non-number (`rate=fast`), a comma decimal (`rate=1,5` — dials are always
+> parsed with `.`), a line with no `=` or with two. Before this, all of those vanished in silence and you got a
+> working plugin that quietly ignored the setting. **Numbers echoed back in the `[TurnEase]` / `[Hug]` log lines
+> are printed the way the file must spell them**, so a value copied out of the log always parses back in.
+
 **Vanilla units** (verified): the Formation Override window has a per-unit **Turn ease** row — tick it on any
 unit link (a link may even carry *only* turn ease, no formation change), Save, relaunch. The plugin resolves
 the link to the unit's pawn descriptor at load (`[TurnEase] vanilla …` in the log confirms the mapping) and

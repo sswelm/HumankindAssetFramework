@@ -18,3 +18,8 @@ jobs:
         run: dotnet build HumankindAssetFramework.csproj -c Release --nologo
       - name: Run tests
         run: dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release --nologo
+      # Needs neither the game nor Unity — pure Markdown/link checking, so it belongs on the runner too.
+      # It was in the pre-push gate only, which a --no-verify (or a web edit) walks straight past.
+      - name: Docs guard (links + notes convention)
+        shell: bash
+        run: bash tools/check-docs.sh

@@ -1,6 +1,6 @@
 # Testing
 
-The plugin has a focused unit-test suite (**120 tests as of 2026-08-18**) over the **pure logic that can run outside the
+The plugin has a focused unit-test suite (**329 tests as of 2026-08-20**) over the **pure logic that can run outside the
 game** — the registry/parse/era layer, the reflection **compatibility report** (`GameBinding`), and the **in-game smoke
 harness's verdict** (`SmokeVerdict`). It is a deliberate, bounded suite, not a coverage target: it guards the functions
 where bugs have actually hidden, and stops there on purpose.
@@ -16,7 +16,7 @@ The fast guards used to be separate scripts you had to remember to run. They're 
 
 | Repo | the `check.sh` gate runs | ~time |
 |---|---|---|
-| **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` (120) · **docs guard** · registry schema parity | seconds |
+| **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` (329) · **docs guard** · registry schema parity | seconds |
 | **ENCReload** (editor) | Roslyn editor compile-check · registry schema parity | ~30 s |
 
 ### The docs guard (`tools/check-docs.sh`)
@@ -81,11 +81,70 @@ the in-game report — same catalog, no game needed.
 | `EraFromName` | `UniversalInject.ScaleEra.cs` | extract `EraN` (case-insensitive, multi-digit); none/null → −1 |
 | `EraAnchorFor` | `UniversalInject.ScaleEra.cs` | the Global Era Lab anchor rule — **a unit stays at 1.0 unless an authored grid cell says otherwise** (own-age-or-earlier → 1.0; later-but-unauthored → 1.0; non-positive eras clamp cleanly) |
 | `GameBinding.Validate` / `Cached` | `Patches/GameBinding.cs` | the startup **reflection compatibility report** — resolves the catalog (~124 type + member bindings across the load-bearing injection path) incl. the simple-name (`Type.Name`) fallback scan, and writes a diffable `haf_bindings_report.txt` every launch; a game-update rename is *reported* (one `[MISSING]` line, headless-checkable), not silently absorbed. The report is self-validating: an added binding that isn't a real game member shows `[MISSING]` on the known-good build. |
+| The four **live dials** | `Patches/DialConfig.cs` | `haf_rotortrim` / `haf_turnease` / `haf_hugterrain` / `haf_battleturn` — every known key, the shipped defaults (`lookahead` 3, `ease` 4, `cliff` 1 — not zero), the `air`→`hover` legacy alias, the **order-independent `hoverbank`→`bank` fallback**, the CSV name filters read *before* any numeric parse, CRLF, and one bad line never costing the rest of the file. Plus the reason the parse was extracted: every unrecognised line now yields a **named problem** (line number, the offending token, and the valid keys) instead of being silently dropped. See below. |
 | `SmokeVerdict` | `Patches/UniversalInject.SmokeTest.cs` | the **in-game smoke harness's** PASS/FAIL rule — PASS iff every catalogued binding resolved, zero injection errors, the registry loaded ≥1 model, the deep per-entry checks are clean, and the live **seam write-back self-test** did not FAIL (the boxed-struct chain every runtime offset uses — the combatZ died-in-the-box class, machine-caught since 2026-08-19); each fail reason surfaced; `repointed`-zero still passes but is NOTED (vacuous coverage announces itself), uninjected entries are named with a diagnosis, and the verdict is written to `haf_smoke_report.txt` next to the load/bindings reports |
 
 These map directly to the registry bugs this codebase has actually hit — the `ParseGuidCsv` sign bug, `LongestMatch`
 ambiguity, "wrapper-parse drops overrides", the substring pawn-match — so the suite is a **regression net, not
 coverage theatre**.
+
+## Extracting logic so it *can* be tested
+
+Most of the plugin cannot be unit-tested: it is reflection against a live game inside Unity. But the *decisions*
+buried in that code usually can be, once they are lifted out of the method that does the I/O. `SmokeVerdict` was the
+first extraction of this shape; **`DialConfig`** (2026-08-20) is the second, and the pattern is now the standard move:
+
+> Find a method that mixes I/O, engine access and a **decision**. Move the decision to a pure static that takes
+> plain data and returns plain data. Leave the I/O where it is. Test the pure half.
+
+The dials are the clearest case. Four `haf_*.txt` files each inlined their own `key=value` loop inside a `Poll*`
+method, wedged between `File.ReadAllText`, `UnityEngine.Time` and live-pawn reflection — untestable, and all four
+shared one failure: **any line the parser did not understand was `continue`d away in silence.** `radus=6`,
+`hoverbanks=12`, a European `rate=1,5` — each produced a working plugin that quietly ignored the setting, with
+nothing in the log. That is the "silently disarmed" class [the 07-31 audit](notes/Audit-2026-07-31.md) was written
+about, sitting in the one part of HAF a user hand-edits mid-session.
+
+The parse is now `Patches/DialConfig.cs`: text in, typed config + a list of problems out. The `Poll*` methods keep
+the I/O and log whatever problems come back, so a typo now names its own line number.
+
+### Guarding a refactor of shipped behaviour
+
+Extracting live code risks changing it. Tests written *after* the extraction only pin what the code does now — they
+would pass just as happily over a subtly wrong parser. So two extra things were done, and both are worth repeating on
+the next extraction:
+
+1. **A legacy parity oracle** (`Tests/DialLegacyParityTests.cs`). The original inline loops are kept verbatim as
+   oracles and compared against the new parser over a 39-case corpus — valid input, half-typed input, CRLF, comma
+   decimals, repeated keys, stray `@`. Values must match exactly; diagnostics are excluded, since emitting them is
+   the point of the change. It found and documents the **one** deliberate divergence: a line like `@1=5` used to
+   produce a trim with an empty bone name, and since `name.IndexOf("")` is `0` for every string, that silently
+   rotated the **first bone in the skeleton**. It is now dropped with a message.
+2. **A mutation drill.** Six mutations were planted in the parser and the suite re-run. Five behaviour-changing ones
+   were each caught (dropping the `hoverbank` fallback → 5 failures; `only`/`skip` falling through to the numeric
+   parse → 6; `lookahead` default 3→0 → 39; re-silencing unknown keys → 4; re-accepting an empty bone name → 4;
+   dropping malformed-line reporting → 4). The sixth — resolving the `hoverbank` fallback inline rather than after
+   the file — passed, correctly: it is a genuinely equivalent implementation, not a defect. A mutation that does not
+   fail the suite is either a gap or an equivalence, and you have to tell which; assuming "gap" would have added a
+   test asserting an implementation detail.
+
+3. **An in-game drill**, because the two above are still only the suite grading itself. Six deliberately broken
+   lines were planted across the live `haf_*.txt` dials — an unknown key, a comma decimal, a line with no `=`, a
+   line with two, a transposed key, and a bone-less `@1=5` — each chosen to be provably **value-neutral**, so the
+   dials had to keep working while every fault got named. The log showed all six warnings with correct line
+   numbers, values byte-identical to the pre-change run, `reloaded 0 line(s)` for the `@1=5`, and — the negative
+   control that matters — **zero warnings once the faults were removed**, proving they fire on faults rather than
+   on every poll.
+
+   **And the drill found a bug all 323 green tests had missed.** The `[Hug]`/`[TurnEase]` echo lines used plain
+   string interpolation, so on a comma-decimal machine the log printed `lookahead=1,5` — the exact spelling the
+   parser rejects, one line above the new warning saying *use '.' for the decimal point*. Copy a value out of the
+   log back into the file and it silently dies. Fixed with `DialConfig.Inv()` and pinned by a round-trip property
+   — *whatever the log prints must parse straight back* — asserted under `nl-NL`.
+
+The rule this follows is the project's own: [review, then drill](notes/Audit-2026-07-31.md). A suite that has never
+been shown to fail is not yet evidence of anything — and a suite that has never been checked against a real machine
+is not yet evidence of much either. The unit tests could not have found the locale bug: they *are* the code's
+opinion of itself, and both halves shared the same blind spot.
 
 ## How it's wired
 

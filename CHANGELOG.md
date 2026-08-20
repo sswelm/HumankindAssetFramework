@@ -10,6 +10,32 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE DIALS STOP SWALLOWING TYPOS — and the drill catches what 323 green tests missed (2026-08-20).** All four
+  live `haf_*.txt` dials (rotor trim, turn ease, terrain hug, battle turn) inlined their own `key=value` loop
+  inside a `Poll*` method, wedged between `File.ReadAllText`, the Unity clock and live-pawn reflection — untestable,
+  and all four shared one behaviour: **any line the parser did not recognise was `continue`d away in silence.**
+  `radus=6`, `hoverbanks=12`, a European `rate=1,5` each produced a working plugin that quietly ignored the
+  setting, with nothing in the log — the "silently disarmed" class, sitting in the one part of HAF a user
+  hand-edits mid-session. The parse is now the pure `Patches/DialConfig.cs` (text in, typed config **plus a list of
+  problems** out; **-85 lines** from the four methods), the `Poll*` methods log what comes back, and a typo names
+  its own line number and the valid keys. Suite **120 → 329**.
+  **Guarded two ways, because extracting shipped code can change it:** a *legacy parity oracle* keeps the original
+  inline loops verbatim in the tests and compares values over a 39-case corpus × 4 dials — which immediately found
+  a latent bug (`@1=5`, a bone-less line, produced a trim with an empty bone name, and since `IndexOf("")` is `0`
+  for every string it silently rotated the **first bone of the skeleton**; now dropped and named) — and a *mutation
+  drill*, where 5 of 6 planted mutations each failed the suite loudly, the sixth correctly passing as a genuinely
+  equivalent implementation rather than a gap.
+  **Then the in-game drill earned its place.** Six provably value-neutral faults planted in the live dials:
+  all six named with correct line numbers, values byte-identical to the pre-change run, `reloaded 0 line(s)` for
+  the `@1=5`, and — the negative control — **zero warnings once the faults were removed**. And it found a bug the
+  whole green suite had missed: the `[Hug]`/`[TurnEase]` echo lines used plain interpolation, so on a
+  comma-decimal machine the log printed `lookahead=1,5` — *the exact spelling the parser rejects*, one line above
+  the new warning saying "use '.' for the decimal point". Copy it back into the file and it silently dies. Fixed
+  (`DialConfig.Inv`) and pinned by a round-trip property — whatever the log prints must parse back — asserted
+  under `nl-NL`, and drilled (reverting the fix fails 3 tests). The lesson is the old one at a new scale: the unit
+  tests are the code's opinion of itself, and both halves shared the same blind spot. Pattern + rules:
+  [Decisions](docs/Decisions.md), [Testing](docs/Testing.md).
+
 - **DISTRICTS + FORMATIONS INHERIT THE COLLAPSE (2026-08-20).** Units got the ONE-file registry on 08-19; the
   district and formation registries still ran the old two-file pattern with none of its protection. Rather than
   two more hand-copies, the machinery moved into a shared `SingleSourceRegistry<TFile>` engine — git-tracked

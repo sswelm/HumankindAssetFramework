@@ -531,6 +531,14 @@ namespace HumankindAssetFramework
         // spawn-time write is fine because the angle never advances) re-aligns disc and spin axis. Dialed LIVE via
         // BepInEx/config/haf_rotortrim.txt — one line per bone, `BoneSubstring@axis=degrees` (axis 0/1/2), '#'
         // comments — polled ~1/s and re-applied to live pawns, so tuning needs no relaunch.
+        // Say out loud whatever the pure dial parser could not understand. Before this, EVERY unrecognised line in
+        // a haf_*.txt dial was silently `continue`d — a typo produced a working plugin that quietly ignored the
+        // setting. One WARN per problem, naming the file and the line. See Patches/DialConfig.cs.
+        internal static void LogDialProblems(string file, List<string> problems)
+        {
+            for (int i = 0; i < problems.Count; i++) Plugin.Log.LogWarning($"[Dial] {file}: {problems[i]}");
+        }
+
         struct TrimSpec { public string bone; public int axis; public float deg; }
         static readonly List<TrimSpec> trims = new List<TrimSpec>();
         static object pawnMgrRef;
@@ -547,22 +555,11 @@ namespace HumankindAssetFramework
                 string txt = File.Exists(path) ? File.ReadAllText(path) : "";
                 if (txt == trimSig) return;
                 trimSig = txt;
+                var problems = new List<string>();
+                var dial = RotorTrimDial.Parse(txt, problems);       // PURE parse — Patches/DialConfig.cs, unit-tested
+                LogDialProblems("haf_rotortrim.txt", problems);
                 trims.Clear();
-                foreach (var raw in txt.Split('\n'))
-                {
-                    var line = raw.Trim();
-                    if (line.Length == 0 || line.StartsWith("#")) continue;
-                    var eq = line.Split('=');
-                    if (eq.Length != 2 || !float.TryParse(eq[1].Trim(), System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out var deg)) continue;
-                    var at = eq[0].Split('@');
-                    trims.Add(new TrimSpec
-                    {
-                        bone = at[0].Trim(),
-                        axis = at.Length > 1 && int.TryParse(at[1].Trim(), out var a) ? a : 0,
-                        deg = deg,
-                    });
-                }
+                foreach (var t in dial.Trims) trims.Add(new TrimSpec { bone = t.Bone, axis = t.Axis, deg = t.Deg });
                 int applied = 0;
                 if (pawnMgrRef != null && entries != null &&
                     GetMember(pawnMgrRef, "pawnEntries") is Array pe)
@@ -598,33 +595,16 @@ namespace HumankindAssetFramework
                 string txt = File.Exists(path) ? File.ReadAllText(path) : "";
                 if (txt == turnSig) return;
                 turnSig = txt;
-                float rate = 0f, bank = 0f, cHum = 0f, cLand = 0f, cTur = 0f, cHov = 0f, cShip = 0f;
-                float hovBank = 0f, shipBank = 0f; bool seenHovBank = false;
-                foreach (var raw in txt.Split('\n'))
-                {
-                    var line = raw.Trim();
-                    if (line.Length == 0 || line.StartsWith("#")) continue;
-                    var eq = line.Split('=');
-                    if (eq.Length != 2 || !float.TryParse(eq[1].Trim(), System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out var v)) continue;
-                    switch (eq[0].Trim().ToLowerInvariant())
-                    {
-                        case "rate": rate = v; break;
-                        case "bank": bank = v; break;     // legacy/fallback bank: models eased by the global `rate`
-                        case "human": cHum = v; break;    // category defaults (docs/Turn-Ease.md): per-model > category > rate
-                        case "land": cLand = v; break;    // turretless land vehicles (towed guns, assault guns)
-                        case "turret": cTur = v; break;   // land vehicles WITH a traversing turret (learned from live pawns)
-                        case "hover": case "air": cHov = v; break;   // Hover-ability units (helicopters, hovercraft); "air" = legacy alias — PLANES are always excluded
-                        case "ship": cShip = v; break;
-                        case "hoverbank": hovBank = v; seenHovBank = true; break;   // per-category bank (user: hover and ship bank differently)
-                        case "shipbank": shipBank = v; break;
-                    }
-                }
-                turnRate = rate; turnBank = bank;
-                catHumanRate = cHum; catLandRate = cLand; catTurretRate = cTur; catHoverRate = cHov; catShipRate = cShip;
-                catHoverBank = seenHovBank ? hovBank : bank;   // legacy files: hover keeps inheriting `bank`
-                catShipBank = shipBank;
-                Plugin.Log.LogInfo($"[TurnEase] rate={rate} bank={bank} | categories human={cHum} land={cLand} turret={cTur} hover={cHov} ship={cShip} deg/s, hoverbank={catHoverBank} shipbank={catShipBank} deg (planes excluded)");
+                var problems = new List<string>();
+                var d = TurnEaseDial.Parse(txt, problems);           // PURE parse — Patches/DialConfig.cs, unit-tested
+                LogDialProblems("haf_turnease.txt", problems);
+                turnRate = d.Rate; turnBank = d.Bank;
+                catHumanRate = d.Human; catLandRate = d.Land; catTurretRate = d.Turret; catHoverRate = d.Hover; catShipRate = d.Ship;
+                catHoverBank = d.HoverBank;   // legacy files with no `hoverbank` keep inheriting `bank` (resolved in the parse)
+                catShipBank = d.ShipBank;
+                // Numbers echoed with DialConfig.Inv so the log spells them the way the dial FILE must (invariant
+                // '.') — a comma-decimal locale used to print values the parser would then reject. See Inv().
+                Plugin.Log.LogInfo($"[TurnEase] rate={DialConfig.Inv(d.Rate)} bank={DialConfig.Inv(d.Bank)} | categories human={DialConfig.Inv(d.Human)} land={DialConfig.Inv(d.Land)} turret={DialConfig.Inv(d.Turret)} hover={DialConfig.Inv(d.Hover)} ship={DialConfig.Inv(d.Ship)} deg/s, hoverbank={DialConfig.Inv(catHoverBank)} shipbank={DialConfig.Inv(catShipBank)} deg (planes excluded)");
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[TurnEase] " + ex.Message); }
         }
@@ -643,36 +623,15 @@ namespace HumankindAssetFramework
                 string txt = File.Exists(path) ? File.ReadAllText(path) : "";
                 if (txt == hugSig) return;
                 hugSig = txt;
-                float drop = 0f, radius = 0f, look = 3f, ease = 4f, cliff = 1f;
+                var problems = new List<string>();
+                var d = TerrainHugDial.Parse(txt, problems);         // PURE parse — Patches/DialConfig.cs, unit-tested
+                LogDialProblems("haf_hugterrain.txt", problems);
+                // name filters: which PresentationDistricts count as "a city block" (vs a farm/exploitation)
                 hugOnly.Clear(); hugSkip.Clear();
-                foreach (var raw in txt.Split('\n'))
-                {
-                    var line = raw.Trim();
-                    if (line.Length == 0 || line.StartsWith("#")) continue;
-                    var eq = line.Split('=');
-                    if (eq.Length != 2) continue;
-                    string key = eq[0].Trim().ToLowerInvariant(), val = eq[1].Trim();
-                    // name filters: which PresentationDistricts count as "a city block" (vs a farm/exploitation)
-                    if (key == "only" || key == "skip")
-                    {
-                        var target = key == "only" ? hugOnly : hugSkip;
-                        foreach (var s in val.Split(',')) if (s.Trim().Length > 0) target.Add(s.Trim());
-                        continue;
-                    }
-                    if (!float.TryParse(val, System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out var v)) continue;
-                    switch (key)
-                    {
-                        case "drop": drop = v; break;
-                        case "radius": radius = v; break;
-                        case "lookahead": look = v; break;
-                        case "ease": ease = v; break;
-                        case "cliff": cliff = v; break;
-                    }
-                }
-                hugDrop = drop; hugRadius = radius; hugLookahead = look; hugEase = ease; hugCliff = cliff;
+                hugOnly.AddRange(d.Only); hugSkip.AddRange(d.Skip);
+                hugDrop = d.Drop; hugRadius = d.Radius; hugLookahead = d.Lookahead; hugEase = d.Ease; hugCliff = d.Cliff;
                 RearmDistrictScan();   // filters changed -> the cached district set must be rebuilt
-                Plugin.Log.LogInfo($"[Hug] drop={drop} radius={radius} lookahead={look} ease={ease} cliff={cliff}" +
+                Plugin.Log.LogInfo($"[Hug] drop={DialConfig.Inv(d.Drop)} radius={DialConfig.Inv(d.Radius)} lookahead={DialConfig.Inv(d.Lookahead)} ease={DialConfig.Inv(d.Ease)} cliff={DialConfig.Inv(d.Cliff)}" +
                                    (hugOnly.Count > 0 ? " only=" + string.Join(",", hugOnly) : "") +
                                    (hugSkip.Count > 0 ? " skip=" + string.Join(",", hugSkip) : ""));
             }
