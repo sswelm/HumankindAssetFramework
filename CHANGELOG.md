@@ -10,6 +10,36 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE PER-FRAME POSE DECISIONS BECOME TESTABLE — and the oracle catches what reading could not (2026-08-21).**
+  `StatePose` / `DeployPoseTime` / `FireOncePoseTime` / `RecoilOverlay` decide, every frame for every pawn, WHICH
+  clip plays and WHERE in it — the thing the player actually sees — and did it tangled with `GetMember` reflection,
+  `Time.time` and the locks around the shared sample lists, so none of it could be tested. Second application of the
+  extraction rule ([Decisions](docs/Decisions.md)): the decisions now live in the pure `Patches/PoseMath.cs` —
+  the proximity-weighted state vote, the attack/after/pre-move windows, the nearest-fire match, the deploy ramp and
+  the recoil sweep — while the callers keep the I/O **and the locks** (the lists are still shared). **-94/+29 lines**;
+  suite **329 → 383**.
+  **The one behaviour change, found by the parity oracle rather than by reading.** The two nearest-fire call sites
+  looked like the same loop written twice. They are not: the recoil overlay seeded `best` with the radius
+  (`d < r²`, strictly inside), fire-once seeded with `float.MaxValue` and range-checked afterwards (`d <= r²`,
+  inclusive) — so they disagreed for a fire at **exactly 4.0 units**, where fire-once counted the pawn as the firer
+  and recoil did not. Unified to strictly-inside, matching what the other two matchers already do; the inclusive
+  form was an artifact of the spelling, not a decision. Pinned by a test that spells out both old behaviours.
+  **What the mutation drill taught, and it is worth more than the tests.** Six mutations: four caught loudly, one a
+  genuine equivalence (a sample exactly on the radius carries weight `R²-d² = 0`, so `>=` vs `>` cannot matter), and
+  one — replacing the proximity weight with a headcount — sailed past thousands of generated layouts. That is not a
+  corpus-tuning problem: the two rules only disagree on small unbalanced in-range splits, and as the sample count
+  rises the majorities converge, so a **bigger corpus fires less often**. Widening the draw and enlarging the
+  formations both failed; only an adversarial hand-written case catches it. **A generated corpus pins that code was
+  COPIED faithfully; hand-written adversarial cases pin that it DECIDES the right thing — and a mutation drill is
+  how you learn which one you are missing.**
+  **DRILLED in-game the same night.** A full session across seven injected types (howitzers, organ gun, drones,
+  mech, tanks, helicopter, abominations) with live varying pose times and **zero HAF frames in any stack trace**;
+  then the closing case, the path carrying the boundary change: a **towed howitzer bombard** — `[Fire] *** OUR MODEL
+  'TowedGunHowitzers' FIRED`, `armed 1 pawn(s)` (the firer, not the battery), and that gun alone sweeping
+  `t=0,941 → 0,949` up the recoil tail while every other unit on screen held `t=0,585` in the same frame. Recoil
+  confirmed by eye. Not extracted: the idle-alt cadence — it draws from `Random` and mutates scheduling state, so it
+  is a scheduler rather than a decision, and needs an injected clock + RNG.
+
 - **THE DIALS STOP SWALLOWING TYPOS — and the drill catches what 323 green tests missed (2026-08-20).** All four
   live `haf_*.txt` dials (rotor trim, turn ease, terrain hug, battle turn) inlined their own `key=value` loop
   inside a `Poll*` method, wedged between `File.ReadAllText`, the Unity clock and live-pawn reflection — untestable,
