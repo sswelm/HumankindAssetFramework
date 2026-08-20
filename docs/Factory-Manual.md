@@ -455,7 +455,7 @@ items). Each test is a row with a plain-language explanation, a checkbox, and Qu
 shows live per-row PASS/FAIL (failures unfold their detail lines) and writes a durable report to
 `Logs/haf_bake_tests_report.txt`. The guards, in pyramid order:
 
-- **Bake Smoke Test** — rows *Smoke — one per bake path* / *Smoke — ALL models*. Bakes one representative per
+- **Bake Smoke Test** — rows *Does the baker still work? (one model per path)* / *Does every model still bake? (whole catalog)*. Bakes one representative per
   bake-path (`animated × material mode`) through the *same* config route as the Bake button and asserts each completes
   without throwing and produces non-empty `_Skeleton`/`_Atlas` (+ `_ModelMesh` for static). **Non-destructive**: it bakes
   `reuseExtracted=false` models under a throwaway `__smoketest__` name (your real assets + registry are untouched) and
@@ -466,7 +466,7 @@ shows live per-row PASS/FAIL (failures unfold their detail lines) and writes a d
   howitzer's throwaway bake exercises its skeleton path, not its texture packing — the multi-material atlas code is
   covered instead by the *static* multi-material AttackHelicopter, whose albedos `glbconv` does regenerate. Texture-only
   entries (Unit Retexture `Retex_*`: no model file, nothing to bake by design) report `SKIP`, not a failure.
-- **Bake Feature Test** — rows *Features — baker options (synthetic)* (**Tier 1**) and *Features — Blender + animated* (**Tier 2**). Complements
+- **Bake Feature Test** — rows *Do the bake options do what they claim? (synthetic cubes)* (**Tier 1**) and *Do the Blender + animation options work? (real rigs)* (**Tier 2**). Complements
   the smoke test: where that proves models *bake*, this proves each baker *feature knob* does what it claims, by baking a
   fixture with one knob toggled at a time and asserting a feature-specific invariant on the baked mesh/atlas.
   **Tier 1** (fast, self-contained synthetic cube): `doubleSided` doubles the triangle count, Faceted unwelds
@@ -480,7 +480,7 @@ shows live per-row PASS/FAIL (failures unfold their detail lines) and writes a d
   (throwaway `__feat_*` names, cleaned up). Benign console noise during Tier 2: `ImportFBX Warnings: Can't import
   normals, because mesh 'default' doesn't have any` — the synthetic OBJ fixtures carry no normals and Unity
   recalculates them; shading is irrelevant to what these fixtures assert.
-- **Conversion Gate Test** — rows *Conversion — litmus rig* and *Conversion — real registry rigs*
+- **Conversion Gate Test** — rows *Is rig conversion still correct? (control rig)* and *Do the real rigs still convert correctly? (every converted model)*
   (2026-07-19). Asserts the raw-rig CONVERSION invariants the animated runtime silently requires — each was once
   violated and each cost hours of blind in-game debugging (the Combine-soldier campaign): every baked bone's
   **BindPose/Local scale == 1** (the file-scale sandwich), every bone's **ParentIndex < its own index**
@@ -497,7 +497,7 @@ shows live per-row PASS/FAIL (failures unfold their detail lines) and writes a d
   models (an empty-clip bake used to pass silently). The full suite re-verified green after the gate refactor:
   smoke 14/14 (soldier fresh-baked as `animated-conv` via the flag at Rotation `0,0,0`; the legacy drone + howitzer
   byte-identical with the flag off) and ConvGate full-conversion PASS on the real soldier rig.
-- **Conversion Gate Test (deploy golden diff)** — row *Conversion — deploy golden diff*,
+- **Conversion Gate Test (deploy golden diff)** — row *Did a deploy model change unexpectedly? (golden snapshot)*,
   or CLI `bash Tools/deploy_regression.sh` (2026-08-01). The two variants above test `convertRig` rigs against
   *invariants*; this covers the **deploy-convert models** (`deployConvert`, not `convertRig` — the m114 howitzers, the
   T-62) with a **golden-master** diff, because an invariant pass can't catch a per-model regression (a crossed-legs bake
