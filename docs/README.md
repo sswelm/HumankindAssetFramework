@@ -27,21 +27,8 @@ This page is the map of the docs themselves.
 
 ---
 
-## Doc status — read this first
 
-Every page in `docs/` is one of two things, and the folder tells you which:
-
-| Status | Where | Means |
-|---|---|---|
-| 🟢 **Maintained** | `docs/*.md` | Current. Kept true as the code changes. Safe to follow as instructions. |
-| 📁 **Archived note** | `docs/notes/` | **Frozen, not maintained.** Investigations, postmortems, superseded design notes. Kept for the *reasoning* — how something was found, and why it is the way it is. Every one carries a banner naming its current replacement. **Do not follow one as instructions.** |
-
-When a page stops being true, it moves to `notes/` with a frozen-date banner rather than being quietly left to rot in
-the main list. That split is the whole point of this folder — the main list is a promise, the archive is a record.
-
----
-
-## 🟢 Maintained
+## The pages
 
 ### Get started
 - [**Getting-Started.md**](Getting-Started.md) — **new here? start here.** Nothing → a custom unit on the map, each step linked to its deep doc.
