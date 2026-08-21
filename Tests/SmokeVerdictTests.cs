@@ -205,6 +205,83 @@ namespace HumankindAssetFramework.Tests
             Assert.Equal(0, f2.TilesActive);   // scoped reads ONLY the scoped ledger
         }
 
+        // TEXTURE HEALTH (2026-08-21). A live tile proves the mesh bound, not that the albedo landed. Both apply paths
+        // give up after 3 exceptions by latching texApplied=true — so the judgement must read texErrors FIRST, or a
+        // district rendering untextured passes as "applied".
+        static UniversalInject.DistrictModel TexturedReactor() =>
+            new UniversalInject.DistrictModel { district = "Extension_Base_BreederReactor", fxMeshGuid = new object(), atlasGuid = new object(), selectorGuid = new object() };
+
+        [Fact]
+        public void DistrictTexture_Applied_CountsInPassLine()
+        {
+            var f = new UniversalInject.SmokeFacts { Models = 3, Repointed = 1 };
+            UniversalInject.GatherDistrictFacts(TexturedReactor(), f, scoped: true, scopedTiles: 1,
+                new UniversalInject.DistrictTexState { Textured = true, Applied = true, Errors = 0, Wait = 900 });
+            Assert.Equal(1, f.TexturedChecked); Assert.Equal(1, f.TexturedApplied);
+            Assert.Empty(f.DistrictIssues); Assert.Empty(f.DistrictNotes);
+            var r = UniversalInject.SmokeVerdict(f);
+            Assert.True(r.Pass);
+            Assert.Contains("[1 tile(s) live, 1 scoped, 1/1 textured]", r.Summary);
+        }
+
+        [Fact]
+        public void DistrictTexture_GaveUp_FailsEvenThoughAppliedLatched()
+        {
+            var f = new UniversalInject.SmokeFacts { Models = 3, Repointed = 1 };
+            // the exact give-up signature: Applied=true (the latch) AND Errors>=3
+            UniversalInject.GatherDistrictFacts(TexturedReactor(), f, scoped: true, scopedTiles: 1,
+                new UniversalInject.DistrictTexState { Textured = true, Applied = true, Errors = UniversalInject.TexGiveUpErrors, Wait = 10 });
+            Assert.Equal(1, f.TexturedChecked); Assert.Equal(0, f.TexturedApplied);
+            var r = UniversalInject.SmokeVerdict(f);
+            Assert.False(r.Pass);
+            Assert.Contains("'Extension_Base_BreederReactor' texture apply GAVE UP after 3 error(s)", r.Summary);
+        }
+
+        [Fact]
+        public void DistrictTexture_Pending_IsNoteNeverFail()
+        {
+            var f = new UniversalInject.SmokeFacts { Models = 3, Repointed = 1 };
+            UniversalInject.GatherDistrictFacts(TexturedReactor(), f, scoped: true, scopedTiles: 1,
+                new UniversalInject.DistrictTexState { Textured = true, Applied = false, Errors = 1, Wait = UniversalInject.TexPendingPolls });   // one transient error, still retrying
+            var r = UniversalInject.SmokeVerdict(f);
+            Assert.True(r.Pass);
+            Assert.Contains("NOTE: 'Extension_Base_BreederReactor' texture still pending after 300 polls", r.Summary);
+            Assert.Contains("0/1 textured", r.Summary);
+
+            var f2 = new UniversalInject.SmokeFacts { Models = 3, Repointed = 1 };
+            UniversalInject.GatherDistrictFacts(TexturedReactor(), f2, scoped: true, scopedTiles: 1,
+                new UniversalInject.DistrictTexState { Textured = true, Applied = false, Errors = 0, Wait = 5 });
+            Assert.Contains("texture pending (just bound", UniversalInject.SmokeVerdict(f2).Summary);
+        }
+
+        [Fact]
+        public void DistrictTexture_NotJudged_WhenUntexturedOrOffScreen()
+        {
+            // untextured by design (pre-2.0 entry, no atlas): nothing to judge even with live tiles
+            var f = new UniversalInject.SmokeFacts { Models = 3, Repointed = 1 };
+            var plain = new UniversalInject.DistrictModel { district = "Oracle", fxMeshGuid = new object(), atlasGuid = null };
+            plain.tiles.Add(new UniversalInject.DistrictModel.TileState());
+            UniversalInject.GatherDistrictFacts(plain, f);
+            Assert.Equal(0, f.TexturedChecked);
+            Assert.DoesNotContain("textured", UniversalInject.SmokeVerdict(f).Summary);
+
+            // textured but off-screen (0 live tiles): it hasn't tried yet — a stale gave-up counter must not fail it
+            var f2 = new UniversalInject.SmokeFacts { Models = 3, Repointed = 1 };
+            UniversalInject.GatherDistrictFacts(TexturedReactor(), f2, scoped: true, scopedTiles: 0,
+                new UniversalInject.DistrictTexState { Textured = true, Applied = false, Errors = 3, Wait = 0 });
+            Assert.Equal(0, f2.TexturedChecked); Assert.Empty(f2.DistrictIssues);
+        }
+
+        [Fact]
+        public void DistrictTexture_IsolateOverload_ReadsTheModelLedger()
+        {
+            var f = new UniversalInject.SmokeFacts { Models = 3, Repointed = 1 };
+            var d = new UniversalInject.DistrictModel { district = "Silo", fxMeshGuid = new object(), atlasGuid = new object(), texApplied = true, texErrors = 3 };
+            d.tiles.Add(new UniversalInject.DistrictModel.TileState());
+            UniversalInject.GatherDistrictFacts(d, f);   // 2-arg overload lifts tex state off DistrictModel
+            Assert.Contains(f.DistrictIssues, s => s.StartsWith("'Silo' texture apply GAVE UP"));
+        }
+
         [Fact]
         public void GatherDistrict_IsolatePath_Unchanged_NoScopedLabel()
         {

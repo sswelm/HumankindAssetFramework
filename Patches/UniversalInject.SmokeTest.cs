@@ -44,6 +44,11 @@ namespace HumankindAssetFramework
             // instead of asking to be believed ("checked 47 roles" is auditable; "clean" is not).
             public int RolesChecked, AssetsChecked, SoundsChecked, LayersChecked, DistrictsChecked, TilesActive, FilesChecked;
             public int ScopedTilesActive;                            // of TilesActive, how many came from the SCOPED path (data-authored selector, e.g. the reactor) — it keeps its tiles in ScopedState.refreshPlbcs, not DistrictModel.tiles
+            // TEXTURE HEALTH (2026-08-21): a live tile proves the MESH bound, not that OUR albedo landed on it. Both paths
+            // retry the apply and, after 3 exceptions, GIVE UP by latching texApplied=true (so the poll stops) — which means
+            // texApplied alone reads as success on a district that is rendering untextured. Judge texErrors first.
+            public int TexturedChecked, TexturedApplied;             // textured districts with live tiles judged / of those, albedo actually applied (no give-up)
+            public List<string> DistrictNotes = new List<string>();  // informational: texture still pending (asset not resolved yet) — never a FAIL
             // 2026-08-19 five-point upgrade (user: "can't we apply all?"):
             public string SeamWriteBack = "";                        // "" = not run; "ok"; "skipped (…)"; "FAILED (…)" — the ObjectSpace round-trip (the combatZ died-in-the-box class), FAILED fails the smoke
             public List<string> Uninjected = new List<string>();     // "loaded but not injected" entries WITH the reason — the silent 19-of-22 delta, named (informational)
@@ -78,6 +83,7 @@ namespace HumankindAssetFramework
             if (f.DistrictsChecked > 0 && f.TilesActive == 0) notes.Add("districts authored but 0 tiles live — district path UNTESTED this session");
             if (f.Models > 0 && f.Repointed == 0) notes.Add("no entries injected — deep checks vacuous (load a save containing your units)");
             notes.AddRange(f.SamplerNotes);
+            notes.AddRange(f.DistrictNotes);
             bool pass = fails.Count == 0;
             string head = pass ? "PASS" : "FAIL (" + string.Join("; ", fails) + ")";
             return new SmokeResult
@@ -87,7 +93,7 @@ namespace HumankindAssetFramework
                           $"({f.Repointed} injected so far), {f.InjectionErrors} injection error(s)" +
                           (pass ? $"; deep checks clean on {f.Repointed} injected — verified {f.RolesChecked} clip role(s), " +
                                   $"{f.AssetsChecked} asset(s), {f.SoundsChecked} sound(s), {f.FilesChecked} file(s) on disk, {f.LayersChecked} GPU layer(s)" +
-                                  (f.DistrictsChecked > 0 ? $", {f.DistrictsChecked} district(s) [{f.TilesActive} tile(s) live{(f.ScopedTilesActive > 0 ? $", {f.ScopedTilesActive} scoped" : "")}]" : "") +
+                                  (f.DistrictsChecked > 0 ? $", {f.DistrictsChecked} district(s) [{f.TilesActive} tile(s) live{(f.ScopedTilesActive > 0 ? $", {f.ScopedTilesActive} scoped" : "")}{(f.TexturedChecked > 0 ? $", {f.TexturedApplied}/{f.TexturedChecked} textured" : "")}]" : "") +
                                   (f.SeamsChecked > 0 ? $", {f.SeamsChecked} patched seam(s) [{f.SharedSeams.Count} shared]" : "") : "") +
                           (f.SeamWriteBack.Length > 0 && !f.SeamWriteBack.StartsWith("FAILED") ? $"; seam write-back {f.SeamWriteBack}" : "") +
                           // The 19-of-22 delta, NAMED: which entries loaded but haven't injected, and why — informational
@@ -220,13 +226,34 @@ namespace HumankindAssetFramework
         // ScopedState.refreshPlbcs and never touches d.tiles. Counting only d.tiles made the smoke print
         // "0 tiles live — district path UNTESTED" in the same session the log showed the reactor bound across 1 tile —
         // the honesty note was itself dishonest. The caller passes the scoped ledger in; this stays pure.
+        // Texture state of ONE district, lifted off whichever ledger owns it (DistrictModel for isolate, ScopedState for
+        // scoped) so the judgement below is pure and identical for both. Textured = the registry authored an albedo
+        // atlas at all (pre-2.0 entries have none — nothing to judge).
+        internal struct DistrictTexState { public bool Textured, Applied; public int Errors, Wait; }
+        internal const int TexGiveUpErrors = 3;   // both apply paths latch texApplied=true after this many exceptions — the "gave up" signature
+        internal const int TexPendingPolls = 300; // both paths Diag "not loadable yet" every 300 polls; past that, pending is worth a note
+
         internal static void GatherDistrictFacts(DistrictModel d, SmokeFacts f) => GatherDistrictFacts(d, f, scoped: false, scopedTiles: 0);
         internal static void GatherDistrictFacts(DistrictModel d, SmokeFacts f, bool scoped, int scopedTiles)
+            => GatherDistrictFacts(d, f, scoped, scopedTiles, new DistrictTexState { Textured = d.atlasGuid != null, Applied = d.texApplied, Errors = d.texErrors, Wait = d.texWait });
+        internal static void GatherDistrictFacts(DistrictModel d, SmokeFacts f, bool scoped, int scopedTiles, DistrictTexState tex)
         {
             f.DistrictsChecked++;
             int live = scoped ? scopedTiles : d.tiles.Count;
             f.TilesActive += live;
             if (scoped) f.ScopedTilesActive += live;
+            // Texture health is judged only where there is something to judge: an authored atlas AND a live tile
+            // (an off-screen district has not tried yet; an untextured one never will).
+            if (live > 0 && tex.Textured)
+            {
+                f.TexturedChecked++;
+                if (tex.Errors >= TexGiveUpErrors)
+                    f.DistrictIssues.Add($"'{d.district}' texture apply GAVE UP after {tex.Errors} error(s) — renders untextured (see [DistrictTex]/[DistrictTile] errors in the log)");
+                else if (tex.Applied) f.TexturedApplied++;
+                else if (tex.Wait >= TexPendingPolls)
+                    f.DistrictNotes.Add($"'{d.district}' texture still pending after {tex.Wait} polls (atlas/layer not resolved yet)");
+                else f.DistrictNotes.Add($"'{d.district}' texture pending (just bound; re-run the smoke in a few seconds)");
+            }
             if (d.fxMeshGuid == null) f.DistrictIssues.Add($"'{d.district}' fxMesh GUID unparsed");
             // groundIdx: int.MinValue = not yet resolved (pending — the district may not be on screen), -1 = the
             // authored GroundMaterialDefinition NAME was looked up and NOT FOUND (a real authoring error).
@@ -290,8 +317,14 @@ namespace HumankindAssetFramework
                     // scoped districts keep their live tiles in scopedStates[name].refreshPlbcs (TryGetValue, not
                     // ScopedFor: the smoke must never CREATE state). Isolate districts: d.tiles.
                     bool scoped = IsScopedDistrict(d.district);
-                    int scopedTiles = scoped && scopedStates.TryGetValue(d.district, out var ss) ? ss.refreshPlbcs.Count : 0;
-                    GatherDistrictFacts(d, f, scoped, scopedTiles);
+                    ScopedState ss = null;
+                    int scopedTiles = scoped && scopedStates.TryGetValue(d.district, out ss) ? ss.refreshPlbcs.Count : 0;
+                    // texture ledger follows the path: scoped keeps it on ScopedState (the atlas guid is copied there from
+                    // the registry when the district is first scoped), isolate on the DistrictModel itself
+                    var tex = scoped
+                        ? new DistrictTexState { Textured = d.atlasGuid != null, Applied = ss != null && ss.texApplied, Errors = ss?.texErrors ?? 0, Wait = ss?.texWait ?? 0 }
+                        : new DistrictTexState { Textured = d.atlasGuid != null, Applied = d.texApplied, Errors = d.texErrors, Wait = d.texWait };
+                    GatherDistrictFacts(d, f, scoped, scopedTiles, tex);
                 }
                 GatherSharedSeams(f, Plugin.GUID);
                 // A file that's missing on disk also shows as a failed load once tried — one cause, one report:
