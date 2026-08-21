@@ -40,6 +40,12 @@ static class Program
             var names = Regex.Matches(m.Groups[2].Value, "\"([^\"]+)\"").Select(x => x.Groups[1].Value).ToList();
             if (names.Count > 0) accessorFqns[m.Groups[1].Value] = names;
         }
+        // accessor -> derivation expression   from   internal static Type X => CachedDerived("X", () => <expr>);
+        // (the A5/A6 DERIVED types — evaluated below along the same ElementType / FieldOrPropType / MethodParamType chain
+        // the runtime walks; until 2026-08-21 these fell through to a bare-name lookup and 7 of 12 false-positived.)
+        var accessorDerived = new Dictionary<string, string>();
+        foreach (Match m in Regex.Matches(noComments, @"static\s+Type\s+(\w+)\s*=>\s*CachedDerived\(\s*""\w+""\s*,\s*\(\)\s*=>\s*(.+?)\);"))
+            accessorDerived[m.Groups[1].Value] = m.Groups[2].Value.Trim();
 
         // Deps: accessor -> [members]   from the Catalog block's   new Dep(Accessor, nameof(Accessor), "m1", "m2", ...)
         var deps = new List<(string accessor, List<string> members)>();
@@ -83,14 +89,76 @@ static class Program
             return false;
         }
 
+        // --- derived-type evaluator: mirrors GameBinding.FieldOrPropType / ElementType / MethodParamType over MLC types ---
+        var memberFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
+        Type FieldOrPropType(Type t, string member)
+        {
+            for (var cur = t; cur != null; )
+            {
+                try { var f = cur.GetField(member, memberFlags); if (f != null) return f.FieldType; } catch { }
+                try { var p = cur.GetProperty(member, memberFlags); if (p != null) return p.PropertyType; } catch { }
+                Type next = null; try { next = cur.BaseType; } catch { }
+                cur = next;
+            }
+            return null;
+        }
+        Type ElementType(Type t)
+        {
+            if (t == null) return null;
+            try { if (t.IsArray) return t.GetElementType(); if (t.IsGenericType) return t.GetGenericArguments().FirstOrDefault(); } catch { }
+            return null;
+        }
+        Type MethodParamType(Type t, string method, int idx)
+        {
+            for (var cur = t; cur != null; )
+            {
+                try { foreach (var m in cur.GetMethods(memberFlags)) if (m.Name == method && m.GetParameters().Length > idx) return m.GetParameters()[idx].ParameterType; } catch { }
+                Type next = null; try { next = cur.BaseType; } catch { }
+                cur = next;
+            }
+            return null;
+        }
+        List<string> SplitArgs(string s)   // top-level comma split (nested calls keep their commas)
+        {
+            var parts = new List<string>(); int depth = 0, start = 0;
+            for (int i = 0; i < s.Length; i++)
+            {
+                if (s[i] == '(') depth++; else if (s[i] == ')') depth--;
+                else if (s[i] == ',' && depth == 0) { parts.Add(s.Substring(start, i - start).Trim()); start = i + 1; }
+            }
+            parts.Add(s.Substring(start).Trim());
+            return parts;
+        }
+        string Unquote(string s) => s.Trim().Trim('"');
+        var memo = new Dictionary<string, Type>();
+        Type Eval(string expr)
+        {
+            expr = expr.Trim();
+            string Inner(string call) => expr.Substring(call.Length, expr.Length - call.Length - 1);   // strip "Name(" ... ")"
+            if (expr.StartsWith("ElementType(")) return ElementType(Eval(Inner("ElementType(")));
+            if (expr.StartsWith("FieldOrPropType(")) { var a = SplitArgs(Inner("FieldOrPropType(")); return a.Count == 2 ? FieldOrPropType(Eval(a[0]), Unquote(a[1])) : null; }
+            if (expr.StartsWith("MethodParamType(")) { var a = SplitArgs(Inner("MethodParamType(")); return a.Count == 3 && int.TryParse(a[2], out var ix) ? MethodParamType(Eval(a[0]), Unquote(a[1]), ix) : null; }
+            return ResolveAccessor(expr);   // a bare accessor name
+        }
+        Type ResolveAccessor(string acc)
+        {
+            if (memo.TryGetValue(acc, out var hit)) return hit;
+            memo[acc] = null;   // cycle guard
+            Type t = accessorDerived.TryGetValue(acc, out var dx) ? Eval(dx)
+                   : Resolve(accessorFqns.TryGetValue(acc, out var f) ? f : new List<string> { acc });
+            memo[acc] = t;
+            return t;
+        }
+
         // --- validate ---
         int typesMissing = 0, membersMissing = 0;
         var lines = new List<string>();
         foreach (var (accessor, members) in deps)
         {
-            var fqns = accessorFqns.TryGetValue(accessor, out var f) ? f : new List<string> { accessor };
-            var type = Resolve(fqns);
-            if (type == null) { typesMissing++; lines.Add($"[MISSING TYPE]    {accessor}  ({string.Join(" | ", fqns)})"); continue; }
+            var type = ResolveAccessor(accessor);
+            string how = accessorDerived.TryGetValue(accessor, out var dx) ? "derived: " + dx
+                       : accessorFqns.TryGetValue(accessor, out var f) ? string.Join(" | ", f) : accessor;
+            if (type == null) { typesMissing++; lines.Add($"[MISSING TYPE]    {accessor}  ({how})"); continue; }
             var miss = members.Where(mm => !MemberExists(type, mm)).ToList();
             if (miss.Count > 0) { membersMissing += miss.Count; lines.Add($"[MISSING MEMBER]  {accessor}: {string.Join(", ", miss)}"); }
         }
