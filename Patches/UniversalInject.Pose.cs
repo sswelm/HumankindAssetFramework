@@ -131,7 +131,7 @@ namespace HumankindAssetFramework
         {
             try
             {
-                if (anyAnimated == null) anyAnimated = entries != null && entries.Any(x => x.ca != 0 || x.cb != 0 || x.cc != 0 || x.cd != 0);
+                if (anyAnimated == null) anyAnimated = entries != null && entries.Any(x => x.Role(ClipRole.Primary).Authored);
                 if (anyFreeze == null) anyFreeze = entries != null && entries.Any(x => x.freezeDonorAnim);
                 // anyRescuable keeps a purely STATIC pack in the hook: those entries have no pose behaviour, so the
                 // two flags above are both false, yet they still need the wrong-skeleton rescue. Recomputed when an

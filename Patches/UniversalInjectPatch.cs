@@ -28,26 +28,50 @@ namespace HumankindAssetFramework
         public bool texOwned;            // true only when `tex` is a texture WE created (LoadSkinPng / BuildAdjustedAtlas) and may Destroy on re-arm. FALSE when `tex` is the raw bundle atlas from LoadAtlas — Destroying that unloads the shared asset so AssetDatabase.LoadAsset then returns NULL (the organ-gun-goes-red-on-reload bug).
         public string layerHint = "";
         public object isolatedLayer;     // our private clone of the host output layer (texture isolation)
-        public int ca, cb, cc, cd;       // ANIMATED models: our baked ClipCollection Amplitude guid (its own clip, e.g. a drone's spinning-prop 'hover'). 0,0,0,0 = static model (no pose override).
-        public object clipColl;          // loaded ClipCollection asset
-        public int animId = -1;          // resolved animation id of our clip (after it's registered in AnimationManager.Apply)
-        // STATE-DRIVEN (Phase 2, 2026-07-19): idle = the primary clip above; MOVE plays while the unit travels;
-        // optional AFTER plays once on stopping. Each role is its own baked ClipCollection sharing the one skeleton.
-        public int mca, mcb, mcc, mcd;   // MOVEMENT ClipCollection Amplitude guid
-        public int aca, acb, acc, acd;   // AFTER-MOVEMENT ClipCollection Amplitude guid (0,0,0,0 = none)
-        public int ata, atb, atc, atd;   // ATTACK ClipCollection Amplitude guid (0,0,0,0 = none) — played once when the pawn ranged-attacks
-        public int cba, cbb, cbc, cbd;   // COMBAT-IDLE ClipCollection Amplitude guid (0,0,0,0 = none) — replaces IDLE while the army is locked in a battle
-        public int pva, pvb, pvc, pvd;   // PRE-MOVEMENT ClipCollection Amplitude guid (0,0,0,0 = none) — played ONCE when the unit STARTS moving (e.g. a howitzer folding), then the Movement loop
-        public int iea, ieb, iec, ied;   // IDLE-OVERRIDE ClipCollection Amplitude guid (0,0,0,0 = none) — a STANCE baked as a ROLE (real deltas vs the full primary clip's reference pose); the stance-as-PRIMARY trap encodes ~identity and renders as REST (the howitzer's "forgot to deploy")
-        public int ala, alb, alc, ald;   // IDLE-ALT ClipCollection Amplitude guid (0,0,0,0 = none) — an OCCASIONAL flavor one-shot while plain-idle (the tiger's howl), played on the jittered idleAltInterval cadence; one pawn per unit type per firing
-        public int a2a, a2b, a2c, a2d;   // IDLE-ALT 2 ClipCollection Amplitude guid (0,0,0,0 = none) — optional second flavor clip (eat/groom); each firing picks randomly between the two
-        public object moveClipColl, afterClipColl, attackClipColl, combatClipColl, preMoveClipColl, idleClipColl, idleAltClipColl, idleAlt2ClipColl;
-        public int moveAnimId = -1, afterAnimId = -1, attackAnimId = -1, combatAnimId = -1, preMoveAnimId = -1, idleAnimId = -1, idleAltAnimId = -1, idleAlt2AnimId = -1;
-        // The state machine (StatePose / ProcessAnimStates) must run whenever ANY state role resolved — NOT just moveAnimId.
-        // Gating those two on moveAnimId while the attack-arming paths gate on attackAnimId meant a move-less state-driven
-        // model (idle+attack, no move clip) armed fires that never animated — StatePose was never entered (critical-review #8).
-        public bool AnyStateRole => moveAnimId >= 0 || attackAnimId >= 0 || afterAnimId >= 0 || combatAnimId >= 0 || preMoveAnimId >= 0 || idleAltAnimId >= 0 || idleAlt2AnimId >= 0 || idleAnimId >= 0;
-        public float moveDur = 1f, afterDur = 1f, attackDur = 1f, combatDur = 1f, preMoveDur = 1f, idleDur = 1f, idleAltDur = 1f, idleAlt2Dur = 1f;
+        // ---- CLIP ROLES: ONE TABLE (Cut A, 2026-08-21; see ClipRoles.cs). The PRIMARY role is the model's own clip (a
+        // drone's spinning-prop 'hover'; not authored = static model, no pose override). The eight STATE-DRIVEN roles
+        // (Phase 2, 2026-07-19) each hold their own baked ClipCollection sharing the one skeleton: MOVE plays while the
+        // unit travels, AFTER once on stopping, ATTACK once per ranged attack, COMBAT replaces idle while the army is
+        // locked in battle, PRE-MOVE once when the unit starts moving (the howitzer folding), IDLE-OVERRIDE is a stance
+        // baked as a role (the stance-as-PRIMARY trap encodes ~identity and renders as REST — the howitzer's "forgot to
+        // deploy"), IDLE-ALT / IDLE-ALT-2 are occasional flavor one-shots (the tiger's howl / groom) on the jittered
+        // idleAltInterval cadence. Guids come from the pack's clip* arrays (both parse paths fill the table); the
+        // collection, animId and duration are resolved at registration. Every "all roles" site loops ClipRoles.All.
+        public readonly ClipBinding[] Roles = ClipRoles.NewTable();
+        public ClipBinding Role(ClipRole r) => Roles[(int)r];
+        // Named accessors — sugar INTO the table for the per-role call sites (the pose hook reads `e.attackAnimId`, not
+        // `e.Roles[3].animId`). They cannot drift from the table because they ARE the table.
+        public object clipColl     { get => Roles[0].coll; set => Roles[0].coll = value; }
+        public int    animId       { get => Roles[0].animId; set => Roles[0].animId = value; }
+        public float  animDuration { get => Roles[0].dur; set => Roles[0].dur = value; }   // clip duration (s); PawnEntryPose.Time is NORMALIZED (Mathf.Repeat(Time,1) = one loop), so Time = seconds/duration plays it at real speed with every frame
+        public object moveClipColl     { get => Roles[1].coll; set => Roles[1].coll = value; }
+        public object afterClipColl    { get => Roles[2].coll; set => Roles[2].coll = value; }
+        public object attackClipColl   { get => Roles[3].coll; set => Roles[3].coll = value; }
+        public object combatClipColl   { get => Roles[4].coll; set => Roles[4].coll = value; }
+        public object preMoveClipColl  { get => Roles[5].coll; set => Roles[5].coll = value; }
+        public object idleClipColl     { get => Roles[6].coll; set => Roles[6].coll = value; }
+        public object idleAltClipColl  { get => Roles[7].coll; set => Roles[7].coll = value; }
+        public object idleAlt2ClipColl { get => Roles[8].coll; set => Roles[8].coll = value; }
+        public int moveAnimId     { get => Roles[1].animId; set => Roles[1].animId = value; }
+        public int afterAnimId    { get => Roles[2].animId; set => Roles[2].animId = value; }
+        public int attackAnimId   { get => Roles[3].animId; set => Roles[3].animId = value; }
+        public int combatAnimId   { get => Roles[4].animId; set => Roles[4].animId = value; }
+        public int preMoveAnimId  { get => Roles[5].animId; set => Roles[5].animId = value; }
+        public int idleAnimId     { get => Roles[6].animId; set => Roles[6].animId = value; }
+        public int idleAltAnimId  { get => Roles[7].animId; set => Roles[7].animId = value; }
+        public int idleAlt2AnimId { get => Roles[8].animId; set => Roles[8].animId = value; }
+        public float moveDur     { get => Roles[1].dur; set => Roles[1].dur = value; }
+        public float afterDur    { get => Roles[2].dur; set => Roles[2].dur = value; }
+        public float attackDur   { get => Roles[3].dur; set => Roles[3].dur = value; }
+        public float combatDur   { get => Roles[4].dur; set => Roles[4].dur = value; }
+        public float preMoveDur  { get => Roles[5].dur; set => Roles[5].dur = value; }
+        public float idleDur     { get => Roles[6].dur; set => Roles[6].dur = value; }
+        public float idleAltDur  { get => Roles[7].dur; set => Roles[7].dur = value; }
+        public float idleAlt2Dur { get => Roles[8].dur; set => Roles[8].dur = value; }
+        // The state machine (StatePose / ProcessAnimStates) must run whenever ANY state role resolved — NOT just move.
+        // Gating on moveAnimId alone meant a move-less state-driven model (idle+attack, no move clip) armed fires that
+        // never animated — StatePose was never entered (critical-review #8). A loop over the table cannot repeat that.
+        public bool AnyStateRole { get { for (int i = 1; i < Roles.Length; i++) if (Roles[i].animId >= 0) return true; return false; } }
         // Per-pawn phase, TRACKED BY POSITION. The pawn entry carries no stable identity (only poses, bone
         // rotations and ObjectSpace), and its array slot is NOT stable: changing camera zoom swaps LODs, the
         // engine re-adds every pawn, and slot-derived phases jump — the animation visibly snapped on every zoom.
@@ -80,7 +104,6 @@ namespace HumankindAssetFramework
         public readonly Dictionary<long, bool> stateCombat = new Dictionary<long, bool>();                               // unit GUID -> was battle-locked last poll (detects the combat flip)
         public readonly Dictionary<long, float> stateCombatChangedAt = new Dictionary<long, float>();                    // unit GUID -> Time.time combat last FLIPPED (the combatZ ease ramp start)
         public readonly List<StateSample> stateSamples = new List<StateSample>();   // published for the pose hook (lock on it); pos = pawn render position
-        public float animDuration = 1f;  // clip duration (s); PawnEntryPose.Time is NORMALIZED (Mathf.Repeat(Time,1) = one loop), so Time = seconds/duration plays it at real speed with every frame
         public int skeletonId = -1;      // runtime AnimationManager skeleton index of our registered skeleton (to match PawnManager.PawnEntry.SkeletonId)
         public int descId = -1;          // runtime PawnDescriptorId of our unit (learned from the correctly-skinned pawn), to spot the wrong-skeleton twin the game spawns for the same unit
         public bool fragsLogged;         // one-shot: dump the donor's fragment mesh names once, so the modder can find hide targets
@@ -663,15 +686,11 @@ namespace HumankindAssetFramework
                             var cmv = m["clipMove"]; var cfa = m["clipAfter"]; var cat = m["clipAttack"]; var ccb = m["clipCombat"]; var cpv = m["clipPreMove"]; var cid = m["clipIdle"]; var cAlt = m["clipIdleAlt"]; var ca2 = m["clipIdleAlt2"];
                             e.sa = A(s, 0); e.sb = A(s, 1); e.sc = A(s, 2); e.sd = A(s, 3);
                             e.ta = A(t, 0); e.tb = A(t, 1); e.tc = A(t, 2); e.td = A(t, 3);
-                            e.ca = A(c, 0); e.cb = A(c, 1); e.cc = A(c, 2); e.cd = A(c, 3);
-                            e.mca = A(cmv, 0); e.mcb = A(cmv, 1); e.mcc = A(cmv, 2); e.mcd = A(cmv, 3);
-                            e.aca = A(cfa, 0); e.acb = A(cfa, 1); e.acc = A(cfa, 2); e.acd = A(cfa, 3);
-                            e.ata = A(cat, 0); e.atb = A(cat, 1); e.atc = A(cat, 2); e.atd = A(cat, 3);
-                            e.cba = A(ccb, 0); e.cbb = A(ccb, 1); e.cbc = A(ccb, 2); e.cbd = A(ccb, 3);
-                            e.pva = A(cpv, 0); e.pvb = A(cpv, 1); e.pvc = A(cpv, 2); e.pvd = A(cpv, 3);
-                            e.iea = A(cid, 0); e.ieb = A(cid, 1); e.iec = A(cid, 2); e.ied = A(cid, 3);
-                            e.ala = A(cAlt, 0); e.alb = A(cAlt, 1); e.alc = A(cAlt, 2); e.ald = A(cAlt, 3);
-                            e.a2a = A(ca2, 0); e.a2b = A(ca2, 1); e.a2c = A(ca2, 2); e.a2d = A(ca2, 3);
+                            // clip-role guid quads → the ROLE TABLE. One line per role, each reading its whole array:
+                            // no per-component hand-copy (the `alc` class of typo) is possible here.
+                            void R(ClipRole r, JToken arr) => e.Role(r).Set(A(arr, 0), A(arr, 1), A(arr, 2), A(arr, 3));
+                            R(ClipRole.Primary, c); R(ClipRole.Move, cmv); R(ClipRole.After, cfa); R(ClipRole.Attack, cat); R(ClipRole.Combat, ccb);
+                            R(ClipRole.PreMove, cpv); R(ClipRole.IdleOverride, cid); R(ClipRole.IdleAlt, cAlt); R(ClipRole.IdleAlt2, ca2);
                             e.position = new UnityEngine.Vector3(Fp(p, "x"), Fp(p, "y"), Fp(p, "z"));
                             entries.Add(e);
                         }
@@ -767,6 +786,9 @@ namespace HumankindAssetFramework
                 var hpa = Regex.Matches(text, "\"handPropAngles\"\\s*:\\s*\"([^\"]*)\"");   // parity: hand-prop draw-time import angles csv
                 int G(Match m, int g) => int.TryParse(m.Groups[g].Value, out var r) ? r : 0;
                 float F(Match m, int g) => float.TryParse(m.Groups[g].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var r) ? r : 0f;
+                // clip-role GUID quads (one JSON array each) land in the ROLE TABLE after construction — the same nine keys the
+                // Newtonsoft path hand-extracts (parity: check_schema_parity.sh greps the Regex.Matches keys above).
+                void Quad(ModelEntry me, ClipRole r, MatchCollection mc, int idx) { if (idx < mc.Count) me.Role(r).Set(G(mc[idx], 1), G(mc[idx], 2), G(mc[idx], 3), G(mc[idx], 4)); }
                 int n = Math.Min(pd.Count, Math.Min(sk.Count, at.Count));
                 for (int i = 0; i < n; i++)
                 {
@@ -777,16 +799,7 @@ namespace HumankindAssetFramework
                         hideMeshes = i < hm.Count ? hm[i].Groups[1].Value : "",   // hideMeshes appears once per model in doc order, same as the others
                         sa = G(sk[i], 1), sb = G(sk[i], 2), sc = G(sk[i], 3), sd = G(sk[i], 4),
                         ta = G(at[i], 1), tb = G(at[i], 2), tc = G(at[i], 3), td = G(at[i], 4),
-                        ca = i < cl.Count ? G(cl[i], 1) : 0, cb = i < cl.Count ? G(cl[i], 2) : 0, cc = i < cl.Count ? G(cl[i], 3) : 0, cd = i < cl.Count ? G(cl[i], 4) : 0,
                         animStateDriven = i < asd.Count && asd[i].Groups[1].Value == "true",
-                        mca = i < cmvR.Count ? G(cmvR[i], 1) : 0, mcb = i < cmvR.Count ? G(cmvR[i], 2) : 0, mcc = i < cmvR.Count ? G(cmvR[i], 3) : 0, mcd = i < cmvR.Count ? G(cmvR[i], 4) : 0,
-                        aca = i < cfaR.Count ? G(cfaR[i], 1) : 0, acb = i < cfaR.Count ? G(cfaR[i], 2) : 0, acc = i < cfaR.Count ? G(cfaR[i], 3) : 0, acd = i < cfaR.Count ? G(cfaR[i], 4) : 0,
-                        ata = i < catR.Count ? G(catR[i], 1) : 0, atb = i < catR.Count ? G(catR[i], 2) : 0, atc = i < catR.Count ? G(catR[i], 3) : 0, atd = i < catR.Count ? G(catR[i], 4) : 0,
-                        cba = i < ccbR.Count ? G(ccbR[i], 1) : 0, cbb = i < ccbR.Count ? G(ccbR[i], 2) : 0, cbc = i < ccbR.Count ? G(ccbR[i], 3) : 0, cbd = i < ccbR.Count ? G(ccbR[i], 4) : 0,
-                        pva = i < cpvR.Count ? G(cpvR[i], 1) : 0, pvb = i < cpvR.Count ? G(cpvR[i], 2) : 0, pvc = i < cpvR.Count ? G(cpvR[i], 3) : 0, pvd = i < cpvR.Count ? G(cpvR[i], 4) : 0,
-                        iea = i < cidR.Count ? G(cidR[i], 1) : 0, ieb = i < cidR.Count ? G(cidR[i], 2) : 0, iec = i < cidR.Count ? G(cidR[i], 3) : 0, ied = i < cidR.Count ? G(cidR[i], 4) : 0,
-                        ala = i < calR.Count ? G(calR[i], 1) : 0, alb = i < calR.Count ? G(calR[i], 2) : 0, alc = i < calR.Count ? G(calR[i], 3) : 0, ald = i < calR.Count ? G(calR[i], 4) : 0,
-                        a2a = i < ca2R.Count ? G(ca2R[i], 1) : 0, a2b = i < ca2R.Count ? G(ca2R[i], 2) : 0, a2c = i < ca2R.Count ? G(ca2R[i], 3) : 0, a2d = i < ca2R.Count ? G(ca2R[i], 4) : 0,
                         idleAltInterval = i < iai.Count && float.TryParse(iai[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _iai) ? _iai : 0f,
                         animPhaseSpread = i < aps.Count && float.TryParse(aps[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _aps) ? _aps : 0.5f,
                         position = i < po.Count ? new UnityEngine.Vector3(F(po[i], 1), F(po[i], 2), F(po[i], 3)) : UnityEngine.Vector3.zero,
@@ -853,6 +866,10 @@ namespace HumankindAssetFramework
                         muzzleOffset = i < mzo.Count ? mzo[i].Groups[1].Value : "",
                         handPropAngles = i < hpa.Count ? hpa[i].Groups[1].Value : "",
                     });
+                    var ne = entries[entries.Count - 1];
+                    Quad(ne, ClipRole.Primary, cl, i);        Quad(ne, ClipRole.Move, cmvR, i);     Quad(ne, ClipRole.After, cfaR, i);
+                    Quad(ne, ClipRole.Attack, catR, i);       Quad(ne, ClipRole.Combat, ccbR, i);   Quad(ne, ClipRole.PreMove, cpvR, i);
+                    Quad(ne, ClipRole.IdleOverride, cidR, i); Quad(ne, ClipRole.IdleAlt, calR, i);  Quad(ne, ClipRole.IdleAlt2, ca2R, i);
                 }
                 Plugin.Log.LogInfo($"[Uni] read {text.Length} chars; parsed {entries.Count} model(s) via regex [" + string.Join(", ", entries.Select(e => e.resourceName + "->" + e.pawnDescription)) + "]");
                 return entries;
@@ -970,7 +987,7 @@ namespace HumankindAssetFramework
                 foreach (var e in list)
                 {
                     e.skeletonId = -1; e.animId = -1; e.descId = -1; e.repointed = false;   // session-scoped ids re-learn
-                    e.moveAnimId = -1; e.afterAnimId = -1; e.attackAnimId = -1; e.combatAnimId = -1; e.preMoveAnimId = -1; e.idleAnimId = -1; e.idleAltAnimId = -1; e.idleAlt2AnimId = -1;   // state-role ids re-resolve
+                    foreach (var b in e.Roles) b.animId = -1;                                   // every clip role's id re-resolves (the table, not a hand-list)
                     e.idleAltNextAt = 0f; e.idleAltStart = -1f; e.idleAltChosenId = -1;   // idle-alt cadence is session-scoped (Time.time resets)
                     e.stateLastPos.Clear(); e.stateMoving.Clear(); e.stateStoppedAt.Clear(); e.stateMoveStartedAt.Clear();
                     e.stateCombat.Clear(); e.stateCombatChangedAt.Clear();

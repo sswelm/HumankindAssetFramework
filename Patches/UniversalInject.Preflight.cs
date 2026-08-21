@@ -66,15 +66,7 @@ namespace HumankindAssetFramework
                         if ((a | b | c | d) != 0 && animId < 0)
                             issues.Add(new ValidationIssue { Severity = ValidationSeverity.Warning, Field = role + "Clip", Message = "authored GUID did not resolve to a registered ClipCollection (was it baked and shipped?)" });
                     }
-                    Role(e.ca, e.cb, e.cc, e.cd, e.animId, "primary");
-                    Role(e.mca, e.mcb, e.mcc, e.mcd, e.moveAnimId, "move");
-                    Role(e.aca, e.acb, e.acc, e.acd, e.afterAnimId, "after");
-                    Role(e.ata, e.atb, e.atc, e.atd, e.attackAnimId, "attack");
-                    Role(e.cba, e.cbb, e.cbc, e.cbd, e.combatAnimId, "combat");
-                    Role(e.pva, e.pvb, e.pvc, e.pvd, e.preMoveAnimId, "preMove");
-                    Role(e.iea, e.ieb, e.iec, e.ied, e.idleAnimId, "idleOverride");
-                    Role(e.ala, e.alb, e.alc, e.ald, e.idleAltAnimId, "idleAlt");
-                    Role(e.a2a, e.a2b, e.a2c, e.a2d, e.idleAlt2AnimId, "idleAlt2");
+                    foreach (var r in ClipRoles.All) { var b = e.Role(r); Role(b.a, b.b, b.c, b.d, b.animId, ClipRoles.Name(r)); }
                     if ((e.sa | e.sb | e.sc | e.sd) != 0 && e.skeleton == null)
                         issues.Add(new ValidationIssue { Severity = ValidationSeverity.Warning, Field = "skeleton", Message = "authored GUID did not resolve to a Skeleton asset (was it baked and shipped?)" });
 

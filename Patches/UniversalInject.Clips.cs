@@ -62,33 +62,18 @@ namespace HumankindAssetFramework
                     return coll;
                 }
                 foreach (var e in entries)
-                {
-                    e.clipColl = InjectOne(e.clipColl, e.ca, e.cb, e.cc, e.cd, e.resourceName);
-                    if (e.animStateDriven)
+                    foreach (var r in ClipRoles.All)   // the state roles load only for a state-driven model; PRIMARY always
                     {
-                        e.moveClipColl = InjectOne(e.moveClipColl, e.mca, e.mcb, e.mcc, e.mcd, e.resourceName + ":move");
-                        e.afterClipColl = InjectOne(e.afterClipColl, e.aca, e.acb, e.acc, e.acd, e.resourceName + ":after");
-                        e.attackClipColl = InjectOne(e.attackClipColl, e.ata, e.atb, e.atc, e.atd, e.resourceName + ":attack");
-                        e.combatClipColl = InjectOne(e.combatClipColl, e.cba, e.cbb, e.cbc, e.cbd, e.resourceName + ":combat");
-                        e.preMoveClipColl = InjectOne(e.preMoveClipColl, e.pva, e.pvb, e.pvc, e.pvd, e.resourceName + ":premove");
-                        e.idleClipColl = InjectOne(e.idleClipColl, e.iea, e.ieb, e.iec, e.ied, e.resourceName + ":idle");
-                        e.idleAltClipColl = InjectOne(e.idleAltClipColl, e.ala, e.alb, e.alc, e.ald, e.resourceName + ":idlealt");
-                        e.idleAlt2ClipColl = InjectOne(e.idleAlt2ClipColl, e.a2a, e.a2b, e.a2c, e.a2d, e.resourceName + ":idlealt2");
+                        if (ClipRoles.IsState(r) && !e.animStateDriven) continue;
+                        var b = e.Role(r);
+                        b.coll = InjectOne(b.coll, b.a, b.b, b.c, b.d, e.resourceName + ClipRoles.Tag(r));
                     }
-                }
             }
             catch (Exception ex) { Plugin.Log.LogError("[Uni] InjectClipCollections: " + ex); }
         }
 
         // After Apply built the animation buffer, resolve our clip's animation id via GetAnimationId(clip guid).
-        static int ResolveAnimId(object animMgr, ModelEntry e)
-        {
-            int id = ResolveCollAnimId(animMgr, e.clipColl, e.resourceName, out float d);
-            if (id >= 0 && d > 0.001f) e.animDuration = d;
-            return id;
-        }
-
-        // Same resolution for ANY of an entry's ClipCollections (idle / move / after — Phase 2): index-0 clip guid ->
+        // Resolution for ANY of an entry's ClipCollections (idle / move / after — Phase 2): index-0 clip guid ->
         // animation id + real duration (the pose hook normalizes Time by it so the clip plays at real speed).
         static int ResolveCollAnimId(object animMgr, object coll, string tag, out float dur)
         {

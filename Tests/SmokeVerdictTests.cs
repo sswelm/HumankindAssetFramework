@@ -387,8 +387,9 @@ namespace HumankindAssetFramework.Tests
         [Fact]
         public void Gather_CountsWhatItChecks()
         {
-            var e = new ModelEntry { resourceName = "C", repointed = true, sa = 1, ta = 1, mca = 1, moveAnimId = 4,
+            var e = new ModelEntry { resourceName = "C", repointed = true, sa = 1, ta = 1, moveAnimId = 4,
                                      soundFile = "a.wav", customClipTried = true };
+            e.Role(ClipRole.Move).Set(1, 0, 0, 0);   // one authored role (move)
             var f = new UniversalInject.SmokeFacts();
             UniversalInject.GatherEntryFacts(e, f);
             Assert.Equal(1, f.RolesChecked);    // one authored role (move)
@@ -495,29 +496,30 @@ namespace HumankindAssetFramework.Tests
             Assert.Empty(f2.FailedSounds);
         }
 
-        // The 36-int wiring guard (the `cb`/`cbb` typo class the review flagged — and which the FIRST DRAFT of
-        // GatherEntryFacts actually shipped: `Role(e.ala, e.alb, e.ald, e.ald, ...)` dropped `alc`). Every single
-        // GUID component of every role must arm its role's dead-role check on its own.
+        // The wiring guard, table edition (was the "36-int" reflection test over nine hand-named quads — the `alc`
+        // component the FIRST DRAFT of GatherEntryFacts dropped is why it existed). Every GUID component of every
+        // role must arm its role's dead-role check on its own, and the role must be reported under its table name.
         [Theory]
-        [InlineData("ca", "cb", "cc", "cd", "primary")]
-        [InlineData("mca", "mcb", "mcc", "mcd", "move")]
-        [InlineData("aca", "acb", "acc", "acd", "after")]
-        [InlineData("ata", "atb", "atc", "atd", "attack")]
-        [InlineData("cba", "cbb", "cbc", "cbd", "combat")]
-        [InlineData("pva", "pvb", "pvc", "pvd", "preMove")]
-        [InlineData("iea", "ieb", "iec", "ied", "idleOverride")]
-        [InlineData("ala", "alb", "alc", "ald", "idleAlt")]
-        [InlineData("a2a", "a2b", "a2c", "a2d", "idleAlt2")]
-        public void Gather_DeadRole_EveryGuidComponentArmsItsRole(string fa, string fb, string fc, string fd, string role)
+        [InlineData(ClipRole.Primary, "primary")]
+        [InlineData(ClipRole.Move, "move")]
+        [InlineData(ClipRole.After, "after")]
+        [InlineData(ClipRole.Attack, "attack")]
+        [InlineData(ClipRole.Combat, "combat")]
+        [InlineData(ClipRole.PreMove, "preMove")]
+        [InlineData(ClipRole.IdleOverride, "idleOverride")]
+        [InlineData(ClipRole.IdleAlt, "idleAlt")]
+        [InlineData(ClipRole.IdleAlt2, "idleAlt2")]
+        public void Gather_DeadRole_EveryGuidComponentArmsItsRole(ClipRole role, string reportedName)
         {
-            foreach (var fieldName in new[] { fa, fb, fc, fd })
+            Assert.Equal(reportedName, ClipRoles.Name(role));
+            for (int component = 0; component < 4; component++)
             {
                 var e = new ModelEntry { resourceName = "T", repointed = true };
-                typeof(ModelEntry).GetField(fieldName).SetValue(e, 1);
+                e.Role(role).Set(component == 0 ? 1 : 0, component == 1 ? 1 : 0, component == 2 ? 1 : 0, component == 3 ? 1 : 0);
                 var f = new UniversalInject.SmokeFacts();
                 UniversalInject.GatherEntryFacts(e, f);
-                Assert.True(f.DeadRoles.Count == 1 && f.DeadRoles[0] == "T " + role,
-                    $"GUID component '{fieldName}' did not arm the '{role}' dead-role check (wiring typo?)");
+                Assert.True(f.DeadRoles.Count == 1 && f.DeadRoles[0] == "T " + reportedName,
+                    $"GUID component {component} of {role} did not arm its dead-role check");
             }
         }
     }

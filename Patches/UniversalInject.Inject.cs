@@ -72,15 +72,16 @@ namespace HumankindAssetFramework
                 foreach (var e in entries)
                 {
                     if (e.skeleton != null) { try { e.skeletonId = Convert.ToInt32(GetMember(e.skeleton, "SkeletonId")); } catch { } }
-                    if (e.clipColl != null) e.animId = ResolveAnimId(animMgr, e);
-                    if (e.moveClipColl != null) e.moveAnimId = ResolveCollAnimId(animMgr, e.moveClipColl, e.resourceName + ":move", out e.moveDur);
-                    if (e.afterClipColl != null) e.afterAnimId = ResolveCollAnimId(animMgr, e.afterClipColl, e.resourceName + ":after", out e.afterDur);
-                    if (e.attackClipColl != null) e.attackAnimId = ResolveCollAnimId(animMgr, e.attackClipColl, e.resourceName + ":attack", out e.attackDur);
-                    if (e.combatClipColl != null) e.combatAnimId = ResolveCollAnimId(animMgr, e.combatClipColl, e.resourceName + ":combat", out e.combatDur);
-                    if (e.preMoveClipColl != null) e.preMoveAnimId = ResolveCollAnimId(animMgr, e.preMoveClipColl, e.resourceName + ":premove", out e.preMoveDur);
-                    if (e.idleClipColl != null) e.idleAnimId = ResolveCollAnimId(animMgr, e.idleClipColl, e.resourceName + ":idle", out e.idleDur);
-                    if (e.idleAltClipColl != null) e.idleAltAnimId = ResolveCollAnimId(animMgr, e.idleAltClipColl, e.resourceName + ":idlealt", out e.idleAltDur);
-                    if (e.idleAlt2ClipColl != null) e.idleAlt2AnimId = ResolveCollAnimId(animMgr, e.idleAlt2ClipColl, e.resourceName + ":idlealt2", out e.idleAlt2Dur);
+                    foreach (var r in ClipRoles.All)   // every loaded role: animation id + real duration (the table, not nine hand-written lines)
+                    {
+                        var b = e.Role(r);
+                        if (b.coll == null) continue;
+                        b.animId = ResolveCollAnimId(animMgr, b.coll, e.resourceName + ClipRoles.Tag(r), out float d);
+                        // PRIMARY keeps its previous duration on a failed resolve (the pose hook normalizes by it every frame);
+                        // the state roles always take the resolved value (1f default) — both exactly as before the table.
+                        if (r == ClipRole.Primary) { if (b.animId >= 0 && d > 0.001f) b.dur = d; }
+                        else b.dur = d;
+                    }
                 }
                 registered = true;
                 Plugin.Diag($"[Uni] registered {n} skeleton(s) + re-Apply'd; " + string.Join(", ", entries.Select(x => $"{x.resourceName}(skel {x.skeletonId}, anim {x.animId})")));
