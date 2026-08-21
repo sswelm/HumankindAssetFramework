@@ -24,7 +24,14 @@ namespace HumankindAssetFramework
     //   - GPU budget: any mesh layer at >=95% verts/indices — the silent skin-vanish wall, alarmed BEFORE it hits
     internal static partial class UniversalInject
     {
-        internal static int InjectionErrors;   // bumped in the injection-path catch blocks (RepointMatch / register / fragments / pose)
+        // Injection errors are a per-SESSION ledger of named SITES, not a frame counter (2026-08-21 review finding: the
+        // pose hook bumped a never-reset int per pawn per frame, so one throwing model FAILed the smoke with a five-digit
+        // count for the rest of the process). NoteInjectionError counts once per distinct site ("register", "repoint",
+        // "fragments", "pose:<model>"); RearmModelRegistration resets both so a clean reload gets a clean verdict.
+        [SessionScoped(Manual = "RearmModelRegistration, under the ledger lock")] internal static readonly HashSet<string> InjectionErrorSites = new HashSet<string>();
+        internal static int InjectionErrors;   // = InjectionErrorSites.Count, kept as a plain int for the panel/facts
+        internal static void NoteInjectionError(string site) { lock (InjectionErrorSites) { if (InjectionErrorSites.Add(site ?? "?")) InjectionErrors = InjectionErrorSites.Count; } }
+        internal static List<string> ErrorSitesSnapshot() { lock (InjectionErrorSites) return InjectionErrorSites.OrderBy(s => s).ToList(); }
 
         internal struct SmokeResult { public bool Pass; public string Summary; }
 
@@ -32,6 +39,7 @@ namespace HumankindAssetFramework
         internal class SmokeFacts
         {
             public int GbMissing, InjectionErrors, Models, Repointed;
+            public List<string> ErrorSites = new List<string>();     // the named injection-error sites behind InjectionErrors
             public List<string> DeadRoles = new List<string>();
             public List<string> MissingAssets = new List<string>();
             public List<string> FailedSounds = new List<string>();
@@ -67,7 +75,7 @@ namespace HumankindAssetFramework
         {
             var fails = new List<string>();
             if (f.GbMissing > 0) fails.Add($"{f.GbMissing} game type/member(s) missing");
-            if (f.InjectionErrors > 0) fails.Add($"{f.InjectionErrors} injection error(s)");
+            if (f.InjectionErrors > 0) fails.Add($"{f.InjectionErrors} injection error(s)" + (f.ErrorSites.Count > 0 ? " at " + string.Join(", ", f.ErrorSites) : ""));
             if (f.Models <= 0) fails.Add("no models loaded from the registry");
             if (f.DeadRoles.Count > 0) fails.Add($"{f.DeadRoles.Count} dead clip role(s): {string.Join(", ", f.DeadRoles)}");
             if (f.MissingAssets.Count > 0) fails.Add($"{f.MissingAssets.Count} missing asset(s): {string.Join(", ", f.MissingAssets)}");
@@ -324,6 +332,7 @@ namespace HumankindAssetFramework
                 {
                     GbMissing = gb.Count(r => !r.TypeFound) + gb.Where(r => r.TypeFound).Sum(r => r.MissingMembers.Count),
                     InjectionErrors = InjectionErrors,
+                    ErrorSites = ErrorSitesSnapshot(),
                     Models = entries?.Count ?? 0,
                     Repointed = entries?.Count(e => e.repointed) ?? 0,
                 };

@@ -551,5 +551,26 @@ namespace HumankindAssetFramework.Tests
             // the addon DID load and WOULD match -> a different diagnosis (repoint failure), never "no unit"
             Assert.Contains("repoint did not run", UniversalInject.UninjectedReason(e, new[] { "Era1_Common_DugoutCanoe_01" }, out bool m3)); Assert.False(m3);
         }
+
+        // The injection-error ledger (2026-08-21): named sites, counted once each, per session — not a frame counter.
+        [Fact]
+        public void InjectionErrors_CountOncePerSite_AndNameTheSites()
+        {
+            lock (UniversalInject.InjectionErrorSites) { UniversalInject.InjectionErrorSites.Clear(); UniversalInject.InjectionErrors = 0; }
+            for (int frame = 0; frame < 500; frame++) UniversalInject.NoteInjectionError("pose:TankDestroyers");   // one throwing model, 500 frames
+            UniversalInject.NoteInjectionError("repoint");
+            UniversalInject.NoteInjectionError("repoint");
+            Assert.Equal(2, UniversalInject.InjectionErrors);
+            Assert.Equal(new[] { "pose:TankDestroyers", "repoint" }, UniversalInject.ErrorSitesSnapshot().ToArray());
+
+            var r = UniversalInject.SmokeVerdict(new UniversalInject.SmokeFacts
+            {
+                GbMissing = 0, Models = 22, Repointed = 5,
+                InjectionErrors = UniversalInject.InjectionErrors, ErrorSites = UniversalInject.ErrorSitesSnapshot(),
+            });
+            Assert.False(r.Pass);
+            Assert.Contains("2 injection error(s) at pose:TankDestroyers, repoint", r.Summary);
+            lock (UniversalInject.InjectionErrorSites) { UniversalInject.InjectionErrorSites.Clear(); UniversalInject.InjectionErrors = 0; }
+        }
     }
 }

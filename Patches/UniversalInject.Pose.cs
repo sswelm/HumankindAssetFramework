@@ -130,6 +130,7 @@ namespace HumankindAssetFramework
         // Each behavior is its own method below, so adding a new one is a new handler — not another branch on this hot path.
         internal static void OnPawnAdded(object pawnManager)
         {
+            string errSite = "pose";   // refined to the model name once resolved — the catch counts ONCE per site, not per frame
             try
             {
                 if (anyAnimated == null) anyAnimated = entries != null && entries.Any(x => x.Role(ClipRole.Primary).Authored);
@@ -194,7 +195,7 @@ namespace HumankindAssetFramework
                     Plugin.Log.LogInfo($"[Census] desc {ctx.descId} ('{an ?? "?"}') skel {ctx.skelId} entry={(hooked?.resourceName ?? "-")} vanillaTurn={(vanillaTurnByDesc.TryGetValue(ctx.descId, out var cvr) ? cvr.ToString("0") : "-")}");
                 }
 
-                var e = hooked;
+                var e = hooked; if (e != null) errSite = "pose:" + e.resourceName;
                 if (e != null) e.descId = ctx.descId;                  // learn our unit's descriptor from the correct pawn
                 else if (ctx.descId >= 0)
                 {
@@ -304,7 +305,7 @@ namespace HumankindAssetFramework
                 }
             }
             // one-shot log: a bare catch here hid member renames after a game update (models just stopped animating, no clue why).
-            catch (Exception ex) { InjectionErrors++; if (!poseErrLogged) { poseErrLogged = true; Plugin.Log.LogError("[Uni] OnPawnAdded (pose hook disabled this pawn): " + ex); } }
+            catch (Exception ex) { NoteInjectionError(errSite); if (!poseErrLogged) { poseErrLogged = true; Plugin.Log.LogError("[Uni] OnPawnAdded (pose hook disabled this pawn): " + ex); } }
         }
 
         // Read the just-written PawnEntry (pawnCount-1) + its skeleton/descriptor ids, or false if there's nothing to act on.

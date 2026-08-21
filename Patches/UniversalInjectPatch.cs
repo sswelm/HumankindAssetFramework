@@ -908,6 +908,8 @@ namespace HumankindAssetFramework
             int cleared = SessionState.Reset(SessionScope.Model);   // EVERY [SessionScoped] static collection (the declared registry — Patches/SessionState.cs), incl. the unit->entry cache, every descId-keyed map, the turn/hug/aim states
             Plugin.Diag($"[Session] model re-arm: {cleared} registry-managed collection(s) cleared");
             registered = false;
+            lock (InjectionErrorSites) { InjectionErrorSites.Clear(); InjectionErrors = 0; }   // the injection-error ledger is per session (cleared under the same lock the hooks add with)
+            poseErrLogged = false;                                   // a recurring error re-logs once per SESSION, not once per process
             anyAnimated = null; anyMuzzle = null; anyFreeze = null; anyRescuable = null;                    // recomputed on the next pawn-add
             cachedEra = -1;   // era is session-scoped (the descriptor maps next to it are registry-cleared above)
             _listenerChecked = false;                                // the AudioListener rode a session-scoped camera

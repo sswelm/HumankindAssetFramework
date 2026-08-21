@@ -10,6 +10,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **SMOKE INJECTION ERRORS: A PER-SESSION LEDGER OF NAMED SITES, NOT A FRAME COUNTER (2026-08-21).** Review finding,
+  verified: `InjectionErrors` was an `int` bumped in the per-pawn-per-frame pose hook and never reset, so one throwing
+  model turned the smoke's second hard-FAIL signal into a five-digit count, and a transient session-1 error FAILed the
+  smoke for the rest of the process — including after a clean reload. Now `NoteInjectionError(site)` adds to a
+  `HashSet` of sites (`register`, `repoint`, `fragments`, `pose:<model>`), counted once each; `RearmModelRegistration`
+  clears it (under the ledger lock) with the one-shot log flag, so a recurring error re-logs once per SESSION and a
+  clean reload gets a clean verdict. The verdict names the sites: `FAIL (1 injection error(s) at pose:TankDestroyers)`.
+  Judgment call, recorded: the session-2 smoke forgets a session-1 error — the smoke answers "is HAF working *now*";
+  the log keeps the history. Test: 500 frames of one throwing model = 1 error, named.
+
 - **SESSION-SCOPED STATE IS DECLARED, NOT REMEMBERED (2026-08-21).** An external structural critique put it exactly:
   findings like "every descId map gets cleared on re-arm" are rules that exist only in a human's head and a comment,
   across 16 partial files sharing ~150 static collections. Now `Patches/SessionState.cs` gives each one a declared
