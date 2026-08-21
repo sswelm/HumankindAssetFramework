@@ -392,38 +392,48 @@ namespace HumankindAssetFramework
                 else
                     show = !show;                       // F8 = toggle the feedback window
             }
+            // Every per-frame entry point is timed into a FrameCost bucket (F8 panel + a log line per minute) — the
+            // per-frame cost of HAF is a measured number, not an estimate. Begin/End are two Stopwatch reads each.
+            long tAll = FrameCost.Begin(), t;
+            t = FrameCost.Begin();
             UniversalInject.ConsumePendingReloadRearm();  // main-thread re-arm after an in-session save-reload (Sandbox.Load requested it off-thread); covers BOTH the model + district axes, so it runs regardless of the injection gate below
             DistrictInject.DrainDistrictDestroys();       // main-thread free of the previous session's district runtime clones queued by ResetDistrictSessionState (leak fix); cheap no-op when the queue is empty
+            FrameCost.End(FrameCost.Rearm, t);
             if (UniversalInjectOn.Value)
             {
-                UniversalInject.TickTexture();          // keep registry-driven model atlases applied
-                UniversalInject.MaybeRespawnPostLoad(); // one-shot post-load re-spawn to clear the first-instance rotor race
-                UniversalInject.ProcessFireQueues();    // per-instance fire-on-attack: arm only the pawn that actually bombarded
-                UniversalInject.ProcessDeployState();   // deploy-on-stop: record which of our pawns' units are currently moving
-                UniversalInject.ProcessAnimStates();    // state-driven (Phase 2): publish per-unit moving/stopped for the idle/move/after clips
-                UniversalInject.ProcessEngineAudio();   // engine sound: fire the per-ship Start/Stop move sound on our units
-                UniversalInject.ProcessSubPawnVisuals();   // one-shot pawn-prefab hierarchy dump (the ghost-rotor hunt); no-op once dumped
-                UniversalInject.ProcessBattleCries();   // battle-start war cries queued by the sim-thread hook
+                t = FrameCost.Begin(); UniversalInject.TickTexture();          FrameCost.End(FrameCost.TickTexture, t);       // keep registry-driven model atlases applied
+                t = FrameCost.Begin(); UniversalInject.MaybeRespawnPostLoad(); FrameCost.End(FrameCost.RespawnPostLoad, t);   // one-shot post-load re-spawn to clear the first-instance rotor race
+                t = FrameCost.Begin(); UniversalInject.ProcessFireQueues();    FrameCost.End(FrameCost.FireQueues, t);        // per-instance fire-on-attack: arm only the pawn that actually bombarded
+                t = FrameCost.Begin(); UniversalInject.ProcessDeployState();   FrameCost.End(FrameCost.DeployState, t);       // deploy-on-stop: record which of our pawns' units are currently moving
+                t = FrameCost.Begin(); UniversalInject.ProcessAnimStates();    FrameCost.End(FrameCost.AnimStates, t);        // state-driven (Phase 2): publish per-unit moving/stopped for the idle/move/after clips
+                t = FrameCost.Begin(); UniversalInject.ProcessEngineAudio();   FrameCost.End(FrameCost.EngineAudio, t);       // engine sound: fire the per-ship Start/Stop move sound on our units
+                t = FrameCost.Begin(); UniversalInject.ProcessSubPawnVisuals(); FrameCost.End(FrameCost.SubPawnVisuals, t);   // one-shot pawn-prefab hierarchy dump (the ghost-rotor hunt); no-op once dumped
+                t = FrameCost.Begin(); UniversalInject.ProcessBattleCries();   FrameCost.End(FrameCost.BattleCries, t);       // battle-start war cries queued by the sim-thread hook
+                t = FrameCost.Begin();
                 UniversalInject.PollRotorTrim();        // live rotor-trim dial (haf_rotortrim.txt): constant BR-slot tilt on donor-clip rotor bones
                 UniversalInject.PollTurnEase();         // live turn-ease dial (haf_turnease.txt): eased facing + bank on donor-clip units (spike)
                 UniversalInject.PollTerrainHug();       // live terrain-hug dial (haf_hugterrain.txt): fly low over open ground, climb for districts (spike)
-                UniversalInject.PollClassScan();        // category turn ease: sample live units for the Hover ability + azimuth turrets (~3s; only while category rates are active)
-                DistrictInject.TickDistrictMeshSwap(); // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
-                DistrictInject.PollRepoDump();         // SPIKE wip-wonder-affinity: one-shot AssetReferenceRepository dump (DistrictDebug-gated)
-                DistrictInject.PollWonderRows();       // SPIKE wip-wonder-affinity: fill configured wonder cells in the ArtificialWonder visual DB
-                DistrictInject.PollDistrictMainRows(); // SPIKE dedicated-visual (hybrid): register our baked selector in */District/Main for an affinity
-                DistrictInject.PollDistrictSelectorTile(); // SCOPED dedicated-visual: put our selector on ONLY the named district's tile (keeps shared affinity + fallback)
-                DistrictInject.ProbeAxisGrowth();      // SPIKE dedicated-visual: one-shot — can matrix.Add grow a criteria axis with a NEW value? (DistrictDebug-gated)
-                DistrictInject.PollHexSculptDial();     // live dial (haf_hexsculpt.txt): re-carve every sculpted district's platform without a relaunch
+                FrameCost.End(FrameCost.Dials, t);
+                t = FrameCost.Begin(); UniversalInject.PollClassScan();        FrameCost.End(FrameCost.ClassScan, t);         // category turn ease: sample live units for the Hover ability + azimuth turrets (~3s; only while category rates are active)
+                t = FrameCost.Begin(); DistrictInject.TickDistrictMeshSwap();  FrameCost.End(FrameCost.DistrictMeshSwap, t);  // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
+                t = FrameCost.Begin(); DistrictInject.PollRepoDump(); DistrictInject.ProbeAxisGrowth(); FrameCost.End(FrameCost.DistrictPolls, t);   // SPIKE diagnostics (DistrictDebug-gated): repository dump, axis-growth probe
+                t = FrameCost.Begin(); DistrictInject.PollWonderRows();          FrameCost.End(FrameCost.WonderRows, t);     // SPIKE wip-wonder-affinity: fill configured wonder cells in the ArtificialWonder visual DB
+                t = FrameCost.Begin(); DistrictInject.PollDistrictMainRows();    FrameCost.End(FrameCost.MainRows, t);       // SPIKE dedicated-visual (hybrid): register our baked selector in */District/Main for an affinity
+                t = FrameCost.Begin(); DistrictInject.PollDistrictSelectorTile(); FrameCost.End(FrameCost.SelectorTile, t);  // SCOPED dedicated-visual: put our selector on ONLY the named district's tile (keeps shared affinity + fallback)
+                t = FrameCost.Begin(); DistrictInject.PollHexSculptDial();       FrameCost.End(FrameCost.HexDial, t);        // live dial (haf_hexsculpt.txt): re-carve every sculpted district's platform without a relaunch
             }
+            t = FrameCost.Begin();
             BattleTurn.Poll();                          // live battle-turn dial (haf_battleturn.txt): turn rate + hold-fire for ALL units — independent of model injection, so outside the UniversalInject gate (spike)
             Hk_BombardAnimHold.Tick();                  // replay deferred bombard attack poses once their turn-hold elapses (muzzle flash + shot sound timing)
+            FrameCost.End(FrameCost.BattleTurn, t);
             if (PersistUnitFacing.Value)
-                FacingPersist.Tick();                   // capture each army's facing + restore it after a load (stationary units only). OWN gate — facing is independent of model injection, so turning UniversalInject off must NOT silence it (it has its own save/load hooks + config).
+            { t = FrameCost.Begin(); FacingPersist.Tick(); FrameCost.End(FrameCost.FacingPersist, t); }   // capture each army's facing + restore it after a load (stationary units only). OWN gate — facing is independent of model injection, so turning UniversalInject off must NOT silence it (it has its own save/load hooks + config).
             if (PropRegisterOn.Value)
-                UniversalInject.TickPropRegister();     // EXPERIMENTAL props: register our MeshCollections once the AnimationManager exists
+            { t = FrameCost.Begin(); UniversalInject.TickPropRegister(); FrameCost.End(FrameCost.PropRegister, t); }   // EXPERIMENTAL props: register our MeshCollections once the AnimationManager exists
             if (FormationOverrideOn.Value)
-                FormationOverride.Tick();               // FORMATION axis: retry inject+repoint if the databases weren't up at AnimationLoad
+            { t = FrameCost.Begin(); FormationOverride.Tick(); FrameCost.End(FrameCost.Formation, t); }   // FORMATION axis: retry inject+repoint if the databases weren't up at AnimationLoad
+            FrameCost.End(FrameCost.UpdateTotal, tAll);
+            FrameCost.EndFrame(Time.realtimeSinceStartup);
         }
 
         private void OnGUI()
@@ -496,6 +506,10 @@ namespace HumankindAssetFramework
             GUILayout.Space(4);
             GUILayout.Label("GPU mesh buffer (live) — Shift+F8 also logs it:");
             foreach (var l in UniversalInject.MeshBudgetLines()) GUILayout.Label(l);
+            GUILayout.Space(6);
+            GUILayout.Label("HAF per-frame cost (5 s window; logged every minute as [FrameCost]):");
+            GUILayout.Label("  " + (FrameCost.Summary.Length > 0 ? FrameCost.Summary : "measuring…"));
+            if (FrameCost.Detail.Length > 0) GUILayout.Label("  top: " + FrameCost.Detail);
             GUILayout.Space(4);
             scroll = GUILayout.BeginScrollView(scroll, GUILayout.Height(320));
             if (Prober.Report.Count == 0)

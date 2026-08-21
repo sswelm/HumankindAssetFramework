@@ -66,7 +66,8 @@ namespace HumankindAssetFramework
             var t = GameBinding.PawnManager;
             return t != null ? AccessTools.Method(t, "AddPawnEntry") : null;
         }
-        static void Postfix(object __instance) => UniversalInject.OnPawnAdded(__instance);
+        static void Postfix(object __instance)   // timed per pawn-add (FrameCost): vanilla pawns (the early-out path) and OUR pawns (the full pose path) in separate buckets
+        { long t0 = FrameCost.Begin(); UniversalInject.OnPawnAdded(__instance); FrameCost.End(UniversalInject.lastPawnMatched ? FrameCost.PoseOurs : FrameCost.PoseHook, t0); }
     }
 
     // Live trace of every Wwise PostEvent — see exactly what the game posts on the AUDIBLE vanilla unit's emitter vs
