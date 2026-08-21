@@ -10,6 +10,47 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE SMOKE TEST JUDGES WHAT A DISTRICT *SHOWS*, NOT JUST THAT IT BOUND — and it counts both render paths
+  (2026-08-21).** Two defects in the harness's own honesty, found by reading the log next to the F8 line. (1) The
+  district "tiles live" count read only the ISOLATE ledger (`DistrictModel.tiles`); the SCOPED path (the reactor,
+  data-authored selector) keeps its tiles in `ScopedState.refreshPlbcs`, so the smoke printed *"districts authored
+  but 0 tiles live — district path UNTESTED"* in the same session the log said `bound 1 building element(s) across
+  1 tile(s)` — the vacuous-coverage note was itself dishonest. The caller now hands the pure `GatherDistrictFacts`
+  whichever ledger owns the district (`TryGetValue`, never `ScopedFor` — the smoke must not *create* state), and the
+  line reads `[1 tile(s) live, 1 scoped]`. (2) A live tile proves the **mesh** bound, nothing about whether OUR
+  albedo landed on it — and both apply paths, after 3 exceptions, **give up by latching `texApplied=true`** so the
+  poll stops, which makes `texApplied` alone read as success on a district rendering untextured. New
+  `DistrictTexState` (lifted off either ledger) is judged **`texErrors` first**: gave-up → **FAIL**, named, pointing
+  at the `[DistrictTex]`/`[DistrictTile]` log tag; applied → `1/1 textured`; pending → a NOTE (≥300 polls: "asset not
+  resolved"; fresh: "re-run in a few seconds"); no atlas or no live tile → not judged. Seven tests, including the
+  latch trap (`Applied=true, Errors=3` must FAIL) and the off-screen case (a stale error count on 0 live tiles must
+  not). **Drilled:** reactor on screen, line 84606 `2 district(s) [1 tile(s) live, 1 scoped, 1/1 textured]`, 0
+  errors, 0 give-ups. Suite 383 → 390.
+
+- **TWO DATA RACES ON "THREAD-SAFE" PATHS — the reflection cache and the district reset (2026-08-21).** A critical
+  review asked a question this codebase had never asked of itself: not *"does this touch the Unity API off the main
+  thread?"* (guarded everywhere, correctly) but *"does this touch shared heap off the main thread?"* Two holes, one
+  blind spot. (1) `memberCache`/`fieldCache` in `UniversalInject.Reflection.cs` were plain `Dictionary`s annotated
+  *"Main-thread only"* — yet the sim-thread hooks read through `GetMember` too (`FireProbe.Member` on
+  `ArtilleryStrikeStarted`, `OnBattleStarted`'s contender walk, `FacingPersist.OnSave/OnLoad`), and the members they
+  touch (`StrikerUnit`, `AttackerGroup`, `Contenders`, `StorageContainerInfo.Name`) are touched by **no** main-thread
+  path — so their first use is a guaranteed *insert* racing the per-pawn-per-frame reads. A `Dictionary` resized under
+  a concurrent reader corrupts its bucket chain: `FindEntry` spins forever — a hard freeze, no exception, no log line,
+  invisible to every one of HAF's loud-failure mechanisms. Now `ConcurrentDictionary` + `GetOrAdd` with static
+  factories (same null-caching, lock-free reads, no closure per miss). (2) `RequestSaveLoadRearm` ran
+  `ResetDistrictSessionState` **inline on the `Sandbox.Load` hook's thread**, justified in three separate comments as
+  *"pure reference-nulling (thread-safe)"*. It `Clear()`s ~13 collections the main thread's per-frame polls read and
+  write (`trackedDistricts`, `loadedSelectorByKey`, `scopedStates`, the wonder-template caches, every district's
+  tiles/leaves/boundSlots) — one corruption window per save-load. It could not simply move to `Update`: the reset must
+  beat the district presentation hooks during the rebuild or they bind onto corpse leaves (the Oracle incident). So
+  `Sandbox.Load` now only **flags** it (`volatile districtResetPending`) and `ConsumePendingDistrictReset` runs it on
+  the main thread from the top of `ConsumePendingReloadRearm` **and the entry of every district Harmony handler** —
+  the first district to build in the new world performs the reset itself, before binding. Idempotent; one volatile
+  read per repeat. **Drilled:** two sessions, the reset logged before every district hook line both times, the
+  reactor bound across 1 tile, artillery fire + the off-thread `StorageContainerInfo` lookup exercised, 0 errors. The
+  07-19 adversarial rounds had signed off "cross-thread sample locking" as clean — and it was; the lists were
+  locked. The caches and the reset were never on that list. Rule recorded in [Decisions](docs/Decisions.md).
+
 - **THE STALE `baker/` EDITOR SNAPSHOT IS GONE — the last cross-repo copy (2026-08-21).** 13 files, **~7,000
   lines**, mirrored from ENCReload and carried since 08-01 as a "deliberately stale reference snapshot" with a
   warning header instead of a fix. Deleted. Its own README admitted the copy's `ModelDef` was missing fields the

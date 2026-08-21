@@ -43,8 +43,12 @@ rendered pawn: `SkeletonId`, `ObjectSpace` TRS, `Pose0..Pose8` blend slots, the 
 > The re-arm therefore also hangs off the seams that DO fire per session:
 > - **`PawnManager.Load`** — the **universal** seam: fires on *every* session (save-load, in-session reload,
 >   **and a New Game**). This is what closes the new-game gap. (Piggybacks the `Hk_AnimatedBonePoolHeadroom` hook.)
-> - **`Sandbox.Load`** — save-load only; used additionally so the **district** axis gets its reset
->   *synchronously* (it must beat the district presentation hooks — see §5 and the district docs).
+> - **`Sandbox.Load`** — save-load only; used additionally so the **district** axis gets its reset *before the
+>   district presentation hooks bind* (see §5 and the district docs). Since 2026-08-21 this hook only **flags** the
+>   reset (`districtResetPending`): the hook may be off the main thread and the reset `Clear()`s collections the
+>   per-frame polls read, so `ConsumePendingDistrictReset` performs it on the main thread — at the entry of every
+>   district Harmony handler (the first district to build in the new world resets before binding) and on the
+>   `Update` tick. Ordering preserved, cross-thread mutation gone.
 >
 > All triggers just set a flag (`RequestReloadRearm`; the hooks may run off the main thread) that is consumed on
 > the next main-thread `Update` (`ConsumePendingReloadRearm → RearmModelRegistration`), which unlatches
@@ -199,7 +203,7 @@ Per bone, per pose slot (`ApplyPose` → `GetPoseTRS`):
 - **Per-session re-arm** (2026-08-16): `AnimationLoad` fires only ONCE per process (even across a main-menu
   round trip), so a second game session doesn't re-arm through it. Registration is therefore re-armed on
   `PawnManager.Load` (the universal per-session seam — save-load, reload, *and* New Game) and additionally on
-  `Sandbox.Load` (so the district axis resets synchronously) — see §2. Skipping this left our skeletons bound to
+  `Sandbox.Load` (so the district axis resets before its hooks bind; main-thread-consumed since 2026-08-21) — see §2. Skipping this left our skeletons bound to
   the first session's `AnimationManager`: an animated unit in both saves (the organ gun) **tore** on the second
   save-load, and a New Game after a load repointed units onto stale registration. The re-arm reset also re-runs
   the whole model-axis session cleanup (audio sources, deploy/state maps, textures), so other second-session

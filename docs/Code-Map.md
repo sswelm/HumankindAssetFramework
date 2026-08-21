@@ -35,8 +35,8 @@ carry no access or lifetime meaning. To find a method, pick the concern:
 | `UniversalInject.Combat.cs` | Combat + post-load: `MaybeRespawnPostLoad` (first-instance rotor race), `ProcessFireQueues`, `TryEarlyAttackSound` (the FaceEnemy roar seam), `OnPawnDeath`/`OnBattleStarted`/`ProcessBattleCries`, `ProcessAnimStates`, `ProcessDeployState`, `TickOne`. |
 | `UniversalInject.Audio.cs` | Engine/move audio: `ProcessEngineAudio`, emitter helpers, `PlaySoundTest`, `DumpSoundCatalog`. Also the Game Sound Lab plumbing: `ShouldSilenceEvent`/`EnsureSoundOverrides` (silence vanilla events from `haf_sounds.json`) and `PlayEventByName`/`StopEventAudition` (F8 audition). See `docs/Game-Sound-Lab.md`. |
 | `UniversalInject.Districts.cs` | District-visual repoint, prop/projectile registration, `DumpMeshBudget`, `ParseGuidCsv`. Nested `DistrictModel`. |
-| `UniversalInject.Reflection.cs` | The one member reader/writer the whole plugin funnels through: `GetMember`/`SetMember`/`MakeGuid` + the `(type,name)` member cache. |
-| `UniversalInject.SmokeTest.cs` | The in-game smoke harness: `RunSmokeTest` (gathers live binding/registry/injection counts and logs a single PASS/FAIL line, echoed to the F8 panel), the pure **`SmokeVerdict`** (unit-tested), and the `InjectionErrors` counter the four injection paths bump. See `docs/Testing.md`. |
+| `UniversalInject.Reflection.cs` | The one member reader/writer the whole plugin funnels through: `GetMember`/`SetMember`/`MakeGuid` + the `(type,name)` member cache — a `ConcurrentDictionary`, because the sim-thread hooks read through it too (2026-08-21). |
+| `UniversalInject.SmokeTest.cs` | The in-game smoke harness: `RunSmokeTest` (gathers live binding/registry/injection counts and logs a single PASS/FAIL line, echoed to the F8 panel), the pure **`SmokeVerdict`** (unit-tested), the per-district facts (`GatherDistrictFacts` — both tile ledgers + `DistrictTexState` texture health), and the `InjectionErrors` counter the four injection paths bump. See `docs/Testing.md`. |
 | `UniversalInject.Hooks.cs` | The Harmony patch classes that call into the above: `UniRegisterHook`, `UniRepointHook`, `UniPawnPoseHook`, `Hk_MuzzleRelocate`, `Hk_AudioTrace`, `Hk_DistrictRepoint`, `Hk_AnimatedBonePoolHeadroom`, `Hk_DistrictBufferHeadroom`, `Hk_PropRegister`, `Hk_ProjectileOverride`. |
 
 Other patch files (already separate, not part of `UniversalInject`):
@@ -53,6 +53,12 @@ All reflection member access funnels through **`UniversalInject.GetMember`/`SetM
 finds non-public), which live — with `MakeGuid` and the member cache — in `UniversalInject.Reflection.cs`.
 `FormationOverride.Mem` and `FireProbe.Member` are thin forwarding aliases to `GetMember`. (`FacingPersist` keeps
 its own small field-only cache, `CachedField`, for its self-contained use.)
+
+**The cache is shared across threads.** `GetMember` is called from the sim-thread hooks as well as the main thread
+(`FireProbe.Member` on `ArtilleryStrikeStarted`, `OnBattleStarted`'s contender walk, `FacingPersist.OnSave/OnLoad`),
+and the members those paths touch are touched by nothing on the main thread — so the first use is always an insert.
+The cache is therefore a `ConcurrentDictionary` (2026-08-21; it was a plain `Dictionary` annotated "main-thread
+only", a freeze-class race). Do not replace it with a `Dictionary` + "main thread only" comment again.
 
 ## Conventions
 

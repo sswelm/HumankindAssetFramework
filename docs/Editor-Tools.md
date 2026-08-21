@@ -198,7 +198,9 @@ Press **F8** in a loaded game for HAF's runtime panel. It's trimmed to what a mo
   your game version, so a compatibility break is loud and specific instead of a silent misbehave (from the `GameBinding`
   startup report). **Nothing shown = all bindings resolved OK.**
 - **Smoke Test** — one-click **PASS/FAIL**: are the game bindings resolved, did your registry load models, and did
-  injection run without errors? The fastest *"why isn't my asset showing?"* check.
+  injection run without errors? The fastest *"why isn't my asset showing?"* check. For districts it reports live
+  tiles on **both** render paths (`[1 tile(s) live, 1 scoped]`) and whether your albedo actually landed
+  (`1/1 textured`; a give-up after 3 apply errors is a named FAIL, a not-yet-applied atlas a NOTE to re-run shortly).
 - **GPU mesh buffer (live)** — per-layer vertex/index/mesh fill, so you can see whether your models fit the shared budget
   ([Vertex-Budget.md](Vertex-Budget.md)); **Shift+F8** also logs it.
 - **Dump Atlases** — dump a unit's atlas to paint (the Unit Retexture workflow; [Textures.md](Textures.md)).

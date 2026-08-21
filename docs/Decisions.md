@@ -7,6 +7,22 @@ check before proposing a change to any of them.
 
 ---
 
+## Thread safety is about shared HEAP, not the Unity API (2026-08-21)
+Every off-main-thread path in HAF (the sim-thread combat/battle hooks, `Sandbox.Load`, `FacingPersist` save/load)
+was correctly guarded against touching Unity objects — queues, volatile flags, main-thread drains. Three separate
+comments then declared paths "thread-safe" because they were *"pure managed reads"* or *"pure reference-nulling"*.
+Both were true about Unity and false about the heap: `GetMember` hides a dictionary **insert** behind a read-shaped
+call, and `ResetDistrictSessionState` hides ~13 `Clear()`s behind "nulling". Either, racing the per-frame main-thread
+readers, is a bucket-chain corruption — a freeze with no exception and no log line, the one failure class none of
+HAF's loud-failure machinery can see.
+**Rule:** for any code reachable off the main thread, the question is *"what shared mutable state does this touch —
+including inside the helpers it calls?"*, not *"does it call into Unity?"*. A static collection touched from two
+threads is either a concurrent type, locked on every access, or published-once-and-snapshotted (`entries`). "Main
+thread only" in a comment is a claim to verify by grepping the sim-thread hooks, not a guard.
+**Why it is written down:** the 07-19 adversarial review signed off "cross-thread sample locking" — and it *was*
+clean; the sample lists were locked. The caches and the reset simply weren't on anyone's list, because their call
+sites look like pure functions. The fix was ~20 lines; finding it took a review that asked the other question.
+
 ## Every RenderTexture readback restores `active` in a `finally` — no exceptions (2026-08-21)
 HAF reads pixels back off the GPU in three places (`BuildAdjustedAtlas`, `MakeGrayCopy`, `ToReadablePng`): take a
 temporary RT, `Blit` into it, set `RenderTexture.active`, `ReadPixels`, restore. If a throw escapes between setting
