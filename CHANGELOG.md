@@ -10,6 +10,31 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE BINDING CATALOG IS CLOSED — 63 → 91 game types, and the headless checker learns to read its own derived
+  entries (2026-08-21).** The review measured the reflection-drift net at ~76 of 88 bound member names and called it
+  the cheapest robustness gain left. By receiver it was worse: ~20 game types HAF reaches *structurally* —
+  `FragmentEntry`, `SkinnedMeshInfo`, `FxMeshContent`, the district level-build channel chain,
+  `PresentationUnitDefinition` and the formation dummy structs, `ArmyInfo`, the Sandbox→empire→science era chain —
+  had **no accessor at all**, so a rename in any of them broke a feature with nothing in `haf_bindings_report.txt`.
+  A6 adds 28 accessors (all but three **derived** along the exact path the code walks — the A5 rule, no name
+  guesses), 28 Deps, and members on 14 existing ones: every Harmony hook *target* (`InitializeCommon`,
+  `StartPairMeleeAttack`, `TriggerDeath`, `StartEvent`, `DoStart`, `InstantiatePawn/s`), the battle hold-fire reads,
+  the formation builder's fields, the skeleton/fragment/vertex-buffer surface the scaled-clone and hand-prop paths
+  rewrite, the scoped-district internals, the Resize Lab's era anchor, and — found last, by a receiver-aware sweep —
+  `PawnDefinitionId` off the addon (the descriptor seed that arms the wrong-skeleton net, six sites) and the
+  sub-pawn's cached `pawnEntry` (the ghost-rotor source fix). Now **91 types, ~250 members, every non-diagnostic
+  by-name site**; what stays outside is listed in the catalog itself (the `DistrictDebug`-gated RepoDump dumps,
+  Prober's database lookup, two reads that live on runtime subclasses the declared type can't see).
+  **The finding on the way in:** `tools/bindcheck` — the headless "validates the ENTIRE catalog" tool from 08-16 —
+  had never understood `CachedDerived`. It fell back to a bare-name lookup, which happened to work for 5 of the 12
+  A5 struct types and reported the other 7 as `[MISSING TYPE]` on a clean build; nobody had run it since the struct
+  batch landed. It now evaluates `ElementType` / `FieldOrPropType` / `MethodParamType` chains over the metadata-only
+  types, and it earned its keep immediately: it caught **five mis-attributions of mine** before any launch —
+  `importAngles` on `FxEvolverMaterial` (it's on `FxMesh`), `allMeshNames` (exists on no assembly — a null-tolerant
+  dead read), and three members that live on **runtime subclasses** the declared field type can't see (`WriteContent`,
+  `AddNullAtlasInfo`, the descriptor's `materialDataHasChanged` — re-homed on the concrete
+  `FxEvolverDescriptorLevelBuildElement`). Headless verdict: `91/91 types | 0 member(s) missing`. Suite 390/390.
+
 - **THE SMOKE TEST JUDGES WHAT A DISTRICT *SHOWS*, NOT JUST THAT IT BOUND — and it counts both render paths
   (2026-08-21).** Two defects in the harness's own honesty, found by reading the log next to the F8 line. (1) The
   district "tiles live" count read only the ISOLATE ledger (`DistrictModel.tiles`); the SCOPED path (the reactor,

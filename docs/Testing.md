@@ -64,8 +64,13 @@ The `bindcheck` tool (net8, `System.Reflection.MetadataLoadContext`) validates *
 against the build's assemblies without launching the game** — it reads `Patches/GameBinding.cs` directly (always in sync,
 no manifest to stale) and inspects the game DLLs reflection-only (Unity's native deps don't matter). It prints
 `bindcheck: N/N types | M member(s) missing` and exits non-zero on any drift, so a game patch's binding breakage is named
-**headlessly** (CI-able on a version bump) instead of found by launching and reading `haf_bindings_report.txt`. Verified
-both ways: `50/50` clean on the pinned build, and it correctly flags an injected fake binding. It's the headless twin of
+**headlessly** (CI-able on a version bump) instead of found by launching and reading `haf_bindings_report.txt`. It
+evaluates the **derived** accessors too (`CachedDerived(... ElementType / FieldOrPropType / MethodParamType ...)`) along
+the same chain the runtime walks — since 2026-08-21; before that it fell back to a bare-name lookup for them and
+false-positived 7 of 12 on a clean build. Verified both ways: `91/91` clean on the pinned build, and it correctly flags
+an injected fake binding — and, closing the catalog on 08-21, it caught five mis-attributions of mine before any launch
+(`importAngles` on the wrong type, a member that exists on no assembly, three that live on runtime subclasses the
+declared field type can't see). It's the headless twin of
 the in-game report — same catalog, no game needed.
 
 ## What it covers

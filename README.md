@@ -132,8 +132,9 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
   and the audio/texture authoring aids). The Smoke Test runs deep per-entry checks *plus* a live **seam write-back
   self-test**, names uninjected entries with a diagnosis, flags untested coverage instead of staying silently green,
   and writes its verdict to `haf_smoke_report.txt`. Every launch also writes a machine-readable `haf_bindings_report.txt` — a
-  diffable list of the ~160 reflection bindings — 59 game types including the hot-path structs, derived
-  structurally so there are no name-guess false positives — that names any game-update drift in one line, headless-checkable.
+  diffable list of the reflection bindings — **91 game types, ~250 members**, every non-diagnostic by-name site the
+  runtime binds, the structs derived along the path the code walks so there are no name-guess false positives — that
+  names any game-update drift in one line, headless-checkable (`tools/check-bindings.sh`, no game launch).
 - **Backup & Restore** — a guarded, additive snapshot of everything ENCReload's git doesn't track.
 - **Pack validator, four surfaces** — one rule set (~30 content checks: bones, files, pawns, formats, ranges) runs
   pre-bake, on the **Validate pack** button, in the mod build (`-strict` fails CI), and as a boot-time pre-flight that
