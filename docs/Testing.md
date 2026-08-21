@@ -1,9 +1,16 @@
 # Testing
 
-The plugin has a focused unit-test suite (**383 tests as of 2026-08-20**) over the **pure logic that can run outside the
-game** — the registry/parse/era layer, the reflection **compatibility report** (`GameBinding`), and the **in-game smoke
-harness's verdict** (`SmokeVerdict`). It is a deliberate, bounded suite, not a coverage target: it guards the functions
-where bugs have actually hidden, and stops there on purpose.
+HAF is verified in **three tiers**, each a machine, each at the level where its bug class actually lives:
+
+| Tier | Runs | Guards |
+|---|---|---|
+| **Unit tests** — **447 as of 2026-08-21** | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers** |
+| **Headless game checks** | `tools/check-bindings.sh`, on demand / after a game update | every catalogued game binding against the real DLLs (`bindcheck`), incl. the seams the runtime hooks; `typeprobe --find` locates a seam before a hook is written |
+| **In-game smoke test** — `[load]` automatic, `[full]` on the F8 button | every load (a few ms, once), and on request | the injecting half, read from the **engine**: bindings, registry, roles, assets, sounds, files, GPU budget, district tiles and textures, patched seams — and, on the button, every live pawn on *our* skeleton, pose-hook liveness, the sub-pawn walk vs a scene scan, the write-back self-test |
+
+The unit suite is a deliberate, bounded suite, not a coverage target: it guards the functions where bugs have actually
+hidden, and stops there on purpose. What it cannot reach — the ~18k lines that reflect into a running game — is not
+left to eyes: the smoke test reads the engine's own state, and its load tier needs no one to press anything.
 
 ```
 dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release
@@ -16,7 +23,7 @@ The fast guards used to be separate scripts you had to remember to run. They're 
 
 | Repo | the `check.sh` gate runs | ~time |
 |---|---|---|
-| **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` (383) · **docs guard** · registry schema parity | seconds |
+| **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` (447) · **docs guard** · registry schema parity | seconds |
 | **ENCReload** (editor) | Roslyn editor compile-check · registry schema parity | ~30 s |
 
 ### The docs guard (`tools/check-docs.sh`)
@@ -196,26 +203,47 @@ substitutes for the other, and a mutation drill is how you find out which one yo
 This boundary is intentional. Adding tests past it would be green ceremony that guards nothing real.
 
 - **The runtime/integration seam** — inject, pose, muzzle, audio, districts, formations. These reflect into Amplitude
-  types that only exist inside the running game process; they can't be loaded in a test host. Their correctness comes
-  from **fail-soft resilience** (per-entry try/catch, null-guards), the **rebuild → relaunch → verify-log** discipline,
-  the editor-side bake smoke/feature tests, and the **in-game smoke harness** — an F8-triggered runtime integration
-  check (`RunSmokeTest`) that asserts the plugin came up and injected cleanly and logs one PASS/FAIL line. That's the
-  *right* instrument for this half: a human loads a game, the harness does the checking. Its **verdict logic is pure
-  and unit-tested** (`SmokeVerdict`, above); only the genuinely untestable part — gathering the live numbers via
-  reflection — runs in-game.
+  types that only exist inside the running game process; they can't be loaded in a test host, and a fake object model
+  under the reflection accessors was considered and declined (reflection is not funnelled — ~1,450 sites — and a fake
+  encodes the very assumptions about the game that drills keep disproving; see Decisions.md). Their correctness comes
+  from **fail-soft resilience** (per-entry try/catch, null-guards), the editor-side bake smoke/feature tests, and the
+  **in-game smoke test**, which is the *right* instrument for this half because it reads the engine, not a model of it:
+  - the **load tier** runs by itself once per session, on the first frame after the loading screen hides
+    (`Amplitude.Mercury.LoadingScreen.VisibilityChanged`, `SmokeOnLoad = true`) — bindings, registry, clip roles,
+    assets, sounds, files on disk, GPU budget, district tiles + textures, patched seams. A few ms, at a moment the
+    player is already waiting; never per frame. Tagged `[load]`.
+  - the **full tier** is the F8 button — load + the **live-pawn checks**: every live pawn slot carrying one of our
+    descriptor ids sits on *our* skeleton (a unit rendering its donor is a named FAIL), the pose hook touched every
+    entry with live pawns within 5 s, the sub-pawn walk re-audited against a full scene scan, the ObjectSpace
+    write-back self-test. Needs pawns on the map and a few hook frames, hence not at load. Tagged `[full]`.
+  - both write the log, the F8 panel and `haf_smoke_report.txt`; the **verdict and every classifier are pure and
+    unit-tested** (`SmokeVerdict`, `GatherEntryFacts`, `GatherLivePawnFacts`, `UninjectedReason`, …) — only the
+    gathering of live numbers via reflection runs in-game. Each check was earned by a shipped bug class, and each
+    first in-game run has so far found a gate the check needed (retexture-only entries have no skeleton; the
+    skeleton check once fired on one, and so did the live-pawn check on its first run).
+  - the **rebuild → relaunch → read the log** drill is still the final word for *visual* truth (does the helicopter
+    follow the terrain) — the smoke proves the engine state, not what it looks like.
 - **`ParseGuidCsv`, `MakeGuid`, `EmitterName`** — build/consume Amplitude types via reflection, absent in the test host.
 - **`FindEntryForUnitDefinition`** — delegates to the already-tested `LongestMatch` + `CoreDesc`; testing it would mean
   exposing the `entries` global as a test seam for ~zero new coverage.
+- **Non-collection session statics** (`bool`/`int` latches like `registered`, `cachedEra`) — outside the
+  `SessionStateTests` rule, which covers every static *collection*; they stay on the hand-list in
+  `RearmModelRegistration`, and the registry cannot prove reset *order* either (Architecture.md §3).
 - **Trivia** (`StrList`, `SanitizeFile`, one-line accessors) — too trivial to regress meaningfully.
 
 ## Adding a test
 
 1. If the target is `private`, bump it to `internal` (never `public` just for tests) — `[InternalsVisibleTo]` handles
    the rest.
-2. Only test **pure** logic (string/JSON/data in → data out). If it reflects into Amplitude/Unity, it belongs to the
-   Phase-5 in-game seam, not here.
-3. Set `Plugin.Log` in the fixture if the code under test logs.
-4. Prefer tests that pin a **real invariant or a historic bug**, not line coverage.
+2. Only test **pure** logic (string/JSON/data in → data out). If it reflects into Amplitude/Unity, it belongs in the
+   in-game smoke test, not here — and the pattern there is the same: extract the *decision* into a pure function that
+   takes plain values (`GatherLivePawnFacts` takes `(descId, skeletonId)` slots, not pawns), test that, and keep the
+   reflection side to a thin collector.
+3. A new **smoke check** goes in the tier it can be true in: load tier if it needs only the loaded world, full tier if
+   it needs pawns on the map. Gate it on what the entry *authored* (a retexture-only entry has no skeleton) and give
+   it a unit test against `SmokeVerdict` before the first in-game run.
+4. Set `Plugin.Log` in the fixture if the code under test logs.
+5. Prefer tests that pin a **real invariant or a historic bug**, not line coverage.
 
 See also: `docs/Building.md` (build/run), `docs/Code-Map.md` (where the tested functions live),
 `docs/Framework-Review.md` (the dated changelog of what each test batch added).
