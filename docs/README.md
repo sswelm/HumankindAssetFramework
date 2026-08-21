@@ -106,10 +106,6 @@ Each axis adds custom content in a different place, from the same JSON registry.
 
 Older design notes and investigations live in [`docs/notes/`](notes/) — frozen, not maintained, not instructions; each opens by
 naming the page that replaced it. They are kept for the reasoning, not for reading first.
-| [Ecosystem-Survey](notes/Ecosystem-Survey.md) | 2026-07-12 | what other Humankind plugins solved (2021–2024 game versions — re-verify every signature) | — |
-| [Headless-CLI-Design](notes/Headless-CLI-Design.md) | 2026-08-08 | the original scoping; parts superseded by the build | [Headless-CLI](Headless-CLI.md) |
-| [Pack-Validator-Design](notes/Pack-Validator-Design.md) | 2026-08-18 | the validation rule catalogue + the fault-injection drill | [Editor-Tools](Editor-Tools.md), [Headless-CLI](Headless-CLI.md) |
-| [Preview-Texture-Postmortem](notes/Preview-Texture-Postmortem.md) | 2026-08-19 | why a defect survived six weeks of fixes | [Textures](Textures.md) |
 
 ---
 
