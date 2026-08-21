@@ -153,6 +153,14 @@ is not to remove reflection but to make drift **loud and localised** ([Decisions
 
 ## 6. Districts — two render paths, two ledgers
 
+The district axis is **its own class, `DistrictInject`** (`DistrictInject.cs` + `DistrictInject.Scoped.cs`, since
+2026-08-21). It was a partial of `UniversalInject`, which meant every one of its ~40 statics was writable from any other
+partial — the shape that let the session reset be called from a hook in another file. Now the rest of the plugin sees
+only its `internal` surface (the hook entry points, `ResetDistrictSessionState`, `distModels`/`IsScopedDistrict`/
+`scopedStates` for the smoke test), and `DistrictInject` reaches back only through `using static UniversalInject` for
+the reflection and asset-loading helpers. **Keep it that way**: a new district feature goes in `DistrictInject`; a
+new shared helper goes in `UniversalInject` and is imported, never duplicated.
+
 A custom district renders through one of two paths, and they keep **separate state**:
 
 | Path | Selected by | Live-tile ledger | Texture ledger |

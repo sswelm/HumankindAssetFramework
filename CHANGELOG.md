@@ -10,6 +10,27 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE DISTRICT AXIS IS ITS OWN CLASS — `DistrictInject`, out of the `UniversalInject` god class (2026-08-21).**
+  The review's architecture finding, applied where it pays: `UniversalInject` was one static partial class across 14
+  files and ~12,100 lines in which every partial could read and write every other partial's statics — exactly how the
+  district session reset came to `Clear()` thirteen collections from a `Sandbox.Load` hook in another file. The
+  largest partial (`Districts.cs`, 2,220 lines) and its scoped-visual half (`RepoDump.cs`, 1,647) are now
+  **`DistrictInject.cs` + `DistrictInject.Scoped.cs`**, a separate class with an `internal` surface of ~57 members
+  (hook entry points, the reset, the smoke test's three reads) and ~300 statics nothing outside can touch. Measured
+  before cutting: the district code's only dependencies on the rest of the plugin were the reflection seam
+  (`GetMember`/`SetMember`/`BF`), asset loading (`LoadAmpliAsset`/`ParseGuid4`) and `AdjustSkin` — five members made
+  `internal` and imported via `using static UniversalInject`; nothing else crossed. What was in `Districts.cs` but
+  *isn't* district — pawn props, projectiles, the GPU mesh budget, the atlas dump (355 lines) — stays in
+  `UniversalInject` as `UniversalInject.PropsBudget.cs`. Compiled clean on the first pass, 390/390, no behaviour
+  change by construction. Also removed on the way: `RearmModelRegistration` called `ResetDistrictSessionState`
+  **twice** per re-arm (the log's paired reset lines) — once now, at the canonical call. The standing decision against
+  a big-bang `ModelEntry` split ([Decisions](docs/Decisions.md)) stands; this is the bounded cut with a proven bug
+  behind it. `UniversalInject` is still ~8,500 lines — smaller, not small.
+  **Drilled:** Oracle save loaded first, then the reactor save in the same process — both scoped districts bound and
+  textured in their sessions (`DistrictMain … bound 1 building element(s) across 1 tile(s)` for each), the reset
+  logged as a **single** line per seam where the morning log showed pairs, always before the first district hook,
+  `freed 1 runtime clone(s) from the previous session`, 0 errors, smoke `[1 tile(s) live, 1 scoped, 1/1 textured]`.
+
 - **`docs/Architecture.md` — the invariants, in one place (2026-08-21).** The critical review scored
   *maintainability by anyone else* lowest of every axis, and the reason was specific: the rules the runtime depends on
   — which state is main-thread-only, the publish-once/snapshot discipline on `entries`, the three per-session re-arm
