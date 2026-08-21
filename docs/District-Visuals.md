@@ -110,10 +110,15 @@ FxMesh verts + bounds) and each mesh-manager layer's fill (`verts used / size`).
 | `DistrictName` | LEGACY fallback — target `ConstructibleDefinitionName`; used only when `haf_districts.json` has no entries |
 | `DistrictFxMeshGuid` | LEGACY fallback — the baked FxMesh GUID `a,b,c,d` for `DistrictName` |
 | `DistrictIsolate` | LEGACY fallback — scope the legacy entry to its own tiles (registry entries carry their own `isolate`) |
-| `DistrictAffinityOverride` / `DistrictEvolverGuid` | earlier proof/experiment modes (superseded) |
+
+Moved to the **`[Debug]`** section on 2026-08-21 (investigation dials — off in normal play): `DistrictDebug` (the
+repository dumps, ~40 ms/frame for the first seconds of a load), and the superseded proof modes
+`DistrictAffinityOverride` / `DistrictEvolverGuid`. `[Debug]` also holds `DumpPawnRig` and `AssetNameFilter`. A key that
+moves sections comes back at its **default** in an existing `.cfg` (BepInEx orphans the old entry) — re-set it under
+`[Debug]` if you need it.
 
 **Gotcha:** a new config key only appears in the `.cfg` after the new build runs once; adding it by hand must go
-**inside** the `[District]` section. The FxMesh ships only after a **mod rebuild/export**.
+**inside** the right section. The FxMesh ships only after a **mod rebuild/export**.
 
 ---
 

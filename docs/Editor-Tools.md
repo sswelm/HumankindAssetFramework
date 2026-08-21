@@ -206,7 +206,7 @@ Press **F8** in a loaded game for HAF's runtime panel. It's trimmed to what a mo
 - **HAF per-frame cost** — what the plugin itself costs each frame, averaged over 5 s: total µs/frame and percent of the
   frame, the pose hook split into vanilla pawns and yours (ns per pawn-add), and the six most expensive internal
   buckets. The same line is written to the log once a minute as `[FrameCost]`. If a number here grows after you add
-  units or districts, the bucket names where. (`DistrictDebug = true` in the config adds ~40 ms/frame for the first
+  units or districts, the bucket names where. (`DistrictDebug = true` in the config's `[Debug]` section adds ~40 ms/frame for the first
   seconds of every load — a diagnostic, keep it off for play.)
 - **Dump Atlases** — dump a unit's atlas to paint (the Unit Retexture workflow; [Textures.md](Textures.md)).
 - **Game Sound Lab** — **Audio Trace** (live Wwise event trace), **Dump Sound Catalog** (list every event name), and

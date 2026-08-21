@@ -26,7 +26,7 @@ namespace HumankindAssetFramework
         // LOG-ONCE, systematized: the codebase had grown 16 hand-rolled `static bool xLogged` guards, and the
         // pattern's failure mode is forgetting one (the corrupt-source error spammed dozens of Console lines the
         // day it shipped). One keyed gate replaces them: Once(key) is true exactly once per process per key.
-        static readonly System.Collections.Generic.HashSet<string> onceKeys = new System.Collections.Generic.HashSet<string>();
+        [ProcessLived("once-per-process log keys")] static readonly System.Collections.Generic.HashSet<string> onceKeys = new System.Collections.Generic.HashSet<string>();
         internal static bool Once(string key) { lock (onceKeys) return onceKeys.Add(key); }
         internal static void DiagOnce(string key, string msg) { if (Once(key)) Diag(msg); }
         internal static void LogOnceInfo(string key, string msg) { if (Once(key)) Log?.LogInfo(msg); }
@@ -39,11 +39,9 @@ namespace HumankindAssetFramework
         // strings). Console lines migrate opportunistically as they're touched.
         internal static string Inv(System.FormattableString f) => System.FormattableString.Invariant(f);
 
-        internal static ConfigEntry<string> TargetMod;       // which mod's assets to access
-        internal static ConfigEntry<string> AssetNameFilter; // substring that identifies that mod's assets
+        internal static ConfigEntry<string> AssetNameFilter; // [Debug] substring filter for the ENCProof scan dumps (Prober.RunScan)
         internal static ConfigEntry<KeyCode> ToggleKey;      // open/close the feedback window (Shift+ToggleKey = dump GPU mesh-buffer usage)
         internal static ConfigEntry<bool>   UniversalInjectOn; // registry-driven universal injector (Model Factory)
-        internal static ConfigEntry<bool>   StateProbePose0Move; // TEMP diagnostic: play a state-driven model's MOVE clip on Pose0, weight 1, always (isolates move-clip vs Pose1-slot failures)
         internal static ConfigEntry<string> DumpPawnRig;      // CATERPILLAR investigation: pawn-name substring (e.g. "MediumTanks"); when that VANILLA addon loads, dump its skeleton bone tables + clip fields once (how do vanilla tank treads roll?). "" = off.
         internal static ConfigEntry<int>    RespawnDelayFrames; // frames to wait after a borrowed-rotor unit renders before re-spawning it (first-instance rotor fix)
         internal static ConfigEntry<bool>   PersistUnitFacing;  // persist each army's on-screen facing to a HAF side-file on save and restore it on load (the standard save has no facing field)
@@ -101,10 +99,6 @@ namespace HumankindAssetFramework
             Log = Logger;
 
             // --- the config file (auto-written to BepInEx/config/community.humankind.haf.cfg) ---
-            TargetMod       = Config.Bind("General", "TargetMod", "ENCReload",
-                                  "Name of the mod whose assets this plugin should access.");
-            AssetNameFilter = Config.Bind("General", "AssetNameFilter", "Zeppelin",
-                                  "Substring used to find that mod's assets in the loaded databases (proof of access).");
             ToggleKey       = Config.Bind("General", "ToggleWindowKey", KeyCode.F8,
                                   "Key to toggle the in-game feedback window. Hold SHIFT + this key to instead dump the live " +
                                   "GPU mesh-content buffer usage (verts/indices/meshes per layer vs the 100k/250k/256 ceiling) to the log.");
@@ -115,11 +109,13 @@ namespace HumankindAssetFramework
             UniversalInjectOn = Config.Bind("Factory", "UniversalInject", true,
                                   "Registry-driven universal model injector (the Model Factory). Reads the model registry JSON " +
                                   "from this config folder and repoints each listed pawn definition onto its baked skeleton.");
-            StateProbePose0Move = Config.Bind("Factory", "StateProbePose0Move", false,
-                                  "TEMP diagnostic for state-driven models: play the MOVEMENT clip on Pose0, weight 1, ALWAYS " +
-                                  "(ignores the state machine). If the model runs in place standing still, the move clip is fine " +
-                                  "and the Pose1 slot is the problem; if it's invisible, the move clip's GPU bake is bad.");
-            DumpPawnRig = Config.Bind("Factory", "DumpPawnRig", "",
+            // --- [Debug] (2026-08-21): investigation dials + superseded proof modes live in their own section, so the play-facing
+            //     sections stay small. Moving a key between sections resets it to its default for existing .cfg files (BepInEx
+            //     orphans the old entry) — deliberate: these should be OFF in normal play. Dead keys (TargetMod,
+            //     StateProbePose0Move — bound, never read) were deleted outright. ---
+            AssetNameFilter = Config.Bind("Debug", "AssetNameFilter", "Zeppelin",
+                                  "Substring that picks which PresentationUnitDefinitions the ENCProof scan (F8 window) dumps in detail.");
+            DumpPawnRig = Config.Bind("Debug", "DumpPawnRig", "",
                                   "CATERPILLAR investigation: pawn-name substring (e.g. MediumTanks). When a matching VANILLA " +
                                   "pawn addon loads, dump its skeleton bone tables, mesh info and clip-related fields to the log " +
                                   "ONCE — the data that decides how vanilla tank treads roll (track bones vs shader scroll). Empty = off.");
@@ -141,10 +137,10 @@ namespace HumankindAssetFramework
                                   "Scoped to the DistrictName below only — other districts sharing the same visual affinity are unaffected.");
             DistrictName        = Config.Bind("District", "DistrictName", "Villages_StoneQuarry",
                                   "The ConstructibleDefinitionName of the district whose on-map building to replace (e.g. ENC's Villages_StoneQuarry).");
-            DistrictAffinity    = Config.Bind("District", "DistrictAffinityOverride", "",
+            DistrictAffinity    = Config.Bind("Debug", "DistrictAffinityOverride", "",
                                   "ZERO-BAKE proof mode: set to another vanilla visual-affinity name (e.g. DistrictVisualAffinity_Base_Industry) to make the " +
                                   "district render that existing building instead — no custom asset needed. Proves the hook + scoping in-game. Blank = off.");
-            DistrictEvolverGuid = Config.Bind("District", "DistrictEvolverGuid", "",
+            DistrictEvolverGuid = Config.Bind("Debug", "DistrictEvolverGuid", "",
                                   "CUSTOM-MODEL mode: an FxEvolverMaterial asset GUID (our baked quarry material) as four ints \"a,b,c,d\". " +
                                   "The hook calls the game's public SetChannel(layer, guid) so the district draws our custom static mesh. Blank = off. " +
                                   "Takes precedence over DistrictAffinityOverride when both are set.");
@@ -157,7 +153,7 @@ namespace HumankindAssetFramework
                                   "SCOPE the mesh-swap to ONLY the DistrictName tile(s), instead of mutating the shared building leaves globally. " +
                                   "Builds ONE private (Instantiated) leaf material pointing at our FxMesh and points just this district's own " +
                                   "channel + particle at it — so other cities' buildings are untouched. Needs DistrictFxMeshGuid set. EXPERIMENTAL.");
-            DistrictDebug       = Config.Bind("District", "DistrictDebug", false,
+            DistrictDebug       = Config.Bind("Debug", "DistrictDebug", false,
                                   "Verbose district-investigation diagnostics: log every district name seen ([District] saw), each district's " +
                                   "resolved material GUID ([DistrictMat]) and the target's sub-material table ([DistrictSub]). These reflect on " +
                                   "every district update — leave OFF in normal play; turn on only when mapping a new district's material chain.");

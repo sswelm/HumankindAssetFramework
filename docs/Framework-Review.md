@@ -29,6 +29,8 @@ Severity key: 🔴 fix soon (silent data loss / silent no-inject) · 🟡 worth 
 
 | Date | Fix |
 |---|---|
+| 08-21 | **Session-state registry**: every static collection declares `[SessionScoped]` / `[ProcessLived]`, `SessionStateTests` fails the build on a bare one; found 2 never-cleared descId maps + 6 Time.time/state lists in triage (external structural critique) |
+| 08-21 | Config `[Debug]` section: 5 investigation dials moved out of the play-facing sections, 2 dead keys deleted |
 | 08-21 | Pack tuning tables (`unitScales`/`eraGrid`/`formationThresholds`) parsed from the RESOLVED packs in mod order via pure `PackTuning.Parse`, cross-pack interactions named in the load report — they had bypassed pack resolution entirely (external-agent finding, verified) |
 | 07-05 | Registry atomic write (`.tmp` + `File.Replace`), corrupt-file guard (`.corrupt.json`, Save refuses), versioned project backup + auto-restore |
 | 07-05 | `RunBounded` 3-min cap on all five shell-outs (but see **E4** below — one unbounded path remains) |

@@ -45,8 +45,9 @@ half as often as they would at 60 — a poll that reads as cheap here may be twi
 | `AnimStates` | 204 µs | ~40 µs | a per-unit name resolve + `ToList()` for every army every 3 frames |
 | `SelectorTile` | ~210 µs | ~210 µs | diffuse per-district overhead in the scoped poll — **left as is** (0.6%) |
 
-Not HAF's steady cost, but visible in the meter: **`DistrictDebug = true`** in the config runs the repository dump at
-load — ~40 ms/frame for the first 5 s of every session. It is a diagnostic; keep it `false` for play.
+Not HAF's steady cost, but visible in the meter: **`DistrictDebug = true`** (in the `[Debug]` config section since
+2026-08-21) runs the repository dump at load — ~40 ms/frame for the first 5 s of every session. It is a diagnostic;
+keep it `false` for play.
 
 ## 3. The rules
 

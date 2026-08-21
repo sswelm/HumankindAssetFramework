@@ -10,6 +10,22 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **SESSION-SCOPED STATE IS DECLARED, NOT REMEMBERED (2026-08-21).** An external structural critique put it exactly:
+  findings like "every descId map gets cleared on re-arm" are rules that exist only in a human's head and a comment,
+  across 16 partial files sharing ~150 static collections. Now `Patches/SessionState.cs` gives each one a declared
+  lifetime — `[SessionScoped]` (the registry clears it on `Reset(Model|District)`), `[SessionScoped(Manual = "site")]`,
+  or `[ProcessLived("why")]` — and `Tests/SessionStateTests.cs` reflects over the assembly and fails on any bare static
+  collection. `RearmModelRegistration` / `ResetDistrictSessionState` call the registry instead of ~30 hand `.Clear()`s.
+  The first run of the rule found **9 fields the grep-based sweep had missed** and, in triage, **two real leaks**: the
+  descId-keyed `sizeFormApplied` / `sizeFormUnitName` had never been cleared (a new session reuses descriptor ids, so
+  the formation-by-size swap could silently skip), plus the turn / hug / aim state lists and `freezeLogSkels`,
+  `sweepLast`, `pawnLiveLast` (Time.time-stamped; the clock resets per session). Triage: 125 attributed fields.
+- **CONFIG `[Debug]` SECTION (2026-08-21).** The `.cfg` a stranger opens had 43 keys on one surface, several labelled
+  TEMP / CATERPILLAR investigation / superseded. `DumpPawnRig`, `DistrictDebug`, `DistrictAffinityOverride`,
+  `DistrictEvolverGuid` and `AssetNameFilter` moved to a `[Debug]` section (a moved key returns at its default in an
+  existing `.cfg` — deliberate, these should be off in play); `TargetMod` and `StateProbePose0Move` — bound, never
+  read — deleted. `WonderNativeRows` stayed in `[District]`: "SPIKE" in its label, but it is the live wonder cell fill.
+
 - **PACK TUNING TABLES NOW FOLLOW PACK RESOLUTION (2026-08-21).** An external review agent found — and a read of
   `LoadRegistry` confirmed — that `unitScales`, `eraGrid` and `formationThresholds` were regex-scraped in three loops
   over the raw *discovery* file list, while the models merged over the *resolved* pack list. So a pack that resolution
