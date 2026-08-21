@@ -102,16 +102,10 @@ Each axis adds custom content in a different place, from the same JSON registry.
 
 ---
 
-## 📁 Archived notes — `docs/notes/`
+## 📁 Archived notes
 
-**Frozen. Not maintained. Not instructions.** Kept because the reasoning is worth more than the conclusion — each says
-what replaced it.
-
-| Note | Frozen | Read it for | Current page |
-|---|---|---|---|
-| [Audit-2026-07-31](notes/Audit-2026-07-31.md) | 2026-08-01 | the "silently disarmed" bug-class taxonomy | [Review-Backlog](Review-Backlog.md) |
-| [District-Dedicated-Visual-Feasibility](notes/District-Dedicated-Visual-Feasibility.md) | 2026-08-13 | how the scoped-visual hybrid was found | [District-Dedicated-Visual](District-Dedicated-Visual.md) |
-| [District-Footprint-Investigation](notes/District-Footprint-Investigation.md) | 2026-08-16 | the strategic-footprint mechanism, mapped | [District-Dedicated-Visual](District-Dedicated-Visual.md) |
+Older design notes and investigations live in [`docs/notes/`](notes/) — frozen, not maintained, not instructions; each opens by
+naming the page that replaced it. They are kept for the reasoning, not for reading first.
 | [Ecosystem-Survey](notes/Ecosystem-Survey.md) | 2026-07-12 | what other Humankind plugins solved (2021–2024 game versions — re-verify every signature) | — |
 | [Headless-CLI-Design](notes/Headless-CLI-Design.md) | 2026-08-08 | the original scoping; parts superseded by the build | [Headless-CLI](Headless-CLI.md) |
 | [Pack-Validator-Design](notes/Pack-Validator-Design.md) | 2026-08-18 | the validation rule catalogue + the fault-injection drill | [Editor-Tools](Editor-Tools.md), [Headless-CLI](Headless-CLI.md) |
