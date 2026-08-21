@@ -10,6 +10,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **SMOKE TEST, LOAD TIER — automatic at the end of the loading screen (2026-08-21).** User: "move part of these
+  tests to the end of the loading screen — as long as the game is not loaded yet, I'm fine with performing tests."
+  The seam is `Amplitude.Mercury.LoadingScreen.VisibilityChanged` (a static `Action<bool>` the game's own cursor,
+  windows and analytics managers subscribe to; found with the new `typeprobe --find <substring>` mode, no launch);
+  `false` = the screen just hid. HAF subscribes at Awake (no Harmony patch, catalogued so bindcheck guards it) and runs
+  the **load tier** on the next Update: bindings, registry, roles, assets, sounds, files, GPU budget, district tiles,
+  seams — everything that needs only the loaded world, a few ms once. The **full tier** (the F8 button) adds the
+  live-pawn checks, which need pawns and a few hook frames. Verdicts are tagged `[load]` / `[full]` in the log, the
+  F8 panel and `haf_smoke_report.txt`; `SmokeOnLoad=false` keeps it button-only. Skipped when no registry session
+  is registered (a return to the main menu also hides a loading screen).
+
 - **SMOKE TEST READS THE ENGINE, NOT JUST THE REGISTRY (2026-08-21).** A structural review called the verification
   pyramid inverted — 445 tests over ~3k lines of pure logic, a person's eyes over the ~18k that inject. The proposed
   fix (a fake-object seam under the reflection accessors) was declined: reflection is not funnelled (~1,450 sites

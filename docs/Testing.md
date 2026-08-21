@@ -70,8 +70,9 @@ the same chain the runtime walks — since 2026-08-21; before that it fell back 
 false-positived 7 of 12 on a clean build. Verified both ways: `91/91` clean on the pinned build, and it correctly flags
 an injected fake binding — and, closing the catalog on 08-21, it caught five mis-attributions of mine before any launch
 (`importAngles` on the wrong type, a member that exists on no assembly, three that live on runtime subclasses the
-declared field type can't see). Its sibling **`tools/typeprobe`** (`dotnet typeprobe.dll <Managed> <Type>…`) dumps a
-game type's real field/property layout from the DLLs — it answered "why did `PawnFast` stay on reflection?"
+declared field type can't see). Its sibling **`tools/typeprobe`** (`dotnet typeprobe.dll <Managed> <Type>…`, or `--find <substring>` to list every
+type/method/field/event whose name contains it — how the end-of-loading seam `LoadingScreen.VisibilityChanged` was
+located for the load-tier smoke) dumps a game type's real field/property layout from the DLLs — it answered "why did `PawnFast` stay on reflection?"
 (`HideFactor` is a packed property) and "where do a squadron's pawns live?" (`PresentationAirPatrolController`)
 without a launch. It's the headless twin of
 the in-game report — same catalog, no game needed.

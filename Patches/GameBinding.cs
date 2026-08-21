@@ -76,6 +76,7 @@ namespace HumankindAssetFramework
         internal static Type PresentationSubPawn => Cached("Amplitude.Mercury.Presentation.PresentationSubPawn");
         internal static Type AudioEmitter        => Cached("Amplitude.Wwise.Components.AudioEmitter");
         internal static Type AudioManager        => Cached("Amplitude.Wwise.Audio.AudioManager");
+        internal static Type LoadingScreen       => Cached("Amplitude.Mercury.LoadingScreen");   // static VisibilityChanged(bool): the end-of-loading seam (load-tier smoke)
         internal static Type AkSoundEngine       => Cached("Amplitude.Wwise.Interop.AkSoundEngine", "AkSoundEngine");
         internal static Type AudioEventHandle    => Cached("Amplitude.Wwise.AudioEventHandle", "AudioEventHandle");
         // ---- combat / fight ----
@@ -332,6 +333,7 @@ namespace HumankindAssetFramework
             new Dep(PresentationSubPawn, nameof(PresentationSubPawn), "AudioEmitter", "Transform", "PresentationPawnDescription", "GetBoneTRS", "PresentationPawnDefinition", "pawnEntry"),   // pawnEntry: the cached struct the ghost-rotor source fix repairs
             new Dep(AudioEmitter, nameof(AudioEmitter), "AudioEntityGUID", "PostEvent"),
             new Dep(AudioManager, nameof(AudioManager), "PostEvent"),
+            new Dep(LoadingScreen, nameof(LoadingScreen), "VisibilityChanged"),
             new Dep(AkSoundEngine, nameof(AkSoundEngine), "PostEvent", "StopAll"),
             new Dep(UIInteractivityManager, nameof(UIInteractivityManager), "IsMouseCovered", "SpecificUpdate"),
             // combat / fight

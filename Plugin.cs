@@ -17,6 +17,7 @@ namespace HumankindAssetFramework
 
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool>   VerboseLog;      // gate the chatty per-model/per-pawn bring-up logs; OFF = a quiet load (summaries + warnings/errors only)
+        internal static ConfigEntry<bool>   SmokeOnLoad;     // run the load-tier smoke test once, on the first frame after the loading screen hides
 
         // Gated diagnostic log: per-model/per-pawn bring-up detail that's a useful trace when investigating but noise in a
         // normal run. OFF by default -> quiet. Summaries ("loaded N models"), warnings and errors stay on Log directly.
@@ -102,6 +103,11 @@ namespace HumankindAssetFramework
             ToggleKey       = Config.Bind("General", "ToggleWindowKey", KeyCode.F8,
                                   "Key to toggle the in-game feedback window. Hold SHIFT + this key to instead dump the live " +
                                   "GPU mesh-content buffer usage (verts/indices/meshes per layer vs the 100k/250k/256 ceiling) to the log.");
+            SmokeOnLoad     = Config.Bind("General", "SmokeOnLoad", true,
+                                  "Run the LOAD tier of the Smoke Test automatically, once per session, on the first frame after the loading " +
+                                  "screen hides (bindings, registry, clip roles, assets, sounds, files, GPU budget, district tiles — a few ms, " +
+                                  "never per frame). The result goes to the log, the F8 panel and haf_smoke_report.txt tagged [load]. The F8 " +
+                                  "button still runs the FULL tier (adds the live-pawn checks). false = button only.");
             VerboseLog      = Config.Bind("General", "VerboseLog", false,
                                   "Log the chatty per-model / per-pawn BRING-UP detail (skeleton repoints, atlas/skin/prop injection, " +
                                   "pose-hook dumps, per-unit state, etc.). OFF (default) keeps a normal load QUIET — only the summary lines " +
@@ -376,11 +382,13 @@ namespace HumankindAssetFramework
             }
             Log.LogInfo($"Model Factory plugin loaded ({patched}/{hooks.Length} hooks patched{(skipped > 0 ? $", {skipped} skipped — see warnings above" : "")}). Press {ToggleKey.Value} in-game for the " +
                         $"diagnostic window. UniversalInject={UniversalInjectOn.Value}");
+            UniversalInject.HookLoadingScreen();   // load-tier smoke: subscribe to the end-of-loading seam (SmokeOnLoad)
             GameBinding.ValidateAndLog(GameBinding.Catalog);   // compatibility report: warn loudly if a bound game type/member went missing (game update)
         }
 
         private void Update()
         {
+            UniversalInject.ConsumePendingLoadSmoke();   // load-tier smoke, the first frame after the loading screen hid (SmokeOnLoad)
             if (Input.GetKeyDown(ToggleKey.Value))
             {
                 if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
@@ -457,7 +465,7 @@ namespace HumankindAssetFramework
             using (new GUILayout.HorizontalScope())
             {
                 if (GUILayout.Button("Dump Atlases")) UniversalInject.DumpOutputLayerAtlases(atlasFilter);   // Unit Retexture workflow: dump a unit's atlas to paint
-                if (GUILayout.Button("Smoke Test")) UniversalInject.RunSmokeTest();   // adopter check: bindings + registry + injection health -> [SmokeTest] PASS/FAIL
+                if (GUILayout.Button("Smoke Test (full — adds the live-pawn checks)")) UniversalInject.RunSmokeTest();   // adopter check: bindings + registry + injection health -> [SmokeTest] PASS/FAIL
             }
             using (new GUILayout.HorizontalScope())
             {

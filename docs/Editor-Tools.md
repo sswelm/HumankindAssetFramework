@@ -205,7 +205,11 @@ Press **F8** in a loaded game for HAF's runtime panel. It's trimmed to what a mo
   of yours must sit on *your* skeleton (`N live pawn(s) on our skeletons` — a unit wearing its donor's skin is a named
   FAIL), the pose hook must have touched every entry with live pawns within 5 s (`[pose hook fresh]`), and the
   sub-pawn walk that feeds engine audio + sub-pawn visuals is re-audited against a full scene scan on the spot
-  (`sub-pawn walk 6/6`; a miss names the sub-pawn). On demand only — nothing runs per frame.
+  (`sub-pawn walk 6/6`; a miss names the sub-pawn). Nothing runs per frame.
+  **Two tiers:** the **load tier** runs by itself once per session, on the first frame after the loading screen
+  hides (`SmokeOnLoad = true`, the default — bindings, registry, roles, assets, sounds, files, GPU budget, district
+  tiles; a few ms at a moment you're already waiting), tagged `[load]` in the log, the F8 panel and
+  `haf_smoke_report.txt`. The **full tier** is the button, now labelled **Smoke Test (full — adds the live-pawn checks)**: load + the live-pawn checks, tagged `[full]`. The panel shows whichever ran last.
 - **GPU mesh buffer (live)** — per-layer vertex/index/mesh fill, so you can see whether your models fit the shared budget
   ([Vertex-Budget.md](Vertex-Budget.md)); **Shift+F8** also logs it.
 - **HAF per-frame cost** — what the plugin itself costs each frame, averaged over 5 s: total µs/frame and percent of the

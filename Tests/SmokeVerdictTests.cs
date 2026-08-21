@@ -646,5 +646,15 @@ namespace HumankindAssetFramework.Tests
             Assert.Empty(f.PawnSkinIssues); Assert.Empty(f.PoseIdle); Assert.Equal(0, f.LivePawnsChecked);
             Assert.True(UniversalInject.SmokeVerdict(f).Pass);
         }
+
+        [Fact]
+        public void Tier_PrefixesTheVerdictLine()
+        {
+            var r = UniversalInject.SmokeVerdict(new UniversalInject.SmokeFacts { Tier = "load", Models = 22, Repointed = 3 });
+            Assert.True(r.Pass); Assert.StartsWith("[load] PASS", r.Summary);
+            r = UniversalInject.SmokeVerdict(new UniversalInject.SmokeFacts { Tier = "full", Models = 0 });
+            Assert.StartsWith("[full] FAIL (", r.Summary);
+            Assert.StartsWith("PASS", UniversalInject.SmokeVerdict(new UniversalInject.SmokeFacts { Models = 1, Repointed = 1 }).Summary);   // untagged stays as it was
+        }
     }
 }

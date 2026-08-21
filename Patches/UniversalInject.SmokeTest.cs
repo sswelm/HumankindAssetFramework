@@ -38,6 +38,7 @@ namespace HumankindAssetFramework
         // Everything the verdict judges, gathered by the thin runtime side. Empty lists = healthy.
         internal class SmokeFacts
         {
+            public string Tier = "";                                 // "load" / "full" — which tier gathered these facts (prefixes the verdict line); "" = untagged
             public int GbMissing, InjectionErrors, Models, Repointed;
             public List<string> ErrorSites = new List<string>();     // the named injection-error sites behind InjectionErrors
             public List<string> DeadRoles = new List<string>();
@@ -104,7 +105,7 @@ namespace HumankindAssetFramework
             notes.AddRange(f.SamplerNotes);
             notes.AddRange(f.DistrictNotes);
             bool pass = fails.Count == 0;
-            string head = pass ? "PASS" : "FAIL (" + string.Join("; ", fails) + ")";
+            string head = (f.Tier.Length > 0 ? "[" + f.Tier + "] " : "") + (pass ? "PASS" : "FAIL (" + string.Join("; ", fails) + ")");
             return new SmokeResult
             {
                 Pass = pass,
@@ -405,13 +406,56 @@ namespace HumankindAssetFramework
             return r;
         }
 
-        internal static void RunSmokeTest()
+
+        // ---------------------------------------------------------------------------------------------------------
+        // TWO TIERS (2026-08-21, user: "move part of these tests to the end of the loading screen — as long as the
+        // game is not loaded yet, I'm fine with performing tests"):
+        //   Load — runs ONCE per session, on the first Update after the game's loading screen hides
+        //          (Amplitude.Mercury.LoadingScreen.VisibilityChanged(false) — the same static event the game's own
+        //          cursor/windows managers subscribe to). Everything that needs only the loaded registry + world
+        //          assets: bindings, models, roles, assets, sounds, files on disk, GPU budget, district tiles, seams.
+        //   Full — the F8 button. Load + the LIVE checks (skeleton truth, pose-hook liveness, sub-pawn walk audit,
+        //          the ObjectSpace write-back), which need pawns on the map and a few frames of the pose hook.
+        // The load tier costs a few ms once, at the boundary the player is already waiting on; nothing runs per frame.
+        // Disable with SmokeOnLoad=false. Both tiers write haf_smoke_report.txt and the F8 panel, tagged [load]/[full].
+        internal enum SmokeTier { Load, Full }
+        static volatile bool loadSmokePending;
+        static bool loadingScreenHooked;
+
+        internal static void HookLoadingScreen()
+        {
+            if (loadingScreenHooked) return;
+            try
+            {
+                var t = GameBinding.LoadingScreen;
+                var ev = t?.GetEvent("VisibilityChanged", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                if (ev == null) { Plugin.Log.LogWarning("[SmokeTest] LoadingScreen.VisibilityChanged not found — the load-tier smoke is off (F8 button still works)"); return; }
+                Action<bool> handler = visible => { if (!visible) loadSmokePending = true; };   // the hide transition = end of loading
+                ev.AddEventHandler(null, Delegate.CreateDelegate(ev.EventHandlerType, handler.Target, handler.Method));
+                loadingScreenHooked = true;
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[SmokeTest] could not subscribe to LoadingScreen.VisibilityChanged: " + ex.Message); }
+        }
+
+        // Main thread (Plugin.Update): the event fires from the UI; the smoke reads main-thread state, so it runs here.
+        internal static void ConsumePendingLoadSmoke()
+        {
+            if (!loadSmokePending) return;
+            loadSmokePending = false;
+            if (Plugin.SmokeOnLoad == null || !Plugin.SmokeOnLoad.Value) return;
+            if (entries == null || !registered) { Plugin.Diag("[SmokeTest][load] skipped — no registry session (main menu?)"); return; }
+            RunSmokeTest(SmokeTier.Load);
+        }
+
+        internal static void RunSmokeTest() => RunSmokeTest(SmokeTier.Full);
+        internal static void RunSmokeTest(SmokeTier tier)
         {
             try
             {
                 var gb = GameBinding.Validate(GameBinding.Catalog);
                 var f = new SmokeFacts
                 {
+                    Tier = tier == SmokeTier.Load ? "load" : "full",
                     GbMissing = gb.Count(r => !r.TypeFound) + gb.Where(r => r.TypeFound).Sum(r => r.MissingMembers.Count),
                     InjectionErrors = InjectionErrors,
                     ErrorSites = ErrorSitesSnapshot(),
@@ -457,9 +501,12 @@ namespace HumankindAssetFramework
                     if (vp >= 95 || xp >= 95) f.BudgetAlarms.Add($"L{i} '{b.Name}' verts {vp}% / idx {xp}%");
                 }
 
-                GatherWriteBackFact(f);   // the seam self-test — after the reads, before the verdict
-                GatherLivePawnFacts(CollectLiveSlots(), snapshot, UnityEngine.Time.time, f);   // live-pawn truth: skeleton + pose-hook liveness
-                if (snapshot != null && f.Repointed > 0) { AuditSubPawnWalk(snapshot, out int w, out int sc, f.SubPawnMissed); f.SubPawnWalk = w; f.SubPawnScene = sc; }
+                if (tier == SmokeTier.Full)
+                {   // LIVE tier — needs pawns on the map and a few frames of the pose hook; the load tier runs before either exists
+                    GatherWriteBackFact(f);   // the seam self-test — after the reads, before the verdict
+                    GatherLivePawnFacts(CollectLiveSlots(), snapshot, UnityEngine.Time.time, f);   // live-pawn truth: skeleton + pose-hook liveness
+                    if (snapshot != null && f.Repointed > 0) { AuditSubPawnWalk(snapshot, out int w, out int sc, f.SubPawnMissed); f.SubPawnWalk = w; f.SubPawnScene = sc; }
+                }
 
                 var res = SmokeVerdict(f);
                 if (res.Pass) Plugin.Log.LogInfo("[SmokeTest] " + res.Summary);
