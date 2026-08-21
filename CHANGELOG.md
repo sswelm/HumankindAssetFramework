@@ -34,6 +34,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   dead read), and three members that live on **runtime subclasses** the declared field type can't see (`WriteContent`,
   `AddNullAtlasInfo`, the descriptor's `materialDataHasChanged` — re-homed on the concrete
   `FxEvolverDescriptorLevelBuildElement`). Headless verdict: `91/91 types | 0 member(s) missing`. Suite 390/390.
+  **Drilled live the same day:** `haf_bindings_report.txt` → `game=1.30 verified=1.30 resolved=91/91 type(s)
+  missing_types=0 missing_members=0`, log `[GameBinding] OK — 91 game type(s) + their members all resolved` — so all
+  37 derived chains also resolve at `Awake`, the one thing the headless check cannot prove. Smoke PASS, bindings ok.
 
 - **THE SMOKE TEST JUDGES WHAT A DISTRICT *SHOWS*, NOT JUST THAT IT BOUND — and it counts both render paths
   (2026-08-21).** Two defects in the harness's own honesty, found by reading the log next to the F8 line. (1) The
