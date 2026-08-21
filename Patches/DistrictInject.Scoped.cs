@@ -17,11 +17,11 @@ namespace HumankindAssetFramework
     {
         static bool repoDumped;
         static int wonderRowTick;
-        static readonly HashSet<string> wonderCellFilled = new HashSet<string>();   // wonders whose repository cell is filled (latched; cleared on session reset)
+        [SessionScoped(Scope = SessionScope.District, Manual = "wonder reset, DistrictInject.Scoped.cs")] static readonly HashSet<string> wonderCellFilled = new HashSet<string>();   // wonders whose repository cell is filled (latched; cleared on session reset)
         static MethodInfo wonderTryLoadAsync, wonderNextIdx;                         // FxEvolverMaterial.TryLoadAsync / NextDoublonAvoidanceIndex, resolved once
         static bool wonderRowsAllDone;                                            // every configured wonder latched -> PollWonderRows is a no-op
         static bool axisProbed;
-        static readonly HashSet<string> wonderRowLogged = new HashSet<string>();
+        [SessionScoped(Scope = SessionScope.District, Manual = "wonder reset, DistrictInject.Scoped.cs")] static readonly HashSet<string> wonderRowLogged = new HashSet<string>();
 
         // SPIKE (dedicated-visual, axis-growth probe): the dedicated-selector path needs a NEW BuildingVisualAffinity value
         // added to a criteria axis. The wonder work only ever FILLED existing empty cells (every wonder name pre-existed on
@@ -79,8 +79,8 @@ namespace HumankindAssetFramework
         // native selector therefore never has a drawable template on our tile: blank for a moment, then OUR
         // model, every load. Config format: "WonderName=a,b,c,d;Other=..." .
         // Re-arms itself: the repository rebuilds its matrices on session reload, wiping late-added cells.
-        static readonly Dictionary<string, object> wonderTemplates = new Dictionary<string, object>();
-        static readonly Dictionary<string, object> wonderTemplateReqs = new Dictionary<string, object>();   // pending AssetBundleRequest per name
+        [SessionScoped(Scope = SessionScope.District, Manual = "wonder reset, DistrictInject.Scoped.cs")] static readonly Dictionary<string, object> wonderTemplates = new Dictionary<string, object>();
+        [SessionScoped(Scope = SessionScope.District, Manual = "wonder reset, DistrictInject.Scoped.cs")] static readonly Dictionary<string, object> wonderTemplateReqs = new Dictionary<string, object>();   // pending AssetBundleRequest per name
 
         internal static void ResetWonderTemplates()   // called from ResetDistrictSessionState — assets are corpses after a reload
         {
@@ -260,7 +260,7 @@ namespace HumankindAssetFramework
         // Config DistrictMainRows: "AffinityName=a,b,c,d;...". Re-armed on reload (matrices rebuild); idempotent.
         static int districtMainTick;
         static bool districtReresolved;   // force the post-fill re-resolve only once per session
-        static readonly HashSet<string> districtMainLogged = new HashSet<string>();
+        [SessionScoped(Scope = SessionScope.District, Manual = "wonder reset, DistrictInject.Scoped.cs")] static readonly HashSet<string> districtMainLogged = new HashSet<string>();
         internal static void PollDistrictMainRows()
         {
             var cfg = Plugin.DistrictMainRows?.Value?.Trim();
@@ -308,12 +308,12 @@ namespace HumankindAssetFramework
         // using it untouched, so a player WITHOUT the plugin still sees the vanilla fallback. Runs every frame with a
         // cheap ReferenceEquals guard (the game re-resolves the channel on its own UpdateLevelBuild; we re-assert). The
         // building element's output layer is bound via the shared BindReactorBuilding once our selector is on a channel.
-        static readonly Dictionary<string, object> selectorTileGuid = new Dictionary<string, object>();   // districtName -> parsed guid
-        static readonly Dictionary<object, string> districtNameCache = new Dictionary<object, string>();   // PresentationDistrict -> ConstructibleDefinitionName (perf 2026-08-21)
+        [ProcessLived("districtName -> guid parsed from the pack; names are process-lived")] static readonly Dictionary<string, object> selectorTileGuid = new Dictionary<string, object>();   // districtName -> parsed guid
+        [SessionScoped(Scope = SessionScope.District)] static readonly Dictionary<object, string> districtNameCache = new Dictionary<object, string>();   // PresentationDistrict -> ConstructibleDefinitionName (perf 2026-08-21)
         static string selectorTileParsedFrom;                                                             // config string we parsed
         static int selectorTileRegCount = -1;                                                             // distModels count at last (re)build — rebuild the map when the registry changes
-        static readonly Dictionary<string, object> loadedSelectorByKey = new Dictionary<string, object>();// guidKey -> loaded+Loaded selector
-        static readonly HashSet<string> selectorTileLogged = new HashSet<string>();
+        [SessionScoped(Scope = SessionScope.District)] static readonly Dictionary<string, object> loadedSelectorByKey = new Dictionary<string, object>();// guidKey -> loaded+Loaded selector
+        [SessionScoped(Scope = SessionScope.District)] static readonly HashSet<string> selectorTileLogged = new HashSet<string>();
         internal static void PollDistrictSelectorTile()
         {
             if (distFxManager == null || trackedDistricts.Count == 0) return;
@@ -485,7 +485,7 @@ namespace HumankindAssetFramework
         // One-shot: dump the live plbc's channel/refresh/content methods + the EventNameEnum values, so we can find a
         // HEAVIER refresh than RefreshChannel(0) that trips the decal content rebuild (pre-warm the footprint).
         static bool plbcDumped;
-        static readonly HashSet<string> plbcEnumsSeen = new HashSet<string>();
+        [ProcessLived("diagnostic: enum names seen once per process")] static readonly HashSet<string> plbcEnumsSeen = new HashSet<string>();
         static void DumpPlbcLevers(object plbc)
         {
             if (plbcDumped || Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;
@@ -518,10 +518,10 @@ namespace HumankindAssetFramework
         // ours. Keeps our building-Element item(s) (child has an `fxMesh`), drops our decal items, appends the donor's
         // decal items (collected recursively, skipping the donor's BUILDINGS). Then re-emits. Best-effort: some donors'
         // nested decals may not transfer cleanly — logged, and the un-grafted selector still renders its baked footprint.
-        static readonly Dictionary<string, object> footprintDonor = new Dictionary<string, object>();
+        [SessionScoped(Scope = SessionScope.District, Manual = "footprint graft pass, DistrictInject.Scoped.cs")] static readonly Dictionary<string, object> footprintDonor = new Dictionary<string, object>();
         static string footprintParsedFrom;
-        static readonly HashSet<string> graftDedup = new HashSet<string>();        // (decal name|position) dedup across culture variants
-        static readonly HashSet<string> graftDecalNames = new HashSet<string>();   // distinct decal names grafted (for the log)
+        [SessionScoped(Scope = SessionScope.District, Manual = "per graft pass, DistrictInject.Scoped.cs")] static readonly HashSet<string> graftDedup = new HashSet<string>();        // (decal name|position) dedup across culture variants
+        [SessionScoped(Scope = SessionScope.District, Manual = "per graft pass, DistrictInject.Scoped.cs")] static readonly HashSet<string> graftDecalNames = new HashSet<string>();   // distinct decal names grafted (for the log)
         static void GraftFootprint(object sel, string name)
         {
             try
@@ -639,7 +639,7 @@ namespace HumankindAssetFramework
         // DIAGNOSTIC (DistrictDebug): dump a selector's element tree — each child's type + name + whether it carries an
         // fxMesh (a building or GROUND mesh) or is a Decal. Comparing the NATIVE Industry selector (which had the paved
         // ground the old isolate path kept) with OUR scoped template selector reveals the exact ground element to graft.
-        static readonly HashSet<string> selDumpLogged = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> selDumpLogged = new HashSet<string>();
         static void DumpSelectorElements(object mat, string label, string name)
         {
             if (Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value || mat == null) return;
@@ -685,7 +685,7 @@ namespace HumankindAssetFramework
         // is bound (OutputLayerIndex / LoadedOutputLayer) and whether it's maskedByTerrain. A gravel decal with an unbound
         // visualOutput writes NO render data (FxEvolverMaterialLevelBuildDecal.AddDataTo early-outs on OutputLayerIndex<0),
         // which would explain why the Industry paving never draws at close zoom while the schematic footprint does.
-        static readonly HashSet<string> decalBindLogged = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> decalBindLogged = new HashSet<string>();
         static void DumpDecalBinding(object sel, string name)
         {
             if (Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value || sel == null) return;
@@ -718,7 +718,7 @@ namespace HumankindAssetFramework
         // Clearing the mask on our paving (CityBricks_*) decals forces them to draw regardless of the terrain-clear state.
         // NOTE: these decal materials are shared game assets — this mutates them process-wide, but forcing false on gravel
         // that already shows on cleared tiles is visually a no-op there. If this proves the fix, switch to private clones.
-        static readonly HashSet<string> unmaskLogged = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> unmaskLogged = new HashSet<string>();
         static void UnmaskPavingDecals(object sel, string name)
         {
             try
@@ -744,7 +744,7 @@ namespace HumankindAssetFramework
         // DIAGNOSTIC (DistrictDebug): dump EVERY channel on the reactor's plbc + the evolver material each holds. The rocky
         // exploitation ground may render on a channel other than the main level-build one; if so we can swap/clear it the way
         // we swap the main channel's selector. Prints channel index, evolver type + name.
-        static readonly HashSet<string> chanDumpLogged = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> chanDumpLogged = new HashSet<string>();
         static void DumpAllChannels(Array channels, string name)
         {
             if (Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value || !chanDumpLogged.Add(name)) return;
@@ -822,7 +822,7 @@ namespace HumankindAssetFramework
         // DIAGNOSTIC (DistrictDebug): scan the NATIVE industry selector for terrain-conforming GROUND/paving MESH elements
         // (fxMesh != null AND a ground-ish name) — the close-zoom cover we discard when we swap the selector. Deduped by name,
         // with position, so we can identify the exact element to graft back into our reactor selector.
-        static readonly HashSet<string> nativeGroundLogged = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> nativeGroundLogged = new HashSet<string>();
         static readonly string[] groundHints = { "Brick", "Ground", "Floor", "Pave", "Concrete", "Asphalt", "Gravel", "Dirt", "Terrain", "Plaza", "Road", "Tarmac", "Slab", "Cobble", "Bricks" };
         static void DumpNativeGroundCandidates(object mat, string name)
         {
@@ -1092,7 +1092,7 @@ namespace HumankindAssetFramework
         // value only reaches the GPU via WriteToGPUData, so we nudge OnEditionChange() then re-emit the selector (LoadFxMaterial).
         // Scoped + safe: the reactor's element is its own custom asset (unique to this district); AlwaysEnabled only ADDS the
         // strategic band, close zoom is unchanged. No mesh re-bake, no LOD change.
-        static readonly HashSet<string> meshPersistLogged = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> meshPersistLogged = new HashSet<string>();
         internal static void KeepDistrictMeshAtStrategicZoom(object sel, string name)
         {
             ResolveScopedFootprint(name);   // per-entry registry values, or the global config fallback — always resolve so the B&W/flat pollers have them
@@ -1207,14 +1207,14 @@ namespace HumankindAssetFramework
         // (index into criteria 24). Our wonder's affinity has no row for this biome → index 0 → bare sand. This
         // postfix forces a chosen ground-material index for our registry districts — the game's own terrain paint,
         // blended, not a flat mesh. Also dumps the ground-material vocabulary once (DistrictDebug) so a name can be picked.
-        static bool groundNamesDumped; static int groundApplyCount; static readonly HashSet<string> groundLogged = new HashSet<string>();
+        static bool groundNamesDumped; static int groundApplyCount; [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> groundLogged = new HashSet<string>();
         static string[] groundNames;   // GroundMaterialDefinition vocabulary, indexed (from the criteria-24 dump)
         static string GroundNameForIndex(int idx) => (groundNames != null && idx >= 0 && idx < groundNames.Length) ? groundNames[idx] : ("idx" + idx);
 
         // GROUND PROBE (DistrictDebug): log what ground index each district hands to ApplyGroundMaterialDefinition — the
         // NATIVE resolve for non-registry districts (e.g. what a normal Industry tile uses = the "deadzone" we want to
         // match), and our override for registry ones. Answers "which GroundMaterialDefinition is the Industry cleared look".
-        static readonly HashSet<string> groundProbeLogged = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> groundProbeLogged = new HashSet<string>();
         internal static void GroundApplyProbe(object district, object idxObj)
         {
             if (Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value || groundProbeLogged.Count > 120) return;
@@ -1301,7 +1301,7 @@ namespace HumankindAssetFramework
         // natural terrain) with no postfix to follow — so we get reverted to rock. Rewriting the index in the PREFIX makes
         // EVERY caller land on our material: the paint holds with no per-frame re-assert and no blend twitch. Uses the index
         // the postfix already resolved+cached (entry.groundIdx); until that first resolve we pass through (postfix applies once).
-        static readonly HashSet<string> groundOverrideLogged = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> groundOverrideLogged = new HashSet<string>();
         // Returns TRUE to let the original ApplyGroundMaterialDefinition run, FALSE to SKIP it. For our districts: rewrite the
         // index to our paint the FIRST time (let it run to set it), then on every subsequent call SKIP — because the game
         // re-calls this every frame on a deposit tile, and each real call restarts the terrain blend (the twitch). Once our
@@ -1443,8 +1443,8 @@ namespace HumankindAssetFramework
         // a HexagonSculptingDefinition from the ArtificialWonder database and calls ApplyHexagonSculptingDefinition;
         // our wonder's cell is empty -> index -1 -> flat terrain, no footprint. This postfix forces a chosen index.
         // Mirrors DistrictApplyGroundMaterial. Criteria 27 = HexagonSculptingDefinitionCriteriaIndex.
-        static bool hexNamesDumped; static readonly HashSet<string> hexLogged = new HashSet<string>();
-        static readonly HashSet<string> hexNativeLogged = new HashSet<string>();
+        static bool hexNamesDumped; [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> hexLogged = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> hexNativeLogged = new HashSet<string>();
         // Diagnostic (DistrictDebug): log the hexagon-sculpting shape each district NATIVELY resolves to — so a modder
         // can read which EmblematicAndCityCenter* a real district/city-center uses and copy it to a custom wonder.
         internal static void DumpNativeHexSculpt(object district)
@@ -1465,7 +1465,7 @@ namespace HumankindAssetFramework
             }
             catch { }
         }
-        static readonly List<object> hexDistricts = new List<object>();   // districts we've sculpted — re-applied by the live dial
+        [SessionScoped(Scope = SessionScope.District)] static readonly List<object> hexDistricts = new List<object>();   // districts we've sculpted — re-applied by the live dial
         static string lastHexDial; static int hexDialTick;
 
         // LIVE dial: edit BepInEx/config/haf_hexsculpt.txt with a HexagonSculptingDefinition name and every sculpted

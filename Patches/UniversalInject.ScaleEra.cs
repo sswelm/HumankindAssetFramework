@@ -96,7 +96,7 @@ namespace HumankindAssetFramework
         // "naval -1" while an era-6 cruiser was on screen). So walk defensively: IEnumerable if offered, else
         // Count + indexer, else a backing Data array. Logs the type once per collection name when it finds no way in,
         // so a future engine change is diagnosable instead of silent.
-        static HashSet<string> walkFailLogged;
+        [ProcessLived("diagnostic once-per-name log dedup (lazy)")] static HashSet<string> walkFailLogged;
         static IEnumerable<object> WalkCollection(object coll, string label)
         {
             if (coll == null) yield break;
@@ -220,17 +220,17 @@ namespace HumankindAssetFramework
         }
 
         // ---- FORMATION BY SIZE (Global Era Lab second table) ----
-        static readonly List<KeyValuePair<float, string>> formationBySize = new List<KeyValuePair<float, string>>();   // sorted asc: first threshold >= effective scale wins
-        static readonly Dictionary<int, string> sizeFormApplied = new Dictionary<int, string>();       // descId -> formation currently applied ("" = the unit's own)
-        static readonly Dictionary<string, string> sizeFormOriginal = new Dictionary<string, string>(StringComparer.Ordinal);   // unitDefName -> its original formation (for restore)
-        static readonly HashSet<string> sizeFormWarned = new HashSet<string>(StringComparer.Ordinal);
+        [ProcessLived("pack tuning table; rebuilt by LoadRegistry")] static readonly List<KeyValuePair<float, string>> formationBySize = new List<KeyValuePair<float, string>>();   // sorted asc: first threshold >= effective scale wins
+        [SessionScoped] static readonly Dictionary<int, string> sizeFormApplied = new Dictionary<int, string>();       // descId -> formation currently applied ("" = the unit's own)
+        [ProcessLived("unitDef name -> its original formation; definitions are process-lived assets")] static readonly Dictionary<string, string> sizeFormOriginal = new Dictionary<string, string>(StringComparer.Ordinal);   // unitDefName -> its original formation (for restore)
+        [ProcessLived("diagnostic once-per-name warning dedup")] static readonly HashSet<string> sizeFormWarned = new HashSet<string>(StringComparer.Ordinal);
 
         // Called from the per-frame scale path with the freshly computed effective scale. Cheap steady-state
         // (name cache + threshold walk + dictionary hit); the definition repoint + live re-form run only when the
         // desired formation actually CHANGES (i.e. the era anchor moved the unit across a threshold).
         // Thresholds are PER UNIT (Formation Override window, `sizeFormations` on the unit's link — user ruling
         // 2026-07-30); the legacy GLOBAL table from the Era Lab remains a fallback for units without their own.
-        static readonly Dictionary<int, string> sizeFormUnitName = new Dictionary<int, string>();   // descId -> unit def name
+        [SessionScoped] static readonly Dictionary<int, string> sizeFormUnitName = new Dictionary<int, string>();   // descId -> unit def name
         static void MaybeSwapFormationBySize(int descId, float effScale)
         {
             // resolve (and cache) the unit definition name for this descriptor

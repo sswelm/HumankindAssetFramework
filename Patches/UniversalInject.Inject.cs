@@ -316,7 +316,7 @@ namespace HumankindAssetFramework
         // project). Config DumpPawnRig = pawn-name substring; when that addon loads we log the skeleton's name
         // tables (bone lists), skinned meshes and every clip-flavoured field — the data that decides how vanilla
         // tank treads roll (many Track/Link bones = clip mechanism; none = shader scroll).
-        static readonly HashSet<string> rigDumped = new HashSet<string>();   // once per pawn NAME (a broad filter can match several)
+        [ProcessLived("diagnostic once-per-name dump dedup")] static readonly HashSet<string> rigDumped = new HashSet<string>();   // once per pawn NAME (a broad filter can match several)
         internal static void MaybeDumpPawnRig(object addon, string name)
         {
             string want;
@@ -441,7 +441,7 @@ namespace HumankindAssetFramework
         // GPU-instanced pipeline every previous lever targeted. One-shot per hideSubPawns entry: walk a matched live
         // PresentationSubPawn's transform tree and log every child with its renderer/mesh/material names, so the next
         // step can disable the rotor children BY NAME instead of guessing. Poll-driven (~3s) from Plugin.Update.
-        static readonly HashSet<string> hierDumped = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name dump dedup")] static readonly HashSet<string> hierDumped = new HashSet<string>();
         static float hierNextAt;
         internal static void ProcessSubPawnVisuals()
         {
@@ -596,10 +596,10 @@ namespace HumankindAssetFramework
         //     restore              restore every saved mesh
         // The operator edits the file while the player watches the ghost; halving the range pins the mesh in ~8 rounds.
         static string lastBisectCmd = "";
-        static readonly Dictionary<long, Array> bisectSaved = new Dictionary<long, Array>();   // (layer<<32)|meshIdx -> original vertex records (animMgr manager)
+        [ProcessLived("per-bisect scratch, cleared per run")] static readonly Dictionary<long, Array> bisectSaved = new Dictionary<long, Array>();   // (layer<<32)|meshIdx -> original vertex records (animMgr manager)
         // manager-aware storage: key -> [mcm, layerIdx, meshIdx, savedArray]. The ghost's mesh proved to live outside
         // the AnimationManager's content manager entirely — other FxManager Behaviours in the scene own their own.
-        static readonly Dictionary<string, object[]> bisectSavedM = new Dictionary<string, object[]>();
+        [ProcessLived("per-bisect scratch, cleared per run")] static readonly Dictionary<string, object[]> bisectSavedM = new Dictionary<string, object[]>();
         static List<object> ListFxManagers()
         {
             var outp = new List<object>();
@@ -858,7 +858,7 @@ namespace HumankindAssetFramework
         // (the formation clone path uses it). Log the DONOR skeleton's index for the donor body mesh and OURS for the
         // same (renamed) mesh — two known (descriptor, index) pairs per entry crack the encoding's bit layout, and the
         // donor's index is the needle to find in whichever descriptor still draws the ghost.
-        static readonly HashSet<string> fxDumped = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name dump dedup")] static readonly HashSet<string> fxDumped = new HashSet<string>();
         static void DumpFxIndices(object donorSkel, ModelEntry e, string bodyName, object animMgr)
         {
             try
@@ -930,7 +930,7 @@ namespace HumankindAssetFramework
             }
             return outp;
         }
-        internal static readonly HashSet<uint> ghostNeedles = new HashSet<uint>();
+        [ProcessLived("per-inject scratch")] internal static readonly HashSet<uint> ghostNeedles = new HashSet<uint>();
 
         // StartIndex of a mesh in the unit ContentLayer buffer (the low-24-bit half of the fragment encoding).
         static uint ReadFxStart(object animMgr, uint fxMeshIdx)
@@ -1086,7 +1086,7 @@ namespace HumankindAssetFramework
         // The donor definition's SubPawnDefinitions: log what's attached (once per entry), and clear the array when the
         // entry sets hideSubPawns. The definition asset is per-unit-type, so clearing only affects OUR overridden unit;
         // clearing is idempotent (an emptied array stays empty across re-Loads).
-        static readonly HashSet<string> subPawnsLogged = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> subPawnsLogged = new HashSet<string>();
         static void DumpAndMaybeClearSubPawns(object addon, ModelEntry e)
         {
             try
@@ -1114,7 +1114,7 @@ namespace HumankindAssetFramework
         }
 
         // Donor-clip diagnostic: every bone's rest frames — Local + BindPose TRS (T + R quaternion) — plain LogInfo.
-        static readonly HashSet<string> restDumped = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name dump dedup")] static readonly HashSet<string> restDumped = new HashSet<string>();
         static void DumpBoneRests(object skel, string label)
         {
             try

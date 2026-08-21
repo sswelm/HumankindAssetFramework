@@ -10,14 +10,14 @@ namespace HumankindAssetFramework
     internal static class Prober
     {
         internal static object AnimMgr;                         // cached AnimationManager (set by the load hook)
-        internal static readonly List<string> Report = new List<string>();
+        [ProcessLived("startup probe report")] internal static readonly List<string> Report = new List<string>();
 
         internal static void RunScan()
         {
             Report.Clear();
             void Add(string s) { Report.Add(s); Plugin.Log.LogInfo("[ENCProof] " + s); }
 
-            Add($"--- scan (target mod: {Plugin.TargetMod.Value}) ---");
+            Add("--- scan ---");
 
             // 1) ENGINE REGISTRY — proof we can read live, loaded game data at runtime
             try
@@ -58,7 +58,7 @@ namespace HumankindAssetFramework
                     }
                     Add($"PresentationPawnDefinition DB: {total} entries; {hits.Count} match \"{filter}\":");
                     foreach (var h in hits) Add("   • " + h);
-                    if (hits.Count > 0) Add($">>> Confirmed access to '{Plugin.TargetMod.Value}' assets. <<<");
+                    if (hits.Count > 0) Add(">>> Confirmed access to modded assets. <<<");
                 }
                 else
                 {

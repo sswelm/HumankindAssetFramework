@@ -86,8 +86,8 @@ namespace HumankindAssetFramework
         // and the entry carries a muzzleBone, hand back OUR muzzle bone's TRS instead (found -> the real path, no re-redirect).
         static MethodBase gocaMethod;   // PresentationPawnDefinitionAddOn.GetOrCreateAddOn(PresentationPawnDefinition)
         static bool gocaResolved, muzzleErrLogged;
-        static readonly HashSet<string> muzzleSeen = new HashSet<string>();   // diagnostic: first distinct bone names through the hook
-        static readonly Dictionary<Type, MethodBase> boneIdxMethods = new Dictionary<Type, MethodBase>();
+        [ProcessLived("diagnostic: first distinct bone names")] static readonly HashSet<string> muzzleSeen = new HashSet<string>();   // diagnostic: first distinct bone names through the hook
+        [ProcessLived("method cache")] static readonly Dictionary<Type, MethodBase> boneIdxMethods = new Dictionary<Type, MethodBase>();
 
         // Full bone name for e.muzzleBone (substring) against OUR skeleton, cached in e.muzzleBoneName. null = unset / not found.
         static string ResolveMuzzleBoneName(ModelEntry e)
@@ -422,7 +422,7 @@ namespace HumankindAssetFramework
         // stacked squadron shares one state harmlessly (same spot, same heading). Every yaw angle eases, 180s
         // included; teleports/battle placement snap naturally by MISSING the position match (fresh state = target yaw).
         class TurnState { public UnityEngine.Vector3 pos; public float yaw; public float targetYaw; public float bank; public float lastT; public float rate; }
-        static readonly List<TurnState> turnStates = new List<TurnState>();
+        [SessionScoped] static readonly List<TurnState> turnStates = new List<TurnState>();
         internal static float turnRate = 0f, turnBank = 0f;   // file-driven while spiking
 
         // TRUE-BEARING AIM (2026-08-05, "turn to the exact angle needed to realistically shoot"): a vanilla map
@@ -435,7 +435,7 @@ namespace HumankindAssetFramework
         // sound/smoke and the shell schedule all fire off this single timestamp — mixing a dynamic release
         // (aligned-within-8°) with static scheduler delays desynced the bang from the recoil by ~0.25 s.
         class AimOverride { public UnityEngine.Vector3 pos; public float yaw; public float until; public float releaseAt; public float createdAt; public float dist; public bool settled; }
-        static readonly List<AimOverride> aimOverrides = new List<AimOverride>();
+        [SessionScoped] static readonly List<AimOverride> aimOverrides = new List<AimOverride>();
         internal static void SetAimOverride(UnityEngine.Vector3 pos, float yaw, float duration, float releaseAt = 0f, float dist = 0f)
         {
             float now = UnityEngine.Time.time;
@@ -756,17 +756,17 @@ namespace HumankindAssetFramework
         // Runs AFTER ApplyPositionOffset: position.z stays the city-clearing height, this subtracts over open
         // ground. Live-tuned via BepInEx/config/haf_hugterrain.txt; drop 0 or no file = off.
         internal static float hugDrop = 0f, hugRadius = 0f, hugLookahead = 3f, hugEase = 4f, hugCliff = 1f;
-        internal static readonly List<string> hugOnly = new List<string>();   // name whitelist (empty = all)
-        internal static readonly List<string> hugSkip = new List<string>();   // name blacklist (farms, exploitations)
+        [ProcessLived("dial-driven list, rebuilt from the dial")] internal static readonly List<string> hugOnly = new List<string>();   // name whitelist (empty = all)
+        [ProcessLived("dial-driven list, rebuilt from the dial")] internal static readonly List<string> hugSkip = new List<string>();   // name blacklist (farms, exploitations)
         // BUILT-IN default blacklist: these district kinds are FLAT (cultivated tiles — fields, vineyards, mines —
         // and rubble), so they must never make an aircraft climb. It's a property of Humankind's data, not a user
         // preference, so it applies whenever the dial file specifies no filter of its own — deleting the file
         // can't resurrect the "cruises high over farmland" bug.
-        static readonly List<string> hugSkipDefault = new List<string> { "Exploitation", "Ruin" };
-        static readonly List<UnityEngine.Vector3> districtPts = new List<UnityEngine.Vector3>();
+        [ProcessLived("constant")] static readonly List<string> hugSkipDefault = new List<string> { "Exploitation", "Ruin" };
+        [ProcessLived("per-scan scratch")] static readonly List<UnityEngine.Vector3> districtPts = new List<UnityEngine.Vector3>();
         static float districtNextScan, districtMinNext, tileSpacing; static bool hugDirty = true;
         class HugState { public UnityEngine.Vector3 pos; public UnityEngine.Vector3 dir; public float cur; public float lastT; public float cliff; public int cliffFrame = -100; }
-        static readonly List<HugState> hugStates = new List<HugState>();
+        [SessionScoped] static readonly List<HugState> hugStates = new List<HugState>();
 
         internal static void RearmDistrictScan() { hugDirty = true; hugScanLogged = false; }   // a district was built / the session reset: refresh the hug map on the next tick (3 s min spacing)
 

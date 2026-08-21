@@ -20,7 +20,7 @@ namespace HumankindAssetFramework
     internal static partial class UniversalInject
     {
         internal const float SubPawnScanMaxAge = 2f;
-        static List<KeyValuePair<UnityEngine.Object, ModelEntry>> _subPawnScan;
+        [SessionScoped(Manual = "MarkSubPawnsDirtyAndReverify")] static List<KeyValuePair<UnityEngine.Object, ModelEntry>> _subPawnScan;
         static float _subPawnScanAt;
         static bool _subPawnScanDirty = true;
         static int _subPawnScanVersion;

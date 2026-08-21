@@ -60,7 +60,7 @@ namespace HumankindAssetFramework
         }
 
         static bool parsed;
-        static readonly List<Entry> entries = new List<Entry>();
+        [ProcessLived("the formation registry; rebuilt by EnsureConfig")] static readonly List<Entry> entries = new List<Entry>();
         // TURN EASE for VANILLA units (docs/Turn-Ease.md): per-unit rate rows parsed off the SAME registry links
         // (the Formation Lab is HAF's per-unit config surface). Kept separate from `entries` because a link may be
         // turn-ease-ONLY (no formation change: `formation` empty) — the formation pipeline skips it, this map keeps
@@ -69,7 +69,7 @@ namespace HumankindAssetFramework
         // ("PresentationLandUnit_Era5_Common_SiegeHowitzers_Default"), whose wrapper prefix/suffix appear in NO
         // other naming layer — the pawn definition is "Era5_Common_SiegeHowitzers_…" and the simulation unit is
         // "LandUnit_Era5_Common_SiegeHowitzers". TurnCore strips the wrappers so contains-matching bridges all three.
-        internal static readonly Dictionary<string, float> TurnRateByUnit = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        [ProcessLived("per-unit dial from the registry")] internal static readonly Dictionary<string, float> TurnRateByUnit = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
 
         static string TurnCore(string unit)
         {
@@ -82,7 +82,7 @@ namespace HumankindAssetFramework
         }
         // Injected formation SOs live for the whole process (HideAndDontSave keeps Unity's unused-asset sweep off
         // them); re-Add per session is cheap and guarded by a by-name DB lookup.
-        static readonly Dictionary<string, ScriptableObject> created = new Dictionary<string, ScriptableObject>(StringComparer.Ordinal);
+        [ProcessLived("injected ScriptableObjects are process-lived assets")] static readonly Dictionary<string, ScriptableObject> created = new Dictionary<string, ScriptableObject>(StringComparer.Ordinal);
         static bool pending;       // armed by AnimationLoad; Tick() retries until the databases resolve
         static int lastTryFrame;
         static bool dbWaitLogged;
@@ -95,8 +95,8 @@ namespace HumankindAssetFramework
         // InstantiatePawns -> re-inits the formation via the grown prefab -> the full dummy count).
         static bool appliedAny;                                            // ≥1 entry applied this session — arm re-instantiation
         static int reformScanFrame;                                        // throttle counter for the live-unit scan
-        static readonly HashSet<object> reformed = new HashSet<object>();  // units already re-formed (or logged) this session, once each
-        static readonly HashSet<object> reformPresent = new HashSet<object>();  // reused each scan (Clear, not new) — live matched units this pass
+        [SessionScoped(Manual = "FormationOverride.OnAnimationLoad")] static readonly HashSet<object> reformed = new HashSet<object>();  // units already re-formed (or logged) this session, once each
+        [ProcessLived("per-scan scratch")] static readonly HashSet<object> reformPresent = new HashSet<object>();  // reused each scan (Clear, not new) — live matched units this pass
         static bool reformSettled;                                         // catch-up complete this session -> stop the ~12x/s scan (a reload re-arms it)
         static int reformQuietScans;                                       // consecutive scans that handled nothing new
         const int ReformQuietLimit = 60;                                   // settle after ~5s of quiet (~12 body-scans/s), long enough to cover the load-time catch-up
@@ -544,9 +544,9 @@ namespace HumankindAssetFramework
         //     members + FragmentEntry rebuild + surgical descriptor repoint preserving SkinnedMeshIndex).
         // Runs in the AddOn.Load postfix window (UniRepointHook), where the model axis proved the swap is safe.
 
-        static readonly Dictionary<string, UnityEngine.Object> scaledCollections = new Dictionary<string, UnityEngine.Object>(StringComparer.Ordinal);   // "(instId)|s" -> collection/skeleton clone (process-lived)
-        static readonly HashSet<string> fragDefsDone = new HashSet<string>(StringComparer.Ordinal);            // defNames processed (cleared per session)
-        static readonly HashSet<string> clonesRegisteredThisSession = new HashSet<string>(StringComparer.Ordinal);
+        [ProcessLived("collection/skeleton clones are process-lived")] static readonly Dictionary<string, UnityEngine.Object> scaledCollections = new Dictionary<string, UnityEngine.Object>(StringComparer.Ordinal);   // "(instId)|s" -> collection/skeleton clone (process-lived)
+        [SessionScoped(Manual = "FormationOverride.OnAnimationLoad")] static readonly HashSet<string> fragDefsDone = new HashSet<string>(StringComparer.Ordinal);            // defNames processed (cleared per session)
+        [SessionScoped(Manual = "FormationOverride.OnAnimationLoad")] static readonly HashSet<string> clonesRegisteredThisSession = new HashSet<string>(StringComparer.Ordinal);
 
         internal static void MaybeScaleFragments(object addon, object animMgr)   // entry-point name kept (wired in UniRepointHook)
         {
@@ -842,7 +842,7 @@ namespace HumankindAssetFramework
         // TRANSFORM scale mode (v1, user-elected per link): pawn root localScale at InstantiatePawn. Simple and
         // decent on bodies + spacing; KNOWN LIMITS on humans (rigid gear double-scales/mis-anchors, limbs distort
         // when scaling UP) — the window says so. "data" mode routes through MaybeScaleFragments instead.
-        static readonly HashSet<string> scaleLogged = new HashSet<string>(StringComparer.Ordinal);
+        [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> scaleLogged = new HashSet<string>(StringComparer.Ordinal);
         internal static void ApplyPawnScale(object pawn, object unit)
         {
             try
@@ -936,8 +936,8 @@ namespace HumankindAssetFramework
         // pool clones that predate the prefab extension, and any Unity oddity around parenting clones into an asset).
         // DIAGNOSTIC while the axis is unverified: also log WHICH definition lands on WHICH unit — once per
         // definition name for vanilla, every time for formations named in our registry (they're the ones under test).
-        static readonly HashSet<string> initSeen = new HashSet<string>(StringComparer.Ordinal);
-        static readonly HashSet<string> oursArmies = new HashSet<string>(StringComparer.Ordinal);   // armies that ever wore a registry formation: log their re-inits too (a later re-init with a vanilla def would otherwise hide behind the once-per-name gate)
+        [ProcessLived("diagnostic once-per-defName log dedup")] static readonly HashSet<string> initSeen = new HashSet<string>(StringComparer.Ordinal);
+        [ProcessLived("army names; stable across sessions")] static readonly HashSet<string> oursArmies = new HashSet<string>(StringComparer.Ordinal);   // armies that ever wore a registry formation: log their re-inits too (a later re-init with a vanilla def would otherwise hide behind the once-per-name gate)
         internal static void EnsureInstanceCapacity(object formation3d, object parent, object definition)
         {
             try

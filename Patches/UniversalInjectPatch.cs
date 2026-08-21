@@ -160,7 +160,7 @@ namespace HumankindAssetFramework
     internal static partial class UniversalInject
     {
         internal const BindingFlags BF = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-        static List<ModelEntry> entries;
+        [ProcessLived("the model registry; rebuilt by LoadRegistry")] static List<ModelEntry> entries;
         static bool loaded, registered, repointActiveLogged, stLogged, greyWaitLogged;
         static int loadAttempts;   // failed-load counter: latch `loaded` only after a success or a few tries, so a TRANSIENT read/parse error (AV scan, sharing violation at startup) retries instead of disabling injection for the whole session
         static volatile bool reloadRearmPending;   // set by the per-session seams (Sandbox.Load / PawnManager.Load, possibly off the main thread); consumed on the main-thread Update tick so RearmModelRegistration's Unity Destroys run safely
@@ -559,7 +559,7 @@ namespace HumankindAssetFramework
         // that's forgotten fails LOUD (the feature's key is stripped, Diag names it). Bake-time-only editor keys
         // (targetTris, convertRig, …) are stripped too — the plugin never read them; Diag-logged, not warned,
         // because every real pack carries ~50 of them by design.
-        static readonly HashSet<string> registryConfigKeys = BuildRegistryConfigKeys();
+        [ProcessLived("constant")] static readonly HashSet<string> registryConfigKeys = BuildRegistryConfigKeys();
         static HashSet<string> BuildRegistryConfigKeys()
         {
             var keys = new HashSet<string>(StringComparer.Ordinal);
@@ -815,7 +815,7 @@ namespace HumankindAssetFramework
         // silence. Log guard is locked (called from the main pawn hook AND the sim-thread combat hook). Result is
         // IDENTICAL to the old FirstOrDefault when only one entry matches (the common case). Non-capturing key lambdas
         // are cached by the compiler, so no per-call allocation.
-        static readonly HashSet<string> _ambigLogged = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> _ambigLogged = new HashSet<string>();
         internal static ModelEntry LongestMatch(List<ModelEntry> list, string name, Func<ModelEntry, string> key)
         {
             if (list == null || string.IsNullOrEmpty(name)) return null;
@@ -905,12 +905,11 @@ namespace HumankindAssetFramework
         internal static void RearmModelRegistration(bool resetDistricts = true)
         {
             MarkSubPawnsDirtyAndReverify();   // session-1 sub-pawn components are corpses; the shared scan must refresh (and re-verify the walk once)
-            _unitEntryCache.Clear();   // unit->entry cache (ProcessAnimStates) keys session-1 PresentationUnits
+            int cleared = SessionState.Reset(SessionScope.Model);   // EVERY [SessionScoped] static collection (the declared registry — Patches/SessionState.cs), incl. the unit->entry cache, every descId-keyed map, the turn/hug/aim states
+            Plugin.Diag($"[Session] model re-arm: {cleared} registry-managed collection(s) cleared");
             registered = false;
             anyAnimated = null; anyMuzzle = null; anyFreeze = null; anyRescuable = null;                    // recomputed on the next pawn-add
-            unitScaleByDesc.Clear(); unitScaleNameByDesc.Clear(); vanillaScaledLogged.Clear(); descApplied.Clear(); cachedEra = -1;   // descriptor ids + era are session-scoped (meshApplied deliberately KEPT: the Fx vertex buffers persist)
-            vanillaTurnByDesc.Clear(); vanillaEaseLogged.Clear(); addonDefIds.Clear(); descCensusLogged.Clear();   // vanilla turn-ease links re-resolve to fresh descriptor ids next session
-            vanillaCatByDesc.Clear(); descTurret.Clear(); descHover.Clear(); classSamples.Clear();   // category + hover/turret classifications are descriptor-id keyed -> session-scoped too
+            cachedEra = -1;   // era is session-scoped (the descriptor maps next to it are registry-cleared above)
             _listenerChecked = false;                                // the AudioListener rode a session-scoped camera
             // DISTRICT runtime state is session-scoped too (the Oracle incident) — reset ONCE, at the end of this method
             // (the canonical call below). Until 2026-08-21 it was also called here, so every re-arm reset districts twice.
@@ -950,9 +949,6 @@ namespace HumankindAssetFramework
                     e.idleNextAt.Clear(); e.attackSoundNextAt.Clear();   // were UNBOUNDED across reloads (never cleared) — session-scoped sub-pawn ids / attacker hashcodes
                 }
             deployMoveState = null;                                  // diagnostic map, unit GUIDs are session-scoped
-            respawnBase.Clear(); respawnCount.Clear();               // keyed by session-1 unit objects
-            knownManagers.Clear();                                   // dead session's pawn managers (the stray-slot sweep re-learns live ones)
-            _silencedEmitterIds.Clear();                             // static: grew per silenced AudioEmitter ever seen, never reset — session-scoped instance ids
             // DISTRICT axis session state (same bug class): the FxManager and each entry's tiles/private clone were
             // captured from session-1 presentation objects — reusing them in a second game points at torn-down GPU
             // state. ONE canonical reset (a hand-rolled copy here had already drifted: it missed the texture bindings

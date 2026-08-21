@@ -173,7 +173,7 @@ namespace HumankindAssetFramework
         public static object StashedLoudHandle;      // the per-ship engine MOVE-START handle (Play_UNIT_Vehicles_<Type>_Start), auto-captured
         public static object StashedStopHandle;      // the matching MOVE-STOP handle (..._Stop), auto-captured
         public static string StashedLoudName = "";
-        public static readonly System.Collections.Generic.HashSet<string> SeenEvents = new System.Collections.Generic.HashSet<string>();
+        [ProcessLived("diagnostic once-per-event log dedup")] public static readonly System.Collections.Generic.HashSet<string> SeenEvents = new System.Collections.Generic.HashSet<string>();
         public static string EmitterName(object emitter) =>
             (GetMember(emitter, "EntityName") as string) ?? (GetMember(emitter, "Name") as string) ?? emitter?.GetType().Name ?? "?";
 
@@ -216,17 +216,17 @@ namespace HumankindAssetFramework
         // handles are auto-captured from any vehicle move by Hk_AudioTrace, so they're ready once any boat has moved once.
         static int engineFrame;
         static bool _listenerChecked;
-        static List<KeyValuePair<UnityEngine.Object, ModelEntry>> _ourSubpawns;   // the audio-relevant subset of the SHARED sub-pawn scan (rebuilt once per rescan)
+        [ProcessLived("derived subset of the shared sub-pawn scan, rebuilt per rescan")] static List<KeyValuePair<UnityEngine.Object, ModelEntry>> _ourSubpawns;   // the audio-relevant subset of the SHARED sub-pawn scan (rebuilt once per rescan)
         static int _engineScanVersion = -1;                                         // last OurSubPawns version this poll rebuilt from
-        static List<ModelEntry> _audioOn;      // cached audio-enabled subset — the fields it filters on are set once at registry load
-        static List<ModelEntry> _audioOnSrc;   // the entries list the cache was built from (rebuilt when the registry republishes)
+        [ProcessLived("cache keyed on the entries list identity, rebuilt when the registry republishes")] static List<ModelEntry> _audioOn;      // cached audio-enabled subset — the fields it filters on are set once at registry load
+        [ProcessLived("cache keyed on the entries list identity, rebuilt when the registry republishes")] static List<ModelEntry> _audioOnSrc;   // the entries list the cache was built from (rebuilt when the registry republishes)
 
         // ---- SILENCE DONOR AUDIO ----
         // AudioEmitter InstanceIDs whose Wwise posts we drop. Hk_SilenceAudio (prefix on AudioEmitter.PostEvent) reads this
         // every post and returns false — no lock: both writer (this poll) and reader (the post) run on the presentation
         // thread. Stale ids from destroyed emitters are harmless (they just never match a live emitter again).
-        internal static readonly HashSet<int> _silencedEmitterIds = new HashSet<int>();
-        static readonly HashSet<int> _engineLiveIds = new HashSet<int>();   // reused each ~2s subpawn refresh — live sub-pawn ids, to prune the per-pawn engine dicts of dead ones
+        [SessionScoped] internal static readonly HashSet<int> _silencedEmitterIds = new HashSet<int>();
+        [ProcessLived("per-refresh scratch")] static readonly HashSet<int> _engineLiveIds = new HashSet<int>();   // reused each ~2s subpawn refresh — live sub-pawn ids, to prune the per-pawn engine dicts of dead ones
         // Remove per-pawn dict entries whose sub-pawn is gone (combat death / zoom-LOD rebuild). These id-keyed maps
         // (engineLastPos/engineMoving/customSources/loopHoldUntil/idleNextAt) otherwise ONLY grew — a slow managed-heap
         // leak proportional to pawns spawned. Called only on the ~2s subpawn refresh (not per frame); allocates a
@@ -254,7 +254,7 @@ namespace HumankindAssetFramework
                 dict.Remove(gone[i]);
             }
         }
-        static readonly List<int> _goneEngines = new List<int>();
+        [ProcessLived("per-refresh scratch")] static readonly List<int> _goneEngines = new List<int>();
         // Kill a stuck engine loop by BOTH routes: the captured playing-id (reliable even after the emitter object is gone)
         // and StopAll on the cached game-object id (fallback, and cuts any other voice still on it). Returns a short tag
         // for the diagnostic log so we can see which handles we actually had.
@@ -294,7 +294,7 @@ namespace HumankindAssetFramework
         // found sub-pawns), so it fires even when the unit is gone from the scene entirely. A genuinely long move refreshes
         // the heartbeat ~10x/s, so it never trips mid-travel.
         const float EngineLoopMaxSilence = 2.5f;   // seconds a loop may run without a heartbeat before we force-stop it
-        static readonly List<int> _watchdogStop = new List<int>();
+        [ProcessLived("per-tick scratch")] static readonly List<int> _watchdogStop = new List<int>();
         static void WatchdogEngineLoops(ModelEntry e, float now)
         {
             if (!e.engineSound || e.engineMoving.Count == 0) return;

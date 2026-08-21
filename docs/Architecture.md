@@ -106,8 +106,17 @@ the compressed facts:
 1. **Everything a session produces is session-scoped state and is reset on re-arm**: learned ids (`skeletonId`,
    `animId`, `descId`, the per-role anim ids), the per-unit state maps keyed by unit GUID / sub-pawn instance id (a new
    game can *reuse* those ids), the isolated layer / hand-prop layer / adjusted-atlas clones, the AudioListener latch,
-   the district tiles / leaves / bind slots / scoped states. `RearmModelRegistration` is the canonical list; if you add
-   session-scoped state, add its reset there — a hand-rolled copy has already drifted once.
+   the district tiles / leaves / bind slots / scoped states. **Since 2026-08-21 this is enforced, not remembered:**
+   every static collection in the plugin must carry `[SessionScoped]` (the `SessionState` registry clears it on the
+   matching reset — `Model` in `RearmModelRegistration`, `District` in `ResetDistrictSessionState`),
+   `[SessionScoped(Manual = "site")]` (reset by hand at the named seam — lock-guarded, nulled, or owned by another
+   hook) or `[ProcessLived("why")]` (a type cache, a name-keyed once-log, per-tick scratch). A bare static collection
+   fails `SessionStateTests` in CI — no game, no Unity. The first run of that test found two descId-keyed maps that had
+   never been cleared (`sizeFormApplied`, `sizeFormUnitName`: the formation-by-size swap silently skipped in a second
+   session) plus the turn/hug/aim state lists. What the registry cannot prove is **order** — the hand-written lines
+   around the bulk clear (`cachedEra`, the per-entry id resets, the layer destroys, `S = new ScopedState()`) still own
+   the sequence; keep them in the same function. Non-collection statics (`registered`, `cachedEra`, `deployMoveState`)
+   are outside the rule and stay on the hand-list.
 2. **Registration must precede `Apply`.** `Apply` snapshots `BoneInfos` into the GPU skeleton buffer; anything you
    change on a skeleton afterwards (a rebase, a rename) never reaches the GPU. Hence `RebaseRootIdentity` runs inside
    `EnsureRegistered`, before `RegisterMeshCollection` + `Apply` — not in `RepointMatch`.

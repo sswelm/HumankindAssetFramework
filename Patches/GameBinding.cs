@@ -61,7 +61,7 @@ namespace HumankindAssetFramework
         // of a scattered TypeByName("…"), so a rename is fixed here, not hunted across the codebase. Resolved once and
         // cached (non-null only, so a type not yet loaded at first touch re-resolves next call). `fallback` mirrors the
         // game's own short-name fallback used for a couple of these. Rolling this out one subsystem at a time; AUDIO first.
-        static readonly Dictionary<string, Type> _typeCache = new Dictionary<string, Type>();
+        [ProcessLived("type cache")] static readonly Dictionary<string, Type> _typeCache = new Dictionary<string, Type>();
         internal static Type Cached(string name, params string[] fallbacks)
         {
             if (_typeCache.TryGetValue(name, out var c) && c != null) return c;
@@ -266,7 +266,7 @@ namespace HumankindAssetFramework
         // null = all resolved (or not yet run); non-null = a one-line "what's missing" summary. `HealthMissing` is the count.
         internal static string HealthSummary;
         internal static int HealthMissing;
-        internal static readonly List<string> HealthDetail = new List<string>();
+        [ProcessLived("rebuilt by Validate")] internal static readonly List<string> HealthDetail = new List<string>();
 
         static string SafeVersion() { try { return UnityEngine.Application.version ?? "?"; } catch { return "?"; } }
 

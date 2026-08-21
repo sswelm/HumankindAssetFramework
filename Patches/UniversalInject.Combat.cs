@@ -25,14 +25,14 @@ namespace HumankindAssetFramework
         // Delay (in frames, after the unit first renders) before the re-spawn is CONFIGURABLE via the plugin cfg
         // (Factory/RespawnDelayFrames, default 1 = near-instant). A modder on slower hardware can raise it if a unit needs
         // longer to settle. base = first LOADED frame — before the unit is rendered there's nothing to fix.
-        static readonly Dictionary<object, int> respawnBase = new Dictionary<object, int>();   // opted-in unit -> frame it was first seen loaded
-        static readonly Dictionary<object, int> respawnCount = new Dictionary<object, int>();  // opted-in unit -> re-spawns done so far
+        [SessionScoped] static readonly Dictionary<object, int> respawnBase = new Dictionary<object, int>();   // opted-in unit -> frame it was first seen loaded
+        [SessionScoped] static readonly Dictionary<object, int> respawnCount = new Dictionary<object, int>();  // opted-in unit -> re-spawns done so far
         // Strip a pawn description's trailing variant suffix ("Era6_Common_StealthHelicopters_01" -> "Era6_Common_StealthHelicopters")
         // so it matches the unit-definition name ("LandUnit_Era6_Common_StealthHelicopters").
         internal static string CoreDesc(string pd) => System.Text.RegularExpressions.Regex.Replace(pd ?? "", "_[0-9]+$", "");
         static bool respawnQuiet;   // adaptive cadence: true once every tracked unit has had its passes (see below)
         // ProcessAnimStates: PresentationUnit -> its entry (null = vanilla), so the name resolve runs once per unit, not per run.
-        internal static readonly Dictionary<object, ModelEntry> _unitEntryCache = new Dictionary<object, ModelEntry>();
+        [SessionScoped] internal static readonly Dictionary<object, ModelEntry> _unitEntryCache = new Dictionary<object, ModelEntry>();
         static int _unitEntryCacheRun;
         // PresentationUnit -> its ONE entry (longest-match on the unit definition name), cached per unit object; null = vanilla.
         // Shared by the anim-state sampler and the sub-pawn walk. Main thread only; cleared on re-arm + every ~30 s.
@@ -678,7 +678,7 @@ namespace HumankindAssetFramework
         // AttackerGroup/DefenderGroup -> Contenders -> Units -> Unit.UnitDefinition finds OUR units in it (pure managed
         // reads — safe on the sim thread). Matches are QUEUED and played on the main thread (Unity audio APIs), one cry
         // per entry per battle, camera-anchored like the attack roar so it opens the battle audibly at any zoom. ----
-        static readonly System.Collections.Concurrent.ConcurrentQueue<ModelEntry> battleCryQueue = new System.Collections.Concurrent.ConcurrentQueue<ModelEntry>();
+        [ProcessLived("drained every frame; holds registry entries")] static readonly System.Collections.Concurrent.ConcurrentQueue<ModelEntry> battleCryQueue = new System.Collections.Concurrent.ConcurrentQueue<ModelEntry>();
         internal static void OnBattleStarted(object battle)
         {
             try
@@ -745,7 +745,7 @@ namespace HumankindAssetFramework
         // settling unit reads stopped and the after/idle clips play instead of the run). On a moving->stopped flip
         // the stop time is recorded for the AFTER one-shot window. Publishes one sample per PAWN under lock, so
         // every soldier of a squad animates (the pose hook matches by nearest sample).
-        static readonly List<long> scratchGoneKeys = new List<long>();   // reused by PruneGone — was a Keys.Where(...).ToList() alloc per dict per poll (6x/poll)
+        [ProcessLived("per-poll scratch")] static readonly List<long> scratchGoneKeys = new List<long>();   // reused by PruneGone — was a Keys.Where(...).ToList() alloc per dict per poll (6x/poll)
         // Remove every key not seen this poll (a unit that despawned). Main-thread only; the shared scratch is safe because
         // ProcessAnimStates/ProcessDeployState run sequentially from Plugin.Update and PruneGone completes before the next call.
         static void PruneGone<TV>(Dictionary<long, TV> dict, HashSet<long> seen)
@@ -864,7 +864,7 @@ namespace HumankindAssetFramework
         // one of those and holds the deployed pose for the rest — an instant, per-pawn moving→pose mapping (no state machine).
         // Same presentation walk as MaybeRespawnPostLoad; scoped to VISIBLE our-model units, so AI/off-screen moves never reach it.
         static int deployFrame;
-        static Dictionary<long, bool> deployMoveState;   // diagnostic: log each deploy unit's moving<->stopped transitions
+        [SessionScoped(Manual = "RearmModelRegistration nulls it")] static Dictionary<long, bool> deployMoveState;   // diagnostic: log each deploy unit's moving<->stopped transitions
         internal static void ProcessDeployState()
         {
             if (entries == null || !Plugin.UniversalInjectOn.Value) return;

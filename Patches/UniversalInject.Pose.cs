@@ -13,7 +13,7 @@ namespace HumankindAssetFramework
     internal static partial class UniversalInject
     {
         static object animMgrRef;             // AnimationManager instance, captured at registration ([AnimDiag])
-        static HashSet<string> animDiagDone;  // entries already dumped by the one-shot [AnimDiag]
+        [ProcessLived("diagnostic one-shot dump dedup (lazy)")] static HashSet<string> animDiagDone;  // entries already dumped by the one-shot [AnimDiag]
 
         // ONE-SHOT GPU-record diagnostic (2026-07-26, the T-62 renders-REST hunt): dump the engine's live
         // per-bone GPUAnimationEntry records (FrameCount/Format/StartPoseData/BBox) for an entry's primary and
@@ -89,9 +89,9 @@ namespace HumankindAssetFramework
         static bool? anyFreeze;          // cached early-out: skip the per-pawn hook if no model wants its donor animation frozen
         static bool? anyRescuable;       // any entry repointed onto our skeleton — the rescue must run even for a purely STATIC pack (no pose behaviour)
         static bool rescueLogged, posLogged, poseErrLogged, scaleLogged;
-        static HashSet<string> poseHookSeen;   // dump the pose-hook + runtime transform once PER MODEL (so the howitzer logs even if the drone spawns first)
-        static readonly HashSet<string> unseededLogged = new HashSet<string>();   // one warning per entry for the disarmed-net state
-        static HashSet<int> freezeLogSkels;   // distinct skeleton ids we've logged a freeze for (so a second-instance "twin via descriptor" shows up in the log without spamming)
+        [ProcessLived("diagnostic once-per-model dump dedup (lazy)")] static HashSet<string> poseHookSeen;   // dump the pose-hook + runtime transform once PER MODEL (so the howitzer logs even if the drone spawns first)
+        [ProcessLived("diagnostic once-per-entry warning dedup")] static readonly HashSet<string> unseededLogged = new HashSet<string>();   // one warning per entry for the disarmed-net state
+        [SessionScoped] static HashSet<int> freezeLogSkels;   // distinct skeleton ids we've logged a freeze for (so a second-instance "twin via descriptor" shows up in the log without spamming)
         static float recoilLogStart = -1f;    // diagnostic: log once per fire when the deploy+recoil overlay actually sweeps
 
         // An entry the per-pawn hook acts on: an ANIMATED model (plays its own baked clip) OR a STATIC model that freezes
@@ -336,14 +336,14 @@ namespace HumankindAssetFramework
         // live array — from inside the hook, i.e. the same thread as the game's writes — and rescue any same-descriptor
         // slot sitting on a foreign skeleton: force our skeleton and put our clip on Pose0 (the donor clip id can't
         // resolve on our rig). A rescued stale slot stays rescued (nobody rewrites it), so the log goes quiet once clean.
-        static readonly Dictionary<string, float> sweepLast = new Dictionary<string, float>();
-        static readonly HashSet<string> sweepScanLogged = new HashSet<string>();
+        [SessionScoped] static readonly Dictionary<string, float> sweepLast = new Dictionary<string, float>();
+        [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> sweepScanLogged = new HashSet<string>();
         static int sweepFixLogged;
         // EVERY pawn manager the hook has ever seen (reference-identity; a handful — the map's plus per-battle ones).
         // The hook fires per-manager as pawns are ADDED, so a manager whose buffer was written once and never re-added
         // (a stale PresentationUnit from the load/respawn path) would never be swept via ctx alone — its stale slots
         // keep rendering donor visuals forever. Sweeping every known manager closes that hole. Cleared on session reset.
-        internal static readonly List<object> knownManagers = new List<object>();
+        [SessionScoped] internal static readonly List<object> knownManagers = new List<object>();
         static void SweepForStrays(PawnCtx ctx, ModelEntry e)
         {
             if (e.descId < 0) return;
@@ -488,7 +488,7 @@ namespace HumankindAssetFramework
         // rotation quaternion at several frames. Answers WITH DATA which local axis the donor's tail-rotor channel
         // (ch3, Helix_back) spins about — the bake must orient our canted fan bone so that axis lands on the fan's
         // real axle. One-shot per entry, useDonorClip only.
-        static readonly HashSet<string> donorAxisDumped = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name dump dedup")] static readonly HashSet<string> donorAxisDumped = new HashSet<string>();
         static void DumpDonorChannels(object entry, ModelEntry e)
         {
             if (animMgrRef == null || !donorAxisDumped.Add(e.resourceName)) return;
@@ -539,7 +539,7 @@ namespace HumankindAssetFramework
         }
 
         struct TrimSpec { public string bone; public int axis; public float deg; }
-        static readonly List<TrimSpec> trims = new List<TrimSpec>();
+        [ProcessLived("dial-driven list, rebuilt from the dial")] static readonly List<TrimSpec> trims = new List<TrimSpec>();
         static object pawnMgrRef;
         static string trimSig;
         static float trimNextPoll;
@@ -726,7 +726,7 @@ namespace HumankindAssetFramework
 
         // ANIMATED: play OUR clip on Pose0 (weight 1, advancing time); zero the others (never all-zero => NaN => invisible),
         // clear the aim layer, and apply the runtime position/scale. The pose Time comes from the model's behavior below.
-        static readonly Dictionary<string, float> pawnLiveLast = new Dictionary<string, float>();
+        [SessionScoped] static readonly Dictionary<string, float> pawnLiveLast = new Dictionary<string, float>();
 
         // [PawnLive] throttled live-pawn dump (2026-07-26, T-62 hunt): read the entry AS THE GAME LEFT IT
         // (before our writes this frame) — Pose slots + BoneRotation layer. Our own log lines only ever showed

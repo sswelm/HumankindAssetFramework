@@ -81,7 +81,7 @@ namespace HumankindAssetFramework
             // (res switch rebuilds the layer's materials) or on session reset — the full walk then runs again.
             public readonly List<(UnityEngine.Material mat, string prop)> boundSlots = new List<(UnityEngine.Material, string)>();
         }
-        internal static readonly List<DistrictModel> distModels = new List<DistrictModel>();
+        [ProcessLived("the district registry; rebuilt by LoadRegistry")] internal static readonly List<DistrictModel> distModels = new List<DistrictModel>();
 
         static bool distParsed, distOn; static string distName, distAffinity; static object distGuid, distFxMeshGuid;
         static bool distSwapLogged, distGuidLogged;
@@ -153,7 +153,7 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogError("[District] config parse: " + ex); }
         }
 
-        static readonly HashSet<string> distSeen = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> distSeen = new HashSet<string>();
         // Diagnostic: log every distinct district name UpdateLevelBuild fires for, so we can see the ACTUAL
         // ConstructibleDefinitionName to target (an Extension_Base_* reactor may present under its host district's name).
         internal static void DistrictDiag(object district)
@@ -169,7 +169,7 @@ namespace HumankindAssetFramework
             catch { }
         }
 
-        static readonly HashSet<string> distMatDumped = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name dump dedup")] static readonly HashSet<string> distMatDumped = new HashSet<string>();
         // Diagnostic: after a district builds, read the FxEvolverMaterial GUID its main channel resolved to and log it as
         // "a,b,c,d" — ready to paste into another district's DistrictEvolverGuid (the clean SetChannel path), and the way to
         // grab a donor material for the bake. plbc.channels[layer].EvolverMaterialGuid (PerChannelData is a private struct).
@@ -198,7 +198,7 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogError("[DistrictMat] dump: " + ex); }
         }
 
-        static readonly HashSet<string> distSubDumped = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name dump dedup")] static readonly HashSet<string> distSubDumped = new HashSet<string>();
         // Diagnostic: the district's channel-0 material is an FxEvolverMaterialLevelBuildSelector that picks among a table
         // of PLAIN building-variant drawers (its `pairs` NameToGuidPair[] + `defaultMaterial`). Dump those sub-material
         // GUIDs — those are the plain drawers that actually render a mesh, and the clean thing to map an affinity at.
@@ -303,7 +303,7 @@ namespace HumankindAssetFramework
 
         // The leaf that holds geometry is FxEvolverMaterialLevelBuildElement with an `fxMesh` Guid field. Reached via:
         //   Selector.pairs[culture] -> Emitter.levelBuildItems[].loadedEvolverMaterial -> Element(.fxMesh)  (Emitters nest).
-        static readonly List<object> distLeaves = new List<object>();   // legacy shared list (single-model path)
+        [SessionScoped(Scope = SessionScope.District)] static readonly List<object> distLeaves = new List<object>();   // legacy shared list (single-model path)
         static bool UseDeepClone = false;   // SPIKE: deep-clone footprint hack — PARKED. The proper path is a data-authored district visual (see District-Dedicated-Visual-Feasibility.md), not runtime selector surgery.
         static float DeepCloneBuildingMinSize = 0.35f;   // deep-clone: swap building slots this big (bbox max dim) to our mesh; hide smaller props
         static int DeepCloneKeepEvery = 1;               // deep-clone: keep 1 in N large building slots as our reactor (1 = swap ALL large, no thinning → no mid-zoom gaps)
@@ -538,7 +538,7 @@ namespace HumankindAssetFramework
         // once and reuse (AccessTools.Field/GetMethods re-walk the type's members on every call otherwise).
         static FieldInfo fiPlbcChannels, fiChanEvolverMaterial;
         static MethodInfo miRefreshChannel; static object[] refreshArgs;
-        static readonly HashSet<string> distBackoffLogged = new HashSet<string>();   // one-shot log per district when we back off a foreign channel material
+        [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> distBackoffLogged = new HashSet<string>();   // one-shot log per district when we back off a foreign channel material
 
         // ISOLATE mode, per TILE: keep this instance's channel pointed at the entry's (shared) private leaf +
         // re-spawned particle. Re-applied each frame (the game reloads the shared selector into the channel on
@@ -884,7 +884,7 @@ namespace HumankindAssetFramework
         }
 
         // ---- DEDICATED-VISUAL HYBRID: force a district re-resolve after the */District/Main cell fill lands ----
-        static readonly List<object> trackedDistricts = new List<object>();   // live district instances (for the replay)
+        [SessionScoped(Scope = SessionScope.District)] static readonly List<object> trackedDistricts = new List<object>();   // live district instances (for the replay)
         static object lastLevelBuildEvent;            // the real HgFxAnchorComponent.EventNameEnum arg the game passes
         static bool haveLevelBuildEvent;              // guard: only replay once we've captured a genuine arg value
         static bool inForcedReresolve;                // re-entry guard while WE re-invoke UpdateLevelBuild
@@ -1019,7 +1019,7 @@ namespace HumankindAssetFramework
             }
             catch (Exception ex) { Plugin.Log.LogError("[DistrictMain] bind reactor building: " + ex); return false; }
         }
-        static readonly HashSet<string> bindLog = new HashSet<string>();
+        [SessionScoped(Scope = SessionScope.District)] static readonly HashSet<string> bindLog = new HashSet<string>();
 
         // ---- SCOPED texture: bind the district's OWN baked albedo onto the borrowed (brick) donor output-layer clone,
         // so the reactor wears its own texture instead of the donor's. Mirrors DistrictApplyTexture/BindAlbedo but drives
@@ -1045,7 +1045,7 @@ namespace HumankindAssetFramework
             public object flatSel;
             public readonly Dictionary<object, UnityEngine.Vector3> origSize = new Dictionary<object, UnityEngine.Vector3>();
         }
-        internal static readonly Dictionary<string, ScopedState> scopedStates = new Dictionary<string, ScopedState>();
+        [SessionScoped(Scope = SessionScope.District, Manual = "ResetDistrictSessionState, paired with S = new ScopedState()")] internal static readonly Dictionary<string, ScopedState> scopedStates = new Dictionary<string, ScopedState>();
         static ScopedState S = new ScopedState();   // current scoped district's state (never null)
         internal static ScopedState ScopedFor(string name) { if (!scopedStates.TryGetValue(name, out var s)) scopedStates[name] = s = new ScopedState(); return s; }
 
@@ -1060,7 +1060,7 @@ namespace HumankindAssetFramework
         static int scopedTexErrors { get => S.texErrors; set => S.texErrors = value; }
         static bool HasAlpha(UnityEngine.TextureFormat f) => f == UnityEngine.TextureFormat.DXT5 || f == UnityEngine.TextureFormat.RGBA32 || f == UnityEngine.TextureFormat.ARGB32 || f == UnityEngine.TextureFormat.BC7 || f == UnityEngine.TextureFormat.RGBAHalf || f == UnityEngine.TextureFormat.RGBAFloat;
         internal static int scopedRebindLog;   // TWITCH DIAG counter (albedo rebinds = game resetting our texture)
-        static readonly HashSet<string> scopedTexLog = new HashSet<string>();
+        [SessionScoped(Scope = SessionScope.District)] static readonly HashSet<string> scopedTexLog = new HashSet<string>();
         internal static void ApplyScopedAlbedo()
         {
             if (scopedDonorClone == null || scopedElements.Count == 0 || scopedAtlasGuid == null) return;
@@ -1451,8 +1451,8 @@ namespace HumankindAssetFramework
         // unused-asset sweep does not collect them, so each in-session reload leaked a native FxOutputLayer + N cloned
         // FxEvolverMaterials + a gray texture per scoped district.
         static readonly object districtDestroyGate = new object();
-        static readonly List<UnityEngine.Object> districtOwnedClones = new List<UnityEngine.Object>();   // live clones this session
-        static readonly List<UnityEngine.Object> districtPendingDestroy = new List<UnityEngine.Object>(); // moved here on reset, freed on Update
+        [SessionScoped(Scope = SessionScope.District, Manual = "ResetDistrictSessionState under districtDestroyGate")] static readonly List<UnityEngine.Object> districtOwnedClones = new List<UnityEngine.Object>();   // live clones this session
+        [SessionScoped(Scope = SessionScope.District, Manual = "drained by the main-thread destroy queue")] static readonly List<UnityEngine.Object> districtPendingDestroy = new List<UnityEngine.Object>(); // moved here on reset, freed on Update
         static void TrackDistrictClone(UnityEngine.Object o) { if (o) lock (districtDestroyGate) districtOwnedClones.Add(o); }
 
         // Main thread (Plugin.Update). Free the district clones queued by a session reset.
@@ -1483,11 +1483,10 @@ namespace HumankindAssetFramework
                 districtOwnedClones.Clear();
             }
             distFxManager = null;
-            trackedDistricts.Clear(); districtNameCache.Clear(); lastLevelBuildEvent = null; haveLevelBuildEvent = false;   // instances/args reference the dead session
-            bindLog.Clear();   // re-bind the building output layers against the new session's leaves
-            loadedSelectorByKey.Clear(); selectorTileLogged.Clear();   // loaded selectors reference the dead session's FxManager
+            lastLevelBuildEvent = null; haveLevelBuildEvent = false;   // instances/args reference the dead session
+            Plugin.Diag($"[Session] district reset: {SessionState.Reset(SessionScope.District)} registry-managed collection(s) cleared");   // trackedDistricts, districtNameCache, bindLog, loadedSelectorByKey, selectorTileLogged, scopedTexLog, hexDistricts, distLeaves — every [SessionScoped(District)] static
             scopedStates.Clear(); S = new ScopedState();   // ALL per-district scoped state (donorClone/albedo/elements/B&W/flatten) referenced the dead session
-            reactorBoundGlobal = false; scopedTexLog.Clear();   // legacy once-flag + global diag throttle
+            reactorBoundGlobal = false;   // legacy once-flag + global diag throttle
             foreach (var d in distModels)
             {
                 d.tiles.Clear(); d.privateLeaf = null; d.leaves.Clear(); d.collected = false;
@@ -1623,7 +1622,7 @@ namespace HumankindAssetFramework
         // footprint asset. This shows whether the decal channel exists for our district and what it holds.
         // Dump the channel + material tree of ANY district by name — call for vanilla AND ours to diff what a normal
         // district's presentation has (a decal drawer for the footprint?) that the reactor's lacks. First ~12 distinct.
-        static readonly HashSet<string> treeDumpedNames = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name dump dedup")] static readonly HashSet<string> treeDumpedNames = new HashSet<string>();
         internal static void DumpAnyDistrictTree(object district)
         {
             try

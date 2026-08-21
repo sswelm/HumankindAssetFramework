@@ -103,16 +103,16 @@ namespace HumankindAssetFramework
         // RESIZE LAB (2026-07-28): pattern rules from the packs' "unitScales" arrays + the per-session
         // resolution to descriptor ids (session-scoped — descriptor indices change per load).
         internal struct ScaleRule { public string match; public float scale; public int era; }            // era 0 = derive from the unit's name
-        static readonly List<ScaleRule> unitScaleRules = new List<ScaleRule>();
+        [ProcessLived("pack tuning table; rebuilt by LoadRegistry")] static readonly List<ScaleRule> unitScaleRules = new List<ScaleRule>();
         struct UnitScaleInfo { public float scale; public int homeEra; public int domain; }   // rule product, the unit's own era, and its domain (UnitSpawnType) for the frontier lookup
-        static readonly Dictionary<int, UnitScaleInfo> unitScaleByDesc = new Dictionary<int, UnitScaleInfo>();
-        static readonly Dictionary<int, string> unitScaleNameByDesc = new Dictionary<int, string>();   // F8 readout only
+        [SessionScoped] static readonly Dictionary<int, UnitScaleInfo> unitScaleByDesc = new Dictionary<int, UnitScaleInfo>();
+        [SessionScoped] static readonly Dictionary<int, string> unitScaleNameByDesc = new Dictionary<int, string>();   // F8 readout only
         // TURN EASE for VANILLA units (docs/Turn-Ease.md): Formation Lab turn links resolved to descriptor ids at
         // addon load (same session-scoped resolution as the Resize rules above); read by the pose hook per pawn.
-        static readonly Dictionary<int, float> vanillaTurnByDesc = new Dictionary<int, float>();
-        static readonly HashSet<int> vanillaEaseLogged = new HashSet<int>();   // one "easing vanilla desc N" line per type per session
-        static readonly Dictionary<string, int> addonDefIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);   // every addon seen this session: name -> PawnDefinitionId
-        internal static readonly HashSet<int> descCensusLogged = new HashSet<int>();   // diag=1 census: one line per rendered descriptor per session
+        [SessionScoped] static readonly Dictionary<int, float> vanillaTurnByDesc = new Dictionary<int, float>();
+        [SessionScoped] static readonly HashSet<int> vanillaEaseLogged = new HashSet<int>();   // one "easing vanilla desc N" line per type per session
+        [SessionScoped] static readonly Dictionary<string, int> addonDefIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);   // every addon seen this session: name -> PawnDefinitionId
+        [SessionScoped] internal static readonly HashSet<int> descCensusLogged = new HashSet<int>();   // diag=1 census: one line per rendered descriptor per session
 
         // CATEGORY TURN EASE (2026-08-06, user design): global defaults per unit TYPE instead of one blanket
         // rate — Human, turretless Land vehicle, Land vehicle WITH a turret, Hover, Ship. Classification is by
@@ -133,11 +133,11 @@ namespace HumankindAssetFramework
         // The bank a category-eased unit gets (per-model turnBank still wins for entries).
         internal static float CategoryBank(int effCat) => effCat == CatHover ? catHoverBank : effCat == CatShip ? catShipBank : 0f;
         internal static bool AnyCatRate => catHumanRate > 0f || catLandRate > 0f || catTurretRate > 0f || catHoverRate > 0f || catShipRate > 0f;
-        static readonly Dictionary<int, int> vanillaCatByDesc = new Dictionary<int, int>();   // desc -> BASE category (land, not yet hover/turret-refined)
-        static readonly Dictionary<int, bool> descTurret = new Dictionary<int, bool>();       // desc -> has azimuth turret (learned)
-        static readonly Dictionary<int, bool> descHover = new Dictionary<int, bool>();        // desc -> carries the Hover ability (learned)
+        [SessionScoped] static readonly Dictionary<int, int> vanillaCatByDesc = new Dictionary<int, int>();   // desc -> BASE category (land, not yet hover/turret-refined)
+        [SessionScoped] static readonly Dictionary<int, bool> descTurret = new Dictionary<int, bool>();       // desc -> has azimuth turret (learned)
+        [SessionScoped] static readonly Dictionary<int, bool> descHover = new Dictionary<int, bool>();        // desc -> carries the Hover ability (learned)
         internal struct ClassSample { public UnityEngine.Vector3 pos; public bool turret; public bool hover; public int baseCat; }
-        internal static readonly List<ClassSample> classSamples = new List<ClassSample>();    // slow-scan output for the position join
+        [SessionScoped] internal static readonly List<ClassSample> classSamples = new List<ClassSample>();    // slow-scan output for the position join
 
         internal static int CategoryFromProfile(int prof)
         {
@@ -234,9 +234,9 @@ namespace HumankindAssetFramework
                     }
             }
         }
-        static readonly Dictionary<int, float[]> eraGridRows = new Dictionary<int, float[]>();  // Global Era Lab: unit era -> modifier per CURRENT era
-        static HashSet<string> unitScaleLogged;
-        static readonly HashSet<int> vanillaScaledLogged = new HashSet<int>();
+        [ProcessLived("pack tuning table; rebuilt by LoadRegistry")] static readonly Dictionary<int, float[]> eraGridRows = new Dictionary<int, float[]>();  // Global Era Lab: unit era -> modifier per CURRENT era
+        [ProcessLived("diagnostic once-per-name log dedup (lazy)")] static HashSet<string> unitScaleLogged;
+        [SessionScoped] static readonly HashSet<int> vanillaScaledLogged = new HashSet<int>();
 
         // RESIZE — CLOSED WITH INSTRUCTION-LEVEL PROOF (2026-07-29, the shader dig): the entire render
         // pipeline was disassembled from AssetBundles/InstancingAndFx (AmpliAnimation compute kernels +
@@ -275,8 +275,8 @@ namespace HumankindAssetFramework
         // of trusting a stale bookkeeping entry. That closes both failure modes at once: double-scaling a buffer
         // that persisted, and silently under-scaling one that was rebuilt.
         struct MeshScale { public float factor; public UnityEngine.Vector3 probe; }
-        static readonly Dictionary<long, MeshScale> meshApplied = new Dictionary<long, MeshScale>();   // (layer<<32)|meshIndex
-        static readonly Dictionary<int, float> descApplied = new Dictionary<int, float>();             // descriptor -> current target (session-scoped)
+        [SessionScoped] static readonly Dictionary<long, MeshScale> meshApplied = new Dictionary<long, MeshScale>();   // (layer<<32)|meshIndex
+        [SessionScoped] static readonly Dictionary<int, float> descApplied = new Dictionary<int, float>();             // descriptor -> current target (session-scoped)
 
         // ── THE WORLD'S ERA (2026-07-29) ─────────────────────────────────────────────────────────────────────────
         // We want "how advanced is the world", and the obvious API is the wrong one: Timeline.GetGlobalEraIndex()

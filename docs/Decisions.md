@@ -183,6 +183,22 @@ When two packs target the same pawn, the first-loaded one (now = earlier in Huma
 loud; a replacement must be **declared** in the pack's `overrides`. No implicit or silent overrides. **Why:** silent
 overrides make a multi-pack setup undebuggable.
 
+## Session-scoped state is declared, not remembered (2026-08-21)
+
+**Decision:** every static collection in the plugin carries a lifetime attribute — `[SessionScoped]` (the
+`SessionState` registry clears it on the scope's reset), `[SessionScoped(Manual = "site")]` (hand-reset at a named
+seam) or `[ProcessLived("why")]` — and a reflection test fails the build on a bare one.
+
+**Why:** the project's most-repeated bug class was "a static survived re-arm" (the Oracle incident, the `_DRILL`
+pack-data bug, the tank-destroyer donor skin). The rule against it lived in a comment and a hand-list of ~60
+`.Clear()` calls across sixteen partial files, so it held only as long as every author remembered it. The first run of
+the test found two descId-keyed maps that had never been cleared. Enforcement costs one attribute per field and
+runs in CI with no game.
+
+**What it does not do:** prove order. The hand-written lines around the bulk clear still own the sequence, and
+non-collection statics (`bool`/`int` latches) are outside the rule. A triage reason on `[ProcessLived]` is
+mandatory — "constant" and "type cache" are fine; an empty one fails.
+
 ## A focused unit suite, not broad coverage or an in-game test framework (settled)
 The plugin has a bounded suite (**111 tests**) over the **pure logic that runs outside the game** (parse / schema /
 reflection-resolution / the smoke-verdict rule); everything engine-coupled is verified by in-editor instruments (Feature

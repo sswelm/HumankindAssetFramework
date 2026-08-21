@@ -29,8 +29,8 @@ namespace HumankindAssetFramework
         // A plain Dictionary resized under a concurrent reader corrupts its bucket chain (FindEntry spins forever — a
         // hard freeze, no exception, no log line). ConcurrentDictionary: same null-caching semantics, lock-free reads
         // on the hot path, and a non-capturing factory so the miss path allocates no closure.
-        static readonly System.Collections.Concurrent.ConcurrentDictionary<(Type, string), MemberInfo> memberCache = new System.Collections.Concurrent.ConcurrentDictionary<(Type, string), MemberInfo>();
-        static readonly System.Collections.Concurrent.ConcurrentDictionary<(Type, string), FieldInfo> fieldCache = new System.Collections.Concurrent.ConcurrentDictionary<(Type, string), FieldInfo>();
+        [ProcessLived("reflection cache")] static readonly System.Collections.Concurrent.ConcurrentDictionary<(Type, string), MemberInfo> memberCache = new System.Collections.Concurrent.ConcurrentDictionary<(Type, string), MemberInfo>();
+        [ProcessLived("reflection cache")] static readonly System.Collections.Concurrent.ConcurrentDictionary<(Type, string), FieldInfo> fieldCache = new System.Collections.Concurrent.ConcurrentDictionary<(Type, string), FieldInfo>();
         static readonly Func<(Type, string), MemberInfo> resolveMember = k => (MemberInfo)AccessTools.Property(k.Item1, k.Item2) ?? AccessTools.Field(k.Item1, k.Item2);
         static readonly Func<(Type, string), FieldInfo> resolveField = k => AccessTools.Field(k.Item1, k.Item2);
         static MemberInfo CachedMember(Type t, string name) => memberCache.GetOrAdd((t, name), resolveMember);

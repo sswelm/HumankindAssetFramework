@@ -33,7 +33,7 @@ namespace HumankindAssetFramework
         // the same AssetReference-guid swap the prop axis uses for a fragment's ModelPrefab. Applied at AnimationLoad (data
         // is up, before combat); idempotent, so re-running each session just re-asserts it.
         static bool projParsed;
-        static readonly List<(object pawnGuid, object projGuid, string raw)> projOverrides = new List<(object, object, string)>();
+        [SessionScoped(Manual = "RearmProjectileOverrides (registry-derived, re-parsed per session)")] static readonly List<(object pawnGuid, object projGuid, string raw)> projOverrides = new List<(object, object, string)>();
         internal static void RearmProjectileOverrides() { projParsed = false; projOverrides.Clear(); }
 
         // Comma-ONLY 4-int parser. (ParseGuidCsv splits on '-' too, which would corrupt the negative ints a projectile
@@ -112,7 +112,7 @@ namespace HumankindAssetFramework
             }
         }
 
-        static readonly List<object> propPending = new List<object>();   // parsed GUIDs not yet registered (per-session)
+        [SessionScoped(Manual = "UniversalInject.PropsBudget load path")] static readonly List<object> propPending = new List<object>();   // parsed GUIDs not yet registered (per-session)
         static bool propParsed; static int propWait; static bool propTickArmed; static int propTick;
         internal static void RearmPropRegistration() { propParsed = false; propPending.Clear(); propTickArmed = true; }   // AnimationLoad cleared the manager's list — register ours again
         static void ParsePropGuidsIFN()

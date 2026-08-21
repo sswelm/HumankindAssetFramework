@@ -20,7 +20,7 @@ namespace HumankindAssetFramework
     // degrades to the old speed, never to a crash. Accessors are cached per (type, path, T, get/set); thread-safe.
     internal static class FastMember
     {
-        static readonly ConcurrentDictionary<(Type, string, Type, bool), Delegate> cache = new ConcurrentDictionary<(Type, string, Type, bool), Delegate>();
+        [ProcessLived("compiled accessor cache")] static readonly ConcurrentDictionary<(Type, string, Type, bool), Delegate> cache = new ConcurrentDictionary<(Type, string, Type, bool), Delegate>();
         const BindingFlags F = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
 
         public static Func<object, T> Getter<T>(Type t, string path) =>

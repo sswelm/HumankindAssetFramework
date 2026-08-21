@@ -74,20 +74,20 @@ namespace HumankindAssetFramework
         const int ApplyWindow  = 300;  // BACKSTOP only (~5s): the restore stops the moment every saved unit has been handled once (Walk); this cap just bounds the wait for saved units that never load this session
 
         static readonly object gate = new object();
-        static readonly Dictionary<ulong, int> live = new Dictionary<ulong, int>();   // guid -> angle, main-thread snapshot (save reads it)
-        static readonly Dictionary<ulong, int> snap = new Dictionary<ulong, int>();   // reused scratch for each Walk (was a fresh Dictionary per tick — GC every capture) -> copied into `live` under lock
+        [SessionScoped(Manual = "FacingPersistPatch load/save seams, under lock")] static readonly Dictionary<ulong, int> live = new Dictionary<ulong, int>();   // guid -> angle, main-thread snapshot (save reads it)
+        [ProcessLived("per-capture scratch, cleared per Walk")] static readonly Dictionary<ulong, int> snap = new Dictionary<ulong, int>();   // reused scratch for each Walk (was a fresh Dictionary per tick — GC every capture) -> copied into `live` under lock
 
         // apply state (touched on the main thread except pendingFile, set by the load hook thread)
         static string pendingFile;
-        static readonly Dictionary<ulong, int> pendingMap = new Dictionary<ulong, int>();
-        static readonly HashSet<ulong> applied = new HashSet<ulong>();   // per-army: handled ONCE (restored / released / already-correct), then NEVER touched again this load — the single-shot model, so no continuous re-apply can fight a move
+        [SessionScoped(Manual = "FacingPersistPatch load/save seams")] static readonly Dictionary<ulong, int> pendingMap = new Dictionary<ulong, int>();
+        [SessionScoped(Manual = "FacingPersistPatch load/save seams")] static readonly HashSet<ulong> applied = new HashSet<ulong>();   // per-army: handled ONCE (restored / released / already-correct), then NEVER touched again this load — the single-shot model, so no continuous re-apply can fight a move
         // RESPAWN RE-ARM (2026-08-16): a respawnAfterLoad unit (helicopters) re-runs UpdatePawns ~a few frames post-load, which
         // recomputes FormationAngle to neutral AFTER the single-shot restore above already fired + closed — so its heading was
         // lost while non-respawn units (organ gun) kept theirs. MaybeRespawnPostLoad calls OnArmyRespawned right after each
         // UpdatePawns; we then re-apply the saved angle once the rebuilt unit is loaded + stationary, independent of the
         // initial restore window. savedFacing keeps this load's angles for the whole session (pendingMap gets cleared on close).
-        static readonly Dictionary<ulong, int> savedFacing = new Dictionary<ulong, int>();
-        static readonly HashSet<ulong> respawnReapply = new HashSet<ulong>();
+        [SessionScoped(Manual = "FacingPersistPatch load/save seams")] static readonly Dictionary<ulong, int> savedFacing = new Dictionary<ulong, int>();
+        [SessionScoped(Manual = "FacingPersistPatch load/save seams")] static readonly HashSet<ulong> respawnReapply = new HashSet<ulong>();
         static bool mapLoaded;
         static int applyStart = -1;
         static int frame;
@@ -280,7 +280,7 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogError("[Facing] apply: " + ex); return false; }
         }
 
-        static readonly Dictionary<(Type, string), FieldInfo> fc = new Dictionary<(Type, string), FieldInfo>();
+        [ProcessLived("field cache")] static readonly Dictionary<(Type, string), FieldInfo> fc = new Dictionary<(Type, string), FieldInfo>();
         static FieldInfo CachedField(Type t, string n) { var k = (t, n); if (!fc.TryGetValue(k, out var f)) fc[k] = f = AccessTools.Field(t, n); return f; }
     }
 }

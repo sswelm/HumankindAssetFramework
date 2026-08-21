@@ -149,7 +149,7 @@ namespace HumankindAssetFramework
     [HarmonyPatch] internal static class Hk_BombardAnimHold
     {
         class Pending { public object fsm; public float due; public float start; public bool fixedDue; }
-        static readonly List<Pending> pending = new List<Pending>();
+        [SessionScoped] static readonly List<Pending> pending = new List<Pending>();
         static MethodInfo miTeleport;
         static bool replaying;
         static MethodBase TargetMethod()
