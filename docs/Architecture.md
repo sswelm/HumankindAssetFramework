@@ -66,6 +66,27 @@ main-thread.
 5. **Per-frame hot paths don't allocate for logging they won't emit.** `Plugin.Diag` is gated on `VerboseLog`, but
    its *argument* is built by the caller; on a per-pawn-per-frame path, guard the construction too.
 
+### 2b. Per-frame cost — measured, bucketed, never estimated
+
+`FrameCost` times every per-frame entry point (the `Update` fan-out, the pose hook split vanilla/ours, sub-buckets
+inside the hot paths) and prints µs/frame per bucket to the F8 panel and the log. The rules it enforces
+([Decisions](Decisions.md) "Per-frame cost is a number"):
+
+- **A new per-frame path gets a bucket when it is written.** Unbucketed cost is invisible cost.
+- **No full-scene `FindObjectsOfType` on a timer.** It is ~50 ms on a busy map. The sub-pawn source
+  (`SubPawnScan.cs`) walks the presentation tree instead and self-verifies against the scan once per session; the
+  terrain-hug district map is dirty-driven from the district hook. If you must scan, mark it dirty from an event and
+  cap the cadence in tens of seconds.
+- **No retry-every-frame until something exists.** The scoped-district bind walked every leaf of every district each
+  frame for the first 5 s of every load. Throttle unbound retries (twice a second is plenty).
+- **Resolve reflection once, not per frame.** `AccessTools.TypeByName` is an uncached assembly walk; bone-name lookups
+  are a reflection read + a string alloc per bone. Cache per entry, keyed on whatever can change the answer.
+- **The per-pawn path uses `PawnFast`.** Boxed-struct reflection costs ~0.5-1 µs per get/set on Mono; the compiled
+  accessors (`FastMember`) cost ~10 ns and write INTO the box the same way. Every accessor has a reflection fallback
+  — a game update that renames a field degrades to the old speed, never to a crash — and `[PawnFast]` in the log
+  says which path is live.
+- **Two `Physics.RaycastAll` per pawn per frame is a budget line item.** Sample, hold, ease.
+
 ## 3. Session lifecycle — what re-arms, when, in what order
 
 The game rebuilds its presentation world per **session** (new game, save-load, in-session reload), but some of its

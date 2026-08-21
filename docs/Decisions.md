@@ -7,6 +7,20 @@ check before proposing a change to any of them.
 
 ---
 
+## Per-frame cost is a number in the F8 panel, never an estimate (2026-08-21)
+Asked what a day of changes cost per frame, the answer given was a reasoned estimate: "under 1%". The first
+measurement read **5.7 ms/frame — 16.7% of a 30 fps frame, 15× the estimate** — and not one of the causes was the
+day's changes; all were long-standing per-frame scene scans, unthrottled retries and reflection density that nobody
+had ever timed. Six measured rounds later it is ~0.9 ms.
+**Rule:** `FrameCost` stays on. Every per-frame entry point runs inside a bucket; a new poll, hook or per-pawn path
+gets a bucket when it is written. Performance claims about HAF are read off the `[FrameCost]` line (µs/frame per
+bucket, ns per pawn-add), never reasoned from the code. When a bucket surprises, SPLIT it before touching anything
+— twice today a fix aimed at the wrong cause (reflection on the pose entry; the raycasts) until a sub-bucket showed
+where the time actually was. And when a target can't be found by reading, ask the DLLs headlessly (`tools/typeprobe`)
+before spending a game launch.
+**Why it is written down:** the estimate was confident, specific, wrong by an order of magnitude, and would have been
+accepted. The meter costs two `Stopwatch` reads per bucket per frame.
+
 ## Thread safety is about shared HEAP, not the Unity API (2026-08-21)
 Every off-main-thread path in HAF (the sim-thread combat/battle hooks, `Sandbox.Load`, `FacingPersist` save/load)
 was correctly guarded against touching Unity objects — queues, volatile flags, main-thread drains. Three separate

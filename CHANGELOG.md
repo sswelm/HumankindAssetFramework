@@ -10,6 +10,51 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **PER-FRAME COST: MEASURED, THEN CUT 5.7 ms → ~0.6-0.8 ms (16.7% → ~2% of a 30 fps frame) (2026-08-21).** The user asked
+  what the day's changes had cost; the answer was an estimate ("under 1%"). `Patches/FrameCost.cs` replaced the
+  estimate with a number: every per-frame entry point — the `Plugin.Update` fan-out, bucket by bucket, and the
+  per-pawn pose hook (vanilla vs OUR pawns) — timed with `Stopwatch`, averaged over 5 s, shown in the F8 panel and
+  logged once a minute as `[FrameCost]`. **The first run read 5,662 µs/frame — 15× the estimate** — and the buckets
+  named the causes, none of them the day's changes. Six drilled rounds, each aimed at a measured bucket:
+  (1) **two independent full-scene `FindObjectsOfType` scans** (engine audio every 2 s, sub-pawn repair every 3 s;
+  ~60-100 ms stalls, ~1.7 ms/frame averaged) → ONE shared source, `UniversalInject.SubPawnScan.cs`: a targeted walk
+  of the presentation tree (armies, squadrons, **air formations** — where a squadron's pawns actually live, found with
+  the new headless `tools/typeprobe` — battle units) matched by the scan's own criterion and **self-verified** against
+  the scene scan once per session (the log names any miss, and the scan stays in charge); (2) the scoped-district
+  bind retrying its full leaf walk EVERY frame until the donor layer existed — 42 ms/frame for the first 5 s of every
+  load → twice a second; (3) `WonderRows` running an uncached `AccessTools.TypeByName` assembly walk every 30 frames
+  forever (1.35 ms/frame) → resolved once + a done-latch, and a scoped wonder latches immediately; (4) the **pose hook
+  at 25-57 µs per OUR pawn**: ~60 reflection get/sets on the boxed `PawnEntry` per pawn per frame → `FastMember.cs`
+  (compiled `DynamicMethod` field/property accessors with nested struct paths, null = "use reflection") behind
+  `PawnFast` (ids, translation, rotation, scale, the nine poses, the four aim slots; each with its own fallback, core
+  set gated by `Ready`). The first deploy stayed on reflection because `HideFactor` is a packed PROPERTY — caught by
+  the log line, confirmed by `typeprobe`, fixed with property-leaf support; (5) the donor-clip branch (helicopters):
+  **two `Physics.RaycastAll` per pawn per frame** for the cliff pre-climb → sampled every 15 frames and held (eased
+  anyway); rotor-trim re-resolving every bone name by reflection per line per pawn per frame → resolved once per dial
+  edit; the terrain-hug district map's 3-second scene scan → dirty-driven from the district hook (30 s safety net);
+  (6) the rest: unit→entry cached per `PresentationUnit` (anim sampler), adaptive respawn-poll cadence, texture tick
+  at 1/5, district name cache, flatten poll at 1/10. **Measured at each step, not inferred**: our pawns 57 → ~5 µs.
+  **Final drill:** `[SubPawnScan] walk verified against the scene scan: 52 sub-pawn(s), none missed — walk in charge`,
+  `[PawnFast] compiled accessors ready`, `[FrameCost] HAF 780 µs/frame (2.3% @ 30 fps)` (565 in a quiet window),
+  helicopters hugging terrain, drones / abominations / biremes / the Jagdpanzer all rendering, smoke PASS, 0 errors.
+  Unchanged and documented: `SelectorTile` ~0.2 ms (diffuse, 0.6%), and `DistrictDebug=true` in the config costs
+  ~40 ms/frame for the first 5 s of every load (the repository dump) — a debug setting, off for play.
+  The 30 fps cap matters for reading the numbers: µs/frame is absolute, the percentage is against a 33 ms frame, and
+  frame-count throttles run half as often as they would at 60 fps.
+
+- **THE DAY'S ONLY REGRESSION WAS WEEKS OLD: TankDestroyers rendered as its donor (2026-08-21).** Noticed by the user
+  mid-drill. Cause: the pack's `pawnDescription` read `Era6_Common_TankDestroyers_01_DRILL` — a drill leftover
+  committed to the ENCReload source (d02b00f) — and the runtime matches `addon.IndexOf(pawnDescription)`, so the
+  real addon never matched and the smoke said *"no unit on the map this session"* every time, while the unit was on
+  screen as a vanilla MediumTank. Fixed at the source (ENCReload 0a8787b) and in the deployed pack; the Jagdpanzer is
+  back. So the class can't hide again: the **validator** warns on a `pawnDescription` that doesn't end in `_NN`
+  (every game pawn definition does — checkable with no game), and the **smoke**, given the unit-definition names the
+  addon hook saw, now says *"matches NOTHING the game loaded — it loaded 'X', which yours only extends (stray suffix
+  '_DRILL'?)"* and **FAILS** — the harness had that list all along. Suite 410 → 425.
+  Open question recorded, not fixed: the walk showed the hovercraft's and drones' UNIT-definition names do not
+  contain their pawnDescription, so `FindEntryForUnitDefinition` (fire-on-attack, engine audio, the anim sampler)
+  may be skipping those units too — the next drill's question.
+
 - **THE NINE CLIP ROLES BECOME ONE TABLE — god-class cut A, reversing one slice of a recorded decision
   (2026-08-21).** `ModelEntry` carried each animation role as its own hand-expanded field family — `mca/mcb/mcc/mcd`
   + `moveClipColl` + `moveAnimId` + `moveDur`, ×9 ≈ 63 fields — and every "all roles" site was a hand-written list

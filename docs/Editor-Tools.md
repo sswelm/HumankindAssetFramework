@@ -203,6 +203,11 @@ Press **F8** in a loaded game for HAF's runtime panel. It's trimmed to what a mo
   (`1/1 textured`; a give-up after 3 apply errors is a named FAIL, a not-yet-applied atlas a NOTE to re-run shortly).
 - **GPU mesh buffer (live)** — per-layer vertex/index/mesh fill, so you can see whether your models fit the shared budget
   ([Vertex-Budget.md](Vertex-Budget.md)); **Shift+F8** also logs it.
+- **HAF per-frame cost** — what the plugin itself costs each frame, averaged over 5 s: total µs/frame and percent of the
+  frame, the pose hook split into vanilla pawns and yours (ns per pawn-add), and the six most expensive internal
+  buckets. The same line is written to the log once a minute as `[FrameCost]`. If a number here grows after you add
+  units or districts, the bucket names where. (`DistrictDebug = true` in the config adds ~40 ms/frame for the first
+  seconds of every load — a diagnostic, keep it off for play.)
 - **Dump Atlases** — dump a unit's atlas to paint (the Unit Retexture workflow; [Textures.md](Textures.md)).
 - **Game Sound Lab** — **Audio Trace** (live Wwise event trace), **Dump Sound Catalog** (list every event name), and
   **Play Event / Stop** (audition an event before you override it; [Game-Sound-Lab.md](Game-Sound-Lab.md)).
