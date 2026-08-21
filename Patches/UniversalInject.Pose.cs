@@ -228,7 +228,7 @@ namespace HumankindAssetFramework
                     return;
                 }
 
-                lastPawnMatched = true;   // from here on this pawn is OURS (FrameCost: PoseOurs bucket)
+                lastPawnMatched = true; e.lastPoseHookAt = UnityEngine.Time.time;   // from here on this pawn is OURS (FrameCost: PoseOurs bucket)
 
                 // DUPLICATE-PAWN HIDE (2026-08-03, the helicopter "GPU rotor" endgame): gunship-class units spawn a
                 // SQUADRON of pawns via the air hardcode — the formation override's 1-dummy layout doesn't reduce them,

@@ -199,6 +199,25 @@ runs in CI with no game.
 non-collection statics (`bool`/`int` latches) are outside the rule. A triage reason on `[ProcessLived]` is
 mandatory — "constant" and "type cache" are fine; an empty one fails.
 
+## The injecting 18k lines are verified in the live game, on demand — not through a fake object model (2026-08-21)
+
+**Decision:** the reflection half is verified by the in-game smoke test reading the *engine's* state on demand
+(live pawn slots, the pose hook's own timestamps, a fresh sub-pawn scene audit), plus the pure-extraction pattern
+for decision logic. No fake-object seam under the reflection accessors; no always-on verification.
+
+**Why:** a reviewer proposed a thin seam over `GetMember`/`SetMember`/`Invoke` with a recorded type graph so the
+decision logic could run in xUnit. Measured: reflection is *not* funnelled — ~660 accessor calls but also ~350
+direct `AccessTools` and ~400 `.GetType()` sites, ~1,450 in all — so the seam would be a rewrite before the first
+test. And a type graph gives types, not values; the decisions depend on runtime values the game assigns (ids per
+session, which collection holds a squadron, a packed property). Every drill-caught bug this week was one of those
+assumptions being wrong — a fake built on the same assumptions would have passed them all. The user also ruled out
+always-on automation on performance grounds: checks run when the button is pressed, never per frame.
+
+**What it means in practice:** a drill-caught bug earns a smoke check that reads the engine at the level the bug
+lived (see Editor-Tools.md, Smoke Test), and decision logic that *can* be pure is extracted and tested (`PoseMath`,
+`DialConfig`, `PackTuning`, `MergeModels`, `GatherLivePawnFacts`, …). "Coverage target = theatre" still holds;
+"the seams are untestable" does not — they are testable in the one place they are real.
+
 ## A focused unit suite, not broad coverage or an in-game test framework (settled)
 The plugin has a bounded suite (**111 tests**) over the **pure logic that runs outside the game** (parse / schema /
 reflection-resolution / the smoke-verdict rule); everything engine-coupled is verified by in-editor instruments (Feature

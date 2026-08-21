@@ -29,6 +29,7 @@ Severity key: 🔴 fix soon (silent data loss / silent no-inject) · 🟡 worth 
 
 | Date | Fix |
 |---|---|
+| 08-21 | Smoke **live-pawn truth**: skeleton truth per live pawn, pose-hook liveness, on-demand sub-pawn walk audit — the engine-level checks for the three bug classes drills caught by eye (verification-pyramid finding; the fake-object seam was declined, see Decisions) |
 | 08-21 | `disabled` honoured on the declared-override path — merge extracted to pure `MergeModels` + 4 tests; `CropAtlasTile` readback hardened with `try/finally` (the fourth site the 08-21 sweep missed) |
 | 08-21 | Smoke `InjectionErrors`: per-session ledger of named sites (once per site, reset on re-arm, sites in the verdict) — was a never-reset per-frame counter that FAILed the smoke for the whole process after one transient error |
 | 08-21 | **Session-state registry**: every static collection declares `[SessionScoped]` / `[ProcessLived]`, `SessionStateTests` fails the build on a bare one; found 2 never-cleared descId maps + 6 Time.time/state lists in triage (external structural critique) |

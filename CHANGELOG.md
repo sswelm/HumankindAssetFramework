@@ -10,6 +10,22 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **SMOKE TEST READS THE ENGINE, NOT JUST THE REGISTRY (2026-08-21).** A structural review called the verification
+  pyramid inverted — 445 tests over ~3k lines of pure logic, a person's eyes over the ~18k that inject. The proposed
+  fix (a fake-object seam under the reflection accessors) was declined: reflection is not funnelled (~1,450 sites
+  across `GetMember`/`AccessTools`/`GetType`), and a fake would encode the same assumptions about the game every
+  drill-caught bug this week disproved. The user's direction instead — *on demand, no per-frame cost, better smoke
+  tests* — became three live checks, each for a bug class a drill caught by eye: (1) **skeleton truth** — every live
+  pawn slot carrying one of our descriptor ids must sit on OUR skeleton (the tank-destroyer-shows-donor class);
+  (2) **pose-hook liveness** — an entry with live pawns the hook hasn't touched in 5 s is a FAIL ("models just
+  stopped animating"); (3) **sub-pawn walk coverage** — the walk is re-audited against a full scene scan at smoke
+  time (zeppelins / hovercraft / drones were missed this week by a walk that had self-verified before they spawned).
+  The classifier is pure (`GatherLivePawnFacts`, 5 tests); the runtime collects slots with the sweep's own loop.
+  `ModelEntry.lastPoseHookAt` stamps the hook; the PASS line shows `N live pawn(s) on our skeletons … [pose hook
+  fresh], sub-pawn walk W/S`. First in-game run FAILed on the stealth corvette — a RETEXTURE-ONLY entry with no
+  skeleton of its own, which the pose hook never matches by design; both checks now gate on an authored skeleton,
+  the same lesson the asset check learned on its first run. Drilled: PASS, 19 live pawns across 6 entries, walk 53/45.
+
 - **`disabled` HONOURED ON THE DECLARED-OVERRIDE PATH + the fourth readback site hardened (2026-08-21).** Two review
   findings, both verified. (1) The `e.disabled` check sat on the no-prior-owner branch of the model merge only, so a
   pack whose *declared override* was `disabled: true` still replaced the owner — the debug switch died in exactly

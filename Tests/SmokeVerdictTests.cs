@@ -572,5 +572,79 @@ namespace HumankindAssetFramework.Tests
             Assert.Contains("2 injection error(s) at pose:TankDestroyers, repoint", r.Summary);
             lock (UniversalInject.InjectionErrorSites) { UniversalInject.InjectionErrorSites.Clear(); UniversalInject.InjectionErrors = 0; }
         }
+
+
+        // ---- LIVE-PAWN TRUTH (2026-08-21): skeleton truth, pose-hook liveness, sub-pawn walk coverage ----
+        static ModelEntry Live(string name, int desc, int skel, float lastHook) =>
+            new ModelEntry { resourceName = name, repointed = true, descId = desc, skeletonId = skel, lastPoseHookAt = lastHook };
+
+        [Fact]
+        public void LivePawns_AllOnOurSkeleton_AndHookFresh_IsClean()
+        {
+            var f = new UniversalInject.SmokeFacts { Models = 1, Repointed = 1 };
+            var e = Live("Tank", desc: 40, skel: 7, lastHook: 99f);
+            UniversalInject.GatherLivePawnFacts(new[] { new UniversalInject.LiveSlot(40, 7), new UniversalInject.LiveSlot(40, 7), new UniversalInject.LiveSlot(3, 1) }, new[] { e }, now: 100f, f);
+            Assert.Equal(2, f.LivePawnsChecked);   // the vanilla slot (desc 3) is not ours — not counted
+            Assert.Equal(1, f.EntriesWithLivePawns);
+            Assert.Empty(f.PawnSkinIssues); Assert.Empty(f.PoseIdle);
+            Assert.True(UniversalInject.SmokeVerdict(f).Pass);
+        }
+
+        [Fact]
+        public void LivePawns_OnDonorSkeleton_FailsAndNamesTheEntry()
+        {
+            var f = new UniversalInject.SmokeFacts { Models = 1, Repointed = 1 };
+            var e = Live("TankDestroyers", desc: 40, skel: 7, lastHook: 99f);
+            UniversalInject.GatherLivePawnFacts(new[] { new UniversalInject.LiveSlot(40, 7), new UniversalInject.LiveSlot(40, 2) }, new[] { e }, now: 100f, f);
+            var issue = Assert.Single(f.PawnSkinIssues);
+            Assert.Contains("TankDestroyers: 1 of 2 live pawn(s) on skeleton 2, ours is 7", issue);
+            var r = UniversalInject.SmokeVerdict(f);
+            Assert.False(r.Pass); Assert.Contains("rendering the donor", r.Summary);
+        }
+
+        [Fact]
+        public void LivePawns_HookIdleOrNeverRun_Fails()
+        {
+            var f = new UniversalInject.SmokeFacts { Models = 2, Repointed = 2 };
+            var stale = Live("Heli", desc: 40, skel: 7, lastHook: 80f);    // 20 s ago
+            var never = Live("Drone", desc: 41, skel: 8, lastHook: -1f);
+            UniversalInject.GatherLivePawnFacts(new[] { new UniversalInject.LiveSlot(40, 7), new UniversalInject.LiveSlot(41, 8) }, new[] { stale, never }, now: 100f, f);
+            Assert.Equal(2, f.PoseIdle.Count);
+            Assert.Contains(f.PoseIdle, s => s.StartsWith("Heli:") && s.Contains("last ran 20s ago"));
+            Assert.Contains(f.PoseIdle, s => s.StartsWith("Drone:") && s.Contains("never run"));
+            Assert.False(UniversalInject.SmokeVerdict(f).Pass);
+        }
+
+        [Fact]
+        public void LivePawns_EntryWithoutLiveSlots_IsNotJudgedForLiveness()
+        {
+            var f = new UniversalInject.SmokeFacts { Models = 1, Repointed = 1 };
+            var e = Live("Zeppelin", desc: 40, skel: 7, lastHook: -1f);   // injected, but no unit on the map right now
+            UniversalInject.GatherLivePawnFacts(new UniversalInject.LiveSlot[0], new[] { e }, now: 100f, f);
+            Assert.Empty(f.PoseIdle); Assert.Equal(0, f.EntriesWithLivePawns);
+        }
+
+        [Fact]
+        public void SubPawnWalk_MissedSubPawn_Fails_AndCoverageShowsInSummary()
+        {
+            var ok = new UniversalInject.SmokeFacts { Models = 1, Repointed = 1, SubPawnWalk = 6, SubPawnScene = 6 };
+            var r = UniversalInject.SmokeVerdict(ok);
+            Assert.True(r.Pass); Assert.Contains("sub-pawn walk 6/6", r.Summary);
+
+            var bad = new UniversalInject.SmokeFacts { Models = 1, Repointed = 1, SubPawnWalk = 5, SubPawnScene = 6 };
+            bad.SubPawnMissed.Add("Zeppelin_Body→ReconZeppelin");
+            r = UniversalInject.SmokeVerdict(bad);
+            Assert.False(r.Pass); Assert.Contains("sub-pawn walk missed 1 of 6: Zeppelin_Body→ReconZeppelin", r.Summary);
+        }
+
+        [Fact]
+        public void LivePawns_RetextureOnlyEntry_RidesVanillaSkeleton_NotJudged()   // the stealth-corvette false FAIL, first in-game run
+        {
+            var f = new UniversalInject.SmokeFacts { Models = 1, Repointed = 1 };
+            var retex = Live("Retex_StealthCorvettes", desc: 40, skel: -1, lastHook: -1f);   // no skeleton authored, hook never matches it
+            UniversalInject.GatherLivePawnFacts(new[] { new UniversalInject.LiveSlot(40, 53) }, new[] { retex }, now: 100f, f);
+            Assert.Empty(f.PawnSkinIssues); Assert.Empty(f.PoseIdle); Assert.Equal(0, f.LivePawnsChecked);
+            Assert.True(UniversalInject.SmokeVerdict(f).Pass);
+        }
     }
 }

@@ -62,6 +62,12 @@ namespace HumankindAssetFramework
             public string SeamWriteBack = "";                        // "" = not run; "ok"; "skipped (…)"; "FAILED (…)" — the ObjectSpace round-trip (the combatZ died-in-the-box class), FAILED fails the smoke
             public List<string> Uninjected = new List<string>();     // "loaded but not injected" entries WITH the reason — the silent 19-of-22 delta, named (informational)
             public List<string> SamplerNotes = new List<string>();   // state/combat sampler starvation per entry — informational (samples legitimately empty when the unit left the map)
+            // LIVE-PAWN TRUTH (2026-08-21): what the engine is rendering, not what the registry says
+            public int LivePawnsChecked, EntriesWithLivePawns;      // live pawn slots carrying one of our descriptor ids / entries that have at least one
+            public List<string> PawnSkinIssues = new List<string>(); // FAIL: a live pawn of ours on a skeleton that is not ours (rendering the donor)
+            public List<string> PoseIdle = new List<string>();       // FAIL: an entry with live pawns the pose hook has not touched for PoseIdleSeconds
+            public int SubPawnWalk = -1, SubPawnScene = -1;          // -1 = audit not run; the targeted walk vs the full scene scan, right now
+            public List<string> SubPawnMissed = new List<string>();  // FAIL: sub-pawns the scene scan sees and the walk does not (silent engine audio / visual)
         }
 
         // Back-compat convenience: the original four-signal verdict (deep-check lists empty).
@@ -87,6 +93,9 @@ namespace HumankindAssetFramework
             // The seam self-test: a computed-but-never-written offset (the combatZ box bug) is a hard FAIL — it means
             // EVERY runtime offset feature is silently dead. "skipped" is not a failure (no pawns to probe).
             if (f.SeamWriteBack.StartsWith("FAILED")) fails.Add("ObjectSpace write-back self-test " + f.SeamWriteBack);
+            if (f.PawnSkinIssues.Count > 0) fails.Add($"{f.PawnSkinIssues.Count} entry(ies) rendering the donor: {string.Join("; ", f.PawnSkinIssues)}");
+            if (f.PoseIdle.Count > 0) fails.Add($"pose hook idle on {f.PoseIdle.Count} entry(ies): {string.Join("; ", f.PoseIdle)}");
+            if (f.SubPawnMissed.Count > 0) fails.Add($"sub-pawn walk missed {f.SubPawnMissed.Count} of {f.SubPawnScene}: {string.Join(", ", f.SubPawnMissed)}");
             // VACUOUS-COVERAGE notes (silence is not success): a green segment that verified NOTHING says so out loud.
             // Notes never fail the smoke — they keep the PASS honest about what it did NOT test this session.
             var notes = new List<string>();
@@ -103,6 +112,8 @@ namespace HumankindAssetFramework
                           $"({f.Repointed} injected so far), {f.InjectionErrors} injection error(s)" +
                           (pass ? $"; deep checks clean on {f.Repointed} injected — verified {f.RolesChecked} clip role(s), " +
                                   $"{f.AssetsChecked} asset(s), {f.SoundsChecked} sound(s), {f.FilesChecked} file(s) on disk, {f.LayersChecked} GPU layer(s)" +
+                                  (f.LivePawnsChecked > 0 ? $", {f.LivePawnsChecked} live pawn(s) on our skeletons across {f.EntriesWithLivePawns} entry(ies) [pose hook fresh]" : "") +
+                                  (f.SubPawnWalk >= 0 ? $", sub-pawn walk {f.SubPawnWalk}/{f.SubPawnScene}" : "") +
                                   (f.DistrictsChecked > 0 ? $", {f.DistrictsChecked} district(s) [{f.TilesActive} tile(s) live{(f.ScopedTilesActive > 0 ? $", {f.ScopedTilesActive} scoped" : "")}{(f.TexturedChecked > 0 ? $", {f.TexturedApplied}/{f.TexturedChecked} textured" : "")}]" : "") +
                                   (f.SeamsChecked > 0 ? $", {f.SeamsChecked} patched seam(s) [{f.SharedSeams.Count} shared]" : "") : "") +
                           (f.SeamWriteBack.Length > 0 && !f.SeamWriteBack.StartsWith("FAILED") ? $"; seam write-back {f.SeamWriteBack}" : "") +
@@ -323,6 +334,77 @@ namespace HumankindAssetFramework
             catch (Exception ex) { f.SeamWriteBack = "FAILED (" + ex.Message + ")"; }
         }
 
+
+        // ---------------------------------------------------------------------------------------------------------
+        // LIVE-PAWN TRUTH (2026-08-21, user: "make more or better smoke tests"). Every check above judges CONFIG-level
+        // facts — the registry, the assets, the roles, the tiles. The bugs a drill still caught by EYE this week were
+        // all one level lower: what the engine is actually rendering. Three on-demand checks read that level:
+        //   1. SKELETON TRUTH — every live pawn slot carrying one of our descriptor ids must sit on OUR skeleton id.
+        //      A slot on another skeleton is the unit wearing its DONOR's skin (the tank-destroyer-shows-donor class,
+        //      and the "later instances spawn on a different vanilla skeleton" class the sweep exists for).
+        //   2. POSE-HOOK LIVENESS — an entry with live slots must have been touched by the pose hook within the last
+        //      few seconds (the engine re-adds every rendered pawn each frame). Idle = the hook is dead for that
+        //      model ("models just stopped animating, no clue why").
+        //   3. SUB-PAWN WALK COVERAGE — the targeted walk that feeds engine audio + sub-pawn visuals is re-audited
+        //      against the full scene scan RIGHT NOW (the runtime self-verifies once per session; a unit type that
+        //      spawned later — zeppelins, hovercraft, drones this week — can still be missed). A miss = that unit's
+        //      engine sound / sub-pawn visual is silently absent.
+        // The classification is PURE over (descId, skelId) slots + entries + the clock, so it is unit-tested; the
+        // runtime side only collects the slots from the pawn managers — the same loop the stray-slot sweep uses.
+        // Cost: a walk over the live pawn slots + one FindObjectsOfType — on demand only, never per frame.
+        internal struct LiveSlot { public int Desc, Skel; public LiveSlot(int d, int s) { Desc = d; Skel = s; } }
+        internal const float PoseIdleSeconds = 5f;
+
+        internal static void GatherLivePawnFacts(IEnumerable<LiveSlot> slots, IList<ModelEntry> list, float now, SmokeFacts f)
+        {
+            if (slots == null || list == null) return;
+            var byDesc = new Dictionary<int, ModelEntry>();
+            // RETEXTURE-ONLY entries (no skeleton of their own, skeletonId -1) ride the vanilla skeleton and are never matched by
+            // the pose hook — neither check applies (first in-game run, 2026-08-21: the stealth corvette FAILed both). Same gate
+            // as the asset check: judge only what the entry AUTHORED.
+            foreach (var e in list) if (e.repointed && e.descId >= 0 && e.skeletonId >= 0 && !byDesc.ContainsKey(e.descId)) byDesc[e.descId] = e;
+            var live = new Dictionary<ModelEntry, int>(); var wrong = new Dictionary<ModelEntry, KeyValuePair<int, int>>();   // entry -> (count, a wrong skel)
+            foreach (var s in slots)
+            {
+                if (!byDesc.TryGetValue(s.Desc, out var e)) continue;
+                f.LivePawnsChecked++;
+                live[e] = (live.TryGetValue(e, out var n) ? n : 0) + 1;
+                if (s.Skel != e.skeletonId)
+                    wrong[e] = new KeyValuePair<int, int>((wrong.TryGetValue(e, out var w) ? w.Key : 0) + 1, s.Skel);
+            }
+            foreach (var kv in wrong)
+                f.PawnSkinIssues.Add($"{kv.Key.resourceName}: {kv.Value.Key} of {live[kv.Key]} live pawn(s) on skeleton {kv.Value.Value}, ours is {kv.Key.skeletonId} (rendering the donor)");
+            foreach (var kv in live)
+            {
+                f.EntriesWithLivePawns++;
+                float idle = kv.Key.lastPoseHookAt < 0f ? float.PositiveInfinity : now - kv.Key.lastPoseHookAt;
+                if (idle > PoseIdleSeconds)
+                    f.PoseIdle.Add(kv.Key.lastPoseHookAt < 0f
+                        ? $"{kv.Key.resourceName}: {kv.Value} live pawn(s) but the pose hook has never run for it this session"
+                        : $"{kv.Key.resourceName}: {kv.Value} live pawn(s) but the pose hook last ran {idle:0}s ago");
+            }
+        }
+
+        // Runtime collector: every (descriptor, skeleton) pair in every known pawn manager's live slots.
+        static List<LiveSlot> CollectLiveSlots()
+        {
+            var r = new List<LiveSlot>();
+            for (int m = 0; m < knownManagers.Count; m++)
+            {
+                var arr = GetMember(knownManagers[m], "pawnEntries") as Array;
+                if (arr == null) continue;
+                int cnt;
+                try { cnt = Convert.ToInt32(GetMember(knownManagers[m], "pawnCount")); } catch { continue; }
+                if (cnt <= 0 || cnt > arr.Length) continue;
+                for (int i = 0; i < cnt; i++)
+                {
+                    var slot = arr.GetValue(i);
+                    try { r.Add(new LiveSlot(ReadDescId(slot), ReadSkelId(slot))); } catch { }
+                }
+            }
+            return r;
+        }
+
         internal static void RunSmokeTest()
         {
             try
@@ -376,6 +458,8 @@ namespace HumankindAssetFramework
                 }
 
                 GatherWriteBackFact(f);   // the seam self-test — after the reads, before the verdict
+                GatherLivePawnFacts(CollectLiveSlots(), snapshot, UnityEngine.Time.time, f);   // live-pawn truth: skeleton + pose-hook liveness
+                if (snapshot != null && f.Repointed > 0) { AuditSubPawnWalk(snapshot, out int w, out int sc, f.SubPawnMissed); f.SubPawnWalk = w; f.SubPawnScene = sc; }
 
                 var res = SmokeVerdict(f);
                 if (res.Pass) Plugin.Log.LogInfo("[SmokeTest] " + res.Summary);

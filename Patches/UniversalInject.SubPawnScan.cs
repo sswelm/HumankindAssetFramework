@@ -100,6 +100,23 @@ namespace HumankindAssetFramework
             return byWalk;
         }
 
+
+        // ON-DEMAND AUDIT for the smoke test (2026-08-21): re-run the walk-vs-scene comparison NOW, regardless of the
+        // once-per-session self-verify (which may have run before a later-spawning unit type existed). Returns the
+        // two counts and the missed sub-pawns by name. One FindObjectsOfType — fine on a button, never per frame.
+        internal static void AuditSubPawnWalk(List<ModelEntry> list, out int walk, out int scene, List<string> missed)
+        {
+            walk = scene = 0;
+            if (list == null) return;
+            var byWalk = WalkSubPawns(list); var byScene = SceneScan(list);
+            walk = byWalk.Count; scene = byScene.Count;
+            var walkIds = new HashSet<int>();
+            foreach (var p in byWalk) if (p.Key != null) walkIds.Add(p.Key.GetInstanceID());
+            foreach (var p in byScene)
+                if (p.Key != null && !walkIds.Contains(p.Key.GetInstanceID()) && missed.Count < 12)
+                    missed.Add($"{(p.Key as UnityEngine.Component)?.gameObject.name}→{p.Value.resourceName}");
+        }
+
         // The old method, kept as the verification oracle + the fallback.
         static List<KeyValuePair<UnityEngine.Object, ModelEntry>> SceneScan(List<ModelEntry> list)
         {

@@ -201,6 +201,11 @@ Press **F8** in a loaded game for HAF's runtime panel. It's trimmed to what a mo
   injection run without errors? The fastest *"why isn't my asset showing?"* check. For districts it reports live
   tiles on **both** render paths (`[1 tile(s) live, 1 scoped]`) and whether your albedo actually landed
   (`1/1 textured`; a give-up after 3 apply errors is a named FAIL, a not-yet-applied atlas a NOTE to re-run shortly).
+  Since 2026-08-21 it also reads **what the engine is rendering**, not just what the registry says: every live pawn
+  of yours must sit on *your* skeleton (`N live pawn(s) on our skeletons` — a unit wearing its donor's skin is a named
+  FAIL), the pose hook must have touched every entry with live pawns within 5 s (`[pose hook fresh]`), and the
+  sub-pawn walk that feeds engine audio + sub-pawn visuals is re-audited against a full scene scan on the spot
+  (`sub-pawn walk 6/6`; a miss names the sub-pawn). On demand only — nothing runs per frame.
 - **GPU mesh buffer (live)** — per-layer vertex/index/mesh fill, so you can see whether your models fit the shared budget
   ([Vertex-Budget.md](Vertex-Budget.md)); **Shift+F8** also logs it.
 - **HAF per-frame cost** — what the plugin itself costs each frame, averaged over 5 s: total µs/frame and percent of the

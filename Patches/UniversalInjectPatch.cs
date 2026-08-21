@@ -109,6 +109,7 @@ namespace HumankindAssetFramework
         public int descId = -1;          // runtime PawnDescriptorId of our unit (learned from the correctly-skinned pawn), to spot the wrong-skeleton twin the game spawns for the same unit
         public bool fragsLogged;         // one-shot: dump the donor's fragment mesh names once, so the modder can find hide targets
         public bool repointed;
+        public float lastPoseHookAt = -1f;   // Time.time the pose hook last matched a live pawn to this entry (smoke: pose-hook liveness); -1 = never this session
         // PER-INSTANCE fire, so only the howitzer that actually bombarded animates (not every howitzer of the type):
         public readonly System.Collections.Concurrent.ConcurrentQueue<long> fireGuidQueue = new System.Collections.Concurrent.ConcurrentQueue<long>();  // SIM thread enqueues the firing unit's SimulationEntityGUID; Plugin.Update (main thread) drains it (no Unity access on the sim thread).
         public readonly List<FireInstance> activeFires = new List<FireInstance>();  // MAIN/render thread only (locked): each firing pawn's render position + start time; the pose hook plays the clip on the pawn nearest an active fire.
@@ -947,7 +948,7 @@ namespace HumankindAssetFramework
             if (list != null)
                 foreach (var e in list)
                 {
-                    e.skeletonId = -1; e.animId = -1; e.descId = -1; e.repointed = false;   // session-scoped ids re-learn
+                    e.skeletonId = -1; e.animId = -1; e.descId = -1; e.repointed = false; e.lastPoseHookAt = -1f;   // session-scoped ids re-learn
                     foreach (var b in e.Roles) b.animId = -1;                                   // every clip role's id re-resolves (the table, not a hand-list)
                     e.idleAltNextAt = 0f; e.idleAltStart = -1f; e.idleAltChosenId = -1;   // idle-alt cadence is session-scoped (Time.time resets)
                     e.stateLastPos.Clear(); e.stateMoving.Clear(); e.stateStoppedAt.Clear(); e.stateMoveStartedAt.Clear();
