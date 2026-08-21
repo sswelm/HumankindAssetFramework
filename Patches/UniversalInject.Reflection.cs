@@ -22,10 +22,19 @@ namespace HumankindAssetFramework
         // every Amplitude member we touch is a FIELD — so the old property-THEN-field pair paid a wasted CachedProp dict
         // lookup on every call. Resolve property-or-field in a single dict hit (null cached too). Main-thread only.
         // `fieldCache`/`CachedField` stays for the polls' direct static-field lookups.
-        static readonly Dictionary<(Type, string), MemberInfo> memberCache = new Dictionary<(Type, string), MemberInfo>();
-        static readonly Dictionary<(Type, string), FieldInfo> fieldCache = new Dictionary<(Type, string), FieldInfo>();
-        static MemberInfo CachedMember(Type t, string name) { var k = (t, name); if (!memberCache.TryGetValue(k, out var m)) memberCache[k] = m = (MemberInfo)AccessTools.Property(t, name) ?? AccessTools.Field(t, name); return m; }
-        static FieldInfo CachedField(Type t, string name) { var k = (t, name); if (!fieldCache.TryGetValue(k, out var f)) fieldCache[k] = f = AccessTools.Field(t, name); return f; }
+        // NOT main-thread only (review 2026-08-21). The "Main-thread only" note above was wrong: the SIM-thread hooks
+        // read through here too — FireProbe.Member (ArtilleryStrikeStarted), OnBattleStarted's group/contender walk,
+        // FacingPersist.OnSave/OnLoad — and the members they touch (StrikerUnit, AttackerGroup, Contenders, ...) are
+        // touched by NO main-thread path, so their first use is a guaranteed INSERT racing the per-pawn-per-frame reads.
+        // A plain Dictionary resized under a concurrent reader corrupts its bucket chain (FindEntry spins forever — a
+        // hard freeze, no exception, no log line). ConcurrentDictionary: same null-caching semantics, lock-free reads
+        // on the hot path, and a non-capturing factory so the miss path allocates no closure.
+        static readonly System.Collections.Concurrent.ConcurrentDictionary<(Type, string), MemberInfo> memberCache = new System.Collections.Concurrent.ConcurrentDictionary<(Type, string), MemberInfo>();
+        static readonly System.Collections.Concurrent.ConcurrentDictionary<(Type, string), FieldInfo> fieldCache = new System.Collections.Concurrent.ConcurrentDictionary<(Type, string), FieldInfo>();
+        static readonly Func<(Type, string), MemberInfo> resolveMember = k => (MemberInfo)AccessTools.Property(k.Item1, k.Item2) ?? AccessTools.Field(k.Item1, k.Item2);
+        static readonly Func<(Type, string), FieldInfo> resolveField = k => AccessTools.Field(k.Item1, k.Item2);
+        static MemberInfo CachedMember(Type t, string name) => memberCache.GetOrAdd((t, name), resolveMember);
+        static FieldInfo CachedField(Type t, string name) => fieldCache.GetOrAdd((t, name), resolveField);
 
         internal static object GetMember(object o, string name)
         {
