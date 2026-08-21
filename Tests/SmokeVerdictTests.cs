@@ -522,5 +522,34 @@ namespace HumankindAssetFramework.Tests
                     $"GUID component {component} of {role} did not arm its dead-role check");
             }
         }
+        // THE _DRILL CLASS (2026-08-21): TankDestroyers shipped with pawnDescription "…_01_DRILL" for weeks; the game loaded
+        // "…_01", nothing matched, the unit rendered as its donor, and the smoke said "no unit on the map this session".
+        [Fact]
+        public void Uninjected_StraySuffix_IsNamedMismatch_AndFails()
+        {
+            var e = new ModelEntry { resourceName = "TankDestroyers", pawnDescription = "Era6_Common_TankDestroyers_01_DRILL" };
+            var seen = new[] { "Era6_Common_TankDestroyers_01", "Era6_Common_UniversalTanks_01" };
+            var reason = UniversalInject.UninjectedReason(e, seen, out bool mismatch);
+            Assert.True(mismatch);
+            Assert.Contains("it loaded 'Era6_Common_TankDestroyers_01'", reason);
+            Assert.Contains("stray suffix '_DRILL'", reason);
+            var f = new UniversalInject.SmokeFacts { Models = 22, Repointed = 17 };
+            UniversalInject.GatherEntryFacts(e, f, seen);
+            Assert.Single(f.MatchIssues); Assert.Empty(f.Uninjected);
+            var r = UniversalInject.SmokeVerdict(f);
+            Assert.False(r.Pass);
+            Assert.Contains("cannot match the loaded unit", r.Summary);
+        }
+
+        [Fact]
+        public void Uninjected_NoUnitOnMap_StaysInformational()
+        {
+            var e = new ModelEntry { resourceName = "Canoe", pawnDescription = "Era1_Common_DugoutCanoe_01" };
+            Assert.Equal("no unit on the map this session", UniversalInject.UninjectedReason(e, new[] { "Era6_Common_UniversalTanks_01" }, out bool m1)); Assert.False(m1);
+            Assert.Equal("no unit on the map this session", UniversalInject.UninjectedReason(e, null, out bool m2)); Assert.False(m2);
+            Assert.Equal("disabled", UniversalInject.UninjectedReason(new ModelEntry { disabled = true, pawnDescription = "x" }, null, out _));
+            // the addon DID load and WOULD match -> a different diagnosis (repoint failure), never "no unit"
+            Assert.Contains("repoint did not run", UniversalInject.UninjectedReason(e, new[] { "Era1_Common_DugoutCanoe_01" }, out bool m3)); Assert.False(m3);
+        }
     }
 }

@@ -44,6 +44,11 @@ namespace Haf.Schema
             if (string.IsNullOrWhiteSpace(e.pawnDescription)) Add(ValidationSeverity.Error, "pawnDescription", "empty — no target unit, the entry will never match anything");
             else if (ctx?.PawnExists(e.pawnDescription) == false)
                 Warn("pawnDescription", $"'{e.pawnDescription}' matches no known unit descriptor — check the exact name (editor: use the Pick list)");
+            // NAMING CONVENTION (2026-08-21, the TankDestroyers _DRILL leftover): every game pawn definition is named
+            // <Era>_<Kind>_<Unit>_NN; the runtime matches by addon.IndexOf(pawnDescription), so a pawnDescription with
+            // anything AFTER the _NN can never match — the unit silently renders as its donor. Checkable without the game.
+            else if (!System.Text.RegularExpressions.Regex.IsMatch(e.pawnDescription.Trim(), @"_[0-9]{2}$"))
+                Warn("pawnDescription", $"'{e.pawnDescription}' does not end in _NN (e.g. Era6_Common_TankDestroyers_01) — game pawn definitions always do; a stray suffix can never match the unit's addon, so the unit would keep its donor model");
 
             // ---- referenced files (existence via the host; format by extension) ----
             void SndFile(string field, string file)

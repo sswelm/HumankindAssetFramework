@@ -151,5 +151,12 @@ namespace HumankindAssetFramework.Tests
                 Assert.DoesNotContain("\n", i.ToString());
             }
         }
+        [Fact]
+        public void PawnDescription_WithoutNNSuffix_IsWarned_TheDrillLeftoverClass()
+        {
+            var e = Valid(); e.pawnDescription = "Era6_Common_TankDestroyers_01_DRILL";
+            Assert.Contains(PackValidator.ValidateEntry(e, null), i => i.Field == "pawnDescription" && i.Severity == ValidationSeverity.Warning && i.Message.Contains("_NN"));
+            Assert.DoesNotContain(PackValidator.ValidateEntry(Valid(), null), i => i.Field == "pawnDescription");   // the convention itself passes silently
+        }
     }
 }

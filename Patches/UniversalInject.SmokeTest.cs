@@ -49,6 +49,7 @@ namespace HumankindAssetFramework
             // texApplied alone reads as success on a district that is rendering untextured. Judge texErrors first.
             public int TexturedChecked, TexturedApplied;             // textured districts with live tiles judged / of those, albedo actually applied (no give-up)
             public List<string> DistrictNotes = new List<string>();  // informational: texture still pending (asset not resolved yet) — never a FAIL
+            public List<string> MatchIssues = new List<string>();    // FAIL: an entry whose pawnDescription can never match, although the game loaded its obvious target (the _DRILL class)
             // 2026-08-19 five-point upgrade (user: "can't we apply all?"):
             public string SeamWriteBack = "";                        // "" = not run; "ok"; "skipped (…)"; "FAILED (…)" — the ObjectSpace round-trip (the combatZ died-in-the-box class), FAILED fails the smoke
             public List<string> Uninjected = new List<string>();     // "loaded but not injected" entries WITH the reason — the silent 19-of-22 delta, named (informational)
@@ -74,6 +75,7 @@ namespace HumankindAssetFramework
             if (f.BudgetAlarms.Count > 0) fails.Add($"GPU mesh budget near the wall: {string.Join(", ", f.BudgetAlarms)}");
             if (f.DistrictIssues.Count > 0) fails.Add($"{f.DistrictIssues.Count} district issue(s): {string.Join(", ", f.DistrictIssues)}");
             if (f.MissingFiles.Count > 0) fails.Add($"{f.MissingFiles.Count} referenced file(s) missing on disk: {string.Join(", ", f.MissingFiles)}");
+            if (f.MatchIssues.Count > 0) fails.Add($"{f.MatchIssues.Count} entry(ies) whose pawnDescription cannot match the loaded unit: {string.Join("; ", f.MatchIssues)}");
             // The seam self-test: a computed-but-never-written offset (the combatZ box bug) is a hard FAIL — it means
             // EVERY runtime offset feature is silently dead. "skipped" is not a failure (no pawns to probe).
             if (f.SeamWriteBack.StartsWith("FAILED")) fails.Add("ObjectSpace write-back self-test " + f.SeamWriteBack);
@@ -109,7 +111,31 @@ namespace HumankindAssetFramework
         // Per-entry deep-check gathering — PURE over the entry's fields, so it's unit-testable (the first in-game run
         // proved why: the skeleton check fired on a RETEXTURE-ONLY entry, which legitimately has no skeleton — every
         // asset requirement must gate on "was one AUTHORED", exactly like the roles do).
-        internal static void GatherEntryFacts(ModelEntry e, SmokeFacts f)
+        // PURE: why an entry hasn't injected, given the unit-definition names the game loaded this session (the addon
+        // hook records every one). `mismatch` = the pawnDescription can never match although its obvious target DID load.
+        internal static string UninjectedReason(ModelEntry e, ICollection<string> seenAddonNames, out bool mismatch)
+        {
+            mismatch = false;
+            if (e.disabled) return "disabled";
+            var pd = e.pawnDescription ?? "";
+            if (seenAddonNames == null || seenAddonNames.Count == 0 || pd.Length == 0) return "no unit on the map this session";
+            string nearest = null;
+            foreach (var n in seenAddonNames)
+            {
+                if (n.IndexOf(pd, StringComparison.OrdinalIgnoreCase) >= 0) return "its addon loaded but the repoint did not run — see the log";   // matchable: should have repointed
+                // the reverse containment: the game loaded a name the pawnDescription merely EXTENDS (a stray suffix)
+                if (pd.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0 && (nearest == null || n.Length > nearest.Length)) nearest = n;
+            }
+            if (nearest != null)
+            {
+                mismatch = true;
+                return $"pawnDescription '{pd}' matches NOTHING the game loaded — it loaded '{nearest}', which '{pd}' only extends (stray suffix '{pd.Substring(nearest.Length)}'?) — fix pawnDescription; the unit renders as its donor";
+            }
+            return "no unit on the map this session";
+        }
+
+        internal static void GatherEntryFacts(ModelEntry e, SmokeFacts f) => GatherEntryFacts(e, f, null);
+        internal static void GatherEntryFacts(ModelEntry e, SmokeFacts f, ICollection<string> seenAddonNames)
         {
             // Sounds: judgeable for EVERY entry once the audio poll has tried loading (skip = still pending).
             if (e.customClipTried)
@@ -138,8 +164,13 @@ namespace HumankindAssetFramework
 
             if (!e.repointed)
             {
-                // The silent 19-of-22 delta, named per entry with its diagnosis (informational, never a failure):
-                f.Uninjected.Add($"{e.resourceName} ({(e.disabled ? "disabled" : "no unit on the map this session")})");
+                // The silent 19-of-22 delta, named per entry with its diagnosis. "No unit on the map" is informational;
+                // a pawnDescription that matches NOTHING the game loaded while the game DID load its obvious target is a
+                // FAIL (2026-08-21: TankDestroyers carried a _DRILL suffix for weeks, rendered as its donor, and this line
+                // said "no unit on the map this session" every time — the harness had the addon list to know better).
+                var reason = UninjectedReason(e, seenAddonNames, out bool mismatch);
+                if (mismatch) f.MatchIssues.Add($"{e.resourceName}: {reason}");
+                else f.Uninjected.Add($"{e.resourceName} ({reason})");
                 return;   // deep checks only where the full pipeline provably ran
             }
             // Asset checks gate on AUTHORED config: a retexture-only entry has no skeleton/atlas of its own and is healthy without them.
@@ -301,7 +332,7 @@ namespace HumankindAssetFramework
                 if (snapshot != null)
                     foreach (var e in snapshot)
                     {
-                        GatherEntryFacts(e, f);
+                        GatherEntryFacts(e, f, addonDefIds.Keys);   // every unit-definition name the addon hook saw this session
                         CheckLooseFiles(e, f, Path.Combine(Paths.ConfigPath, "haf_sounds"), Path.Combine(Paths.ConfigPath, "haf_skins"));
                     }
                 foreach (var d in DistrictInject.distModels)   // main-thread state, read on the main thread (F8)
