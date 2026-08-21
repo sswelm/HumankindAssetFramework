@@ -24,6 +24,10 @@ run "plugin unit tests (dotnet test)" dotnet test "$ROOT/Tests/HumankindAssetFra
 #    publish to the repo, the Pages site AND the wiki, all resolving relative links, so one bad move breaks three.
 run "docs guard (links + notes convention)" bash "$ROOT/tools/check-docs.sh"
 
+# 3b) binding-catalog SURFACE — bindcheck proves the catalog RESOLVES against the game; this proves it COVERS the code.
+#     Pure source analysis (no game DLLs), so it belongs in the fast gate; bindcheck stays on the game-update trigger.
+run "binding catalog surface (every by-name site catalogued)" bash "$ROOT/tools/check-catalog.sh"
+
 # 4) registry schema parity — cross-repo: the guard lives in the ENCReload editor checkout and compares the plugin's
 #    Newtonsoft + regex parse against the editor's ModelDef. Best-effort: a plugin parse change is one half of that
 #    drift, so run it here too when the sibling checkout is present; skip with a note otherwise.

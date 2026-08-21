@@ -10,6 +10,27 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **A7 — THE CATALOG'S GREEN LIGHT NOW MEANS WHAT IT SAYS (2026-08-21).** A review made a measurable claim: `bindcheck`
+  can only validate what is *catalogued*, so `95/95 clean` is a statement about the catalog, not about the binding
+  surface — and ~55 game-shaped member names were read by name and absent from it. Reproduced mechanically and it was
+  **worse: 84**, including four the reviewer named by hand, each behind a silent catch on a functional path —
+  `FacingAngleOffset` (battle aim), `IdleAudioEvent`, `CurrentTechnologicalEraIndex`, `BonesCount`. The A6 entry's
+  "every non-diagnostic by-name site" was a hand sweep; it is corrected in place above.
+  - **`tools/check-catalog.sh`** (new, in the push gate): extracts every string literal passed to a by-name reflection
+    accessor, subtracts the catalog, subtracts an allowlist where **every entry carries its reason** (Unity/BCL names;
+    four *tolerant probes* that already try several names and cope with all absent), and fails on the rest. Pure source
+    analysis — no game needed. Fault-injected both ways on the day it was written: dropping `BonesCount` from the
+    catalog and adding a new uncatalogued site were each caught by name, and the baseline returned green.
+  - **The catalog grew 95 → 130 types (~330 members)**: the GPU descriptor/fragment/animation entry structs, the
+    Fx one-mesh + vertex records, the ground-material chain, the atlas entry/element structs, the database matrices,
+    the audio GUID and event-handle boxes, the simulation battle types. `typeprobe` gained **`--exact <name>…`** (which
+    types declare this member, one pass over the DLLs) — the tool that made attribution evidence-based instead of
+    name-guessing.
+  - **bindcheck adjudicated, and caught one of mine**: `WriteContent` attributed to `ContentLayer.vertexBuffer`, whose
+    *declared* type is the abstract base — the member lives on the generic subclass, and `Pos` on the Bones-format
+    vertex struct the resize path is guarded to touch. Both re-bound to their real types. Final: **`130/130 types |
+    0 member(s) missing`**, and `catalog surface: OK — all 275 by-name literal(s) catalogued or allowlisted`.
+
 - **SMOKE TEST, LOAD TIER — automatic at the end of the loading screen (2026-08-21).** User: "move part of these
   tests to the end of the loading screen — as long as the game is not loaded yet, I'm fine with performing tests."
   The seam is `Amplitude.Mercury.LoadingScreen.VisibilityChanged` (a static `Action<bool>` the game's own cursor,
@@ -196,9 +217,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   the formation builder's fields, the skeleton/fragment/vertex-buffer surface the scaled-clone and hand-prop paths
   rewrite, the scoped-district internals, the Resize Lab's era anchor, and — found last, by a receiver-aware sweep —
   `PawnDefinitionId` off the addon (the descriptor seed that arms the wrong-skeleton net, six sites) and the
-  sub-pawn's cached `pawnEntry` (the ghost-rotor source fix). Now **91 types, ~250 members, every non-diagnostic
-  by-name site**; what stays outside is listed in the catalog itself (the `DistrictDebug`-gated RepoDump dumps,
-  Prober's database lookup, two reads that live on runtime subclasses the declared type can't see).
+  sub-pawn's cached `pawnEntry` (the ghost-rotor source fix). Now **91 types, ~250 members**; what stays outside is
+  listed in the catalog itself (the `DistrictDebug`-gated RepoDump dumps, Prober's database lookup, two reads that
+  live on runtime subclasses the declared type can't see).
+  > **CORRECTION (2026-08-21, same day):** this entry also claimed "every non-diagnostic by-name site". **It was
+  > wrong** — a review extracted every member-name literal at a reflection call site and found **~80 not in the
+  > catalog**, several on functional paths behind silent catches (`FacingAngleOffset`, `IdleAudioEvent`,
+  > `CurrentTechnologicalEraIndex`, `BonesCount`). A6 was a *hand* sweep, so the claim was true of nobody's code for
+  > long. Closed properly by A7 below, which adds the members **and the gate that proves the claim**.
   **The finding on the way in:** `tools/bindcheck` — the headless "validates the ENTIRE catalog" tool from 08-16 —
   had never understood `CachedDerived`. It fell back to a bare-name lookup, which happened to work for 5 of the 12
   A5 struct types and reported the other 7 as `[MISSING TYPE]` on a clean build; nobody had run it since the struct

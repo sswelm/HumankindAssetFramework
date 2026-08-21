@@ -29,6 +29,7 @@ Severity key: 🔴 fix soon (silent data loss / silent no-inject) · 🟡 worth 
 
 | Date | Fix |
 |---|---|
+| 08-21 | **A7 — the catalog's green light now means what it says**: `tools/check-catalog.sh` (push gate, fault-injected) fails on any by-name reflection literal that isn't catalogued or reason-allowlisted; catalog 95 → 130 types (~330 members); the A6 "every by-name site" claim corrected in place. bindcheck caught one of my attributions (`WriteContent` on the abstract base) |
 | 08-21 | Smoke **load tier** runs automatically on the first frame after the loading screen hides (`LoadingScreen.VisibilityChanged`, `SmokeOnLoad`); `typeprobe --find` added to locate seams headlessly |
 | 08-21 | Smoke **live-pawn truth**: skeleton truth per live pawn, pose-hook liveness, on-demand sub-pawn walk audit — the engine-level checks for the three bug classes drills caught by eye (verification-pyramid finding; the fake-object seam was declined, see Decisions) |
 | 08-21 | `disabled` honoured on the declared-override path — merge extracted to pure `MergeModels` + 4 tests; `CropAtlasTile` readback hardened with `try/finally` (the fourth site the 08-21 sweep missed) |

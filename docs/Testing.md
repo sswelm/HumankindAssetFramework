@@ -5,7 +5,7 @@ HAF is verified in **three tiers**, each a machine, each at the level where its 
 | Tier | Runs | Guards |
 |---|---|---|
 | **Unit tests** — **447 as of 2026-08-21** | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers** |
-| **Headless game checks** | `tools/check-bindings.sh`, on demand / after a game update | every catalogued game binding against the real DLLs (`bindcheck`), incl. the seams the runtime hooks; `typeprobe --find` locates a seam before a hook is written |
+| **Headless game checks** | `tools/check-catalog.sh` in the push gate; `tools/check-bindings.sh` on demand / after a game update | **two halves of one claim**: `check-catalog.sh` proves the catalog **covers the code** (every by-name literal at a reflection site is catalogued or allowlisted with a reason), `bindcheck` proves it **resolves** against the real DLLs; `typeprobe --find` / `--exact` locate a seam or a member's owner before a binding is written |
 | **In-game smoke test** — `[load]` automatic, `[full]` on the F8 button | every load (a few ms, once), and on request | the injecting half, read from the **engine**: bindings, registry, roles, assets, sounds, files, GPU budget, district tiles and textures, patched seams — and, on the button, every live pawn on *our* skeleton, pose-hook liveness, the sub-pawn walk vs a scene scan, the write-back self-test |
 
 The unit suite is a deliberate, bounded suite, not a coverage target: it guards the functions where bugs have actually
@@ -23,7 +23,7 @@ The fast guards used to be separate scripts you had to remember to run. They're 
 
 | Repo | the `check.sh` gate runs | ~time |
 |---|---|---|
-| **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` (447) · **docs guard** · registry schema parity | seconds |
+| **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` (447) · **docs guard** · **binding-catalog surface** · registry schema parity | seconds |
 | **ENCReload** (editor) | Roslyn editor compile-check · registry schema parity | ~30 s |
 
 ### The docs guard (`tools/check-docs.sh`)
@@ -57,6 +57,20 @@ each with a plain-language explanation, live per-row PASS/FAIL, and a durable `L
 run; see [Factory-Manual.md](Factory-Manual.md) §11). The
 gate earned its keep on day one: standing it up surfaced three latent schema drifts (a wrapper field the plugin read but
 the baker never wrote, two runtime-only keys, and a `float?`-cast the parity script mis-classified), all fixed to green.
+
+### The binding-catalog surface guard (`tools/check-catalog.sh`)
+
+`bindcheck` (below) validates every binding **in** the catalog, so its green light is a statement about the catalog —
+not about the code. On 2026-08-21 a review measured the difference and found **84 member names read by name at
+reflection call sites that were not catalogued**, several on functional paths behind silent catches
+(`FacingAngleOffset`, `IdleAudioEvent`, `CurrentTechnologicalEraIndex`, `BonesCount`) — the CHANGELOG had claimed full
+coverage on the strength of a *hand* sweep. This guard makes the claim mechanical: it extracts every string literal
+passed to a by-name reflection accessor, subtracts the catalog, subtracts an allowlist where **every entry states its
+reason** (Unity/BCL names; a handful of *tolerant probes* that try several names and cope with all absent), and fails
+on the rest. Pure source analysis, so it runs in the fast gate. Fault-injected on the day it was written: dropping
+`BonesCount` from the catalog, and adding a new uncatalogued site, were each caught by name.
+
+Together the two are the whole claim: **covers the code** (this) **and resolves against the game** (bindcheck).
 
 ## Headless binding drift check (`Tools/check-bindings.sh` — for game updates)
 

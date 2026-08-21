@@ -226,6 +226,45 @@ namespace HumankindAssetFramework
         internal static Type FxAtlas                => CachedDerived("FxAtlas",                () => ElementType(FieldOrPropType(FxOutputLayer, "atlases")));   // the B&W footprint's private mask atlas
         internal static Type FxAtlasOutputEntry     => CachedDerived("FxAtlasOutputEntry",     () => ElementType(FieldOrPropType(FxAtlas, "outputEntries")));
         internal static Type AssetReferenceRepository => Cached("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");   // the */District/Main + wonder cell registration
+
+        // ---- A7 (2026-08-21): the types behind the ~80 by-name literals the A6 sweep MISSED. A review measured the
+        //      gap mechanically — `bindcheck` proves the catalog resolves, it cannot prove the catalog COVERS the code —
+        //      and `tools/check-catalog.sh` now fails the gate on any by-name literal that isn't here. Several of these
+        //      sit behind silent catches (FacingAngleOffset, IdleAudioEvent, CurrentTechnologicalEraIndex, BonesCount),
+        //      where a game rename degrades a feature with no error at all: exactly what the catalog exists to name.
+        internal static Type PresentationPawnDescription => Cached("Amplitude.Mercury.Data.World.PresentationPawnDescription");
+        internal static Type PawnRotationTransformInfo => Cached("Amplitude.Mercury.Data.World.PresentationPawnDescription+RotationTransformInfo");
+        internal static Type MecanimEvent        => Cached("Amplitude.Mercury.Animation.MecanimEvent");
+        internal static Type ClipCurveEntry      => Cached("Amplitude.Mercury.Animation.ClipCurveEntry");
+        internal static Type Databases           => Cached("Amplitude.Framework.Databases");
+        internal static Type DatatableElementReference => Cached("Amplitude.Framework.DatatableElementReference");
+        internal static Type SimulationUnitDefinition => Cached("Amplitude.Mercury.Data.Simulation.UnitDefinition");
+        internal static Type BattleContender     => Cached("Amplitude.Mercury.Simulation.BattleContender");
+        internal static Type BattleUnit          => Cached("Amplitude.Mercury.Simulation.BattleUnit");
+        internal static Type GroundMaterialDefinition => Cached("Amplitude.Mercury.Terrain.GroundMaterialDefinition");
+        internal static Type GroundMaterialAuthoringData => Cached("Amplitude.Mercury.Terrain.GroundMaterialAuthoringData");
+        internal static Type GroundMaterialTextureData => Cached("Amplitude.Mercury.Terrain.GroundMaterialTextureData");
+        internal static Type FxComponentTextureAtlasManager => Cached("Amplitude.Graphics.Fx.FxComponentTextureAtlasManager");
+        internal static Type AbstractTextureAtlas => Cached("Amplitude.Graphics.Atlas.AbstractTextureAtlas");
+        internal static Type GenericTextureAtlas => Cached("Amplitude.Graphics.Atlas.GenericTextureAtlas`1");
+        internal static Type FxTextureAtlasStruct => Cached("Amplitude.Graphics.Fx.FxTextureAtlasStruct");
+        internal static Type HgFxOutputLayerAndSubShaderProperty => Cached("Amplitude.Mercury.Fx.HgFx.HgFxOutputLayerAndSubShaderProperty");
+        internal static Type FxLevelBuildDecalTextureEntryProperty => Cached("Amplitude.Mercury.Terrain.Fx.FxLevelBuildDecalTextureEntryProperty");
+        // derived (A7): the GPU-side entry structs + the boxed handles the runtime reads through
+        internal static Type GpuDescriptorEntry  => CachedDerived("GpuDescriptorEntry",  () => ElementType(FieldOrPropType(PawnManager, "gpuPawnDescriptorEntries")));
+        internal static Type GpuFragmentEntry    => CachedDerived("GpuFragmentEntry",    () => ElementType(FieldOrPropType(PawnManager, "gpuPawnDescriptorFragmentEntries")));
+        internal static Type GpuAnimationEntry   => CachedDerived("GpuAnimationEntry",   () => ElementType(FieldOrPropType(FieldOrPropType(AnimationManager, "gpuAnimationEntryBuffer"), "WriteContent")));
+        internal static Type FxOneMeshStruct     => CachedDerived("FxOneMeshStruct",     () => ElementType(FieldOrPropType(ContentLayer, "HxFxOneMeshComputeBufferData")));
+        // `vertexBuffer` is DECLARED as the abstract base, so WriteContent (on the generic subclass) is not reachable from it —
+        // bindcheck caught that attribution of mine. Bind the runtime types directly: the generic buffer, and the Bones-format
+        // vertex struct the resize path is guarded to touch ("only the Bones format stores Pos as raw floats").
+        internal static Type ReadWriteBuffer1D   => Cached("Amplitude.Graphics.ReadWriteBuffer1D`1");
+        internal static Type MeshVertexRecord    => Cached("Amplitude.Graphics.Fx.FxMeshContent+VertexDataPosUVNormalTangentBones");
+        internal static Type AudioEntityGuid     => CachedDerived("AudioEntityGuid",     () => FieldOrPropType(AudioEmitter, "AudioEntityGUID"));
+        internal static Type AudioEventHandleRef => CachedDerived("AudioEventHandleRef", () => FieldOrPropType(PresentationPawnDescription, "IdleAudioEvent"));
+        internal static Type AtlasEntry          => CachedDerived("AtlasEntry",          () => ElementType(FieldOrPropType(AbstractTextureAtlas, "atlasEntries")));
+        internal static Type DatabaseMatrix1D    => CachedDerived("DatabaseMatrix1D",    () => ElementType(FieldOrPropType(AssetReferenceRepository, "databaseMatrices1D")));
+        internal static Type DatabaseMatrix2D    => CachedDerived("DatabaseMatrix2D",    () => ElementType(FieldOrPropType(AssetReferenceRepository, "databaseMatrices2D")));
         // ---- runtime module order (pack load order follows the game's own mod order — docs/Multi-Mod.md) ----
         internal static Type FrameworkServices   => Cached("Amplitude.Framework.Services");
         internal static Type RuntimeService      => Cached("Amplitude.Mercury.Runtime.IRuntimeService");
@@ -329,15 +368,52 @@ namespace HumankindAssetFramework
         // (A1's PresentationUnit mistake was the lesson). A "missing" here is a real game-API change.
         internal static readonly Dep[] Catalog =
         {
+            // A7 (2026-08-21) — the by-name surface the A6 sweep missed, now catalogued so bindcheck validates it and
+            // tools/check-catalog.sh proves nothing new escapes. Grouped by the type the CALL SITE's receiver actually is.
+            new Dep(PresentationPawnDescription, nameof(PresentationPawnDescription), "AudioEntityName", "IdleAudioEvent"),   // idle audio: behind a silent catch
+            new Dep(PawnRotationTransformInfo, nameof(PawnRotationTransformInfo), "BoneName"),
+            new Dep(MecanimEvent, nameof(MecanimEvent), "ParentNameToLaunchVFXPosition", "PositionToLaunchVFX"),   // muzzle VFX anchor
+            new Dep(ClipCurveEntry, nameof(ClipCurveEntry), "EncodingFormat"),
+            new Dep(Databases, nameof(Databases), "GetDatabase"),
+            new Dep(DatatableElementReference, nameof(DatatableElementReference), "XmlSerializableElementName"),   // formation-by-size reads the unit's own formation through this
+            new Dep(SimulationUnitDefinition, nameof(SimulationUnitDefinition), "SpawnType"),   // era-scale domain (land/naval/air)
+            new Dep(BattleContender, nameof(BattleContender), "Units"),
+            new Dep(BattleUnit, nameof(BattleUnit), "Unit", "TargetUnit"),
+            new Dep(GroundMaterialDefinition, nameof(GroundMaterialDefinition), "GroundMaterialAuthoringData"),
+            new Dep(GroundMaterialAuthoringData, nameof(GroundMaterialAuthoringData), "GroundMaterialLayer0", "GroundMaterialOneLayer", "Color"),
+            new Dep(GroundMaterialTextureData, nameof(GroundMaterialTextureData), "AtlasElement"),
+            new Dep(FxComponentTextureAtlasManager, nameof(FxComponentTextureAtlasManager), "AddNullAtlasInfo"),
+            new Dep(AbstractTextureAtlas, nameof(AbstractTextureAtlas), "atlasEntries"),
+            new Dep(GenericTextureAtlas, nameof(GenericTextureAtlas), "GetElementData"),
+            new Dep(FxTextureAtlasStruct, nameof(FxTextureAtlasStruct), "Uvs"),
+            new Dep(HgFxOutputLayerAndSubShaderProperty, nameof(HgFxOutputLayerAndSubShaderProperty), "LoadedOutputLayer", "OutputLayerIndex"),
+            new Dep(FxLevelBuildDecalTextureEntryProperty, nameof(FxLevelBuildDecalTextureEntryProperty), "maskOption"),
+            new Dep(GpuDescriptorEntry, nameof(GpuDescriptorEntry), "StartFragment", "FragmentCount"),
+            new Dep(GpuFragmentEntry, nameof(GpuFragmentEntry), "EncodedMeshAndVisualParticleCountFxMeshIndex", "SkinnedMeshIndex", "FxOutputLayerIndex"),
+            new Dep(GpuAnimationEntry, nameof(GpuAnimationEntry), "FrameCount", "Format", "StartPoseData"),
+            new Dep(FxOneMeshStruct, nameof(FxOneMeshStruct), "StartVertex", "VertexCount", "StartIndex", "PrimitiveCount"),
+            new Dep(MeshVertexRecord, nameof(MeshVertexRecord), "Pos"),
+            new Dep(ReadWriteBuffer1D, nameof(ReadWriteBuffer1D), "WriteContent"),
+            new Dep(AudioEntityGuid, nameof(AudioEntityGuid), "guid", "IsValid"),
+            new Dep(AudioEventHandleRef, nameof(AudioEventHandleRef), "Value"),
+            new Dep(AtlasEntry, nameof(AtlasEntry), "FullPath", "ShortPath", "Index"),
+            new Dep(DatabaseMatrix1D, nameof(DatabaseMatrix1D), "CriteriaNames", "cells"),
+            new Dep(DatabaseMatrix2D, nameof(DatabaseMatrix2D), "FirstCriteriaNames", "SecondCriteriaNames"),
+            // A7 continued — members on types whose Dep entry above spans several lines (kept as their own rows for clarity)
+            new Dep(PresentationDistrict, nameof(PresentationDistrict), "ApplyHexagonSculptingDefinition", "RenderMode", "constructibleDefinitionName"),
+            new Dep(ContentLayer, nameof(ContentLayer), "currentIndexIndex", "currentMeshAddedCount", "currentVertexIndex"),
+            new Dep(PresentationPawnDefinitionAddOn, nameof(PresentationPawnDefinitionAddOn), "definition"),
+            new Dep(PresentationLevelBuildComponent, nameof(PresentationLevelBuildComponent), "FxManager"),
+            new Dep(FxEvolverMaterialLevelBuildElement, nameof(FxEvolverMaterialLevelBuildElement), "ResolveDependencies"),
             // audio
-            new Dep(PresentationSubPawn, nameof(PresentationSubPawn), "AudioEmitter", "Transform", "PresentationPawnDescription", "GetBoneTRS", "PresentationPawnDefinition", "pawnEntry"),   // pawnEntry: the cached struct the ghost-rotor source fix repairs
-            new Dep(AudioEmitter, nameof(AudioEmitter), "AudioEntityGUID", "PostEvent"),
+            new Dep(PresentationSubPawn, nameof(PresentationSubPawn), "AudioEmitter", "Transform", "PresentationPawnDescription", "GetBoneTRS", "PresentationPawnDefinition", "pawnEntry", "FreeEventHashes"),   // pawnEntry: the cached struct the ghost-rotor source fix repairs
+            new Dep(AudioEmitter, nameof(AudioEmitter), "AudioEntityGUID", "PostEvent", "EntityName"),
             new Dep(AudioManager, nameof(AudioManager), "PostEvent"),
             new Dep(LoadingScreen, nameof(LoadingScreen), "VisibilityChanged"),
             new Dep(AkSoundEngine, nameof(AkSoundEngine), "PostEvent", "StopAll"),
             new Dep(UIInteractivityManager, nameof(UIInteractivityManager), "IsMouseCovered", "SpecificUpdate"),
             // combat / fight
-            new Dep(PawnRangedFightSequence, nameof(PawnRangedFightSequence), "InitializeCommon"),   // the state-driven attack hook's target
+            new Dep(PawnRangedFightSequence, nameof(PawnRangedFightSequence), "InitializeCommon", "Shooter", "Targets"),   // the state-driven attack hook's target
             new Dep(PawnActionMeleeStartFight, nameof(PawnActionMeleeStartFight), "StartPairMeleeAttack"),   // the per-swing melee hook's target
             new Dep(RotationPawnStateMachine, nameof(RotationPawnStateMachine), "StartDirectionToLook", "StepTurning", "ownerPawn", "UseRotationAnimation", "rotationStart", "rotationEnd"),
             new Dep(PawnActionRangedStartAttack, nameof(PawnActionRangedStartAttack), "OnReadyToStart", "isReadyToStart", "pawn", "creationTime"),   // creationTime: base PresentationChoreographyAction (base-chain walk)
@@ -349,7 +425,7 @@ namespace HumankindAssetFramework
             new Dep(WorldPosition, nameof(WorldPosition)),
             new Dep(WorldPositionExtensions, nameof(WorldPositionExtensions), "ToVector3"),
             new Dep(UnitActionFaceEnemy, nameof(UnitActionFaceEnemy), "StartUnitAction", "actionScope", "AttackerBattleUnit"),
-            new Dep(MecanimEventInterpreter, nameof(MecanimEventInterpreter)),
+            new Dep(MecanimEventInterpreter, nameof(MecanimEventInterpreter), "presentationSubPawn"),
             new Dep(AlterationFireProjectile, nameof(AlterationFireProjectile), "StartEvent"),   // the muzzle offset-stash hook's target
             // presentation core
             new Dep(Presentation, nameof(Presentation), "PresentationEntityFactoryController", "PresentationBattleReportController", "PresentationAirPatrolController"),   // the STATIC army-walk root — read by respawn / facing / class-scan / census; a rename silently no-ops all four (was uncatalogued: critical-review #5)
@@ -359,7 +435,7 @@ namespace HumankindAssetFramework
             new Dep(PresentationUnit, nameof(PresentationUnit), "UnitDefinition", "GUID", "Pawns", "Formation",
                 "PresentationUnitDefinition", "IsLoaded", "IsNaval", "IsAnyPawnMoving",
                 "UpdatePawns", "FormationAngle", "PresentationEntityHolder", "InstantiatePawns"),   // + re-form / respawn, facing persistence, health-ratio spawn count, pawns hook
-            new Dep(PresentationUnitHolder, nameof(PresentationUnitHolder), "PresentationUnit"),
+            new Dep(PresentationUnitHolder, nameof(PresentationUnitHolder), "PresentationUnit", "audioEmitter", "playRumbleAudioEvent"),
             new Dep(PresentationDistrict, nameof(PresentationDistrict), "presentationLevelBuildComponent", "ApplyGroundMaterialDefinition", "ConstructibleDefinitionName",
                 "UpdateLevelBuild", "UpdateGroundMaterial", "UpdateHexagonSculpting", "mainLevelBuildComponantLayer", "visualAffinityName", "initialVisualAffinityName", "hexagonSculptingDefinitionIndex"),
             // animation / pawn
@@ -374,13 +450,13 @@ namespace HumankindAssetFramework
             new Dep(MeshCollection, nameof(MeshCollection)),
             // data / assets / graphics
             new Dep(AssetDatabase, nameof(AssetDatabase)),
-            new Dep(Guid, nameof(Guid), "a", "b", "c", "d"),
+            new Dep(Guid, nameof(Guid), "a", "b", "c", "d", "Null"),
             new Dep(FxEvolverMaterial, nameof(FxEvolverMaterial), "NextDoublonAvoidanceIndex", "TryLoad"),
             new Dep(FxMesh, nameof(FxMesh), "Mesh", "importAngles"),   // importAngles: the hand-prop import-angle stamp (bindcheck re-homed it here from FxEvolverMaterial)
             new Dep(ContentLayer, nameof(ContentLayer),
                 "LoadEncodingVertexAndBuffer", "baseVertexBufferSize", "baseIndexBufferSize", "maxMeshCount", "maxMeshTriangleCount",
                 "vertexBuffer", "HxFxOneMeshComputeBufferData", "hxFxOneMeshComputeBuffer", "FindGuidAssociatedToIndex"),
-            new Dep(PresentationPawnDefinition, nameof(PresentationPawnDefinition), "Projectile"),
+            new Dep(PresentationPawnDefinition, nameof(PresentationPawnDefinition), "Projectile", "AnimationCapabilityProfile", "SubPawnDefinitions"),
             new Dep(ProjectileAsset, nameof(ProjectileAsset)),
             // district scoped-visual — the mesh strategic footprint (render-feature gate, B&W, flatten) + composed foliage
             new Dep(FxEvolverMaterialLevelBuildElement, nameof(FxEvolverMaterialLevelBuildElement), "renderFeatureSelector", "size", "outputLayer", "fxMesh", "WriteToGPUData",
@@ -390,7 +466,7 @@ namespace HumankindAssetFramework
                 "pairs", "defaultMaterial", "invalidNameMaterial", "deferredName", "deferredTable"),
             new Dep(RenderFeatureSelector, nameof(RenderFeatureSelector), "SelectionFlags0", "FadingOptions"),
             new Dep(RenderFeatureProvider, nameof(RenderFeatureProvider), "ComputeRenderState"),
-            new Dep(FxOutputLayer, nameof(FxOutputLayer), "primitivePerParticleCount", "RenderOutputs", "renderOutputs", "atlases"),
+            new Dep(FxOutputLayer, nameof(FxOutputLayer), "primitivePerParticleCount", "RenderOutputs", "renderOutputs", "atlases", "Atlas", "atlas", "LayerIndex"),
             // formation (EntityFactoryControllerSettings / GameObjectPoolController resolve by SIMPLE name — see ResolveType)
             // ColumnsCountPerRow0/5 are the ENDPOINTS of the six per-row grids the builder writes (like Pose0/Pose8).
             new Dep(PresentationFormationDefinition, nameof(PresentationFormationDefinition), "Dummies", "ColumnsCountPerRow0", "ColumnsCountPerRow5", "Initialize", "LowSpecFormationDefinition"),
@@ -421,15 +497,15 @@ namespace HumankindAssetFramework
             new Dep(ContentOutputLayerEntry, nameof(ContentOutputLayerEntry), "OutputLayerInstance"),
             new Dep(SimulationEventBattleStarted, nameof(SimulationEventBattleStarted), "Raise"),
             new Dep(SimulationBattle, nameof(SimulationBattle), "AttackerGroup", "DefenderGroup"),
-            new Dep(SimulationBattleGroup, nameof(SimulationBattleGroup), "Contenders"),
+            new Dep(SimulationBattleGroup, nameof(SimulationBattleGroup), "Contenders", "Contenders"),
             // A6 — CLOSING THE CATALOG (2026-08-21): the by-name sites that were still outside the drift net. Each member
             // is attributed to the receiver the code actually reads it off (derived receivers follow the walked path).
             new Dep(FragmentEntry, nameof(FragmentEntry), "meshCollection", "meshName", "boneName", "SlotIndex", "BoneIndex", "EncodedMeshAndVisualParticleCount", "FxOutputLayer", "fxOutputLayer", "Load"),
-            new Dep(SkinnedMeshInfo, nameof(SkinnedMeshInfo), "MeshName", "FxMeshContent"),
+            new Dep(SkinnedMeshInfo, nameof(SkinnedMeshInfo), "MeshName", "FxMeshContent", "MeshIndex"),
             new Dep(FxMeshContent, nameof(FxMeshContent), "verticesBytes", "vertexCount", "verticesBytesCrc", "bboxMin", "bboxMax", "Guid", "ImportAngles"),
-            new Dep(FxComponentMeshContentManager, nameof(FxComponentMeshContentManager), "layers"),
-            new Dep(MeshVertexBuffer, nameof(MeshVertexBuffer), "Apply"),   // WriteContent lives on the RUNTIME buffer subclass, not the declared field type — unreachable statically, read null-tolerant via GetMember
-            new Dep(ClipEntry, nameof(ClipEntry), "UnityAnimationClip"),
+            new Dep(FxComponentMeshContentManager, nameof(FxComponentMeshContentManager), "layers", "Layers"),
+            new Dep(MeshVertexBuffer, nameof(MeshVertexBuffer), "Apply", "Size"),   // WriteContent lives on the RUNTIME buffer subclass, not the declared field type — unreachable statically, read null-tolerant via GetMember
+            new Dep(ClipEntry, nameof(ClipEntry), "UnityAnimationClip", "FrameCount", "BonesCount", "CurveIndex", "Looping"),
             new Dep(PawnDefinitionEntry, nameof(PawnDefinitionEntry), "PresentationUnitDefinition"),
             new Dep(AnimationVariableNames, nameof(AnimationVariableNames), "SimpleAttackState"),
             new Dep(PresentationUnitDefinition, nameof(PresentationUnitDefinition), "CoordinationValues", "PresentationFormationDefinition"),
@@ -445,14 +521,14 @@ namespace HumankindAssetFramework
             new Dep(PresentationAirFormation, nameof(PresentationAirFormation), "airFormationUnits"),
             new Dep(PresentationAirUnit, nameof(PresentationAirUnit), "PresentationUnit", "MainPawn"),
             new Dep(MajorEmpire, nameof(MajorEmpire), "DepartmentOfScience"),
-            new Dep(DepartmentOfScience, nameof(DepartmentOfScience), "GetTechnologicalEra"),
+            new Dep(DepartmentOfScience, nameof(DepartmentOfScience), "GetTechnologicalEra", "CurrentTechnologicalEraIndex"),
             new Dep(Timeline, nameof(Timeline), "GetGlobalEraIndex"),
             new Dep(PresentationLevelBuildComponent, nameof(PresentationLevelBuildComponent), "channels", "RefreshChannel"),
-            new Dep(LevelBuildChannel, nameof(LevelBuildChannel), "evolverMaterial"),
+            new Dep(LevelBuildChannel, nameof(LevelBuildChannel), "evolverMaterial", "EvolverMaterialGuid"),
             new Dep(LevelBuildItem, nameof(LevelBuildItem), "loadedEvolverMaterial"),
             new Dep(FxMaterialCache, nameof(FxMaterialCache), "Entries"),
             new Dep(FxMaterialCacheEntry, nameof(FxMaterialCacheEntry), "FxMaterial"),
-            new Dep(FxEvolverDescriptorLevelBuildElement, nameof(FxEvolverDescriptorLevelBuildElement), "assetContentManagerTexture", "materialDataHasChanged", "EvolverMaterials"),
+            new Dep(FxEvolverDescriptorLevelBuildElement, nameof(FxEvolverDescriptorLevelBuildElement), "assetContentManagerTexture", "materialDataHasChanged", "EvolverMaterials", "AssetContentManagerMesh", "evolverMaterials", "GetInstance"),
             // (assetContentManagerTexture's AddNullAtlasInfo is on the RUNTIME manager subclass — called null-tolerant off GetType(), not catalogued)
             new Dep(FxAtlas, nameof(FxAtlas), "atlasEntries", "elementData", "outputEntries", "owner"),
             new Dep(FxAtlasOutputEntry, nameof(FxAtlasOutputEntry), "unityTextureRef"),

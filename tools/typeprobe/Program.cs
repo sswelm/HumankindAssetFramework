@@ -20,6 +20,36 @@ static class Program
         // --find <substring>: every type, method, field, property or event whose name contains it (case-insensitive),
         // with the declaring type and the method signature — for locating a SEAM (e.g. "LoadingCompleted") before a hook
         // is written against it (2026-08-21, the end-of-loading smoke tier).
+        // --exact <name> [name...]: for each name, the types that declare a member with EXACTLY that name — the
+        // "which type owns this member?" question the catalog-surface check asks for every uncatalogued literal.
+        // One pass over the DLLs for all names (2026-08-21).
+        if (args[1] == "--exact" && args.Length >= 3)
+        {
+            var names = new HashSet<string>(args.Skip(2), StringComparer.Ordinal);
+            var found = names.ToDictionary(n => n, n => new List<string>(), StringComparer.Ordinal);
+            foreach (var a in asms)
+            {
+                Type[] types; try { types = a.GetTypes(); } catch (ReflectionTypeLoadException ex) { types = ex.Types.Where(x => x != null).ToArray(); } catch { continue; }
+                foreach (var t in types)
+                {
+                    try
+                    {
+                        foreach (var f in t.GetFields(F)) if (found.TryGetValue(f.Name, out var l)) l.Add($"{t.FullName} (field {f.FieldType.Name})");
+                        foreach (var p in t.GetProperties(F)) if (found.TryGetValue(p.Name, out var l)) l.Add($"{t.FullName} (prop {p.PropertyType.Name})");
+                        foreach (var m in t.GetMethods(F)) if (found.TryGetValue(m.Name, out var l)) l.Add($"{t.FullName} (method)");
+                        foreach (var e in t.GetEvents(F)) if (found.TryGetValue(e.Name, out var l)) l.Add($"{t.FullName} (event)");
+                    }
+                    catch { }
+                }
+            }
+            foreach (var n in args.Skip(2).Distinct())
+            {
+                var l = found[n].Distinct().ToList();
+                Console.WriteLine($"== {n}: {(l.Count == 0 ? "NOT FOUND in any assembly" : l.Count + " declaring type(s)")}");
+                foreach (var s in l.Take(12)) Console.WriteLine("   " + s);
+            }
+            return 0;
+        }
         if (args[1] == "--find" && args.Length >= 3)
         {
             var needle = args[2];
