@@ -189,7 +189,9 @@ Custom animation is **rotation-only on the GPU path**, pose time is **normalized
 the per-frame pose decision for every pawn runs in the pose hook. The *decisions* (which clip, where in it) live in
 the pure `PoseMath`; the hook keeps the I/O and the locks. Phases are tracked **by position**, not array slot — the
 pawn array is rebuilt on every zoom and slot-derived state snaps visibly. The three match radii are **deliberately
-different** (state 4u, fire 4u, deploy 3u) — a tidy-up that unifies them breaks formations. Full detail:
+different** (state 4u, fire 4u, deploy 3u) — a tidy-up that unifies them breaks formations. **The nine clip roles are
+one table** (`ClipRoles.cs`, `ModelEntry.Roles[ClipRole]`): never add a role as a new field family, and never write
+an "all roles" site as a list — loop `ClipRoles.All` (the lockstep-list shape shipped two bugs). Full detail:
 [Animated-Runtime.md](Animated-Runtime.md), [Unit-Combat-Behavior.md](Unit-Combat-Behavior.md).
 
 ## 8. Verification — what proves what

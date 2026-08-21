@@ -10,6 +10,30 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE NINE CLIP ROLES BECOME ONE TABLE — god-class cut A, reversing one slice of a recorded decision
+  (2026-08-21).** `ModelEntry` carried each animation role as its own hand-expanded field family — `mca/mcb/mcc/mcd`
+  + `moveClipColl` + `moveAnimId` + `moveDur`, ×9 ≈ 63 fields — and every "all roles" site was a hand-written list
+  of nine that had to be edited in lockstep: the collection load, the id resolve, the session re-arm, the preflight,
+  the smoke test's dead-role check, `AnyStateRole`. Two shipped bugs came from exactly that shape (`AnyStateRole`
+  gating on `moveAnimId` alone — critical-review #8; the smoke wiring's dropped `alc` component — why a 36-int
+  reflection test existed). Now **`ClipRoles.cs`**: a `ClipRole` enum, a `ClipBinding` (guid, collection, animId,
+  duration) per role, `ModelEntry.Roles[9]`, and every one of those six sites is a **loop** — a tenth role is one enum
+  value plus its name/tag/key. The named accessors (`e.attackAnimId`, `e.idleDur` …) stay as properties *into* the
+  table, so ~200 per-role call sites and the per-frame pose hook are byte-for-byte unchanged. **The pack contract is
+  untouched:** the discovery on the way in was that the 36 ints were never the contract — the JSON `clip*` arrays
+  are, and both parse paths keep their literal keys (the cross-repo parity gate greps them; it still passes). Gone:
+  36 guid ints, 27 runtime fields, `ResolveAnimId` (folded into the loop), one regex-fallback initializer of nine
+  40-column lines. Tests: the 36-int reflection theory became a table-driven one (every component of every role arms
+  its own check, under its table name) plus `ClipRolesTests` — order, distinct names/tags/keys, fresh table per entry,
+  accessors-are-the-table, `AnyStateRole` true for each state role alone and false for primary alone, and **each
+  `clip*` key landing on its role on BOTH parse paths** — the test the reflection guard was standing in for. Suite
+  390 → 410. [Decisions](docs/Decisions.md) records the reversal and its evidence; the rule now reads: reopen a
+  `ModelEntry` slice only with a proven bug from the shape it removes.
+  **Drilled:** the howitzer's full state chain (idle-override → pre-move → move → after → recoil on bombard) and a
+  creature's idle cue played; every role tag still injects under its own name (`<primary>` 14, `:move` 11, `:attack`
+  5, `:idle` 5, `:after` 2, `:premove` 2, `:combat` 1); smoke `verified 35 clip role(s)` — the same count as before
+  the table — 0 dead roles, 0 errors.
+
 - **THE DISTRICT AXIS IS ITS OWN CLASS — `DistrictInject`, out of the `UniversalInject` god class (2026-08-21).**
   The review's architecture finding, applied where it pays: `UniversalInject` was one static partial class across 14
   files and ~12,100 lines in which every partial could read and write every other partial's statics — exactly how the

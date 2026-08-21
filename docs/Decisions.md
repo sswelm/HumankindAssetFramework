@@ -129,10 +129,21 @@ owns animation config, the Sound Studio audio, and so on. Cross-window writes go
 old denylist rebase was forgotten four times (silent field reverts); the fail-safe inversion killed the drift class.
 Don't re-litigate the split. See [Framework-Review.md](Framework-Review.md).
 
-## No `ModelEntry` split / POCO refactor (declined)
-The plugin's `ModelEntry` is a large struct; a proposed split into smaller POCOs was **declined**. **Why:** the churn
+## No `ModelEntry` split / POCO refactor (declined) — **scope narrowed 2026-08-21: the clip roles became a table**
+The plugin's `ModelEntry` is a large class; a proposed split into smaller POCOs was **declined**. **Why:** the churn
 touches the settled ownership model and the reflection-cached per-frame hot path for no proven bug; the drift it was
-meant to prevent is already handled by the fail-safe rebase + the schema-parity guard. Don't resurface.
+meant to prevent is already handled by the fail-safe rebase + the schema-parity guard. The big-bang split stays declined.
+**What changed (2026-08-21), and the evidence that justified reopening one slice:** the premise *"no proven bug"* had
+aged. The nine clip roles were nine hand-expanded field families (4 guid ints + collection + animId + duration, ×9 ≈ 63
+fields), and every "all roles" site was a hand-written list of nine edited in lockstep. That shape produced **two
+shipped bugs**: `AnyStateRole` gated on `moveAnimId` alone, so a move-less state-driven model armed fires that never
+animated (critical-review #8); and the smoke test's wiring dropped the `alc` component (the reason a 36-int reflection
+test had to exist). So **that slice** is now one table — `ClipRoles.cs`: a `ClipRole` enum, a `ClipBinding` per role,
+`ModelEntry.Roles[9]` — and every "all roles" site (load, resolve, re-arm, preflight, smoke, `AnyStateRole`) is a loop.
+The named accessors (`e.attackAnimId` …) remain as sugar *into* the table so the per-role call sites and the hot path
+are untouched; the pack contract (the `clip*` JSON arrays) is unchanged on both parse paths. **Rule going forward:** a
+restructuring of `ModelEntry` is on the table only with a *proven* bug from the shape it removes, and only as the
+bounded slice that removes it. The per-unit runtime dictionaries stay as they are — no bug, hot path, threaded.
 
 ## >127-bone rigs: pair-merge on the deploy path, not zero-weight slimming (2026-08)
 The GPU skinning wall is a per-vertex **bone-index** limit of **128** (indices break past 127) — *not* 256. A rig with
