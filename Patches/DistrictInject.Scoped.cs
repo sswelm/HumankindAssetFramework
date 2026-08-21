@@ -17,6 +17,9 @@ namespace HumankindAssetFramework
     {
         static bool repoDumped;
         static int wonderRowTick;
+        static readonly HashSet<string> wonderCellFilled = new HashSet<string>();   // wonders whose repository cell is filled (latched; cleared on session reset)
+        static MethodInfo wonderTryLoadAsync, wonderNextIdx;                         // FxEvolverMaterial.TryLoadAsync / NextDoublonAvoidanceIndex, resolved once
+        static bool wonderRowsAllDone;                                            // every configured wonder latched -> PollWonderRows is a no-op
         static bool axisProbed;
         static readonly HashSet<string> wonderRowLogged = new HashSet<string>();
 
@@ -81,6 +84,7 @@ namespace HumankindAssetFramework
 
         internal static void ResetWonderTemplates()   // called from ResetDistrictSessionState — assets are corpses after a reload
         {
+            wonderCellFilled.Clear(); wonderRowsAllDone = false;   // the repository is rebuilt per session -> re-fill (and re-latch) next session
             wonderTemplates.Clear();
             wonderTemplateReqs.Clear();
             wonderRowLogged.Clear();
@@ -98,19 +102,29 @@ namespace HumankindAssetFramework
         {
             var cfg = Plugin.WonderNativeRows?.Value?.Trim();
             if (string.IsNullOrEmpty(cfg)) return;
+            if (wonderRowsAllDone) return;            // all cells filled this session (see the latch below)
             if (++wonderRowTick % 30 != 1) return;   // ~2x/second is plenty; every step below is idempotent
             try
             {
-                var fxmType = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxEvolverMaterial");
-                var tryLoadAsync = fxmType?.GetMethods(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(x => x.Name == "TryLoadAsync" && x.GetParameters().Length == 2);
-                var nextIdx = fxmType?.GetMethod("NextDoublonAvoidanceIndex", BindingFlags.Public | BindingFlags.Static);
+                // resolved ONCE: AccessTools.TypeByName is an uncached walk of every type in every assembly, and this ran it
+                // (plus a LINQ method search) every 30 frames — ~40 ms a run, 1.35 ms/frame averaged (FrameCost 2026-08-21)
+                if (wonderTryLoadAsync == null || wonderNextIdx == null)
+                {
+                    var fxmType = GameBinding.FxEvolverMaterial;
+                    wonderTryLoadAsync = fxmType?.GetMethods(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(x => x.Name == "TryLoadAsync" && x.GetParameters().Length == 2);
+                    wonderNextIdx = fxmType?.GetMethod("NextDoublonAvoidanceIndex", BindingFlags.Public | BindingFlags.Static);
+                }
+                var tryLoadAsync = wonderTryLoadAsync; var nextIdx = wonderNextIdx;
                 if (tryLoadAsync == null || nextIdx == null) return;
+                bool anyWork = false;
 
                 foreach (var part in cfg.Split(';'))
                 {
                     var eq = part.IndexOf('=');
                     if (eq <= 0) continue;
                     string wname = part.Substring(0, eq).Trim();
+                    if (wonderCellFilled.Contains(wname)) continue;   // DONE (latched): no template / repository work until the next session reset
+                    anyWork = true;
                     var guid = ParseGuid4(part.Substring(eq + 1).Trim());
                     if (guid == null) { if (wonderRowLogged.Add(wname + ":badguid")) Plugin.Log.LogWarning($"[WonderRow] '{wname}': unparseable guid"); continue; }
 
@@ -139,9 +153,16 @@ namespace HumankindAssetFramework
 
                     // 2) fill the repository cell ONLY once the entry's swap is live (the player never sees the template)
                     var entry = distModels.FirstOrDefault(d => d.district == wname);
+                    // a SCOPED district (selectorGuid) registers through the selector-tile path; the isolate swap that this
+                    // cell fill waits on never happens for it — latch, or the poll retries forever (the Oracle save)
+                    if (entry != null && entry.selectorGuid != null) { wonderCellFilled.Add(wname); continue; }
                     if (entry == null || entry.privateLeaf == null) continue;   // swap not established yet — cell stays empty
                     FillWonderCell(wname, guid);
                 }
+                // every configured wonder latched -> stop polling altogether (was ~40 ms per run, every 30 frames, forever:
+                // a TypeByName assembly scan + a LINQ method search + a boxed copy of every repository matrix, all to
+                // discover "already filled" at the end — FrameCost 2026-08-21: 1.35 ms/frame)
+                if (!anyWork) wonderRowsAllDone = true;
             }
             catch (Exception ex) { if (wonderRowLogged.Add("ex")) Plugin.Log.LogError("[WonderRow] " + ex); }
         }
@@ -169,8 +190,9 @@ namespace HumankindAssetFramework
                 if (idx < 0) { if (wonderRowLogged.Add(wname + ":noaxis")) Plugin.Log.LogWarning($"[WonderRow] '{wname}': not in the criteria axis (definition not loaded?)"); return; }
                 var cell = cells.GetValue(idx);
                 var curGuid = AccessTools.Field(cell.GetType(), "Guid")?.GetValue(cell);
-                if (curGuid != null && curGuid.Equals(guid)) return;   // already filled
+                if (curGuid != null && curGuid.Equals(guid)) { wonderCellFilled.Add(wname); return; }   // already filled -> latch
                 addM.Invoke(m, new object[] { Activator.CreateInstance(ssType, wname), guid, null });
+                wonderCellFilled.Add(wname);
                 if (wonderRowLogged.Add(wname + ":filled"))
                     Plugin.Diag($"[WonderRow] '{wname}': cell filled AFTER swap went live (fallback only — the tile draws our private leaf)");
                 return;
@@ -287,6 +309,7 @@ namespace HumankindAssetFramework
         // cheap ReferenceEquals guard (the game re-resolves the channel on its own UpdateLevelBuild; we re-assert). The
         // building element's output layer is bound via the shared BindReactorBuilding once our selector is on a channel.
         static readonly Dictionary<string, object> selectorTileGuid = new Dictionary<string, object>();   // districtName -> parsed guid
+        static readonly Dictionary<object, string> districtNameCache = new Dictionary<object, string>();   // PresentationDistrict -> ConstructibleDefinitionName (perf 2026-08-21)
         static string selectorTileParsedFrom;                                                             // config string we parsed
         static int selectorTileRegCount = -1;                                                             // distModels count at last (re)build — rebuild the map when the registry changes
         static readonly Dictionary<string, object> loadedSelectorByKey = new Dictionary<string, object>();// guidKey -> loaded+Loaded selector
@@ -296,7 +319,7 @@ namespace HumankindAssetFramework
             if (distFxManager == null || trackedDistricts.Count == 0) return;
             try
             {
-                EnsureDistrictConfig();   // populates distModels (per-entry atlasGuid + selectorGuid) even with DistrictRepoint off
+                long tCfg = FrameCost.Begin(); EnsureDistrictConfig(); FrameCost.End(FrameCost.SelTileCfg, tCfg);   // populates distModels (per-entry atlasGuid + selectorGuid) even with DistrictRepoint off
                 var cfg = Plugin.DistrictSelectorTile?.Value?.Trim() ?? "";
                 // (re)build the scoped map from the CONFIG **and** any registry entry that baked a selectorGuid (editor-driven,
                 // no config line needed) — rebuild when the config text OR the registry set changes.
@@ -316,10 +339,13 @@ namespace HumankindAssetFramework
                     selectorTileParsedFrom = cfg; selectorTileRegCount = distModels.Count;
                 }
                 if (selectorTileGuid.Count == 0) return;
+                long tLoop = FrameCost.Begin();
                 foreach (var d in trackedDistricts)
                 {
                     if (d is UnityEngine.Object duo && duo == null) continue;
-                    var name = GetMember(d, "ConstructibleDefinitionName")?.ToString();
+                    // name resolved ONCE per PresentationDistrict (a reflection read + a StaticString ToString alloc, ×17
+                    // districts × 60 fps before — perf pass 2026-08-21); the cache is cleared with trackedDistricts on reset
+                    if (!districtNameCache.TryGetValue(d, out var name)) districtNameCache[d] = name = GetMember(d, "ConstructibleDefinitionName")?.ToString();
                     if (string.IsNullOrEmpty(name) || !selectorTileGuid.TryGetValue(name, out var guid)) continue;
                     S = ScopedFor(name);   // PER-DISTRICT: point the scoped-state proxies at THIS district before any scoped work (texture / B&W / flatten no longer clash between the reactor and the Oracle)
                     // resolve THIS district's own baked albedo atlas from the registry (for the scoped texture bind)
@@ -386,10 +412,16 @@ namespace HumankindAssetFramework
                     // PER-DISTRICT (S = this district's state): bind its element to its OWN donor-layer clone, then bind its
                     // albedo + drive its flatten. These ran AFTER the loop before — so only the LAST scoped district got
                     // processed (a 2nd district rendered untextured / shared the first's layer). Now each owns its state.
-                    BindReactorBuilding(name);
-                    ApplyScopedAlbedo();
-                    UpdateMeshFlatness();
+                    // UNBOUND: the bind walks every leaf of every tracked district looking for a donor layer — 42 ms/frame
+                    // during a load, every frame, until the leaves exist (FrameCost 2026-08-21). Retry twice a second;
+                    // once bound (S.donorClone set) the call is a no-op anyway.
+                    long tb = FrameCost.Begin();
+                    if (S.donorClone != null || (UnityEngine.Time.frameCount % 30) == 0) BindReactorBuilding(name);
+                    FrameCost.End(FrameCost.SelTileBind, tb);
+                    tb = FrameCost.Begin(); ApplyScopedAlbedo();  FrameCost.End(FrameCost.SelTileAlbedo, tb);
+                    tb = FrameCost.Begin(); UpdateMeshFlatness(); FrameCost.End(FrameCost.SelTileFlat, tb);
                 }
+                FrameCost.End(FrameCost.SelTileLoop, tLoop);   // the whole district loop (head cost = loop − bind − albedo − flat)
             }
             catch (Exception ex) { if (selectorTileLogged.Add("ex")) Plugin.Log.LogError("[DistrictTile] " + ex); }
         }

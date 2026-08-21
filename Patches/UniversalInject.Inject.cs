@@ -253,14 +253,19 @@ namespace HumankindAssetFramework
                 InjectHandProp(addon, animMgr, e.skeleton, e);
                 ApplyTexture(e, animMgr);
                 DumpFxIndices(donorSkel0, e, bodyName, animMgr);   // ghost hunt: donor vs our FxMeshIndex + StartIndex needle + descriptor scan
-                if (!e.repointed) { e.repointed = true; anyRescuable = null; Plugin.Diag($"[Uni] repointed '{name}' -> {e.resourceName} (mesh '{bodyName}', layer '{e.layerHint}')"); }
+                if (!e.repointed) { e.repointed = true; anyRescuable = null; MarkSubPawnsDirty(); Plugin.Diag($"[Uni] repointed '{name}' -> {e.resourceName} (mesh '{bodyName}', layer '{e.layerHint}')"); }
             }
             catch (Exception ex) { InjectionErrors++; Plugin.Log.LogError("[Uni] repoint: " + ex); }
         }
 
+        static int texTickFrame;
         internal static void TickTexture()
         {
             if (entries == null) return;
+            // RECOVERY path, not a per-frame need: the game resets a material only on its own rebuild events, and a
+            // 5-frame re-apply latency is invisible — while the per-frame walk (every entry × output × 3 material
+            // fields, reflection + native GetTexture) was a steady ~0.1-0.2 ms (perf pass 2026-08-21).
+            if ((++texTickFrame % 5) != 0) return;
             foreach (var e in entries)
             {
                 TickOne(e);
@@ -450,13 +455,12 @@ namespace HumankindAssetFramework
             if (!anyWanted) return;
             try
             {
-                var spType = GameBinding.PresentationSubPawn;
-                if (spType == null) return;
-                foreach (var o in UnityEngine.Object.FindObjectsOfType(spType))
+                // the SHARED sub-pawn source (SubPawnScan.cs: a targeted presentation walk, scene-scan verified) — this poll used to run its own full FindObjectsOfType every 3 s
+                foreach (var pr in OurSubPawns(list, now, out _))
                 {
-                    if (!(o is UnityEngine.Component c) || c == null) continue;
-                    var e = LongestMatch(list, c.gameObject.name, x => x.pawnDescription);
-                    if (e == null || !e.hideSubPawns) continue;
+                    if (!(pr.Key is UnityEngine.Component c) || c == null) continue;
+                    var e = pr.Value;
+                    if (!e.hideSubPawns) continue;
                     // SOURCE FIX (2026-08-03): the SubPawn caches a private PawnEntry STRUCT at init and re-posts it
                     // every frame — after a respawn it re-cached the DONOR SkeletonId (40) + donor clip, so the game
                     // fights our per-frame overwrite forever (the ghost's engine). Repair the CACHED struct once:

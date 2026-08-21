@@ -89,6 +89,7 @@ namespace HumankindAssetFramework
         public string rotorSpinBones = "";  // reclaim rotor bones the donor clip hijacks: "BoneName@axis;BoneName@axis" (axis 0/1/2, per-model like turretAxis). Each named bone gets a BoneRotation slot with a constantly-advancing angle — the aim-layer override outranks the clip's channel, so the rotor spins flat about the chosen axis while the donor clip drives the body.
         public float rotorSpinSpeed = 720f; // rotor spin rate, degrees/second (720 = 120 RPM)
         public int[] rotorIdx; public int[] rotorAxis;   // resolved bone indices + axes (cached once)
+        public int[] rotorTrimIdx = new int[0], rotorTrimAxis = new int[0]; public float[] rotorTrimDeg = new float[0]; public string rotorTrimSig;   // rotor-trim dial lines resolved to THIS rig's bone slots, re-resolved only when the dial file changes (perf 2026-08-21)
         public bool vfxSilencedLogged;    // session flag: log the first suppressed event once per entry
         public int turretBoneIdx = -2;    // cached bone index for turretBone (-2 = not resolved yet, -1 = not found). Resolved once from e.skeleton.BoneInfos.
         public int gunElevBoneIdx = -2;   // cached bone index (-2 = unresolved, -1 = not found)
@@ -974,6 +975,8 @@ namespace HumankindAssetFramework
 
         internal static void RearmModelRegistration(bool resetDistricts = true)
         {
+            MarkSubPawnsDirtyAndReverify();   // session-1 sub-pawn components are corpses; the shared scan must refresh (and re-verify the walk once)
+            _unitEntryCache.Clear();   // unit->entry cache (ProcessAnimStates) keys session-1 PresentationUnits
             registered = false;
             anyAnimated = null; anyMuzzle = null; anyFreeze = null; anyRescuable = null;                    // recomputed on the next pawn-add
             unitScaleByDesc.Clear(); unitScaleNameByDesc.Clear(); vanillaScaledLogged.Clear(); descApplied.Clear(); cachedEra = -1;   // descriptor ids + era are session-scoped (meshApplied deliberately KEPT: the Fx vertex buffers persist)

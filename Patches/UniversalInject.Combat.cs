@@ -30,11 +30,31 @@ namespace HumankindAssetFramework
         // Strip a pawn description's trailing variant suffix ("Era6_Common_StealthHelicopters_01" -> "Era6_Common_StealthHelicopters")
         // so it matches the unit-definition name ("LandUnit_Era6_Common_StealthHelicopters").
         internal static string CoreDesc(string pd) => System.Text.RegularExpressions.Regex.Replace(pd ?? "", "_[0-9]+$", "");
+        static bool respawnQuiet;   // adaptive cadence: true once every tracked unit has had its passes (see below)
+        // ProcessAnimStates: PresentationUnit -> its entry (null = vanilla), so the name resolve runs once per unit, not per run.
+        internal static readonly Dictionary<object, ModelEntry> _unitEntryCache = new Dictionary<object, ModelEntry>();
+        static int _unitEntryCacheRun;
+        // PresentationUnit -> its ONE entry (longest-match on the unit definition name), cached per unit object; null = vanilla.
+        // Shared by the anim-state sampler and the sub-pawn walk. Main thread only; cleared on re-arm + every ~30 s.
+        internal static ModelEntry ResolveUnitEntry(object unit)
+        {
+            if (unit == null) return null;
+            if (!_unitEntryCache.TryGetValue(unit, out var e))
+            {
+                string uname = GetMember(GetMember(unit, "UnitDefinition"), "Name")?.ToString() ?? "";
+                e = uname.Length == 0 ? null : FindEntryForUnitDefinition(uname);
+                _unitEntryCache[unit] = e;
+            }
+            return e;
+        }
         internal static void MaybeRespawnPostLoad()
         {
             if (entries == null || !Plugin.UniversalInjectOn.Value) return;
             if (!entries.Any(x => x.respawnAfterLoad)) return;      // no model opted in — nothing to do
-            if (++respawnFrame % 5 != 0) return;                    // throttle the scan to ~12x/s (frame counter still advances every frame)
+            // ADAPTIVE cadence (perf pass 2026-08-21): ~12x/s while any tracked unit still has respawn passes pending (the
+            // rotor-race fix wants to land "shortly after it rendered"), else ~2x/s — the walk is every army on the map
+            // with a per-unit name resolve, and it ran at 12 Hz forever after its one-shot job was done (~0.1 ms/frame).
+            if (++respawnFrame % (respawnQuiet ? 30 : 5) != 0) return;   // (frame counter still advances every frame)
             try
             {
                 var presType = GameBinding.Presentation;
@@ -43,6 +63,7 @@ namespace HumankindAssetFramework
                 if (armies == null) return;
 
                 var present = new HashSet<object>();
+                bool anyPending = false;
                 foreach (var army in armies)
                 {
                     if (army == null) continue;
@@ -58,16 +79,19 @@ namespace HumankindAssetFramework
                     // and the 1s marks would be wasted during the load.
                     bool loaded = true; try { loaded = Convert.ToBoolean(GetMember(unit, "IsLoaded")); } catch { }
                     if (!loaded) continue;
-                    if (!respawnBase.ContainsKey(unit)) { respawnBase[unit] = respawnFrame; respawnCount[unit] = 0; continue; }
+                    if (!respawnBase.ContainsKey(unit)) { respawnBase[unit] = respawnFrame; respawnCount[unit] = 0; anyPending = true; continue; }
                     int done = respawnCount[unit];
                     if (done >= RespawnAttempts) continue;                                             // all passes done
+                    anyPending = true;                                                                 // a pass is still owed -> keep the fast cadence
                     if (respawnFrame - respawnBase[unit] < (done + 1) * Math.Max(1, Plugin.RespawnDelayFrames.Value)) continue; // not time for the next pass yet
                     respawnCount[unit] = done + 1;                                                     // bump first so a throwing unit isn't stuck
                     bool naval = false; try { naval = Convert.ToBoolean(GetMember(unit, "IsNaval")); } catch { }
                     AccessTools.Method(unit.GetType(), "UpdatePawns", new[] { typeof(bool) })?.Invoke(unit, new object[] { naval });
+                    MarkSubPawnsDirty();                   // the respawn rebuilt this unit's sub-pawns -> the shared scan must refresh
                     FacingPersist.OnArmyRespawned(army);   // the rebuild just wiped this unit's heading — re-arm facing restore (respawnAfterLoad units otherwise lose their saved facing)
                     Plugin.Diag($"[Uni][RESPAWN] re-spawned '{uname}' shortly after it rendered (clears the first-instance rotor race)");
                 }
+                respawnQuiet = !anyPending;   // nothing owed -> back off to ~2x/s until a new instance appears
                 // Drop bookkeeping for units that are gone (destroyed, or the previous game's units after a reload) so the
                 // dicts don't grow and a genuinely new instance (a new object) is detected + fixed again.
                 if (respawnBase.Count > 0) foreach (var k in respawnBase.Keys.Where(k => !present.Contains(k)).ToList()) { respawnBase.Remove(k); respawnCount.Remove(k); }
@@ -743,6 +767,7 @@ namespace HumankindAssetFramework
             foreach (var e in list) if ((e.animStateDriven && e.AnyStateRole) || e.combatZ != 0f) { any = true; break; }
             if (!any) return;
             if (++stateFrame % 3 != 0) return;   // ~20x/s, like the deploy poll
+            if ((++_unitEntryCacheRun % 200) == 0) _unitEntryCache.Clear();   // ~every 30 s: drop dead units' keys (cheap to re-resolve)
             try
             {
                 float now = UnityEngine.Time.time;
@@ -760,18 +785,20 @@ namespace HumankindAssetFramework
                 void SampleUnit(object unit, bool combat, long keySalt)
                 {
                     if (unit == null) return;
-                    string uname = GetMember(GetMember(unit, "UnitDefinition"), "Name")?.ToString() ?? "";
-                    if (uname.Length == 0) return;
-                    var e = FindEntryForUnitDefinition(uname);   // the unit's ONE entry (longest-match), then gate on its flags
+                    // unit -> entry resolved ONCE per PresentationUnit object (null cached too): the per-unit name read
+                    // (two reflection hops + a StaticString ToString alloc) and the 22-entry longest-match ran for EVERY
+                    // army on the map every 3 frames, vanilla included (perf pass 2026-08-21). Cleared on re-arm and
+                    // every 200 runs (dead units would otherwise pin their entry forever).
+                    var e = ResolveUnitEntry(unit);
                     if (e == null || !((e.animStateDriven && e.moveAnimId >= 0) || e.combatZ != 0f)) return;
                     if (!fresh.ContainsKey(e)) return;   // gate parity guard: only entries the dicts were built for
                     long guid = GuidToLong(GetMember(unit, "GUID"));
                     if (guid == 0) return;
                     guid = unchecked(guid ^ keySalt);
-                    var pawnList = (GetMember(unit, "Pawns") as System.Collections.IEnumerable)?.Cast<object>().ToList();
                     UnityEngine.Vector3 upos = UnityEngine.Vector3.zero; bool hasPos = false;
-                    if (pawnList != null)
-                        foreach (var pawn in pawnList)
+                    var pawnSeq = GetMember(unit, "Pawns") as System.Collections.IEnumerable;   // enumerated directly (twice) — no Cast().ToList() copy per unit per run
+                    if (pawnSeq != null)
+                        foreach (var pawn in pawnSeq)
                             if (GetMember(pawn, "Transform") is UnityEngine.Transform tr0) { upos = tr0.position; hasPos = true; break; }
                     bool moving = false;
                     if (hasPos)
@@ -795,8 +822,8 @@ namespace HumankindAssetFramework
                     float moveStartedAt = e.stateMoveStartedAt.TryGetValue(guid, out var mAt) ? mAt : -1f;
                     float combatChangedAt = e.stateCombatChangedAt.TryGetValue(guid, out var cAt) ? cAt : -1f;
                     seen[e].Add(guid);
-                    if (pawnList != null)
-                        foreach (var pawn in pawnList)
+                    if (pawnSeq != null)
+                        foreach (var pawn in pawnSeq)
                             if (GetMember(pawn, "Transform") is UnityEngine.Transform tr)
                                 fresh[e].Add(new StateSample { pos = tr.position, moving = moving, stoppedAt = stoppedAt, moveStartedAt = moveStartedAt, combat = combat, combatChangedAt = combatChangedAt });
                 }

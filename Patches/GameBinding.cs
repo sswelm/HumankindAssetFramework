@@ -204,6 +204,10 @@ namespace HumankindAssetFramework
         internal static Type Formation3D            => CachedDerived("Formation3D",            () => FieldOrPropType(EntityFactoryControllerSettings, "Formation3DPrefab"));   // the dummy-pool prefab we extend
         internal static Type Formation3DDummy       => CachedDerived("Formation3DDummy",       () => ElementType(FieldOrPropType(Formation3D, "Dummies")));
         internal static Type ArmyInfo               => CachedDerived("ArmyInfo",               () => FieldOrPropType(PresentationArmy, "ArmyInfo"));   // facing persistence keys on its SimulationEntityGUID
+        internal static Type PresentationSquadron   => CachedDerived("PresentationSquadron",   () => ElementType(FieldOrPropType(PresentationEntityFactoryController, "presentationSquadronEntities")));   // AIR units (the sub-pawn walk)
+        internal static Type PresentationAirPatrolController => CachedDerived("PresentationAirPatrolController", () => FieldOrPropType(Presentation, "PresentationAirPatrolController"));   // owns the air formations (a squadron's pawns live there)
+        internal static Type PresentationAirFormation => CachedDerived("PresentationAirFormation", () => ElementType(FieldOrPropType(PresentationAirPatrolController, "presentationAirFormations")));
+        internal static Type PresentationAirUnit    => CachedDerived("PresentationAirUnit",    () => ElementType(FieldOrPropType(PresentationAirFormation, "airFormationUnits")));
         // world / era (the Resize Lab's era anchor)
         internal static Type MajorEmpire            => CachedDerived("MajorEmpire",            () => ElementType(FieldOrPropType(Sandbox, "MajorEmpires")));
         internal static Type DepartmentOfScience    => CachedDerived("DepartmentOfScience",    () => FieldOrPropType(MajorEmpire, "DepartmentOfScience"));
@@ -346,8 +350,8 @@ namespace HumankindAssetFramework
             new Dep(MecanimEventInterpreter, nameof(MecanimEventInterpreter)),
             new Dep(AlterationFireProjectile, nameof(AlterationFireProjectile), "StartEvent"),   // the muzzle offset-stash hook's target
             // presentation core
-            new Dep(Presentation, nameof(Presentation), "PresentationEntityFactoryController", "PresentationBattleReportController"),   // the STATIC army-walk root — read by respawn / facing / class-scan / census; a rename silently no-ops all four (was uncatalogued: critical-review #5)
-            new Dep(PresentationEntityFactoryController, nameof(PresentationEntityFactoryController), "PresentationArmyEntities"),   // the next hop off that root — the army array every walk enumerates
+            new Dep(Presentation, nameof(Presentation), "PresentationEntityFactoryController", "PresentationBattleReportController", "PresentationAirPatrolController"),   // the STATIC army-walk root — read by respawn / facing / class-scan / census; a rename silently no-ops all four (was uncatalogued: critical-review #5)
+            new Dep(PresentationEntityFactoryController, nameof(PresentationEntityFactoryController), "PresentationArmyEntities", "presentationSquadronEntities"),   // the next hops off that root — the army array every walk enumerates, and the AIR units (squadrons) beside it
             new Dep(PresentationPawn, nameof(PresentationPawn), "Transform", "PresentationUnit",
                 "SubPawns", "SubPawnCount", "IsTurning", "PlayAnimationState", "TriggerDeath", "InstantiatePawn", "rotationTransformInfos", "Dummy"),   // + battle hold-fire replay, death cue, pawn-spawn hook, turret census
             new Dep(PresentationUnit, nameof(PresentationUnit), "UnitDefinition", "GUID", "Pawns", "Formation",
@@ -434,6 +438,10 @@ namespace HumankindAssetFramework
             new Dep(Formation3D, nameof(Formation3D), "Dummies"),
             new Dep(Formation3DDummy, nameof(Formation3DDummy), "Transform", "GameObject"),
             new Dep(ArmyInfo, nameof(ArmyInfo), "SimulationEntityGUID"),
+            new Dep(PresentationSquadron, nameof(PresentationSquadron), "PresentationUnit"),
+            new Dep(PresentationAirPatrolController, nameof(PresentationAirPatrolController), "presentationAirFormations"),
+            new Dep(PresentationAirFormation, nameof(PresentationAirFormation), "airFormationUnits"),
+            new Dep(PresentationAirUnit, nameof(PresentationAirUnit), "PresentationUnit", "MainPawn"),
             new Dep(MajorEmpire, nameof(MajorEmpire), "DepartmentOfScience"),
             new Dep(DepartmentOfScience, nameof(DepartmentOfScience), "GetTechnologicalEra"),
             new Dep(Timeline, nameof(Timeline), "GetGlobalEraIndex"),

@@ -1290,10 +1290,12 @@ namespace HumankindAssetFramework
             runtimeFlatHeight = UnityEngine.Mathf.Clamp(value, 0.02f, 1f);
             Plugin.Log.LogInfo($"[FootprintMesh] flat-height override -> {runtimeFlatHeight:0.00} (all scoped districts)");
         }
+        static int flatPollTick;
         internal static void UpdateMeshFlatness()
         {
             bool flatOn = fpResolved ? fpFlat : (Plugin.DistrictFootprintMeshFlat != null && Plugin.DistrictFootprintMeshFlat.Value == "true");
             if (!flatOn || scopedElements.Count == 0) return;
+            if ((++flatPollTick % 10) != 0) return;   // the zoom-band read (ComputeRenderState via reflection) every 10 frames — the crossover is a fade, 0.17 s is invisible (FrameCost 2026-08-21: SelectorTile 210 µs/frame)
             float topoVis = SchematicVis();
             if (topoVis < 0f) return;                                    // provider not ready
             bool flat = topoVis >= 0.5f;
@@ -1397,7 +1399,7 @@ namespace HumankindAssetFramework
                 {
                     bool seen = false;
                     for (int i = 0; i < trackedDistricts.Count && !seen; i++) seen = ReferenceEquals(trackedDistricts[i], district);
-                    if (!seen) trackedDistricts.Add(district);
+                    if (!seen) { trackedDistricts.Add(district); UniversalInject.RearmDistrictScan(); }   // a NEW district: terrain-hug's district map refreshes (dirty-driven, not a 3 s scene scan)
                 }
                 if (!distOn || distModels.Count == 0) return;
                 var name = GetMember(district, "ConstructibleDefinitionName")?.ToString();
@@ -1481,7 +1483,7 @@ namespace HumankindAssetFramework
                 districtOwnedClones.Clear();
             }
             distFxManager = null;
-            trackedDistricts.Clear(); lastLevelBuildEvent = null; haveLevelBuildEvent = false;   // instances/args reference the dead session
+            trackedDistricts.Clear(); districtNameCache.Clear(); lastLevelBuildEvent = null; haveLevelBuildEvent = false;   // instances/args reference the dead session
             bindLog.Clear();   // re-bind the building output layers against the new session's leaves
             loadedSelectorByKey.Clear(); selectorTileLogged.Clear();   // loaded selectors reference the dead session's FxManager
             scopedStates.Clear(); S = new ScopedState();   // ALL per-district scoped state (donorClone/albedo/elements/B&W/flatten) referenced the dead session

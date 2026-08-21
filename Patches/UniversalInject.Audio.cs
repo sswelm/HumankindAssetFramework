@@ -216,8 +216,8 @@ namespace HumankindAssetFramework
         // handles are auto-captured from any vehicle move by Hk_AudioTrace, so they're ready once any boat has moved once.
         static int engineFrame;
         static bool _listenerChecked;
-        static List<KeyValuePair<UnityEngine.Object, ModelEntry>> _ourSubpawns;   // cached OUR-units' sub-pawns (refreshed ~every 2s)
-        static float _spCacheAt;
+        static List<KeyValuePair<UnityEngine.Object, ModelEntry>> _ourSubpawns;   // the audio-relevant subset of the SHARED sub-pawn scan (rebuilt once per rescan)
+        static int _engineScanVersion = -1;                                         // last OurSubPawns version this poll rebuilt from
         static List<ModelEntry> _audioOn;      // cached audio-enabled subset — the fields it filters on are set once at registry load
         static List<ModelEntry> _audioOnSrc;   // the entries list the cache was built from (rebuilt when the registry republishes)
 
@@ -388,22 +388,17 @@ namespace HumankindAssetFramework
                 }
                 if (anyCustom) EnsureAudioListener();
 
-                var spType = GameBinding.PresentationSubPawn;
-                if (spType == null) return;
-                // FindObjectsOfType is a FULL scene scan — running it every poll causes periodic frame spikes (bad 1% lows).
-                // Do it (and the name-match) only every ~2s, caching just OUR units' sub-pawns; each poll then touches only
-                // those few. New units appear within ~2s; destroyed ones read as Unity fake-null and are skipped.
+                // The scene scan is SHARED (UniversalInject.SubPawnScan.cs — one FindObjectsOfType per ≤5 s or on a dirty
+                // mark, for every consumer); this poll keeps only the audio-relevant entries' sub-pawns and re-runs its
+                // per-id pruning exactly once per rescan (perf pass 2026-08-21: this scan + ProcessSubPawnVisuals' copy
+                // were ~1.7 ms/frame averaged, as two separate 60-100 ms stalls).
                 float now = UnityEngine.Time.time;
-                if (_ourSubpawns == null || now - _spCacheAt > 2f)
+                var scan = OurSubPawns(list, now, out int scanVersion);
+                if (scanVersion != _engineScanVersion)
                 {
-                    _ourSubpawns = new List<KeyValuePair<UnityEngine.Object, ModelEntry>>();
-                    foreach (var o in UnityEngine.Object.FindObjectsOfType(spType))
-                    {
-                        if (!(o is UnityEngine.Component c) || c == null) continue;
-                        var m = LongestMatch(on, c.gameObject.name, x => x.pawnDescription);   // most-specific match (shared with the inject + combat matchers)
-                        if (m != null) _ourSubpawns.Add(new KeyValuePair<UnityEngine.Object, ModelEntry>(o, m));
-                    }
-                    _spCacheAt = now;
+                    _engineScanVersion = scanVersion;
+                    _ourSubpawns = new List<KeyValuePair<UnityEngine.Object, ModelEntry>>(scan.Count);
+                    foreach (var pr in scan) if (on.Contains(pr.Value)) _ourSubpawns.Add(pr);
                     // Prune the per-pawn engine dicts of ids whose sub-pawn is gone (died / LOD-rebuilt) — they only grew.
                     _engineLiveIds.Clear();
                     foreach (var pr in _ourSubpawns) if (pr.Key != null) _engineLiveIds.Add(pr.Key.GetInstanceID());
