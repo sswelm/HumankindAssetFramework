@@ -43,6 +43,7 @@ namespace HumankindAssetFramework
             // Coverage counters — how many facts the deep pass actually verified, so a PASS line SHOWS its work
             // instead of asking to be believed ("checked 47 roles" is auditable; "clean" is not).
             public int RolesChecked, AssetsChecked, SoundsChecked, LayersChecked, DistrictsChecked, TilesActive, FilesChecked;
+            public int ScopedTilesActive;                            // of TilesActive, how many came from the SCOPED path (data-authored selector, e.g. the reactor) — it keeps its tiles in ScopedState.refreshPlbcs, not DistrictModel.tiles
             // 2026-08-19 five-point upgrade (user: "can't we apply all?"):
             public string SeamWriteBack = "";                        // "" = not run; "ok"; "skipped (…)"; "FAILED (…)" — the ObjectSpace round-trip (the combatZ died-in-the-box class), FAILED fails the smoke
             public List<string> Uninjected = new List<string>();     // "loaded but not injected" entries WITH the reason — the silent 19-of-22 delta, named (informational)
@@ -86,7 +87,7 @@ namespace HumankindAssetFramework
                           $"({f.Repointed} injected so far), {f.InjectionErrors} injection error(s)" +
                           (pass ? $"; deep checks clean on {f.Repointed} injected — verified {f.RolesChecked} clip role(s), " +
                                   $"{f.AssetsChecked} asset(s), {f.SoundsChecked} sound(s), {f.FilesChecked} file(s) on disk, {f.LayersChecked} GPU layer(s)" +
-                                  (f.DistrictsChecked > 0 ? $", {f.DistrictsChecked} district(s) [{f.TilesActive} tile(s) live]" : "") +
+                                  (f.DistrictsChecked > 0 ? $", {f.DistrictsChecked} district(s) [{f.TilesActive} tile(s) live{(f.ScopedTilesActive > 0 ? $", {f.ScopedTilesActive} scoped" : "")}]" : "") +
                                   (f.SeamsChecked > 0 ? $", {f.SeamsChecked} patched seam(s) [{f.SharedSeams.Count} shared]" : "") : "") +
                           (f.SeamWriteBack.Length > 0 && !f.SeamWriteBack.StartsWith("FAILED") ? $"; seam write-back {f.SeamWriteBack}" : "") +
                           // The 19-of-22 delta, NAMED: which entries loaded but haven't injected, and why — informational
@@ -214,10 +215,18 @@ namespace HumankindAssetFramework
 
         // Per-district deep checks — pure over the DistrictModel's fields (2026-08-17, smoke scale-out). Data-driven:
         // every district in haf_districts.json is covered the day it's added, like the unit checks.
-        internal static void GatherDistrictFacts(DistrictModel d, SmokeFacts f)
+        // TWO render paths, two tile ledgers (drill 2026-08-21): the ISOLATE path tracks its live tiles in
+        // DistrictModel.tiles; the SCOPED path (selectorGuid / DistrictSelectorTile — the reactor) binds through
+        // ScopedState.refreshPlbcs and never touches d.tiles. Counting only d.tiles made the smoke print
+        // "0 tiles live — district path UNTESTED" in the same session the log showed the reactor bound across 1 tile —
+        // the honesty note was itself dishonest. The caller passes the scoped ledger in; this stays pure.
+        internal static void GatherDistrictFacts(DistrictModel d, SmokeFacts f) => GatherDistrictFacts(d, f, scoped: false, scopedTiles: 0);
+        internal static void GatherDistrictFacts(DistrictModel d, SmokeFacts f, bool scoped, int scopedTiles)
         {
             f.DistrictsChecked++;
-            f.TilesActive += d.tiles.Count;
+            int live = scoped ? scopedTiles : d.tiles.Count;
+            f.TilesActive += live;
+            if (scoped) f.ScopedTilesActive += live;
             if (d.fxMeshGuid == null) f.DistrictIssues.Add($"'{d.district}' fxMesh GUID unparsed");
             // groundIdx: int.MinValue = not yet resolved (pending — the district may not be on screen), -1 = the
             // authored GroundMaterialDefinition NAME was looked up and NOT FOUND (a real authoring error).
@@ -276,7 +285,14 @@ namespace HumankindAssetFramework
                         GatherEntryFacts(e, f);
                         CheckLooseFiles(e, f, Path.Combine(Paths.ConfigPath, "haf_sounds"), Path.Combine(Paths.ConfigPath, "haf_skins"));
                     }
-                foreach (var d in distModels) GatherDistrictFacts(d, f);   // main-thread state, read on the main thread (F8)
+                foreach (var d in distModels)   // main-thread state, read on the main thread (F8)
+                {
+                    // scoped districts keep their live tiles in scopedStates[name].refreshPlbcs (TryGetValue, not
+                    // ScopedFor: the smoke must never CREATE state). Isolate districts: d.tiles.
+                    bool scoped = IsScopedDistrict(d.district);
+                    int scopedTiles = scoped && scopedStates.TryGetValue(d.district, out var ss) ? ss.refreshPlbcs.Count : 0;
+                    GatherDistrictFacts(d, f, scoped, scopedTiles);
+                }
                 GatherSharedSeams(f, Plugin.GUID);
                 // A file that's missing on disk also shows as a failed load once tried — one cause, one report:
                 // the missing-on-disk line wins, the derived load-failure line is dropped (same "<name> <role> '<file>'" key).

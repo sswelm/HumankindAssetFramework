@@ -181,6 +181,42 @@ namespace HumankindAssetFramework.Tests
             Assert.Contains("'Silo' fxMesh GUID unparsed", f.DistrictIssues);
         }
 
+        // Drill 2026-08-21: the reactor (SCOPED path) was bound across 1 tile per the log, yet the smoke said
+        // "0 tiles live — district path UNTESTED" because it only read the ISOLATE ledger (d.tiles). The scoped
+        // ledger is passed in by the caller; the pure fact must count it, label it, and drop the vacuous note.
+        [Fact]
+        public void GatherDistrict_ScopedPath_CountsScopedTiles_NotIsolateLedger()
+        {
+            var reactor = new UniversalInject.DistrictModel { district = "Extension_Base_BreederReactor", fxMeshGuid = new object(), selectorGuid = new object() };
+            var f = new UniversalInject.SmokeFacts { Models = 3, Repointed = 1 };
+            UniversalInject.GatherDistrictFacts(reactor, f, scoped: true, scopedTiles: 1);
+            Assert.Equal(1, f.TilesActive);
+            Assert.Equal(1, f.ScopedTilesActive);
+            Assert.Empty(f.DistrictIssues);
+            var r = UniversalInject.SmokeVerdict(f);
+            Assert.True(r.Pass);
+            Assert.Contains("1 district(s) [1 tile(s) live, 1 scoped]", r.Summary);
+            Assert.DoesNotContain("UNTESTED", r.Summary);
+
+            // a scoped district with stale isolate tiles (never the case, but the ledgers must not be summed)
+            reactor.tiles.Add(new UniversalInject.DistrictModel.TileState());
+            var f2 = new UniversalInject.SmokeFacts();
+            UniversalInject.GatherDistrictFacts(reactor, f2, scoped: true, scopedTiles: 0);
+            Assert.Equal(0, f2.TilesActive);   // scoped reads ONLY the scoped ledger
+        }
+
+        [Fact]
+        public void GatherDistrict_IsolatePath_Unchanged_NoScopedLabel()
+        {
+            var oracle = new UniversalInject.DistrictModel { district = "Oracle", fxMeshGuid = new object() };
+            oracle.tiles.Add(new UniversalInject.DistrictModel.TileState()); oracle.tiles.Add(new UniversalInject.DistrictModel.TileState());
+            var f = new UniversalInject.SmokeFacts { Models = 3, Repointed = 1 };
+            UniversalInject.GatherDistrictFacts(oracle, f);   // back-compat overload = isolate
+            Assert.Equal(2, f.TilesActive);
+            Assert.Equal(0, f.ScopedTilesActive);
+            Assert.Contains("[2 tile(s) live]", UniversalInject.SmokeVerdict(f).Summary);   // no ", N scoped" suffix when none
+        }
+
         [Fact]
         public void Verdict_DistrictIssues_FailAndAreNamed_CountersInPassLine()
         {
