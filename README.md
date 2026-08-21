@@ -132,7 +132,7 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
   a **per-frame cost meter** — HAF's own µs/frame, bucket by bucket, so its overhead is a number (~3% of a 30 fps frame), not a guess —
   and the audio/texture authoring aids). The Smoke Test runs deep per-entry checks *plus* a live **seam write-back
   self-test**, names uninjected entries with a diagnosis, flags untested coverage instead of staying silently green,
-  and writes its verdict to `haf_smoke_report.txt`. Every launch also writes a machine-readable `haf_bindings_report.txt` — a
+  and writes its verdict to `haf_smoke_report.txt`. HAF's own per-frame cost is measured, not estimated — see [Performance.md](docs/Performance.md). Every launch also writes a machine-readable `haf_bindings_report.txt` — a
   diffable list of the reflection bindings — **91 game types, ~250 members**, every non-diagnostic by-name site the
   runtime binds, the structs derived along the path the code walks so there are no name-guess false positives — that
   names any game-update drift in one line, headless-checkable (`tools/check-bindings.sh`, no game launch).

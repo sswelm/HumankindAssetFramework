@@ -82,6 +82,7 @@ Each axis adds custom content in a different place, from the same JSON registry.
 - [**Multi-Mod.md**](Multi-Mod.md) — the pack format, the `haf_packs/` drop folder, how packs merge and conflict, and the load report. Read this to add assets **without touching ENC**. Template: [haf-pack.example.json](haf-pack.example.json).
 
 ### Internals — for anyone extending the plugin
+- [**Performance.md**](Performance.md) — what HAF costs per frame (the F8 meter, today's baseline by bucket, the rules that keep it there, what to do when a number grows). Measured, not estimated.
 - [**Architecture.md**](Architecture.md) — **read this before changing the runtime.** The invariants no compiler enforces — threads, session re-arm order, the reflection contract, the two district ledgers — each with the failure it was learned from.
 - [**Code-Map.md**](Code-Map.md) — where everything lives in the plugin source.
 - [**Shared-Schema.md**](Shared-Schema.md) — the `Haf.Schema` library both halves inherit: what's shared, what's divergent, how to add a field. *(Owns the field count.)*
