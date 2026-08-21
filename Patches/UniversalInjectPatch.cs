@@ -196,7 +196,6 @@ namespace HumankindAssetFramework
             // The old code published the empty list first and Add()ed into it — the sim-thread combat hook
             // (FindEntryForUnitDefinition) could then foreach over it mid-Add and throw (review 2026-07-19).
             entries = new List<ModelEntry>();   // readers see empty while we build
-            var built = new List<ModelEntry>();
             try
             {
                 // DISCOVERY: every *.json / <mod>/pack.json a modder drops in haf_packs/ (+ a legacy haf_models.json base
@@ -268,42 +267,10 @@ namespace HumankindAssetFramework
                 packs = ResolvePacks(packs, resolution);
                 if (packs.Count == 0) throw new Exception("no packs survived resolution (see haf_load_report.txt)");
 
-                // MERGE with explicit conflict detection. A model's identity is its pawnDescription (the physical pawn slot
-                // — two skins can't ride one pawn). Policy: a DECLARED override (the pack's `overrides` array names the
-                // owning modId + pawn) REPLACES the earlier entry — declared = consensual, logged as an override, not a
-                // conflict. An UNdeclared clash stays FIRST-loaded wins, logged LOUD (no silent overrides — the HAF
-                // conflict philosophy).
-                var ownerMod = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                var ownerIdx = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-                var conflicts = new List<string>();
-                var applied = new List<string>();
-                foreach (var pk in packs)
-                    foreach (var e in pk.models)
-                    {
-                        e.assetDir = pk.assetDir;   // file-based assets (WAV/PNG) resolve pack-relative first
-                        if (!string.IsNullOrEmpty(e.pawnDescription) && ownerMod.TryGetValue(e.pawnDescription, out var held))
-                        {
-                            bool declared = false;
-                            foreach (var ov in pk.overrides)
-                                if (string.Equals(ov.modId, held, StringComparison.OrdinalIgnoreCase) &&
-                                    string.Equals(ov.pawn, e.pawnDescription, StringComparison.OrdinalIgnoreCase))
-                                { declared = true; break; }
-                            if (declared)
-                            {
-                                built[ownerIdx[e.pawnDescription]] = e;   // replace in place — ownerIdx stays valid
-                                ownerMod[e.pawnDescription] = pk.modId;
-                                applied.Add($"pawn={e.pawnDescription} '{pk.modId}' replaces '{held}' (declared override)");
-                                Plugin.Diag($"[Uni] OVERRIDE: pack '{pk.modId}' replaces '{held}' on pawn '{e.pawnDescription}' (declared).");
-                                continue;
-                            }
-                            conflicts.Add($"pawn={e.pawnDescription} kept={held} dropped={pk.modId}({e.resourceName})");
-                            Plugin.Log.LogWarning($"[Uni] CONFLICT: pack '{pk.modId}' targets pawn '{e.pawnDescription}' already claimed by '{held}' — keeping '{held}' (first-loaded wins; declare it in `overrides` to replace).");
-                            continue;
-                        }
-                        if (e.disabled) { Plugin.Diag($"[Uni] '{e.resourceName}' -> '{e.pawnDescription}': DISABLED in registry — skipping override (original unit rendered)."); continue; }
-                        if (!string.IsNullOrEmpty(e.pawnDescription)) { ownerMod[e.pawnDescription] = pk.modId; ownerIdx[e.pawnDescription] = built.Count; }
-                        built.Add(e);
-                    }
+                // MERGE — the pure MergeModels below (extracted 2026-08-21 so the `disabled` rule is testable).
+                var merged = MergeModels(packs);
+                var built = merged.Built; var conflicts = merged.Conflicts; var applied = merged.Applied;
+                resolution.AddRange(merged.Notes);
 
                 Plugin.Log.LogInfo($"[Uni] loaded {packs.Count} pack(s), {built.Count} model(s), {conflicts.Count} conflict(s), {applied.Count} override(s) [" + string.Join(", ", packs.Select(p => p.modId + "×" + p.models.Count)) + "]");
                 // PACK TUNING TABLES (unitScales / eraGrid / formationThresholds) — parsed from the RESOLVED packs in load
@@ -900,6 +867,67 @@ namespace HumankindAssetFramework
             bool distDone = districtResetSync; districtResetSync = false;   // Sandbox.Load already reset districts (save-load)? then skip the redundant reset; a New Game needs it done here.
             try { RearmModelRegistration(resetDistricts: !distDone); }
             catch (Exception ex) { Plugin.Log.LogError("[Uni] deferred load re-arm: " + ex); }
+        }
+
+
+        internal sealed class MergeResult
+        {
+            public readonly List<ModelEntry> Built = new List<ModelEntry>();
+            public readonly List<string> Conflicts = new List<string>();   // undeclared clashes (first-loaded kept)
+            public readonly List<string> Applied = new List<string>();     // declared overrides applied
+            public readonly List<string> Notes = new List<string>();       // e.g. a disabled override that left the owner in place
+        }
+
+        // MERGE with explicit conflict detection. A model's identity is its pawnDescription (the physical pawn slot
+        // — two skins can't ride one pawn). Policy: a DECLARED override (the pack's `overrides` array names the
+        // owning modId + pawn) REPLACES the earlier entry — declared = consensual, logged as an override, not a
+        // conflict. An UNdeclared clash stays FIRST-loaded wins, logged LOUD (no silent overrides — the HAF
+        // conflict philosophy). `disabled` (the modder's debug switch: "render the original, not my model") is
+        // honoured on EVERY path — review finding 2026-08-21: it used to sit on the no-prior-owner branch only, so a
+        // disabled DECLARED override still replaced the owner, i.e. the switch died in exactly the case a modder
+        // uses it (testing an override against the original). A disabled entry now never enters `built`; when it
+        // was a declared override, the prior owner keeps the pawn and the report says so.
+        internal static MergeResult MergeModels(List<Pack> packs)
+        {
+            var r = new MergeResult();
+            var ownerMod = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var ownerIdx = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var pk in packs)
+                foreach (var e in pk.models)
+                {
+                    e.assetDir = pk.assetDir;   // file-based assets (WAV/PNG) resolve pack-relative first
+                    string held = null;
+                    bool hasOwner = !string.IsNullOrEmpty(e.pawnDescription) && ownerMod.TryGetValue(e.pawnDescription, out held);
+                    if (e.disabled)
+                    {
+                        string where = hasOwner ? $" — '{held}' keeps the pawn" : " (original unit renders)";
+                        Plugin.Diag($"[Uni] '{e.resourceName}' -> '{e.pawnDescription}': DISABLED in registry — skipping{where}.");
+                        if (hasOwner) r.Notes.Add($"DISABLED: pawn={e.pawnDescription} '{pk.modId}' is disabled; '{held}' keeps the pawn");
+                        continue;
+                    }
+                    if (hasOwner)
+                    {
+                        bool declared = false;
+                        foreach (var ov in pk.overrides)
+                            if (string.Equals(ov.modId, held, StringComparison.OrdinalIgnoreCase) &&
+                                string.Equals(ov.pawn, e.pawnDescription, StringComparison.OrdinalIgnoreCase))
+                            { declared = true; break; }
+                        if (declared)
+                        {
+                            r.Built[ownerIdx[e.pawnDescription]] = e;   // replace in place — ownerIdx stays valid
+                            ownerMod[e.pawnDescription] = pk.modId;
+                            r.Applied.Add($"pawn={e.pawnDescription} '{pk.modId}' replaces '{held}' (declared override)");
+                            Plugin.Diag($"[Uni] OVERRIDE: pack '{pk.modId}' replaces '{held}' on pawn '{e.pawnDescription}' (declared).");
+                            continue;
+                        }
+                        r.Conflicts.Add($"pawn={e.pawnDescription} kept={held} dropped={pk.modId}({e.resourceName})");
+                        Plugin.Log.LogWarning($"[Uni] CONFLICT: pack '{pk.modId}' targets pawn '{e.pawnDescription}' already claimed by '{held}' — keeping '{held}' (undeclared; add it to `overrides` if intended).");
+                        continue;
+                    }
+                    if (!string.IsNullOrEmpty(e.pawnDescription)) { ownerMod[e.pawnDescription] = pk.modId; ownerIdx[e.pawnDescription] = r.Built.Count; }
+                    r.Built.Add(e);
+                }
+            return r;
         }
 
         internal static void RearmModelRegistration(bool resetDistricts = true)

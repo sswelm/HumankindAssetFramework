@@ -84,6 +84,10 @@ ENC itself now ships as a normal pack at `haf_packs/ENCReload/pack.json` (`modId
    that entry (logged + reported as an override, not a conflict).
 8. **Undeclared conflicts** — the **first-loaded pack wins** (first = earlier in Humankind's mod order), logged loud.
    *No implicit overrides* — declare it in `overrides` if the replacement is intentional.
+   **`disabled: true`** on an entry is honoured on *every* path (since 2026-08-21): the entry never merges, so the
+   original unit renders — and if it was a **declared override**, the prior owner keeps the pawn and the load report
+   says so (`DISABLED: pawn=… 'b' is disabled; 'a' keeps the pawn`). That's the switch for testing an override
+   against the original without editing two packs.
 9. **The tuning tables** (`unitScales`, `eraGrid`, `formationThresholds` — see [Unit-Size.md](Unit-Size.md) and
    [Formations.md](Formations.md)) are read from **the same resolved, ordered pack list** as the models (since
    2026-08-21 — before that they were scraped from the raw file list, so a *skipped* pack still resized units and

@@ -10,6 +10,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **`disabled` HONOURED ON THE DECLARED-OVERRIDE PATH + the fourth readback site hardened (2026-08-21).** Two review
+  findings, both verified. (1) The `e.disabled` check sat on the no-prior-owner branch of the model merge only, so a
+  pack whose *declared override* was `disabled: true` still replaced the owner — the debug switch died in exactly
+  the case a modder uses it (testing an override against the original). The merge is now the pure `MergeModels`
+  (`MergeModelsTests`, 4 cases): a disabled entry never enters the build on any path, and a disabled declared
+  override leaves the owner in place with a `DISABLED:` note in the load report. (2) `CropAtlasTile` (the
+  `haf_ground_colors.json` readback) restored `RenderTexture.active` and released its temp RT on the success line
+  only — a throw in Blit / ReadPixels / Apply would leave the active target pointing at our RT (corrupting the next
+  draw) and leak the RT + `Texture2D`. Now `try/finally`, like the three sites the 08-21 sweep had already hardened.
+
 - **SMOKE INJECTION ERRORS: A PER-SESSION LEDGER OF NAMED SITES, NOT A FRAME COUNTER (2026-08-21).** Review finding,
   verified: `InjectionErrors` was an `int` bumped in the per-pawn-per-frame pose hook and never reset, so one throwing
   model turned the smoke's second hard-FAIL signal into a five-digit count, and a transient session-1 error FAILed the

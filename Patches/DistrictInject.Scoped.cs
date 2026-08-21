@@ -1566,26 +1566,32 @@ namespace HumankindAssetFramework
         // (offsetU, offsetV, scaleU, scaleV); Graphics.Blit with a scale/offset samples exactly that sub-region.
         static byte[] CropAtlasTile(UnityEngine.Texture2D page, UnityEngine.Vector4 uv)
         {
+            // the Vector4 is a MIN/MAX UV rect (minU, minV, maxU, maxV) — scale = extent, offset = min. (The
+            // first pass read it as offset/scale, so V sampled past 1.0 and wrapped: black + several tiles.)
+            var scale = new UnityEngine.Vector2(uv.z - uv.x, uv.w - uv.y);
+            var offset = new UnityEngine.Vector2(uv.x, uv.y);
+            if (scale.x <= 0f || scale.y <= 0f) { scale = new UnityEngine.Vector2(1, 1); offset = UnityEngine.Vector2.zero; }   // degenerate rect -> whole page
+            int sz = 256;
+            // try/finally (the fourth readback site, 2026-08-21 — the 08-21 sweep hardened the other three): a throw in
+            // Blit / ReadPixels / Apply must NOT leave RenderTexture.active pointing at our temp RT (corrupts the next
+            // draw) nor leak the RT + Texture2D. Restore + release + destroy run whatever happens.
+            UnityEngine.RenderTexture rt = null, prev = null; UnityEngine.Texture2D t = null;
             try
             {
-                // the Vector4 is a MIN/MAX UV rect (minU, minV, maxU, maxV) — scale = extent, offset = min. (The
-                // first pass read it as offset/scale, so V sampled past 1.0 and wrapped: black + several tiles.)
-                var scale = new UnityEngine.Vector2(uv.z - uv.x, uv.w - uv.y);
-                var offset = new UnityEngine.Vector2(uv.x, uv.y);
-                if (scale.x <= 0f || scale.y <= 0f) { scale = new UnityEngine.Vector2(1, 1); offset = UnityEngine.Vector2.zero; }   // degenerate rect -> whole page
-                int sz = 256;
-                var rt = UnityEngine.RenderTexture.GetTemporary(sz, sz, 0, UnityEngine.RenderTextureFormat.ARGB32, UnityEngine.RenderTextureReadWrite.sRGB);
-                var prev = UnityEngine.RenderTexture.active;
+                rt = UnityEngine.RenderTexture.GetTemporary(sz, sz, 0, UnityEngine.RenderTextureFormat.ARGB32, UnityEngine.RenderTextureReadWrite.sRGB);
+                prev = UnityEngine.RenderTexture.active;
                 UnityEngine.Graphics.Blit(page, rt, scale, offset);
                 UnityEngine.RenderTexture.active = rt;
-                var t = new UnityEngine.Texture2D(sz, sz, UnityEngine.TextureFormat.RGBA32, false);
+                t = new UnityEngine.Texture2D(sz, sz, UnityEngine.TextureFormat.RGBA32, false);
                 t.ReadPixels(new UnityEngine.Rect(0, 0, sz, sz), 0, 0); t.Apply();
-                UnityEngine.RenderTexture.active = prev; UnityEngine.RenderTexture.ReleaseTemporary(rt);
-                var png = UnityEngine.ImageConversion.EncodeToPNG(t);
-                UnityEngine.Object.Destroy(t);
-                return png;
+                return UnityEngine.ImageConversion.EncodeToPNG(t);
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[GroundTex] crop: " + ex.Message); return null; }
+            finally
+            {
+                if (rt != null) { UnityEngine.RenderTexture.active = prev; UnityEngine.RenderTexture.ReleaseTemporary(rt); }
+                if (t != null) UnityEngine.Object.Destroy(t);
+            }
         }
 
         internal static void PollRepoDump()
