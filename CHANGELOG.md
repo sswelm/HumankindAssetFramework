@@ -10,6 +10,30 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE HOT PATH NO LONGER CALLS ITSELF A SPIKE (2026-08-22).** A review counted 52 `SPIKE`/`EXPERIMENTAL` markers and
+  named five on the per-frame path: `PollWonderRows`, `PollDistrictMainRows`, `PollRepoDump` / `ProbeAxisGrowth`,
+  `TickDistrictMeshSwap`. Checked, and the split matters: **32 of the 52 are in `Plugin.cs` as config-key
+  documentation** — a description that warns a player "EXPERIMENTAL: this footprint mask is a work in progress" is
+  honest labelling, not shipped-spike code — and one of the rest is a *war story* about a rendering artifact literally
+  named "the spike plague". But the five call sites were real, and the principle is right: **a shipped plugin
+  shouldn't run code its own comments call a spike.** What was actually true of each:
+  - `PollWonderRows` — **promoted**. It is how a custom Artificial Wonder renders at all (the Oracle); config-gated
+    and latched once every cell is filled. Label dropped, cost owned, `[District] WonderNativeRows` description
+    rewritten (it no longer says SPIKE to the player).
+  - `PollDistrictMainRows` — **promoted** to what it is: the shared-cell district path, the documented alternative to
+    `DistrictSelectorTile`. Config-gated (blank = off), then 1-in-30 frames.
+  - `PollRepoDump` / `ProbeAxisGrowth` — **already correct**, now said out loud: `[Debug]`-gated *and* one-shot
+    latched, so they cost two bool reads a frame with the default config.
+  - `TickDistrictMeshSwap` — **promoted**: it is the district axis's own per-frame driver (isolate path), shipped and
+    documented in District-Visuals.md, no-op with no district entries.
+  - `UseDeepClone` — **deleted**. A parked hack behind an always-false flag, plus the 45-line helper only that dead
+    branch called: 46 lines of code the plugin shipped and never ran.
+  - The **cost** half of the finding is history: the 1,350 µs/frame `WonderRows` was fixed in the 08-21 perf pass.
+    Measured now, every one of these buckets sits below the FrameCost top-six cutoff (<35 µs on a 19-model save).
+  - **`tools/check-hot-path.sh`** (new, in the push gate, fault-injected): `Plugin.Update()` may contain no `SPIKE`
+    at all, and `EXPERIMENTAL` only when the same line names its gate (`EXPERIMENTAL (opt-in, [Props] …)`). The label
+    can't outlive the experiment again without failing a push.
+
 - **A7 — THE CATALOG'S GREEN LIGHT NOW MEANS WHAT IT SAYS (2026-08-21).** A review made a measurable claim: `bindcheck`
   can only validate what is *catalogued*, so `95/95 clean` is a statement about the catalog, not about the binding
   surface — and ~55 game-shaped member names were read by name and absent from it. Reproduced mechanically and it was

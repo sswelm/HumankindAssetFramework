@@ -28,6 +28,10 @@ run "docs guard (links + notes convention)" bash "$ROOT/tools/check-docs.sh"
 #     Pure source analysis (no game DLLs), so it belongs in the fast gate; bindcheck stays on the game-update trigger.
 run "binding catalog surface (every by-name site catalogued)" bash "$ROOT/tools/check-catalog.sh"
 
+# 3c) hot path — nothing Plugin.Update() runs every frame may still call itself a SPIKE (a label that outlives its
+#     experiment is how 1,350 µs/frame hid for weeks). EXPERIMENTAL is allowed only when it names its config gate.
+run "hot path (no shipped spikes in Update)" bash "$ROOT/tools/check-hot-path.sh"
+
 # 4) registry schema parity — cross-repo: the guard lives in the ENCReload editor checkout and compares the plugin's
 #    Newtonsoft + regex parse against the editor's ModelDef. Best-effort: a plugin parse change is one half of that
 #    drift, so run it here too when the sibling checkout is present; skip with a note otherwise.

@@ -304,7 +304,6 @@ namespace HumankindAssetFramework
         // The leaf that holds geometry is FxEvolverMaterialLevelBuildElement with an `fxMesh` Guid field. Reached via:
         //   Selector.pairs[culture] -> Emitter.levelBuildItems[].loadedEvolverMaterial -> Element(.fxMesh)  (Emitters nest).
         [SessionScoped(Scope = SessionScope.District)] static readonly List<object> distLeaves = new List<object>();   // legacy shared list (single-model path)
-        static bool UseDeepClone = false;   // SPIKE: deep-clone footprint hack — PARKED. The proper path is a data-authored district visual (see District-Dedicated-Visual-Feasibility.md), not runtime selector surgery.
         static float DeepCloneBuildingMinSize = 0.35f;   // deep-clone: swap building slots this big (bbox max dim) to our mesh; hide smaller props
         static int DeepCloneKeepEvery = 1;               // deep-clone: keep 1 in N large building slots as our reactor (1 = swap ALL large, no thinning → no mid-zoom gaps)
         internal static FieldInfo GF(Type t, string n) => t.GetField(n, BF);      // no AccessTools warning-on-miss (probing spams the log)
@@ -780,53 +779,6 @@ namespace HumankindAssetFramework
                 }
         }
 
-        // ISOLATE + deep-clone: point this tile's channel [0] at a fully-private clone of the selector (our building mesh +
-        // the surviving footprint decals), re-asserted per frame; periodic RepointFromMemo defends against reloads.
-        static void PointTileAtClonedSelector(DistrictModel e, DistrictModel.TileState t)
-        {
-            try
-            {
-                if (t.plbc == null) return;
-                if (fiPlbcChannels == null) fiPlbcChannels = AccessTools.Field(t.plbc.GetType(), "channels");
-                if (!(fiPlbcChannels?.GetValue(t.plbc) is Array channels) || t.layer >= channels.Length) return;
-                var box = channels.GetValue(t.layer);
-                if (fiChanEvolverMaterial == null) fiChanEvolverMaterial = GF(box.GetType(), "evolverMaterial");
-                var evf = fiChanEvolverMaterial; if (evf == null) return;
-                if (e.clonedSelector == null)
-                {
-                    var sel = evf.GetValue(box); if (sel == null) return;
-                    if (e.selectorType == null) e.selectorType = sel.GetType();
-                    if (!(sel is UnityEngine.Object)) return;
-                    e.cloneMap = new System.Collections.Generic.Dictionary<object, object>();
-                    var cl = DeepCloneMat(e, sel, e.fxMeshGuid, e.cloneMap, 0);
-                    if (cl == null || ReferenceEquals(cl, sel)) { if (t.wait++ % 300 == 0) Plugin.Diag($"[District] '{e.district}': deep-clone not ready, retry..."); return; }
-                    e.clonedSelector = cl;
-                    Plugin.Diag($"[District] '{e.district}': deep-cloned selector — {e.cloneMap.Count} node(s) privatized.");
-                }
-                var curMat = evf.GetValue(box);
-                if (!ReferenceEquals(curMat, e.clonedSelector))
-                {
-                    if (curMat != null && e.selectorType != null && curMat.GetType() != e.selectorType) return;   // don't fight a foreign material
-                    evf.SetValue(box, e.clonedSelector);
-                    channels.SetValue(box, t.layer);
-                    if (miRefreshChannel == null)
-                    {
-                        miRefreshChannel = t.plbc.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
-                            .FirstOrDefault(m => m.Name == "RefreshChannel" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
-                        if (miRefreshChannel != null) refreshArgs = new object[] { 0, System.Enum.ToObject(miRefreshChannel.GetParameters()[1].ParameterType, 0) };
-                    }
-                    if (miRefreshChannel != null) { refreshArgs[0] = t.layer; miRefreshChannel.Invoke(t.plbc, refreshArgs); }
-                    if (!e.cloneLogged) { e.cloneLogged = true; Plugin.Diag($"[District] '{e.district}' DEEP-CLONE: channel {t.layer} -> private selector (footprint preserved)."); }
-                }
-                // frequent early (async variants still resolving), then sparse once stable
-                int every = e.cloneReassert < 900 ? 15 : 120;
-                // EnsurePrivate DISABLED for the un-thinned mid-zoom test: it tanked perf and didn't reach the pairs-resolved
-                // mid-LOD anyway. This isolates whether the mid-zoom donor is inherent (pairs LOD) or was a thinning artifact.
-                // if (++e.cloneReassert % every == 0) EnsurePrivate(e, e.clonedSelector, e.fxMeshGuid, e.cloneMap, new HashSet<object>(), 0);
-                _ = every;
-            }
-            catch (Exception ex) { Plugin.Log.LogError("[District] cloned selector: " + ex); }
-        }
 
         // Diagnostic (DistrictDebug): dump every serializable field of the cloned leaf — the hunt for the
         // level-build reveal-ramp levers (duration/speed/curve fields we could zero on the load path).
@@ -1542,8 +1494,7 @@ namespace HumankindAssetFramework
                     // must share the main selector. So the footprint needs the deep-clone/privatize path, not a side channel.
                     for (int i = 0; i < e.tiles.Count; i++)
                     {
-                        if (UseDeepClone) PointTileAtClonedSelector(e, e.tiles[i]);
-                        else PointTileAtPrivateLeaf(e, e.tiles[i]);
+                        PointTileAtPrivateLeaf(e, e.tiles[i]);
                     }
                     DistrictApplyTexture(e);   // both paths: e.privateLeaf points at a reactor element sharing e.deepLayer, so our albedo binds to all swapped slots
                 }

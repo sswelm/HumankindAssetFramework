@@ -58,8 +58,8 @@ namespace HumankindAssetFramework
         internal static ConfigEntry<string> DistrictHexSculpt; // force a HexagonSculptingDefinition (raised platform + strategic footprint) under custom wonders. Blank = off. Per-entry field overrides.
         internal static ConfigEntry<bool>   DistrictIsolate;         // scope the mesh-swap to only the target district's own tile (private per-instance leaf) instead of the shared-global swap
         internal static ConfigEntry<bool>   DistrictDebug;           // investigation diagnostics ([District] saw / [DistrictMat] / [DistrictSub] dumps) — off in normal play, they reflect on every district update
-        internal static ConfigEntry<string> WonderNativeRows;        // SPIKE wip-wonder-affinity: fill empty cells in the ArtificialWonder repo database, "WonderName=a,b,c,d;..." (FxEvolverMaterial guid)
-        internal static ConfigEntry<string> DistrictMainRows;        // SPIKE dedicated-visual (hybrid register): fill */District/Main.Level1+2 cells for an affinity -> our baked CityMapSelector, "AffinityName=a,b,c,d;..."
+        internal static ConfigEntry<string> WonderNativeRows;        // wonder cell fill: fill empty cells in the ArtificialWonder repo database, "WonderName=a,b,c,d;..." (FxEvolverMaterial guid)
+        internal static ConfigEntry<string> DistrictMainRows;        // shared-cell district path (alternative to DistrictSelectorTile): fill */District/Main.Level1+2 cells for an affinity -> our baked CityMapSelector, "AffinityName=a,b,c,d;..."
         internal static ConfigEntry<string> DistrictSelectorTile;    // SCOPED dedicated-visual: put our baked selector on ONLY the named district's tile (keeps shared affinity + fallback), "ConstructibleDefinitionName=a,b,c,d;..."
         internal static ConfigEntry<string> DistrictFootprint;       // RUNTIME footprint choice: graft a chosen donor selector's DECALS onto the scoped district (building stays ours), "ConstructibleDefinitionName=a,b,c,d;..." (donor = any */District/Main selector GUID)
         internal static ConfigEntry<string> DistrictFootprintDrop;   // comma-separated decal NAME substrings to DROP from the grafted footprint (the rock/rubble "surface texture" layers); blank = keep ALL donor decals
@@ -164,11 +164,11 @@ namespace HumankindAssetFramework
                                   "resolved material GUID ([DistrictMat]) and the target's sub-material table ([DistrictSub]). These reflect on " +
                                   "every district update — leave OFF in normal play; turn on only when mapping a new district's material chain.");
             WonderNativeRows    = Config.Bind("District", "WonderNativeRows", "",
-                                  "SPIKE (wip-wonder-affinity): fill a custom Artificial Wonder's EMPTY cell in the game's 'ArtificialWonder' " +
+                                  "Fill a custom Artificial Wonder's EMPTY cell in the game's 'ArtificialWonder' " +
                                   "visual database so the NATIVE wonder affinity renders a completed model. Format: 'WonderName=a,b,c,d;...' " +
                                   "where the guid is an FxEvolverMaterial (vanilla wonder material for a zero-bake proof, or our own baked one).");
             DistrictMainRows    = Config.Bind("District", "DistrictMainRows", "",
-                                  "SPIKE (dedicated-visual hybrid): register a DATA-AUTHORED district selector by filling the */District/Main." +
+                                  "SHARED-CELL district path (the alternative to DistrictSelectorTile): register a DATA-AUTHORED district selector by filling the */District/Main." +
                                   "Level1+Level2 cells for an affinity with our baked CityMapSelector's GUID. Format: 'AffinityName=a,b,c,d;...' " +
                                   "(e.g. DistrictVisualAffinity_Base_Industry=...). The game then resolves + LODs our selector natively.");
             DistrictFootprint = Config.Bind("District", "DistrictFootprint", "",
@@ -419,10 +419,10 @@ namespace HumankindAssetFramework
                 UniversalInject.PollTerrainHug();       // live terrain-hug dial (haf_hugterrain.txt): fly low over open ground, climb for districts (spike)
                 FrameCost.End(FrameCost.Dials, t);
                 t = FrameCost.Begin(); UniversalInject.PollClassScan();        FrameCost.End(FrameCost.ClassScan, t);         // category turn ease: sample live units for the Hover ability + azimuth turrets (~3s; only while category rates are active)
-                t = FrameCost.Begin(); DistrictInject.TickDistrictMeshSwap();  FrameCost.End(FrameCost.DistrictMeshSwap, t);  // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
-                t = FrameCost.Begin(); DistrictInject.PollRepoDump(); DistrictInject.ProbeAxisGrowth(); FrameCost.End(FrameCost.DistrictPolls, t);   // SPIKE diagnostics (DistrictDebug-gated): repository dump, axis-growth probe
-                t = FrameCost.Begin(); DistrictInject.PollWonderRows();          FrameCost.End(FrameCost.WonderRows, t);     // SPIKE wip-wonder-affinity: fill configured wonder cells in the ArtificialWonder visual DB
-                t = FrameCost.Begin(); DistrictInject.PollDistrictMainRows();    FrameCost.End(FrameCost.MainRows, t);       // SPIKE dedicated-visual (hybrid): register our baked selector in */District/Main for an affinity
+                t = FrameCost.Begin(); DistrictInject.TickDistrictMeshSwap();  FrameCost.End(FrameCost.DistrictMeshSwap, t);  // DISTRICT AXIS (isolate path): drive each registry entry across its live tiles; no-op with no district entries. Shipped, docs/District-Visuals.mdp our FxMesh into the live selector's leaf drawers
+                t = FrameCost.Begin(); DistrictInject.PollRepoDump(); DistrictInject.ProbeAxisGrowth(); FrameCost.End(FrameCost.DistrictPolls, t);   // DIAGNOSTICS, [Debug]-gated AND one-shot latched: two bool reads per frame when off (the default)
+                t = FrameCost.Begin(); DistrictInject.PollWonderRows();          FrameCost.End(FrameCost.WonderRows, t);     // WONDER CELL FILL: how a custom Artificial Wonder renders (docs/Wonder-Spike.md). Config-gated (blank = off) + latched once every cell is filled
+                t = FrameCost.Begin(); DistrictInject.PollDistrictMainRows();    FrameCost.End(FrameCost.MainRows, t);       // SHARED-CELL district path, the alternative to DistrictSelectorTile (docs/District-Dedicated-Visual.md). Config-gated (blank = off), then 1-in-30 frames
                 t = FrameCost.Begin(); DistrictInject.PollDistrictSelectorTile(); FrameCost.End(FrameCost.SelectorTile, t);  // SCOPED dedicated-visual: put our selector on ONLY the named district's tile (keeps shared affinity + fallback)
                 t = FrameCost.Begin(); DistrictInject.PollHexSculptDial();       FrameCost.End(FrameCost.HexDial, t);        // live dial (haf_hexsculpt.txt): re-carve every sculpted district's platform without a relaunch
             }
@@ -433,7 +433,7 @@ namespace HumankindAssetFramework
             if (PersistUnitFacing.Value)
             { t = FrameCost.Begin(); FacingPersist.Tick(); FrameCost.End(FrameCost.FacingPersist, t); }   // capture each army's facing + restore it after a load (stationary units only). OWN gate — facing is independent of model injection, so turning UniversalInject off must NOT silence it (it has its own save/load hooks + config).
             if (PropRegisterOn.Value)
-            { t = FrameCost.Begin(); UniversalInject.TickPropRegister(); FrameCost.End(FrameCost.PropRegister, t); }   // EXPERIMENTAL props: register our MeshCollections once the AnimationManager exists
+            { t = FrameCost.Begin(); UniversalInject.TickPropRegister(); FrameCost.End(FrameCost.PropRegister, t); }   // EXPERIMENTAL (opt-in, [Props] PropRegister=false by default): register our MeshCollections once the AnimationManager exists
             if (FormationOverrideOn.Value)
             { t = FrameCost.Begin(); FormationOverride.Tick(); FrameCost.End(FrameCost.Formation, t); }   // FORMATION axis: retry inject+repoint if the databases weren't up at AnimationLoad
             FrameCost.End(FrameCost.UpdateTotal, tAll);
