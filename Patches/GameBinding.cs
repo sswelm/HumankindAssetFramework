@@ -325,7 +325,7 @@ namespace HumankindAssetFramework
         internal static readonly Dep[] Catalog =
         {
             // audio
-            new Dep(PresentationSubPawn, nameof(PresentationSubPawn), "AudioEmitter", "Transform", "PresentationPawnDescription", "GetBoneTRS", "PresentationPawnDefinition"),
+            new Dep(PresentationSubPawn, nameof(PresentationSubPawn), "AudioEmitter", "Transform", "PresentationPawnDescription", "GetBoneTRS", "PresentationPawnDefinition", "pawnEntry"),   // pawnEntry: the cached struct the ghost-rotor source fix repairs
             new Dep(AudioEmitter, nameof(AudioEmitter), "AudioEntityGUID", "PostEvent"),
             new Dep(AudioManager, nameof(AudioManager), "PostEvent"),
             new Dep(AkSoundEngine, nameof(AkSoundEngine), "PostEvent", "StopAll"),
@@ -363,7 +363,7 @@ namespace HumankindAssetFramework
                 "AnimationLoad", "RegisterMeshCollection", "Apply", "loadedAnimationClipCollections", "GetAnimationId", "GetAnimationDuration", "GetPoseTRS",
                 "gpuAnimationEntryBuffer", "gpuSkeletonEntriesBuffer", "gpuSkeletonBoneEntiesBuffer", "meshCollections"),
             new Dep(PresentationPawnDefinitionAddOn, nameof(PresentationPawnDefinitionAddOn), "FragmentEntries", "Skeleton", "MeshCollection",
-                "Load", "Definition", "GetOrCreateAddOn"),
+                "Load", "Definition", "GetOrCreateAddOn", "PawnDefinitionId"),   // PawnDefinitionId: the descriptor seed that arms the wrong-skeleton net + the Resize/turn-ease maps (6 sites)
             new Dep(ClipCollection, nameof(ClipCollection), "animationClipEntries", "animationClipCurveEntries"),
             new Dep(MeshCollection, nameof(MeshCollection)),
             // data / assets / graphics
