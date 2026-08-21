@@ -84,6 +84,15 @@ ENC itself now ships as a normal pack at `haf_packs/ENCReload/pack.json` (`modId
    that entry (logged + reported as an override, not a conflict).
 8. **Undeclared conflicts** — the **first-loaded pack wins** (first = earlier in Humankind's mod order), logged loud.
    *No implicit overrides* — declare it in `overrides` if the replacement is intentional.
+9. **The tuning tables** (`unitScales`, `eraGrid`, `formationThresholds` — see [Unit-Size.md](Unit-Size.md) and
+   [Formations.md](Formations.md)) are read from **the same resolved, ordered pack list** as the models (since
+   2026-08-21 — before that they were scraped from the raw file list, so a *skipped* pack still resized units and
+   "later wins" meant alphabetical). Their cross-pack rules, each one **named** in the load report as a `TUNING:` line
+   and a `[Resize] cross-pack:` warning:
+   - `unitScales` — rules **multiply**, across packs too; when two packs' rules share a `match`, the report names both
+     factors and the composed product (×0.6 × ×0.5 → ×0.3). Nothing is dropped; the point is that it's never silent.
+   - `eraGrid` — each **row** (unit era) belongs to the **last** pack in mod order that authors it.
+   - `formationThresholds` — the **whole table** belongs to the **last** pack in mod order that authors one.
 
 **Not built (deliberately):** a `patches` concept — field-level modification of another pack's entry, as opposed to
 `overrides`' whole-entry replacement. It would let compatibility packs tweak one knob without duplicating a full model

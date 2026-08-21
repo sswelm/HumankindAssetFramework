@@ -183,6 +183,7 @@ namespace HumankindAssetFramework
             public List<string> loadAfter = new List<string>();
             public List<PackOverride> overrides = new List<PackOverride>();   // ENFORCED since 2026-07-19: an explicit, declared replacement of another pack's entry
             public List<ModelEntry> models = new List<ModelEntry>();
+            public string text = "";                 // the raw pack JSON (2026-08-21): the tuning tables parse from the RESOLVED pack, not the file list
         }
         // A declared cross-pack replacement: "this pack intentionally replaces <modId>'s entry on <pawnDescription>".
         // Declared = consensual under the HAF conflict philosophy (an UNdeclared clash is still first-loaded-wins, loud).
@@ -225,7 +226,7 @@ namespace HumankindAssetFramework
                 foreach (var file in files)
                 {
                     // One unreadable pack must not sink the others — skip it loudly and keep going.
-                    try { packs.Add(ParsePack(file, file == basePath)); }
+                    try { var pk = ParsePack(file, file == basePath); pk.text = File.ReadAllText(file); packs.Add(pk); }   // text kept: the tuning tables parse from the resolved pack
                     catch (Exception ex) { Plugin.Log.LogWarning($"[Uni] pack '{Path.GetFileName(file)}' failed to parse ({ex.Message}); skipped"); }
                 }
                 if (packs.Count == 0) throw new Exception("no packs could be read");   // transient (lock/AV) — retry, don't latch
@@ -304,100 +305,28 @@ namespace HumankindAssetFramework
                         built.Add(e);
                     }
 
-                WriteLoadReport(packs, built.Count, conflicts, applied, resolution);
                 Plugin.Log.LogInfo($"[Uni] loaded {packs.Count} pack(s), {built.Count} model(s), {conflicts.Count} conflict(s), {applied.Count} override(s) [" + string.Join(", ", packs.Select(p => p.modId + "×" + p.models.Count)) + "]");
-                // RESIZE LAB rules (2026-07-28, user-designed): every pack may carry a "unitScales" array of
-                // {match, scale} — a runtime multiplier for ANY pawn whose PRESENTATION DEFINITION name contains
-                // `match` (vanilla units included; no bake, no assets). All matching rules MULTIPLY (a per-unit
-                // true-size correction rides on a broader rule). Resolved to descriptor ids in RepointMatch,
-                // applied at pawn spawn in OnPawnAdded. v2 (planned): trueSize / current-era reference anchoring.
-                unitScaleRules.Clear();
-                foreach (var file in files)
-                {
-                    try
-                    {
-                        var text2 = File.ReadAllText(file);
-                        var arr = Regex.Match(text2, "\"unitScales\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
-                        if (!arr.Success) continue;
-                        foreach (Match rm in Regex.Matches(arr.Groups[1].Value, "\\{[^{}]*\\}", RegexOptions.Singleline))
-                        {
-                            var mm = Regex.Match(rm.Value, "\"match\"\\s*:\\s*\"([^\"]*)\"");
-                            var ms = Regex.Match(rm.Value, "\"scale\"\\s*:\\s*(-?[\\d.eE+]+)");
-                            if (!mm.Success || !ms.Success) continue;
-                            var key = mm.Groups[1].Value.Trim();
-                            if (key.Length == 0) continue;
-                            var mr = Regex.Match(rm.Value, "\"era\"\\s*:\\s*(-?\\d+)");   // optional: the unit's own era (0/absent = read it off the name)
-                            int ruleEra = mr.Success && int.TryParse(mr.Groups[1].Value, out int re) && re > 0 ? re : 0;
-                            if (float.TryParse(ms.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float sv) && sv > 0f)
-                                unitScaleRules.Add(new ScaleRule { match = key, scale = sv, era = ruleEra });
-                        }
-                    }
-                    catch (Exception ex) { Plugin.Log.LogWarning("[Resize] unitScales parse in '" + Path.GetFileName(file) + "': " + ex.Message); }
-                }
+                // PACK TUNING TABLES (unitScales / eraGrid / formationThresholds) — parsed from the RESOLVED packs in load
+                // order by the pure PackTuning.Parse (2026-08-21). They used to be regex-scraped from the raw discovery
+                // list: a pack resolution had REJECTED still resized units, "later wins" meant alphabetical rather than
+                // mod order, and two packs' unitScales on one unit composed silently. Cross-pack interactions are now
+                // NOTES in haf_load_report.txt (and a warning each); the tables themselves are unchanged in shape.
+                var tuning = PackTuning.Parse(packs.Select(p => new KeyValuePair<string, string>(p.modId, p.text)).ToList());
+                foreach (var w in tuning.Warnings) Plugin.Log.LogWarning("[Resize] " + w);
+                foreach (var n in tuning.Notes) Plugin.Log.LogWarning("[Resize] cross-pack: " + n);
+                resolution.AddRange(tuning.Notes.Select(n => "TUNING: " + n));
+                unitScaleRules.Clear(); unitScaleRules.AddRange(tuning.ScaleRules);
+                eraGridRows.Clear(); foreach (var kv in tuning.EraGridRows) eraGridRows[kv.Key] = kv.Value;
+                formationBySize.Clear(); formationBySize.AddRange(tuning.FormationBySize);
                 if (unitScaleRules.Count > 0)
-                    Plugin.Diag($"[Resize] {unitScaleRules.Count} unit-scale rule(s): " + string.Join(", ", unitScaleRules.Select(r => $"'{r.match}'x{r.scale:0.###}" + (r.era > 0 ? $"@era{r.era}" : ""))));
-
-                // GLOBAL ERA LAB (2026-07-29, user-designed): each pack may carry an "eraGrid" — one row per UNIT
-                // era holding that unit's rescale modifier for every CURRENT era, i.e. modifier[unitEra][nowEra].
-                // A grid, not a curve, because how much a unit should shrink depends on both how old it is and how
-                // far the world has moved: in the Contemporary age an Ancient trireme and an Industrial battleship
-                // must age differently. Scope is deliberately narrow (user rule): it multiplies units that ALREADY
-                // have a scale rule and never resizes anything else. Missing cells fall back to unitEra/nowEra.
-                eraGridRows.Clear();
-                foreach (var file in files)
-                {
-                    try
-                    {
-                        var text3 = File.ReadAllText(file);
-                        var arr = Regex.Match(text3, "\"eraGrid\"\\s*:\\s*\\[(.*)\\]", RegexOptions.Singleline);
-                        if (!arr.Success) continue;
-                        foreach (Match rm in Regex.Matches(arr.Groups[1].Value, "\\{[^{}]*\"scales\"\\s*:\\s*\\[[^\\]]*\\][^{}]*\\}", RegexOptions.Singleline))
-                        {
-                            var me = Regex.Match(rm.Value, "\"unitEra\"\\s*:\\s*(\\d+)");
-                            var sa = Regex.Match(rm.Value, "\"scales\"\\s*:\\s*\\[([^\\]]*)\\]", RegexOptions.Singleline);
-                            if (!me.Success || !sa.Success || !int.TryParse(me.Groups[1].Value, out int uEra)) continue;
-                            var cells = sa.Groups[1].Value.Split(',')
-                                .Select(t => float.TryParse(t.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float cv) ? cv : 1f)
-                                .ToArray();
-                            if (cells.Length > 0) eraGridRows[uEra] = cells;   // later packs win, same as the rest of the merge
-                        }
-                    }
-                    catch (Exception ex) { Plugin.Log.LogWarning("[Resize] eraGrid parse in '" + Path.GetFileName(file) + "': " + ex.Message); }
-                }
+                    Plugin.Diag($"[Resize] {unitScaleRules.Count} unit-scale rule(s): " + string.Join(", ", unitScaleRules.Select(r => $"'{r.match}'x{r.scale:0.###}" + (r.era > 0 ? $" (era {r.era})" : ""))));
                 if (eraGridRows.Count > 0)
                     Plugin.Diag("[Resize] era grid: " + string.Join(" | ", eraGridRows.OrderBy(k => k.Key)
                         .Select(k => $"unit era {k.Key} -> [" + string.Join(",", k.Value.Select(v => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)).ToArray()) + "]")));
-
-                // FORMATION BY SIZE (Global Era Lab second table, runtime 2026-07-30): {threshold, formation} rows;
-                // when a ruled unit's EFFECTIVE scale (rule x era anchor) drops to <= a threshold, its unit
-                // definition is repointed at that formation (first row with threshold >= scale wins; sorted
-                // ascending here so the walk can take the first hit) and live units re-form. Above every
-                // threshold = the unit's own original formation.
-                formationBySize.Clear();
-                foreach (var file in files)
-                {
-                    try
-                    {
-                        var text4 = File.ReadAllText(file);
-                        var arr4 = Regex.Match(text4, "\"formationThresholds\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
-                        if (!arr4.Success) continue;
-                        var rows = new List<KeyValuePair<float, string>>();
-                        foreach (Match rm in Regex.Matches(arr4.Groups[1].Value, "\\{[^{}]*\\}", RegexOptions.Singleline))
-                        {
-                            var th = Regex.Match(rm.Value, "\"threshold\"\\s*:\\s*([0-9.eE+-]+)");
-                            var fm = Regex.Match(rm.Value, "\"formation\"\\s*:\\s*\"([^\"]+)\"");
-                            if (th.Success && fm.Success
-                                && float.TryParse(th.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float tv))
-                                rows.Add(new KeyValuePair<float, string>(tv, fm.Groups[1].Value));
-                        }
-                        if (rows.Count > 0) { formationBySize.Clear(); formationBySize.AddRange(rows); }   // later packs win
-                    }
-                    catch (Exception ex) { Plugin.Log.LogWarning("[Resize] formationThresholds parse in '" + Path.GetFileName(file) + "': " + ex.Message); }
-                }
-                formationBySize.Sort((a, b) => a.Key.CompareTo(b.Key));
                 if (formationBySize.Count > 0)
                     Plugin.Diag("[Resize] formation-by-size: " + string.Join(", ",
                         formationBySize.Select(t => $"<= x{t.Key.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} -> {t.Value}")));
+                WriteLoadReport(packs, built.Count, conflicts, applied, resolution);   // AFTER the tuning notes joined `resolution`
                 foreach (var e in built) e.coreDesc = CoreDesc(e.pawnDescription);   // cache the _NN-stripped match key ONCE (read every frame by the movement polls); done before publish so readers never see it unset
                 entries = built;   // publish fully built — never mutated after this point
                 // Invalidate the pawn-hook early-out caches: if pawns spawned during a transient-failure retry window

@@ -102,7 +102,7 @@ namespace HumankindAssetFramework
 
         // RESIZE LAB (2026-07-28): pattern rules from the packs' "unitScales" arrays + the per-session
         // resolution to descriptor ids (session-scoped — descriptor indices change per load).
-        struct ScaleRule { public string match; public float scale; public int era; }            // era 0 = derive from the unit's name
+        internal struct ScaleRule { public string match; public float scale; public int era; }            // era 0 = derive from the unit's name
         static readonly List<ScaleRule> unitScaleRules = new List<ScaleRule>();
         struct UnitScaleInfo { public float scale; public int homeEra; public int domain; }   // rule product, the unit's own era, and its domain (UnitSpawnType) for the frontier lookup
         static readonly Dictionary<int, UnitScaleInfo> unitScaleByDesc = new Dictionary<int, UnitScaleInfo>();

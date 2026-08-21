@@ -10,6 +10,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **PACK TUNING TABLES NOW FOLLOW PACK RESOLUTION (2026-08-21).** An external review agent found — and a read of
+  `LoadRegistry` confirmed — that `unitScales`, `eraGrid` and `formationThresholds` were regex-scraped in three loops
+  over the raw *discovery* file list, while the models merged over the *resolved* pack list. So a pack that resolution
+  had skipped (duplicate `modId`, unmet `dependsOn`) still resized every matching unit; "later packs win" meant later by
+  filename, not the player's mod order; and two packs' `unitScales` on one unit composed silently (×0.6 × ×0.6) under a
+  framework whose rule is "no silent overrides". Fix: the three loops became one pure `PackTuning.Parse` over the
+  resolved `(modId, text)` pairs — the `Pack` now keeps its raw text — that also emits a NOTE per cross-pack interaction
+  (shared `unitScales` match with the composed factor; an `eraGrid` row or the `formationThresholds` table taken over by
+  a later pack). Notes reach `haf_load_report.txt` as `TUNING:` lines and the log as `[Resize] cross-pack:` warnings.
+  Policy in Multi-Mod.md §How packs merge (9); 6 tests in `PackTuningTests` incl. the alphabetical-vs-mod-order case.
+
 - **PER-FRAME COST: MEASURED, THEN CUT 5.7 ms → ~0.6-0.8 ms (16.7% → ~2% of a 30 fps frame) (2026-08-21).** The user asked
   what the day's changes had cost; the answer was an estimate ("under 1%"). `Patches/FrameCost.cs` replaced the
   estimate with a number: every per-frame entry point — the `Plugin.Update` fan-out, bucket by bucket, and the

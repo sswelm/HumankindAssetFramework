@@ -29,6 +29,7 @@ Severity key: 🔴 fix soon (silent data loss / silent no-inject) · 🟡 worth 
 
 | Date | Fix |
 |---|---|
+| 08-21 | Pack tuning tables (`unitScales`/`eraGrid`/`formationThresholds`) parsed from the RESOLVED packs in mod order via pure `PackTuning.Parse`, cross-pack interactions named in the load report — they had bypassed pack resolution entirely (external-agent finding, verified) |
 | 07-05 | Registry atomic write (`.tmp` + `File.Replace`), corrupt-file guard (`.corrupt.json`, Save refuses), versioned project backup + auto-restore |
 | 07-05 | `RunBounded` 3-min cap on all five shell-outs (but see **E4** below — one unbounded path remains) |
 | 07-05 | `[SerializeField]` form persistence; dead `LoadHookPatch` removed; F8 window un-broken |
