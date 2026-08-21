@@ -108,6 +108,7 @@ namespace HumankindAssetFramework
         // Bonus: an ANIMATED entry whose clip fails to resolve (stale GUID after a rebake -> animId -1) used to drop
         // out of `Hooked` and lose the skeleton force too; it keeps it now.
         static bool Rescuable(ModelEntry x) => x.skeletonId >= 0 && x.repointed;
+        internal static bool lastPawnMatched;   // set per pawn-add: did this pawn match one of OUR entries? (FrameCost splits vanilla vs ours on it)
         static ModelEntry HookedEntryFor(int skeletonId)
         {
             if (entries == null || skeletonId < 0) return null;
@@ -138,13 +139,15 @@ namespace HumankindAssetFramework
                 // entry is repointed and on session reset — `repointed` flips at runtime, so it cannot be latched.
                 if (anyRescuable == null) anyRescuable = entries != null && entries.Any(Rescuable);
                 if ((anyAnimated != true && anyFreeze != true && anyRescuable != true && unitScaleByDesc.Count == 0 && vanillaTurnByDesc.Count == 0 && !AnyCatRate) || !Plugin.UniversalInjectOn.Value) return;
+                lastPawnMatched = false;
                 pawnMgrRef = pawnManager;   // cached for the live rotor-trim re-apply (PollRotorTrim walks live pawns)
                 if (!TryReadLastPawn(pawnManager, out var ctx)) return;
                 if (!knownManagers.Contains(pawnManager)) knownManagers.Add(pawnManager);   // every manager, incl. ones only adding vanilla pawns — the sweep needs them all
+                var hooked = HookedEntryFor(ctx.skelId);   // resolved ONCE per pawn-add (was three lookups on the vanilla path — perf 2026-08-21)
 
                 // RESIZE LAB: a vanilla pawn (no model entry) whose descriptor has a resolved scale rule gets its
                 // ObjectSpace.Scale multiplied ONCE at spawn — the same mechanism the per-entry `scale` field uses.
-                if (unitScaleByDesc.Count > 0 && unitScaleByDesc.TryGetValue(ctx.descId, out var vInfo) && HookedEntryFor(ctx.skelId) == null)
+                if (unitScaleByDesc.Count > 0 && unitScaleByDesc.TryGetValue(ctx.descId, out var vInfo) && hooked == null)
                     ApplyVanillaScale(ctx, vInfo);   // MESH-SCALE engine: verts x s (on change) + ObjectSpace.Scale (per frame)
 
                 // TURN EASE for VANILLA units (docs/Turn-Ease.md): a Formation Lab LINK rate wins; else the
@@ -152,7 +155,7 @@ namespace HumankindAssetFramework
                 // category only. Land descriptors learn their turret refinement by position-joining the slow
                 // army scan. Same write-back rule as the vanilla scale above: this pawn matches no entry, so
                 // nothing downstream persists the mutation for us.
-                if ((vanillaTurnByDesc.Count > 0 || AnyCatRate) && HookedEntryFor(ctx.skelId) == null)
+                if ((vanillaTurnByDesc.Count > 0 || AnyCatRate) && hooked == null)
                 {
                     float vTurn = 0f; int vCat = -1;
                     if (!vanillaTurnByDesc.TryGetValue(ctx.descId, out vTurn) && AnyCatRate)
@@ -188,10 +191,10 @@ namespace HumankindAssetFramework
                 if (BattleTurn.diag && descCensusLogged.Add(ctx.descId))
                 {
                     string an = null; foreach (var kv in addonDefIds) if (kv.Value == ctx.descId) { an = kv.Key; break; }
-                    Plugin.Log.LogInfo($"[Census] desc {ctx.descId} ('{an ?? "?"}') skel {ctx.skelId} entry={(HookedEntryFor(ctx.skelId)?.resourceName ?? "-")} vanillaTurn={(vanillaTurnByDesc.TryGetValue(ctx.descId, out var cvr) ? cvr.ToString("0") : "-")}");
+                    Plugin.Log.LogInfo($"[Census] desc {ctx.descId} ('{an ?? "?"}') skel {ctx.skelId} entry={(hooked?.resourceName ?? "-")} vanillaTurn={(vanillaTurnByDesc.TryGetValue(ctx.descId, out var cvr) ? cvr.ToString("0") : "-")}");
                 }
 
-                var e = HookedEntryFor(ctx.skelId);
+                var e = hooked;
                 if (e != null) e.descId = ctx.descId;                  // learn our unit's descriptor from the correct pawn
                 else if (ctx.descId >= 0)
                 {
@@ -224,6 +227,8 @@ namespace HumankindAssetFramework
                     return;
                 }
 
+                lastPawnMatched = true;   // from here on this pawn is OURS (FrameCost: PoseOurs bucket)
+
                 // DUPLICATE-PAWN HIDE (2026-08-03, the helicopter "GPU rotor" endgame): gunship-class units spawn a
                 // SQUADRON of pawns via the air hardcode — the formation override's 1-dummy layout doesn't reduce them,
                 // so 4-5 copies of the model render stacked (the phantom rotors). For hideSubPawns entries keep the
@@ -236,11 +241,9 @@ namespace HumankindAssetFramework
                     // ALL units of the type, so a 2nd coexisting unit rendered nothing — critical-review fix 2026-08-16.)
                     int fr = UnityEngine.Time.frameCount;
                     if (e.lastPawnFrame != fr) { e.lastPawnFrame = fr; e.pawnKeptPos.Clear(); }
-                    var os = GetMember(ctx.entry, "ObjectSpace");
-                    var tpObj = os != null ? GetMember(os, "Translation") : null;
-                    UnityEngine.Vector3 pos = tpObj is UnityEngine.Vector3 tv ? tv : UnityEngine.Vector3.zero;
+                    bool havePos = TryGetTranslation(ctx.entry, out var pos);   // PawnFast or reflection
                     bool keptHere = false;
-                    if (tpObj is UnityEngine.Vector3)
+                    if (havePos)
                         for (int k = 0; k < e.pawnKeptPos.Count; k++)
                             if ((e.pawnKeptPos[k] - pos).sqrMagnitude < 0.25f) { keptHere = true; break; }   // within 0.5u = same unit's stack
                     if (keptHere)
@@ -248,24 +251,22 @@ namespace HumankindAssetFramework
                         // a duplicate of a unit we already kept this frame → hide + bury it. HideFactor hides the mesh
                         // draw, but the ghost overlay samples a pawn slot's data — if it rides a duplicate slot, dropping
                         // that slot 1000u under the world takes the ghost with it. The real mesh is hidden anyway.
-                        SetMember(ctx.entry, "HideFactor", 1f);
-                        if (os != null)
-                        {
-                            SetMember(os, "Translation", new UnityEngine.Vector3(pos.x, pos.y - 1000f, pos.z));
-                            SetMember(ctx.entry, "ObjectSpace", os);
-                        }
+                        WriteHideFactor(ctx.entry, 1f);
+                        SetTranslation(ctx.entry, new UnityEngine.Vector3(pos.x, pos.y - 1000f, pos.z));
                         ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
                         return;   // hidden + buried duplicate — no pose work
                     }
-                    if (tpObj is UnityEngine.Vector3) e.pawnKeptPos.Add(pos);   // first pawn for this unit this frame — remember its spot
+                    if (havePos) e.pawnKeptPos.Add(pos);   // first pawn for this unit this frame — remember its spot
                     // the KEPT pawn: un-hide every frame — the cached struct posts HideFactor=1 (the sandwich that
                     // starves the ghost's pre-hook draw); the real post-hook state must render.
-                    SetMember(ctx.entry, "HideFactor", 0f);
+                    WriteHideFactor(ctx.entry, 0f);
                 }
 
                 ForceOurSkeleton(ctx, e);
+                long tS = FrameCost.Begin();
                 SweepForStrays(ctx, e);   // stale same-descriptor slots the game no longer rewrites (the ghost-donor fix)
                 DumpNearbyPawns(ctx, e);  // ghost census BY POSITION — catches a coincident pawn wearing a DIFFERENT descriptor
+                FrameCost.End(FrameCost.PoseSweep, tS);
 
                 // FREEZE (static): no clip of our own — pin the donor pose to frame 0 and stop. ANIMATED: play our clip on Pose0.
                 // NEITHER: a purely static repointed model. It reaches here only since the rescue was widened past
@@ -282,7 +283,7 @@ namespace HumankindAssetFramework
                 // Donor-clip path: the donor's clip drives the pose, but the pawn-level adjusters must still run —
                 // they live in ApplyAnimatedPose, which this branch bypasses, and without them Position offset
                 // (hover height!), moveTilt and runtime scale are silently dead on donor-clip models.
-                if (e.useDonorClip) { DumpDonorChannels(ctx.entry, e); ApplyRotorSpin(ctx.entry, e); ApplyRotorTrim(ctx.entry, e); ApplyPositionOffset(e, ctx.entry); ApplyCombatZ(e, ctx.entry); ApplyTerrainHug(e, ctx.entry); ApplyTurnEase(e, ctx.entry); ApplyMoveTilt(e, ctx.entry); ApplyGunElevation(e, ctx.entry); ApplyScale(e, ctx.entry); ctx.pawnEntries.SetValue(ctx.entry, ctx.idx); }
+                if (e.useDonorClip) { long tD = FrameCost.Begin(); DumpDonorChannels(ctx.entry, e); ApplyRotorSpin(ctx.entry, e); ApplyRotorTrim(ctx.entry, e); ApplyPositionOffset(e, ctx.entry); ApplyCombatZ(e, ctx.entry); ApplyTerrainHug(e, ctx.entry); ApplyTurnEase(e, ctx.entry); ApplyMoveTilt(e, ctx.entry); ApplyGunElevation(e, ctx.entry); ApplyScale(e, ctx.entry); ctx.pawnEntries.SetValue(ctx.entry, ctx.idx); FrameCost.End(FrameCost.PoseDonor, tD); }
                 else
                 {
                     // TURN EASE for every non-donor entry too (battle-turn spike): a map attack SNAPS the unit's
@@ -290,12 +291,16 @@ namespace HumankindAssetFramework
                     // world map — measured 0->0), so ObjectSpace easing is the ONE seam that smooths it — same
                     // mechanism the Comanche flies with. Self-gated: no dial rate AND no per-model rate = no-op.
                     // Runs before the pose handlers; they mutate the same boxed entry and write it back.
+                    long tA = FrameCost.Begin();
                     ApplyTurnEase(e, ctx.entry);
                     ApplyGunElevation(e, ctx.entry);   // distance-proportional barrel raise during a bombard (BR slot — independent of the pose)
                     ApplyCombatZ(e, ctx.entry);        // combat height offset — for EVERY non-donor entry (a STATIC submarine dives too); mutates the same boxed entry the branches below write back
+                    FrameCost.End(FrameCost.PoseAdjust, tA);
+                    long tP = FrameCost.Begin();
                     if (e.freezeDonorAnim && e.animId < 0) ApplyFreeze(ctx, e);
                     else if (e.animId >= 0) ApplyAnimatedPose(ctx, e);
                     else ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
+                    FrameCost.End(FrameCost.PoseAnim, tP);
                 }
             }
             // one-shot log: a bare catch here hid member renames after a game update (models just stopped animating, no clue why).
@@ -312,11 +317,12 @@ namespace HumankindAssetFramework
             if (pawnCount <= 0 || pawnCount > pawnEntries.Length) return false;
             int idx = pawnCount - 1;
             var entry = pawnEntries.GetValue(idx);                     // boxed PawnEntry (struct)
+            PawnFast.EnsureInit(entry);                                 // compiled accessors for THIS struct type (once; reflection fallback if unavailable)
             ctx = new PawnCtx
             {
                 pawnEntries = pawnEntries, idx = idx, entry = entry,
-                skelId = Convert.ToInt32(GetMember(entry, "SkeletonId")),
-                descId = Convert.ToInt32(GetMember(entry, "PawnDescriptorId")),
+                skelId = ReadSkelId(entry),
+                descId = ReadDescId(entry),
                 pawnCount = pawnCount,
             };
             return true;
@@ -474,14 +480,7 @@ namespace HumankindAssetFramework
             if (e.rotorIdx.Length == 0) return;
             float angle = (UnityEngine.Time.time * e.rotorSpinSpeed) % 360f;
             for (int i = 0; i < e.rotorIdx.Length && i < 4; i++)
-            {
-                var br = GetMember(entry, BoneRotationNames[i]);
-                if (br == null) continue;
-                SetMember(br, "SkeletonBoneIndex", (uint)e.rotorIdx[i]);
-                SetMember(br, "AxisIndex", (uint)e.rotorAxis[i]);
-                SetMember(br, "Angle", angle);
-                SetMember(entry, BoneRotationNames[i], br);
-            }
+                SetBoneRotation(entry, i, (uint)e.rotorIdx[i], (uint)e.rotorAxis[i], angle);   // fast path (PawnFast) or reflection
         }
 
         // DONOR-AXIS DIAGNOSTIC (2026-08-04, the canted-fantail question): decode the DONOR clip's four channels
@@ -646,8 +645,7 @@ namespace HumankindAssetFramework
         static void ApplyGunElevation(ModelEntry e, object entry)
         {
             if (e.gunElevMax == 0f) return;
-            var os = GetMember(entry, "ObjectSpace");
-            if (os == null || !(GetMember(os, "Translation") is UnityEngine.Vector3 pos)) return;
+            if (!TryGetTranslation(entry, out var pos)) return;
             if (!TryAimElevAt(pos, out float dist, out float f)) return;
             if (e.gunElevBoneIdx == -2)
             {
@@ -666,38 +664,36 @@ namespace HumankindAssetFramework
             float full = 3f * (tileSpacing > 0.1f ? tileSpacing : 6.93f);
             float angle = e.gunElevMax * UnityEngine.Mathf.Clamp01(dist / full) * f;
             if (UnityEngine.Mathf.Abs(angle) < 0.05f) return;
-            var br = GetMember(entry, BoneRotationNames[3]);
-            if (br == null) return;
-            SetMember(br, "SkeletonBoneIndex", (uint)e.gunElevBoneIdx);
-            SetMember(br, "AxisIndex", (uint)e.gunElevAxis);
-            SetMember(br, "Angle", angle);
-            SetMember(entry, BoneRotationNames[3], br);
+            SetBoneRotation(entry, 3, (uint)e.gunElevBoneIdx, (uint)e.gunElevAxis, angle);
         }
 
         static void ApplyRotorTrim(object entry, ModelEntry e)
         {
             if (trims.Count == 0) return;
-            var bones = e.skeleton == null ? null : GetMember(e.skeleton, "BoneInfos") as Array;
-            if (bones == null) return;
-            int slot = 0;
-            foreach (var t in trims)
+            // RESOLVE ONCE per entry per dial edit (perf pass 2026-08-21): this re-read every bone's Name through reflection
+            // (+ a string alloc each) for every trim line, per pawn, per frame — with 6 dial lines and a 60-bone rig that
+            // was ~700 reflection ops per helicopter per frame. trimSig changes only when the dial file changes.
+            if (!ReferenceEquals(e.rotorTrimSig, trimSig))
             {
-                if (slot >= 4) break;
-                int found = -1;
-                for (int i = 0; i < bones.Length; i++)
-                {
-                    var n = GetMember(bones.GetValue(i), "Name")?.ToString() ?? "";
-                    if (n.IndexOf(t.bone, StringComparison.OrdinalIgnoreCase) >= 0) { found = i; break; }
-                }
-                if (found < 0) continue;
-                var br = GetMember(entry, BoneRotationNames[slot]);
-                if (br == null) continue;
-                SetMember(br, "SkeletonBoneIndex", (uint)found);
-                SetMember(br, "AxisIndex", (uint)t.axis);
-                SetMember(br, "Angle", t.deg);
-                SetMember(entry, BoneRotationNames[slot], br);
-                slot++;
+                var bones = e.skeleton == null ? null : GetMember(e.skeleton, "BoneInfos") as Array;
+                var idx = new List<int>(); var axes = new List<int>(); var degs = new List<float>();
+                if (bones != null)
+                    foreach (var t in trims)
+                    {
+                        if (idx.Count >= 4) break;
+                        int found = -1;
+                        for (int i = 0; i < bones.Length; i++)
+                        {
+                            var n = GetMember(bones.GetValue(i), "Name")?.ToString() ?? "";
+                            if (n.IndexOf(t.bone, StringComparison.OrdinalIgnoreCase) >= 0) { found = i; break; }
+                        }
+                        if (found >= 0) { idx.Add(found); axes.Add(t.axis); degs.Add(t.deg); }
+                    }
+                e.rotorTrimIdx = idx.ToArray(); e.rotorTrimAxis = axes.ToArray(); e.rotorTrimDeg = degs.ToArray();
+                e.rotorTrimSig = trimSig;
             }
+            for (int slot = 0; slot < e.rotorTrimIdx.Length; slot++)
+                SetBoneRotation(entry, slot, (uint)e.rotorTrimIdx[slot], (uint)e.rotorTrimAxis[slot], e.rotorTrimDeg[slot]);
         }
 
         // FORCE our skeleton so this pawn skins by OUR rig. A LATER instance the game spawned on a vanilla skeleton would
@@ -706,7 +702,7 @@ namespace HumankindAssetFramework
         static void ForceOurSkeleton(PawnCtx ctx, ModelEntry e)
         {
             if (ctx.skelId == e.skeletonId) return;
-            SetMember(ctx.entry, "SkeletonId", e.skeletonId);
+            WriteSkelId(ctx.entry, e.skeletonId);
             if (!rescueLogged) { rescueLogged = true; Plugin.Diag($"[Uni] rescued wrong-skeleton pawn: skelId {ctx.skelId} -> {e.skeletonId} (descId {ctx.descId})"); }
         }
 
@@ -769,7 +765,6 @@ namespace HumankindAssetFramework
             var entry = ctx.entry;
             DumpAnimEntries(e);                                        // one-shot [AnimDiag] per entry (no-op after first)
             DumpPawnLive(ctx, e);                                      // throttled [PawnLive] engine-state dump
-            var pose0 = GetMember(entry, "Pose0");                     // boxed PawnEntryPose (struct)
             // PER-INSTANCE PHASE (2026-07-31): every pawn was fed the SAME Time.time/dur, so a multi-pawn unit
             // moved as one body — twelve canoes rocking in perfect lockstep reads as a single rigid raft. Offset
             // each pawn by a deterministic fraction of its clip. ctx.idx is the pawn's slot in the entries array
@@ -793,41 +788,35 @@ namespace HumankindAssetFramework
                 {
                     // ATTACK wins over every other state: the pawn just fired (ranged-fight hook armed a window at
                     // its position) — one clamped 0->1 pass of the attack clip, holding the last frame until it elapses.
-                    SetMember(pose0, "AnimationId", (uint)e.attackAnimId);
-                    SetMember(pose0, "Time", attackT);
+                    SetPose(entry, 0, (uint)e.attackAnimId, attackT);
                 }
                 else if (inPreMove)
                 {
                     // PRE-MOVEMENT: the unit just STARTED moving — one clamped pass (e.g. the howitzer folding),
                     // then the Move loop takes over when the window elapses.
-                    SetMember(pose0, "AnimationId", (uint)e.preMoveAnimId);
-                    SetMember(pose0, "Time", preMoveT);
+                    SetPose(entry, 0, (uint)e.preMoveAnimId, preMoveT);
                 }
                 else if (moving && e.moveAnimId >= 0)   // guard: a move-less state-driven model (idle+attack only) that moves falls through to idle rather than a bad -1 anim id
                 {
                     float md = e.moveDur > 0.001f ? e.moveDur : 1f;
-                    SetMember(pose0, "AnimationId", (uint)e.moveAnimId);
-                    SetMember(pose0, "Time", UnityEngine.Time.time / md + phase);
+                    SetPose(entry, 0, (uint)e.moveAnimId, UnityEngine.Time.time / md + phase);
                 }
                 else if (inAfter)
                 {
-                    SetMember(pose0, "AnimationId", (uint)e.afterAnimId);
-                    SetMember(pose0, "Time", afterT);
+                    SetPose(entry, 0, (uint)e.afterAnimId, afterT);
                 }
                 else if (inCombat && e.combatAnimId >= 0)
                 {
                     // COMBAT-IDLE: the army is locked in a battle — hold the combat stance instead of the relaxed idle.
                     // (A single-frame stance clip renders fine: FrameCount 1 pins the sampler to frame 0 at any Time.)
                     float cd = e.combatDur > 0.001f ? e.combatDur : 1f;
-                    SetMember(pose0, "AnimationId", (uint)e.combatAnimId);
-                    SetMember(pose0, "Time", UnityEngine.Time.time / cd + phase);
+                    SetPose(entry, 0, (uint)e.combatAnimId, UnityEngine.Time.time / cd + phase);
                 }
                 else if (inIdleAlt && idleAltId >= 0)
                 {
                     // IDLE-ALT: the occasional flavor one-shot (howl/eat) — one clamped 0->1 pass at the performer
                     // pawn, then back to the normal idle. Never fires outside plain idle (StatePose gates it).
-                    SetMember(pose0, "AnimationId", (uint)idleAltId);
-                    SetMember(pose0, "Time", idleAltT);
+                    SetPose(entry, 0, (uint)idleAltId, idleAltT);
                 }
                 else if (e.idleAnimId >= 0)
                 {
@@ -837,42 +826,33 @@ namespace HumankindAssetFramework
                     // ROLE (real deltas against the full primary clip's reference) and idle plays it here; the
                     // primary (e.animId) stays the full reference clip and is what plays when no override is set.
                     float idleDur = e.idleDur > 0.001f ? e.idleDur : 1f;
-                    SetMember(pose0, "AnimationId", (uint)e.idleAnimId);
-                    SetMember(pose0, "Time", UnityEngine.Time.time / idleDur + phase);
+                    SetPose(entry, 0, (uint)e.idleAnimId, UnityEngine.Time.time / idleDur + phase);
                 }
                 else
                 {
                     float idleDur = e.animDuration > 0.001f ? e.animDuration : 1f;
-                    SetMember(pose0, "AnimationId", (uint)e.animId);
-                    SetMember(pose0, "Time", UnityEngine.Time.time / idleDur + phase);
+                    SetPose(entry, 0, (uint)e.animId, UnityEngine.Time.time / idleDur + phase);
                 }
-                SetMember(pose0, "Weight", 1f);
-                SetMember(entry, "Pose0", pose0);
+                SetPoseWeight(entry, 0, 1f);
             }
             else
             {
                 float dur = e.animDuration > 0.001f ? e.animDuration : 1f;
-                SetMember(pose0, "AnimationId", (uint)e.animId);
-                SetMember(pose0, "Weight", 1f);
-                SetMember(pose0, "Time", ComputePoseTime(e, entry, dur, phase));
-                SetMember(entry, "Pose0", pose0);
+                SetPose(entry, 0, (uint)e.animId, ComputePoseTime(e, entry, dur, phase));
+                SetPoseWeight(entry, 0, 1f);
             }
-            for (int i = 1; i < 9; i++)
-            {
-                var pose = GetMember(entry, PoseNames[i]);
-                if (pose == null) continue;
-                SetMember(pose, "Weight", 0f);
-                SetMember(entry, PoseNames[i], pose);
-            }
+            for (int i = 1; i < 9; i++) SetPoseWeight(entry, i, 0f);   // zero the secondary slots (never all-zero => NaN => invisible)
             // The AIM layer is cleared only for the ARTILLERY behaviors (it twists the howitzer's barrel as the game
             // aims). For other animated models the game's bone-rotation layer stays — it carries the pawn's FACING
             // (clearing it froze the soldier to one compass direction) — but on some donors it arrives with an
             // INVALID bone index (0xFFFFFFFF) and RUNAWAY angles (1558°…): those magnitudes deform the rig (the
             // soldier's ripped-off head). SanitizeAimLayer wraps such angles into 0..360 — same orientation, sane
             // magnitude — instead of zeroing (which would kill facing).
+            long tAim = FrameCost.Begin();
             if (((e.fireOnAttack || e.deployOnStop) && !e.animStateDriven) || e.clearAimLayer) ClearAimLayer(entry);   // legacy artillery rule, OR the explicit per-model knob (a STATE-DRIVEN howitzer still needs the donor's aim/wheel junk cleared; characters keep the layer for facing)
             else if (!string.IsNullOrEmpty(e.turretBone)) TurretizeAimLayer(entry, e);   // retarget the game's aim/heading angle onto OUR turret bone (a vehicle turret tracks the target)
             else SanitizeAimLayer(entry);
+            FrameCost.End(FrameCost.PoseAim, tAim);
             ApplyPositionOffset(e, entry);
             ApplyMoveTilt(e, entry);       // nose-down while moving (helicopter attitude), eased; no-op at moveTilt 0
             ApplyScale(e, entry);
@@ -886,7 +866,7 @@ namespace HumankindAssetFramework
             // foundation for the vanilla-in-combat feature: keep the donor's descriptor alive alongside ours and
             // flip each pawn by combat state.
             ctx.pawnEntries.SetValue(entry, ctx.idx);
-            LogPoseHookOnce(ctx, e, pose0);
+            LogPoseHookOnce(ctx, e);
         }
 
         // This pawn's animation phase, held STEADY across LOD rebuilds. Identified by position (the entry has no
@@ -896,10 +876,7 @@ namespace HumankindAssetFramework
         static float PhaseFor(ModelEntry e, object entry)
         {
             if (e.animPhaseSpread <= 0.0001f) return 0f;
-            var os = GetMember(entry, "ObjectSpace");
-            if (os == null) return 0f;
-            UnityEngine.Vector3 pos;
-            try { pos = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return 0f; }
+            if (!TryGetTranslation(entry, out var pos)) return 0f;
             float now = UnityEngine.Time.time;
             lock (e.phaseTracks)
             {
@@ -957,10 +934,7 @@ namespace HumankindAssetFramework
         static void StatePose(ModelEntry e, object entry, out bool moving, out bool inAfter, out float afterT, out bool inAttack, out float attackT, out bool inCombat, out bool inPreMove, out float preMoveT, out bool inIdleAlt, out float idleAltT, out int idleAltId)
         {
             moving = false; inAfter = false; afterT = 0f; inAttack = false; attackT = 0f; inCombat = false; inPreMove = false; preMoveT = 0f; inIdleAlt = false; idleAltT = 0f; idleAltId = -1;
-            var os = GetMember(entry, "ObjectSpace");
-            if (os == null) return;
-            UnityEngine.Vector3 pos;
-            try { pos = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return; }
+            if (!TryGetTranslation(entry, out var pos)) return;
             if (e.attackAnimId >= 0)
             {
                 // PURE decision — Patches/PoseMath.cs, unit-tested. The lock stays here: the list is shared.
@@ -1022,9 +996,7 @@ namespace HumankindAssetFramework
         // position (Unity render coords); default deployPoseTime if unmatched (idle -> deployed).
         static float DeployPoseTime(ModelEntry e, object entry, float dur)
         {
-            var osD = GetMember(entry, "ObjectSpace");
-            UnityEngine.Vector3 dpos;
-            try { dpos = (UnityEngine.Vector3)GetMember(osD, "Translation"); } catch { return e.deployPoseTime; }   // member renamed by a game update -> degrade to the default pose instead of throwing per pawn per frame
+            if (!TryGetTranslation(entry, out var dpos)) return e.deployPoseTime;   // member renamed by a game update -> degrade to the default pose instead of throwing per pawn per frame
             float poseTime;
             // PURE decision — Patches/PoseMath.cs, unit-tested (note the 3u radius, tighter than the fire match).
             lock (e.deploySamples) poseTime = PoseMath.NearestDeployPose(e.deploySamples, dpos, e.deployPoseTime);
@@ -1058,9 +1030,7 @@ namespace HumankindAssetFramework
         static float FireOncePoseTime(ModelEntry e, object entry, float dur)
         {
             float poseTime = 0f;
-            var osT = GetMember(entry, "ObjectSpace");
-            UnityEngine.Vector3 tpos;
-            try { tpos = (UnityEngine.Vector3)GetMember(osT, "Translation"); } catch { return 0f; }   // renamed member -> rest at frame 0 instead of throwing per pawn per frame
+            if (!TryGetTranslation(entry, out var tpos)) return 0f;   // renamed member -> rest at frame 0 instead ofthrowing per pawn per frame
             // PURE decision — Patches/PoseMath.cs, unit-tested. A pawn within 4u of a fire is the firer (tiles are
             // spaced wider). This used to seed `best` with float.MaxValue and range-check afterwards, where the
             // recoil overlay seeded it with the radius; the two are equivalent and PoseMathTests pins that.

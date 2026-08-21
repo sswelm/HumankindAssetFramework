@@ -352,9 +352,7 @@ namespace HumankindAssetFramework
         static void ApplyCombatZ(ModelEntry e, object entry)
         {
             if (e.combatZ == 0f) return;
-            var os = GetMember(entry, "ObjectSpace");
-            UnityEngine.Vector3 tr;
-            try { tr = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return; }
+            if (!TryGetTranslation(entry, out var tr)) return;
             bool combat = false; float changedAt = -1f; bool matched = false;
             lock (e.stateSamples)
             {
@@ -373,11 +371,9 @@ namespace HumankindAssetFramework
             float off = combat ? e.combatZ * t : e.combatZ * (1f - t);   // never-flipped: changedAt<0 → t=1 → in-combat full, out-of-combat exactly 0
             if (off == 0f) return;
             tr.y += off;
-            SetMember(os, "Translation", tr);
-            SetMember(entry, "ObjectSpace", os);   // ObjectSpace is a BOXED STRUCT: without this write-back the mutation
-                                                   // dies in the box — drill-caught 2026-08-19 ("I did not see any change!!"
-                                                   // while the engaged log fired: the log proved the COMPUTATION, not the
-                                                   // write). Same last-line-of-the-pattern omission family as the Lab port.
+            SetTranslation(entry, tr);   // ObjectSpace is a BOXED STRUCT: the write-back lives INSIDE SetTranslation (fast path writes
+                                         // straight into the entry). Drill-caught 2026-08-19 ("I did not see any change!!" while the
+                                         // engaged log fired: the log proved the COMPUTATION, not the write) — the Lab-port omission family.
             // the Once/Inv exemplar (2026-08-19 logging audit): keyed one-shot + invariant interpolation — the
             // pattern for NEW log-once sites (the 15 legacy static-bool guards stay: several are load-bearing state)
             Plugin.DiagOnce("combatZ", Plugin.Inv($"[Uni] {e.resourceName} combatZ {e.combatZ} engaged (combat={combat}, eased {CombatZEaseSecs}s)"));
@@ -386,16 +382,13 @@ namespace HumankindAssetFramework
         static void ApplyPositionOffset(ModelEntry e, object entry)
         {
             if (e.position == UnityEngine.Vector3.zero) return;
-            var os = GetMember(entry, "ObjectSpace");                  // boxed TRS
-            UnityEngine.Vector3 tr;
-            try { tr = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return; }   // renamed member -> skip the offset instead of throwing per pawn per frame
+            if (!TryGetTranslation(entry, out var tr)) return;         // renamed member -> skip the offset instead of throwing per pawn per frame
             var planar = new UnityEngine.Vector3(e.position.x, 0f, e.position.y);   // registry y (fore/aft) -> local Z
-            bool rotated = TryQuaternion(GetMember(os, "Rotation"), out var rot);
+            bool rotated = TryGetRotation(entry, out var rot);   // PawnFast or reflection
             if (rotated) planar = rot * planar;                        // pawn frame; else fall back to world axes
             tr += planar; tr.y += e.position.z;                        // registry z (height) -> world Y (up)
             if (!posLogged) { posLogged = true; Plugin.Diag($"[Uni] {e.resourceName} position offset {e.position} applied in {(rotated ? "PAWN frame (turns with the unit)" : "world axes (Rotation unreadable)")}, z->up Y"); }
-            SetMember(os, "Translation", tr);
-            SetMember(entry, "ObjectSpace", os);
+            SetTranslation(entry, tr);
         }
 
         // MOVE TILT (2026-08-04, user request — "helicopter-ness" after the ghost-rotor sprite was silenced): pitch the
@@ -406,9 +399,7 @@ namespace HumankindAssetFramework
         static void ApplyMoveTilt(ModelEntry e, object entry)
         {
             if (e.moveTilt == 0f) return;
-            var os = GetMember(entry, "ObjectSpace");
-            UnityEngine.Vector3 tr;
-            try { tr = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return; }
+            if (!TryGetTranslation(entry, out var tr)) return;
             float now = UnityEngine.Time.time;
             float dt = UnityEngine.Mathf.Clamp(now - e.tiltLastTime, 0f, 0.1f);
             var dp = tr - e.tiltLastPos; dp.y = 0f;
@@ -416,16 +407,9 @@ namespace HumankindAssetFramework
             e.tiltLastPos = tr; e.tiltLastTime = now;
             e.tiltCur = UnityEngine.Mathf.MoveTowards(e.tiltCur, moving ? e.moveTilt : 0f, 60f * dt);   // ease 60 deg/s
             if (UnityEngine.Mathf.Abs(e.tiltCur) < 0.01f) return;
-            var ro = GetMember(os, "Rotation");
-            if (!TryQuaternion(ro, out var rot)) return;
+            if (!TryGetRotation(entry, out var rot)) return;
             var tilted = rot * UnityEngine.Quaternion.Euler(e.tiltCur, 0f, 0f);   // local pitch; negative registry value = nose-up if the axis reads inverted
-            if (ro is UnityEngine.Quaternion) SetMember(os, "Rotation", tilted);
-            else
-            {   // Amplitude quaternion struct: write components onto the boxed value, then put it back
-                SetMember(ro, "x", tilted.x); SetMember(ro, "y", tilted.y); SetMember(ro, "z", tilted.z); SetMember(ro, "w", tilted.w);
-                SetMember(os, "Rotation", ro);
-            }
-            SetMember(entry, "ObjectSpace", os);
+            SetRotation(entry, tilted);
         }
 
         // TURN EASE (spike/turn-ease 2026-08-04, "make it more fluent"): the engine writes a pawn's FACING as an
@@ -732,11 +716,7 @@ namespace HumankindAssetFramework
         internal static void ApplyTurnEaseCore(float rate, float bank, object entry)
         {
             if (rate <= 0f) return;
-            var os = GetMember(entry, "ObjectSpace");
-            UnityEngine.Vector3 tr;
-            try { tr = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return; }
-            var ro = GetMember(os, "Rotation");
-            if (!TryQuaternion(ro, out var rot)) return;
+            if (!TryGetTranslation(entry, out var tr) || !TryGetRotation(entry, out var rot)) return;   // PawnFast or reflection
             // true-bearing aim: an active strike/battle override replaces the game's yaw as the target — and
             // PERSISTS until the game itself changes facing intent (AimMaintain), so the unit stays laid on
             // its target after the shot instead of springing back to the pre-attack facing
@@ -763,13 +743,7 @@ namespace HumankindAssetFramework
             if (!aimed && UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(st.yaw, target)) < 0.01f && UnityEngine.Mathf.Abs(st.bank) < 0.05f)
                 return;   // converged on the game's own value — leave it (while AIMED we must keep writing: the game re-writes the quantized yaw every frame)
             var eased = UnityEngine.Quaternion.Euler(rot.eulerAngles.x, st.yaw, st.bank);   // keep the game's pitch; z = our bank
-            if (ro is UnityEngine.Quaternion) SetMember(os, "Rotation", eased);
-            else
-            {
-                SetMember(ro, "x", eased.x); SetMember(ro, "y", eased.y); SetMember(ro, "z", eased.z); SetMember(ro, "w", eased.w);
-                SetMember(os, "Rotation", ro);
-            }
-            SetMember(entry, "ObjectSpace", os);
+            SetRotation(entry, eased);   // straight into the entry (PawnFast), or the boxed TRS round-trip on reflection
         }
 
         // TERRAIN HUG (spike/terrain-hug 2026-08-04): the engine already flies air units at a terrain-RELATIVE
@@ -790,11 +764,11 @@ namespace HumankindAssetFramework
         // can't resurrect the "cruises high over farmland" bug.
         static readonly List<string> hugSkipDefault = new List<string> { "Exploitation", "Ruin" };
         static readonly List<UnityEngine.Vector3> districtPts = new List<UnityEngine.Vector3>();
-        static float districtNextScan, tileSpacing;
-        class HugState { public UnityEngine.Vector3 pos; public UnityEngine.Vector3 dir; public float cur; public float lastT; }
+        static float districtNextScan, districtMinNext, tileSpacing; static bool hugDirty = true;
+        class HugState { public UnityEngine.Vector3 pos; public UnityEngine.Vector3 dir; public float cur; public float lastT; public float cliff; public int cliffFrame = -100; }
         static readonly List<HugState> hugStates = new List<HugState>();
 
-        internal static void RearmDistrictScan() { districtNextScan = 0f; hugScanLogged = false; }
+        internal static void RearmDistrictScan() { hugDirty = true; hugScanLogged = false; }   // a district was built / the session reset: refresh the hug map on the next tick (3 s min spacing)
 
         // Ground height under a world point via a downward physics raycast (float.MinValue = nothing hit).
         // One-shot log of the first hit so we know WHAT we're standing on — and, if nothing ever hits, that the
@@ -837,8 +811,13 @@ namespace HumankindAssetFramework
         static void RescanDistricts()
         {
             float now = UnityEngine.Time.time;
-            if (now < districtNextScan) return;
-            districtNextScan = now + 3f;   // districts are static; a rescan every few seconds is plenty
+            // FindObjectsOfType(PresentationDistrict) is a ~50 ms scene scan; at 3 s it cost ~0.5 ms/frame, charged to the
+            // helicopter whose frame triggered it (FrameCost 2026-08-21, PoseDonor). Districts change only when something is
+            // BUILT — and the district hook sees every build (RearmDistrictScan marks the list dirty) — so: rescan when dirty
+            // (no sooner than 3 s after the last scan) or after 30 s, whichever first.
+            if (!hugDirty && now < districtNextScan) return;
+            if (now < districtMinNext) return;
+            districtNextScan = now + 30f; districtMinNext = now + 3f; hugDirty = false;
             try
             {
                 var dt = GameBinding.PresentationDistrict;
@@ -903,9 +882,7 @@ namespace HumankindAssetFramework
             float lookahead = hugDrop != 0f ? hugLookahead : e.hugLookahead;
             if (drop == 0f) return;
             RescanDistricts();
-            var os = GetMember(entry, "ObjectSpace");
-            UnityEngine.Vector3 tr;
-            try { tr = (UnityEngine.Vector3)GetMember(os, "Translation"); } catch { return; }
+            if (!TryGetTranslation(entry, out var tr)) return;
             float now = UnityEngine.Time.time;
             HugState st = null; float best = 16f;
             for (int i = hugStates.Count - 1; i >= 0; i--)
@@ -951,17 +928,24 @@ namespace HumankindAssetFramework
             float cliff = 0f;
             if (hugCliff > 0f)
             {
-                float gHere = GroundHeight(tr), gAhead = GroundHeight(probe);
-                if (gHere > float.MinValue && gAhead > float.MinValue && gAhead > gHere)
-                    cliff = UnityEngine.Mathf.Min(gAhead - gHere, 12f) * hugCliff;
+                // TWO Physics.RaycastAll per pawn per FRAME was the helicopters' whole cost (FrameCost 2026-08-21: ~50 µs
+                // per pawn, plus a hit-array alloc each). The probe is eased through st.cur anyway, so sample it at ~5 Hz
+                // per pawn state (every 15 frames = 0.5 s at 30 fps) and hold the value between samples — the climb still starts before the edge.
+                int fr = UnityEngine.Time.frameCount;
+                if (fr - st.cliffFrame >= 15)
+                {
+                    st.cliffFrame = fr;
+                    float gHere = GroundHeight(tr), gAhead = GroundHeight(probe);
+                    st.cliff = gHere > float.MinValue && gAhead > float.MinValue && gAhead > gHere ? UnityEngine.Mathf.Min(gAhead - gHere, 12f) * hugCliff : 0f;
+                }
+                cliff = st.cliff;
             }
             // target: 0 near a district (keep the full position.z lift) or `drop` over open ground, plus any
             // cliff pre-climb
             st.cur = UnityEngine.Mathf.MoveTowards(st.cur, (overDistrict ? 0f : drop) + cliff, hugEase * dt);
             if (UnityEngine.Mathf.Abs(st.cur) < 0.001f) return;
             tr.y += st.cur;
-            SetMember(os, "Translation", tr);
-            SetMember(entry, "ObjectSpace", os);
+            SetTranslation(entry, tr);
         }
 
         // ObjectSpace.Rotation as a UnityEngine.Quaternion: it may BE one, or an Amplitude quaternion type with the
@@ -984,6 +968,7 @@ namespace HumankindAssetFramework
         static void ApplyScale(ModelEntry e, object entry)
         {
             if (e.scale == 1f || e.scale <= 0f) return;
+            if (PawnFast.Scale != null && PawnFast.SetScale != null) { PawnFast.SetScale(entry, PawnFast.Scale(entry) * e.scale); if (!scaleLogged) { scaleLogged = true; Plugin.Diag($"[Uni] {e.resourceName} runtime scale x{e.scale} (fast path)"); } return; }
             var oss = GetMember(entry, "ObjectSpace");
             var scObj = GetMember(oss, "Scale");
             if (scObj is float sf) SetMember(oss, "Scale", sf * e.scale);
@@ -995,10 +980,11 @@ namespace HumankindAssetFramework
 
         // Diagnostic: dump the pawn's runtime transform once per model — a zero/huge Scale or an off Translation explains a
         // model that's fine in the editor preview but invisible in-game (docs/Firing-On-Attack.md).
-        static void LogPoseHookOnce(PawnCtx ctx, ModelEntry e, object pose0)
+        static void LogPoseHookOnce(PawnCtx ctx, ModelEntry e)
         {
             if (poseHookSeen == null) poseHookSeen = new HashSet<string>();
             if (!poseHookSeen.Add(e.resourceName)) return;
+            var pose0 = GetMember(ctx.entry, "Pose0");   // one-shot per entry: reflection is fine here
             var osd = GetMember(ctx.entry, "ObjectSpace");
             Plugin.Diag($"[Uni] pose hook: '{e.resourceName}' -> Pose0 anim {e.animId} (skelId {ctx.skelId} -> {e.skeletonId}, desc {ctx.descId}); " +
                 $"ObjectSpace T={GetMember(osd, "Translation")} S={GetMember(osd, "Scale")} R={GetMember(osd, "Rotation")} poseW={GetMember(pose0, "Weight")}");
