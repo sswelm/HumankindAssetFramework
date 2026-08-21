@@ -140,7 +140,8 @@ namespace HumankindAssetFramework
         static bool loaded, registered, repointActiveLogged, stLogged, greyWaitLogged;
         static int loadAttempts;   // failed-load counter: latch `loaded` only after a success or a few tries, so a TRANSIENT read/parse error (AV scan, sharing violation at startup) retries instead of disabling injection for the whole session
         static volatile bool reloadRearmPending;   // set by the per-session seams (Sandbox.Load / PawnManager.Load, possibly off the main thread); consumed on the main-thread Update tick so RearmModelRegistration's Unity Destroys run safely
-        static volatile bool districtResetSync;    // Sandbox.Load reset the district axis synchronously for the pending rearm — the deferred consume then skips a redundant district reset (a New Game leaves this false so the consume does it)
+        static volatile bool districtResetSync;    // Sandbox.Load requested its own district reset (via districtResetPending) for the pending rearm — the deferred consume then skips a redundant district reset (a New Game leaves this false so the consume does it)
+        static volatile bool districtResetPending; // Sandbox.Load (possibly off the main thread) asks for the district reset; CONSUMED on the main thread — by the next Update tick or by the first district presentation hook of the rebuild, whichever comes first (review 2026-08-21: the reset used to run inline on the sim thread, Clear()ing ~13 collections the main thread reads per frame)
         static UnityEngine.Texture2D _flatN, _white, _black, _grey;   // neutral overlay maps (kill the host's detail/camo)
 
         // A discovered mod PACK: one registry file's wrapper metadata + its models. HAF (Humankind Asset Framework)
@@ -917,21 +918,36 @@ namespace HumankindAssetFramework
         // Update tick in ConsumePendingReloadRearm. Multiple triggers per load coalesce into one consume.
         internal static void RequestReloadRearm() => reloadRearmPending = true;
 
-        // Sandbox.Load (save-load): reset the district axis SYNCHRONOUSLY here — it's pure reference-nulling
-        // (thread-safe) and MUST land before the district presentation hooks fire during the world rebuild, or they
-        // bind onto corpse leaves (the Oracle incident). Then request the model re-arm, flagging that districts were
-        // already reset so the deferred consume won't churn a second reset. A NEW GAME does NOT reach this (no save
-        // deserialize) — there the deferred consume resets districts itself (districtResetSync stays false).
+        // Sandbox.Load (save-load): request the district reset. It MUST land before the district presentation hooks
+        // bind during the world rebuild, or they bind onto corpse leaves (the Oracle incident) — so the hooks consume
+        // the flag themselves on entry (Hooks.cs), and Update consumes it otherwise. It used to run INLINE here,
+        // justified as "pure reference-nulling (thread-safe)"; it is not — ResetDistrictSessionState Clear()s
+        // trackedDistricts / loadedSelectorByKey / scopedStates / the wonder-template caches, all read (and written)
+        // by the main thread's per-frame polls, and this hook may be off the main thread. Clearing a Dictionary
+        // under a concurrent TryGetValue is a corruption race, once per save-load. Then request the model re-arm,
+        // flagging that districts are handled so the deferred consume won't churn a second reset. A NEW GAME does
+        // NOT reach this (no save deserialize) — there the deferred consume resets districts itself.
         internal static void RequestSaveLoadRearm()
         {
-            ResetDistrictSessionState();
+            districtResetPending = true;
             districtResetSync = true;
             reloadRearmPending = true;
+        }
+
+        // Main thread ONLY (Plugin.Update, and the entry of every district presentation hook). Runs the district reset
+        // Sandbox.Load asked for. Idempotent and cheap when nothing is pending — the hooks call it per district build.
+        internal static void ConsumePendingDistrictReset()
+        {
+            if (!districtResetPending) return;
+            districtResetPending = false;
+            try { ResetDistrictSessionState(); }
+            catch (Exception ex) { Plugin.Log.LogError("[District] deferred session reset: " + ex); }
         }
 
         // Main thread (Plugin.Update). Runs the deferred full re-arm requested by any per-session seam above.
         internal static void ConsumePendingReloadRearm()
         {
+            ConsumePendingDistrictReset();   // before the early return: the district reset must not wait on the model re-arm
             if (!reloadRearmPending) return;
             reloadRearmPending = false;
             bool distDone = districtResetSync; districtResetSync = false;   // Sandbox.Load already reset districts (save-load)? then skip the redundant reset; a New Game needs it done here.

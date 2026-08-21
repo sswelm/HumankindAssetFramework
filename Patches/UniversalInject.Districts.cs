@@ -1459,9 +1459,12 @@ namespace HumankindAssetFramework
             if (n > 0) Plugin.Diag($"[District] freed {n} runtime clone(s) from the previous session (leak fix).");
         }
 
+        // MAIN THREAD ONLY (review 2026-08-21). Previously also ran inline on the Sandbox.Load hook's thread as
+        // "pure reference-nulling"; it Clear()s a dozen collections the per-frame polls read, so it now runs via
+        // ConsumePendingDistrictReset (Update tick or first district hook of the rebuild) — see RequestSaveLoadRearm.
         internal static void ResetDistrictSessionState()
         {
-            // hand this session's runtime clones to the main-thread destroy queue (this method may run off the main thread)
+            // hand this session's runtime clones to the main-thread destroy queue (kept locked: TrackDistrictClone may be called from either side)
             lock (districtDestroyGate)
             {
                 districtPendingDestroy.AddRange(districtOwnedClones);

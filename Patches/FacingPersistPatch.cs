@@ -59,11 +59,12 @@ namespace HumankindAssetFramework
             try { FacingPersist.OnLoad(__0); } catch (Exception ex) { Plugin.Log.LogError("[Facing] load hook: " + ex); }
             // A save-load rebuilds the world WITHOUT re-firing AnimationManager.AnimationLoad (proven 2026-08-16:
             // AnimationLoad fires once per PROCESS), so the model+district re-arm that hangs off it never runs on the
-            // 2nd load. Re-arm here instead: RequestSaveLoadRearm resets the DISTRICT axis SYNCHRONOUSLY (pure
-            // reference-nulling, thread-safe — it must beat the district presentation hooks or they bind onto corpse
-            // leaves, the Oracle incident) and requests the MODEL re-arm on the next main-thread Update (its Destroys
-            // are main-thread-only and this hook may be off it). RepointMatch then lazily re-registers into the new
-            // manager. (A New Game doesn't reach this seam — PawnManager.Load covers it, see Hk_AnimatedBonePoolHeadroom.)
+            // 2nd load. Re-arm here instead: RequestSaveLoadRearm FLAGS the DISTRICT reset (consumed on the main thread
+            // by the first district presentation hook of the rebuild, so it still beats their binding — the Oracle
+            // incident; it used to Clear() the district collections inline on this thread, racing the per-frame polls)
+            // and requests the MODEL re-arm on the next main-thread Update (its Destroys are main-thread-only and this
+            // hook may be off it). RepointMatch then lazily re-registers into the new manager. (A New Game doesn't
+            // reach this seam — PawnManager.Load covers it, see Hk_AnimatedBonePoolHeadroom.)
             try { UniversalInject.RequestSaveLoadRearm(); } catch (Exception ex) { Plugin.Log.LogError("[Uni] save-load re-arm: " + ex); }
         }
     }
