@@ -227,9 +227,15 @@ Press **F8** in a loaded game for HAF's runtime panel. It's trimmed to what a mo
 
 One window is the whole in-editor test suite (it replaced seven bare menu items on 2026-08-20). Every bake
 integration test is a row with a plain-language explanation of what it tests and what it costs, a checkbox, and
-Quick/Everything presets; one Run button executes the selection with live per-row PASS/FAIL (failures unfold their
-detail), and each run writes a durable report to `Logs/haf_bake_tests_report.txt`. All tests are non-destructive
-(throwaway resource names — your assets and registry are untouched). The rows:
+Quick/Everything presets; one Run button executes the selection and each run writes a durable report to
+`Logs/haf_bake_tests_report.txt`, with per-row PASS/FAIL in the window (failures unfold their detail). All tests are
+non-destructive (throwaway resource names — your assets and registry are untouched).
+
+**Fire and forget** (since 2026-08-22): a run finishes on its own — alt-tab away, minimise Unity, walk off. It used to
+be driven by editor ticks, which Unity stops delivering when its window loses OS focus, so a 28-minute suite silently
+stalled the moment you looked at something else. The run is now one synchronous pass behind a cancellable progress
+bar, and the report is **rewritten after every test**, so even a cancelled or interrupted run leaves a record of
+everything that finished. The rows:
 
 - **Smoke** (one per bake path / ALL models) — re-bakes models and asserts the output assets exist and aren't stubs.
 - **Features** (synthetic / Blender + animated) — bakes fixtures toggling one baker option at a time and asserts a
