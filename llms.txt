@@ -57,6 +57,7 @@ so an agent can crawl the whole doc set from here with no authentication. The hu
 - [docs/haf-pack.example.json](docs/haf-pack.example.json): a minimal pack template.
 
 ## Runtime internals
+- [docs/Architecture.md](docs/Architecture.md): the invariants no compiler enforces — thread model, session re-arm order, the reflection contract, the two district ledgers, verification layers — each with the failure it was learned from. Read before changing the runtime.
 - [docs/Code-Map.md](docs/Code-Map.md): where everything lives in the plugin source.
 - [docs/Animated-Runtime.md](docs/Animated-Runtime.md): the decompiled animation runtime — clip registration, the per-frame pose hook, GPU pose math, the runtime cost model (§3b), and the engine contracts (default rotation-only with opt-in bone translation, scale-1, name-ordered bones).
 - [docs/Unit-Combat-Behavior.md](docs/Unit-Combat-Behavior.md): how the game drives combat animation and how HAF hooks it.

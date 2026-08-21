@@ -10,6 +10,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **`docs/Architecture.md` — the invariants, in one place (2026-08-21).** The critical review scored
+  *maintainability by anyone else* lowest of every axis, and the reason was specific: the rules the runtime depends on
+  — which state is main-thread-only, the publish-once/snapshot discipline on `entries`, the three per-session re-arm
+  seams and their order, `texOwned`, the two district ledgers, derived-not-guessed reflection — all existed, as
+  comments scattered across six files, findable only by breaking something. Collected into one page: nine sections,
+  each rule paired with the failure it was learned from (so it is falsifiable, not folklore) and a test for what
+  belongs there (*hard to trace back, and nothing automated catches it*). Indexed under Internals in
+  [docs/README.md](docs/README.md) and in `llms.txt`. Transcription, not engineering — which is why it was the cheapest
+  point left on the board.
+
 - **THE BINDING CATALOG IS CLOSED — 63 → 91 game types, and the headless checker learns to read its own derived
   entries (2026-08-21).** The review measured the reflection-drift net at ~76 of 88 bound member names and called it
   the cheapest robustness gain left. By receiver it was worse: ~20 game types HAF reaches *structurally* —
