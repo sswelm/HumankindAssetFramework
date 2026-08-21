@@ -233,10 +233,10 @@ namespace HumankindAssetFramework
         internal const int TexGiveUpErrors = 3;   // both apply paths latch texApplied=true after this many exceptions — the "gave up" signature
         internal const int TexPendingPolls = 300; // both paths Diag "not loadable yet" every 300 polls; past that, pending is worth a note
 
-        internal static void GatherDistrictFacts(DistrictModel d, SmokeFacts f) => GatherDistrictFacts(d, f, scoped: false, scopedTiles: 0);
-        internal static void GatherDistrictFacts(DistrictModel d, SmokeFacts f, bool scoped, int scopedTiles)
+        internal static void GatherDistrictFacts(DistrictInject.DistrictModel d, SmokeFacts f) => GatherDistrictFacts(d, f, scoped: false, scopedTiles: 0);
+        internal static void GatherDistrictFacts(DistrictInject.DistrictModel d, SmokeFacts f, bool scoped, int scopedTiles)
             => GatherDistrictFacts(d, f, scoped, scopedTiles, new DistrictTexState { Textured = d.atlasGuid != null, Applied = d.texApplied, Errors = d.texErrors, Wait = d.texWait });
-        internal static void GatherDistrictFacts(DistrictModel d, SmokeFacts f, bool scoped, int scopedTiles, DistrictTexState tex)
+        internal static void GatherDistrictFacts(DistrictInject.DistrictModel d, SmokeFacts f, bool scoped, int scopedTiles, DistrictTexState tex)
         {
             f.DistrictsChecked++;
             int live = scoped ? scopedTiles : d.tiles.Count;
@@ -312,13 +312,13 @@ namespace HumankindAssetFramework
                         GatherEntryFacts(e, f);
                         CheckLooseFiles(e, f, Path.Combine(Paths.ConfigPath, "haf_sounds"), Path.Combine(Paths.ConfigPath, "haf_skins"));
                     }
-                foreach (var d in distModels)   // main-thread state, read on the main thread (F8)
+                foreach (var d in DistrictInject.distModels)   // main-thread state, read on the main thread (F8)
                 {
                     // scoped districts keep their live tiles in scopedStates[name].refreshPlbcs (TryGetValue, not
                     // ScopedFor: the smoke must never CREATE state). Isolate districts: d.tiles.
-                    bool scoped = IsScopedDistrict(d.district);
-                    ScopedState ss = null;
-                    int scopedTiles = scoped && scopedStates.TryGetValue(d.district, out ss) ? ss.refreshPlbcs.Count : 0;
+                    bool scoped = DistrictInject.IsScopedDistrict(d.district);
+                    DistrictInject.ScopedState ss = null;
+                    int scopedTiles = scoped && DistrictInject.scopedStates.TryGetValue(d.district, out ss) ? ss.refreshPlbcs.Count : 0;
                     // texture ledger follows the path: scoped keeps it on ScopedState (the atlas guid is copied there from
                     // the registry when the district is first scoped), isolate on the DistrictModel itself
                     var tex = scoped

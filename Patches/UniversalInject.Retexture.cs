@@ -204,7 +204,7 @@ namespace HumankindAssetFramework
         // near-black atlas), (2) pull each pixel toward its luminance by `desat` (1 = full grey), (3) add the
         // per-channel colour offset tR/tG/tB (-255..+255). Shared by the own-atlas path and the PNG path. The editor's
         // Retexture-window preview mirrors this math exactly — keep them in lockstep.
-        static void AdjustSkin(UnityEngine.Texture2D t, float brightness, float desat, float tR, float tG, float tB)
+        internal static void AdjustSkin(UnityEngine.Texture2D t, float brightness, float desat, float tR, float tG, float tB)
         {
             var px = t.GetPixels32();
             float s = UnityEngine.Mathf.Clamp01(desat);

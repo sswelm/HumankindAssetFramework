@@ -393,7 +393,7 @@ namespace HumankindAssetFramework
                     show = !show;                       // F8 = toggle the feedback window
             }
             UniversalInject.ConsumePendingReloadRearm();  // main-thread re-arm after an in-session save-reload (Sandbox.Load requested it off-thread); covers BOTH the model + district axes, so it runs regardless of the injection gate below
-            UniversalInject.DrainDistrictDestroys();       // main-thread free of the previous session's district runtime clones queued by ResetDistrictSessionState (leak fix); cheap no-op when the queue is empty
+            DistrictInject.DrainDistrictDestroys();       // main-thread free of the previous session's district runtime clones queued by ResetDistrictSessionState (leak fix); cheap no-op when the queue is empty
             if (UniversalInjectOn.Value)
             {
                 UniversalInject.TickTexture();          // keep registry-driven model atlases applied
@@ -408,13 +408,13 @@ namespace HumankindAssetFramework
                 UniversalInject.PollTurnEase();         // live turn-ease dial (haf_turnease.txt): eased facing + bank on donor-clip units (spike)
                 UniversalInject.PollTerrainHug();       // live terrain-hug dial (haf_hugterrain.txt): fly low over open ground, climb for districts (spike)
                 UniversalInject.PollClassScan();        // category turn ease: sample live units for the Hover ability + azimuth turrets (~3s; only while category rates are active)
-                UniversalInject.TickDistrictMeshSwap(); // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
-                UniversalInject.PollRepoDump();         // SPIKE wip-wonder-affinity: one-shot AssetReferenceRepository dump (DistrictDebug-gated)
-                UniversalInject.PollWonderRows();       // SPIKE wip-wonder-affinity: fill configured wonder cells in the ArtificialWonder visual DB
-                UniversalInject.PollDistrictMainRows(); // SPIKE dedicated-visual (hybrid): register our baked selector in */District/Main for an affinity
-                UniversalInject.PollDistrictSelectorTile(); // SCOPED dedicated-visual: put our selector on ONLY the named district's tile (keeps shared affinity + fallback)
-                UniversalInject.ProbeAxisGrowth();      // SPIKE dedicated-visual: one-shot — can matrix.Add grow a criteria axis with a NEW value? (DistrictDebug-gated)
-                UniversalInject.PollHexSculptDial();     // live dial (haf_hexsculpt.txt): re-carve every sculpted district's platform without a relaunch
+                DistrictInject.TickDistrictMeshSwap(); // EXPERIMENTAL district: per-frame swap our FxMesh into the live selector's leaf drawers
+                DistrictInject.PollRepoDump();         // SPIKE wip-wonder-affinity: one-shot AssetReferenceRepository dump (DistrictDebug-gated)
+                DistrictInject.PollWonderRows();       // SPIKE wip-wonder-affinity: fill configured wonder cells in the ArtificialWonder visual DB
+                DistrictInject.PollDistrictMainRows(); // SPIKE dedicated-visual (hybrid): register our baked selector in */District/Main for an affinity
+                DistrictInject.PollDistrictSelectorTile(); // SCOPED dedicated-visual: put our selector on ONLY the named district's tile (keeps shared affinity + fallback)
+                DistrictInject.ProbeAxisGrowth();      // SPIKE dedicated-visual: one-shot — can matrix.Add grow a criteria axis with a NEW value? (DistrictDebug-gated)
+                DistrictInject.PollHexSculptDial();     // live dial (haf_hexsculpt.txt): re-carve every sculpted district's platform without a relaunch
             }
             BattleTurn.Poll();                          // live battle-turn dial (haf_battleturn.txt): turn rate + hold-fire for ALL units — independent of model injection, so outside the UniversalInject gate (spike)
             Hk_BombardAnimHold.Tick();                  // replay deferred bombard attack poses once their turn-hold elapses (muzzle flash + shot sound timing)
@@ -482,16 +482,16 @@ namespace HumankindAssetFramework
             GUILayout.Label("Strategic footprint — flatten height (live override, all scoped districts; 0.02 = flat, 1 = full 3D):");
             using (new GUILayout.HorizontalScope())
             {
-                bool overriding = UniversalInject.FlatHeightOverriding();
-                float h = UniversalInject.FlatHeightOverrideValue();
+                bool overriding = DistrictInject.FlatHeightOverriding();
+                float h = DistrictInject.FlatHeightOverrideValue();
                 GUILayout.Label(overriding ? $"override = {h:0.00}" : "per-district", GUILayout.Width(110));
-                if (GUILayout.Button("-0.05", GUILayout.Width(55))) UniversalInject.NudgeFlatHeight(-0.05f);
-                if (GUILayout.Button("-0.01", GUILayout.Width(55))) UniversalInject.NudgeFlatHeight(-0.01f);
-                if (GUILayout.Button("+0.01", GUILayout.Width(55))) UniversalInject.NudgeFlatHeight(+0.01f);
-                if (GUILayout.Button("+0.05", GUILayout.Width(55))) UniversalInject.NudgeFlatHeight(+0.05f);
+                if (GUILayout.Button("-0.05", GUILayout.Width(55))) DistrictInject.NudgeFlatHeight(-0.05f);
+                if (GUILayout.Button("-0.01", GUILayout.Width(55))) DistrictInject.NudgeFlatHeight(-0.01f);
+                if (GUILayout.Button("+0.01", GUILayout.Width(55))) DistrictInject.NudgeFlatHeight(+0.01f);
+                if (GUILayout.Button("+0.05", GUILayout.Width(55))) DistrictInject.NudgeFlatHeight(+0.05f);
                 float nv = GUILayout.HorizontalSlider(h, 0.02f, 1f, GUILayout.Width(160));
-                if (Mathf.Abs(nv - h) > 0.001f) UniversalInject.SetFlatHeight(nv);
-                if (overriding && GUILayout.Button("Reset", GUILayout.Width(55))) UniversalInject.ClearFlatHeightOverride();
+                if (Mathf.Abs(nv - h) > 0.001f) DistrictInject.SetFlatHeight(nv);
+                if (overriding && GUILayout.Button("Reset", GUILayout.Width(55))) DistrictInject.ClearFlatHeightOverride();
             }
             GUILayout.Space(4);
             GUILayout.Label("GPU mesh buffer (live) — Shift+F8 also logs it:");

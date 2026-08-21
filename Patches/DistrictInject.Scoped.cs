@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using HarmonyLib;
+using static HumankindAssetFramework.UniversalInject;   // GetMember/SetMember/BF, LoadAmpliAsset/ParseGuid4
 
 namespace HumankindAssetFramework
 {
@@ -12,7 +13,7 @@ namespace HumankindAssetFramework
     // their completed model here as plain AssetReferenceDatabaseContent datatable rows keyed by WONDER NAME —
     // so the goal is to learn the exact database + row shape a custom wonder must mimic, then register our own.
     // Gated by DistrictDebug; logs once per app run.
-    internal static partial class UniversalInject
+    internal static partial class DistrictInject
     {
         static bool repoDumped;
         static int wonderRowTick;

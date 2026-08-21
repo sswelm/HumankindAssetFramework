@@ -135,7 +135,7 @@ namespace HumankindAssetFramework
 
     internal static partial class UniversalInject
     {
-        const BindingFlags BF = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        internal const BindingFlags BF = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
         static List<ModelEntry> entries;
         static bool loaded, registered, repointActiveLogged, stLogged, greyWaitLogged;
         static int loadAttempts;   // failed-load counter: latch `loaded` only after a success or a few tries, so a TRANSIENT read/parse error (AV scan, sharing violation at startup) retries instead of disabling injection for the whole session
@@ -940,7 +940,7 @@ namespace HumankindAssetFramework
         {
             if (!districtResetPending) return;
             districtResetPending = false;
-            try { ResetDistrictSessionState(); }
+            try { DistrictInject.ResetDistrictSessionState(); }
             catch (Exception ex) { Plugin.Log.LogError("[District] deferred session reset: " + ex); }
         }
 
@@ -963,10 +963,8 @@ namespace HumankindAssetFramework
             vanillaTurnByDesc.Clear(); vanillaEaseLogged.Clear(); addonDefIds.Clear(); descCensusLogged.Clear();   // vanilla turn-ease links re-resolve to fresh descriptor ids next session
             vanillaCatByDesc.Clear(); descTurret.Clear(); descHover.Clear(); classSamples.Clear();   // category + hover/turret classifications are descriptor-id keyed -> session-scoped too
             _listenerChecked = false;                                // the AudioListener rode a session-scoped camera
-            // DISTRICT runtime state is session-scoped too (the Oracle incident): the cached FxManager, each entry's
-            // matched component, its private leaf (a clone of a SESSION-1 material whose cloned output layer registered
-            // into the OLD renderer) and the texture-injection state all reference dead objects after a new game loads.
-            if (resetDistricts) ResetDistrictSessionState();
+            // DISTRICT runtime state is session-scoped too (the Oracle incident) — reset ONCE, at the end of this method
+            // (the canonical call below). Until 2026-08-21 it was also called here, so every re-arm reset districts twice.
             var list = entries;
             if (list != null)
                 foreach (var e in list)
@@ -1010,7 +1008,7 @@ namespace HumankindAssetFramework
             // captured from session-1 presentation objects — reusing them in a second game points at torn-down GPU
             // state. ONE canonical reset (a hand-rolled copy here had already drifted: it missed the texture bindings
             // and cached bind slots) — DistrictApplyEntries re-derives per district instance as the new session loads.
-            if (resetDistricts) ResetDistrictSessionState();
+            if (resetDistricts) DistrictInject.ResetDistrictSessionState();
         }
 
     }

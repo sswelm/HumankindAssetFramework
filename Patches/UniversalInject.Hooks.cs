@@ -159,9 +159,9 @@ namespace HumankindAssetFramework
         // ConsumePendingDistrictReset FIRST on every district hook: a save-load's Sandbox.Load (possibly off-thread) only
         // FLAGS the district reset; the first district to build in the new world performs it here, on the main thread,
         // before anything binds — so the reset still beats the hooks (the Oracle incident) without a cross-thread Clear().
-        static void Prefix(object __instance, object __0) { UniversalInject.ConsumePendingDistrictReset(); UniversalInject.CaptureLevelBuildEvent(__0); UniversalInject.DistrictDiag(__instance); UniversalInject.DistrictAffinitySwap(__instance); }
+        static void Prefix(object __instance, object __0) { UniversalInject.ConsumePendingDistrictReset(); DistrictInject.CaptureLevelBuildEvent(__0); DistrictInject.DistrictDiag(__instance); DistrictInject.DistrictAffinitySwap(__instance); }
         // Postfix: after UpdateLevelBuild built the request/material — dumps + the registry-driven apply act here.
-        static void Postfix(object __instance) { UniversalInject.ConsumePendingDistrictReset(); UniversalInject.DistrictDumpMaterial(__instance); UniversalInject.DistrictDumpSubMaterials(__instance); UniversalInject.DistrictApplyEntries(__instance); UniversalInject.DistrictGuidOverride(__instance); }
+        static void Postfix(object __instance) { UniversalInject.ConsumePendingDistrictReset(); DistrictInject.DistrictDumpMaterial(__instance); DistrictInject.DistrictDumpSubMaterials(__instance); DistrictInject.DistrictApplyEntries(__instance); DistrictInject.DistrictGuidOverride(__instance); }
     }
 
     // EXPERIMENTAL — GROUND MATERIAL under a custom district ("maintained grass field"). PresentationDistrict
@@ -176,7 +176,7 @@ namespace HumankindAssetFramework
             return t?.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
                     .FirstOrDefault(m => m.Name == "UpdateGroundMaterial");
         }
-        static void Postfix(object __instance) { UniversalInject.ConsumePendingDistrictReset(); UniversalInject.DistrictApplyGroundMaterial(__instance); }
+        static void Postfix(object __instance) { UniversalInject.ConsumePendingDistrictReset(); DistrictInject.DistrictApplyGroundMaterial(__instance); }
     }
 
     // Ground-material index rewrite at the SINGLE choke point. UpdateGroundMaterial isn't the only caller of
@@ -195,8 +195,8 @@ namespace HumankindAssetFramework
         static bool Prefix(object __instance, ref int __0)
         {
             UniversalInject.ConsumePendingDistrictReset();
-            UniversalInject.GroundApplyProbe(__instance, __0);            // log the ORIGINAL resolve first (native/deadzone)
-            return UniversalInject.GroundApplyOverride(__instance, ref __0); // rewrite+run once, then SKIP redundant calls (false) so the blend settles
+            DistrictInject.GroundApplyProbe(__instance, __0);            // log the ORIGINAL resolve first (native/deadzone)
+            return DistrictInject.GroundApplyOverride(__instance, ref __0); // rewrite+run once, then SKIP redundant calls (false) so the blend settles
         }
     }
 
@@ -212,7 +212,7 @@ namespace HumankindAssetFramework
             return t?.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
                     .FirstOrDefault(m => m.Name == "UpdateHexagonSculpting");
         }
-        static void Postfix(object __instance) { UniversalInject.ConsumePendingDistrictReset(); UniversalInject.DumpNativeHexSculpt(__instance); UniversalInject.DistrictApplyHexSculpt(__instance); }
+        static void Postfix(object __instance) { UniversalInject.ConsumePendingDistrictReset(); DistrictInject.DumpNativeHexSculpt(__instance); DistrictInject.DistrictApplyHexSculpt(__instance); }
     }
 
     // THE SPIKE PLAGUE (2026-07-26, first seen the day the 242-bone tank-destroyer shipped): every VISIBLE pawn

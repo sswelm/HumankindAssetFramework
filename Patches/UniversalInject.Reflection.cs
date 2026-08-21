@@ -44,7 +44,7 @@ namespace HumankindAssetFramework
             return null;
         }
 
-        static void SetMember(object o, string name, object val)
+        internal static void SetMember(object o, string name, object val)
         {
             var m = CachedMember(o.GetType(), name);
             try { if (m is PropertyInfo p) { if (p.CanWrite) p.SetValue(o, val); } else if (m is FieldInfo f) f.SetValue(o, val); } catch { }

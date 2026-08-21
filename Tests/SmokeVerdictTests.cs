@@ -160,12 +160,12 @@ namespace HumankindAssetFramework.Tests
         [Fact]
         public void GatherDistrict_GroundMaterialNameNotFound_IsIssue_UnresolvedIsPending()
         {
-            var bad = new UniversalInject.DistrictModel { district = "Reactor", fxMeshGuid = new object(), groundMaterial = "Prairie_Grasland", groundIdx = -1 };
+            var bad = new DistrictInject.DistrictModel { district = "Reactor", fxMeshGuid = new object(), groundMaterial = "Prairie_Grasland", groundIdx = -1 };
             var f = new UniversalInject.SmokeFacts();
             UniversalInject.GatherDistrictFacts(bad, f);
             Assert.Contains("'Reactor' ground material 'Prairie_Grasland' not found", f.DistrictIssues);
 
-            var pending = new UniversalInject.DistrictModel { district = "R2", fxMeshGuid = new object(), groundMaterial = "Prairie_Grassland", groundIdx = int.MinValue };
+            var pending = new DistrictInject.DistrictModel { district = "R2", fxMeshGuid = new object(), groundMaterial = "Prairie_Grassland", groundIdx = int.MinValue };
             var f2 = new UniversalInject.SmokeFacts();
             UniversalInject.GatherDistrictFacts(pending, f2);
             Assert.Empty(f2.DistrictIssues);   // not-yet-resolved is pending, never a failure
@@ -175,7 +175,7 @@ namespace HumankindAssetFramework.Tests
         [Fact]
         public void GatherDistrict_UnparsedFxMeshGuid_IsIssue()
         {
-            var d = new UniversalInject.DistrictModel { district = "Silo", fxMeshGuid = null };
+            var d = new DistrictInject.DistrictModel { district = "Silo", fxMeshGuid = null };
             var f = new UniversalInject.SmokeFacts();
             UniversalInject.GatherDistrictFacts(d, f);
             Assert.Contains("'Silo' fxMesh GUID unparsed", f.DistrictIssues);
@@ -187,7 +187,7 @@ namespace HumankindAssetFramework.Tests
         [Fact]
         public void GatherDistrict_ScopedPath_CountsScopedTiles_NotIsolateLedger()
         {
-            var reactor = new UniversalInject.DistrictModel { district = "Extension_Base_BreederReactor", fxMeshGuid = new object(), selectorGuid = new object() };
+            var reactor = new DistrictInject.DistrictModel { district = "Extension_Base_BreederReactor", fxMeshGuid = new object(), selectorGuid = new object() };
             var f = new UniversalInject.SmokeFacts { Models = 3, Repointed = 1 };
             UniversalInject.GatherDistrictFacts(reactor, f, scoped: true, scopedTiles: 1);
             Assert.Equal(1, f.TilesActive);
@@ -199,7 +199,7 @@ namespace HumankindAssetFramework.Tests
             Assert.DoesNotContain("UNTESTED", r.Summary);
 
             // a scoped district with stale isolate tiles (never the case, but the ledgers must not be summed)
-            reactor.tiles.Add(new UniversalInject.DistrictModel.TileState());
+            reactor.tiles.Add(new DistrictInject.DistrictModel.TileState());
             var f2 = new UniversalInject.SmokeFacts();
             UniversalInject.GatherDistrictFacts(reactor, f2, scoped: true, scopedTiles: 0);
             Assert.Equal(0, f2.TilesActive);   // scoped reads ONLY the scoped ledger
@@ -208,8 +208,8 @@ namespace HumankindAssetFramework.Tests
         // TEXTURE HEALTH (2026-08-21). A live tile proves the mesh bound, not that the albedo landed. Both apply paths
         // give up after 3 exceptions by latching texApplied=true — so the judgement must read texErrors FIRST, or a
         // district rendering untextured passes as "applied".
-        static UniversalInject.DistrictModel TexturedReactor() =>
-            new UniversalInject.DistrictModel { district = "Extension_Base_BreederReactor", fxMeshGuid = new object(), atlasGuid = new object(), selectorGuid = new object() };
+        static DistrictInject.DistrictModel TexturedReactor() =>
+            new DistrictInject.DistrictModel { district = "Extension_Base_BreederReactor", fxMeshGuid = new object(), atlasGuid = new object(), selectorGuid = new object() };
 
         [Fact]
         public void DistrictTexture_Applied_CountsInPassLine()
@@ -259,8 +259,8 @@ namespace HumankindAssetFramework.Tests
         {
             // untextured by design (pre-2.0 entry, no atlas): nothing to judge even with live tiles
             var f = new UniversalInject.SmokeFacts { Models = 3, Repointed = 1 };
-            var plain = new UniversalInject.DistrictModel { district = "Oracle", fxMeshGuid = new object(), atlasGuid = null };
-            plain.tiles.Add(new UniversalInject.DistrictModel.TileState());
+            var plain = new DistrictInject.DistrictModel { district = "Oracle", fxMeshGuid = new object(), atlasGuid = null };
+            plain.tiles.Add(new DistrictInject.DistrictModel.TileState());
             UniversalInject.GatherDistrictFacts(plain, f);
             Assert.Equal(0, f.TexturedChecked);
             Assert.DoesNotContain("textured", UniversalInject.SmokeVerdict(f).Summary);
@@ -276,8 +276,8 @@ namespace HumankindAssetFramework.Tests
         public void DistrictTexture_IsolateOverload_ReadsTheModelLedger()
         {
             var f = new UniversalInject.SmokeFacts { Models = 3, Repointed = 1 };
-            var d = new UniversalInject.DistrictModel { district = "Silo", fxMeshGuid = new object(), atlasGuid = new object(), texApplied = true, texErrors = 3 };
-            d.tiles.Add(new UniversalInject.DistrictModel.TileState());
+            var d = new DistrictInject.DistrictModel { district = "Silo", fxMeshGuid = new object(), atlasGuid = new object(), texApplied = true, texErrors = 3 };
+            d.tiles.Add(new DistrictInject.DistrictModel.TileState());
             UniversalInject.GatherDistrictFacts(d, f);   // 2-arg overload lifts tex state off DistrictModel
             Assert.Contains(f.DistrictIssues, s => s.StartsWith("'Silo' texture apply GAVE UP"));
         }
@@ -285,8 +285,8 @@ namespace HumankindAssetFramework.Tests
         [Fact]
         public void GatherDistrict_IsolatePath_Unchanged_NoScopedLabel()
         {
-            var oracle = new UniversalInject.DistrictModel { district = "Oracle", fxMeshGuid = new object() };
-            oracle.tiles.Add(new UniversalInject.DistrictModel.TileState()); oracle.tiles.Add(new UniversalInject.DistrictModel.TileState());
+            var oracle = new DistrictInject.DistrictModel { district = "Oracle", fxMeshGuid = new object() };
+            oracle.tiles.Add(new DistrictInject.DistrictModel.TileState()); oracle.tiles.Add(new DistrictInject.DistrictModel.TileState());
             var f = new UniversalInject.SmokeFacts { Models = 3, Repointed = 1 };
             UniversalInject.GatherDistrictFacts(oracle, f);   // back-compat overload = isolate
             Assert.Equal(2, f.TilesActive);
