@@ -4,7 +4,7 @@ HAF is verified in **three tiers**, each a machine, each at the level where its 
 
 | Tier | Runs | Guards |
 |---|---|---|
-| **Unit tests** — **447 as of 2026-08-21** | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers** |
+| **Unit tests** — **501 as of 2026-08-22** | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers** |
 | **Headless game checks** | `tools/check-catalog.sh` in the push gate; `tools/check-bindings.sh` on demand / after a game update | **two halves of one claim**: `check-catalog.sh` proves the catalog **covers the code** (every by-name literal at a reflection site is catalogued or allowlisted with a reason), `bindcheck` proves it **resolves** against the real DLLs; `typeprobe --find` / `--exact` locate a seam or a member's owner before a binding is written |
 | **In-game smoke test** — `[load]` automatic, `[full]` on the F8 button | every load (a few ms, once), and on request | the injecting half, read from the **engine**: bindings, registry, roles, assets, sounds, files, GPU budget, district tiles and textures, patched seams — and, on the button, every live pawn on *our* skeleton, pose-hook liveness, the sub-pawn walk vs a scene scan, the write-back self-test |
 
@@ -24,7 +24,7 @@ The fast guards used to be separate scripts you had to remember to run. They're 
 | Repo | the `check.sh` gate runs | ~time |
 |---|---|---|
 | **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` (447) · **docs guard** · **binding-catalog surface** · registry schema parity | seconds |
-| **ENCReload** (editor) | Roslyn editor compile-check · registry schema parity | ~30 s |
+| **ENCReload** (editor) | Roslyn editor compile-check · registry schema parity · hand-list gate (4 blocks) | ~30 s |
 
 ### The docs guard (`tools/check-docs.sh`)
 
@@ -57,6 +57,22 @@ each with a plain-language explanation, live per-row PASS/FAIL, and a durable `L
 run; see [Factory-Manual.md](Factory-Manual.md) §11). The
 gate earned its keep on day one: standing it up surfaced three latent schema drifts (a wrapper field the plugin read but
 the baker never wrote, two runtime-only keys, and a `float?`-cast the parity script mis-classified), all fixed to green.
+
+### The hand-list gate (`ENCReload/Tools/check_handlists.sh`) — four blocks
+
+This project's signature bug class is a **hand-maintained list of fields that must stay in step with a type**. Each
+instance shipped a real bug before it was gated, and each gate compares the list against the type mechanically, so
+the next added field fails the push instead of being silently dropped:
+
+| Block | The list | The bug it shipped |
+|---|---|---|
+| Factory ownership rebase | every UI-edited field re-applied on Save | `combatZ` silently reset to 0 the day it landed |
+| Animation Lab ownership rebase | same shape, the Lab's 63 fields | same class |
+| Vehicle Lab recipe round-trip | every `Recipe` DTO field written **and** restored | the canoe's wave config vanished; took GLB forensics to recover |
+| Clone GUID reset (2026-08-22) | every `int[4]` GUID cleared on a copy | `clipIdleAlt2` inherited, pointing the clone at the **source's** ClipCollection |
+
+Each block is drilled the same way: plant the omission, watch the gate name it, restore. A gate nobody has seen
+fail is not yet a gate.
 
 ### The binding-catalog surface guard (`tools/check-catalog.sh`)
 
