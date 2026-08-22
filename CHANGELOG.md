@@ -1010,6 +1010,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   wheels and hull all sit at `+0.00`. With recoil off the bone list is identical to the shipped M114 rig, so every
   gun already baked regenerates unchanged. The kick is a derived ~15% of the clip with the ride forward taking the
   rest (2 frames back, 14 forward at 16) — the asymmetry is what reads as a shot, so it is not left to be set wrong.
+  The user caught the design flaw from the turntable: "shouldn't it be in the 45 degree angle?" A role clip poses
+  the WHOLE skeleton, so keying only the barrel left every other bone at reference — the gun would have dropped to
+  level and the trails snapped folded for the duration of the attack, firing from the travel pose. The clip now
+  carries the end-of-Deploy pose flat across its own length: verified at 0.00 deg on every held bone at every frame.
   One measurement error caught in the making: an early check reported 8° of bore deviation under elevation, which
   was the *test* picking different min/max-Y vertices once the tube rotated, not the rig.
 - **CRADLE — THE PART THAT HOLDS THE CANNON, GIVEN ITS PROPER NAME (2026-08-22).** The user had marked `cannon2` as

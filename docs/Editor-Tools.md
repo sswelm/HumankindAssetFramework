@@ -134,6 +134,13 @@ The deploy block's **Wheel bones (roll while moving)** + axle axis / loop frames
 >   forward gets the rest, derived from **Recoil frames** rather than given its own dial, so it cannot be set to a
 >   shape that reads wrong. At 16 frames that is 2 back, 14 forward.
 >
+> * **The clip holds the deployed pose itself.** A role clip poses the **whole skeleton** — every bone it does not
+>   key sits at the reference pose. So a Recoil clip keying only the barrel drops the gun to level and snaps the
+>   trails folded for the duration of the attack: the gun fires from its *travel* pose. A gun only ever fires
+>   deployed, so the clip carries the end-of-`Deploy` pose flat across its own length rather than trusting the stance
+>   clip to still be in effect. Verified at `0.00°` from that pose on every held bone at every frame, with the muzzle
+>   staying up and sliding *down its own 45° bore* (Z −17.8, Y +16.0 at peak — √ = the exact 23.9-unit slide).
+>
 > **Recoil is a TRANSLATION**, and the clip bake is rotation-only by default — tick **Keep bone translations** on the
 > entry or the bake discards it and the gun does not move at all. That flag is the whole reason this can be an honest
 > slide rather than the far-pivot `RecoilArm` rotation trick `deploy_convert` was forced into. Assign `Recoil` to the
