@@ -94,9 +94,10 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
   `static bool` latch that survives a session reset while `ResetDistrictSessionState` destroys the clone it
   guards, leaving the strategic-zoom footprint dead until a process restart. It needs a per-session reset by
   hand; the fence cannot find it for you.
-- **`Hk_BattleHoldFire` fails closed** (`BattleTurnPatch.cs:343`): `ct == null ||` selects the hold branch, so a
-  missing `creationTime` holds the attack every frame with no deadline — against the stated policy every sibling
-  hold follows ("any failure = vanilla, never a stuck army").
+- ~~**`Hk_BattleHoldFire` fails closed.**~~ — **FIXED 2026-08-22.** An unreadable `creationTime` is now treated
+  like an expired one (release, with a one-shot warning naming the likely cause), matching the policy every
+  sibling hold follows. The decision is a pure `TryElapsedSince(clock, now, out seconds)` with four tests,
+  mutation-drilled.
 - **A fourth hand-maintained field list is ungated**: Clone's `int[4]` GUID clears (11 such fields in `ModelDef`).
   `check_handlists.sh` already gates three lists of exactly this shape; this one is guarded by a comment.
 - **`Plugin.Update` has no try/catch**, so a throwing poll skips the frame's own accounting — the meter reads

@@ -10,6 +10,23 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE ONE HOLD THAT COULD STALL AN ATTACK NOW FAILS OPEN (2026-08-22, review finding — fixed).**
+  `Hk_BattleHoldFire` can *suppress* a game action, and its bound came from a field read by reflection. The test
+  was `ct == null || elapsed < deadline` — and `GetMember` returns null on **any** resolution failure (a rename, a
+  moved base class, a throwing getter). A null therefore selected the **hold** branch, un-latched `isReadyToStart`
+  and returned false *every frame with no deadline at all*: the ranged attack never starts and the choreography
+  action never completes. Every sibling hold in this file fails **open** by explicit policy — "any failure =
+  vanilla, never a stuck army" — and `TargetMethod` already refuses to patch when the un-latch field is missing;
+  the single input deciding whether this hold was bounded was the exception. An unreadable clock is now treated
+  exactly like an expired one: release, plus a one-shot warning naming the likely cause and pointing at the
+  bindings report, so an incompatibility is loud instead of a frozen battle. The decision moved into a pure
+  `TryElapsedSince(clock, now, out seconds)` — `now` is a parameter rather than `Time.time`, which is what makes
+  it testable outside the engine (the first cut called `Time.time` directly and the test host rejected the ECall,
+  a useful reminder that "pure" means *no ambient inputs*, not just "no side effects"). Four tests, including a
+  non-numeric clock, mutation-drilled: restoring the fail-closed behaviour fails the one named for the regression.
+  Mitigating context, unchanged: the path is off by default and `creationTime` is catalogued, so a rename also
+  shows up in the bindings report at Awake.
+
 - **THE SESSION FENCE WAS DRAWN BY AN IMPLEMENTATION DETAIL (2026-08-22, review finding — fixed).** The
   `[SessionScoped]` rule policed a field only if its type *happened* to have a public parameterless `Clear()`.
   On net471 that silently excludes `ConcurrentQueue<T>`, `ConcurrentBag<T>`, arrays and `ConditionalWeakTable` —

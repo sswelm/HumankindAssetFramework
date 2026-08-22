@@ -324,6 +324,21 @@ namespace HumankindAssetFramework
             return fiReady != null ? m : null;   // no field, no patch — skipping without the un-latch would stall attacks
         }
         static float nextLog;
+        [ProcessLived("one-shot incompatibility notice — the clock is either readable for the process or it is not")]
+        static bool clockWarned;
+
+        // PURE (tested: Tests/HoldFireTests.cs) — seconds between `now` and a reflected creationTime, or false when
+        // the clock cannot be read at all. `false` means "no bound available", and every caller must then RELEASE
+        // rather than hold. `now` is a parameter, not Time.time, so the decision is testable without the engine —
+        // the same rule the DialConfig and PoseMath extractions follow.
+        internal static bool TryElapsedSince(object creationTime, float now, out float seconds)
+        {
+            seconds = 0f;
+            if (creationTime == null) return false;
+            try { seconds = now - Convert.ToSingle(creationTime); return true; }
+            catch { return false; }   // a non-numeric type is as unusable as a missing one
+        }
+
         static bool Prefix(object __instance)
         {
             try
@@ -338,9 +353,29 @@ namespace HumankindAssetFramework
                     turning = UniversalInject.TurnMisalignAt(htr.position) > 8f;
                 if (turning)
                 {
-                    // failsafe: creationTime is set from Time.time when the action spawns (base PresentationChoreographyAction)
-                    var ct = UniversalInject.GetMember(__instance, "creationTime");
-                    if (ct == null || UnityEngine.Time.time - Convert.ToSingle(ct) < BattleTurn.HoldDeadline)
+                    // failsafe: creationTime is set from Time.time when the action spawns (base PresentationChoreographyAction).
+                    //
+                    // FAIL OPEN ON A MISSING CLOCK (review 2026-08-22). This prefix can SUPPRESS a game action, and it is
+                    // the only such hold in the plugin whose bound comes from a reflected field. The old test read
+                    // `ct == null || elapsed < deadline`, so a null — which `GetMember` returns on ANY resolution failure,
+                    // a rename, a moved base class, a throwing getter — selected the HOLD branch, un-latched `isReadyToStart`
+                    // and returned false *every frame, with no deadline at all*: the ranged attack never starts and the
+                    // choreography action never completes. Every sibling hold here fails open by explicit policy ("any
+                    // failure = vanilla, never a stuck army"), and `TargetMethod` already refuses to patch at all when the
+                    // un-latch field is missing — the one input deciding whether THIS hold is bounded was the exception.
+                    // Now an unreadable clock is treated exactly like an expired one: release, and say so once.
+                    float since;
+                    if (!TryElapsedSince(UniversalInject.GetMember(__instance, "creationTime"), UnityEngine.Time.time, out since))
+                    {
+                        if (!clockWarned)
+                        {
+                            clockWarned = true;
+                            Plugin.Log.LogWarning("[BattleTurn] hold-fire: 'creationTime' could not be read — releasing the attack " +
+                                                  "instead of holding it unbounded. The turn-before-firing hold is INERT this session " +
+                                                  "(a game update likely moved the field; it is catalogued, so check the bindings report).");
+                        }
+                    }
+                    else if (since < BattleTurn.HoldDeadline)
                     {
                         if (UnityEngine.Time.realtimeSinceStartup > nextLog)
                         {
