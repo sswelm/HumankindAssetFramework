@@ -673,9 +673,14 @@ namespace HumankindAssetFramework
                 catHoverBank = d.HoverBank;   // legacy files with no `hoverbank` keep inheriting `bank` (resolved in the parse)
                 catShipBank = d.ShipBank;
                 turnPivot = d.Pivot;          // pivot-in-place threshold (default 90; 0 = off) — ground/naval only
+                // GUN ELEVATION descent, live-tunable: how long the barrel holds its firing angle after the shot,
+                // and how long the way back down takes. Shipped as 4 s + 2 s, which reads as the gun forgetting to
+                // stand down; the hold only has to outlast the attack clip so it cannot drop mid-recoil.
+                ElevHoldSeconds = UnityEngine.Mathf.Max(0f, d.ElevHold);
+                ElevFallSeconds = UnityEngine.Mathf.Max(0.05f, d.ElevFall);
                 // Numbers echoed with DialConfig.Inv so the log spells them the way the dial FILE must (invariant
                 // '.') — a comma-decimal locale used to print values the parser would then reject. See Inv().
-                Plugin.Log.LogInfo($"[TurnEase] rate={DialConfig.Inv(d.Rate)} bank={DialConfig.Inv(d.Bank)} | categories human={DialConfig.Inv(d.Human)} land={DialConfig.Inv(d.Land)} turret={DialConfig.Inv(d.Turret)} hover={DialConfig.Inv(d.Hover)} ship={DialConfig.Inv(d.Ship)} deg/s, hoverbank={DialConfig.Inv(catHoverBank)} shipbank={DialConfig.Inv(catShipBank)} deg (planes excluded), pivot={DialConfig.Inv(d.Pivot)} deg (ground/naval turn in place first)");
+                Plugin.Log.LogInfo($"[TurnEase] rate={DialConfig.Inv(d.Rate)} bank={DialConfig.Inv(d.Bank)} | categories human={DialConfig.Inv(d.Human)} land={DialConfig.Inv(d.Land)} turret={DialConfig.Inv(d.Turret)} hover={DialConfig.Inv(d.Hover)} ship={DialConfig.Inv(d.Ship)} deg/s, hoverbank={DialConfig.Inv(catHoverBank)} shipbank={DialConfig.Inv(catShipBank)} deg (planes excluded), pivot={DialConfig.Inv(d.Pivot)} | elevhold={DialConfig.Inv(d.ElevHold)}s elevfall={DialConfig.Inv(d.ElevFall)}s deg (ground/naval turn in place first)");
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[TurnEase] " + ex.Message); }
         }
