@@ -49,12 +49,18 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
   NOTE and a printed `0 live pawn(s) examined`, never a dropped clause. An unreadable oracle returns -1 and cannot
   pose as a confident zero. Five tests, mutation-drilled.
 
-- **Two reports can still say PASS on nothing.** The bake-test verdict treats zero failures as success, so an
-  all-skipped run writes `PASS — 0 passed` to `haf_bake_tests_report.txt`; and `UninjectedReason`'s "its addon
-  loaded but the repoint did not run" — a definite pipeline break — is filed under `Uninjected`, which the verdict
-  only prints. (The smoke's *live-pawn* clause was the third of these and is fixed — see the entry above; the
-  remaining coverage clauses, `SubPawnScene` / `LayersChecked` / `SeamsChecked` / `RolesChecked` / `SoundsChecked`,
-  are still suppressed at zero rather than printed.)
+- **One report can still say PASS on nothing.** The bake-test verdict treats zero failures as success, so an
+  all-skipped run writes `PASS — 0 passed` to `haf_bake_tests_report.txt`. (Two of the original three are fixed:
+  the smoke's *live-pawn* clause and the *matched-but-never-repointed* misfiling — see the entries above. Still
+  cosmetic-but-dishonest: the remaining coverage clauses, `SubPawnScene` / `LayersChecked` / `SeamsChecked` /
+  `RolesChecked` / `SoundsChecked`, are suppressed at zero rather than printed.)
+
+- **The sub-pawn walk double-counts, so its coverage number can read better than complete.** A `PresentationUnit`
+  reached twice during a battle (armies *and* battle units), and a squadron reachable both via the holder subtree
+  and the air-formation `MainPawn` walk, are counted twice — the F8 panel showed `sub-pawn walk 56/46` on
+  2026-08-22, i.e. ten duplicates against a superset oracle. The miss detection is set-based on instance ids so the
+  verdict is sound, but the printed number is misleading and `ProcessEngineAudio` processes the duplicated pairs
+  twice per poll. Fix: dedupe by `GetInstanceID()` before counting.
 - ~~**Two gates have blind spots and neither is in CI.**~~ — **HOT-PATH HALF FIXED 2026-08-22**: the grep is
   case-insensitive with stand-alone word matching (the naive `-i` false-positived on `docs/Wonder-Spike.md`),
   verified in both directions, the three stale `(spike)` labels promoted (all three are documented shipped dials),

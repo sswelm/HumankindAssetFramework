@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using HumankindAssetFramework;
 using Xunit;
 
@@ -7,6 +8,74 @@ namespace HumankindAssetFramework.Tests
     // These lock the PASS/FAIL rules so the harness's assertion stays trustworthy.
     public class SmokeVerdictTests
     {
+        // ---- "MATCHED BUT NEVER REPOINTED" IS A BREAK, NOT NEWS (2026-08-22 review) ----
+        // The string means: the game loaded the unit, our pawnDescription matched it, and the repoint still did not
+        // happen. That used to be filed in `Uninjected`, which the verdict only prints — a green PASS over a broken
+        // pipeline. Failing it required fixing the second half too: the check now asks the injector's own question
+        // (LongestMatch), so an entry legitimately shadowed by a more specific one is NOT accused.
+
+        static List<ModelEntry> Entries(params ModelEntry[] e) => new List<ModelEntry>(e);
+
+        [Fact]
+        public void Uninjected_MatchedButNotRepointed_IsAMismatch_AndFailsTheVerdict()
+        {
+            var e = new ModelEntry { resourceName = "TankDestroyers", pawnDescription = "Era6_Common_TankDestroyers_01" };
+            var seen = new List<string> { "Era6_Common_TankDestroyers_01" };
+            var reason = UniversalInject.UninjectedReason(e, seen, Entries(e), out bool mismatch);
+
+            Assert.True(mismatch);                                    // before the fix this was false → informational
+            Assert.Contains("the repoint did not run", reason);
+
+            var f = Healthy();
+            f.MatchIssues.Add("TankDestroyers: " + reason);
+            Assert.False(UniversalInject.SmokeVerdict(f).Pass);       // and a mismatch actually FAILS
+        }
+
+        [Fact]
+        public void Uninjected_ShadowedByAMoreSpecificEntry_IsBenign_AndNamesTheWinner()
+        {
+            // Healthy by design: the injector takes the LONGEST match, so the variant beats the base it extends.
+            var baseE = new ModelEntry { resourceName = "Tanks", pawnDescription = "TankDestroyers_01" };
+            var variant = new ModelEntry { resourceName = "TanksVariant", pawnDescription = "Common_TankDestroyers_01" };
+            var seen = new List<string> { "Era6_Common_TankDestroyers_01" };
+
+            var reason = UniversalInject.UninjectedReason(baseE, seen, Entries(baseE, variant), out bool mismatch);
+            Assert.False(mismatch);                                   // must NOT be accused
+            Assert.Contains("shadowed", reason);
+            Assert.Contains("TanksVariant", reason);                  // and the winner is named, so it is diagnosable
+        }
+
+        [Fact]
+        public void Uninjected_TheWinnerItself_IsStillAccused_WhenItDidNotRepoint()
+        {
+            // The other side of the same registry: the entry that WOULD win is the one at fault.
+            var baseE = new ModelEntry { resourceName = "Tanks", pawnDescription = "TankDestroyers_01" };
+            var variant = new ModelEntry { resourceName = "TanksVariant", pawnDescription = "Common_TankDestroyers_01" };
+            var seen = new List<string> { "Era6_Common_TankDestroyers_01" };
+
+            UniversalInject.UninjectedReason(variant, seen, Entries(baseE, variant), out bool mismatch);
+            Assert.True(mismatch);
+        }
+
+        [Fact]
+        public void Uninjected_NoUnitOnTheMap_StaysInformational()
+        {
+            var e = new ModelEntry { resourceName = "DugoutCanoe", pawnDescription = "Era1_Common_Canoe_01" };
+            var reason = UniversalInject.UninjectedReason(e, new List<string> { "Era6_Something_Else" }, Entries(e), out bool mismatch);
+            Assert.False(mismatch);
+            Assert.Contains("no unit on the map", reason);
+        }
+
+        [Fact]
+        public void Uninjected_WithoutTheEntryList_KeepsTheOldConservativeWording()
+        {
+            // The back-compat overload cannot run LongestMatch, so it must not fail anything.
+            var e = new ModelEntry { resourceName = "X", pawnDescription = "Unit_01" };
+            var reason = UniversalInject.UninjectedReason(e, new List<string> { "Era_Unit_01" }, out bool mismatch);
+            Assert.False(mismatch);
+            Assert.Contains("the repoint did not run", reason);
+        }
+
         // ---- THE DETECTOR'S OWN LIVENESS (2026-08-22 review) ----
         // The live-pawn checks read `knownManagers`, which only the pose hook writes. A dead hook therefore left the
         // list empty, examined zero pawns, and PASSED with the coverage clause omitted — the detector was fed by the

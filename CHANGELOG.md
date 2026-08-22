@@ -10,6 +10,22 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **A BROKEN REPOINT NOW FAILS INSTEAD OF INFORMING (2026-08-22, review finding — fixed).** `UninjectedReason`
+  returned *"its addon loaded but the repoint did not run"* with `mismatch = false`, so the entry landed in
+  `Uninjected` — a list the verdict only ever **prints**. That string means the game loaded the unit, our
+  `pawnDescription` matched it, and the repoint still didn't happen: a definite pipeline break under a green
+  verdict, and the same bug class as the `_DRILL` suffix that shipped in the pack two days earlier — which a
+  person caught, not the check. Failing it required fixing the **second half of the same defect** first: the
+  reason was computed with a plain substring test while the injector picks the **longest** match, so an entry
+  legitimately shadowed by a more specific one (a variant beating the base it extends) got the identical
+  accusing line although it is perfectly healthy. The check now asks the injector's own question — it runs
+  `LongestMatch` over the real entry list — and the two cases separate cleanly: *shadowed* names the winning
+  entry and stays informational, while *"is the most specific match and still did not repoint"* raises
+  `mismatch` and **fails** the smoke. The back-compat overload without the entry list keeps the old
+  conservative wording and fails nothing. Five tests, mutation-drilled: neutering the flag fails the two named
+  for it, and the shadowing test is the one that would have caught a naive fix turning healthy variants into
+  false alarms.
+
 - **THE DETECTOR THAT COULD NOT SEE ITS OWN DEATH (2026-08-22, review finding — fixed).** The smoke's live-pawn
   checks — skeleton truth and pose-hook liveness, the ones that prove the engine is actually rendering our models —
   read `knownManagers`, a list written at exactly **one** place in the codebase: inside the pose hook's pawn-added

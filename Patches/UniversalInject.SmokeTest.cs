@@ -164,6 +164,21 @@ namespace HumankindAssetFramework
         // PURE: why an entry hasn't injected, given the unit-definition names the game loaded this session (the addon
         // hook records every one). `mismatch` = the pawnDescription can never match although its obvious target DID load.
         internal static string UninjectedReason(ModelEntry e, ICollection<string> seenAddonNames, out bool mismatch)
+            => UninjectedReason(e, seenAddonNames, null, out mismatch);
+
+        // `all` = the full entry list, so this can ask the SAME question the injector asks — LongestMatch — instead of
+        // "does any loaded name contain my pawnDescription?". Two things depended on that (review 2026-08-22):
+        //   * a matchable-but-never-repointed entry was returned with mismatch=false, so it landed in `Uninjected`,
+        //     a list the verdict only PRINTS. "The game loaded the unit, the name matched, and the repoint still did
+        //     not happen" is a definite pipeline break being reported under a green verdict — the same bug class as
+        //     the `_DRILL` suffix that shipped in the pack, one step further down the pipe, and that one was caught
+        //     by a person rather than by this check.
+        //   * the message was also wrong in the other direction: an entry legitimately SHADOWED by a more specific
+        //     one (the injector picks the longest match, so a variant entry beats the base it extends) got the same
+        //     alarming line although it is perfectly healthy.
+        // With `all` supplied both are answered exactly: shadowed is named and benign, unshadowed-and-unrepointed FAILS.
+        // Without it (the back-compat overload) the old conservative wording is kept and nothing is failed.
+        internal static string UninjectedReason(ModelEntry e, ICollection<string> seenAddonNames, List<ModelEntry> all, out bool mismatch)
         {
             mismatch = false;
             if (e.disabled) return "disabled";
@@ -172,7 +187,17 @@ namespace HumankindAssetFramework
             string nearest = null;
             foreach (var n in seenAddonNames)
             {
-                if (n.IndexOf(pd, StringComparison.OrdinalIgnoreCase) >= 0) return "its addon loaded but the repoint did not run — see the log";   // matchable: should have repointed
+                if (n.IndexOf(pd, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    // This entry matches a loaded unit. Would the injector actually pick IT for that unit?
+                    var winner = all == null ? null : LongestMatch(all, n, x => x.pawnDescription);
+                    if (winner != null && !ReferenceEquals(winner, e))
+                        return $"shadowed on '{n}' by the more specific entry '{winner.resourceName}' " +
+                               $"(pawnDescription '{winner.pawnDescription}') — the injector takes the longest match";
+                    if (all == null) return "its addon loaded but the repoint did not run — see the log";
+                    mismatch = true;   // it IS the winner and it still did not repoint: the pipeline broke
+                    return $"its addon '{n}' loaded and '{pd}' is the most specific match, but the repoint did not run — see the log";
+                }
                 // the reverse containment: the game loaded a name the pawnDescription merely EXTENDS (a stray suffix)
                 if (pd.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0 && (nearest == null || n.Length > nearest.Length)) nearest = n;
             }
@@ -184,8 +209,10 @@ namespace HumankindAssetFramework
             return "no unit on the map this session";
         }
 
-        internal static void GatherEntryFacts(ModelEntry e, SmokeFacts f) => GatherEntryFacts(e, f, null);
-        internal static void GatherEntryFacts(ModelEntry e, SmokeFacts f, ICollection<string> seenAddonNames)
+        internal static void GatherEntryFacts(ModelEntry e, SmokeFacts f) => GatherEntryFacts(e, f, null, null);
+        internal static void GatherEntryFacts(ModelEntry e, SmokeFacts f, ICollection<string> seenAddonNames) => GatherEntryFacts(e, f, seenAddonNames, null);
+        // `all` reaches UninjectedReason so it can run the injector's own LongestMatch — see there.
+        internal static void GatherEntryFacts(ModelEntry e, SmokeFacts f, ICollection<string> seenAddonNames, List<ModelEntry> all)
         {
             // Sounds: judgeable for EVERY entry once the audio poll has tried loading (skip = still pending).
             if (e.customClipTried)
@@ -218,7 +245,7 @@ namespace HumankindAssetFramework
                 // a pawnDescription that matches NOTHING the game loaded while the game DID load its obvious target is a
                 // FAIL (2026-08-21: TankDestroyers carried a _DRILL suffix for weeks, rendered as its donor, and this line
                 // said "no unit on the map this session" every time — the harness had the addon list to know better).
-                var reason = UninjectedReason(e, seenAddonNames, out bool mismatch);
+                var reason = UninjectedReason(e, seenAddonNames, all, out bool mismatch);
                 if (mismatch) f.MatchIssues.Add($"{e.resourceName}: {reason}");
                 else f.Uninjected.Add($"{e.resourceName} ({reason})");
                 return;   // deep checks only where the full pipeline provably ran
@@ -518,7 +545,7 @@ namespace HumankindAssetFramework
                 if (snapshot != null)
                     foreach (var e in snapshot)
                     {
-                        GatherEntryFacts(e, f, addonDefIds.Keys);   // every unit-definition name the addon hook saw this session
+                        GatherEntryFacts(e, f, addonDefIds.Keys, snapshot);   // every unit-definition name the addon hook saw this session
                         CheckLooseFiles(e, f, Path.Combine(Paths.ConfigPath, "haf_sounds"), Path.Combine(Paths.ConfigPath, "haf_skins"));
                     }
                 foreach (var d in DistrictInject.distModels)   // main-thread state, read on the main thread (F8)
