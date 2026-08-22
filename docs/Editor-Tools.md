@@ -159,6 +159,25 @@ The deploy block's **Wheel bones (roll while moving)** + axle axis / loop frames
 > slide rather than the far-pivot `RecoilArm` rotation trick `deploy_convert` was forced into. Assign `Recoil` to the
 > **Attack clip**.
 
+> **THE FIRING CYCLE — proven numbers (2026-08-22, verified in-game).** *"They allow a reasonable time to aim,
+> fire, recover and reload."* The elevation timing that came out of tuning the M114 is now the **shipped default**,
+> so a new gun starts here rather than from scratch:
+>
+> | Animation Lab | value | what it buys |
+> |---|---|---|
+> | Raise over | **1 s** | the gun is laid onto the target — and the shot WAITS for it |
+> | Hold after firing | **1 s** | stays up through the recoil, then settles |
+> | Lower over | **1 s** | eases back to the resting angle |
+>
+> Read as a rhythm: one second up, one second holding the shot, one second down — about three seconds from aim to
+> stood-down, which leaves room for the recoil (0.67 s) inside it and reads as a crew working the gun.
+> The angles stay per-model, because a howitzer and a tank destroyer want different envelopes: the M114 runs a
+> **10°** baked resting angle plus **35°** of runtime lift, topping out at the 45° max-range pose on an 8-tile shot.
+>
+> `Raise over = 0` remains available and means *track the turn* — the elevation finishes exactly as the slew does,
+> and the shot is not delayed. That was the old default; 1 s replaced it because a fixed, deliberate lay reads
+> better than one whose speed changes with how far the unit happened to turn.
+
 > **THE M114, END TO END — the worked example (2026-08-22, verified in-game).** A towed howitzer rebuilt from a raw
 > Sketchfab GLB on a Vehicle Lab rig, wheels + trails + gun, no converter. The shipped settings:
 >

@@ -720,9 +720,9 @@ namespace HumankindAssetFramework
                         gunElevAxis = i < gea.Count && int.TryParse(gea[i].Groups[1].Value, out var gav) ? gav : 0,
                         // Defaults match the schema (1.5s / 2s) so an entry saved before these fields existed still
                         // eases down sensibly rather than snapping or hanging at maximum elevation.
-                        gunElevRise = i < ger.Count && float.TryParse(ger[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var gerv) ? gerv : 0f,
-                        gunElevHold = i < geh.Count && float.TryParse(geh[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var gehv) ? gehv : 1.5f,
-                        gunElevFall = i < gef.Count && float.TryParse(gef[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var gefv) ? gefv : 2f,
+                        gunElevRise = i < ger.Count && float.TryParse(ger[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var gerv) ? gerv : 1f,
+                        gunElevHold = i < geh.Count && float.TryParse(geh[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var gehv) ? gehv : 1f,
+                        gunElevFall = i < gef.Count && float.TryParse(gef[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var gefv) ? gefv : 1f,
                         hugDrop = i < hgd.Count && float.TryParse(hgd[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hdv) ? hdv : 0f,
                         hugLookahead = i < hgl.Count && float.TryParse(hgl[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hlv) ? hlv : 1.5f,
                         combatZ = i < cbz.Count && float.TryParse(cbz[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cbv) ? cbv : 0f,
