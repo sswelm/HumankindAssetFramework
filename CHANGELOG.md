@@ -10,6 +10,22 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE GUARD WAS REAL; IT JUST WASN'T ON EVERY DOOR (2026-08-22, review finding — fixed).** Saturday's commit
+  closed a data-loss hole: type a resource name that already exists and Bake and Save settings grey out behind a
+  red "Not allowed" box. `ModelRegistry.Upsert` is a blind `RemoveAll(name) + Add`, so a write under someone
+  else's name deletes them and orphans their baked assets. Three of the Factory's four write paths asked
+  `BlockedByRenameClobber` first — **`Make static…` did not**, and its button sat in no disabled scope either, so
+  with the warning visibly on screen one click destroyed the colliding entry. Rather than bolt a fourth
+  hand-check on (the habit that produced the gap), the guard became the single definition and grew the shape it
+  had always missed: a **＜new model＞ typed straight onto an existing name**, which the rename test could never
+  see because there is no previous key to compare against — the same hole, one door along. It now runs *before*
+  the confirm dialog, because being told a write would destroy another entry beats confirming an action that is
+  about to be refused. **And the guard's own comparison exposed a third gap**: it compares `OrdinalIgnoreCase`
+  while `Upsert` removed with ordinal `==`, so renaming `Tank` → `tank` read as "writing over itself", then
+  failed to remove the old row — two registry entries whose baked assets (`<name>_Skeleton.asset`, …) are the
+  *same files* on Windows, each bake silently overwriting the other. `Upsert` now removes case-insensitively;
+  verified first that no shipped pack has case-duplicate names, so nothing is merged by the change.
+
 - **THE ONE HOLD THAT COULD STALL AN ATTACK NOW FAILS OPEN (2026-08-22, review finding — fixed).**
   `Hk_BattleHoldFire` can *suppress* a game action, and its bound came from a field read by reflection. The test
   was `ct == null || elapsed < deadline` — and `GetMember` returns null on **any** resolution failure (a rename, a

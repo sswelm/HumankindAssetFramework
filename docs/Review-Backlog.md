@@ -22,10 +22,12 @@ by when they'll bite.
 Every item below was re-verified in source during the review; the range's critical (the strike hold reusing a
 stale aim marker) was fixed the same day and is not repeated here. Ranked by consequence.
 
-- **`Make static…` bypasses the name-collision guard** (`ModelFactoryWindow.cs:948`). `nameCollides` gates
-  `canBake` and Save settings only; the Make-static button sits in no disabled scope and calls
-  `ModelRegistry.Upsert`, a blind `RemoveAll(name) + Add`. With the red "Not allowed" box on screen, one click
-  destroys the colliding entry and orphans its baked assets — the exact data loss 898c732 was written to stop.
+- ~~**`Make static…` bypasses the name-collision guard.**~~ — **FIXED 2026-08-22.** The guard is now the single
+  definition used by all four Factory write paths, the button greys like its neighbours, and the check runs before
+  the confirm dialog. It also grew the shape it had always missed (＜new model＞ typed onto an existing name), and
+  fixing it surfaced a third gap: `Upsert` removed with ordinal `==` while the guard compares `OrdinalIgnoreCase`,
+  so a case-only rename left two entries sharing one set of asset files on Windows. `Upsert` is case-insensitive
+  now; no shipped pack has case-duplicate names.
 - **The Vehicle Lab's trail/gun/recoil dials are dead on rigged sources.** Eight sites in that block count roles
   from `parts`; every other section uses `ActiveParts`, and Generate uses `fast ? boneParts : parts`. On an
   `SKM_` source with the fast path on, the section reads "no trails marked" and every control is disabled, while
