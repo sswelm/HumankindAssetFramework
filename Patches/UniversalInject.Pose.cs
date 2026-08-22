@@ -80,6 +80,54 @@ namespace HumankindAssetFramework
                         Plugin.Diag($"[AnimDiag] {e.resourceName}:{pair.Item1} bone{b}: frames={fc} fmt={fmt} start={spd} bbox={bmin}..{bmax}{local}{decoded}");
                     }
                 }
+                // WHICH BONES ACTUALLY MOVE (2026-08-22, the towed howitzer's wheels): the fixed bone list above
+                // samples four arbitrary indices, so it cannot answer "did the bake keep the roll I authored?".
+                // This scans EVERY bone of the skeleton, decodes frame 0 against the middle frame, and NAMES the
+                // bones whose rotation actually changes — per role, one-shot per model. A clip the importer
+                // flattened prints NONE; a travel clip with a wheel roll prints the wheel bones and their angle.
+                // It is what proved the roll reaches the GPU while the unit under suspicion was the wrong one.
+                if (getPose != null && GetMember(e.skeleton, "BoneInfos") is Array skelBones)
+                {
+                    foreach (var pair in new[] { ("primary", e.animId), ("idle", e.idleAnimId), ("move", e.moveAnimId),
+                                                 ("premove", e.preMoveAnimId), ("after", e.afterAnimId) })
+                    {
+                        if (pair.Item2 < 0) continue;
+                        var moved = new List<string>();
+                        for (int b = 0; b < skelBones.Length; b++)
+                        {
+                            int idx = pair.Item2 + b;
+                            if (idx < 0 || idx >= animBuf.Length) break;
+                            var ae = animBuf.GetValue(idx);
+                            uint fcv;
+                            try { fcv = Convert.ToUInt32(GetMember(ae, "FrameCount")); } catch { continue; }
+                            if (fcv < 2) continue;                                  // a held pose can't move
+                            try
+                            {
+                                var spd2 = GetMember(ae, "StartPoseData"); var fmt2 = GetMember(ae, "Format");
+                                var bmin2 = GetMember(ae, "BBoxMin"); var bmax2 = GetMember(ae, "BBoxMax");
+                                var p0 = getPose.Invoke(am, new object[] { spd2, fmt2, (uint)0, bmin2, bmax2 });
+                                var pm = getPose.Invoke(am, new object[] { spd2, fmt2, fcv / 2, bmin2, bmax2 });
+                                if (!TryQuaternion(GetMember(p0, "Rotation"), out var q0) ||
+                                    !TryQuaternion(GetMember(pm, "Rotation"), out var qm)) continue;
+                                float ang = UnityEngine.Quaternion.Angle(q0, qm);
+                                if (ang <= 1f) continue;
+                                // The bone's REST pivot as the GAME has it, plus the mid-frame quaternion: a wheel that
+                                // "spins through the air" is rotating about the wrong POINT (rest far from the wheel's
+                                // own centre, e.g. an unscaled 100x pivot) or the wrong AXIS (the quaternion's xyz not
+                                // along the axle). Both are unreadable without these numbers (drill 2026-08-22).
+                                string rest = "";
+                                if (boneBuf != null && startBone + (uint)b < boneBuf.Length &&
+                                    GetMember(boneBuf.GetValue((int)(startBone + (uint)b)), "Local") is object lb2)
+                                    rest = $" rest T={GetMember(lb2, "Translation")}";
+                                moved.Add($"{b}:{GetMember(skelBones.GetValue(b), "Name")}={ang:0}deg{rest} qMid=({qm.x:0.00},{qm.y:0.00},{qm.z:0.00},{qm.w:0.00})");
+                            }
+                            catch { }
+                        }
+                        Plugin.Log.LogInfo($"[AnimDiag] {e.resourceName}:{pair.Item1} bones that MOVE (f0 vs mid): " +
+                            (moved.Count == 0 ? "NONE — the baked clip is a held pose"
+                                              : string.Join(", ", moved.Take(8)) + (moved.Count > 8 ? $" (+{moved.Count - 8} more)" : "")));
+                    }
+                }
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[AnimDiag] " + ex); }
         }

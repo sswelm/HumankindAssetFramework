@@ -37,6 +37,15 @@ actual rigger, or anything you rig yourself.
 Models animated by **moving separate parts** (nodes) rather than a skinned skeleton — a howitzer's folding trail
 legs, landing gear, a crane, turrets. Very common for Sketchfab vehicles.
 
+> **SUPERSEDED FOR NEW WORK (2026-08-22).** Everything below still describes what the *converter* route can do, and
+> the shipped TowedGunHowitzers still runs on it. But a deploy-converted rig **cannot carry authored bone motion** —
+> its clips do not share a frame with its own rest pose — so anything you want to *add* (wheels that roll, a gun that
+> raises) has to be built on a clean rig instead. The M114 was rebuilt that way and is the worked example: see
+> **[Editor-Tools.md](Editor-Tools.md) ▸ Vehicle Lab** for the roles and dials, and
+> **[Animation-Pitfalls.md](Animation-Pitfalls.md) ▸ "Authoring INTO a converted rig"** for why. Reach for the
+> converter when a source *already has* the motion baked in (the T-62); reach for the Vehicle Lab when you are
+> authoring it yourself.
+
 - **Examples shipped:** the TowedGunHowitzers — folds for travel, deploys when it stops, recoils when it bombards.
   And since 2026-07-26, the **T-62** — a full tracked vehicle (spinning wheels, crawling track links) straight
   from a Sketchfab object-baked drive animation, zero rigging: `deploy_convert` now enforces the decoded engine
@@ -244,6 +253,42 @@ the legacy instant snap. The full worked recipe and every trap behind these rule
 
 All clips come from the same model file and bake against **one shared skeleton** in a single pass — pick, bake,
 done. This is what makes a humanoid read as a *unit* instead of a statue gliding across the map.
+
+**Wheels on a deploy-converted vehicle** — *the tooling below works, but only for a rig whose clips share a
+frame with its rest pose. On the M114 howitzer it does NOT: its converted clips sit 90° rotated (and the legacy
+one at 2× scale) from its own rest, so an authored wheel roll pivots about the wrong point in-game no matter
+how correct the input. Read [Animation-Pitfalls ▸ "Authoring INTO a converted rig"](Animation-Pitfalls.md)
+before using this. A source that animates its own wheels — the T-62 — needs none of it.* Its clips are
+poses (fold / folded / unfold), so nothing rolled the wheels while it travelled. The fix is **baked, in the
+Lab**: the deploy section's **Wheel bones (roll while moving)** (`deployWheelBones`, pick the wheel parts),
+**Axle axis** (empty = AUTO: each wheel's thinnest skinned extent), **Loop frames** (15) and **Degrees**
+(−360) make the converter key a LINEAR roll of those bones into the **`folded`** role clip — the travel
+stance becomes a 16-frame loop — and the **Movement clip is `folded[1..15]`**: folded legs + rolling wheels,
+one baked clip, previewable like any other. A model converted before this existed is retrofitted in place
+without re-converting: `blender -b -P Tools/add_role_clips.py -- <deploy_converted.glb> 0.999 "" "l_wheel,r_wheel"
+AUTO 15 -360 wheelsonly` (rebuilds only `folded`; a `.bak` is written), then set the Movement clip and Bake.
+
+*Never re-orient the wheel bone.* The converter keys the roll about the **local axis nearest the axle** and
+leaves the bone's rest exactly as built (its head is already at the wheel centre). Pointing the tail along the
+axle — the convention the Vehicle Lab uses for rigs it *builds* — gives the bone a non-identity rest rotation,
+and Amplitude's skeleton bake then mangles that bone's offset: measured on this rig, a clean FBX
+`local T = (21.096, 0, 0)` came out of the bake as `(-0.00932, 0, -0.00466)`, putting one wheel's pivot ~0.93
+**below** its hub and the other the same distance above, so the wheels rotated about a point at ground level
+and swept underground. Identity-rest bones (the trail legs) bake symmetric and correct — that contrast is the
+diagnostic (drill 2026-08-22).
+
+**Verify a wheel bake without launching the game:** parse `Assets/Resources/<name>_Skeleton.asset` (plain YAML)
+and compose each bone's `Local` TRS up its `ParentIndex` chain — a left/right wheel pair must come out
+symmetric, differing only in the sideways axis. Asymmetric heights mean the pivot is wrong and no amount of
+in-game staring will explain it. If the wheels roll the wrong way, flip the sign of **Degrees** in the Lab and
+re-bake; the preview's ground arrow shows which way is forward.
+
+**Watch it move — in the Lab** (2026-08-22): the Lab's model preview draws the rig's *bind pose* (no skinning),
+and the raw-model `▶` picker scrubs the **untextured** source, where a dark wheel against a dark hull reads as
+motionless. So the preview now has a **Play clip** row: pick a baked role clip (Idle / Movement / After-move /
+Pre-move / Attack), and it plays **textured and skinned** in the same view — Pause, a scrub slider and a speed
+slider (slow a 0.5 s wheel loop down to judge the roll). It plays the *baked* FBX, so it is the honest preview
+of what the game will play; re-Bake to refresh it after changing a clip range.
 
 ### Clip slicing — one long clip, many states
 

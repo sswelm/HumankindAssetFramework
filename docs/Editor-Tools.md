@@ -53,10 +53,93 @@ block (frames, strip-parts, recoil frames/step/return, slam), turret bone + aim 
 (bone/material/live rotation), animate-only bones, convert-raw-rig, fix-100×. The rest-pose preview stands the rig on a
 true-size tile hex at the in-game surface level (water-blue for Boat-profile pawns, forward arrow = in-game
 facing) — the faithful upright/grounded view for animated models — with orbit/pan/deep-zoom and a **Center** re-frame
-button.
+button, and a **Play clip** row that plays any *baked* role clip (Idle / Movement / After-move / Pre-move / Attack)
+**textured and skinned** right there — Pause, scrub, speed. That is the only view in which a subtle motion (a
+rolling wheel) is actually visible: the rest pose has no motion at all, and the raw-model ▶ picker is untextured.
+The deploy block's **Wheel bones (roll while moving)** + axle axis / loop frames / degrees key that roll into the
+`folded` travel stance at conversion time (Movement clip = `folded[1..N]`).
 *Writes:* `pack.json`, same `UniversalBaker.BuildAnimated` pipeline. **Deep dive:** [Animated-Models.md](Animated-Models.md), [Factory-Manual.md](Factory-Manual.md) §16.
 
 ### Vehicle Lab — `Tools ▸ HAF ▸ Vehicle Lab`
+
+> **TRAILS — a split-trail gun's deploy (2026-08-22, verified in-game).** Mark a gun's arms **Trail** in the part
+> dropdown and the rigger gives each a bone **hinged at its body end** plus a second action, **`Deploy`**, that
+> swings them open about the vertical — mirrored per side, with the direction *chosen* by testing which way moves
+> the spade away from the centreline (so left and right open together whatever way the source faces). Dials:
+> **Spread (deg)** and **Deploy frames**. That one rig then feeds the whole state machine: Idle stance
+> `Deploy[N..N]` (parked, deployed), Movement `Spin` (wheels rolling, trails at their folded rest), After-move
+> `Deploy` (opens on arrival), Pre-move `Deploy[N..0]` (folds before travelling). *Trail* is the artillery term —
+> these are the arms of a split-trail carriage, each ending in a spade; **Leg** is deliberately left free for a
+> walking mech limb. The **preview picks the clip** when a rig has more than one, so `Spin` and `Deploy` can each
+> be judged on the turntable before a bake, and **Checker** paints a high-contrast skin so rotation is visible at
+> all — an untextured wheel looks identical spinning or still.
+
+> **THE GUN COMES UP WITH THE TRAILS (2026-08-22).** Two dials in that same section, both only live when parts are
+> marked **Gun**:
+>
+> * **Gun pivot (breech→muzzle)** — where the `Gun` bone's head sits along the assembly, `0` = breech, `1` = muzzle,
+>   `0.5` = the bbox centre. That head **is the trunnion**: the bone rotates about its own origin, so at the centre a
+>   tube see-saws about its middle and the breech swings down through the carriage. Measured on the M114 (76-unit
+>   tube): at `0.4` the muzzle rises 15.5 and the breech drops 10.3, clearing the ground; at the `0.5` default it
+>   would be a symmetric ±15.5. `0.5` stays the default so rigs baked before this dial existed regenerate identical.
+> * **Gun raise on deploy (deg)** — degrees the gun elevates *inside the `Deploy` clip*, on the same frames as the
+>   spread. A towed gun travels with the tube clamped level over its closed trails and only comes up once they are
+>   planted, so the raise belongs in the same clip; every use the state machine already makes of `Deploy` then
+>   carries it free — unfold raises, `Deploy[N..0]` lowers it back onto the travel lock before the unit rolls,
+>   `Deploy[N..N]` holds it up. Axis is the world horizontal perpendicular to the tube and the **sign is chosen**, as
+>   the trails' is, by testing which way actually lifts the muzzle.
+>
+> **THE THREE GUN ROLES — one bone, three meanings (2026-08-22).** **Gun**, **Cradle** and **Muzzle** all weld to the
+> single `Gun` bone, because all three elevate together about the trunnions. None of them gets a bone of its own.
+> What separates them is what else they mean:
+>
+> | role | is | in the breech→muzzle span? | when recoil lands |
+> |---|---|---|---|
+> | **Gun** | the tube itself | **yes** — it *defines* the span | the part that **kicks back** |
+> | **Cradle** | the frame holding the tube — trunnions, recoil cylinders, the trough it slides in | **no** | the part that **stays** |
+> | **Muzzle** | a separately-modelled brake / flash hider | yes, and it **pins the tip exactly** | rides the tube |
+>
+> The span exclusion is the point of **Cradle**: a cradle stops well short of the muzzle (26 units short on the
+> M114), so folding it in would shrink the span and make *Gun pivot*'s fraction lie about where along the barrel the
+> trunnion sits. On a model whose barrel already outreaches its cradle both ways, marking the cradle `Gun` gives a
+> byte-identical rig — but the role is still the right home, because it is the split recoil will need.
+>
+> **Muzzle** buys an **exact tip**: without it the muzzle end is the gun bbox's far extreme, which a wide brake or a
+> front bracket skews. That tip is the fire origin, and the run reports it **gun-bone-local, in source units** (scale
+> by the bake's `size`) in its DONE status — the value the Animation Lab's *Muzzle offset* dial otherwise costs an
+> iterate-and-relaunch loop to find. If the brake is modelled **into** the barrel mesh — as on the M114, where the
+> tube tapers to 3.84 wide and then flares back to 5.22 over its last 6 units — there is nothing to mark; skip it.
+> Marking the *cradle* as Muzzle is the trap: it pins the tip 26 units short and silently rescales the pivot slider.
+
+> **THE M114, END TO END — the worked example (2026-08-22, verified in-game).** A towed howitzer rebuilt from a raw
+> Sketchfab GLB on a Vehicle Lab rig, wheels + trails + gun, no converter. The shipped settings:
+>
+> | where | setting |
+> |---|---|
+> | **Vehicle Lab** — parts | `l_wheel`, `r_wheel` = **Wheel** · `l_leg`, `r_leg` = **Trail** · `barrel1` (+ breech door, handle, lanyard) = **Gun** · `cannon2` = **Cradle** · `main` = **Body** |
+> | **Vehicle Lab** — Spin | 30 frames · −360° · axle **AUTO** |
+> | **Vehicle Lab** — Deploy | Spread **28°** · **20** frames · Gun pivot **0.25** · Gun raise on deploy **45°** |
+> | **Animation Lab** — clips | Idle/reference `Spin` · Idle stance `Deploy[20..20]` · Movement `Spin` · After-move `Deploy[0..20]` · Pre-move `Deploy[20..0]` |
+> | **Animation Lab** — flags | Convert raw rig ✓ · Auto-ground ✓ · Keep bone translations ✓ · Fix 100× ✗ · `gunElevMax` **0** |
+>
+> The resulting 6-bone rig (`Root, Wheel_00, Wheel_01, Gun, Trail_00, Trail_01`) separates cleanly: `Spin` moves
+> **only** the wheels, `Deploy` moves **only** the gun (45°) and the trails (28°). So it drives with the gun clamped
+> and the trails folded, folds before it turns, and opens again on arrival.
+>
+> Two dial choices worth knowing were **not** the measured-accurate ones. The real trunnion is pivot **0.4** — it
+> lands within 0.8 units of the cradle's centre — but 45° there drops the breech to `Z 1.6`, on the ground; **0.25**
+> keeps the full 45° with ~11 units of breech clearance. And 45° itself is well above an M114's parked elevation.
+> Both were chosen by eye, and correctly: *"when you see it you should think, ah that looks like a howitzer."* The bar
+> is recognition at map zoom, and it can want a pose exaggerated past the accurate one. Measure to catch what is
+> **broken** — geometry through the ground, a bone that never moves, a slice that holds the wrong frame — then let
+> the eye pick the look.
+
+> **This does not replace HAF's runtime `gunElevMax`** (Animation Lab ▸ *Gun elevation — max*) — that writes a
+> `BoneRotation` slot, a channel the clip pose never touches, so the two **compose**: the clip sets the base firing
+> elevation, the runtime adds the per-shot, distance-proportional lift on top of it. Dial `gunElevMax` against the
+> raised base, not against level. The hand-converted M114 baked its elevation into the deploy clip too
+> (`deployReadyFrame`), but out of necessity — a deploy-converted rig cannot carry authored bone motion at all
+> ([Animation-Pitfalls.md](Animation-Pitfalls.md)). Here it is a deliberate two-key authoring on a clean rig.
 
 > The Spin section leads with **Enable spin animation** — the master switch: off, the rig generates with zero
 > wheel/rotor rotation and static tracks, keeping every bone, marking and dial for re-enabling (no more
