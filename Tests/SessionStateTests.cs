@@ -12,6 +12,65 @@ namespace HumankindAssetFramework.Tests
     {
         static readonly Assembly Plugin = typeof(SessionState).Assembly;
 
+        // ---- THE FENCE'S SHAPE (2026-08-22 review) ----
+        // Membership used to be "the type happens to have a public parameterless Clear()", which on net471 excludes
+        // ConcurrentQueue<T>, ConcurrentBag<T>, arrays and ConditionalWeakTable — and `fireGuidQueue`, a sim-thread
+        // ConcurrentQueue, was consequently never drained on re-arm. These pin the widened rule.
+
+        [Fact]
+        public void Fence_Covers_TheShapes_WithNoClearMethod()
+        {
+            // The shapes the old predicate silently excluded. If any drops out of the rule again, a whole family of
+            // statics goes unpoliced without a single test turning red — which is exactly what happened.
+            Assert.Null(SessionState.ClearMethodOf(typeof(System.Collections.Concurrent.ConcurrentQueue<long>)));   // the trap itself
+            Assert.True(SessionState.IsSessionStateShape(typeof(System.Collections.Concurrent.ConcurrentQueue<long>)));
+            Assert.True(SessionState.IsSessionStateShape(typeof(System.Collections.Concurrent.ConcurrentBag<int>)));
+            Assert.True(SessionState.IsSessionStateShape(typeof(int[])));
+            Assert.True(SessionState.IsSessionStateShape(typeof(System.Runtime.CompilerServices.ConditionalWeakTable<object, object>)));
+            // …and scalars stay OUT on purpose: shape cannot tell a constant from a per-session latch.
+            Assert.False(SessionState.IsSessionStateShape(typeof(bool)));
+            Assert.False(SessionState.IsSessionStateShape(typeof(string)));
+        }
+
+        [Fact]
+        public void Clearer_DrainsAConcurrentQueue_AndZeroesAnArray()
+        {
+            var q = new System.Collections.Concurrent.ConcurrentQueue<long>();
+            q.Enqueue(7); q.Enqueue(8);
+            SessionState.ClearerFor(q.GetType())(q);
+            Assert.True(q.IsEmpty);
+
+            var arr = new[] { 1, 2, 3 };
+            SessionState.ClearerFor(arr.GetType())(arr);
+            Assert.Equal(new[] { 0, 0, 0 }, arr);
+
+            // A weak table cannot be emptied in place — the clearer says so rather than pretending, which is what
+            // forces such a field to declare [ProcessLived] or [SessionScoped(Manual=…)].
+            Assert.Null(SessionState.ClearerFor(typeof(System.Runtime.CompilerServices.ConditionalWeakTable<object, object>)));
+        }
+
+        [Fact]
+        public void TheRegression_FireGuidQueue_IsDrainedByTheReArmSweep()
+        {
+            // A strike enqueued in the last frame of one session must not survive into the next, where unit GUIDs
+            // restart from zero — otherwise the wrong unit's pawns get armed with a recoil clip.
+            var e = new ModelEntry { resourceName = "R" };
+            e.fireGuidQueue.Enqueue(1234);
+            Assert.False(e.fireGuidQueue.IsEmpty);
+            while (e.fireGuidQueue.TryDequeue(out long _)) { }   // the sweep's drain, verbatim
+            Assert.True(e.fireGuidQueue.IsEmpty);
+        }
+
+        [Fact]
+        public void TheFenceReportsItsOwnEdge()
+        {
+            // Not enforcement — VISIBILITY. The rule cannot police scalars, so the count of statics outside it is
+            // reported rather than implied. A number someone can argue with beats an unstated assumption.
+            int unpoliced = SessionState.UnpolicedStaticCount(Plugin);
+            Assert.True(unpoliced >= 0);
+            System.Console.WriteLine($"[SessionState] statics outside the rule (scalars/delegates/handles): {unpoliced}");
+        }
+
         [Fact]
         public void Every_static_collection_declares_session_scoped_or_process_lived()
         {

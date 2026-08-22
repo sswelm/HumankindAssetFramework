@@ -52,19 +52,78 @@ namespace HumankindAssetFramework
             return t.GetMethod("Clear", BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null);
         }
 
-        // Every static field in the assembly whose type is a collection (incl. nested + compiler-generated holders).
+        // THE FENCE WAS DRAWN BY AN IMPLEMENTATION DETAIL (review 2026-08-22). Membership was "the type happens to
+        // have a public parameterless Clear()", which on net471 silently excludes ConcurrentQueue<T>, ConcurrentBag<T>,
+        // arrays and ConditionalWeakTable — 137 of 549 author-written statics were inside it. The rule is now "state
+        // shaped like session state", and each shape brings its own clearer:
+        //   * Clear()                 — every BCL collection, unchanged
+        //   * ConcurrentQueue/Bag<T>  — drained via TryDequeue/TryTake (this framework has no Clear() on them)
+        //   * arrays                  — Array.Clear over the whole length
+        //   * ConditionalWeakTable    — CANNOT be emptied in place, so it must declare [ProcessLived] or
+        //                               [SessionScoped(Manual=…)]; the test now forces that instead of never seeing it
+        // Scalars stay outside on purpose: a static bool/int can be a constant, a cache, or a per-session latch, and
+        // the difference is intent rather than shape. UnpolicedStaticCount() reports how many remain, so the edge of
+        // the fence is a number in the test output instead of an implied "everything is covered".
+        internal static bool IsConcurrentDrainable(Type t) =>
+            t != null && t.IsGenericType
+            && (t.GetGenericTypeDefinition() == typeof(System.Collections.Concurrent.ConcurrentQueue<>)
+             || t.GetGenericTypeDefinition() == typeof(System.Collections.Concurrent.ConcurrentBag<>));
+
+        internal static bool IsWeakTable(Type t) =>
+            t != null && t.IsGenericType && t.GetGenericTypeDefinition() == typeof(System.Runtime.CompilerServices.ConditionalWeakTable<,>);
+
+        internal static bool IsSessionStateShape(Type t) =>
+            ClearMethodOf(t) != null || IsConcurrentDrainable(t) || IsWeakTable(t) || (t != null && t.IsArray);
+
+        // The clearer for a field's type, or null when the shape cannot be emptied in place (weak tables).
+        internal static Action<object> ClearerFor(Type t)
+        {
+            var m = ClearMethodOf(t);
+            if (m != null) return v => m.Invoke(v, null);
+            if (t != null && t.IsArray) return v => { var a = (Array)v; if (a.Length > 0) Array.Clear(a, 0, a.Length); };
+            if (IsConcurrentDrainable(t))
+            {
+                var take = t.GetMethod("TryDequeue", BindingFlags.Public | BindingFlags.Instance)
+                        ?? t.GetMethod("TryTake", BindingFlags.Public | BindingFlags.Instance);
+                if (take == null) return null;
+                return v => { var args = new object[1]; int guard = 0; while ((bool)take.Invoke(v, args) && ++guard < 1000000) { } };
+            }
+            return null;
+        }
+
+        // Every static field in the assembly holding session-state shape (incl. nested + compiler-generated holders).
         internal static IEnumerable<FieldInfo> StaticCollectionFields(Assembly asm)
         {
             Type[] types;
             try { types = asm.GetTypes(); } catch (ReflectionTypeLoadException ex) { types = ex.Types.Where(t => t != null).ToArray(); }
             foreach (var t in types)
                 foreach (var f in t.GetFields(Statics))
-                    if (ClearMethodOf(f.FieldType) != null) yield return f;
+                    if (IsSessionStateShape(f.FieldType)) yield return f;
+        }
+
+        // VISIBILITY, not enforcement: author-written mutable statics the rule does NOT police (scalars, delegates,
+        // game-object handles), so the fence's edge is measured rather than implied.
+        internal static int UnpolicedStaticCount(Assembly asm)
+        {
+            Type[] types;
+            try { types = asm.GetTypes(); } catch (ReflectionTypeLoadException ex) { types = ex.Types.Where(t => t != null).ToArray(); }
+            int n = 0;
+            foreach (var t in types)
+            {
+                if (t.Name.IndexOf('<') >= 0) continue;
+                foreach (var f in t.GetFields(Statics))
+                {
+                    if (f.IsLiteral || f.Name.IndexOf('<') >= 0 || IsSessionStateShape(f.FieldType)) continue;
+                    if (f.IsInitOnly) continue;
+                    n++;
+                }
+            }
+            return n;
         }
 
         internal static string Describe(FieldInfo f) => (f.DeclaringType?.FullName ?? "?") + "." + f.Name;
 
-        sealed class Entry { public FieldInfo Field; public MethodInfo Clear; }
+        sealed class Entry { public FieldInfo Field; public Action<object> Clear; }
         [ProcessLived("the registry itself")] static readonly Dictionary<Assembly, Dictionary<SessionScope, List<Entry>>> _registry = new Dictionary<Assembly, Dictionary<SessionScope, List<Entry>>>();   // built once per assembly
         static readonly object _gate = new object();
 
@@ -78,7 +137,13 @@ namespace HumankindAssetFramework
                 {
                     var a = f.GetCustomAttribute<SessionScopedAttribute>();
                     if (a == null || a.Manual != null) continue;
-                    reg[a.Scope].Add(new Entry { Field = f, Clear = ClearMethodOf(f.FieldType) });
+                    var clear = ClearerFor(f.FieldType);
+                    if (clear == null)   // no in-place empty (a weak table): it must say Manual rather than sit here mute
+                    {
+                        Plugin.Log?.LogWarning($"[Session] {Describe(f)} is [SessionScoped] but its type has no in-place clear — declare it Manual and reset it by hand.");
+                        continue;
+                    }
+                    reg[a.Scope].Add(new Entry { Field = f, Clear = clear });
                 }
                 return _registry[asm] = reg;
             }
@@ -95,7 +160,7 @@ namespace HumankindAssetFramework
                 {
                     var v = e.Field.GetValue(null);
                     if (v == null) continue;
-                    e.Clear.Invoke(v, null); n++;
+                    e.Clear(v); n++;
                 }
                 catch (Exception ex) { Plugin.Log?.LogError($"[Session] reset of {Describe(e.Field)} threw: {ex.InnerException ?? ex}"); }
             }

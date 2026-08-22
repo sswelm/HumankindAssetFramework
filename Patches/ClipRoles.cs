@@ -26,13 +26,13 @@ namespace HumankindAssetFramework
     internal static class ClipRoles
     {
         public const int Count = 9;
-        public static readonly ClipRole[] All =
+        [ProcessLived("the role table itself - shape of the code, fixed for the process")] public static readonly ClipRole[] All =
             { ClipRole.Primary, ClipRole.Move, ClipRole.After, ClipRole.Attack, ClipRole.Combat, ClipRole.PreMove, ClipRole.IdleOverride, ClipRole.IdleAlt, ClipRole.IdleAlt2 };
         // report / validator names (the smoke's "dead clip role" line, the preflight's Field), the log tag suffix the
         // collection is injected under, and the pack JSON key — all indexed by (int)role.
-        static readonly string[] names    = { "primary", "move",     "after",     "attack",     "combat",     "preMove",     "idleOverride", "idleAlt",     "idleAlt2" };
-        static readonly string[] tags     = { "",        ":move",    ":after",    ":attack",    ":combat",    ":premove",    ":idle",        ":idlealt",    ":idlealt2" };
-        static readonly string[] jsonKeys = { "clip",    "clipMove", "clipAfter", "clipAttack", "clipCombat", "clipPreMove", "clipIdle",     "clipIdleAlt", "clipIdleAlt2" };
+        [ProcessLived("literal role name table")] static readonly string[] names    = { "primary", "move",     "after",     "attack",     "combat",     "preMove",     "idleOverride", "idleAlt",     "idleAlt2" };
+        [ProcessLived("literal role tag table")] static readonly string[] tags     = { "",        ":move",    ":after",    ":attack",    ":combat",    ":premove",    ":idle",        ":idlealt",    ":idlealt2" };
+        [ProcessLived("literal role json-key table")] static readonly string[] jsonKeys = { "clip",    "clipMove", "clipAfter", "clipAttack", "clipCombat", "clipPreMove", "clipIdle",     "clipIdleAlt", "clipIdleAlt2" };
         public static string Name(ClipRole r) => names[(int)r];
         public static string Tag(ClipRole r) => tags[(int)r];
         public static string JsonKey(ClipRole r) => jsonKeys[(int)r];

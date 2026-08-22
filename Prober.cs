@@ -107,7 +107,7 @@ namespace HumankindAssetFramework
 
         // DISCOVERY: list the registered skeletons (repoint targets) and flag any airship-like model.
         // Decides milestone 3: repoint to an existing model (easy) vs bake a custom one.
-        private static readonly string[] AirshipTerms = { "zeppelin", "airship", "balloon", "blimp", "dirigible", "aerostat" };
+        [ProcessLived("literal search-term vocabulary")] private static readonly string[] AirshipTerms = { "zeppelin", "airship", "balloon", "blimp", "dirigible", "aerostat" };
         private static bool IsAirship(string n) => !string.IsNullOrEmpty(n) && Array.Exists(AirshipTerms, t => n.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0);
 
         internal static void ScanModels()

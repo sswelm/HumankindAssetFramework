@@ -119,7 +119,7 @@ namespace HumankindAssetFramework
         // event-name SUBSTRINGS to drop; a match suppresses the post. Runs on the game's hot audio path, so: empty config
         // fast-returns immediately, and the substring list is re-parsed ONLY when the config string actually changes.
         static string _silenceRaw = "\0";   // sentinel != any real config value (incl. "") so the first call parses
-        static string[] _silenceSubs = new string[0];
+        [ProcessLived("config-derived cache, rebuilt whenever the raw config string changes")] static string[] _silenceSubs = new string[0];
         static string[] SplitSubs(string raw)
         {
             var parts = raw.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
@@ -146,7 +146,7 @@ namespace HumankindAssetFramework
         // "replaceWith": "" } ] }. Loaded once (relaunch to apply Lab edits, same as the district/formation registries).
         // replaceWith is reserved for the future silence-then-substitute step; only `silence` is consumed today.
         static bool _soundOvLoaded;
-        static string[] _soundOverrideSubs = new string[0];
+        [ProcessLived("config-derived cache, rebuilt whenever the raw config string changes")] static string[] _soundOverrideSubs = new string[0];
         static void EnsureSoundOverrides()
         {
             if (_soundOvLoaded) return;

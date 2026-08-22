@@ -43,6 +43,8 @@ mainTexture	UnityEngine.Material
 _MainTex	shader property NAME, not a managed member — a shader rename shows up as the smoke test's texture health
 Add	BCL collection method
 Clear	BCL collection method
+TryDequeue	BCL ConcurrentQueue drain (SessionState.ClearerFor)
+TryTake	BCL ConcurrentBag drain (SessionState.ClearerFor)
 ToString	BCL
 Length	BCL array member
 Value@Patches/DistrictInject.cs	tolerant probe: the code tries Guid ?? Value ?? guid on an unknown pair type and copes with all three absent

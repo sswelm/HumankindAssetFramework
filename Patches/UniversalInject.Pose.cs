@@ -182,8 +182,8 @@ namespace HumankindAssetFramework
 
         // Precomputed member names (perf pass 2026-07-19): "Pose" + i / "BoneRotation" + i built fresh STRINGS per
         // pawn per FRAME on the game's hottest loop — thousands of small allocations a second at scale, pure GC churn.
-        static readonly string[] PoseNames = { "Pose0", "Pose1", "Pose2", "Pose3", "Pose4", "Pose5", "Pose6", "Pose7", "Pose8" };
-        static readonly string[] BoneRotationNames = { "BoneRotation0", "BoneRotation1", "BoneRotation2", "BoneRotation3" };
+        [ProcessLived("literal member-name table")] static readonly string[] PoseNames = { "Pose0", "Pose1", "Pose2", "Pose3", "Pose4", "Pose5", "Pose6", "Pose7", "Pose8" };
+        [ProcessLived("literal member-name table")] static readonly string[] BoneRotationNames = { "BoneRotation0", "BoneRotation1", "BoneRotation2", "BoneRotation3" };
 
         // Per-pawn state read once at the top of the hook and threaded through the behavior handlers. `entry` is the boxed
         // PawnEntry struct — every SetMember mutates that one box, and the handler writes it back via pawnEntries.SetValue.

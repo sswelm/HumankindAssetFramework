@@ -325,7 +325,7 @@ namespace HumankindAssetFramework
         // Comparing like with like is the whole point: a trireme should look small beside a battleship, not beside a
         // tank. Falls back to the overall unit frontier, then to the empires' tech era, then to the Timeline index.
         static int cachedEra = -1;                        // the world era for display / land default
-        static readonly int[] domainEra = new int[4];     // 0 Land, 1 Maritime, 2 Air, 3 Missile — max era BUILT
+        [ProcessLived("recomputed from scratch at the start of every era-anchor pass")] static readonly int[] domainEra = new int[4];     // 0 Land, 1 Maritime, 2 Air, 3 Missile — max era BUILT
         static int techEra = -1, aggregateEra = -1;       // research-based fallbacks, also shown for comparison
         static float lastEraPoll = -999f;
         static bool eraApiLogged;

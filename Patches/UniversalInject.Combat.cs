@@ -1050,7 +1050,7 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogError("[Deploy] ProcessDeployState: " + ex); }
         }
 
-        static readonly string[] RenderMatFields = { "currentRenderMaterial", "runTimeRenderMaterial" };   // hoisted — was a new[] per RenderOutput per FRAME
+        [ProcessLived("literal field-name table")] static readonly string[] RenderMatFields = { "currentRenderMaterial", "runTimeRenderMaterial" };   // hoisted — was a new[] per RenderOutput per FRAME
         static void TickOne(ModelEntry e)
         {
             // GREY retry: if the skin wasn't ready when ApplyGrey ran (build returned null), build it now from the

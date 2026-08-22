@@ -85,9 +85,15 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
   the bug fails 6 tests. The remaining `PackTuning` gap from the review is unrelated and still open: the
   cross-pack conflict NOTE is keyed on exact `match` strings while the runtime matches by **substring**, so
   `"Tank"` in one pack and `"Tanks_01"` in another both apply (×0.36) with no note.
-- **`fireGuidQueue` is never drained on re-arm** and is invisible to `SessionState` (net471 `ConcurrentQueue`
-  has no instance `Clear()`, so the fence — which keys on that — sees 137 of 549 statics). A strike enqueued in
-  the last frame of one session can arm the wrong unit's recoil in the next, where GUIDs restart from zero.
+- ~~**`fireGuidQueue` is never drained on re-arm**, and the fence sees 137 of 549 statics.~~ — **FIXED
+  2026-08-22.** The queue is drained by the re-arm sweep, and the fence is redrawn by intent rather than by
+  "the type has `Clear()`": queues/bags are drained, arrays zeroed, `ConditionalWeakTable` forced to declare a
+  lifetime. 27 previously-invisible statics are now annotated. Scalars remain outside on purpose (shape cannot
+  distinguish a constant from a per-session latch) and `UnpolicedStaticCount()` reports how many, so the edge is
+  measured. **Still open from the same review:** `footprintMaskInjected` is exactly that unpoliceable shape — a
+  `static bool` latch that survives a session reset while `ResetDistrictSessionState` destroys the clone it
+  guards, leaving the strategic-zoom footprint dead until a process restart. It needs a per-session reset by
+  hand; the fence cannot find it for you.
 - **`Hk_BattleHoldFire` fails closed** (`BattleTurnPatch.cs:343`): `ct == null ||` selects the hold branch, so a
   missing `creationTime` holds the attack every frame with no deadline — against the stated policy every sibling
   hold follows ("any failure = vanilla, never a stuck army").

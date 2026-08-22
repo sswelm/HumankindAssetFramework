@@ -368,7 +368,7 @@ namespace HumankindAssetFramework
         // The catalog validates the ACCESSORS above (the one place each game-type name lives — A3). Every accessor is
         // listed so the startup report covers all of them; members are attributed to the type they're actually read off
         // (A1's PresentationUnit mistake was the lesson). A "missing" here is a real game-API change.
-        internal static readonly Dep[] Catalog =
+        [ProcessLived("the binding catalog - the code's contract with the game, fixed for the process")] internal static readonly Dep[] Catalog =
         {
             // A7 (2026-08-21) — the by-name surface the A6 sweep missed, now catalogued so bindcheck validates it and
             // tools/check-catalog.sh proves nothing new escapes. Grouped by the type the CALL SITE's receiver actually is.

@@ -176,7 +176,7 @@ namespace HumankindAssetFramework
         static float EraAnchor(UnitScaleInfo info)
             => info.domain == NavalDomain ? EraAnchorFor(info.homeEra, WorldEraFor(info.domain)) : 1f;
 
-        static readonly string[] EraNames = { "Neolithic", "Ancient", "Classical", "Medieval", "Early Modern", "Industrial", "Contemporary" };
+        [ProcessLived("literal era-name table")] static readonly string[] EraNames = { "Neolithic", "Ancient", "Classical", "Medieval", "Early Modern", "Industrial", "Contemporary" };
         static string EraName(int era) => era >= 0 && era < EraNames.Length ? EraNames[era] : "?";
 
         // LIVE READOUT for the F8 window: the global era plus, per scaled unit, how its size is being composed

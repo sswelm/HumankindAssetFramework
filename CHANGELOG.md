@@ -10,6 +10,25 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE SESSION FENCE WAS DRAWN BY AN IMPLEMENTATION DETAIL (2026-08-22, review finding — fixed).** The
+  `[SessionScoped]` rule policed a field only if its type *happened* to have a public parameterless `Clear()`.
+  On net471 that silently excludes `ConcurrentQueue<T>`, `ConcurrentBag<T>`, arrays and `ConditionalWeakTable` —
+  by the review's measurement **137 of 549** author-written statics were inside the fence, and the boundary was
+  an accident of the BCL rather than a statement about lifetime. It had already cost a real bug:
+  **`fireGuidQueue`** is a `ConcurrentQueue` written from the **sim thread**, and the re-arm sweep that clears
+  every neighbouring per-entry collection walked straight past it — so a strike enqueued in the last frame of one
+  session survived into the next, where unit GUIDs restart from zero, and armed *the wrong unit's* recoil. The
+  rule is now "state shaped like session state", with a clearer per shape: `Clear()` as before, queues and bags
+  **drained** via `TryDequeue`/`TryTake`, arrays zeroed via `Array.Clear`, and `ConditionalWeakTable` — which
+  cannot be emptied in place — forced to declare `[ProcessLived]` or `[SessionScoped(Manual=…)]` instead of
+  passing unseen. Widening it immediately flagged **27 undeclared statics**, each now annotated with its real
+  lifetime (literal lookup tables, compiled-accessor tables, per-pass scratch, config-derived caches, the binding
+  catalog). Scalars stay outside deliberately — a static `bool` can be a constant, a cache or a per-session latch,
+  and shape cannot tell them apart — so `UnpolicedStaticCount()` **reports** how many remain, making the fence's
+  edge a number in the test output rather than an implied "everything is covered". Four tests, mutation-drilled:
+  restoring the old predicate fails the one that pins the shapes. The catalog gate then caught the fix's *own*
+  new reflection (`TryDequeue`/`TryTake`), which is the two guards checking each other exactly as intended.
+
 - **THE DROPPED GUARD, AND THE ORACLE THAT SHOULD HAVE CAUGHT IT (2026-08-22, review finding — fixed).** The
   pre-extraction tuning parser read `if (float.TryParse(…, out float sv) && sv > 0f)`. The extraction into
   `PackTuning.Parse` kept everything except **`&& sv > 0f`**, and nothing downstream re-guards it: `Inject.cs`

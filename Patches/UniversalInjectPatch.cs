@@ -963,7 +963,14 @@ namespace HumankindAssetFramework
                     e.stateLastPos.Clear(); e.stateMoving.Clear(); e.stateStoppedAt.Clear(); e.stateMoveStartedAt.Clear();
                     e.stateCombat.Clear(); e.stateCombatChangedAt.Clear();
                     lock (e.stateSamples) e.stateSamples.Clear();
-                    lock (e.activeFires) e.activeFires.Clear();                              // session-1 fire windows (positions + Time.time) are meaningless in the new session
+                    lock (e.activeFires) e.activeFires.Clear();
+                    // ...and its SIM-THREAD twin, which this sweep used to walk straight past (review 2026-08-22).
+                    // fireGuidQueue is a ConcurrentQueue, and on net471 that type has no Clear(), so the session-state
+                    // rule — which policed "types with a Clear()" — could not see it and nobody noticed the omission.
+                    // A strike enqueued in the last frame of one session then survived into the next, where unit GUIDs
+                    // restart from zero: the wrong unit's pawns get armed with a recoil clip. Drain, don't reassign:
+                    // the sim thread may hold a reference and Hk_ArtilleryStrike enqueues without a lock.
+                    while (e.fireGuidQueue.TryDequeue(out long _)) { }                              // session-1 fire windows (positions + Time.time) are meaningless in the new session
                     // Retexture/isolation state is session-scoped too: the isolated layer is a clone of a SESSION-1
                     // output layer and the adjusted atlas was dumped from it — handing either to the new session's
                     // content manager re-injects dead objects. Cheap to re-derive; destroy the texture we created.

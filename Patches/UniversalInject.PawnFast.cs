@@ -29,12 +29,12 @@ namespace HumankindAssetFramework
             public static Action<object, float> SetScale;
             public static Func<object, UnityEngine.Quaternion> Rotation;
             public static Action<object, UnityEngine.Quaternion> SetRotation;
-            public static readonly Action<object, uint>[] PoseAnimId = new Action<object, uint>[9];
-            public static readonly Action<object, float>[] PoseTime = new Action<object, float>[9];
-            public static readonly Action<object, float>[] PoseWeight = new Action<object, float>[9];
-            public static readonly Action<object, uint>[] BRBone = new Action<object, uint>[4];    // BoneRotationN.SkeletonBoneIndex (rotor spin/trim, gun elevation)
-            public static readonly Action<object, uint>[] BRAxis = new Action<object, uint>[4];    // BoneRotationN.AxisIndex
-            public static readonly Action<object, float>[] BRAngle = new Action<object, float>[4]; // BoneRotationN.Angle
+            [ProcessLived("compiled accessor table, built once per pawn-entry type")] public static readonly Action<object, uint>[] PoseAnimId = new Action<object, uint>[9];
+            [ProcessLived("compiled accessor table, built once per pawn-entry type")] public static readonly Action<object, float>[] PoseTime = new Action<object, float>[9];
+            [ProcessLived("compiled accessor table, built once per pawn-entry type")] public static readonly Action<object, float>[] PoseWeight = new Action<object, float>[9];
+            [ProcessLived("compiled accessor table, built once per pawn-entry type")] public static readonly Action<object, uint>[] BRBone = new Action<object, uint>[4];    // BoneRotationN.SkeletonBoneIndex (rotor spin/trim, gun elevation)
+            [ProcessLived("compiled accessor table, built once per pawn-entry type")] public static readonly Action<object, uint>[] BRAxis = new Action<object, uint>[4];    // BoneRotationN.AxisIndex
+            [ProcessLived("compiled accessor table, built once per pawn-entry type")] public static readonly Action<object, float>[] BRAngle = new Action<object, float>[4]; // BoneRotationN.Angle
             public static bool BRReady;
 
             public static void EnsureInit(object entry)

@@ -369,7 +369,7 @@ namespace HumankindAssetFramework
     [HarmonyPatch] internal static class Hk_BattleAttackGate
     {
         class HoldTag { public float since; }
-        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object, HoldTag> holds =
+        [ProcessLived("ConditionalWeakTable keyed on game objects - entries die with their keys, so it needs no session reset (and cannot be cleared in place)")] static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object, HoldTag> holds =
             new System.Runtime.CompilerServices.ConditionalWeakTable<object, HoldTag>();
         static MethodBase TargetMethod()
         {

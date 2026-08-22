@@ -823,7 +823,7 @@ namespace HumankindAssetFramework
         // (fxMesh != null AND a ground-ish name) — the close-zoom cover we discard when we swap the selector. Deduped by name,
         // with position, so we can identify the exact element to graft back into our reactor selector.
         [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> nativeGroundLogged = new HashSet<string>();
-        static readonly string[] groundHints = { "Brick", "Ground", "Floor", "Pave", "Concrete", "Asphalt", "Gravel", "Dirt", "Terrain", "Plaza", "Road", "Tarmac", "Slab", "Cobble", "Bricks" };
+        [ProcessLived("literal substring vocabulary")] static readonly string[] groundHints = { "Brick", "Ground", "Floor", "Pave", "Concrete", "Asphalt", "Gravel", "Dirt", "Terrain", "Plaza", "Road", "Tarmac", "Slab", "Cobble", "Bricks" };
         static void DumpNativeGroundCandidates(object mat, string name)
         {
             if (Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value || mat == null || !nativeGroundLogged.Add(name)) return;
@@ -1208,7 +1208,7 @@ namespace HumankindAssetFramework
         // postfix forces a chosen ground-material index for our registry districts — the game's own terrain paint,
         // blended, not a flat mesh. Also dumps the ground-material vocabulary once (DistrictDebug) so a name can be picked.
         static bool groundNamesDumped; static int groundApplyCount; [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> groundLogged = new HashSet<string>();
-        static string[] groundNames;   // GroundMaterialDefinition vocabulary, indexed (from the criteria-24 dump)
+        [ProcessLived("GroundMaterialDefinition vocabulary from the game database - stable for the process")] static string[] groundNames;   // GroundMaterialDefinition vocabulary, indexed (from the criteria-24 dump)
         static string GroundNameForIndex(int idx) => (groundNames != null && idx >= 0 && idx < groundNames.Length) ? groundNames[idx] : ("idx" + idx);
 
         // GROUND PROBE (DistrictDebug): log what ground index each district hands to ApplyGroundMaterialDefinition — the

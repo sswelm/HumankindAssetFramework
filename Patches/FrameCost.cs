@@ -20,7 +20,7 @@ namespace HumankindAssetFramework
                          Formation = 17, Rearm = 18, PoseOurs = 19, SelectorTile = 20, MainRows = 21, WonderRows = 22, HexDial = 23,
                          SelTileCfg = 24, SelTileLoop = 25, SelTileBind = 26, SelTileAlbedo = 27, SelTileFlat = 28,   // SelectorTile sub-buckets
                          PoseSweep = 29, PoseAdjust = 30, PoseAnim = 31, PoseAim = 32, PoseDonor = 33;   // PoseOurs sub-buckets (nested inside PoseOurs); PoseDonor = the donor-clip branch (helicopters) (nested inside SelectorTile, so they double-count in a sum — read them as a breakdown)
-        static readonly string[] names =
+        [ProcessLived("literal bucket label table")] static readonly string[] names =
         {
             "Update(total)", "PoseVanilla", "TickTexture", "RespawnPostLoad", "FireQueues", "DeployState", "AnimStates", "EngineAudio",
             "SubPawnVisuals", "BattleCries", "Dials", "ClassScan", "DistrictMeshSwap", "DistrictDbg", "BattleTurn", "FacingPersist",
@@ -30,8 +30,8 @@ namespace HumankindAssetFramework
         public static int Count => names.Length;
         public static string Name(int bucket) => names[bucket];
 
-        static readonly long[] ticks = new long[names.Length];
-        static readonly long[] calls = new long[names.Length];
+        [ProcessLived("per-MEASUREMENT-WINDOW counters, reset by EndFrame every 5s - not session state")] static readonly long[] ticks = new long[names.Length];
+        [ProcessLived("per-measurement-window counters, reset by EndFrame - not session state")] static readonly long[] calls = new long[names.Length];
         static int frames;
         static long windowStart;
         static float nextLogAt;

@@ -536,7 +536,8 @@ namespace HumankindAssetFramework
         // PERF: reflection handles for the per-frame hot path — the types are stable within a session, so resolve
         // once and reuse (AccessTools.Field/GetMethods re-walk the type's members on every call otherwise).
         static FieldInfo fiPlbcChannels, fiChanEvolverMaterial;
-        static MethodInfo miRefreshChannel; static object[] refreshArgs;
+        static MethodInfo miRefreshChannel;
+        [ProcessLived("reusable invoke-args scratch buffer, overwritten at every use")] static object[] refreshArgs;
         [ProcessLived("diagnostic once-per-name log dedup")] static readonly HashSet<string> distBackoffLogged = new HashSet<string>();   // one-shot log per district when we back off a foreign channel material
 
         // ISOLATE mode, per TILE: keep this instance's channel pointed at the entry's (shared) private leaf +
