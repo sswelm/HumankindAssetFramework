@@ -62,6 +62,18 @@ The deploy block's **Wheel bones (roll while moving)** + axle axis / loop frames
 
 ### Vehicle Lab — `Tools ▸ HAF ▸ Vehicle Lab`
 
+> **TRAILS — a split-trail gun's deploy (2026-08-22, verified in-game).** Mark a gun's arms **Trail** in the part
+> dropdown and the rigger gives each a bone **hinged at its body end** plus a second action, **`Deploy`**, that
+> swings them open about the vertical — mirrored per side, with the direction *chosen* by testing which way moves
+> the spade away from the centreline (so left and right open together whatever way the source faces). Dials:
+> **Spread (deg)** and **Deploy frames**. That one rig then feeds the whole state machine: Idle stance
+> `Deploy[N..N]` (parked, deployed), Movement `Spin` (wheels rolling, trails at their folded rest), After-move
+> `Deploy` (opens on arrival), Pre-move `Deploy[N..0]` (folds before travelling). *Trail* is the artillery term —
+> these are the arms of a split-trail carriage, each ending in a spade; **Leg** is deliberately left free for a
+> walking mech limb. The **preview picks the clip** when a rig has more than one, so `Spin` and `Deploy` can each
+> be judged on the turntable before a bake, and **Checker** paints a high-contrast skin so rotation is visible at
+> all — an untextured wheel looks identical spinning or still.
+
 > The Spin section leads with **Enable spin animation** — the master switch: off, the rig generates with zero
 > wheel/rotor rotation and static tracks, keeping every bone, marking and dial for re-enabling (no more
 > unmarking every wheel to still a vehicle). With no wheel/rotor/turret marked at all the section reads

@@ -996,6 +996,21 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   with Deploy conversion OFF, Convert raw rig ON, Fix 100× OFF, Auto-ground ON, Idle stance `Spin[0..0]`, Movement
   `Spin`, every `deploy…`/`recoil` clip field cleared. **"In game it moves perfectly."** Cost, as agreed for step 1:
   the fold/deploy/recoil are gone on that unit until re-authored on the clean rig.
+- **THE HOWITZER, REBUILT: WHEELS + A SPLIT-TRAIL DEPLOY ON A LAB RIG (2026-08-22, verified in-game).** Once the
+  converted rig was shown unable to carry authored bone motion, the user called the rebuild — "let's do this properly
+  in the Vehicle Lab" — and it went the whole way in one sitting: wheels first (in-game verified), then the deploy.
+  New **Trail** part role — the artillery term for a split-trail carriage's arms, each ending in a spade; **Leg** is
+  deliberately reserved for a walking mech limb, at the user's call. The rigger hinges one bone per trail at its BODY
+  end (picked geometrically as the arm's extreme nearest the body bone, not the bbox centre a wheel uses) and authors
+  a second action, `Deploy`, swinging them open about the vertical — the direction CHOSEN per arm by testing which way
+  moves the spade away from the centreline, so mirrored arms open together whatever way a source faces. Dials: Spread
+  (deg) + Deploy frames, saved into recipes. Verified headless before any bake: hinges fixed at `±10.07, −4.91, 17.12`
+  through the clip while the tails swing `|x|` 8.52 → 14.59 → 20.24, level and symmetric. One rig now feeds the whole
+  state machine — Idle stance `Deploy[N..N]`, Movement `Spin`, After-move `Deploy`, Pre-move `Deploy[N..0]` — so the
+  gun parks deployed, folds before it turns (the pivot hold waits for the fold), rolls its wheels while travelling and
+  opens again on arrival. The turntable also gained a **clip picker**, so `Spin` and `Deploy` can be judged before a
+  bake. Spread caps near 28° on this model before the arms clip the wheels — its hinge sits slightly forward of the
+  axle where the real M114 pivots aft of it; a hinge-offset dial would buy the realistic 45–60°.
 - **VEHICLE LAB: A CHECKER SKIN FOR THE TURNTABLE (2026-08-22).** "I can't see the wheels spin" — the preview
   renders the raw model with no material, and a featureless grey disc gives the eye nothing to track: spinning and
   still look identical. A **Checker** toggle (preview toolbar, on by default) paints the instance with a
