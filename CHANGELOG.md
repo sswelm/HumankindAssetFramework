@@ -916,6 +916,104 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Units & animation
 
+- **WHEEL SPIN for state-driven vehicles (2026-08-22, the towed howitzer — verification pending).** Its clips are
+  fold/folded/unfold POSES, so nothing rolled the wheels while it travelled (and the aim-layer sanitize zeroes the
+  game's own wheel channel on our rigs). New shared-schema fields `wheelSpinBones` ("l_wheel@0;r_wheel@0" — baked-rig
+  substrings + roll axis, max 3) and `wheelSpinDegPerUnit` (360/(2πr)); `ApplyWheelSpin` (Pose.cs, non-donor path
+  after the gun elevation) resolves the bones once like the rotor reclaim and writes BoneRotation slots 0..2 with
+  angle = DISTANCE × deg/unit — the distance is a new odometer on the pawn's turn-ease state (`TurnState.travel`,
+  `TryTravelAt`), so the wheels stand still during the fold-in-place hold and roll exactly with travel. Factory:
+  "Wheel spin — bones / deg per unit" under Flight character (+ the ownership list; hand-list gate PASS). Regex
+  fallback covered (parity PASS). Set on TowedGunHowitzers in the live pack.json and the repo mirror (165 deg/u —
+  a 0.35 u wheel guess; dial from the drill). First drill: bones resolved (`l_wheel -> 14`, `r_wheel -> 17`) but
+  nothing turned — the howitzer has `clearAimLayer`, and `ClearAimLayer` ran AFTER the wheel write in the same frame,
+  flattening all four slots. The write moved into `ApplyAnimatedPose` right after the clear/turretize/sanitize step
+  (animated entries only — the only ones with a pose to roll wheels under). Second drill: STILL nothing. The user
+  called it: "let's make it work in the Animation Lab first" — so the wheel roll is now BAKED, Lab-native. ENCReload:
+  `deploy_convert.py` step 7c and `add_role_clips.py` take `wheelBones axis frames degrees` and key a LINEAR roll of
+  the wheel bones into the `folded` role clip (N+1 frames, frame 0 = the folded rest; axle = the bone-local axis
+  closest to the world axle, AUTO = each wheel's thinnest skinned extent, signed — vehicle_rig.py's fast-path math);
+  `add_role_clips.py … wheelsonly` retrofits an existing GLB rebuilding ONLY `folded` (the howitzer's converter-tuned
+  `recoil` and legacy `deploy[...]` slices must survive). Registry fields `deployWheelBones/Axis/Frames/Degrees`,
+  Lab UI "Wheel bones (roll while moving)" + picker (hand-list gate 44/60 PASS), baker argv[17..20]. Run headless on
+  the howitzer GLB: `{'howitzer:l_wheel': '+X', 'howitzer:r_wheel': '+X'}, 15 frames, -360 deg`; its registry entry
+  now has Movement = `folded[1..15]` and the runtime wheelSpin keys removed (no double roll). **Proved end-to-end
+  through the real pipeline**: the user's Bake re-ran the converter with the new args, and a Blender probe of the
+  regenerated `deploy_converted.glb` reads `folded` = 16 keys per wheel bone with the quaternion w running 1.0 →
+  −1.0 (a clean linear 360°) while `deploy`/`fold`/`unfold` keep their 2 static keys.
+  **The runtime aim-layer route is DELETED** (schema fields, regex, `ApplyWheelSpin`, the `TurnState` odometer,
+  the Factory fields): two drills never saw it move a wheel, the baked route does the job, and an unproven knob in
+  the shared schema + a Factory field that does nothing is exactly the silent lie this project keeps hunting. One
+  route: bake it.
+  **THE WRONG UNIT, then the wrong AXIS.** Two more drills reported "wheels still don't turn", and the log finally
+  named the unit that was moving: `[State] poll: 'SiegeHowitzersCar' … moving False -> True` — the user was driving
+  the **Era 5** siege howitzer (`animClipMove: deploy[0..0]`, a held pose), while the wheels had gone onto the
+  **Era 6** TowedGunHowitzers, which never moved once in any of those sessions. Era 5 now carries the same wheel
+  config. Chasing the wrong unit also produced two changes to movement detection (holder transform instead of
+  Pawns[0]; a speed-independent test) made on false inference — both REVERTED, unverified changes don't ship.
+  Then, on the right unit: the wheels rolled but swept **through the air**. Offline probes cleared the bake input
+  (bone pivot exactly at the wheel centre, offset 0.000; the wheel's skinned centroid held still across the clip —
+  it spun in place). What did not survive the bake was the AXIS CONVENTION: the roll was authored about "the
+  bone-local axis closest to the world axle", but a bone's X/Z axes are re-derived downstream from head→tail while
+  Y — the bone's own direction — survives. Fixed by adopting the Vehicle Lab's convention, whose wheels do spin
+  correctly in-game: `_orient_wheel_bones` points each wheel bone's TAIL along its axle (head untouched, so the
+  pivot stays at the wheel centre and the mesh cannot move at rest), then keys the roll about that bone's local Y.
+  Mirrored in `add_role_clips.py`. Verified offline on a real conversion: centroid fixed at (19.49, −0.05, 1.39)
+  for the whole loop while a marker vertex sweeps top → front → bottom → top. **Verified in-game 2026-08-22: the
+  wheels roll, forward** — but about a pivot at GROUND level, sweeping underground. That was MY re-orientation:
+  giving the wheel bone a non-identity rest rotation makes Amplitude's skeleton bake mangle its offset. Measured
+  from the baked `_Skeleton.asset` (plain YAML — compose each bone's `Local` up its `ParentIndex` chain): the legs,
+  rest rotation identity, come out symmetric (`l_leg` y 0.5851 / `r_leg` y 0.5751); the wheels, rest rotation
+  `(0.5,-0.5,-0.5,-0.5)`, come out 1.86 apart in HEIGHT (`l_wheel` y −0.4038 / `r_wheel` y +1.4612) — one pivot
+  below the hub, one above. The FBX was clean either way (`local T = (21.096, 0, 0)`), so only the baked asset
+  showed it. Reverted: the roll is keyed about the local axis nearest the axle with the bone's rest UNTOUCHED
+  (re-verified on a real conversion: identity rest rotation, pivot at the hub, centroid fixed through the loop).
+  Then, on the right rest, the game STILL rotated the wheels about a point at ground level — this rig's compensated-scale chain displaces the composed pivot. Rather than guess a compensation, it became a DIAL at the user's request: `deployWheelLift`, in tyre radii (0 = the true rest, 1 = up one radius), moving head AND tail so the rest ORIENTATION stays identity. **The lesson that matters: verify the BAKED asset offline** — the skeleton YAML answers "is this pivot right?"
+  in seconds, where four in-game drills could only say "it still looks wrong".
+  Direction is the sign of `deployWheelDegrees` (the earlier build rolled forward at `360`)
+  — and it must be set IN THE LAB: editing pack.json while the Lab holds that entry open loses the change, because
+  its Save writes the stale in-memory value back and the next bake uses it. That cost a whole bake cycle: the flip
+  landed in the file at 12:12:59, the Lab overwrote it, and the converter ran at 12:11:30 with the old sign.
+  **OUTCOME: the wheels are OFF on both howitzers, and the reason is documented as a limit, not a bug.** The user
+  read it off the preview — "the model is fundamentally baked wrong, it shows this in the preview" — and the bbox
+  measurement proved it: EVERY clip of this converted model poses it **90° rotated from its own rest pose**
+  (rest `(52.1, 135.7, 37.6)` vs `folded` `(41.7, 27.6, 119.3)`), the legacy clip at 2× scale, which is where the
+  skeleton's `Scale 2` / `BindPose 0.005` compensation comes from. Pawn-level features are blind to it (that is why
+  fold-before-moving, deploy-on-stop, the bombard hold and turn-in-place all work); bone-level ones inherit a frame
+  that disagrees with the geometry, so no authored wheel roll can pivot correctly. The sharp rule, now in
+  Animation-Pitfalls: **a converted rig carries motion the source already had (the T-62's wheels DO spin), but you
+  cannot author new bone motion into it.** Both registries reverted to `deploy[0..0]`; the `deployWheelLift`
+  pre-compensation hack was removed (treats the symptom); the wheel tooling stays for rigs whose clips and rest
+  share a frame. Real repair, with an offline acceptance test ready: make `deploy_convert` author clips in the rest
+  pose's frame (`folded` f1 bbox must match the rest bbox).
+  **AND THEN IT SHIPPED — via the Vehicle Lab, verified in-game the same afternoon.** The user called the route
+  ("let's recreate the model properly in the Vehicle Lab, start simple with only the wheels"), and the generated rig
+  passes every check the converted one failed: clip frame **identical** to the rest frame `(52.1, 135.7, 37.6)`;
+  wheel pivots **symmetric** at the hubs (`±0.9325, 0.5424, −0.001`); **every scale 1**; four bones instead of 28.
+  Recipe on the Era 5 SiegeHowitzersCar (kept the Era 6 gun intact as the fallback): static source
+  `m114_gun_only.glb` (no armature, no crew) → mark the two ROAD wheels W — the auto-guess also grabs the crew's
+  hand-cranks by name, and a near-cubic bbox would give them a meaningless AUTO axle → Generate rig → Factory/Lab
+  with Deploy conversion OFF, Convert raw rig ON, Fix 100× OFF, Auto-ground ON, Idle stance `Spin[0..0]`, Movement
+  `Spin`, every `deploy…`/`recoil` clip field cleared. **"In game it moves perfectly."** Cost, as agreed for step 1:
+  the fold/deploy/recoil are gone on that unit until re-authored on the clean rig.
+- **VEHICLE LAB: A CHECKER SKIN FOR THE TURNTABLE (2026-08-22).** "I can't see the wheels spin" — the preview
+  renders the raw model with no material, and a featureless grey disc gives the eye nothing to track: spinning and
+  still look identical. A **Checker** toggle (preview toolbar, on by default) paints the instance with a
+  high-contrast checker, which beats the real tyre texture — a tyre is itself nearly rotationally symmetric.
+  Originals are remembered per renderer so toggling off restores the import exactly, and the yellow part-highlight
+  still wins on top. Same blind spot, same week, as the Animation Lab's bind-pose preview.
+- **PLAY THE CLIP IN THE LAB PREVIEW (2026-08-22).** "In the movement clip view it's impossible to see the wheels
+  move because it's missing a texture" — true twice over: the Lab's model preview draws the rig's BIND POSE
+  (`DrawMesh` of `sharedMesh`, no skinning, so no clip can ever move in it), and the raw-model ▶ picker scrubs the
+  UNTEXTURED source. The preview now has a **Play clip** row: pick a baked role FBX (anim/, anim_move/, anim_after/,
+  anim_premove/, anim_attack/) and it runs textured and skinned in the same view — Pause, scrub, speed (0.1–2×).
+  Implementation is the Vehicle Lab turntable's proven route, ported: `Instantiate`, `PreviewRenderUtility.AddSingleGO`,
+  `clip.SampleAnimation` per repaint, framed once from the posed instance, the bind-pose draw list suppressed
+  while it plays, self-repainting only while running. Wears the baked atlas material and the atlas-UV substitute
+  meshes — but only substitutes ones that carry matching skinning data (a UV clone without bind poses would render
+  the model as an unskinned heap; motion beats exact UVs here, and it says so in the status line). Survives a bake
+  (rebuilt with the fit preview) and a domain reload (rebuilt at Layout, when `cur` is loaded again).
+
 - **PIVOT IN PLACE — ground and naval units turn first, then move (2026-08-22, built + unit-tested, NOT yet
   drilled in-game).** Turn ease smoothed the facing but the game keeps translating the pawn from the very frame it
   re-points it, so a tank ordered 150° around slid sideways into its new heading while already rolling — the user

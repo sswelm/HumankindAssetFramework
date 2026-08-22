@@ -53,7 +53,11 @@ block (frames, strip-parts, recoil frames/step/return, slam), turret bone + aim 
 (bone/material/live rotation), animate-only bones, convert-raw-rig, fix-100×. The rest-pose preview stands the rig on a
 true-size tile hex at the in-game surface level (water-blue for Boat-profile pawns, forward arrow = in-game
 facing) — the faithful upright/grounded view for animated models — with orbit/pan/deep-zoom and a **Center** re-frame
-button.
+button, and a **Play clip** row that plays any *baked* role clip (Idle / Movement / After-move / Pre-move / Attack)
+**textured and skinned** right there — Pause, scrub, speed. That is the only view in which a subtle motion (a
+rolling wheel) is actually visible: the rest pose has no motion at all, and the raw-model ▶ picker is untextured.
+The deploy block's **Wheel bones (roll while moving)** + axle axis / loop frames / degrees key that roll into the
+`folded` travel stance at conversion time (Movement clip = `folded[1..N]`).
 *Writes:* `pack.json`, same `UniversalBaker.BuildAnimated` pipeline. **Deep dive:** [Animated-Models.md](Animated-Models.md), [Factory-Manual.md](Factory-Manual.md) §16.
 
 ### Vehicle Lab — `Tools ▸ HAF ▸ Vehicle Lab`

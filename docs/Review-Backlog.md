@@ -19,6 +19,18 @@ by when they'll bite.
 
 ## Worth fixing before the next model of the affected kind
 
+- **A CONVERTED RIG'S CLIPS DON'T SHARE A FRAME WITH ITS REST POSE (measured 2026-08-22, the howitzer wheels)** —
+  every clip `deploy_convert` produces for the M114 poses the model **90° rotated** from its own rest pose
+  (rest bbox `(52.1, 135.7, 37.6)` vs `folded` `(41.7, 27.6, 119.3)`), the legacy clip additionally at **2× scale**;
+  the baked skeleton then carries compensating scales (`howitzer:main` Local **2**, wheel BindPose **0.005**, where
+  a Vehicle-Lab rig reads 1/1). Pawn-level features are blind to it — everything shipped today works — but
+  **bone-level ones inherit a frame that disagrees with the geometry**, so authored bone motion (a wheel roll, and
+  by extension any future bone-driven feature on a converted model) pivots wrongly and cannot be compensated
+  reliably. Motion the SOURCE animates rides through fine (the T-62's wheels spin), which is why this went
+  unnoticed for so long. **Acceptance test, offline, no bake and no game: `folded` at frame 1 must have the rest
+  pose's bbox orientation.** Guarded by the existing conversion golden-master gate. Full write-up + the four
+  offline verification recipes: [Animation-Pitfalls.md ▸ "Authoring INTO a converted rig"](Animation-Pitfalls.md).
+
 - **ENTRY-STATE COHERENCE (user verdict 2026-07-26, tread-saga fallout: "this seems like a serious configuration
   bug")** — an entry's config lives in FOUR places (Factory window memory, Animation Lab memory, the DEPLOYED
   pack.json the editor reads as its registry, the project dual-write copy) and the reconciliation rules ambushed

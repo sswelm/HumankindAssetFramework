@@ -136,6 +136,9 @@ means all three guards passed. They never trip a valid bake — a converged fold
 | Symptom (in-game unless said otherwise) | Cause | Fix |
 | --- | --- | --- |
 | Part sweeps through the model; previews fine | Law 1 (translation stripped) | re-key as rotation (legScale / RecoilArm) |
+| An **authored** wheel/bone roll sweeps through the air or pivots at the ground; the FBX previews perfectly | a converted rig's clips sit in a different frame than its rest (90° + scale) — see "Authoring INTO a converted rig" | don't author into a converted rig: carry the source's own motion, rebuild on a Vehicle Lab rig, or fix the converter's frame |
+| Clip preview stands the model on end while the rest pose stands upright | same — the clip and rest frames disagree | not a preview artifact; measure the bbox both ways |
+| Left/right pair (wheels) rotate about points at different heights | non-identity rest rotation on those bones; the skeleton bake mangles the offset | leave bone rests alone; compose the `_Skeleton.asset` chain and check the pair is symmetric |
 | Idle shows travel pose; stance previews fine | Law 2 (stance-as-primary) | full clip as Idle/reference; stance in Idle override |
 | "Forgets to fold" — travels deployed | Law 3 (fold outlasts the move) | speed step `/6`…, or empty Pre-move = instant snap |
 | Fold/unfold plays but glacially | Law 3 | speed step |
@@ -352,3 +355,85 @@ in-place), bone slimming (bones only for binding targets — 1033-node wrapper r
 in-memory copies of shared entry state; baking from one silently reverts fields edited via the other (or via
 the registry file directly) — `keepTranslations` was lost three times this way. Until the root cause is fixed:
 after ANY field change, Reload in the window you'll bake from and eyeball the checkbox before pressing Bake.
+
+## Authoring INTO a converted rig — you can carry motion, you can't add it (2026-08-22, the howitzer's wheels)
+
+`deploy_convert` gives a rigid-part Sketchfab rip a working unit for free. What it does **not** give is a rig
+you can author new bone motion into. Spending a day proving that produced the sharpest statement of the limit:
+
+> **Motion the source already animates rides through correctly. Motion you key onto a converted bone does not.**
+
+The T-62 is the proof of the first half — deploy-converted, and its wheels spin and its tracks crawl in-game,
+because its Sketchfab source animated them, so that motion sits in the same frame as everything else in the
+clip. The M114 howitzer is the proof of the second half: its source never rotates its wheels, so we keyed a
+roll onto the wheel bones — and no version of that roll ever looked right in-game.
+
+**Why.** A converted rig does not share a frame with itself. Measured on the shipped M114:
+
+| | measurement |
+|---|---|
+| model at **rest pose** | bbox `(52.1, 135.7, 37.6)` — gun along Y, 37.6 tall |
+| the same model inside **any clip** | `folded` `(41.7, 27.6, 119.3)`, `deployed` `(41.7, 55.8, 143.9)` — gun along **Z**: rotated ~90° |
+| the legacy `deploy` clip | `(83.4, 55.3, 238.6)` — same rotation, and **2× scale** |
+| baked skeleton scales | `howitzer:main` Local **2**, wheel BindPose **0.005** (a clean rig — the ArmouredCar — reads 1 / 1) |
+
+Everything that acts at **pawn** level is unaffected: the engine's own orientation hides the mismatch, which is
+why the model looks perfect in-game and every pawn-level feature (fold-before-moving, deploy-on-stop, the
+bombard hold, turn-in-place) works. Everything that acts at **bone** level inherits a frame that disagrees with
+the geometry — so an authored wheel roll pivots about a point that is not the hub, however correct the input.
+
+**The tell you can see for free:** open the clip in the Lab's ▶ *Play in preview*. If the model stands on end
+there while its rest pose stands upright, the clip and the rest are in different frames. (The user spotted this
+immediately from the preview; it was explained away twice as "a harmless preview artifact" before the bbox
+numbers above confirmed it. It is not harmless — it is the whole defect.)
+
+### Verify a bake OFFLINE — no game launch, no guessing
+
+Four in-game drills can only report "it still looks wrong". These answer *why*, in seconds, on the bake output:
+
+1. **Pivots** — `Assets/Resources/<name>_Skeleton.asset` is plain YAML. Compose each bone's `Local` TRS up its
+   `ParentIndex` chain. A left/right pair (wheels, legs) **must** come out symmetric, differing only sideways.
+   Asymmetric heights = the pivot is wrong. This is what finally localised the wheel bug:
+   `l_wheel y −0.4038` vs `r_wheel y +1.4612`, while the legs read `0.5851` / `0.5751`.
+2. **Frame** — import the converted GLB in Blender, measure the mesh bbox at rest and inside the clip. Different
+   orientation = the table above.
+3. **Does the part actually spin in place?** — evaluate the armature per frame and track the centroid of the
+   verts weighted to that bone. Constant centroid = spinning; drifting = orbiting.
+4. **In-game, what does the clip really animate?** — `[AnimDiag] <model>:<role> bones that MOVE (f0 vs mid)`
+   names every bone whose rotation changes between frame 0 and the middle frame, with its angle. A flattened
+   clip prints `NONE — the baked clip is a held pose`; a working wheel roll prints the wheel bones. Run it on a
+   model you believe works as the control.
+
+### Dead ends — don't re-walk them
+
+- **Runtime aim-layer wheel spin** (rotate the bones through `BoneRotation` slots by distance travelled): two
+  drills, never once seen to move a wheel; deleted. The aim layer is also cleared per frame on artillery
+  (`clearAimLayer`), so any writer must run *after* that clear.
+- **Tail-along-the-axle bones** (the Vehicle Lab's convention for rigs it *builds*): gives a converted wheel bone
+  a non-identity rest rotation, and the skeleton bake then mangles its offset — a clean FBX `local T (21.096, 0, 0)`
+  baked as `(-0.00932, 0, -0.00466)`, one wheel's pivot a radius below its hub, the other a radius above.
+  Identity-rest bones (the trail legs) bake correctly; that contrast is the diagnostic.
+- **Pre-compensating the pivot** (raise the bone by a tyre radius so the displaced pivot lands on the hub):
+  treats the symptom, and the displacement isn't a clean radius anyway once the `Scale 2` chain is involved.
+
+### If you need authored bone motion on a converted model — the Vehicle Lab route (VERIFIED in-game 2026-08-22)
+
+Rebuild the model on a **Vehicle Lab** rig. Done on the M114 the same afternoon the limit was found, and every
+measurement that failed on the converted rig passes on the generated one:
+
+| check | converted rig | Vehicle Lab rig |
+| --- | --- | --- |
+| clip frame vs rest frame | `(41.7, 27.6, 119.3)` vs `(52.1, 135.7, 37.6)` — 90 deg out | **identical** `(52.1, 135.7, 37.6)` |
+| wheel pivots (baked skeleton) | `l −0.40` / `r +1.46` — one below its hub, one above | **symmetric** `±0.9325, 0.5424, −0.001` |
+| chain scales | `main` Local **2**, wheel Bind **0.005** | **all 1** |
+| bone count | 28 (bone-per-part) | 4 (`VehicleRig`, `Root`, two wheels) |
+
+Recipe: Vehicle Lab -> Browse the STATIC source (`m114_gun_only.glb` — no armature, no crew), mark the two road
+wheels **W** (watch the auto-guess: it also grabs the crew`s hand-cranks by name), Generate rig; then Factory/Lab
+with Deploy conversion **OFF**, Convert raw rig **ON**, Fix 100x **OFF**, Auto-ground **ON**, Idle stance
+`Spin[0..0]`, Movement `Spin`, and every `deploy…`/`recoil` clip field **cleared**. Cost: the fold, deploy and
+recoil the converter gave you are gone until re-authored on the clean rig.
+
+The alternatives remain: find a source that animates the part itself (the T-62 route), or fix the converter so
+clips are authored in the rest pose`s frame — the real repair, with the acceptance test **`folded` at frame 1
+must have the rest pose`s bbox orientation**.
