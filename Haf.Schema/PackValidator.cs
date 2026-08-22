@@ -116,7 +116,6 @@ namespace Haf.Schema
                 Warn("deployOnStop", "state-driven mode is mutually exclusive with deployOnStop — use the PRE-MOVE/IDLE state roles instead");
             if (e.turnBank != 0f && e.turnRate <= 0f)
                 Warn("turnBank", $"{F(e.turnBank)} set but turnRate is 0 — bank only applies while turn ease is on (set turnRate > 0)");
-
             return issues;
         }
 

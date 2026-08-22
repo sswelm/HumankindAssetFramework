@@ -91,6 +91,8 @@ namespace HumankindAssetFramework
         internal static Type UnitActionRangedFightSequence => Cached("Amplitude.Mercury.Presentation.UnitActionRangedFightSequence");
         internal static Type WorldPosition          => Cached("Amplitude.Mercury.WorldPosition");
         internal static Type WorldPositionExtensions => Cached("WorldPositionExtensions", "Amplitude.Mercury.WorldPositionExtensions");
+        internal static Type AStarResults           => Cached("Amplitude.Mercury.Simulation.AStarResults");   // a computed path: Steps[] + StepCount (the army's positionHistory)
+        internal static Type AstarStep              => Cached("Amplitude.Mercury.Simulation.AstarStep");      // one path step: TileIndex
         internal static Type UnitActionFaceEnemy      => Cached("Amplitude.Mercury.Presentation.UnitActionFaceEnemy");
         internal static Type MecanimEventInterpreter  => Cached("Amplitude.Mercury.Animation.MecanimEventInterpreter");
         internal static Type AlterationFireProjectile => Cached("Amplitude.Mercury.Animation.AlterationFireProjectile");
@@ -434,7 +436,8 @@ namespace HumankindAssetFramework
                 "SubPawns", "SubPawnCount", "IsTurning", "PlayAnimationState", "TriggerDeath", "InstantiatePawn", "rotationTransformInfos", "Dummy"),   // + battle hold-fire replay, death cue, pawn-spawn hook, turret census
             new Dep(PresentationUnit, nameof(PresentationUnit), "UnitDefinition", "GUID", "Pawns", "Formation",
                 "PresentationUnitDefinition", "IsLoaded", "IsNaval", "IsAnyPawnMoving",
-                "UpdatePawns", "FormationAngle", "PresentationEntityHolder", "InstantiatePawns"),   // + re-form / respawn, facing persistence, health-ratio spawn count, pawns hook
+                "UpdatePawns", "FormationAngle", "PresentationEntityHolder", "InstantiatePawns",
+                "MoveAlongTilesState"),   // + re-form / respawn, facing persistence, health-ratio spawn count, pawns hook; idle check for the pivot hold
             new Dep(PresentationUnitHolder, nameof(PresentationUnitHolder), "PresentationUnit", "audioEmitter", "playRumbleAudioEvent"),
             new Dep(PresentationDistrict, nameof(PresentationDistrict), "presentationLevelBuildComponent", "ApplyGroundMaterialDefinition", "ConstructibleDefinitionName",
                 "UpdateLevelBuild", "UpdateGroundMaterial", "UpdateHexagonSculpting", "mainLevelBuildComponantLayer", "visualAffinityName", "initialVisualAffinityName", "hexagonSculptingDefinitionIndex"),
@@ -490,7 +493,10 @@ namespace HumankindAssetFramework
             new Dep(PawnBoneRotation, nameof(PawnBoneRotation), "Angle", "SkeletonBoneIndex", "AxisIndex"),
             new Dep(SkeletonAsset, nameof(SkeletonAsset), "BoneInfos", "SkeletonId", "skinnedMeshInfos", "GetFxMeshIndex", "GetBoneIndex", "LoadIFN", "loadingStatus", "BBoxMin", "BBoxMax"),
             new Dep(SkeletonBoneInfo, nameof(SkeletonBoneInfo), "Name", "Local", "BindPose", "ParentIndex"),
-            new Dep(PresentationArmy, nameof(PresentationArmy), "PresentationUnit", "ArmyInfo", "IsLockedByBattle"),
+            new Dep(PresentationArmy, nameof(PresentationArmy), "PresentationUnit", "ArmyInfo", "IsLockedByBattle",
+                "UpdateWaitForReadyToMove", "doMoveWhenReady", "positionHistory", "currentIndexInHistory"),   // + pivot-in-place move-start hold (Hk_PivotMoveHold / ShouldHoldArmyMove)
+            new Dep(AStarResults, nameof(AStarResults), "Steps", "StepCount"),   // the army's positionHistory: next-tile bearing for the pivot hold
+            new Dep(AstarStep, nameof(AstarStep), "TileIndex"),
             new Dep(BattleReportController, nameof(BattleReportController), "Battles"),
             new Dep(PresentationBattle, nameof(PresentationBattle), "AllUnits"),
             // the launch-flagged members, re-homed on their TRUE receivers (both derived — see the accessors)

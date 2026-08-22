@@ -177,9 +177,15 @@ namespace HumankindAssetFramework
                     {
                         if (vanillaEaseLogged.Add(ctx.descId))
                             Plugin.Log.LogInfo($"[TurnEase] easing vanilla desc {ctx.descId} at {vTurn} deg/s ({(vCat >= 0 ? "category" : "link")}, first pawn seen)");
-                        ApplyTurnEaseCore(vTurn, vCat >= 0 ? CategoryBank(EffectiveCat(ctx.descId, vCat)) : 0f, ctx.entry);
+                        // a LINKED unit (vCat -1) has no category to exclude it: links are Formation Lab picks of
+                        // ground/naval units (the Zulu howitzers); a linked helicopter pivoting in place is the
+                        // user's own dial choice to make (pivot=0 turns it off globally)
+                        int vEff = vCat >= 0 ? EffectiveCat(ctx.descId, vCat) : -1;
+                        ApplyTurnEaseCore(vTurn, vCat >= 0 ? CategoryBank(vEff) : 0f, ctx.entry, PivotThresholdForDesc(ctx.descId, vEff));   // a LINKED unit (vEff -1) pivots by default; its own link may still say never
                         ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
                     }
+                    // (the artillery's servant crew — human, rate 0 — needs nothing here: the pivot holds the MOVE
+                    // START per unit, so the crew waits with its gun — ShouldHoldMoveStart)
                 }
 
                 // Match this pawn to one of our entries (animated OR freeze-static) by OUR baked skeleton id (the correctly
@@ -602,9 +608,10 @@ namespace HumankindAssetFramework
                 catHumanRate = d.Human; catLandRate = d.Land; catTurretRate = d.Turret; catHoverRate = d.Hover; catShipRate = d.Ship;
                 catHoverBank = d.HoverBank;   // legacy files with no `hoverbank` keep inheriting `bank` (resolved in the parse)
                 catShipBank = d.ShipBank;
+                turnPivot = d.Pivot;          // pivot-in-place threshold (default 90; 0 = off) — ground/naval only
                 // Numbers echoed with DialConfig.Inv so the log spells them the way the dial FILE must (invariant
                 // '.') — a comma-decimal locale used to print values the parser would then reject. See Inv().
-                Plugin.Log.LogInfo($"[TurnEase] rate={DialConfig.Inv(d.Rate)} bank={DialConfig.Inv(d.Bank)} | categories human={DialConfig.Inv(d.Human)} land={DialConfig.Inv(d.Land)} turret={DialConfig.Inv(d.Turret)} hover={DialConfig.Inv(d.Hover)} ship={DialConfig.Inv(d.Ship)} deg/s, hoverbank={DialConfig.Inv(catHoverBank)} shipbank={DialConfig.Inv(catShipBank)} deg (planes excluded)");
+                Plugin.Log.LogInfo($"[TurnEase] rate={DialConfig.Inv(d.Rate)} bank={DialConfig.Inv(d.Bank)} | categories human={DialConfig.Inv(d.Human)} land={DialConfig.Inv(d.Land)} turret={DialConfig.Inv(d.Turret)} hover={DialConfig.Inv(d.Hover)} ship={DialConfig.Inv(d.Ship)} deg/s, hoverbank={DialConfig.Inv(catHoverBank)} shipbank={DialConfig.Inv(catShipBank)} deg (planes excluded), pivot={DialConfig.Inv(d.Pivot)} deg (ground/naval turn in place first)");
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[TurnEase] " + ex.Message); }
         }

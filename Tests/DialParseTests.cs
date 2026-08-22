@@ -92,7 +92,7 @@ namespace HumankindAssetFramework.Tests
         public void TurnEase_ReadsEveryKnownKey()
         {
             var d = TurnEaseDial.Parse(
-                "rate=90\nbank=12\nhuman=45\nland=30\nturret=60\nhover=120\nship=15\nhoverbank=20\nshipbank=8", Probs());
+                "rate=90\nbank=12\nhuman=45\nland=30\nturret=60\nhover=120\nship=15\nhoverbank=20\nshipbank=8\npivot=120", Probs());
             Assert.Equal(90f, d.Rate);
             Assert.Equal(12f, d.Bank);
             Assert.Equal(45f, d.Human);
@@ -102,6 +102,19 @@ namespace HumankindAssetFramework.Tests
             Assert.Equal(15f, d.Ship);
             Assert.Equal(20f, d.HoverBank);
             Assert.Equal(8f, d.ShipBank);
+            Assert.Equal(120f, d.Pivot);
+        }
+
+        // pivot is the ONE turn-ease key with a non-zero default: a legacy file that never mentions it keeps the
+        // 90-degree pivot-in-place, and an explicit 0 switches it off (not "unset").
+        [Theory]
+        [InlineData("rate=90", 90f)]
+        [InlineData("", 90f)]
+        [InlineData("pivot=0", 0f)]
+        [InlineData("pivot=135\nrate=90", 135f)]
+        public void TurnEase_PivotDefaults90_ExplicitZeroIsOff(string text, float expected)
+        {
+            Assert.Equal(expected, TurnEaseDial.Parse(text, Probs()).Pivot);
         }
 
         [Fact]

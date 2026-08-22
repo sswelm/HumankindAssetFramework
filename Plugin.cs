@@ -364,6 +364,7 @@ namespace HumankindAssetFramework
                 typeof(Hk_BattleAttackGate),  // BATTLE TURN experimental (hold=1): dynamic gate on the attack FSM's delay step for battle volleys (2026-08-05)
                 typeof(Hk_BattleTurnProbe),   // BATTLE TURN forensics (diag=1): log RotationFSM turn starts (2026-08-05)
                 typeof(Hk_BattleTurnStep),    // BATTLE TURN forensics (diag=1): log StepTurning route (animated vs unanimated) + start/end angles (2026-08-05)
+                typeof(Hk_PivotMoveHold),     // PIVOT IN PLACE: defer a pawn's vanilla move start while its eased yaw turns to the new facing (2026-08-22, docs/Turn-Ease.md)
                 typeof(Hk_MouseCoverExtend),  // F8 window click-through fix: hovering our window counts as the game's own mouse-covered (map stops panning under it) (2026-08-17)
             };
             int skipped = 0;

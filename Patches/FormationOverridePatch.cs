@@ -70,6 +70,10 @@ namespace HumankindAssetFramework
         // other naming layer — the pawn definition is "Era5_Common_SiegeHowitzers_…" and the simulation unit is
         // "LandUnit_Era5_Common_SiegeHowitzers". TurnCore strips the wrappers so contains-matching bridges all three.
         [ProcessLived("per-unit dial from the registry")] internal static readonly Dictionary<string, float> TurnRateByUnit = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        // PIVOT-IN-PLACE per unit (2026-08-22, "configure it in the Formation Override so vanilla units get it too"):
+        // core token -> threshold deg (> 0 = this unit's own; < 0 = never; a link at 0 is simply absent = the dial).
+        // Same keying as TurnRateByUnit; independent of the rate — a unit eased by its CATEGORY may carry only this.
+        [ProcessLived("per-unit dial from the registry")] internal static readonly Dictionary<string, float> TurnPivotByUnit = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
 
         static string TurnCore(string unit)
         {
@@ -191,10 +195,18 @@ namespace HumankindAssetFramework
                         Plugin.Log.LogInfo($"[Formation] '{e.unit}' turn ease {tRate} deg/s (match core '{core}', docs/Turn-Ease.md)");
                     }
 
+                    float tPivot = (float?)l["turnPivot"] ?? 0f;
+                    if (e.unit.Length > 0 && tPivot != 0f)
+                    {
+                        var core = TurnCore(e.unit);
+                        TurnPivotByUnit[core] = tPivot;
+                        Plugin.Log.LogInfo($"[Formation] '{e.unit}' pivot in place {(tPivot > 0f ? $"at >= {tPivot} deg" : "NEVER")} (match core '{core}')");
+                    }
+
                     if (e.formation.Length == 0)
                     {
-                        // a unit link that ONLY carries turn ease is legitimate — no formation change requested
-                        if (!(e.unit.Length > 0 && tRate > 0f))
+                        // a unit link that ONLY carries turn ease / pivot is legitimate — no formation change requested
+                        if (!(e.unit.Length > 0 && (tRate > 0f || tPivot != 0f)))
                             Plugin.Log.LogWarning("[Formation] registry entry skipped (formation name empty).");
                         continue;
                     }

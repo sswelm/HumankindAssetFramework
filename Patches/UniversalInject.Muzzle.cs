@@ -421,9 +421,15 @@ namespace HumankindAssetFramework
         // (nearest within 4u — the deploy poll's approximation) so multiple units smooth independently; a
         // stacked squadron shares one state harmlessly (same spot, same heading). Every yaw angle eases, 180s
         // included; teleports/battle placement snap naturally by MISSING the position match (fresh state = target yaw).
-        class TurnState { public UnityEngine.Vector3 pos; public float yaw; public float targetYaw; public float bank; public float lastT; public float rate; }
+        // PIVOT-IN-PLACE (2026-08-22, user request: "a non-helicopter unit that has to turn more than 90° should
+        // first turn in the heading direction before moving"): `pivotDeg` is published here per state so the
+        // move-start hold (ShouldHoldMoveStart) reads the threshold off the same position-joined state the easing
+        // uses — one source of truth, like `rate`. `pos` is ALWAYS the game's translation.
+        class TurnState { public UnityEngine.Vector3 pos; public float yaw; public float targetYaw; public float bank; public float lastT; public float rate; public float pivotDeg; public float lastMovedT = -10f; }
         [SessionScoped] static readonly List<TurnState> turnStates = new List<TurnState>();
         internal static float turnRate = 0f, turnBank = 0f;   // file-driven while spiking
+        internal static float turnPivot = 90f;                // pivot-in-place threshold, deg (dial `pivot=`; 0 = off)
+        const float PivotFailsafeSec = 4f;                    // a move start is never held longer than this
 
         // TRUE-BEARING AIM (2026-08-05, "turn to the exact angle needed to realistically shoot"): a vanilla map
         // bombard flips the unit to a HEX-QUANTIZED angle (GetHexagonAngleToPosition = one of six directions, up
@@ -705,7 +711,13 @@ namespace HumankindAssetFramework
                        : catBank != 0f ? catBank
                        : e.turnRate > 0f || turnRate > 0f ? turnBank
                        : 0f;
-            ApplyTurnEaseCore(rate, bank, entry);
+            // pivot-in-place is for things that roll, walk or sail: a helicopter translates while it yaws, a
+            // plane never eases at all (the rate above is 0 unless per-model, and even then it flies a curve)
+            // PER-UNIT OVERRIDE (user request 2026-08-22: "some units should completely turn, others only at large
+            // angles" — configured in the Formation Override so VANILLA units get it too): a link's turnPivot > 0
+            // is this unit's own threshold (1 = always turn fully first; even opts a helicopter in), < 0 = never;
+            // no link = the dial under the category rule. Keyed by the entry's (vanilla) descriptor.
+            ApplyTurnEaseCore(rate, bank, entry, PivotThresholdForDesc(e.descId, EffectiveCat(e.descId, EntryBaseCat(e))));
         }
 
         // The entry-declared base category (turretBone lifts land to turret) — shared with TurnRateForUnitDef.
@@ -713,7 +725,9 @@ namespace HumankindAssetFramework
 
         // Core easing, rate/bank already resolved — shared by our model entries and VANILLA pawns whose unit
         // carries a Formation Lab turn-ease link (rate from vanillaTurnByDesc, bank always 0 for those).
-        internal static void ApplyTurnEaseCore(float rate, float bank, object entry)
+        // `pivotDeg` = this unit's PIVOT-IN-PLACE threshold (0 = never), PUBLISHED on the state for the move-start
+        // hold (ShouldHoldMoveStart) — the easing itself never touches position any more.
+        internal static void ApplyTurnEaseCore(float rate, float bank, object entry, float pivotDeg = 0f)
         {
             if (rate <= 0f) return;
             if (!TryGetTranslation(entry, out var tr) || !TryGetRotation(entry, out var rot)) return;   // PawnFast or reflection
@@ -732,7 +746,8 @@ namespace HumankindAssetFramework
             }
             if (st == null) { st = new TurnState { pos = tr, yaw = target, lastT = now }; turnStates.Add(st); }
             float dt = UnityEngine.Mathf.Clamp(now - st.lastT, 0f, 0.1f);
-            st.pos = tr; st.lastT = now; st.targetYaw = target; st.rate = rate;   // published for the holds: target for misalign, rate as GROUND TRUTH (whatever path resolved it — the strike side must never re-derive and disagree)
+            { var mv = tr - st.pos; mv.y = 0f; if (mv.sqrMagnitude > 0.02f * 0.02f) st.lastMovedT = now; }   // "is the unit rolling?" — the move-start hold only fires from standstill
+            st.pos = tr; st.lastT = now; st.targetYaw = target; st.rate = rate; st.pivotDeg = pivotDeg;   // published for the holds: target for misalign, rate as GROUND TRUTH (whatever path resolved it — the strike side must never re-derive and disagree), pivotDeg for the move-start hold
             float diff = UnityEngine.Mathf.DeltaAngle(st.yaw, target);
             // NO yaw-size guard (user verdict: every angle eases, incl. full 180s). Teleports/battle placement
             // still snap NATURALLY: a pawn that jumps >4u misses its position-matched state and the fresh state
@@ -744,6 +759,69 @@ namespace HumankindAssetFramework
                 return;   // converged on the game's own value — leave it (while AIMED we must keep writing: the game re-writes the quantized yaw every frame)
             var eased = UnityEngine.Quaternion.Euler(rot.eulerAngles.x, st.yaw, st.bank);   // keep the game's pitch; z = our bank
             SetRotation(entry, eased);   // straight into the entry (PawnFast), or the boxed TRS round-trip on reflection
+        }
+
+        // PIVOT IN PLACE = HOLD THE ARMY'S MOVE START (2026-08-22, the seventh and eighth drills): the sim feeds
+        // PresentationArmy a growing positionHistory; PresentationArmy.UpdateWaitForReadyToMove (called every frame
+        // from OnUpdate) hands it to the unit as DoMoveAlongTiles when the unit is idle, or EXTENDS a running move with
+        // ChangeMoveTiles. A prefix that says "not yet" while the unit is idle defers the WHOLE presentation move —
+        // unit holder and every pawn together — so the chunk pipeline stays in sync (holding only the pawns put them
+        // 1.8 s behind the holder: the army could not extend the path, the first chunk ran to Finalize, and the unit
+        // stood 1.5 s at the intermediate tile — "turns, moves, turns again, pauses"). Meanwhile the history keeps
+        // growing, so on release the unit gets the longer path at once and rolls through. The pawns' facing is OURS
+        // during the hold: an aim override at the unit centre with the bearing to the next history tile — the same
+        // hex direction FlipPawnsGrid will stamp on release, so the ease hands over seamlessly. One hold per start.
+        class MoveHold { public float releaseAt; public float armedAt; }
+        [SessionScoped] static readonly Dictionary<object, MoveHold> moveHoldByUnit = new Dictionary<object, MoveHold>();
+        static System.Reflection.MethodInfo miTileToVector3;
+        internal static bool ShouldHoldArmyMove(object army)
+        {
+            if (turnStates.Count == 0) return false;
+            if (!(GetMember(army, "doMoveWhenReady") is bool pending) || !pending) return false;   // nothing queued — the cheap exit every frame
+            var unit = GetMember(army, "PresentationUnit");
+            if (unit == null) return false;
+            float now = UnityEngine.Time.time;
+            if (moveHoldByUnit.TryGetValue(unit, out var h))
+            {
+                if (now < h.releaseAt) return true;
+                moveHoldByUnit.Remove(unit);   // released: this frame's call starts the move; no re-evaluation of the same start
+                return false;
+            }
+            if (Convert.ToInt32(GetMember(unit, "MoveAlongTilesState")) != 0) return false;   // not idle (Setup/MoveLoop/Finalize): an EXTENSION of a running move — vanilla
+            if (!(GetMember(GetMember(unit, "PresentationEntityHolder"), "Transform") is UnityEngine.Transform ut)) return false;
+            var upos = ut.position;
+            TurnState st = null; float best = 16f;
+            for (int i = turnStates.Count - 1; i >= 0; i--)
+            {
+                if (now - turnStates[i].lastT > 1f) continue;   // a live, currently-rendered state only
+                var d = turnStates[i].pos - upos; d.y = 0f;
+                if (d.sqrMagnitude < best) { best = d.sqrMagnitude; st = turnStates[i]; }
+            }
+            if (st == null || st.rate <= 0f || st.pivotDeg <= 0f) return false;
+            if (now - st.lastMovedT < 1f) return false;   // from a REAL stop only — a unit that just rolled in keeps rolling
+            if (moveHoldByUnit.Count > 64)
+                foreach (var k in new List<object>(moveHoldByUnit.Keys)) if (now - moveHoldByUnit[k].armedAt > 20f) moveHoldByUnit.Remove(k);
+            // the bearing from the current history tile to the next one (tile centres -> Unity world via the strike aim's ToVector3)
+            var hist = GetMember(army, "positionHistory");
+            if (hist == null || !(GetMember(army, "currentIndexInHistory") is int idx)) return false;
+            if (!(GetMember(hist, "Steps") is Array steps) || !(GetMember(hist, "StepCount") is int count) || idx < 0 || idx + 1 >= count || idx + 1 >= steps.Length) return false;
+            var wpT = GameBinding.WorldPosition; var extT = GameBinding.WorldPositionExtensions;
+            if (wpT == null || extT == null) return false;
+            if (miTileToVector3 == null) miTileToVector3 = AccessTools.Method(extT, "ToVector3");
+            if (miTileToVector3 == null) return false;
+            int tFrom = Convert.ToInt32(GetMember(steps.GetValue(idx), "TileIndex")), tTo = Convert.ToInt32(GetMember(steps.GetValue(idx + 1), "TileIndex"));
+            if (!(miTileToVector3.Invoke(null, new object[] { Activator.CreateInstance(wpT, tFrom), false }) is UnityEngine.Vector3 from) ||
+                !(miTileToVector3.Invoke(null, new object[] { Activator.CreateInstance(wpT, tTo), false }) is UnityEngine.Vector3 to)) return false;
+            var dir = to - from; dir.y = 0f;
+            if (dir.sqrMagnitude < 0.25f || dir.sqrMagnitude > 400f) return false;   // same tile / a wrapped-world artefact
+            float yaw = UnityEngine.Mathf.Atan2(dir.x, dir.z) * UnityEngine.Mathf.Rad2Deg;
+            float diff = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(st.yaw, yaw));
+            if (diff < st.pivotDeg) return false;
+            float hold = UnityEngine.Mathf.Min(diff / st.rate + 0.1f, PivotFailsafeSec);
+            SetAimOverride(upos, yaw, hold);   // the ease target for the hold: the next tile's bearing (AimMaintain reads it; it expires with the hold)
+            moveHoldByUnit[unit] = new MoveHold { releaseAt = now + hold, armedAt = now };
+            Plugin.Log.LogInfo($"[Pivot] holding army move {hold:F2} s: turn {diff:F0} deg to the next tile at {st.rate:F0} deg/s (threshold {st.pivotDeg:F0}, stood {now - st.lastMovedT:F1} s, history {idx + 1}/{count})");
+            return true;
         }
 
         // TERRAIN HUG (spike/terrain-hug 2026-08-04): the engine already flies air units at a terrain-RELATIVE

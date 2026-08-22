@@ -221,18 +221,41 @@ namespace HumankindAssetFramework
         // first) — whichever side arrives last completes the mapping.
         internal static void SweepTurnLinks()
         {
-            if (FormationOverride.TurnRateByUnit.Count == 0 || addonDefIds.Count == 0) return;
-            foreach (var ad in addonDefIds)
-            {
-                if (vanillaTurnByDesc.ContainsKey(ad.Value)) continue;
-                foreach (var kv in FormationOverride.TurnRateByUnit)
-                    if (TurnLinkMatches(ad.Key, kv.Key))
-                    {
-                        vanillaTurnByDesc[ad.Value] = kv.Value;
-                        Plugin.Log.LogInfo($"[TurnEase] vanilla '{ad.Key}' -> desc {ad.Value} rate {kv.Value} deg/s (Formation Lab link '{kv.Key}')");
-                        break;
-                    }
-            }
+            if (addonDefIds.Count == 0) return;
+            if (FormationOverride.TurnRateByUnit.Count > 0)
+                foreach (var ad in addonDefIds)
+                {
+                    if (vanillaTurnByDesc.ContainsKey(ad.Value)) continue;
+                    foreach (var kv in FormationOverride.TurnRateByUnit)
+                        if (TurnLinkMatches(ad.Key, kv.Key))
+                        {
+                            vanillaTurnByDesc[ad.Value] = kv.Value;
+                            Plugin.Log.LogInfo($"[TurnEase] vanilla '{ad.Key}' -> desc {ad.Value} rate {kv.Value} deg/s (Formation Lab link '{kv.Key}')");
+                            break;
+                        }
+                }
+            // pivot-in-place links map the same way — for VANILLA pawns and for OUR entries alike (an entry's
+            // descId is the unit's vanilla descriptor, so PivotThresholdFor reads this map first)
+            if (FormationOverride.TurnPivotByUnit.Count > 0)
+                foreach (var ad in addonDefIds)
+                {
+                    if (pivotByDesc.ContainsKey(ad.Value)) continue;
+                    foreach (var kv in FormationOverride.TurnPivotByUnit)
+                        if (TurnLinkMatches(ad.Key, kv.Key))
+                        {
+                            pivotByDesc[ad.Value] = kv.Value;
+                            Plugin.Log.LogInfo($"[TurnEase] pivot link '{ad.Key}' -> desc {ad.Value} {(kv.Value > 0f ? $">= {kv.Value} deg" : "never")} (Formation Lab link '{kv.Key}')");
+                            break;
+                        }
+                }
+        }
+        // desc -> pivot-in-place override from a Formation Lab link (> 0 own threshold, < 0 never); absent = the dial
+        [SessionScoped] static readonly Dictionary<int, float> pivotByDesc = new Dictionary<int, float>();
+        // The pivot threshold for a descriptor whose category is `effCat`: link > dial-under-category-rule.
+        internal static float PivotThresholdForDesc(int descId, int effCat)
+        {
+            if (descId >= 0 && pivotByDesc.TryGetValue(descId, out float p)) return p > 0f ? p : 0f;
+            return effCat != CatHover && effCat != CatPlane ? turnPivot : 0f;
         }
         [ProcessLived("pack tuning table; rebuilt by LoadRegistry")] static readonly Dictionary<int, float[]> eraGridRows = new Dictionary<int, float[]>();  // Global Era Lab: unit era -> modifier per CURRENT era
         [ProcessLived("diagnostic once-per-name log dedup (lazy)")] static HashSet<string> unitScaleLogged;

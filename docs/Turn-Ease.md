@@ -66,10 +66,45 @@ is always the game's own projectile — HAF only fixes *where* and *when*.
 facing. The aim releases only on unambiguous signals: the unit moves, the next attack re-aims it, or a 120 s
 long-stop.
 
+**Pivot in place** (verified in-game 2026-08-22 — "now it is moving perfect"): a ground or naval unit that has to turn **90° or
+more** **turns on the spot first and only then moves off** — the way a tank, a cart or a ship actually behaves,
+instead of sliding sideways into its new heading while already rolling. Mechanism: the simulation feeds the
+presentation army a growing `positionHistory`; every frame `PresentationArmy.UpdateWaitForReadyToMove` hands
+it to the unit as a move when the unit is idle, or extends a running move. HAF's prefix answers "not yet"
+while the unit is idle, for as long as the eased yaw needs to face the **next history tile** (`turn ÷ rate` +
+0.1 s, capped 4 s) — that bearing is set as an aim override so the ease turns to it — and so the **whole
+vanilla move is deferred**, holder and pawns together: the unit turns standing still, then the game's own
+smoothed path starts from rest, untouched, with the longer history it accumulated meanwhile. Nothing is
+re-drawn, nothing catches up, the chunk pipeline stays in sync. The hold is **per unit** (decided by the turn
+state at the unit centre), so an artillery piece's crew waits with its gun, and only from a **real stop** (no
+movement for 1 s) — a unit that just rolled in keeps rolling and bends onto the next leg the vanilla way. Helicopters/hovercraft (`hover`) and planes are
+**never** pivoted by default — a chopper translates while it yaws. Threshold via the dial: `pivot=<deg>` in
+`haf_turnease.txt`, **default 90** (the one key with a non-zero default — a legacy file keeps the behaviour),
+`pivot=0` turns it off. Every hold writes `[Pivot] holding move start … s: turn … deg` to the log.
+
+*Graveyard (nine drills, one morning):* every approach that kept the vanilla movement running and **re-drew the
+pawn's position** read as a sideways slide — parking the rendered unit and catching up along a chord; replaying
+the game's recorded trail at 1.5×; turn → drive straight to the next hex → rejoin. The log showed why: a 150°
+turn at 90°/s is 1.6 s, the real unit was 4 u ahead by the time the drive ended, and no catch-up closes that
+naturally (the 4 s failsafe fired with 2.7 u of lag). Don't re-draw; **delay the game** — and delay it at the
+**army** layer: holding only the pawns' `StartMoveAlongTilesIfPossible` put them 1.8 s behind the unit holder,
+the army could no longer extend the running path, and the unit stood 1.5 s at the intermediate tile
+(`stood 1.5 s, pawn-unit gap 0.0 u` in the log) before the next chunk started from rest.
+
+**Per-unit override** — **Pivot in place** on a Formation Override **unit link** (`turnPivot` in
+`haf_formations.json`, runtime-only: Save + relaunch), so **vanilla units and HAF models alike** get it — the
+runtime maps the link to the unit's pawn descriptor exactly like the Turn ease row (`[TurnEase] pivot link …`
+in the log confirms it), and an entry's descriptor *is* its unit's vanilla one. The row is a popup:
+**Default** = the global dial under the category rule (ground/naval pivot, hover/planes don't); **Custom
+angle** (`> 0`) = this unit's own threshold — `1°` makes it *always* turn fully before moving (a tank, a towed
+gun), `150°` only on near-reversals, and it even opts a helicopter in; **Never** (`< 0`) = turn while rolling.
+Independent of the Turn ease row: a unit eased by its *category* default may carry only this, and a link may
+carry only this (no formation change). Precedence: link > dial.
+
 Live dials (`BepInEx/config/`, polled ~1/s, no restart):
 
-- **`haf_turnease.txt`** — the category defaults above, plus `rate=`/`bank=` as last-resort fallbacks for
-  uncategorized units and per-model-eased flyers.
+- **`haf_turnease.txt`** — the category defaults above, `pivot=` (pivot-in-place threshold, default 90), plus
+  `rate=`/`bank=` as last-resort fallbacks for uncategorized units and per-model-eased flyers.
 - **`haf_battleturn.txt`** — `hold=1` enables the **experimental, untested** battle-side hold (ranged attacks in
   deployed battles wait for the rotation FSM); `diag=1` turns on choreography forensics logging.
 

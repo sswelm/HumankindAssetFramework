@@ -10,6 +10,24 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **`ModelEntry`'S THREAD DISCIPLINE IS DECLARED, NOT MEMORISED (2026-08-22).** A review asked to reopen the A2
+  god-object split, citing the two 08-21 data races as the "proven bug from the shape" that Decisions.md requires.
+  **Neither race was in `ModelEntry`** — one was the reflection-cache *statics*, the other DistrictInject's collections
+  — so the trigger wasn't met, and the quoted cost was off too (the four locked fields have **53** call sites between
+  them, not ~200). But the underlying complaint was fair, and checking it found something worse than the review
+  claimed: of `ModelEntry`'s **23 mutable collections, only 6 stated any thread discipline at all**; the other
+  seventeen said nothing, on an object reachable from a simulation thread, guarded by exactly the kind of comment
+  Architecture.md §2 already records as "a claim, not a guard" (both 08-21 races hid behind one).
+  So: `Patches/ThreadDiscipline.cs` — every mutable field on `ModelEntry` declares `[MainThread("owner")]`,
+  `[Locked("why")]` or `[Concurrent("why")]`, and `ModelEntryThreadTests` fails the build on an undeclared one.
+  `[Concurrent]` is **machine-checked** against the field's real type (and the converse: a concurrent-typed field
+  can't be filed as plain main-thread state), the four Architecture §2 names are pinned so a silent demotion fails,
+  and a test asserts the inherited `Haf.Schema` half contributes no mutable collection — so "config is immutable" is
+  true by construction, not by habit. Triage: **19 main-thread, 4 locked, 1 concurrent** (`fireGuidQueue`, the only
+  `ModelEntry` field the off-thread hooks touch). Fault-injected both ways: an undeclared new field and a false
+  `[Concurrent]` claim each fail by name. Architecture.md §2 now states the rule instead of listing four names; the
+  split stays declined, on the record, with the reasons.
+
 - **THE HOT PATH NO LONGER CALLS ITSELF A SPIKE (2026-08-22).** A review counted 52 `SPIKE`/`EXPERIMENTAL` markers and
   named five on the per-frame path: `PollWonderRows`, `PollDistrictMainRows`, `PollRepoDump` / `ProbeAxisGrowth`,
   `TickDistrictMeshSwap`. Checked, and the split matters: **32 of the 52 are in `Plugin.cs` as config-key
@@ -897,6 +915,98 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   bindings genuinely needs the game's own DLLs.
 
 ## Units & animation
+
+- **PIVOT IN PLACE — ground and naval units turn first, then move (2026-08-22, built + unit-tested, NOT yet
+  drilled in-game).** Turn ease smoothed the facing but the game keeps translating the pawn from the very frame it
+  re-points it, so a tank ordered 150° around slid sideways into its new heading while already rolling — the user
+  called it out on closer inspection of ENC. `ApplyTurnEaseCore` now takes a `pivot` eligibility flag (every
+  category except `hover` and plane — a helicopter yaws while it translates): a heading change of at least
+  `turnPivot` degrees **parks the RENDERED position** on the turn-start spot (last frame's game position, stored on
+  the same position-joined `TurnState`) until the eased yaw is within 8° of the target, then **catches up** to the
+  game's live position at 1.5× its measured pace (≥ 2 u/s) and releases on arrival. Never while a strike aim is
+  armed; a 4 s failsafe and a >12 u jump release unconditionally; a second big turn mid-catch-up re-parks where the
+  unit is *drawn*. Dial: `pivot=<deg>` in `haf_turnease.txt`, **default 90** (the first turn-ease key with a
+  non-zero default — `TurnEaseDial.Pivot = 90f`, so an old file keeps it), `pivot=0` off; echoed in the `[TurnEase]`
+  line. Tests: the every-key parse and a 4-case default/explicit-zero theory (456 total).
+  **Drilled 2026-08-22: pure vehicles verified** — first finding: the artillery's **servant crew walked off** toward
+  the destination while the gun was still turning (human category, rate 0 → no turn state → nothing to park).
+  Fix: `ApplyPivotFollow` — a non-eased vanilla pawn standing on a parked unit's spot is drawn displaced by the
+  parked unit's own `pivotVis - pos` offset (no state of its own; holds formation, releases the frame the gun does).
+  **Crew verified in the second drill.** Then the per-unit override — first built as a Model Factory / schema
+  field, then **moved to the Formation Override unit link** on the user's call ("that way we can also configure
+  vanilla units"): `turnPivot` on the link (0 = absent = the dial under the category rule; > 0 = own threshold —
+  `1` = always turn fully first, even a helicopter; < 0 = never), parsed into `FormationOverride.TurnPivotByUnit`,
+  mapped to descriptors by `SweepTurnLinks` (`pivotByDesc`, the same core-token matching the Turn ease link uses)
+  and resolved by `PivotThresholdForDesc` for vanilla pawns AND our entries (an entry's descId is its unit's
+  vanilla descriptor). `ApplyTurnEaseCore` takes the threshold in degrees instead of a bool. The schema field,
+  regex key, validator rule and Factory field were taken back out so there is ONE route (parity PASS, 456 tests).
+  ENCReload: `FormationRegistry.turnPivot` + a Default / Custom angle / Never popup under the Turn ease row.
+  Lesson re-learned on the way: an Edit whose old_string starts with a newline eats the NEXT line's break —
+  three joined lines, caught by the build.
+  **Third drill finding — it turned toward the DESTINATION, not the next hex.** Decompiled the move: `DoMoveAlongTiles`
+  calls `FlipPawnsGrid(next tile)` once, but the pawns then ride `MoveAlongPoints(smoothPoints)` — a smoothed curve
+  through the tile centres — and their facing is that curve's tangent, which for "north on a hex grid" (NE then NW)
+  points at the end tile from frame one. Fix: at arm time the pivot latches the bearing to the nearest moving unit's
+  `PresentationUnit.NextWorldPositionOnPath` (`TryNextTileBearing`: army walk + the strike aim's `ToVector3` binding;
+  re-asked for the first 0.5 s since the arm frame can precede the move loop's publish), eases to THAT, then
+  `pivotStepDone` releases the park and hands the yaw back to the game's curve. `NextWorldPositionOnPath` added to
+  the `PresentationUnit` catalog entry (the A7 coverage gate caught the bare read; bindcheck 130/130).
+  **Fourth finding — "still sliding sideways".** The catch-up closed the gap along a straight CHORD to the live
+  position; on a zig-zag that chord runs north while the tank faces the NE leg. Now the hold RECORDS the game's
+  position + yaw every frame (`TurnState.trail/trailYaw`) and the catch-up REPLAYS that polyline at 1.5x (≥ 2 u/s),
+  drawing the cursor and easing the yaw toward the heading the game had at that point — the rendered unit rolls the
+  real legs facing along them. `[Pivot] arm / hex-step bearing / caught up / released` log lines make the next drill
+  readable from the log alone.
+  **Fifth finding — "it fights itself" (user's Custom 1° link).** Two arm rules were wrong: a re-arm was allowed
+  mid-replay (meant for a second big turn), so with a 1° threshold every difference between the replayed yaw and the
+  live yaw re-parked the unit every 0.5 s and yanked it toward a fresh hex-step bearing; and a pivot could arm while
+  already rolling, where the smoothed curve bends the heading a degree or two per frame. Now a pivot arms ONLY from
+  standstill (`TurnState.lastMovedT`, no movement for 0.25 s — read before this frame's own first step counts) and
+  never while one is live; after the turn the vanilla movement owns the unit, the replay merely carries the rendered
+  unit along the vanilla path to the live position. User's design: "only turn to the next grid cell, then let the
+  vanilla movement take over."
+  **Sixth finding — it turned toward the destination on the first leg.** The replay reproduced the game's recorded
+  headings, and the game's smoothed curve bends toward the end tile from frame one — so a tank that had just lined
+  up on the next hex immediately started crabbing. Replaced the trail replay with the user's THREE PHASES
+  (`TurnState.pivotPhase`): 0 TURN in place to the next-tile bearing; 1 DRIVE straight to that tile (`pivotStepPos` =
+  tile + the pawn's own formation offset, `StepPosFor`) with the heading LOCKED; 2 REJOIN — ease to the live position
+  at 1.5x while the yaw eases to the live heading, vanilla owns it, release on arrival. `TryNextTileBearing` now also
+  returns the tile and the unit centre. Log: `arm → faced the hex step → at first hex, vanilla takes over → rejoined`.
+  **Seventh finding — the log settled it: "still sliding like before".** `[Pivot] arm: turn 150 deg at 90 deg/s` →
+  `faced the hex step after 1.59 s` → `at first hex after 2.62 s` → `released by failsafe after 4.02 s, lag 2.7 u`.
+  The real unit had a 2.6 s head start; no catch-up closes 4 u naturally. **Every position-faking approach is now in
+  the graveyard.** Replacement: DELAY THE GAME. Decompiled the move start — the pawn's own Update re-calls
+  `PresentationPawn.StartMoveAlongTilesIfPossible` every frame while a tile move is queued, so `Hk_PivotMoveHold`
+  (`Patches/PivotHoldPatch.cs`, prefix → `ShouldHoldMoveStart`) answers "not yet" for `turn ÷ rate + 0.1 s` (cap 4 s):
+  the unit turns standing still (FlipPawnsGrid already stamped the new facing; the ease swings to it), then the
+  vanilla smoothed path starts from rest, untouched. Hold keyed PER UNIT (`moveHoldByUnit`, decided by the turn state
+  at the unit centre) so the crew waits with its gun. `TurnState.pivotDeg` is published by `ApplyTurnEaseCore` so the
+  hold reads the threshold off the same state as the rate (one source of truth, per the 08-05 lesson). Deleted:
+  pivot phases, trail, `ApplyPivotFollow`, `TryNextTileBearing`, `StepPosFor`; `NextWorldPositionOnPath` dropped from
+  the catalog, `StartMoveAlongTilesIfPossible` added (bindcheck OK). First drill of it: "no delay at all" — the log had
+  no `[Pivot] hooked …` line: this plugin patches from an EXPLICIT `hooks` list in `Plugin.cs` (so one missing game
+  member disables one hook, not PatchAll), and a new `[HarmonyPatch]` class is inert until it is listed there. Listed.
+  **Drilled: "much better, almost perfect, no more sliding"** — one leftover: a one-second wait at the first hex. The
+  log: a SECOND `holding move start 0.77 s: turn 60 deg` — the game hands the pawn its path in chunks and each
+  chunk's start passes the same seam. Gate: `TurnState.lastMovedT` (set by `ApplyTurnEaseCore` on any position
+  delta); `ShouldHoldMoveStart` refuses a unit that moved within the last 0.3 s — pivots happen from standstill only,
+  a rolling unit bends onto the next leg the vanilla way. **Still paused** ("turns, moves, turns again, pauses, moves
+  again"): the pawn genuinely STANDS at the chunk boundary for longer than 0.3 s, so the boundary counted as standstill.
+  Gate raised to a REAL stop (≥ 1 s), a released hold now persists until the unit has actually moved (the re-issued
+  chunk on release can't re-hold), and every chunk start that would have qualified logs `chunk start passed through:
+  stood X s, turn N deg` plus the hold line carries `stood`/`pawn-unit gap` — the next drill is measurable.
+  **Measured: `stood 1.5 s, pawn-unit gap 0.0 u`** — the pawn AND the unit holder genuinely stopped 1.5 s at the
+  intermediate tile before any second hold. The pawn-level seam was the wrong LAYER: holding only the pawns put them
+  1.8 s behind the holder, the army could no longer extend the running path (`CanModifyPawnsPath`), the first chunk ran
+  to Finalize (final-angle turn = "turns again"), and the next chunk started from rest. Moved the hold UP to
+  `PresentationArmy.UpdateWaitForReadyToMove` (called every frame from OnUpdate; it issues `DoMoveAlongTiles` when the
+  unit is idle or `ChangeMoveTiles` to extend): `ShouldHoldArmyMove` defers the WHOLE presentation move while the unit
+  is idle (`MoveAlongTilesState == None`), from a real stop (1 s), for `turn ÷ rate + 0.1 s`; the facing during the
+  hold is an aim override at the unit centre with the bearing between `positionHistory` tiles `idx` and `idx+1`
+  (`AStarResults.Steps[].TileIndex` → `ToVector3`) — the hex direction FlipPawnsGrid stamps on release. The history keeps
+  growing during the hold, so the released move gets the longer path at once. Catalog: PresentationArmy +4, PresentationUnit
+  `MoveAlongTilesState`, new `AStarResults`/`AstarStep` types (bindcheck 132/132). **Verified in-game 2026-08-22:
+  "Yes, finally, now it is moving perfect!"** — nine drills from the first cut to the one that ships.
 
 - **GLBCONV SPLIT-BRAIN — a verified fix silently regressed out of the deployed exe (2026-08-17).** A verified
   critical review found glbconv had TWO sources of truth that had each grown a fix the other lacked: ENCReload's
