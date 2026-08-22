@@ -28,10 +28,9 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
   fixing it surfaced a third gap: `Upsert` removed with ordinal `==` while the guard compares `OrdinalIgnoreCase`,
   so a case-only rename left two entries sharing one set of asset files on Windows. `Upsert` is case-insensitive
   now; no shipped pack has case-duplicate names.
-- **The Vehicle Lab's trail/gun/recoil dials are dead on rigged sources.** Eight sites in that block count roles
-  from `parts`; every other section uses `ActiveParts`, and Generate uses `fast ? boneParts : parts`. On an
-  `SKM_` source with the fast path on, the section reads "no trails marked" and every control is disabled, while
-  Generate ships the defaults (35° spread, pivot 0.5, recoil 0).
+- ~~**The Vehicle Lab's trail/gun/recoil dials are dead on rigged sources.**~~ — **FIXED 2026-08-22**: all eight
+  sites read `ActiveParts`, and the UI and Generate now share one `FastPath` predicate and one list.
+
 - ~~**The trail-spread sign heuristic may test the wrong axis**~~ — **DRILLED AND DOWNGRADED 2026-08-22.** The
   headless drill (M114, 13 yaw angles) shows the shipped rig is **correct**: at yaw 0/90/180 the two trails take
   opposite signs and open to a ~102-unit spread. The critical does not reproduce. What the drill *did* confirm is
@@ -51,8 +50,8 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
   NOTE and a printed `0 live pawn(s) examined`, never a dropped clause. An unreadable oracle returns -1 and cannot
   pose as a confident zero. Five tests, mutation-drilled.
 
-- **One report can still say PASS on nothing.** The bake-test verdict treats zero failures as success, so an
-  all-skipped run writes `PASS — 0 passed` to `haf_bake_tests_report.txt`. (Two of the original three are fixed:
+- ~~**One report can still say PASS on nothing.**~~ — **FIXED 2026-08-22**: the bake-test verdict reads NOTHING
+  VERIFIED when no section passed, and the Console line becomes a warning. (Two of the original three are fixed:
   the smoke's *live-pawn* clause and the *matched-but-never-repointed* misfiling — see the entries above. Still
   cosmetic-but-dishonest: the remaining coverage clauses, `SubPawnScene` / `LayersChecked` / `SeamsChecked` /
   `RolesChecked` / `SoundsChecked`, are suppressed at zero rather than printed.)
@@ -77,9 +76,8 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
 - ~~**Two gates have blind spots and neither is in CI.**~~ — **HOT-PATH HALF FIXED 2026-08-22**: the grep is
   case-insensitive with stand-alone word matching (the naive `-i` false-positived on `docs/Wonder-Spike.md`),
   verified in both directions, the three stale `(spike)` labels promoted (all three are documented shipped dials),
-  and **both** source-only guards moved into CI beside the docs guard. **Still open:** `check-catalog.sh`'s
-  extraction regex omits the `CachedField(` accessor family (16 call sites, 3 added by that range) — its literals
-  are catalogued today, so the gate is green by luck rather than by proof.
+  and **both** source-only guards moved into CI beside the docs guard. The catalog half was fixed the same day —
+  see the `CachedField(` entry above, which turned out to be hiding 32 uncatalogued names.
 - ~~**`PackTuning` dropped the `sv > 0f` guard.**~~ — **FIXED 2026-08-22.** Guard restored as `!(sv > 0f)` so NaN
   is rejected too, and it now WARNS with the pack, key and value instead of skipping in silence. No shipped pack
   was affected. More importantly the missing discipline was supplied: `PackTuningLegacyParityTests` keeps the

@@ -10,6 +10,22 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **TWO EDITOR FIXES FROM THE 08-22 REVIEW (2026-08-22).** *(1) The gun and trail dials were invisible on exactly
+  the sources they exist for.* Eight sites in the Vehicle Lab's Deploy/gun/recoil block counted roles from the raw
+  `parts` list while every other section used `ActiveParts` and Generate used `fast ? boneParts : parts`. So on a
+  rigged source with the fast path on — the Ehrhardt, any `SKM_` rip — marking a bone **Trail** or **Gun** left the
+  section reading *"no trails marked"* with every control disabled (Spread, Deploy frames, Gun pivot, Gun raise,
+  Recoil, lead-in), while Generate read those same bone roles and shipped the **defaults** (35°, pivot 0.5, recoil
+  0) with no way to dial them. Root cause was two copies of one predicate: the UI had
+  `useSourceRig && boneParts.Count > 0` inline, Generate had its own `fast`. Both now come from `FastPath` and
+  Generate takes `ActiveParts` itself, so the list the UI counts and the list the rigger consumes cannot disagree
+  again. *(2) The bake-test report printed PASS when nothing ran.* The verdict read `fail == 0 ? PASS : FAIL`, so
+  an all-skipped run wrote *"PASS — 0 passed, 0 failed, 1 skipped"* into the window headline and into
+  `Logs/haf_bake_tests_report.txt` — the artifact whose entire job is answering "did the tests pass before this
+  release?" — reachable on any machine without Blender. The per-row label already said SKIPPED for a zero-pass
+  section; the summary never learned the same rule (mine, from Thursday). It now reads **NOTHING VERIFIED**, and
+  the Console line becomes a warning in that case, so a run that checked nothing cannot look like success anywhere.
+
 - **THE GUARD WAS REAL; IT JUST WASN'T ON EVERY DOOR (2026-08-22, review finding — fixed).** Saturday's commit
   closed a data-loss hole: type a resource name that already exists and Bake and Save settings grey out behind a
   red "Not allowed" box. `ModelRegistry.Upsert` is a blind `RemoveAll(name) + Add`, so a write under someone
