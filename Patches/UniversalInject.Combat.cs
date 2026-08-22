@@ -404,13 +404,24 @@ namespace HumankindAssetFramework
                         var f = e.activeFires[i];
                         if (f.waitAlign)
                         {
-                            // battle-turn: hold the clip's clock while the pawn is still turning. PREFERRED
-                            // signal = the strike's ONE shared release time (same clock as the attack pose and
-                            // the shell schedules — per-consumer checks desynced the recoil from the bang);
-                            // fallback = the live misalignment. 4 s failsafe either way.
-                            bool still = UnityEngine.Time.time - f.armTime < 4f &&
-                                         (TryAimRelease(f.pos, out float rel) ? UnityEngine.Time.time < rel
-                                                                              : TurnMisalignAt(f.pos) > 8f);
+                            // battle-turn: hold the clip's clock while the pawn is still turning. The strike's ONE
+                            // shared release time is the primary signal — it is the clock the attack pose and the
+                            // shell schedules use, and per-consumer checks desynced the recoil from the bang.
+                            // BUT IT IS AN ESTIMATE: `miss/rate + 0.2`, capped at 3 s, computed at strike prep. When
+                            // the pawn is genuinely still slewing at the deadline the gun recoils mid-turn — visibly
+                            // firing off-target (user, 2026-08-22: a 173 deg miss held only 1.16 s). So the live
+                            // misalignment is now an ADDITIONAL hold rather than a mere fallback: release needs the
+                            // clock elapsed AND the pawn actually pointing at the target. The 4 s failsafe still caps
+                            // both, so a stuck ease can never wedge a fire open.
+                            float miss = TurnMisalignAt(f.pos);
+                            bool clockHeld = TryAimRelease(f.pos, out float rel) && UnityEngine.Time.time < rel;
+                            bool still = UnityEngine.Time.time - f.armTime < 4f && (clockHeld || miss > 8f);
+                            if (still && !clockHeld && !f.lateAlignLogged)
+                            {
+                                f.lateAlignLogged = true;   // once per fire: how far the shared clock under-called it
+                                Plugin.Diag($"[BattleTurn] recoil held past the strike clock: still {miss:F0}deg off " +
+                                            $"after {UnityEngine.Time.time - f.armTime:F2}s — the clock's miss/rate estimate ran short");
+                            }
                             if (still) { f.startTime = UnityEngine.Time.time; e.activeFires[i] = f; continue; }
                             f.waitAlign = false; e.activeFires[i] = f;   // released (or timed out): clock runs from here
                         }

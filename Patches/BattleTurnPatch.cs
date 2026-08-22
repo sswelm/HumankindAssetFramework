@@ -148,7 +148,7 @@ namespace HumankindAssetFramework
     // our held recoil clip all land together at alignment. Single caller = the map bombard. ----
     [HarmonyPatch] internal static class Hk_BombardAnimHold
     {
-        class Pending { public object fsm; public float due; public float start; public bool fixedDue; }
+        class Pending { public object fsm; public float due; public float start; public bool fixedDue; public bool lateLogged; }
         [SessionScoped] static readonly List<Pending> pending = new List<Pending>();
         static MethodInfo miTeleport;
         static bool replaying;
@@ -199,13 +199,29 @@ namespace HumankindAssetFramework
             {
                 if (now < pending[i].due) continue;
                 var fsm = pending[i].fsm;
-                if (!pending[i].fixedDue && now - pending[i].start < 4f)
+                // RE-CHECK THE AIM ON BOTH PATHS (2026-08-22). This used to skip the check whenever `fixedDue` was
+                // set — i.e. exactly when the strike's shared clock supplied the deadline — on the reasoning that
+                // the shared clock is authoritative for shell/smoke sync. But that clock is an ESTIMATE
+                // (`miss/rate + 0.2`, capped at 3 s, computed at strike prep), so when it under-calls the slew the
+                // gun fires mid-turn, visibly shooting off-target (user, 2026-08-22: a 173 deg miss held 1.16 s).
+                // Deferring further costs nothing in sync: the shell and launch smoke are scheduled off the state
+                // we are replaying, so the whole attack moves together. The 4 s cap from the ORIGINAL defer still
+                // bounds it, so a stuck ease can only ever delay by that much.
+                if (now - pending[i].start < 4f)
                 {
                     try
                     {
                         var pawn = UniversalInject.GetMember(fsm, "ownerPawn");
                         if (pawn != null && UniversalInject.TurnHoldTransformSeconds(pawn) > 0f)
-                        { pending[i].due = now + 0.1f; continue; }   // aim not reached yet — check again shortly
+                        {
+                            if (pending[i].fixedDue && !pending[i].lateLogged)
+                            {
+                                pending[i].lateLogged = true;
+                                Plugin.Diag($"[BattleTurn] attack pose held past the strike clock: still slewing " +
+                                            $"{now - pending[i].start:F2}s in — the shared clock's estimate ran short");
+                            }
+                            pending[i].due = now + 0.1f; continue;   // aim not reached yet — check again shortly
+                        }
                     }
                     catch { }
                 }

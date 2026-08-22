@@ -154,7 +154,7 @@ namespace HumankindAssetFramework
     // frame) until the pawn's turn-ease yaw reaches the game's target — the recoil then fires exactly when the
     // barrel faces the enemy. armTime bounds the hold (4 s failsafe). Only set by the artillery arm when turn
     // ease is active; default(false) everywhere else = exact old behavior.
-    internal struct FireInstance { public UnityEngine.Vector3 pos; public float startTime; public long pawnId; public bool waitAlign; public float armTime; }
+    internal struct FireInstance { public UnityEngine.Vector3 pos; public float startTime; public long pawnId; public bool waitAlign; public float armTime; public bool lateAlignLogged; }
     // A pawn's render position + the (ramped) normalized pose time its unit should currently hold, for the gradual deploy.
     internal struct DeploySample { public UnityEngine.Vector3 pos; public float poseTime; }
 
