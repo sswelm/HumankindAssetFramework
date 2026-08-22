@@ -378,7 +378,7 @@ namespace HumankindAssetFramework
             new Dep(ClipCurveEntry, nameof(ClipCurveEntry), "EncodingFormat"),
             new Dep(Databases, nameof(Databases), "GetDatabase"),
             new Dep(DatatableElementReference, nameof(DatatableElementReference), "XmlSerializableElementName"),   // formation-by-size reads the unit's own formation through this
-            new Dep(SimulationUnitDefinition, nameof(SimulationUnitDefinition), "SpawnType"),   // era-scale domain (land/naval/air)
+            new Dep(SimulationUnitDefinition, nameof(SimulationUnitDefinition), "SpawnType", "TagAsAbilities"),   // era-scale domain (land/naval/air)
             new Dep(BattleContender, nameof(BattleContender), "Units"),
             new Dep(BattleUnit, nameof(BattleUnit), "Unit", "TargetUnit"),
             new Dep(GroundMaterialDefinition, nameof(GroundMaterialDefinition), "GroundMaterialAuthoringData"),
@@ -514,7 +514,10 @@ namespace HumankindAssetFramework
             new Dep(ClipEntry, nameof(ClipEntry), "UnityAnimationClip", "FrameCount", "BonesCount", "CurveIndex", "Looping"),
             new Dep(PawnDefinitionEntry, nameof(PawnDefinitionEntry), "PresentationUnitDefinition"),
             new Dep(AnimationVariableNames, nameof(AnimationVariableNames), "SimpleAttackState"),
-            new Dep(PresentationUnitDefinition, nameof(PresentationUnitDefinition), "CoordinationValues", "PresentationFormationDefinition"),
+            // FacingAngleOffset = broadside aim (ships present their SIDE to a target). The 08-21 review named it as
+            // uncatalogued; it was never actually added — only a COMMENT in this file mentioned it. It reads at a
+            // NESTED call site, which this gate could not see until 2026-08-22.
+            new Dep(PresentationUnitDefinition, nameof(PresentationUnitDefinition), "CoordinationValues", "PresentationFormationDefinition", "FacingAngleOffset"),
             new Dep(CoordinationValues, nameof(CoordinationValues), "DummyOffsetPosition"),
             new Dep(PresentationFormation, nameof(PresentationFormation), "DummyCount"),
             new Dep(FormationDummyData, nameof(FormationDummyData), "Position", "CoordinatePerDirection"),

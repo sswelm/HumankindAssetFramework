@@ -47,6 +47,50 @@ ToString	BCL
 Length	BCL array member
 Value@Patches/DistrictInject.cs	tolerant probe: the code tries Guid ?? Value ?? guid on an unknown pair type and copes with all three absent
 guid@Patches/DistrictInject.cs	tolerant probe: same chain as Value above
+# ---- the GF( family, made visible 2026-08-22 when this gate learned to see it (it had been blind to 16 sites) ----
+# GF(type, "name") is the district axis's tolerant field probe over a type resolved AT RUNTIME (mat.GetType(),
+# voBox.GetType(), a clone's type). The catalog binds member-to-DECLARING-TYPE, and these sites genuinely do not
+# know the type statically — so they are allowlisted with the reason rather than faked into the catalog. Every one
+# is site-scoped: the same name read anywhere else still has to be catalogued.
+# DIAGNOSTIC DUMPS (DistrictDebug-gated, tolerant, never on a render path — a rename degrades a debug line):
+visualOutput@Patches/DistrictInject.cs	DumpMatTree diagnostic (DistrictDebug-gated)
+layerEntryCount@Patches/DistrictInject.cs	DumpMatTree diagnostic
+levelBuildDecalRenderDataEntryIndex@Patches/DistrictInject.cs	DumpMatTree diagnostic
+loadedStatus@Patches/DistrictInject.cs	DumpMatTree diagnostic
+lodData@Patches/DistrictInject.cs	DumpMatTree diagnostic
+meshIndexLod0@Patches/DistrictInject.cs	DumpMatTree diagnostic
+meshIndexLod1@Patches/DistrictInject.cs	DumpMatTree diagnostic
+useCustomBBox@Patches/DistrictInject.cs	DumpMatTree diagnostic
+decalMesh@Patches/DistrictInject.cs	DumpDecalDescriptor diagnostic (DistrictDebug-gated)
+elements@Patches/DistrictInject.Scoped.cs	DumpGroundMatchers diagnostic (DistrictDebug-gated)
+levelBuildMatchElements@Patches/DistrictInject.Scoped.cs	DumpGroundMatchers diagnostic
+Exploitation@Patches/DistrictInject.Scoped.cs	DumpGroundMatchers diagnostic
+District@Patches/DistrictInject.Scoped.cs	DumpGroundMatchers diagnostic
+emitter@Patches/DistrictInject.Scoped.cs	DumpGroundMatchers diagnostic
+# FUNCTIONAL, on a runtime-resolved type. These DO carry silent-degradation risk if the game renames them — the
+# `?.` chains simply stop applying. Promoting them to derived catalog bindings (the A6 CachedDerived mechanism,
+# anchored on the type that produced the instance) is in docs/Review-Backlog.md; until then the risk is named here
+# rather than hidden by a gate that could not see the site at all.
+mesh@Patches/DistrictInject.cs	tolerant alternate spelling: every site reads GF(t,"fxMesh") ?? GF(t,"mesh") — fxMesh IS catalogued, this is the fallback
+fadeInOutMode@Patches/DistrictInject.cs	functional read on a runtime-resolved material type (clone path); no static declaring type to bind
+fadeInOutMode@Patches/DistrictInject.Scoped.cs	same read on the scoped path's recursive material walk (mat.GetType(), depth-limited)
+bbox@Patches/DistrictInject.cs	functional read on a runtime-resolved clone type; also read by DumpMatTree in the same file
+loadedOutputLayer@Patches/DistrictInject.Scoped.cs	footprint injection writes the cloned output layer through voBox.GetType() — type known only at runtime
+loadedOutputLayerGUID@Patches/DistrictInject.Scoped.cs	written beside loadedOutputLayer above, same runtime-resolved box
+# ---- surfaced 2026-08-22 by the NESTED-call extraction pass (outer literals were invisible before) ----
+# The footprint/mask injection block (Scoped.cs ~1006-1067) clones a visual-output box and its evolver material,
+# every type resolved from the instance the game handed back. Same reason as the GF( block above.
+visualOutput@Patches/DistrictInject.Scoped.cs	footprint injection, runtime-resolved host/output-layer box
+maskedByTerrain@Patches/DistrictInject.Scoped.cs	footprint mask, runtime-resolved decal type
+maskTexture@Patches/DistrictInject.Scoped.cs	footprint mask, runtime-resolved decal type
+layer0@Patches/DistrictInject.Scoped.cs	footprint mask, runtime-resolved output-layer clone
+bboxOverride@Patches/DistrictInject.Scoped.cs	footprint sizing, runtime-resolved clone
+defaultSize@Patches/DistrictInject.Scoped.cs	footprint sizing, runtime-resolved clone
+loadedEvolverMaterialGuid@Patches/DistrictInject.Scoped.cs	evolver-material clone, runtime-resolved
+LocalScale@Patches/DistrictInject.Scoped.cs	evolver-material clone, runtime-resolved
+AxeY@Patches/DistrictInject.Scoped.cs	evolver-material clone, runtime-resolved
+AxeZ@Patches/DistrictInject.Scoped.cs	evolver-material clone, runtime-resolved
+StartSkeletonBoneEntry@Patches/UniversalInject.Pose.cs	read off an element of the engine's skeleton BUFFER (skelBuf.GetValue(id)); the element type is not resolved statically — see Review-Backlog for promoting it to a derived binding
 Data@Patches/UniversalInject.ScaleEra.cs	generic collection walker — tries an indexer first, then Data, then gives up; no single game type owns it
 definition@Patches/DistrictInject.Scoped.cs	tolerant probe: tries Definition ?? definition on a database matrix and copes with both absent
 EOF
@@ -56,7 +100,15 @@ EOF
 # A literal immediately followed by `+` is a CONCATENATED family ("Pose" + i, "BoneRotation" + i): the real member is
 # <name>0, which is what the catalog holds, so check that instead of the bare prefix.
 extract() {
-  grep -onE "(GetMember|SetMember|GetMemberOrNull|CallMethod|FastMember\.(Getter|Setter)<[^>]*>|AccessTools\.(Field|Property|Method|PropertyGetter|PropertySetter|DeclaredField|DeclaredProperty|DeclaredMethod)|\.Get(Field|Property|Method|Event|Member)|Traverse\.Field|Traverse\.Property|Traverse\.Method)\([^)]*?\"[A-Za-z_][A-Za-z0-9_.]*\" *\+?" $SRC 2>/dev/null \
+  # PASS 2 — the NESTED shape, added 2026-08-22. `GetMember(GetMember(x, "Inner"), "Outer")` gave up only "Inner":
+  # pass 1 stops at the first `)`, so every OUTER literal in a nested call was invisible. That was not theoretical —
+  # `TagAsAbilities` (Combat.cs, read that way and only that way) was missing from the catalog AND from this gate.
+  # Deliberately narrow: accessor( identifier( …no nested parens… ), "NAME" — it cannot wander into a neighbouring
+  # call on the same line, which a general "allow any )" relaxation would.
+  grep -onE "(GetMember|SetMember|GetMemberOrNull|CallMethod|CachedField|CachedProp|GF)\([A-Za-z_][A-Za-z0-9_.]*\([^()]*\), *\"[A-Za-z_][A-Za-z0-9_.]*\"" $SRC 2>/dev/null \
+  | sed -E 's/^([^:]+):([0-9]+):.*"([A-Za-z_][A-Za-z0-9_.]*)"$/\3\t\1:\2/' \
+  | awk -F'\t' '{n=split($1,p,"."); for(i=1;i<=n;i++) if (p[i] != "") print p[i] "\t" $2}'
+  grep -onE "(GetMember|SetMember|GetMemberOrNull|CallMethod|CachedField|CachedProp|GF|FastMember\.(Getter|Setter)<[^>]*>|AccessTools\.(Field|Property|Method|PropertyGetter|PropertySetter|DeclaredField|DeclaredProperty|DeclaredMethod)|\.Get(Field|Property|Method|Event|Member)|Traverse\.Field|Traverse\.Property|Traverse\.Method)\([^)]*?\"[A-Za-z_][A-Za-z0-9_.]*\" *\+?" $SRC 2>/dev/null \
   | sed -E 's/^([^:]+):([0-9]+):.*"([A-Za-z_][A-Za-z0-9_.]*)"( *\+)?$/\3\4\t\1:\2/' \
   | sed -E 's/^([A-Za-z_][A-Za-z0-9_.]*) *\+\t/\10\t/' \
   | awk -F'\t' '{n=split($1,p,"."); for(i=1;i<=n;i++) if (p[i] != "") print p[i] "\t" $2}'

@@ -55,6 +55,17 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
   cosmetic-but-dishonest: the remaining coverage clauses, `SubPawnScene` / `LayersChecked` / `SeamsChecked` /
   `RolesChecked` / `SoundsChecked`, are suppressed at zero rather than printed.)
 
+- ~~**The catalog gate cannot see the `CachedField(` family.**~~ — **FIXED 2026-08-22**, and it was worse than
+  reported: teaching it `CachedField(`/`GF(` surfaced 19 uncatalogued names, and a second pass for nested calls
+  (`GetMember(GetMember(x, "Inner"), "Outer")` only ever yielded *Inner*) surfaced 13 more — including
+  **`FacingAngleOffset`**, the member the 08-21 review had named, which was never actually catalogued; its only
+  mention in `GameBinding.cs` was the comment describing that review. Now catalogued with `TagAsAbilities` and
+  bindcheck-validated. **Still open (low priority):** ~30 duck-typed reads over runtime-resolved types
+  (`mat.GetType()`, `voBox.GetType()`, the skeleton buffer element at `Pose.cs:42`) are site-scoped allowlist
+  entries with reasons, not catalog bindings — the functional ones among them still degrade silently on a game
+  rename. Promoting them via the A6 `CachedDerived` mechanism (anchored on the type that produced the instance)
+  is the real close-out.
+
 - **The sub-pawn walk double-counts, so its coverage number can read better than complete.** A `PresentationUnit`
   reached twice during a battle (armies *and* battle units), and a squadron reachable both via the holder subtree
   and the air-formation `MainPawn` walk, are counted twice — the F8 panel showed `sub-pawn walk 56/46` on

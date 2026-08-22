@@ -10,6 +10,25 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE CATALOG GATE WAS BLIND TO 46 OF ITS OWN SITES — AND ONE OF THEM WAS THE MEMBER THE LAST REVIEW NAMED
+  (2026-08-22).** A7's promise is that the catalog covers the code, *proven mechanically*. Its extraction regex
+  listed `GetMember`/`SetMember`/`CallMethod`/`FastMember`/`AccessTools.*`/`Traverse.*` — and not `CachedField(`
+  or `GF(`, the district axis's own probe, 16 sites. Teaching it that family took the visible surface from 283 to
+  311 literals and **failed immediately on 19 real uncatalogued names**. Then a second blind spot: `\([^)]*?"…"`
+  cannot cross a `)`, so in `GetMember(GetMember(x, "Inner"), "Outer")` only *Inner* was ever extracted. A narrow
+  second pass for that shape (accessor → identifier-call → literal; deliberately unable to wander into a
+  neighbouring call) brought it to **329 literals and 13 more missing names**. Among them: **`FacingAngleOffset`**
+  — the battle-aim member the 08-21 review explicitly listed as uncatalogued. It had never been added. The only
+  occurrence in `GameBinding.cs` was a *comment describing the review that found it*, and because its read is a
+  nested call, nothing could contradict that comment. It and `TagAsAbilities` are now real catalog entries on
+  `PresentationUnitDefinition` / `SimulationUnitDefinition`, **validated against the game DLLs by bindcheck**
+  (132/132 types, 0 missing). The remaining 30 are duck-typed reads over types resolved at runtime
+  (`mat.GetType()`, `voBox.GetType()`) which the catalog's member→declaring-type model genuinely cannot express;
+  each is site-scoped in the allowlist **with its reason**, diagnostics separated from functional reads, and the
+  functional ones' residual silent-degradation risk written down rather than hidden by a gate that could not see
+  the site at all. Drilled both new paths: a planted `CachedField(t, "…")` and a planted nested literal are each
+  caught and named with file:line; before today both printed OK.
+
 - **A BROKEN REPOINT NOW FAILS INSTEAD OF INFORMING (2026-08-22, review finding — fixed).** `UninjectedReason`
   returned *"its addon loaded but the repoint did not run"* with `mismatch = false`, so the entry landed in
   `Uninjected` — a list the verdict only ever **prints**. That string means the game loaded the unit, our
