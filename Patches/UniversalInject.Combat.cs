@@ -525,6 +525,30 @@ namespace HumankindAssetFramework
         // (StartPawnAction — the moment the attack begins), while the attack ANIMATION arms from the PER-SWING hook
         // (StartPairMeleeAttack). Firing the sound per-swing made the roar land near the END of the anim (too late);
         // fight-start is "the moment you attack". Ranged still does both from its one shot hook (timing is fine there).
+        // RELEASE THE HELD RECOIL AT THE ATTACK ITSELF (2026-08-22). Called from the attack-pose replay — the moment
+        // the game actually fires, muzzle flash and sound included. A held fire near that pawn starts its clip NOW,
+        // instead of independently re-deriving the same moment from the strike clock's estimate. One event beats two
+        // clocks: the kick can no longer lead or lag the bang, whatever the estimate said.
+        internal static void ReleaseHeldFiresAt(UnityEngine.Vector3 pos)
+        {
+            var list = entries;
+            if (list == null) return;
+            foreach (var e in list)
+            {
+                if (e.activeFires == null) continue;
+                lock (e.activeFires)
+                    for (int i = 0; i < e.activeFires.Count; i++)
+                    {
+                        var f = e.activeFires[i];
+                        if (!f.waitAlign || (f.pos - pos).sqrMagnitude >= PoseMath.FireMatchRadiusSq) continue;
+                        f.waitAlign = false; f.startTime = UnityEngine.Time.time;
+                        e.activeFires[i] = f;
+                        Plugin.Diag($"[Fire] '{e.resourceName}': recoil released BY THE ATTACK EVENT " +
+                                    $"({UnityEngine.Time.time - f.armTime:F2}s after arming)");
+                    }
+            }
+        }
+
         internal static void OnPawnAttack(object attacker, string how, bool playSound = true, bool armAnim = true)
         {
             try

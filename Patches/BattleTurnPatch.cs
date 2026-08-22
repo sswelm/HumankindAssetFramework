@@ -242,6 +242,14 @@ namespace HumankindAssetFramework
             try
             {
                 var pawn = UniversalInject.GetMember(fsm, "ownerPawn");
+                // THE RECOIL RIDES THIS EVENT (2026-08-22, user: "isn't the attack itself already deferred, why not
+                // the animation?"). It is: this method IS the moment the attack plays, muzzle flash and shot sound
+                // included. Our recoil clip used to reach the same moment independently, by re-deriving alignment
+                // against the strike CLOCK — two clocks that agree only while the estimate holds, and visibly did
+                // not. Releasing the held fire here replaces an estimate with the event itself, so the kick starts
+                // exactly when the gun fires. The waitAlign path stays as the failsafe for fires this never reaches.
+                if (pawn != null && UniversalInject.GetMember(pawn, "Transform") is UnityEngine.Transform ptr)
+                    UniversalInject.ReleaseHeldFiresAt(ptr.position);
                 if (pawn != null && !playResolveFailed)
                 {
                     if (miPlayState == null)
