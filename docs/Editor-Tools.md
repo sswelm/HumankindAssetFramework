@@ -89,16 +89,27 @@ The deploy block's **Wheel bones (roll while moving)** + axle axis / loop frames
 >   `Deploy[N..N]` holds it up. Axis is the world horizontal perpendicular to the tube and the **sign is chosen**, as
 >   the trails' is, by testing which way actually lifts the muzzle.
 >
-> **MUZZLE — a part role, deliberately not a bone (2026-08-22).** Mark a separately-modelled **muzzle brake / flash
-> hider** as **Muzzle** and the rigger *welds it to the `Gun` bone* rather than giving it one: a brake is bolted to
-> the tube, so it must elevate — and later recoil — with it, and a bone of its own could only ever drift off the
-> barrel it is screwed to. What the marking buys is an **exact muzzle tip**: without it the muzzle end is the gun
-> bbox's far extreme, which a wide brake or a front bracket skews; with it, it is the marked geometry's farthest
-> point from the breech. That tip pins the breech→muzzle span *Gun pivot* measures against, and the run reports the
-> **measured fire origin** (gun-bone-local, in source units — scale by the bake's `size`) in its DONE status, which
-> is the value the Animation Lab's *Muzzle offset* dial otherwise costs an iterate-and-relaunch loop to find.
-> If the brake is modelled **into** the barrel mesh — as it is on the M114, where the tube tapers to 3.84 wide and
-> then flares back to 5.22 over its last 6 units — there is nothing to mark; skip the role.
+> **THE THREE GUN ROLES — one bone, three meanings (2026-08-22).** **Gun**, **Cradle** and **Muzzle** all weld to the
+> single `Gun` bone, because all three elevate together about the trunnions. None of them gets a bone of its own.
+> What separates them is what else they mean:
+>
+> | role | is | in the breech→muzzle span? | when recoil lands |
+> |---|---|---|---|
+> | **Gun** | the tube itself | **yes** — it *defines* the span | the part that **kicks back** |
+> | **Cradle** | the frame holding the tube — trunnions, recoil cylinders, the trough it slides in | **no** | the part that **stays** |
+> | **Muzzle** | a separately-modelled brake / flash hider | yes, and it **pins the tip exactly** | rides the tube |
+>
+> The span exclusion is the point of **Cradle**: a cradle stops well short of the muzzle (26 units short on the
+> M114), so folding it in would shrink the span and make *Gun pivot*'s fraction lie about where along the barrel the
+> trunnion sits. On a model whose barrel already outreaches its cradle both ways, marking the cradle `Gun` gives a
+> byte-identical rig — but the role is still the right home, because it is the split recoil will need.
+>
+> **Muzzle** buys an **exact tip**: without it the muzzle end is the gun bbox's far extreme, which a wide brake or a
+> front bracket skews. That tip is the fire origin, and the run reports it **gun-bone-local, in source units** (scale
+> by the bake's `size`) in its DONE status — the value the Animation Lab's *Muzzle offset* dial otherwise costs an
+> iterate-and-relaunch loop to find. If the brake is modelled **into** the barrel mesh — as on the M114, where the
+> tube tapers to 3.84 wide and then flares back to 5.22 over its last 6 units — there is nothing to mark; skip it.
+> Marking the *cradle* as Muzzle is the trap: it pins the tip 26 units short and silently rescales the pivot slider.
 
 > **This does not replace HAF's runtime `gunElevMax`** (Animation Lab ▸ *Gun elevation — max*) — that writes a
 > `BoneRotation` slot, a channel the clip pose never touches, so the two **compose**: the clip sets the base firing

@@ -996,6 +996,20 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   with Deploy conversion OFF, Convert raw rig ON, Fix 100× OFF, Auto-ground ON, Idle stance `Spin[0..0]`, Movement
   `Spin`, every `deploy…`/`recoil` clip field cleared. **"In game it moves perfectly."** Cost, as agreed for step 1:
   the fold/deploy/recoil are gone on that unit until re-authored on the clean rig.
+- **CRADLE — THE PART THAT HOLDS THE CANNON, GIVEN ITS PROPER NAME (2026-08-22).** The user had marked `cannon2` as
+  *Muzzle* — "I called it the muzzle because it's one part" — and the run's own readout caught it: `tip=(-0.00,
+  -34.14, 19.25)`, pinning the muzzle 26 units short of the real one at `Y −60.55`, which silently shrank the
+  breech→muzzle span from 76 to 49.6 and made a *Gun pivot* of `0.2` actually land at 11% of the tube. The label and
+  the number had stopped agreeing. Their own description — "the part that holds the cannon" — is exactly what
+  artillery calls a **cradle**, so it got the name rather than a workaround, on the same reasoning as Trail-not-Leg.
+  The three gun roles now all weld to the one `Gun` bone (they elevate together about the trunnions) and differ in
+  what else they mean: **Gun** is the tube and *defines* the span; **Cradle** is the frame holding it and is kept
+  **out** of the span, because a cradle stops short of the muzzle and would shrink it; **Muzzle** is a separate brake
+  and *pins* the tip. The split earns itself twice over on recoil — the user's own read, *the barrel is the part that
+  kicks back*: Gun moves, Cradle stays. Proven headless three ways on the same marking: as Muzzle the span truncates
+  to `−34.14`; as Cradle it is the honest `−60.55`; as Gun it is byte-identical to Cradle, since this barrel already
+  outreaches its cradle both ways — so the role changes nothing *today* and is still the right home for tomorrow. All
+  three keep one Gun bone with 5 parts welded, no bone added.
 - **A MUZZLE ROLE THAT IS DELIBERATELY NOT A BONE (2026-08-22).** Reading the howitzer's anatomy off the mesh rather
   than the part names settled what the gun actually is: `barrel1` is the 76-unit tube — and its last 6 units flare
   from 3.84 back out to 5.22, so **the muzzle brake is modelled *into* the barrel**, not as a part — while `cannon2`
