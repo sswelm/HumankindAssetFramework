@@ -634,6 +634,7 @@ namespace HumankindAssetFramework
                 var tbk = Regex.Matches(text, "\"turnBank\"\\s*:\\s*(-?[0-9.]+)");         // parity: bank into the turn, degrees
                 var gem = Regex.Matches(text, "\"gunElevMax\"\\s*:\\s*(-?[0-9.]+)");       // parity: distance-proportional barrel elevation, max degrees
                 var gea = Regex.Matches(text, "\"gunElevAxis\"\\s*:\\s*(-?[0-9]+)");       // parity: elevation local axis index
+                var ger = Regex.Matches(text, "\"gunElevRise\"\\s*:\\s*(-?[0-9.]+)");      // parity: seconds to raise (0 = track the turn)
                 var geh = Regex.Matches(text, "\"gunElevHold\"\\s*:\\s*(-?[0-9.]+)");      // parity: seconds the barrel holds its firing angle after the shot
                 var gef = Regex.Matches(text, "\"gunElevFall\"\\s*:\\s*(-?[0-9.]+)");      // parity: seconds to ease back to the resting elevation
                 var hgd = Regex.Matches(text, "\"hugDrop\"\\s*:\\s*(-?[0-9.]+)");          // parity: terrain hug drop, units
@@ -719,6 +720,7 @@ namespace HumankindAssetFramework
                         gunElevAxis = i < gea.Count && int.TryParse(gea[i].Groups[1].Value, out var gav) ? gav : 0,
                         // Defaults match the schema (1.5s / 2s) so an entry saved before these fields existed still
                         // eases down sensibly rather than snapping or hanging at maximum elevation.
+                        gunElevRise = i < ger.Count && float.TryParse(ger[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var gerv) ? gerv : 0f,
                         gunElevHold = i < geh.Count && float.TryParse(geh[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var gehv) ? gehv : 1.5f,
                         gunElevFall = i < gef.Count && float.TryParse(gef[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var gefv) ? gefv : 2f,
                         hugDrop = i < hgd.Count && float.TryParse(hgd[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hdv) ? hdv : 0f,

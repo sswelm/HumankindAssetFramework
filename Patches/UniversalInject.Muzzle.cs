@@ -498,7 +498,7 @@ namespace HumankindAssetFramework
         // angle"): for the strike override nearest `pos`, the target DISTANCE plus a 0→1 envelope — rising
         // over the turn hold (the barrel comes up while the hull lays), holding through the strike, easing
         // back down over the last 2 s of the override window (the crew lowering the gun).
-        internal static bool TryAimElevAt(UnityEngine.Vector3 pos, out float dist, out float envelope, float hold, float fall)
+        internal static bool TryAimElevAt(UnityEngine.Vector3 pos, out float dist, out float envelope, float rise, float hold, float fall)
         {
             dist = 0f; envelope = 0f;
             float now = UnityEngine.Time.time; AimOverride o = null; float best = 16f;
@@ -510,7 +510,14 @@ namespace HumankindAssetFramework
             }
             if (o == null) return false;
             float relEnd = o.releaseAt > o.createdAt ? o.releaseAt : o.createdAt + 0.5f;
-            float up = UnityEngine.Mathf.Clamp01((now - o.createdAt) / UnityEngine.Mathf.Max(0.3f, relEnd - o.createdAt));
+            // GOING UP. By default the raise TRACKS THE TURN: it ramps from the moment the aim is set to the moment
+            // the turn hold releases, so the gun finishes elevating exactly as it finishes slewing — arriving aimed
+            // and elevated together, ready to fire. That is why `rise` defaults to 0 and means "track the turn": a
+            // fixed time cannot do this (on a long turn the gun would sit waiting at full elevation; on a short one
+            // it would still be climbing when the shot went off). A positive `rise` overrides it for models that
+            // want a deliberately slow, cranked-up look regardless of how far the unit had to turn.
+            float upDur = rise > 0.01f ? rise : UnityEngine.Mathf.Max(0.3f, relEnd - o.createdAt);
+            float up = UnityEngine.Mathf.Clamp01((now - o.createdAt) / upDur);
             // lower the barrel a few seconds after the SHOT (releaseAt), not when the override dies — with
             // facing persistence the override outlives the strike, but the gun shouldn't stay elevated forever
             // COMING BACK DOWN (2026-08-22): hold the elevation past the shot, then ease it back to the resting

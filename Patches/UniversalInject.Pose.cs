@@ -727,7 +727,7 @@ namespace HumankindAssetFramework
             // before ever looking. Each early exit now says so once, so "no effect" names its own cause.
             if (!TryGetTranslation(entry, out var pos))
             { Plugin.DiagOnce("elev-nopos-" + e.resourceName, $"[Elev] '{e.resourceName}': no pawn translation — elevation cannot run"); return; }
-            if (!TryAimElevAt(pos, out float dist, out float f, e.gunElevHold, e.gunElevFall))
+            if (!TryAimElevAt(pos, out float dist, out float f, e.gunElevRise, e.gunElevHold, e.gunElevFall))
             { Plugin.DiagOnce("elev-noaim-" + e.resourceName, $"[Elev] '{e.resourceName}': no aim override near the pawn (or its target distance is 0) — elevation only runs during a bombard"); return; }
             Plugin.DiagOnce("elev-live-" + e.resourceName, $"[Elev] '{e.resourceName}': aim found, dist={dist:F1} envelope={f:F2}");
             if (e.gunElevBoneIdx == -2)
