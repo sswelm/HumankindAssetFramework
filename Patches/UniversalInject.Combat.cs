@@ -414,8 +414,18 @@ namespace HumankindAssetFramework
                             // clock elapsed AND the pawn actually pointing at the target. The 4 s failsafe still caps
                             // both, so a stuck ease can never wedge a fire open.
                             float miss = TurnMisalignAt(f.pos);
-                            bool clockHeld = TryAimRelease(f.pos, out float rel) && UnityEngine.Time.time < rel;
-                            bool still = UnityEngine.Time.time - f.armTime < 4f && (clockHeld || miss > 8f);
+                            bool aimKnown = TryAimRelease(f.pos, out float rel);
+                            bool clockHeld = aimKnown && UnityEngine.Time.time < rel;
+                            // THE RACE THAT MADE EVERY EARLIER FIX LOOK LIKE A NO-OP (2026-08-22, measured).
+                            // The ranged-fight hook arms this fire BEFORE the strike registers its aim override —
+                            // measured at 20 ms before. In that window the unit has not been told to turn yet, so
+                            // `miss` is legitimately 0 and no release time exists: the hold released instantly on
+                            // "aligned", and the strike then announced a 173 deg turn. "Aligned" is only meaningful
+                            // once there is an aim to be aligned WITH, so an unknown aim keeps the fire held for a
+                            // short grace. Bounded by the same 4 s failsafe, and by the grace itself for the case
+                            // where no strike aim ever arrives (a melee-ish or dial-off path).
+                            bool aimPending = !aimKnown && UnityEngine.Time.time - f.armTime < 0.5f;
+                            bool still = UnityEngine.Time.time - f.armTime < 4f && (clockHeld || aimPending || miss > 8f);
                             if (still && !clockHeld && !f.lateAlignLogged)
                             {
                                 f.lateAlignLogged = true;   // once per fire: how far the shared clock under-called it
@@ -430,7 +440,7 @@ namespace HumankindAssetFramework
                             // downstream (clip pacing, or the pawn's rendered facing trailing the eased yaw).
                             Plugin.Diag($"[Fire] '{e.resourceName}': recoil released after " +
                                         $"{UnityEngine.Time.time - f.armTime:F2}s — still {miss:F1}deg off " +
-                                        $"({(UnityEngine.Time.time - f.armTime >= 4f ? "4s FAILSAFE" : clockHeld ? "clock" : "alignment")})");
+                                        $"({(UnityEngine.Time.time - f.armTime >= 4f ? "4s FAILSAFE" : !aimKnown ? "no strike aim arrived" : "alignment")})");
                             f.waitAlign = false; e.activeFires[i] = f;   // released (or timed out): clock runs from here
                         }
                         if (UnityEngine.Time.time - f.startTime >= dur) e.activeFires.RemoveAt(i);   // drop finished one-shots
