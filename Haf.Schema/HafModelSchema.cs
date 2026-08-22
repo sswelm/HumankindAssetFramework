@@ -77,5 +77,7 @@ namespace Haf.Schema
         public float soundBattleOffset = 0f; // RUNTIME (not baked): seconds into the war-cry WAV.
         public float gunElevMax;            // RUNTIME-ONLY (GUN ELEVATION): max barrel raise (deg) during a bombard, proportional to target distance. 0 = off.
         public int gunElevAxis;             // RUNTIME-ONLY: the gun bone's local PITCH axis for the elevation (0=X, 1=Y, 2=Z).
+        public float gunElevHold = 1.5f;    // RUNTIME-ONLY: seconds the barrel HOLDS its firing angle after the shot before easing down. Must outlast the attack clip or it drops mid-recoil.
+        public float gunElevFall = 2f;      // RUNTIME-ONLY: seconds to ease from the firing angle back to the resting elevation.
     }
 }

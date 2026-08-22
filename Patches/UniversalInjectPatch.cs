@@ -634,6 +634,8 @@ namespace HumankindAssetFramework
                 var tbk = Regex.Matches(text, "\"turnBank\"\\s*:\\s*(-?[0-9.]+)");         // parity: bank into the turn, degrees
                 var gem = Regex.Matches(text, "\"gunElevMax\"\\s*:\\s*(-?[0-9.]+)");       // parity: distance-proportional barrel elevation, max degrees
                 var gea = Regex.Matches(text, "\"gunElevAxis\"\\s*:\\s*(-?[0-9]+)");       // parity: elevation local axis index
+                var geh = Regex.Matches(text, "\"gunElevHold\"\\s*:\\s*(-?[0-9.]+)");      // parity: seconds the barrel holds its firing angle after the shot
+                var gef = Regex.Matches(text, "\"gunElevFall\"\\s*:\\s*(-?[0-9.]+)");      // parity: seconds to ease back to the resting elevation
                 var hgd = Regex.Matches(text, "\"hugDrop\"\\s*:\\s*(-?[0-9.]+)");          // parity: terrain hug drop, units
                 var hgl = Regex.Matches(text, "\"hugLookahead\"\\s*:\\s*(-?[0-9.]+)");     // parity: terrain hug probe lead, units
                 var cbz = Regex.Matches(text, "\"combatZ\"\\s*:\\s*(-?[0-9.]+)");          // parity: combat height offset, units (− submerges)
@@ -715,6 +717,10 @@ namespace HumankindAssetFramework
                         turnBank = i < tbk.Count && float.TryParse(tbk[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var tbv) ? tbv : 0f,
                         gunElevMax = i < gem.Count && float.TryParse(gem[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var gev) ? gev : 0f,
                         gunElevAxis = i < gea.Count && int.TryParse(gea[i].Groups[1].Value, out var gav) ? gav : 0,
+                        // Defaults match the schema (1.5s / 2s) so an entry saved before these fields existed still
+                        // eases down sensibly rather than snapping or hanging at maximum elevation.
+                        gunElevHold = i < geh.Count && float.TryParse(geh[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var gehv) ? gehv : 1.5f,
+                        gunElevFall = i < gef.Count && float.TryParse(gef[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var gefv) ? gefv : 2f,
                         hugDrop = i < hgd.Count && float.TryParse(hgd[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hdv) ? hdv : 0f,
                         hugLookahead = i < hgl.Count && float.TryParse(hgl[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hlv) ? hlv : 1.5f,
                         combatZ = i < cbz.Count && float.TryParse(cbz[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cbv) ? cbv : 0f,

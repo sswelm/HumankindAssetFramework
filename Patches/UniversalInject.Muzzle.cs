@@ -435,9 +435,6 @@ namespace HumankindAssetFramework
         class TurnState { public UnityEngine.Vector3 pos; public float yaw; public float targetYaw; public float bank; public float lastT; public float rate; public float pivotDeg; public float lastMovedT = -10f; }
         [SessionScoped] static readonly List<TurnState> turnStates = new List<TurnState>();
         internal static float turnRate = 0f, turnBank = 0f;   // file-driven while spiking
-        // Gun-elevation descent, dialled in haf_turnease.txt (elevhold/elevfall). Defaults chosen so the barrel
-        // holds through the recoil and then eases down rather than sitting at maximum for six seconds.
-        internal static float ElevHoldSeconds = 1.5f, ElevFallSeconds = 2f;
 
         // THE one place that answers "how fast does this entry turn?" — per-model, else category, else the legacy
         // global. Extracted 2026-08-22 because the answer was spelled out inline in ApplyTurnEase while the fire
@@ -501,7 +498,7 @@ namespace HumankindAssetFramework
         // angle"): for the strike override nearest `pos`, the target DISTANCE plus a 0→1 envelope — rising
         // over the turn hold (the barrel comes up while the hull lays), holding through the strike, easing
         // back down over the last 2 s of the override window (the crew lowering the gun).
-        internal static bool TryAimElevAt(UnityEngine.Vector3 pos, out float dist, out float envelope)
+        internal static bool TryAimElevAt(UnityEngine.Vector3 pos, out float dist, out float envelope, float hold, float fall)
         {
             dist = 0f; envelope = 0f;
             float now = UnityEngine.Time.time; AimOverride o = null; float best = 16f;
@@ -521,7 +518,7 @@ namespace HumankindAssetFramework
             // 0.67 s recoil, which reads as the gun forgetting to stand down. The hold only has to outlast the
             // attack clip so the barrel cannot start dropping mid-recoil; 1.5 s clears that with margin (and still
             // clears a lead-in of ~24 frames should one be dialled back in).
-            float down = 1f - UnityEngine.Mathf.Clamp01((now - (relEnd + ElevHoldSeconds)) / ElevFallSeconds);
+            float down = 1f - UnityEngine.Mathf.Clamp01((now - (relEnd + UnityEngine.Mathf.Max(0f, hold))) / UnityEngine.Mathf.Max(0.05f, fall));
             envelope = UnityEngine.Mathf.Min(up, down);
             dist = o.dist;
             return envelope > 0.001f;

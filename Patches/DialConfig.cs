@@ -89,8 +89,6 @@ namespace HumankindAssetFramework
         // Default 90 — the one turn-ease key with a non-zero default, so a legacy file without it keeps the
         // behaviour a fresh install shows; 0 = off (turn while moving, the pre-2026-08-22 behaviour).
         internal float Pivot = 90f;
-        internal float ElevHold = 1.5f;   // seconds the gun holds its firing elevation after the shot, before easing down
-        internal float ElevFall = 2f;     // seconds it takes to ease back to the resting elevation
         const string Known = "rate, bank, human, land, turret, hover (air), ship, hoverbank, shipbank, pivot";
 
         internal static TurnEaseDial Parse(string text, List<string> problems)
@@ -111,8 +109,6 @@ namespace HumankindAssetFramework
                     case "ship":      if (DialConfig.Num(l, problems, out var sh)) d.Ship = sh;     break;
                     case "hoverbank": if (DialConfig.Num(l, problems, out var hb)) { d.HoverBank = hb; seenHoverBank = true; } break;
                     case "shipbank":  if (DialConfig.Num(l, problems, out var sb)) d.ShipBank = sb; break;
-                    case "elevhold":  if (DialConfig.Num(l, problems, out var eh)) d.ElevHold = eh; break;   // gun elevation: hold after the shot
-                    case "elevfall":  if (DialConfig.Num(l, problems, out var ef)) d.ElevFall = ef; break;   // ...and how long the way down takes
                     case "pivot":     if (DialConfig.Num(l, problems, out var pv)) d.Pivot = pv;    break;   // 0 = off
                     default: DialConfig.Unknown(l, problems, Known); break;
                 }
