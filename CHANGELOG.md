@@ -996,6 +996,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   with Deploy conversion OFF, Convert raw rig ON, Fix 100× OFF, Auto-ground ON, Idle stance `Spin[0..0]`, Movement
   `Spin`, every `deploy…`/`recoil` clip field cleared. **"In game it moves perfectly."** Cost, as agreed for step 1:
   the fold/deploy/recoil are gone on that unit until re-authored on the clean rig.
+- **IT TURNS, *THEN* IT FIRES (2026-08-22, verified in-game).** The recoil kept playing before the gun had slewed,
+  and it took five attempts because four of them were diagnosed by reading code rather than the log. The cause was
+  a **race**, visible in the line ordering of the very first failed run: the ranged-fight hook arms the fire, and
+  the strike registers its aim override **20 ms later**. In that window the unit has not been told to turn, so
+  `TurnMisalignAt` legitimately returns 0° and `TryAimRelease` finds nothing — the hold released instantly on
+  "aligned", and the strike then announced a 173° turn. Every earlier fix governed what happens *after* the hold
+  engages (arming HELD via `EffectiveTurnRate`, re-checking alignment at the deadline, releasing from the attack
+  event), so all three read as no-ops while the hold was ending 20 ms in. *"Aligned" is only meaningful once there
+  is an aim to be aligned with* — an unknown aim now holds the fire for a 0.5 s grace, bounded by the same 4 s
+  failsafe. The measurement that found it was two lines: elapsed-time plus measured misalignment at the moment of
+  release, and at the frame the attack clip actually starts. **Lesson recorded: a fix that changes nothing is
+  evidence that the assumption under it is wrong — stop fixing and add one measurement.**
 - **THE HOWITZER KICKS (2026-08-22, verified in-game).** *"Alright, it finally works."* The M114 rebuilt on a Vehicle
   Lab rig now rolls its wheels, folds before it turns, spreads its trails on arrival, raises to 45°, waits for the
   turn, and **recoils when it fires**. Getting the last part took two distinct bugs and four wrong theories.

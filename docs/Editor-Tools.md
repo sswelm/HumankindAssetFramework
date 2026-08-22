@@ -136,10 +136,11 @@ The deploy block's **Wheel bones (roll while moving)** + axle axis / loop frames
 >   **The far-pivot trick is not a legacy workaround for missing translation support — it IS the mechanism.**
 >   Residual tilt is the price of faking a slide with an arc, and `R` must stay finite: a pivot at infinity collapses
 >   bone chains through float32 cancellation (the old `1e9` sentinel bug).
-> * **Recoil lead-in (frames)** holds the gun still before the kick. The engine decides when the attack clip
->   *starts*, from a strike clock that is only an estimate (`miss/rate + 0.2`, capped at 3 s), so it can begin while
->   the gun is still slewing. The front of the clip is the part we own outright — raise this until the kick visibly
->   lands after the turn. 24 fps, so 24 = one second.
+> * **Recoil lead-in (frames)** holds the gun still before the kick. **Normally leave this at 0.** It exists from
+>   the days when the recoil could start before the gun had finished slewing; that turned out to be a race in the
+>   plugin — the fire was released 20 ms *before* the strike even set an aim to be aligned with — and is fixed, so
+>   the hold is now real. Use a handful of frames only if you deliberately want a beat between the gun settling and
+>   the kick. 24 fps, so 24 = one second.
 > * **The asymmetry is what sells it, not the distance.** The kick takes the first ~15% of the clip and the ride
 >   forward gets the rest, derived from **Recoil frames** rather than given its own dial, so it cannot be set to a
 >   shape that reads wrong. At 16 frames that is 2 back, 14 forward.
