@@ -457,7 +457,11 @@ namespace HumankindAssetFramework
                         int n = 0; string posDump = "";
                         // battle-turn spike: when turn ease is live for this entry, arm the fire HELD (waitAlign) so
                         // the recoil starts only once the pawn's eased yaw reaches the attack facing.
-                        bool hold = turnRate > 0f || e.turnRate > 0f;
+                        // Ask the SAME question ApplyTurnEase asks (EffectiveTurnRate): per-model, else CATEGORY,
+                        // else global. This used to be `turnRate > 0f || e.turnRate > 0f`, which skipped the
+                        // category dial — so a land unit eased entirely by `land=180` armed its recoil unheld and
+                        // kicked the instant the order was given while the muzzle flash correctly waited for the turn.
+                        bool hold = EffectiveTurnRate(e) > 0f;
                         lock (e.activeFires)
                             foreach (var pawn in pawns)
                             {
@@ -469,7 +473,10 @@ namespace HumankindAssetFramework
                         matched = true;
                         // Log the fire positions so they can be compared to the pose hook's 'ObjectSpace T=...' dump — if the
                         // two are in different spaces the nearest-match (radius 4u) won't fire; this shows it at a glance.
-                        Plugin.Diag($"[Fire] '{e.resourceName}' unit/army {uguid}: armed {n} pawn(s) at{posDump}");
+                        Plugin.Diag($"[Fire] '{e.resourceName}' unit/army {uguid}: armed {n} pawn(s) " +
+                                    (hold ? $"HELD until aligned (turn {EffectiveTurnRate(e):0} deg/s)"
+                                          : "UNHELD — no turn ease resolved, so the recoil fires at once") +
+                                    $" at{posDump}");
                     }
                     if (!matched) Plugin.Log.LogWarning($"[Fire] '{e.resourceName}': fired GUID(s) [{string.Join(",", fired)}] matched no PresentationUnit — barrel won't animate (timing/GUID mismatch)");
                 }

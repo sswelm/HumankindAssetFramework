@@ -428,6 +428,20 @@ namespace HumankindAssetFramework
         class TurnState { public UnityEngine.Vector3 pos; public float yaw; public float targetYaw; public float bank; public float lastT; public float rate; public float pivotDeg; public float lastMovedT = -10f; }
         [SessionScoped] static readonly List<TurnState> turnStates = new List<TurnState>();
         internal static float turnRate = 0f, turnBank = 0f;   // file-driven while spiking
+
+        // THE one place that answers "how fast does this entry turn?" — per-model, else category, else the legacy
+        // global. Extracted 2026-08-22 because the answer was spelled out inline in ApplyTurnEase while the fire
+        // arming asked a SHORTER question (`turnRate > 0 || e.turnRate > 0`) that missed the CATEGORY dial entirely.
+        // A land unit eased purely by `land=180` therefore armed its recoil UNHELD: the muzzle flash waited for the
+        // turn and the kickback fired instantly, at the moment the order was given (user, 2026-08-22).
+        internal static float EffectiveTurnRate(ModelEntry e)
+        {
+            float catRate = CategoryRateForDesc(e.descId, EntryBaseCat(e));
+            return e.turnRate > 0f ? e.turnRate
+                 : e.profCat == CatPlane ? 0f
+                 : catRate > 0f ? catRate
+                 : turnRate;
+        }
         internal static float turnPivot = 90f;                // pivot-in-place threshold, deg (dial `pivot=`; 0 = off)
         const float PivotFailsafeSec = 4f;                    // a move start is never held longer than this
 
@@ -699,11 +713,7 @@ namespace HumankindAssetFramework
             // a model that configures HAF's own turret aim (turretBone) SELF-DECLARES as turreted — the entry's
             // declaration is a characteristic (the Jagdpanzer lesson: a stray turretBone made a casemate gun
             // traverse while the scan rightly saw no engine azimuth and called it turretless)
-            float catRate = CategoryRateForDesc(e.descId, EntryBaseCat(e));
-            float rate = e.turnRate > 0f ? e.turnRate
-                       : e.profCat == CatPlane ? 0f
-                       : catRate > 0f ? catRate
-                       : turnRate;
+            float rate = EffectiveTurnRate(e);
             // bank: per-model wins; then the CATEGORY bank (hoverbank/shipbank — a chopper banks, a ship
             // heels, a truck does neither); the legacy file `bank` covers models eased per-model/global-rate.
             float catBank = CategoryBank(EffectiveCat(e.descId, EntryBaseCat(e)));
