@@ -79,7 +79,7 @@ main-thread.
 ### 2b. Per-frame cost — measured, bucketed, never estimated
 
 The full treatment — the meter, the baseline, the investigation recipe — is [Performance.md](Performance.md); the
-invariants are repeated here because they are invariants. `FrameCost` times every per-frame entry point (the `Update` fan-out, the pose hook split vanilla/ours, sub-buckets
+invariants are repeated here because they are invariants. `FrameCost` times the `Update` fan-out, the pose hook split vanilla/ours, sub-buckets
 inside the hot paths) and prints µs/frame per bucket to the F8 panel and the log. The rules it enforces
 ([Decisions](Decisions.md) "Per-frame cost is a number"):
 

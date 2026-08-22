@@ -98,12 +98,13 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
   like an expired one (release, with a one-shot warning naming the likely cause), matching the policy every
   sibling hold follows. The decision is a pure `TryElapsedSince(clock, now, out seconds)` with four tests,
   mutation-drilled.
-- **A fourth hand-maintained field list is ungated**: Clone's `int[4]` GUID clears (11 such fields in `ModelDef`).
-  `check_handlists.sh` already gates three lists of exactly this shape; this one is guarded by a comment.
-- **`Plugin.Update` has no try/catch**, so a throwing poll skips the frame's own accounting — the meter reads
-  healthier exactly when HAF is most broken. And `docs/Performance.md`'s "everything HAF did in an average
-  frame" overstates the meter: 33 timing sites cover the Update fan-out, the pose hook and the district path,
-  not the other ~36 Harmony hooks or `OnGUI` (which does a full reflection walk of the GPU budget per repaint).
+- ~~**A fourth hand-maintained field list is ungated.**~~ — **FIXED 2026-08-22**: `check_handlists.sh` compares
+  `ModelDef`'s 11 `int[]` guid fields against the Clone block; drilled by re-removing `clipIdleAlt2`.
+
+- ~~**`Plugin.Update` has no try/catch, and the meter overstates its scope.**~~ — **FIXED 2026-08-22**:
+  `try/finally` closes the frame accounting on a throwing poll (the meter no longer reads healthiest when HAF is
+  most broken), and `Performance.md` now states exactly what the 33 buckets cover and what they do not.
+
 
 ## Worth fixing before the next model of the affected kind
 

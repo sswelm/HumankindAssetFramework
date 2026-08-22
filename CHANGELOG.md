@@ -10,6 +10,26 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE LAST THREE FROM THE 08-22 REVIEW (2026-08-22).** *(1) The fourth hand-maintained field list is now gated.*
+  A clone owns no assets until its own bake, so every `int[4]` GUID on the copy must be reset — an inherited one
+  silently points the clone at the **source's** ClipCollection, which is how `clipIdleAlt2` shipped. That fix
+  carried a good comment and nothing else; three lists of exactly this shape were already gated (the two ownership
+  rebases, the recipe round-trip) and this one was not. `check_handlists.sh` now compares `ModelDef`'s 11 `int[]`
+  fields against the Clone block on every push, and the drill re-removes `clipIdleAlt2` to watch it named and
+  failed. *(2) `Plugin.Update` closes its accounting even when a poll throws.* Unity catches per-message, so a
+  throwing poll skipped the whole tail of the method — including the two lines that close the frame. The Update
+  bucket lost that frame while its sub-buckets kept their ticks, and `frames` stopped incrementing while the window
+  kept aging, so fps read low, `frameUs` inflated, and the percentage collapsed toward zero: **the meter read its
+  healthiest exactly when HAF was most broken.** `try/finally` fixes the reporting; the `catch` names the failure
+  once (and marks an injection-error site) instead of letting Unity's per-frame spam bury its own first line.
+  *(3) The meter's advertised scope now matches its real one.* `Performance.md` claimed "everything HAF did in an
+  average frame"; the 33 timing sites cover the `Update` fan-out, the pose hook and the district path — not the
+  other ~36 Harmony hooks, not `OnGUI` (which walks the GPU budget by reflection every repaint while the panel is
+  open), not Harmony's own dispatch, and not GC from HAF's allocations. The page states all of that, plus the fact
+  that a 5-second **mean** hides hitches, so the meter is read as a budget tool rather than a hitch detector.
+  *(The review's fourth item — CI running three of five checks — was already closed earlier the same day when the
+  hot-path and catalog guards moved onto the runner.)*
+
 - **TWO EDITOR FIXES FROM THE 08-22 REVIEW (2026-08-22).** *(1) The gun and trail dials were invisible on exactly
   the sources they exist for.* Eight sites in the Vehicle Lab's Deploy/gun/recoil block counted roles from the raw
   `parts` list while every other section used `ActiveParts` and Generate used `fast ? boneParts : parts`. So on a

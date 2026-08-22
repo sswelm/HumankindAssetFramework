@@ -20,13 +20,23 @@ How to read it:
 
 | Field | Meaning |
 |---|---|
-| `HAF N µs/frame (x% @ fps)` | everything HAF did in an average frame of the last 5 s; the percentage is of the **measured** frame (33 ms at 30 fps) |
+| `HAF N µs/frame (x% @ fps)` | what HAF did **inside its timed buckets** in an average frame of the last 5 s — see the scope note below; the percentage is of the **measured** frame (33 ms at 30 fps) |
 | `Update N µs` | the `Plugin.Update` fan-out — every poll, every tick |
 | `pose vanilla … = A adds × N ns` | the pose hook on pawns that are **not** ours (the early-out path): how many pawn-adds per frame, and the cost of each |
 | `pose ours … = A adds × N ns` | the pose hook's full path on **our** pawns — this one scales with how many custom units are on screen |
 | `top: …` | the six most expensive buckets. Sub-buckets (`PoseAnim`, `PoseDonor`, `SelTileLoop` …) are nested inside their parent and **double-count in a sum** — read them as a breakdown, not additively |
 
-Every per-frame entry point in the plugin lives inside a named bucket (`Patches/FrameCost.cs`). The meter itself
+**What the meter covers, exactly (narrowed 2026-08-22 after a review found the previous wording overstated).** The
+33 timing sites cover the `Plugin.Update` fan-out, the pose hook (split vanilla/ours) and the district path. They do
+**not** cover: the other ~36 Harmony hooks — several of which run per frame or per event, e.g. the mouse-cover
+postfix on `SpecificUpdate`, the `GetBoneTRS` prefix+postfix, and the audio `PostEvent` hooks; `OnGUI`, which walks
+the GPU budget by reflection on **every repaint while the F8 panel is open**; Harmony's own dispatch across every
+patched method, since `FrameCost.Begin()` runs *inside* the postfix; and GC caused by HAF's own allocations, which
+lands in someone else's frame. The number is also a **mean over 5 s** — a 40 ms hitch once a second reads as
+1.2 ms/frame and looks unremarkable, so the meter is a budget tool, not a hitch detector. Read it as "HAF's steady
+per-frame cost from Update plus the pose hook", which is what it measures honestly.
+
+Every per-frame entry point *in that scope* lives inside a named bucket (`Patches/FrameCost.cs`). The meter itself
 costs two `Stopwatch` reads per bucket per frame — well under what it can measure.
 
 **The 30 fps cap.** The reference machine caps the game at 30 fps. µs/frame is absolute; the percentage is against a

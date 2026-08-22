@@ -400,6 +400,14 @@ namespace HumankindAssetFramework
             // Every per-frame entry point is timed into a FrameCost bucket (F8 panel + a log line per minute) — the
             // per-frame cost of HAF is a measured number, not an estimate. Begin/End are two Stopwatch reads each.
             long tAll = FrameCost.Begin(), t;
+            // THE ACCOUNTING MUST CLOSE EVEN WHEN A POLL THROWS (review 2026-08-22). Unity catches per-message, so a
+            // throwing poll used to skip the whole TAIL of this method — including the two lines that close the frame.
+            // The Update bucket then lost that frame while its sub-buckets kept their ticks, and `frames` stopped
+            // incrementing while the window kept aging, so fps read low, frameUs inflated and the percentage collapsed
+            // toward zero: THE METER READ ITS HEALTHIEST EXACTLY WHEN HAF WAS MOST BROKEN. try/finally fixes the
+            // reporting; the catch names the failure once instead of letting Unity's per-frame spam bury it.
+            try
+            {
             t = FrameCost.Begin();
             UniversalInject.ConsumePendingReloadRearm();  // main-thread re-arm after an in-session save-reload (Sandbox.Load requested it off-thread); covers BOTH the model + district axes, so it runs regardless of the injection gate below
             DistrictInject.DrainDistrictDestroys();       // main-thread free of the previous session's district runtime clones queued by ResetDistrictSessionState (leak fix); cheap no-op when the queue is empty
@@ -437,8 +445,19 @@ namespace HumankindAssetFramework
             { t = FrameCost.Begin(); UniversalInject.TickPropRegister(); FrameCost.End(FrameCost.PropRegister, t); }   // EXPERIMENTAL (opt-in, [Props] PropRegister=false by default): register our MeshCollections once the AnimationManager exists
             if (FormationOverrideOn.Value)
             { t = FrameCost.Begin(); FormationOverride.Tick(); FrameCost.End(FrameCost.Formation, t); }   // FORMATION axis: retry inject+repoint if the databases weren't up at AnimationLoad
-            FrameCost.End(FrameCost.UpdateTotal, tAll);
-            FrameCost.EndFrame(Time.realtimeSinceStartup);
+            }
+            catch (System.Exception ex)
+            {
+                // Once per distinct message: a per-frame throw would otherwise fill the log and hide its own first line.
+                UniversalInject.NoteInjectionError("update");
+                LogOnceWarning("update:" + ex.GetType().Name + ":" + ex.Message,
+                               "[HAF] a per-frame poll threw — the rest of this frame's polls were skipped: " + ex);
+            }
+            finally
+            {
+                FrameCost.End(FrameCost.UpdateTotal, tAll);
+                FrameCost.EndFrame(Time.realtimeSinceStartup);
+            }
         }
 
         private void OnGUI()
