@@ -69,6 +69,14 @@ namespace HumankindAssetFramework
             public List<string> PoseIdle = new List<string>();       // FAIL: an entry with live pawns the pose hook has not touched for PoseIdleSeconds
             public int SubPawnWalk = -1, SubPawnScene = -1;          // -1 = audit not run; the targeted walk vs the full scene scan, right now
             public List<string> SubPawnMissed = new List<string>();  // FAIL: sub-pawns the scene scan sees and the walk does not (silent engine audio / visual)
+            // THE DETECTOR'S OWN LIVENESS (2026-08-22). The live-pawn checks read `knownManagers`, which is written
+            // at exactly ONE place — inside the pose hook's pawn-added path. So a pose hook that never ran leaves the
+            // list empty, examines zero pawns, and PASSES, with the coverage clause omitted rather than printed as
+            // zero: the detector was fed by the thing it certifies and could only catch a hook alive enough to
+            // register a manager. These two fields give it an INDEPENDENT oracle — the live army count, read straight
+            // from the presentation entity factory, which no HAF hook touches.
+            public int PawnManagers = -1;                            // -1 = not sampled; registered pawn managers (pose-hook evidence)
+            public int ArmiesLive = -1;                              // -1 = not sampled; armies the engine has on the map right now
         }
 
         // Back-compat convenience: the original four-signal verdict (deep-check lists empty).
@@ -97,11 +105,29 @@ namespace HumankindAssetFramework
             if (f.PawnSkinIssues.Count > 0) fails.Add($"{f.PawnSkinIssues.Count} entry(ies) rendering the donor: {string.Join("; ", f.PawnSkinIssues)}");
             if (f.PoseIdle.Count > 0) fails.Add($"pose hook idle on {f.PoseIdle.Count} entry(ies): {string.Join("; ", f.PoseIdle)}");
             if (f.SubPawnMissed.Count > 0) fails.Add($"sub-pawn walk missed {f.SubPawnMissed.Count} of {f.SubPawnScene}: {string.Join(", ", f.SubPawnMissed)}");
+            // THE CONTRADICTION THAT PROVES THE POSE HOOK IS DEAD (2026-08-22). Armies are on the map and entries are
+            // injected, so the pawn-added path must have run and registered a manager — every applicable entry makes
+            // the hook proceed for every pawn add. Zero managers with live armies is not "nothing to check", it is the
+            // hook not running: the patch failed to apply after a game update, its reflection broke, or the master
+            // toggle is off. Previously this state produced a silent PASS, because the only thing that noticed was a
+            // counter fed by the very hook in question.
+            if (f.PawnManagers == 0 && f.ArmiesLive > 0 && f.Repointed > 0)
+                fails.Add($"the pose hook has registered NO pawn manager while {f.ArmiesLive} army(ies) are live and " +
+                          $"{f.Repointed} entry(ies) are injected — the pawn-added patch is not running, so every " +
+                          "per-frame offset (pose, muzzle, elevation, turn ease) is silently dead");
             // VACUOUS-COVERAGE notes (silence is not success): a green segment that verified NOTHING says so out loud.
             // Notes never fail the smoke — they keep the PASS honest about what it did NOT test this session.
             var notes = new List<string>();
             if (f.DistrictsChecked > 0 && f.TilesActive == 0) notes.Add("districts authored but 0 tiles live — district path UNTESTED this session");
             if (f.Models > 0 && f.Repointed == 0) notes.Add("no entries injected — deep checks vacuous (load a save containing your units)");
+            // A live-pawn segment that examined NOTHING says so, instead of dropping its clause and reading clean.
+            // Only the benign shapes reach here — the damning one (managers 0, armies live) already FAILED above.
+            if (f.PawnManagers >= 0 && f.LivePawnsChecked == 0 && f.Repointed > 0)
+                notes.Add(f.PawnManagers == 0
+                    ? $"0 live pawn(s) examined — no pawn manager registered yet and {f.ArmiesLive} army(ies) live; " +
+                      "the live-pawn checks (skeleton truth, pose-hook liveness) are UNTESTED this session"
+                    : $"0 live pawn(s) examined — {f.PawnManagers} manager(s) registered but no slot carries one of our " +
+                      "descriptor ids; the live-pawn checks are UNTESTED this session");
             notes.AddRange(f.SamplerNotes);
             notes.AddRange(f.DistrictNotes);
             bool pass = fails.Count == 0;
@@ -113,7 +139,11 @@ namespace HumankindAssetFramework
                           $"({f.Repointed} injected so far), {f.InjectionErrors} injection error(s)" +
                           (pass ? $"; deep checks clean on {f.Repointed} injected — verified {f.RolesChecked} clip role(s), " +
                                   $"{f.AssetsChecked} asset(s), {f.SoundsChecked} sound(s), {f.FilesChecked} file(s) on disk, {f.LayersChecked} GPU layer(s)" +
-                                  (f.LivePawnsChecked > 0 ? $", {f.LivePawnsChecked} live pawn(s) on our skeletons across {f.EntriesWithLivePawns} entry(ies) [pose hook fresh]" : "") +
+                                  // NEVER suppressed at zero: an omitted clause reads as "fine", a printed 0 reads as
+                                  // "nothing was examined" — and the note above says why. (Review 2026-08-22.)
+                                  (f.PawnManagers >= 0 && f.LivePawnsChecked == 0
+                                     ? $", 0 live pawn(s) examined [{f.PawnManagers} pawn manager(s), {f.ArmiesLive} army(ies) live]"
+                                     : f.LivePawnsChecked > 0 ? $", {f.LivePawnsChecked} live pawn(s) on our skeletons across {f.EntriesWithLivePawns} entry(ies) [pose hook fresh]" : "") +
                                   (f.SubPawnWalk >= 0 ? $", sub-pawn walk {f.SubPawnWalk}/{f.SubPawnScene}" : "") +
                                   (f.DistrictsChecked > 0 ? $", {f.DistrictsChecked} district(s) [{f.TilesActive} tile(s) live{(f.ScopedTilesActive > 0 ? $", {f.ScopedTilesActive} scoped" : "")}{(f.TexturedChecked > 0 ? $", {f.TexturedApplied}/{f.TexturedChecked} textured" : "")}]" : "") +
                                   (f.SeamsChecked > 0 ? $", {f.SeamsChecked} patched seam(s) [{f.SharedSeams.Count} shared]" : "") : "") +
@@ -386,6 +416,27 @@ namespace HumankindAssetFramework
             }
         }
 
+        // THE INDEPENDENT ORACLE (2026-08-22): how many armies the engine has on the map, read straight from the
+        // presentation entity factory. Nothing in HAF writes this — it is the game's own list — which is exactly the
+        // point: the live-pawn checks are fed by `knownManagers`, and `knownManagers` is fed by the pose hook they
+        // certify. This is the second, unrelated source that lets the verdict tell "nothing to examine" apart from
+        // "the hook that would have told us is dead". Returns -1 when the surface itself cannot be read, so an
+        // unreadable oracle can never masquerade as "no armies".
+        internal static int CountLiveArmies()
+        {
+            try
+            {
+                var presType = GameBinding.Presentation;
+                var factory = presType == null ? null : CachedField(presType, "PresentationEntityFactoryController")?.GetValue(null);
+                var armies = factory == null ? null : GetMember(factory, "PresentationArmyEntities") as Array;
+                if (armies == null) return -1;
+                int n = 0;
+                for (int i = 0; i < armies.Length; i++) if (armies.GetValue(i) != null) n++;
+                return n;
+            }
+            catch { return -1; }
+        }
+
         // Runtime collector: every (descriptor, skeleton) pair in every known pawn manager's live slots.
         static List<LiveSlot> CollectLiveSlots()
         {
@@ -504,6 +555,11 @@ namespace HumankindAssetFramework
                 if (tier == SmokeTier.Full)
                 {   // LIVE tier — needs pawns on the map and a few frames of the pose hook; the load tier runs before either exists
                     GatherWriteBackFact(f);   // the seam self-test — after the reads, before the verdict
+                    // Sample BOTH sides before judging: the hook's own evidence (registered managers) and the engine's
+                    // (live armies). Either alone is unfalsifiable; together they separate "nothing on the map" from
+                    // "the pawn-added patch is not running".
+                    f.PawnManagers = knownManagers.Count;
+                    f.ArmiesLive = CountLiveArmies();
                     GatherLivePawnFacts(CollectLiveSlots(), snapshot, UnityEngine.Time.time, f);   // live-pawn truth: skeleton + pose-hook liveness
                     if (snapshot != null && f.Repointed > 0) { AuditSubPawnWalk(snapshot, out int w, out int sc, f.SubPawnMissed); f.SubPawnWalk = w; f.SubPawnScene = sc; }
                 }

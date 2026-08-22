@@ -42,10 +42,19 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
   ends of a diagonal arm. Fixed instead: the silence — an un-mirrored pair now warns, promoted to the Lab's status
   box. **Still open** (low priority, needs a diagonally-authored gun to matter): rotation-invariant arm-end
   extraction, after which the sign rule can be re-derived from the trails' own centreline.
-- **Three reports can say PASS on nothing.** The bake-test verdict treats zero failures as success, so an
-  all-skipped run writes `PASS — 0 passed` to `haf_bake_tests_report.txt`; the smoke suppresses each coverage
-  clause when its counter is zero instead of printing it; and `UninjectedReason`'s "its addon loaded but the
-  repoint did not run" — a definite pipeline break — is filed under `Uninjected`, which the verdict only prints.
+- ~~**The live-pawn check is fed by the hook it is checking.**~~ — **FIXED 2026-08-22.** The smoke now samples an
+  independent oracle (`CountLiveArmies()`, read from the presentation entity factory — a surface no HAF hook
+  writes) alongside the registered-manager count. Zero managers while armies are live and entries are injected is
+  a FAIL naming the consequence; the benign shapes (no armies; managers but no matching descriptor ids) produce a
+  NOTE and a printed `0 live pawn(s) examined`, never a dropped clause. An unreadable oracle returns -1 and cannot
+  pose as a confident zero. Five tests, mutation-drilled.
+
+- **Two reports can still say PASS on nothing.** The bake-test verdict treats zero failures as success, so an
+  all-skipped run writes `PASS — 0 passed` to `haf_bake_tests_report.txt`; and `UninjectedReason`'s "its addon
+  loaded but the repoint did not run" — a definite pipeline break — is filed under `Uninjected`, which the verdict
+  only prints. (The smoke's *live-pawn* clause was the third of these and is fixed — see the entry above; the
+  remaining coverage clauses, `SubPawnScene` / `LayersChecked` / `SeamsChecked` / `RolesChecked` / `SoundsChecked`,
+  are still suppressed at zero rather than printed.)
 - ~~**Two gates have blind spots and neither is in CI.**~~ — **HOT-PATH HALF FIXED 2026-08-22**: the grep is
   case-insensitive with stand-alone word matching (the naive `-i` false-positived on `docs/Wonder-Spike.md`),
   verified in both directions, the three stale `(spike)` labels promoted (all three are documented shipped dials),

@@ -7,6 +7,67 @@ namespace HumankindAssetFramework.Tests
     // These lock the PASS/FAIL rules so the harness's assertion stays trustworthy.
     public class SmokeVerdictTests
     {
+        // ---- THE DETECTOR'S OWN LIVENESS (2026-08-22 review) ----
+        // The live-pawn checks read `knownManagers`, which only the pose hook writes. A dead hook therefore left the
+        // list empty, examined zero pawns, and PASSED with the coverage clause omitted — the detector was fed by the
+        // thing it certifies. These pin the three states apart using the independent army count.
+
+        [Fact]
+        public void LivePawns_NoManagerWhileArmiesAreLive_FAILS_TheHookIsDead()
+        {
+            var f = Healthy();
+            f.PawnManagers = 0; f.ArmiesLive = 7;   // engine has units; our pawn-added patch registered nothing
+            var r = UniversalInject.SmokeVerdict(f);
+            Assert.False(r.Pass);                                   // before the fix this PASSED, silently
+            Assert.Contains("pose hook has registered NO pawn manager", r.Summary);
+            Assert.Contains("7 army(ies) are live", r.Summary);
+        }
+
+        [Fact]
+        public void LivePawns_NoManagerAndNoArmies_IsNotAFailure_ButSaysItCheckedNothing()
+        {
+            // Main menu / empty map: nothing to examine is legitimate — but it must not read as "verified".
+            var f = Healthy();
+            f.PawnManagers = 0; f.ArmiesLive = 0;
+            var r = UniversalInject.SmokeVerdict(f);
+            Assert.True(r.Pass);
+            Assert.Contains("0 live pawn(s) examined", r.Summary);   // the clause is PRINTED, not dropped
+            Assert.Contains("UNTESTED this session", r.Summary);
+        }
+
+        [Fact]
+        public void LivePawns_ManagersButNoMatchingSlots_SaysSo()
+        {
+            // The hook is alive; nothing on the map carries one of our descriptor ids. Also vacuous, also stated.
+            var f = Healthy();
+            f.PawnManagers = 3; f.ArmiesLive = 4;
+            var r = UniversalInject.SmokeVerdict(f);
+            Assert.True(r.Pass);
+            Assert.Contains("3 manager(s) registered but no slot carries one of our", r.Summary);
+        }
+
+        [Fact]
+        public void LivePawns_UnreadableOracle_NeverMasqueradesAsNoArmies()
+        {
+            // CountLiveArmies returns -1 when the game surface can't be read. That must not satisfy the FAIL rule
+            // (which needs ArmiesLive > 0) nor be reported as a confident zero.
+            var f = Healthy();
+            f.PawnManagers = 0; f.ArmiesLive = -1;
+            var r = UniversalInject.SmokeVerdict(f);
+            Assert.True(r.Pass);
+            Assert.DoesNotContain("pose hook has registered NO pawn manager", r.Summary);
+        }
+
+        [Fact]
+        public void LivePawns_NotSampled_KeepsTheOldQuietBehaviour()
+        {
+            // The load tier never samples these (-1): no clause, no note — it runs before pawns exist by design.
+            var f = Healthy();
+            var r = UniversalInject.SmokeVerdict(f);
+            Assert.True(r.Pass);
+            Assert.DoesNotContain("live pawn(s) examined", r.Summary);
+        }
+
         [Fact]
         public void Pass_WhenAllGood()
         {

@@ -10,6 +10,22 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE DETECTOR THAT COULD NOT SEE ITS OWN DEATH (2026-08-22, review finding — fixed).** The smoke's live-pawn
+  checks — skeleton truth and pose-hook liveness, the ones that prove the engine is actually rendering our models —
+  read `knownManagers`, a list written at exactly **one** place in the codebase: inside the pose hook's pawn-added
+  path, after two early returns. So the detector was fed by the very hook it certifies. A pose hook that never ran
+  at all (patch failed to apply after a game update, its reflection broke, or the master toggle is off) left the
+  list empty, examined zero pawns, and **passed** — with the coverage clause *omitted from the summary* rather than
+  printed as zero, so the line read clean. It could only ever catch a hook alive enough to register a manager but
+  no longer matching one entry. The fix gives it an **independent oracle**: `CountLiveArmies()` reads the live army
+  count straight from the presentation entity factory, a surface no HAF hook writes. Zero managers while armies are
+  live and entries are injected is now a **FAIL** that names the consequence ("every per-frame offset — pose,
+  muzzle, elevation, turn ease — is silently dead"), because the pawn-added path must have run. The benign shapes
+  are separated and stated rather than hidden: no armies at all, or managers registered but no slot carrying one of
+  our descriptor ids, each produce a NOTE and a printed `0 live pawn(s) examined [N pawn manager(s), M army(ies)
+  live]`. An unreadable oracle returns -1 and can never masquerade as a confident zero. Five tests
+  (`SmokeVerdictTests`), mutation-drilled: neutering the rule fails the one named for it.
+
 - **THE SUITE STOPPED BAKING THE SAME MODELS TWICE — 6.7 → 4.7 min, MEASURED (2026-08-22).** "Can't we parallelise
   it?" The honest answer was no: the bake path is 71 Unity API calls against 11 subprocess calls, and
   `AssetDatabase` is main-thread-only, so concurrent bakes are not on the table. But the run was doing the same
