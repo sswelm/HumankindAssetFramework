@@ -78,9 +78,13 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
   and **both** source-only guards moved into CI beside the docs guard. **Still open:** `check-catalog.sh`'s
   extraction regex omits the `CachedField(` accessor family (16 call sites, 3 added by that range) — its literals
   are catalogued today, so the gate is green by luck rather than by proof.
-- **`PackTuning` dropped the `sv > 0f` guard** the pre-extraction parser had. Nothing downstream re-guards it:
-  `"scale": 0` multiplies a shared GPU mesh entry by zero, `-1` renders it inside-out, both silently. It is the
-  one extraction in the range that shipped without a legacy-parity oracle.
+- ~~**`PackTuning` dropped the `sv > 0f` guard.**~~ — **FIXED 2026-08-22.** Guard restored as `!(sv > 0f)` so NaN
+  is rejected too, and it now WARNS with the pack, key and value instead of skipping in silence. No shipped pack
+  was affected. More importantly the missing discipline was supplied: `PackTuningLegacyParityTests` keeps the
+  pre-extraction loop verbatim as an oracle and compares over a 19-entry corpus — mutation-drilled, re-introducing
+  the bug fails 6 tests. The remaining `PackTuning` gap from the review is unrelated and still open: the
+  cross-pack conflict NOTE is keyed on exact `match` strings while the runtime matches by **substring**, so
+  `"Tank"` in one pack and `"Tanks_01"` in another both apply (×0.36) with no note.
 - **`fireGuidQueue` is never drained on re-arm** and is invisible to `SessionState` (net471 `ConcurrentQueue`
   has no instance `Clear()`, so the fence — which keys on that — sees 137 of 549 statics). A strike enqueued in
   the last frame of one session can arm the wrong unit's recoil in the next, where GUIDs restart from zero.

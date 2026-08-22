@@ -62,6 +62,24 @@ namespace HumankindAssetFramework
                             var mr = Regex.Match(rm.Value, "\"era\"\\s*:\\s*(-?\\d+)");   // optional: the unit's own era (0/absent = read it off the name)
                             int ruleEra = mr.Success && int.TryParse(mr.Groups[1].Value, out int re) && re > 0 ? re : 0;
                             if (!float.TryParse(ms.Groups[1].Value, NumberStyles.Float, Inv, out float sv)) continue;
+                            // A NON-POSITIVE SCALE IS REJECTED — and now SAYS SO (2026-08-22).
+                            // The pre-extraction parser had `&& sv > 0f` and this extraction dropped it; nothing
+                            // downstream re-guards, because Inject.cs multiplies the value as given. The damage is
+                            // quiet and total: `"scale": 0` multiplies a SHARED GPU mesh-table entry by zero, so the
+                            // unit — and anything sharing that mesh index — collapses to a point and is culled, then
+                            // the recorded probe becomes the zero vector and every later pass computes 0/0 = NaN and
+                            // re-applies for the rest of the session. `-1` inverts the mesh through the origin and
+                            // renders it inside-out. Both from a plausible hand-edit: 0 reads like "disable this rule".
+                            // Restoring the guard silently would still leave the author guessing why nothing happened,
+                            // and this framework's rule is that nothing is silently disarmed — so it is a WARNING that
+                            // names the pack, the key and the value, and the rule is skipped.
+                            if (!(sv > 0f))   // written this way so NaN is rejected too, not just <= 0
+                            {
+                                r.Warnings.Add($"unitScales '{key}' in '{pk.Key}': scale {F(sv)} is not positive — rule IGNORED " +
+                                               "(a scale of 0 would collapse the shared mesh buffer, a negative one would render it inside-out; " +
+                                               "remove the rule, or use a small positive value)");
+                                continue;
+                            }
                             r.ScaleRules.Add(new ScaleRule { match = key, scale = sv, era = ruleEra });
                             if (!scaleOwners.TryGetValue(key, out var owners)) scaleOwners[key] = owners = new List<KeyValuePair<string, float>>();
                             owners.Add(new KeyValuePair<string, float>(pk.Key, sv));

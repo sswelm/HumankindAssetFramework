@@ -10,6 +10,23 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE DROPPED GUARD, AND THE ORACLE THAT SHOULD HAVE CAUGHT IT (2026-08-22, review finding — fixed).** The
+  pre-extraction tuning parser read `if (float.TryParse(…, out float sv) && sv > 0f)`. The extraction into
+  `PackTuning.Parse` kept everything except **`&& sv > 0f`**, and nothing downstream re-guards it: `Inject.cs`
+  multiplies the value as given. A hand-edited `"scale": 0` — a plausible way to write "disable this rule" —
+  multiplies a **shared** GPU mesh-table entry by zero, so the unit and anything sharing that mesh index collapse
+  to a point and are culled; the recorded probe then becomes the zero vector and every later pass computes
+  `0/0 = NaN` and re-applies for the rest of the session. `-1` inverts the mesh through the origin and renders it
+  inside-out. Both silent, in a framework whose stated rule is that nothing is silently disarmed. The guard is
+  back — written `!(sv > 0f)` so **NaN is rejected too** — and it is no longer silent: it emits a warning naming
+  the pack, the key and the value, because restoring the old quiet skip would still leave an author wondering why
+  their edit did nothing. No shipped pack is affected (the one live rule is `Biremes ×4.0`). **The real fix is the
+  oracle**: `PackTuningLegacyParityTests` keeps the pre-extraction loop verbatim and compares the new parser
+  against it over a 19-entry corpus — healthy packs, hand-edit shapes, and the half-saved truncations a live edit
+  passes through. That is exactly what `DialConfig` and `PoseMath` each shipped, and each of those oracles caught a
+  real divergence; this extraction shipped none, which is why its divergence reached the registry. Mutation-drilled
+  by re-introducing the bug: **6 tests fail**, three of them naming the corpus entry (`Zero`, `Neg`, `NegSmall`).
+
 - **THE CATALOG GATE WAS BLIND TO 46 OF ITS OWN SITES — AND ONE OF THEM WAS THE MEMBER THE LAST REVIEW NAMED
   (2026-08-22).** A7's promise is that the catalog covers the code, *proven mechanically*. Its extraction regex
   listed `GetMember`/`SetMember`/`CallMethod`/`FastMember`/`AccessTools.*`/`Traverse.*` — and not `CachedField(`
