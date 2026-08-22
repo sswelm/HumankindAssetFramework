@@ -996,6 +996,26 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   with Deploy conversion OFF, Convert raw rig ON, Fix 100× OFF, Auto-ground ON, Idle stance `Spin[0..0]`, Movement
   `Spin`, every `deploy…`/`recoil` clip field cleared. **"In game it moves perfectly."** Cost, as agreed for step 1:
   the fold/deploy/recoil are gone on that unit until re-authored on the clean rig.
+- **THE HOWITZER KICKS (2026-08-22, verified in-game).** *"Alright, it finally works."* The M114 rebuilt on a Vehicle
+  Lab rig now rolls its wheels, folds before it turns, spreads its trails on arrival, raises to 45°, waits for the
+  turn, and **recoils when it fires**. Getting the last part took two distinct bugs and four wrong theories.
+  **Bug 1 — a bone's own translation does not render.** The clip baked the slide correctly and the engine's *own*
+  `GetPoseTRS` decoded it correctly (`SLID 0,3 (0,0,-0.001)->(-0.001,-0.013,-0.301)`, matching the authored frame 8
+  to three decimals) and the barrel still did not move a pixel. That is Law 5: bone positions are held at BIND and
+  only orientations propagate. `deploy_convert` had the verified finding written down the whole time — *"a bone's OWN
+  local translation is DROPPED ... but a bone's position derived from an ANCESTOR's rotation DOES bake"*. So the
+  slide is now an arc: a hidden **`RecoilArm`** pivot 228 units off the bore with `Barrel` under it, rotated by
+  `θ = slide/R`. At peak the muzzle travels −11.87 along its own bore (asked 11.96), 3.4 off-bore, 3° residual tilt.
+  The far-pivot trick is not a legacy workaround for missing translation support — **it is the mechanism**.
+  **Bug 2 — the recoil armed UNHELD.** The gun then kicked at the instant the order was given while the muzzle flash
+  correctly waited: the two halves of "turn, then attack" asked different questions. `ApplyTurnEase` resolves a rate
+  as per-model → **category** → global; the fire arming asked `turnRate > 0f || e.turnRate > 0f`, which skips the
+  category dial, so a land unit eased entirely by `land=180` never armed `waitAlign`. Extracted as
+  `EffectiveTurnRate(e)` and used by both. Two further holds were tightened en route: the attack-pose deferral
+  skipped its alignment re-check whenever the strike clock supplied the deadline, and the recoil's own release used
+  that clock exclusively — both now require the clock elapsed **and** the pawn actually aimed, still capped at 4 s.
+  Finally a **Recoil lead-in** dial pads the front of the clip, because the engine decides when the clip *starts* and
+  its clock is only an estimate; the front of the clip is the part we own outright.
 - **WHAT THE PROVEN RECOIL ACTUALLY DOES — and a flip-flop worth recording (2026-08-22).** The kickback did not play
   in game. Reading *"BIND must equal animation frame 0"* out of the engine contract, I blamed the `Recoil` clip's
   non-identity frame 0 (it held the deployed pose so the gun would not fire from its travel pose) and reverted the

@@ -85,6 +85,16 @@ bind-pose position and plays only orientations through the hierarchy. Consequenc
   (the same frames played backward slowed, gliding home). Whole-body motion would need a runtime ObjectSpace
   nudge (possible, unbuilt).
 
+> **LAW 5, RESTATED PRECISELY (2026-08-22, the Vehicle Lab recoil).** `keepTranslations` gets a translation curve
+> *into the clip*, and the engine's own `GetPoseTRS` *decodes it correctly* — both were measured end-to-end on a
+> barrel that never moved a pixel in game (`[AnimDiag] … SLID 0,3 (0,0,-0.001)->(-0.001,-0.013,-0.301)`, matching the
+> authored frame to three decimals). **Decoding is not rendering.** A bone's OWN local translation still does not
+> move it; what moves a bone is its ancestors' ROTATION, rebuilt by forward kinematics. `deploy_convert` recorded the
+> same finding years of debugging earlier — *"sliding cannon2's local left its baked bbox unchanged"*. So the
+> far-pivot arm is not a workaround for a pipeline that can't keep translations: **it is how you move a bone.**
+> Diagnostic: `[AnimDiag]` reports `SLID d (t0->tm)` per bone per role, so "the data is there" and "the model moves"
+> can be told apart in one line instead of a day.
+
 ### Law 4 — What a preview shows is NOT what the game plays
 Three different things can lie to you independently:
 - a **custom editor renderer** can corrupt the view itself (two hand-rolled BakeMesh draw paths each mangled

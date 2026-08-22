@@ -124,12 +124,22 @@ The deploy block's **Wheel bones (roll while moving)** + axle axis / loop frames
 >
 > Two design points worth keeping:
 >
-> * **Identity rest, deliberately.** The tempting rig points the bone down the bore so recoil is simply `−Y` in bone
->   space. Don't: a non-identity rest rotation is mangled by the skeleton bake (measured — an FBX local `T` of
->   `(21.096, 0, 0)` came back as `(-0.00932, 0, -0.00466)`), which is why every bone this rigger makes is
->   axis-aligned. `Barrel` is axis-aligned too and recoils by a **local translation** along the bore taken in the
->   rest frame. Because it is a child of `Gun`, that vector rotates with the elevation — verified at `0.00°`
->   deviation from the bore both level and elevated 45°, at a constant slide length.
+> * **THE SLIDE IS AN ARC, because a bone's own translation does not render.** This is the whole reason recoil is
+>   hard, and it cost a full debugging cycle to re-learn. The clip can bake a perfect translation and the engine's
+>   **own** `GetPoseTRS` can decode it perfectly — measured in-game, `SLID 0,3 (0,0,-0.001)->(-0.001,-0.013,-0.301)`,
+>   matching the authored frame to three decimals — and **the barrel still will not move a pixel**. Law 5: bone
+>   positions are held at BIND and only orientations propagate. But *a position derived from an ANCESTOR's rotation
+>   does bake*, by forward kinematics. So the rigger builds a hidden **`RecoilArm`** whose pivot sits far off the
+>   bore, hangs `Barrel` under it, and **rotates the arm** by `θ = slide/R`: the tube swings `R·θ` along its own
+>   bore — a near-straight slide — while tilting only `θ`. Chain `Root → Gun → RecoilArm → Barrel`, so it still
+>   rides the elevation. Measured at peak: −11.87 along the bore (asked 11.96), 3.4 off-bore, 3.0° tilt.
+>   **The far-pivot trick is not a legacy workaround for missing translation support — it IS the mechanism.**
+>   Residual tilt is the price of faking a slide with an arc, and `R` must stay finite: a pivot at infinity collapses
+>   bone chains through float32 cancellation (the old `1e9` sentinel bug).
+> * **Recoil lead-in (frames)** holds the gun still before the kick. The engine decides when the attack clip
+>   *starts*, from a strike clock that is only an estimate (`miss/rate + 0.2`, capped at 3 s), so it can begin while
+>   the gun is still slewing. The front of the clip is the part we own outright — raise this until the kick visibly
+>   lands after the turn. 24 fps, so 24 = one second.
 > * **The asymmetry is what sells it, not the distance.** The kick takes the first ~15% of the clip and the ride
 >   forward gets the rest, derived from **Recoil frames** rather than given its own dial, so it cannot be set to a
 >   shape that reads wrong. At 16 frames that is 2 back, 14 forward.
