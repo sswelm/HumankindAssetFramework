@@ -134,15 +134,14 @@ The deploy block's **Wheel bones (roll while moving)** + axle axis / loop frames
 >   forward gets the rest, derived from **Recoil frames** rather than given its own dial, so it cannot be set to a
 >   shape that reads wrong. At 16 frames that is 2 back, 14 forward.
 >
-> * **The clip must START AT IDENTITY — never hold the deployed pose inside it.** A role clip poses the whole
->   skeleton, so it is tempting to key the deployed pose flat across the recoil, reasoning that otherwise the gun
->   fires from its travel pose. **That breaks the clip outright**: it makes frame 0 non-identity, and Amplitude's
->   encoder discards a constant frame-0 offset — see **The engine contract** in
->   [Animation-Pitfalls.md](Animation-Pitfalls.md): *BIND must equal animation frame 0*. Done that way the kickback
->   does not play **at all** (in-game, 2026-08-22). `Spin` and `Deploy` work precisely because both of their
->   endpoints are identity, and the proven M114 recoil is delta-rebased to *"identity at f0 by construction"* for
->   exactly this reason. **If the turntable shows the gun level during `Recoil`, that is Law 4** — the picker plays
->   ONE clip in isolation — not a defect to fix.
+> * **The clip HOLDS the deployed pose — and that is correct.** A role clip poses the whole skeleton, so bones it
+>   does not key sit at the reference pose; keying only the barrel fires the gun from its *travel* pose (level tube,
+>   folded trails). So the clip carries the end-of-`Deploy` pose flat across its own length. This looks like it
+>   should violate *"BIND must equal animation frame 0"* from **The engine contract**, and it does not: that contract
+>   governs the **primary (Idle/reference)** clip, which is what defines the reference pose. A **role** clip
+>   legitimately encodes a non-identity pose against it — Law 2 is the same rule from the other side (a stance
+>   belongs in a role clip, never the primary). The proven M114 confirms it: `deploy_convert`'s `make_role` writes
+>   **absolute poses, no delta-rebasing**, and its `recoil` role is authored from `m_home` captured at `deploy_end`.
 >
 > **Recoil is a TRANSLATION**, and the clip bake is rotation-only by default — tick **Keep bone translations** on the
 > entry or the bake discards it and the gun does not move at all. That flag is the whole reason this can be an honest

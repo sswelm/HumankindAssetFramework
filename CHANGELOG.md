@@ -996,20 +996,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   with Deploy conversion OFF, Convert raw rig ON, Fix 100× OFF, Auto-ground ON, Idle stance `Spin[0..0]`, Movement
   `Spin`, every `deploy…`/`recoil` clip field cleared. **"In game it moves perfectly."** Cost, as agreed for step 1:
   the fold/deploy/recoil are gone on that unit until re-authored on the clean rig.
-- **THE CONTRACT I BROKE WHILE FIXING A PREVIEW ARTEFACT (2026-08-22).** Between authoring the recoil and testing
-  it, the turntable showed the gun level during the `Recoil` clip, and I "fixed" that by keying the end-of-`Deploy`
-  pose flat across the clip — reasoning that a role clip poses the whole skeleton, so unkeyed bones sit at reference.
-  In game the kickback then did not play **at all**. The cause was the fix: it made frame 0 non-identity, and
-  Amplitude's encoder normalizes every clip against the skeleton BIND rest and **discards a constant frame-0
-  offset** — *"BIND must equal animation frame 0"*, or the model renders its bind forever no matter what plays
-  ([Animation-Pitfalls](docs/Animation-Pitfalls.md) ▸ "The engine contract"). `Spin` and `Deploy` work precisely
-  because both of their endpoints are identity; `Recoil` was the only clip that was not, and the only one that
-  failed. The proven M114 recoil obeys the same rule from the other side — `deploy_convert` delta-rebases every bone
-  to *"identity at f0 by construction"*, even for an attack clip cut from an already-deployed source. Reverted; all
-  three clips now verify identity at f0. The lesson underneath is Law 4: the turntable plays **one clip in
-  isolation**, so a gun looking level there was a preview lying, not a defect to chase — and the user had said as
-  much by pointing at the preview. `[AnimDiag]` now also covers the **attack** role and reports **translation**, the
-  one motion on the one role it could not previously see.
+- **WHAT THE PROVEN RECOIL ACTUALLY DOES — and a flip-flop worth recording (2026-08-22).** The kickback did not play
+  in game. Reading *"BIND must equal animation frame 0"* out of the engine contract, I blamed the `Recoil` clip's
+  non-identity frame 0 (it held the deployed pose so the gun would not fire from its travel pose) and reverted the
+  hold. That was **wrong**, and the turntable said so immediately — the gun went back to firing horizontal. The
+  proven M114 settles it empirically: `deploy_convert`'s `make_role` writes **absolute poses with no delta-rebasing**,
+  and its `recoil` role is authored from `m_home` captured at `deploy_end` — *the deployed pose*. The bind==frame-0
+  contract governs the **primary (Idle/reference)** clip, which defines the reference pose; a **role** clip
+  legitimately encodes a non-identity pose against it. Law 2 is the same point from the other side: the stance
+  belongs in a role clip, never the primary. Hold restored. The real cause of the in-game failure is still open, so
+  `[AnimDiag]` now covers the **attack** role and reports **translation** (`SLID d (t0->tm)`, via the engine's own
+  `GetPoseTRS`) — the one motion, on the one role, the scan could not previously see. Lesson: two opposite changes on
+  two readings of the same paragraph is a sign to go and measure, not to read it a third time.
 - **RECOIL: THE BARREL FINALLY GETS ITS OWN BONE (2026-08-22).** "Of course `keepTranslations`, what else?" — and
   that is the point: the flag exists, so recoil can be an **honest slide** instead of the far-pivot `RecoilArm`
   rotation trick `deploy_convert` was forced into for want of any translation at all. New **Recoil (fraction of
