@@ -10,6 +10,23 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE GATE THAT PASSED ON WHAT IT GUARDS (2026-08-22, review finding — fixed).** `check-hot-path.sh` forbids
+  SPIKE/EXPERIMENTAL labels inside `Plugin.Update()`, and the CHANGELOG claimed "the label can't outlive the
+  experiment again without failing a push". It greps **case-sensitively**. Three calls in the shipped Update body
+  carried lowercase `(spike)` — `PollTurnEase`, `PollTerrainHug` and `BattleTurn.Poll`, the last running for
+  *every* unit — and the gate printed OK and exited 0 on all three. A guard reporting green on the very method it
+  guards is the failure this project calls its worst, so the fix came with its own drill. Adding `-i` immediately
+  produced a **false positive** on the line citing `docs/Wonder-Spike.md` — a doc link, not a label — so the match
+  now requires the word to stand alone: ignored when glued to an identifier or filename (`Wonder-Spike`,
+  `docs/Spike`, `de-spiked`, `…Spike.md`), still fired by every label form actually used (`(spike)`, `SPIKE:`,
+  `EXPERIMENTAL (opt-in, …)`). Verified in both directions: it named exactly the three real labels, and after they
+  were cleared it caught a freshly planted one. **The three were then PROMOTED, not deleted** — each is a
+  documented, shipped feature with a live dial file, a `FrameCost` bucket and doc pages
+  (`haf_turnease` / `haf_hugterrain` / `haf_battleturn`, peers of the untagged `haf_rotortrim` one line above);
+  the labels were simply stale. And the two source-only guards — hot path and catalog surface — **moved into CI**
+  beside the docs guard, for the reason that promotion was made in the first place: a pre-push hook is per-clone
+  config, and `--no-verify` or a web edit walks straight past it.
+
 - **THE SECOND SHOT (2026-08-22, review critical — fixed).** A critical review of the 109 commits since the
   08-21 pass found the turn-before-firing feature defeated on its *second* use. `TurnHoldForStrike` reuses an
   armed hold so that one strike's three prefixes (visuals + both schedules) share a single clock — the fix

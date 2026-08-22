@@ -24,7 +24,17 @@ start=$(grep -n "^        private void Update()" "$F" | head -1 | cut -d: -f1)
 end=$(awk -v s="$start" 'NR>s && /^        }$/ {print NR; exit}' "$F")
 [ -n "$end" ] || { echo "[FAIL] could not find the end of Plugin.Update()"; exit 2; }
 
-bad=$(sed -n "${start},${end}p" "$F" | grep -nE "SPIKE|EXPERIMENTAL" | grep -vE "EXPERIMENTAL \(opt-in" || true)
+# CASE-INSENSITIVE, both halves (2026-08-22). The gate shipped case-sensitive and therefore passed on three live
+# `(spike)` labels sitting inside Update() — a guard reporting OK on the very thing it guards, found by review.
+# The exclusion must match the same way, or a lowercase `experimental (opt-in…)` would be caught and never excused.
+#
+# The word must stand ALONE to count. Going case-insensitive immediately produced a false positive on the line
+# citing `docs/Wonder-Spike.md` — a doc link, not a label — so a match is ignored when the word is glued to an
+# identifier or filename: preceded by `-` or `/` (Wonder-Spike, docs/Spike, de-spiked) or trailed by `.` (…Spike.md).
+# Labels in practice read `(spike)`, `SPIKE:`, `EXPERIMENTAL (opt-in, …)`, all of which stand alone and still fire.
+bad=$(sed -n "${start},${end}p" "$F" \
+      | grep -inE '(^|[^A-Za-z0-9_/-])(SPIKE|EXPERIMENTAL)([^A-Za-z0-9_.-]|$)' \
+      | grep -viE "EXPERIMENTAL \(opt-in" || true)
 if [ -z "$bad" ]; then
   echo "hot path: OK — Plugin.Update() ($((end - start)) lines) runs nothing labelled SPIKE, and every EXPERIMENTAL names its gate."
   exit 0

@@ -46,10 +46,12 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
   all-skipped run writes `PASS — 0 passed` to `haf_bake_tests_report.txt`; the smoke suppresses each coverage
   clause when its counter is zero instead of printing it; and `UninjectedReason`'s "its addon loaded but the
   repoint did not run" — a definite pipeline break — is filed under `Uninjected`, which the verdict only prints.
-- **Two gates have blind spots and neither is in CI.** `check-hot-path.sh` greps case-sensitively and passes on
-  three lowercase `(spike)` labels live inside `Plugin.Update`; `check-catalog.sh`'s extraction regex omits
-  `CachedField(` (16 call sites, 3 added by that range). Both are pure greps needing neither Unity nor the game,
-  so both belong beside the docs guard on the runner.
+- ~~**Two gates have blind spots and neither is in CI.**~~ — **HOT-PATH HALF FIXED 2026-08-22**: the grep is
+  case-insensitive with stand-alone word matching (the naive `-i` false-positived on `docs/Wonder-Spike.md`),
+  verified in both directions, the three stale `(spike)` labels promoted (all three are documented shipped dials),
+  and **both** source-only guards moved into CI beside the docs guard. **Still open:** `check-catalog.sh`'s
+  extraction regex omits the `CachedField(` accessor family (16 call sites, 3 added by that range) — its literals
+  are catalogued today, so the gate is green by luck rather than by proof.
 - **`PackTuning` dropped the `sv > 0f` guard** the pre-extraction parser had. Nothing downstream re-guards it:
   `"scale": 0` multiplies a shared GPU mesh entry by zero, `-1` renders it inside-out, both silently. It is the
   one extraction in the range that shipped without a legacy-parity oracle.

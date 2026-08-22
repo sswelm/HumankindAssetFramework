@@ -23,3 +23,15 @@ jobs:
       - name: Docs guard (links + notes convention)
         shell: bash
         run: bash tools/check-docs.sh
+
+      # The other two source-only guards belong here for the same reason the docs guard does: a pre-push hook is
+      # per-clone config that a PR author may not have, and --no-verify (or a web edit) walks straight past it.
+      # Neither needs the game or Unity — both are greps over the tree, milliseconds each. Added 2026-08-22 after
+      # a review found the hot-path gate had been passing on three live violations for want of a `-i`.
+      - name: Hot path (no shipped spikes in Update)
+        shell: bash
+        run: bash tools/check-hot-path.sh
+
+      - name: Binding catalog surface (every by-name site catalogued)
+        shell: bash
+        run: bash tools/check-catalog.sh

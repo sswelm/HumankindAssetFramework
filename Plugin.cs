@@ -416,8 +416,8 @@ namespace HumankindAssetFramework
                 t = FrameCost.Begin(); UniversalInject.ProcessBattleCries();   FrameCost.End(FrameCost.BattleCries, t);       // battle-start war cries queued by the sim-thread hook
                 t = FrameCost.Begin();
                 UniversalInject.PollRotorTrim();        // live rotor-trim dial (haf_rotortrim.txt): constant BR-slot tilt on donor-clip rotor bones
-                UniversalInject.PollTurnEase();         // live turn-ease dial (haf_turnease.txt): eased facing + bank on donor-clip units (spike)
-                UniversalInject.PollTerrainHug();       // live terrain-hug dial (haf_hugterrain.txt): fly low over open ground, climb for districts (spike)
+                UniversalInject.PollTurnEase();         // live turn-ease dial (haf_turnease.txt): eased facing + bank on donor-clip units
+                UniversalInject.PollTerrainHug();       // live terrain-hug dial (haf_hugterrain.txt): fly low over open ground, climb for districts
                 FrameCost.End(FrameCost.Dials, t);
                 t = FrameCost.Begin(); UniversalInject.PollClassScan();        FrameCost.End(FrameCost.ClassScan, t);         // category turn ease: sample live units for the Hover ability + azimuth turrets (~3s; only while category rates are active)
                 t = FrameCost.Begin(); DistrictInject.TickDistrictMeshSwap();  FrameCost.End(FrameCost.DistrictMeshSwap, t);  // DISTRICT AXIS (isolate path): drive each registry entry across its live tiles; no-op with no district entries. Shipped, docs/District-Visuals.mdp our FxMesh into the live selector's leaf drawers
@@ -428,7 +428,7 @@ namespace HumankindAssetFramework
                 t = FrameCost.Begin(); DistrictInject.PollHexSculptDial();       FrameCost.End(FrameCost.HexDial, t);        // live dial (haf_hexsculpt.txt): re-carve every sculpted district's platform without a relaunch
             }
             t = FrameCost.Begin();
-            BattleTurn.Poll();                          // live battle-turn dial (haf_battleturn.txt): turn rate + hold-fire for ALL units — independent of model injection, so outside the UniversalInject gate (spike)
+            BattleTurn.Poll();                          // live battle-turn dial (haf_battleturn.txt): turn rate + hold-fire for ALL units — independent of model injection, so outside the UniversalInject gate
             Hk_BombardAnimHold.Tick();                  // replay deferred bombard attack poses once their turn-hold elapses (muzzle flash + shot sound timing)
             FrameCost.End(FrameCost.BattleTurn, t);
             if (PersistUnitFacing.Value)
