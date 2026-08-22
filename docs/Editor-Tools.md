@@ -74,6 +74,28 @@ The deploy block's **Wheel bones (roll while moving)** + axle axis / loop frames
 > be judged on the turntable before a bake, and **Checker** paints a high-contrast skin so rotation is visible at
 > all — an untextured wheel looks identical spinning or still.
 
+> **THE GUN COMES UP WITH THE TRAILS (2026-08-22).** Two dials in that same section, both only live when parts are
+> marked **Gun**:
+>
+> * **Gun pivot (breech→muzzle)** — where the `Gun` bone's head sits along the assembly, `0` = breech, `1` = muzzle,
+>   `0.5` = the bbox centre. That head **is the trunnion**: the bone rotates about its own origin, so at the centre a
+>   tube see-saws about its middle and the breech swings down through the carriage. Measured on the M114 (76-unit
+>   tube): at `0.4` the muzzle rises 15.5 and the breech drops 10.3, clearing the ground; at the `0.5` default it
+>   would be a symmetric ±15.5. `0.5` stays the default so rigs baked before this dial existed regenerate identical.
+> * **Gun raise on deploy (deg)** — degrees the gun elevates *inside the `Deploy` clip*, on the same frames as the
+>   spread. A towed gun travels with the tube clamped level over its closed trails and only comes up once they are
+>   planted, so the raise belongs in the same clip; every use the state machine already makes of `Deploy` then
+>   carries it free — unfold raises, `Deploy[N..0]` lowers it back onto the travel lock before the unit rolls,
+>   `Deploy[N..N]` holds it up. Axis is the world horizontal perpendicular to the tube and the **sign is chosen**, as
+>   the trails' is, by testing which way actually lifts the muzzle.
+>
+> **This does not replace HAF's runtime `gunElevMax`** (Animation Lab ▸ *Gun elevation — max*) — that writes a
+> `BoneRotation` slot, a channel the clip pose never touches, so the two **compose**: the clip sets the base firing
+> elevation, the runtime adds the per-shot, distance-proportional lift on top of it. Dial `gunElevMax` against the
+> raised base, not against level. The hand-converted M114 baked its elevation into the deploy clip too
+> (`deployReadyFrame`), but out of necessity — a deploy-converted rig cannot carry authored bone motion at all
+> ([Animation-Pitfalls.md](Animation-Pitfalls.md)). Here it is a deliberate two-key authoring on a clean rig.
+
 > The Spin section leads with **Enable spin animation** — the master switch: off, the rig generates with zero
 > wheel/rotor rotation and static tracks, keeping every bone, marking and dial for re-enabling (no more
 > unmarking every wheel to still a vehicle). With no wheel/rotor/turret marked at all the section reads

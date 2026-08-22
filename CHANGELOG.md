@@ -996,6 +996,24 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   with Deploy conversion OFF, Convert raw rig ON, Fix 100× OFF, Auto-ground ON, Idle stance `Spin[0..0]`, Movement
   `Spin`, every `deploy…`/`recoil` clip field cleared. **"In game it moves perfectly."** Cost, as agreed for step 1:
   the fold/deploy/recoil are gone on that unit until re-authored on the clean rig.
+- **THE GUN COMES UP WITH THE TRAILS (2026-08-22).** Next step on the rebuilt howitzer: get the barrel to raise.
+  Two findings shaped it. First, HAF already elevates guns at runtime — `ApplyGunElevation` resolves `turretBone`
+  else `muzzleBone` and raises it distance-proportionally during a bombard — so this needed **no plugin code**, only
+  a clean `Gun` bone to aim it at. Second, the runtime writes a **`BoneRotation` slot**, a channel the clip pose never
+  touches, which is *why* a baked raise and the runtime raise **compose** instead of fighting: the clip sets the base
+  firing elevation, the runtime adds the per-shot lift on top. So both got built. **Gun pivot (breech→muzzle)** slides
+  the `Gun` bone's head along the assembly — that head *is* the trunnion, since the bone turns about its own origin,
+  and at the historical bbox-centre placement a tube see-saws about its middle and drives the breech down through the
+  carriage. Measured offline on the M114's 76-unit tube: at `0.4` the muzzle rises 15.5 and the breech drops 10.3,
+  with the model's lowest vertex unmoved at `Z −1.0`; the `0.5` default is kept so every rig baked before the dial
+  regenerates identical. **Gun raise on deploy (deg)** then keys the elevation *into the `Deploy` clip*, on the same
+  frames as the trail spread — the user's own read of the old converted model, "raising the gun used to be part of
+  the deploy animation, which makes sense", and it is: a towed gun travels clamped level over its closed trails and
+  comes up only once they are planted. Every use the state machine already makes of `Deploy` carries it free — unfold
+  raises, `Deploy[N..0]` lowers it onto the travel lock before the unit rolls, `Deploy[N..N]` holds it up. Axis is the
+  world horizontal perpendicular to the tube; the sign is *chosen* by testing which way lifts the muzzle, the same way
+  the trails choose theirs. The converted M114 did bake elevation into its deploy clip too (`deployReadyFrame`) — but
+  out of necessity, having no way to carry authored bone motion at all. Here it is two keys on a clean rig.
 - **THE HOWITZER, REBUILT: WHEELS + A SPLIT-TRAIL DEPLOY ON A LAB RIG (2026-08-22, verified in-game).** Once the
   converted rig was shown unable to carry authored bone motion, the user called the rebuild — "let's do this properly
   in the Vehicle Lab" — and it went the whole way in one sitting: wheels first (in-game verified), then the deploy.
