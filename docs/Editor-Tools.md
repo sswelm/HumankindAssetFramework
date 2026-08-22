@@ -89,6 +89,17 @@ The deploy block's **Wheel bones (roll while moving)** + axle axis / loop frames
 >   `Deploy[N..N]` holds it up. Axis is the world horizontal perpendicular to the tube and the **sign is chosen**, as
 >   the trails' is, by testing which way actually lifts the muzzle.
 >
+> **MUZZLE — a part role, deliberately not a bone (2026-08-22).** Mark a separately-modelled **muzzle brake / flash
+> hider** as **Muzzle** and the rigger *welds it to the `Gun` bone* rather than giving it one: a brake is bolted to
+> the tube, so it must elevate — and later recoil — with it, and a bone of its own could only ever drift off the
+> barrel it is screwed to. What the marking buys is an **exact muzzle tip**: without it the muzzle end is the gun
+> bbox's far extreme, which a wide brake or a front bracket skews; with it, it is the marked geometry's farthest
+> point from the breech. That tip pins the breech→muzzle span *Gun pivot* measures against, and the run reports the
+> **measured fire origin** (gun-bone-local, in source units — scale by the bake's `size`) in its DONE status, which
+> is the value the Animation Lab's *Muzzle offset* dial otherwise costs an iterate-and-relaunch loop to find.
+> If the brake is modelled **into** the barrel mesh — as it is on the M114, where the tube tapers to 3.84 wide and
+> then flares back to 5.22 over its last 6 units — there is nothing to mark; skip the role.
+
 > **This does not replace HAF's runtime `gunElevMax`** (Animation Lab ▸ *Gun elevation — max*) — that writes a
 > `BoneRotation` slot, a channel the clip pose never touches, so the two **compose**: the clip sets the base firing
 > elevation, the runtime adds the per-shot, distance-proportional lift on top of it. Dial `gunElevMax` against the

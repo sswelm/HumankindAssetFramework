@@ -996,6 +996,21 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   with Deploy conversion OFF, Convert raw rig ON, Fix 100× OFF, Auto-ground ON, Idle stance `Spin[0..0]`, Movement
   `Spin`, every `deploy…`/`recoil` clip field cleared. **"In game it moves perfectly."** Cost, as agreed for step 1:
   the fold/deploy/recoil are gone on that unit until re-authored on the clean rig.
+- **A MUZZLE ROLE THAT IS DELIBERATELY NOT A BONE (2026-08-22).** Reading the howitzer's anatomy off the mesh rather
+  than the part names settled what the gun actually is: `barrel1` is the 76-unit tube — and its last 6 units flare
+  from 3.84 back out to 5.22, so **the muzzle brake is modelled *into* the barrel**, not as a part — while `cannon2`
+  ("cannon_body") stops 26 units short of the muzzle and is the **recoil cradle**, the trough the tube slides in and
+  where the trunnions live. The user's read of which part matters was exactly right: *the barrel is the part that
+  kicks back*. That is the split that governs recoil — tube moves, cradle stays — and it is *not* the split for
+  elevation, where tube and cradle rotate together about the trunnions and belong on one bone. Asked for a **Muzzle**
+  part role anyway, and it earns its place on other models: a separately-modelled brake gets **no bone of its own** —
+  it is bolted to the tube, so the rigger welds it to the `Gun` bone and it elevates and recoils with it. What the
+  marking buys is an exact tip: the breech→muzzle span *Gun pivot* measures against stops guessing at the gun bbox's
+  far extreme, and the run reports the **measured fire origin**, gun-bone-local — the value the Animation Lab's
+  *Muzzle offset* dial otherwise costs an iterate-value-then-relaunch loop to find. Proven headless both ways: with
+  nothing marked the rig is byte-for-byte the earlier one (same head, breech and muzzle), and with a part marked it
+  welds onto the *one* Gun bone — "2 gun part(s) on one Gun bone", no bone added — while the tip snaps to the marked
+  geometry.
 - **THE GUN COMES UP WITH THE TRAILS (2026-08-22).** Next step on the rebuilt howitzer: get the barrel to raise.
   Two findings shaped it. First, HAF already elevates guns at runtime — `ApplyGunElevation` resolves `turretBone`
   else `muzzleBone` and raises it distance-proportionally during a bombard — so this needed **no plugin code**, only
