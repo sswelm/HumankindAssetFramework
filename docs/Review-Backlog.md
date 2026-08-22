@@ -30,10 +30,18 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
   from `parts`; every other section uses `ActiveParts`, and Generate uses `fast ? boneParts : parts`. On an
   `SKM_` source with the fast path on, the section reads "no trails marked" and every control is disabled, while
   Generate ships the defaults (35° spread, pivot 0.5, recoil 0).
-- **The trail-spread sign heuristic may test the wrong axis** (`Tools/vehicle_rig.py:1820`) — it measures
-  displacement in X while the file documents X as the longitudinal axis, so both arms can take the same sign and
-  one swings inward. `_centre_x = 0.0` is commented as "recentred before this point" and nothing recentres.
-  NEEDS A BLENDER DRILL on the M114 (dump both signs, assert opposite) before it is called real or dismissed.
+- ~~**The trail-spread sign heuristic may test the wrong axis**~~ — **DRILLED AND DOWNGRADED 2026-08-22.** The
+  headless drill (M114, 13 yaw angles) shows the shipped rig is **correct**: at yaw 0/90/180 the two trails take
+  opposite signs and open to a ~102-unit spread. The critical does not reproduce. What the drill *did* confirm is
+  a narrower fragility: at every yaw in between, both arms take the **same** sign and the spread collapses to ~12
+  units — off-axis the test measures the arm's foreshortening in x rather than distance from the centreline. The
+  live path is real (`model_rot` is applied and baked *before* the rig is built), but the dials exist precisely to
+  square a model up, so it needs someone to leave a gun at an odd angle. Two rewrites were tried against the same
+  harness and both scored **worse** (they failed at yaw 0, where the current rule passes), because the real
+  off-axis fault is upstream: the arm's ends come from the dominant axis-aligned bbox extent, which mis-picks the
+  ends of a diagonal arm. Fixed instead: the silence — an un-mirrored pair now warns, promoted to the Lab's status
+  box. **Still open** (low priority, needs a diagonally-authored gun to matter): rotation-invariant arm-end
+  extraction, after which the sign rule can be re-derived from the trails' own centreline.
 - **Three reports can say PASS on nothing.** The bake-test verdict treats zero failures as success, so an
   all-skipped run writes `PASS — 0 passed` to `haf_bake_tests_report.txt`; the smoke suppresses each coverage
   clause when its counter is zero instead of printing it; and `UninjectedReason`'s "its addon loaded but the
