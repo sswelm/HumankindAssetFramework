@@ -996,6 +996,22 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   with Deploy conversion OFF, Convert raw rig ON, Fix 100× OFF, Auto-ground ON, Idle stance `Spin[0..0]`, Movement
   `Spin`, every `deploy…`/`recoil` clip field cleared. **"In game it moves perfectly."** Cost, as agreed for step 1:
   the fold/deploy/recoil are gone on that unit until re-authored on the clean rig.
+- **RECOIL: THE BARREL FINALLY GETS ITS OWN BONE (2026-08-22).** "Of course `keepTranslations`, what else?" — and
+  that is the point: the flag exists, so recoil can be an **honest slide** instead of the far-pivot `RecoilArm`
+  rotation trick `deploy_convert` was forced into for want of any translation at all. New **Recoil (fraction of
+  tube)** + **Recoil frames** dials. Marked **Gun** parts move onto a new `Barrel` bone, a child of `Gun`; marked
+  **Cradle** parts stay — the split the Cradle role was invented for, one step after it was named. The fraction is
+  measured breech→muzzle, not trunnion→muzzle, so turning *Gun pivot* cannot silently change what the number means.
+  **Identity rest, deliberately:** the obvious rig points the bone down the bore so recoil is `−Y`, but a
+  non-identity rest is mangled by the skeleton bake (the measured `(21.096,0,0)` → `(-0.00932,0,-0.00466)`), so
+  `Barrel` is axis-aligned like every other bone here and slides by a local translation along the rest-frame bore —
+  which, being a child of `Gun`, rotates with the elevation for free. **Verified offline:** `0.00°` deviation from
+  the bore both level and elevated 45°, constant 23.93-unit slide, and *only* the tube moves — cradle, trails,
+  wheels and hull all sit at `+0.00`. With recoil off the bone list is identical to the shipped M114 rig, so every
+  gun already baked regenerates unchanged. The kick is a derived ~15% of the clip with the ride forward taking the
+  rest (2 frames back, 14 forward at 16) — the asymmetry is what reads as a shot, so it is not left to be set wrong.
+  One measurement error caught in the making: an early check reported 8° of bore deviation under elevation, which
+  was the *test* picking different min/max-Y vertices once the tube rotated, not the rig.
 - **CRADLE — THE PART THAT HOLDS THE CANNON, GIVEN ITS PROPER NAME (2026-08-22).** The user had marked `cannon2` as
   *Muzzle* — "I called it the muzzle because it's one part" — and the run's own readout caught it: `tip=(-0.00,
   -34.14, 19.25)`, pinning the muzzle 26 units short of the real one at `Y −60.55`, which silently shrank the

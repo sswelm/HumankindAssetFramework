@@ -111,6 +111,34 @@ The deploy block's **Wheel bones (roll while moving)** + axle axis / loop frames
 > tube tapers to 3.84 wide and then flares back to 5.22 over its last 6 units — there is nothing to mark; skip it.
 > Marking the *cradle* as Muzzle is the trap: it pins the tip 26 units short and silently rescales the pivot slider.
 
+> **RECOIL — the one motion that needs the barrel on its OWN bone (2026-08-22).** **Recoil (fraction of tube)** is
+> how far the tube kicks back when the gun fires, as a fraction of its own breech→muzzle length — a fraction, so the
+> dial means the same distance-relative-to-the-gun on any model at any scale, and measured breech-to-muzzle rather
+> than trunnion-to-muzzle so that moving *Gun pivot* doesn't silently change what the number means. **0 = off**, and
+> off means the `Barrel` bone is never created: a gun that never recoils costs no bone and regenerates byte-identical
+> to before the feature existed (verified — bone lists match the shipped M114 rig exactly).
+>
+> With it on, the **Gun**-marked parts move onto a new `Barrel` bone, a child of `Gun`, and the **Cradle**-marked
+> parts stay behind. *That* is the split the Cradle role was created for. Mark no cradle and the whole assembly
+> slides back together, mount and all — the Lab warns about it.
+>
+> Two design points worth keeping:
+>
+> * **Identity rest, deliberately.** The tempting rig points the bone down the bore so recoil is simply `−Y` in bone
+>   space. Don't: a non-identity rest rotation is mangled by the skeleton bake (measured — an FBX local `T` of
+>   `(21.096, 0, 0)` came back as `(-0.00932, 0, -0.00466)`), which is why every bone this rigger makes is
+>   axis-aligned. `Barrel` is axis-aligned too and recoils by a **local translation** along the bore taken in the
+>   rest frame. Because it is a child of `Gun`, that vector rotates with the elevation — verified at `0.00°`
+>   deviation from the bore both level and elevated 45°, at a constant slide length.
+> * **The asymmetry is what sells it, not the distance.** The kick takes the first ~15% of the clip and the ride
+>   forward gets the rest, derived from **Recoil frames** rather than given its own dial, so it cannot be set to a
+>   shape that reads wrong. At 16 frames that is 2 back, 14 forward.
+>
+> **Recoil is a TRANSLATION**, and the clip bake is rotation-only by default — tick **Keep bone translations** on the
+> entry or the bake discards it and the gun does not move at all. That flag is the whole reason this can be an honest
+> slide rather than the far-pivot `RecoilArm` rotation trick `deploy_convert` was forced into. Assign `Recoil` to the
+> **Attack clip**.
+
 > **THE M114, END TO END — the worked example (2026-08-22, verified in-game).** A towed howitzer rebuilt from a raw
 > Sketchfab GLB on a Vehicle Lab rig, wheels + trails + gun, no converter. The shipped settings:
 >
