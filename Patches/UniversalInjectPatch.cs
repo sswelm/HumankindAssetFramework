@@ -95,6 +95,7 @@ namespace HumankindAssetFramework
         public int gunElevBoneIdx = -2;   // cached bone index (-2 = unresolved, -1 = not found)
         public string muzzleBoneName;     // cached FULL bone name resolved from muzzleBone (null = not resolved yet, "" = not found on our skeleton).
         public UnityEngine.Vector3 muzzleOffsetV; public bool muzzleOffsetParsed;   // parsed once per session
+        public bool attackOpenLogged;   // diagnostic: log the attack clip's first frame once per shot
         public bool muzzlePinLogged;      // session flag: log the first StartVFXEvent pin once per entry
         public object handPropLayer;      // session-scoped: our PRIVATE clone of the borrowed weapon output layer, painted with the prop's own atlas (<prop>_Atlas)
         public UnityEngine.Texture2D propAtlasTex;   // session-scoped: the prop atlas — repainted EVERY TICK like the unit retexture (the game resets the material; a one-shot paint flip-flopped between sessions)

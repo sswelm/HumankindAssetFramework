@@ -423,6 +423,14 @@ namespace HumankindAssetFramework
                                             $"after {UnityEngine.Time.time - f.armTime:F2}s — the clock's miss/rate estimate ran short");
                             }
                             if (still) { f.startTime = UnityEngine.Time.time; e.activeFires[i] = f; continue; }
+                            // WHY IT RELEASED, measured (2026-08-22). "Still fires too early" kept being diagnosed by
+                            // reasoning about which clock won; this states it outright — how long the hold lasted and
+                            // how far off the gun still was at that instant. A release at miss>8 means the alignment
+                            // test itself is wrong; a release at miss~0 means the hold worked and the visible lag is
+                            // downstream (clip pacing, or the pawn's rendered facing trailing the eased yaw).
+                            Plugin.Diag($"[Fire] '{e.resourceName}': recoil released after " +
+                                        $"{UnityEngine.Time.time - f.armTime:F2}s — still {miss:F1}deg off " +
+                                        $"({(UnityEngine.Time.time - f.armTime >= 4f ? "4s FAILSAFE" : clockHeld ? "clock" : "alignment")})");
                             f.waitAlign = false; e.activeFires[i] = f;   // released (or timed out): clock runs from here
                         }
                         if (UnityEngine.Time.time - f.startTime >= dur) e.activeFires.RemoveAt(i);   // drop finished one-shots

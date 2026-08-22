@@ -1013,6 +1013,16 @@ namespace HumankindAssetFramework
                 lock (e.activeFires)
                     inAttack = PoseMath.AttackWindow(e.activeFires, pos, UnityEngine.Time.time,
                                                      e.attackDur, e.attackRepeats, out attackT);
+                // WHEN THE ATTACK CLIP ACTUALLY STARTS PLAYING, and how far off the gun is at that moment. This is
+                // the frame the player sees the kick begin, so it is the only timestamp that can settle "it fires
+                // before it has turned" — everything else in this chain is an intention, not an observation.
+                if (inAttack && !e.attackOpenLogged)
+                {
+                    e.attackOpenLogged = true;
+                    Plugin.Diag($"[Fire] '{e.resourceName}': ATTACK CLIP STARTS (t={attackT:F2}, dur={e.attackDur:F2}s) " +
+                                $"— gun is {TurnMisalignAt(pos):F1}deg off target");
+                }
+                else if (!inAttack) e.attackOpenLogged = false;   // re-arm for the next shot
             }
             PoseMath.StatePick pick;
             lock (e.stateSamples) pick = PoseMath.PickState(e.stateSamples, pos);
