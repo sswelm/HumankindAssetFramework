@@ -748,7 +748,7 @@ namespace HumankindAssetFramework
             // first APPLYING line always reports a near-zero angle and says nothing about whether the elevation ever
             // gets large. If this never logs, the envelope never opens; if it logs a big angle and the gun still does
             // not move, the write is reaching the entry and losing to the clip's own channel for that bone.
-            if (angle >= 0.5f * UnityEngine.Mathf.Abs(e.gunElevMax))
+            if (UnityEngine.Mathf.Abs(angle) >= 0.5f * UnityEngine.Mathf.Abs(e.gunElevMax))
                 Plugin.DiagOnce("elev-peak-" + e.resourceName, $"[Elev] '{e.resourceName}': reached {angle:F1}deg (>= half of gunElevMax {e.gunElevMax:F0}) — envelope={f:F2}, dist={dist:F1}");
             SetBoneRotation(entry, 3, (uint)e.gunElevBoneIdx, (uint)e.gunElevAxis, angle);
         }
