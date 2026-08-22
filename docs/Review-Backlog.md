@@ -17,6 +17,47 @@ by when they'll bite.
   `animated-legacy` through the gated pipeline. **In-game verification DONE (2026-08-02)** — the howitzer checked out
   correctly after a real re-bake.
 
+## From the 2026-08-22 critical review (confirmed, unfixed)
+
+Every item below was re-verified in source during the review; the range's critical (the strike hold reusing a
+stale aim marker) was fixed the same day and is not repeated here. Ranked by consequence.
+
+- **`Make static…` bypasses the name-collision guard** (`ModelFactoryWindow.cs:948`). `nameCollides` gates
+  `canBake` and Save settings only; the Make-static button sits in no disabled scope and calls
+  `ModelRegistry.Upsert`, a blind `RemoveAll(name) + Add`. With the red "Not allowed" box on screen, one click
+  destroys the colliding entry and orphans its baked assets — the exact data loss 898c732 was written to stop.
+- **The Vehicle Lab's trail/gun/recoil dials are dead on rigged sources.** Eight sites in that block count roles
+  from `parts`; every other section uses `ActiveParts`, and Generate uses `fast ? boneParts : parts`. On an
+  `SKM_` source with the fast path on, the section reads "no trails marked" and every control is disabled, while
+  Generate ships the defaults (35° spread, pivot 0.5, recoil 0).
+- **The trail-spread sign heuristic may test the wrong axis** (`Tools/vehicle_rig.py:1820`) — it measures
+  displacement in X while the file documents X as the longitudinal axis, so both arms can take the same sign and
+  one swings inward. `_centre_x = 0.0` is commented as "recentred before this point" and nothing recentres.
+  NEEDS A BLENDER DRILL on the M114 (dump both signs, assert opposite) before it is called real or dismissed.
+- **Three reports can say PASS on nothing.** The bake-test verdict treats zero failures as success, so an
+  all-skipped run writes `PASS — 0 passed` to `haf_bake_tests_report.txt`; the smoke suppresses each coverage
+  clause when its counter is zero instead of printing it; and `UninjectedReason`'s "its addon loaded but the
+  repoint did not run" — a definite pipeline break — is filed under `Uninjected`, which the verdict only prints.
+- **Two gates have blind spots and neither is in CI.** `check-hot-path.sh` greps case-sensitively and passes on
+  three lowercase `(spike)` labels live inside `Plugin.Update`; `check-catalog.sh`'s extraction regex omits
+  `CachedField(` (16 call sites, 3 added by that range). Both are pure greps needing neither Unity nor the game,
+  so both belong beside the docs guard on the runner.
+- **`PackTuning` dropped the `sv > 0f` guard** the pre-extraction parser had. Nothing downstream re-guards it:
+  `"scale": 0` multiplies a shared GPU mesh entry by zero, `-1` renders it inside-out, both silently. It is the
+  one extraction in the range that shipped without a legacy-parity oracle.
+- **`fireGuidQueue` is never drained on re-arm** and is invisible to `SessionState` (net471 `ConcurrentQueue`
+  has no instance `Clear()`, so the fence — which keys on that — sees 137 of 549 statics). A strike enqueued in
+  the last frame of one session can arm the wrong unit's recoil in the next, where GUIDs restart from zero.
+- **`Hk_BattleHoldFire` fails closed** (`BattleTurnPatch.cs:343`): `ct == null ||` selects the hold branch, so a
+  missing `creationTime` holds the attack every frame with no deadline — against the stated policy every sibling
+  hold follows ("any failure = vanilla, never a stuck army").
+- **A fourth hand-maintained field list is ungated**: Clone's `int[4]` GUID clears (11 such fields in `ModelDef`).
+  `check_handlists.sh` already gates three lists of exactly this shape; this one is guarded by a comment.
+- **`Plugin.Update` has no try/catch**, so a throwing poll skips the frame's own accounting — the meter reads
+  healthier exactly when HAF is most broken. And `docs/Performance.md`'s "everything HAF did in an average
+  frame" overstates the meter: 33 timing sites cover the Update fan-out, the pose hook and the district path,
+  not the other ~36 Harmony hooks or `OnGUI` (which does a full reflection walk of the GPU budget per repaint).
+
 ## Worth fixing before the next model of the affected kind
 
 - **A CONVERTED RIG'S CLIPS DON'T SHARE A FRAME WITH ITS REST POSE (measured 2026-08-22, the howitzer wheels)** —

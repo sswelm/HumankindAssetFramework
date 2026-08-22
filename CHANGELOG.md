@@ -10,6 +10,24 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE SECOND SHOT (2026-08-22, review critical — fixed).** A critical review of the 109 commits since the
+  08-21 pass found the turn-before-firing feature defeated on its *second* use. `TurnHoldForStrike` reuses an
+  armed hold so that one strike's three prefixes (visuals + both schedules) share a single clock — the fix
+  that stopped the bang desyncing from the recoil. But the marker it tested for "already armed" is the aim
+  override, which **outlives its strike by design**: `SetAimOverride` writes a 120 s `until` because the same
+  record doubles as the facing long-stop that keeps a unit pointed at what it shot. Existence was not
+  pendency. So a second bombard from the same tile within two minutes — a siege, counter-battery, any
+  consecutive turn — hit the early return, got `hold = 0` off a long-expired release time, and never reached
+  the fall-through that arms a new bearing. Every consumer then agreed on the *previous* target's yaw: the
+  attack pose fired at once, the recoil released at once, the elevation ramp had long since finished. The gun
+  shot without turning, which is the exact symptom the whole 20-commit arc exists to eliminate. The drills
+  never saw it because they fired **one shot**. The decision is now a pure predicate, `ArmedHoldPending`
+  (`overrideFound && releaseAt > now`), with the reasoning at the call site and five tests in
+  `Tests/StrikeHoldTests.cs` — mutation-drilled: reverting to the old test fails three of them, including the
+  named regression. That closes the gap the review flagged in this subsystem specifically — it was the one
+  place the project's own "extract the decision, test it" rule had never been applied, so a single in-game
+  drill was its only oracle.
+
 - **`ModelEntry`'S THREAD DISCIPLINE IS DECLARED, NOT MEMORISED (2026-08-22).** A review asked to reopen the A2
   god-object split, citing the two 08-21 data races as the "proven bug from the shape" that Decisions.md requires.
   **Neither race was in `ModelEntry`** — one was the reflection-cache *statics*, the other DistrictInject's collections

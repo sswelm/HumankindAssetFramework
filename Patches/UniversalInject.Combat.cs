@@ -302,6 +302,23 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogWarning("[BattleTurn] BattleAimPrep: " + ex.Message); }
         }
 
+        // PURE (tested: Tests/StrikeHoldTests.cs) — "is this strike ALREADY armed?", the test that keeps the
+        // three prefixes of one strike on a single shared clock.
+        //
+        // An aim override deliberately OUTLIVES its strike: SetAimOverride writes a 120 s `until` because the
+        // override doubles as the facing long-stop that keeps a unit pointed at what it shot. So "an override
+        // exists near this pawn" does NOT mean "this strike is armed" — only a release time still in the FUTURE
+        // does. Testing existence alone made the second bombard from the same tile within two minutes reuse the
+        // FIRST strike's long-expired clock: hold 0, the fall-through that arms a new bearing never reached, and
+        // every consumer (attack pose, shell schedule, recoil, elevation ramp) agreeing on the previous target's
+        // yaw — the gun fired without turning. Found by review 2026-08-22; the drills had only ever fired once.
+        //
+        // `releaseAt > now` and not `>=`: a hold of 0 (already aligned) stores releaseAt == now, and re-arming
+        // that case is correct — it recomputes the same 0 and refreshes the bearing, and SetAimOverride replaces
+        // the entry in place rather than appending.
+        internal static bool ArmedHoldPending(bool overrideFound, float releaseAt, float now)
+            => overrideFound && releaseAt > now;
+
         internal static float TurnHoldForStrike(object strike)
         {
             try
@@ -327,7 +344,7 @@ namespace HumankindAssetFramework
                     foreach (var pawn0 in pawns)
                     {
                         if (!(GetMember(pawn0, "Transform") is UnityEngine.Transform tr0)) continue;
-                        if (TryAimRelease(tr0.position, out float rel))
+                        if (ArmedHoldPending(TryAimRelease(tr0.position, out float rel), rel, UnityEngine.Time.time))
                             return UnityEngine.Mathf.Max(0f, rel - UnityEngine.Time.time);
                         TryTurnStateAt(tr0.position, out _, out stateRate);   // GROUND TRUTH: the rate this pawn is actually easing at
                         break;   // first pawn only — not armed yet, fall through to arm below
