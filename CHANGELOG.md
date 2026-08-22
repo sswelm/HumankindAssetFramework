@@ -1025,7 +1025,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   nothing marked the rig is byte-for-byte the earlier one (same head, breech and muzzle), and with a part marked it
   welds onto the *one* Gun bone — "2 gun part(s) on one Gun bone", no bone added — while the tip snaps to the marked
   geometry.
-- **THE GUN COMES UP WITH THE TRAILS (2026-08-22).** Next step on the rebuilt howitzer: get the barrel to raise.
+- **THE GUN COMES UP WITH THE TRAILS (2026-08-22, verified in-game).** Next step on the rebuilt howitzer: get the
+  barrel to raise. Shipped settings, settled by eye against measurement: **Gun pivot 0.25, raise 45°** over a
+  20-frame `Deploy`, trails at 28°, `gunElevMax` 0. **"And it moves perfectly."**
   Two findings shaped it. First, HAF already elevates guns at runtime — `ApplyGunElevation` resolves `turretBone`
   else `muzzleBone` and raises it distance-proportionally during a bombard — so this needed **no plugin code**, only
   a clean `Gun` bone to aim it at. Second, the runtime writes a **`BoneRotation` slot**, a channel the clip pose never

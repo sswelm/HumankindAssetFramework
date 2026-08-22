@@ -111,6 +111,29 @@ The deploy block's **Wheel bones (roll while moving)** + axle axis / loop frames
 > tube tapers to 3.84 wide and then flares back to 5.22 over its last 6 units — there is nothing to mark; skip it.
 > Marking the *cradle* as Muzzle is the trap: it pins the tip 26 units short and silently rescales the pivot slider.
 
+> **THE M114, END TO END — the worked example (2026-08-22, verified in-game).** A towed howitzer rebuilt from a raw
+> Sketchfab GLB on a Vehicle Lab rig, wheels + trails + gun, no converter. The shipped settings:
+>
+> | where | setting |
+> |---|---|
+> | **Vehicle Lab** — parts | `l_wheel`, `r_wheel` = **Wheel** · `l_leg`, `r_leg` = **Trail** · `barrel1` (+ breech door, handle, lanyard) = **Gun** · `cannon2` = **Cradle** · `main` = **Body** |
+> | **Vehicle Lab** — Spin | 30 frames · −360° · axle **AUTO** |
+> | **Vehicle Lab** — Deploy | Spread **28°** · **20** frames · Gun pivot **0.25** · Gun raise on deploy **45°** |
+> | **Animation Lab** — clips | Idle/reference `Spin` · Idle stance `Deploy[20..20]` · Movement `Spin` · After-move `Deploy[0..20]` · Pre-move `Deploy[20..0]` |
+> | **Animation Lab** — flags | Convert raw rig ✓ · Auto-ground ✓ · Keep bone translations ✓ · Fix 100× ✗ · `gunElevMax` **0** |
+>
+> The resulting 6-bone rig (`Root, Wheel_00, Wheel_01, Gun, Trail_00, Trail_01`) separates cleanly: `Spin` moves
+> **only** the wheels, `Deploy` moves **only** the gun (45°) and the trails (28°). So it drives with the gun clamped
+> and the trails folded, folds before it turns, and opens again on arrival.
+>
+> Two dial choices worth knowing were **not** the measured-accurate ones. The real trunnion is pivot **0.4** — it
+> lands within 0.8 units of the cradle's centre — but 45° there drops the breech to `Z 1.6`, on the ground; **0.25**
+> keeps the full 45° with ~11 units of breech clearance. And 45° itself is well above an M114's parked elevation.
+> Both were chosen by eye, and correctly: *"when you see it you should think, ah that looks like a howitzer."* The bar
+> is recognition at map zoom, and it can want a pose exaggerated past the accurate one. Measure to catch what is
+> **broken** — geometry through the ground, a bone that never moves, a slice that holds the wrong frame — then let
+> the eye pick the look.
+
 > **This does not replace HAF's runtime `gunElevMax`** (Animation Lab ▸ *Gun elevation — max*) — that writes a
 > `BoneRotation` slot, a channel the clip pose never touches, so the two **compose**: the clip sets the base firing
 > elevation, the runtime adds the per-shot, distance-proportional lift on top of it. Dial `gunElevMax` against the

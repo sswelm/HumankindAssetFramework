@@ -37,6 +37,15 @@ actual rigger, or anything you rig yourself.
 Models animated by **moving separate parts** (nodes) rather than a skinned skeleton — a howitzer's folding trail
 legs, landing gear, a crane, turrets. Very common for Sketchfab vehicles.
 
+> **SUPERSEDED FOR NEW WORK (2026-08-22).** Everything below still describes what the *converter* route can do, and
+> the shipped TowedGunHowitzers still runs on it. But a deploy-converted rig **cannot carry authored bone motion** —
+> its clips do not share a frame with its own rest pose — so anything you want to *add* (wheels that roll, a gun that
+> raises) has to be built on a clean rig instead. The M114 was rebuilt that way and is the worked example: see
+> **[Editor-Tools.md](Editor-Tools.md) ▸ Vehicle Lab** for the roles and dials, and
+> **[Animation-Pitfalls.md](Animation-Pitfalls.md) ▸ "Authoring INTO a converted rig"** for why. Reach for the
+> converter when a source *already has* the motion baked in (the T-62); reach for the Vehicle Lab when you are
+> authoring it yourself.
+
 - **Examples shipped:** the TowedGunHowitzers — folds for travel, deploys when it stops, recoils when it bombards.
   And since 2026-07-26, the **T-62** — a full tracked vehicle (spinning wheels, crawling track links) straight
   from a Sketchfab object-baked drive animation, zero rigging: `deploy_convert` now enforces the decoded engine
