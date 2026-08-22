@@ -367,6 +367,25 @@ namespace HumankindAssetFramework
                             { Plugin.Log.LogInfo($"[BattleTurn] strike prep '{unitDef}': rate={rate} but NO ease state near the pawn — no hold"); return 0f; }
                             float miss = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(eased, target));
                             hold = miss >= 8f ? UnityEngine.Mathf.Min(miss / rate + 0.2f, 3f) : 0f;
+                            // A GUN THAT IS STILL BEING LAID MUST NOT FIRE (2026-08-22, user). When a model asks for
+                            // a fixed raise time (gunElevRise > 0) rather than tracking the turn, the elevation can
+                            // outlast the slew — and the shot would go off with the barrel still climbing. Extending
+                            // THIS hold fixes it everywhere at once: it is the strike's one shared clock, so the
+                            // attack pose (muzzle flash + sound), the shell schedules and our recoil all wait
+                            // together. It also stretches `relEnd`, which the elevation ramp measures against, so
+                            // the raise and the release stay in step by construction rather than by luck.
+                            // No-op at the default rise of 0, where the raise already tracks the turn exactly.
+                            var eElev = FindEntryForUnitDefinition(unitDef);
+                            if (eElev != null && eElev.gunElevMax != 0f && eElev.gunElevRise > 0.01f && eElev.gunElevRise > hold)
+                            {
+                                // Capped below the 4 s failsafes that bound the recoil release and the attack-pose
+                                // deferral — past those they would fire anyway, desyncing the very things this
+                                // extension exists to keep together.
+                                float want = UnityEngine.Mathf.Min(eElev.gunElevRise, 3.5f);
+                                Plugin.Log.LogInfo($"[BattleTurn] strike hold extended {hold:F2}s -> {want:F2}s: " +
+                                                   $"the gun is still elevating (Raise over {eElev.gunElevRise:F2}s)");
+                                hold = want;
+                            }
                             releaseAt = UnityEngine.Time.time + hold;
                             Plugin.Log.LogInfo($"[BattleTurn] strike hold '{unitDef}': eased={eased:F0} aim={target:F0}{(targetPos != UnityEngine.Vector3.zero ? fao != 0 ? $" (true bearing, broadside {fao}deg)" : " (true bearing)" : " (quantized)")} miss={miss:F0}deg -> +{hold:F2}s (shared clock)");
                         }
