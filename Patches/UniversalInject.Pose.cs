@@ -714,6 +714,9 @@ namespace HumankindAssetFramework
         // (full at ~3 tiles). Rides the strike aim override's envelope (up over the turn hold, hold, down as
         // the override expires) and writes BoneRotation slot 3 (spin/trim fill 0-up; a 4-trim dial would
         // collide — documented). Bone = turretBone else muzzleBone, axis per gunElevAxis, resolved once.
+        // Range band the elevation ramps across, in TILES: a 1-tile shot commands none of it, an 8-tile shot all of it.
+        const float ElevMinTiles = 1f, ElevMaxTiles = 8f;
+
         static void ApplyGunElevation(ModelEntry e, object entry)
         {
             if (e.gunElevMax == 0f) return;
@@ -739,17 +742,29 @@ namespace HumankindAssetFramework
                 if (e.gunElevBoneIdx < 0) Plugin.Log.LogWarning($"[Elev] '{e.resourceName}': gun bone '{bn}' not found — gun elevation off");
             }
             if (e.gunElevBoneIdx < 0) return;
-            float full = 3f * (tileSpacing > 0.1f ? tileSpacing : 6.93f);
-            float angle = e.gunElevMax * UnityEngine.Mathf.Clamp01(dist / full) * f;
+            // RANGE BAND (user spec 2026-08-22): elevation ramps across 1..8 TILES — a point-blank shot sits at the
+            // gun's resting elevation and only an 8-tile shot commands the full angle. It used to saturate at 3
+            // tiles, so nearly every bombard fired at maximum elevation and the "further = higher" reading was lost.
+            float sp = tileSpacing > 0.1f ? tileSpacing : 6.93f;
+            float tiles = dist / sp;
+            float span = UnityEngine.Mathf.Max(0.01f, ElevMaxTiles - ElevMinTiles);
+            // SIGN: NEGATED so that a POSITIVE gunElevMax RAISES the barrel (2026-08-22, in-game).
+            // A positive rotation about the gun bone's pitch axis points the muzzle DOWN in the engine's frame — the
+            // baked Deploy raise proves it from the other side, keying its elevation as a negative X component
+            // (`qMid=(-0.20, 0, 0, 0.98)` for a 22 deg raise). Before this, "Gun elevation — max = 25" lowered the
+            // gun, and the two elevation dials a modeller sets together disagreed in sign: the Vehicle Lab's
+            // "Gun raise on deploy" elevated while this one depressed. A dial labelled elevation must elevate.
+            // A rig whose gun bone genuinely pitches the other way can still dial a NEGATIVE max.
+            float angle = -e.gunElevMax * UnityEngine.Mathf.Clamp01((tiles - ElevMinTiles) / span) * f;
             if (UnityEngine.Mathf.Abs(angle) < 0.05f)
-            { Plugin.DiagOnce("elev-tiny-" + e.resourceName, $"[Elev] '{e.resourceName}': angle {angle:F3}deg too small to apply (dist={dist:F1} of {full:F1} full-range, envelope={f:F2})"); return; }
+            { Plugin.DiagOnce("elev-tiny-" + e.resourceName, $"[Elev] '{e.resourceName}': angle {angle:F3}deg too small to apply (dist={tiles:F1} tiles of the {ElevMinTiles:F0}..{ElevMaxTiles:F0} band, envelope={f:F2})"); return; }
             Plugin.DiagOnce("elev-applied-" + e.resourceName, $"[Elev] '{e.resourceName}': APPLYING {angle:F1}deg to bone[{e.gunElevBoneIdx}] axis {e.gunElevAxis} (BoneRotation slot 3)");
             // THE PEAK is what matters, not the first frame. The envelope ramps from 0 across the turn hold, so the
             // first APPLYING line always reports a near-zero angle and says nothing about whether the elevation ever
             // gets large. If this never logs, the envelope never opens; if it logs a big angle and the gun still does
             // not move, the write is reaching the entry and losing to the clip's own channel for that bone.
             if (UnityEngine.Mathf.Abs(angle) >= 0.5f * UnityEngine.Mathf.Abs(e.gunElevMax))
-                Plugin.DiagOnce("elev-peak-" + e.resourceName, $"[Elev] '{e.resourceName}': reached {angle:F1}deg (>= half of gunElevMax {e.gunElevMax:F0}) — envelope={f:F2}, dist={dist:F1}");
+                Plugin.DiagOnce("elev-peak-" + e.resourceName, $"[Elev] '{e.resourceName}': reached {angle:F1}deg (>= half of gunElevMax {e.gunElevMax:F0}) — envelope={f:F2}, dist={tiles:F1} tiles");
             SetBoneRotation(entry, 3, (uint)e.gunElevBoneIdx, (uint)e.gunElevAxis, angle);
         }
 
