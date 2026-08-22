@@ -399,8 +399,10 @@ namespace HumankindAssetFramework
                                 // deferral — past those they would fire anyway, desyncing the very things this
                                 // extension exists to keep together.
                                 float want = UnityEngine.Mathf.Min(eElev.gunElevRise, 3.5f);
-                                Plugin.Log.LogInfo($"[BattleTurn] strike hold extended {hold:F2}s -> {want:F2}s: " +
-                                                   $"the gun is still elevating (Raise over {eElev.gunElevRise:F2}s)");
+                                // Diag, not LogInfo: gunElevRise now DEFAULTS to 1s, so this fires on every
+                                // artillery shot — per-shot detail belongs behind VerboseLog, not in normal play.
+                                Plugin.Diag($"[BattleTurn] strike hold extended {hold:F2}s -> {want:F2}s: " +
+                                            $"the gun is still elevating (Raise over {eElev.gunElevRise:F2}s)");
                                 hold = want;
                             }
                             releaseAt = UnityEngine.Time.time + hold;
