@@ -744,6 +744,12 @@ namespace HumankindAssetFramework
             if (UnityEngine.Mathf.Abs(angle) < 0.05f)
             { Plugin.DiagOnce("elev-tiny-" + e.resourceName, $"[Elev] '{e.resourceName}': angle {angle:F3}deg too small to apply (dist={dist:F1} of {full:F1} full-range, envelope={f:F2})"); return; }
             Plugin.DiagOnce("elev-applied-" + e.resourceName, $"[Elev] '{e.resourceName}': APPLYING {angle:F1}deg to bone[{e.gunElevBoneIdx}] axis {e.gunElevAxis} (BoneRotation slot 3)");
+            // THE PEAK is what matters, not the first frame. The envelope ramps from 0 across the turn hold, so the
+            // first APPLYING line always reports a near-zero angle and says nothing about whether the elevation ever
+            // gets large. If this never logs, the envelope never opens; if it logs a big angle and the gun still does
+            // not move, the write is reaching the entry and losing to the clip's own channel for that bone.
+            if (angle >= 0.5f * UnityEngine.Mathf.Abs(e.gunElevMax))
+                Plugin.DiagOnce("elev-peak-" + e.resourceName, $"[Elev] '{e.resourceName}': reached {angle:F1}deg (>= half of gunElevMax {e.gunElevMax:F0}) — envelope={f:F2}, dist={dist:F1}");
             SetBoneRotation(entry, 3, (uint)e.gunElevBoneIdx, (uint)e.gunElevAxis, angle);
         }
 
