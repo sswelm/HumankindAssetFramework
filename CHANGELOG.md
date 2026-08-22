@@ -26,7 +26,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   `Tests/StrikeHoldTests.cs` — mutation-drilled: reverting to the old test fails three of them, including the
   named regression. That closes the gap the review flagged in this subsystem specifically — it was the one
   place the project's own "extract the decision, test it" rule had never been applied, so a single in-game
-  drill was its only oracle.
+  drill was its only oracle. **Provenance — nobody wrote this bug; two correct commits made it together.** The
+  early return landed 2026-08-05 (`963042d`, the shared-clock fix) when the override's lifetime was **8–10 s**:
+  at that lifetime "an override exists near this pawn" really was a sound proxy for "this strike is armed",
+  because a hold is at most 3.5 s and the record expired seconds later. Twenty-one hours later `3ceb089` raised
+  the lifetime to 120 s so facing would persist "until the game changes intent" instead of springing back on a
+  timer — correct on its own terms, and it silently invalidated the proxy in the other file. Nothing in that
+  diff touched the early return, because nothing had to: it still compiled, still passed, still read correctly.
+  The bug was 16 days old and survived the 08-21 review; it is only visible if you ask what the *lifetime means*
+  rather than what either commit does.
 
 - **`ModelEntry`'S THREAD DISCIPLINE IS DECLARED, NOT MEMORISED (2026-08-22).** A review asked to reopen the A2
   god-object split, citing the two 08-21 data races as the "proven bug from the shape" that Decisions.md requires.
