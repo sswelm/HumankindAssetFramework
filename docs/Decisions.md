@@ -159,6 +159,20 @@ are untouched; the pack contract (the `clip*` JSON arrays) is unchanged on both 
 restructuring of `ModelEntry` is on the table only with a *proven* bug from the shape it removes, and only as the
 bounded slice that removes it. The per-unit runtime dictionaries stay as they are — no bug, hot path, threaded.
 
+**Re-examined 2026-08-22 — split still declined; the real complaint fixed another way.** A review asked to reopen the
+split, arguing that Architecture.md §2's four-locked-field table is the shape leaking into the docs, and offering **the
+two 08-21 data races as the "proven bug"**. Checked: *neither race was in `ModelEntry`* — one was the `memberCache` /
+`fieldCache` **statics** in `UniversalInject.Reflection.cs`, the other `ResetDistrictSessionState` clearing
+**DistrictInject's** collections off-thread. A split would have prevented neither, so the trigger above is not met.
+Two further facts narrowed it: the split's cost was quoted as ~200 call sites, but the four locked fields have **53**
+between them; and config/state separation already *partly* exists by construction — the 68 inherited members are the
+shared `Haf.Schema` config, so the mixing is only within the 92 own members. What the review was right about is
+**memorisation**, and looking for its evidence found worse than it claimed: of `ModelEntry`'s 23 mutable collections,
+only **6** stated any thread discipline. So the fix is the pattern this codebase now uses everywhere — declare and
+enforce (`[MainThread]` / `[Locked]` / `[Concurrent]` + `ModelEntryThreadTests`, Architecture.md §2) — which covers all
+24 mutable fields instead of 4, touches no call site and no hot path, and leaves the split available if a bug ever does
+trace to the shape.
+
 ## >127-bone rigs: pair-merge on the deploy path, not zero-weight slimming (2026-08)
 The GPU skinning wall is a per-vertex **bone-index** limit of **128** (indices break past 127) — *not* 256. A rig with
 verts weighted to bones past index 127 breaks. `deploy_convert` pair-merges instanced link chains to ≤126; `rig_anim`'s

@@ -29,6 +29,7 @@ Severity key: 🔴 fix soon (silent data loss / silent no-inject) · 🟡 worth 
 
 | Date | Fix |
 |---|---|
+| 08-22 | **A2 re-examined — split still declined, memorisation fixed**: the cited "proven bug" (the two 08-21 races) was in neither `ModelEntry` case; instead all 24 mutable fields now declare `[MainThread]`/`[Locked]`/`[Concurrent]` with `ModelEntryThreadTests` (fault-injected, `[Concurrent]` machine-checked) — 17 of 23 collections had declared nothing |
 | 08-22 | **Hot path de-spiked**: the five per-frame polls labelled SPIKE/EXPERIMENTAL promoted to what they are (or, for the two diagnostics, documented as `[Debug]`-gated + latched); the parked `UseDeepClone` hack + its orphaned helper deleted (46 dead lines); `tools/check-hot-path.sh` (gate, fault-injected) keeps a label from outliving its experiment |
 | 08-21 | **A7 — the catalog's green light now means what it says**: `tools/check-catalog.sh` (push gate, fault-injected) fails on any by-name reflection literal that isn't catalogued or reason-allowlisted; catalog 95 → 130 types (~330 members); the A6 "every by-name site" claim corrected in place. bindcheck caught one of my attributions (`WriteContent` on the abstract base) |
 | 08-21 | Smoke **load tier** runs automatically on the first frame after the loading screen hides (`LoadingScreen.VisibilityChanged`, `SmokeOnLoad`); `typeprobe --find` added to locate seams headlessly |

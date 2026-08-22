@@ -78,7 +78,7 @@ namespace HumankindAssetFramework
         // Position is intrinsic to the pawn, so a nearest-match tracker survives the rebuild AND follows the pawn
         // as it sails. Match radius is deliberately small (well under formation spacing, far over per-frame travel).
         internal class PawnPhase { public UnityEngine.Vector3 pos; public float phase; public float seen; }
-        public readonly List<PawnPhase> phaseTracks = new List<PawnPhase>();
+        [Locked("per-pawn phase list mutated and read inside the pose hook — Architecture.md 2")] public readonly List<PawnPhase> phaseTracks = new List<PawnPhase>();
         public float phaseLogAt = 0f;        // throttle for the [Phase] census
         public float idleAltNextAt, idleAltStart = -1f, idleAltChosenDur = 1f;   // session cadence state (per entry = one voice per unit type)
         public int idleAltChosenId = -1;
@@ -98,54 +98,54 @@ namespace HumankindAssetFramework
         public bool muzzlePinLogged;      // session flag: log the first StartVFXEvent pin once per entry
         public object handPropLayer;      // session-scoped: our PRIVATE clone of the borrowed weapon output layer, painted with the prop's own atlas (<prop>_Atlas)
         public UnityEngine.Texture2D propAtlasTex;   // session-scoped: the prop atlas — repainted EVERY TICK like the unit retexture (the game resets the material; a one-shot paint flip-flopped between sessions)
-        public readonly Dictionary<long, UnityEngine.Vector3> stateLastPos = new Dictionary<long, UnityEngine.Vector3>();  // MAIN thread poll: unit GUID -> last render pos
-        public readonly Dictionary<long, bool> stateMoving = new Dictionary<long, bool>();                                 // unit GUID -> was moving last poll (detects the moving->stopped flip)
-        public readonly Dictionary<long, float> stateStoppedAt = new Dictionary<long, float>();                            // unit GUID -> Time.time the unit stopped moving
-        public readonly Dictionary<long, float> stateMoveStartedAt = new Dictionary<long, float>();                       // unit GUID -> Time.time the unit STARTED moving (the PRE-MOVEMENT one-shot window, e.g. the howitzer folding)
-        public readonly Dictionary<long, bool> stateCombat = new Dictionary<long, bool>();                               // unit GUID -> was battle-locked last poll (detects the combat flip)
-        public readonly Dictionary<long, float> stateCombatChangedAt = new Dictionary<long, float>();                    // unit GUID -> Time.time combat last FLIPPED (the combatZ ease ramp start)
-        public readonly List<StateSample> stateSamples = new List<StateSample>();   // published for the pose hook (lock on it); pos = pawn render position
+        [MainThread("ProcessAnimStates poll")] public readonly Dictionary<long, UnityEngine.Vector3> stateLastPos = new Dictionary<long, UnityEngine.Vector3>();  // MAIN thread poll: unit GUID -> last render pos
+        [MainThread("ProcessAnimStates poll")] public readonly Dictionary<long, bool> stateMoving = new Dictionary<long, bool>();                                 // unit GUID -> was moving last poll (detects the moving->stopped flip)
+        [MainThread("ProcessAnimStates poll")] public readonly Dictionary<long, float> stateStoppedAt = new Dictionary<long, float>();                            // unit GUID -> Time.time the unit stopped moving
+        [MainThread("ProcessAnimStates poll")] public readonly Dictionary<long, float> stateMoveStartedAt = new Dictionary<long, float>();                       // unit GUID -> Time.time the unit STARTED moving (the PRE-MOVEMENT one-shot window, e.g. the howitzer folding)
+        [MainThread("ProcessAnimStates poll")] public readonly Dictionary<long, bool> stateCombat = new Dictionary<long, bool>();                               // unit GUID -> was battle-locked last poll (detects the combat flip)
+        [MainThread("ProcessAnimStates poll")] public readonly Dictionary<long, float> stateCombatChangedAt = new Dictionary<long, float>();                    // unit GUID -> Time.time combat last FLIPPED (the combatZ ease ramp start)
+        [Locked("published by ProcessAnimStates, read by the pose hook — Architecture.md 2")] public readonly List<StateSample> stateSamples = new List<StateSample>();   // published for the pose hook (lock on it); pos = pawn render position
         public int skeletonId = -1;      // runtime AnimationManager skeleton index of our registered skeleton (to match PawnManager.PawnEntry.SkeletonId)
         public int descId = -1;          // runtime PawnDescriptorId of our unit (learned from the correctly-skinned pawn), to spot the wrong-skeleton twin the game spawns for the same unit
         public bool fragsLogged;         // one-shot: dump the donor's fragment mesh names once, so the modder can find hide targets
         public bool repointed;
         public float lastPoseHookAt = -1f;   // Time.time the pose hook last matched a live pawn to this entry (smoke: pose-hook liveness); -1 = never this session
         // PER-INSTANCE fire, so only the howitzer that actually bombarded animates (not every howitzer of the type):
-        public readonly System.Collections.Concurrent.ConcurrentQueue<long> fireGuidQueue = new System.Collections.Concurrent.ConcurrentQueue<long>();  // SIM thread enqueues the firing unit's SimulationEntityGUID; Plugin.Update (main thread) drains it (no Unity access on the sim thread).
-        public readonly List<FireInstance> activeFires = new List<FireInstance>();  // MAIN/render thread only (locked): each firing pawn's render position + start time; the pose hook plays the clip on the pawn nearest an active fire.
+        [Concurrent("the ONE ModelEntry field the SIM-thread hooks touch: Hk_ArtilleryStrike enqueues, ProcessFireQueues drains on the main thread — Architecture.md 2")] public readonly System.Collections.Concurrent.ConcurrentQueue<long> fireGuidQueue = new System.Collections.Concurrent.ConcurrentQueue<long>();  // SIM thread enqueues the firing unit's SimulationEntityGUID; Plugin.Update (main thread) drains it (no Unity access on the sim thread).
+        [Locked("armed by OnPawnAttack, read + pruned by the pose hook and ProcessFireQueues — Architecture.md 2")] public readonly List<FireInstance> activeFires = new List<FireInstance>();  // MAIN/render thread only (locked): each firing pawn's render position + start time; the pose hook plays the clip on the pawn nearest an active fire.
         // DEPLOY-ON-STOP (a HELD state, not a one-shot): the clip rests at the DEPLOYED pose by default and snaps to the
         // UNDEPLOYED pose while the unit is moving. Pure function of "is this pawn's unit moving right now" — no state machine,
         // AI/concurrency-safe. Plugin.Update polls PresentationUnit.IsAnyPawnMoving and records the moving pawns' positions.
         // GRADUAL deploy: instead of snapping, ramp each unit's pose time toward its target (0 while moving, deployPoseTime
         // when stopped) at the clip's authored speed, so the legs visibly spread/fold. Progress is per-unit (stateful) so it
         // survives across polls and units entering/leaving view; the pose hook reads the ramped value matched by position.
-        public readonly Dictionary<long, float> deployProgress = new Dictionary<long, float>();  // MAIN thread: unit GUID -> current normalized pose time (ramps toward target)
-        public readonly Dictionary<long, UnityEngine.Vector3> deployLastPos = new Dictionary<long, UnityEngine.Vector3>();  // MAIN thread: unit GUID -> last render position; movement = the position actually changed (instant fold, settle-immune)
-        public readonly List<DeploySample> deploySamples = new List<DeploySample>();             // MAIN thread only (locked): each pawn's render position + its unit's current (ramped) pose time; the pose hook holds that pose on the nearest pawn.
+        [MainThread("ProcessDeployState poll")] public readonly Dictionary<long, float> deployProgress = new Dictionary<long, float>();  // MAIN thread: unit GUID -> current normalized pose time (ramps toward target)
+        [MainThread("ProcessDeployState poll")] public readonly Dictionary<long, UnityEngine.Vector3> deployLastPos = new Dictionary<long, UnityEngine.Vector3>();  // MAIN thread: unit GUID -> last render position; movement = the position actually changed (instant fold, settle-immune)
+        [Locked("published by ProcessDeployState, read by the pose hook — Architecture.md 2")] public readonly List<DeploySample> deploySamples = new List<DeploySample>();             // MAIN thread only (locked): each pawn's render position + its unit's current (ramped) pose time; the pose hook holds that pose on the nearest pawn.
         public float deployLastPoll;          // Time.time of the last deploy poll, for a framerate-independent ramp step
         // ENGINE AUDIO: our injected units never FIRE the per-ship move sound (Play_UNIT_Vehicles_<Type>_Start/_Stop) — it
         // rides the service path tied to the vanilla unit's move state, which our re-loaded units don't trigger. When set,
         // the plugin detects each instance starting/stopping (render-position delta, like deployOnStop) and posts the
         // captured Start/Stop AudioEventHandle onto that pawn's AudioEmitter, restoring the missing engine sound.
         public int lastPawnFrame = -1;   // duplicate-pawn hide (hideSubPawns): Time.frameCount of the last pawn add for this entry
-        public readonly List<UnityEngine.Vector3> pawnKeptPos = new List<UnityEngine.Vector3>();   // hideSubPawns: positions of the pawns KEPT this frame — one per distinct UNIT (a unit's stacked squadron duplicates share a position; different units are tiles apart). Keeping per-position, not a per-type count, lets two units of the same model coexist.
+        [MainThread("the pose hook, OnPawnAdded")] public readonly List<UnityEngine.Vector3> pawnKeptPos = new List<UnityEngine.Vector3>();   // hideSubPawns: positions of the pawns KEPT this frame — one per distinct UNIT (a unit's stacked squadron duplicates share a position; different units are tiles apart). Keeping per-position, not a per-type count, lets two units of the same model coexist.
         public float rendererCensusNextAt;   // next Unity-renderer census time for this entry (the ghost-rotor hunt)
         public int profCat = -1;             // runtime: the unit's TYPE category (human/land/turret/air/ship) off its capability profile at addon load — drives the category default rates.
         public UnityEngine.Vector3 tiltLastPos; public float tiltCur; public float tiltLastTime;   // move-tilt runtime state
         public UnityEngine.AudioClip customClip, customStartClip, customStopClip, customIdleClip, customAttackClip, customDeathClip, customBattleClip;    // loaded once from the files
         public float deathSoundNextAt, battleCryNextAt;   // per-entry min-gap clocks (a wiped stack / double battle shouldn't chorus)
-        public readonly Dictionary<long, float> attackSoundNextAt = new Dictionary<long, float>();   // attacking-pawn id -> earliest Time.time it may play the attack sound again (min-gap)
+        [MainThread("OnPawnAttack / TryEarlyAttackSound — presentation hooks, main thread")] public readonly Dictionary<long, float> attackSoundNextAt = new Dictionary<long, float>();   // attacking-pawn id -> earliest Time.time it may play the attack sound again (min-gap)
         public bool customClipTried;                                                 // don't retry a failed load every poll
-        public readonly Dictionary<int, float> idleNextAt = new Dictionary<int, float>();   // sub-pawn instance id -> Time.time of its next idle growl (jittered)
-        public readonly List<KeyValuePair<UnityEngine.Vector3, float>> idleRecent = new List<KeyValuePair<UnityEngine.Vector3, float>>();  // recent growls (pos, Time.time) for group de-dup — pruned each poll
+        [MainThread("ProcessEngineAudio poll")] public readonly Dictionary<int, float> idleNextAt = new Dictionary<int, float>();   // sub-pawn instance id -> Time.time of its next idle growl (jittered)
+        [MainThread("ProcessEngineAudio poll")] public readonly List<KeyValuePair<UnityEngine.Vector3, float>> idleRecent = new List<KeyValuePair<UnityEngine.Vector3, float>>();  // recent growls (pos, Time.time) for group de-dup — pruned each poll
         public string assetDir = "";     // owning pack's asset root (set at registry load, never parsed from JSON): WAVs/PNGs resolve from <assetDir>/sounds|skins first, then the legacy shared haf_sounds/haf_skins
-        public readonly Dictionary<int, UnityEngine.AudioSource> customSources = new Dictionary<int, UnityEngine.AudioSource>();  // sub-pawn instance id -> our looping AudioSource (played while moving)
-        public readonly Dictionary<int, float> loopHoldUntil = new Dictionary<int, float>();   // instance id -> Time.time to hold the travel loop off until (so the spool-up one-shot isn't masked)
-        public readonly Dictionary<int, UnityEngine.Vector3> engineLastPos = new Dictionary<int, UnityEngine.Vector3>();  // sub-pawn instance id -> last render pos
-        public readonly Dictionary<int, bool> engineMoving = new Dictionary<int, bool>();                                  // sub-pawn instance id -> was moving last poll
-        public readonly Dictionary<int, ulong> engineEmitterGuids = new Dictionary<int, ulong>();                          // sub-pawn instance id -> its Wwise game-object id, cached WHILE ALIVE so a unit that despawns mid-move (e.g. into a battle) can have its looping Wwise _Start Stopped even after the emitter GameObject is destroyed
-        public readonly Dictionary<int, float> engineLoudSince = new Dictionary<int, float>();                            // sub-pawn instance id -> Time.time we last SAW it alive this poll (watchdog heartbeat); if a loop is still flagged active long after this goes stale, the unit vanished and we force-stop it
-        public readonly Dictionary<int, uint> enginePlayingIds = new Dictionary<int, uint>();                             // sub-pawn instance id -> the Wwise PLAYING id returned when we posted its _Start loop; StopPlayingID cuts THAT voice regardless of whether the emitter game-object still exists (the reliable despawn stop; StopAll(guid) no-ops once the object is unregistered)
+        [MainThread("ProcessEngineAudio poll")] public readonly Dictionary<int, UnityEngine.AudioSource> customSources = new Dictionary<int, UnityEngine.AudioSource>();  // sub-pawn instance id -> our looping AudioSource (played while moving)
+        [MainThread("ProcessEngineAudio poll")] public readonly Dictionary<int, float> loopHoldUntil = new Dictionary<int, float>();   // instance id -> Time.time to hold the travel loop off until (so the spool-up one-shot isn't masked)
+        [MainThread("ProcessEngineAudio poll")] public readonly Dictionary<int, UnityEngine.Vector3> engineLastPos = new Dictionary<int, UnityEngine.Vector3>();  // sub-pawn instance id -> last render pos
+        [MainThread("ProcessEngineAudio poll")] public readonly Dictionary<int, bool> engineMoving = new Dictionary<int, bool>();                                  // sub-pawn instance id -> was moving last poll
+        [MainThread("ProcessEngineAudio poll")] public readonly Dictionary<int, ulong> engineEmitterGuids = new Dictionary<int, ulong>();                          // sub-pawn instance id -> its Wwise game-object id, cached WHILE ALIVE so a unit that despawns mid-move (e.g. into a battle) can have its looping Wwise _Start Stopped even after the emitter GameObject is destroyed
+        [MainThread("ProcessEngineAudio poll")] public readonly Dictionary<int, float> engineLoudSince = new Dictionary<int, float>();                            // sub-pawn instance id -> Time.time we last SAW it alive this poll (watchdog heartbeat); if a loop is still flagged active long after this goes stale, the unit vanished and we force-stop it
+        [MainThread("ProcessEngineAudio poll")] public readonly Dictionary<int, uint> enginePlayingIds = new Dictionary<int, uint>();                             // sub-pawn instance id -> the Wwise PLAYING id returned when we posted its _Start loop; StopPlayingID cuts THAT voice regardless of whether the emitter game-object still exists (the reliable despawn stop; StopAll(guid) no-ops once the object is unregistered)
     }
 
     // One in-flight one-shot: the world position of a pawn that just fired + when it started. The pose hook matches a

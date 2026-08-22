@@ -54,8 +54,18 @@ main-thread.
    *queues*, never a direct Destroy from a reset.
 2. **Off-thread code never mutates a plain collection the main thread reads.** Shared state is one of exactly three
    shapes: a **concurrent type** (`ConcurrentQueue`, the `ConcurrentDictionary` reflection caches in
-   `UniversalInject.Reflection.cs`), **locked on every access** (`e.stateSamples`, `e.activeFires`, `e.deploySamples`,
-   `e.phaseTracks`, `FacingPersist.live`), or **published-once-and-snapshotted** (next point).
+   `UniversalInject.Reflection.cs`), **locked on every access**, or **published-once-and-snapshotted** (next point).
+   **On `ModelEntry` this is declared, not memorised (2026-08-22).** Its ~90 config members are immutable after load
+   (the inherited `Haf.Schema` half contributes *no* mutable collection — a test pins that), and every one of its 24
+   mutable fields carries `[MainThread("owner")]`, `[Locked("why")]` or `[Concurrent("why")]`; `ModelEntryThreadTests`
+   fails the build on an undeclared one, and `[Concurrent]` is machine-checked against the field's real type. So the
+   rule reads **"config is immutable; every mutable field declares its discipline"** rather than a list of four names
+   to remember. Today that resolves to 19 main-thread, 4 locked (`stateSamples`, `activeFires`, `deploySamples`,
+   `phaseTracks` — pinned by the test), and 1 concurrent (`fireGuidQueue`, the only `ModelEntry` field the off-thread
+   hooks touch). `FacingPersist.live` is locked the same way but lives outside `ModelEntry`, so the rule doesn't cover
+   it. What the rule does **not** prove: that a `[Locked]` field's every access site takes the lock, or that a
+   `[MainThread]` claim is true — it proves someone wrote an answer down, so a wrong one is a line to argue with in
+   review instead of silence.
 3. **`entries` is published once and never mutated.** `LoadRegistry` builds a fresh list and assigns the field in one
    write (`entries = built`). Readers — including the sim-thread `FindEntryForUnitDefinition` — take `var snap =
    entries` and iterate the snapshot. A retry publishes a *new* list; it never `Add`s into the live one. (The 07-19
