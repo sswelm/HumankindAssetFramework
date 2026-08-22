@@ -306,10 +306,17 @@ namespace HumankindAssetFramework
         }
 
         static float lastAimLog;
-        static void ClearAimLayer(object entry)
+        // Zero the donor's streamed aim angles. It clears ALL FOUR BoneRotation slots — which is right for the junk
+        // it exists to kill (runaway angles at the invalid bone sentinel) and WRONG for a slot we deliberately wrote
+        // ourselves. ApplyGunElevation owns slot 3, and it runs EARLIER in the same frame, so clearing slot 3
+        // unconditionally zeroed the gun elevation before it could ever render: measured 2026-08-22 as a live
+        // 12.8deg write on the correct bone with no visible movement at all. Skip the slot the elevation owns.
+        static void ClearAimLayer(object entry, ModelEntry e = null)
         {
+            int keepSlot = e != null && e.gunElevMax != 0f ? 3 : -1;
             for (int i = 0; i < 4; i++)
             {
+                if (i == keepSlot) continue;
                 var br = GetMember(entry, BoneRotationNames[i]);
                 if (br == null) continue;
                 // DIAGNOSTIC (bombard face-plant, 2026-07-19): log what the game streamed into the aim layer BEFORE

@@ -935,7 +935,7 @@ namespace HumankindAssetFramework
             // soldier's ripped-off head). SanitizeAimLayer wraps such angles into 0..360 — same orientation, sane
             // magnitude — instead of zeroing (which would kill facing).
             long tAim = FrameCost.Begin();
-            if (((e.fireOnAttack || e.deployOnStop) && !e.animStateDriven) || e.clearAimLayer) ClearAimLayer(entry);   // legacy artillery rule, OR the explicit per-model knob (a STATE-DRIVEN howitzer still needs the donor's aim/wheel junk cleared; characters keep the layer for facing)
+            if (((e.fireOnAttack || e.deployOnStop) && !e.animStateDriven) || e.clearAimLayer) ClearAimLayer(entry, e);   // legacy artillery rule, OR the explicit per-model knob (a STATE-DRIVEN howitzer still needs the donor's aim/wheel junk cleared; characters keep the layer for facing)
             else if (!string.IsNullOrEmpty(e.turretBone)) TurretizeAimLayer(entry, e);   // retarget the game's aim/heading angle onto OUR turret bone (a vehicle turret tracks the target)
             else SanitizeAimLayer(entry);
             FrameCost.End(FrameCost.PoseAim, tAim);
