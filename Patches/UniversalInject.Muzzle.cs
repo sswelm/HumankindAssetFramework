@@ -1065,6 +1065,21 @@ namespace HumankindAssetFramework
 
         // ObjectSpace.Rotation as a UnityEngine.Quaternion: it may BE one, or an Amplitude quaternion type with the
         // same x/y/z/w layout — read the components reflectively in that case. False (identity) if unreadable.
+        // Same shape as TryQuaternion, for the TRANSLATION half of a decoded pose — [AnimDiag] needs it to answer
+        // "did a kept location curve survive to the GPU?", which rotation-only reporting could never show.
+        static bool TryVector3(object o, out UnityEngine.Vector3 v)
+        {
+            if (o is UnityEngine.Vector3 uv) { v = uv; return true; }
+            try
+            {
+                v = new UnityEngine.Vector3(
+                    Convert.ToSingle(GetMember(o, "x")), Convert.ToSingle(GetMember(o, "y")),
+                    Convert.ToSingle(GetMember(o, "z")));
+                return true;
+            }
+            catch { v = UnityEngine.Vector3.zero; return false; }
+        }
+
         static bool TryQuaternion(object o, out UnityEngine.Quaternion q)
         {
             if (o is UnityEngine.Quaternion uq) { q = uq; return true; }

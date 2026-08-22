@@ -88,8 +88,12 @@ namespace HumankindAssetFramework
                 // It is what proved the roll reaches the GPU while the unit under suspicion was the wrong one.
                 if (getPose != null && GetMember(e.skeleton, "BoneInfos") is Array skelBones)
                 {
+                    // ATTACK is in this list as of 2026-08-22 (the Vehicle Lab recoil): a barrel that SLIDES is the
+                    // one motion this scan could not see, on the one role it did not cover. Rotation-only reporting
+                    // could not have answered "did the slide reach the GPU?" either — so translation is reported too.
                     foreach (var pair in new[] { ("primary", e.animId), ("idle", e.idleAnimId), ("move", e.moveAnimId),
-                                                 ("premove", e.preMoveAnimId), ("after", e.afterAnimId) })
+                                                 ("premove", e.preMoveAnimId), ("after", e.afterAnimId),
+                                                 ("attack", e.attackAnimId) })
                     {
                         if (pair.Item2 < 0) continue;
                         var moved = new List<string>();
@@ -110,7 +114,19 @@ namespace HumankindAssetFramework
                                 if (!TryQuaternion(GetMember(p0, "Rotation"), out var q0) ||
                                     !TryQuaternion(GetMember(pm, "Rotation"), out var qm)) continue;
                                 float ang = UnityEngine.Quaternion.Angle(q0, qm);
-                                if (ang <= 1f) continue;
+                                // TRANSLATION, decoded by the ENGINE's own GetPoseTRS — the only thing that settles
+                                // whether a kept location curve survives to the GPU. Law 5 says translation is zeroed
+                                // for Rotation-encoded curves; a RotationTranslation-encoded bone should report a real
+                                // delta here. A bone that only slides has ang ~ 0, so it must not be filtered out by
+                                // the rotation test below.
+                                string slid = "";
+                                if (TryVector3(GetMember(p0, "Translation"), out var t0) &&
+                                    TryVector3(GetMember(pm, "Translation"), out var tm))
+                                {
+                                    float d = (tm - t0).magnitude;
+                                    if (d > 0.0005f) slid = $" SLID {d:0.###} ({t0.ToString("0.###")}->{tm.ToString("0.###")})";
+                                }
+                                if (ang <= 1f && slid.Length == 0) continue;
                                 // The bone's REST pivot as the GAME has it, plus the mid-frame quaternion: a wheel that
                                 // "spins through the air" is rotating about the wrong POINT (rest far from the wheel's
                                 // own centre, e.g. an unscaled 100x pivot) or the wrong AXIS (the quaternion's xyz not
@@ -119,7 +135,7 @@ namespace HumankindAssetFramework
                                 if (boneBuf != null && startBone + (uint)b < boneBuf.Length &&
                                     GetMember(boneBuf.GetValue((int)(startBone + (uint)b)), "Local") is object lb2)
                                     rest = $" rest T={GetMember(lb2, "Translation")}";
-                                moved.Add($"{b}:{GetMember(skelBones.GetValue(b), "Name")}={ang:0}deg{rest} qMid=({qm.x:0.00},{qm.y:0.00},{qm.z:0.00},{qm.w:0.00})");
+                                moved.Add($"{b}:{GetMember(skelBones.GetValue(b), "Name")}={ang:0}deg{slid}{rest} qMid=({qm.x:0.00},{qm.y:0.00},{qm.z:0.00},{qm.w:0.00})");
                             }
                             catch { }
                         }

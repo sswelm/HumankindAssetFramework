@@ -996,6 +996,20 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   with Deploy conversion OFF, Convert raw rig ON, Fix 100× OFF, Auto-ground ON, Idle stance `Spin[0..0]`, Movement
   `Spin`, every `deploy…`/`recoil` clip field cleared. **"In game it moves perfectly."** Cost, as agreed for step 1:
   the fold/deploy/recoil are gone on that unit until re-authored on the clean rig.
+- **THE CONTRACT I BROKE WHILE FIXING A PREVIEW ARTEFACT (2026-08-22).** Between authoring the recoil and testing
+  it, the turntable showed the gun level during the `Recoil` clip, and I "fixed" that by keying the end-of-`Deploy`
+  pose flat across the clip — reasoning that a role clip poses the whole skeleton, so unkeyed bones sit at reference.
+  In game the kickback then did not play **at all**. The cause was the fix: it made frame 0 non-identity, and
+  Amplitude's encoder normalizes every clip against the skeleton BIND rest and **discards a constant frame-0
+  offset** — *"BIND must equal animation frame 0"*, or the model renders its bind forever no matter what plays
+  ([Animation-Pitfalls](docs/Animation-Pitfalls.md) ▸ "The engine contract"). `Spin` and `Deploy` work precisely
+  because both of their endpoints are identity; `Recoil` was the only clip that was not, and the only one that
+  failed. The proven M114 recoil obeys the same rule from the other side — `deploy_convert` delta-rebases every bone
+  to *"identity at f0 by construction"*, even for an attack clip cut from an already-deployed source. Reverted; all
+  three clips now verify identity at f0. The lesson underneath is Law 4: the turntable plays **one clip in
+  isolation**, so a gun looking level there was a preview lying, not a defect to chase — and the user had said as
+  much by pointing at the preview. `[AnimDiag]` now also covers the **attack** role and reports **translation**, the
+  one motion on the one role it could not previously see.
 - **RECOIL: THE BARREL FINALLY GETS ITS OWN BONE (2026-08-22).** "Of course `keepTranslations`, what else?" — and
   that is the point: the flag exists, so recoil can be an **honest slide** instead of the far-pivot `RecoilArm`
   rotation trick `deploy_convert` was forced into for want of any translation at all. New **Recoil (fraction of
@@ -1010,10 +1024,6 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   wheels and hull all sit at `+0.00`. With recoil off the bone list is identical to the shipped M114 rig, so every
   gun already baked regenerates unchanged. The kick is a derived ~15% of the clip with the ride forward taking the
   rest (2 frames back, 14 forward at 16) — the asymmetry is what reads as a shot, so it is not left to be set wrong.
-  The user caught the design flaw from the turntable: "shouldn't it be in the 45 degree angle?" A role clip poses
-  the WHOLE skeleton, so keying only the barrel left every other bone at reference — the gun would have dropped to
-  level and the trails snapped folded for the duration of the attack, firing from the travel pose. The clip now
-  carries the end-of-Deploy pose flat across its own length: verified at 0.00 deg on every held bone at every frame.
   One measurement error caught in the making: an early check reported 8° of bore deviation under elevation, which
   was the *test* picking different min/max-Y vertices once the tube rotated, not the rig.
 - **CRADLE — THE PART THAT HOLDS THE CANNON, GIVEN ITS PROPER NAME (2026-08-22).** The user had marked `cannon2` as
