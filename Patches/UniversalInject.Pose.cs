@@ -717,8 +717,14 @@ namespace HumankindAssetFramework
         static void ApplyGunElevation(ModelEntry e, object entry)
         {
             if (e.gunElevMax == 0f) return;
-            if (!TryGetTranslation(entry, out var pos)) return;
-            if (!TryAimElevAt(pos, out float dist, out float f)) return;
+            // WHY THE ELEVATION DID NOTHING, per exit (2026-08-22). The bone resolve sits BELOW the aim gate, so an
+            // absent "[Elev] bone not found" warning does NOT mean the bone resolved — it usually means we returned
+            // before ever looking. Each early exit now says so once, so "no effect" names its own cause.
+            if (!TryGetTranslation(entry, out var pos))
+            { Plugin.DiagOnce("elev-nopos-" + e.resourceName, $"[Elev] '{e.resourceName}': no pawn translation — elevation cannot run"); return; }
+            if (!TryAimElevAt(pos, out float dist, out float f))
+            { Plugin.DiagOnce("elev-noaim-" + e.resourceName, $"[Elev] '{e.resourceName}': no aim override near the pawn (or its target distance is 0) — elevation only runs during a bombard"); return; }
+            Plugin.DiagOnce("elev-live-" + e.resourceName, $"[Elev] '{e.resourceName}': aim found, dist={dist:F1} envelope={f:F2}");
             if (e.gunElevBoneIdx == -2)
             {
                 e.gunElevBoneIdx = -1;
@@ -735,7 +741,9 @@ namespace HumankindAssetFramework
             if (e.gunElevBoneIdx < 0) return;
             float full = 3f * (tileSpacing > 0.1f ? tileSpacing : 6.93f);
             float angle = e.gunElevMax * UnityEngine.Mathf.Clamp01(dist / full) * f;
-            if (UnityEngine.Mathf.Abs(angle) < 0.05f) return;
+            if (UnityEngine.Mathf.Abs(angle) < 0.05f)
+            { Plugin.DiagOnce("elev-tiny-" + e.resourceName, $"[Elev] '{e.resourceName}': angle {angle:F3}deg too small to apply (dist={dist:F1} of {full:F1} full-range, envelope={f:F2})"); return; }
+            Plugin.DiagOnce("elev-applied-" + e.resourceName, $"[Elev] '{e.resourceName}': APPLYING {angle:F1}deg to bone[{e.gunElevBoneIdx}] axis {e.gunElevAxis} (BoneRotation slot 3)");
             SetBoneRotation(entry, 3, (uint)e.gunElevBoneIdx, (uint)e.gunElevAxis, angle);
         }
 
