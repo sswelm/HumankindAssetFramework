@@ -784,7 +784,11 @@ namespace HumankindAssetFramework
             if (moveHoldByUnit.TryGetValue(unit, out var h))
             {
                 if (now < h.releaseAt) return true;
-                moveHoldByUnit.Remove(unit);   // released: this frame's call starts the move; no re-evaluation of the same start
+                // released: this frame's call starts the move. The entry lingers half a second so IsMoveHeld bridges the
+                // gap until the position actually changes — else the state poll sees held->not-moving->moving, and the
+                // howitzer UNFOLDS (its AFTER clip) for a frame and folds again
+                if (now < h.releaseAt + 0.5f) return false;
+                moveHoldByUnit.Remove(unit);
                 return false;
             }
             if (Convert.ToInt32(GetMember(unit, "MoveAlongTilesState")) != 0) return false;   // not idle (Setup/MoveLoop/Finalize): an EXTENSION of a running move — vanilla
@@ -797,32 +801,65 @@ namespace HumankindAssetFramework
                 var d = turnStates[i].pos - upos; d.y = 0f;
                 if (d.sqrMagnitude < best) { best = d.sqrMagnitude; st = turnStates[i]; }
             }
-            if (st == null || st.rate <= 0f || st.pivotDeg <= 0f) return false;
-            if (now - st.lastMovedT < 1f) return false;   // from a REAL stop only — a unit that just rolled in keeps rolling
             if (moveHoldByUnit.Count > 64)
                 foreach (var k in new List<object>(moveHoldByUnit.Keys)) if (now - moveHoldByUnit[k].armedAt > 20f) moveHoldByUnit.Remove(k);
+            // TWO REASONS TO HOLD, each on its own terms; the hold is the longer of the two:
+            //   TURN — the unit eases (rate > 0), pivots (pivotDeg > 0) and must turn >= pivotDeg to face the next tile
+            //   FOLD — the model is state-driven with a PRE-MOVE clip (the howitzer's legs): ANY move start waits for the
+            //          fold, turn or no turn (user 2026-08-22: "any time a unit plays a deploy animation"). The state
+            //          polls count a held unit as moving (IsMoveHeld), so the clip plays during the hold.
+            string uname = GetMember(GetMember(unit, "UnitDefinition"), "Name")?.ToString() ?? "";
+            var ent = uname.Length > 0 ? FindEntryForUnitDefinition(uname) : null;
+            bool hasFold = ent != null && ent.animStateDriven && ent.preMoveAnimId >= 0 && ent.preMoveDur > 0f;
+            bool canTurn = st != null && st.rate > 0f && st.pivotDeg > 0f;
+            if (!hasFold && !canTurn) return false;
+            // FROM A REAL STOP ONLY — a unit that just rolled in keeps rolling (the chunk boundary). The turn state knows
+            // when the unit last moved; a model with no turn state falls back to the state poll's moving flag.
+            if (st != null) { if (now - st.lastMovedT < 1f) return false; }
+            else if (ent != null && ent.stateMoving.TryGetValue(GuidToLong(GetMember(unit, "GUID")), out bool mv) && mv) return false;   // map-army key (salt 0L in ProcessAnimStates)
             // the bearing from the current history tile to the next one (tile centres -> Unity world via the strike aim's ToVector3)
+            float turnHold = 0f, diff = 0f, yaw = 0f; bool haveYaw = false; int idx = -1, count = 0;
             var hist = GetMember(army, "positionHistory");
-            if (hist == null || !(GetMember(army, "currentIndexInHistory") is int idx)) return false;
-            if (!(GetMember(hist, "Steps") is Array steps) || !(GetMember(hist, "StepCount") is int count) || idx < 0 || idx + 1 >= count || idx + 1 >= steps.Length) return false;
-            var wpT = GameBinding.WorldPosition; var extT = GameBinding.WorldPositionExtensions;
-            if (wpT == null || extT == null) return false;
-            if (miTileToVector3 == null) miTileToVector3 = AccessTools.Method(extT, "ToVector3");
-            if (miTileToVector3 == null) return false;
-            int tFrom = Convert.ToInt32(GetMember(steps.GetValue(idx), "TileIndex")), tTo = Convert.ToInt32(GetMember(steps.GetValue(idx + 1), "TileIndex"));
-            if (!(miTileToVector3.Invoke(null, new object[] { Activator.CreateInstance(wpT, tFrom), false }) is UnityEngine.Vector3 from) ||
-                !(miTileToVector3.Invoke(null, new object[] { Activator.CreateInstance(wpT, tTo), false }) is UnityEngine.Vector3 to)) return false;
-            var dir = to - from; dir.y = 0f;
-            if (dir.sqrMagnitude < 0.25f || dir.sqrMagnitude > 400f) return false;   // same tile / a wrapped-world artefact
-            float yaw = UnityEngine.Mathf.Atan2(dir.x, dir.z) * UnityEngine.Mathf.Rad2Deg;
-            float diff = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(st.yaw, yaw));
-            if (diff < st.pivotDeg) return false;
-            float hold = UnityEngine.Mathf.Min(diff / st.rate + 0.1f, PivotFailsafeSec);
-            SetAimOverride(upos, yaw, hold);   // the ease target for the hold: the next tile's bearing (AimMaintain reads it; it expires with the hold)
+            if (hist != null && GetMember(army, "currentIndexInHistory") is int ix && GetMember(hist, "Steps") is Array steps && GetMember(hist, "StepCount") is int cnt &&
+                ix >= 0 && ix + 1 < cnt && ix + 1 < steps.Length)
+            {
+                idx = ix; count = cnt;
+                var wpT = GameBinding.WorldPosition; var extT = GameBinding.WorldPositionExtensions;
+                if (wpT != null && extT != null)
+                {
+                    if (miTileToVector3 == null) miTileToVector3 = AccessTools.Method(extT, "ToVector3");
+                    int tFrom = Convert.ToInt32(GetMember(steps.GetValue(idx), "TileIndex")), tTo = Convert.ToInt32(GetMember(steps.GetValue(idx + 1), "TileIndex"));
+                    if (miTileToVector3 != null &&
+                        miTileToVector3.Invoke(null, new object[] { Activator.CreateInstance(wpT, tFrom), false }) is UnityEngine.Vector3 from &&
+                        miTileToVector3.Invoke(null, new object[] { Activator.CreateInstance(wpT, tTo), false }) is UnityEngine.Vector3 to)
+                    {
+                        var dir = to - from; dir.y = 0f;
+                        if (dir.sqrMagnitude >= 0.25f && dir.sqrMagnitude <= 400f)   // not the same tile / a wrapped-world artefact
+                        { yaw = UnityEngine.Mathf.Atan2(dir.x, dir.z) * UnityEngine.Mathf.Rad2Deg; haveYaw = true; }
+                    }
+                }
+            }
+            if (canTurn && haveYaw)
+            {
+                diff = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(st.yaw, yaw));
+                if (diff >= st.pivotDeg) turnHold = UnityEngine.Mathf.Min(diff / st.rate + 0.1f, PivotFailsafeSec);
+            }
+            float foldHold = hasFold ? UnityEngine.Mathf.Min(ent.preMoveDur + 0.1f, PivotFoldCapSec) : 0f;
+            float hold = UnityEngine.Mathf.Max(turnHold, foldHold);
+            if (hold <= 0f) return false;
+            if (turnHold > 0f) SetAimOverride(upos, yaw, hold);   // the ease target for the hold: the next tile's bearing (AimMaintain reads it; it expires with the hold)
             moveHoldByUnit[unit] = new MoveHold { releaseAt = now + hold, armedAt = now };
-            Plugin.Log.LogInfo($"[Pivot] holding army move {hold:F2} s: turn {diff:F0} deg to the next tile at {st.rate:F0} deg/s (threshold {st.pivotDeg:F0}, stood {now - st.lastMovedT:F1} s, history {idx + 1}/{count})");
+            Plugin.Log.LogInfo($"[Pivot] holding army move {hold:F2} s: " +
+                (turnHold > 0f ? $"turn {diff:F0} deg to the next tile at {st.rate:F0} deg/s (threshold {st.pivotDeg:F0})" : "no turn") +
+                (hasFold ? $", pre-move fold {ent.preMoveDur:F1} s" : "") +
+                $" | stood {(st != null ? (now - st.lastMovedT).ToString("F1") : "?")} s, history {idx + 1}/{count}");
             return true;
         }
+        const float PivotFoldCapSec = 8f;   // a pre-move clip can be longer than a turn; still never park a unit longer than this
+        // Is HAF currently holding this unit's move start? Read by the state/deploy polls so a turning unit already
+        // counts as moving (its pre-move fold plays during the turn).
+        internal static bool IsMoveHeld(object unit)
+            => unit != null && moveHoldByUnit.TryGetValue(unit, out var h) && UnityEngine.Time.time < h.releaseAt + 0.5f;   // + the bridge to the first real step
 
         // TERRAIN HUG (spike/terrain-hug 2026-08-04): the engine already flies air units at a terrain-RELATIVE
         // altitude (user-verified), but that altitude ignores BUILDINGS — hence the registry position.z lift that

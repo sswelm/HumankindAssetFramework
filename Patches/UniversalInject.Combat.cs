@@ -806,6 +806,10 @@ namespace HumankindAssetFramework
                         if (e.stateLastPos.TryGetValue(guid, out var lastP)) moving = (upos - lastP).sqrMagnitude > 0.1f * 0.1f;
                         e.stateLastPos[guid] = upos;
                     }
+                    // PIVOT IN PLACE (2026-08-22): a unit whose move start HAF is holding while it turns counts as moving
+                    // from the moment the hold arms — so the PRE-MOVE one-shot (the howitzer folding) plays DURING the
+                    // turn and the unit rolls off already folded, instead of folding on the first metre of travel
+                    if (!moving && IsMoveHeld(unit)) moving = true;
                     if (!e.stateMoving.TryGetValue(guid, out bool wasMoving)) wasMoving = false;
                     if (wasMoving != moving)
                     {
@@ -922,6 +926,7 @@ namespace HumankindAssetFramework
                             if (e.deployLastPos.TryGetValue(guid, out var lastP)) moving = (upos - lastP).sqrMagnitude > 0.1f * 0.1f;
                             e.deployLastPos[guid] = upos;
                         }
+                        if (!moving && IsMoveHeld(unit)) moving = true;   // pivot in place: fold while the held unit turns (see ProcessAnimStates)
                         // Clamp the deployed target just below 1.0: the pose sampler does Mathf.Repeat(Time,1), so a poseTime of
                         // EXACTLY 1.0 wraps to 0.0 = frame 0 = the FOLDED pose. Holding at 0.999 lands on the last real frame instead.
                         float target = UnityEngine.Mathf.Min(e.deployPoseTime, 0.999f);

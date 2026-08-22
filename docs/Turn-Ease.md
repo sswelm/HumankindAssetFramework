@@ -77,7 +77,12 @@ vanilla move is deferred**, holder and pawns together: the unit turns standing s
 smoothed path starts from rest, untouched, with the longer history it accumulated meanwhile. Nothing is
 re-drawn, nothing catches up, the chunk pipeline stays in sync. The hold is **per unit** (decided by the turn
 state at the unit centre), so an artillery piece's crew waits with its gun, and only from a **real stop** (no
-movement for 1 s) — a unit that just rolled in keeps rolling and bends onto the next leg the vanilla way. Helicopters/hovercraft (`hover`) and planes are
+movement for 1 s) — a unit that just rolled in keeps rolling and bends onto the next leg the vanilla way.
+**Fold first** (verified 2026-08-22): a state-driven model with a **pre-move clip** (the howitzer folding its
+legs) holds **every** move start for the clip's length — turn or no turn, whatever the pivot threshold — and
+counts as *moving* from the moment the hold arms, so the fold plays during the hold (during the turn, when
+there is one) and the gun rolls off fully folded. With a turn, the hold is the longer of the two
+(`… turn 150 deg …, pre-move fold 2.0 s` in the `[Pivot]` line; `no turn, pre-move fold 2.0 s` without). Helicopters/hovercraft (`hover`) and planes are
 **never** pivoted by default — a chopper translates while it yaws. Threshold via the dial: `pivot=<deg>` in
 `haf_turnease.txt`, **default 90** (the one key with a non-zero default — a legacy file keeps the behaviour),
 `pivot=0` turns it off. Every hold writes `[Pivot] holding move start … s: turn … deg` to the log.

@@ -1007,6 +1007,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   growing during the hold, so the released move gets the longer path at once. Catalog: PresentationArmy +4, PresentationUnit
   `MoveAlongTilesState`, new `AStarResults`/`AstarStep` types (bindcheck 132/132). **Verified in-game 2026-08-22:
   "Yes, finally, now it is moving perfect!"** — nine drills from the first cut to the one that ships.
+  **Follow-up — the howitzer folded WHILE rolling** (its state-driven pre-move clip keys off the first position
+  delta, which now comes after the turn). `IsMoveHeld(unit)`: both state polls count a held unit as moving from the
+  arm frame, so the fold plays during the turn; `ShouldHoldArmyMove` stretches the hold to ≥ the pre-move clip
+  (cap 8 s); the hold entry lingers 0.5 s past release so the poll never sees held→still→moving (which would have
+  flashed the AFTER unfold). **Verified** ("yes, it looks good"). Then generalised on request — "any time a unit
+  plays a deploy animation": `ShouldHoldArmyMove` now has TWO independent reasons to hold, the longer wins — TURN
+  (eased + pivoting + >= threshold to the next tile) and FOLD (state-driven with a pre-move clip: EVERY move start
+  from a real stop waits for the clip, turn or not; a model with no turn state uses the state poll's moving flag
+  for the stop test). Verified in-game 2026-08-22 ("it looks good").
 
 - **GLBCONV SPLIT-BRAIN — a verified fix silently regressed out of the deployed exe (2026-08-17).** A verified
   critical review found glbconv had TWO sources of truth that had each grown a fix the other lacked: ENCReload's
