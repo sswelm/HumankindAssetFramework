@@ -10,6 +10,22 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE SUITE STOPPED BAKING THE SAME MODELS TWICE — 6.7 → 4.7 min, MEASURED (2026-08-22).** "Can't we parallelise
+  it?" The honest answer was no: the bake path is 71 Unity API calls against 11 subprocess calls, and
+  `AssetDatabase` is main-thread-only, so concurrent bakes are not on the table. But the run was doing the same
+  work twice. With Everything selected, the whole-catalog row and the converted-rigs row each baked every
+  `animated + convertRig` model — **12 of the run's 32 heavy bakes, and conversion bakes are the slowest kind**.
+  The conversion row now also runs the catalog row's asset check on the bake it was already doing, so the catalog
+  row hands those models over; same assertion, same outputs, one bake earlier, and the handed-over models are
+  named in the report. The hand-over is conditional on both rows being in the same run — the catalog row alone
+  still bakes everything, exactly as its title promises. **Verified in-game-adjacent (the user's own run): 6.7 min
+  → 4.7 min, 43 passed / 0 failed / 2 skipped.** The pass count falls from 55 because twelve bakes are no longer
+  double-counted, not because anything stopped being checked. Every row now also times itself, so the report
+  finally answers "which row costs the time?" — converted rigs 1.5 min, whole catalog 1.3, golden snapshot 1.0,
+  Blender+animation 0.5, synthetic cubes 0.3, control rig 0.1. Two measured negatives worth keeping: Blender's
+  ~2 s process start is irreducible by `--factory-startup` / `--disable-autoexec` (tested, no gain), and the
+  remaining big rows are exactly the ones the main thread pins.
+
 - **THE GATE THAT PASSED ON WHAT IT GUARDS (2026-08-22, review finding — fixed).** `check-hot-path.sh` forbids
   SPIKE/EXPERIMENTAL labels inside `Plugin.Update()`, and the CHANGELOG claimed "the label can't outlive the
   experiment again without failing a push". It greps **case-sensitively**. Three calls in the shipped Update body
