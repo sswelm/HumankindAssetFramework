@@ -89,6 +89,15 @@ Each axis adds custom content in a different place, from the same JSON registry.
 
 ---
 
+## HAF in the wild
+
+**[What HAF brings to ENCReload](https://sswelm.github.io/ENCReload/HAF-Effects.html)** — the first mod built on HAF,
+and the most useful thing to read after this index if you want to know what the framework actually *looks like* in a
+shipped game rather than in a feature list. It inventories 22 configured units and the type-wide dials behind them:
+custom models, state-driven animation, traversing turrets and distance-proportional gun elevation, recoil, gradual
+turning and pivot-in-place, terrain hugging, formations, sound. Most of HAF's harder capabilities exist because
+something in that list needed them.
+
 ## 📁 Archived notes
 
 Older design notes and investigations live in [`docs/notes/`](notes/) — frozen, not maintained, not instructions; each opens by

@@ -246,6 +246,11 @@ The plugin's own cfg (`…\community.humankind.haf.cfg`) — press **F8** in-gam
 📖 **Docs site:** **<https://sswelm.github.io/HumankindAssetFramework/>** — the full documentation as a browsable static
 site, generated from [`/docs`](docs/).
 
+🎮 **HAF in a real mod:** **[What HAF brings to ENCReload](https://sswelm.github.io/ENCReload/HAF-Effects.html)** — the
+first mod built on HAF, and the quickest way to see what the framework does in practice rather than in a feature list.
+22 configured units and the type-wide dials behind them: custom models, state-driven animation, traversing turrets and
+distance-proportional gun elevation, recoil, gradual turning and pivot-in-place, terrain hugging, formations, sound.
+
 > **For AI agents:** the machine-readable entry point is [**`llms.txt`**](llms.txt) — fetch it raw at
 > `https://raw.githubusercontent.com/sswelm/HumankindAssetFramework/master/llms.txt`. It maps the whole doc set with
 > links that resolve to public raw Markdown, so an agent can crawl everything with no authentication.
