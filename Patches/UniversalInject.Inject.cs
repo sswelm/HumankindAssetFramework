@@ -603,7 +603,7 @@ namespace HumankindAssetFramework
         static List<object> ListFxManagers()
         {
             var outp = new List<object>();
-            var t = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxManager") ?? AccessTools.TypeByName("Amplitude.Graphics.FxManager");
+            var t = GameBinding.FxManager;
             if (t == null) return outp;
             foreach (var o in UnityEngine.Object.FindObjectsOfType(t)) outp.Add(o);
             outp.Sort((a, b) => string.CompareOrdinal((a as UnityEngine.Object)?.name, (b as UnityEngine.Object)?.name));
@@ -613,7 +613,11 @@ namespace HumankindAssetFramework
         {
             try
             {
-                var mcmType = GameBinding.ContentLayer?.DeclaringType ?? AccessTools.TypeByName("Amplitude.Graphics.Fx.FxComponentMeshContentManager");
+                // fallback changed from a literal TypeByName to the DERIVED accessor: the primary here already IS the
+                // literal (ContentLayer is Cached("…FxComponentMeshContentManager+ContentLayer"), so .DeclaringType is
+                // that type), which means the fallback only runs in a world where that name is gone — exactly where
+                // reading the type off AnimationManager's field is the more robust probe, not the less.
+                var mcmType = GameBinding.ContentLayer?.DeclaringType ?? GameBinding.FxComponentMeshContentManager;
                 var g = fxManager.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance)
                     .FirstOrDefault(m => m.Name == "GetFxComponent" && m.IsGenericMethodDefinition && m.GetParameters().Length == 0);
                 return g == null || mcmType == null ? null : g.MakeGenericMethod(mcmType).Invoke(fxManager, null);

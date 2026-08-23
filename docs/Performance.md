@@ -83,9 +83,20 @@ Learned in one afternoon, each from a bucket that surprised ([Architecture](Arch
    tree instead (`SubPawnScan.cs` is the template: targeted, *self-verified against the scan once per session*, with
    the scan as the fallback), or mark dirty from an event and cap the cadence in tens of seconds.
 3. **No retry-every-frame until something exists.** Throttle unbound retries; twice a second is plenty.
-4. **Resolve reflection once.** `AccessTools.TypeByName` walks every assembly; a bone-name lookup is a reflection read
-   and a string allocation per bone. Cache per entry, keyed on whatever can change the answer (a dial signature, a
-   session).
+4. **Resolve reflection once — but know which reflection.** Measured 2026-08-23 (see §8): the four resolvers differ by
+   five orders of magnitude, and the expensive one is not the one that looks expensive.
+
+   | call | cost | cached |
+   |---|---|---|
+   | `Type.GetField` | 20 ns | 42 ns — **caching it is a 2x pessimisation**; the runtime already keeps a per-type member cache |
+   | `AccessTools.Field` / `.Property` / `.Method` | 41–344 ns | ~42 ns |
+   | `AccessTools.TypeByName` — **hit** | 1,032 ns | 19 ns |
+   | `AccessTools.TypeByName` — **miss** | **7.85 ms** | 13.7 µs |
+
+   So: member lookups are cheap and a memo on them is worth little (and on `Type.GetField`, worth less than nothing).
+   **Type** lookups are the ones that matter, and a *failed* one is 7.85 milliseconds — a quarter of a 30 fps frame,
+   paid again on every call, because `TypeByName` memoises nothing. Resolve types through `GameBinding.Cached`, never
+   a raw `TypeByName`; `tools/check-catalog.sh` fails the gate on one.
 5. **The per-pawn path uses `PawnFast` — including the reads that GATE it.** Boxed-struct reflection is ~0.5–1 µs
    per get/set on Mono; the compiled accessors (`FastMember`) are ~10 ns and write into the box identically. Every
    accessor has a reflection fallback, so a renamed game field costs speed, never function — `[PawnFast]` in the log
@@ -210,7 +221,80 @@ district axis isn't running:
 Two tests pin the summary segment so it cannot silently stop reporting; nine more cover the filter, the prune and
 the O(1) dedup that replaced the linear scan.
 
-## 7. Open items
+## 7. Reflection resolvers — the 7.85 ms miss (2026-08-23)
+
+The question that started this: *"are all reflection lookups fully cached now?"* The answer needed a measurement, not
+an audit, and the measurement moved the target.
+
+### What was measured
+
+A benchmark over the four resolvers HAF uses, warm (the first-ever call on a cold type is ~2,200 ns of metadata
+warm-up and was excluded — an earlier figure of "1,524 ns for `AccessTools.Field`" quoted in the GF commit was that
+warm-up leaking into a short average, and is **wrong**; the real number is 131 ns):
+
+```text
+FIELD  own-public      AccessTools  130 ns | cached  42 | Type.GetField  18
+FIELD  inherited-priv  AccessTools   84 ns | cached  43
+FIELD  MISS            AccessTools  125 ns | cached  47 | Type.GetField  24
+PROP   own             AccessTools   64 ns | cached  41 | Type.GetProperty 26
+PROP   MISS            AccessTools  344 ns | cached  44
+METHOD own             AccessTools   41 ns | cached  42
+METHOD MISS            AccessTools  147 ns | cached  41
+TYPE   hit             AccessTools 1032 ns | cached  19
+TYPE   MISS            AccessTools 7.85 ms | cached  13.7 µs      <-- five orders of magnitude
+```
+
+The miss is not a cold-start artefact: three consecutive rounds measured 7.54, 7.56 and 7.58 ms, and distinct names
+each time cost the same. `TypeByName` memoises **nothing** — not the hit, and certainly not the miss.
+
+### Why that is a stall and not a slow path
+
+A failed type lookup is what happens when a game patch renames something. The code around it is written to degrade
+gracefully — `if (rfpType == null) return -1f;` — so it *looks* safe. It isn't: the caller retries, so the failure
+repeats, and each repeat costs 7.85 ms with no exception and no log line. `DistrictInject.SchematicVis()` re-probed
+**two** types on every call and is called from `UpdateMeshFlatness` every 10 frames for the whole session; if either
+name ever broke, that is 15.7 ms every 10 frames — 1.57 ms/frame averaged, with a half-frame spike on the frames it
+lands — presenting as "the game feels bad" and nothing else.
+
+The same shape is worse where the code looks *most* careful. A `??` fallback chain spends a **full** miss on every
+probe that is meant to fail. `BattleTurnPatch`'s attack replay probed three names for `AnimationVariableNames`, the
+first two of which are alternates — ~15.7 ms on the frame a battle first replays an aligned attack. `Prober`'s
+database resolve loops three candidate type names the same way.
+
+### What changed
+
+Every type name now resolves through `GameBinding.Cached` — 19 ns on the hit, and a miss that re-resolves in 13.7 µs
+because it scans loaded assemblies instead of doing whatever `TypeByName` does on a name it cannot find. Fallback
+chains became the accessor's own fallback list (`Cached(primary, alt1, alt2)`), which memoises the **winner**, so the
+probes that are meant to fail are paid once and never again.
+
+This was half-built already: the A6/A7 catalog sweeps added `RenderFeatureProvider`, `AssetReferenceRepository`,
+`AnimationVariableNames` and others as accessors — but never migrated the call sites, so the names lived in two places
+and the hot ones still paid full price. A8 finished it. `tools/check-catalog.sh` now fails on a raw `TypeByName`
+outside `GameBinding.cs`, which is what stops it drifting back out a fourth time.
+
+**Fallback order turned out to matter more than expected**, and `bindcheck` cannot police it — it reports 132/132
+whether an accessor resolved on its primary or limped in on a fallback. `typeprobe` against the shipped DLLs found two
+chains leading with a name that does not exist, i.e. paying a guaranteed 7.85 ms miss before reaching the real one:
+`GroundMaterialTextureData` probed a **nested** form (`GroundMaterialAuthoringData+GroundMaterialTextureData`) that
+is NOT FOUND in this build, and the battle replay's `AnimationVariableNames` probed *three* names of which **none**
+match — the real type is `Amplitude.Mercury.AnimationVariableNames`, and the bare-name probe only ever resolved
+through `ResolveType`'s simple-name branch, a `GetTypes()` walk of every loaded assembly. Both now lead with the name
+the build actually has, old names kept behind them, and `Tests/TypeResolutionTests.cs` pins the order.
+
+Also on the way: `GameBinding`'s
+`_typeCache` is a plain `Dictionary` with no stated thread contract. It is main-thread-only in practice — audited: the
+three sim-thread hooks reach reflection only through the `ConcurrentDictionary` in `UniversalInject` — so it is now
+annotated `[MainThread]` rather than converted, with the audit written down next to it.
+
+### What was NOT changed, and why
+
+`DistrictInject.GF` stays a bare `Type.GetField`. A cache was written for it and measured away: 20 ns becomes 42 ns,
+because .NET already keeps a per-type member cache and hashing a `(Type, string)` tuple costs more than the runtime's
+own lookup. Member-level memoising is worth ~90 ns a call at best — real, but three orders of magnitude below the
+thing that actually mattered. **The lookup that looked expensive was cheap; the one nobody was counting was 7.85 ms.**
+
+## 8. Open items
 
 - The unit-name matcher (`FindEntryForUnitDefinition`) does not match units whose definition name lacks the
   pawnDescription (the hovercraft, the drones — found by the sub-pawn walk's self-check). The walk now handles it; the

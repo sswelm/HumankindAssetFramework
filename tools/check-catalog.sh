@@ -128,6 +128,26 @@ if [ "${1:-}" = "--list" ]; then
   exit 0
 fi
 
+# ---- TYPE RESOLUTION must go through GameBinding (2026-08-23) ----
+# AccessTools.TypeByName memoises NOTHING. Measured on this box: 1,032 ns on a HIT, and 7.85 MILLISECONDS on a MISS —
+# every single call, forever. GameBinding.Cached is 19 ns on the hit and re-resolves a miss in 13.7 µs. The damage is
+# worst exactly where the code looks most careful: a `?? TypeByName(other)` fallback chain spends a FULL miss on each
+# probe that is MEANT to fail, and a lookup that never resolves (a game rename) turns into a permanent per-call stall
+# with no exception and no log line — SchematicVis() was re-probing two types on every call and would have paid
+# 15.7 ms a call, every 10 frames, if either name ever broke.
+# So: no raw TypeByName outside the catalog. It also keeps the promise GameBinding.cs makes in its own header — that
+# it is the ONE place each game type NAME lives — which a call-site literal quietly breaks.
+RAWTBN=$(grep -nE '(HarmonyLib\.)?AccessTools\.TypeByName *\(' $SRC 2>/dev/null | grep -vE '^\s*[^:]+:[0-9]+: *(//|\*|/\*)' | grep -vE ':[0-9]+:.*//.*AccessTools\.TypeByName' || true)
+if [ -n "$RAWTBN" ]; then
+  echo "[FAIL] raw AccessTools.TypeByName at $(printf '%s\n' "$RAWTBN" | grep -c .) call site(s) outside Patches/GameBinding.cs:"
+  printf '%s\n' "$RAWTBN" | sed 's/^/  /'
+  echo
+  echo "A MISS costs 7.85 ms and repeats on every call — a renamed type becomes a silent per-frame stall, not a"
+  echo "graceful degradation. Add an accessor to Patches/GameBinding.cs and call it, or for a name computed at"
+  echo "runtime call GameBinding.Cached(name) directly (it takes fallbacks: Cached(primary, alt1, alt2))."
+  exit 1
+fi
+
 CAT=$(grep -oE '"[A-Za-z_][A-Za-z0-9_.+`]*"' "$CATALOG" | tr -d '"' | awk -F'.' '{print $NF}' | sort -u)
 GLOBAL_ALLOW=$(printf '%s\n' "$ALLOW" | cut -f1 | grep -v '@' | sort -u)
 SITE_ALLOW=$(printf '%s\n' "$ALLOW" | cut -f1 | grep '@' | sort -u)

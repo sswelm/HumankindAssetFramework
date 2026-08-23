@@ -85,7 +85,7 @@ namespace HumankindAssetFramework
             try
             {
                 int before = RuntimeListCount(AnimMgr);
-                var mcType = AccessTools.TypeByName("Amplitude.Mercury.Animation.MeshCollection");
+                var mcType = GameBinding.MeshCollection;
                 if (mcType == null) { Add("MeshCollection type not found."); return; }
                 var mc = ScriptableObject.CreateInstance(mcType);                 // empty placeholder
                 var reg = AccessTools.Method(AnimMgr.GetType(), "RegisterMeshCollection");
@@ -300,16 +300,19 @@ namespace HumankindAssetFramework
         // (internal: FormationOverride resolves the formation + unit-definition databases through this too)
         internal static IEnumerable ResolveDatabase(string elementTypeFullName)
         {
-            var elemType = AccessTools.TypeByName(elementTypeFullName);
+            var elemType = GameBinding.Cached(elementTypeFullName);   // a DYNAMIC name, so it can miss — and a raw TypeByName miss is 7.85 ms
             if (elemType == null) return null;
             return ResolveDatabase(elemType);
         }
 
         internal static IEnumerable ResolveDatabase(Type elemType)
         {
+            // Two of these three are ALWAYS misses if the first one's GetDatabase doesn't resolve — at a raw TypeByName's
+            // 7.85 ms per miss that is a 15.7 ms stall on a path FormationOverride calls at runtime. Cached re-resolves
+            // a miss in 13.7 µs.
             foreach (var dbTypeName in new[] { "Amplitude.Framework.Databases", "Amplitude.Mercury.Databases", "Amplitude.Databases" })
             {
-                var dbType = AccessTools.TypeByName(dbTypeName);
+                var dbType = GameBinding.Cached(dbTypeName);
                 var getDb = dbType != null ? AccessTools.Method(dbType, "GetDatabase", new[] { typeof(Type) }) : null;
                 if (getDb == null) continue;
                 try { if (getDb.Invoke(null, new object[] { elemType }) is IEnumerable e) return e; } catch { }

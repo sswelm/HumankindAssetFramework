@@ -10,6 +10,51 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE 7.85 MILLISECOND LOOKUP NOBODY WAS COUNTING (2026-08-23).** The question was "are all reflection lookups
+  cached now?" — and the honest answer needed a benchmark, which then pointed somewhere nobody was looking.
+  `AccessTools.Field`/`.Property`/`.Method` are 41–344 ns, and memoising them saves ~90 ns; `Type.GetField` is 20 ns
+  and memoising it makes it **worse** (42 ns — the runtime already keeps a per-type member cache, so a `(Type, string)`
+  tuple hash costs more than the lookup it replaces; see the GF entry below). But **`AccessTools.TypeByName` costs
+  1,032 ns on a hit and 7.85 MILLISECONDS on a miss — every call, memoising nothing.** Three consecutive rounds:
+  7.54 / 7.56 / 7.58 ms. That is a quarter of a 30 fps frame for *one failed type lookup*.
+  **The danger is that it hides inside code written to be careful.** A failed lookup is what a renamed game type looks
+  like, and the call sites all degrade gracefully — `if (type == null) return -1f;` — so the failure repeats forever
+  instead of being reported. `DistrictInject.SchematicVis()` re-probed **two** types on every call and runs every 10
+  frames all session: if either name broke, 15.7 ms every 10 frames, silently, presenting only as "the game feels
+  bad". Worse still where the code looks *most* defensive — a `?? TypeByName(alt)` chain pays a **full** miss for
+  every probe that is *meant* to fail, so the battle attack-replay's three-name probe cost ~15.7 ms of stall on the
+  frame it first ran.
+  Fixed by finishing a migration that was already half-done: the A6/A7 catalog sweeps had added
+  `RenderFeatureProvider`, `AssetReferenceRepository`, `AnimationVariableNames` and friends as `GameBinding` accessors
+  **but never migrated the call sites**, so the names lived in two places and the hot ones still paid full price. A8
+  moved every one of them (19 ns on a hit, 13.7 µs to re-resolve a miss — 573x), turned each `??` chain into the
+  accessor's own fallback list so the *winner* is what gets cached, and added a gate: `tools/check-catalog.sh` now
+  fails on a raw `TypeByName` outside `GameBinding.cs`. Drilled — putting one back fails the gate.
+  **Fallback ORDER turned out to be its own bug class, and `bindcheck` is blind to it** — it reports 132/132 whether an
+  accessor resolved on its primary or limped in on a fallback. `typeprobe` against the shipped DLLs found two chains
+  leading with a name that does not exist, i.e. paying a guaranteed 7.85 ms miss before reaching the real one:
+  `GroundMaterialTextureData` led with a **nested** form that is NOT FOUND in this build, and the battle replay's
+  `AnimationVariableNames` probed *three* names of which **none** match — the real type is
+  `Amplitude.Mercury.AnimationVariableNames`, and the bare-name probe only ever worked via the simple-name `GetTypes()`
+  walk over every loaded assembly. (My first pass got `GroundMaterialTextureData` backwards, preserving the call site's
+  intent instead of checking the game; the typeprobe refuted it.) Both now lead with the name the build has, and the
+  order is pinned by test.
+  Also on the way: `GameBinding._typeCache` is a plain `Dictionary` with no thread contract stated; audited (the three sim-thread hooks
+  reach reflection only via the `ConcurrentDictionary` in `UniversalInject`, never a `GameBinding` accessor) and
+  annotated `[MainThread]` with the audit written beside it — a contract, not a bug fix.
+  New `Tests/TypeResolutionTests.cs` pins the property the whole swap rests on: a **miss must not be memoised**, or
+  every type HAF resolves before the game finishes loading would be dead for the session. It proves it the real way —
+  ask for a type that doesn't exist, create it in a dynamic assembly, ask again. Drill note recorded in the file:
+  `Cached` guards this twice (skip the null on write, ignore it on read) so *either* mutation alone survives and only
+  both together are caught.
+
+- **GF STAYS UNCACHED — AND THE 1,524 ns THAT JUSTIFIED CACHING IT WAS WRONG (2026-08-23).** The commit that reverted
+  `DistrictInject.GF`'s cache quoted `AccessTools.Field` at 1,524 ns against a memoised 49 ns, "31x". A second harness
+  says 131 ns. The first figure was cold-start metadata warm-up (~2,200 ns on the first-ever call for a type) leaking
+  into too short an average. The revert itself was right and stands — `Type.GetField` 20 ns vs 42 ns cached — but the
+  number used to justify its sibling `GFA` was inflated by 12x. Corrected here and in `docs/Performance.md` rather
+  than quietly: `GFA` is still worth having (131 → 43 ns), just for a much smaller reason than claimed.
+
 - **THE POSE HOOK'S FLOOR COST HALVED — TWO READS THE 08-21 PASS MISSED (2026-08-23).** With `SelectorTile` gone the
   top six was entirely pose work, and `PoseVanilla` stood out: **210 µs = 116 adds × 1,805 ns**, apparently 1.8 µs
   just to decide a pawn is *not* ours — 20× the 89 ns the district skip costs for the same kind of decision.

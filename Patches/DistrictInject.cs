@@ -431,14 +431,19 @@ namespace HumankindAssetFramework
         //     become GFA — swapping would change which members resolve. See GFA below for when to use which.
         // DELIBERATELY NOT CACHED — measured 2026-08-23, after a cache was written for it and then thrown away:
         //
-        //     Type.GetField     20 ns      GF with a (Type,string) ConcurrentDictionary   42 ns
-        //     AccessTools.Field 1524 ns    GFA (that, cached)                             49 ns
+        //     Type.GetField      20 ns     GF with a (Type,string) ConcurrentDictionary   42 ns
+        //     AccessTools.Field 131 ns     GFA (that, cached)                             43 ns
         //
         // The .NET runtime already keeps a per-type member cache, so `Type.GetField` is a ~20 ns lookup, not the
         // fresh scan it looks like. Wrapping it costs MORE than it saves — hashing a (Type, string) tuple is more
-        // work than the runtime's own lookup — so the "obvious" optimisation is a 2x pessimisation. `AccessTools`
-        // is the one that genuinely needs memoising: it walks the base-type chain and formats a warning on a miss,
-        // which is 1,524 ns and why GFA exists at all.
+        // work than the runtime's own lookup — so the "obvious" optimisation is a 2x pessimisation.
+        //
+        // CORRECTION (same day): the first version of this comment said AccessTools.Field was 1,524 ns, and used that
+        // to justify GFA. It is 131 ns. The 1,524 was cold-start metadata warm-up (~2,200 ns on the first-ever call
+        // against a type) leaking into too short an average. GFA is still worth having — 131 → 43 ns, since
+        // AccessTools walks the base-type chain and formats a warning on a miss — just for 3x, not 31x.
+        // The lookup that actually costs real time is neither of these: AccessTools.TypeByName, at 7.85 MILLISECONDS
+        // on a miss. See docs/Performance.md §7.
         //
         // Left uncached on purpose. If this line ever looks like an oversight next to its memoised siblings, the
         // numbers above are the reason it is not.
@@ -1432,8 +1437,8 @@ namespace HumankindAssetFramework
             {
                 if (rfpInstance == null || (rfpInstance is UnityEngine.Object ruo && ruo == null))
                 {
-                    var rfpType = AccessTools.TypeByName("Amplitude.Mercury.Fx.RenderFeatureProvider");
-                    var selType = AccessTools.TypeByName("Amplitude.Mercury.Fx.RenderFeatureSelector");
+                    var rfpType = GameBinding.RenderFeatureProvider;
+                    var selType = GameBinding.RenderFeatureSelector;
                     if (rfpType == null || selType == null) return -1f;
                     var found = UnityEngine.Resources.FindObjectsOfTypeAll(rfpType);
                     if (found == null || found.Length == 0) return -1f;   // not loaded yet
@@ -1789,7 +1794,7 @@ namespace HumankindAssetFramework
             try
             {
                 if (decalDumped || distFxManager == null || Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;
-                var tDesc = HarmonyLib.AccessTools.TypeByName("Amplitude.Mercury.Terrain.Fx.FxEvolverDescriptorLevelBuildDecal");
+                var tDesc = GameBinding.FxEvolverDescriptorLevelBuildDecal;
                 if (tDesc == null) { decalDumped = true; Plugin.Log.LogWarning("[Decal] FxEvolverDescriptorLevelBuildDecal not found"); return; }
                 var getInst = tDesc.GetMethod("GetInstance", BindingFlags.Static | BindingFlags.Public, null, new[] { typeof(bool) }, null);
                 if (getInst == null) { decalDumped = true; Plugin.Log.LogWarning("[Decal] GetInstance(bool) not found"); return; }

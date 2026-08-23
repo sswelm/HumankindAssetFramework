@@ -256,9 +256,10 @@ namespace HumankindAssetFramework
                     {
                         foreach (var m in pawn.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
                             if (m.Name == "PlayAnimationState" && m.GetParameters().Length == 7) { miPlayState = m; break; }
-                        var avn = AccessTools.TypeByName("AnimationVariableNames")
-                               ?? AccessTools.TypeByName("Amplitude.Mercury.Presentation.AnimationVariableNames")
-                               ?? AccessTools.TypeByName("Amplitude.Mercury.Animation.AnimationVariableNames");
+                        // The three-name probe now lives on the accessor (same order, same fallbacks). It matters which
+                        // way round this is written: a raw TypeByName MISS is 7.85 ms, so the two probes that are MEANT
+                        // to fail used to cost ~15.7 ms of stall on the frame a battle first replays an aligned attack.
+                        var avn = GameBinding.AnimationVariableNames;
                         simpleAttackId = avn != null ? AccessTools.Field(avn, "SimpleAttackState")?.GetValue(null) : null;
                         if (miPlayState != null && simpleAttackId != null)
                             capAttack = Enum.Parse(miPlayState.GetParameters()[2].ParameterType, "Attack");

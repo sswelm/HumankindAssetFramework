@@ -8,8 +8,9 @@ namespace HumankindAssetFramework.Tests
     //
     // `GF` is QUIET (Type.GetField, so a miss emits no HarmonyX warning; probing spams the log) and deliberately
     // UNCACHED. A cache was written for it and measured away — the .NET runtime already keeps a per-type member
-    // cache, so Type.GetField is ~20 ns and a (Type,string) dictionary wrapper is ~42 ns. `AccessTools.Field` is
-    // the one that needs memoising at 1,524 ns, which is what GFA is.
+    // cache, so Type.GetField is ~20 ns and a (Type,string) dictionary wrapper is ~42 ns. `AccessTools.Field` is the
+    // one worth memoising at 131 ns, which is what GFA is. (An earlier revision of this comment said 1,524 ns; that
+    // was cold-start warm-up in too short an average — GFA is a 3x win, not a 31x one.)
     //
     // So these do not test caching — there is none to test, and reference identity across calls is the runtime's
     // doing, not ours. What they pin is the RESOLUTION DIFFERENCE that stops the two helpers being merged:
@@ -62,7 +63,7 @@ namespace HumankindAssetFramework.Tests
             Assert.Equal(7, (int)f.GetValue(new Derived()));   // and it really reads it
         }
 
-        // GFA memoises AccessTools (1,524 ns -> 49 ns measured). Same instance across calls is the observable
+        // GFA memoises AccessTools (131 ns -> 43 ns measured). Same instance across calls is the observable
         // side of that; unlike GF, here it really is our cache doing it.
         [Fact]
         public void GFA_Caches()

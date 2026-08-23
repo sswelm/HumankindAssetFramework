@@ -61,6 +61,13 @@ namespace HumankindAssetFramework
         // of a scattered TypeByName("…"), so a rename is fixed here, not hunted across the codebase. Resolved once and
         // cached (non-null only, so a type not yet loaded at first touch re-resolves next call). `fallback` mirrors the
         // game's own short-name fallback used for a couple of these. Rolling this out one subsystem at a time; AUDIO first.
+        // [MainThread], not [Concurrent]: this is a PLAIN Dictionary, and a write under a concurrent reader corrupts its
+        // bucket chain — the silent-freeze mode UniversalInject.memberCache was moved off for exactly that reason.
+        // Audited 2026-08-23: the three SIM-thread hooks (Hk_ArtilleryStrike, Hk_BattleStarted, Sandbox.Save/Load) reach
+        // reflection only through GetMember / FireProbe.Member, which IS the ConcurrentDictionary, and touch no
+        // GameBinding accessor. That is a fact about today's call graph, not a property of this field — a new sim-thread
+        // caller of any GameBinding.<Type> has to move this to a ConcurrentDictionary first.
+        [MainThread("plain Dictionary — see the audit note above")]
         [ProcessLived("type cache")] static readonly Dictionary<string, Type> _typeCache = new Dictionary<string, Type>();
         internal static Type Cached(string name, params string[] fallbacks)
         {
@@ -197,7 +204,12 @@ namespace HumankindAssetFramework
         internal static Type MeshVertexBuffer       => CachedDerived("MeshVertexBuffer",       () => FieldOrPropType(ContentLayer, "vertexBuffer"));   // the GPU vertex slice (crush / scale / prop writes)
         internal static Type ClipEntry              => CachedDerived("ClipEntry",              () => ElementType(FieldOrPropType(ClipCollection, "animationClipEntries")));
         internal static Type PawnDefinitionEntry    => CachedDerived("PawnDefinitionEntry",    () => ElementType(FieldOrPropType(PawnManager, "pawnDefinitions")));   // Resize Lab: descriptor -> unit definition
-        internal static Type AnimationVariableNames => Cached("AnimationVariableNames", "Amplitude.Mercury.Presentation.AnimationVariableNames", "Amplitude.Mercury.Animation.AnimationVariableNames");   // battle hold-fire replay
+        // battle hold-fire replay. typeprobe, 2026-08-23: the type is `Amplitude.Mercury.AnimationVariableNames` — which
+        // is NONE of the three names the call site used to probe. The bare name worked only through ResolveType's
+        // simple-name branch, a GetTypes() walk of every assembly; the two dotted guesses are permanent misses (they
+        // were never reached, since the bare probe hit first). Real full name promoted to primary, the old three kept
+        // behind it so a rename still degrades the way it used to.
+        internal static Type AnimationVariableNames => Cached("Amplitude.Mercury.AnimationVariableNames", "AnimationVariableNames", "Amplitude.Mercury.Presentation.AnimationVariableNames", "Amplitude.Mercury.Animation.AnimationVariableNames");
         // unit / formation
         internal static Type PresentationUnitDefinition => CachedDerived("PresentationUnitDefinition", () => FieldOrPropType(PresentationUnit, "PresentationUnitDefinition"));
         internal static Type CoordinationValues     => CachedDerived("CoordinationValues",     () => FieldOrPropType(PresentationUnitDefinition, "CoordinationValues"));   // the dummyOffset struct
@@ -245,7 +257,13 @@ namespace HumankindAssetFramework
         internal static Type BattleUnit          => Cached("Amplitude.Mercury.Simulation.BattleUnit");
         internal static Type GroundMaterialDefinition => Cached("Amplitude.Mercury.Terrain.GroundMaterialDefinition");
         internal static Type GroundMaterialAuthoringData => Cached("Amplitude.Mercury.Terrain.GroundMaterialAuthoringData");
-        internal static Type GroundMaterialTextureData => Cached("Amplitude.Mercury.Terrain.GroundMaterialTextureData");
+        // FLAT name is the real one — typeprobe against this build, 2026-08-23: the NESTED form
+        // (GroundMaterialAuthoringData+GroundMaterialTextureData) is NOT FOUND. The call site used to probe the nested
+        // form FIRST with `?? flat`, so it paid a guaranteed 7.85 ms miss on every call. Keeping the nested name as the
+        // fallback costs nothing (it is only ever reached if the flat one disappears) and covers a future build that
+        // nests it. Order matters here: bindcheck reports 132/132 either way, because it only asks whether the accessor
+        // resolves — not whether it resolved via the primary or limped in on a fallback.
+        internal static Type GroundMaterialTextureData => Cached("Amplitude.Mercury.Terrain.GroundMaterialTextureData", "Amplitude.Mercury.Terrain.GroundMaterialAuthoringData+GroundMaterialTextureData");
         internal static Type FxComponentTextureAtlasManager => Cached("Amplitude.Graphics.Fx.FxComponentTextureAtlasManager");
         internal static Type AbstractTextureAtlas => Cached("Amplitude.Graphics.Atlas.AbstractTextureAtlas");
         internal static Type GenericTextureAtlas => Cached("Amplitude.Graphics.Atlas.GenericTextureAtlas`1");
@@ -267,6 +285,20 @@ namespace HumankindAssetFramework
         internal static Type AtlasEntry          => CachedDerived("AtlasEntry",          () => ElementType(FieldOrPropType(AbstractTextureAtlas, "atlasEntries")));
         internal static Type DatabaseMatrix1D    => CachedDerived("DatabaseMatrix1D",    () => ElementType(FieldOrPropType(AssetReferenceRepository, "databaseMatrices1D")));
         internal static Type DatabaseMatrix2D    => CachedDerived("DatabaseMatrix2D",    () => ElementType(FieldOrPropType(AssetReferenceRepository, "databaseMatrices2D")));
+        // ---- A8 (2026-08-23): the last names that were still resolved by a raw AccessTools.TypeByName at the call site.
+        //      Measured this pass: TypeByName costs 1,032 ns on a HIT and 7.85 MILLISECONDS on a MISS — every call, it
+        //      memoises nothing. `Cached` is 19 ns on the hit and re-resolves a miss in 13.7 µs (573x), and a `??`
+        //      fallback chain — which spends a FULL miss on the probe that is meant to fail — collapses to one lookup
+        //      once the fallback lands. See docs/Performance.md. tools/check-catalog.sh now fails the gate on a raw
+        //      TypeByName outside this file, so these names cannot drift back out to the call sites.
+        internal static Type StaticString        => Cached("Amplitude.StaticString");
+        internal static Type FxManager           => Cached("Amplitude.Graphics.Fx.FxManager", "Amplitude.Graphics.FxManager");
+        internal static Type FxTextureAtlas      => Cached("Amplitude.Graphics.Fx.FxTextureAtlas");
+        internal static Type DefaultTextureAtlas => Cached("Amplitude.Graphics.Atlas.DefaultTextureAtlas");
+        internal static Type FxEvolverMaterialLevelBuildMatching => Cached("Amplitude.Mercury.Terrain.Fx.FxEvolverMaterialLevelBuildMatching");
+        internal static Type FxEvolverDescriptorLevelBuildDecal  => Cached("Amplitude.Mercury.Terrain.Fx.FxEvolverDescriptorLevelBuildDecal");
+        internal static Type ImageConversion     => Cached("UnityEngine.ImageConversion");   // Unity's, not Amplitude's — but the same 7.85 ms miss applies
+
         // ---- runtime module order (pack load order follows the game's own mod order — docs/Multi-Mod.md) ----
         internal static Type FrameworkServices   => Cached("Amplitude.Framework.Services");
         internal static Type RuntimeService      => Cached("Amplitude.Mercury.Runtime.IRuntimeService");

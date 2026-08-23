@@ -34,13 +34,13 @@ namespace HumankindAssetFramework
             if (axisProbed || Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;
             try
             {
-                var repoType = AccessTools.TypeByName("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");
+                var repoType = GameBinding.AssetReferenceRepository;
                 var inst = repoType?.GetMethod("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.Invoke(null, null);
                 if (inst == null) return;
                 if (!(AccessTools.Property(inst.GetType(), "Loaded")?.GetValue(inst) is bool b) || !b) return;
                 if (!(AccessTools.Field(inst.GetType(), "databaseMatrices1D")?.GetValue(inst) is Array arr)) return;
                 axisProbed = true;
-                var ssType = AccessTools.TypeByName("Amplitude.StaticString");
+                var ssType = GameBinding.StaticString;
                 var testGuid = ParseGuid4("1,2,3,4");
                 int Axis(object mm) => (AccessTools.Property(mm.GetType(), "CriteriaNames")?.GetValue(mm) as Array)?.Length ?? -1;
                 bool Has(object mm, string nm) { if (AccessTools.Property(mm.GetType(), "CriteriaNames")?.GetValue(mm) is Array ax) foreach (var v in ax) if (v?.ToString() == nm) return true; return false; }
@@ -169,7 +169,7 @@ namespace HumankindAssetFramework
 
         static void FillWonderCell(string wname, object guid)
         {
-            var repoType = AccessTools.TypeByName("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");
+            var repoType = GameBinding.AssetReferenceRepository;
             var inst = repoType?.GetMethod("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.Invoke(null, null);
             if (inst == null) return;
             if (!(AccessTools.Property(inst.GetType(), "Loaded")?.GetValue(inst) is bool b) || !b) return;
@@ -182,7 +182,7 @@ namespace HumankindAssetFramework
                 var mt = m.GetType();
                 if (!(AccessTools.Property(mt, "CriteriaNames")?.GetValue(m) is Array axis)) return;
                 var cells = AccessTools.Field(mt, "cells")?.GetValue(m) as Array;
-                var ssType = AccessTools.TypeByName("Amplitude.StaticString");
+                var ssType = GameBinding.StaticString;
                 var addM = mt.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(x => x.Name == "Add" && x.GetParameters().Length == 3);
                 if (cells == null || ssType == null || addM == null) return;
                 int idx = -1;
@@ -207,7 +207,7 @@ namespace HumankindAssetFramework
         static int FillMatrixCells(object inst, string nameContains, string criteriaName, object guid)
         {
             int filled = 0;
-            var ssType = AccessTools.TypeByName("Amplitude.StaticString");
+            var ssType = GameBinding.StaticString;
             if (ssType == null) return 0;
             // matrices live across databaseMatrices1D + databaseMatrices2D (the main visual db is 2D: DistrictState x affinity)
             foreach (var fieldName in new[] { "databaseMatrices1D", "databaseMatrices2D" })
@@ -269,7 +269,7 @@ namespace HumankindAssetFramework
             if (distFxManager == null) return;   // wait until the district machinery is up (repository loaded)
             try
             {
-                var repoType = AccessTools.TypeByName("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");
+                var repoType = GameBinding.AssetReferenceRepository;
                 var inst = repoType?.GetMethod("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.Invoke(null, null);
                 if (inst == null) return;
                 if (!(AccessTools.Property(inst.GetType(), "Loaded")?.GetValue(inst) is bool b) || !b) return;
@@ -801,7 +801,7 @@ namespace HumankindAssetFramework
             matchDumped = true;
             try
             {
-                var matchType = AccessTools.TypeByName("Amplitude.Mercury.Terrain.Fx.FxEvolverMaterialLevelBuildMatching");
+                var matchType = GameBinding.FxEvolverMaterialLevelBuildMatching;
                 if (matchType == null) { Plugin.Log.LogWarning("[Match] FxEvolverMaterialLevelBuildMatching type not found"); return; }
                 var all = UnityEngine.Resources.FindObjectsOfTypeAll(matchType);
                 Plugin.Log.LogInfo($"[Match] {all.Length} loaded matching material(s); scanning for Exploitation/District entries");
@@ -958,7 +958,7 @@ namespace HumankindAssetFramework
                 {
                     if (!System.IO.File.Exists(maskPath)) { if (selectorTileLogged.Add(name + ":masknofile")) Plugin.Log.LogWarning($"[Footprint] mask PNG not found: {maskPath}"); return; }
                     reactorMaskTex = new UnityEngine.Texture2D(2, 2, UnityEngine.TextureFormat.RGBA32, false);
-                    var loadImg = AccessTools.TypeByName("UnityEngine.ImageConversion")?.GetMethod("LoadImage", new[] { typeof(UnityEngine.Texture2D), typeof(byte[]) });
+                    var loadImg = GameBinding.ImageConversion?.GetMethod("LoadImage", new[] { typeof(UnityEngine.Texture2D), typeof(byte[]) });
                     bool ok = loadImg != null && (bool)loadImg.Invoke(null, new object[] { reactorMaskTex, System.IO.File.ReadAllBytes(maskPath) });
                     if (!ok) { Plugin.Log.LogWarning("[Footprint] LoadImage failed (ImageConversion missing?)"); reactorMaskTex = null; return; }
                     reactorMaskTex.name = "ReactorFootprintMask"; reactorMaskTex.wrapMode = UnityEngine.TextureWrapMode.Clamp;
@@ -976,9 +976,9 @@ namespace HumankindAssetFramework
                 if (ol == null || (ol is UnityEngine.Object olu && olu == null)) { if (selectorTileLogged.Add(name + ":fpnool")) Plugin.Log.LogWarning("[Footprint] host output layer not loaded yet — retry"); return; }
 
                 // build our private mask atlas (FxTextureAtlas : GenericTextureAtlas<FxTextureAtlasStruct> : AbstractTextureAtlas)
-                var atlasType = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxTextureAtlas");
-                var absType = AccessTools.TypeByName("Amplitude.Graphics.Atlas.AbstractTextureAtlas");
-                var structType = AccessTools.TypeByName("Amplitude.Graphics.Fx.FxTextureAtlasStruct");
+                var atlasType = GameBinding.FxTextureAtlas;
+                var absType = GameBinding.AbstractTextureAtlas;
+                var structType = GameBinding.FxTextureAtlasStruct;
                 var entryType = absType.GetNestedType("AtlasEntry");
                 var outEntryType = absType.GetNestedType("OutputEntry");
                 // GUID decides block-vs-shape. INVALID -> new Guid()->Null -> FillLayerData skips the mask -> solid quad
@@ -1029,7 +1029,7 @@ namespace HumankindAssetFramework
                 GF(hostClone.GetType(), "visualOutput").SetValue(hostClone, voBox2);
                 var l0Field = GF(hostClone.GetType(), "layer0");
                 var l0 = l0Field.GetValue(hostClone);
-                var guidType = AccessTools.TypeByName("Amplitude.Framework.Guid");
+                var guidType = GameBinding.Guid;
                 var ourGuid = Activator.CreateInstance(guidType, new object[] { maskGuidStr });
                 GF(l0.GetType(), "maskTexture").SetValue(l0, ourGuid);
                 var maskModeType = l0.GetType().GetField("maskOption", BindingFlags.Instance | BindingFlags.NonPublic)?.FieldType;
@@ -1262,7 +1262,7 @@ namespace HumankindAssetFramework
                 DistrictModel entry = null; foreach (var e in distModels) if (e.district == name) { entry = e; break; }
                 if (entry == null) return;
 
-                var repoType = AccessTools.TypeByName("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");
+                var repoType = GameBinding.AssetReferenceRepository;
                 var inst = repoType?.GetMethod("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.Invoke(null, null);
                 if (inst == null) return;
                 if (!(AccessTools.Property(inst.GetType(), "Loaded")?.GetValue(inst) is bool ld) || !ld) return;
@@ -1289,7 +1289,7 @@ namespace HumankindAssetFramework
 
                 if (entry.groundIdx == int.MinValue)
                 {
-                    var ssType = AccessTools.TypeByName("Amplitude.StaticString");
+                    var ssType = GameBinding.StaticString;
                     var idxM = repoType.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(m => m.Name == "IndexOf" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
                     if (idxM == null || ssType == null) { entry.groundIdx = -1; return; }
                     var args = new object[] { GroundCriteria, Activator.CreateInstance(ssType, want) };
@@ -1366,9 +1366,9 @@ namespace HumankindAssetFramework
             if (groundColorsDumped) return; groundColorsDumped = true;
             try
             {
-                var gmdType = AccessTools.TypeByName("Amplitude.Mercury.Terrain.GroundMaterialDefinition");
-                var gmadType = AccessTools.TypeByName("Amplitude.Mercury.Terrain.GroundMaterialAuthoringData");
-                var dbType = AccessTools.TypeByName("Amplitude.Framework.Databases");
+                var gmdType = GameBinding.GroundMaterialDefinition;
+                var gmadType = GameBinding.GroundMaterialAuthoringData;
+                var dbType = GameBinding.Databases;
                 if (gmdType == null || gmadType == null || dbType == null) { Plugin.Log.LogWarning($"[Ground] color dump: type(s) not found (def={gmdType != null}, auth={gmadType != null}, db={dbType != null})"); return; }
                 // non-generic GetDatabase(Type) — avoids the generic overload's optional-bool-param signature mismatch
                 var getDb = dbType.GetMethods(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(m => m.Name == "GetDatabase" && !m.IsGenericMethodDefinition && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(Type));
@@ -1376,15 +1376,15 @@ namespace HumankindAssetFramework
                 if (db == null) { Plugin.Log.LogWarning("[Ground] color dump: GroundMaterialDefinition database null"); return; }
                 var getVal = db.GetType().GetMethods().FirstOrDefault(m => m.Name == "GetValue" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(string))
                           ?? db.GetType().GetMethods().FirstOrDefault(m => m.Name == "GetValue" && m.GetParameters().Length == 1);
-                var ssType = AccessTools.TypeByName("Amplitude.StaticString");
+                var ssType = GameBinding.StaticString;
                 var authGuidP = AccessTools.Property(gmdType, "GroundMaterialAuthoringData");
                 var colorP = AccessTools.Property(gmadType, "Color");
-                var texType = AccessTools.TypeByName("Amplitude.Mercury.Terrain.GroundMaterialAuthoringData+GroundMaterialTextureData") ?? AccessTools.TypeByName("Amplitude.Mercury.Terrain.GroundMaterialTextureData");
+                var texType = GameBinding.GroundMaterialTextureData;   // nested name first, flat one as the fallback — both now on the accessor
                 var oneLayerP = AccessTools.Property(gmadType, "GroundMaterialOneLayer");
                 var layer0P = AccessTools.Property(gmadType, "GroundMaterialLayer0");
                 var atlasElemF = texType?.GetField("AtlasElement", BindingFlags.Public | BindingFlags.Instance);
                 var atlasF = texType?.GetField("Atlas", BindingFlags.Public | BindingFlags.Instance);
-                var defAtlasType = AccessTools.TypeByName("Amplitude.Graphics.Atlas.DefaultTextureAtlas");
+                var defAtlasType = GameBinding.DefaultTextureAtlas;
                 var texDir = System.IO.Path.Combine(BepInEx.Paths.ConfigPath, "haf_ground_tex");
                 System.IO.Directory.CreateDirectory(texDir);
 
@@ -1477,7 +1477,7 @@ namespace HumankindAssetFramework
                 var idxObj = AccessTools.Field(district.GetType(), "hexagonSculptingDefinitionIndex")?.GetValue(district);
                 if (!(idxObj is int idx)) return;
                 string shape = "?";
-                var repoType = AccessTools.TypeByName("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");
+                var repoType = GameBinding.AssetReferenceRepository;
                 var inst = repoType?.GetMethod("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.Invoke(null, null);
                 var namesM = repoType?.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(m => m.Name == "Names" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(int));
                 if (inst != null && namesM?.Invoke(inst, new object[] { 27 }) is Array arr && idx >= 0 && idx < arr.Length) shape = arr.GetValue(idx)?.ToString();
@@ -1503,10 +1503,10 @@ namespace HumankindAssetFramework
                 lastHexDial = want;
                 if (string.IsNullOrEmpty(want)) return;
 
-                var repoType = AccessTools.TypeByName("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");
+                var repoType = GameBinding.AssetReferenceRepository;
                 var inst = repoType?.GetMethod("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.Invoke(null, null);
                 if (inst == null || !(AccessTools.Property(inst.GetType(), "Loaded")?.GetValue(inst) is bool ld) || !ld) return;
-                var ssType = AccessTools.TypeByName("Amplitude.StaticString");
+                var ssType = GameBinding.StaticString;
                 var idxM = repoType.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(m => m.Name == "IndexOf" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
                 if (idxM == null || ssType == null) return;
                 int idx = (int)idxM.Invoke(inst, new object[] { 27, Activator.CreateInstance(ssType, want) });
@@ -1538,7 +1538,7 @@ namespace HumankindAssetFramework
                 DistrictModel entry = null; foreach (var e in distModels) if (e.district == name) { entry = e; break; }
                 if (entry == null) return;
 
-                var repoType = AccessTools.TypeByName("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");
+                var repoType = GameBinding.AssetReferenceRepository;
                 var inst = repoType?.GetMethod("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.Invoke(null, null);
                 if (inst == null) return;
                 if (!(AccessTools.Property(inst.GetType(), "Loaded")?.GetValue(inst) is bool ld) || !ld) return;
@@ -1560,7 +1560,7 @@ namespace HumankindAssetFramework
 
                 if (entry.hexIdx == int.MinValue)
                 {
-                    var ssType = AccessTools.TypeByName("Amplitude.StaticString");
+                    var ssType = GameBinding.StaticString;
                     var idxM = repoType.GetMethods(BindingFlags.Public | BindingFlags.Instance).FirstOrDefault(m => m.Name == "IndexOf" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int));
                     if (idxM == null || ssType == null) { entry.hexIdx = -1; return; }
                     entry.hexIdx = (int)idxM.Invoke(inst, new object[] { HexCriteria, Activator.CreateInstance(ssType, want) });
@@ -1619,7 +1619,7 @@ namespace HumankindAssetFramework
             if (repoDumped || Plugin.DistrictDebug == null || !Plugin.DistrictDebug.Value) return;
             try
             {
-                var repoType = AccessTools.TypeByName("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");
+                var repoType = GameBinding.AssetReferenceRepository;
                 if (repoType == null) { repoDumped = true; Plugin.Log.LogWarning("[RepoDump] repository type not found"); return; }
                 var inst = repoType.GetMethod("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.Invoke(null, null);
                 if (inst == null) return;                                   // not created yet — retry next frame
@@ -1683,7 +1683,7 @@ namespace HumankindAssetFramework
             var get = mt.GetMethods(BindingFlags.Public | BindingFlags.Instance)
                         .FirstOrDefault(x => x.Name == "GetValue" && x.GetParameters().Length == 2);
             if (get == null) return;
-            var ssType = AccessTools.TypeByName("Amplitude.StaticString");
+            var ssType = GameBinding.StaticString;
             foreach (var n in names)
             {
                 try

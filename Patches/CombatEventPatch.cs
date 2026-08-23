@@ -16,7 +16,7 @@ namespace HumankindAssetFramework
         // when it fires). All these events live in Amplitude.Mercury.Simulation.
         internal static MethodBase Resolve(string type, string label)
         {
-            var t = AccessTools.TypeByName("Amplitude.Mercury.Simulation." + type);
+            var t = GameBinding.Cached("Amplitude.Mercury.Simulation." + type);   // composed name — can miss, and a raw TypeByName miss is 7.85 ms
             var m = t != null ? AccessTools.Method(t, "Raise") : null;
             if (m != null) Plugin.Log.LogInfo("[Fire] hooked " + label);
             else Plugin.Log.LogWarning("[Fire] NOT found: " + type + ".Raise");
