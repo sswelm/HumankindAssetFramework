@@ -1411,19 +1411,39 @@ namespace HumankindAssetFramework
         {
             DistrictModel e = null;
             foreach (var dm in distModels) if (dm.district == name) { e = dm; break; }
-            if (e != null && e.footprintMesh)   // the entry is authoritative
+
+            // Read BOTH candidate sets, then let the pure rule pick. Reading the loser costs nothing and is the
+            // point: the config branch used to be reachable only when no entry claimed the district, so on the
+            // shipped pack it never ran at all and a bug could sit in it indefinitely.
+            var entryVals = e == null ? default(FootprintValues) : new FootprintValues
             {
-                fpMesh = true; fpBW = e.footprintMeshBW; fpFlat = e.footprintMeshFlat;
-                fpFlatHeight = e.footprintMeshFlatHeight > 0f ? e.footprintMeshFlatHeight : 0.17f; fpHideDecal = e.footprintMeshHideDecal;
-            }
-            else   // fall back to the global config
+                mesh = e.footprintMesh, bw = e.footprintMeshBW, flat = e.footprintMeshFlat,
+                hideDecal = e.footprintMeshHideDecal, flatHeight = e.footprintMeshFlatHeight,
+            };
+            var globalVals = new FootprintValues
             {
-                fpMesh = Plugin.CfgBool(Plugin.DistrictFootprintMesh, false);
-                fpBW = Plugin.CfgBool(Plugin.DistrictFootprintMeshBW, false);
-                fpFlat = Plugin.CfgBool(Plugin.DistrictFootprintMeshFlat, false);
-                fpHideDecal = Plugin.CfgBool(Plugin.DistrictFootprintMeshHideDecal, true);   // defaults TRUE — see CfgBool
-                fpFlatHeight = Plugin.CfgFloat(Plugin.DistrictFootprintMeshFlatHeight, 0.17f);   // blank/malformed -> 0.17, NOT 0 (see Plugin.ParseFloat)
-            }
+                mesh = Plugin.CfgBool(Plugin.DistrictFootprintMesh, false),
+                bw = Plugin.CfgBool(Plugin.DistrictFootprintMeshBW, false),
+                flat = Plugin.CfgBool(Plugin.DistrictFootprintMeshFlat, false),
+                hideDecal = Plugin.CfgBool(Plugin.DistrictFootprintMeshHideDecal, true),   // defaults TRUE — see CfgBool
+                flatHeight = Plugin.CfgFloat(Plugin.DistrictFootprintMeshFlatHeight, FootprintPrecedence.DefaultFlatHeight),
+            };
+
+            var d = FootprintPrecedence.Resolve(e != null, entryVals, globalVals, name);
+            fpMesh = d.Values.mesh; fpBW = d.Values.bw; fpFlat = d.Values.flat;
+            fpHideDecal = d.Values.hideDecal; fpFlatHeight = d.Values.flatHeight;
+
+            // SAY WHICH SOURCE WON, once per district per process. The failure this closes is silent and specific:
+            // an operator edits DistrictFootprintMeshFlat in the config, sees no change, and has no way to learn
+            // that their own registry entry outranks it. Once-keyed, so it cannot become per-frame noise.
+            // Inv() wraps the FLOAT only — it takes a FormattableString, and concatenating two interpolated strings
+            // produces a plain string, so a single `Inv($"…" + $"…")` does not compile. Bools and the enum are
+            // culture-invariant already; flatHeight is the one value a comma-decimal locale would mangle.
+            Plugin.LogOnceInfo("fpsrc:" + name,
+                "[Footprint] '" + name + "' -> " + d.Source + ": " + d.Reason
+                + ". mesh=" + d.Values.mesh + " bw=" + d.Values.bw + " flat=" + d.Values.flat
+                + " hideDecal=" + d.Values.hideDecal + " flatHeight=" + Plugin.Inv($"{d.Values.flatHeight}"));
+
             fpResolved = true;
         }
         static UnityEngine.Texture2D scopedAlbedoGray { get => S.albedoGray; set => S.albedoGray = value; }

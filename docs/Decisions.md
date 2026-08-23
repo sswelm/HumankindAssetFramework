@@ -7,6 +7,35 @@ check before proposing a change to any of them.
 
 ---
 
+## Footprint settings: keep BOTH sources, make the precedence explicit and logged (2026-08-23)
+The strategic footprint can be set in two places — the per-district **registry entry** (what a pack authors and
+ships) and the **global config** (what an operator tunes live in the F8 window, no re-bake). A 2026-08-23 review
+flagged the fork: the precedence lived only in a comment on `DistrictModel` and in the shape of an `if/else` inside
+`ResolveScopedFootprint`, and **nothing told anyone which source had won**.
+
+**Decision: keep both.** They serve different people — authoring versus live tuning — and collapsing them would cost
+the tuning loop that made the footprint work possible. What was wrong was never that there were two, but that the
+rule between them was implicit.
+
+**The rule, now stated in exactly one place** (`Patches/FootprintPrecedence.cs`): *an entry that turns
+`footprintMesh` ON claims the district and supplies **all five** values; otherwise the global config governs all
+five.* It is **all-or-nothing, not per-field, deliberately**: `footprintMesh` is a plain `bool`, so "the author left
+this unset" and "the author set it false" are the same value — a per-field merge would have to invent that
+difference and would treat every un-authored `false` as an override. Per-field needs nullable fields in
+`Haf.Schema` plus an editor change; until something needs it, one rule you can say in a sentence beats a merge
+nobody can predict.
+
+**And it is logged** — `[Footprint] '<district>' -> Entry|GlobalConfig: <reason>` plus the five resolved values,
+once per district per process (`LogOnceInfo`, so it can never become per-frame noise). That line closes a specific
+silent failure: an operator edits `DistrictFootprintMeshFlat`, sees nothing change, and has no way to discover that
+their own registry entry outranks it.
+
+**Why it is written down:** the config branch turned out to be **unreachable on the shipped pack** — every district
+entry sets `footprintMesh=true` — so it never executed in-game, which is how a dead-default parse bug sat in it
+unnoticed (see [Review-Backlog](Review-Backlog.md)). The resolver is pure, so both branches are now reachable from
+tests even when the game can only reach one: 9 tests, 4 mutations drilled (inverted precedence, dropped height
+guard, a partial-merge leak, and a reason that stops naming the district — 4/2/1/3 failures respectively).
+
 ## The authoring tools are single-tenant until they are packaged (2026-08-23)
 The **runtime** is multi-tenant by construction: `haf_packs/*.json` is discovered, resolved in Humankind's own mod
 order, merged, and conflict-reported, and a stranger's pack is a first-class citizen there ([Multi-Mod.md](Multi-Mod.md)).

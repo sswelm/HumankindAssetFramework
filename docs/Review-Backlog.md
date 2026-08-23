@@ -68,6 +68,20 @@ stale** — struck through in place below, each with the evidence. The rest are 
   [Decisions](Decisions.md), a gate's all-clear is only as wide as its regex, so widen it when a new shape appears
   and drill the NEW shape rather than assuming the old pattern reaches it.
 
+- ~~**The footprint settings fork: `pack.json` and the global cfg both set them, with an implicit precedence.**~~ —
+  **RESOLVED 2026-08-23 by decision: keep both, state the rule, log the winner.** The fork itself was never the
+  defect — the registry is what a pack *authors*, the config is what an operator *tunes live*, and collapsing them
+  would cost the tuning loop. The defect was that the rule lived in a comment on `DistrictModel` and in the shape of
+  an `if/else`, so nothing told anyone which source had won. Now one pure resolver
+  (`Patches/FootprintPrecedence.cs`) states it — *an entry with `footprintMesh` ON claims the district and supplies
+  all five values; otherwise the global config governs all five* — and every resolution logs
+  `[Footprint] '<district>' -> Entry|GlobalConfig: <reason>` once per district per process. All-or-nothing rather
+  than per-field is deliberate and the reasoning is in [Decisions](Decisions.md): a `bool` cannot distinguish
+  *unset* from *false*, so a per-field merge would treat every un-authored `false` as an override. 9 tests, 4
+  mutations drilled. **The side effect that matters most:** the config branch is unreachable on the shipped pack
+  (every entry sets `footprintMesh=true`), so it never ran in-game — and that is precisely how the dead-default
+  parse bug hid in it. A pure resolver makes both branches reachable from tests even where the game reaches only one.
+
 - **The runtime is multi-tenant; the authoring tools are not.** — **DECIDED 2026-08-23: intentional, deferred to
   packaging.** The Factory writes one hardcoded pack identity — `ModelRegistry.PackLiveDir`/`PackRepoDir`
   (`haf_packs/ENCReload`, `Assets/Pack/ENCReload`, 19 call sites over 4 windows), `PackDef.modId = "enc"` with no window
