@@ -135,7 +135,7 @@ Learned in one afternoon, each from a bucket that surprised ([Architecture](Arch
    tree instead (`SubPawnScan.cs` is the template: targeted, *self-verified against the scan once per session*, with
    the scan as the fallback), or mark dirty from an event and cap the cadence in tens of seconds.
 3. **No retry-every-frame until something exists.** Throttle unbound retries; twice a second is plenty.
-4. **Resolve reflection once — but know which reflection.** Measured 2026-08-23 (see §8): the four resolvers differ by
+4. **Resolve reflection once — but know which reflection.** Measured 2026-08-23 (see §7): the four resolvers differ by
    five orders of magnitude, and the expensive one is not the one that looks expensive.
 
    | call | cost | cached |
@@ -366,7 +366,85 @@ because .NET already keeps a per-type member cache and hashing a `(Type, string)
 own lookup. Member-level memoising is worth ~90 ns a call at best — real, but three orders of magnitude below the
 thing that actually mattered. **The lookup that looked expensive was cheap; the one nobody was counting was 7.85 ms.**
 
-## 8. Open items
+## 8. `Formation` — 63 µs of re-deciding (2026-08-23, RESOLVED)
+
+`Formation` entered the top six at **61.8 µs** in a battle session, and `Update` went 166 → 224 µs with it — outside
+the ~13% band §2's control run measures for that bucket, so: signal, not the meter breathing. This is the first time
+the published noise floor was used to *classify* a reading rather than describe one.
+
+Two suspects, opposite fixes. The poll does a `pending` retry (throttled 1-in-60 frames) **and** `MaybeReinstantiate`,
+a 1-in-5-frame walk over every army. Following §4, the bucket was split before anything was touched — `FormRetry`,
+plus the per-army loop divided into armies rejected vs armies matched, the way `SelTileSkip`/`SelTileOurs` was:
+
+```text
+armies 35 skipped 63 µs (1794 ns ea), 3 ours 9.3 µs (3380 ns ea), retry 0 µs
+```
+
+**`retry 0 µs` — the throttle was never the issue**, and a fix aimed there would have been wasted. 87% of the bucket
+was the scan. The number that mattered is **1,794 ns to reject one army**: a rejected *district* costs 89 ns
+(`SelTileSkip`), so saying "no" here cost twenty times more — re-deriving the unit, its definition, its name, its
+formation reference (two uncached reflection lookups) and up to sixteen `OrdinalIgnoreCase` comparisons across the
+registry's links. Every scan, ~12×/s, for a verdict that **cannot change**: a unit's definition is fixed for its
+lifetime.
+
+So the verdict is remembered (`reformRejected`, `[SessionScoped]`, cleared in `OnAnimationLoad` beside `reformed` —
+a stale reject surviving a load would hide a unit from the catch-up, which is a correctness bug, not a slow one). A
+repeat rejection is now one cached member read plus a reference-hash lookup.
+
+**Scope, stated honestly: this bucket is transient.** The scan latches ~5 s after load (`ReformQuietLimit`), and a
+panel read after settling shows no `armies` segment at all. It stays alive longer *in battle*, because each newly
+handled unit resets the quiet counter — which is exactly when 63 µs/frame is least welcome.
+
+A second finding, recorded not fixed: the per-army `fref` lookup is read by **one** match arm (macro-replacement
+links, `unit: ""`). A pack without such links pays two reflection lookups per army for a string nothing reads; it is
+now skipped when unwanted. Checked against the real registry rather than assumed — ENC has 8 links and **4 do** carry
+`unit: ""`, so this buys ENC nothing. It helps other packs.
+
+## 9. `PoseDonor` — the pose hook's variable cost (2026-08-23, OPEN — instrumented)
+
+The pose hook's per-pawn cost is not one number. Within a single session, on the same pawn count:
+
+| | `pose ours` | `PoseDonor` | share |
+|---|---|---|---|
+| panel | 182 µs = 32 adds × **5,678 ns** | *not in top six* | — |
+| logged | 693 µs = 34 adds × **20,589 ns** | 495.7 µs | 72% |
+| logged | 701 µs = 31 adds × **22,406 ns** | 521.9 µs | 74% |
+
+A **4× swing**, far outside the ~11% §2 allows for that bucket, and the whole difference is whether the donor-clip
+branch runs. So `PoseDonor` — not the load window, as an earlier 2,308 µs reading suggested — is the pose hook's
+variable cost.
+
+Not fixed, because `PoseDonor` is one bucket over nine applies and a total cannot say which. One suspect was removed
+by *reading*: `DumpDonorChannels` latches on `donorAxisDumped.Add(resourceName)`, so it runs once per model, never per
+frame. The rest are split by the **kind** of work, since that decides the fix:
+
+| Sub-bucket | Work | Calls |
+|---|---|---|
+| `DonorRig` | bone / channel writes | `ApplyRotorSpin`, `ApplyRotorTrim` |
+| `DonorWorld` | world queries + raycasts | `ApplyPositionOffset`, `ApplyCombatZ`, `ApplyTerrainHug` |
+| `DonorMotion` | arithmetic on the entry | `ApplyTurnEase`, `ApplyMoveTilt`, `ApplyGunElevation`, `ApplyScale` |
+
+`DonorWorld` is where §2's already-fixed *"two raycasts per helicopter per frame"* lived, so it is the one to
+**disprove first**, not assume. The readout also prints the donor **count**, which is the decisive number and the same
+question `SelTileSkip`/`SelTileOurs` answered — at ~495 µs it is either ~165 µs per helicopter or ~14 µs per pawn, and
+those need opposite fixes:
+
+```text
+| donor N poses X µs (Y ns ea) = rig A + world B + motion C µs
+```
+
+**Would compiling against the game DLLs fix it?** Asked 2026-08-23; answered with the numbers, not intuition — **no.**
+`FastMember` already emits a `DynamicMethod` doing what direct compiled access does (`unbox` to a managed pointer,
+`ldflda` through the nested struct, `ldfld`/`stfld` the leaf) at **~10 ns**. Hard-typing would take that to ~1–2 ns.
+Against `PoseOurs` at 5,678 ns/add, ~60 accesses × 10 ns ≈ 600 ns is roughly **10%** of the bucket — and against
+`PoseDonor`'s ~165 µs per helicopter it is nothing at all. The speedup lands on the part that is already fast. The
+costs are not theoretical: CI builds today from **public sources only** (`fetch-refs.ps1`: *"the plugin's only
+compile-time game surface is string-based reflection"* — the last csproj game reference was removed 2026-08-17), and
+`FastMember` returning null lets a renamed member **degrade to the old speed, never to a crash**, which a hard-typed
+reference converts into a `TypeLoadException` that takes the whole plugin down. See
+[Decisions](Decisions.md) *"Make reflection drift loud"*.
+
+## 10. Open items
 
 - The unit-name matcher (`FindEntryForUnitDefinition`) does not match units whose definition name lacks the
   pawnDescription (the hovercraft, the drones — found by the sub-pawn walk's self-check). The walk now handles it; the

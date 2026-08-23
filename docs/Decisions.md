@@ -184,6 +184,18 @@ startup catalog validates types + members, and a machine-readable `haf_bindings_
 breaks (headless-checkable). **Why:** removing reflection isn't possible; turning a game patch into one diffable report
 line is. See [Framework-Review.md](Framework-Review.md) (reflection-fragility A1–A5).
 
+**Asked again 2026-08-23 — "would compiling against the game DLLs be faster?" Answered with numbers: effectively no,
+and it costs more than it buys.** `FastMember` already emits a `DynamicMethod` that does what direct compiled access
+does (`unbox` to a managed pointer, `ldflda` through the nested struct, `ldfld`/`stfld` the leaf) at **~10 ns**;
+hard-typing takes that to ~1–2 ns. Against `PoseOurs` at 5,678 ns/add, ~60 accesses × 10 ns ≈ 600 ns — about **10%**
+of the bucket — and against `PoseDonor`'s ~165 µs per helicopter, nothing at all. The gain lands on the part that is
+already fast ([Performance §9](Performance.md)). Against that: CI builds today from **public sources only** (the last
+csproj game reference was removed 2026-08-17 — `fetch-refs.ps1` says so in its header), and a null accessor lets a
+renamed member **degrade to the old speed**, where a hard-typed reference is a `TypeLoadException` that takes the
+whole plugin down and silences the very binding report meant to explain it. The one real benefit — compile-time
+member checking — is already had headlessly from `check-catalog.sh` + `bindcheck`, with no coupling.
+**Re-open only if** a measurement shows member access dominating a bucket; the donor split will say.
+
 ## Fail loud, never silently mis-produce (ongoing)
 Wherever HAF could ship a *broken* result silently — a mis-bake, a stale cache reuse, an empty district, a zero-GUID
 munition, a vanished UV — it aborts or warns loudly instead of reporting success. **Why:** a silent wrong result costs
