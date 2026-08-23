@@ -661,7 +661,45 @@ namespace HumankindAssetFramework
             return keys;
         }
 
-        internal static List<ModelEntry> ParseModels(string text)
+        // The `models` array split into one text per entry, for the regex fallback. STRING-AWARE brace counting, not
+        // a regex: a model field legitimately contains braces and brackets (`position` is an object, `hideMeshes` is
+        // free text), and a `}` inside a quoted value would split an entry in half. Escapes are honoured so a
+        // trailing backslash cannot swallow the closing quote. Returns empty when there is no `models` array at all,
+        // which is the correct answer for a wrapper-only file — and, importantly, means an `overrides` array can no
+        // longer contribute entries: it is outside the scanned region entirely.
+        internal static List<string> ModelChunks(string text)
+        {
+            var outp = new List<string>();
+            var key = Regex.Match(text ?? "", "\"models\"\\s*:\\s*\\[");
+            if (!key.Success) return outp;
+            int i = key.Index + key.Length, depth = 0, start = -1;
+            bool inStr = false, esc = false;
+            for (; i < text.Length; i++)
+            {
+                char c = text[i];
+                if (inStr)
+                {
+                    if (esc) esc = false;
+                    else if (c == '\\') esc = true;
+                    else if (c == '"') inStr = false;
+                    continue;
+                }
+                if (c == '"') { inStr = true; continue; }
+                if (c == '{') { if (depth++ == 0) start = i; continue; }
+                if (c == '}')
+                {
+                    if (--depth == 0 && start >= 0) { outp.Add(text.Substring(start, i - start + 1)); start = -1; }
+                    continue;
+                }
+                if (c == ']' && depth == 0) break;   // the models array closed
+            }
+            // An unterminated final entry (a truncated file — the shape the fallback exists for) still yields what
+            // it has: better a recovered entry missing its tail than an entry silently dropped.
+            if (depth > 0 && start >= 0) outp.Add(text.Substring(start));
+            return outp;
+        }
+
+        internal static List<ModelEntry> ParseModels(string doc)
         {
             var entries = new List<ModelEntry>();
                 // PRIMARY: Newtonsoft (the game's own copy) parses each model as an OBJECT, so fields stay with their
@@ -670,7 +708,7 @@ namespace HumankindAssetFramework
                 // so it's not usable here; Newtonsoft works in-process. Regex is kept as a last-resort fallback.
                 try
                 {
-                    var models = JObject.Parse(text)["models"] as JArray;
+                    var models = JObject.Parse(doc)["models"] as JArray;
                     if (models != null && models.Count > 0)
                     {
                         int A(JToken arr, int k) => (arr is JArray a && k < a.Count) ? (int)a[k] : 0;
@@ -718,9 +756,21 @@ namespace HumankindAssetFramework
                 }
                 catch (Exception ex) { Plugin.Log.LogWarning("[Uni] Newtonsoft parse failed (" + ex.Message + "); using regex fallback"); entries.Clear(); }
 
-                // FALLBACK: field-by-field regex. Each model has exactly one of each field in document order, so the i-th
-                // match of each belongs to model i (fragile only if a MIDDLE model omits a field — the object parse above avoids that).
+                // FALLBACK: field-by-field regex, PER MODEL OBJECT (2026-08-23). It used to match each field across the
+                // WHOLE document and pair them BY INDEX, which was wrong in three ways that all fire on real packs:
+                //   * `overrides` precedes `models` in every pack the Factory writes, and an override object carries a
+                //     "pawnDescription" too — so the first model was handed the first OVERRIDE's pawn name and the
+                //     fallback REPOINTED THE WRONG UNIT;
+                //   * an entry with no `skel`/`atlas` — a runtime-only retexture/tint/sound entry, which Multi-Mod.md
+                //     documents as legitimate — shifted every LATER entry's guids onto the wrong model;
+                //   * and `n = min(pd, skel, atlas)` then silently DROPPED the tail.
+                // Reading each entry's fields from its OWN object text retires index alignment as a concept: a field
+                // an entry didn't write simply isn't in its chunk, so it falls to the same default the object path uses.
+                // This path runs exactly when the document is already damaged, which is when being right matters most.
                 const string i4 = @"\[\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\]";
+                foreach (var chunk in ModelChunks(doc))
+                {
+                    var text = chunk;   // every Regex.Matches below reads THIS entry's object, not the document
                 var rn = Regex.Matches(text, "\"resourceName\"\\s*:\\s*\"([^\"]*)\"");
                 var pd = Regex.Matches(text, "\"pawnDescription\"\\s*:\\s*\"([^\"]*)\"");
                 var hm = Regex.Matches(text, "\"hideMeshes\"\\s*:\\s*\"([^\"]*)\"");
@@ -810,16 +860,22 @@ namespace HumankindAssetFramework
                 // clip-role GUID quads (one JSON array each) land in the ROLE TABLE after construction — the same nine keys the
                 // Newtonsoft path hand-extracts (parity: check_schema_parity.sh greps the Regex.Matches keys above).
                 void Quad(ModelEntry me, ClipRole r, MatchCollection mc, int idx) { if (idx < mc.Count) me.Role(r).Set(G(mc[idx], 1), G(mc[idx], 2), G(mc[idx], 3), G(mc[idx], 4)); }
-                int n = Math.Min(pd.Count, Math.Min(sk.Count, at.Count));
-                for (int i = 0; i < n; i++)
                 {
+                    const int i = 0;   // one entry per chunk: every `xx[i]` below now reads THIS entry's own field
                     entries.Add(new ModelEntry
                     {
-                        resourceName = i < rn.Count ? rn[i].Groups[1].Value : ("model" + i),
-                        pawnDescription = pd[i].Groups[1].Value,
+                        // "" like the object path's field initializer, not "model0": a fallback that invents a
+                        // different default quietly changes behaviour on the one day it runs (backlog: "resourceName
+                        // default differs"). Parity with the primary path is the whole contract of a fallback.
+                        resourceName = i < rn.Count ? rn[i].Groups[1].Value : "",
+                        // GUARDED since 2026-08-23. These three were indexed unguarded because `n = min(pd, sk, at)`
+                        // guaranteed the count — which is the same min that dropped the tail and misaligned the
+                        // guids. With one entry per chunk the count is gone, so each reads its own field or its
+                        // own default: absent skel/atlas means zeroes, exactly as the object path leaves them.
+                        pawnDescription = i < pd.Count ? pd[i].Groups[1].Value : "",
                         hideMeshes = i < hm.Count ? hm[i].Groups[1].Value : "",   // hideMeshes appears once per model in doc order, same as the others
-                        sa = G(sk[i], 1), sb = G(sk[i], 2), sc = G(sk[i], 3), sd = G(sk[i], 4),
-                        ta = G(at[i], 1), tb = G(at[i], 2), tc = G(at[i], 3), td = G(at[i], 4),
+                        sa = i < sk.Count ? G(sk[i], 1) : 0, sb = i < sk.Count ? G(sk[i], 2) : 0, sc = i < sk.Count ? G(sk[i], 3) : 0, sd = i < sk.Count ? G(sk[i], 4) : 0,
+                        ta = i < at.Count ? G(at[i], 1) : 0, tb = i < at.Count ? G(at[i], 2) : 0, tc = i < at.Count ? G(at[i], 3) : 0, td = i < at.Count ? G(at[i], 4) : 0,
                         animStateDriven = i < asd.Count && asd[i].Groups[1].Value == "true",
                         idleAltInterval = i < iai.Count && float.TryParse(iai[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _iai) ? _iai : 0f,
                         animPhaseSpread = i < aps.Count && float.TryParse(aps[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _aps) ? _aps : 0.5f,
@@ -897,7 +953,8 @@ namespace HumankindAssetFramework
                     Quad(ne, ClipRole.Attack, catR, i);       Quad(ne, ClipRole.Combat, ccbR, i);   Quad(ne, ClipRole.PreMove, cpvR, i);
                     Quad(ne, ClipRole.IdleOverride, cidR, i); Quad(ne, ClipRole.IdleAlt, calR, i);  Quad(ne, ClipRole.IdleAlt2, ca2R, i);
                 }
-                Plugin.Log.LogInfo($"[Uni] read {text.Length} chars; parsed {entries.Count} model(s) via regex [" + string.Join(", ", entries.Select(e => e.resourceName + "->" + e.pawnDescription)) + "]");
+                }   // per-model chunk
+                Plugin.Log.LogInfo($"[Uni] read {doc.Length} chars; parsed {entries.Count} model(s) via regex [" + string.Join(", ", entries.Select(e => e.resourceName + "->" + e.pawnDescription)) + "]");
                 return entries;
         }
 

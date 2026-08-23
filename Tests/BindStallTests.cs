@@ -25,10 +25,19 @@ namespace HumankindAssetFramework.Tests
             SessionState.Reset(SessionScope.District);   // bindLog + bindAttempts are [SessionScoped(District)]
         }
 
-        static List<string> Warnings(Action a)
+        // FILTERED to this test's own subject. Plugin.Log is process-wide and xUnit runs test classes in parallel,
+        // so an unfiltered capture collects other classes' warnings too — which is exactly how
+        // LongStall_WarnsExactlyOnce started failing the moment another class was added. A capture that can see
+        // someone else's output is a capture that asserts on noise.
+        static List<string> Warnings(Action a, string about)
         {
             var got = new List<string>();
-            EventHandler<LogEventArgs> h = (s, e) => { if ((e.Level & LogLevel.Warning) != 0) got.Add(e.Data?.ToString() ?? ""); };
+            EventHandler<LogEventArgs> h = (s, e) =>
+            {
+                if ((e.Level & LogLevel.Warning) == 0) return;
+                var msg = e.Data?.ToString() ?? "";
+                if (msg.Contains(about)) got.Add(msg);
+            };
             Plugin.Log.LogEvent += h;
             try { a(); } finally { Plugin.Log.LogEvent -= h; }
             return got;
@@ -56,14 +65,14 @@ namespace HumankindAssetFramework.Tests
         [Fact]
         public void LongStall_WarnsExactlyOnce()
         {
-            var w = Warnings(() => Stall("DistrictA", DistrictInject.BindEscalateAfter * 3));
+            var w = Warnings(() => Stall("DistrictA", DistrictInject.BindEscalateAfter * 3), "DistrictA");
             Assert.Single(w);
         }
 
         [Fact]
         public void TheWarning_NamesTheDistrictTheReasonAndTheConsequence()
         {
-            var msg = Assert.Single(Warnings(() => Stall("DistrictA", DistrictInject.BindEscalateAfter)));
+            var msg = Assert.Single(Warnings(() => Stall("DistrictA", DistrictInject.BindEscalateAfter), "DistrictA"));
             Assert.Contains("DistrictA", msg);
             Assert.Contains(Reason, msg);
             Assert.Contains("NOT render", msg);   // the consequence, not just the fact
@@ -78,7 +87,7 @@ namespace HumankindAssetFramework.Tests
         public void OneDistrictStalling_DoesNotConsumeAnothersBudget()
         {
             Stall("DistrictA", DistrictInject.BindEscalateAfter);           // A escalates
-            var w = Warnings(() => Stall("DistrictB", 1));                  // B's FIRST stall
+            var w = Warnings(() => Stall("DistrictB", 1), "DistrictB");                  // B's FIRST stall
             Assert.Empty(w);                                                // ...must not ride A's count
         }
 
@@ -89,7 +98,7 @@ namespace HumankindAssetFramework.Tests
             {
                 Stall("DistrictA", DistrictInject.BindEscalateAfter);
                 Stall("DistrictB", DistrictInject.BindEscalateAfter);
-            });
+            }, "District");
             Assert.Equal(2, w.Count);
             Assert.Contains(w, m => m.Contains("DistrictA"));
             Assert.Contains(w, m => m.Contains("DistrictB"));
@@ -99,7 +108,7 @@ namespace HumankindAssetFramework.Tests
         [Fact]
         public void TheSharedPath_IsNamed()
         {
-            var msg = Assert.Single(Warnings(() => Stall(null, DistrictInject.BindEscalateAfter)));
+            var msg = Assert.Single(Warnings(() => Stall(null, DistrictInject.BindEscalateAfter), "(all districts)"));
             Assert.Contains("(all districts)", msg);
         }
 
@@ -107,7 +116,7 @@ namespace HumankindAssetFramework.Tests
         [Fact]
         public void ShortStall_IsSilent()
         {
-            Assert.Empty(Warnings(() => Stall("DistrictA", DistrictInject.BindEscalateAfter - 1)));
+            Assert.Empty(Warnings(() => Stall("DistrictA", DistrictInject.BindEscalateAfter - 1), "DistrictA"));
         }
 
         // The threshold has to be long enough that an honest async selector load on a slow machine never trips it.
