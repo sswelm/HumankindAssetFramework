@@ -194,7 +194,19 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
   the latch alone would have turned a one-shot leak into a per-reload one. `reactorMaskTex` deliberately stays
   `[ProcessLived]`. Five mutations drilled; the same new test then found `_subPawnScan` holding destroyed sub-pawn
   references after the model reset. See the CHANGELOG.
-  **Residual, needs the in-game double-load drill:** `InjectReactorFootprint` trims `sel.levelBuildItems` **in place**,
+  **DRILLED IN-GAME 2026-08-23 — latch and leak confirmed, RENDERING still untested.** With the mask temporarily
+  enabled and five session resets in one process, the log shows **three** complete `[Footprint] done` blocks where the
+  old code would have produced exactly one; `step1: loaded mask 512x512` appears **once**, so the `[ProcessLived]`
+  texture is reused rather than re-decoded; and `[District] freed 4` then `freed 5 runtime clone(s)` shows the newly
+  owned atlas and decal clone being released. Every free lands after a reset and before the next injection, so the
+  ownership tracking is not eating the new clones. The residual below also resolved: `placed=True` on all three runs.
+  What was NOT established is that the silhouette *draws*. The drill turned `DistrictFootprintMesh` off (it drops the
+  decal the mask injects), which removed the reactor from the strategic map — the operator reported that as the visual
+  result, so it tells us nothing about the mask. **Lesson, mine:** the mask path was blank while `MaskSize`, `Rotation`
+  and `Cut` were all tuned to non-defaults — the feature had been used and then abandoned for the mesh footprint. That
+  was legible in the config and I read past it, ranked a dormant feature as the top user-visible defect, and changed a
+  live setup to test it. Check whether a feature is switched on before calling its bug the one a player would hit.
+  **Original residual (now resolved, kept for the reasoning):** `InjectReactorFootprint` trims `sel.levelBuildItems` **in place**,
   and `sel` is a bundle asset the game loads once per app run — so the second injection runs against an array the first
   one already trimmed, whose single decal item points at a `hostClone` the reset has since destroyed. Reading the code,
   that path repoints it at the new clone and comes out right; a destroyed `UnityEngine.Object`'s managed wrapper still
