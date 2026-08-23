@@ -307,6 +307,20 @@ namespace HumankindAssetFramework
         static float DeepCloneBuildingMinSize = 0.35f;   // deep-clone: swap building slots this big (bbox max dim) to our mesh; hide smaller props
         static int DeepCloneKeepEvery = 1;               // deep-clone: keep 1 in N large building slots as our reactor (1 = swap ALL large, no thinning → no mid-zoom gaps)
         internal static FieldInfo GF(Type t, string n) => t.GetField(n, BF);      // no AccessTools warning-on-miss (probing spams the log)
+
+        // GF's QUIET TWIN, WITH ACCESSTOOLS REACH (2026-08-23). GF exists precisely to stop AccessTools' warning-on-miss
+        // from spamming the log — and then CollectLeaves, defined immediately below it, kept calling AccessTools.Field
+        // for seven of its nine probes. The result: 23,000-35,000 HarmonyX warning lines per session (94% of the whole
+        // log), because the walk is POLYMORPHIC — it probes every node for both emitter and selector shapes, so each
+        // node necessarily MISSES the ~4 probes that don't apply to its type, and every miss was a full uncached
+        // hierarchy walk plus a formatted log write. With ~121 emitter nodes in the tree and a bind that retries once
+        // a second, that is ~580 wasted lookups per second, forever.
+        //   Why not just swap in GF? Because it is not the same lookup: GF is Type.GetField, which does NOT see a
+        //   PRIVATE field inherited from a base type, while AccessTools.Field walks the hierarchy and does. Swapping
+        //   would silently change which nodes the descent can see — the exact thing being debugged. So the fix keeps
+        //   AccessTools' resolution EXACTLY and only memoizes it: identical FieldInfo, one dict hit on a repeat, and
+        //   the HarmonyX warning fires at most once per (type, member) per process instead of once per visit.
+        internal static FieldInfo GFA(Type t, string n) => UniversalInject.CachedField(t, n);
         static void CollectLeaves(object mat, List<object> outLeaves, int depth, HashSet<object> visited)
         {
             if (mat == null || depth > 8 || !visited.Add(mat)) return;
@@ -315,12 +329,15 @@ namespace HumankindAssetFramework
             var lf = GF(t, "fxMesh") ?? GF(t, "mesh");
             if (lf != null && lf.FieldType.Name == "Guid") { outLeaves.Add(mat); return; }
             // emitter: levelBuildItems[].loadedEvolverMaterial
-            if (AccessTools.Field(t, "levelBuildItems")?.GetValue(mat) is Array items)
-                foreach (var it in items) if (it != null) CollectLeaves(AccessTools.Field(it.GetType(), "loadedEvolverMaterial")?.GetValue(it), outLeaves, depth + 1, visited);
+            // GFA, not AccessTools.Field: identical resolution, memoized. See GFA's note above — this walk is
+            // polymorphic, so every node MISSES the probes for the shapes it isn't, and each miss used to cost a
+            // hierarchy walk plus a HarmonyX warning line. Same FieldInfo, one dict hit on a repeat.
+            if (GFA(t, "levelBuildItems")?.GetValue(mat) is Array items)
+                foreach (var it in items) if (it != null) CollectLeaves(GFA(it.GetType(), "loadedEvolverMaterial")?.GetValue(it), outLeaves, depth + 1, visited);
             // selector: loaded cache entries + the pairs variant table (load each distinct GUID)
-            var cache = AccessTools.Field(t, "fxMaterialCacheEntries")?.GetValue(mat);
-            if (cache != null && AccessTools.Field(cache.GetType(), "Entries")?.GetValue(cache) is Array entries)
-                foreach (var e in entries) if (e != null) CollectLeaves(AccessTools.Field(e.GetType(), "FxMaterial")?.GetValue(e), outLeaves, depth + 1, visited);
+            var cache = GFA(t, "fxMaterialCacheEntries")?.GetValue(mat);
+            if (cache != null && GFA(cache.GetType(), "Entries")?.GetValue(cache) is Array entries)
+                foreach (var e in entries) if (e != null) CollectLeaves(GFA(e.GetType(), "FxMaterial")?.GetValue(e), outLeaves, depth + 1, visited);
             var seen = new HashSet<string>();
             void tryGuid(object g)
             {
@@ -328,10 +345,10 @@ namespace HumankindAssetFramework
                 if (!seen.Add($"{gt.GetField("a", BF)?.GetValue(g)},{gt.GetField("b", BF)?.GetValue(g)},{gt.GetField("c", BF)?.GetValue(g)},{gt.GetField("d", BF)?.GetValue(g)}")) return;
                 CollectLeaves(TryLoadMaterial(g), outLeaves, depth + 1, visited);
             }
-            if (AccessTools.Field(t, "pairs")?.GetValue(mat) is Array pairs)
+            if (GFA(t, "pairs")?.GetValue(mat) is Array pairs)
                 foreach (var pr in pairs) if (pr != null) tryGuid(PairGuid(pr));
             foreach (var fn in new[] { "defaultMaterial", "invalidNameMaterial" })
-            { var g = AccessTools.Field(t, fn)?.GetValue(mat); if (g != null) tryGuid(g); }
+            { var g = GFA(t, fn)?.GetValue(mat); if (g != null) tryGuid(g); }
         }
         static object distFxManager; static MethodInfo fxNextDoublon;
         // Re-point every collected leaf's fxMesh at our FxMesh. On the first pass, also call the leaf's own Load() so it
@@ -924,8 +941,8 @@ namespace HumankindAssetFramework
                     }
                     if (thisPlbcHasTarget) refreshPlbcs.Add(plbc);
                 }
-                if (targets.Count == 0) { if (bindLog.Add("notgt")) Plugin.Diag("[DistrictMain] bind: no null-outputLayer element found yet (selectors still loading?)."); return false; }
-                if (donorLayer == null) { if (bindLog.Add("nodonor")) Plugin.Diag("[DistrictMain] bind: found our element(s) but no vanilla building output layer to borrow yet."); return false; }
+                if (targets.Count == 0) { NoteBindStall(onlyName, "no element with a null outputLayer yet (its selector may still be loading)"); return false; }
+                if (donorLayer == null) { NoteBindStall(onlyName, "our element(s) are there, but no vanilla building output layer to borrow yet"); return false; }
                 var donorClone = ClonePrivateOutputLayer((UnityEngine.Object)donorLayer);
                 int bound = 0;
                 foreach (var leaf in targets)
@@ -967,12 +984,48 @@ namespace HumankindAssetFramework
                     scopedRefreshPlbcs.Clear(); scopedRefreshPlbcs.AddRange(refreshPlbcs);
                 }
                 else reactorBoundGlobal = true;                    // legacy shared path: elements hold the clone via their outputLayer; no per-district S
+                bindAttempts.Remove(onlyName ?? "(all districts)");   // bound late is still bound — don't carry a stall count forward
                 Plugin.Log.LogInfo($"[DistrictMain] '{onlyName ?? "MainRows(shared)"}': bound {bound} building element(s) across {refreshPlbcs.Count} tile(s) (donor='{donorLayer}') — renders on the footprint.");
                 return true;
             }
             catch (Exception ex) { Plugin.Log.LogError("[DistrictMain] bind reactor building: " + ex); return false; }
         }
         [SessionScoped(Scope = SessionScope.District)] static readonly HashSet<string> bindLog = new HashSet<string>();
+
+        // A DISTRICT THAT NEVER BINDS USED TO SAY NOTHING, FOREVER (2026-08-23 review). The scoped poll retries the
+        // bind about once a second for as long as the district is unbound, and that retry is correct — selectors
+        // load asynchronously, so the first few seconds of failure are normal. What was wrong was everything around
+        // it. TWO faults compounded:
+        //   1. The one-shot key was the REASON ("notgt"/"nodonor"), not the DISTRICT. `bindLog` is shared across all
+        //      districts, so the first one to stall claimed the key and every OTHER district was permanently silent
+        //      for that reason — with two districts, one masks the other.
+        //   2. It was Plugin.Diag, which is gated behind VerboseLog — OFF by default. So at default settings a
+        //      district could fail to render for an entire session and produce literally no output at all, at any
+        //      severity, no matter how long it went on.
+        // Now the key is (district, reason) so each district speaks for itself, and a stall that outlives "still
+        // loading" escalates ONCE to a real warning naming the district, the reason and the consequence. The retry
+        // itself is unchanged and never gives up — fail-soft stands; what changes is that it stops being silent.
+        // Reset on success so a district that binds late doesn't carry its stall count into a later re-arm.
+        [SessionScoped(Scope = SessionScope.District)] static readonly Dictionary<string, int> bindAttempts = new Dictionary<string, int>();
+
+        // ~1 attempt/second while unbound (the poll's `frameCount % 30` at 30 fps), so this is ~30 s — an order of
+        // magnitude beyond the async selector load, and chosen so a slow machine's honest load never trips it.
+        internal const int BindEscalateAfter = 30;
+
+        // PURE, so the escalation policy is testable without a district: fires EXACTLY once, on the Nth attempt,
+        // rather than on every attempt past N — a stall that is already unrecoverable must not become log spam.
+        internal static bool ShouldEscalateBind(int attempts) => attempts == BindEscalateAfter;
+
+        internal static void NoteBindStall(string onlyName, string reason)
+        {
+            string who = onlyName ?? "(all districts)";
+            bindAttempts.TryGetValue(who, out int n);
+            bindAttempts[who] = ++n;
+            if (bindLog.Add(who + ":" + reason)) Plugin.Diag($"[DistrictMain] '{who}' bind waiting: {reason}.");
+            if (ShouldEscalateBind(n))
+                Plugin.Log.LogWarning($"[DistrictMain] '{who}' has failed to bind its building element {n} times (~{n}s) — {reason}. " +
+                                      $"Its custom visual will NOT render until this resolves. Still retrying, but this is past 'still loading'.");
+        }
 
         // ---- SCOPED texture: bind the district's OWN baked albedo onto the borrowed (brick) donor output-layer clone,
         // so the reactor wears its own texture instead of the donor's. Mirrors DistrictApplyTexture/BindAlbedo but drives

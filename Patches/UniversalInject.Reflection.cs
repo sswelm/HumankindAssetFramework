@@ -34,7 +34,10 @@ namespace HumankindAssetFramework
         static readonly Func<(Type, string), MemberInfo> resolveMember = k => (MemberInfo)AccessTools.Property(k.Item1, k.Item2) ?? AccessTools.Field(k.Item1, k.Item2);
         static readonly Func<(Type, string), FieldInfo> resolveField = k => AccessTools.Field(k.Item1, k.Item2);
         static MemberInfo CachedMember(Type t, string name) => memberCache.GetOrAdd((t, name), resolveMember);
-        static FieldInfo CachedField(Type t, string name) => fieldCache.GetOrAdd((t, name), resolveField);
+        // internal since 2026-08-23: DistrictInject's recursive Fx-tree walk needs AccessTools' base-type-walking
+        // resolution (its own GF is a plain Type.GetField, which cannot see an inherited PRIVATE field) but must not
+        // pay the uncached cost. Sharing this cache rather than adding a second one keeps the strategy in one place.
+        internal static FieldInfo CachedField(Type t, string name) => fieldCache.GetOrAdd((t, name), resolveField);
 
         internal static object GetMember(object o, string name)
         {

@@ -474,11 +474,12 @@ namespace HumankindAssetFramework
                 try { var inst = Enum.Parse(fm.FieldType, "Instant"); if (!Equals(fm.GetValue(mat), inst)) { fm.SetValue(mat, inst); changed = true; } }
                 catch { }
             }
-            if (AccessTools.Field(t, "levelBuildItems")?.GetValue(mat) is Array items)
-                foreach (var it in items) if (it != null) changed |= SetInstantAppear(AccessTools.Field(it.GetType(), "loadedEvolverMaterial")?.GetValue(it), depth + 1, visited);
-            var cache = AccessTools.Field(t, "fxMaterialCacheEntries")?.GetValue(mat);
-            if (cache != null && AccessTools.Field(cache.GetType(), "Entries")?.GetValue(cache) is Array entries)
-                foreach (var e in entries) if (e != null) changed |= SetInstantAppear(AccessTools.Field(e.GetType(), "FxMaterial")?.GetValue(e), depth + 1, visited);
+            // GFA (memoized AccessTools resolution) — CollectLeaves' twin recursion, same reason. See GF/GFA in DistrictInject.cs.
+            if (GFA(t, "levelBuildItems")?.GetValue(mat) is Array items)
+                foreach (var it in items) if (it != null) changed |= SetInstantAppear(GFA(it.GetType(), "loadedEvolverMaterial")?.GetValue(it), depth + 1, visited);
+            var cache = GFA(t, "fxMaterialCacheEntries")?.GetValue(mat);
+            if (cache != null && GFA(cache.GetType(), "Entries")?.GetValue(cache) is Array entries)
+                foreach (var e in entries) if (e != null) changed |= SetInstantAppear(GFA(e.GetType(), "FxMaterial")?.GetValue(e), depth + 1, visited);
             return changed;
         }
 

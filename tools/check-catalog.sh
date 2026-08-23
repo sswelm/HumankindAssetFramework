@@ -50,6 +50,10 @@ Length	BCL array member
 Value@Patches/DistrictInject.cs	tolerant probe: the code tries Guid ?? Value ?? guid on an unknown pair type and copes with all three absent
 guid@Patches/DistrictInject.cs	tolerant probe: same chain as Value above
 # ---- the GF( family, made visible 2026-08-22 when this gate learned to see it (it had been blind to 16 sites) ----
+# GFA( joined it 2026-08-23 (the memoized AccessTools probe). It was added and the gate still said OK — because a
+# shape it cannot see is a shape it stops counting, not one it reports. Drilled both ways: a bogus name inside a
+# GFA( call passes the un-taught gate and fails the taught one. ANY new accessor helper must be added here.
+
 # GF(type, "name") is the district axis's tolerant field probe over a type resolved AT RUNTIME (mat.GetType(),
 # voBox.GetType(), a clone's type). The catalog binds member-to-DECLARING-TYPE, and these sites genuinely do not
 # know the type statically — so they are allowlisted with the reason rather than faked into the catalog. Every one
@@ -107,10 +111,10 @@ extract() {
   # `TagAsAbilities` (Combat.cs, read that way and only that way) was missing from the catalog AND from this gate.
   # Deliberately narrow: accessor( identifier( …no nested parens… ), "NAME" — it cannot wander into a neighbouring
   # call on the same line, which a general "allow any )" relaxation would.
-  grep -onE "(GetMember|SetMember|GetMemberOrNull|CallMethod|CachedField|CachedProp|GF)\([A-Za-z_][A-Za-z0-9_.]*\([^()]*\), *\"[A-Za-z_][A-Za-z0-9_.]*\"" $SRC 2>/dev/null \
+  grep -onE "(GetMember|SetMember|GetMemberOrNull|CallMethod|CachedField|CachedProp|GFA|GF)\([A-Za-z_][A-Za-z0-9_.]*\([^()]*\), *\"[A-Za-z_][A-Za-z0-9_.]*\"" $SRC 2>/dev/null \
   | sed -E 's/^([^:]+):([0-9]+):.*"([A-Za-z_][A-Za-z0-9_.]*)"$/\3\t\1:\2/' \
   | awk -F'\t' '{n=split($1,p,"."); for(i=1;i<=n;i++) if (p[i] != "") print p[i] "\t" $2}'
-  grep -onE "(GetMember|SetMember|GetMemberOrNull|CallMethod|CachedField|CachedProp|GF|FastMember\.(Getter|Setter)<[^>]*>|AccessTools\.(Field|Property|Method|PropertyGetter|PropertySetter|DeclaredField|DeclaredProperty|DeclaredMethod)|\.Get(Field|Property|Method|Event|Member)|Traverse\.Field|Traverse\.Property|Traverse\.Method)\([^)]*?\"[A-Za-z_][A-Za-z0-9_.]*\" *\+?" $SRC 2>/dev/null \
+  grep -onE "(GetMember|SetMember|GetMemberOrNull|CallMethod|CachedField|CachedProp|GFA|GF|FastMember\.(Getter|Setter)<[^>]*>|AccessTools\.(Field|Property|Method|PropertyGetter|PropertySetter|DeclaredField|DeclaredProperty|DeclaredMethod)|\.Get(Field|Property|Method|Event|Member)|Traverse\.Field|Traverse\.Property|Traverse\.Method)\([^)]*?\"[A-Za-z_][A-Za-z0-9_.]*\" *\+?" $SRC 2>/dev/null \
   | sed -E 's/^([^:]+):([0-9]+):.*"([A-Za-z_][A-Za-z0-9_.]*)"( *\+)?$/\3\4\t\1:\2/' \
   | sed -E 's/^([A-Za-z_][A-Za-z0-9_.]*) *\+\t/\10\t/' \
   | awk -F'\t' '{n=split($1,p,"."); for(i=1;i<=n;i++) if (p[i] != "") print p[i] "\t" $2}'
