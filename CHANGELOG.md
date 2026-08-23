@@ -10,6 +10,38 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE STRATEGIC FOOTPRINT DIED ON THE SECOND SAVE LOAD, AND NOTHING SAID SO (2026-08-23).** `footprintMaskInjected` is
+  a `static bool` guarding a once-per-session injection. It was never reset — so on the second save load of a process
+  `InjectReactorFootprint` returned immediately, while `ResetDistrictSessionState` had just queued the atlas and decal
+  clone it guards for destruction. No strategic-zoom footprint at all, no error, no log line, until the game restarted.
+  Re-injection is reachable (`loadedSelectorByKey` is `[SessionScoped]`, so the selector re-loads and the whole per-tile
+  setup runs again); the latch was the only thing stopping it.
+  **The leak beside it is why this is one fix and not two.** The injection creates three Unity objects and only one was
+  owned — `ClonePrivateOutputLayer` tracks its clone, but the mask atlas and the decal clone went into
+  `districtOwnedClones` never. That was survivable *only because the latch meant the method ran once per process*.
+  Resetting the latch without tracking them would have converted a one-shot leak into a native atlas + decal leak on
+  **every** save reload. Both now tracked. `reactorMaskTex` goes the other way and is marked `[ProcessLived]`: we decode
+  it from a PNG once and every re-injection reuses it, so destroying it would leave the next session's atlas pointing at
+  a dead texture.
+  It is exactly the shape `SessionState`'s fence is documented as unable to police — a bare scalar, indistinguishable
+  from a constant. Enumerating every one-way `static bool` in the plugin (set `= true`, never `= false`) found 35, of
+  which **34 are legitimately process-lived** (`*Logged`, `*Dumped`, `*Resolved`) or are properties backed by
+  `ScopedState`, which `S = new ScopedState()` already resets. So a blanket one-way-latch gate would have been 34 false
+  positives and was deliberately not built; `Tests/DistrictSessionLatchTests.cs` is targeted instead — including a
+  structural check that *every* Unity object the injection creates is owned, which catches the next clone added here
+  rather than only the two that leaked.
+  **The new test then found a second one.** A `[SessionScoped(Manual = …)]` field promises a hand-reset; asserting that
+  something actually assigns or clears each one flagged `_subPawnScan`, whose sole reset site (the model session reset,
+  commented *"session-1 sub-pawn components are corpses"*) set only the dirty flag. Never a correctness bug — the flag
+  forces a rebuild before the next read — but the list went on holding references to every one of those destroyed Unity
+  objects until something asked for the scan again. Now nulled there.
+  Two of my own tests were caught cheating during the drill and are worth naming: one passed because **a comment
+  quoting `_subPawnScan = null` satisfied its text search** (comments are stripped now — a prose mention is not a
+  reset), and tightening an extraction regex silently stopped it matching any generic whose type argument list contains
+  a space, dropping `_subPawnScan` out of the checked set entirely while the green line read the same. Canaries added
+  for both awkward shapes. Same lesson as the catalog gate two entries down: **a guard that filters before it counts
+  reports a smaller set, not a smaller number.**
+
 - **A GATE THAT COUNTED 331 SITES AND SHOULD HAVE COUNTED 477 (2026-08-23).** Verifying the type-name migration in-game,
   the log showed `AccessTools.Field: Could not find field for type …Skeleton and name allMeshNames` **36 times in one
   session**. `typeprobe --exact` then said it plainly: **no assembly in the game declares `allMeshNames` at all** —

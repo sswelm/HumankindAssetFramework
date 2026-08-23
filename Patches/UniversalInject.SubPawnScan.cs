@@ -27,7 +27,13 @@ namespace HumankindAssetFramework
         static bool _subPawnWalkVerified, _subPawnWalkTrusted = true;
 
         internal static void MarkSubPawnsDirty() => _subPawnScanDirty = true;
-        internal static void MarkSubPawnsDirtyAndReverify() { _subPawnScanDirty = true; _subPawnWalkVerified = false; _subPawnWalkTrusted = true; }
+        // `_subPawnScan = null` added 2026-08-23. The dirty flag alone forces a REBUILD before the next read, so this was
+        // never a correctness bug — but the sole caller is the model session reset, whose own comment says "session-1
+        // sub-pawn components are corpses", and clearing only the flag left the list holding references to every one of
+        // those destroyed Unity objects until something happened to ask for the scan again. Drop them here, which also
+        // makes the field's [SessionScoped(Manual = "MarkSubPawnsDirtyAndReverify")] annotation true rather than
+        // approximately true. Found by the guard written for the footprint latch, not by hand.
+        internal static void MarkSubPawnsDirtyAndReverify() { _subPawnScan = null; _subPawnScanDirty = true; _subPawnWalkVerified = false; _subPawnWalkTrusted = true; }
 
         internal static List<KeyValuePair<UnityEngine.Object, ModelEntry>> OurSubPawns(List<ModelEntry> list, float now, out int version)
         {

@@ -189,7 +189,19 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
   "the type has `Clear()`": queues/bags are drained, arrays zeroed, `ConditionalWeakTable` forced to declare a
   lifetime. 27 previously-invisible statics are now annotated. Scalars remain outside on purpose (shape cannot
   distinguish a constant from a per-session latch) and `UnpolicedStaticCount()` reports how many, so the edge is
-  measured. **Still open from the same review:** `footprintMaskInjected` is exactly that unpoliceable shape — a
+  measured. **~~Still open from the same review:~~ FIXED 2026-08-23** — reset in `ResetDistrictSessionState`, with the
+  two clones it guards (`ourAtlas`, `hostClone`) handed to `districtOwnedClones` in the same change, because resetting
+  the latch alone would have turned a one-shot leak into a per-reload one. `reactorMaskTex` deliberately stays
+  `[ProcessLived]`. Five mutations drilled; the same new test then found `_subPawnScan` holding destroyed sub-pawn
+  references after the model reset. See the CHANGELOG.
+  **Residual, needs the in-game double-load drill:** `InjectReactorFootprint` trims `sel.levelBuildItems` **in place**,
+  and `sel` is a bundle asset the game loads once per app run — so the second injection runs against an array the first
+  one already trimmed, whose single decal item points at a `hostClone` the reset has since destroyed. Reading the code,
+  that path repoints it at the new clone and comes out right; a destroyed `UnityEngine.Object`'s managed wrapper still
+  answers `GetType()`, and the `child == null` test is reference equality on an `object`, so the item is not skipped.
+  But that is a chain of Unity lifetime details, not something source review settles — load a save, load a second, and
+  look for `[Footprint] done` a second time with the silhouette actually drawn.
+  The original entry, for the record: `footprintMaskInjected` is exactly that unpoliceable shape — a
   `static bool` latch that survives a session reset while `ResetDistrictSessionState` destroys the clone it
   guards, leaving the strategic-zoom footprint dead until a process restart. It needs a per-session reset by
   hand; the fence cannot find it for you.

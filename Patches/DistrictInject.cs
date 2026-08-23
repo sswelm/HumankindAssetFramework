@@ -1693,6 +1693,12 @@ namespace HumankindAssetFramework
             Plugin.Diag($"[Session] district reset: {SessionState.Reset(SessionScope.District)} registry-managed collection(s) cleared");   // trackedDistricts, districtNameCache, bindLog, loadedSelectorByKey, selectorTileLogged, scopedTexLog, hexDistricts, distLeaves — every [SessionScoped(District)] static
             scopedStates.Clear(); S = new ScopedState();   // ALL per-district scoped state (donorClone/albedo/elements/B&W/flatten) referenced the dead session
             reactorBoundGlobal = false;   // legacy once-flag + global diag throttle
+            // The strategic-footprint mask latch (2026-08-23). Left set, InjectReactorFootprint returned immediately for
+            // the rest of the process while the reset above had just queued its atlas and decal clone for destruction —
+            // so the second save load of a session showed no strategic footprint at all, silently, until a restart.
+            // Re-injection is reachable because `loadedSelectorByKey` is [SessionScoped] too: the selector is re-loaded
+            // and the whole per-tile setup runs again.
+            footprintMaskInjected = false;
             foreach (var d in distModels)
             {
                 d.tiles.Clear(); d.privateLeaf = null; d.leaves.Clear(); d.collected = false;

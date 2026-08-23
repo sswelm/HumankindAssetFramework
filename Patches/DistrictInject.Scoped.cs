@@ -947,7 +947,18 @@ namespace HumankindAssetFramework
         // SchematicView output layer to point its mask atlas (atlases[0]) at ours, and re-bind one SchematicView decal's
         // visualOutput + maskTexture at it — so the strategic footprint shows the district's OWN top-down shape. Per-step
         // logging so a failed reflection point is obvious. Runs once.
-        static bool footprintMaskInjected; static UnityEngine.Texture2D reactorMaskTex;
+        // PER-SESSION latch, reset by hand in ResetDistrictSessionState (2026-08-23). It is a bare `static bool`, which is
+        // exactly the shape SessionState's fence cannot police — it cannot tell a per-session latch from a constant — so
+        // nothing was going to find this for us. Left unreset, it survived a save reload while the reset destroyed the
+        // clones it guards, so the strategic-zoom footprint went dead until the process restarted, with no error.
+        [SessionScoped(Scope = SessionScope.District, Manual = "ResetDistrictSessionState, DistrictInject.cs")]
+        static bool footprintMaskInjected;
+        // NOT per-session, on purpose: a Texture2D we allocated and filled from a PNG on disk. Nothing in the game owns
+        // it, our static reference keeps the unused-asset sweep off it, and re-injection reuses it rather than re-reading
+        // the file. It must NOT go in districtOwnedClones — destroying it would leave the next session's atlas holding a
+        // dead texture reference.
+        [ProcessLived("mask PNG decoded once per process, reused by every re-injection")]
+        static UnityEngine.Texture2D reactorMaskTex;
         internal static void InjectReactorFootprint(object sel, string name)
         {
             var maskPath = Plugin.DistrictFootprintMask?.Value?.Trim();
@@ -987,6 +998,7 @@ namespace HumankindAssetFramework
                     ? "deadbeef000000000000000000000001" : "reactorfootprintmask000000000001";
                 var ourAtlas = UnityEngine.ScriptableObject.CreateInstance(atlasType);
                 ourAtlas.name = "ReactorFootprint_MaskAtlas";
+                TrackDistrictClone(ourAtlas);   // OWN it — freed on the next session reset (leak fix, 2026-08-23)
                 // atlasEntries[1]  (GUID -> Index 0)
                 var entryArr = Array.CreateInstance(entryType, 1);
                 var entry = Activator.CreateInstance(entryType);
@@ -1022,6 +1034,7 @@ namespace HumankindAssetFramework
                 // shared decal leaked to every district's footprint).
                 var hostClone = UnityEngine.Object.Instantiate((UnityEngine.Object)host);
                 hostClone.name = "ReactorFootprint_Decal";
+                TrackDistrictClone(hostClone);   // OWN it — freed on the next session reset (leak fix, 2026-08-23)
                 var voT = voBox.GetType();
                 var voBox2 = GF(hostClone.GetType(), "visualOutput").GetValue(hostClone);
                 GF(voT, "loadedOutputLayer").SetValue(voBox2, olClone);
