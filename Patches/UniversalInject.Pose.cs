@@ -354,7 +354,25 @@ namespace HumankindAssetFramework
                 // Donor-clip path: the donor's clip drives the pose, but the pawn-level adjusters must still run —
                 // they live in ApplyAnimatedPose, which this branch bypasses, and without them Position offset
                 // (hover height!), moveTilt and runtime scale are silently dead on donor-clip models.
-                if (e.useDonorClip) { long tD = FrameCost.Begin(); DumpDonorChannels(ctx.entry, e); ApplyRotorSpin(ctx.entry, e); ApplyRotorTrim(ctx.entry, e); ApplyPositionOffset(e, ctx.entry); ApplyCombatZ(e, ctx.entry); ApplyTerrainHug(e, ctx.entry); ApplyTurnEase(e, ctx.entry); ApplyMoveTilt(e, ctx.entry); ApplyGunElevation(e, ctx.entry); ApplyScale(e, ctx.entry); ctx.pawnEntries.SetValue(ctx.entry, ctx.idx); FrameCost.End(FrameCost.PoseDonor, tD); }
+                if (e.useDonorClip)
+                {
+                    // Split into three nested sub-buckets (2026-08-23) — PoseDonor is 72-74% of PoseOurs whenever it
+                    // runs, and one bucket over nine applies cannot say which. Grouped by KIND of work, since that is
+                    // what decides the fix; they nest inside PoseDonor, so they double-count in a sum.
+                    long tD = FrameCost.Begin();
+                    DumpDonorChannels(ctx.entry, e);                                            // latches per model — not per frame
+                    long tR = FrameCost.Begin();
+                    ApplyRotorSpin(ctx.entry, e); ApplyRotorTrim(ctx.entry, e);
+                    FrameCost.End(FrameCost.DonorRig, tR);
+                    long tW = FrameCost.Begin();
+                    ApplyPositionOffset(e, ctx.entry); ApplyCombatZ(e, ctx.entry); ApplyTerrainHug(e, ctx.entry);
+                    FrameCost.End(FrameCost.DonorWorld, tW);
+                    long tM = FrameCost.Begin();
+                    ApplyTurnEase(e, ctx.entry); ApplyMoveTilt(e, ctx.entry); ApplyGunElevation(e, ctx.entry); ApplyScale(e, ctx.entry);
+                    FrameCost.End(FrameCost.DonorMotion, tM);
+                    ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
+                    FrameCost.End(FrameCost.PoseDonor, tD);
+                }
                 else
                 {
                     // TURN EASE for every non-donor entry too (battle-turn spike): a map attack SNAPS the unit's

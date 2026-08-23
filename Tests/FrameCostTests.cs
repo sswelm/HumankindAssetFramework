@@ -1,3 +1,5 @@
+using System.Linq;
+using System.Reflection;
 using HumankindAssetFramework;
 using Xunit;
 
@@ -88,6 +90,30 @@ namespace HumankindAssetFramework.Tests
             tk[FrameCost.UpdateTotal] = 1000 * 300; cl[FrameCost.UpdateTotal] = 300;
             var s = FrameCost.Format(tk, cl, 300, 5.0, Freq, out _);
             Assert.DoesNotContain("districts", s);
+        }
+
+        // EVERY DECLARED BUCKET ID MUST HAVE A LABEL. `Count` is `names.Length`, and the arrays are sized from it, so
+        // a const id added without its name entry is not a compile error — it is an IndexOutOfRangeException the
+        // first time that bucket is timed, i.e. in-game, on whatever path the new bucket was added to measure.
+        // Seven ids were added on 2026-08-23 alone (four Formation, three donor), which is exactly when a table like
+        // this drifts. Reflection over the consts so the test cannot itself go stale.
+        [Fact]
+        public void EveryBucketConstant_HasAName()
+        {
+            var consts = typeof(FrameCost).GetFields(BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)
+                                          .Where(f => f.IsLiteral && !f.IsInitOnly && f.FieldType == typeof(int))
+                                          .ToArray();
+            Assert.NotEmpty(consts);
+            foreach (var f in consts)
+            {
+                int id = (int)f.GetRawConstantValue();
+                Assert.True(id >= 0 && id < FrameCost.Count,
+                            $"bucket '{f.Name}' = {id} is outside the label table (Count={FrameCost.Count}) — add its entry to `names`");
+                Assert.False(string.IsNullOrWhiteSpace(FrameCost.Name(id)), $"bucket '{f.Name}' has a blank label");
+            }
+            // and no two ids collide, which would silently merge two measurements into one
+            var ids = consts.Select(f => (int)f.GetRawConstantValue()).ToArray();
+            Assert.Equal(ids.Length, ids.Distinct().Count());
         }
     }
 }

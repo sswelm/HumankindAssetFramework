@@ -38,7 +38,20 @@ namespace HumankindAssetFramework
                          // before touching: FormRetry vs FormScan, and inside the scan the per-army loop split into
                          // armies SKIPPED (cheap × many) vs armies MATCHED (expensive × few). Their CALL counts are
                          // the army counts — the number nothing currently reports.
-                         FormRetry = 36, FormScan = 37, FormScanSkip = 38, FormScanOurs = 39;
+                         FormRetry = 36, FormScan = 37, FormScanSkip = 38, FormScanOurs = 39,
+                         // PoseDonor split (2026-08-23). Measured, not suspected: in one session `pose ours` ran
+                         // 5,678 ns/add with PoseDonor absent from the top six, and 20,589 / 22,406 ns/add with
+                         // PoseDonor at 72-74% of it — a 4x swing on the same pawn count, far outside the ~11% the
+                         // noise floor allows. So the donor-clip branch IS the variable cost of the pose hook.
+                         // That branch is one bucket wrapping NINE applies (DumpDonorChannels latches after the
+                         // first call per model, so it is not the cost). Grouped by the KIND of work each does,
+                         // because that is what decides the fix:
+                         //   DonorRig    bone/channel writes      ApplyRotorSpin, ApplyRotorTrim
+                         //   DonorWorld  world queries + raycasts ApplyPositionOffset, ApplyCombatZ, ApplyTerrainHug
+                         //   DonorMotion arithmetic on the entry  ApplyTurnEase, ApplyMoveTilt, ApplyGunElevation, ApplyScale
+                         // DonorWorld is where §2's already-fixed "two raycasts per helicopter per frame" lived, so
+                         // it is the one to disprove first rather than assume.
+                         DonorRig = 40, DonorWorld = 41, DonorMotion = 42;
         [ProcessLived("literal bucket label table")] static readonly string[] names =
         {
             "Update(total)", "PoseVanilla", "TickTexture", "RespawnPostLoad", "FireQueues", "DeployState", "AnimStates", "EngineAudio",
@@ -47,6 +60,7 @@ namespace HumankindAssetFramework
             "SelTileCfg", "SelTileLoop", "SelTileBind", "SelTileAlbedo", "SelTileFlat", "PoseSweep", "PoseAdjust", "PoseAnim", "PoseAim", "PoseDonor",
             "SelTileSkip", "SelTileOurs",
             "FormRetry", "FormScan", "FormScanSkip", "FormScanOurs",
+            "DonorRig", "DonorWorld", "DonorMotion",
         };
         public static int Count => names.Length;
         public static string Name(int bucket) => names[bucket];
@@ -107,6 +121,20 @@ namespace HumankindAssetFramework
                 double skipNs = cl[SelTileSkip] > 0 ? tk[SelTileSkip] * usPerTick * 1000.0 / cl[SelTileSkip] : 0;
                 double oursNs = cl[SelTileOurs] > 0 ? tk[SelTileOurs] * usPerTick * 1000.0 / cl[SelTileOurs] : 0;
                 summary += Inv($" | districts {skipN:0} skipped {skipUs:0.#} µs ({skipNs:0} ns ea), {oursN:0} ours {oursUs:0.#} µs ({oursNs:0} ns ea)");
+            }
+            // DONOR-CLIP POSE, stated with its COUNT (2026-08-23). PoseDonor is 72-74% of PoseOurs when it runs, and
+            // the total alone cannot distinguish a few helicopters costing a fortune each from every pawn costing a
+            // little — which is the same question SelTileSkip/SelTileOurs was built to answer, and the answer decides
+            // whether to attack per-call work or the number of calls. Silent when no donor-clip unit is live.
+            if (cl[PoseDonor] > 0)
+            {
+                double dUs = tk[PoseDonor] * usPerTick / frameCount;
+                double dN = cl[PoseDonor] / (double)frameCount;
+                double dNs = tk[PoseDonor] * usPerTick * 1000.0 / cl[PoseDonor];
+                double rigUs = tk[DonorRig] * usPerTick / frameCount;
+                double worldUs = tk[DonorWorld] * usPerTick / frameCount;
+                double motionUs = tk[DonorMotion] * usPerTick / frameCount;
+                summary += Inv($" | donor {dN:0} poses {dUs:0.#} µs ({dNs:0} ns ea) = rig {rigUs:0.#} + world {worldUs:0.#} + motion {motionUs:0.#} µs");
             }
             // FORMATION SCAN, same shape and for the same reason (2026-08-23): `Formation` entered the top six at
             // 61.8 µs and the bucket mixes a throttled retry with a 12×/s walk over every army. Print the army counts
