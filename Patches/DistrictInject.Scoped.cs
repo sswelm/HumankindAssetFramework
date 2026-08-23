@@ -994,7 +994,7 @@ namespace HumankindAssetFramework
                 var outEntryType = absType.GetNestedType("OutputEntry");
                 // GUID decides block-vs-shape. INVALID -> new Guid()->Null -> FillLayerData skips the mask -> solid quad
                 // block (default). VALID hex (DistrictFootprintMaskCut=true) -> the mask cuts to the PNG's shape (e.g. circle).
-                string maskGuidStr = (Plugin.DistrictFootprintMaskCut != null && Plugin.DistrictFootprintMaskCut.Value == "true")
+                string maskGuidStr = Plugin.CfgBool(Plugin.DistrictFootprintMaskCut, false)
                     ? "deadbeef000000000000000000000001" : "reactorfootprintmask000000000001";
                 var ourAtlas = UnityEngine.ScriptableObject.CreateInstance(atlasType);
                 ourAtlas.name = "ReactorFootprint_MaskAtlas";

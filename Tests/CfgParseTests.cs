@@ -80,5 +80,17 @@ namespace HumankindAssetFramework.Tests
         {
             Assert.Equal(0.17f, Plugin.CfgFloat(null, 0.17f), 4);
         }
+
+        // ---- CfgBool: the five district footprint keys, typed bool since 2026-08-23 ----
+        // They were ConfigEntry<string> compared with `== "true"`, which answers FALSE to every value that is not
+        // that exact token — blank, "True", "1", "yes", " true". BepInEx now does the parsing, so the only decision
+        // left in our code is the null case, and it is the one with teeth: TWO of the five default to TRUE, so a
+        // `?? false` would silently INVERT them in the window before Bind runs.
+        [Fact]
+        public void CfgBool_NullEntry_ReturnsFallback_IncludingTrue()
+        {
+            Assert.False(Plugin.CfgBool(null, false));
+            Assert.True(Plugin.CfgBool(null, true));   // DistrictFootprintMeshHideDecal defaults true — must not invert
+        }
     }
 }

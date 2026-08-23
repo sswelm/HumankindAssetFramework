@@ -1418,10 +1418,10 @@ namespace HumankindAssetFramework
             }
             else   // fall back to the global config
             {
-                fpMesh = Plugin.DistrictFootprintMesh != null && Plugin.DistrictFootprintMesh.Value == "true";
-                fpBW = Plugin.DistrictFootprintMeshBW != null && Plugin.DistrictFootprintMeshBW.Value == "true";
-                fpFlat = Plugin.DistrictFootprintMeshFlat != null && Plugin.DistrictFootprintMeshFlat.Value == "true";
-                fpHideDecal = Plugin.DistrictFootprintMeshHideDecal == null || Plugin.DistrictFootprintMeshHideDecal.Value != "false";
+                fpMesh = Plugin.CfgBool(Plugin.DistrictFootprintMesh, false);
+                fpBW = Plugin.CfgBool(Plugin.DistrictFootprintMeshBW, false);
+                fpFlat = Plugin.CfgBool(Plugin.DistrictFootprintMeshFlat, false);
+                fpHideDecal = Plugin.CfgBool(Plugin.DistrictFootprintMeshHideDecal, true);   // defaults TRUE — see CfgBool
                 fpFlatHeight = Plugin.CfgFloat(Plugin.DistrictFootprintMeshFlatHeight, 0.17f);   // blank/malformed -> 0.17, NOT 0 (see Plugin.ParseFloat)
             }
             fpResolved = true;
@@ -1456,7 +1456,7 @@ namespace HumankindAssetFramework
         }
         static UnityEngine.Texture2D DesiredScopedAlbedo()
         {
-            bool bw = fpResolved ? fpBW : (Plugin.DistrictFootprintMeshBW != null && Plugin.DistrictFootprintMeshBW.Value == "true");
+            bool bw = fpResolved ? fpBW : Plugin.CfgBool(Plugin.DistrictFootprintMeshBW, false);
             if (!bw || scopedAlbedo == null) return scopedAlbedo;
             float topoVis = SchematicVis();
             if (topoVis < 0f) return scopedAlbedo;                       // provider not ready -> colour
@@ -1499,7 +1499,7 @@ namespace HumankindAssetFramework
         static int flatPollTick;
         internal static void UpdateMeshFlatness()
         {
-            bool flatOn = fpResolved ? fpFlat : (Plugin.DistrictFootprintMeshFlat != null && Plugin.DistrictFootprintMeshFlat.Value == "true");
+            bool flatOn = fpResolved ? fpFlat : Plugin.CfgBool(Plugin.DistrictFootprintMeshFlat, false);
             if (!flatOn || scopedElements.Count == 0) return;
             if ((++flatPollTick % 10) != 0) return;   // the zoom-band read (ComputeRenderState via reflection) every 10 frames — the crossover is a fade, 0.17 s is invisible (FrameCost 2026-08-21: SelectorTile 210 µs/frame)
             float topoVis = SchematicVis();
