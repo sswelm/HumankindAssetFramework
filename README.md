@@ -228,8 +228,11 @@ All code, scripts, and docs in this repo are **MIT** ([LICENSE](LICENSE)) — fo
 path, build on it. Two things the MIT grant does *not* cover, because they aren't ours: the game internals the docs
 describe (decompiled `Amplitude.*` code remains Amplitude Studios' property; the required game DLLs are gitignored
 and must be copied from your own install), and any 3D model you bake (each stays under its own license — see
-[CREDITS.md](CREDITS.md)). The ENC mod's own game-data content lives in the
-[ENCReload](https://github.com/sswelm/ENCReload) repo and is all-rights-reserved there.
+[CREDITS.md](CREDITS.md)). The ENC mod's own **content** — game data, and the pack's skins and sounds — lives in the
+[ENCReload](https://github.com/sswelm/ENCReload) repo and is **all rights reserved** there. That repo's
+[LICENSE](https://github.com/sswelm/ENCReload/blob/master/LICENSE) grants MIT over **its editor code and scripts only**
+(`Assets/Scripts/`, `Tools/` — the HAF authoring tools), so the tooling is as free as the plugin while the mod's content
+is not.
 
 ## Config
 The plugin reads `<Humankind>\BepInEx\config\haf_packs\ENCReload\pack.json` — ENC's **pack** (one entry per model: pawn description,
