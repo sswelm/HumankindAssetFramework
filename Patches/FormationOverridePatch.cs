@@ -40,9 +40,9 @@ namespace HumankindAssetFramework
 {
     internal static class FormationOverride
     {
-        class Cell { public int x, y; }
-        class Dummy { public Vector3 pos; public readonly List<Cell> coords = new List<Cell>(); }
-        class Entry
+        internal class Cell { public int x, y; }
+        internal class Dummy { public Vector3 pos; public readonly List<Cell> coords = new List<Cell>(); }
+        internal class Entry
         {
             public string unit = "", formation = "", lowSpec = "";
             public readonly List<Dummy> dummies = new List<Dummy>();
@@ -87,6 +87,10 @@ namespace HumankindAssetFramework
         // Injected formation SOs live for the whole process (HideAndDontSave keeps Unity's unused-asset sweep off
         // them); re-Add per session is cheap and guarded by a by-name DB lookup.
         [ProcessLived("injected ScriptableObjects are process-lived assets")] static readonly Dictionary<string, ScriptableObject> created = new Dictionary<string, ScriptableObject>(StringComparer.Ordinal);
+        // What we last WROTE into each pre-existing formation name, so a second link writing the same name can be
+        // told apart from a second link writing it DIFFERENTLY. Process-lived like the database objects it
+        // describes: the write itself always repeats, only the log line consults this.
+        [ProcessLived("mirrors the process-lived formation database objects")] static readonly Dictionary<string, string> overwrittenSig = new Dictionary<string, string>(StringComparer.Ordinal);
         static bool pending;       // armed by AnimationLoad; Tick() retries until the databases resolve
         static int lastTryFrame;
         static bool dbWaitLogged;
@@ -219,12 +223,61 @@ namespace HumankindAssetFramework
                 }
                 if (entries.Count > 0)
                     Plugin.Log.LogInfo($"[Formation] registry: {entries.Count} link(s) from haf_formations.json");
+                ReportFormationCollisions(entries);   // two links writing one formation name — see its note
                 // map turn links onto addons that loaded BEFORE this parse (the SiegeHowitzers ordering: the
                 // MAIN pawn's addon loads early; its satellites load on first view) — the addon-load hook
                 // covers the other direction.
                 UniversalInject.SweepTurnLinks();
             }
             catch (Exception ex) { Plugin.Log.LogError("[Formation] haf_formations.json parse: " + ex); }
+        }
+
+        // WHAT A WRITE TO A FORMATION NAME ACTUALLY CONSISTS OF (2026-08-23). Derived from the four things
+        // FillFormationFields sets — the scaled dummy positions, the per-orientation coordinates, the six
+        // ColumnsCountPerRow arrays and the low-spec reference — so it cannot drift from the write it describes:
+        // a field added there without being added here would make two genuinely different formations compare equal.
+        // Invariant-formatted per the logging policy; these strings are compared, never shown as numbers to read.
+        internal static string FormationSignature(Entry e)
+        {
+            float posMul = e.layoutScale > 0f ? e.layoutScale : (e.scale > 0f ? e.scale : 1f);   // same rule as FillFormationFields
+            var sb = new System.Text.StringBuilder();
+            sb.Append("n=").Append(e.dummies.Count).Append(';');
+            foreach (var d in e.dummies)
+            {
+                var p = d.pos * posMul;
+                sb.Append(Plugin.Inv($"{p.x:0.####},{p.y:0.####},{p.z:0.####}")).Append(':');
+                foreach (var c in d.coords) sb.Append(c.x).Append('/').Append(c.y).Append(',');
+                sb.Append(';');
+            }
+            for (int i = 0; i < 6; i++)
+            { sb.Append('|'); foreach (var c in e.columns[i] ?? new int[0]) sb.Append(c).Append(','); }
+            sb.Append("|low=").Append(string.IsNullOrEmpty(e.lowSpec) ? "Formation_1" : e.lowSpec);
+            return sb.ToString();
+        }
+
+        // TWO LINKS, ONE FORMATION NAME (2026-08-23 review). Formation data lives in the database under a NAME, so
+        // several links naming the same formation all resolve to the same object — the last write wins for EVERY
+        // one of them. Today that is harmless in the shipped pack (three links point at `Formation_1`; the two that
+        // carry data write an identical single dummy at the origin), and nothing detected it either way: `created`
+        // only remembers formations HAF INJECTED, never ones it OVERWROTE, so each link re-did the write and
+        // re-emitted the same warning — whose text blames a VANILLA collision for what is really a collision inside
+        // the author's own registry. Checked here, at parse, so it is reported before anything has been written.
+        internal static void ReportFormationCollisions(List<Entry> entries)
+        {
+            var byName = new Dictionary<string, Entry>(StringComparer.Ordinal);
+            foreach (var e in entries)
+            {
+                if (e.dummies.Count == 0) continue;   // a pure repoint writes nothing — it cannot collide
+                if (!byName.TryGetValue(e.formation, out var first)) { byName[e.formation] = e; continue; }
+                string a = FormationSignature(first), b = FormationSignature(e);
+                string who = $"'{(first.unit.Length == 0 ? "(macro)" : first.unit)}' and '{(e.unit.Length == 0 ? "(macro)" : e.unit)}'";
+                if (a == b)
+                    Plugin.Diag($"[Formation] '{e.formation}' is written by {who} with IDENTICAL data — harmless, but only one write is needed.");
+                else
+                    Plugin.Log.LogError($"[Formation] CONFLICT in your own registry: {who} both define '{e.formation}' with DIFFERENT data " +
+                                        $"({first.dummies.Count} vs {e.dummies.Count} dummies). A formation is shared BY NAME, so the last one " +
+                                        $"written wins for BOTH units — one of them will not get the layout you authored. Give one of them its own formation name.");
+            }
         }
 
         // The consistency rules BuildDummiesGrid enforces by crashing; we enforce them by skipping. Null = valid.
@@ -389,8 +442,27 @@ namespace HumankindAssetFramework
                 // every unit referencing it (usable as a macro override; the log is loud so it's never a surprise).
                 var fdT = existing.GetType();
                 FillFormationFields(existing, fdT, e);
-                Plugin.Log.LogWarning($"[Formation] '{e.formation}' already existed in the database — its data was OVERWRITTEN in place " +
-                                      $"from the registry ({e.dummies.Count} dummies). If that name is a vanilla formation, every unit using it is affected.");
+                // The WRITE is unconditional and unchanged — only what we SAY about it depends on whether this name
+                // has been written before. The first overwrite of a name is the real macro-replacement event and
+                // still warns. A repeat with identical data is noise (the shipped pack emitted the same alarming
+                // line twice for `Formation_1`); a repeat with DIFFERENT data is the clobber actually happening,
+                // and it is an error, not a warning — the earlier link's units silently inherit this layout.
+                string sig = FormationSignature(e);
+                if (!overwrittenSig.TryGetValue(e.formation, out var prevSig))
+                {
+                    overwrittenSig[e.formation] = sig;
+                    Plugin.Log.LogWarning($"[Formation] '{e.formation}' already existed in the database — its data was OVERWRITTEN in place " +
+                                          $"from the registry ({e.dummies.Count} dummies). If that name is a vanilla formation, every unit using it is affected.");
+                }
+                else if (prevSig == sig)
+                    Plugin.Diag($"[Formation] '{e.formation}' re-written with identical data (link '{(e.unit.Length == 0 ? "(macro)" : e.unit)}') — no change.");
+                else
+                {
+                    overwrittenSig[e.formation] = sig;
+                    Plugin.Log.LogError($"[Formation] '{e.formation}' was ALREADY overwritten with DIFFERENT data earlier in this load, and link " +
+                                        $"'{(e.unit.Length == 0 ? "(macro)" : e.unit)}' has just replaced it ({e.dummies.Count} dummies). A formation is shared BY NAME — " +
+                                        $"whichever link wrote LAST now applies to every unit using it. Give one of them its own formation name.");
+                }
             }
 
             // The count a fresh spawn of the target formation produces — used by the reform catch-up to decide whether a
