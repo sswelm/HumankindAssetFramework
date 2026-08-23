@@ -173,9 +173,20 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
   that fallback for a unit already fully collected. The collapsed count is reported by the self-verify, so an overlap
   that *grows* (a new holder list that re-reaches an existing one) shows up instead of being silently absorbed.
   Eight tests, four mutations drilled — including dedupe-by-reference, which is the mistake that would collapse nothing
-  in production, since each path yields a **different managed wrapper** for the same sub-pawn. Verify in-game by the
-  panel reading `sub-pawn walk 46/46` rather than `56/46`.
-  The original entry: a `PresentationUnit`
+  in production, since each path yields a **different managed wrapper** for the same sub-pawn.
+  **BUT THE PREMISE OF THIS ENTRY WAS WRONG — drilled 2026-08-23.** The `56/46` gap is **not** duplicates. With the
+  dedupe shipped and reporting, the log read `walk verified against the scene scan: 55 sub-pawn(s), none missed (scene
+  scan 45)` and **no duplicates were collapsed**. The real cause: `SceneScan` only counts a sub-pawn whose **own
+  gameObject name** matches a `pawnDescription`, whereas the walk — once a unit resolves to one of our entries — adds
+  **every** sub-pawn of that unit's pawns regardless of name. The walk is a legitimate SUPERSET; the verify block has
+  always collected the difference as `walkOnly`. The count on the panel is therefore correct as printed, and the claim
+  that `ProcessEngineAudio` processes duplicated pairs twice per poll is unsupported.
+  The dedupe is kept on honest terms: the overlap it guards is structurally real (a battling unit *is* reachable via
+  both the army list and the battle's `AllUnits`; a squadron via both its subtree and its air formation), but the drill
+  session exercised **neither** — 0 battle-start events, no air unit on the map. Defensive, self-reporting, and
+  unproven in the wild. To exercise it: fight a battle with an air unit present, then check the self-verify line for
+  a "duplicate(s) collapsed" clause.
+  The original entry, whose diagnosis did not survive measurement: a `PresentationUnit`
   reached twice during a battle (armies *and* battle units), and a squadron reachable both via the holder subtree
   and the air-formation `MainPawn` walk, are counted twice — the F8 panel showed `sub-pawn walk 56/46` on
   2026-08-22, i.e. ten duplicates against a superset oracle. The miss detection is set-based on instance ids so the

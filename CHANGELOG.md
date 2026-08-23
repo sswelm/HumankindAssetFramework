@@ -10,8 +10,26 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
-- **`sub-pawn walk 56/46` WAS TEN PAWNS COUNTED TWICE (2026-08-23).** The number on the F8 panel read like a *superset* —
-  56 found against a 46-strong oracle, better than complete. It was the opposite. `WalkSubPawns` collects from four
+- **CORRECTION, same day, from the drill: `56/46` IS a superset, and I had the diagnosis backwards.** The entry below
+  says the ten-pawn gap *was* a double-count. It is not. With the dedupe shipped and reporting, the log read
+  `walk verified against the scene scan: 55 sub-pawn(s), none missed (scene scan 45)` with **no "duplicate(s)
+  collapsed" clause** — zero duplicates. The gap has a different cause: `SceneScan` only counts a sub-pawn whose **own
+  gameObject name** matches a `pawnDescription`, while the walk, once a unit resolves to one of our entries, adds
+  **every** sub-pawn of that unit's pawns regardless of name. So the walk legitimately sees sub-pawns the name-based
+  oracle cannot. Superset by design — the verify block has always collected those as `walkOnly`.
+  I took the backlog's "ten duplicates" claim at face value, repeated it as fact, and predicted the panel would read
+  `46/46`. It reads `56/46`, correctly. **Same mistake as the footprint latch two hours earlier: ranked and described a
+  defect from a stale note instead of measuring it first.** The backlog entry is corrected in place.
+  The dedupe itself is KEPT, but on honest terms: the overlap it guards is structurally real — a unit in a battle *is*
+  reachable through both `PresentationArmyEntities` and the battle's `AllUnits`, and a squadron through both its holder
+  subtree and its air formation — and this session exercised **neither** (0 battle-start events, no air unit on the
+  map). So it is defensive and **unproven in the wild**, not a fix for the observed number. What it did buy is the
+  instrumentation: if the overlap ever does fire, the self-verify line now says so, where before nobody would ever have
+  known. Needs a battle and an air unit on the map to be exercised.
+
+- **~~`sub-pawn walk 56/46` WAS TEN PAWNS COUNTED TWICE~~ (2026-08-23) — see the correction directly above.** The number
+  on the F8 panel read like a *superset* — 56 found against a 46-strong oracle, better than complete. I concluded it was
+  the opposite. `WalkSubPawns` collects from four
   sources that are not disjoint: a unit fighting a battle is reached through **both** `PresentationArmyEntities` and the
   battle's `AllUnits`, and a squadron through **both** its holder subtree and its air formation's `MainPawn`. The miss
   detection was always sound (it is set-based on instance ids), so this never hid a gap — but every consumer of the list

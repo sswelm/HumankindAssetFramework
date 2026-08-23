@@ -9,10 +9,14 @@ namespace HumankindAssetFramework.Tests
     //
     // WalkSubPawns collects from four sources that are NOT disjoint: PresentationArmyEntities, presentationSquadronEntities,
     // the air formations' MainPawn, and each battle's AllUnits. A unit fighting a battle is reached through the army list
-    // AND the battle list; a squadron through its holder subtree AND its air formation. The F8 panel read
-    // `sub-pawn walk 56/46` — ten of the 56 were the same pawns counted twice, which reads as a SUPERSET (better than
-    // complete) when it is the opposite. Every consumer then processed those pairs twice per poll, ProcessEngineAudio
-    // among them — a top-six FrameCost bucket.
+    // AND the battle list; a squadron through its holder subtree AND its air formation. Every consumer iterates the
+    // result per poll, ProcessEngineAudio among them (a top-six FrameCost bucket), so a duplicate is paid repeatedly.
+    //
+    // WHAT THIS IS *NOT*: these tests were written believing the panel's `sub-pawn walk 56/46` was ten duplicates. The
+    // drill collapsed ZERO. That gap is a legitimate superset — SceneScan only counts a sub-pawn whose own gameObject
+    // NAME matches a pawnDescription, while the walk adds every sub-pawn of a unit that resolved to one of our entries.
+    // The overlap guarded here is structurally real but was not exercised (0 battles, no air unit that session), so
+    // treat these as pinning DEFENSIVE behaviour, not a reproduction of an observed defect.
     //
     // The dedupe is generic over the key with an INJECTED id function, and that is not gratuitous: a live
     // UnityEngine.Object cannot be constructed in this test host, and Unity's overloaded `==` makes a bare

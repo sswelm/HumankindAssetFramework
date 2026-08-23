@@ -177,12 +177,18 @@ namespace HumankindAssetFramework
                             foreach (var bu in allUnits) AddUnitSubPawns(bu, GetMember(bu, "PresentationUnit"), list, result);
             }
             catch (Exception ex) { Plugin.LogOnceWarning("subpawn-walk", "[SubPawnScan] walk failed (" + ex.Message + ") — scene scan takes over"); _subPawnWalkTrusted = false; }
-            // DEDUPE (2026-08-23). The four sources above are not disjoint, so the same sub-pawn arrives more than once:
-            // a unit in a battle is reached through BOTH PresentationArmyEntities and the battle's AllUnits, and a
-            // squadron through BOTH its holder subtree and its air formation's MainPawn. The panel read `sub-pawn walk
-            // 56/46` — ten duplicates against a 46-strong oracle — which looks like a SUPERSET (better than complete)
-            // when it is really the same pawns counted twice. Worse, every consumer of this list processes those pairs
-            // twice per poll, ProcessEngineAudio included (a top-six FrameCost bucket).
+            // DEDUPE (2026-08-23). The four sources above are not disjoint in principle: a unit in a battle is reached
+            // through BOTH PresentationArmyEntities and the battle's AllUnits, and a squadron through BOTH its holder
+            // subtree and its air formation's MainPawn. Every consumer iterates this list per poll, ProcessEngineAudio
+            // included (a top-six FrameCost bucket), so a duplicate is paid for repeatedly.
+            //
+            // HONEST STATUS: this was written believing the panel's `sub-pawn walk 56/46` was ten duplicates. It is NOT
+            // — the drill that followed collapsed ZERO. That gap is a legitimate SUPERSET: SceneScan only counts a
+            // sub-pawn whose own gameObject NAME matches a pawnDescription, while the walk adds every sub-pawn of a
+            // unit that resolved to one of our entries, named or not. The overlap guarded here is real but was not
+            // exercised (that session had 0 battles and no air unit), so this is defensive, not a proven fix. The
+            // collapsed count is reported by the self-verify precisely so that "does it ever fire?" stops being a
+            // matter of belief.
             //
             // Deduped HERE, at the boundary, and deliberately not inside the adders: AddUnitSubPawns decides whether to
             // fall back to a holder-subtree search by testing `result.Count == before`, so suppressing a duplicate mid-walk
