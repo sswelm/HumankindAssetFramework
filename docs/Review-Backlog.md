@@ -5,6 +5,33 @@ The two-round adversarial review (5 parallel reviewers per round over both repos
 **found, verified real, and deliberately deferred** — so the list survives outside the session that produced it. Ranked
 by when they'll bite.
 
+## ⚠ How to use this file (added after the 2026-08-23 sweep)
+
+**An entry here is a HYPOTHESIS, not a finding.** It records what someone believed when they wrote it, and the code has
+moved since. Restating one as fact — in a ranking, a commit message, or to the user — launders a guess into a finding.
+
+That is not a theoretical caution. On 2026-08-23 three entries were acted on without re-checking, and all three were
+wrong in a different way: one described a bug whose *diagnosis* was backwards (the sub-pawn "double-count" is a
+legitimate superset — the fix collapsed **zero**); one was **dormant**, sitting behind a config key that is blank by
+default and was blank in the live setup, yet was ranked the top user-visible defect; and one had been **fixed weeks
+earlier** and never struck through. Before touching an entry:
+
+1. **Re-read the code it names.** Line numbers and helper names drift; some entries describe code that no longer exists.
+2. **Check the feature is switched ON.** A defect behind a blank config key is not the one a player hits.
+3. **Check the number is still the number.** Panel/log figures quoted here were true on the day they were written.
+
+### Verification sweep — 2026-08-23
+
+Every open entry that could be checked mechanically was re-read against current source. **8 of the 18 checked were
+stale** — struck through in place below, each with the evidence. The rest are confirmed still-real and left open.
+
+| verdict | entries |
+|---|---|
+| **Stale — closed in this sweep** | district regex fallback · district-ground/hex types off-catalog · no offsite copy · "pre-flight validator not yet built" · registry Save wipes wrapper metadata · regex-fallback overrides-as-models drift · `cb` vs `cbb` naming · `animated` written-not-read |
+| **Confirmed still open** | editor's 4th `schemaVersion` · future-schema warning can't name the dials · `Hk_SilenceEvents` `eo.name` per event · `LongestMatch` tiebreak · `TryLearnClass` first-not-nearest · `rotorSpin*` plugin-only · `deployMoveState` unpruned · `alphaBoost` mapping |
+| **Real but not exercisable today** | Harmony `TargetMethod` param filters — typeprobe says both names have exactly **one** declaring type and one method in this build, so there is no ambiguity to fix; pure future-proofing |
+| **Not re-verified** | the feature *seams* (unbuilt by design, they do not go stale), the bake-script items (need a failing repro), and the editor items needing Unity: `BoneRotation` slot clobber, muzzle-compensation stash, converted-rig rest pose, entry-state coherence, `LoadOrderedAlbedos` |
+
 ## Needs a decision first
 
 - ~~**Gate the rest-fold on the `convertRig` flag?**~~ — DECIDED + IMPLEMENTED 2026-07-19: **split gating.** The
@@ -361,9 +388,12 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
 - ~~**DatabaseBrowser**~~ — FIXED 2026-07-19: `ExitGUIException` is rethrown before the generic catch.
 - **Animated multi-material albedos**: `LoadOrderedAlbedos` drops no-`map_Kd` materials (index shift → wrong rects) and
   can't load `.tga` (red placeholder) — the static path handles both.
-- **Regex-fallback parser drift** (plugin): overrides-array objects parsed as models when `models` is empty; count
+- ~~**Regex-fallback parser drift** (plugin)~~ — **STALE, closed 2026-08-23 sweep.** `ModelChunks` anchors on `"models"s*:s*[` and brace-counts inside it, so an `overrides` array can never be read as models; index alignment was retired the same day (each entry is read from its OWN object text). Original:: overrides-array objects parsed as models when `models` is empty; count
   truncation via min(pd,skel,atlas); early-entry key omission misaligns later entries; resourceName default differs.
-- **Misc small:** registry Save wipes hand-edited pack wrapper metadata (matters when a second pack author exists);
+- **Misc small:** ~~registry Save wipes hand-edited pack wrapper metadata~~ (**STALE, closed 2026-08-23 sweep**:
+  `ModelRegistry.Save()` MERGES onto the on-disk file and explicitly preserves the pack header —
+  `schemaVersion`/`modId`/`dependsOn`/`loadAfter`/`overrides` — "no window edits these, so they must survive every
+  Save"; also `Upsert`/`Remove` became case-insensitive on 08-22, closing the case-only-rename twin below);
   Lab bakes a brand-new never-baked entry with default model fields (Factory→Lab handoff carries only name/file/pawn);
   Browse's auto-set `animUnitFix` announcement is discarded by the ownership merge for existing entries; case-sensitive
   Upsert/Remove matching (case-only rename → twin entries); `atlasGuid` never validated; ~~`_ClipsPoseData.bytes`
@@ -390,7 +420,7 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
   third-party pack never touches an `haf_*` path. **Verified in-game same day** (first session clean: new identity
   loads, settings carried, units/districts/audio normal). Still open for the package release: hardcoded paths,
   package scaffolding. (The `ENCAccessProof` C# namespace + project filename were renamed to `HumankindAssetFramework` on 2026-08-01; the local repo FOLDER followed on 2026-08-16 — nothing left of the old name.)
-- **Pack pre-flight validator (third-party author DX)** — *legitimate gap, not yet built.* Today pack **structure**
+- ~~**Pack pre-flight validator (third-party author DX)**~~ — **STALE, closed 2026-08-23 sweep.** Built: `Haf.Schema/PackValidator.cs` (the rule core, now including WRAPPER rules), `Patches/UniversalInject.Preflight.cs` (boot pre-flight into `haf_load_report.txt`), and the editor's **Validate pack** button. Original: Today pack **structure**
   resolution is loud and human-readable (malformed JSON, duplicate `modId`, missing `dependsOn`, cycles, conflicts →
   clear warnings + `haf_load_report.txt`), and bad input fails *soft* (never crashes). But there's **no entry-level
   content validation**: a wrong bone name, an unresolvable GUID, or a missing texture path degrades silently rather
@@ -659,9 +689,9 @@ dismissed.
 - ~~**`idleAltInterval` default mismatch** (editor 25f / plugin 0f) — a pack.json missing the key gets idle-alt
   disabled instead of the documented 25s cadence.~~ **FIXED 2026-08-16** by the shared-schema field initializers
   (one authoritative default = 25f, test-pinned; see the Framework-Review generic-parse row).
-- **`haf_districts.json` has no regex fallback** — one malformed char disables ALL custom districts (the model
+- ~~**`haf_districts.json` has no regex fallback**~~ — **STALE (duplicate): already struck above, fixed 2026-08-22.** `ParseDistricts` = `Usable(ParseDistrictsRaw(text))` with a per-entry try and `RegexDistricts` as the fallback. Original: — one malformed char disables ALL custom districts (the model
   registry has a fallback; districts don't).
-- **`animated` flag written but not read** — the plugin infers animation from the clip-GUID presence, so the field
+- ~~**`animated` flag written but not read**~~ — **STALE, closed 2026-08-23 sweep — this is BY DESIGN and already policed.** `check_schema_parity.sh` lists `animated` in its "baker fields not read at runtime (bake-time-only, expected)" allowlist, so the asymmetry is declared and gated, not drifting. Original: — the plugin infers animation from the clip-GUID presence, so the field
   is a silently-ignored authored value.
 - Regex-fallback float fields can't parse exponent notation (`1E-05`); narrow (malformed-JSON path only).
 
@@ -672,7 +702,7 @@ dismissed.
 member audit took coverage from 31 types / ~49 members to **49 types / ~124 members** (verified `missing_members=0`).
 See CHANGELOG + Framework-Review A5. What remains:
 
-- **District-ground/hex support types resolved reflectively but off-catalog:** `AssetReferenceRepository`,
+- ~~**District-ground/hex support types resolved reflectively but off-catalog**~~ — **STALE, closed 2026-08-23.** All of them are catalogued now (`AssetReferenceRepository`, `GroundMaterialDefinition`, `GroundMaterialAuthoringData`, `StaticString`, `Databases`), and `check-catalog.sh` — widened the same day to see `AccessTools.Field(x.GetType(), ...)` — passes over 371 names. Original: `AssetReferenceRepository`,
   `Amplitude.StaticString`, `GroundMaterialDefinition`, `AnimationVariableNames`, `HgFxAnchorComponent`. A rename
   there degrades silently. (The `SimulationEvent_*` combat types resolve with their own local warnings, so they're
   loud-but-off-catalog.)
@@ -701,10 +731,10 @@ deferred**:
   builds + runs all 61 tests on every push, using `tools/fetch-refs.ps1` (reference DLLs from public sources — the
   vestigial Amplitude reference turned out removable, so no game files are needed). bindcheck stays manual (needs
   the game's DLLs).
-- **No offsite copy of the unversioned working set** — all code is on public GitHub, but the licensed source models
+- ~~**No offsite copy of the unversioned working set**~~ — **STALE, closed 2026-08-17/22.** `BackupWindow` has an offsite destination (`HAF.Backup.OffsiteDest`), auto-offsite, per-backup zip, a skip-when-unchanged signature, and a refusal when the destination is missing; the operator keeps the compressed copy in cloud storage. Original: — all code is on public GitHub, but the licensed source models
   and baked assets exist only on this machine plus same-machine `D:\HAF_Backups` (now noted in Backup.md). One disk
   event loses the un-reproducible half of the project.
-- **`cb` vs `cbb` GUID-component naming** (clip vs combat-clip; also `ca`/`cba`/`aca`/`a2a`) — a one-character typo
+- ~~**`cb` vs `cbb` GUID-component naming**~~ — **STALE, closed 2026-08-23 sweep.** The confusable clip set (`cb`/`cbb`/`ca`/`cba`/`aca`/`a2a`) no longer exists: clip guids go through the `ClipRoles` table (one enum value + one name/tag/key per role). Only the two unambiguous prefix groups remain — `sa..sd` (skeleton), `ta..td` (texture). Original: (clip vs combat-clip; also `ca`/`cba`/`aca`/`a2a`) — a one-character typo
   in the 44-int wiring compiles clean and mis-wires a clip role; nothing tests the field→`InjectClipCollections`
   wiring. Rename or add a wiring test when next touching the schema.
 - ~~**Ghost-hunt log tags bypass the quiet-by-default `Diag` gate** (`[REND]`/`[SRCFIX]`/`[CRUSH]`/`[GHOST]`/`[DESC]`,
