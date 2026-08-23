@@ -1132,7 +1132,12 @@ namespace HumankindAssetFramework
                             continue;
                         }
                         r.Conflicts.Add($"pawn={e.pawnDescription} kept={held} dropped={pk.modId}({e.resourceName})");
-                        Plugin.Log.LogWarning($"[Uni] CONFLICT: pack '{pk.modId}' targets pawn '{e.pawnDescription}' already claimed by '{held}' — keeping '{held}' (undeclared; add it to `overrides` if intended).");
+                        // `?.` — MergeModels is the PURE merge the unit suite covers, and a pure function must not
+                        // depend on a BepInEx host being wired. Without the guard this line NREs whenever Plugin.Log
+                        // is unset, which on CI made `Undeclared_clash_keeps_first_loaded_and_is_a_conflict` pass or
+                        // fail on xunit's scheduling luck (five OTHER test classes seed the log; this one didn't).
+                        // The two Diag calls above were already safe — Diag short-circuits on a null config entry.
+                        Plugin.Log?.LogWarning($"[Uni] CONFLICT: pack '{pk.modId}' targets pawn '{e.pawnDescription}' already claimed by '{held}' — keeping '{held}' (undeclared; add it to `overrides` if intended).");
                         continue;
                     }
                     if (!string.IsNullOrEmpty(e.pawnDescription)) { ownerMod[e.pawnDescription] = pk.modId; ownerIdx[e.pawnDescription] = r.Built.Count; }
