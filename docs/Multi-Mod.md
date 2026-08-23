@@ -40,6 +40,31 @@ A copy-ready starting point is [`haf-pack.example.json`](haf-pack.example.json).
 | `module` / `moduleGuid` | *(optional)* the Humankind runtime **module** your pack extends — packs load in the game's own mod order (see below). Defaults to your pack's **folder/file name** (== the module Name by convention), so you usually set nothing. Declare `module` (the module Name) only if your pack folder differs from your mod's name; `moduleGuid` is the stable key that survives a retitle. |
 | `overrides` | explicit `{modId, pawnDescription}` replacements: your entry **replaces** that pack's entry on that pawn. Declared = consensual; without it, the clash is a conflict and the first-loaded entry wins. |
 
+### Write only the keys you set — and don't copy ENC's pack as a template
+
+A model entry needs **`resourceName` and `pawnDescription`**; everything else is optional. A key you omit falls back
+to that field's default in `HafModelSchema` — the one authoritative default for both halves — which is why
+[`haf-pack.example.json`](haf-pack.example.json) is a working retexture pack in **five keys**. Write what you set,
+nothing more.
+
+That matters because **ENC's own shipped `pack.json` is a bad thing to learn the format from.** It carries roughly
+200 lines per entry, and about **55 of those keys per entry are bake-time-only** — `size`, `rotation`,
+`normalsMode`, `stripParts`, `convertGrid`, `targetTris`, the `deploy*` tuning, the `animClip*` names — read by the
+Model Factory when it bakes and **never read by the runtime at all**. They are in that file because it doubles as
+the editor's authoring database, and Unity's `JsonUtility` always writes every field of the class it serializes.
+They are not part of the pack contract, and setting them in a hand-written pack does nothing.
+
+The split is structural, so you can always check it rather than guess:
+
+| In a pack file | What it is |
+|---|---|
+| Every field on **`Haf.Schema.HafModelSchema`** | **the contract** — the behaviour/sound/prop/tint config both halves read |
+| The **`int[]` GUID arrays** (`skel`, `atlas`, `clip*`) | **the contract** — asset handles the Factory fills in; omit them entirely for a runtime-only entry |
+| Everything else `ModelDef` declares (non-`int[]`) | **bake-time only** — ignored by the runtime |
+
+`Tools/check_schema_parity.sh` prints the current bake-time-only list under its `INFO` line, so the set is derived
+from the code rather than from this page. See [Shared-Schema.md](Shared-Schema.md) for the field taxonomy.
+
 **Backward compatible:** a legacy bare `{ "models": [...] }` with no wrapper still loads — it just gets default metadata
 (`modId` = the filename, `schemaVersion` = 0). A legacy `haf_models.json` base file, if one exists, still loads too;
 ENC itself now ships as a normal pack at `haf_packs/ENCReload/pack.json` (`modId` `enc`, module `ENCReload`).
