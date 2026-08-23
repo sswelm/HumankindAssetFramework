@@ -340,7 +340,11 @@ namespace HumankindAssetFramework
                 }
                 if (selectorTileGuid.Count == 0) return;
                 long tLoop = FrameCost.Begin();
-                foreach (var d in trackedDistricts)
+                // Walk the MATCHED districts, not all of them. Measured before this: 2,668 walked per frame to find
+                // 1 — 237.3 µs of scan (89 ns each) against 5.6 µs of real work. The filter is rebuilt only when the
+                // tracked set or the guid map changes, so the steady-state loop is ones and twos.
+                EnsureMatchedDistricts(selectorTileGuid);
+                foreach (var d in matchedDistricts)
                 {
                     // SCAN vs WORK, timed apart (2026-08-23). This loop walks EVERY district the game presents to find
                     // the one or two that are ours, and SelectorTile is 36% of HAF's per-frame cost. Whether that is

@@ -972,6 +972,65 @@ namespace HumankindAssetFramework
 
         // ---- DEDICATED-VISUAL HYBRID: force a district re-resolve after the */District/Main cell fill lands ----
         [SessionScoped(Scope = SessionScope.District)] static readonly List<object> trackedDistricts = new List<object>();   // live district instances (for the replay)
+        // MEASURED 2026-08-23: 2,668 tracked districts, walked EVERY frame by the scoped poll to find the ONE that is
+        // ours — 237 µs/frame of pure scan against 5.6 µs of actual work. Two causes behind that number, both here:
+        //   * nothing ever REMOVED a destroyed district, so the list only grew for the whole session; and
+        //   * the dedup on Add was a LINEAR scan of the list (O(n) per add, O(n²) over a session).
+        // This set makes the membership test O(1) and is the thing pruning updates alongside the list. Reference
+        // identity, not Equals: these are Unity objects whose == is an overloaded native liveness check, and using it
+        // for set membership would both cost an interop call per compare and equate two DIFFERENT destroyed objects.
+        [SessionScoped(Scope = SessionScope.District)] static readonly HashSet<object> trackedSet =
+            new HashSet<object>(ReferenceEqualityComparer.Instance);
+
+        sealed class ReferenceEqualityComparer : IEqualityComparer<object>
+        {
+            internal static readonly ReferenceEqualityComparer Instance = new ReferenceEqualityComparer();
+            public new bool Equals(object a, object b) => ReferenceEquals(a, b);
+            public int GetHashCode(object o) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(o);
+        }
+
+        // THE MATCHED SUBSET — the districts the scoped poll actually has work for (measured: 1 of 2,668). Rebuilt
+        // only when the tracked set or the guid map changes, so the per-frame loop walks ones and twos instead of
+        // thousands. It is a CACHE of a filter, never a second source of truth: everything still lives in
+        // trackedDistricts, and a stale entry is caught by the fake-null check on the few matched entries.
+        [SessionScoped(Scope = SessionScope.District)] internal static readonly List<object> matchedDistricts = new List<object>();
+        static int matchedFromTracked = -1, matchedFromGuids = -1;
+
+        /// <summary>Refilter if anything that could change the answer changed. Cheap no-op on the frames — nearly all
+        /// of them — where nothing did.</summary>
+        internal static void EnsureMatchedDistricts(Dictionary<string, object> wanted)
+        {
+            if (matchedFromTracked == trackedDistricts.Count && matchedFromGuids == wanted.Count) return;
+            PruneDeadDistricts();   // the only place that runs; a rebuild is exactly when the list is being walked anyway
+            matchedDistricts.Clear();
+            foreach (var d in trackedDistricts)
+            {
+                if (!districtNameCache.TryGetValue(d, out var nm)) districtNameCache[d] = nm = GetMember(d, "ConstructibleDefinitionName")?.ToString();
+                if (!string.IsNullOrEmpty(nm) && wanted.ContainsKey(nm)) matchedDistricts.Add(d);
+            }
+            matchedFromTracked = trackedDistricts.Count; matchedFromGuids = wanted.Count;
+            Plugin.Diag($"[DistrictTile] matched {matchedDistricts.Count} of {trackedDistricts.Count} tracked district(s) — the per-frame loop walks the matched ones only.");
+        }
+
+        // Test-facing: the tracking list is fed from a Harmony hook on a live game, so the dedup and the prune —
+        // both of which the 2,668-district measurement blamed — would otherwise be unreachable from a unit test.
+        internal static int TrackedCountForTests => trackedDistricts.Count;
+        internal static void TrackForTests(object d) { if (trackedSet.Add(d)) trackedDistricts.Add(d); }
+
+        /// <summary>Drop districts the engine has destroyed. Nothing did this before, so every razed district — and
+        /// every district from a previous in-session load — stayed in the list and cost a Unity fake-null check
+        /// (a native interop call, not a reference test) on every frame, forever. Returns how many went.</summary>
+        internal static int PruneDeadDistricts()
+        {
+            int n = 0;
+            for (int i = trackedDistricts.Count - 1; i >= 0; i--)
+            {
+                var d = trackedDistricts[i];
+                if (d != null && !(d is UnityEngine.Object uo && uo == null)) continue;
+                trackedSet.Remove(d); trackedDistricts.RemoveAt(i); n++;
+            }
+            return n;
+        }
         static object lastLevelBuildEvent;            // the real HgFxAnchorComponent.EventNameEnum arg the game passes
         static bool haveLevelBuildEvent;              // guard: only replay once we've captured a genuine arg value
         static bool inForcedReresolve;                // re-entry guard while WE re-invoke UpdateLevelBuild
@@ -1520,9 +1579,9 @@ namespace HumankindAssetFramework
                               || (Plugin.DistrictSelectorTile != null && !string.IsNullOrEmpty(Plugin.DistrictSelectorTile.Value));
                 if (!inForcedReresolve && wantTrack)
                 {
-                    bool seen = false;
-                    for (int i = 0; i < trackedDistricts.Count && !seen; i++) seen = ReferenceEquals(trackedDistricts[i], district);
-                    if (!seen) { trackedDistricts.Add(district); UniversalInject.RearmDistrictScan(); }   // a NEW district: terrain-hug's district map refreshes (dirty-driven, not a 3 s scene scan)
+                    // O(1) via trackedSet — this was a LINEAR scan of trackedDistricts, i.e. O(n) on every district
+                    // build event with n measured at 2,668 and only ever growing.
+                    if (trackedSet.Add(district)) { trackedDistricts.Add(district); UniversalInject.RearmDistrictScan(); }   // a NEW district: terrain-hug's district map refreshes (dirty-driven, not a 3 s scene scan)
                 }
                 if (!distOn || distModels.Count == 0) return;
                 var name = GetMember(district, "ConstructibleDefinitionName")?.ToString();
