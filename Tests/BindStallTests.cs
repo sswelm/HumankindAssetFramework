@@ -17,6 +17,10 @@ namespace HumankindAssetFramework.Tests
     //
     // These pin the two properties that fix it: the stall count is PER DISTRICT, and a stall that outlives "still
     // loading" escalates exactly ONCE to a real warning that names the district and the consequence.
+    // Shares District session state with DistrictScanTests — both call SessionState.Reset(SessionScope.District),
+    // and xUnit runs test CLASSES in parallel, so without a shared collection one clears the other mid-test. Found
+    // the honest way: DistrictScanTests passed alone and failed in the full suite, and the pre-push gate refused it.
+    [Collection("haf-district-session-state")]
     public class BindStallTests
     {
         public BindStallTests()

@@ -18,6 +18,9 @@ namespace HumankindAssetFramework.Tests
     //
     // These cover the two pure pieces. The per-frame loop itself needs the live game, so it is drilled in-game via
     // the FrameCost line, not here.
+    // Serialised against BindStallTests: both reset District session state, which xUnit would otherwise let them do
+    // concurrently.
+    [Collection("haf-district-session-state")]
     public class DistrictScanTests
     {
         public DistrictScanTests()
