@@ -38,6 +38,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   and a failed link falls back to a plain copy: costs space, never correctness. See [Backup.md](docs/Backup.md).
   **Not yet drilled: restoring FROM a hard-linked snapshot.** The direction of every copy says it is safe; that is
   read, not run.
+  **Follow-up the same day — the local root was 17 GB and 6.4 GB of it was junk.** 362 delete-guard folders, almost
+  all bake-test fixtures the guard had faithfully snapshotted: every suite run bakes assets under a throwaway prefix
+  and deletes them again, and `__smoketest__ReconDrone` alone was 1.9 GB as eight copies of one 232 MB fixture. The
+  restorable list had become a wall of `__convgate__` entries, which is the real cost — *a safety net nobody can see
+  into is not a safety net*. The guard now excludes test fixtures the same way it already excluded preview scratch
+  (*it protects what cannot be rebuilt, not what rebuilds itself*), referencing each suite's **own prefix constant**
+  rather than a copy, because a duplicated literal would drift silently the day a suite renames its fixtures. And the
+  layer finally has retention — it was the only one without any — pruning by **age, not count**, since a burst of
+  thirty deletions in one afternoon must not evict the single one from yesterday that someone actually needs.
+  Configurable in the window (default 14 days, **0 = keep forever** for anyone relying on the original promise);
+  manual backups, `_prerestore` and Factory `_removed_` undo snapshots are still never auto-deleted.
 
 - **ONE THROWING POLL NO LONGER DISABLES EVERY POLL AFTER IT (2026-08-23).** The 08-22 fix put `Plugin.Update`'s
   fan-out in a `try/finally` so the frame accounting always closed — but the `try` still wrapped **all ~25 polls**,

@@ -14,7 +14,7 @@ thing" up to "the machine burned down."
 | --- | --- | --- | --- |
 | **Manual version** | *Back up now* button | Timestamped folder of the toggled groups + manifest | Never auto-deleted |
 | **Daily auto-version** | First editor load of a day (>24 h since last; toggle, default ON) | Full backup of ALL groups — assets *and* configuration — on a background thread, same core as the button | Newest **3** `_auto_` versions kept; rotation logged |
-| **Delete guard** | Any asset deletion under a protected root (toggle, default ON) | `_deleted_<timestamp>_<name>/` copy of the asset (+ `.meta`) *before* the delete proceeds | Never auto-deleted (prune by hand via *Delete*) |
+| **Delete guard** | Any asset deletion under a protected root (toggle, default ON) — **excluding preview scratch and bake-test fixtures** | `_deleted_<timestamp>_<name>/` copy of the asset (+ `.meta`) *before* the delete proceeds | **Pruned after N days** by the daily auto-version (field under the toggle; default 14, **0 = keep forever**) |
 | **Offsite zip** | Rides along with any manual/auto backup (optional: set the *Offsite folder*) | ONE `HAF_<timestamp>.zip` per backup, in a second — ideally cloud-synced — folder. **Skipped entirely when nothing changed** since the last upload (see *Space*) | Never overwritten |
 | **Factory remove-undo** | The Model Factory's **Remove** (always) | `_removed_<timestamp>_<name>/` with the entry's JSON + the exact baked-output whitelist, taken BEFORE anything is deleted; restore via the **Undo remove** button next to Remove OR the window's *Factory remove snapshots* section — both do the full restore (baked assets + registry entry) through one shared implementation | Never auto-deleted |
 
@@ -97,6 +97,21 @@ go-back-a-version. **Preview-scratch files are excluded too** (`*_PropFit.prefab
 `*_PreviewMesh/_PreviewMat`): the Lab's fit preview delete-first *rebuilds* them constantly ("NOT shipped;
 preview-only"), and logging that churn as deletions alarmed exactly the person the guard should reassure — the
 guard protects what can't be rebuilt, not what rebuilds itself.
+
+**Bake-test fixtures are excluded for the same reason (2026-08-23).** Every run of the Bake Tests bakes assets under
+a throwaway prefix (`__smoketest__`, `__feat_`, `__convgate__`) and deletes them again. Measured on the live backup
+root: **362 guard folders totalling 6.4 GB across four days**, 128 of them in one day, with `__smoketest__ReconDrone`
+alone accounting for 1.9 GB as eight copies of the same 232 MB fixture. None of it could ever be worth restoring —
+those assets exist to be deleted — and the volume made the window's restorable list unreadable, which is the real
+cost: *a safety net nobody can see into is not a safety net.* The exclusion references each suite's **own prefix
+constant** rather than a copy of the string, so a suite renaming its fixtures cannot silently restart the hoarding.
+
+**Retention (2026-08-23).** This was the one layer with none — every other layer rotates. Guard snapshots older than
+**N days** are pruned by the daily auto-version; the field sits under the *Delete guard* toggle (default **14**,
+**0 = keep forever**, the original behaviour, still reachable for anyone who relied on it). By **age, not count**: a
+guard's worth is how recently it was made, and a burst of thirty deletions in one afternoon must not evict the single
+one from yesterday that someone actually needs. Manual backups, `_prerestore` and the Factory's `_removed_` undo
+snapshots are still **never** auto-deleted.
 
 ## How a backup is stored
 
