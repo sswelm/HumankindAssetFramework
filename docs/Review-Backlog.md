@@ -19,8 +19,13 @@ by when they'll bite.
 
 ## From the 2026-08-23 critical review
 
-- **`SelectorTile` is 219 µs/frame — 36% of HAF's per-frame cost — and unexplained.** *(Instrumented 2026-08-23,
-  awaiting a heavy-scene reading; see [Performance.md](Performance.md) §6 for the full state.)* Looked at twice:
+- ~~**`SelectorTile` is 219 µs/frame — 36% of HAF's per-frame cost — and unexplained.**~~ — **FIXED 2026-08-23,
+  219 → 6.3 µs, drilled twice.** The measurement ended it: `districts 2668 skipped 237.3 µs, 1 ours 5.6 µs` — the
+  poll walked every tracked district each frame to find one, on a list nothing ever pruned, with an O(n) dedup on
+  add. `Update` fell 391 → 167 µs, matching the 237 µs of measured scan. 9 tests, 4 mutations. See
+  [Performance.md](Performance.md) §6. **Still open in that bucket:** the per-match work reads ~6 µs steady but
+  ~497 µs during the load window — visible only now that the scan no longer hides it; same shape as the §2 load
+  spike, so not urgent. *Original entry follows, kept because the reasoning is the reusable part.* Looked at twice:
   08-21 called it "diffuse, left as is", 08-23 accounted for ~9 µs (uncached reflection in the Fx-tree walk) and
   left ~210 µs. Ruled out by reading: all six per-loop diagnostics are `DistrictDebug`-gated **and** latched, and
   `ResolveMainLayer` is cached — none contribute. Known from the existing buckets: `SelTileLoop ≈ SelectorTile` and

@@ -53,7 +53,7 @@ half as often as they would at 60 — a poll that reads as cheap here may be twi
 | `WonderRows` | 1,350 µs | 0 | an uncached `AccessTools.TypeByName` assembly walk every 30 frames, forever |
 | `PoseOurs` (per our pawn) | 25–57 µs | ~5 µs | ~60 reflection get/sets on the boxed `PawnEntry`, then two raycasts + a bone-name re-resolve per helicopter per frame |
 | `AnimStates` | 204 µs | ~40 µs | a per-unit name resolve + `ToList()` for every army every 3 frames |
-| `SelectorTile` | ~210 µs | ~219 µs | per-district overhead in the scoped poll. Called "diffuse" in the 08-21 pass and left alone; 08-23 named part of it — the Fx-tree walk was re-resolving every field on every visit (see below) — and removing that took it 227.7 → 218.7 µs. The **remaining ~219 µs is still unexplained**, and `SelTileLoop` ≈ `SelectorTile` in every reading, so it is the loop head, not the bind. |
+| `SelectorTile` | ~210 µs | **6.3 µs** | per-district overhead in the scoped poll. Called "diffuse" and left alone in the 08-21 pass; **fully accounted for on 08-23** — the poll was walking **2,668 tracked districts every frame to find 1**, on a list nothing ever pruned. See §6. `Update` fell 391 → 167 µs with it. |
 
 **A correction worth keeping (2026-08-23).** The Fx-tree caching was first written up as taking `SelectorTile` "out of
 the top six, below 10.7 µs". That was measured in a session with 3 injected models and 1 live pawn against the
@@ -120,11 +120,44 @@ Learned in one afternoon, each from a bucket that surprised ([Architecture](Arch
 - **Scoped districts** → `SelectorTile` (~0.2 ms for one; a per-district loop, so roughly linear).
 - **Zoom changes** → pawn-add spikes (the engine re-adds every pawn), visible as a brief rise in both pose buckets.
 
-## 6. `SelectorTile` — the open investigation (2026-08-23)
+## 6. `SelectorTile` — 219 µs → 6 µs (2026-08-23, RESOLVED)
 
-**219 µs/frame: 36% of HAF's entire per-frame cost, and the largest unexplained number in the runtime.** It has been
-looked at twice. The 08-21 pass called it *"diffuse per-district overhead, left as is (0.6%)"*. 08-23 accounted for
-**~9 µs** of it — the Fx-tree walk was re-resolving every field on every visit — leaving **~210 µs unattributed**.
+**It was 219 µs/frame: 36% of HAF's entire per-frame cost, and the largest unexplained number in the runtime.** Looked
+at twice before: 08-21 called it *"diffuse per-district overhead, left as is (0.6%)"*; 08-23 accounted for **~9 µs**
+(the Fx-tree walk re-resolving every field on every visit) and left ~210 µs unattributed. Splitting the loop into
+scan-vs-work produced the number that ended the guessing:
+
+```
+districts 2668 skipped 237.3 µs (89 ns ea), 1 ours 5.6 µs (5592 ns ea)
+```
+
+**2,668 districts walked every frame to find one.** The scan *was* the bucket; the per-match work was 5.6 µs. Three
+causes, all in the tracking list — nothing ever pruned a destroyed district, the dedup on Add was a linear scan, and
+the poll iterated everything instead of the matches. Drilled in-game twice, and `Update` moved by what the
+measurement predicted:
+
+| | before | after |
+|---|---|---|
+| districts walked/frame | 2,668 | **1** |
+| `SelectorTile` | 218.7 µs | **6.3 µs** |
+| `Update` total | 391 µs | **167 µs** (−224 µs, against 237 µs of measured scan) |
+
+> **Read the bucket, not the total.** HAF's total went 612 → 671 µs across those runs and that is *not* a
+> regression: the later scene had **46 live pawns against 18**, and `PoseOurs` alone went 74 → 294 µs. This is the
+> same trap that produced a wrong claim earlier the same day — see the correction under §2.
+
+**What it cost to get there, worth repeating:** the 08-21 pass recorded a *verdict* where it should have recorded a
+*measurement*. "Diffuse, left as is" survived two years of readings and was simply wrong — the bucket was a list
+nobody was pruning, growing with session length. The instrumentation that settled it took an afternoon; the verdict
+had already cost two passes.
+
+### Still open in this bucket
+
+The per-match work reads **~6 µs steady but ~497 µs during the load window**, while selectors are still resolving —
+visible now only because the 237 µs scan is no longer hiding it. Same shape as the 42 ms/frame load spike in §2:
+a boundary the player is already waiting on, so it is not urgent, but it is the next thing in `SelectorTile`.
+
+### The historical record (what was ruled out, and how)
 
 ### What is already known, from the buckets that exist
 
@@ -150,9 +183,10 @@ problems, wanting opposite fixes:
 | **many districts skipped, cheap each** | stop walking them: keep a matched subset, rebuilt when `trackedDistricts` changes. The per-district skip still costs a Unity fake-null check, which is a native interop call, not a reference test |
 | **few districts, expensive each** | the per-match work is the target, and the existing sub-buckets narrow it further |
 
-Nothing reported which, so neither fix could be justified.
+It turned out to be the FIRST, overwhelmingly — and the second cause was one nothing had suspected: nothing ever
+pruned a destroyed district, so the list grew for the whole session.
 
-### The instrumentation (shipped, no fix yet)
+### The instrumentation that settled it
 
 `SelTileSkip` / `SelTileOurs` split the loop, and their **call counts are the district counts** — a number HAF has
 never printed. The summary states both sides the way it already states the pose hook, and stays silent when the
@@ -166,8 +200,8 @@ district axis isn't running:
 > under-count the time *and* the call count — the same accounting leak the 08-22 `Update` fix closed, where a bucket
 > lost frames while its window kept aging and the meter read healthiest exactly when it was most wrong.
 
-**Next step: read it on a heavy scene** (~19 injected models — the bucket does not show its real cost on a light one),
-then fix the half the numbers name. Two tests pin the summary segment so it cannot silently stop reporting.
+Two tests pin the summary segment so it cannot silently stop reporting; nine more cover the filter, the prune and
+the O(1) dedup that replaced the linear scan.
 
 ## 7. Open items
 

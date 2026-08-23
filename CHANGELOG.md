@@ -10,6 +10,29 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **`SelectorTile`: 219 µs → 6 µs — IT WAS WALKING 2,668 DISTRICTS TO FIND ONE (2026-08-23).** The measurement below
+  came back unambiguous: `districts 2668 skipped 237.3 µs (89 ns ea), 1 ours 5.6 µs (5592 ns ea)`. The scan **was**
+  the bucket. Three causes, all in the district tracking list: the poll iterated everything instead of the matches;
+  **nothing ever removed a destroyed district**, so razed districts and every district from a previous in-session
+  load stayed for the whole session, each costing a Unity fake-null check (a native interop call) every frame; and
+  the dedup on Add was a **linear scan** — O(n) per district-build event at n=2,668, O(n²) over a session. Now a
+  matched subset refiltered only on change, a prune, and an O(1) set that compares by **reference** (UnityEngine's
+  `Equals` compares native pointers, so two *different* destroyed districts compare equal and a value-based set
+  would collapse them). **Drilled in-game twice**, and `Update` moved by what the measurement predicted:
+  `SelectorTile` 218.7 → **6.3 µs**, districts walked 2,668 → **1**, `Update` total 391 → **167 µs** (−224 µs against
+  237 µs of measured scan); the log confirms the mechanism — *"matched 1 of 2669 tracked district(s)"*. **Read the
+  bucket, not the total:** HAF's total went 612 → 671 µs across those runs and that is not a regression — the later
+  scene had 46 live pawns against 18 and `PoseOurs` alone went 74 → 294 µs. That is the same trap that produced a
+  wrong claim earlier the same day, and the reason the correction above exists. *Three process notes, all the same
+  lesson in different clothes:* two of four mutations survived the first drill because the **tests** were weak, not
+  the code (a "refresh only while empty" bug passed a test that started empty; a reference-vs-`Equals` mutation is
+  invisible to a stand-in that doesn't override `Equals`); the **pre-push gate refused the push** when
+  `DistrictScanTests` passed alone and failed in the full suite, because it and `BindStallTests` both reset District
+  session state and xUnit runs classes in parallel — the second isolation bug of the day from that root; and the
+  bucket that had been dismissed as "diffuse" for two passes turned out to be a list nobody was pruning, which is
+  what recording a *verdict* instead of a *measurement* costs. **Still open:** the per-match work reads ~6 µs steady
+  but **~497 µs during the load window**, visible only now that the scan no longer hides it.
+
 - **`SelectorTile` — THE MEASUREMENT BEFORE THE FIX (2026-08-23).** At 219 µs/frame it is **36% of HAF's entire
   per-frame cost** and the largest unexplained number in the runtime. It has now been looked at three times: 08-21
   called it *"diffuse per-district overhead, left as is (0.6%)"*; 08-23 accounted for **~9 µs** of it (the Fx-tree
