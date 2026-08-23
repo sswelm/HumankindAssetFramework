@@ -34,6 +34,18 @@ schema** that `ModelDef` (editor) and `ModelEntry` (plugin) both inherit — the
 together. The editor half consumes the same DLL from `ENCReload/Assets/Plugins/HafSchema/Haf.Schema.dll` (drop it there
 after a build, like the other managed plugins in `Assets/Plugins`).
 
+> **That copy is by hand, and it goes stale silently.** The editor compiles against the **deployed** DLL, not the
+> source, so a change to `Haf.Schema` is invisible on the editor side until the file is copied across — and the failure
+> looks like a compile error naming a type that plainly does exist (`'PackValidator' does not contain a definition for
+> 'ValidatePack'`), which reads as *your* mistake rather than a stale binary. Hit exactly this on 2026-08-23 adding the
+> wrapper rules. If `Tools/editor_compile_check.sh` reports a member that you can see in `Haf.Schema/`, copy the DLL
+> before believing it:
+>
+> ```
+> cp Haf.Schema/bin/Release/netstandard2.0/Haf.Schema.dll \
+>    ../ENCReload/Assets/Plugins/HafSchema/Haf.Schema.dll
+> ```
+
 ## Blender (optional dependency)
 
 **Blender** is needed for `.blend` import, **animated-model import**, **Strip parts**, and Reduce-to-tris decimation —

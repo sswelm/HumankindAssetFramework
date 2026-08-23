@@ -61,7 +61,25 @@ by when they'll bite.
   Fixed in three layers (source guard + post-condition, defence-in-depth skip, a discovered-pack breadcrumb in the
   failure log); see the CHANGELOG entry. 20 tests, mutation-drilled 15/20.
 
-- **`PackValidator` has no rules for pack WRAPPER metadata — only for model entries.** The residue of the fix
+- ~~**`PackValidator` has no rules for pack WRAPPER metadata — only for model entries.**~~ — **FIXED 2026-08-23.**
+  `PackValidator.ValidatePack` adds rules for `modId` / `schemaVersion` / `dependsOn` / `loadAfter` / `overrides`, each
+  one mirroring behaviour **verified in `UniversalInjectPatch` first** rather than invented: a blank wrapper key falls
+  back to the file name (`WrapperStr`); an `overrides` entry with a blank field is *silently dropped* at parse; an
+  unsatisfiable `dependsOn` means the pack is SKIPPED (the one Error — everything else is advisory, so the fail-soft
+  contract stands, and a test asserts that); a future `schemaVersion` is advisory (`CheckSchema`).
+  The rule worth having: **an override with no ordering constraint**. An override replaces a pawn *already claimed*, so
+  the pack must load AFTER its target; with neither `dependsOn` nor `loadAfter` naming it, load order is whatever the
+  game's module order happens to be, and if this pack lands first the target's entry is dropped as an undeclared
+  CONFLICT — the override silently doing the opposite of its intent.
+  Wired into **both** surfaces: the plugin writes wrapper issues into `haf_load_report.txt` (in `WriteLoadReport`, not
+  the pre-flight pass — the pre-flight iterates `entries`, and a wrapper mistake bad enough to get the pack skipped
+  contributes no entries, so it would be invisible exactly when it matters), and the editor's **Validate pack** button
+  reports them first, which is the surface the whole item was about. 23 tests, five mutations drilled, plus one pinning
+  that the shipped ENC wrapper stays SILENT — a rule that fires on a healthy pack trains authors to ignore the report.
+  Deliberately still self-contained: the cross-pack questions (does `dependsOn` resolve, does the override's target
+  pawn exist) need the whole pack set, which an author validating one pack does not have, and which the runtime's
+  resolution report already answers better.
+  The original entry: the residue of the fix
   above. The validator is the shared rule core behind all four surfaces (pre-bake, the *Validate pack* button,
   `-strict` in CI, the boot pre-flight), and it has ~30 content checks for bones/files/pawns/formats/ranges and
   **zero** for `modId` / `schemaVersion` / `dependsOn` / `loadAfter` / `overrides`. So a pack whose wrapper is

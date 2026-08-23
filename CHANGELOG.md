@@ -10,6 +10,34 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE VALIDATOR HAD ~30 RULES FOR ENTRIES AND NONE FOR THE PACK ITSELF (2026-08-23).** `PackValidator` checked bones,
+  files, pawns, formats and ranges — and not one thing about the wrapper the whole multi-mod format rests on:
+  `modId`, `schemaVersion`, `dependsOn`, `loadAfter`, `overrides`. So a broken wrapper failed *soft* at runtime (named,
+  graceful) and was never caught at **authoring** time, which is the only point where the author can still fix it.
+  Every new rule mirrors behaviour **verified in `UniversalInjectPatch` before it was written**, not invented policy: a
+  blank wrapper key falls back to the file name (`WrapperStr`); an `overrides` entry with a blank field is *silently
+  dropped* at parse, so the author's intent vanishes with no runtime message at all; an unsatisfiable `dependsOn` gets
+  the pack SKIPPED outright — the single Error, because everything else is advisory and the fail-soft contract stands
+  (a test asserts exactly that, so a future rule cannot quietly start blocking).
+  **The rule worth having is the ordering one.** An override replaces a pawn *already claimed* by an earlier-loaded
+  pack, so the overriding pack must load AFTER its target. With neither `dependsOn` nor `loadAfter` naming it, order is
+  whatever the game's module order happens to be — and if this pack lands first, the target's entry arrives later,
+  finds the pawn owned by us, has no matching override of its own, and is dropped as an undeclared CONFLICT. The
+  override then silently does the **opposite** of what the author wrote. Nothing named that before.
+  Wired into both surfaces. The plugin reports into `haf_load_report.txt` from `WriteLoadReport` rather than the
+  pre-flight pass, and that placement is the point: the pre-flight iterates `entries`, and a wrapper mistake bad enough
+  to get the pack skipped contributes *no entries*, so it would have been invisible exactly when it mattered most. The
+  editor's **Validate pack** button reports wrapper issues first — the surface this item was always about.
+  23 tests, five mutations drilled, plus one that pins the shipped ENC wrapper as **silent**: a rule that fires on a
+  healthy pack trains every author to ignore the report, which is the one failure a validator cannot survive.
+  Deliberately still self-contained — the cross-pack questions (does `dependsOn` resolve, does the override's target
+  pawn exist) need the whole pack set, which an author validating one pack does not have, and which the runtime's
+  resolution report already answers with better information.
+  Found on the way, and now documented in [Building](docs/Building.md): the editor compiles against the **deployed**
+  `Haf.Schema.dll`, hand-copied between the repos, so a schema change is invisible on the editor side until someone
+  copies it — and the failure presents as a compile error naming a member that plainly exists, which reads as your
+  mistake rather than a stale binary.
+
 - **CORRECTION, same day, from the drill: `56/46` IS a superset, and I had the diagnosis backwards.** The entry below
   says the ten-pawn gap *was* a double-count. It is not. With the dedupe shipped and reporting, the log read
   `walk verified against the scene scan: 55 sub-pawn(s), none missed (scene scan 45)` with **no "duplicate(s)

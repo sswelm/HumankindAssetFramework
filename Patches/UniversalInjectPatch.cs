@@ -606,6 +606,18 @@ namespace HumankindAssetFramework
             return ordered;
         }
 
+        // Pack -> the validator's input DTO. Kept as an explicit mapping rather than making `Pack` implement a shared
+        // shape: `Pack` is the plugin's runtime object (it carries `file`, `text`, `assetDir`, the parsed models), and
+        // the validator must stay a pure rule core with no dependency on it.
+        static Haf.Schema.PackValidator.PackWrapper WrapperOf(Pack p) => new Haf.Schema.PackValidator.PackWrapper
+        {
+            ModId = p.modId,
+            SchemaVersion = p.schemaVersion,
+            DependsOn = p.dependsOn,
+            LoadAfter = p.loadAfter,
+            Overrides = p.overrides.Select(o => new Haf.Schema.PackValidator.PackOverrideRef { ModId = o.modId, Pawn = o.pawn }).ToList(),
+        };
+
         static void WriteLoadReport(List<Pack> packs, int total, List<string> conflicts, List<string> applied, List<string> resolution)
         {
             try
@@ -617,13 +629,26 @@ namespace HumankindAssetFramework
                 // `schemaVersion=` line below — the comparison a modder is actually making when they open this file.
                 sb.AppendLine($"packs={packs.Count}  models={total}  conflicts={conflicts.Count}  overrides applied={applied.Count}  schema implemented={Haf.Schema.HafSchema.Version} (reads {Haf.Schema.HafSchema.MinReadable}+)");
                 sb.AppendLine();
+                int wrapperIssues = 0;
                 foreach (var p in packs)
                 {
                     sb.AppendLine($"[{p.modId}]  schemaVersion={p.schemaVersion}  models={p.models.Count}  file={Path.GetFileName(p.file)}");
                     if (p.dependsOn.Count > 0) sb.AppendLine("    dependsOn: " + string.Join(", ", p.dependsOn));
                     if (p.loadAfter.Count > 0) sb.AppendLine("    loadAfter: " + string.Join(", ", p.loadAfter));
                     if (p.overrides.Count > 0) sb.AppendLine("    overrides declared: " + string.Join(", ", p.overrides.Select(o => o.modId + ":" + o.pawn)));
+                    // WRAPPER VALIDATION (2026-08-23). The shared rule core had ~30 rules for entry CONTENT and none for
+                    // the wrapper, so a broken modId/dependsOn/overrides failed soft at runtime and was never named
+                    // anywhere the author would look. Reported HERE rather than in the pre-flight pass because the
+                    // pre-flight iterates `entries`, and a wrapper mistake bad enough to get the pack SKIPPED
+                    // contributes no entries at all — it would be invisible exactly when it matters most.
+                    foreach (var vi in Haf.Schema.PackValidator.ValidatePack(WrapperOf(p)))
+                    {
+                        sb.AppendLine("    " + vi);
+                        wrapperIssues++;
+                    }
                 }
+                if (wrapperIssues > 0)
+                    Plugin.Log.LogWarning($"[Uni] {wrapperIssues} pack wrapper issue(s) across {packs.Count} pack(s) — see haf_load_report.txt (modId / schemaVersion / dependsOn / loadAfter / overrides).");
                 if (resolution.Count > 0) { sb.AppendLine(); sb.AppendLine("RESOLUTION:"); foreach (var r in resolution) sb.AppendLine("  " + r); }
                 if (applied.Count > 0) { sb.AppendLine(); sb.AppendLine("OVERRIDES APPLIED (declared replacements):"); foreach (var a in applied) sb.AppendLine("  " + a); }
                 if (conflicts.Count > 0) { sb.AppendLine(); sb.AppendLine("CONFLICTS (undeclared — first-loaded kept; declare in `overrides` to replace):"); foreach (var c in conflicts) sb.AppendLine("  " + c); }
