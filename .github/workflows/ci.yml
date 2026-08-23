@@ -35,3 +35,9 @@ jobs:
       - name: Binding catalog surface (every by-name site catalogued)
         shell: bash
         run: bash tools/check-catalog.sh
+
+      # Same reasoning again: source-only, milliseconds, and the class it catches is invisible at runtime by
+      # construction — a failed parse overwriting its own default throws nothing and logs nothing.
+      - name: Parse shape (no dead-default TryParse)
+        shell: bash
+        run: bash tools/check-parse-shape.sh

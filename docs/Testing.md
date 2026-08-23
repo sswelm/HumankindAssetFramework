@@ -23,7 +23,7 @@ The fast guards used to be separate scripts you had to remember to run. They're 
 
 | Repo | the `check.sh` gate runs | ~time |
 |---|---|---|
-| **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` (447) · **docs guard** · **binding-catalog surface** · registry schema parity | seconds |
+| **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` (681) · **docs guard** · **binding-catalog surface** · **hot path** · **parse shape** · registry schema parity | seconds |
 | **ENCReload** (editor) | Roslyn editor compile-check · registry schema parity · hand-list gate (4 blocks) | ~30 s |
 
 ### The docs guard (`tools/check-docs.sh`)

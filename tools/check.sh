@@ -32,6 +32,10 @@ run "binding catalog surface (every by-name site catalogued)" bash "$ROOT/tools/
 #     experiment is how 1,350 µs/frame hid for weeks). EXPERIMENTAL is allowed only when it names its config gate.
 run "hot path (no shipped spikes in Update)" bash "$ROOT/tools/check-hot-path.sh"
 
+# 3d) parse shape — `float x = D; TryParse(…, out x)` silently overwrites D with 0. Four sites carried it before
+#     2026-08-23; two were live and NOTHING else could see them (no throw, no log, a plausible number). Source-only.
+run "parse shape (no dead-default TryParse)" bash "$ROOT/tools/check-parse-shape.sh"
+
 # 4) registry schema parity — cross-repo: the guard lives in the ENCReload editor checkout and compares the plugin's
 #    Newtonsoft + regex parse against the editor's ModelDef. Best-effort: a plugin parse change is one half of that
 #    drift, so run it here too when the sibling checkout is present; skip with a note otherwise.

@@ -58,9 +58,15 @@ stale** — struck through in place below, each with the evidence. The rest are 
   return value, never an out-param — per [Decisions](Decisions.md) *"move the DECISION out of the method that does the
   I/O"*. 21 tests (`CfgParseTests`); drilled by restoring the old shape inside the helper: **9 fail, including the
   null and blank cases.** The config description for the same key advertised *"Default 0.08"* against a bound default
-  of `0.17` — corrected in the same pass. **Still open:** nothing gates the shape's return; a regex guard over
-  `= <literal>; <type>.TryParse` in `tools/check.sh` would be ~10 lines, and would need to skip comments (the policy
-  note at `Plugin.ParseFloat` names the pattern deliberately).
+  of `0.17` — corrected in the same pass. **The shape is now gated** (`tools/check-parse-shape.sh`, in the pre-push
+  gate and CI): it strips comments before scanning — the policy note at `Plugin.ParseFloat` quotes the banned shape
+  verbatim, and a gate that trips on its own documentation is one nobody keeps — and back-references the variable, so
+  it fires only when the parse targets the same local the initializer just set. Drilled 7 ways: the original bug
+  verbatim, the two-line form and an `int` variant all FAIL; an uninitialised out-target, an inline `out float b`,
+  parse-then-assign, and the fixed `ParseFloat` idiom all PASS. **What it cannot see** is written into the script
+  (statements separated by a brace, `out` into a field, a wrapper it doesn't know) — per
+  [Decisions](Decisions.md), a gate's all-clear is only as wide as its regex, so widen it when a new shape appears
+  and drill the NEW shape rather than assuming the old pattern reaches it.
 
 - **The runtime is multi-tenant; the authoring tools are not.** — **DECIDED 2026-08-23: intentional, deferred to
   packaging.** The Factory writes one hardcoded pack identity — `ModelRegistry.PackLiveDir`/`PackRepoDir`
