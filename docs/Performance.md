@@ -100,18 +100,26 @@ redeployed with **zero `.cs` changes** (docs and gate scripts only) and the smok
 session a **control**: identical code, near-identical scene (19 live pawns against 18). Everything that moved is the
 meter's own variance.
 
-| | build `15:31` | build `16:31` | spread |
-|---|---|---|---|
-| HAF total | 348 µs | 325 µs | ~7% |
-| `Update` | 185 µs | 162 µs | ~13% |
-| `PoseOurs` per add | 4,544 ns | 4,023 ns | ~11% |
-| `PoseVanilla` per add | 1,573 ns | 1,748 ns | ~11% |
-| `SelectorTile` (ours) | 6.6 µs | 5.4 µs | ~20% |
+**Three samples, not two** (a third session followed on build `16:40`, which carried the district-boolean retype —
+a real code change, but not one that touches these paths). Two points can only ever state a difference; the third is
+what makes this a *range*:
+
+| | `15:31` | `16:31` | `16:40` | spread |
+|---|---|---|---|---|
+| HAF total | 348 µs | 325 µs | 338 µs | ~7% |
+| `Update` | 185 µs | 162 µs | 166 µs | ~13% |
+| `PoseOurs` per add | 4,544 ns | 4,023 ns | 4,092 ns | ~11% |
+| `PoseVanilla` per add | 1,573 ns | 1,748 ns | 1,783 ns | ~12% |
+| `SelectorTile` (ours) | 6.6 µs | 5.4 µs | 5.4 µs | ~20% |
+| live pawns (the scene) | 18 | 19 | 19 | — |
 
 **So a swing under roughly 10% on these buckets is not a signal.** §4 says split a bucket when a number surprises;
-this says what "surprising" has to clear first, and it means the 348 µs above is a sample, not a constant. The one
-number that did *not* move is the one that matters most: `districts 0 skipped` in **both** sessions — §6's fix
-confirmed on two independent runs rather than one.
+this says what "surprising" has to clear first, and it means no single figure on this page is a constant — each is
+one draw from a band this wide. Note the third sample lands *between* the first two rather than extending the range,
+which is what a noise band should do and what a real regression would not.
+
+The one number that did *not* move is the one that matters most: `districts 0 skipped` in **all three** sessions —
+§6's fix confirmed on three independent runs rather than the bench that produced it.
 
 Also recorded from the same panel — GPU mesh buffers, the other budget a custom model spends against:
 `L0 'Visual'` 3,061,435 / 5,000,000 verts (61%), meshes 4,608/8,000 · `L2 'MeshWithSkeletonParticleIndexBuffer'`
