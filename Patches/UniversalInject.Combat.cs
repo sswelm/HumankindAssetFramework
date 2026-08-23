@@ -120,15 +120,19 @@ namespace HumankindAssetFramework
                     present.Add(unit);
                     // Only start the clock once the unit is actually rendered (IsLoaded) — before that there's nothing to fix
                     // and the 1s marks would be wasted during the load.
-                    bool loaded = true; try { loaded = Convert.ToBoolean(GetMember(unit, "IsLoaded")); } catch { }
-                    if (!loaded) continue;
+                    // Default TRUE = "assume rendered unless the game says otherwise". The old shape wrote that
+                    // default into a variable Convert.ToBoolean(null) then overwrote with FALSE, so a renamed
+                    // IsLoaded would have skipped every unit here forever — the respawn silently never running.
+                    if (!MemberBool(unit, "IsLoaded", true)) continue;
                     if (!respawnBase.ContainsKey(unit)) { respawnBase[unit] = respawnFrame; respawnCount[unit] = 0; anyPending = true; continue; }
                     int done = respawnCount[unit];
                     if (done >= RespawnAttempts) continue;                                             // all passes done
                     anyPending = true;                                                                 // a pass is still owed -> keep the fast cadence
                     if (respawnFrame - respawnBase[unit] < (done + 1) * Math.Max(1, Plugin.RespawnDelayFrames.Value)) continue; // not time for the next pass yet
                     respawnCount[unit] = done + 1;                                                     // bump first so a throwing unit isn't stuck
-                    bool naval = false; try { naval = Convert.ToBoolean(GetMember(unit, "IsNaval")); } catch { }
+                    // Correct-by-coincidence in the old shape (the default and the converted-null were both false).
+                    // Converted anyway: that is the version that gets copied to a site where they differ.
+                    bool naval = MemberBool(unit, "IsNaval", false);
                     AccessTools.Method(unit.GetType(), "UpdatePawns", new[] { typeof(bool) })?.Invoke(unit, new object[] { naval });
                     MarkSubPawnsDirty();                   // the respawn rebuilt this unit's sub-pawns -> the shared scan must refresh
                     FacingPersist.OnArmyRespawned(army);   // the rebuild just wiped this unit's heading — re-arm facing restore (respawnAfterLoad units otherwise lose their saved facing)
@@ -327,8 +331,7 @@ namespace HumankindAssetFramework
                 if (dv.sqrMagnitude < 0.01f) return;
                 float aim = UnityEngine.Mathf.Atan2(dv.x, dv.z) * UnityEngine.Mathf.Rad2Deg;
                 // broadside units present the side in battle too
-                int fao = 0;
-                try { fao = Convert.ToInt32(GetMember(GetMember(unit, "PresentationUnitDefinition"), "FacingAngleOffset")); } catch { }
+                int fao = MemberInt(GetMember(unit, "PresentationUnitDefinition"), "FacingAngleOffset", 0);
                 float eased0 = TryTurnStateAt(tr.position, out float ey, out float srate) ? ey : tr.eulerAngles.y;
                 if (fao != 0)
                 {
@@ -403,8 +406,7 @@ namespace HumankindAssetFramework
                     // BROADSIDE FACING (user catch): FacingAngleOffset units — ships, offset typically 90 —
                     // present their SIDE to the target, not the bow; the battle path rotates its look target
                     // by the same offset. Aim at bearing +/- offset, whichever side needs the smaller turn.
-                    int fao = 0;
-                    try { fao = Convert.ToInt32(GetMember(GetMember(unit, "PresentationUnitDefinition"), "FacingAngleOffset")); } catch { }
+                    int fao = MemberInt(GetMember(unit, "PresentationUnitDefinition"), "FacingAngleOffset", 0);
                     float hold = 0f; bool first = true; float releaseAt = 0f;
                     foreach (var pawn in pawns)
                     {

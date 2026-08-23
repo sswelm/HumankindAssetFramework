@@ -47,8 +47,7 @@ namespace HumankindAssetFramework
                                     if (def == null) continue;
                                     int uEra = EraFromName(GetMember(def, "Name")?.ToString());
                                     if (uEra < 0) continue;
-                                    int dom = 0;
-                                    try { dom = Convert.ToInt32(GetMember(def, "SpawnType")); } catch { }
+                                    int dom = MemberInt(def, "SpawnType", 0);
                                     if (dom >= 0 && dom < domainEra.Length && uEra > domainEra[dom]) domainEra[dom] = uEra;
                                     if (uEra > era) era = uEra;
                                 }
@@ -321,9 +320,11 @@ namespace HumankindAssetFramework
                     var pdef = GetMember(unit, "PresentationUnitDefinition");
                     var pdn = (pdef as UnityEngine.Object)?.name ?? "";
                     if (!string.Equals(pdn, unitDefName, StringComparison.OrdinalIgnoreCase)) continue;
-                    bool loaded = true; try { loaded = Convert.ToBoolean(GetMember(unit, "IsLoaded")); } catch { }
-                    if (!loaded) continue;
-                    bool naval = false; try { naval = Convert.ToBoolean(GetMember(unit, "IsNaval")); } catch { }
+                    // See UniversalInject.Reflection.cs: the old `bool loaded = true; try { … } catch { }` had a
+                    // DEAD initializer — Convert.ToBoolean(null) is false, so a renamed IsLoaded would have made
+                    // this loop skip every unit and the vanilla re-scale would simply never have happened.
+                    if (!MemberBool(unit, "IsLoaded", true)) continue;
+                    bool naval = MemberBool(unit, "IsNaval", false);
                     try { AccessTools.Method(unit.GetType(), "UpdatePawns", new[] { typeof(bool) })?.Invoke(unit, new object[] { naval }); n++; }
                     catch { }
                 }

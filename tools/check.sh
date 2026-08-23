@@ -36,6 +36,11 @@ run "hot path (no shipped spikes in Update)" bash "$ROOT/tools/check-hot-path.sh
 #     2026-08-23; two were live and NOTHING else could see them (no throw, no log, a plausible number). Source-only.
 run "parse shape (no dead-default TryParse)" bash "$ROOT/tools/check-parse-shape.sh"
 
+# 3e) member shape — the same bug class one layer down: `bool x = true; try { x = Convert.ToBoolean(GetMember(…)) }
+#     catch {}`. GetMember returns null for a renamed member and Convert.To*(null) does NOT throw, so the catch
+#     never runs and the default is dead. Two live sites then did `if (!x) continue;` — work skipped forever.
+run "member shape (no dead-sentinel Convert(GetMember))" bash "$ROOT/tools/check-member-shape.sh"
+
 # 4) registry schema parity — cross-repo: the guard lives in the ENCReload editor checkout and compares the plugin's
 #    Newtonsoft + regex parse against the editor's ModelDef. Best-effort: a plugin parse change is one half of that
 #    drift, so run it here too when the sibling checkout is present; skip with a note otherwise.

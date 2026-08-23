@@ -10,6 +10,33 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE SENTINEL THAT COULD NEVER BE REACHED (2026-08-23).** `bool loaded = true; try { loaded =
+  Convert.ToBoolean(GetMember(unit, "IsLoaded")); } catch { }` reads as *"true unless the game says otherwise"*
+  and means *"**false** whenever the member is missing"*. `GetMember` swallows its own exception and returns null
+  for a renamed member, and `Convert.ToBoolean(null)` is `false` — **it does not throw** — so the catch never runs
+  and the initializer beside it is dead code. Two live sites then did `if (!loaded) continue;`: on a game rename
+  the post-load respawn pass and the vanilla re-scale would each have stopped running, silently and for good.
+  A second variant was worse than merely dead. `catch { continue; }` means *"cannot read it, leave the thing
+  alone"* — and in the muzzle loop an unreadable `SkeletonBoneIndex` became `0`, which is a **valid** index, so
+  the slot fell through to the donor-junk branch and had its angle stomped: precisely the bone-stomping that loop
+  exists to prevent.
+  Fixed the way [Decisions](docs/Decisions.md) already prescribes and `Plugin.ParseFloat` already demonstrates —
+  **the fallback is a RETURN VALUE, never a variable the call can overwrite** — as `MemberBool/Float/Int/Long/UInt`
+  plus a `TryMember*` pair for the sites that must be able to see *absence*. Note what this is not: it does not
+  replace the `GameBinding` catalog, which is what makes a rename LOUD at startup. It stops a call site from
+  advertising a local defence it never had, so the two stop being confused for one another.
+  **The gate found what the review did not.** `tools/check-member-shape.sh` was drilled on arrival, and the drill
+  earned its keep twice over: the first version caught the `catch { continue; }` form but **missed the headline
+  dead-initializer form** — the regex could not cross the `;` inside `GetMember(…);` — so a gate that looked clean
+  was blind to the case it was written for. Corrected, it then flagged **ten more sites the hand review had
+  missed**, every one a two-line declaration no single-line grep could see, including the exact
+  `int prof = -1; … AnimationCapabilityProfile` site the review had quoted as the example. It also produced one
+  **false positive** — `Convert.ToInt32(GetMember(o, "Count") ?? -1)`, where `??` supplies the fallback *before*
+  the convert and the sentinel genuinely is reachable — excluded by name, because a gate that cries wolf on
+  correct code is one people learn to pass with `--no-verify`. 7 tests (`MemberReadTests`), including an oracle
+  pinning `Convert.ToBoolean(null) == false`; drilled by restoring the old semantics inside the helper, which
+  turns 4 of them red.
+
 - **THREE FEATURES THAT LOOKED HEALTHY AND WERE NEVER RUNNING (2026-08-23).** The Community folder — Humankind's
   mod folder — was `const string @"C:\GameData\Humankind\Community"`, copied into three files: the District
   Factory's health check, Ship Status, and `HafCli.CleanExport`. That is one machine's junctioned layout, and

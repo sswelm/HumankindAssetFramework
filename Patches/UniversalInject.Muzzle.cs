@@ -36,8 +36,11 @@ namespace HumankindAssetFramework
             {
                 var br = GetMember(entry, BoneRotationNames[i]);
                 if (br == null) continue;
-                long axis, boneIdx;
-                try { axis = Convert.ToInt64(GetMember(br, "AxisIndex")); boneIdx = Convert.ToInt64(GetMember(br, "SkeletonBoneIndex")); } catch { continue; }
+                // `continue` = "cannot read this slot, leave it ALONE". The old try/catch never delivered that:
+                // Convert.ToInt64(null) is 0, not a throw, so an unreadable SkeletonBoneIndex became boneIdx 0 —
+                // which is a VALID index, so the slot fell through to the donor-junk branch below and had its
+                // angle zeroed. Exactly the bone-stomping this loop exists to prevent.
+                if (!TryMemberLong(br, "AxisIndex", out long axis) || !TryMemberLong(br, "SkeletonBoneIndex", out long boneIdx)) continue;
                 bool invalid = boneIdx < 0 || boneIdx >= 100000;           // the 0xFFFFFFFF sentinel (aim meant for us)
                 if (!invalid)
                 {
@@ -49,7 +52,7 @@ namespace HumankindAssetFramework
                     // shifts which bone is the victim). Unless it happens to BE our turret, zero it.
                     if (boneIdx != e.turretBoneIdx)
                     {
-                        float aj; try { aj = Convert.ToSingle(GetMember(br, "Angle")); } catch { continue; }
+                        if (!TryMemberFloat(br, "Angle", out float aj)) continue;
                         if (aj != 0f) { SetMember(br, "Angle", 0f); SetMember(entry, BoneRotationNames[i], br); }
                     }
                     continue;
@@ -66,12 +69,12 @@ namespace HumankindAssetFramework
                         SetMember(br, "AxisIndex", newAx);
                     }
                     SetMember(entry, BoneRotationNames[i], br);
-                    if (!turretLogged) { turretLogged = true; float ang = 0f; try { ang = Convert.ToSingle(GetMember(br, "Angle")); } catch { }
+                    if (!turretLogged) { turretLogged = true; float ang = MemberFloat(br, "Angle", 0f);
                         Plugin.Diag($"[Turret] '{e.resourceName}' slot {i} heading angle {ang:0.#}° -> bone {e.turretBoneIdx}, axis {(e.turretAxis >= 0 ? e.turretAxis.ToString() : "keep")}"); }
                 }
                 else                                                       // wheel-spin (axis 0) etc. -> zero
                 {
-                    float a; try { a = Convert.ToSingle(GetMember(br, "Angle")); } catch { continue; }
+                    if (!TryMemberFloat(br, "Angle", out float a)) continue;
                     if (a != 0f) { SetMember(br, "Angle", 0f); SetMember(entry, BoneRotationNames[i], br); }
                 }
             }
@@ -285,19 +288,19 @@ namespace HumankindAssetFramework
             {
                 var br = GetMember(entry, BoneRotationNames[i]);
                 if (br == null) continue;
-                long boneIdx;
-                try { boneIdx = Convert.ToInt64(GetMember(br, "SkeletonBoneIndex")); } catch { continue; }
+                if (!TryMemberLong(br, "SkeletonBoneIndex", out long boneIdx)) continue;
                 if (boneIdx >= 0 && boneIdx < 100000) continue;        // a real bone — the game's own layer, keep it
                 // Invalid-bone slots, by axis (observed on the Humvee donor): axis=1 (up) ≈ the HEADING channel — keep
                 // it, it turns the pawn. axis=0 (roll) = the donor's WHEEL SPIN, accumulating as the unit travels —
                 // on a humanoid rig those land on head/neck bones and wind them up (the ripped-off head). Zero them:
                 // our model has no wheels to roll. (Magnitude-wrapping alone was tried first and didn't help — even a
                 // sane 250° on the wrong bone tears the rig.)
-                long axis;
-                try { axis = Convert.ToInt64(GetMember(br, "AxisIndex")); } catch { continue; }
+                // Unreadable = leave the slot alone. The old catch never fired (Convert.ToInt64(null) is 0), so a
+                // renamed AxisIndex read as axis 0 — "not heading" — and this sanitize would have zeroed the very
+                // heading slot the `axis == 1` test exists to protect.
+                if (!TryMemberLong(br, "AxisIndex", out long axis)) continue;
                 if (axis == 1) continue;                                // heading — leave alone
-                float a;
-                try { a = Convert.ToSingle(GetMember(br, "Angle")); } catch { continue; }
+                if (!TryMemberFloat(br, "Angle", out float a)) continue;
                 if (a == 0f) continue;
                 SetMember(br, "Angle", 0f);
                 SetMember(entry, BoneRotationNames[i], br);

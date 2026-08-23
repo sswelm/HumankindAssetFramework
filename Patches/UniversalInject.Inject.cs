@@ -122,8 +122,7 @@ namespace HumankindAssetFramework
                         // ChariotHumanFighter(4), Mount(6), HumanMountedDriver(9), Chariot(10), ChariotMount(12),
                         // ChariotHumanDriver(13), HumanServant(16). ANIMALS stay scalable (AnimalFighter=3 — cave
                         // bears!), as do boats, planes, vehicles, missiles and custom rigs.
-                        int prof = -1;
-                        try { prof = Convert.ToInt32(GetMember(def, "AnimationCapabilityProfile")); } catch { }
+                        int prof = MemberInt(def, "AnimationCapabilityProfile", -1);
                         bool humanClass = prof == 1 || prof == 2 || prof == 4 || prof == 6 || prof == 9 || prof == 10 || prof == 12 || prof == 13 || prof == 16;
                         if (unitScaleLogged == null) unitScaleLogged = new HashSet<string>();
                         if (humanClass)
@@ -132,8 +131,7 @@ namespace HumankindAssetFramework
                         }
                         else
                         {
-                            int sdefId = -1;
-                            try { sdefId = Convert.ToInt32(GetMember(addon, "PawnDefinitionId")); } catch { }
+                            int sdefId = MemberInt(addon, "PawnDefinitionId", -1);
                             if (sdefId >= 0)
                             {
                                 // THE UNIT'S OWN ERA (user: "the unit needs to register its era as well"): era
@@ -472,7 +470,7 @@ namespace HumankindAssetFramework
                         {
                             var pe = peF.GetValue(c);
                             int cachedSkel = Convert.ToInt32(GetMember(pe, "SkeletonId"));
-                            float cachedHide = 0f; try { cachedHide = Convert.ToSingle(GetMember(pe, "HideFactor")); } catch { }
+                            float cachedHide = MemberFloat(pe, "HideFactor", 0f);   // was correct only by coincidence: 0f == Convert.ToSingle(null)
                             // THE SANDWICH (2026-08-03, the ghost kill): the ghost renders from this CACHED struct's
                             // state (proven: repairing its skeleton reoriented the ghost; offsetting OUR post-hook
                             // position moved the model but not the ghost). So poison the source: the cached struct is
@@ -978,8 +976,8 @@ namespace HumankindAssetFramework
                 var sb = new System.Text.StringBuilder($"[Uni][FXMESHES] layer {layer}: {buf?.Length ?? 0} slots (loader={(loadFx != null ? "OK" : "MISSING")})\n");
                 for (int i = 0; buf != null && i < buf.Length && i < 300; i++)
                 {
-                    uint start = 0, prim = 0;
-                    try { start = Convert.ToUInt32(GetMember(buf.GetValue(i), "StartIndex")); prim = Convert.ToUInt32(GetMember(buf.GetValue(i), "PrimitiveCount")); } catch { }
+                    var slotv = buf.GetValue(i);
+                    uint start = MemberUInt(slotv, "StartIndex", 0), prim = MemberUInt(slotv, "PrimitiveCount", 0);
                     if (start == 0 && prim == 0) continue;   // empty slot
                     string nm = "?";
                     if (find != null)
@@ -1444,8 +1442,7 @@ namespace HumankindAssetFramework
                     var pmType = GameBinding.PawnManager;
                     var pm = pmType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
                              ?? AccessTools.Field(pmType, "Instance")?.GetValue(null);
-                    int defId = -1;
-                    try { defId = Convert.ToInt32(GetMember(addon, "PawnDefinitionId")); } catch { }
+                    int defId = MemberInt(addon, "PawnDefinitionId", -1);
                     if (pm != null && defId >= 0)
                     {
                         var descs = AccessTools.Field(pmType, "gpuPawnDescriptorEntries")?.GetValue(pm) as Array;
@@ -1482,8 +1479,7 @@ namespace HumankindAssetFramework
                             // sheet. Sync count + bbox from OUR skeleton.
                             try
                             {
-                                uint ourBones = 0;
-                                try { ourBones = Convert.ToUInt32(GetMember(skel, "BonesCount")); } catch { }
+                                uint ourBones = MemberUInt(skel, "BonesCount", 0);
                                 var bcF = dT.GetField("BonesCount");
                                 if (ourBones > 0 && bcF != null)
                                 {
@@ -1717,8 +1713,7 @@ namespace HumankindAssetFramework
                     var pmType = GameBinding.PawnManager;
                     var pm = pmType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
                              ?? AccessTools.Field(pmType, "Instance")?.GetValue(null);
-                    int defId = -1;
-                    try { defId = Convert.ToInt32(GetMember(addon, "PawnDefinitionId")); } catch { }
+                    int defId = MemberInt(addon, "PawnDefinitionId", -1);
                     if (pm == null || defId < 0)
                     {
                         // Not registered yet: RegisterPawnDefinition's own Add() snapshots the appended array — nothing to patch.

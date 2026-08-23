@@ -42,6 +42,13 @@ jobs:
         shell: bash
         run: bash tools/check-parse-shape.sh
 
+      # Same class one layer down, and invisible for the same reason: GetMember returns null for a renamed member
+      # and Convert.To*(null) returns zero WITHOUT throwing, so `bool x = true; try { x = … } catch {}` silently
+      # becomes false. Two live sites then skipped their work forever. Source-only, milliseconds.
+      - name: Member shape (no dead-sentinel Convert(GetMember))
+        shell: bash
+        run: bash tools/check-member-shape.sh
+
       # REGISTRY SCHEMA PARITY — the cross-repo guard, and the one this workflow was missing. The editor WRITES
       # pack.json from ModelDef; this plugin READS it two ways, and a key the REGEX FALLBACK forgot is invisible at
       # runtime by construction: a malformed-JSON pack silently loses that field, no throw, no log. tools/check.sh

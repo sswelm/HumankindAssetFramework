@@ -472,8 +472,7 @@ namespace HumankindAssetFramework
             {
                 var arr = GetMember(knownManagers[m], "pawnEntries") as Array;
                 if (arr == null) continue;
-                int cnt;
-                try { cnt = Convert.ToInt32(GetMember(knownManagers[m], "pawnCount")); } catch { continue; }
+                if (!TryMemberInt(knownManagers[m], "pawnCount", out int cnt)) continue;
                 if (cnt <= 0 || cnt > arr.Length) continue;
                 for (int i = 0; i < cnt; i++)
                 {

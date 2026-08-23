@@ -36,7 +36,7 @@ in **GitHub Actions**. Both lanes matter, and for different reasons:
 
 | Repo | `check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
-| **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` · **docs guard** · **binding-catalog surface** · **hot path** · **parse shape** · registry schema parity | all of them | seconds |
+| **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` · **docs guard** · **binding-catalog surface** · **hot path** · **parse shape** · **member shape** · registry schema parity | all of them | seconds |
 | **ENCReload** (editor) | Roslyn editor compile-check · registry schema parity · hand-list gate (4 blocks) | parity + hand-list — **not** the compile check | ~30 s |
 
 The one guard CI cannot run is **`Tools/editor_compile_check.sh`**: it needs a licensed Unity 2021.3.1f1 install
@@ -116,6 +116,42 @@ the next added field fails the push instead of being silently dropped:
 
 Each block is drilled the same way: plant the omission, watch the gate name it, restore. A gate nobody has seen
 fail is not yet a gate.
+
+### The dead-sentinel gate (`tools/check-member-shape.sh`)
+
+Sibling of the dead-default `TryParse` gate, one layer down. The banned shape:
+
+```csharp
+bool loaded = true; try { loaded = Convert.ToBoolean(GetMember(unit, "IsLoaded")); } catch { }
+if (!loaded) continue;
+```
+
+`GetMember` swallows its own exception and returns **null** for a missing or renamed member — and
+`Convert.ToBoolean(null)` is `false`, `Convert.ToInt32(null)` is `0`. **They do not throw.** So the `catch` never
+runs, the initializer is dead, and the variable takes the converted-null value instead of the default written
+beside it. Two live sites had exactly this and then skipped their work on it: on a game rename the respawn pass
+and the vanilla re-scale would each have stopped running, silently and permanently.
+
+The fix is the one the `ParseFloat` policy already states — **the fallback is a return value, never a variable the
+call can overwrite** — plus a `Try*` pair for the sites whose intent is *"if I cannot read this, leave the thing
+alone"* (they used `catch { continue; }`, which never fired either):
+
+```csharp
+if (!MemberBool(unit, "IsLoaded", true)) continue;              // fallback returned
+if (!TryMemberLong(br, "AxisIndex", out long axis)) continue;   // absence is a state you can branch on
+```
+
+**This does not replace the binding catalog.** The catalog is what makes a rename *loud* at startup; this stops a
+call site from advertising a local defence it never had, so the two are not mistaken for one another.
+
+Drilled on the day it was written (2026-08-23), and the drill paid immediately: the first version of the gate
+caught the `catch { continue; }` form but **missed the headline dead-initializer form** — its regex could not
+cross the `;` inside `GetMember(…);`. A planted violation exposed that in one run. The corrected gate then found
+**ten more sites the hand review had missed**, all two-line declarations that a single-line grep never saw, and
+one **false positive** — `Convert.ToInt32(GetMember(o, "Count") ?? -1)`, where the `??` supplies the fallback
+before the convert, so that sentinel really is reachable. Excluded by name, because a gate that cries wolf on
+correct code is a gate people learn to bypass. Tests: `Tests/MemberReadTests.cs`, including an **oracle** test
+asserting `Convert.ToBoolean(null) == false` — the premise the whole bug class rests on.
 
 ### The binding-catalog surface guard (`tools/check-catalog.sh`)
 

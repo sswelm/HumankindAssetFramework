@@ -47,6 +47,52 @@ namespace HumankindAssetFramework
             return null;
         }
 
+        // ---- TYPED MEMBER READS: the fallback is a RETURN VALUE, and "absent" is a state you can see ----
+        //
+        // THE SHAPE THESE REPLACE (review 2026-08-23), which reads as careful and is not:
+        //     bool loaded = true; try { loaded = Convert.ToBoolean(GetMember(unit, "IsLoaded")); } catch { }
+        // GetMember swallows its own exception and returns NULL for a missing/renamed member — and
+        // Convert.ToBoolean(null) is `false`, Convert.ToInt32(null) is `0`. They do not throw. So the catch never
+        // runs, the initializer is DEAD, and the variable silently takes the converted-null value instead of the
+        // default the author wrote. `loaded` defaulted to true and became false; the caller's `if (!loaded)
+        // continue;` then skipped the work forever. Same family as the dead-default TryParse (Plugin.ParseFloat)
+        // and fixed the same way: the fallback is returned, never assigned through a variable the call can clobber.
+        //
+        // This does NOT replace the GameBinding catalog — that is what makes a rename LOUD at startup. It stops the
+        // call site from *pretending* to a local defence it never had, so the two are not confused for each other.
+        //
+        // A missing member and a member holding null are the same thing here (null); every member these read is a
+        // value type on a game struct, where "present but null" cannot occur.
+        static bool TryConvert<T>(object o, string name, Func<object, T> conv, out T value)
+        {
+            value = default(T);
+            object raw = GetMember(o, name);
+            if (raw == null) return false;                       // absent — the ONLY signal the old shape threw away
+            try { value = conv(raw); return true; } catch { return false; }   // present but unconvertible: also "no"
+        }
+
+        internal static bool MemberBool(object o, string name, bool fallback)
+            => TryConvert(o, name, Convert.ToBoolean, out bool v) ? v : fallback;
+        internal static float MemberFloat(object o, string name, float fallback)
+            => TryConvert(o, name, Convert.ToSingle, out float v) ? v : fallback;
+        internal static int MemberInt(object o, string name, int fallback)
+            => TryConvert(o, name, Convert.ToInt32, out int v) ? v : fallback;
+        internal static long MemberLong(object o, string name, long fallback)
+            => TryConvert(o, name, Convert.ToInt64, out long v) ? v : fallback;
+        internal static uint MemberUInt(object o, string name, uint fallback)
+            => TryConvert(o, name, Convert.ToUInt32, out uint v) ? v : fallback;
+
+        // Try* for the call sites whose intent is "if I cannot read this, leave the thing ALONE" — they used
+        // `catch { continue; }`, which likewise never fired.
+        internal static bool TryMemberFloat(object o, string name, out float value)
+            => TryConvert(o, name, Convert.ToSingle, out value);
+        internal static bool TryMemberLong(object o, string name, out long value)
+            => TryConvert(o, name, Convert.ToInt64, out value);
+        internal static bool TryMemberInt(object o, string name, out int value)
+            => TryConvert(o, name, Convert.ToInt32, out value);
+        internal static bool TryMemberUInt(object o, string name, out uint value)
+            => TryConvert(o, name, Convert.ToUInt32, out value);
+
         internal static void SetMember(object o, string name, object val)
         {
             var m = CachedMember(o.GetType(), name);

@@ -102,8 +102,7 @@ namespace HumankindAssetFramework
                             int idx = pair.Item2 + b;
                             if (idx < 0 || idx >= animBuf.Length) break;
                             var ae = animBuf.GetValue(idx);
-                            uint fcv;
-                            try { fcv = Convert.ToUInt32(GetMember(ae, "FrameCount")); } catch { continue; }
+                            if (!TryMemberUInt(ae, "FrameCount", out uint fcv)) continue;
                             if (fcv < 2) continue;                                  // a held pose can't move
                             try
                             {
@@ -447,16 +446,13 @@ namespace HumankindAssetFramework
             {
                 var arr = GetMember(knownManagers[m], "pawnEntries") as Array;
                 if (arr == null) continue;
-                int cnt;
-                try { cnt = Convert.ToInt32(GetMember(knownManagers[m], "pawnCount")); } catch { continue; }
+                if (!TryMemberInt(knownManagers[m], "pawnCount", out int cnt)) continue;
                 if (cnt <= 0 || cnt > arr.Length) continue;
                 int nFixed = 0, nSeen = 0;
                 for (int i = 0; i < cnt; i++)
                 {
                     var slot = arr.GetValue(i);
-                    int d, s;
-                    try { d = Convert.ToInt32(GetMember(slot, "PawnDescriptorId")); s = Convert.ToInt32(GetMember(slot, "SkeletonId")); }
-                    catch { continue; }
+                    if (!TryMemberInt(slot, "PawnDescriptorId", out int d) || !TryMemberInt(slot, "SkeletonId", out int s)) continue;
                     if (d != e.descId) continue;
                     nSeen++;
                     if (s == e.skeletonId) continue;
@@ -507,8 +503,7 @@ namespace HumankindAssetFramework
                 {
                     var arr = GetMember(knownManagers[m], "pawnEntries") as Array;
                     if (arr == null) continue;
-                    int cnt;
-                    try { cnt = Convert.ToInt32(GetMember(knownManagers[m], "pawnCount")); } catch { continue; }
+                    if (!TryMemberInt(knownManagers[m], "pawnCount", out int cnt)) continue;
                     if (cnt <= 0 || cnt > arr.Length) continue;
                     // THE STALE-BUFFER REGION (the ghost's hiding place, 2026-08-03): the GPU uploads the WHOLE
                     // pawnEntries array every frame — but the game (and every census we wrote) only touches
