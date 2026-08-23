@@ -14,7 +14,11 @@
          (a self-contained .NET 8 publish full of mscorlib.dll/System.*.dll) gets swept in as candidate assembly
          files, and reference resolution silently prefers its .NET 8 facade mscorlib over the net471 reference
          assemblies — every framework type then fails to resolve (271x CS0518/CS0103). -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);baker\**;tools\**;Tests\**</DefaultItemExcludes>
+    <!-- _enc\** : CI checks the EDITOR repo out into _enc/ to run the cross-repo schema-parity guard (see
+         .github/workflows/ci.yml) — ~15k lines of Unity editor C# landing under the default **/*.cs glob. The
+         workflow orders that checkout AFTER the build, so it cannot bite today; this exclude is so it still
+         cannot bite the day someone reorders the steps. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);baker\**;tools\**;Tests\**;_enc\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <!-- BUILD STAMP (2026-08-23). "Which build is actually running?" cost a whole in-game drill: an F8 smoke and a
