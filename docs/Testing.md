@@ -4,9 +4,15 @@ HAF is verified in **three tiers**, each a machine, each at the level where its 
 
 | Tier | Runs | Guards |
 |---|---|---|
-| **Unit tests** — **589 as of 2026-08-23** | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers** |
+| **Unit tests** — **705 as of 2026-08-23** | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers** |
 | **Headless game checks** | `tools/check-catalog.sh` in the push gate; `tools/check-bindings.sh` on demand / after a game update | **two halves of one claim**: `check-catalog.sh` proves the catalog **covers the code** (every by-name literal at a reflection site is catalogued or allowlisted with a reason), `bindcheck` proves it **resolves** against the real DLLs; `typeprobe --find` / `--exact` locate a seam or a member's owner before a binding is written |
 | **In-game smoke test** — `[load]` automatic, `[full]` on the F8 button | every load (a few ms, once), and on request | the injecting half, read from the **engine**: bindings, registry, roles, assets, sounds, files, GPU budget, district tiles and textures, patched seams — and, on the button, every live pawn on *our* skeleton, pose-hook liveness, the sub-pawn walk vs a scene scan, the write-back self-test |
+
+> **This page owns the test count.** Nowhere else states it. On 2026-08-23 this file said **589** in the table above
+> and **681** twelve lines further down, while `dotnet test` reported **705** — the same drift
+> [Shared-Schema.md](Shared-Schema.md) already fences off for the field count, caught here by a review rather than by a
+> guard. Re-check with `dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release` and read the `Total:`.
+> The number counts expanded `[Theory]` cases, so it moves faster than the count of test *methods*.
 
 The unit suite is a deliberate, bounded suite, not a coverage target: it guards the functions where bugs have actually
 hidden, and stops there on purpose. What it cannot reach — the ~18k lines that reflect into a running game — is not
@@ -16,15 +22,52 @@ left to eyes: the smoke test reads the engine's own state, and its load tier nee
 dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release
 ```
 
-## The pre-push gate (`Tools/check.sh`)
+## The fast gates — two lanes, `check.sh` and CI
 
-The fast guards used to be separate scripts you had to remember to run. They're now one command per repo, wired as a
-**pre-push hook** so a push can't land a broken build, a failing test, or a drifted schema:
+The fast guards used to be separate scripts you had to remember to run. They're now one command per repo
+(`check.sh`), wired as a **pre-push hook** — and, since 2026-08-23, the guards that need nothing but source also run
+in **GitHub Actions**. Both lanes matter, and for different reasons:
 
-| Repo | the `check.sh` gate runs | ~time |
-|---|---|---|
-| **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` (681) · **docs guard** · **binding-catalog surface** · **hot path** · **parse shape** · registry schema parity | seconds |
-| **ENCReload** (editor) | Roslyn editor compile-check · registry schema parity · hand-list gate (4 blocks) | ~30 s |
+- **The hook** runs *everything*, including the guards that need a licensed Unity install or the game. It is the
+  complete gate, and it is the only place some checks can run at all.
+- **CI** runs the source-only subset. A hook is **per-clone config** (`git config core.hooksPath …`) that a
+  contributor may never have set, and `git push --no-verify` — or a GitHub web edit, which runs no hook whatsoever —
+  walks straight past it. CI is the lane that survives all three.
+
+| Repo | `check.sh` (pre-push hook) | also in CI | ~time |
+|---|---|---|---|
+| **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` · **docs guard** · **binding-catalog surface** · **hot path** · **parse shape** · registry schema parity | all of them | seconds |
+| **ENCReload** (editor) | Roslyn editor compile-check · registry schema parity · hand-list gate (4 blocks) | parity + hand-list — **not** the compile check | ~30 s |
+
+The one guard CI cannot run is **`Tools/editor_compile_check.sh`**: it needs a licensed Unity 2021.3.1f1 install
+(`UnityEditor.dll`, the MonoBleedingEdge 4.7.1 profile, every `UnityEngine` module), none of which is
+redistributable or present on a hosted runner. It stays in the hook, where the Unity install already is. So the
+editor's compile check is the one check a `--no-verify` still gets past — worth knowing before you use one.
+
+### Schema parity now runs from **both** sides
+
+`check.sh` has always run the cross-repo parity guard *best-effort* — "when the sibling checkout is present" — and
+on a runner it never is, so it took the `[SKIP]` branch every time. The result was one-directional: an **editor**
+change was checked whenever ENCReload was pushed, but a **plugin** change to the regex fallback in `ParseModels` was
+guarded by nothing at all until somebody happened to push the *other* repo. That is precisely the failure class that
+is invisible at runtime by construction — a key the fallback forgot is silently lost from a malformed-JSON pack, no
+throw, no log.
+
+Both workflows now check the sibling repo out (into `_enc/` and `_haf/` respectively) and run the one parity script,
+which lives in ENCReload because it is that repo's schema too. Consequences worth knowing:
+
+- **A red parity step can mean the *other* repo moved.** That is the drift the guard exists to make loud; read the
+  failure before blaming the pull request.
+- A plugin-side schema change still only trips ENCReload's copy on its next push. `workflow_dispatch` is enabled on
+  both so parity can be re-run by hand, and ENCReload's workflow carries a commented-out weekly `schedule:` for the
+  day that becomes worth automating.
+- The plugin's `.csproj` excludes `_enc\**` from its default `**/*.cs` glob. The workflow already orders that
+  checkout after the build, but the exclude is what makes a future step-reorder harmless — verified load-bearing by
+  reverting it and watching a planted invalid `.cs` under `_enc/` break the build with real `CS` errors.
+
+Both CI guards were **fault-injected before being trusted**, the same standard as every other gate here: a UI-edited
+field with no ownership-list entry, and a deleted `Regex.Matches` line in `ParseModels`, each turned the matching
+step red with `rc=1` and named the offending field.
 
 ### The docs guard (`tools/check-docs.sh`)
 

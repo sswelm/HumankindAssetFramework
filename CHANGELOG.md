@@ -10,6 +10,32 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **HALF THE GATE ONLY EXISTED ON ONE MACHINE (2026-08-23).** The editor repo had **no CI at all** — ~15k lines of
+  Unity editor C# whose only guards ran from a pre-push hook. That hook is per-clone config
+  (`git config core.hooksPath Tools/git-hooks`) a contributor may never have set, and `--no-verify`, or a GitHub web
+  edit that runs no hook whatsoever, walks straight past it. The argument against that arrangement was already
+  written down — in *this* repo's `ci.yml`, in the comment explaining why three source-only guards had been moved
+  onto the runner. It had simply never been applied to the other half. Both of the editor's portable guards (the
+  hand-list gate, registry schema parity) are greps that take seconds; only `editor_compile_check.sh` genuinely
+  cannot run, needing a licensed Unity 2021.3.1f1 install no hosted runner has, so it stays in the hook.
+  The second, quieter half: `check.sh` has always run parity **best-effort** — "when the sibling checkout is
+  present" — and on a runner it never is, so it took the `[SKIP]` branch every single time. Parity was therefore
+  **one-directional**: an editor change was checked when ENCReload was pushed, while a plugin-side change to the
+  regex fallback in `ParseModels` was guarded by *nothing*, in either lane, until somebody happened to push the
+  other repo. That is the same class as the entry below it — a failure that announces itself nowhere, since a key
+  the fallback forgot is silently dropped from a malformed-JSON pack with no throw and no log. Both workflows now
+  check the sibling out and run the one parity script.
+  Every new step was **fault-injected before being trusted**, the standard the rest of the gates are held to: a
+  UI-edited field with no ownership-list entry, and a deleted `Regex.Matches` line in `ParseModels`, each turned its
+  step red with `rc=1` and named the field. Two traps surfaced while wiring it, neither in the plan. The editor
+  repo's `.gitignore` opens with `/*` — ignore-everything-then-allowlist — so without `!/.github` the workflow file
+  is *silently untracked*: CI that appears to exist and never runs. And the plugin's `.csproj` excluded
+  `baker/tools/Tests` from its default `**/*.cs` glob but had nothing for the `_enc/` checkout, which is a second
+  repository landing inside the project; the exclude added for it was verified **load-bearing** rather than assumed,
+  by reverting it and watching a planted invalid `.cs` break the build with real `CS` errors. Documented in
+  [Testing](docs/Testing.md), which in the same pass was found stating the test count as **589** in one table and
+  **681** twelve lines later while `dotnet test` reported **705**, and now owns that number in one place.
+
 - **THE DEFAULT WAS DEAD CODE IN FOUR PLACES (2026-08-23).** `float x = 0.17f; float.TryParse(cfg, …, out x);` reads as
   *"0.17 unless the config overrides it"* and means *"**0** unless it parses"* — `out` is definitely-assigned, so a
   failed parse writes 0 straight over the initializer. Two of the four sites were live, both the district footprint's

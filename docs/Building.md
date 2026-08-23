@@ -19,7 +19,9 @@ Needs the **.NET SDK**. The project file is `HumankindAssetFramework.csproj`. Pu
 **No game installed?** `pwsh tools/fetch-refs.ps1` collects every reference DLL from public sources
 (nuget.org, the BepInEx release, BepInEx's unstripped-Unity mirror) — this is what CI uses; it never overwrites
 DLLs you already copied from the game. GitHub Actions builds + runs the full test suite on every push
-(`.github/workflows/ci.yml`).
+(`.github/workflows/ci.yml`), along with every source-only guard — docs links, binding-catalog surface, hot path,
+parse shape, and the cross-repo registry schema parity (which checks the editor repo out to do it). See
+[Testing.md](Testing.md) for which guards run in which lane, and why the hook is not enough on its own.
 
 Then:
 

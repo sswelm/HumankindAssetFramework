@@ -72,7 +72,7 @@ so an agent can crawl the whole doc set from here with no authentication. The hu
 - [CHANGELOG.md](CHANGELOG.md): the dated milestone log and the war stories behind each capability.
 - [docs/Framework-Review.md](docs/Framework-Review.md): verified code-review findings (prioritized) and the hardening order.
 - [docs/Review-Backlog.md](docs/Review-Backlog.md): the open review backlog.
-- [docs/Testing.md](docs/Testing.md): the testing strategy — what's unit-tested, what's covered by in-editor instruments, and why.
+- [docs/Testing.md](docs/Testing.md): the testing strategy — what's unit-tested, what's covered by in-editor instruments, and why. Also the two gate lanes: `check.sh` as the pre-push hook (everything, incl. the guards needing Unity) vs GitHub Actions (the source-only subset, because a hook is per-clone config a `--no-verify` walks past), and the cross-repo schema parity that now runs from both repos. Owns the unit-test count.
 - [docs/Headless-CLI.md](docs/Headless-CLI.md): the headless CLI reference — re-bake models and run the full Humankind mod build+deploy from the command line (Unity batch mode via `-executeMethod`), so scripts/CI/agents drive HAF without the GUI. Built + verified.
 
 ## Optional

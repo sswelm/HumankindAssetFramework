@@ -240,7 +240,7 @@ an "all roles" site as a list — loop `ClipRoles.All` (the lockstep-list shape 
 | Layer | Proves | Runs |
 |---|---|---|
 | xUnit suite (`Tests/`) | the pure cores: parse/resolve, validator, `GameBinding` resolution, `DialConfig`, `PoseMath` (with legacy-oracle parity), the smoke *verdict* | every push (CI, no game files) |
-| `tools/check.sh` pre-push gate | build, tests, docs links, schema parity | every push, locally |
+| `tools/check.sh` pre-push gate | build, tests, docs links, binding-catalog surface, hot path, parse shape, schema parity | every push, locally — and every source-only guard among them **also in CI**, because a hook is per-clone config a `--no-verify` walks past ([Testing](Testing.md)) |
 | `tools/check-bindings.sh` | the whole reflection catalog against the game DLLs | after a game update; before a launch when the catalog changed |
 | In-game **Smoke Test** (F8) | the plugin came up: bindings, injection, per-entry assets/roles/sounds/files, GPU budget, district tiles on both paths + texture health, seam write-back, shared Harmony seams | by hand, and it writes `haf_smoke_report.txt` |
 | A **drill** | the feature actually does the thing on screen | by hand — nothing above replaces it ([Decisions](Decisions.md): "a tool is not trusted until it is DRILLED") |
