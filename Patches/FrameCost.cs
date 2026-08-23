@@ -51,7 +51,16 @@ namespace HumankindAssetFramework
                          //   DonorMotion arithmetic on the entry  ApplyTurnEase, ApplyMoveTilt, ApplyGunElevation, ApplyScale
                          // DonorWorld is where §2's already-fixed "two raycasts per helicopter per frame" lived, so
                          // it is the one to disprove first rather than assume.
-                         DonorRig = 40, DonorWorld = 41, DonorMotion = 42;
+                         DonorRig = 40, DonorWorld = 41, DonorMotion = 42,
+                         // HugScan (2026-08-23): the district rescan inside ApplyTerrainHug is a
+                         // FindObjectsOfType scene walk — ~50-75 ms — throttled to at most 1-in-3s. Measured as
+                         // 492 µs of DonorWorld's 496 µs, i.e. 99% of the donor branch, which made a ONE-OFF STALL
+                         // look like a per-frame cost: a 5 s window at 30 fps spreads a single 74 ms scan across
+                         // 150 frames as ~490 µs/frame. §1 says the meter is a budget tool, not a hitch detector,
+                         // and this is that sentence happening. Its own bucket so the stall is attributed to the
+                         // scan instead of to the helicopter whose frame happened to trigger it — the per-pawn
+                         // donor cost is then readable as the ~4 µs it actually is.
+                         HugScan = 43;
         [ProcessLived("literal bucket label table")] static readonly string[] names =
         {
             "Update(total)", "PoseVanilla", "TickTexture", "RespawnPostLoad", "FireQueues", "DeployState", "AnimStates", "EngineAudio",
@@ -61,6 +70,7 @@ namespace HumankindAssetFramework
             "SelTileSkip", "SelTileOurs",
             "FormRetry", "FormScan", "FormScanSkip", "FormScanOurs",
             "DonorRig", "DonorWorld", "DonorMotion",
+            "HugScan",
         };
         public static int Count => names.Length;
         public static string Name(int bucket) => names[bucket];

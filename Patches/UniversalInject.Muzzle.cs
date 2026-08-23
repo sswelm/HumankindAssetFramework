@@ -962,6 +962,12 @@ namespace HumankindAssetFramework
             if (!hugDirty && now < districtNextScan) return;
             if (now < districtMinNext) return;
             districtNextScan = now + 30f; districtMinNext = now + 3f; hugDirty = false;
+            // OWN BUCKET (2026-08-23). Everything below is a FindObjectsOfType scene walk — a one-off stall, not a
+            // per-frame cost — and it was being charged to whichever helicopter's frame happened to trigger it.
+            // Measured that way it read as 492 µs of DonorWorld's 496 µs and made the donor branch look like the
+            // pose hook's problem; the donor's real per-pawn cost is ~4 µs. Timing it here separates the stall from
+            // the pose, so both numbers mean what they say.
+            long tScan = FrameCost.Begin();
             try
             {
                 var dt = GameBinding.PresentationDistrict;
@@ -992,20 +998,35 @@ namespace HumankindAssetFramework
                 // the tile spacing (adjacent districts sit one tile apart). `radius` then means "this tile only"
                 // instead of an arbitrary world distance — the difference between climbing OVER the buildings and
                 // climbing for the whole neighbourhood around them.
-                var nn = new List<float>();
-                for (int i = 0; i < districtPts.Count; i++)
+                // TILE SPACING IS MEASURED ONCE, NOT EVERY RESCAN (2026-08-23).
+                // This is O(n²): every district's distance to every other, to take the median nearest-neighbour gap.
+                // At the district counts this map actually reaches — the SelectorTile fix measured 2,668 tracked
+                // districts — that is ~7 MILLION distance computations, re-run on every rescan (dirty, min 3 s
+                // apart) for the whole session. And it re-derives a CONSTANT: tile spacing is a property of the
+                // map's hex grid, identical on the first scan and the fiftieth. Districts get built; the grid they
+                // sit on does not move.
+                // A SAMPLE is also enough for a median: the pairwise loop is capped so a large empire costs the same
+                // as a small one. Both guards, not one — measuring once bounds the frequency, sampling bounds the
+                // size, and a 200-district sample of a hex grid gives the same median as 2,668 of them.
+                if (tileSpacing <= 0.01f && districtPts.Count > 1)
                 {
-                    float b = float.MaxValue;
-                    for (int j = 0; j < districtPts.Count; j++)
+                    const int SpacingSample = 200;
+                    int n = districtPts.Count < SpacingSample ? districtPts.Count : SpacingSample;
+                    var nn = new List<float>(n);
+                    for (int i = 0; i < n; i++)
                     {
-                        if (i == j) continue;
-                        float dx = districtPts[i].x - districtPts[j].x, dz = districtPts[i].z - districtPts[j].z;
-                        float d2 = dx * dx + dz * dz;
-                        if (d2 < b) b = d2;
+                        float b = float.MaxValue;
+                        for (int j = 0; j < districtPts.Count; j++)   // nearest over ALL, sampled over the first n
+                        {
+                            if (i == j) continue;
+                            float dx = districtPts[i].x - districtPts[j].x, dz = districtPts[i].z - districtPts[j].z;
+                            float d2 = dx * dx + dz * dz;
+                            if (d2 < b) b = d2;
+                        }
+                        if (b < float.MaxValue) nn.Add(UnityEngine.Mathf.Sqrt(b));
                     }
-                    if (b < float.MaxValue) nn.Add(UnityEngine.Mathf.Sqrt(b));
+                    if (nn.Count > 0) { nn.Sort(); tileSpacing = nn[nn.Count / 2]; }
                 }
-                if (nn.Count > 0) { nn.Sort(); tileSpacing = nn[nn.Count / 2]; }
                 if (!hugScanLogged)
                 {
                     hugScanLogged = true;
@@ -1014,6 +1035,7 @@ namespace HumankindAssetFramework
                 }
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[Hug] district scan: " + ex.Message); }
+            finally { FrameCost.End(FrameCost.HugScan, tScan); }
         }
         static bool hugScanLogged, hugWasOver;
 
