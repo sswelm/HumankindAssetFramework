@@ -26,7 +26,19 @@ namespace HumankindAssetFramework
                          // that decides where to look is whether the cost is the SCAN (many districts skipped cheaply,
                          // ×N per frame) or the WORK (few districts, expensive each). These two answer it, and their
                          // CALL counts are the district counts — the thing nothing currently reports.
-                         SelTileSkip = 34, SelTileOurs = 35;
+                         SelTileSkip = 34, SelTileOurs = 35,
+                         // Formation split (2026-08-23): `Formation` entered the top six at 61.8 µs in a battle scene
+                         // and accounted for essentially the whole rise in `Update` (166 → 224 µs) — outside the ~13%
+                         // noise band §2 measures for that bucket, so it is signal. The poll does two unrelated
+                         // things: a `pending` RETRY (already throttled to 1-in-60 frames) and `MaybeReinstantiate`,
+                         // a 1-in-5-frame scan over EVERY army that does an uncached `AccessTools.Field` +
+                         // `GetProperty` PER ARMY — the same shape as the WonderRows find (uncached lookup on a
+                         // timer, 1,350 µs) and the SelectorTile scan.
+                         // Which it is decides where to look, exactly as SelTileSkip/SelTileOurs did, so measure
+                         // before touching: FormRetry vs FormScan, and inside the scan the per-army loop split into
+                         // armies SKIPPED (cheap × many) vs armies MATCHED (expensive × few). Their CALL counts are
+                         // the army counts — the number nothing currently reports.
+                         FormRetry = 36, FormScan = 37, FormScanSkip = 38, FormScanOurs = 39;
         [ProcessLived("literal bucket label table")] static readonly string[] names =
         {
             "Update(total)", "PoseVanilla", "TickTexture", "RespawnPostLoad", "FireQueues", "DeployState", "AnimStates", "EngineAudio",
@@ -34,6 +46,7 @@ namespace HumankindAssetFramework
             "PropRegister", "Formation", "Rearm", "PoseOurs", "SelectorTile", "MainRows", "WonderRows", "HexDial",
             "SelTileCfg", "SelTileLoop", "SelTileBind", "SelTileAlbedo", "SelTileFlat", "PoseSweep", "PoseAdjust", "PoseAnim", "PoseAim", "PoseDonor",
             "SelTileSkip", "SelTileOurs",
+            "FormRetry", "FormScan", "FormScanSkip", "FormScanOurs",
         };
         public static int Count => names.Length;
         public static string Name(int bucket) => names[bucket];
@@ -94,6 +107,18 @@ namespace HumankindAssetFramework
                 double skipNs = cl[SelTileSkip] > 0 ? tk[SelTileSkip] * usPerTick * 1000.0 / cl[SelTileSkip] : 0;
                 double oursNs = cl[SelTileOurs] > 0 ? tk[SelTileOurs] * usPerTick * 1000.0 / cl[SelTileOurs] : 0;
                 summary += Inv($" | districts {skipN:0} skipped {skipUs:0.#} µs ({skipNs:0} ns ea), {oursN:0} ours {oursUs:0.#} µs ({oursNs:0} ns ea)");
+            }
+            // FORMATION SCAN, same shape and for the same reason (2026-08-23): `Formation` entered the top six at
+            // 61.8 µs and the bucket mixes a throttled retry with a 12×/s walk over every army. Print the army counts
+            // and the per-army cost so the answer is READ, not inferred. Silent when the formation axis isn't running.
+            if (cl[FormScanSkip] + cl[FormScanOurs] > 0)
+            {
+                double fSkipUs = tk[FormScanSkip] * usPerTick / frameCount, fOursUs = tk[FormScanOurs] * usPerTick / frameCount;
+                double fSkipN = cl[FormScanSkip] / (double)frameCount, fOursN = cl[FormScanOurs] / (double)frameCount;
+                double fSkipNs = cl[FormScanSkip] > 0 ? tk[FormScanSkip] * usPerTick * 1000.0 / cl[FormScanSkip] : 0;
+                double fOursNs = cl[FormScanOurs] > 0 ? tk[FormScanOurs] * usPerTick * 1000.0 / cl[FormScanOurs] : 0;
+                double retryUs = tk[FormRetry] * usPerTick / frameCount;
+                summary += Inv($" | armies {fSkipN:0} skipped {fSkipUs:0.#} µs ({fSkipNs:0} ns ea), {fOursN:0} ours {fOursUs:0.#} µs ({fOursNs:0} ns ea), retry {retryUs:0.#} µs");
             }
             // detail: every bucket except the total, sorted by cost, top 6, only those that ran
             var idx = new int[tk.Length - 1]; for (int i = 1; i < tk.Length; i++) idx[i - 1] = i;

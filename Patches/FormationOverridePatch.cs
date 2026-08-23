@@ -131,15 +131,22 @@ namespace HumankindAssetFramework
         // (2) once applied, catch up any units that spawned before the override landed (re-instantiate them to full count).
         internal static void Tick()
         {
+            // SPLIT, not guessed (2026-08-23): the two halves below are unrelated work sharing one bucket, and the
+            // bucket surprised. Timing them separately is what says which one to look at — the SelTileSkip/SelTileOurs
+            // lesson, where "diffuse per-district overhead" turned out to be a 2,668-item scan.
             if (pending && Time.frameCount - lastTryFrame >= 60)
             {
+                long t = FrameCost.Begin();
                 try { TryApply(); }
                 catch (Exception ex) { Plugin.Log.LogError("[Formation] Tick: " + ex); pending = false; }
+                finally { FrameCost.End(FrameCost.FormRetry, t); }
             }
             if (!pending && appliedAny && Plugin.FormationReinstantiateOn != null && Plugin.FormationReinstantiateOn.Value)
             {
+                long t = FrameCost.Begin();
                 try { MaybeReinstantiate(); }
                 catch (Exception ex) { Plugin.Log.LogError("[Formation] reinstantiate: " + ex); appliedAny = false; }
+                finally { FrameCost.End(FrameCost.FormScan, t); }
             }
         }
 
@@ -362,6 +369,11 @@ namespace HumankindAssetFramework
             bool handledAny = false;
             foreach (var army in armies)
             {
+                // PER-ARMY TIMING. The call COUNT on these two buckets is the army count — the number nothing
+                // reported, and the one that decides between "many cheap skips" and "few expensive matches".
+                long ta = FrameCost.Begin();
+                bool matched = false;
+                try {
                 if (army == null) continue;
                 var unit = Mem(army, "PresentationUnit");
                 if (unit == null) continue;
@@ -383,6 +395,7 @@ namespace HumankindAssetFramework
                             || (x.unit.Length == 0 && string.Equals(x.formation, fref ?? "", StringComparison.OrdinalIgnoreCase))))
                     { e = x; break; }
                 if (e == null) continue;                             // not one of our repointed/replaced units
+                matched = true;                                      // from here on this army is OURS — timed as FormScanOurs
                 reformPresent.Add(unit);
                 if (reformed.Contains(unit)) continue;               // already handled this session
                 bool loaded = true; try { loaded = Convert.ToBoolean(Mem(unit, "IsLoaded")); } catch { }
@@ -401,6 +414,8 @@ namespace HumankindAssetFramework
                 int after = (Mem(unit, "Pawns") as ICollection)?.Count ?? -1;
                 object dc2 = Mem(Mem(unit, "Formation"), "DummyCount");
                 Plugin.Diag($"[Formation] re-instantiated '{pdn}': pawns {pawns} -> {after} (formation='{fn}', dummyCount {dc} -> {dc2}, target {e.targetCount}) — spawned before the override.");
+                }
+                finally { FrameCost.End(matched ? FrameCost.FormScanOurs : FrameCost.FormScanSkip, ta); }
             }
             reformed.RemoveWhere(u => !reformPresent.Contains(u));   // drop gone units so a genuinely new instance is handled again
             // TERMINATION: the catch-up only ever targets units that spawned BEFORE the override (all present within a few
