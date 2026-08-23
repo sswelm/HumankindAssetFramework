@@ -166,7 +166,16 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
   stronger/decoupled rounds mapping, and a before→after coverage pair. Neither is a correctness bug; the dials do
   run (drilled 2026-08-23: `scaled 2171 of 2592 card island(s)`, `2 dilation round(s)`).
 
-- **The sub-pawn walk double-counts, so its coverage number can read better than complete.** A `PresentationUnit`
+- ~~**The sub-pawn walk double-counts, so its coverage number can read better than complete.**~~ — **FIXED 2026-08-23.**
+  Deduped by `GetInstanceID()` at the boundary of `WalkSubPawns`, first occurrence wins, order preserved. Deliberately
+  NOT inside the adders: `AddUnitSubPawns` decides whether to fall back to a holder-subtree search by testing
+  `result.Count == before`, so suppressing a duplicate mid-walk would read as "the pawn list yielded nothing" and fire
+  that fallback for a unit already fully collected. The collapsed count is reported by the self-verify, so an overlap
+  that *grows* (a new holder list that re-reaches an existing one) shows up instead of being silently absorbed.
+  Eight tests, four mutations drilled — including dedupe-by-reference, which is the mistake that would collapse nothing
+  in production, since each path yields a **different managed wrapper** for the same sub-pawn. Verify in-game by the
+  panel reading `sub-pawn walk 46/46` rather than `56/46`.
+  The original entry: a `PresentationUnit`
   reached twice during a battle (armies *and* battle units), and a squadron reachable both via the holder subtree
   and the air-formation `MainPawn` walk, are counted twice — the F8 panel showed `sub-pawn walk 56/46` on
   2026-08-22, i.e. ten duplicates against a superset oracle. The miss detection is set-based on instance ids so the

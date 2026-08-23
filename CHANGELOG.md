@@ -10,6 +10,24 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **`sub-pawn walk 56/46` WAS TEN PAWNS COUNTED TWICE (2026-08-23).** The number on the F8 panel read like a *superset* —
+  56 found against a 46-strong oracle, better than complete. It was the opposite. `WalkSubPawns` collects from four
+  sources that are not disjoint: a unit fighting a battle is reached through **both** `PresentationArmyEntities` and the
+  battle's `AllUnits`, and a squadron through **both** its holder subtree and its air formation's `MainPawn`. The miss
+  detection was always sound (it is set-based on instance ids), so this never hid a gap — but every consumer of the list
+  processed those pairs twice per poll, `ProcessEngineAudio` among them, and that is a top-six `FrameCost` bucket.
+  Deduped by `GetInstanceID()` at the **boundary** of the walk, first occurrence wins, order preserved. Not inside the
+  adders, and that placement is the whole subtlety: `AddUnitSubPawns` decides whether to fall back to a holder-subtree
+  search by testing `result.Count == before`, so suppressing a duplicate mid-walk would read as "the pawn list yielded
+  nothing" and fire that fallback for a unit already fully collected. A test pins the placement, not just the behaviour.
+  The collapsed count now rides on the self-verify line, so an overlap that *grows* — a new holder list that re-reaches
+  an existing one — announces itself rather than being absorbed.
+  Eight tests, four mutations drilled. The one worth naming is **dedupe-by-reference**: each path yields a *different
+  managed wrapper* for the same sub-pawn, so keying on the reference would collapse nothing at all in production while
+  looking perfectly reasonable in review. The dedupe is generic with an injected id function for a real reason — a live
+  `UnityEngine.Object` cannot be built in the test host, and Unity's overloaded `==` makes a bare `new Object()` read as
+  null, so a test against the real type could not tell "deduped" from "dropped everything".
+
 - **THE STRATEGIC FOOTPRINT DIED ON THE SECOND SAVE LOAD, AND NOTHING SAID SO (2026-08-23).** `footprintMaskInjected` is
   a `static bool` guarding a once-per-session injection. It was never reset — so on the second save load of a process
   `InjectReactorFootprint` returned immediately, while `ResetDistrictSessionState` had just queued the atlas and decal

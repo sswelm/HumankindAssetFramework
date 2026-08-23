@@ -101,7 +101,9 @@ namespace HumankindAssetFramework
                                           $"missed: {string.Join(", ", missedNames)} | walk-only: {string.Join(", ", walkOnly)}");
                     return byScene;
                 }
-                Plugin.Log.LogInfo($"[SubPawnScan] walk verified against the scene scan: {byWalk.Count} sub-pawn(s), none missed (scene scan {byScene.Count}) — walk in charge, 2 s cadence");
+                Plugin.Log.LogInfo($"[SubPawnScan] walk verified against the scene scan: {byWalk.Count} sub-pawn(s), none missed (scene scan {byScene.Count})" +
+                                   (_subPawnWalkDupes > 0 ? $", {_subPawnWalkDupes} duplicate(s) collapsed (the holder lists overlap — battles re-reach army units, air formations re-reach squadrons)" : "") +
+                                   " — walk in charge, 2 s cadence");
             }
             return byWalk;
         }
@@ -175,7 +177,48 @@ namespace HumankindAssetFramework
                             foreach (var bu in allUnits) AddUnitSubPawns(bu, GetMember(bu, "PresentationUnit"), list, result);
             }
             catch (Exception ex) { Plugin.LogOnceWarning("subpawn-walk", "[SubPawnScan] walk failed (" + ex.Message + ") — scene scan takes over"); _subPawnWalkTrusted = false; }
+            // DEDUPE (2026-08-23). The four sources above are not disjoint, so the same sub-pawn arrives more than once:
+            // a unit in a battle is reached through BOTH PresentationArmyEntities and the battle's AllUnits, and a
+            // squadron through BOTH its holder subtree and its air formation's MainPawn. The panel read `sub-pawn walk
+            // 56/46` — ten duplicates against a 46-strong oracle — which looks like a SUPERSET (better than complete)
+            // when it is really the same pawns counted twice. Worse, every consumer of this list processes those pairs
+            // twice per poll, ProcessEngineAudio included (a top-six FrameCost bucket).
+            //
+            // Deduped HERE, at the boundary, and deliberately not inside the adders: AddUnitSubPawns decides whether to
+            // fall back to a holder-subtree search by testing `result.Count == before`, so suppressing a duplicate mid-walk
+            // would read as "the pawn list yielded nothing" and fire that fallback for a unit already fully collected.
+            int raw = result.Count;
+            result = DedupeFirstWins(result, o => o.GetInstanceID());
+            _subPawnWalkDupes = raw - result.Count;
             return result;
+        }
+
+        // How many duplicates the last walk collapsed — reported by the self-verify, so an overlap that GROWS (a new
+        // holder list added later that overlaps an existing one) is visible rather than silently absorbed.
+        // Deliberately NOT [SessionScoped]: it is recomputed on every walk, so it is a result, not a latch — annotating
+        // it would promise a hand-reset that nothing performs.
+        static int _subPawnWalkDupes;
+
+        // First occurrence wins: entries are only ever added with a non-null ModelEntry (AddPawnSubPawns guards on
+        // `m != null`, and the subtree fallback runs only when the unit resolved), so every copy of a given sub-pawn
+        // carries an equally valid entry and the earliest is as good as any.
+        // Generic over the key with an injected id so it is testable without a live UnityEngine.Object — a real one
+        // cannot be constructed in the test host, and Unity's overloaded `==` makes a bare `new Object()` read as null.
+        internal static List<KeyValuePair<TKey, TVal>> DedupeFirstWins<TKey, TVal>(List<KeyValuePair<TKey, TVal>> src, Func<TKey, int> idOf)
+        {
+            if (src == null || src.Count < 2) return src;
+            var seen = new HashSet<int>();
+            var outp = new List<KeyValuePair<TKey, TVal>>(src.Count);
+            foreach (var p in src)
+            {
+                // Plain REFERENCE null only — inside a generic this cannot dispatch to Unity's overloaded `==`, so it
+                // does not (and is not meant to) catch a destroyed object. Unity fake-null is already filtered where the
+                // pairs are added (`!o` in AddPawnSubPawns, `o != null` in the subtree fallback).
+                if (p.Key == null) continue;
+                if (!seen.Add(idOf(p.Key))) continue;
+                outp.Add(p);
+            }
+            return outp;
         }
 
         // ONE-TIME diagnostic on a verification miss: per holder list, how many holders, how many resolved to one of OUR
