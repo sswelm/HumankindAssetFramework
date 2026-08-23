@@ -17,6 +17,60 @@ by when they'll bite.
   `animated-legacy` through the gated pipeline. **In-game verification DONE (2026-08-02)** — the howitzer checked out
   correctly after a real re-bake.
 
+## From the 2026-08-23 critical review
+
+- ~~**Two registry links writing one formation name are undetected.**~~ — **FIXED 2026-08-23.** `'Formation_1'`
+  warned twice in a clean load because three links target it and two carry data; `created` tracked only INJECTED
+  formations, never OVERWRITTEN ones, so a repeat write re-emitted a warning that blamed vanilla for a same-registry
+  collision. A formation is shared BY NAME, so the last write wins for every link on it. `FormationSignature` +
+  `ReportFormationCollisions` now detect it at parse: identical data is a Diag, differing data is an error naming
+  both links. The write path is unchanged. 12 tests, four mutations drilled. See the CHANGELOG entry.
+
+- ~~**One malformed third-party pack disables ALL custom content for the session.**~~ — **FIXED 2026-08-23**, and
+  it was the highest-consequence finding in the range: `"modId": null` reached `ResolvePacks`' dictionary as a null
+  key, and the resulting `ArgumentNullException` latched the whole registry off with a stack trace naming no file.
+  Fixed in three layers (source guard + post-condition, defence-in-depth skip, a discovered-pack breadcrumb in the
+  failure log); see the CHANGELOG entry. 20 tests, mutation-drilled 15/20.
+
+- **`PackValidator` has no rules for pack WRAPPER metadata — only for model entries.** The residue of the fix
+  above. The validator is the shared rule core behind all four surfaces (pre-bake, the *Validate pack* button,
+  `-strict` in CI, the boot pre-flight), and it has ~30 content checks for bones/files/pawns/formats/ranges and
+  **zero** for `modId` / `schemaVersion` / `dependsOn` / `loadAfter` / `overrides`. So a pack whose wrapper is
+  wrong is now handled gracefully at *runtime* but is still never caught at *authoring* time, which is where the
+  author can actually fix it. Not urgent — the runtime path is safe and warns by name — but this is the surface
+  that should have caught it first. Note the boot pre-flight cannot cover this on its own: it runs after
+  registration, so a registry that fails to load never reaches it.
+
+- ~~**`schemaVersion` is parsed, printed, and never enforced.**~~ — **FIXED 2026-08-23.** The decision the entry
+  asked for was already on the page: `Multi-Mod.md` has documented the contract since the pack format shipped
+  ("Currently `1`. Evolves **additively** — new keys are added, old files keep loading"), so the work was to
+  *implement the documented contract*, not to invent one. Additive evolution makes refusal the wrong lever — a pack
+  from the future is one whose extra keys are stripped and whose known keys read exactly as intended — so the
+  version is now an **advisory that never gates**: `Haf.Schema.HafSchema` owns the number, `CheckSchema` classifies
+  each pack against it, a future pack warns (naming the consequence and the remedy), a legacy unversioned pack gets
+  a quiet note, and the implemented version prints in the load-report header beside each pack's own. See the
+  CHANGELOG entry. 18 tests, three mutations drilled; the doc/code agreement is now in the push gate.
+
+- **The editor holds a FOURTH copy of the schema version, as a literal.** The residue of the fix above.
+  `HafSchema.Version` is the definition, and `tools/check-docs.sh` now fails the push if `docs/Multi-Mod.md` or
+  `docs/haf-pack.example.json` quotes a different number — but ENCReload's `ModelRegistry.cs:101` declares
+  `public int schemaVersion = 1;` independently, and nothing compares the two. Bumping the constant here would
+  therefore leave the editor stamping the OLD number into every pack it bakes, which is precisely the silent drift
+  the constant was introduced to end. The editor already references `Haf.Schema` (its `ModelDef` inherits
+  `HafModelSchema`), so the fix is small — write `HafSchema.Version` instead of the literal — but it is a
+  cross-repo change, and the guard that would enforce it belongs in ENCReload's `Tools/check_schema_parity.sh`
+  beside the field-list comparison it already does.
+
+- **A "from the future" warning still can't name WHICH dials are being ignored.** The advisory says features may
+  silently do nothing; it cannot yet say which, and that is the sentence a modder actually needs. The data is
+  already computed — `ParseModels` strips every key not in `registryConfigKeys` and knows their names — but it
+  can't be reported usefully, because a real pack carries ~56 legitimate **bake-time editor keys** (`targetTris`,
+  `windingFix`, `convertRig`, …) that the plugin has never read by design, so naming unknown keys would bury the
+  two that matter in fifty-odd that don't. Separating them needs the editor's bake-only field list, which the
+  plugin cannot know without a hand-list that drifts — the thing this codebase keeps (rightly) refusing to add.
+  The clean close-out is to declare that set once in the shared `Haf.Schema` project, where the existing cross-repo
+  parity guard (which already computes "baker fields not read at runtime") can hold it honest.
+
 ## From the 2026-08-22 critical review (confirmed, unfixed)
 
 Every item below was re-verified in source during the review; the range's critical (the strike hold reusing a
@@ -66,6 +120,22 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
   entries with reasons, not catalog bindings — the functional ones among them still degrade silently on a game
   rename. Promoting them via the A6 `CachedDerived` mechanism (anchored on the type that produced the instance)
   is the real close-out.
+
+- ~~**A district that never binds retries forever, silently.**~~ — **FIXED 2026-08-23.** Two compounding faults:
+  the one-shot log key was the REASON (`notgt`/`nodonor`) rather than the DISTRICT, so the first district to stall
+  silenced every other one for that reason; and the line was `Plugin.Diag`, off by default. A district could fail
+  to render for a whole session emitting nothing at any severity. Now keyed `(district, reason)`, with one
+  escalating WARNING after `BindEscalateAfter` (~30 s) naming the district, reason and consequence. The retry is
+  unchanged and still never gives up. 8 tests, three mutations drilled. See the CHANGELOG entry.
+
+- **`alphaBoost` is far weaker than its slider implies, and its diagnostic can't show it.** (Editor-side, ENCReload
+  `DistrictBaker.cs`.) Its own comment records that the alpha GAIN is a no-op on a binary-alpha foliage sheet, so
+  the dial collapses to `rounds = Clamp(RoundToInt(boost - 1), 0, 6)` — **2 texels of dilation at 2.5, 3 at the
+  slider's max of 4**. The UI advertises "2-4 = fuller crown". Separately the log line reads *"opaque coverage now
+  ~20%"* with no BEFORE figure, so it says where the bake landed but not whether the dial moved anything — which is
+  why "do the leaf dials work?" cost a re-bake to answer instead of a log read. Both worth fixing together: a
+  stronger/decoupled rounds mapping, and a before→after coverage pair. Neither is a correctness bug; the dials do
+  run (drilled 2026-08-23: `scaled 2171 of 2592 card island(s)`, `2 dilation round(s)`).
 
 - **The sub-pawn walk double-counts, so its coverage number can read better than complete.** A `PresentationUnit`
   reached twice during a battle (armies *and* battle units), and a squadron reachable both via the holder subtree

@@ -10,6 +10,170 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **A DISTRICT THAT NEVER BINDS NO LONGER FAILS IN SILENCE (2026-08-23).** The scoped poll retries the building-element
+  bind about once a second for as long as a district is unbound, and that retry is right — selectors load
+  asynchronously, so early failure is normal. Everything around it was wrong, in two ways that compounded.
+  *(1) The one-shot log key was the REASON, not the DISTRICT.* `bindLog.Add("notgt")` / `Add("nodonor")` share one
+  session-scoped set across every district, so the FIRST district to stall claimed the key and every other district
+  was permanently silent for that reason — with two districts, one masks the other entirely. *(2) It was
+  `Plugin.Diag`*, gated behind `VerboseLog`, which is **off by default**. Together: at default settings a district
+  could fail to render for an entire session and emit **nothing, at any severity, no matter how long it went on** —
+  which is exactly what made the retry loop invisible while it was also burning ~580 uncached reflection lookups a
+  second (see the Fx-tree entry above). Fixing the cost first is what made fixing the silence urgent: the symptom
+  that would eventually have exposed it is now gone. The key is `(district, reason)` so each district speaks for
+  itself; a stall that outlives "still loading" escalates **exactly once** to a real `LogWarning` naming the
+  district, the reason and the consequence (*"its custom visual will NOT render"*); and the counter resets on a
+  late bind so it never carries into a re-arm. **The retry itself is unchanged and still never gives up** —
+  fail-soft stands, per the pre-flight rule; what changed is that it stopped being mute. Threshold is a named
+  constant (`BindEscalateAfter = 30`, ~30 s at the poll's 1/s) behind a pure `ShouldEscalateBind`, which fires on
+  the Nth attempt rather than every attempt past it — an already-unrecoverable stall must not become log spam.
+  8 tests, three mutations drilled: re-keying the counter globally (3 caught), escalating on every attempt past N
+  (2), and disabling the escalation entirely (4). *Note on that third one: the first harness run reported it
+  SURVIVED — the perl expression had silently failed to apply. A mutation drill that does not verify the mutation
+  landed reports "your tests are weak" when the truth is "my drill missed", which is the same failure shape as the
+  catalog gate that passed by no longer seeing its inputs. Re-run with the edit verified, it fails 4 tests.*
+
+- **TWO LINKS WRITING ONE FORMATION NAME ARE NOW DETECTED (2026-08-23).** Investigating the seven `[Formation]`
+  warnings in a clean load found `'Formation_1'` warning **twice**. Cause: three registry links target that name
+  and two of them carry dummy data, so each performed its own in-place overwrite.
+  The immediate defect was in what the log SAID — `created` only ever remembered formations HAF **injected**, never
+  ones it **overwrote**, so a repeat write looked like a first write and re-emitted a warning whose text blames a
+  *vanilla* collision (*"If that name is a vanilla formation…"*) for what is really a collision inside the author's
+  own registry. The latent one is worse: formation data lives in the database **under a name**, so every link on
+  that name resolves to the same object and **the last write wins for all of them**. Verified harmless in the
+  shipped pack — both writers put a single dummy at the origin, byte-identical — but nothing checked, so the day
+  they diverge one unit silently inherits the other's layout with no signal but two warnings the author has already
+  learned to ignore. Now: `FormationSignature` derives a comparison key from exactly the four things
+  `FillFormationFields` writes — the **scaled** dummy positions (so `layoutScale`, and the `scale` it falls back
+  to, are seen through), the per-orientation coordinates, the six `ColumnsCountPerRow` arrays and the low-spec
+  reference — so it cannot drift from the write it describes. `ReportFormationCollisions` runs at **parse**, before
+  anything has been written: identical data is a Diag, differing data is an **ERROR naming both links** and saying
+  which way the clobber goes. At apply time the write itself is **unchanged and unconditional** — only the log line
+  now distinguishes a first overwrite (warns, as before), an identical repeat (Diag — the duplicate alarming line
+  is gone) and a differing repeat (error). A pure repoint carries no data and can never collide, so the shipped
+  pure-repoint link is correctly silent. 12 tests, four mutations drilled: dropping `layoutScale` from the signature
+  (2 caught), un-skipping pure repoints (1), never reporting a conflict (3), dropping `lowSpec` (1).
+
+- **THE FX-TREE WALK STOPPED RE-RESOLVING EVERY FIELD, EVERY VISIT (2026-08-23).** Investigating "those HarmonyX
+  warnings in the log" found they were not noise: **23,194 of the log's 37,329 lines — 94% — were
+  `AccessTools.Field: Could not find field`**, and they came from `CollectLeaves`, the recursive Fx-material walk.
+  The walk is POLYMORPHIC: it probes every node for both emitter and selector shapes, so each node necessarily
+  MISSES the ~4 probes for the shape it isn't. Every miss was an uncached type-hierarchy walk plus a formatted log
+  write, and with ~121 emitter nodes in the tree and a bind that retries once a second while a district is unbound,
+  that ran forever. The tell was one line above the offender: `GF` — `// no AccessTools warning-on-miss (probing
+  spams the log)` — exists precisely to prevent this, and `CollectLeaves`, defined immediately beneath it, used GF
+  for probe 1 and `AccessTools.Field` for probes 2-9. The migration stopped one line in. **The fix is NOT a swap to
+  `GF`:** GF is `Type.GetField`, which cannot see a PRIVATE field inherited from a base type, while
+  `AccessTools.Field` walks the hierarchy — swapping would silently change which nodes the descent can reach, the
+  one thing that must not move. New `GFA` memoizes `AccessTools.Field` instead: identical `FieldInfo`, one dict hit
+  on a repeat, warning at most once per (type, member) per process. Applied to `CollectLeaves` and its twin
+  `SetInstantAppear`. **Drilled in-game: 23,194 → 149 warnings (156×), log 37,329 → 779 lines**, and — the check
+  that actually mattered — the descent resolves exactly what it did before: the Oracle still binds
+  (`bound 1 building element(s) across 1 tile(s)`), its selector still lands on channel 0, the mesh footprint still
+  finds its 2 elements, smoke still PASS, 0 injection errors. `SelectorTile`, previously the single most expensive
+  HAF bucket at 227.7 µs/frame and top of the F8 list, dropped out of the top six entirely (below 10.7 µs). *(Total
+  µs/frame is NOT comparable between the two runs — the verification session had 3 injected models and 1 live pawn
+  against 19 and 18, and the pose buckets scale with that. The district state was identical in both, which is why
+  the SelectorTile figure is the one worth quoting.)* **A gate lesson came with it:** adding `GFA` made
+  `tools/check-catalog.sh` blind to those sites — its alternation ends `|GF)\(`, which `GFA(` does not match — and
+  the gate still reported OK, because a shape it cannot see is a shape it stops counting rather than one it
+  reports. Taught, and drilled both ways with a planted bogus name: the un-taught gate passes it, the taught gate
+  fails and names the file and line. The script now says that any new accessor helper must be registered there.
+
+- **EVERY OUTPUT NAMES THE BUILD THAT PRODUCED IT (2026-08-23).** The two fixes above were drilled in-game and came
+  back **PASS** — F8 smoke green, 22 models loaded, 0 injection errors, and the editor's 43-test bake suite green
+  too. The PASS was real and the code was fine, but it was **evidence about the wrong build**: the deployed
+  `HumankindAssetFramework.dll` was dated `08-22 22:41`, from the previous day, and neither fix was in it. Nothing
+  on screen, in `LogOutput.log`, in `haf_load_report.txt` or in `haf_smoke_report.txt` said which build was
+  talking, so a stale-DLL drill was indistinguishable from a fresh one — the failure mode this project spent the
+  whole day removing from *packs*, sitting in its own diagnostics. What gave it away was a header field that
+  happened to be new (`schema implemented=`); without that coincidence the run would have been recorded as
+  verification. Now `Plugin.VersionLine` — `HAF 0.1.0 (built 2026-08-23 07:30 UTC)` — leads the **F8 panel** (first
+  line, above the binding banner, because the panel is what gets screenshotted as proof), the **boot log line**,
+  and the header of **both** reports. The stamp is compiled in via an MSBuild `AssemblyMetadata` attribute rather
+  than read from the DLL's file time, so it describes the CODE and survives every copy, deploy and backup restore;
+  the file time remains as a fallback and *labels itself as one*, because a file time answers "when was this
+  copied", not "what is in it". Deliberately non-deterministic: this assembly is a hand-deployed game plugin, never
+  a cached build input. `Tests/BuildStampTests.cs` guards the csproj stanza — losing it would break no build and no
+  other test, it would just quietly restore the ambiguity — drilled by stripping the attribute and watching the
+  test fail through to the file-time fallback.
+
+- **THE FIRST CUT OF THE WRAPPER GUARD WARNED ON THE REFERENCE PACK (2026-08-23, same day, caught by the drill).**
+  Shipping the `modId` fix introduced a regression the unit tests could not see: `WrapperStr` warned on any key
+  that was present-but-unusable, and **empty string is how the editor writes "not set"** — every pack it bakes
+  carries `"module": ""` and `"moduleGuid": ""`. So ENC itself logged two warnings on every clean load. Behaviour
+  was correct throughout (the folder-name auto-match resolved, `enc #1→ENCReload`); only the noise was wrong — but
+  a warning that fires on the reference pack has stopped meaning anything by the second load, which is the same
+  disease as the silence it replaced. The rule is now per-key: a **wrong type** (number, bool, object, array) warns
+  on any key, because nothing emits `"modId": 3` on purpose; a **blank** warns only where nothing writes it blank
+  by design — `modId`, where the fallback silently renames the pack to its file name and that name is the identity
+  other packs write `dependsOn`/`overrides` against — and is a Diag line on `module`/`moduleGuid`, where blank *is*
+  the editor's idiom. Pinned by a test that asserts the reference pack's exact wrapper shape logs **zero**
+  warnings. That test needed two negative controls to be worth anything, and they earned their keep immediately:
+  the first capture hooked `BepInEx.Logging.Logger.Listeners`, which a bare `ManualLogSource` is not attached to,
+  so it recorded nothing and the "no warnings" assertion **could not fail**. The controls failed, the capture moved
+  to the source's own `LogEvent`, and all four now bite.
+
+- **`schemaVersion` DOES SOMETHING NOW (2026-08-23).** The same critical review found the registry's version field
+  was decorative: parsed on both paths, printed into `haf_load_report.txt`, and **read back by nobody**. A pack
+  could declare any version at all and load identically. The README calls the registry "the public API other mods
+  build against", which makes an unread version field worse than no field — it tells a pack author they are
+  protected against a skew that is in fact entirely unchecked. The decision the fix needed turned out to be already
+  made and already written down: [Multi-Mod.md](docs/Multi-Mod.md) has documented the contract since the pack
+  format shipped — *"Currently `1`. Evolves **additively** — new keys are added, old files keep loading"* — so the
+  work was to **implement the documented contract**, not to invent one. And additive evolution is what makes
+  *refusal* the wrong lever: a pack from the future is a pack whose extra keys this build strips
+  (`registryConfigKeys`) and whose known keys it reads exactly as the author intended, so refusing it would break
+  something that demonstrably works to protect an author who would far rather a dial degrade than lose the whole
+  unit. What was missing was never enforcement — it was ever **saying so**. Now: `Haf.Schema.HafSchema` owns the
+  number (`Version` / `MinReadable` / the `Unversioned` sentinel) in the project the editor and plugin already
+  share; `CheckSchema` classifies each surviving pack against it and returns **null for the ordinary in-range
+  pack**, so the report keeps talking about conflicts instead of restating a number it already prints. A pack from
+  the future **warns** — naming the consequence (*"keys introduced after schema 1 are stripped and IGNORED, so
+  dials the author set may silently do nothing"*) and the remedy (*"Update HAF"*); an unversioned legacy pack gets
+  a quiet note, not a warning; a version below the floor warns to re-bake (the reserved lever for the day a
+  field's *meaning* changes — the one break the additive contract does not cover). The implemented version now
+  prints in the load-report header, `schema implemented=1 (reads 1+)`, directly above each pack's own
+  `schemaVersion=` line, because that side-by-side is the comparison a modder is actually making when they open
+  the file. **Fail-soft is pinned by test**, not just by intent: a theory over `{0, 1, 99, -5}` asserts no verdict
+  can ever cost a pack its place, so turning the advisory into a gate fails the build. 18 tests in
+  `Tests/SchemaVersionTests.cs`, including both parse paths (an advisory that fired only on the Newtonsoft path
+  would miss the hand-written pack — exactly the one most likely to target a newer HAF). Three mutations drilled:
+  the off-by-one that warns on the current version (3 caught), legacy packs falling through to the floor (2), and
+  the future advisory going silent again (6). The number is also quoted to pack authors in two docs, so
+  `tools/check-docs.sh` now fails the push if either drifts from the constant — drilled in all three directions.
+  *Known residue, both in [Review-Backlog.md](docs/Review-Backlog.md):* ENCReload's `ModelRegistry.cs` still holds
+  a **fourth** copy of the number as a literal that no guard compares, and the warning cannot yet name *which*
+  dials are ignored — the stripped-key set is computed but a real pack carries ~56 legitimate bake-time editor
+  keys that would bury the two that matter.
+
+- **ONE BROKEN THIRD-PARTY PACK NO LONGER SINKS EVERY OTHER PACK (2026-08-23).** A critical review found, and a
+  drill confirmed, that `"modId": null` in any `pack.json` disabled **all** custom content for the session — the
+  reference pack included. The mechanism: `(string)root["modId"]` returns C# **null** for a JSON null *without
+  throwing*, so it slipped past `ParsePack`'s catch and reached `ResolvePacks`' duplicate-id `Dictionary` as a null
+  **key**. `TryGetValue(null)` is an `ArgumentNullException`, and its only handler resets `entries` and latches
+  `loaded` after three tries. The failure was also close to undiagnosable: `WriteLoadReport` sits past the throw, so
+  `haf_load_report.txt` was never written, and the log carried a bare stack trace naming **no file**. The
+  boot pre-flight could not help either — it runs after registration, which never happened — and `PackValidator`
+  has no rules for wrapper metadata at all, only for model entries. The tell was that the **regex recovery** path
+  had guarded this exact shape since it was written (`.Groups[1].Value.Length > 0`) while the primary path never
+  did: the fallback was more defensive than the thing it backed up. Fixed in three layers. *(1) At the source:*
+  `WrapperStr` accepts a wrapper string only when it is really a non-blank string, so `modId` / `module` /
+  `moduleGuid` that are JSON-null, numeric, object, array or blank keep the computed file-name default **and warn**
+  — silently discarding what an author explicitly wrote is the failure mode this path exists to stop. `ParsePack`
+  also gained a post-condition: no `Pack` leaves it without a usable id, even from a file literally named `.json`.
+  *(2) Defence in depth:* `ResolvePacks` is the pure, separately-tested entry point, so it now treats an unusable id
+  as any other broken pack — **skipped, loudly, by name** — instead of throwing. The blast radius of a broken pack
+  is that pack. *(3) Diagnosability:* the load-failure log line now carries the discovered pack list, so an
+  unanticipated throw still hands the modder a candidate set to bisect. Two adjacent bugs of the same family fell
+  out: a non-integer `schemaVersion` used to **throw on the cast**, dropping the whole header into regex recovery
+  and logging "header didn't JSON-parse" against a file whose JSON was perfectly well-formed; and ids are now
+  trimmed on *both* sides of every reference (`modId`, `dependsOn`, `loadAfter`, `overrides`, in the primary path
+  **and** its regex twin) — trimming one side only would have turned a harmless trailing-space typo into a
+  dependant that resolved today and was skipped tomorrow. 20 tests in `Tests/PackWrapperMetadataTests.cs`,
+  mutation-drilled: **15 of the 20 fail against the pre-fix code**, and the 5 that pass either way are the
+  deliberate no-regression guards.
+
 - **THE LAST THREE FROM THE 08-22 REVIEW (2026-08-22).** *(1) The fourth hand-maintained field list is now gated.*
   A clone owns no assets until its own bake, so every `int[4]` GUID on the copy must be reset — an inherited one
   silently points the clone at the **source's** ClipCollection, which is how `clipIdleAlt2` shipped. That fix
