@@ -1008,7 +1008,9 @@ namespace HumankindAssetFramework
             if (count > 1 && best != null)
                 lock (_ambigLogged)
                     if (_ambigLogged.Add(name))
-                        Plugin.Log.LogWarning($"[Uni] '{name}' matched {count} registry entries by substring — using the most specific ('{key(best)}'). Make nested pawnDescriptions distinct to avoid mis-binding.");
+                        // `?.` for the same reason as MergeModels' conflict line: LongestMatch is pure and unit-tested,
+                        // so it must not require a BepInEx host to be wired (2026-08-23 CI flake).
+                        Plugin.Log?.LogWarning($"[Uni] '{name}' matched {count} registry entries by substring — using the most specific ('{key(best)}'). Make nested pawnDescriptions distinct to avoid mis-binding.");
             return best;
         }
 

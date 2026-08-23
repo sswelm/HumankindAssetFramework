@@ -43,10 +43,53 @@ namespace HumankindAssetFramework
             {
                 string uname = GetMember(GetMember(unit, "UnitDefinition"), "Name")?.ToString() ?? "";
                 e = uname.Length == 0 ? null : FindEntryForUnitDefinition(uname);
+                // PAWN-NAME FALLBACK (2026-08-23). The unit-definition name does not always contain the
+                // pawnDescription: a pack can target a pawn SLOT on a unit named for something else entirely (the
+                // 2026-08-21 sub-pawn drill found 'Era6_Common_Hovercrafts_01' pawns under a differently-named unit).
+                // When that happens this returns null and every feature routed through it — animStateDriven,
+                // fire-on-attack, deploy-on-stop, gun elevation — silently does nothing for that unit, with no error.
+                // The sub-pawn walk already solved this by matching the PAWN's own name; do the same here so the two
+                // resolvers cannot disagree about which entry drives a unit. Runs only when the name match failed,
+                // and the result is cached per unit, so it costs nothing on the common path.
+                // A null cached before the unit's pawns exist would pin the wrong answer — but this cache is cleared
+                // on re-arm and every ~30 s (see its declaration), so it self-heals rather than latching for the
+                // session. Not worth a "could not decide" flag; worth knowing it is the reason one is unnecessary.
+                if (e == null) e = MatchByPawnName(unit);
                 _unitEntryCache[unit] = e;
             }
             return e;
         }
+
+        // The fallback resolver: match the unit's own PAWNS by GameObject name against pawnDescription — the same
+        // criterion OurSubPawns/AddPawnSubPawns uses, deliberately, so the unit-level and pawn-level answers agree.
+        // Returns null for a genuinely vanilla unit, which is the overwhelmingly common case and must stay silent.
+        static ModelEntry MatchByPawnName(object unit)
+        {
+            try
+            {
+                var list = entries;
+                if (list == null || !(GetMember(unit, "Pawns") is System.Collections.IEnumerable pawns)) return null;
+                foreach (var p in pawns)
+                {
+                    if (!(p is UnityEngine.Component c) || !c) continue;
+                    var m = LongestMatch(list, c.gameObject.name, x => x.pawnDescription);
+                    if (m == null) continue;
+                    // LOUD, ONCE PER UNIT DEFINITION. This is a real bind that the primary matcher could not make,
+                    // so it is exactly the drift the project wants named rather than absorbed: it tells a pack author
+                    // that their pawnDescription does not appear in the unit's definition name, which is why a
+                    // feature "did nothing" before. Once-keyed, so it can never become per-frame noise.
+                    string uname = GetMember(GetMember(unit, "UnitDefinition"), "Name")?.ToString() ?? "?";
+                    Plugin.LogOnceWarning("pawnfallback:" + uname + ":" + m.pawnDescription,
+                        "[Uni] unit '" + uname + "' does not contain pawnDescription '" + m.pawnDescription +
+                        "' — matched '" + m.resourceName + "' by PAWN name instead. Unit-level features (animStateDriven, " +
+                        "fireOnAttack, deployOnStop, gun elevation) would have been skipped for this unit before 2026-08-23.");
+                    return m;
+                }
+            }
+            catch { }
+            return null;
+        }
+
         internal static void MaybeRespawnPostLoad()
         {
             if (entries == null || !Plugin.UniversalInjectOn.Value) return;

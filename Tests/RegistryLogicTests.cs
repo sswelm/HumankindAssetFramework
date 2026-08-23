@@ -50,6 +50,41 @@ namespace HumankindAssetFramework.Tests
             Assert.Same(general, hit);   // "ManOWar_Elite" is NOT a substring of this name -> only "ManOWar" matches
         }
 
+        // THE GAP THE PAWN-NAME FALLBACK EXISTS FOR (characterised 2026-08-23).
+        // A pack can target a pawn SLOT on a unit named for something else — ENC's drones ride a pawn slot whose
+        // donor description asset is `Unit_Era6_Australia_AllTerrainAPCs_01`, and the hovercraft's is
+        // `Unit_Era6_Common_LandingCrafts_01` while its pawnDescription is `Era6_Common_Hovercrafts_01`. When the
+        // unit-definition name does not contain the pawnDescription, BOTH keys miss: the full description AND the
+        // coreDesc fallback. This pins that miss as real rather than theoretical, because everything routed through
+        // ResolveUnitEntry (animStateDriven, fireOnAttack, deployOnStop, gun elevation) then silently does nothing
+        // for that unit — no exception, no log line. ResolveUnitEntry now falls back to the PAWN's own name, which
+        // is the criterion the sub-pawn walk already used, so the two resolvers cannot disagree.
+        [Fact]
+        public void LongestMatch_MissesWhenTheUnitNameDoesNotCarryThePawnDescription()
+        {
+            var drone = new ModelEntry { resourceName = "DroneSquadFPV", pawnDescription = "Era6_Common_DroneSquadFPV_01", coreDesc = "Era6_Common_DroneSquadFPV" };
+            var list = new List<ModelEntry> { drone };
+
+            // the unit it actually rides is named for the APC, not the drone
+            const string unitDef = "LandUnit_Era6_Australia_AllTerrainAPCs";
+            Assert.Null(UniversalInject.LongestMatch(list, unitDef, x => x.pawnDescription));
+            Assert.Null(UniversalInject.LongestMatch(list, unitDef, x => x.coreDesc.Length > 4 ? x.coreDesc : ""));
+
+            // ...while the PAWN's own GameObject name carries it — the fallback's criterion
+            Assert.Same(drone, UniversalInject.LongestMatch(list, "Era6_Common_DroneSquadFPV_01", x => x.pawnDescription));
+        }
+
+        // The counter-case, so the fallback is not assumed to be needed everywhere: DugoutCanoe's unit definition
+        // DOES carry its coreDesc, so the primary matcher resolves it and the fallback never runs.
+        [Fact]
+        public void LongestMatch_StillResolvesWhenTheUnitNameCarriesTheCoreDesc()
+        {
+            var canoe = new ModelEntry { resourceName = "DugoutCanoe", pawnDescription = "Era1_Common_DugoutCanoe_01", coreDesc = "Era1_Common_DugoutCanoe" };
+            var list = new List<ModelEntry> { canoe };
+
+            Assert.Same(canoe, UniversalInject.LongestMatch(list, "NavalTransport_Era1_Common_DugoutCanoe_Default", x => x.coreDesc.Length > 4 ? x.coreDesc : ""));
+        }
+
         [Fact]
         public void LongestMatch_ReturnsNullOnNoMatch()
         {

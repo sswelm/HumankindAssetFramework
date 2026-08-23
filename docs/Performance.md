@@ -446,10 +446,22 @@ reference converts into a `TypeLoadException` that takes the whole plugin down. 
 
 ## 10. Open items
 
-- The unit-name matcher (`FindEntryForUnitDefinition`) does not match units whose definition name lacks the
+- ~~The unit-name matcher (`FindEntryForUnitDefinition`) does not match units whose definition name lacks the
   pawnDescription (the hovercraft, the drones — found by the sub-pawn walk's self-check). The walk now handles it; the
-  fire-on-attack and engine-audio paths use the same matcher and may be skipping those units. Correctness, not cost —
-  recorded for the next drill.
+  fire-on-attack and engine-audio paths use the same matcher and may be skipping those units.~~ — **ADDRESSED
+  2026-08-23, and the entry was half wrong.** `ResolveUnitEntry` now falls back to matching the unit's own **pawn**
+  names against `pawnDescription` — the criterion `OurSubPawns` already used, so the unit-level and pawn-level
+  resolvers cannot disagree — and says so once per unit definition rather than absorbing it silently.
+  **The correction:** *engine audio was never affected.* `ProcessEngineAudio` consumes `OurSubPawns`, i.e. the walk
+  that was already fixed, so it resolved these units all along. Checked against the shipped pack rather than assumed:
+  of the named units, `Hovercraft` runs only `engineSound` (the safe path) and the drones' flags are off except
+  **`animStateDriven` on `DroneSquadFPV`**, which is the one ENC feature the gap could actually have silenced.
+  `DugoutCanoe` was never affected either — `NavalTransport_Era1_Common_DugoutCanoe_Default` does carry its coreDesc.
+  **Still unverified in-game:** no session since has had a hovercraft or drone on the map, so the exact unit-definition
+  strings are unconfirmed. That is now self-reporting instead of guesswork — the fallback logs
+  `[Uni] unit '<name>' does not contain pawnDescription '<desc>' — matched '<model>' by PAWN name instead`, so the
+  next session with one of those units on the map either prints it or proves the concern was never real.
+  Pinned by two tests (the miss, and `DugoutCanoe` as the counter-case so the fallback isn't assumed universal).
 
 Related: [Architecture](Architecture.md) (§2 threads, §2b per-frame), [Testing](Testing.md) (the headless tools),
 [Vertex-Budget](Vertex-Budget.md) (the *GPU* budget — a different axis: mesh memory, not frame time).
