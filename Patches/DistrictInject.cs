@@ -423,7 +423,26 @@ namespace HumankindAssetFramework
         [SessionScoped(Scope = SessionScope.District)] static readonly List<object> distLeaves = new List<object>();   // legacy shared list (single-model path)
         static float DeepCloneBuildingMinSize = 0.35f;   // deep-clone: swap building slots this big (bbox max dim) to our mesh; hide smaller props
         static int DeepCloneKeepEvery = 1;               // deep-clone: keep 1 in N large building slots as our reactor (1 = swap ALL large, no thinning → no mid-zoom gaps)
-        internal static FieldInfo GF(Type t, string n) => t.GetField(n, BF);      // no AccessTools warning-on-miss (probing spams the log)
+        // GF — the district axis's quiet field probe. Two things it is, and one it was NOT until 2026-08-23:
+        //   * quiet: `Type.GetField` instead of `AccessTools.Field`, so a miss doesn't emit a HarmonyX warning
+        //     (probing spams the log — that is why this helper exists at all); and
+        //   * NARROWER than AccessTools on purpose-by-accident: Type.GetField does not see a PRIVATE field inherited
+        //     from a base type, where AccessTools walks the hierarchy. That difference is why this cannot simply
+        //     become GFA — swapping would change which members resolve. See GFA below for when to use which.
+        // DELIBERATELY NOT CACHED — measured 2026-08-23, after a cache was written for it and then thrown away:
+        //
+        //     Type.GetField     20 ns      GF with a (Type,string) ConcurrentDictionary   42 ns
+        //     AccessTools.Field 1524 ns    GFA (that, cached)                             49 ns
+        //
+        // The .NET runtime already keeps a per-type member cache, so `Type.GetField` is a ~20 ns lookup, not the
+        // fresh scan it looks like. Wrapping it costs MORE than it saves — hashing a (Type, string) tuple is more
+        // work than the runtime's own lookup — so the "obvious" optimisation is a 2x pessimisation. `AccessTools`
+        // is the one that genuinely needs memoising: it walks the base-type chain and formats a warning on a miss,
+        // which is 1,524 ns and why GFA exists at all.
+        //
+        // Left uncached on purpose. If this line ever looks like an oversight next to its memoised siblings, the
+        // numbers above are the reason it is not.
+        internal static FieldInfo GF(Type t, string n) => t == null ? null : t.GetField(n, BF);
 
         // GF's QUIET TWIN, WITH ACCESSTOOLS REACH (2026-08-23). GF exists precisely to stop AccessTools' warning-on-miss
         // from spamming the log — and then CollectLeaves, defined immediately below it, kept calling AccessTools.Field
