@@ -73,6 +73,32 @@ Not HAF's steady cost, but visible in the meter: **`DistrictDebug = true`** (in 
 2026-08-21) runs the repository dump at load — ~40 ms/frame for the first 5 s of every session. It is a diagnostic;
 keep it `false` for play.
 
+### A reading after the `SelectorTile` fix (2026-08-23, build `2026-08-23 15:31 UTC`)
+
+First session on a build carrying §6's fix. Smoke `[full]` **PASS**, 0 injection errors, 22 models loaded / 19
+injected, 2 district(s) `[1 tile(s) live, 1 scoped, 1/1 textured]`.
+
+```
+HAF 348 µs/frame (1.0% @ 30 fps) | Update 185 µs | pose vanilla 81 µs = 52 adds × 1573 ns
+  | pose ours 82 µs = 18 adds × 4544 ns | districts 0 skipped 0 µs (0 ns ea), 1 ours 6.6 µs (6564 ns ea)
+top: PoseOurs 81.8 µs, PoseVanilla 81.0 µs, EngineAudio 46.9 µs, AnimStates 45.4 µs, RespawnPostLoad 20.6 µs, PoseAdjust 20.4 µs
+```
+
+**The line that matters is `districts 0 skipped`.** §6's scan walked 2,668 tracked districts every frame to find one;
+this session skips **zero**, at 0 µs, and the per-match work reads 6.6 µs against the 6.3 µs measured when the fix
+landed. `SelectorTile` no longer appears in the top six at all. That is the fix confirmed on a live scene rather than
+on the bench that produced it.
+
+**What this reading does NOT say.** The total is 348 µs against the 565–780 µs above, and **that is not a 2× win** —
+it is a different scene, which is the exact error the correction above this section exists to prevent. Read the
+buckets: 18 live pawns (`pose ours 18 adds`) puts this at the *light* end of the range those figures span, and
+`PoseOurs` at 4,544 ns/add against the ~5 µs/pawn in §5 is the like-for-like number, i.e. unchanged. Nothing here
+claims an improvement outside the district bucket, because nothing here measured one.
+
+Also recorded from the same panel — GPU mesh buffers, the other budget a custom model spends against:
+`L0 'Visual'` 3,061,435 / 5,000,000 verts (61%), meshes 4,608/8,000 · `L2 'MeshWithSkeletonParticleIndexBuffer'`
+(our models) 873,226 / 2,000,000 verts (43%), meshes 706/3,500. See [Vertex-Budget.md](Vertex-Budget.md).
+
 ## 3. The rules
 
 Learned in one afternoon, each from a bucket that surprised ([Architecture](Architecture.md) §2b):
