@@ -10,6 +10,35 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **BACKUPS GOT SMART, AND STOPPED FAILING IN SILENCE (2026-08-23, editor side).** Found by accident while checking
+  whether the offsite copy existed: the *Offsite folder* had been renamed hours earlier, the window displayed the
+  dead path as if it were fine, and `OffsiteZipCore` opened with an unconditional `Directory.CreateDirectory`. The
+  next backup would have **silently recreated a local folder nothing syncs** and reported *"Offsite: zipped N files
+  → …"* — a completely successful-looking line about a backup that was no longer offsite in any sense.
+  `SnapshotInto` had the same hole for the backup **root**: creating the new *timestamped* folder is correct,
+  creating its *parent* is not — a renamed root or an unmounted drive rebuilt the chain and started a fresh empty
+  history while every real snapshot sat under the old path and the *Existing backups* list simply went empty. Both
+  now **refuse** and name the path and the likely cause, and both warn **in the window** the moment the path is
+  missing, because a refusal that only reaches the status line after a run is no use when the daily auto is
+  unattended. *(Drilled: with the path left stale deliberately, a full backup wrote its local snapshot and created
+  nothing — `D:\Backup\Compressed` stayed absent.)*
+  **Then the size problem, measured rather than assumed:** two snapshots 3.5 hours apart differed in **18 of 4,076
+  files** — every backup re-copied ~1.4 GB of which ~99.6% was byte-identical, `source` alone (the licensed models)
+  being 971 MB of it. Locally, unchanged files are now **hard-linked** to the newest snapshot: zero extra bytes,
+  each snapshot still a complete independently-restorable folder, the Time Machine / `rsync --link-dest` trick.
+  First real run: **4,077 files, 3,966 hard-linked (1.2 GB saved), 111 copied (65.4 MB)** — verified by link count
+  (`stat %h = 2`), not by the report, because `du` on Windows cannot see NTFS hard links and its "saved" arithmetic
+  would have been self-confirming. Offsite, an unchanged snapshot is now **not uploaded at all**: a SHA-1 over every
+  file's path, size and mtime is written into the snapshot and beside each zip, and a match means the existing zip
+  already IS this backup. Not a hash of the bytes on purpose — reading 1.4 GB to decide whether to upload 1 GB is a
+  poor trade, and it is the same evidence the copy step already trusts. An absent or unreadable signature always
+  proceeds: **"I don't know" must never be read as "unchanged"**, and the sidecar is written only after the zip is
+  verified and moved, so a crash mid-zip cannot leave a signature claiming an upload that never happened. Safe
+  because nothing writes INTO a snapshot — restore copies *out*, the delete-guard copies *in* from the live tree —
+  and a failed link falls back to a plain copy: costs space, never correctness. See [Backup.md](docs/Backup.md).
+  **Not yet drilled: restoring FROM a hard-linked snapshot.** The direction of every copy says it is safe; that is
+  read, not run.
+
 - **ONE THROWING POLL NO LONGER DISABLES EVERY POLL AFTER IT (2026-08-23).** The 08-22 fix put `Plugin.Update`'s
   fan-out in a `try/finally` so the frame accounting always closed — but the `try` still wrapped **all ~25 polls**,
   and the catch's own wording admitted the rest: *"the rest of this frame's polls were skipped."* A poll that threw

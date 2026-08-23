@@ -53,7 +53,17 @@ half as often as they would at 60 — a poll that reads as cheap here may be twi
 | `WonderRows` | 1,350 µs | 0 | an uncached `AccessTools.TypeByName` assembly walk every 30 frames, forever |
 | `PoseOurs` (per our pawn) | 25–57 µs | ~5 µs | ~60 reflection get/sets on the boxed `PawnEntry`, then two raycasts + a bone-name re-resolve per helicopter per frame |
 | `AnimStates` | 204 µs | ~40 µs | a per-unit name resolve + `ToList()` for every army every 3 frames |
-| `SelectorTile` | ~210 µs | ~210 µs | diffuse per-district overhead in the scoped poll — **left as is** (0.6%) |
+| `SelectorTile` | ~210 µs | ~219 µs | per-district overhead in the scoped poll. Called "diffuse" in the 08-21 pass and left alone; 08-23 named part of it — the Fx-tree walk was re-resolving every field on every visit (see below) — and removing that took it 227.7 → 218.7 µs. The **remaining ~219 µs is still unexplained**, and `SelTileLoop` ≈ `SelectorTile` in every reading, so it is the loop head, not the bind. |
+
+**A correction worth keeping (2026-08-23).** The Fx-tree caching was first written up as taking `SelectorTile` "out of
+the top six, below 10.7 µs". That was measured in a session with 3 injected models and 1 live pawn against the
+original's 19 and 18; the reasoning for quoting it anyway — that the district-state line was identical in both
+(`2 district(s) [1 tile(s) live, 1 scoped]`) so the bucket was comparable — **did not hold.** A later heavy run put it
+straight back at the top. Two runs reporting the same district state differed ~20× on that bucket, so that line does
+not capture what drives it, and `SelectorTile` cannot be compared across unlike scenes. Like-for-like, both heavy:
+HAF total 608 → 570 µs, `Update` 396 → 391 µs, `SelectorTile` 227.7 → 218.7 µs — **~9 µs, about 4%.** What the change
+unambiguously fixed was the **log**: 23,194 → 149 AccessTools warnings (94% of the file), because that walk runs on the
+bind retry ~1/s, not per frame. It was worth far more to the log than to the frame.
 
 Also not steady cost: the **load-tier smoke test** (`SmokeOnLoad`, default on) runs once per session on the first
 frame after the loading screen hides — a few ms, at a boundary the player is already waiting on — and never again

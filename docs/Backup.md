@@ -15,11 +15,58 @@ thing" up to "the machine burned down."
 | **Manual version** | *Back up now* button | Timestamped folder of the toggled groups + manifest | Never auto-deleted |
 | **Daily auto-version** | First editor load of a day (>24 h since last; toggle, default ON) | Full backup of ALL groups — assets *and* configuration — on a background thread, same core as the button | Newest **3** `_auto_` versions kept; rotation logged |
 | **Delete guard** | Any asset deletion under a protected root (toggle, default ON) | `_deleted_<timestamp>_<name>/` copy of the asset (+ `.meta`) *before* the delete proceeds | Never auto-deleted (prune by hand via *Delete*) |
-| **Offsite zip** | Rides along with any manual/auto backup (optional: set the *Offsite folder*) | ONE `HAF_<timestamp>.zip` per backup, in a second — ideally cloud-synced — folder | Never overwritten |
+| **Offsite zip** | Rides along with any manual/auto backup (optional: set the *Offsite folder*) | ONE `HAF_<timestamp>.zip` per backup, in a second — ideally cloud-synced — folder. **Skipped entirely when nothing changed** since the last upload (see *Space*) | Never overwritten |
 | **Factory remove-undo** | The Model Factory's **Remove** (always) | `_removed_<timestamp>_<name>/` with the entry's JSON + the exact baked-output whitelist, taken BEFORE anything is deleted; restore via the **Undo remove** button next to Remove OR the window's *Factory remove snapshots* section — both do the full restore (baked assets + registry entry) through one shared implementation | Never auto-deleted |
 
 Every layer feeds the **same restorable list**: each entry, whether manual, auto, or delete-guard, has a
 **Restore** button and the same safety guards.
+
+## Space — why a daily 1.4 GB backup costs ~65 MB
+
+Two snapshots taken 3.5 hours apart were compared file by file: **18 of 4,076 files differed.** Every backup was
+re-copying ~1.4 GB of which ~99.6% was byte-identical to the one before, and `source` alone — the licensed models,
+which change rarely — is 971 MB of that. Two independent savings (2026-08-23), kept separate because they fail
+differently:
+
+**Locally, unchanged files are hard-linked** to the newest existing snapshot. A hard link is a second *name* for the
+same bytes on the same volume, so an unchanged file costs **zero** additional space while each snapshot stays a
+complete, independently browsable, independently restorable folder. Same idea as Time Machine or `rsync --link-dest`.
+The first real run: 4,077 files, **3,966 hard-linked (1.2 GB saved), 111 copied (65.4 MB)**.
+
+> **Two consequences worth knowing.** Explorer reports each snapshot at its full apparent size — it counts shared
+> bytes once per name, so the folder still *looks* like 1.4 GB. And deleting an old snapshot frees only the blocks
+> unique to it; the bytes survive while any other snapshot still names them. Both are normal, and both mean keeping
+> old snapshots is now nearly free.
+>
+> **The rule that makes it safe: never write INTO a snapshot folder.** Editing a hard-linked file edits every
+> snapshot sharing it. Nothing in HAF does — restore copies *out* of a snapshot into the live tree, and the
+> delete-guard copies *in* from the live tree to a fresh folder — so neither writes through a link. Deleting is
+> always safe. If the backup root ever moves to a different volume, linking silently degrades to full copies: costs
+> space, never correctness.
+
+**Offsite, an unchanged snapshot is not uploaded at all.** Each zip is a full ~1 GB, and daily uploads of the same
+models fill a 15 GB cloud quota in about a week. A SHA-1 over every file's relative path, size and mtime is written
+into each snapshot (`haf_signature.txt`) and beside each uploaded zip (`.sig`); a matching signature means the
+existing zip already *is* this backup, so the zip is skipped. Deliberately **not** a hash of the file bytes — reading
+1.4 GB to decide whether to upload 1 GB is a poor trade, and path+size+mtime is the same evidence the copy step
+already trusts. An absent or unreadable signature always proceeds: *"I don't know"* must never be read as
+*"unchanged"*. The sidecar is written only after the zip is verified and moved into place, so a crash mid-zip cannot
+leave a signature claiming an upload that never landed.
+
+## A missing destination is a failure, not a thing to create
+
+Both destinations used to be created on demand. Found live on 2026-08-23: the offsite folder was renamed and
+**nothing anywhere said a word** — the next backup would have silently recreated it and reported
+*"Offsite: zipped N files → …"*, a completely successful-looking line about a folder nothing syncs.
+
+- **Offsite folder missing** → the zip is **skipped** with a message naming the path and the likely cause (renamed,
+  moved, drive/share unavailable). The local backup is complete and untouched.
+- **Backup root missing** → the backup is **aborted** before anything is written. Creating the new *timestamped*
+  folder is correct; creating its *parent* is not — that silently rebuilds an empty history while every real snapshot
+  sits under the old path, with the *Existing backups* list simply going empty.
+
+Both also warn **in the window** the moment the path is missing, not only in the status line after a run — because the
+daily auto-version runs unattended and nobody would ever read it.
 
 ## What it captures
 
