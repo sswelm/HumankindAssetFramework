@@ -273,9 +273,18 @@ suite over its pure-data layer plus an in-game smoke harness, and a full documen
 
 The remaining work is **productizing the authoring tools for third-party distribution** — the framework itself is done;
 this is packaging:
-- **Neutral naming** — drop the "ENC" prefix (→ `HumankindModelFactory`) across the editor tooling.
-- **Package scaffolding** — a Unity `package.json` / asmdef and single-DLL plugin packaging.
+- **Package scaffolding** — a Unity `package.json` / asmdef and single-DLL plugin packaging, so the tools install into
+  *any* project instead of living inside the ENCReload project.
+- **Pack identity in the tools** — the authoring windows write **one hardcoded pack** (`haf_packs/ENCReload`,
+  `modId: "enc"`); packaging turns that into an authored setting. Deliberate until then — one project, one pack, so the
+  setting would today have exactly one legal value; the reasoning is in
+  [Decisions](docs/Decisions.md). *(Menu naming is already neutral — every window is under `Tools ▸ HAF`.)*
 - **An install guide + quickstart** for adopters bringing their own models.
+
+> **This gates baking, not shipping a pack.** At **runtime** a third-party pack is already a first-class citizen:
+> hand-write a `pack.json`, drop it in `haf_packs/`, and retextures, tints, sounds, formations and unit sizes all work
+> with no editor at all ([Multi-Mod.md](docs/Multi-Mod.md)). What waits on the packaging work is *baking your own model
+> into your own pack*.
 
 Already in place toward that goal: zero-config path auto-detection, the self-contained converter (no .NET dependency), one
 consolidated injection path, full multi-material GLB support, one-click animated import, bake-time skin controls,

@@ -6,6 +6,13 @@ ship a config file plus your assets; the runtime discovers, merges, and reports.
 
 This is the *loader* contract. For how to **bake** a model into the assets a pack references, see [`Factory-Manual.md`](Factory-Manual.md).
 
+> **One honest caveat, and it is on the *authoring* side only.** Everything on this page — discovery, resolution,
+> merge, conflicts, declared overrides, the tuning tables — is fully multi-pack **today**, and every runtime-only entry
+> (retexture, tint, sound, formation, unit size) needs no bake at all: hand-write the JSON below and you are done. The
+> **authoring tools**, however, still write one hardcoded pack identity (`haf_packs/ENCReload`, `modId: "enc"`), because
+> they live inside the ENCReload Unity project. That is deliberate until the tools are packaged — see
+> [Decisions](Decisions.md) — so baking a *new model* into *your own* pack is the one step that waits on it.
+
 ## What a pack is
 
 A pack is one JSON file with the schema wrapper around the familiar `models` array:

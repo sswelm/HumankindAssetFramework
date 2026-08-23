@@ -96,6 +96,12 @@ reference snapshot that used to sit in `baker/` was **deleted on 2026-08-21** (~
 omitted fields the plugin reads, so anything baked from it produced quietly wrong packs — reasoning in
 `baker/README.md` and [Decisions.md](Decisions.md).
 
+**They are also single-tenant, on purpose.** Living in one project means they write one pack identity —
+`haf_packs/ENCReload`, `modId: "enc"` — hardcoded rather than configurable. Packaging the tools is what turns that into
+an authored setting; until then, a second author bakes by pointing this project at their model, not by re-aiming the
+tools. The runtime has no such limit (see [Multi-Mod.md](Multi-Mod.md)), and the full reasoning is in
+[Decisions.md](Decisions.md).
+
 ## What `baker/` still holds
 
 Two live things that exist **only** here, and are built from here:

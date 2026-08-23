@@ -7,6 +7,37 @@ check before proposing a change to any of them.
 
 ---
 
+## The authoring tools are single-tenant until they are packaged (2026-08-23)
+The **runtime** is multi-tenant by construction: `haf_packs/*.json` is discovered, resolved in Humankind's own mod
+order, merged, and conflict-reported, and a stranger's pack is a first-class citizen there ([Multi-Mod.md](Multi-Mod.md)).
+**The editor half is not.** The tools write exactly one pack identity, hardcoded:
+
+| Site (in the ENCReload project) | Hardcoded |
+|---|---|
+| `ModelRegistry.PackLiveDir` / `PackRepoDir` | `haf_packs/ENCReload` and `Assets/Pack/ENCReload` — 19 call sites across 4 windows |
+| `PackDef.modId` | defaults to `"enc"`; no window field edits it |
+| `DistrictFactoryWindow` / `ShipStatusWindow` / `HafCli` | glob the built bundle as `ENCReload.*` |
+
+**This is deliberate, not an oversight.** The tools live, compile and run only inside the ENCReload Unity project
+([Building.md](Building.md) — *"Editor tooling — in ENCReload, not here"*). One project, one pack: a pack-identity
+setting today would be a setting with exactly one legal value, plus a fresh class of user error (baking into the wrong
+folder). Parameterising the write target is part of **packaging** the tools — it is not something to bolt on before
+the tools have a package to live in.
+
+**What a third party can do today, fully supported:** hand-write a `pack.json`, drop it in `haf_packs/`. Retextures,
+tints, sounds, formations, unit sizes — every runtime-only entry — work with no editor at all, as does any entry
+referencing an already-baked GUID. What needs the packaging work is *baking into your own pack*.
+
+**What settles it:** when the tools move out of ENCReload into a distributable Unity package, pack identity becomes an
+authored field (a Settings entry defaulting to the host project's own mod id) and these sites read it. Until that day
+the constant is the *honest* description of the tool, and a settings field would be a lie about what it can do.
+
+**Why it is written down:** a 2026-08-23 critical review flagged it as the highest structural finding, and from the
+code it reads exactly that way — the two halves of one framework disagree about how many mods exist. Worth recording
+so the next reader does not "fix" it in isolation. It also corrected the README, which called what remained *"neutral
+naming"*: the naming is **done** (32 `MenuItem`s, all under `Tools ▸ HAF`, none carrying ENC). The write target is
+what is left. See the [Review-Backlog](Review-Backlog.md) entry.
+
 ## Per-frame cost is a number in the F8 panel, never an estimate (2026-08-21)
 Asked what a day of changes cost per frame, the answer given was a reasoned estimate: "under 1%". The first
 measurement read **5.7 ms/frame — 16.7% of a 30 fps frame, 15× the estimate** — and not one of the causes was the
