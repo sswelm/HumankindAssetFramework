@@ -367,6 +367,14 @@ namespace HumankindAssetFramework
 
             reformPresent.Clear();                                  // reused across scans (no per-scan HashSet allocation)
             bool handledAny = false;
+            // Hoisted out of the per-army loop: is the formation-reference lookup wanted by ANY entry? Only the
+            // macro-replacement arm (a link with no unit name) reads it. `entries` is published at load and not
+            // mutated during a scan, so this is a constant for the whole walk.
+            // Mirrors the match arm below EXACTLY: that arm requires `x.done && (dummies>0 || unit.Length>0)` and
+            // then `x.unit.Length == 0`, which collapses the disjunction to `dummies > 0`. Same predicate, hoisted.
+            bool needFref = false;
+            foreach (var x in entries)
+                if (x.done && x.unit.Length == 0 && x.dummies.Count > 0) { needFref = true; break; }
             foreach (var army in armies)
             {
                 // PER-ARMY TIMING. The call COUNT on these two buckets is the army count — the number nothing
@@ -380,14 +388,27 @@ namespace HumankindAssetFramework
                 var pdef = Mem(unit, "PresentationUnitDefinition");
                 string pdn = Mem(pdef, "name")?.ToString() ?? Mem(pdef, "Name")?.ToString() ?? "";
                 if (pdn.Length == 0) continue;
-                // macro replacements have no unit name — match those by the definition's own formation reference
+                // macro replacements have no unit name — match those by the definition's own formation reference.
+                // TWO CHANGES, both rule-application rather than a guess at where the 61.8 µs lives (2026-08-23):
+                //
+                // 1. DON'T COMPUTE IT AT ALL unless some entry can actually use it. `fref` is read in exactly one
+                //    place — the `x.unit.Length == 0` macro-replacement arm — so with no such entry authored, every
+                //    army in the game paid two reflection lookups per scan, 12×/s, for a string nothing ever read.
+                //    Dead work is the cheapest kind to delete, and `needFref` is a load-time constant.
+                // 2. When it IS needed, resolve through the shared cache. §7 measured AccessTools.Field at 130 ns
+                //    against 42 ns cached, and GetProperty at 64 ns — but 344 ns on a MISS, which is the case that
+                //    matters here because a renamed member would make this a permanent per-army stall that degrades
+                //    "gracefully" into a `catch {}` and never says a word.
                 string fref = null;
-                try
+                if (needFref)
                 {
-                    var r = AccessTools.Field(pdef.GetType(), "PresentationFormationDefinition")?.GetValue(pdef);
-                    fref = r?.GetType().GetProperty("XmlSerializableElementName")?.GetValue(r) as string;
+                    try
+                    {
+                        var r = UniversalInject.CachedField(pdef.GetType(), "PresentationFormationDefinition")?.GetValue(pdef);
+                        if (r != null) fref = UniversalInject.GetMember(r, "XmlSerializableElementName") as string;
+                    }
+                    catch { }
                 }
-                catch { }
                 Entry e = null;                                     // plain loop, not entries.FirstOrDefault — no per-army closure allocation at 12x/s
                 foreach (var x in entries)
                     if (x.done && (x.dummies.Count > 0 || x.unit.Length > 0)   // include PURE-REPOINT links (no dummy data) — they also need pre-override units re-instantiated
