@@ -19,13 +19,21 @@ namespace HumankindAssetFramework
                          DistrictMeshSwap = 12, DistrictPolls = 13, BattleTurn = 14, FacingPersist = 15, PropRegister = 16,
                          Formation = 17, Rearm = 18, PoseOurs = 19, SelectorTile = 20, MainRows = 21, WonderRows = 22, HexDial = 23,
                          SelTileCfg = 24, SelTileLoop = 25, SelTileBind = 26, SelTileAlbedo = 27, SelTileFlat = 28,   // SelectorTile sub-buckets
-                         PoseSweep = 29, PoseAdjust = 30, PoseAnim = 31, PoseAim = 32, PoseDonor = 33;   // PoseOurs sub-buckets (nested inside PoseOurs); PoseDonor = the donor-clip branch (helicopters) (nested inside SelectorTile, so they double-count in a sum — read them as a breakdown)
+                         PoseSweep = 29, PoseAdjust = 30, PoseAnim = 31, PoseAim = 32, PoseDonor = 33,   // PoseOurs sub-buckets (nested inside PoseOurs); PoseDonor = the donor-clip branch (helicopters) (nested inside SelectorTile, so they double-count in a sum — read them as a breakdown)
+                         // SelTileLoop split (2026-08-23): SelectorTile is 219 µs — 36% of HAF's whole per-frame cost —
+                         // and `SelTileLoop ≈ SelectorTile` in every reading, so it is the loop, not the bind. The loop
+                         // walks EVERY district the game presents to find the one or two that are ours, so the question
+                         // that decides where to look is whether the cost is the SCAN (many districts skipped cheaply,
+                         // ×N per frame) or the WORK (few districts, expensive each). These two answer it, and their
+                         // CALL counts are the district counts — the thing nothing currently reports.
+                         SelTileSkip = 34, SelTileOurs = 35;
         [ProcessLived("literal bucket label table")] static readonly string[] names =
         {
             "Update(total)", "PoseVanilla", "TickTexture", "RespawnPostLoad", "FireQueues", "DeployState", "AnimStates", "EngineAudio",
             "SubPawnVisuals", "BattleCries", "Dials", "ClassScan", "DistrictMeshSwap", "DistrictDbg", "BattleTurn", "FacingPersist",
             "PropRegister", "Formation", "Rearm", "PoseOurs", "SelectorTile", "MainRows", "WonderRows", "HexDial",
             "SelTileCfg", "SelTileLoop", "SelTileBind", "SelTileAlbedo", "SelTileFlat", "PoseSweep", "PoseAdjust", "PoseAnim", "PoseAim", "PoseDonor",
+            "SelTileSkip", "SelTileOurs",
         };
         public static int Count => names.Length;
         public static string Name(int bucket) => names[bucket];
@@ -75,6 +83,18 @@ namespace HumankindAssetFramework
             double vanNs = cl[PoseHook] > 0 ? tk[PoseHook] * usPerTick * 1000.0 / cl[PoseHook] : 0;
             double ourNs = cl[PoseOurs] > 0 ? tk[PoseOurs] * usPerTick * 1000.0 / cl[PoseOurs] : 0;
             var summary = Inv($"HAF {totalUs:0} µs/frame ({100.0 * totalUs / frameUs:0.0}% @ {fps:0} fps) | Update {updateUs:0} µs | pose vanilla {poseVanUs:0} µs = {vanAdds:0} adds × {vanNs:0} ns | pose ours {poseOurUs:0} µs = {ourAdds:0} adds × {ourNs:0} ns");
+            // DISTRICT SCAN, stated like the pose hook is (2026-08-23). SelectorTile is the biggest single bucket and
+            // its cost divides two ways that need completely different fixes: too MANY districts walked per frame, or
+            // too much work on the few that match. Printing both counts and the per-district cost makes that readable
+            // at a glance instead of inferable from a total. Silent when the district axis isn't running.
+            if (cl[SelTileSkip] + cl[SelTileOurs] > 0)
+            {
+                double skipUs = tk[SelTileSkip] * usPerTick / frameCount, oursUs = tk[SelTileOurs] * usPerTick / frameCount;
+                double skipN = cl[SelTileSkip] / (double)frameCount, oursN = cl[SelTileOurs] / (double)frameCount;
+                double skipNs = cl[SelTileSkip] > 0 ? tk[SelTileSkip] * usPerTick * 1000.0 / cl[SelTileSkip] : 0;
+                double oursNs = cl[SelTileOurs] > 0 ? tk[SelTileOurs] * usPerTick * 1000.0 / cl[SelTileOurs] : 0;
+                summary += Inv($" | districts {skipN:0} skipped {skipUs:0.#} µs ({skipNs:0} ns ea), {oursN:0} ours {oursUs:0.#} µs ({oursNs:0} ns ea)");
+            }
             // detail: every bucket except the total, sorted by cost, top 6, only those that ran
             var idx = new int[tk.Length - 1]; for (int i = 1; i < tk.Length; i++) idx[i - 1] = i;
             Array.Sort(idx, (a, b) => tk[b].CompareTo(tk[a]));

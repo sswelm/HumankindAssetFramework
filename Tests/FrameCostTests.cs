@@ -62,5 +62,32 @@ namespace HumankindAssetFramework.Tests
             Assert.Contains("pose vanilla 0 µs = 0 adds × 0 ns", s);
             Assert.DoesNotContain("NaN", s);
         }
+
+        // THE DISTRICT SCAN SEGMENT (2026-08-23). SelectorTile is 36% of HAF's per-frame cost and its two halves need
+        // opposite fixes — too MANY districts walked, or too much work per match. The summary states both counts and
+        // the per-district cost so that is readable rather than inferable; these pin it so it can't quietly stop.
+        [Fact]
+        public void Format_StatesTheDistrictScanSplit()
+        {
+            var tk = Ticks(); var cl = Calls();
+            int frames = 300; double elapsed = 5.0;
+            tk[FrameCost.UpdateTotal] = 1000 * frames; cl[FrameCost.UpdateTotal] = frames;
+            tk[FrameCost.SelTileSkip] = 470 * frames; cl[FrameCost.SelTileSkip] = 47L * frames;   // 47 µs/frame over 47 skips = 1000 ns each
+            tk[FrameCost.SelTileOurs] = 1800 * frames; cl[FrameCost.SelTileOurs] = 1L * frames;   // 180 µs/frame on ONE district
+            var s = FrameCost.Format(tk, cl, frames, elapsed, Freq, out _);
+            Assert.Contains("districts 47 skipped 47 µs (1000 ns ea)", s);
+            Assert.Contains("1 ours 180 µs (180000 ns ea)", s);
+        }
+
+        // Silent when the district axis isn't running — an empty segment on every line would be noise, and the
+        // summary is read every minute in the log.
+        [Fact]
+        public void Format_OmitsTheDistrictSegmentWhenNoDistrictsWereWalked()
+        {
+            var tk = Ticks(); var cl = Calls();
+            tk[FrameCost.UpdateTotal] = 1000 * 300; cl[FrameCost.UpdateTotal] = 300;
+            var s = FrameCost.Format(tk, cl, 300, 5.0, Freq, out _);
+            Assert.DoesNotContain("districts", s);
+        }
     }
 }

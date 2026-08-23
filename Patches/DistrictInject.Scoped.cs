@@ -342,11 +342,24 @@ namespace HumankindAssetFramework
                 long tLoop = FrameCost.Begin();
                 foreach (var d in trackedDistricts)
                 {
-                    if (d is UnityEngine.Object duo && duo == null) continue;
+                    // SCAN vs WORK, timed apart (2026-08-23). This loop walks EVERY district the game presents to find
+                    // the one or two that are ours, and SelectorTile is 36% of HAF's per-frame cost. Whether that is
+                    // N cheap skips or a few expensive matches decides where the fix goes, and nothing reported it.
+                    // The skip timer closes on EVERY early-out path, so its call count is the districts-walked number.
+                    long tSkip = FrameCost.Begin();
+                    if (d is UnityEngine.Object duo && duo == null) { FrameCost.End(FrameCost.SelTileSkip, tSkip); continue; }
                     // name resolved ONCE per PresentationDistrict (a reflection read + a StaticString ToString alloc, ×17
                     // districts × 60 fps before — perf pass 2026-08-21); the cache is cleared with trackedDistricts on reset
                     if (!districtNameCache.TryGetValue(d, out var name)) districtNameCache[d] = name = GetMember(d, "ConstructibleDefinitionName")?.ToString();
-                    if (string.IsNullOrEmpty(name) || !selectorTileGuid.TryGetValue(name, out var guid)) continue;
+                    if (string.IsNullOrEmpty(name) || !selectorTileGuid.TryGetValue(name, out var guid)) { FrameCost.End(FrameCost.SelTileSkip, tSkip); continue; }
+                    // from here on this district IS ours — everything below is WORK. try/finally because the body
+                    // has SIX `continue` paths (no selector, no plbc, no channels, bad layer, no box, no field), and
+                    // an End() they skip would under-count both the time AND the call count — the same accounting
+                    // leak the 08-22 Update fix closed, where a bucket lost frames while its window kept aging and
+                    // the meter read healthiest exactly when it was most wrong.
+                    long tOurs = FrameCost.Begin();
+                    try
+                    {
                     S = ScopedFor(name);   // PER-DISTRICT: point the scoped-state proxies at THIS district before any scoped work (texture / B&W / flatten no longer clash between the reactor and the Oracle)
                     // resolve THIS district's own baked albedo atlas from the registry (for the scoped texture bind)
                     if (scopedAtlasGuid == null)
@@ -420,6 +433,8 @@ namespace HumankindAssetFramework
                     FrameCost.End(FrameCost.SelTileBind, tb);
                     tb = FrameCost.Begin(); ApplyScopedAlbedo();  FrameCost.End(FrameCost.SelTileAlbedo, tb);
                     tb = FrameCost.Begin(); UpdateMeshFlatness(); FrameCost.End(FrameCost.SelTileFlat, tb);
+                    }
+                    finally { FrameCost.End(FrameCost.SelTileOurs, tOurs); }   // closes on every path, `continue` included
                 }
                 FrameCost.End(FrameCost.SelTileLoop, tLoop);   // the whole district loop (head cost = loop − bind − albedo − flat)
             }
