@@ -1514,7 +1514,15 @@ namespace HumankindAssetFramework
         internal static void SetFlatHeight(float value)
         {
             runtimeFlatHeight = UnityEngine.Mathf.Clamp(value, 0.02f, 1f);
-            Plugin.Log.LogInfo($"[FootprintMesh] flat-height override -> {runtimeFlatHeight:0.00} (all scoped districts)");
+            // Inv() — NOT optional here, and not the general "console lines migrate opportunistically" case. This
+            // number is an ECHO OF A CONFIG INPUT: the DistrictFootprintMeshFlatHeight description tells the author
+            // to "tune it LIVE in the F8 window", so the intended workflow is to nudge, read the value off this
+            // line, and write it into the cfg. Plain interpolation prints it in the CURRENT culture — verified in
+            // this machine's own LogOutput.log, which is full of `duration 0,042` — while CfgFloat parses
+            // invariant only. So the log would hand the author `0,35`, the parser would reject it, and their tuning
+            // would silently fall back to the default. That is exactly the dial-echo bug found in the 2026-08-20
+            // drill (see DialConfig.Inv) reappearing in a second place. Anything echoed for copy-back is invariant.
+            Plugin.Log.LogInfo(Plugin.Inv($"[FootprintMesh] flat-height override -> {runtimeFlatHeight:0.00} (all scoped districts)"));
         }
         static int flatPollTick;
         internal static void UpdateMeshFlatness()

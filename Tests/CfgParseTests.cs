@@ -73,6 +73,23 @@ namespace HumankindAssetFramework.Tests
             Assert.Equal(v, Plugin.ParseFloat(printed, float.NaN), 4);
         }
 
+        // THE ECHO CONTRACT, for the one number the docs tell an author to copy out of the log and paste into the
+        // config: DistrictFootprintMeshFlatHeight, tuned live in the F8 window (SetFlatHeight logs it with "0.00").
+        // Plain interpolation formats in the CURRENT culture — this machine's own LogOutput.log is full of
+        // `duration 0,042` — while CfgFloat parses invariant ONLY. Un-Inv'd, the log hands the author `0,35`, the
+        // parser rejects it, and their tuning silently reverts. Same bug DialConfig found on 2026-08-20, second site.
+        [Theory]
+        [InlineData(0.02f)]   // the clamp floor
+        [InlineData(0.17f)]   // the default
+        [InlineData(0.35f)]
+        [InlineData(1f)]      // the clamp ceiling
+        public void FlatHeightEcho_IsReparseable(float v)
+        {
+            string echoed = Plugin.Inv($"{v:0.00}");     // exactly SetFlatHeight's format
+            Assert.DoesNotContain(",", echoed);          // never a comma decimal, whatever the machine's culture
+            Assert.Equal(v, Plugin.ParseFloat(echoed, float.NaN), 2);
+        }
+
         // CfgFloat's null path — the only line of the pair that isn't pure. A null ConfigEntry (never bound, or a
         // [Debug] key absent from this build) must answer the caller's default, not throw and not zero.
         [Fact]
