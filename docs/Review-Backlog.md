@@ -46,6 +46,35 @@ stale** — struck through in place below, each with the evidence. The rest are 
 
 ## From the 2026-08-23 critical review
 
+- ~~**Four `float x = D; TryParse(cfg, out x)` sites — the default is dead code.**~~ — **FIXED 2026-08-23,
+  mutation-drilled.** `out` is definitely-assigned, so a failed parse overwrites the initializer: the shape reads
+  "D unless the config overrides it" and means "**0** unless it parses". **Two were live** — `DistrictInject`'s
+  footprint flat height on both its resolve and its accessor path, which then handed **0** to a consumer whose own
+  `SetFlatHeight` clamps to `[0.02, 1]`, i.e. a value the rest of the system treats as illegal. The other two were
+  latent, and instructively so: one is rescued by a range check on the next line, the other is harmless only because
+  its fallback happens to *equal* the failure value. **The review over-counted these as four live bugs — they are two
+  live plus two copies of the shape**; all four were converted anyway, because a shape that is safe by coincidence is
+  the one that gets copied a fifth time. Fixed as `Plugin.ParseFloat`/`CfgFloat` — one pure function, fallback as a
+  return value, never an out-param — per [Decisions](Decisions.md) *"move the DECISION out of the method that does the
+  I/O"*. 21 tests (`CfgParseTests`); drilled by restoring the old shape inside the helper: **9 fail, including the
+  null and blank cases.** The config description for the same key advertised *"Default 0.08"* against a bound default
+  of `0.17` — corrected in the same pass. **Still open:** nothing gates the shape's return; a regex guard over
+  `= <literal>; <type>.TryParse` in `tools/check.sh` would be ~10 lines, and would need to skip comments (the policy
+  note at `Plugin.ParseFloat` names the pattern deliberately).
+
+- **The runtime is multi-tenant; the authoring tools are not.** — **DECIDED 2026-08-23: intentional, deferred to
+  packaging.** The Factory writes one hardcoded pack identity — `ModelRegistry.PackLiveDir`/`PackRepoDir`
+  (`haf_packs/ENCReload`, `Assets/Pack/ENCReload`, 19 call sites over 4 windows), `PackDef.modId = "enc"` with no window
+  field, and an `ENCReload.*` bundle glob in `DistrictFactoryWindow`/`ShipStatusWindow`/`HafCli`. So a second author
+  baking with these tools writes into ENC's pack. **Not a bug to fix in place:** the tools compile and run only inside
+  the ENCReload project, so a pack-identity setting today has exactly one legal value and adds a way to bake into the
+  wrong folder; parameterising the write target is part of packaging the tools, and lands with it. Recorded in
+  [Decisions](Decisions.md); the README's roadmap, `Building.md` and `Multi-Mod.md` now say so where an adopter reads
+  them. **The review's second point stands and was fixed:** the README called what remained *"neutral naming"*, which
+  undersold it — naming is done (32 `MenuItem`s, all `Tools ▸ HAF`, none carrying ENC); the write target is what is
+  left. **Re-open when** the tools get a `package.json`/asmdef and a home outside ENCReload — that is the commit where
+  these sites read an authored mod id.
+
 - ~~**`SelectorTile` is 219 µs/frame — 36% of HAF's per-frame cost — and unexplained.**~~ — **FIXED 2026-08-23,
   219 → 6.3 µs, drilled twice.** The measurement ended it: `districts 2668 skipped 237.3 µs, 1 ours 5.6 µs` — the
   poll walked every tracked district each frame to find one, on a list nothing ever pruned, with an O(n) dedup on

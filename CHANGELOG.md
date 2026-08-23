@@ -10,6 +10,30 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE DEFAULT WAS DEAD CODE IN FOUR PLACES (2026-08-23).** `float x = 0.17f; float.TryParse(cfg, …, out x);` reads as
+  *"0.17 unless the config overrides it"* and means *"**0** unless it parses"* — `out` is definitely-assigned, so a
+  failed parse writes 0 straight over the initializer. Two of the four sites were live, both the district footprint's
+  flatten height, and the consequence names itself: the 0 was handed to a path whose own `SetFlatHeight` clamps to
+  `[0.02, 1]`, so the config route could produce a value the rest of the system defines as illegal — a footprint
+  squashed coplanar with the ground, edges drowning wherever the terrain rises, from nothing worse than a cleared
+  config key. **Nothing in HAF could have caught it.** It throws nothing, logs nothing and yields a perfectly plausible
+  number; every guard the plugin has — the per-poll isolation, the injection-error ledger, the smoke verdict — watches
+  for failures that *announce* themselves.
+  The other two sites are the instructive half. One is rescued by a range check on the very next line; the other is
+  harmless **only because its fallback happens to equal zero**, the failure value. Neither is a bug today and both were
+  converted anyway, because a shape that is correct by coincidence is the one that gets copied a fifth time into a site
+  where the coincidence does not hold. (The review that found this reported four live bugs; it was two live plus two
+  copies of the shape, corrected in [Review-Backlog](docs/Review-Backlog.md) rather than quietly.)
+  Fixed as `Plugin.ParseFloat` / `CfgFloat` — one pure function, **fallback as a return value, never an out-param** —
+  which is [Decisions](docs/Decisions.md)' *"move the DECISION out of the method that does the I/O"* applied to the
+  config path, and makes the shape unwritable rather than merely absent. It lives beside `Inv()` as the read-side
+  mirror of the same invariant-culture policy: `Inv` guarantees a float HAF *prints* can be read back, `ParseFloat`
+  guarantees a float HAF *reads* is invariant — a comma-decimal `"0,17"` falls back rather than silently becoming 17.
+  21 tests (`CfgParseTests`), drilled by restoring the old shape inside the helper: **9 fail, including the null and
+  blank cases** that were the likeliest real trigger. Found alongside it and fixed in the same pass: that key's own
+  config description advertised *"Default 0.08"* against a bound default of `0.17` — the sentence the user reads while
+  tuning the exact field, disagreeing with the code by 2×.
+
 - **THE VALIDATOR HAD ~30 RULES FOR ENTRIES AND NONE FOR THE PACK ITSELF (2026-08-23).** `PackValidator` checked bones,
   files, pawns, formats and ranges — and not one thing about the wrapper the whole multi-mod format rests on:
   `modId`, `schemaVersion`, `dependsOn`, `loadAfter`, `overrides`. So a broken wrapper failed *soft* at runtime (named,

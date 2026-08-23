@@ -1048,8 +1048,8 @@ namespace HumankindAssetFramework
                 var maskModeType = l0.GetType().GetField("maskOption", BindingFlags.Instance | BindingFlags.NonPublic)?.FieldType;
                 if (maskModeType != null) GF(l0.GetType(), "maskOption").SetValue(l0, Enum.Parse(maskModeType, "Alpha"));
                 l0Field.SetValue(hostClone, l0);
-                float fpSize = 3.0f; float.TryParse(Plugin.DistrictFootprintMaskSize?.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out fpSize);
-                if (fpSize <= 0f) fpSize = 3.0f;
+                float fpSize = Plugin.CfgFloat(Plugin.DistrictFootprintMaskSize, 3.0f);
+                if (fpSize <= 0f) fpSize = 3.0f;   // separate concern: an explicitly-authored 0/negative is out of range too
                 GF(hostClone.GetType(), "defaultSize")?.SetValue(hostClone, new UnityEngine.Vector3(1f, 0.25f, 1f));
                 GF(hostClone.GetType(), "bboxOverride")?.SetValue(hostClone, new UnityEngine.Bounds(UnityEngine.Vector3.zero, new UnityEngine.Vector3(fpSize * 2f, fpSize * 2f, fpSize * 2f)));
                 Plugin.Log.LogInfo($"[Footprint] step4: cloned decal + rebound private copy (size {fpSize})");
@@ -1092,7 +1092,7 @@ namespace HumankindAssetFramework
                             var pf = GF(it.GetType(), "Position"); if (pf != null) pf.SetValue(itBox, UnityEngine.Vector3.zero);
                             var lsF = GF(it.GetType(), "LocalScale"); if (lsF != null) lsF.SetValue(itBox, new UnityEngine.Vector3(fpSize, 1f, fpSize));   // was 0.04 = shrink; drive size here (per-item, scoped)
                             // ROTATE: spin the decal's orientation (AxeY up, AxeZ forward) by DistrictFootprintMaskRotation° clockwise about vertical
-                            float fpRot = 0f; float.TryParse(Plugin.DistrictFootprintMaskRotation?.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out fpRot);
+                            float fpRot = Plugin.CfgFloat(Plugin.DistrictFootprintMaskRotation, 0f);
                             if (fpRot != 0f)
                             {
                                 var q = UnityEngine.Quaternion.AngleAxis(fpRot, UnityEngine.Vector3.up);

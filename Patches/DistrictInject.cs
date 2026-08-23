@@ -1422,7 +1422,7 @@ namespace HumankindAssetFramework
                 fpBW = Plugin.DistrictFootprintMeshBW != null && Plugin.DistrictFootprintMeshBW.Value == "true";
                 fpFlat = Plugin.DistrictFootprintMeshFlat != null && Plugin.DistrictFootprintMeshFlat.Value == "true";
                 fpHideDecal = Plugin.DistrictFootprintMeshHideDecal == null || Plugin.DistrictFootprintMeshHideDecal.Value != "false";
-                float h = 0.17f; float.TryParse(Plugin.DistrictFootprintMeshFlatHeight?.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out h); fpFlatHeight = h;
+                fpFlatHeight = Plugin.CfgFloat(Plugin.DistrictFootprintMeshFlatHeight, 0.17f);   // blank/malformed -> 0.17, NOT 0 (see Plugin.ParseFloat)
             }
             fpResolved = true;
         }
@@ -1482,7 +1482,7 @@ namespace HumankindAssetFramework
         {
             if (!float.IsNaN(runtimeFlatHeight)) return runtimeFlatHeight;   // live F8 override wins (global, all scoped districts)
             if (fpResolved) return fpFlatHeight;                             // THIS district's per-entry value (or its config fallback)
-            float v = 0.17f; float.TryParse(Plugin.DistrictFootprintMeshFlatHeight?.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v); return v;
+            return Plugin.CfgFloat(Plugin.DistrictFootprintMeshFlatHeight, 0.17f);   // blank/malformed -> 0.17, NOT 0 (see Plugin.ParseFloat)
         }
         // F8-window (S-INDEPENDENT) accessors: the flat-height slider is a GLOBAL live override across every scoped district
         // (the window has no per-district selection). These never touch S, so the readout/tuning stays meaningful with two

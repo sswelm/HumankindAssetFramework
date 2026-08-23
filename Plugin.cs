@@ -68,6 +68,25 @@ namespace HumankindAssetFramework
         // strings). Console lines migrate opportunistically as they're touched.
         internal static string Inv(System.FormattableString f) => System.FormattableString.Invariant(f);
 
+        // INVARIANT READING, by policy — the mirror of Inv() above, and the reason it exists (2026-08-23 review).
+        // `float x = 0.17f; float.TryParse(cfg, …, out x);` READS as "0.17 unless the config overrides it" and MEANS
+        // "0 unless the config parses": `out` is definitely-assigned, so a failed parse writes 0 over the initializer
+        // and the default is dead code. Four sites had the shape; two were live (the footprint flat height, which
+        // then handed 0 to a consumer whose own setter clamps to [0.02, 1] — a value the rest of the system calls
+        // illegal), one was rescued by a range check on the next line, one was harmless only because its fallback
+        // happened to equal 0. Nothing catches it: it is silent, it is a plausible number, and it survives every
+        // guard HAF has because nothing throws.
+        // POLICY: config text becomes a number ONLY through here. The fallback is a return value, never an out-param.
+        // Pure and unit-tested (CfgParseTests) — the ConfigEntry overload is the one line that isn't.
+        internal static float ParseFloat(string text, float fallback)
+        {
+            return float.TryParse(text, System.Globalization.NumberStyles.Float,
+                                  System.Globalization.CultureInfo.InvariantCulture, out float v) ? v : fallback;
+        }
+        // Null-safe read of a string-typed config entry. Null entry (pre-Bind, or a [Debug] key that never bound) and
+        // unparseable text are the SAME answer — the caller's default — because to a reader they are the same event.
+        internal static float CfgFloat(ConfigEntry<string> e, float fallback) => ParseFloat(e?.Value, fallback);
+
         internal static ConfigEntry<string> AssetNameFilter; // [Debug] substring filter for the ENCProof scan dumps (Prober.RunScan)
         internal static ConfigEntry<KeyCode> ToggleKey;      // open/close the feedback window (Shift+ToggleKey = dump GPU mesh-buffer usage)
         internal static ConfigEntry<bool>   UniversalInjectOn; // registry-driven universal injector (Model Factory)
@@ -250,7 +269,8 @@ namespace HumankindAssetFramework
                                   "Tuning for DistrictFootprintMeshFlat: the flatten HEIGHT = the size.y multiplier applied on the strategic map. ~0.02 is " +
                                   "paper-flat, but the sheet is then coplanar with the ground so its edges drown where the tile's terrain rises over them; up " +
                                   "toward 1.0 is full 3D. The sweet spot reads flat yet still pokes clear of the terrain. Tune it LIVE in the F8 window " +
-                                  "(vertical placement is terrain-owned, so this — not a lift — is the lever). Default 0.08.");
+                                  "(vertical placement is terrain-owned, so this — not a lift — is the lever). Default 0.17; " +
+                                  "blank or unparseable falls back to that same 0.17.");
             DistrictSelectorTile = Config.Bind("District", "DistrictSelectorTile", "",
                                   "SCOPED dedicated-visual: put a DATA-AUTHORED district selector on ONLY the named district's own tile(s) " +
                                   "(matched by ConstructibleDefinitionName), leaving the shared visual affinity — and every other district using " +
