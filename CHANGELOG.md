@@ -36,6 +36,21 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   correct code is one people learn to pass with `--no-verify`. 7 tests (`MemberReadTests`), including an oracle
   pinning `Convert.ToBoolean(null) == false`; drilled by restoring the old semantics inside the helper, which
   turns 4 of them red.
+  **And then the gate was too narrow again, in the same way, and hid two more live bugs.** Its pattern matched
+  `x = Convert.To…(GetMember(…))` but not `x = SomeCall(Convert.To…(GetMember(…)))` — one wrapping call, which is
+  exactly the shape of the two worst sites in the family:
+  `baseCat = CategoryFromProfile(Convert.ToInt32(GetMember(…, "AnimationCapabilityProfile")))` in the class scan,
+  and its twin on the addon hook. Absent member → `0` → and **`CategoryFromProfile(0)` is `CatHuman`**. A renamed
+  `AnimationCapabilityProfile` would therefore have registered *every* descriptor as human and applied human turn
+  rates to ships, planes and vehicles — while `CategoryFromProfile`'s own `prof >= 0 ? CatHuman : -1` branch, and
+  the `adProfCat >= 0` guards at both call sites, all say plainly that **-1 was meant to be reachable**. Through
+  that read it never could be. A third site alongside them (`int adId = Convert.ToInt32(GetMember(addon,
+  "PawnDefinitionId"))`, guarded by `if (adId >= 0)`) had no sentinel at all and would have registered under
+  descriptor 0 — a different unit. All three now read through `MemberInt(…, -1)`.
+  The lesson is the one this repo keeps relearning and had already written down: **a guard's "all clear" is only
+  as wide as its regex.** Twice in one sitting this gate reported a clean tree while blind to the shape it was
+  written for — first the two-line declaration, then the wrapping call. Each time the fix came from planting the
+  shape and watching, never from reading the regex and believing it.
 
 - **THREE FEATURES THAT LOOKED HEALTHY AND WERE NEVER RUNNING (2026-08-23).** The Community folder — Humankind's
   mod folder — was `const string @"C:\GameData\Humankind\Community"`, copied into three files: the District

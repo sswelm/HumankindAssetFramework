@@ -24,6 +24,9 @@
 # WHAT IT CANNOT SEE (stated because a gate's "all clear" is only as wide as its regex — this repo has been bitten
 # three times by a guard that silently excluded the shape it was meant to catch):
 #   - the declaration and the try separated by other statements or a brace;
+#   - MORE THAN ONE wrapping call: `x = Outer(Inner(Convert.To…(GetMember(…))))`. One level is handled, because
+#     one level is what occurred — `baseCat = CategoryFromProfile(Convert.ToInt32(GetMember(…)))`, which the FIRST
+#     version of this gate could not see at all and which hid two live bugs through a whole review;
 #   - NOT a violation, and deliberately skipped: `Convert.ToInt32(GetMember(o, "Count") ?? -1)`. The `??` supplies
 #     the fallback BEFORE the convert, so the sentinel is genuinely reachable there. One real site had this shape
 #     (ScaleEra), and a gate that cries wolf on correct code is a gate people start passing with --no-verify.
@@ -49,7 +52,7 @@ for f in $FILES; do
   # (a) DEAD INITIALIZER: <type> <var> = <init>; try { <var> = Convert.To*(GetMember(...
   # \1 back-reference is the whole test — it is only a bug when the try targets the SAME local just initialized.
   a=$(printf '%s' "$stripped" | grep -oP \
-    '\b(?:bool|float|double|int|long|uint|ulong|short|byte|decimal)\s+(\w+)\s*=\s*[^;{}]+;\s*try\s*\{\s*\1\s*=\s*Convert\.To\w+\s*\(\s*GetMember\b(?![^{}]*\?\?)[^{}]*?\}\s*catch' \
+    '\b(?:bool|float|double|int|long|uint|ulong|short|byte|decimal)\s+(\w+)\s*=\s*[^;{}]+;\s*try\s*\{\s*\1\s*=\s*(?:\w+\s*\(\s*)?Convert\.To\w+\s*\(\s*GetMember\b(?![^{}]*\?\?)[^{}]*?\}\s*catch' \
     || true)
 
   # (b) PHANTOM SKIP: try { ... Convert.To*(GetMember(...)) ... } catch { continue; }  — the continue never fires.

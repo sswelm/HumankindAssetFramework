@@ -93,6 +93,24 @@ namespace HumankindAssetFramework.Tests
             Assert.Equal(12.5f, ang);
         }
 
+        // THE COMPOSED CASE, and the two live bugs it carried. `CategoryFromProfile(Convert.ToInt32(GetMember(…)))`
+        // fed the classifier a 0 for an absent member, and 0 classifies as CatHuman — so a renamed
+        // AnimationCapabilityProfile silently registered every descriptor as HUMAN and applied human turn rates to
+        // ships, planes and vehicles. The classifier's own `prof >= 0 ? CatHuman : -1` branch says plainly that -1
+        // was meant to be reachable; through the old read it never could be.
+        [Fact]
+        public void UnknownProfile_MustReachTheClassifierAsUnknown_NotAsHuman()
+        {
+            var absent = new Host();   // has no AnimationCapabilityProfile member
+
+            // the old composed shape, pinned as the oracle: absent -> 0 -> a REAL category (human)
+            Assert.True(UniversalInject.CategoryFromProfile(Convert.ToInt32((object)null)) >= 0);
+
+            // the fix: absent -> -1 -> "no category", which is what the >= 0 guards at the call sites test for
+            Assert.Equal(-1, UniversalInject.CategoryFromProfile(
+                UniversalInject.MemberInt(absent, "AnimationCapabilityProfile", -1)));
+        }
+
         // Zero is a legitimate VALUE, and must be distinguishable from "absent" — the distinction the old shape
         // could not express at all.
         [Fact]

@@ -221,8 +221,10 @@ namespace HumankindAssetFramework
                         bool turret = fiRotInfos?.GetValue(pawn) is Array infos && infos.Length > 1;
                         // base category off the LIVE pawn's Definition — classifies descriptors whose pawn
                         // definition never passes the addon hook (the mortar gun's route)
-                        int baseCat = -1;
-                        try { baseCat = CategoryFromProfile(Convert.ToInt32(GetMember(GetMember(pawn, "Definition"), "AnimationCapabilityProfile"))); } catch { }
+                        // Unknown must reach CategoryFromProfile as -1, not as the 0 that Convert.ToInt32(null)
+                        // produced — 0 classifies as CatHuman, so a renamed member silently made every sampled
+                        // unit human. See the twin site in UniversalInject.Inject.cs.
+                        int baseCat = CategoryFromProfile(MemberInt(GetMember(pawn, "Definition"), "AnimationCapabilityProfile", -1));
                         classSamples.Add(new ClassSample { pos = tr.position, turret = turret, hover = hover, baseCat = baseCat });
                         break;   // the first pawn is representative for the unit's descriptor family
                     }
