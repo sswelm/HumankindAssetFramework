@@ -400,7 +400,17 @@ links, `unit: ""`). A pack without such links pays two reflection lookups per ar
 now skipped when unwanted. Checked against the real registry rather than assumed — ENC has 8 links and **4 do** carry
 `unit: ""`, so this buys ENC nothing. It helps other packs.
 
-## 9. `PoseDonor` — the pose hook's variable cost (2026-08-23, OPEN — instrumented)
+**Confirmed in-game 2026-08-23** on build `18:55`, same shape of scene:
+
+```text
+armies 36 skipped 5.5 µs (152 ns ea), 3 ours 8.4 µs (2965 ns ea), retry 0 µs
+```
+
+**1,794 → 152 ns to reject an army; the skip total 63 → 5.5 µs.** A rejected army now costs less than twice a
+rejected district (89 ns), which is what it should always have cost: one cached member read and a reference-hash
+lookup. The prediction from the measurement and the result on the map agree, so this bucket is closed.
+
+## 9. `PoseDonor` — a stall wearing a per-frame costume (2026-08-23, ROOT-CAUSED)
 
 The pose hook's per-pawn cost is not one number. Within a single session, on the same pawn count:
 
@@ -432,6 +442,39 @@ those need opposite fixes:
 ```text
 | donor N poses X µs (Y ns ea) = rig A + world B + motion C µs
 ```
+
+### The answer, first reading (build `18:55`)
+
+```text
+donor 1 poses 496.6 µs (496577 ns ea) = rig 0.2 + world 492.3 + motion 3.4 µs
+```
+
+**`DonorWorld` is 99% of it, on ONE pawn** — so it was never a per-pawn cost at all. `ApplyTerrainHug` calls
+`RescanDistricts`, whose own comment already said what it is: *"`FindObjectsOfType` … a ~50 ms scene scan … charged
+to the helicopter whose frame triggered it."* A single ~74 ms scan inside a **5-second** window at 30 fps spreads
+across 150 frames as **~490 µs/frame**. §1 warns that the meter is a mean and *"a budget tool, not a hitch
+detector"* — this is that warning happening: a one-off stall wearing a per-frame costume, and it disguised itself
+as the pose hook's problem. **The donor branch's real per-pawn cost is ~4 µs** (`rig 0.2 + motion 3.4`).
+
+It also retired the stated hypothesis. `DonorWorld` was flagged because §2's raycast fix lived there; the raycasts
+were not the cost, the scene scan sitting behind them was. Naming the suspect in advance is what made that
+falsifiable rather than a story told afterwards.
+
+Two changes, neither touching the throttle (already at most 1-in-3 s):
+
+1. **Attribution** — the scan gets its own `HugScan` bucket, so the stall is charged to the scan instead of to
+   whichever helicopter's frame triggered it. Same reasoning as `SelTileSkip`/`SelTileOurs`: a number that names the
+   wrong thing sends the next reader to the wrong place.
+2. **A real cost found while instrumenting** — the tile-spacing calculation is **O(n²)** (every district's distance
+   to every other), re-run on *every* rescan, and it re-derives a **constant**: tile spacing is a property of the
+   map's hex grid, identical on the first scan and the fiftieth. Districts get built; the grid they sit on does not
+   move. At the counts this map reaches (§6 measured **2,668** tracked districts) that is ~7 million distance
+   computations per rescan. Now measured **once** and over a **200-district sample** — frequency bounded *and* size
+   bounded, because either guard alone leaves the other hole open.
+
+**Still open**, and deliberately not pre-empted: if the next reading shows `HugScan` still ~50 ms, the residue is
+`FindObjectsOfType` itself, and the fix is for the district hook to maintain the list incrementally instead of
+walking the scene. That is a larger change and it waits for the number to ask for it.
 
 **Would compiling against the game DLLs fix it?** Asked 2026-08-23; answered with the numbers, not intuition — **no.**
 `FastMember` already emits a `DynamicMethod` doing what direct compiled access does (`unbox` to a managed pointer,
