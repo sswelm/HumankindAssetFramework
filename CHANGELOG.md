@@ -36,8 +36,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   verified and moved, so a crash mid-zip cannot leave a signature claiming an upload that never happened. Safe
   because nothing writes INTO a snapshot — restore copies *out*, the delete-guard copies *in* from the live tree —
   and a failed link falls back to a plain copy: costs space, never correctness. See [Backup.md](docs/Backup.md).
-  **Not yet drilled: restoring FROM a hard-linked snapshot.** The direction of every copy says it is safe; that is
-  read, not run.
+  **DRILLED 2026-08-23, both directions.** Restoring: a real hard-linked file (`links=2`) copied out of a snapshot
+  and then edited left **both** snapshots byte-identical and the link count at 2 — the restore path is safe as
+  documented. The hazard: writing INTO a hard-linked file really does change every name sharing it, and deleting one
+  name really is safe, confirmed on scratch files. *The first attempt at that negative control silently failed to
+  create the link and reported "hazard NOT real" — the same false-negative shape as a mutation that never applied,
+  the third time in one day. Redone with the link creation verified first.* And the drill found a real defect nothing
+  else would have: `fsutil hardlink list` showed the 12:40 snapshot sharing bytes with the **09:11 `_auto_`**
+  snapshot rather than the 12:27 manual one beside it — `PreviousSnapshot` ordered by NAME, and `_auto_` starts with
+  `_` (0x5F), which sorts after every digit. Never wrong (any previous snapshot is a valid link base) but wasteful:
+  it linked against a 3.5-hour-old base and copied 111 files where ~18 had changed. Now ordered by time.
   **Follow-up the same day — the local root was 17 GB and 6.4 GB of it was junk.** 362 delete-guard folders, almost
   all bake-test fixtures the guard had faithfully snapshotted: every suite run bakes assets under a throwaway prefix
   and deletes them again, and `__smoketest__ReconDrone` alone was 1.9 GB as eight copies of one 232 MB fixture. The
