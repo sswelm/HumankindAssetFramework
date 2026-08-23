@@ -19,6 +19,17 @@ by when they'll bite.
 
 ## From the 2026-08-23 critical review
 
+- ~~**`Plugin.Update`'s try/catch is one bag — one throwing poll skips every poll after it.**~~ — **FIXED
+  2026-08-23.** Each step now runs in its own `Poll(bucket, name, run)` guard, with the failure attributed to its
+  own site and cached `readonly` delegates so the hot path allocates nothing. The outer catch survives as a
+  fan-out backstop. 6 tests; drilled by making Poll propagate again. **Not yet drilled in-game** — hot path.
+
+- ~~**`haf_districts.json` has no regex fallback — one malformed char disables ALL custom districts.**~~ —
+  **FIXED 2026-08-23.** The twin of the pack-`modId` crash. Now primary parse + per-entry isolation + regex
+  fallback, all sharing one accept/reject gate. 12 tests including a parity oracle between the two extractors.
+  See the CHANGELOG entry, and the two drill lessons in it (a CRLF-broken fixture that was never malformed, and
+  assertions made vacuous by a game-dependent filter).
+
 - ~~**Two registry links writing one formation name are undetected.**~~ — **FIXED 2026-08-23.** `'Formation_1'`
   warned twice in a clean load because three links target it and two carry data; `created` tracked only INJECTED
   formations, never OVERWRITTEN ones, so a repeat write re-emitted a warning that blamed vanilla for a same-registry

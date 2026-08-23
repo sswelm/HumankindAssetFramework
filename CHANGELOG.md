@@ -10,6 +10,40 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **ONE THROWING POLL NO LONGER DISABLES EVERY POLL AFTER IT (2026-08-23).** The 08-22 fix put `Plugin.Update`'s
+  fan-out in a `try/finally` so the frame accounting always closed — but the `try` still wrapped **all ~25 polls**,
+  and the catch's own wording admitted the rest: *"the rest of this frame's polls were skipped."* A poll that threw
+  took every poll after it down, that frame and every frame it kept throwing, so a persistently failing
+  `TickTexture` silently disabled `BattleTurn`, `FacingPersist` and `Formation` — subsystems with nothing to do with
+  textures — behind one once-per-message warning that had scrolled away hours earlier. Each step now runs in its own
+  `Poll(bucket, name, run)` guard: timed into its bucket, its failure named and counted **against its own site** so
+  the smoke report's error list says *which* subsystem broke, and its neighbours run regardless. The delegates are
+  cached in `readonly` statics rather than converted at the call site, because a method-group conversion at 25 call
+  sites allocates an `Action` per poll per frame — the kind of cost this file exists to measure rather than assume.
+  Granularity is the BUCKET, not the individual call (the three dial polls still share `Dials`), because the bug is
+  cross-SUBSYSTEM silence and splitting them would change what the FrameCost buckets mean. The outer catch survives
+  as a backstop for the fan-out itself and now says so. 6 tests, drilled by making `Poll` propagate again (4 caught).
+  **Not yet drilled in-game** — it is a hot-path change and wants a session before it is called verified.
+
+- **A MALFORMED CHARACTER NO LONGER DELETES EVERY CUSTOM DISTRICT (2026-08-23).** The twin of the pack-`modId`
+  crash, in the sibling that was overlooked. `haf_districts.json` was parsed by one `JObject.Parse` inside one try,
+  with the per-entry loop inside it too: a **single malformed character** left `distModels` empty and every custom
+  district silently gone behind one LogError, and a single bad **entry** aborted the loop and took every entry after
+  it as well. The model registry has had a field-by-field regex fallback for exactly this since it shipped
+  (`ParseModels`); its twin never got one — the recurring shape of this codebase is a fix that lands in one of two
+  twins. Now three layers, matching `ParseModels`: the primary object parse, **per-entry isolation** so one bad
+  entry is skipped loudly instead of sinking its neighbours, and a **regex fallback** when the document itself will
+  not parse. Every recovered value goes through the same converters and the same accept/reject gate (`Usable`) as a
+  parsed one, so the fallback cannot smuggle in something the primary path would have rejected. 12 tests including a
+  **parity oracle** — the two extractors compared field-for-field on one document, which is the only thing that pins
+  the fallback's index alignment. *Two drill lessons, both of them the same shape as the gate that passed while
+  blind:* the first fixtures were built with `.Replace("}\n          ]", …)`, which matched **nothing**, because a
+  verbatim string in a CRLF file contains `\r\n` — the "broken" document was byte-identical to the valid one, so
+  the whole regex fallback could be deleted with the suite still green. And `ParseDistricts` filters through
+  `Usable`, whose GUID check needs the live game, so assertions on it were vacuous outside it; the raw seam
+  (`ParseDistrictsRaw`) is where the primary-or-fallback decision is observable. Both fixtures now have a test of
+  their own asserting they really are malformed. Five mutations drilled, all caught.
+
 - **A DISTRICT THAT NEVER BINDS NO LONGER FAILS IN SILENCE (2026-08-23).** The scoped poll retries the building-element
   bind about once a second for as long as a district is unbound, and that retry is right — selectors load
   asynchronously, so early failure is normal. Everything around it was wrong, in two ways that compounded.
