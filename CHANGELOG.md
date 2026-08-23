@@ -10,6 +10,44 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THREE FEATURES THAT LOOKED HEALTHY AND WERE NEVER RUNNING (2026-08-23).** The Community folder — Humankind's
+  mod folder — was `const string @"C:\GameData\Humankind\Community"`, copied into three files: the District
+  Factory's health check, Ship Status, and `HafCli.CleanExport`. That is one machine's junctioned layout, and
+  every use of it sits behind `Directory.Exists`. Off that box the condition is false, so all three quietly did
+  nothing — and **a guard that finds nothing is indistinguishable from a guard that found nothing wrong.**
+  `CleanExport` was the worst: it answered `{"ok":true,"removed":0}`, which is also exactly what a successful
+  clean prints. Ship Status said *"Last mod build: NONE FOUND"*, which reads as *"you have not built the mod"*
+  when the truth was *"I do not know where to look."*
+  The path cannot be looked up. Humankind **computes** it (`GetCommunityFolderPath()` = `GameDirectory +
+  "/../Humankind/Community"`) and records it nowhere — `HKCU\Software\AMPLITUDE Studios\Humankind` holds Unity
+  PlayerPrefs only, window positions, not one path value. So `HafPaths` derives it: saved override →
+  `<Documents>/Humankind/Community` → **ask**. The asking is a real path, not a log line: Ship Status offers a
+  **Locate…** picker and remembers the answer, the District Factory now says the stale-bundle check is NOT
+  RUNNING rather than staying silent, and batch mode — which has nobody to ask — exits 2 naming both fixes.
+  `Environment.GetFolderPath` rather than a literal `%USERPROFILE%\Documents\…`, and this machine is the argument:
+  here Documents is `D:\OneDrive\Documenten` — OneDrive-redirected, another drive, **localized to Dutch** — and
+  `Humankind` inside it is a reparse point back to `C:\GameData\Humankind`. A literal path is wrong three separate
+  ways, and neither redirection nor a localized Documents name is exotic; the latter is the common case for most
+  non-English players. Verified equivalent rather than assumed: the resolved path lists the same 25 mod folders as
+  the old hardcoded one, identical listing, `ENCReload.*.1.3329` among them — no behaviour change here, correct
+  behaviour everywhere else.
+
+- **THE RELEASE WAS THE ONE ARTIFACT NOBODY COULD REGENERATE (2026-08-23).** The v0.1.0 zip was assembled by hand
+  and its `INSTALL.txt` existed nowhere but inside that zip. In a project that treats every deployed thing as
+  derived-never-edited — the pack's deployed copy, the bindings report, the smoke verdict — the thing players
+  actually download was the exception, and it had drifted 178 commits and 40 fixes behind master without anything
+  noticing. It also held two DLLs and nothing else: a player who installed it saw nothing happen, because the mod
+  half was never in the box.
+  `Tools/package-release.sh` builds both halves into one download, with two numbered top-level folders because
+  they install to different roots (a Community module and a BepInEx DLL — no single "extract here" covers both)
+  and a **tracked** `READ_ME_FIRST.txt` template so the shipped instructions cannot drift from what shipped.
+  The guard that earns it: `pack.json`'s GUIDs point *into* the asset bundle, so a re-bake after the last mod
+  build ships a pair that looks fine and is broken — *"waiting for leaves to load…"* forever, or a scrambled
+  texture. Same rule as the District Factory's health check, moved to where it would otherwise reach a player,
+  and drilled by back-dating the bundle (`rc=1`, both timestamps named). It excludes bake-test fixtures by the
+  same three prefixes the delete guard uses: a `__feat_` fixture left at 17:07 against a 10:11 bundle would
+  otherwise have failed every package on this machine.
+
 - **HALF THE GATE ONLY EXISTED ON ONE MACHINE (2026-08-23).** The editor repo had **no CI at all** — ~15k lines of
   Unity editor C# whose only guards ran from a pre-push hook. That hook is per-clone config
   (`git config core.hooksPath Tools/git-hooks`) a contributor may never have set, and `--no-verify`, or a GitHub web

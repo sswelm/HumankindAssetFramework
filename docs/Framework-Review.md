@@ -340,6 +340,13 @@ machine-specific paths (D: backup, `C:\GameData` junction); the ENCReload README
 *different* repo for all docs. None are bugs — just the gap between "works on my machine" and "shippable to
 strangers." Overlaps the deferred list's ENC-branding, Blender-PATH-discovery, and Blender-free-static items.
 
+> **Partly closed, 2026-08-23.** The `C:\GameData` junction is gone: the Community folder is resolved by
+> `HafPaths` (saved override → `<Documents>/Humankind/Community` → ask), replacing a `const` that was copied into
+> three files. It was worse than "not portable" — every use sat behind `Directory.Exists`, so off that one machine
+> the stale-bundle check, the Ship Status verdict and `CleanExport` all silently did nothing, and `CleanExport`
+> answered `{"ok":true,"removed":0}`, which is what success looks like. **Still open:** the `D:/HAF_Backups`
+> default (overridable, but a drive most machines lack), the ENC branding, and Blender discovery.
+
 ---
 
 ## Still deferred (from earlier passes — unchanged)

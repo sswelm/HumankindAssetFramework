@@ -89,6 +89,39 @@ and where the bugs have historically been. Needs the same gitignored `References
 into the test bin). Full detail — what's covered, what's deliberately out of scope and why, how to add a test — is in
 **[Testing.md](Testing.md)**.
 
+## Packaging a player release
+
+`ENCReload/Tools/package-release.sh` builds the **player download**: the Humankind mod and the HAF plugin that
+renders its custom units, in one reproducible artifact.
+
+```
+bash Tools/package-release.sh              # -> Distribution/release/ENCReload-<ver>.zip
+bash Tools/package-release.sh --no-zip     # stage only (fast, for inspection)
+bash Tools/package-release.sh --haf <dir>  # explicit plugin checkout
+```
+
+**Two numbered folders, because the halves install to different roots** — the mod is a Humankind *Community*
+module, the plugin is a *BepInEx* DLL, and no single "extract here" covers both:
+
+| In the zip | Goes to |
+|---|---|
+| `1_Humankind_game_folder/BepInEx/` | the Humankind install (the folder with `Humankind.exe`) |
+| `2_Community_mods_folder/ENCReload.<guid>.<ver>/` | the Community folder the player's other mods are in |
+
+`READ_ME_FIRST.txt` is generated from a **tracked** template (`Tools/release/`) with the version and module GUID
+substituted, so the shipped instructions cannot drift from what shipped. The plugin is **built by the script**,
+never collected from wherever a DLL happened to be lying — the hand-made v0.1.0 zip ended up 178 commits behind
+master exactly that way.
+
+**The stale-bundle guard is why this is a script and not a checklist.** `pack.json`'s `skel`/`atlas`/`clip` GUIDs
+point *into* the asset bundle, so a re-bake after the last mod build produces a pair that looks fine and is
+broken — *"waiting for leaves to load…"* forever, or a scrambled texture from a mismatched mesh/atlas pair. The
+script refuses to package when any baked asset (or `pack.json`) is newer than the bundle: the same rule the
+District Factory's health check already applies at authoring time, moved to where it would otherwise reach a
+player. It excludes the bake-test fixtures by the same three prefixes the delete guard uses
+(`__feat_` / `__smoketest__` / `__convgate__`) — a leftover fixture is newer than everything and would otherwise
+fail every package.
+
 ## Editor tooling — in ENCReload, not here
 
 The Model Factory and the other authoring windows live — and are edited, compiled, and run — **only in the

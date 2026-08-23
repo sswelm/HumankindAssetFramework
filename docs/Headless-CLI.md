@@ -38,6 +38,12 @@ Deploy-only (no Unity): `Tools\haf-deploy.bat`. Each Unity verb prints one `[HAF
 `-executeMethod HAF.Cli.CleanExport`. Deletes `Community\ENCReload.<GUID>.*` (the *"move your mod … is denied"* fix,
 scoped to GUID `cd3480e932114f8084db755ddd65f2d8`). It removes the **live** deployed mod — a pre-build cleanup.
 
+The Community folder is **resolved, not hardcoded** (`HafPaths`, 2026-08-23): a saved override, else
+`<Documents>/Humankind/Community`, else unknown. When it is unknown this verb **fails with exit 2** and names both
+fixes. That failure is the point: until 2026-08-23 the path was a `const` naming one developer's junctioned layout,
+so on any other machine the verb found nothing and reported `{"ok":true,"removed":0}` — **byte-identical to a
+successful clean.** Batch mode has nobody to prompt, so it must fail loudly instead of succeeding emptily.
+
 ### `build-mod` ✅ (full build + deploy)
 `-executeMethod HAF.Cli.BuildMod [-strict]`. Reproduces, via reflection, exactly what clicking **Build** in the Mod
 Editor does — but headless. **Pre-ship validation first (2026-08-18):** before any build step, the shared

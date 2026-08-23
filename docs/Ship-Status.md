@@ -41,6 +41,18 @@ every row with a tooltip:
 | shipped | in the current build | — |
 | no bake needed / no bake yet | retex/borrow entries; saved-but-unbaked district/prop recipes | — |
 
+**When it does not know where the mods are.** Every verdict above depends on finding Humankind's Community
+folder. That path used to be a hardcoded `const`, so off the one machine it named, the window reported
+*"Last mod build: NONE FOUND"* — which reads as *"you have not built the mod"* when the truth was *"I do not
+know where to look."* It is now resolved (`HafPaths`): a saved override, else `<Documents>/Humankind/Community`.
+When it still cannot be found the window says so and offers **Locate…**, a folder picker whose choice is
+remembered. Pick the folder your other Humankind mods are already in.
+
+`Environment.GetFolderPath` rather than a literal `%USERPROFILE%\Documents\…` on purpose: Documents is
+routinely OneDrive-redirected to another drive and **localized** (on the machine this was written it is
+`D:\OneDrive\Documenten`, with `Humankind` inside it a junction to `C:\GameData`). A literal path is wrong three
+ways there; the API performs the shell's own resolution and follows all three.
+
 ## Selecting and deleting
 
 Every row that has baked output files is selectable, list-style: **plain click** selects that row alone,
