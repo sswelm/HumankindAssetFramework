@@ -22,6 +22,9 @@
   <!-- compile-time references the TEST code uses directly -->
   <ItemGroup>
     <Reference Include="UnityEngine.CoreModule"><HintPath>..\References\UnityEngine.CoreModule.dll</HintPath></Reference>
+    <!-- Plugin derives from BaseUnityPlugin : MonoBehaviour, so touching ANY static on it needs the base-type chain
+         resolvable — even a pure static helper like Plugin.Poll. Added 2026-08-23 with PollIsolationTests. -->
+    <Reference Include="UnityEngine"><HintPath>..\References\UnityEngine.dll</HintPath></Reference>
     <Reference Include="BepInEx"><HintPath>..\References\BepInEx.dll</HintPath></Reference>
     <Reference Include="Newtonsoft.Json"><HintPath>..\References\Newtonsoft.Json.dll</HintPath></Reference>
     <Reference Include="0Harmony"><HintPath>..\References\0Harmony.dll</HintPath></Reference>   <!-- shared-seam census tests patch a dummy method with two real Harmony instances -->

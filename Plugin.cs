@@ -415,6 +415,64 @@ namespace HumankindAssetFramework
             GameBinding.ValidateAndLog(GameBinding.Catalog);   // compatibility report: warn loudly if a bound game type/member went missing (game update)
         }
 
+        // PER-POLL ISOLATION (2026-08-23). The 08-22 fix put the fan-out in a try/finally so the frame accounting
+        // always closed — but the `try` still wrapped ALL ~25 polls, so ONE throwing poll skipped every poll AFTER
+        // it, that frame and every frame it kept throwing. A persistently failing TickTexture therefore silently
+        // disabled BattleTurn, FacingPersist and Formation — subsystems with nothing to do with textures — behind a
+        // single once-per-message warning that had scrolled away hours earlier. The catch's own wording admitted it:
+        // "the rest of this frame's polls were skipped".
+        //
+        // Each step now runs in its own guard: timed into its bucket, its failure named and counted against ITS OWN
+        // site, and its neighbours run regardless. The delegate arrives already-constructed (the cached fields
+        // below) because a method-group conversion at the call site allocates a new Action per poll per frame —
+        // 25 allocations a frame is exactly the kind of cost this file measures rather than assumes.
+        //
+        // Granularity is the BUCKET, not the individual call: three dial polls share the Dials bucket, so a throw in
+        // the second still skips the third. Splitting those would change what the FrameCost buckets mean, and the
+        // bug being fixed is cross-SUBSYSTEM silence, not intra-bucket.
+        internal static void Poll(int bucket, string name, System.Action run)
+        {
+            long t = FrameCost.Begin();
+            try { run(); }
+            catch (System.Exception ex)
+            {
+                UniversalInject.NoteInjectionError("update:" + name);
+                LogOnceWarning("poll:" + name + ":" + ex.GetType().Name + ":" + ex.Message,
+                               $"[HAF] per-frame poll '{name}' threw — it is skipped every frame it fails, but every OTHER poll still runs: " + ex);
+            }
+            finally { FrameCost.End(bucket, t); }
+        }
+
+        // Multi-call steps that share one FrameCost bucket, named so the cached delegates below can point at them.
+        static void StepRearm()         { UniversalInject.ConsumePendingReloadRearm(); DistrictInject.DrainDistrictDestroys(); }
+        static void StepDials()         { UniversalInject.PollRotorTrim(); UniversalInject.PollTurnEase(); UniversalInject.PollTerrainHug(); }
+        static void StepDistrictDiag()  { DistrictInject.PollRepoDump(); DistrictInject.ProbeAxisGrowth(); }
+        static void StepBattleTurn()    { BattleTurn.Poll(); Hk_BombardAnimHold.Tick(); }
+
+        // Built once at type-init; `readonly` so the session-state rule correctly leaves them alone.
+        static readonly System.Action
+            pRearm = StepRearm,
+            pTickTexture = UniversalInject.TickTexture,
+            pRespawnPostLoad = UniversalInject.MaybeRespawnPostLoad,
+            pFireQueues = UniversalInject.ProcessFireQueues,
+            pDeployState = UniversalInject.ProcessDeployState,
+            pAnimStates = UniversalInject.ProcessAnimStates,
+            pEngineAudio = UniversalInject.ProcessEngineAudio,
+            pSubPawnVisuals = UniversalInject.ProcessSubPawnVisuals,
+            pBattleCries = UniversalInject.ProcessBattleCries,
+            pDials = StepDials,
+            pClassScan = UniversalInject.PollClassScan,
+            pDistrictMeshSwap = DistrictInject.TickDistrictMeshSwap,
+            pDistrictDiag = StepDistrictDiag,
+            pWonderRows = DistrictInject.PollWonderRows,
+            pMainRows = DistrictInject.PollDistrictMainRows,
+            pSelectorTile = DistrictInject.PollDistrictSelectorTile,
+            pHexDial = DistrictInject.PollHexSculptDial,
+            pBattleTurn = StepBattleTurn,
+            pFacingPersist = FacingPersist.Tick,
+            pPropRegister = UniversalInject.TickPropRegister,
+            pFormation = FormationOverride.Tick;
+
         private void Update()
         {
             UniversalInject.ConsumePendingLoadSmoke();   // load-tier smoke, the first frame after the loading screen hid (SmokeOnLoad)
@@ -427,7 +485,7 @@ namespace HumankindAssetFramework
             }
             // Every per-frame entry point is timed into a FrameCost bucket (F8 panel + a log line per minute) — the
             // per-frame cost of HAF is a measured number, not an estimate. Begin/End are two Stopwatch reads each.
-            long tAll = FrameCost.Begin(), t;
+            long tAll = FrameCost.Begin();
             // THE ACCOUNTING MUST CLOSE EVEN WHEN A POLL THROWS (review 2026-08-22). Unity catches per-message, so a
             // throwing poll used to skip the whole TAIL of this method — including the two lines that close the frame.
             // The Update bucket then lost that frame while its sub-buckets kept their ticks, and `frames` stopped
@@ -436,50 +494,39 @@ namespace HumankindAssetFramework
             // reporting; the catch names the failure once instead of letting Unity's per-frame spam bury it.
             try
             {
-            t = FrameCost.Begin();
-            UniversalInject.ConsumePendingReloadRearm();  // main-thread re-arm after an in-session save-reload (Sandbox.Load requested it off-thread); covers BOTH the model + district axes, so it runs regardless of the injection gate below
-            DistrictInject.DrainDistrictDestroys();       // main-thread free of the previous session's district runtime clones queued by ResetDistrictSessionState (leak fix); cheap no-op when the queue is empty
-            FrameCost.End(FrameCost.Rearm, t);
+            Poll(FrameCost.Rearm, "Rearm", pRearm);   // main-thread re-arm after an in-session save-reload + the district destroy drain; runs regardless of the injection gate below
             if (UniversalInjectOn.Value)
             {
-                t = FrameCost.Begin(); UniversalInject.TickTexture();          FrameCost.End(FrameCost.TickTexture, t);       // keep registry-driven model atlases applied
-                t = FrameCost.Begin(); UniversalInject.MaybeRespawnPostLoad(); FrameCost.End(FrameCost.RespawnPostLoad, t);   // one-shot post-load re-spawn to clear the first-instance rotor race
-                t = FrameCost.Begin(); UniversalInject.ProcessFireQueues();    FrameCost.End(FrameCost.FireQueues, t);        // per-instance fire-on-attack: arm only the pawn that actually bombarded
-                t = FrameCost.Begin(); UniversalInject.ProcessDeployState();   FrameCost.End(FrameCost.DeployState, t);       // deploy-on-stop: record which of our pawns' units are currently moving
-                t = FrameCost.Begin(); UniversalInject.ProcessAnimStates();    FrameCost.End(FrameCost.AnimStates, t);        // state-driven (Phase 2): publish per-unit moving/stopped for the idle/move/after clips
-                t = FrameCost.Begin(); UniversalInject.ProcessEngineAudio();   FrameCost.End(FrameCost.EngineAudio, t);       // engine sound: fire the per-ship Start/Stop move sound on our units
-                t = FrameCost.Begin(); UniversalInject.ProcessSubPawnVisuals(); FrameCost.End(FrameCost.SubPawnVisuals, t);   // one-shot pawn-prefab hierarchy dump (the ghost-rotor hunt); no-op once dumped
-                t = FrameCost.Begin(); UniversalInject.ProcessBattleCries();   FrameCost.End(FrameCost.BattleCries, t);       // battle-start war cries queued by the sim-thread hook
-                t = FrameCost.Begin();
-                UniversalInject.PollRotorTrim();        // live rotor-trim dial (haf_rotortrim.txt): constant BR-slot tilt on donor-clip rotor bones
-                UniversalInject.PollTurnEase();         // live turn-ease dial (haf_turnease.txt): eased facing + bank on donor-clip units
-                UniversalInject.PollTerrainHug();       // live terrain-hug dial (haf_hugterrain.txt): fly low over open ground, climb for districts
-                FrameCost.End(FrameCost.Dials, t);
-                t = FrameCost.Begin(); UniversalInject.PollClassScan();        FrameCost.End(FrameCost.ClassScan, t);         // category turn ease: sample live units for the Hover ability + azimuth turrets (~3s; only while category rates are active)
-                t = FrameCost.Begin(); DistrictInject.TickDistrictMeshSwap();  FrameCost.End(FrameCost.DistrictMeshSwap, t);  // DISTRICT AXIS (isolate path): drive each registry entry across its live tiles; no-op with no district entries. Shipped, docs/District-Visuals.mdp our FxMesh into the live selector's leaf drawers
-                t = FrameCost.Begin(); DistrictInject.PollRepoDump(); DistrictInject.ProbeAxisGrowth(); FrameCost.End(FrameCost.DistrictPolls, t);   // DIAGNOSTICS, [Debug]-gated AND one-shot latched: two bool reads per frame when off (the default)
-                t = FrameCost.Begin(); DistrictInject.PollWonderRows();          FrameCost.End(FrameCost.WonderRows, t);     // WONDER CELL FILL: how a custom Artificial Wonder renders (docs/Wonder-Spike.md). Config-gated (blank = off) + latched once every cell is filled
-                t = FrameCost.Begin(); DistrictInject.PollDistrictMainRows();    FrameCost.End(FrameCost.MainRows, t);       // SHARED-CELL district path, the alternative to DistrictSelectorTile (docs/District-Dedicated-Visual.md). Config-gated (blank = off), then 1-in-30 frames
-                t = FrameCost.Begin(); DistrictInject.PollDistrictSelectorTile(); FrameCost.End(FrameCost.SelectorTile, t);  // SCOPED dedicated-visual: put our selector on ONLY the named district's tile (keeps shared affinity + fallback)
-                t = FrameCost.Begin(); DistrictInject.PollHexSculptDial();       FrameCost.End(FrameCost.HexDial, t);        // live dial (haf_hexsculpt.txt): re-carve every sculpted district's platform without a relaunch
+                Poll(FrameCost.TickTexture,      "TickTexture",      pTickTexture);       // keep registry-driven model atlases applied
+                Poll(FrameCost.RespawnPostLoad,  "RespawnPostLoad",  pRespawnPostLoad);   // one-shot post-load re-spawn to clear the first-instance rotor race
+                Poll(FrameCost.FireQueues,       "FireQueues",       pFireQueues);        // per-instance fire-on-attack: arm only the pawn that actually bombarded
+                Poll(FrameCost.DeployState,      "DeployState",      pDeployState);       // deploy-on-stop: record which of our pawns' units are currently moving
+                Poll(FrameCost.AnimStates,       "AnimStates",       pAnimStates);        // state-driven (Phase 2): publish per-unit moving/stopped for the idle/move/after clips
+                Poll(FrameCost.EngineAudio,      "EngineAudio",      pEngineAudio);       // engine sound: fire the per-ship Start/Stop move sound on our units
+                Poll(FrameCost.SubPawnVisuals,   "SubPawnVisuals",   pSubPawnVisuals);    // one-shot pawn-prefab hierarchy dump (the ghost-rotor hunt); no-op once dumped
+                Poll(FrameCost.BattleCries,      "BattleCries",      pBattleCries);       // battle-start war cries queued by the sim-thread hook
+                Poll(FrameCost.Dials,            "Dials",            pDials);             // live dials: rotor trim, turn ease, terrain hug (haf_*.txt)
+                Poll(FrameCost.ClassScan,        "ClassScan",        pClassScan);         // category turn ease: sample live units for the Hover ability + azimuth turrets (~3s; only while category rates are active)
+                Poll(FrameCost.DistrictMeshSwap, "DistrictMeshSwap", pDistrictMeshSwap);  // DISTRICT AXIS (isolate path): drive each registry entry across its live tiles; no-op with no district entries
+                Poll(FrameCost.DistrictPolls,    "DistrictDiag",     pDistrictDiag);      // DIAGNOSTICS, [Debug]-gated AND one-shot latched: two bool reads per frame when off (the default)
+                Poll(FrameCost.WonderRows,       "WonderRows",       pWonderRows);        // WONDER CELL FILL (docs/Wonder-Spike.md). Config-gated (blank = off) + latched once every cell is filled
+                Poll(FrameCost.MainRows,         "MainRows",         pMainRows);          // SHARED-CELL district path (docs/District-Dedicated-Visual.md). Config-gated (blank = off), then 1-in-30 frames
+                Poll(FrameCost.SelectorTile,     "SelectorTile",     pSelectorTile);      // SCOPED dedicated-visual: put our selector on ONLY the named district's tile (keeps shared affinity + fallback)
+                Poll(FrameCost.HexDial,          "HexDial",          pHexDial);           // live dial (haf_hexsculpt.txt): re-carve every sculpted district's platform without a relaunch
             }
-            t = FrameCost.Begin();
-            BattleTurn.Poll();                          // live battle-turn dial (haf_battleturn.txt): turn rate + hold-fire for ALL units — independent of model injection, so outside the UniversalInject gate
-            Hk_BombardAnimHold.Tick();                  // replay deferred bombard attack poses once their turn-hold elapses (muzzle flash + shot sound timing)
-            FrameCost.End(FrameCost.BattleTurn, t);
-            if (PersistUnitFacing.Value)
-            { t = FrameCost.Begin(); FacingPersist.Tick(); FrameCost.End(FrameCost.FacingPersist, t); }   // capture each army's facing + restore it after a load (stationary units only). OWN gate — facing is independent of model injection, so turning UniversalInject off must NOT silence it (it has its own save/load hooks + config).
-            if (PropRegisterOn.Value)
-            { t = FrameCost.Begin(); UniversalInject.TickPropRegister(); FrameCost.End(FrameCost.PropRegister, t); }   // EXPERIMENTAL (opt-in, [Props] PropRegister=false by default): register our MeshCollections once the AnimationManager exists
-            if (FormationOverrideOn.Value)
-            { t = FrameCost.Begin(); FormationOverride.Tick(); FrameCost.End(FrameCost.Formation, t); }   // FORMATION axis: retry inject+repoint if the databases weren't up at AnimationLoad
+            Poll(FrameCost.BattleTurn, "BattleTurn", pBattleTurn);   // turn rate + hold-fire for ALL units, plus deferred bombard poses — independent of model injection, so outside the UniversalInject gate
+            if (PersistUnitFacing.Value) Poll(FrameCost.FacingPersist, "FacingPersist", pFacingPersist);   // OWN gate — facing is independent of model injection, so turning UniversalInject off must NOT silence it
+            if (PropRegisterOn.Value)    Poll(FrameCost.PropRegister,  "PropRegister",  pPropRegister);    // EXPERIMENTAL (opt-in, [Props] PropRegister=false by default)
+            if (FormationOverrideOn.Value) Poll(FrameCost.Formation,   "Formation",     pFormation);       // FORMATION axis: retry inject+repoint if the databases weren't up at AnimationLoad
             }
             catch (System.Exception ex)
             {
-                // Once per distinct message: a per-frame throw would otherwise fill the log and hide its own first line.
-                UniversalInject.NoteInjectionError("update");
+                // BACKSTOP ONLY. Every poll is individually guarded above, so reaching here means the fan-out
+                // itself threw — a null config entry, a gate read — not a poll. Kept so the frame accounting in
+                // `finally` is still the last word, and named distinctly from a poll failure.
+                UniversalInject.NoteInjectionError("update:fanout");
                 LogOnceWarning("update:" + ex.GetType().Name + ":" + ex.Message,
-                               "[HAF] a per-frame poll threw — the rest of this frame's polls were skipped: " + ex);
+                               "[HAF] the per-frame fan-out itself threw (not a poll — those are guarded individually): " + ex);
             }
             finally
             {
