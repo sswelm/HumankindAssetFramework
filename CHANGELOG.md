@@ -10,6 +10,25 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **`SelectorTile` — THE MEASUREMENT BEFORE THE FIX (2026-08-23).** At 219 µs/frame it is **36% of HAF's entire
+  per-frame cost** and the largest unexplained number in the runtime. It has now been looked at three times: 08-21
+  called it *"diffuse per-district overhead, left as is (0.6%)"*; 08-23 accounted for **~9 µs** of it (the Fx-tree
+  walk re-resolving every field on every visit) and left **~210 µs** unattributed. Ruled out by reading this round:
+  every per-loop diagnostic — `DumpPlbcLevers`, `DumpAllChannels`, `DumpGroundMatchers`, `DumpSelectorElements`,
+  `DumpNativeGroundCandidates` — is correctly `DistrictDebug`-gated **and** latched, and `ResolveMainLayer` is
+  cached, so none of them contribute. The existing buckets already said it is the loop's own head (`SelTileLoop` ≈
+  `SelectorTile`; bind/albedo/flat never reach the top six). What they could **not** say is the thing that decides
+  the fix: the loop walks **every district the game presents** to find the one or two that are ours, so 219 µs is
+  either many cheap skips (fix: keep a matched subset and stop walking the rest — a skip still pays a Unity
+  fake-null check, which is a native interop call, not a reference test) or a few expensive matches (fix: the
+  per-match work). `SelTileSkip`/`SelTileOurs` now split it, and their **call counts are the district counts** — a
+  number HAF has never printed: `districts 47 skipped 47 µs (1000 ns ea), 1 ours 180 µs (180000 ns ea)`, silent when
+  the district axis isn't running. The ours-timer closes in a `finally` because that body has **six `continue`
+  paths**, and an `End()` they skipped would under-count time *and* calls — the same accounting leak the 08-22
+  `Update` fix closed. **Deliberately no fix yet**: picking one without the numbers is exactly what produced the
+  "diffuse" verdict that turned out to be partly wrong. Two tests pin the summary segment (and its silence),
+  drilled by removing it. See [Performance.md](docs/Performance.md) §6.
+
 - **BACKUPS GOT SMART, AND STOPPED FAILING IN SILENCE (2026-08-23, editor side).** Found by accident while checking
   whether the offsite copy existed: the *Offsite folder* had been renamed hours earlier, the window displayed the
   dead path as if it were fine, and `OffsiteZipCore` opened with an unconditional `Directory.CreateDirectory`. The

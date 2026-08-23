@@ -120,9 +120,57 @@ Learned in one afternoon, each from a bucket that surprised ([Architecture](Arch
 - **Scoped districts** → `SelectorTile` (~0.2 ms for one; a per-district loop, so roughly linear).
 - **Zoom changes** → pawn-add spikes (the engine re-adds every pawn), visible as a brief rise in both pose buckets.
 
-## 6. Open items
+## 6. `SelectorTile` — the open investigation (2026-08-23)
 
-- `SelectorTile` ~210 µs: diffuse, not worth a round at 0.6% — but it is the largest remaining steady bucket.
+**219 µs/frame: 36% of HAF's entire per-frame cost, and the largest unexplained number in the runtime.** It has been
+looked at twice. The 08-21 pass called it *"diffuse per-district overhead, left as is (0.6%)"*. 08-23 accounted for
+**~9 µs** of it — the Fx-tree walk was re-resolving every field on every visit — leaving **~210 µs unattributed**.
+
+### What is already known, from the buckets that exist
+
+| Reading | What it rules out |
+|---|---|
+| `SelTileLoop ≈ SelectorTile` in every sample | Not the config parse, not anything outside the district loop |
+| `SelTileBind` / `SelTileAlbedo` / `SelTileFlat` never reach the top six | Not the bind, the albedo rebind, or the flatten — the cost is the loop's own head |
+
+### What was ruled out by reading, 2026-08-23
+
+Every per-loop diagnostic is correctly `DistrictDebug`-gated **and** latched, so all are no-ops in normal play:
+`DumpPlbcLevers`, `DumpAllChannels`, `DumpGroundMatchers`, `DumpSelectorElements`, `DumpNativeGroundCandidates`.
+`ResolveMainLayer` is cached after the first resolve. None of them contribute.
+
+### The question the old buckets could not answer
+
+The loop walks **every district the game presents** — `trackedDistricts` accumulates each live `PresentationDistrict`,
+so it grows with the map — to find the one or two that are ours. That means 219 µs is one of two completely different
+problems, wanting opposite fixes:
+
+| If the cost is… | …the fix is |
+|---|---|
+| **many districts skipped, cheap each** | stop walking them: keep a matched subset, rebuilt when `trackedDistricts` changes. The per-district skip still costs a Unity fake-null check, which is a native interop call, not a reference test |
+| **few districts, expensive each** | the per-match work is the target, and the existing sub-buckets narrow it further |
+
+Nothing reported which, so neither fix could be justified.
+
+### The instrumentation (shipped, no fix yet)
+
+`SelTileSkip` / `SelTileOurs` split the loop, and their **call counts are the district counts** — a number HAF has
+never printed. The summary states both sides the way it already states the pose hook, and stays silent when the
+district axis isn't running:
+
+```
+| districts 47 skipped 47 µs (1000 ns ea), 1 ours 180 µs (180000 ns ea)
+```
+
+> The ours-timer closes in a `finally`: that loop body has **six `continue` paths**, and an `End()` they skipped would
+> under-count the time *and* the call count — the same accounting leak the 08-22 `Update` fix closed, where a bucket
+> lost frames while its window kept aging and the meter read healthiest exactly when it was most wrong.
+
+**Next step: read it on a heavy scene** (~19 injected models — the bucket does not show its real cost on a light one),
+then fix the half the numbers name. Two tests pin the summary segment so it cannot silently stop reporting.
+
+## 7. Open items
+
 - The unit-name matcher (`FindEntryForUnitDefinition`) does not match units whose definition name lacks the
   pawnDescription (the hovercraft, the drones — found by the sub-pawn walk's self-check). The walk now handles it; the
   fire-on-attack and engine-audio paths use the same matcher and may be skipping those units. Correctness, not cost —

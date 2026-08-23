@@ -19,6 +19,18 @@ by when they'll bite.
 
 ## From the 2026-08-23 critical review
 
+- **`SelectorTile` is 219 µs/frame — 36% of HAF's per-frame cost — and unexplained.** *(Instrumented 2026-08-23,
+  awaiting a heavy-scene reading; see [Performance.md](Performance.md) §6 for the full state.)* Looked at twice:
+  08-21 called it "diffuse, left as is", 08-23 accounted for ~9 µs (uncached reflection in the Fx-tree walk) and
+  left ~210 µs. Ruled out by reading: all six per-loop diagnostics are `DistrictDebug`-gated **and** latched, and
+  `ResolveMainLayer` is cached — none contribute. Known from the existing buckets: `SelTileLoop ≈ SelectorTile` and
+  bind/albedo/flat never reach the top six, so it is the loop's own head. The loop walks EVERY district the game
+  presents to find the one or two that are ours, so the cost is either **many cheap skips** (fix: keep a matched
+  subset, don't walk the rest — the skip still pays a Unity fake-null check, a native interop call) or **few
+  expensive matches** (fix: the per-match work). `SelTileSkip`/`SelTileOurs` now split it and their call counts are
+  the district counts. **Do not fix until the numbers say which** — that is what the 08-21 "diffuse" verdict got
+  wrong.
+
 - ~~**`Plugin.Update`'s try/catch is one bag — one throwing poll skips every poll after it.**~~ — **FIXED
   2026-08-23.** Each step now runs in its own `Poll(bucket, name, run)` guard, with the failure attributed to its
   own site and cached `readonly` delegates so the hot path allocates nothing. The outer catch survives as a
