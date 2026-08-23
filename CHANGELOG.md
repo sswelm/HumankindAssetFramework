@@ -10,6 +10,26 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE POSE HOOK'S FLOOR COST HALVED — TWO READS THE 08-21 PASS MISSED (2026-08-23).** With `SelectorTile` gone the
+  top six was entirely pose work, and `PoseVanilla` stood out: **210 µs = 116 adds × 1,805 ns**, apparently 1.8 µs
+  just to decide a pawn is *not* ours — 20× the 89 ns the district skip costs for the same kind of decision.
+  **That framing was wrong, and reading the code corrected it:** `TryReadLastPawn` must read the manager's
+  `pawnEntries` array and `pawnCount` before anything can tell whose pawn it is, so there is no cheaper decision to
+  make — those two reads are the hook's floor. But they were still on plain reflection. The 08-21 pass compiled
+  accessors for everything inside the PawnEntry **struct** (that is what took `PoseOurs` 25-57 µs → ~5 µs); the pawn
+  **manager** is a different type and never got the same treatment. This page's own figure is ~0.5-1 µs per boxed
+  reflection get on Mono, and two of those is the whole 1,805 ns. They run on EVERY add, ours and vanilla alike —
+  162/frame in the measured scene. `PawnFast.EnsureMgrInit` compiles them per manager type with the reflection path
+  kept as the fallback, as at every other PawnFast site. **Drilled in-game:** `pose vanilla` 1,805 → **1,006 ns/add**
+  (−44%), `pose ours` 6,390 → **3,424 ns/add** (−46%), and the log confirms the mechanism —
+  *"manager accessors compiled for PawnManager (pawnEntries, pawnCount)"*. `PoseOurs` falling too is the tell that
+  this really was the shared floor rather than something vanilla-specific: both paths call `TryReadLastPawn` first.
+  *(Totals are NOT comparable here — the verification scene had 46 vanilla adds against 116 and 17 ours against 46.
+  ns-per-add is the scene-independent figure, which is exactly why the meter computes it.)* It also exposed a
+  `FastMember` shape with **no coverage at all**: a reference-typed field read off a CLASS (`Castclass`, not
+  `Unbox`) — everything before was boxed structs. Three tests added, drilled by emitting `Unbox` for the class
+  path, which fails two tests and crashes the host on invalid IL.
+
 - **`SelectorTile`: 219 µs → 6 µs — IT WAS WALKING 2,668 DISTRICTS TO FIND ONE (2026-08-23).** The measurement below
   came back unambiguous: `districts 2668 skipped 237.3 µs (89 ns ea), 1 ours 5.6 µs (5592 ns ea)`. The scan **was**
   the bucket. Three causes, all in the district tracking list: the poll iterated everything instead of the matches;

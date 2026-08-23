@@ -86,9 +86,16 @@ Learned in one afternoon, each from a bucket that surprised ([Architecture](Arch
 4. **Resolve reflection once.** `AccessTools.TypeByName` walks every assembly; a bone-name lookup is a reflection read
    and a string allocation per bone. Cache per entry, keyed on whatever can change the answer (a dial signature, a
    session).
-5. **The per-pawn path uses `PawnFast`.** Boxed-struct reflection is ~0.5–1 µs per get/set on Mono; the compiled
-   accessors (`FastMember`) are ~10 ns and write into the box identically. Every accessor has a reflection fallback,
-   so a renamed game field costs speed, never function — `[PawnFast]` in the log says which path is live.
+5. **The per-pawn path uses `PawnFast` — including the reads that GATE it.** Boxed-struct reflection is ~0.5–1 µs
+   per get/set on Mono; the compiled accessors (`FastMember`) are ~10 ns and write into the box identically. Every
+   accessor has a reflection fallback, so a renamed game field costs speed, never function — `[PawnFast]` in the log
+   says which path is live.
+   *Corollary, learned 2026-08-23:* the 08-21 pass compiled everything inside the PawnEntry **struct** and stopped
+   there, leaving the two reads on the pawn **manager** (`pawnEntries`, `pawnCount`) on plain reflection — and those
+   run *before* anything can tell whose pawn it is, so **every** add paid them. That was the entire 1,805 ns of
+   `PoseVanilla`'s per-add cost; compiling them took vanilla to 1,006 ns and ours to 3,424 ns. **When optimising a
+   hot path, the gate is part of the path** — an accessor table that stops at the type you were thinking about
+   leaves the cost on the type you had to go through to reach it.
 6. **Physics queries are budget line items.** Two `RaycastAll` per pawn per frame was the helicopters' entire cost.
    Sample, hold, ease.
 7. **Don't build log strings the verbose gate will discard.** `Plugin.Diag` is gated, its *argument* is not.
