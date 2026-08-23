@@ -616,6 +616,7 @@ namespace HumankindAssetFramework
             {
                 File.WriteAllText(Path.Combine(Paths.ConfigPath, "haf_smoke_report.txt"),
                     "HAF smoke report  (regenerated every Smoke Test run)\n" +
+                    Plugin.VersionLine + "\n" +   // a PASS is only evidence about the build that produced it
                     "ranAt=" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) + "\n\n" +
                     summary + "\n");
             }

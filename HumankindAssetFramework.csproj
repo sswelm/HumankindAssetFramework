@@ -17,6 +17,21 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);baker\**;tools\**;Tests\**</DefaultItemExcludes>
   </PropertyGroup>
 
+  <!-- BUILD STAMP (2026-08-23). "Which build is actually running?" cost a whole in-game drill: an F8 smoke and a
+       43-test bake suite were read as PASS for two fixes that were not in the deployed DLL — it was the previous
+       day's build, and nothing in any output said so. The stamp is baked in at COMPILE time rather than read from
+       the file's timestamp, so it describes the CODE and survives every copy, deploy and backup restore. It is
+       deliberately non-deterministic: this assembly is a hand-deployed game plugin, never a cached build input. -->
+  <PropertyGroup>
+    <HafBuildStamp>$([System.DateTime]::UtcNow.ToString('yyyy-MM-dd HH:mm'))</HafBuildStamp>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>HafBuildStamp</_Parameter1>
+      <_Parameter2>$(HafBuildStamp) UTC</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <!-- baker/ is the Unity *editor* mesh baker (needs UnityEditor); it ships in the mod, not this plugin. -->
   <ItemGroup>
     <Compile Remove="baker\**\*.cs" />

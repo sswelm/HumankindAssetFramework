@@ -16,6 +16,34 @@ namespace HumankindAssetFramework
         public const string GUID = "community.humankind.haf";
 
         internal static ManualLogSource Log;
+
+        // BUILD IDENTITY (2026-08-23). Every output that a drill is read from names the build that produced it.
+        // The trigger: an in-game F8 smoke PASS and a 43-test bake suite PASS were both taken as verification of
+        // two fixes that were not in the deployed DLL at all — it was the previous day's build. Nothing on screen,
+        // in the log, or in either report said which build was talking, so a green run proved something about code
+        // nobody was looking at. The stamp is compiled in (see the csproj's HafBuildStamp), so it describes THIS
+        // CODE and cannot be reset by a copy or a backup restore; the file's own timestamp is only the fallback,
+        // and says so, because a file time answers "when was this copied", not "what is in it".
+        [ProcessLived("immutable build identity")] static string buildStamp;
+        internal static string BuildStamp => buildStamp ?? (buildStamp = ReadBuildStamp());
+        internal static string VersionLine => "HAF " + PluginVersion + " (built " + BuildStamp + ")";
+        public const string PluginVersion = "0.1.0";
+
+        static string ReadBuildStamp()
+        {
+            try
+            {
+                var asm = typeof(Plugin).Assembly;
+                foreach (var a in asm.GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false))
+                    if (a is System.Reflection.AssemblyMetadataAttribute m &&
+                        string.Equals(m.Key, "HafBuildStamp", System.StringComparison.Ordinal)) return m.Value;
+                var loc = asm.Location;
+                if (!string.IsNullOrEmpty(loc) && System.IO.File.Exists(loc))
+                    return System.IO.File.GetLastWriteTimeUtc(loc).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture) + " UTC (file time — no build stamp)";
+            }
+            catch { }
+            return "unknown";
+        }
         internal static ConfigEntry<bool>   VerboseLog;      // gate the chatty per-model/per-pawn bring-up logs; OFF = a quiet load (summaries + warnings/errors only)
         internal static ConfigEntry<bool>   SmokeOnLoad;     // run the load-tier smoke test once, on the first frame after the loading screen hides
 
@@ -381,7 +409,7 @@ namespace HumankindAssetFramework
                 }
                 catch (System.Exception ex) { skipped++; Log.LogError($"[Uni] hook '{t.Name}' failed to apply (Amplitude API changed?): {ex.Message}"); }
             }
-            Log.LogInfo($"Model Factory plugin loaded ({patched}/{hooks.Length} hooks patched{(skipped > 0 ? $", {skipped} skipped — see warnings above" : "")}). Press {ToggleKey.Value} in-game for the " +
+            Log.LogInfo($"{VersionLine} — plugin loaded ({patched}/{hooks.Length} hooks patched{(skipped > 0 ? $", {skipped} skipped — see warnings above" : "")}). Press {ToggleKey.Value} in-game for the " +
                         $"diagnostic window. UniversalInject={UniversalInjectOn.Value}");
             UniversalInject.HookLoadingScreen();   // load-tier smoke: subscribe to the end-of-loading seam (SmokeOnLoad)
             GameBinding.ValidateAndLog(GameBinding.Catalog);   // compatibility report: warn loudly if a bound game type/member went missing (game update)
@@ -471,6 +499,14 @@ namespace HumankindAssetFramework
 
         private void DrawWindow(int id)
         {
+            // WHICH BUILD IS TALKING — first line, above everything, because this panel is what gets screenshotted
+            // as evidence that a fix works. A drill against a stale DLL reads exactly like a drill against a fresh
+            // one; this is the only line that tells them apart.
+            {
+                var prev = GUI.color; GUI.color = new Color(0.72f, 0.78f, 0.86f);
+                GUILayout.Label(VersionLine);
+                GUI.color = prev;
+            }
             // FRAGILITY BANNER: HAF binds to the game by reflection, so a game update can silently break a feature. The
             // startup GameBinding report resolves the critical types/members; if any are missing, shout it HERE (top of the
             // window a player actually opens) — not just in the log — with exactly what broke.
