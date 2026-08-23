@@ -95,6 +95,24 @@ buckets: 18 live pawns (`pose ours 18 adds`) puts this at the *light* end of the
 `PoseOurs` at 4,544 ns/add against the ~5 µs/pawn in §5 is the like-for-like number, i.e. unchanged. Nothing here
 claims an improvement outside the district bucket, because nothing here measured one.
 
+**The meter's noise floor — measured by accident, worth keeping (same day, build `16:31 UTC`).** The plugin was
+redeployed with **zero `.cs` changes** (docs and gate scripts only) and the smoke re-run, which makes the second
+session a **control**: identical code, near-identical scene (19 live pawns against 18). Everything that moved is the
+meter's own variance.
+
+| | build `15:31` | build `16:31` | spread |
+|---|---|---|---|
+| HAF total | 348 µs | 325 µs | ~7% |
+| `Update` | 185 µs | 162 µs | ~13% |
+| `PoseOurs` per add | 4,544 ns | 4,023 ns | ~11% |
+| `PoseVanilla` per add | 1,573 ns | 1,748 ns | ~11% |
+| `SelectorTile` (ours) | 6.6 µs | 5.4 µs | ~20% |
+
+**So a swing under roughly 10% on these buckets is not a signal.** §4 says split a bucket when a number surprises;
+this says what "surprising" has to clear first, and it means the 348 µs above is a sample, not a constant. The one
+number that did *not* move is the one that matters most: `districts 0 skipped` in **both** sessions — §6's fix
+confirmed on two independent runs rather than one.
+
 Also recorded from the same panel — GPU mesh buffers, the other budget a custom model spends against:
 `L0 'Visual'` 3,061,435 / 5,000,000 verts (61%), meshes 4,608/8,000 · `L2 'MeshWithSkeletonParticleIndexBuffer'`
 (our models) 873,226 / 2,000,000 verts (43%), meshes 706/3,500. See [Vertex-Budget.md](Vertex-Budget.md).
