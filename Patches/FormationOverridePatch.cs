@@ -105,6 +105,12 @@ namespace HumankindAssetFramework
         static int reformScanFrame;                                        // throttle counter for the live-unit scan
         [SessionScoped(Manual = "FormationOverride.OnAnimationLoad")] static readonly HashSet<object> reformed = new HashSet<object>();  // units already re-formed (or logged) this session, once each
         [ProcessLived("per-scan scratch")] static readonly HashSet<object> reformPresent = new HashSet<object>();  // reused each scan (Clear, not new) — live matched units this pass
+        // MEASURED 2026-08-23: `armies 35 skipped 63 µs (1794 ns ea), 3 ours 9.3 µs (3380 ns ea), retry 0 µs`.
+        // 87% of the bucket was re-deciding, ~12×/s, that the same 35 armies still don't match — at 1,794 ns each,
+        // twenty times what a rejected DISTRICT costs (SelTileSkip: 89 ns). A unit's definition does not change over
+        // its lifetime, so that verdict is a constant being recomputed. Remember it: a repeat rejection becomes one
+        // reference-hash lookup. Same answer the SelectorTile scan needed — keep the subset, stop re-walking the rest.
+        [SessionScoped(Manual = "FormationOverride.OnAnimationLoad")] static readonly HashSet<object> reformRejected = new HashSet<object>();  // units already decided NOT ours this session
         static bool reformSettled;                                         // catch-up complete this session -> stop the ~12x/s scan (a reload re-arms it)
         static int reformQuietScans;                                       // consecutive scans that handled nothing new
         const int ReformQuietLimit = 60;                                   // settle after ~5s of quiet (~12 body-scans/s), long enough to cover the load-time catch-up
@@ -118,7 +124,7 @@ namespace HumankindAssetFramework
                 EnsureConfig();
                 if (entries.Count == 0) return;
                 foreach (var e in entries) e.done = false;   // fresh session: repoint again (defs reload per session)
-                appliedAny = false; reformed.Clear();        // fresh session: re-arm + drop last session's unit objects
+                appliedAny = false; reformed.Clear(); reformRejected.Clear();   // fresh session: re-arm + drop last session's unit objects (BOTH verdicts — a stale reject would permanently hide a unit)
                 reformSettled = false; reformQuietScans = 0;  // re-arm the re-instantiate catch-up for this session's load-time units
                 fragDefsDone.Clear(); clonesRegisteredThisSession.Clear();   // equipment counter-scale: re-process defs + re-register clones (AnimationLoad cleared the manager)
                 pending = true;
@@ -385,6 +391,10 @@ namespace HumankindAssetFramework
                 if (army == null) continue;
                 var unit = Mem(army, "PresentationUnit");
                 if (unit == null) continue;
+                // The memoised verdict, checked FIRST — everything below it is the work being skipped. One cached
+                // member read plus a reference-hash lookup, instead of re-deriving a name, a formation reference and
+                // up to sixteen case-insensitive comparisons to reach the same "no" as the previous scan.
+                if (reformRejected.Contains(unit)) continue;
                 var pdef = Mem(unit, "PresentationUnitDefinition");
                 string pdn = Mem(pdef, "name")?.ToString() ?? Mem(pdef, "Name")?.ToString() ?? "";
                 if (pdn.Length == 0) continue;
@@ -415,7 +425,7 @@ namespace HumankindAssetFramework
                         && (string.Equals(x.unit, pdn, StringComparison.OrdinalIgnoreCase)
                             || (x.unit.Length == 0 && string.Equals(x.formation, fref ?? "", StringComparison.OrdinalIgnoreCase))))
                     { e = x; break; }
-                if (e == null) continue;                             // not one of our repointed/replaced units
+                if (e == null) { reformRejected.Add(unit); continue; }   // not one of ours — remember it, so this scan's work is the LAST time we ask
                 matched = true;                                      // from here on this army is OURS — timed as FormScanOurs
                 reformPresent.Add(unit);
                 if (reformed.Contains(unit)) continue;               // already handled this session
