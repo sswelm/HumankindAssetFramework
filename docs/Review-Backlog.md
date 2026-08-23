@@ -22,7 +22,8 @@ by when they'll bite.
 - ~~**`Plugin.Update`'s try/catch is one bag — one throwing poll skips every poll after it.**~~ — **FIXED
   2026-08-23.** Each step now runs in its own `Poll(bucket, name, run)` guard, with the failure attributed to its
   own site and cached `readonly` delegates so the hot path allocates nothing. The outer catch survives as a
-  fan-out backstop. 6 tests; drilled by making Poll propagate again. **Not yet drilled in-game** — hot path.
+  fan-out backstop. 6 tests; drilled by making Poll propagate again. **Drilled in-game 2026-08-23**: 0 poll
+  throws, every bucket populated, smoke PASS, `Update` 391 µs vs 396 µs before (the guards cost nothing measurable).
 
 - ~~**`haf_districts.json` has no regex fallback — one malformed char disables ALL custom districts.**~~ —
   **FIXED 2026-08-23.** The twin of the pack-`modId` crash. Now primary parse + per-entry isolation + regex

@@ -23,7 +23,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   Granularity is the BUCKET, not the individual call (the three dial polls still share `Dials`), because the bug is
   cross-SUBSYSTEM silence and splitting them would change what the FrameCost buckets mean. The outer catch survives
   as a backstop for the fan-out itself and now says so. 6 tests, drilled by making `Poll` propagate again (4 caught).
-  **Not yet drilled in-game** — it is a hot-path change and wants a session before it is called verified.
+  **DRILLED IN-GAME 2026-08-23** (build `08:54 UTC`): 0 `per-frame poll … threw`, 0 fan-out throws, every bucket
+  still populated (`SelectorTile` 218.7, `PoseVanilla` 103.5, `PoseOurs` 74.9, `AnimStates` 45.6, `EngineAudio`
+  40.2 µs), smoke PASS, 0 injection errors — and `Update` at 391 µs against 396 µs before, so the 25 guards and
+  their cached delegates cost nothing measurable.
 
 - **A MALFORMED CHARACTER NO LONGER DELETES EVERY CUSTOM DISTRICT (2026-08-23).** The twin of the pack-`modId`
   crash, in the sibling that was overlooked. `haf_districts.json` was parsed by one `JObject.Parse` inside one try,
@@ -105,10 +108,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   that actually mattered — the descent resolves exactly what it did before: the Oracle still binds
   (`bound 1 building element(s) across 1 tile(s)`), its selector still lands on channel 0, the mesh footprint still
   finds its 2 elements, smoke still PASS, 0 injection errors. `SelectorTile`, previously the single most expensive
-  HAF bucket at 227.7 µs/frame and top of the F8 list, dropped out of the top six entirely (below 10.7 µs). *(Total
-  µs/frame is NOT comparable between the two runs — the verification session had 3 injected models and 1 live pawn
-  against 19 and 18, and the pose buckets scale with that. The district state was identical in both, which is why
-  the SelectorTile figure is the one worth quoting.)* **A gate lesson came with it:** adding `GFA` made
+  HAF bucket at 227.7 µs/frame. **CORRECTED 2026-08-23:** the first draft of this entry said it "dropped out of the
+  top six entirely (below 10.7 µs)". That was measured in a session with 3 injected models and 1 live pawn against
+  the original's 19 and 18. The reasoning for quoting it anyway — that the district state string was identical in
+  both (`2 district(s) [1 tile(s) live, 1 scoped]`) so the bucket was comparable — **did not hold**: a later heavy
+  run put `SelectorTile` straight back at the top. Two runs reporting the same district state differed ~20× on it,
+  so that string does not capture what drives the bucket, and it cannot be compared across unlike scenes.
+  Like-for-like, both heavy scenes: HAF total 608 → 570 µs, `Update` 396 → 391 µs, `SelectorTile` 227.7 → 218.7 µs.
+  The honest result is **~9 µs (~4%)**, not a collapse; `SelTileLoop` ≈ `SelectorTile` in every reading, so the bulk
+  is the loop head, not the bind. What the change unambiguously fixed is the LOG — 23,194 → 149, re-confirmed at
+  209 on the later heavy run — because the walk that produced those lines runs on the bind retry (~1/s), not per
+  frame. Silencing it was worth far more to the log than to the frame, and the first draft did not say so.* **A gate lesson came with it:** adding `GFA` made
   `tools/check-catalog.sh` blind to those sites — its alternation ends `|GF)\(`, which `GFA(` does not match — and
   the gate still reported OK, because a shape it cannot see is a shape it stops counting rather than one it
   reports. Taught, and drilled both ways with a planted bogus name: the un-taught gate passes it, the taught gate
