@@ -382,9 +382,13 @@ namespace HumankindAssetFramework
         static bool TryReadLastPawn(object pawnManager, out PawnCtx ctx)
         {
             ctx = default;
-            var pawnEntries = GetMember(pawnManager, "pawnEntries") as Array;
+            // Compiled accessors where available — these two run on EVERY pawn-add, before anything knows whether the
+            // pawn is ours, so they are the floor cost of the hook. See PawnFast.EnsureMgrInit. The reflection path
+            // stays as the fallback, exactly like every other PawnFast site: a renamed member costs speed, not function.
+            PawnFast.EnsureMgrInit(pawnManager);
+            var pawnEntries = (PawnFast.MgrReady ? PawnFast.MgrEntries(pawnManager) : GetMember(pawnManager, "pawnEntries")) as Array;
             if (pawnEntries == null) return false;
-            int pawnCount = Convert.ToInt32(GetMember(pawnManager, "pawnCount"));
+            int pawnCount = PawnFast.MgrReady ? PawnFast.MgrCount(pawnManager) : Convert.ToInt32(GetMember(pawnManager, "pawnCount"));
             if (pawnCount <= 0 || pawnCount > pawnEntries.Length) return false;
             int idx = pawnCount - 1;
             var entry = pawnEntries.GetValue(idx);                     // boxed PawnEntry (struct)

@@ -37,6 +37,36 @@ namespace HumankindAssetFramework
             [ProcessLived("compiled accessor table, built once per pawn-entry type")] public static readonly Action<object, float>[] BRAngle = new Action<object, float>[4]; // BoneRotationN.Angle
             public static bool BRReady;
 
+            // THE TWO READS THAT GATE EVERY PAWN-ADD (2026-08-23). The 08-21 perf pass compiled accessors for
+            // everything INSIDE the PawnEntry struct and took `PoseOurs` from 25-57 µs to ~5 µs per pawn — but
+            // `TryReadLastPawn` reads `pawnEntries` and `pawnCount` off the pawn MANAGER, a different type, and
+            // those two stayed on plain reflection. They run before anything else can decide whether the pawn is
+            // even ours, so every add pays them: measured `PoseVanilla` 210 µs = 116 adds × 1,805 ns, against this
+            // page's own figure of ~0.5-1 µs per boxed reflection get on Mono. Two of those is the whole 1,805 ns.
+            // Separate from the entry accessors above because it is a separate type with its own lifetime.
+            [ProcessLived("compiled manager accessors, built once per pawn-manager type")] static Type mgrBuiltFor;
+            public static Func<object, object> MgrEntries;
+            public static Func<object, int> MgrCount;
+            public static bool MgrReady;
+
+            public static void EnsureMgrInit(object mgr)
+            {
+                if (mgr == null) return;
+                var t = mgr.GetType();
+                if (t == mgrBuiltFor) return;
+                mgrBuiltFor = t; MgrReady = false;
+                try
+                {
+                    MgrEntries = FastMember.Getter<object>(t, "pawnEntries");
+                    MgrCount = FastMember.Getter<int>(t, "pawnCount");
+                    MgrReady = MgrEntries != null && MgrCount != null;
+                    Plugin.LogOnceInfo("pawnfast:mgr:" + t.Name,
+                        MgrReady ? $"[PawnFast] manager accessors compiled for {t.Name} (pawnEntries, pawnCount) — the two reads on every pawn-add"
+                                 : $"[PawnFast] manager accessors NOT available on {t.Name} — falling back to reflection (slower, still correct)");
+                }
+                catch { MgrReady = false; }   // any Emit failure degrades to the reflection path below, never to a crash
+            }
+
             public static void EnsureInit(object entry)
             {
                 if (entry == null) return;

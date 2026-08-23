@@ -99,5 +99,39 @@ namespace HumankindAssetFramework.Tests
         {
             Assert.Same(FastMember.Getter<int>(typeof(Outer), "SkeletonId"), FastMember.Getter<int>(typeof(Outer), "SkeletonId"));
         }
+
+        // ---- reference-typed fields on a CLASS (2026-08-23) ----
+        // The pawn MANAGER is a class, not a boxed struct, and the two reads that gate every pawn-add are an ARRAY
+        // and an int on it. Everything PawnFast accelerated before was inside the PawnEntry struct, so this shape —
+        // Castclass rather than Unbox, and a reference-typed leaf returned as object — had no coverage at all.
+        class Manager { public object[] pawnEntries = new object[3]; public int pawnCount = 2; }
+
+        [Fact]
+        public void Getter_ReadsAReferenceTypedFieldOffAClass()
+        {
+            var m = new Manager();
+            var g = FastMember.Getter<object>(typeof(Manager), "pawnEntries");
+            Assert.NotNull(g);
+            Assert.Same(m.pawnEntries, g(m));   // the same array instance, not a copy
+        }
+
+        [Fact]
+        public void Getter_ReadsAnIntFieldOffAClass()
+        {
+            var g = FastMember.Getter<int>(typeof(Manager), "pawnCount");
+            Assert.NotNull(g);
+            Assert.Equal(2, g(new Manager()));
+        }
+
+        // A class field must track the live object, not a snapshot — the manager's array is swapped by the game.
+        [Fact]
+        public void ClassGetter_SeesLaterWritesToTheField()
+        {
+            var m = new Manager();
+            var g = FastMember.Getter<object>(typeof(Manager), "pawnEntries");
+            var replacement = new object[9];
+            m.pawnEntries = replacement;
+            Assert.Same(replacement, g(m));
+        }
     }
 }
