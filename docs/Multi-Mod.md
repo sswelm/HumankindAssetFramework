@@ -25,7 +25,7 @@ A copy-ready starting point is [`haf-pack.example.json`](haf-pack.example.json).
 
 | Key | Meaning |
 |---|---|
-| `schemaVersion` | The HAF schema version this file targets. Currently `1`. Evolves **additively** — new keys are added, old files keep loading. |
+| `schemaVersion` | The HAF schema version this file targets. Currently `1`. Evolves **additively** — new keys are added, old files keep loading. Checked at load against the version the installed HAF implements; see [The schema contract](#the-schema-contract). |
 | `modId` | Your pack's unique id. Keep it stable; it's how you're named in the load report and how others depend on you. |
 | `models` | Your model entries — identical to what the Factory bakes. Runtime-only entries (a retexture/tint/sound with no baked mesh) need no GUIDs. |
 | `dependsOn` | modIds your pack **requires**. A missing dependency means your pack is **skipped** (loudly, in the log + report). Also orders you after them. |
@@ -36,6 +36,29 @@ A copy-ready starting point is [`haf-pack.example.json`](haf-pack.example.json).
 **Backward compatible:** a legacy bare `{ "models": [...] }` with no wrapper still loads — it just gets default metadata
 (`modId` = the filename, `schemaVersion` = 0). A legacy `haf_models.json` base file, if one exists, still loads too;
 ENC itself now ships as a normal pack at `haf_packs/ENCReload/pack.json` (`modId` `enc`, module `ENCReload`).
+
+### The schema contract
+
+The registry schema **evolves additively**: new keys get added, existing keys keep their name, type and meaning. That
+is what makes the version safe in both directions — a key your pack never wrote falls through to its default, and a key
+this HAF doesn't know is stripped before it can touch anything.
+
+So `schemaVersion` is an **advisory, never a gate**. Nothing HAF does with it can cost your pack its place:
+
+| Your `schemaVersion` | What happens |
+|---|---|
+| absent (`0`) | Loads normally. A line in `RESOLUTION` notes it's unversioned — no warning; legacy packs predate the field. |
+| `1` … the version HAF implements | Loads normally, silently. This is the ordinary case. |
+| **newer than HAF implements** | **Loads, with a warning.** Every key this build knows still works, but keys added after its version are stripped and ignored — so dials you set may silently do nothing. The remedy is to update HAF. |
+| below the oldest readable version | Loads, with a warning to re-bake. Reserved for the day a field's *meaning* changes rather than a field being added — the one break the additive contract doesn't cover. |
+
+The version HAF implements is printed in the `haf_load_report.txt` header (`schema implemented=1 (reads 1+)`), directly
+above each pack's own `schemaVersion=` line, so the comparison is one glance. It is defined once, in
+`Haf.Schema.HafSchema.Version`, and the push gate fails if this page or the example pack quotes a different number.
+
+**If you author a pack:** set `schemaVersion` to the version you built against and leave it alone. Bumping it doesn't
+unlock anything — it only tells an older HAF that it's older, which is exactly the signal a user needs when your unit
+loads but your new dial appears to do nothing.
 
 > **Naming — framework vs packs (deliberate):** everything FRAMEWORK-level is `haf_*` (`haf_packs/`,
 > `haf_load_report.txt`); everything `haf_*` (`haf_models.json`, `haf_sounds/`, `haf_skins/`) belongs to **ENC the
@@ -108,7 +131,7 @@ Every load writes **`BepInEx/config/haf_load_report.txt`** — the first thing t
 
 ```
 HAF load report  (regenerated every load)
-packs=2  models=14  conflicts=0  overrides applied=0
+packs=2  models=14  conflicts=0  overrides applied=0  schema implemented=1 (reads 1+)
 
 [enc]      schemaVersion=1  models=13  file=pack.json
 [yourmod]  schemaVersion=1  models=1   file=yourmod.json

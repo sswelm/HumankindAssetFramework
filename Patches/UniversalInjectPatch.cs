@@ -198,6 +198,11 @@ namespace HumankindAssetFramework
             // The old code published the empty list first and Add()ed into it — the sim-thread combat hook
             // (FindEntryForUnitDefinition) could then foreach over it mid-Add and throw (review 2026-07-19).
             entries = new List<ModelEntry>();   // readers see empty while we build
+            // BREADCRUMB for the catch below (2026-08-23). A throw anywhere past discovery aborts before
+            // WriteLoadReport runs, so haf_load_report.txt is never written and the only artefact is a stack trace
+            // that names no pack. Carrying the discovered file list out to the handler means the modder always gets
+            // the candidate set to bisect, even when the failure is one we haven't anticipated.
+            string discovered = "(discovery did not complete)";
             try
             {
                 // DISCOVERY: every *.json / <mod>/pack.json a modder drops in haf_packs/ (+ a legacy haf_models.json base
@@ -222,6 +227,7 @@ namespace HumankindAssetFramework
                     files.AddRange(found.OrderBy(f => f, StringComparer.OrdinalIgnoreCase));
                 }
                 if (files.Count == 0) { Plugin.Diag("[Uni] no registry at " + basePath + " and no haf_packs/*.json"); loaded = true; return; }
+                discovered = string.Join(", ", files.Select(f => Path.GetFileName(Path.GetDirectoryName(f)) + "/" + Path.GetFileName(f)));
 
                 var packs = new List<Pack>();
                 foreach (var file in files)
@@ -269,6 +275,18 @@ namespace HumankindAssetFramework
                 packs = ResolvePacks(packs, resolution);
                 if (packs.Count == 0) throw new Exception("no packs survived resolution (see haf_load_report.txt)");
 
+                // SCHEMA CONTRACT (2026-08-23): every surviving pack's declared version is checked against the one
+                // this build implements. Advisory only — see CheckSchema. Runs AFTER resolution so a pack that was
+                // already skipped doesn't also get told its schema is wrong.
+                foreach (var pk in packs)
+                {
+                    var sn = CheckSchema(pk.modId, pk.schemaVersion);
+                    if (sn == null) continue;
+                    resolution.Add(sn.Text);
+                    if (sn.Warn) Plugin.Log.LogWarning("[Uni] " + sn.Text);
+                    else Plugin.Diag("[Uni] " + sn.Text);
+                }
+
                 // MERGE — the pure MergeModels below (extracted 2026-08-21 so the `disabled` rule is testable).
                 var merged = MergeModels(packs);
                 var built = merged.Built; var conflicts = merged.Conflicts; var applied = merged.Applied;
@@ -310,8 +328,8 @@ namespace HumankindAssetFramework
                 // still flushing a file) would otherwise disable ALL injection for the session. Retry on the next few
                 // pawn loads; give up (latch) only after 3 tries so a genuinely broken file doesn't re-parse forever.
                 entries = new List<ModelEntry>();
-                if (++loadAttempts >= 3) { loaded = true; Plugin.Log.LogError("[Uni] registry load failed 3x, giving up for this session: " + e); }
-                else Plugin.Log.LogWarning($"[Uni] registry load failed (attempt {loadAttempts}/3), will retry on next pawn: " + e.Message);
+                if (++loadAttempts >= 3) { loaded = true; Plugin.Log.LogError($"[Uni] registry load failed 3x, giving up for this session — NO custom content will inject. Packs discovered: {discovered}. " + e); }
+                else Plugin.Log.LogWarning($"[Uni] registry load failed (attempt {loadAttempts}/3), will retry on next pawn. Packs discovered: {discovered}. " + e.Message);
             }
         }
 
@@ -338,9 +356,37 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Diag("[Uni] runtime-module order unavailable (" + ex.Message + ") — packs stay alphabetical."); return null; }
         }
 
+        // One wrapper-metadata string, or null when the key gives us nothing usable — in which case the caller keeps
+        // the value it computed from the file name.
+        //
+        // BLANK IS NOT BROKEN, AND THE DIFFERENCE IS PER-KEY (in-game drill, 2026-08-23). The first cut warned on
+        // anything unusable, which put TWO warnings in every clean load: the editor writes `"module": ""` and
+        // `"moduleGuid": ""` on every pack it bakes — empty is its idiom for "no explicit override, use the auto
+        // match" — so the reference pack itself tripped the guard. A warning that fires on the reference pack has
+        // stopped meaning anything by the second load, which is the same disease as the silence it replaced.
+        //   * absent            — silent. The computed default is the answer.
+        //   * blank, and blank is this key's normal "not set" (module/moduleGuid) — Diag only; a quiet load stays quiet.
+        //   * blank, where nothing writes it blank on purpose (modId) — WARN: the pack's IDENTITY just changed to a
+        //     file name, and other packs' dependsOn/overrides are written against that identity.
+        //   * wrong TYPE (number, bool, object, array) — WARN always. Nothing emits `"modId": 3` by accident twice.
+        static string WrapperStr(JToken t, string file, string key, bool blankIsNormal)
+        {
+            if (t == null) return null;                                   // absent — the computed default stands, silently
+            if (t.Type == JTokenType.String || t.Type == JTokenType.Null)
+            {
+                var s = ((string)t ?? "").Trim();
+                if (s.Length > 0) return s;
+                if (blankIsNormal) Plugin.Diag($"[Uni] pack '{Path.GetFileName(file)}': \"{key}\" is empty — using the file-name default (normal).");
+                else Plugin.Log.LogWarning($"[Uni] pack '{Path.GetFileName(file)}': \"{key}\" is empty or null — falling back to the file-name default '{Path.GetFileNameWithoutExtension(file)}'. Other packs depend on and override you by that id, so set it explicitly.");
+                return null;
+            }
+            Plugin.Log.LogWarning($"[Uni] pack '{Path.GetFileName(file)}': \"{key}\" is {t.Type}, not a string — ignored; the file-name default is used instead.");
+            return null;
+        }
+
         // Parse one pack file into its wrapper metadata + models. The wrapper is OPTIONAL: a legacy bare { "models": [...] }
         // yields default metadata (modId = "enc" for the base file, else the filename). Throws only if the file can't be read.
-        static Pack ParsePack(string file, bool isBase)
+        internal static Pack ParsePack(string file, bool isBase)
         {
             var text = File.ReadAllText(file);
             bool isDirPack = !isBase && string.Equals(Path.GetFileName(file), "pack.json", StringComparison.OrdinalIgnoreCase);
@@ -363,16 +409,32 @@ namespace HumankindAssetFramework
             try
             {
                 var root = JObject.Parse(text);
-                if (root["modId"] != null) pk.modId = (string)root["modId"];
-                if (root["schemaVersion"] != null) pk.schemaVersion = (int)root["schemaVersion"];
-                if (root["module"] != null) pk.moduleName = (string)root["module"];        // explicit override of the folder-name auto-match
-                if (root["moduleGuid"] != null) pk.moduleGuid = (string)root["moduleGuid"];
+                // A wrapper key that is PRESENT but not a usable string keeps the computed default (review 2026-08-23).
+                // `(string)root["modId"]` returns C# null for `"modId": null` WITHOUT throwing, so it slipped past the
+                // catch below and reached ResolvePacks' dictionary as a NULL KEY — an ArgumentNullException whose only
+                // handler resets `entries` and disables injection for the whole session. One malformed third-party pack
+                // therefore took every OTHER pack down with it (the reference pack included), named no file, and wrote
+                // no load report. The regex recovery path below had guarded exactly this shape since it was written
+                // (`.Groups[1].Value.Length > 0`); the primary path never did.
+                // blankIsNormal: the editor bakes `"module": ""` / `"moduleGuid": ""` into every pack as its "no
+                // explicit override" idiom, so blank there is routine. A blank `modId` is not — it silently renames
+                // the pack to its file name, and that name is what other packs' dependsOn/overrides are written to.
+                var wModId  = WrapperStr(root["modId"],      file, "modId",      blankIsNormal: false); if (wModId  != null) pk.modId      = wModId;
+                var wModule = WrapperStr(root["module"],     file, "module",     blankIsNormal: true);  if (wModule != null) pk.moduleName = wModule;   // explicit override of the folder-name auto-match
+                var wGuid   = WrapperStr(root["moduleGuid"], file, "moduleGuid", blankIsNormal: true);  if (wGuid   != null) pk.moduleGuid = wGuid;
+                // schemaVersion: only a real integer counts. A null/string/garbage value used to THROW on the cast,
+                // which dropped the whole header into the regex recovery below and logged "header didn't JSON-parse"
+                // against a file whose JSON was in fact well-formed — a misleading diagnosis for a one-key mistake.
+                var svTok = root["schemaVersion"];
+                if (svTok != null && svTok.Type == JTokenType.Integer) pk.schemaVersion = (int)svTok;
+                else if (svTok != null)
+                    Plugin.Log.LogWarning($"[Uni] pack '{Path.GetFileName(file)}': \"schemaVersion\" is {svTok.Type}, not an integer — ignored.");
                 pk.dependsOn = StrList(root["dependsOn"]);
                 pk.loadAfter = StrList(root["loadAfter"]);
                 if (root["overrides"] is JArray ovs)
                     foreach (var ov in ovs)
                     {
-                        string om = (string)ov["modId"] ?? "", op = (string)ov["pawnDescription"] ?? "";
+                        string om = ((string)ov["modId"] ?? "").Trim(), op = ((string)ov["pawnDescription"] ?? "").Trim();
                         if (om.Length > 0 && op.Length > 0) pk.overrides.Add(new PackOverride { modId = om, pawn = op });
                     }
             }
@@ -385,13 +447,13 @@ namespace HumankindAssetFramework
                 Plugin.Log.LogWarning($"[Uni] pack '{Path.GetFileName(file)}' header didn't JSON-parse ({ex.Message}) — recovering modId/dependsOn/loadAfter/overrides by regex. Fix the JSON syntax to be safe.");
                 pk.overrides.Clear();   // in case the try partially populated before throwing
                 var mid = Regex.Match(text, "\"modId\"\\s*:\\s*\"([^\"]*)\"");
-                if (mid.Success && mid.Groups[1].Value.Length > 0) pk.modId = mid.Groups[1].Value;
+                if (mid.Success && mid.Groups[1].Value.Trim().Length > 0) pk.modId = mid.Groups[1].Value.Trim();
                 var sv = Regex.Match(text, "\"schemaVersion\"\\s*:\\s*(\\d+)");
                 if (sv.Success && int.TryParse(sv.Groups[1].Value, out var svi)) pk.schemaVersion = svi;
                 var mm = Regex.Match(text, "\"module\"\\s*:\\s*\"([^\"]*)\"");
-                if (mm.Success && mm.Groups[1].Value.Length > 0) pk.moduleName = mm.Groups[1].Value;
+                if (mm.Success && mm.Groups[1].Value.Trim().Length > 0) pk.moduleName = mm.Groups[1].Value.Trim();
                 var mg = Regex.Match(text, "\"moduleGuid\"\\s*:\\s*\"([^\"]*)\"");
-                if (mg.Success && mg.Groups[1].Value.Length > 0) pk.moduleGuid = mg.Groups[1].Value;
+                if (mg.Success && mg.Groups[1].Value.Trim().Length > 0) pk.moduleGuid = mg.Groups[1].Value.Trim();
                 pk.dependsOn = RegexStrArray(text, "dependsOn");
                 pk.loadAfter = RegexStrArray(text, "loadAfter");
                 var ovBlock = Regex.Match(text, "\"overrides\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
@@ -400,16 +462,30 @@ namespace HumankindAssetFramework
                     {
                         var om = Regex.Match(ovm.Value, "\"modId\"\\s*:\\s*\"([^\"]*)\"");
                         var op = Regex.Match(ovm.Value, "\"pawnDescription\"\\s*:\\s*\"([^\"]*)\"");
-                        if (om.Success && op.Success && om.Groups[1].Value.Length > 0 && op.Groups[1].Value.Length > 0)
-                            pk.overrides.Add(new PackOverride { modId = om.Groups[1].Value, pawn = op.Groups[1].Value });
+                        if (om.Success && op.Success && om.Groups[1].Value.Trim().Length > 0 && op.Groups[1].Value.Trim().Length > 0)
+                            pk.overrides.Add(new PackOverride { modId = om.Groups[1].Value.Trim(), pawn = op.Groups[1].Value.Trim() });
                     }
+            }
+            // POST-CONDITION: a Pack never leaves here without a usable modId. Even with the guards above the COMPUTED
+            // defaults can come out blank (a file literally named ".json", a pack.json sitting at a drive root), and
+            // every downstream consumer keys on this string — the duplicate-id dictionary, dependsOn matching, the
+            // override ledger, the conflict lines. A named placeholder keeps all of them working AND keeps the pack
+            // loadable, instead of trading one silent failure for another.
+            if (string.IsNullOrWhiteSpace(pk.modId))
+            {
+                pk.modId = "unnamed-pack:" + (Path.GetFileName(file) ?? "?");
+                Plugin.Log.LogWarning($"[Uni] pack '{Path.GetFileName(file)}' has no usable modId — using '{pk.modId}' for this session. Give it a unique \"modId\" so other packs can depend on it or declare an override against it.");
             }
             pk.models = ParseModels(text);
             return pk;
         }
 
+        // TRIM SYMMETRY (2026-08-23). WrapperStr trims the id a pack declares for ITSELF, so every place another pack
+        // NAMES that id has to trim too or the two sides stop matching: a `"modId": "enc "` typo would otherwise be
+        // repaired on one side only, and the dependant that faithfully copied the same trailing space would go from
+        // silently-working to loudly-skipped. Ids are trimmed everywhere they are written or compared, or nowhere.
         static List<string> StrList(JToken t) =>
-            (t as JArray)?.Select(x => (string)x).Where(s => !string.IsNullOrEmpty(s)).ToList() ?? new List<string>();
+            (t as JArray)?.Select(x => ((string)x ?? "").Trim()).Where(s => s.Length > 0).ToList() ?? new List<string>();
 
         // REGEX recovery of a wrapper string-array ("dependsOn"/"loadAfter") when JObject.Parse failed — same resilience
         // the models parse already has. These keys are wrapper-only (never in a model entry), so matching the whole file is safe.
@@ -419,7 +495,7 @@ namespace HumankindAssetFramework
             var m = Regex.Match(text, "\"" + field + "\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
             if (m.Success)
                 foreach (Match s in Regex.Matches(m.Groups[1].Value, "\"([^\"]*)\""))
-                    if (s.Groups[1].Value.Length > 0) list.Add(s.Groups[1].Value);
+                { var v = s.Groups[1].Value.Trim(); if (v.Length > 0) list.Add(v); }   // trimmed like StrList — the recovery twin must agree with the primary
             return list;
         }
 
@@ -433,6 +509,35 @@ namespace HumankindAssetFramework
         // filename order), so with no declared constraints the result is byte-identical to the pre-resolution order —
         // today's single-pack setup is provably unaffected. loadAfter naming an absent modId is soft (ignored);
         // a dependency cycle appends its members in seed order with a loud warning. `notes` feeds the load report.
+        // THE SCHEMA ADVISORY (2026-08-23). PURE: what a pack's declared `schemaVersion` earns against the version
+        // this build implements. Returns null when there is nothing worth saying — the ordinary in-range pack, which
+        // is very nearly every pack — so the load report keeps talking about conflicts instead of restating a number
+        // it already prints on the pack's own line.
+        //
+        // FAIL-SOFT, ALWAYS: nothing here refuses a pack. That is the house rule the boot pre-flight already states
+        // ("fail-soft stands, nothing is ever blocked"), and the ADDITIVE contract is what makes it the correct rule
+        // rather than merely the lenient one. A pack from the future is a pack whose extra keys this build strips
+        // (registryConfigKeys) and whose known keys it reads exactly as the author intended. Refusing it would break
+        // something that demonstrably works, to protect an author who would far rather a dial degrade than lose the
+        // whole unit. What was missing was never enforcement — it was ever SAYING SO.
+        internal sealed class SchemaNote
+        {
+            public bool Warn;     // true = a real LogWarning; false = a quiet line in the report's RESOLUTION section
+            public string Text;
+        }
+
+        internal static SchemaNote CheckSchema(string modId, int declared)
+        {
+            const int ours = Haf.Schema.HafSchema.Version, oldest = Haf.Schema.HafSchema.MinReadable;
+            if (declared == Haf.Schema.HafSchema.Unversioned)
+                return new SchemaNote { Warn = false, Text = $"schema: '{modId}' declares no schemaVersion (legacy bare pack or hand-written) — read as schema {ours}; additive evolution means it still loads correctly." };
+            if (declared > ours)
+                return new SchemaNote { Warn = true, Text = $"schema: '{modId}' targets schema {declared} but this HAF implements {ours}. The pack LOADS and every key this build knows still works — but any key introduced after schema {ours} is stripped and IGNORED, so dials the author set may silently do nothing. Update HAF to get them." };
+            if (declared < oldest)
+                return new SchemaNote { Warn = true, Text = $"schema: '{modId}' targets schema {declared}, older than the oldest this HAF can read ({oldest}). It still loads, but a field whose MEANING changed since then may be misread — re-bake the pack." };
+            return null;   // oldest..ours — the contract holds, and the pack's own report line already prints the number
+        }
+
         internal static List<Pack> ResolvePacks(List<Pack> packs, List<string> notes)
         {
             // -- duplicate modIds --
@@ -440,6 +545,17 @@ namespace HumankindAssetFramework
             var kept = new List<Pack>();
             foreach (var pk in packs)
             {
+                // DEFENCE IN DEPTH (2026-08-23). ParsePack now guarantees a usable modId, but this method is the pure,
+                // separately-tested entry point and must not depend on that: `Dictionary.TryGetValue(null)` throws
+                // ArgumentNullException, and the only handler above resets `entries` and disables injection for the
+                // whole session. A pack that reaches here without an id gets the same treatment as any other broken
+                // pack — SKIPPED, loudly, by name — so the blast radius is one pack instead of all of them.
+                if (string.IsNullOrWhiteSpace(pk.modId))
+                {
+                    notes.Add($"SKIPPED '{Path.GetFileName(pk.file)}': no usable modId");
+                    Plugin.Log.LogWarning($"[Uni] pack '{Path.GetFileName(pk.file)}' skipped: its \"modId\" is missing or not a string. Every other pack still loads.");
+                    continue;
+                }
                 if (byId.TryGetValue(pk.modId, out var first))
                 {
                     notes.Add($"SKIPPED '{Path.GetFileName(pk.file)}': duplicate modId '{pk.modId}' (kept '{Path.GetFileName(first.file)}')");
@@ -496,7 +612,10 @@ namespace HumankindAssetFramework
             {
                 var sb = new System.Text.StringBuilder();
                 sb.AppendLine("HAF load report  (regenerated every load)");
-                sb.AppendLine($"packs={packs.Count}  models={total}  conflicts={conflicts.Count}  overrides applied={applied.Count}");
+                sb.AppendLine(Plugin.VersionLine);   // which build wrote this file — a stale DLL's report is indistinguishable without it
+                // The implemented version sits in the HEADER so it reads directly against each pack's own
+                // `schemaVersion=` line below — the comparison a modder is actually making when they open this file.
+                sb.AppendLine($"packs={packs.Count}  models={total}  conflicts={conflicts.Count}  overrides applied={applied.Count}  schema implemented={Haf.Schema.HafSchema.Version} (reads {Haf.Schema.HafSchema.MinReadable}+)");
                 sb.AppendLine();
                 foreach (var p in packs)
                 {
