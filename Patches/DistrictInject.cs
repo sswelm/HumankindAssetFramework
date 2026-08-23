@@ -96,6 +96,152 @@ namespace HumankindAssetFramework
             Plugin.Log.LogError($"[District] GUID must be four ints \"a,b,c,d\" (got '{gs}').");
             return null;
         }
+        // THE DISTRICT REGISTRY PARSE (hardened 2026-08-23). It used to be one `JObject.Parse` inside one try, with
+        // the whole per-entry loop inside it too — so a SINGLE malformed character anywhere in haf_districts.json
+        // left `distModels` empty and **every** custom district silently gone behind one LogError, and a single bad
+        // ENTRY aborted the loop and took every entry after it down as well. The model registry has had a
+        // field-by-field regex fallback for exactly this since it shipped (`ParseModels`); the district registry,
+        // its twin, never got one. This is the same blast-radius bug as the pack `modId` crash fixed earlier today,
+        // in the sibling that was overlooked — the recurring shape of this codebase is a fix that lands in one of
+        // two twins.
+        //
+        // Three layers, matching ParseModels: PRIMARY object parse; PER-ENTRY isolation so one bad entry is skipped
+        // loudly instead of sinking its neighbours; and a REGEX fallback when the document itself won't parse.
+        internal static List<DistrictModel> ParseDistricts(string text) => Usable(ParseDistrictsRaw(text));
+
+        // The primary-or-fallback DECISION and the per-entry isolation, before the accept/reject gate. Split out
+        // because every GUID needs the live game to resolve: a test calling ParseDistricts outside it gets an empty
+        // list whatever happens, so assertions on it are vacuous — which a mutation drill proved by deleting the
+        // regex fallback and the per-entry try and watching the suite stay green.
+        internal static List<DistrictModel> ParseDistrictsRaw(string text)
+        {
+            var outp = new List<DistrictModel>();
+            try
+            {
+                var root = JObject.Parse(text);
+                var arr = root["districts"] as JArray;
+                if (arr == null)
+                {
+                    Plugin.Log.LogWarning("[District] haf_districts.json has no \"districts\" array — no custom districts will load.");
+                    return outp;
+                }
+                for (int i = 0; i < arr.Count; i++)
+                {
+                    // PER ENTRY: a bad `isolate` or a mistyped number is that entry's problem, not the registry's.
+                    try { outp.Add(BuildDistrict(arr[i])); }
+                    catch (Exception ex) { Plugin.Log.LogWarning($"[District] registry entry #{i + 1} skipped ({ex.GetType().Name}: {ex.Message}) — the other entries still load."); }
+                }
+                return outp;
+            }
+            catch (Exception ex)
+            {
+                // The document didn't parse — almost always a hand-edit typo. Recover field-by-field rather than
+                // lose every district, and WARN loudly so the author fixes the JSON instead of relying on this.
+                Plugin.Log.LogWarning($"[District] haf_districts.json didn't JSON-parse ({ex.Message}) — recovering entries by regex. FIX THE JSON: the recovery is index-aligned and cannot survive a missing field in a middle entry.");
+                return RegexDistricts(text);
+            }
+        }
+
+        // The accept/reject rule, applied identically to BOTH paths — a recovered entry is held to exactly the same
+        // bar as a parsed one, so the fallback can never smuggle in something the primary path would have rejected.
+        // Kept OUT of the two extractors so each can be tested for what it EXTRACTS: every GUID here routes through
+        // MakeGuid, which needs the live game, so outside it every entry would fail this gate and a parity test
+        // would compare two empty lists and pass while proving nothing.
+        internal static List<DistrictModel> Usable(List<DistrictModel> raw)
+        {
+            var outp = new List<DistrictModel>();
+            foreach (var e in raw)
+            {
+                if (e.district.Length > 0 && e.fxMeshGuid != null) outp.Add(e);
+                else Plugin.Log.LogWarning($"[District] registry entry skipped (district='{e.district}', bad fxMeshGuid?)");
+            }
+            return outp;
+        }
+
+        internal static DistrictModel BuildDistrict(JToken d) => new DistrictModel
+        {
+            district = (string)d["district"] ?? "",
+            fxMeshGuid = ParseGuidCsv((string)d["fxMeshGuid"] ?? ""),
+            atlasGuid = ParseGuid4((string)d["atlasGuid"] ?? ""),   // optional: entries baked before texture injection have none
+            normalAtlasGuid = ParseGuid4((string)d["normalAtlasGuid"] ?? ""),
+            roughAtlasGuid = ParseGuid4((string)d["roughAtlasGuid"] ?? ""),
+            footprintDonor = ParseGuid4((string)d["footprintDonor"] ?? ""),   // registry-driven strategic-footprint donor (null = none)
+            // SPIKE: DistrictIsolate config (default true) now OVERRIDES the JSON when set false, so we
+            // can force a registry entry into TRUE global mode for the footprint test. Without this the
+            // reactor's JSON isolate=true silently won every "global" test. Otherwise honour the JSON.
+            isolate = (Plugin.DistrictIsolate != null && !Plugin.DistrictIsolate.Value) ? false : ((bool?)d["isolate"] ?? true),
+            groundMaterial = (string)d["groundMaterial"] ?? "",
+            hexSculpt = (string)d["hexSculpt"] ?? "",
+            footprintMesh = (bool?)d["footprintMesh"] ?? false,
+            footprintMeshBW = (bool?)d["footprintMeshBW"] ?? false,
+            footprintMeshFlat = (bool?)d["footprintMeshFlat"] ?? false,
+            footprintMeshFlatHeight = (float?)d["footprintMeshFlatHeight"] ?? 0.17f,
+            footprintMeshHideDecal = (bool?)d["footprintMeshHideDecal"] ?? true,
+            selectorGuid = ParseGuid4((string)d["selectorGuid"] ?? ""),   // baked scoped CityMapSelector -> the scoped rendering path
+        };
+
+        // INDEX-ALIGNED regex recovery, the same last resort ParseModels uses: the i-th match of each field belongs
+        // to entry i. Fragile only if a MIDDLE entry omits a field, which the Factory never writes — it emits every
+        // key for every entry. Every value goes through the SAME converters as the object path (ParseGuidCsv /
+        // ParseGuid4 / the same defaults), so a recovered entry cannot mean something different from a parsed one.
+        // District keys are checked against the whole document: none of them collide with a `parts[]` sub-object key.
+        internal static List<DistrictModel> RegexDistricts(string text)
+        {
+            var outp = new List<DistrictModel>();
+            var names = Regex.Matches(text, "\"district\"\\s*:\\s*\"([^\"]*)\"");
+            if (names.Count == 0) return outp;
+            string S(MatchCollection m, int i) => i < m.Count ? m[i].Groups[1].Value : "";
+            bool B(MatchCollection m, int i, bool dflt) => i < m.Count ? m[i].Groups[1].Value == "true" : dflt;
+            var fx   = Regex.Matches(text, "\"fxMeshGuid\"\\s*:\\s*\"([^\"]*)\"");
+            var at   = Regex.Matches(text, "\"atlasGuid\"\\s*:\\s*\"([^\"]*)\"");
+            var nm   = Regex.Matches(text, "\"normalAtlasGuid\"\\s*:\\s*\"([^\"]*)\"");
+            var rg   = Regex.Matches(text, "\"roughAtlasGuid\"\\s*:\\s*\"([^\"]*)\"");
+            var fd   = Regex.Matches(text, "\"footprintDonor\"\\s*:\\s*\"([^\"]*)\"");
+            var sel  = Regex.Matches(text, "\"selectorGuid\"\\s*:\\s*\"([^\"]*)\"");
+            var gm   = Regex.Matches(text, "\"groundMaterial\"\\s*:\\s*\"([^\"]*)\"");
+            var hx   = Regex.Matches(text, "\"hexSculpt\"\\s*:\\s*\"([^\"]*)\"");
+            var iso  = Regex.Matches(text, "\"isolate\"\\s*:\\s*(true|false)");
+            var fpm  = Regex.Matches(text, "\"footprintMesh\"\\s*:\\s*(true|false)");
+            var fbw  = Regex.Matches(text, "\"footprintMeshBW\"\\s*:\\s*(true|false)");
+            var ffl  = Regex.Matches(text, "\"footprintMeshFlat\"\\s*:\\s*(true|false)");
+            var fhd  = Regex.Matches(text, "\"footprintMeshHideDecal\"\\s*:\\s*(true|false)");
+            var ffh  = Regex.Matches(text, "\"footprintMeshFlatHeight\"\\s*:\\s*(-?[\\d.eE+]+)");
+            for (int i = 0; i < names.Count; i++)
+            {
+                var e = new DistrictModel
+                {
+                    district = S(names, i),
+                    fxMeshGuid = ParseGuidCsv(S(fx, i)),
+                    atlasGuid = ParseGuid4(S(at, i)),
+                    normalAtlasGuid = ParseGuid4(S(nm, i)),
+                    roughAtlasGuid = ParseGuid4(S(rg, i)),
+                    footprintDonor = ParseGuid4(S(fd, i)),
+                    selectorGuid = ParseGuid4(S(sel, i)),
+                    groundMaterial = S(gm, i),
+                    hexSculpt = S(hx, i),
+                    isolate = (Plugin.DistrictIsolate != null && !Plugin.DistrictIsolate.Value) ? false : B(iso, i, true),
+                    footprintMesh = B(fpm, i, false),
+                    footprintMeshBW = B(fbw, i, false),
+                    footprintMeshFlat = B(ffl, i, false),
+                    footprintMeshHideDecal = B(fhd, i, true),
+                    footprintMeshFlatHeight = i < ffh.Count && float.TryParse(ffh[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var fh) ? fh : 0.17f,
+                };
+                outp.Add(e);   // RAW: the accept/reject gate is Usable(), applied once to both paths by ParseDistricts
+            }
+            return outp;
+        }
+
+        // The object path's extraction, exposed raw for the parity oracle — same entries ParseDistricts builds
+        // before Usable() filters them, so a test can compare the two extractors field for field.
+        internal static List<DistrictModel> JsonDistricts(string text)
+        {
+            var outp = new List<DistrictModel>();
+            var arr = JObject.Parse(text)["districts"] as JArray;
+            if (arr == null) return outp;
+            foreach (var d in arr) outp.Add(BuildDistrict(d));
+            return outp;
+        }
+
         static void EnsureDistrictConfig()
         {
             if (distParsed) return; distParsed = true;
@@ -113,38 +259,9 @@ namespace HumankindAssetFramework
                 var regPath = Path.Combine(Paths.ConfigPath, "haf_districts.json");
                 if (File.Exists(regPath))
                 {
-                    try
-                    {
-                        var root = JObject.Parse(File.ReadAllText(regPath));
-                        foreach (var d in (root["districts"] as JArray) ?? new JArray())
-                        {
-                            var e = new DistrictModel
-                            {
-                                district = (string)d["district"] ?? "",
-                                fxMeshGuid = ParseGuidCsv((string)d["fxMeshGuid"] ?? ""),
-                                atlasGuid = ParseGuid4((string)d["atlasGuid"] ?? ""),   // optional: entries baked before texture injection have none
-                                normalAtlasGuid = ParseGuid4((string)d["normalAtlasGuid"] ?? ""),
-                                roughAtlasGuid = ParseGuid4((string)d["roughAtlasGuid"] ?? ""),
-                                footprintDonor = ParseGuid4((string)d["footprintDonor"] ?? ""),   // registry-driven strategic-footprint donor (null = none)
-                                // SPIKE: DistrictIsolate config (default true) now OVERRIDES the JSON when set false, so we
-                                // can force a registry entry into TRUE global mode for the footprint test. Without this the
-                                // reactor's JSON isolate=true silently won every "global" test. Otherwise honour the JSON.
-                                isolate = (Plugin.DistrictIsolate != null && !Plugin.DistrictIsolate.Value) ? false : ((bool?)d["isolate"] ?? true),
-                                groundMaterial = (string)d["groundMaterial"] ?? "",
-                                hexSculpt = (string)d["hexSculpt"] ?? "",
-                                footprintMesh = (bool?)d["footprintMesh"] ?? false,
-                                footprintMeshBW = (bool?)d["footprintMeshBW"] ?? false,
-                                footprintMeshFlat = (bool?)d["footprintMeshFlat"] ?? false,
-                                footprintMeshFlatHeight = (float?)d["footprintMeshFlatHeight"] ?? 0.17f,
-                                footprintMeshHideDecal = (bool?)d["footprintMeshHideDecal"] ?? true,
-                                selectorGuid = ParseGuid4((string)d["selectorGuid"] ?? ""),   // baked scoped CityMapSelector -> the scoped rendering path
-                            };
-                            if (e.district.Length > 0 && e.fxMeshGuid != null) distModels.Add(e);
-                            else Plugin.Log.LogWarning($"[District] registry entry skipped (district='{e.district}', bad fxMeshGuid?)");
-                        }
-                        Plugin.Log.LogInfo($"[District] registry: {distModels.Count} district model(s) from haf_districts.json");
-                    }
-                    catch (Exception rex) { Plugin.Log.LogError("[District] haf_districts.json parse: " + rex); }
+                    try { distModels.AddRange(ParseDistricts(File.ReadAllText(regPath))); }
+                    catch (Exception rex) { Plugin.Log.LogError("[District] haf_districts.json could not be READ: " + rex); }
+                    Plugin.Log.LogInfo($"[District] registry: {distModels.Count} district model(s) from haf_districts.json");
                 }
                 // legacy single-model config keeps working: synthesize an entry when the registry has none
                 if (distModels.Count == 0 && !string.IsNullOrEmpty(distName) && distFxMeshGuid != null)
