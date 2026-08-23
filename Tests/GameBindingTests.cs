@@ -138,5 +138,47 @@ namespace HumankindAssetFramework.Tests
             Assert.True(r.TypeFound);
             Assert.Equal(new[] { "RenamedByUpdate" }, r.MissingMembers.ToArray());
         }
+
+        // ---- The version advisory: the case that used to be SILENT ----
+        // A game update that BREAKS a binding was always loud (HealthMissing > 0 -> red F8 banner). A game update
+        // where every binding still resolves said nothing in-game: HealthSummary was nulled, the banner is gated on
+        // HealthMissing, and the only trace was a log line and a report file. Resolution succeeding proves the NAMES
+        // survived, not the behaviour — which is exactly when an update-caused oddity gets blamed on HAF.
+
+        [Fact]
+        public void VersionAdvisory_IsSilentOnTheVerifiedBuild()
+        {
+            Assert.Null(GameBinding.VersionAdvisoryFor("1.30", "1.30"));
+        }
+
+        [Fact]
+        public void VersionAdvisory_NamesBothBuildsOnAMismatch()
+        {
+            var a = GameBinding.VersionAdvisoryFor("1.31", "1.30");
+            Assert.NotNull(a);
+            Assert.Contains("1.31", a);          // what you are running
+            Assert.Contains("1.30", a);          // what the catalog was verified against
+            Assert.Contains("advisory", a);      // fail-soft: it must not read as a fault
+        }
+
+        // Unknowable inputs must stay silent rather than guess. An unreadable Application.version (SafeVersion
+        // returns "?" or "") or an unpinned catalog are both "no information", and an advisory with a "?" in it
+        // would train the reader to ignore the line — the one failure an advisory cannot survive.
+        [Theory]
+        [InlineData(null, "1.30")]
+        [InlineData("", "1.30")]
+        [InlineData("1.31", null)]
+        [InlineData("1.31", "")]
+        public void VersionAdvisory_SaysNothingWhenItCannotKnow(string game, string verified)
+        {
+            Assert.Null(GameBinding.VersionAdvisoryFor(game, verified));
+        }
+
+        // The shipped constant must match what the report claims, so the advisory cannot fire on a verified build.
+        [Fact]
+        public void VerifiedGameVersion_IsPinned()
+        {
+            Assert.False(string.IsNullOrWhiteSpace(GameBinding.VerifiedGameVersion));
+        }
     }
 }

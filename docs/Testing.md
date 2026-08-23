@@ -114,6 +114,18 @@ a bad name *in the new shape* over one that just re-runs the gate.
 A **different trigger** from the push gate: that guards HAF *code* changes; this guards *game* changes. After a Humankind
 update, run:
 
+> **How you learn a game update happened at all (2026-08-23).** Two signals, and the second closed a real blind spot.
+> An update that **breaks** a binding was always loud — `HealthMissing > 0` puts a red banner at the top of the F8
+> window naming exactly what broke. An update where every binding still **resolves** used to be *silent in-game*:
+> `HealthSummary` was nulled, the banner is gated on `HealthMissing`, and the only trace was one log line and
+> `haf_bindings_report.txt`. But resolution succeeding proves the *names* survived the update, not the *behaviour* —
+> which is precisely the state where an update-caused oddity gets blamed on HAF. So an amber advisory now shows
+> whenever `Application.version` differs from `GameBinding.VerifiedGameVersion`, naming both builds and pointing here.
+> It is advisory by design (fail-soft) and silent on a verified build. The decision is a pure function
+> (`VersionAdvisoryFor`) so it is unit-tested without a game, including the cases where it must say **nothing**: an
+> unreadable version or an unpinned catalog are "no information", and a `?` in an advisory trains the reader to ignore
+> the line. **`VerifiedGameVersion` is hand-updated** — bump it in the same commit as a re-verification, never before.
+
 ```
 bash tools/check-bindings.sh [<…/Humankind_Data/Managed>]
 ```

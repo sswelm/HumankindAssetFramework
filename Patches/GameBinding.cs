@@ -336,6 +336,27 @@ namespace HumankindAssetFramework
                 : $" [game {ver} — UNTESTED; catalog verified against {VerifiedGameVersion}, so warnings are likely this update]";
         }
 
+        // THE SILENT CASE (2026-08-23). A game update that breaks a binding is loud: HealthMissing > 0 puts a banner
+        // in the F8 window. A game update where every binding still RESOLVES was silent — HealthSummary was set to
+        // null, the F8 banner is gated on HealthMissing > 0, and the only trace was one log line and a report file.
+        // That is the wrong way round: resolution succeeding proves the NAMES survived, not that the behaviour did,
+        // and it is precisely when a subtle misbehaviour gets blamed on HAF instead of on the update. The player
+        // should be told they are on an unverified build while everything still looks fine.
+        //
+        // Pure so it can be tested without a game (Decisions: move the DECISION out of the method that does the I/O).
+        // Returns null when there is nothing worth saying: versions match, no pin, or the version is unreadable.
+        internal static string VersionAdvisoryFor(string gameVersion, string verifiedVersion)
+        {
+            if (string.IsNullOrEmpty(gameVersion) || string.IsNullOrEmpty(verifiedVersion)) return null;
+            if (gameVersion == verifiedVersion) return null;
+            return $"game build {gameVersion} is UNTESTED — the binding catalog was verified against {verifiedVersion}. "
+                 + "Every binding still resolves, so this is advisory, not a fault: names survived the update. "
+                 + "If something behaves oddly, suspect the update first and re-run tools/check-bindings.sh.";
+        }
+
+        // Set by Validate every launch; null = nothing to say. Surfaced in the F8 window even when nothing is missing.
+        internal static string VersionAdvisory;
+
         // Last startup-report result, surfaced in the F8 window so a player SEES a break instead of it hiding in the log.
         // null = all resolved (or not yet run); non-null = a one-line "what's missing" summary. `HealthMissing` is the count.
         internal static string HealthSummary;
@@ -378,6 +399,7 @@ namespace HumankindAssetFramework
                 int typesMissing = results.Count(r => !r.TypeFound);
                 int membersMissing = results.Where(r => r.TypeFound).Sum(r => r.MissingMembers.Count);
                 HealthDetail.Clear();
+                VersionAdvisory = VersionAdvisoryFor(SafeVersion(), VerifiedGameVersion);   // set pass OR fail — the version is a fact about the build, not about the result
                 WriteReport(results, typesMissing, membersMissing);   // always write the full machine-readable report, pass or fail
                 if (typesMissing == 0 && membersMissing == 0)
                 {

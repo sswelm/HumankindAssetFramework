@@ -596,6 +596,17 @@ namespace HumankindAssetFramework
                 GUI.color = prev;
                 GUILayout.Space(4);
             }
+            // ...and the QUIET case, which used to say nothing at all: every binding resolved, but against a game build
+            // the catalog has never been verified on. Resolution proves the NAMES survived the update, not the
+            // behaviour — so this is the state where an update-caused oddity gets blamed on HAF. Amber, not red: it is
+            // advisory, and it shows only while the versions differ, so a verified build keeps a clean window.
+            else if (GameBinding.VersionAdvisory != null)
+            {
+                var prev = GUI.color; GUI.color = new Color(1f, 0.85f, 0.5f);
+                GUILayout.Label($"ℹ GAME BUILD: {GameBinding.VersionAdvisory}");
+                GUI.color = prev;
+                GUILayout.Space(4);
+            }
             using (new GUILayout.HorizontalScope())
             {
                 if (GUILayout.Button("Dump Atlases")) UniversalInject.DumpOutputLayerAtlases(atlasFilter);   // Unit Retexture workflow: dump a unit's atlas to paint
