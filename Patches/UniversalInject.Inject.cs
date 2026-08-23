@@ -1352,15 +1352,18 @@ namespace HumankindAssetFramework
                     AccessTools.Field(item.GetType(), "MeshName")?.SetValue(item, newName);
                     arr.SetValue(item, 0);
                 }
-                var amnField = AccessTools.Field(skel.GetType(), "allMeshNames");
-                var amn = amnField?.GetValue(skel) as string[];
-                if (amn != null && amn.Length > 0) amn[0] = newName;
-                else if (arr != null && arr.Length > 0)
-                {
-                    var names = new string[arr.Length];
-                    for (int i = 0; i < arr.Length; i++) names[i] = GetMember(arr.GetValue(i), "MeshName") as string;
-                    amnField?.SetValue(skel, names);
-                }
+                // There used to be a second half here that mirrored the new name into a parallel `allMeshNames` string[]
+                // on the skeleton. REMOVED 2026-08-23: `typeprobe --exact allMeshNames` says NO type in ANY game
+                // assembly declares that field, and `Skeleton` (base `MeshCollection`) carries only `skinnedMeshInfos`.
+                // So the probe missed every time — 36 HarmonyX warnings in one session — and the fallback branch it fell
+                // into rebuilt the whole names array by reflection and then dropped it on the floor, because the
+                // `amnField?.SetValue(...)` that was supposed to store it was null too. Work done, discarded, logged.
+                // The rename that actually lands is the `skinnedMeshInfos[0].MeshName` write above.
+                //
+                // Worth recording HOW this was found: not by the binding catalog, which is exactly the guard meant to
+                // catch a by-name read of a member the game does not have. `AccessTools.Field(x.GetType(), "name")` was
+                // invisible to check-catalog.sh — 146 sites over 70 names — so the gate reported "all 331 catalogued"
+                // while never looking. A log line found it. The gate has been widened; see that script's pass 1.
             }
             catch (Exception e) { Plugin.Log.LogError("[Uni] rename: " + e); }
         }

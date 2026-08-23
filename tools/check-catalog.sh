@@ -49,6 +49,12 @@ ToString	BCL
 Length	BCL array member
 Value@Patches/DistrictInject.cs	tolerant probe: the code tries Guid ?? Value ?? guid on an unknown pair type and copes with all three absent
 guid@Patches/DistrictInject.cs	tolerant probe: same chain as Value above
+# ---- surfaced 2026-08-23 when pass 1 learned to see `AccessTools.Field(x.GetType(), "…")`. Both sit in the DUMPS the
+#      catalog already exempts by policy ("the RepoDump matrix/criteria walk, the ground-material colour dump" — see
+#      the note at the end of GameBinding.Catalog): DistrictDebug-gated, every read null-tolerant, a rename costs a
+#      debug line and not a feature. Site-scoped, so the same names read anywhere else still have to be catalogued.
+ContentTypeName@Patches/DistrictInject.Scoped.cs	diagnostics only: DumpMatrices' repo dump, off a Definition whose type is not known statically
+OutputEntries@Patches/DistrictInject.Scoped.cs	diagnostics only: DumpGroundColors' atlas walk, read off atlas.GetType() at runtime
 # ---- the GF( family, made visible 2026-08-22 when this gate learned to see it (it had been blind to 16 sites) ----
 # GFA( joined it 2026-08-23 (the memoized AccessTools probe). It was added and the gate still said OK — because a
 # shape it cannot see is a shape it stops counting, not one it reports. Drilled both ways: a bogus name inside a
@@ -111,7 +117,13 @@ extract() {
   # `TagAsAbilities` (Combat.cs, read that way and only that way) was missing from the catalog AND from this gate.
   # Deliberately narrow: accessor( identifier( …no nested parens… ), "NAME" — it cannot wander into a neighbouring
   # call on the same line, which a general "allow any )" relaxation would.
-  grep -onE "(GetMember|SetMember|GetMemberOrNull|CallMethod|CachedField|CachedProp|GFA|GF)\([A-Za-z_][A-Za-z0-9_.]*\([^()]*\), *\"[A-Za-z_][A-Za-z0-9_.]*\"" $SRC 2>/dev/null \
+  # WIDENED 2026-08-23. Pass 1's accessor list used to stop at HAF's own helpers, so the whole `AccessTools.*` /
+  # `.GetField` family was covered only by pass 2 — which gives up at the first `)`. That made
+  # `AccessTools.Field(skel.GetType(), "allMeshNames")` invisible, and `x.GetType()` as the first argument is one of
+  # the most common shapes in this codebase: 146 sites across 70 distinct names were never being checked, while this
+  # script reported "all 331 catalogued". Found by a log line, not by the gate — `allMeshNames` missed 36 times in one
+  # session, and typeprobe says no assembly in the game declares it at all.
+  grep -onE "(GetMember|SetMember|GetMemberOrNull|CallMethod|CachedField|CachedProp|GFA|GF|FastMember\.(Getter|Setter)<[^>]*>|AccessTools\.(Field|Property|Method|PropertyGetter|PropertySetter|DeclaredField|DeclaredProperty|DeclaredMethod)|\.Get(Field|Property|Method|Event|Member)|Traverse\.(Field|Property|Method))\([A-Za-z_][A-Za-z0-9_.]*\([^()]*\), *\"[A-Za-z_][A-Za-z0-9_.]*\"" $SRC 2>/dev/null \
   | sed -E 's/^([^:]+):([0-9]+):.*"([A-Za-z_][A-Za-z0-9_.]*)"$/\3\t\1:\2/' \
   | awk -F'\t' '{n=split($1,p,"."); for(i=1;i<=n;i++) if (p[i] != "") print p[i] "\t" $2}'
   grep -onE "(GetMember|SetMember|GetMemberOrNull|CallMethod|CachedField|CachedProp|GFA|GF|FastMember\.(Getter|Setter)<[^>]*>|AccessTools\.(Field|Property|Method|PropertyGetter|PropertySetter|DeclaredField|DeclaredProperty|DeclaredMethod)|\.Get(Field|Property|Method|Event|Member)|Traverse\.Field|Traverse\.Property|Traverse\.Method)\([^)]*?\"[A-Za-z_][A-Za-z0-9_.]*\" *\+?" $SRC 2>/dev/null \

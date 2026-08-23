@@ -287,6 +287,26 @@ Also on the way: `GameBinding`'s
 three sim-thread hooks reach reflection only through the `ConcurrentDictionary` in `UniversalInject` — so it is now
 annotated `[MainThread]` rather than converted, with the audit written down next to it.
 
+### Verified in-game (2026-08-23, game 1.30)
+
+Not off a green build — from the log:
+
+- `[GameBinding] OK — 132 game type(s) + their members all resolved. [game 1.30, verified]` — runtime resolution inside
+  the Unity domain, which is the half `bindcheck` cannot prove by reading DLLs offline. Every A8 accessor and both
+  reordered fallback chains included.
+- `[FootprintMesh] reactor mesh -> 3D` → `-> FLAT (strategic footprint)` → `-> 3D`. That toggle only happens if
+  `SchematicVis()` returned real band values on **both** sides of the crossover, so `RenderFeatureProvider` and
+  `RenderFeatureSelector` resolved through the new accessors and `ComputeRenderState` ran. This is the path that would
+  have paid 15.7 ms every 10 frames under the old code if either name had broken.
+- Smoke test `[load]` and `[full]` PASS, 0 injection errors, 2 districts (1 scoped, 1/1 textured). Frame cost 322 µs
+  (1.0% @ 30 fps), shape unchanged.
+- **Zero type-lookup misses in the entire session.** All 197 `AccessTools` warnings in the log are *member* misses at
+  ~130 ns each.
+
+Not exercised: no battle was fought, so the attack replay's `ReplayAligned` never ran. The failure that was actually
+plausible there — `AnimationVariableNames` not resolving under its new full-name primary — is ruled out anyway, since
+the validator resolved it as one of the 132.
+
 ### What was NOT changed, and why
 
 `DistrictInject.GF` stays a bare `Type.GetField`. A cache was written for it and measured away: 20 ns becomes 42 ns,

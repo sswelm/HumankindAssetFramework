@@ -10,6 +10,31 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **A GATE THAT COUNTED 331 SITES AND SHOULD HAVE COUNTED 477 (2026-08-23).** Verifying the type-name migration in-game,
+  the log showed `AccessTools.Field: Could not find field for type …Skeleton and name allMeshNames` **36 times in one
+  session**. `typeprobe --exact` then said it plainly: **no assembly in the game declares `allMeshNames` at all** —
+  `Skeleton` (base `MeshCollection`) carries only `skinnedMeshInfos`. So the probe missed every call, and the fallback
+  branch it dropped into rebuilt the entire mesh-name array by reflection and then discarded it, because the
+  `amnField?.SetValue(...)` meant to store it was equally null. Work done, thrown away, logged 36 times. The rename that
+  actually lands is the `skinnedMeshInfos[0].MeshName` write above it. Dead block removed.
+  **The real defect is that this is exactly what `check-catalog.sh` exists to catch, and it never looked.** The gate is
+  regexes over source, and pass 1's accessor list stopped at HAF's own helpers while pass 2 gives up at the first `)` —
+  so `AccessTools.Field(x.GetType(), "name")`, one of the commonest shapes in this codebase, was invisible. **146 sites
+  across 70 distinct names**, never checked, while the pass line read "all 331 by-name literals catalogued". A filter
+  that runs before the count cannot report its own blindness: an unseen shape is not flagged, it is silently subtracted
+  from the denominator. Widened; the gate now sees 371. Drilled by putting a bogus member name in the newly-visible
+  shape — **the gate as shipped at HEAD printed `OK — all 331 catalogued`, the widened one fails.**
+  Of the four names the widening surfaced, three are real: `evolverDescriptorInstance` (`FxEvolverMaterial`) is a genuine
+  feature path — the `[NonSerialized]` field `Instantiate` won't copy, which the reactor-footprint clone must carry by
+  hand or `ResolveDependencies` NREs — so it is catalogued; `ContentTypeName` and `OutputEntries` sit in the
+  `DistrictDebug`-gated dumps the catalog already exempts by policy, so they are site-allowlisted with that reason.
+  The fourth was `allMeshNames`, which exists nowhere.
+  **This is the third blind spot in this one guard** (08-22 the nested `GetMember(GetMember(…))` shape, 08-23 the
+  `CachedField`/`GFA` family at 16 sites, now this at 146). Written up as its own lesson in [Testing](docs/Testing.md):
+  when adding an accessor helper or call shape, extend `extract()` in the same commit, and drill by injecting a bad name
+  *in the new shape* rather than re-running the gate. Found by a log line — not by the gate, not by `bindcheck`, not by
+  review.
+
 - **THE 7.85 MILLISECOND LOOKUP NOBODY WAS COUNTING (2026-08-23).** The question was "are all reflection lookups
   cached now?" — and the honest answer needed a benchmark, which then pointed somewhere nobody was looking.
   `AccessTools.Field`/`.Property`/`.Method` are 41–344 ns, and memoising them saves ~90 ns; `Type.GetField` is 20 ns

@@ -486,7 +486,10 @@ namespace HumankindAssetFramework
             // data / assets / graphics
             new Dep(AssetDatabase, nameof(AssetDatabase)),
             new Dep(Guid, nameof(Guid), "a", "b", "c", "d", "Null"),
-            new Dep(FxEvolverMaterial, nameof(FxEvolverMaterial), "NextDoublonAvoidanceIndex", "TryLoad"),
+            // evolverDescriptorInstance: base [NonSerialized] field that Instantiate does NOT copy — the reactor-footprint
+            // clone has to carry it across by hand or ResolveDependencies NREs. A real feature path, not a dump. It went
+            // uncatalogued because the gate could not see `AccessTools.Field(x.GetType(), "…")` until 2026-08-23.
+            new Dep(FxEvolverMaterial, nameof(FxEvolverMaterial), "NextDoublonAvoidanceIndex", "TryLoad", "evolverDescriptorInstance"),
             new Dep(FxMesh, nameof(FxMesh), "Mesh", "importAngles"),   // importAngles: the hand-prop import-angle stamp (bindcheck re-homed it here from FxEvolverMaterial)
             new Dep(ContentLayer, nameof(ContentLayer),
                 "LoadEncodingVertexAndBuffer", "baseVertexBufferSize", "baseIndexBufferSize", "maxMeshCount", "maxMeshTriangleCount",
