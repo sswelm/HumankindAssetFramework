@@ -18,7 +18,11 @@
          .github/workflows/ci.yml) — ~15k lines of Unity editor C# landing under the default **/*.cs glob. The
          workflow orders that checkout AFTER the build, so it cannot bite today; this exclude is so it still
          cannot bite the day someone reorders the steps. -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);baker\**;tools\**;Tests\**;_enc\**</DefaultItemExcludes>
+    <!-- editor\** : the AUTHORING TOOLS, which moved into this repo on 2026-08-24 as the com.sswelm.haf-authoring
+         Unity package. ~19k lines of UnityEditor C# that only Unity can compile — under the default **/*.cs glob
+         they broke this build the moment they landed (that is exactly how this exclude was found). The package is
+         consumed by Unity, never by the plugin: the two halves still talk only through the JSON pack registry. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);baker\**;tools\**;Tests\**;_enc\**;editor\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <!-- BUILD STAMP (2026-08-23). "Which build is actually running?" cost a whole in-game drill: an F8 smoke and a

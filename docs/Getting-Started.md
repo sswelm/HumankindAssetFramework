@@ -11,53 +11,47 @@ HAF has **two halves, and you work in both:**
 
 So a custom unit is a round trip: **bake in the editor → build & deploy the mod → launch the game → see it.**
 
-> **Just want a retexture, colour tint, or sound swap — no new mesh?** You can skip the editor entirely: hand-write a
-> `pack.json`, drop it in `haf_packs/`, done. Jump straight to [Multi-Mod.md](Multi-Mod.md) and its
-> [template](haf-pack.example.json).
+Follow it in order. There *is* a second, editor-free route — hand-writing a `pack.json` for a retexture, tint or
+sound swap — but that means authoring JSON against a schema by hand, with no UI and no validation as you type. It's
+an advanced shortcut, not an easier start; it's described in [Multi-Mod.md](Multi-Mod.md) when you want it.
 
 ---
 
 ## 0. What you need
 
-| | |
-|---|---|
-| **Humankind + BepInEx 5.4** | The game with the BepInEx mod loader installed. |
-| **The HAF plugin** | A released `HumankindAssetFramework.dll` (or build it — [Building.md](Building.md)), dropped into `<Humankind>\BepInEx\plugins\`. It auto-detects your game and Blender paths. |
-| **Unity + the Humankind SDK** | The editor half runs in a Unity project that has the Humankind Mod SDK — your own mod project is fine. Unity **2021.3.1f1**, the version the SDK targets. You install HAF's tools into it in step 1. |
-| **Blender** (free) | Only for the **animated** and prep paths; a static model needs none. Auto-located; every Blender feature warns *before* a bake if it's missing. |
-| **A 3D model** | HAF is the *pipeline*, not an art library — bring a licensed **GLB / glTF / FBX / OBJ** (a free download, a commission, or your own build). Models aren't shipped with HAF. |
+**[→ Installation.md](Installation.md) walks through all of it, step by step.** The short version:
+
+| | | Get it |
+|---|---|---|
+| **BepInEx 5.4** | The mod loader the plugin runs inside. | [Download](https://github.com/BepInEx/BepInEx/releases) (x64, Windows) |
+| **The HAF plugin** | Injects your baked assets into the running game. Not needed for projectiles. | [Releases](https://github.com/sswelm/HumankindAssetFramework/releases) · or [build it](Building.md) |
+| **Unity 2021.3.1f1** | The exact version the Humankind ModTools SDK targets. | [Unity archive](https://unity.com/releases/editor/archive) |
+| **The Humankind ModTools SDK** | Turns a Unity project into a Humankind mod project. | [Games2Gether modding](https://www.games2gether.com/amplitude-studios/humankind/modding) |
+| **The HAF authoring tools** | The Model Factory and every Lab, as a Unity package. | [Installation §3](Installation.md#3-the-authoring-tools) |
+| **Blender** (free, optional) | Only for tri-reduction, part-stripping and animated bakes. A static model needs none. | [blender.org/download](https://www.blender.org/download/) |
+| **A 3D model** | HAF is the *pipeline*, not an art library — bring a licensed **GLB / glTF / FBX / OBJ**. Prefer a **game-ready** model. | [Sketchfab](https://sketchfab.com/features/free-3d-models) — every model HAF ships came from there. Filter by **Downloadable** + a **CC** licence; **CC-BY** means free to use *with credit*. Record yours in [CREDITS.md](../CREDITS.md). |
+
+> **Look for "game ready".** It is a real tag on Sketchfab and it is the single best predictor of a smooth bake: a
+> low, sane triangle count, one or few materials, proper UVs and a baked texture. The opposite — a CAD or
+> "sketch" model — arrives tessellated into hundreds of thousands of triangles, often single-sided, sometimes with
+> no UVs at all. HAF *can* rescue those (a vertex reducer, a winding fix, height-based UVs, an N-material atlas
+> packer), and the LCAC hovercraft in [CREDITS.md](../CREDITS.md) is one that had to be replaced outright by a clean
+> remodel. Starting game-ready skips that entire class of problem.
 
 ---
 
 ## 1. Install the authoring tools
 
-The tools are a **Unity package**. In your mod project: **`Window ▸ Package Manager`** → **`+`** (top left) →
-**`Add package from git URL…`** → paste:
+In your mod project: **`Window ▸ Package Manager`** → **`+`** → **`Add package from git URL…`**:
 
 ```
-https://github.com/sswelm/ENCReload.git?path=/Assets/Scripts/Editor
+https://github.com/sswelm/HumankindAssetFramework.git?path=/editor
 ```
 
-It resolves as **HAF Authoring Tools**, and every window appears under **`Tools ▸ HAF`**. Nothing to copy, nothing to
-reference: the tools reach every game type by reflection, so they carry no compile-time dependency on Humankind's
-assemblies.
+The windows appear under **`Tools ▸ HAF`**. You should see one white console line and **no errors** — nothing runs on
+its own and your project isn't modified.
 
-**A clean install is the contract.** You should see one white console line naming the menu, and no errors. The tools
-ship with automatic backups, an asset-delete guard and a console filter — all of which stay **off** in an installed
-package and change nothing until you turn them on in `Tools ▸ HAF ▸ Backup & Restore`. If you see red, report it
-rather than working around it.
-
-> **Don't use the Releases page.** `HumankindAssetFramework-v0.1.0.zip` there is the *runtime plugin* (the BepInEx
-> DLL from the table above), not the tools. The URL is the only install.
-
-**Two current limits**, both being worked on:
-
-- The **Blender helper scripts don't ship in the package yet** — anything that shells out to Blender (tri-reduction,
-  strip-parts, animated conversion) won't find them. Set `targetTris` to `0` and bring your mesh in at the polycount
-  you want.
-- **Pack identity is still fixed** to `haf_packs/ENCReload` / `modId: "enc"`. Harmless for the projectile axis, which
-  never touches the registry; blocking if you want unit models in *your own* pack. See
-  [Decisions.md](Decisions.md).
+Full detail, and what to do if that isn't what you see: [**Installation.md §3**](Installation.md#3-the-authoring-tools).
 
 ---
 

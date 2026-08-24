@@ -278,7 +278,7 @@ The remaining work is **productizing the authoring tools for third-party distrib
 this is packaging:
 - ~~**Package scaffolding**~~ — **DONE 2026-08-24.** The tools are a Unity package, installed from the Unity menu
   (`Window ▸ Package Manager ▸ + ▸ Add package from git URL…`) with
-  `https://github.com/sswelm/ENCReload.git?path=/Assets/Scripts/Editor`. First install into a project that was *not*
+  `https://github.com/sswelm/HumankindAssetFramework.git?path=/editor`. First install into a project that was *not*
   ENCReload immediately found two defects invisible from inside it: missing `.meta` files (Unity generates them
   silently under `Assets/`, but a package folder is immutable, so the asmdef was **ignored** and nothing compiled),
   and four `[InitializeOnLoad]` behaviours defaulting **on** — hooking a stranger's asset deletes, backing their

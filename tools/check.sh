@@ -41,15 +41,22 @@ run "parse shape (no dead-default TryParse)" bash "$ROOT/tools/check-parse-shape
 #     never runs and the default is dead. Two live sites then did `if (!x) continue;` — work skipped forever.
 run "member shape (no dead-sentinel Convert(GetMember))" bash "$ROOT/tools/check-member-shape.sh"
 
-# 4) registry schema parity — cross-repo: the guard lives in the ENCReload editor checkout and compares the plugin's
-#    Newtonsoft + regex parse against the editor's ModelDef. Best-effort: a plugin parse change is one half of that
-#    drift, so run it here too when the sibling checkout is present; skip with a note otherwise.
-PARITY=""
-for d in "$ROOT/../ENCReload" "/c/Repo/ENCReload"; do
-  if [ -f "$d/Tools/check_schema_parity.sh" ]; then PARITY="$d/Tools/check_schema_parity.sh"; break; fi
-done
-if [ -n "$PARITY" ]; then run "registry schema parity" bash "$PARITY"
-else printf '\n=== registry schema parity ===\n[SKIP] ENCReload editor checkout not found (../ENCReload or /c/Repo/ENCReload) — run its Tools/check.sh\n'; fi
+# 4) registry schema parity — IN-REPO since 2026-08-24. The authoring tools moved from the ENCReload Unity project
+#    into editor/, so both halves of the contract now live here: the guard compares the plugin's Newtonsoft + regex
+#    parse against the baker's ModelDef with no sibling checkout, no best-effort [SKIP] branch, and no direction it
+#    can only be checked from. That [SKIP] used to fire on every runner, which is exactly how a plugin-side change
+#    went unguarded until somebody happened to push the other repo.
+run "registry schema parity" bash "$ROOT/tools/check_schema_parity.sh"
+
+# 5) editor source guards — also in-repo since the move. Both guard editor/, so they belong with it.
+#    5a) The editor compiles. Roslyn against Unity's own reference assemblies — the ONE check that needs a licensed
+#        Unity install (UnityEditor.dll + the MonoBleedingEdge profile), so it stays hook-only and never runs in CI.
+if [ -d "${UNITY_ROOT:-/c/Program Files/Unity/Hub/Editor}" ] || [ -f "$ROOT/tools/editor_compile_check.rsp" ]; then
+  run "editor scripts compile (Roslyn)" bash "$ROOT/tools/editor_compile_check.sh"
+fi
+#    5b) The ownership-rebase hand-lists. A field the UI edits but the window's rebase doesn't re-apply is thrown
+#        away on every Save — silent, and the reason this gate exists. Pure source analysis, so CI can run it too.
+run "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"
 
 printf '\n========================================\n'
 if [ "$fail" -eq 0 ]; then printf 'CHECK: PASS — safe to push.\n'; else printf 'CHECK: FAIL — fix the [FAIL] step(s) above before pushing (or, only in a real emergency, git push --no-verify).\n'; fi

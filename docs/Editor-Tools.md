@@ -2,8 +2,9 @@
 
 The **HAF Authoring Tools** are a suite of Unity editor windows under **`Tools ▸ HAF`**. They are the *bake* half of HAF —
 you author custom content here, and the runtime plugin injects it in-game; the two halves talk only through the JSON pack
-registry. (The editor scripts live in the [ENCReload](https://github.com/sswelm/ENCReload) repo, under
-`Assets/Scripts/Editor/` — the only copy; the stale mirror that used to sit in this repo's `baker/` was deleted 2026-08-21.)
+registry. (The editor source lives in this repo under [`editor/`](https://github.com/sswelm/HumankindAssetFramework/tree/master/editor)
+— the only copy. It moved out of the ENCReload Unity project on 2026-08-24 so the framework owns both its halves;
+ENCReload now consumes it as a package like anyone else.)
 
 This page is the **map** — every tool, its exact menu path, what it does, and what it writes. For the deep, field-by-field
 workflows, follow the *Deep dive* links; this reference deliberately doesn't duplicate them.
@@ -13,7 +14,7 @@ workflows, follow the *Deep dive* links; this reference deliberately doesn't dup
 `Window ▸ Package Manager` → `+` → `Add package from git URL…`:
 
 ```
-https://github.com/sswelm/ENCReload.git?path=/Assets/Scripts/Editor
+https://github.com/sswelm/HumankindAssetFramework.git?path=/editor
 ```
 
 The install is inert by design: automatic backups, the asset-delete guard and the console filter all default **off**
