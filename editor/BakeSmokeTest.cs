@@ -116,7 +116,12 @@ public static class BakeSmokeTest
                 else
                 {
                     // reuseExtracted=false: bake fresh under a THROWAWAY name so the real assets + registry are untouched.
-                    string testName = PREFIX + src.resourceName;
+                    // The run position rides IN the fixture name ("__smoketest__03of14_StealthCruiser") because
+                    // Unity's native Importing modal — which covers every HAF-drawn bar for most of a real bake's
+                    // wall clock and accepts no injection — displays the asset PATH. The path is the one channel
+                    // in that dialog we author. PREFIX stays first: the delete-guard exclusion, the registry
+                    // filter and Ship Status's TEST ARTIFACT detection all match by StartsWith(PREFIX).
+                    string testName = PREFIX + $"{i + 1:00}of{models.Count:00}_" + src.resourceName;
                     BakeTestRunnerWindow.Progress.Step($"Baking {src.resourceName} ({i + 1}/{models.Count})…", (float)i / models.Count);
                     try
                     {

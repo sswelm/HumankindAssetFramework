@@ -107,7 +107,7 @@ public static class ConversionGateTest
             { lines.Add($"SKIP {src.resourceName} — source model file not on disk ({src.modelFile})"); skipped++; continue; }
             var clone = JsonUtility.FromJson<ModelDef>(JsonUtility.ToJson(src));   // never mutate the real entry
             BakeTestRunnerWindow.Progress.Step($"{src.resourceName} ({total + 1}/{defs.Count}) — full conversion bake…", (float)total / defs.Count);
-            int fails = BakeAndAssert(clone);
+            int fails = BakeAndAssert(clone, $"{total + 1:00}of{defs.Count:00}_");
             lines.Add(fails == 0
                 ? $"PASS {src.resourceName} (full conversion on the real rig)"
                 : $"FAIL {src.resourceName} — {fails} invariant failure(s), see the Console");
@@ -207,9 +207,12 @@ public static class ConversionGateTest
 
     // Bake `def` under a throwaway name via the SAME ConfigFor route as the Bake button, assert every conversion
     // invariant on the baked Amplitude assets (reflection — they're Amplitude's types), clean up. Returns failures.
-    static int BakeAndAssert(ModelDef def)
+    static int BakeAndAssert(ModelDef def, string progressTag = "")
     {
-        string testName = PREFIX + def.resourceName;
+        // progressTag ("03of12_") rides in the fixture name so Unity's native Importing modal — the one bar no
+        // editor code can draw into, which shows the asset PATH — carries the run position too. PREFIX stays
+        // first; every prefix-matched exclusion (delete guard, Ship Status TEST ARTIFACT) still holds.
+        string testName = PREFIX + progressTag + def.resourceName;
         def.resourceName = testName;
         int fails = 0;
         try

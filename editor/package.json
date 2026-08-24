@@ -1,6 +1,6 @@
 {
   "name": "com.sswelm.haf-authoring",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "displayName": "HAF Authoring Tools",
   "description": "The bake half of the Humankind Asset Framework: Model Factory, Animation / Vehicle / District / Prop / Projectile / Sound Labs, the bakers and the registries. Install into a Humankind ModTools project; the tools appear under Tools > HAF. Nothing runs on its own - automatic backups, the asset-delete guard and console filtering are off in an installed package until you turn them on. Requires the HAF BepInEx plugin at runtime for the pack-based axes (units, districts, props); the projectile axis needs no plugin.",
   "unity": "2021.3",
