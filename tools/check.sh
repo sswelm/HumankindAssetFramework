@@ -58,6 +58,12 @@ fi
 #        away on every Save — silent, and the reason this gate exists. Pure source analysis, so CI can run it too.
 run "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"
 
+#    5c) Every path in editor/ has a COMMITTED .meta. Unity generates missing ones under Assets/ and cannot in a
+#        package folder, so the working copy is always right and only the commit is short — invisible from the
+#        authoring side by construction. Broke the install three times on 2026-08-24 (package.json + asmdef, then
+#        HafPackageContext.cs, then the Plugins FOLDER); an ignored asmdef means the package compiles to nothing.
+run "package meta (every editor/ path has one)" bash "$ROOT/tools/check-package-meta.sh"
+
 printf '\n========================================\n'
 if [ "$fail" -eq 0 ]; then printf 'CHECK: PASS — safe to push.\n'; else printf 'CHECK: FAIL — fix the [FAIL] step(s) above before pushing (or, only in a real emergency, git push --no-verify).\n'; fi
 exit "$fail"

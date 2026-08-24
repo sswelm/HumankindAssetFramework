@@ -30,9 +30,30 @@ using UnityEngine;
 internal static class HafPackageContext
 {
     internal const string PackageName = "com.sswelm.haf-authoring";
-    internal const string Version = "0.1.0";
 
     static int _asPackage = -1;   // -1 unknown, 0 home project, 1 installed package
+    static string _version;       // read from the manifest, never a const — see below
+
+    /// The installed version, read from the package manifest itself. It was a `const string "0.1.0"` for one
+    /// commit, and the first install of 0.2.0 greeted the user with "0.1.0" — a version number is exactly the
+    /// kind of fact that must be derived, not restated. Empty string in the home project (no manifest to read).
+    internal static string Version
+    {
+        get
+        {
+            if (_version == null)
+            {
+                try
+                {
+                    var info = UnityEditor.PackageManager.PackageInfo.FindForAssembly(
+                                   typeof(HafPackageContext).Assembly);
+                    _version = info?.version ?? "";
+                }
+                catch { _version = ""; }
+            }
+            return _version;
+        }
+    }
 
     /// True when these scripts were resolved from a package rather than compiled out of the host's Assets/.
     internal static bool RunningAsPackage
@@ -79,8 +100,9 @@ static class HafFirstRunNotice
             string key = "HAF.FirstRun." + Application.dataPath.GetHashCode().ToString("X8");
             if (EditorPrefs.GetBool(key, false)) return;
             EditorPrefs.SetBool(key, true);
+            string ver = HafPackageContext.Version;
             EditorApplication.delayCall += () =>
-                Debug.Log("[HAF] HAF Authoring Tools " + HafPackageContext.Version + " installed — the tools are " +
+                Debug.Log("[HAF] HAF Authoring Tools " + (ver.Length > 0 ? ver + " " : "") + "installed — the tools are " +
                           "under Tools \u25B8 HAF.\n" +
                           "Nothing runs on its own in an installed package: automatic backups, the asset-delete " +
                           "guard and console filtering are all OFF, and this project has not been modified. " +

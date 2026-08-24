@@ -74,3 +74,14 @@ jobs:
       - name: Hand-list gate (ownership rebases)
         shell: bash
         run: bash tools/check_handlists.sh
+
+      # PACKAGE META — every path in editor/ needs a COMMITTED .meta. Under Assets/ Unity writes missing ones the
+      # moment the editor regains focus, so the working copy is always correct and only the COMMIT is short; in a
+      # package folder Unity cannot write them at all and drops the asset. That asymmetry makes this invisible from
+      # the authoring side by construction, which is exactly why it broke three installs on 2026-08-24 — and why it
+      # belongs in CI, where the check runs against the index rather than somebody's working tree.
+      # Fault-injected on the day it was written: un-committing the asmdef's .meta and the Plugins folder's .meta
+      # each turned it red with rc=1 and named the path.
+      - name: Package meta (every editor/ path has one)
+        shell: bash
+        run: bash tools/check-package-meta.sh
