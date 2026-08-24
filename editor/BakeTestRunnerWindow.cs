@@ -149,6 +149,19 @@ public class BakeTestRunnerWindow : EditorWindow
             "detail), in the Console, and in Logs/haf_bake_tests_report.txt.\n" +
             "Fire and forget: a run finishes on its own — you can alt-tab away or minimise Unity, and the report is " +
             "rewritten after every test, so even a cancelled run leaves what finished.", MessageType.Info);
+
+        // THE TWO IN-WINDOW BARS — run level and step level — live during a run via Progress.RepaintNow().
+        // They freeze only while Unity's own native dialogs (Importing…, Hold on…) hold the screen; the run
+        // position keeps showing there too, ridden into the fixture filenames those dialogs display.
+        if (Running && Progress.Active)
+        {
+            EditorGUILayout.Space(2);
+            var r1 = EditorGUILayout.GetControlRect(false, 18);
+            EditorGUI.ProgressBar(r1, Progress.OverallFrac, "Run:  " + Progress.RowLabel);
+            var r2 = EditorGUILayout.GetControlRect(false, 18);
+            EditorGUI.ProgressBar(r2, Progress.InnerFrac, Progress.InnerText ?? "");
+            EditorGUILayout.Space(2);
+        }
         if (!blender)
             EditorGUILayout.HelpBox("Blender not found — rows marked 'needs Blender' will be skipped.", MessageType.Warning);
 
@@ -249,6 +262,7 @@ public class BakeTestRunnerWindow : EditorWindow
         current = null;
         blenderAtRunStart = blender;
         runWatch = System.Diagnostics.Stopwatch.StartNew();
+        Progress.Attach(this);   // the in-window bars need the instance to force synchronous repaints
         lastVerdict = null;
         foreach (var r in queue) r.last = null;
         ConversionRowSelected = queue.Any(x => x.run.Method.Name.Contains("RunRegistryConvertedSection")
@@ -288,16 +302,49 @@ public class BakeTestRunnerWindow : EditorWindow
     internal static class Progress
     {
         static string rowName; static int rowIndex, rowCount; static System.Diagnostics.Stopwatch watch;
+        static BakeTestRunnerWindow window;                 // the open window, for the IN-WINDOW bars below
+        static System.Reflection.MethodInfo repaintNow;     // EditorWindow.RepaintImmediately (internal)
+
+        // Read by OnGUI to draw the two bars INSIDE the window while a run is on the stack.
+        internal static bool Active => rowName != null;
+        internal static string RowLabel => rowName == null ? "" : $"{rowIndex + 1}/{rowCount} · {rowName}";
+        internal static string InnerText { get; private set; }
+        internal static float InnerFrac { get; private set; }
+        internal static float OverallFrac => rowName == null ? 0f : (rowIndex + Mathf.Clamp01(InnerFrac)) / Math.Max(1, rowCount);
+
+        internal static void Attach(BakeTestRunnerWindow w) { window = w; }
         internal static void BeginRow(string name, int index, int count, System.Diagnostics.Stopwatch w)
-        { rowName = name; rowIndex = index; rowCount = count; watch = w; }
-        internal static void EndRun() { rowName = null; watch = null; }
+        { rowName = name; rowIndex = index; rowCount = count; watch = w; InnerText = "starting…"; InnerFrac = 0f; RepaintNow(); }
+        internal static void EndRun() { rowName = null; watch = null; window = null; }
         internal static void Step(string inner, float innerFrac)
         {
+            InnerText = inner; InnerFrac = Mathf.Clamp01(innerFrac);
             if (rowName == null) { EditorUtility.DisplayProgressBar("HAF Bake Tests", inner, innerFrac); return; }
             EditorUtility.DisplayProgressBar(
                 FormattableString.Invariant($"HAF Bake Tests — {rowIndex + 1}/{rowCount} · {rowName}"),
                 FormattableString.Invariant($"{inner}   ({watch.Elapsed.TotalMinutes:0.0} min elapsed)"),
-                (rowIndex + Mathf.Clamp01(innerFrac)) / Math.Max(1, rowCount));
+                OverallFrac);
+            RepaintNow();
+        }
+
+        // THE ONLY WAY AN EDITOR WINDOW UPDATES DURING A SYNCHRONOUS RUN (2026-08-24, user: "no progress bar in
+        // the test dialog as I asked you to add"). The run blocks the main thread by design (the fire-and-forget
+        // decision — a tick-driven queue silently stopped when the editor lost focus), and a blocked main thread
+        // never services Repaint() — an in-window bar drawn the normal way would sit frozen at 0% for the whole
+        // run, which lies. EditorWindow.RepaintImmediately() paints synchronously but is INTERNAL; reflected here,
+        // pinned to Unity 2021.3.1f1 like every other internal this project reaches. If Unity ever removes it the
+        // catch degrades to a queued Repaint: the bars freeze instead of erroring, and the modal bar still works.
+        static void RepaintNow()
+        {
+            if (window == null) return;
+            try
+            {
+                if (repaintNow == null)
+                    repaintNow = typeof(EditorWindow).GetMethod("RepaintImmediately",
+                        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                if (repaintNow != null) repaintNow.Invoke(window, null); else window.Repaint();
+            }
+            catch { try { window.Repaint(); } catch { } }
         }
     }
 
