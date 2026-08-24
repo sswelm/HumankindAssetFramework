@@ -455,6 +455,23 @@ items). Each test is a row with a plain-language explanation, a checkbox, and Qu
 shows live per-row PASS/FAIL (failures unfold their detail lines) and writes a durable report to
 `Logs/haf_bake_tests_report.txt`.
 
+### Following a run — where the progress shows
+
+A run is one synchronous, fire-and-forget pass (deliberately: a tick-driven queue used to stop silently when the
+editor lost focus), and its progress shows in three places, because no single surface survives every phase:
+
+1. **Two bars at the top of the Bake Tests window** — the run level (`Run: 1/3 · Does the baker still work?`) and
+   the step level (`Baking AttackHelicopter (2/5)…`) — live during the run, with each row marked `RUNNING…` /
+   `queued` below. (The window forces synchronous repaints for this; a blocked main thread never paints otherwise.)
+2. **The cancellable modal bar** carries the same two levels in its title and text, plus elapsed time.
+3. **Unity's own native dialogs** (`Importing…`, `Hold on…`) cover everything editor-drawn while they run — most of
+   a real model bake's wall clock. Nothing can draw into them, so the run position rides in the one thing they do
+   display: the fixture path. `__smoketest__04of05_ReconDrone` in the import dialog is the run telling you where it
+   is through Unity's bar.
+
+The report file is rewritten after *every* row, so a cancelled or interrupted run still leaves a record of what
+finished.
+
 ### Reading the results — PASS, FAIL, and SKIPPED
 
 A row has three verdicts, and **SKIPPED is a first-class answer, not a soft failure**: it means the row had nothing
