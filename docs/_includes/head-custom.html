@@ -1,0 +1,43 @@
+<!-- head-custom.html — the ONE customization hook GitHub Pages' default (primer) theme includes in <head>.
+     Adds a Copy button to every code block on the rendered site. Why: a reader following Getting-Started has to
+     copy the package-install URL exactly, and the page offered nothing — the first user to try clicked a browser
+     extension's injected icon instead and got its popup. The repo and wiki views already have GitHub's native
+     copy button on code blocks; this brings the Pages site level with them. Markdown sources stay plain — this
+     file never syncs to the wiki (sync_wiki.sh copies *.md only) and never renders on github.com. -->
+<style>
+  .markdown-body pre { position: relative; }
+  .haf-copy {
+    position: absolute; top: 6px; right: 6px;
+    padding: 3px 10px; font-size: 12px; line-height: 1.4;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #57606a; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    cursor: pointer; opacity: 0; transition: opacity .15s ease;
+  }
+  .markdown-body pre:hover .haf-copy, .haf-copy:focus-visible { opacity: 1; }
+  .haf-copy:hover { color: #24292f; background: #eef1f4; }
+  .haf-copy.haf-copied { color: #1a7f37; border-color: #1a7f37; opacity: 1; }
+</style>
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.markdown-body pre').forEach(function (pre) {
+      var code = pre.querySelector('code') || pre;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'haf-copy';
+      btn.textContent = 'Copy';
+      btn.setAttribute('aria-label', 'Copy code to clipboard');
+      btn.addEventListener('click', function () {
+        navigator.clipboard.writeText(code.innerText.replace(/\n$/, '')).then(function () {
+          btn.textContent = 'Copied'; btn.classList.add('haf-copied');
+          setTimeout(function () { btn.textContent = 'Copy'; btn.classList.remove('haf-copied'); }, 1600);
+        }, function () {           /* clipboard API refused (http, permissions) — select the text instead */
+          var r = document.createRange(); r.selectNodeContents(code);
+          var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+          btn.textContent = 'Press Ctrl+C';
+          setTimeout(function () { btn.textContent = 'Copy'; }, 2200);
+        });
+      });
+      pre.appendChild(btn);
+    });
+  });
+</script>
