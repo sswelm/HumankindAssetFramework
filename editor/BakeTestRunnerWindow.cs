@@ -159,7 +159,7 @@ public class BakeTestRunnerWindow : EditorWindow
             var r1 = EditorGUILayout.GetControlRect(false, 18);
             EditorGUI.ProgressBar(r1, Progress.OverallFrac, "Run:  " + Progress.RowLabel);
             var r2 = EditorGUILayout.GetControlRect(false, 18);
-            EditorGUI.ProgressBar(r2, Progress.InnerFrac, Progress.InnerText ?? "");
+            EditorGUI.ProgressBar(r2, Progress.InnerFrac, Progress.InnerLabel);
             EditorGUILayout.Space(2);
         }
         if (!blender)
@@ -311,11 +311,26 @@ public class BakeTestRunnerWindow : EditorWindow
         internal static string InnerText { get; private set; }
         internal static float InnerFrac { get; private set; }
         internal static float OverallFrac => rowName == null ? 0f : (rowIndex + Mathf.Clamp01(InnerFrac)) / Math.Max(1, rowCount);
+        internal static string InnerLabel => watch == null || InnerText == null ? (InnerText ?? "")
+            : FormattableString.Invariant($"{InnerText}   ({watch.Elapsed.TotalMinutes:0.0} min)");
 
         internal static void Attach(BakeTestRunnerWindow w) { window = w; }
         internal static void BeginRow(string name, int index, int count, System.Diagnostics.Stopwatch w)
         { rowName = name; rowIndex = index; rowCount = count; watch = w; InnerText = "starting…"; InnerFrac = 0f; RepaintNow(); }
         internal static void EndRun() { rowName = null; watch = null; window = null; }
+        /// Re-render the bars with live elapsed time while a SUBPROCESS runs (RunBounded's sliced wait calls this
+        /// every 250 ms). Text and fraction stay put — only the elapsed figure and the modal repaint move, which
+        /// is exactly the "still alive" signal a minutes-long Blender step was missing. No-op outside a run.
+        internal static void Heartbeat()
+        {
+            if (rowName == null || InnerText == null) return;
+            EditorUtility.DisplayProgressBar(
+                FormattableString.Invariant($"HAF Bake Tests — {rowIndex + 1}/{rowCount} · {rowName}"),
+                FormattableString.Invariant($"{InnerText}   ({watch.Elapsed.TotalMinutes:0.0} min elapsed)"),
+                OverallFrac);
+            RepaintNow();
+        }
+
         internal static void Step(string inner, float innerFrac)
         {
             InnerText = inner; InnerFrac = Mathf.Clamp01(innerFrac);

@@ -1786,7 +1786,17 @@ public static class UniversalBaker
         var outTask = System.Threading.Tasks.Task.Run(() => p.StandardOutput.ReadToEnd());
         var errTask = System.Threading.Tasks.Task.Run(() => p.StandardError.ReadToEnd());
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        if (!p.WaitForExit(timeoutMs)) { try { p.Kill(); } catch { } return false; }   // the process itself hung -> killed
+        // SLICED wait instead of one blocking WaitForExit: a Blender step runs for MINUTES, and the bake-test
+        // progress bars sat frozen the whole time ("it still could be improved if it was more smooth"). Waiting in
+        // 250 ms slices lets the heartbeat re-render the bars with live elapsed time between slices — a no-op
+        // outside a bake-test run, so a Factory-button bake behaves exactly as before. Same timeout semantics.
+        bool exited = false;
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            if (p.WaitForExit(250)) { exited = true; break; }
+            try { BakeTestRunnerWindow.Progress.Heartbeat(); } catch { }   // cosmetic — must never kill a bake
+        }
+        if (!exited && !p.WaitForExit(0)) { try { p.Kill(); } catch { } return false; }   // the process itself hung -> killed
         // E4: WaitForExit(timeout) returns as soon as the PROCESS exits, but stdout/stderr stay open until EVERY handle to
         // their write end is closed — including one a grandchild (a Blender helper) may have inherited. ReadToEnd only
         // returns at pipe EOF, so awaiting the drain tasks UNBOUNDED (the old GetResult()) could hang the editor main
