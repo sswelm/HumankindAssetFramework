@@ -517,7 +517,7 @@ public static class ModelRegistry
         try
         {
             string projRoot = Directory.GetParent(Application.dataPath).FullName;
-            string rel = "Assets/Pack/ENCReload/pack.json";
+            string rel = "Assets/Pack/" + HafPackageContext.PackName + "/pack.json";
             var psi = new System.Diagnostics.ProcessStartInfo("git", $"-C \"{projRoot}\" checkout -- \"{rel}\"")
             { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true };
             using (var p = System.Diagnostics.Process.Start(psi))

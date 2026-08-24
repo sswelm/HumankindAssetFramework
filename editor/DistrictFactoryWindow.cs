@@ -115,11 +115,11 @@ public class DistrictFactoryWindow : EditorWindow
             if (newestBaked > System.DateTime.MinValue && System.IO.Directory.Exists(CommunityDir))
             {
                 System.DateTime newestBundle = System.DateTime.MinValue;
-                foreach (var dir in System.IO.Directory.GetDirectories(CommunityDir, "ENCReload.*"))
+                foreach (var dir in System.IO.Directory.GetDirectories(CommunityDir, HafPackageContext.BuildPrefix + ".*"))
                     foreach (var f in System.IO.Directory.GetFiles(dir, "*.assetbundle"))
                         if (System.IO.File.GetLastWriteTime(f) > newestBundle) newestBundle = System.IO.File.GetLastWriteTime(f);
                 if (newestBundle == System.DateTime.MinValue)
-                    health.Add((MessageType.Warning, "No built ENCReload assetbundle found in the game's Community folder — build the mod before launching."));
+                    health.Add((MessageType.Warning, $"No built {HafPackageContext.BuildPrefix} assetbundle found in the game's Community folder — build the mod before launching."));
                 else if (newestBaked > newestBundle)
                     health.Add((MessageType.Warning, $"STALE BUNDLE: baked assets ({newestBaked:HH:mm:ss}) are newer than the built mod ({newestBundle:HH:mm:ss}) — REBUILD the mod before launching, or the game ships the old mesh/atlas pair (scrambled texture)."));
             }

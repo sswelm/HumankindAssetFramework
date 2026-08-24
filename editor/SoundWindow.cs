@@ -39,7 +39,7 @@ public class SoundWindow : EditorWindow
     void OnEnable()  => registryCache = ModelRegistry.Load();
     void OnFocus()   => registryCache = ModelRegistry.Load();
 
-    // The pack's sounds folder that the running game reads (deployed under haf_packs/ENCReload/sounds). Apply also mirrors
+    // The pack's sounds folder that the running game reads (deployed under haf_packs/<your pack>/sounds). Apply also mirrors
     // each WAV into the git-tracked repo source (PackRepoDir/sounds) so the pack ships self-contained — see CopyWav.
     static string SoundsDir => Path.Combine(ModelRegistry.PackLiveDir, "sounds");
     static string SoundsRepoDir => Path.Combine(ModelRegistry.PackRepoDir, "sounds");
@@ -58,7 +58,7 @@ public class SoundWindow : EditorWindow
         using (new EditorGUILayout.HorizontalScope())
         {
             if (GUILayout.Button(new GUIContent("Open pack sounds folder",
-                "The pack's deployed sounds/ (haf_packs/ENCReload/sounds) — where Apply copies your WAVs and the plugin reads them. Apply also mirrors into the repo source so the pack ships self-contained."), GUILayout.Width(170), GUILayout.Height(20)))
+                "The pack's deployed sounds/ (haf_packs/<your pack>/sounds) — where Apply copies your WAVs and the plugin reads them. Apply also mirrors into the repo source so the pack ships self-contained."), GUILayout.Width(170), GUILayout.Height(20)))
             {
                 Directory.CreateDirectory(SoundsDir);
                 EditorUtility.RevealInFinder(SoundsDir + Path.DirectorySeparatorChar);

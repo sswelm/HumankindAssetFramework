@@ -18,14 +18,15 @@ internal static class ShipStatus
     // than reporting a clean bill of health it has not actually checked.
     internal static string CommunityDir => HafPaths.CommunityDir;
 
-    // Newest file inside the newest ENCReload.* build (dir mtime alone lies — deploy copies preserve it).
+    // Newest file inside THIS mod's newest build — <BuildPrefix>.<guid>.<version> — (dir mtime alone lies:
+    // deploy copies preserve it). The prefix is the project's own (HafPackageContext.BuildPrefix), never ENC's.
     internal static DateTime? LastBuildUtc(out string buildDir)
     {
         buildDir = null;
         try
         {
             if (!Directory.Exists(CommunityDir)) return null;
-            buildDir = Directory.GetDirectories(CommunityDir, "ENCReload.*")
+            buildDir = Directory.GetDirectories(CommunityDir, HafPackageContext.BuildPrefix + ".*")
                                 .OrderByDescending(d => Directory.GetLastWriteTimeUtc(d)).FirstOrDefault();
             if (buildDir == null) return null;
             var files = Directory.GetFiles(buildDir, "*", SearchOption.AllDirectories);

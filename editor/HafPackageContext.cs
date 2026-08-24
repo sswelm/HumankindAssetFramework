@@ -133,16 +133,47 @@ internal static class HafPackageContext
             {
                 string over = "";
                 try { over = EditorPrefs.GetString(PrefModId, ""); } catch { }
-                _modId = !string.IsNullOrWhiteSpace(over) ? over.Trim().ToLowerInvariant()
-                       : RunningAsPackage ? SanitizedProjectName.ToLowerInvariant()
+                // a modId is a bare token other packs name in dependsOn/loadAfter — lowercase, no spaces
+                _modId = !string.IsNullOrWhiteSpace(over) ? over.Trim().ToLowerInvariant().Replace(" ", "")
+                       : RunningAsPackage ? SanitizedProjectName.ToLowerInvariant().Replace(" ", "")
                        : "enc";
             }
             return _modId;
         }
     }
 
+    internal const string PrefBuildPrefix = "HAF.Pack.BuildPrefix";   // the "<Name>.<guid>.<version>" prefix of this mod's builds
+
+    static string _buildPrefix;
+
+    /// The prefix of this mod's BUILT module folders in Humankind's Community directory
+    /// ("<ModuleName>.<guid>.<version>"). The module name is the mod's display title, SPACES INCLUDED
+    /// ("Long Range Nuclear Missiles.…"), so this is the raw product name, not the sanitized pack token.
+    /// Used by the build-freshness checks (Ship Status, the District Factory health row) and CleanExport.
+    internal static string BuildPrefix
+    {
+        get
+        {
+            if (_buildPrefix == null)
+            {
+                string over = "";
+                try { over = EditorPrefs.GetString(PrefBuildPrefix, ""); } catch { }
+                if (!string.IsNullOrWhiteSpace(over)) _buildPrefix = over.Trim();
+                else if (!RunningAsPackage) _buildPrefix = "ENCReload";
+                else
+                {
+                    string raw = "";
+                    try { raw = (Application.productName ?? "").Trim(); } catch { }
+                    _buildPrefix = raw.Length > 0 ? raw : SanitizedProjectName;
+                }
+            }
+            return _buildPrefix;
+        }
+    }
+
     /// The host project's name reduced to a safe folder/id token. productName first (the author's own title),
-    /// then the project folder; never empty.
+    /// then the project folder; never empty. Spaces survive — the pack folder name doubles as the Humankind
+    /// MODULE name for the runtime's automatic load-order match, and module names routinely contain them.
     internal static string SanitizedProjectName
     {
         get
@@ -153,8 +184,10 @@ internal static class HafPackageContext
                 try { raw = new DirectoryInfo(Directory.GetParent(Application.dataPath).FullName).Name; } catch { }
             var sb = new System.Text.StringBuilder();
             foreach (char c in raw ?? "")
-                if (char.IsLetterOrDigit(c) || c == '_' || c == '-') sb.Append(c);
-            return sb.Length > 0 ? sb.ToString() : "MyHafPack";
+                if (char.IsLetterOrDigit(c) || c == '_' || c == '-' || c == ' ') sb.Append(c);
+            string s = sb.ToString().Trim();
+            while (s.Contains("  ")) s = s.Replace("  ", " ");
+            return s.Length > 0 ? s : "MyHafPack";
         }
     }
 }

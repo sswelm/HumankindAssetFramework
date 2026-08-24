@@ -106,10 +106,15 @@ namespace HAF
                             HafPaths.PrefCommunity + "' to its path.\"}");
                     return;
                 }
-                const string modGuid = "cd3480e932114f8084db755ddd65f2d8";
+                // Home: ENC's exact mod GUID, the narrowest possible match (never another mod's folder). Guest:
+                // the project's own build prefix — their mod's display name — which is that project's equivalent
+                // scoping (a GUID cannot be known generically; the prefix IS their mod).
+                string pattern = HafPackageContext.RunningAsPackage
+                    ? HafPackageContext.BuildPrefix + ".*"
+                    : "ENCReload.cd3480e932114f8084db755ddd65f2d8.*";
                 int removed = 0;
                 if (Directory.Exists(community))
-                    foreach (var dir in Directory.GetDirectories(community, "ENCReload." + modGuid + ".*"))
+                    foreach (var dir in Directory.GetDirectories(community, pattern))
                     {
                         Directory.Delete(dir, true);
                         removed++;

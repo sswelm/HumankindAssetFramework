@@ -41,7 +41,7 @@ public class RetextureWindow : EditorWindow
     string srcSig = null;                            // signature of the loaded source (path + timestamp)
     string previewSig = null;                        // signature of the built preview (source + adjustments)
 
-    // The pack's skins/ folder the running game reads (deployed under haf_packs/ENCReload/skins). Apply also mirrors each
+    // The pack's skins/ folder the running game reads (deployed under haf_packs/<your pack>/skins). Apply also mirrors each
     // PNG into the git-tracked repo source (PackRepoDir/skins) so the pack ships self-contained. DumpDir stays a scratch
     // folder in the game config (atlas dumps you paint from — not shipped).
     static string SkinsDir => Path.Combine(ModelRegistry.PackLiveDir, "skins");
