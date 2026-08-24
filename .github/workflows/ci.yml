@@ -49,26 +49,28 @@ jobs:
         shell: bash
         run: bash tools/check-member-shape.sh
 
-      # REGISTRY SCHEMA PARITY — the cross-repo guard, and the one this workflow was missing. The editor WRITES
-      # pack.json from ModelDef; this plugin READS it two ways, and a key the REGEX FALLBACK forgot is invisible at
-      # runtime by construction: a malformed-JSON pack silently loses that field, no throw, no log. tools/check.sh
-      # runs this best-effort only when a sibling ENCReload checkout happens to exist — which on a runner it never
-      # does, so it took the [SKIP] branch and a plugin-side fallback change landed completely unguarded until
-      # somebody next pushed the EDITOR repo. The script lives over there because it is that repo's schema too, so
-      # check it out and run it with the roots in this orientation.
+      # REGISTRY SCHEMA PARITY — IN-REPO since 2026-08-24. The editor WRITES pack.json from ModelDef; this plugin
+      # READS it two ways, and a key the REGEX FALLBACK forgot is invisible at runtime by construction: a
+      # malformed-JSON pack silently loses that field, no throw, no log.
+      #
+      # This step used to check out sswelm/ENCReload into _enc/ and run the script from there, because that repo
+      # owned the authoring tools. The tools moved into editor/ here, so both halves of the contract are now in one
+      # tree: no second checkout, no orientation arguments, and no way for one side to be checked and not the other.
+      # (That is also what killed the old best-effort [SKIP] in tools/check.sh, which fired on every runner.)
       #
       # Drilled, not assumed: deleting one Regex.Matches line from ParseModels turns this step red with rc=1 and
-      # names the field. A red here can also mean the EDITOR moved — that is the drift, read it before blaming the PR.
-      #
-      # Ordered LAST on purpose: _enc/ is ~15k lines of Unity editor C# under this project's default **/*.cs glob.
-      # The csproj also excludes _enc\** so a future reorder can't sweep it into the plugin build.
-      - name: Check out the editor repo (it owns the parity script)
-        uses: actions/checkout@v5
-        with:
-          repository: sswelm/ENCReload
-          ref: main
-          path: _enc
-
-      - name: Registry schema parity (plugin parse vs editor ModelDef)
+      # names the field.
+      - name: Registry schema parity (plugin parse vs baker ModelDef)
         shell: bash
-        run: bash _enc/Tools/check_schema_parity.sh "$GITHUB_WORKSPACE/_enc" "$GITHUB_WORKSPACE"
+        run: bash tools/check_schema_parity.sh
+
+      # HAND-LIST GATE — moved here with the tools it guards. A field a window's UI edits but its ownership-rebase
+      # doesn't re-apply is thrown away on every Save: no error, no log, the value simply reverts (the combatZ
+      # class, drill-caught 2026-08-19). Pure source analysis of editor/, so it belongs in CI as well as the hook.
+      #
+      # Its sibling, tools/editor_compile_check.sh, deliberately does NOT run here: it needs a licensed Unity
+      # 2021.3.1f1 install (UnityEditor.dll, the MonoBleedingEdge profile), none of which a hosted runner has or
+      # may redistribute. That one stays hook-only — the single check a --no-verify still gets past.
+      - name: Hand-list gate (ownership rebases)
+        shell: bash
+        run: bash tools/check_handlists.sh

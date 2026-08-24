@@ -14,10 +14,9 @@
          (a self-contained .NET 8 publish full of mscorlib.dll/System.*.dll) gets swept in as candidate assembly
          files, and reference resolution silently prefers its .NET 8 facade mscorlib over the net471 reference
          assemblies — every framework type then fails to resolve (271x CS0518/CS0103). -->
-    <!-- _enc\** : CI checks the EDITOR repo out into _enc/ to run the cross-repo schema-parity guard (see
-         .github/workflows/ci.yml) — ~15k lines of Unity editor C# landing under the default **/*.cs glob. The
-         workflow orders that checkout AFTER the build, so it cannot bite today; this exclude is so it still
-         cannot bite the day someone reorders the steps. -->
+    <!-- _enc\** : historical. CI used to check the EDITOR repo out into _enc/ for the cross-repo schema-parity
+         guard. The tools moved into editor/ on 2026-08-24 and parity became in-repo, so nothing writes _enc/ any
+         more. Kept because it costs nothing and a local reproduction of the old workflow would still land there. -->
     <!-- editor\** : the AUTHORING TOOLS, which moved into this repo on 2026-08-24 as the com.sswelm.haf-authoring
          Unity package. ~19k lines of UnityEditor C# that only Unity can compile — under the default **/*.cs glob
          they broke this build the moment they landed (that is exactly how this exclude was found). The package is
