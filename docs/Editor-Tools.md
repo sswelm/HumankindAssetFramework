@@ -8,6 +8,19 @@ registry. (The editor scripts live in the [ENCReload](https://github.com/sswelm/
 This page is the **map** — every tool, its exact menu path, what it does, and what it writes. For the deep, field-by-field
 workflows, follow the *Deep dive* links; this reference deliberately doesn't duplicate them.
 
+## Installing them
+
+`Window ▸ Package Manager` → `+` → `Add package from git URL…`:
+
+```
+https://github.com/sswelm/ENCReload.git?path=/Assets/Scripts/Editor
+```
+
+The install is inert by design: automatic backups, the asset-delete guard and the console filter all default **off**
+in an installed package and on in ENCReload itself (`HafPackageContext` reads the context from
+`UnityEditor.PackageManager`). See [Getting-Started.md](Getting-Started.md) for the ordered path and the two current
+limits — `Tools/` doesn't ship in the package yet, and pack identity is still fixed to ENC's.
+
 ## Where the tools write — the registries
 
 Every registry is **ONE file**: the git-tracked project file is the source the editor reads and writes; the copy in the

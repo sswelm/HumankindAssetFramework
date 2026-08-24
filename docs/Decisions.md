@@ -61,6 +61,25 @@ referencing an already-baked GUID. What needs the packaging work is *baking into
 authored field (a Settings entry defaulting to the host project's own mod id) and these sites read it. Until that day
 the constant is the *honest* description of the tool, and a settings field would be a lie about what it can do.
 
+> **Update 2026-08-24 — the package exists; pack identity is now the *only* thing left.** The tools install from the
+> Unity menu (`package.json` + asmdef, `?path=/Assets/Scripts/Editor`), so "they live only inside ENCReload" no longer
+> blocks a second tenant. The first install into a real second project found two defects that were **invisible from
+> inside the home project by construction** — exactly the class this decision predicted:
+>
+> - **Missing `.meta` files.** Unity generates them silently under `Assets/`, so the 39 scripts had theirs and the two
+>   new files never needed them. A package folder is *immutable*: Unity cannot generate them there, so it **ignored
+>   the asmdef** — and package scripts are not added to the predefined assemblies, so nothing compiled. The package
+>   installed, resolved, and displayed its version and description while being functionally empty.
+> - **Four `[InitializeOnLoad]` behaviours defaulting ON** — the asset-delete guard, the daily auto-backup (to a
+>   `D:/HAF_Backups` default), its offsite zip, and the console-log-handler replacement. All wanted here; in a guest
+>   project they are an authoring tool hooking a stranger's deletes and writing their assets to an invented drive
+>   letter. Now contextual via `HafPackageContext` (`PackageInfo.FindForAssembly` is null for `Assets/`-compiled
+>   scripts, non-null for a resolved package): home unchanged, guest inert until asked.
+>
+> Both share this decision's root cause — **the tools assume they ARE the project.** Pack identity is that same
+> assumption wearing a third hat, and it is now the last one standing, alongside `Tools/` not shipping (which is the
+> assumption again: a helper path resolved against the *host's* project root).
+
 **Why it is written down:** a 2026-08-23 critical review flagged it as the highest structural finding, and from the
 code it reads exactly that way — the two halves of one framework disagree about how many mods exist. Worth recording
 so the next reader does not "fix" it in isolation. It also corrected the README, which called what remained *"neutral

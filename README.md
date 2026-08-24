@@ -276,8 +276,15 @@ suite over its pure-data layer plus an in-game smoke harness, and a full documen
 
 The remaining work is **productizing the authoring tools for third-party distribution** — the framework itself is done;
 this is packaging:
-- **Package scaffolding** — a Unity `package.json` / asmdef and single-DLL plugin packaging, so the tools install into
-  *any* project instead of living inside the ENCReload project.
+- ~~**Package scaffolding**~~ — **DONE 2026-08-24.** The tools are a Unity package, installed from the Unity menu
+  (`Window ▸ Package Manager ▸ + ▸ Add package from git URL…`) with
+  `https://github.com/sswelm/ENCReload.git?path=/Assets/Scripts/Editor`. First install into a project that was *not*
+  ENCReload immediately found two defects invisible from inside it: missing `.meta` files (Unity generates them
+  silently under `Assets/`, but a package folder is immutable, so the asmdef was **ignored** and nothing compiled),
+  and four `[InitializeOnLoad]` behaviours defaulting **on** — hooking a stranger's asset deletes, backing their
+  project up to a `D:/HAF_Backups` default, and replacing the console log handler. Both fixed; defaults are now
+  contextual (`HafPackageContext`). **Still open in the package:** `Tools/` lives outside `Assets/` so the Blender
+  helpers don't ship, and single-DLL plugin packaging.
 - **Pack identity in the tools** — the authoring windows write **one hardcoded pack** (`haf_packs/ENCReload`,
   `modId: "enc"`); packaging turns that into an authored setting. Deliberate until then — one project, one pack, so the
   setting would today have exactly one legal value; the reasoning is in

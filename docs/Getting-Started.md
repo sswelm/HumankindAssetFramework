@@ -23,13 +23,45 @@ So a custom unit is a round trip: **bake in the editor → build & deploy the mo
 |---|---|
 | **Humankind + BepInEx 5.4** | The game with the BepInEx mod loader installed. |
 | **The HAF plugin** | A released `HumankindAssetFramework.dll` (or build it — [Building.md](Building.md)), dropped into `<Humankind>\BepInEx\plugins\`. It auto-detects your game and Blender paths. |
-| **Unity + the Humankind SDK** | The editor half runs in a Unity project that has the Humankind Mod SDK, with HAF's editor scripts + `Tools/`. See [Building.md → Editor tooling](Building.md). This is where you bake. |
+| **Unity + the Humankind SDK** | The editor half runs in a Unity project that has the Humankind Mod SDK — your own mod project is fine. Unity **2021.3.1f1**, the version the SDK targets. You install HAF's tools into it in step 1. |
 | **Blender** (free) | Only for the **animated** and prep paths; a static model needs none. Auto-located; every Blender feature warns *before* a bake if it's missing. |
 | **A 3D model** | HAF is the *pipeline*, not an art library — bring a licensed **GLB / glTF / FBX / OBJ** (a free download, a commission, or your own build). Models aren't shipped with HAF. |
 
 ---
 
-## 1. Bake your first model (start static)
+## 1. Install the authoring tools
+
+The tools are a **Unity package**. In your mod project: **`Window ▸ Package Manager`** → **`+`** (top left) →
+**`Add package from git URL…`** → paste:
+
+```
+https://github.com/sswelm/ENCReload.git?path=/Assets/Scripts/Editor
+```
+
+It resolves as **HAF Authoring Tools**, and every window appears under **`Tools ▸ HAF`**. Nothing to copy, nothing to
+reference: the tools reach every game type by reflection, so they carry no compile-time dependency on Humankind's
+assemblies.
+
+**A clean install is the contract.** You should see one white console line naming the menu, and no errors. The tools
+ship with automatic backups, an asset-delete guard and a console filter — all of which stay **off** in an installed
+package and change nothing until you turn them on in `Tools ▸ HAF ▸ Backup & Restore`. If you see red, report it
+rather than working around it.
+
+> **Don't use the Releases page.** `HumankindAssetFramework-v0.1.0.zip` there is the *runtime plugin* (the BepInEx
+> DLL from the table above), not the tools. The URL is the only install.
+
+**Two current limits**, both being worked on:
+
+- The **Blender helper scripts don't ship in the package yet** — anything that shells out to Blender (tri-reduction,
+  strip-parts, animated conversion) won't find them. Set `targetTris` to `0` and bring your mesh in at the polycount
+  you want.
+- **Pack identity is still fixed** to `haf_packs/ENCReload` / `modId: "enc"`. Harmless for the projectile axis, which
+  never touches the registry; blocking if you want unit models in *your own* pack. See
+  [Decisions.md](Decisions.md).
+
+---
+
+## 2. Bake your first model (start static)
 
 Open **`Tools ▸ HAF ▸ Model Factory`**, then:
 
@@ -45,7 +77,7 @@ can import *your* model? [**Animated-Models.md**](Animated-Models.md) answers th
 
 ---
 
-## 2. Build & deploy the mod
+## 3. Build & deploy the mod
 
 Baking writes assets into the project; the game loads them from a built **asset bundle**, so you package + deploy once
 per set of changes:
@@ -59,7 +91,7 @@ The deployed module lands in Humankind's `Community` folder as a normal mod.
 
 ---
 
-## 3. Launch & verify
+## 4. Launch & verify
 
 1. Start Humankind, **enable your mod** in the mod manager, and load a game containing your target unit.
 2. Press **F8** in-game for HAF's status window — compatibility health, the Smoke Test, and the live GPU-budget readout.
@@ -70,7 +102,7 @@ the fix (start with the troubleshooting table in [Factory-Manual.md](Factory-Man
 
 ---
 
-## 4. Go deeper
+## 5. Go deeper
 
 - **Animate it** — [Animated-Models.md](Animated-Models.md) · [Donor-Clip-Flight.md](Donor-Clip-Flight.md) ·
   [Turn-Ease.md](Turn-Ease.md)
