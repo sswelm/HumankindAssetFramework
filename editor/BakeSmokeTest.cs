@@ -109,7 +109,7 @@ public static class BakeSmokeTest
                 {
                     // The model is deliberately cached (reuseExtracted) — forcing a fresh extraction here would bake it a
                     // way the user never does. Validate its EXISTING shipped assets instead (non-destructive, no re-bake).
-                    EditorUtility.DisplayProgressBar("Bake Smoke Test", $"Checking {src.resourceName} ({i + 1}/{models.Count})…", (float)i / models.Count);
+                    BakeTestRunnerWindow.Progress.Step($"Checking {src.resourceName} ({i + 1}/{models.Count})…", (float)i / models.Count);
                     var missing = MissingAssets(src.resourceName, src.animated);
                     result = missing.Count == 0 ? "PASS (validated existing — reuseExtracted)" : "FAIL — missing/empty: " + string.Join(", ", missing);
                 }
@@ -117,7 +117,7 @@ public static class BakeSmokeTest
                 {
                     // reuseExtracted=false: bake fresh under a THROWAWAY name so the real assets + registry are untouched.
                     string testName = PREFIX + src.resourceName;
-                    EditorUtility.DisplayProgressBar("Bake Smoke Test", $"Baking {src.resourceName} ({i + 1}/{models.Count})…", (float)i / models.Count);
+                    BakeTestRunnerWindow.Progress.Step($"Baking {src.resourceName} ({i + 1}/{models.Count})…", (float)i / models.Count);
                     try
                     {
                         var clone = JsonUtility.FromJson<ModelDef>(JsonUtility.ToJson(src));   // clone: never mutate the real ModelDef

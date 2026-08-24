@@ -453,7 +453,50 @@ baker, `rig_anim.py`, `deploy_convert.py`, `glbconv`, or the registry schema.
 **All of them run from one window: `Tools ▸ HAF ▸ Bake Tests…`** (since 2026-08-20 — it replaced seven bare menu
 items). Each test is a row with a plain-language explanation, a checkbox, and Quick/Everything presets; the run
 shows live per-row PASS/FAIL (failures unfold their detail lines) and writes a durable report to
-`Logs/haf_bake_tests_report.txt`. The guards, in pyramid order:
+`Logs/haf_bake_tests_report.txt`.
+
+### Reading the results — PASS, FAIL, and SKIPPED
+
+A row has three verdicts, and **SKIPPED is a first-class answer, not a soft failure**: it means the row had nothing
+it could legitimately test, and its detail line names why. The distinction that decides which you get is *where the
+tools are running* (they detect this themselves — see [Installation.md](Installation.md)):
+
+- **In the home project** (the tools' own development checkout), a missing prerequisite is a broken dev machine, so
+  it **FAILs loudly** — a run that verified nothing must never report PASS.
+- **In an installed package** (added by git URL into your own mod project), a missing prerequisite is a fact about
+  *your* setup, not a broken pipeline, so the row **SKIPs and names the fact**. A clean install cannot fail a bake
+  test — this is deliberate, and it was earned: the first outside install FAILed five models the author had never
+  heard of (the tools were reading another mod's deployed registry — fixed, packages now own their own pack) and
+  reported prerequisite gaps as pipeline regressions.
+
+**What a fresh install looks like** (verified live in a real second project, 2026-08-24): *smoke* rows SKIP —
+`"this project's pack ('<YourMod>') has no models yet"` — because your pack starts **empty**; the registry-driven
+rows (*every converted model*, *golden snapshot*) SKIP for the same reason; the synthetic rows run for real.
+`PASS — 16 passed, 0 failed, 4 skipped` is the healthy fresh-install result with Blender present. Every SKIP
+converts itself to real coverage as you bake: your first model puts the smoke rows to work, your first
+`Convert raw rig` model feeds the conversion rows.
+
+### What needs Blender — and what happens without it
+
+Blender is the **one external install** the tests (and the baker) can need; the other helpers — the conversion
+scripts and the `glbconv` GLB/glTF importer — **ship inside the package** since 0.4.0, so there is nothing else to
+set up. Blender is auto-detected under Program Files; a winget/Steam/portable install needs the EditorPrefs key
+`HAF.BlenderPath` pointed at `blender.exe` (discovery doesn't probe `PATH`).
+
+| Row | Needs Blender? | Without Blender (installed package) |
+|---|---|---|
+| *Do the bake options do what they claim? (synthetic cubes)* | **No** | runs in full — 13 assertions |
+| *Does the baker still work?* / *whole catalog* | only for animated / tri-reduced / stripped entries | static entries still bake (`glbconv` ships); rows SKIP while your pack is empty |
+| *Do the Blender + animation options work? (real rigs)* | **Yes** | SKIP — `"Blender was not found"` |
+| *Is rig conversion still correct? (control rig)* | **Yes** | SKIP — names Blender (or, pre-0.4.0, the missing scripts) |
+| *every converted model* / *golden snapshot* | **Yes** | SKIP — and also skip while no such models exist in your pack |
+
+The same boundary applies to **baking itself**: a static model at `targetTris 0` with no strip-parts — including the
+whole projectile path — needs **no Blender at all**, from `.glb`, `.gltf`, or `.obj`. Tri-reduction, part-stripping,
+`.fbx`/`.blend` import, and every animated path shell out to Blender and will tell you *before* the bake if it is
+missing.
+
+The guards, in pyramid order:
 
 - **Bake Smoke Test** — rows *Does the baker still work? (one model per path)* / *Does every model still bake? (whole catalog)*. Bakes one representative per
   bake-path (`animated × material mode`) through the *same* config route as the Bake button and asserts each completes

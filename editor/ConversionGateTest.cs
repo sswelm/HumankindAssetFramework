@@ -74,6 +74,7 @@ public static class ConversionGateTest
             animated = true, convertRig = true, animClip = "", rotation = new Vector3(90f, 0f, 0f), size = 2f,
             targetTris = 5000, atlasMaxDim = 256, materialMode = MaterialMode.Auto
         };
+        BakeTestRunnerWindow.Progress.Step("litmus — full conversion bake through Blender…", 0.4f);
         int fails = BakeAndAssert(def);
         Debug.Log(fails == 0
             ? "[ConvGate] LITMUS PASS — conversion invariants hold (all scales 1, parents before children, rotation-only clip)."
@@ -105,6 +106,7 @@ public static class ConversionGateTest
             if (string.IsNullOrWhiteSpace(src.modelFile) || !File.Exists(src.modelFile))
             { lines.Add($"SKIP {src.resourceName} — source model file not on disk ({src.modelFile})"); skipped++; continue; }
             var clone = JsonUtility.FromJson<ModelDef>(JsonUtility.ToJson(src));   // never mutate the real entry
+            BakeTestRunnerWindow.Progress.Step($"{src.resourceName} ({total + 1}/{defs.Count}) — full conversion bake…", (float)total / defs.Count);
             int fails = BakeAndAssert(clone);
             lines.Add(fails == 0
                 ? $"PASS {src.resourceName} (full conversion on the real rig)"

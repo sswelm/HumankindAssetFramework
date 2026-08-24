@@ -1,5 +1,5 @@
 -r:"C:/Repo/ENCReload/Assets/Plugins/Json.Net 11.0.1/Newtonsoft.Json.dll"
--r:"C:/Repo/ENCReload/Assets/Plugins/HafSchema/Haf.Schema.dll"
+-r:"C:/Repo/HumankindAssetFramework/editor/Plugins/Haf.Schema.dll"
 -target:library
 -out:"C:/Users/SEBAST~1/AppData/Local/Temp/claude/c--Repo-ENCReload/986ac936-4086-458b-af86-605e541dbb5c/scratchpad/editorcheck.dll"
 -nostdlib+

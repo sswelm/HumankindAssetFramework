@@ -97,7 +97,8 @@ with `git push --no-verify`. Deliberately **not** in the gate (too slow / need U
 golden-master `deploy_regression.sh`, the in-editor bake tests, and the in-game binding report — those stay manual.
 The in-editor tests all run from **one window** — `Tools ▸ HAF ▸ Bake Tests…` (Smoke / Features / Conversion rows,
 each with a plain-language explanation, live per-row PASS/FAIL, and a durable `Logs/haf_bake_tests_report.txt` per
-run; see [Factory-Manual.md](Factory-Manual.md) §11). The
+run; see [Factory-Manual.md](Factory-Manual.md) §11 — including what SKIPPED means, what a fresh
+package install reports, and which rows need Blender). The
 gate earned its keep on day one: standing it up surfaced three latent schema drifts (a wrapper field the plugin read but
 the baker never wrote, two runtime-only keys, and a `float?`-cast the parity script mis-classified), all fixed to green.
 

@@ -265,6 +265,7 @@ public class BakeTestRunnerWindow : EditorWindow
                         FormattableString.Invariant($"{r.name}  ({i + 1} of {queue.Count}, {runWatch.Elapsed.TotalMinutes:0.0} min elapsed)"),
                         (float)i / Math.Max(1, queue.Count)))
                 { cancelled = true; break; }
+                Progress.BeginRow(r.name, i, queue.Count, runWatch);   // sections compose their step into this row's context
                 RunOne(r);
                 collected.Add(r.last);
                 if (r.last.fail > 0) r.open = true;   // failures unfold themselves — the detail is the point
@@ -273,8 +274,31 @@ public class BakeTestRunnerWindow : EditorWindow
                 lastReportPath = WriteReport(collected, InterimVerdict(collected, runWatch, finished: false));
             }
         }
-        finally { EditorUtility.ClearProgressBar(); }
+        finally { EditorUtility.ClearProgressBar(); Progress.EndRun(); }
         FinishRun(cancelled, queue.Count);
+    }
+
+    // TWO-LEVEL PROGRESS IN THE ONE BAR THE EDITOR HAS (2026-08-24, user: "why doesn't it use 2 progress bars?").
+    // It can't — EditorUtility's modal is title + one line + one float, and Unity's own Importing dialog covers
+    // everything during synchronous imports regardless. But the run DOES know both levels internally: the runner
+    // knows row i/N and elapsed, each section knows model j/M and the step. This composes them into the one bar:
+    // title carries the RUN level, the info line carries the SECTION level, and the fraction is overall progress
+    // (rows weighted equally). Sections call Step() instead of DisplayProgressBar; run standalone (no runner on
+    // the stack) they degrade to the plain single-level bar they always had.
+    internal static class Progress
+    {
+        static string rowName; static int rowIndex, rowCount; static System.Diagnostics.Stopwatch watch;
+        internal static void BeginRow(string name, int index, int count, System.Diagnostics.Stopwatch w)
+        { rowName = name; rowIndex = index; rowCount = count; watch = w; }
+        internal static void EndRun() { rowName = null; watch = null; }
+        internal static void Step(string inner, float innerFrac)
+        {
+            if (rowName == null) { EditorUtility.DisplayProgressBar("HAF Bake Tests", inner, innerFrac); return; }
+            EditorUtility.DisplayProgressBar(
+                FormattableString.Invariant($"HAF Bake Tests — {rowIndex + 1}/{rowCount} · {rowName}"),
+                FormattableString.Invariant($"{inner}   ({watch.Elapsed.TotalMinutes:0.0} min elapsed)"),
+                (rowIndex + Mathf.Clamp01(innerFrac)) / Math.Max(1, rowCount));
+        }
     }
 
     void RunOne(TestRow r)
