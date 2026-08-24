@@ -32,13 +32,17 @@ checked=0
 tracked=$(git ls-files "$PKG")
 [ -n "$tracked" ] || { echo "check-package-meta: nothing tracked under $PKG/ — is the package committed?"; exit 1; }
 
-# collect files (excluding .meta themselves) and every ancestor directory below editor/
+# collect files (excluding .meta themselves) and every ancestor directory below editor/.
+# Paths under a '~'-suffixed directory (Tools~) are EXEMPT: Unity's asset database ignores such folders
+# entirely — no import, no .meta wanted — which is exactly why the Blender helpers ship in one.
 paths=$(
-  printf '%s\n' "$tracked" | grep -v '\.meta$'
-  printf '%s\n' "$tracked" | grep -v '\.meta$' | while IFS= read -r f; do
-    d=$(dirname "$f")
-    while [ "$d" != "$PKG" ] && [ "$d" != "." ] && [ "$d" != "/" ]; do printf '%s\n' "$d"; d=$(dirname "$d"); done
-  done
+  {
+    printf '%s\n' "$tracked" | grep -v '\.meta$'
+    printf '%s\n' "$tracked" | grep -v '\.meta$' | while IFS= read -r f; do
+      d=$(dirname "$f")
+      while [ "$d" != "$PKG" ] && [ "$d" != "." ] && [ "$d" != "/" ]; do printf '%s\n' "$d"; d=$(dirname "$d"); done
+    done
+  } | grep -vE '(^|/)[^/]*~(/|$)'
 )
 
 for p in $(printf '%s\n' "$paths" | sort -u); do

@@ -222,7 +222,7 @@ public static class UniversalBaker
         if (cfg.deployEnd <= 0)
         { error = "deploy conversion: 'Deploy end frame' is required (the source frame where the deploy motion completes — scrub the raw file in the ▶ picker to find it)."; return null; }
         string projRoot = Directory.GetParent(Application.dataPath).FullName;
-        string script = Path.Combine(projRoot, "Tools", "deploy_convert.py");
+        string script = HafPackageContext.ToolPath("deploy_convert.py");
         if (!File.Exists(script)) { error = "deploy conversion: Tools/deploy_convert.py not found."; return null; }
         string outDir = Path.Combine(Application.dataPath, "FactorySource", cfg.resourceName);
         Directory.CreateDirectory(outDir);
@@ -362,7 +362,7 @@ public static class UniversalBaker
         // TOOL-VERSION CACHE-BUSTER (2026-07-19): a cached slim FBX older than rig_anim.py itself is stale — a
         // pipeline fix would otherwise be silently skipped by the reuse path and re-wrap the old (possibly broken)
         // FBX (exactly how the frozen-runner fix got bypassed on its first bake).
-        string rigScript = Path.Combine(projRoot, "Tools", "rig_anim.py");
+        string rigScript = HafPackageContext.ToolPath("rig_anim.py");
         bool toolNewer = File.Exists(rigScript) && File.Exists(fbxFull) &&
                          File.GetLastWriteTimeUtc(rigScript) > File.GetLastWriteTimeUtc(fbxFull);
         if (toolNewer) Debug.Log($"[Factory] {name}: rig_anim.py is newer than the cached slim FBX — re-slimming (tool changed).");
@@ -967,7 +967,7 @@ public static class UniversalBaker
     static bool RigAnimViaBlender(string src, string outFbx, int targetTris, string bonePrefixes, string clipName, string albedoOut, bool keepMaterials, Vector3 rotation, bool convertRig, string stateRoles = "", bool autoGround = false, string socketBones = "", bool keepTranslations = false, string staticParts = "", bool localNodeAnim = false)
     {
         string proj = Directory.GetParent(Application.dataPath).FullName;
-        string script = Path.Combine(proj, "Tools", "rig_anim.py");
+        string script = HafPackageContext.ToolPath("rig_anim.py");
         if (!File.Exists(script)) { Debug.LogError("[Factory] bundled rig_anim.py missing: " + script); return false; }
         string blender = FindBlender();
         var inv = System.Globalization.CultureInfo.InvariantCulture;   // never the OS locale — a Dutch comma-decimal would corrupt the arg
@@ -1042,9 +1042,9 @@ public static class UniversalBaker
                           : null;
         System.DateTime cacheTime = cachedFull != null ? File.GetLastWriteTimeUtc(cachedFull) : System.DateTime.MinValue;
         // tool buster: glbconv (glb/gltf/blend) or prep_model.py (when strip/reduce runs) newer than the cached model
-        string glbconvExe = Path.Combine(projRoot, "Tools", "glbconv", "glbconv.exe");
-        string glbconvDll = Path.Combine(projRoot, "Tools", "glbconv", "glbconv.dll");
-        string prepScript = Path.Combine(projRoot, "Tools", "prep_model.py");
+        string glbconvExe = HafPackageContext.ToolPath("glbconv", "glbconv.exe");
+        string glbconvDll = HafPackageContext.ToolPath("glbconv", "glbconv.dll");
+        string prepScript = HafPackageContext.ToolPath("prep_model.py");
         bool toolNewer = cachedFull != null &&
             ((File.Exists(glbconvExe) && File.GetLastWriteTimeUtc(glbconvExe) > cacheTime) ||
              (File.Exists(glbconvDll) && File.GetLastWriteTimeUtc(glbconvDll) > cacheTime) ||
@@ -1738,7 +1738,7 @@ public static class UniversalBaker
     static bool ConvertGlb(string glb, string outDir, string name, int grid)
     {
         string proj = Directory.GetParent(Application.dataPath).FullName;
-        string tools = Path.Combine(proj, "Tools", "glbconv");
+        string tools = HafPackageContext.ToolPath("glbconv");
         string exe = Path.Combine(tools, "glbconv.exe");
         string dll = Path.Combine(tools, "glbconv.dll");
         string args = $"\"{glb}\" \"{outDir}\" \"{name}\" {Mathf.Max(0, grid)}";
@@ -1845,7 +1845,7 @@ public static class UniversalBaker
         LastPrepSourceTris = -1;
         if (!File.Exists(src)) { Debug.LogError("[Factory] prep: model file not found: " + src); return false; }
         string proj = Directory.GetParent(Application.dataPath).FullName;
-        string script = Path.Combine(proj, "Tools", "prep_model.py");
+        string script = HafPackageContext.ToolPath("prep_model.py");
         if (!File.Exists(script)) { Debug.LogError("[Factory] bundled prep_model.py missing: " + script); return false; }
         string blender = FindBlender();
         var psi = new System.Diagnostics.ProcessStartInfo(blender,
@@ -1873,7 +1873,7 @@ public static class UniversalBaker
     static bool ConvertBlend(string blend, string outGlb)
     {
         string proj = Directory.GetParent(Application.dataPath).FullName;
-        string script = Path.Combine(proj, "Tools", "blend_export.py");
+        string script = HafPackageContext.ToolPath("blend_export.py");
         if (!File.Exists(script)) { Debug.LogError("[Factory] bundled blend exporter missing: " + script); return false; }
         string blender = FindBlender();
         var psi = new System.Diagnostics.ProcessStartInfo(blender, $"\"{blend}\" --background --python \"{script}\" -- \"{outGlb}\"")

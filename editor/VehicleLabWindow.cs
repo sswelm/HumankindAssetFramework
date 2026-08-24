@@ -1317,7 +1317,7 @@ public class VehicleLabWindow : EditorWindow
     {
         stdout = "";
         string projRoot = Directory.GetParent(Application.dataPath).FullName;
-        string script = Path.Combine(projRoot, "Tools", "vehicle_rig.py");
+        string script = HafPackageContext.ToolPath("vehicle_rig.py");
         if (!File.Exists(script)) { status = "Tools/vehicle_rig.py missing."; return false; }
         try
         {

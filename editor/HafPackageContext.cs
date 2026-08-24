@@ -65,9 +65,18 @@ internal static class HafPackageContext
                 bool v = false;
                 try
                 {
-                    // Null for Assets/-compiled scripts; a PackageInfo when resolved from Packages/ or the cache.
-                    v = UnityEditor.PackageManager.PackageInfo.FindForAssembly(
-                            typeof(HafPackageContext).Assembly) != null;
+                    // NOT "is this a package at all" — the HOME project consumes these scripts as a file: package
+                    // too (Packages/manifest.json -> file:../../HumankindAssetFramework/editor), so a bare
+                    // FindForAssembly != null classified ENCReload itself as a guest and silently defaulted its
+                    // own delete guard and daily backups OFF. The split that means something is HOW the package
+                    // is installed: a git/registry/tarball install is an immutable copy on a consumer's machine
+                    // (guest); an embedded or local file: install is the developer's own working copy (home) —
+                    // as is compiling straight out of Assets/ (info == null).
+                    var info = UnityEditor.PackageManager.PackageInfo.FindForAssembly(
+                                   typeof(HafPackageContext).Assembly);
+                    v = info != null && (info.source == UnityEditor.PackageManager.PackageSource.Git
+                                      || info.source == UnityEditor.PackageManager.PackageSource.Registry
+                                      || info.source == UnityEditor.PackageManager.PackageSource.LocalTarball);
                 }
                 catch (Exception e)   // never let a context probe break editor start-up
                 {
@@ -84,6 +93,29 @@ internal static class HafPackageContext
     /// The default for anything that MUTATES the host project or process without being asked:
     /// on in the home project (where it is the point), off in a guest (where it is a surprise).
     internal static bool AutoDefault => !RunningAsPackage;
+
+    /// Resolve a Blender/converter helper under Tools/. Per FILE, not per layout: the host project's own
+    /// Tools/<rel> wins (the home layout, and any project that vendors its own copies), else the package's
+    /// shipped Tools~/<rel> (the '~' suffix keeps Unity's asset database out of it — no .meta files, nothing
+    /// imported). When neither exists the project-relative path is returned anyway, so an error message names
+    /// the conventional location rather than a package-cache hash path.
+    internal static string ToolPath(params string[] rel)
+    {
+        string sub = Path.Combine(rel);
+        try
+        {
+            string proj = Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Tools", sub);
+            if (File.Exists(proj) || Directory.Exists(proj)) return proj;
+            var info = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(HafPackageContext).Assembly);
+            if (info != null && !string.IsNullOrEmpty(info.resolvedPath))
+            {
+                string pkg = Path.Combine(info.resolvedPath, "Tools~", sub);
+                if (File.Exists(pkg) || Directory.Exists(pkg)) return pkg;
+            }
+            return proj;
+        }
+        catch { return Path.Combine("Tools", sub); }
+    }
 
     // ---- PACK IDENTITY (2026-08-24, the same afternoon as everything else in this file) ----
     //

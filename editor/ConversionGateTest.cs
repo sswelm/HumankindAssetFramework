@@ -43,11 +43,19 @@ public static class ConversionGateTest
                       "conversion self-test only; baking your own static models (and projectiles) needs none of it." }
                 : Bad(why);
 
+        // THE BAKE ITSELF needs the Blender helper scripts (rig_anim.py — the "animated slim" step), so gate on
+        // THOSE, before anything runs. The first gate here checked only make_litmus.py — and on a machine where a
+        // cached %TEMP%/haf_litmus.glb skipped synthesis and Blender was installed, the row sailed past both
+        // guards and then FAILED inside the bake on the script this line now probes. A guard that checks the
+        // fixture's prerequisites instead of the bake's is exactly the "guards subtract what they can't see" class.
+        if (!File.Exists(HafPackageContext.ToolPath("rig_anim.py")))
+            return Absent("the Blender helper scripts (Tools/) are not in the installed package yet.");
+
         // --- fixture: synthesize the litmus rig if it isn't cached ---
         string litmus = Path.Combine(Path.GetTempPath(), "haf_litmus.glb");
         if (!File.Exists(litmus))
         {
-            string script = Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Tools", "make_litmus.py");
+            string script = HafPackageContext.ToolPath("make_litmus.py");
             if (!File.Exists(script)) return Absent("the Blender helper scripts (Tools/) are not in the installed package yet.");
             string blender = UniversalBaker.FindBlender();
             if (string.IsNullOrEmpty(blender)) return Absent("Blender was not found on this machine.");
@@ -133,9 +141,9 @@ public static class ConversionGateTest
         if (string.IsNullOrEmpty(blender))
             return HafPackageContext.RunningAsPackage ? Skip("Blender was not found on this machine.")
                                                       : Bad("Blender not found — the deploy golden diff needs it");
-        string convert = Path.Combine(root, "Tools", "deploy_convert.py");
-        string dump = Path.Combine(root, "Tools", "deploy_bonedump.py");
-        string goldDir = Path.Combine(root, "Tools", "deploy_golden");
+        string convert = HafPackageContext.ToolPath("deploy_convert.py");
+        string dump = HafPackageContext.ToolPath("deploy_bonedump.py");
+        string goldDir = HafPackageContext.ToolPath("deploy_golden");
         string fsRoot = Path.Combine(root, "Assets", "FactorySource");
         if (!File.Exists(convert) || !File.Exists(dump))
             return HafPackageContext.RunningAsPackage ? Skip("the Blender helper scripts (Tools/) are not in the installed package yet.")

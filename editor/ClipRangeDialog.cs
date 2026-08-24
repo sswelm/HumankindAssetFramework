@@ -65,7 +65,7 @@ public class ClipRangeDialog : EditorWindow
         string srcTag = System.IO.Path.Combine(dirFull, "source.txt");   // which model file + converter version these
         // FBXs came from — a timestamp check alone silently reuses the previous model's clips when the entry is
         // repointed at an OLDER file, and a converter fix would be silently bypassed (the frozen raw-preview bug).
-        string toolPath = System.IO.Path.Combine(proj, "Tools", "inspect_fbx.py");
+        string toolPath = HafPackageContext.ToolPath("inspect_fbx.py");
         srcKey = modelFile + "|" + (System.IO.File.Exists(toolPath) ? System.IO.File.GetLastWriteTimeUtc(toolPath).Ticks.ToString() : "0");
         bool stale = existing.Length == 0
                      || !System.IO.File.Exists(System.IO.Path.Combine(dirFull, "manifest.txt"))   // pre-manifest converter output (mirrored anim / unreliable take names) — force re-convert
@@ -118,7 +118,7 @@ public class ClipRangeDialog : EditorWindow
                 foreach (var f in System.IO.Directory.GetFiles(dirFull, "*.fbx")) System.IO.File.Delete(f);
             var p = new System.Diagnostics.Process();
             p.StartInfo.FileName = UniversalBaker.FindBlender();
-            p.StartInfo.Arguments = $"--background --python \"{System.IO.Path.Combine(proj, "Tools", "inspect_fbx.py")}\" -- \"{modelFile}\" \"{dirFull}\"";
+            p.StartInfo.Arguments = $"--background --python \"{HafPackageContext.ToolPath("inspect_fbx.py")}\" -- \"{modelFile}\" \"{dirFull}\"";
             p.StartInfo.UseShellExecute = false; p.StartInfo.CreateNoWindow = true;
             p.StartInfo.RedirectStandardOutput = true; p.StartInfo.RedirectStandardError = true;
             p.Start();
