@@ -260,7 +260,7 @@ public class DistrictFactoryWindow : EditorWindow
             }
         }
         if ((cur.modelFile ?? "").ToLowerInvariant().EndsWith(".blend") && !UniversalBaker.BlenderAvailable())
-            EditorGUILayout.HelpBox(".blend import needs Blender installed (auto-detected). Install it, or set EditorPrefs 'ENC.blenderPath' to blender.exe.", MessageType.Warning);
+            EditorGUILayout.HelpBox(".blend import needs Blender installed (auto-detected). Install it, or set EditorPrefs 'HAF.BlenderPath' to blender.exe.", MessageType.Warning);
 
         EditorGUILayout.Space();
         EditorGUILayout.LabelField("Bake", EditorStyles.miniBoldLabel);

@@ -297,7 +297,7 @@ public static class UniversalBaker
             if (!(char.IsLetterOrDigit(c) || c == '_' || c == '-'))
                 return Fail($"resource name '{cfg.resourceName}' contains an invalid character ('{c}'). " +
                             "Use letters, digits, '_' or '-' only — no spaces (e.g. 'AttackHelicopter').");
-        if (!BlenderAvailable()) return Fail("Animated import needs Blender installed (auto-detected, or set EditorPrefs 'ENC.blenderPath').");
+        if (!BlenderAvailable()) return Fail("Animated import needs Blender installed (auto-detected, or set EditorPrefs 'HAF.BlenderPath').");
         if (cfg.deployConvert)
         {
             // recipe-driven pre-step: convert the raw rigid-parts source, then bake the CONVERTED rig. Overwriting
@@ -1087,7 +1087,7 @@ public static class UniversalBaker
             if (wantStrip || wantReduce)
             {
                 if (!BlenderAvailable()) return Fail((wantStrip ? "'Strip parts'" : "'Reduce to tris'") +
-                    " needs Blender installed (auto-detected, or set EditorPrefs 'ENC.blenderPath').");
+                    " needs Blender installed (auto-detected, or set EditorPrefs 'HAF.BlenderPath').");
                 int effTarget = cfg.doubleSided ? Mathf.Max(1, cfg.targetTris / 2) : cfg.targetTris;
                 if (wantReduce && cfg.doubleSided) Debug.Log($"[Factory] reduce target {cfg.targetTris} -> {effTarget} tris (double-sided halves it; it doubles the baked geometry)");
                 string prepped = Path.Combine(Path.GetTempPath(), name + "_prepped.glb");
@@ -1811,7 +1811,9 @@ public static class UniversalBaker
     // else fall back to "blender" on PATH. So .blend import "just works" whenever Blender is installed.
     public static string FindBlender()
     {
-        string pref = EditorPrefs.GetString("ENC.blenderPath", "");
+        // Neutral key first; the historical "ENC.blenderPath" still read so an existing setup keeps working.
+        string pref = EditorPrefs.GetString("HAF.BlenderPath", "");
+        if (string.IsNullOrEmpty(pref)) pref = EditorPrefs.GetString("ENC.blenderPath", "");
         if (!string.IsNullOrEmpty(pref) && File.Exists(pref)) return pref;
         foreach (var root in new[] { @"C:\Program Files\Blender Foundation", @"C:\Program Files (x86)\Blender Foundation" })
         {
@@ -1889,7 +1891,7 @@ public static class UniversalBaker
                 return true;
             }
         }
-        catch (Exception ex) { Debug.LogError("[Factory] could not run Blender ('" + blender + "'): " + ex.Message + "\nInstall Blender, or set EditorPrefs 'ENC.blenderPath' to blender.exe."); return false; }
+        catch (Exception ex) { Debug.LogError("[Factory] could not run Blender ('" + blender + "'): " + ex.Message + "\nInstall Blender, or set EditorPrefs 'HAF.BlenderPath' to blender.exe."); return false; }
     }
 
     static string AmplitudeGuid(UnityEngine.Object asset)

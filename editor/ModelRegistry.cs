@@ -99,7 +99,7 @@ public class OverrideRef { public string modId = ""; public string pawnDescripti
 class RegistryFile
 {
     public int schemaVersion = 1;                                   // HAF schema version this file targets (bump additively)
-    public string modId = "enc";                                   // unique pack id; ENC is the base pack
+    public string modId = HafPackageContext.DefaultModId;          // unique pack id — this project's own (an existing pack.json's value wins on load)
     public string module = "";                                     // HK runtime MODULE this pack extends — pack load order follows the game's mod order (docs/Multi-Mod). "" = auto (the pack folder name == module Name by convention); set only to override. Read by UniversalInjectPatch.ParsePack.
     public string moduleGuid = "";                                 // optional explicit HK module GUID (wins over `module`/folder; stable across a retitle). "" = unused.
     public List<string> dependsOn = new List<string>();            // RESERVED: modIds this pack requires (parsed + reported, not yet enforced)
@@ -186,22 +186,30 @@ public static class ModelRegistry
     {
         get
         {
-            var over = EditorPrefs.GetString("ENC.bepinexConfig", "");
+            var over = ConfigDirOverride;
             if (!string.IsNullOrWhiteSpace(over)) return over;
             return AutoDetectConfigDir() ?? FallbackConfigDir;
         }
     }
+    // Neutral key, with the historical "ENC.bepinexConfig" still read so an existing setup keeps working.
     public static string ConfigDirOverride
     {
-        get => EditorPrefs.GetString("ENC.bepinexConfig", "");
-        set => EditorPrefs.SetString("ENC.bepinexConfig", value ?? "");
+        get
+        {
+            var v = EditorPrefs.GetString("HAF.BepInExConfig", "");
+            return !string.IsNullOrEmpty(v) ? v : EditorPrefs.GetString("ENC.bepinexConfig", "");
+        }
+        set => EditorPrefs.SetString("HAF.BepInExConfig", value ?? "");
     }
     // ENC is now a self-contained HAF SUBDIR PACK (2026-07-24): it ships as ONE directory (pack.json + sounds/ + skins/)
     // so its registry AND file-assets are publishable, instead of loose in the shared BepInEx/config. PackLiveDir = what
     // the running game reads (deployed under haf_packs/); PackRepoDir = the git-tracked source of truth in this project.
     // The editor dual-writes both, exactly as it used to dual-write the live registry + the project backup.
-    public static string PackLiveDir => Path.Combine(ConfigDir, "haf_packs", "ENCReload");
-    public static string PackRepoDir => Path.Combine(Application.dataPath, "Pack", "ENCReload");
+    // The pack is THIS PROJECT'S (HafPackageContext.PackName), never a hardcoded one. ConfigDir is the GAME's
+    // config — machine-global — so a hardcoded "ENCReload" here made the tools in any other project on the same
+    // machine read (and try to re-bake) ENC's deployed pack. A guest project now gets its own, initially empty.
+    public static string PackLiveDir => Path.Combine(ConfigDir, "haf_packs", HafPackageContext.PackName);
+    public static string PackRepoDir => Path.Combine(Application.dataPath, "Pack", HafPackageContext.PackName);
     public static string RegistryPath => Path.Combine(PackLiveDir, "pack.json");
 
     // ---- zero-config game-path discovery (mirrors the Blender/glbconv self-location) ----

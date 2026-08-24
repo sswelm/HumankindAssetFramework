@@ -203,7 +203,13 @@ public static class BakeFeatureTest
         BakeTestSection Section() => new BakeTestSection
         { title = "Features — Blender + animated", pass = pass, fail = fail, skip = skip, body = string.Join("\n", res) };
         if (!UniversalBaker.BlenderAvailable())
-        { fail++; res.Add("FAIL: Blender not found — targetTris / stripParts / animated need it. Install it or set EditorPrefs 'ENC.blenderPath'."); return Section(); }
+        {
+            // Installed package: Blender absent is a missing prerequisite, not a broken pipeline — a clean
+            // install must not go red for it. Home: the dev machine lost Blender, keep the loud FAIL.
+            if (HafPackageContext.RunningAsPackage)
+            { skip++; res.Add("SKIP: Blender was not found — targetTris / stripParts / animated need it. Install it or set EditorPrefs 'HAF.BlenderPath'; everything else bakes without it."); return Section(); }
+            fail++; res.Add("FAIL: Blender not found — targetTris / stripParts / animated need it. Install it or set EditorPrefs 'HAF.BlenderPath'."); return Section();
+        }
         try
         {
             if (Directory.Exists(tmp)) Directory.Delete(tmp, true);

@@ -920,7 +920,7 @@ public class ModelFactoryWindow : EditorWindow
             EditorGUILayout.HelpBox("Model file not found on disk:\n" + cur.modelFile +
                 "\nThe source was moved or renamed — fix it with Browse (or reload the entry if the registry was already corrected).", MessageType.Warning);
         if ((cur.modelFile ?? "").ToLowerInvariant().EndsWith(".blend") && !UniversalBaker.BlenderAvailable())
-            EditorGUILayout.HelpBox(".blend import needs Blender installed (auto-detected). Install it, or set EditorPrefs 'ENC.blenderPath' to blender.exe.", MessageType.Warning);
+            EditorGUILayout.HelpBox(".blend import needs Blender installed (auto-detected). Install it, or set EditorPrefs 'HAF.BlenderPath' to blender.exe.", MessageType.Warning);
 
         // --- Animation: SUMMARY ONLY. The settings themselves (clip, bones, behaviors) are edited exclusively in the
         //     Animation Lab — mutually exclusive settings, working together: this window shows what's configured and
@@ -953,7 +953,7 @@ public class ModelFactoryWindow : EditorWindow
             }
             if (!UniversalBaker.BlenderAvailable())
                 EditorGUILayout.HelpBox("The animated path needs Blender (to slim the rig + bake the clip) — it wasn't found. " +
-                    "Install Blender or set EditorPrefs 'ENC.blenderPath' to blender.exe.", MessageType.Warning);
+                    "Install Blender or set EditorPrefs 'HAF.BlenderPath' to blender.exe.", MessageType.Warning);
             EditorGUILayout.HelpBox("Animated mode uses Size + Reduce-to-tris; the static Mesh/shading options below " +
                 "(normals, winding, double-sided, height UVs, convert grid) don't apply.", MessageType.None);
         }
@@ -1345,16 +1345,16 @@ public class ModelFactoryWindow : EditorWindow
             EditorGUILayout.LabelField("Blender", blenderOk ? found : "⚠ not detected", EditorStyles.wordWrappedMiniLabel);
             using (new EditorGUILayout.HorizontalScope())
             {
-                string bov = EditorPrefs.GetString("ENC.blenderPath", "");
+                string bov = EditorPrefs.GetString("HAF.BlenderPath", EditorPrefs.GetString("ENC.blenderPath", ""));
                 string nb = EditorGUILayout.TextField(new GUIContent("Override (blender.exe)", "Leave empty to auto-detect the newest install under Program Files. Set this if Blender is elsewhere or only on PATH."), bov);
-                if (nb != bov) EditorPrefs.SetString("ENC.blenderPath", nb ?? "");
+                if (nb != bov) EditorPrefs.SetString("HAF.BlenderPath", nb ?? "");
                 if (GUILayout.Button("Browse", GUILayout.Width(70)))
                 {
                     string p = EditorUtility.OpenFilePanel("Select blender.exe", "", "exe");
-                    if (!string.IsNullOrEmpty(p)) { EditorPrefs.SetString("ENC.blenderPath", p); GUI.FocusControl(null); }
+                    if (!string.IsNullOrEmpty(p)) { EditorPrefs.SetString("HAF.BlenderPath", p); GUI.FocusControl(null); }
                 }
-                using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(EditorPrefs.GetString("ENC.blenderPath", ""))))
-                    if (GUILayout.Button("Clear", GUILayout.Width(56))) { EditorPrefs.SetString("ENC.blenderPath", ""); GUI.FocusControl(null); }
+                using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(EditorPrefs.GetString("HAF.BlenderPath", EditorPrefs.GetString("ENC.blenderPath", "")))))
+                    if (GUILayout.Button("Clear", GUILayout.Width(56))) { EditorPrefs.SetString("HAF.BlenderPath", ""); GUI.FocusControl(null); }
             }
             EditorGUILayout.HelpBox(blenderOk
                 ? "Used for animated import, .blend import, and Reduce-to-tris. GLB/OBJ/FBX static bakes work without it."

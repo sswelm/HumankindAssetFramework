@@ -66,7 +66,21 @@ public static class BakeSmokeTest
     // The conversion row's fixture set, defined once so the two rows cannot drift apart on what "converted" means.
     internal static bool IsConverted(ModelDef d) => d != null && d.animated && d.convertRig;
 
-    static BakeTestSection NoModels(string title) => new BakeTestSection { title = title, fail = 1, body = "No models in the registry." };
+    // An empty registry means two OPPOSITE things depending on who is running:
+    //  - HOME project: the registry has ~20 shipped models, so empty = something broke loading it. FAIL, loudly
+    //    (commit f213d0e: a run that verified nothing must never report PASS).
+    //  - INSTALLED package: the pack is THIS project's own and a fresh install has baked nothing yet — empty is
+    //    the expected, healthy state. The first outside install reported FAIL here (worse: on the OLD hardcoded
+    //    pack path it enumerated ENC's deployed registry and tried to bake five models whose sources can never
+    //    exist in a foreign project — which read as an infestation, and nearly was an uninstall). SKIP, and say
+    //    what the empty pack is called and what to do next.
+    static BakeTestSection NoModels(string title) =>
+        HafPackageContext.RunningAsPackage
+            ? new BakeTestSection { title = title, skip = 1, body =
+                  $"SKIP — this project's pack ('{HafPackageContext.PackName}') has no models yet, so there is " +
+                  "nothing to bake. That is the normal state of a fresh install: bake your first model in " +
+                  "Tools ▸ HAF ▸ Model Factory and this test starts covering it." }
+            : new BakeTestSection { title = title, fail = 1, body = "No models in the registry." };
 
     static BakeTestSection Run(List<ModelDef> models, string title)
     {

@@ -34,15 +34,23 @@ public static class ConversionGateTest
     {
         const string title = "Conversion — litmus rig";
         BakeTestSection Bad(string why) { Debug.LogError("[ConvGate] " + why); return new BakeTestSection { title = title, fail = 1, body = "FAIL: " + why }; }
+        // In an installed package the Blender helper scripts (Tools/) do not ship yet, and Blender itself may not
+        // be present — both are ABSENT PREREQUISITES, not a broken pipeline, and a fresh install must not go red
+        // for them. At home the same conditions mean the dev machine is broken: keep the loud FAIL there.
+        BakeTestSection Absent(string why) =>
+            HafPackageContext.RunningAsPackage
+                ? new BakeTestSection { title = title, skip = 1, body = "SKIP — " + why + " This limits the " +
+                      "conversion self-test only; baking your own static models (and projectiles) needs none of it." }
+                : Bad(why);
 
         // --- fixture: synthesize the litmus rig if it isn't cached ---
         string litmus = Path.Combine(Path.GetTempPath(), "haf_litmus.glb");
         if (!File.Exists(litmus))
         {
             string script = Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Tools", "make_litmus.py");
-            if (!File.Exists(script)) return Bad("Tools/make_litmus.py missing");
+            if (!File.Exists(script)) return Absent("the Blender helper scripts (Tools/) are not in the installed package yet.");
             string blender = UniversalBaker.FindBlender();
-            if (string.IsNullOrEmpty(blender)) return Bad("Blender not found — the gate needs it");
+            if (string.IsNullOrEmpty(blender)) return Absent("Blender was not found on this machine.");
             var psi = new System.Diagnostics.ProcessStartInfo(blender, $"-b --python \"{script}\" -- \"{litmus}\"")
             { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             // Drain BOTH pipes concurrently via RunBounded: the old sequential ReadToEnd(stdout) then ReadToEnd(stderr)
@@ -120,12 +128,18 @@ public static class ConversionGateTest
 
         string root = Directory.GetParent(Application.dataPath).FullName;
         string blender = UniversalBaker.FindBlender();
-        if (string.IsNullOrEmpty(blender)) return Bad("Blender not found — the deploy golden diff needs it");
+        // Absent prerequisites are a SKIP in an installed package (Tools/ does not ship yet; Blender may not be
+        // installed) and a loud FAIL at home, where their absence means the dev machine is broken.
+        if (string.IsNullOrEmpty(blender))
+            return HafPackageContext.RunningAsPackage ? Skip("Blender was not found on this machine.")
+                                                      : Bad("Blender not found — the deploy golden diff needs it");
         string convert = Path.Combine(root, "Tools", "deploy_convert.py");
         string dump = Path.Combine(root, "Tools", "deploy_bonedump.py");
         string goldDir = Path.Combine(root, "Tools", "deploy_golden");
         string fsRoot = Path.Combine(root, "Assets", "FactorySource");
-        if (!File.Exists(convert) || !File.Exists(dump)) return Bad("Tools/deploy_convert.py or deploy_bonedump.py missing");
+        if (!File.Exists(convert) || !File.Exists(dump))
+            return HafPackageContext.RunningAsPackage ? Skip("the Blender helper scripts (Tools/) are not in the installed package yet.")
+                                                      : Bad("Tools/deploy_convert.py or deploy_bonedump.py missing");
         if (!Directory.Exists(fsRoot)) return Skip("no Assets/FactorySource — no deploy-convert models to test");
         var argFiles = Directory.GetFiles(fsRoot, "deploy_converted.args.txt", SearchOption.AllDirectories).OrderBy(x => x).ToArray();
         if (argFiles.Length == 0) return Skip("no deploy-convert models (FactorySource/*/deploy_converted.args.txt)");

@@ -1214,7 +1214,7 @@ public class AnimationLabWindow : EditorWindow
             cur.animPhaseSpread, 0f, 1f);
         if (!UniversalBaker.BlenderAvailable())
             EditorGUILayout.HelpBox("The animated bake needs Blender (to slim the rig + bake the clip) — it wasn't found. " +
-                "Install Blender or set EditorPrefs 'ENC.blenderPath' to blender.exe.", MessageType.Warning);
+                "Install Blender or set EditorPrefs 'HAF.BlenderPath' to blender.exe.", MessageType.Warning);
 
         // --- Behavior (LEGACY single-clip runtime flags — superseded by the state machine and HIDDEN whenever
         //     State-driven is ON: the two are mutually exclusive, and dead sliders confuse. Full removal is staged

@@ -66,13 +66,17 @@ rather than working around it.
 The tools ship with automatic backups, an asset-delete guard and a console filter. In an installed package all three
 are **off**, and your project is not modified until you turn them on in `Tools ▸ HAF ▸ Backup & Restore`.
 
-### Two current limits
+### What it reads and writes
+
+- **Your pack is your own.** The tools read and write `haf_packs/<YourProjectName>` — derived from the project name,
+  authorable via the `HAF.Pack.Name` / `HAF.Pack.ModId` EditorPrefs — starting **empty**. An installed package never
+  reads, shows, or bakes another mod's pack.
+
+### One current limit
 
 - **Blender helpers aren't in the package yet.** Anything that shells out to Blender — tri-reduction, part-stripping,
   animated conversion — won't find its scripts. Set `targetTris` to `0` and bring your mesh in at the polycount you
   want.
-- **Pack identity is fixed** to `haf_packs/ENCReload` / `modId: "enc"`. Irrelevant for projectiles, which never touch
-  the registry; blocking if you want unit models in your own pack. See [Decisions.md](Decisions.md).
 
 > **Don't use the Releases page for this.** `HumankindAssetFramework-v0.1.0.zip` there is the *runtime plugin* from
 > step 2, not the tools. The URL above is the only install.
