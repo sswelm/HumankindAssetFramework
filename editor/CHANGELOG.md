@@ -3,6 +3,14 @@
 The **package** changelog: what changed for someone who installs the tools. (The project-wide engineering log
 lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `editor-vX.Y.Z`.
 
+## 0.4.11 — 2026-08-25
+
+- **No more stale "update available" during an update.** Between *Update now* and Unity's reload, the old
+  version's code keeps answering the menu — Package Manager already shows the new version while the check still
+  reports the old one, and a re-click re-offered an update that was already applied. The check now latches while
+  a fetch is in flight (*"update to X is in progress — Unity will reload when it's done"*), unlatches itself the
+  moment the running version matches, and a failed fetch clears the latch so checks are never wedged off.
+
 ## 0.4.10 — 2026-08-25
 
 - Version-only bump: the live fixture for 0.4.9's one-click update. From an 0.4.9 install,

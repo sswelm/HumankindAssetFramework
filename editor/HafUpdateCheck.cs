@@ -36,8 +36,30 @@ internal static class HafUpdateCheck
         catch { }   // an update check must never break editor start-up
     }
 
+    // IN-FLIGHT LATCH (2026-08-25, drilled into existence by the user hitting the gap three times). Between
+    // "Update now" and the domain reload that installs the new version, the OLD assembly keeps answering the
+    // menu — Package Manager already shows the new version while the running code still reports itself, so a
+    // re-click re-offered an update that was already applied ("weird, I updated but it still says the previous
+    // version"). SessionState survives the reload; the flag clears itself the first time the running version
+    // matches what was being fetched.
+    const string InflightKey = "HAF.UpdateCheck.InflightVersion";
+
     static void Check(bool manual)
     {
+        string inflight = UnityEditor.SessionState.GetString(InflightKey, "");
+        if (!string.IsNullOrEmpty(inflight))
+        {
+            if (inflight == HafPackageContext.Version)
+                UnityEditor.SessionState.EraseString(InflightKey);   // the update landed — back to normal checks
+            else
+            {
+                if (manual) UnityEngine.Debug.Log(
+                    $"[HAF] update to {inflight} is in progress — Package Manager is fetching and Unity will " +
+                    "reload when it's done. Nothing to do; check again after the reload.");
+                return;
+            }
+        }
+
         var req = UnityEngine.Networking.UnityWebRequest.Get(RawManifest);
         req.timeout = 10;
         var op = req.SendWebRequest();
@@ -106,6 +128,7 @@ internal static class HafUpdateCheck
     static UnityEditor.PackageManager.Requests.AddRequest updateReq;
     static void ApplyUpdate(string url, string remote)
     {
+        UnityEditor.SessionState.SetString(InflightKey, remote);   // latch until the running version IS this one
         UnityEngine.Debug.Log($"[HAF] updating to {remote} — Package Manager is fetching {url} …");
         updateReq = UnityEditor.PackageManager.Client.Add(url);
         UnityEditor.EditorApplication.update += PollUpdate;
@@ -117,8 +140,11 @@ internal static class HafUpdateCheck
         if (updateReq.Status == UnityEditor.PackageManager.StatusCode.Success)
             UnityEngine.Debug.Log($"[HAF] updated — HAF Authoring Tools {updateReq.Result.version} is installed.");
         else
+        {
+            UnityEditor.SessionState.EraseString(InflightKey);   // a FAILED fetch must not latch checks off
             UnityEngine.Debug.LogWarning("[HAF] update failed: " + updateReq.Error?.message +
                                          " — Window ▸ Package Manager ▸ HAF Authoring Tools ▸ Update works as the fallback.");
+        }
         updateReq = null;
     }
 
