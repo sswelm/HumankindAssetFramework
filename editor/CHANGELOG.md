@@ -3,6 +3,13 @@
 The **package** changelog: what changed for someone who installs the tools. (The project-wide engineering log
 lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `editor-vX.Y.Z`.
 
+## 0.4.13 — 2026-08-25
+
+- **A menu click is answered with a dialog.** Every outcome of `Check for Updates…` now shows one — *up to
+  date*, *update already in progress*, *could not reach the repository*, *check failed* — because the person who
+  clicked is looking at the menu, not the console. The daily automatic check stays a single console line, as
+  promised.
+
 ## 0.4.12 — 2026-08-25
 
 - Version-only bump: the live fixture for 0.4.11's in-flight latch. From an 0.4.11 install: *Check for

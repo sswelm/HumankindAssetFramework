@@ -53,9 +53,13 @@ internal static class HafUpdateCheck
                 UnityEditor.SessionState.EraseString(InflightKey);   // the update landed — back to normal checks
             else
             {
-                if (manual) UnityEngine.Debug.Log(
-                    $"[HAF] update to {inflight} is in progress — Package Manager is fetching and Unity will " +
-                    "reload when it's done. Nothing to do; check again after the reload.");
+                // A MENU CLICK IS ANSWERED WITH A DIALOG (2026-08-25, user: "when it's already up to date it
+                // would be nice the user gets an actual dialog rather than only the console"). Every manual
+                // outcome shows one — up to date, in progress, failed — because the person who clicked is
+                // looking at the menu, not the console. The DAILY check stays console-only, as promised.
+                if (manual) UnityEditor.EditorUtility.DisplayDialog("HAF Authoring Tools",
+                    $"An update to {inflight} is already in progress.\n\n" +
+                    "Package Manager is fetching it; Unity will reload when it's done.", "OK");
                 return;
             }
         }
@@ -68,11 +72,16 @@ internal static class HafUpdateCheck
             try
             {
                 if (req.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
-                { if (manual) UnityEngine.Debug.LogWarning("[HAF] update check failed: " + req.error); return; }
+                {
+                    if (manual) UnityEditor.EditorUtility.DisplayDialog("HAF Authoring Tools",
+                        "The update check could not reach the repository:\n\n" + req.error +
+                        "\n\nCheck your connection, or use Window ▸ Package Manager ▸ HAF Authoring Tools ▸ Update.", "OK");
+                    return;
+                }
                 var m = System.Text.RegularExpressions.Regex.Match(
                     req.downloadHandler.text, "\"version\"\\s*:\\s*\"([0-9.]+)\"");
                 if (!m.Success)
-                { if (manual) UnityEngine.Debug.LogWarning("[HAF] update check: could not read the remote version."); return; }
+                { if (manual) UnityEditor.EditorUtility.DisplayDialog("HAF Authoring Tools", "The update check could not read the remote version file.", "OK"); return; }
                 string remote = m.Groups[1].Value;
                 string local = HafPackageContext.Version;
                 if (string.IsNullOrEmpty(local)) local = "0.0.0";
@@ -100,9 +109,14 @@ internal static class HafUpdateCheck
                             $"and sends nothing; disable it with EditorPrefs '{PrefAuto}' = false.)");
                 }
                 else if (manual)
-                    UnityEngine.Debug.Log($"[HAF] up to date — installed {local}; newest release is {remote}.");
+                    UnityEditor.EditorUtility.DisplayDialog("HAF Authoring Tools",
+                        $"Up to date.\n\nInstalled: {local} — this is the newest release.", "OK");
             }
-            catch (System.Exception e) { if (manual) UnityEngine.Debug.LogWarning("[HAF] update check: " + e.Message); }
+            catch (System.Exception e)
+            {
+                if (manual) UnityEditor.EditorUtility.DisplayDialog("HAF Authoring Tools",
+                    "The update check failed:\n\n" + e.Message, "OK");
+            }
             finally { req.Dispose(); }
         };
     }
