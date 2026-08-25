@@ -3,6 +3,12 @@
 The **package** changelog: what changed for someone who installs the tools. (The project-wide engineering log
 lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `editor-vX.Y.Z`.
 
+## 0.4.10 — 2026-08-25
+
+- Version-only bump: the live fixture for 0.4.9's one-click update. From an 0.4.9 install,
+  `Tools ▸ HAF ▸ Check for Updates…` should show the *Update now* dialog for this release — the first update
+  ever applied without opening Package Manager.
+
 ## 0.4.9 — 2026-08-25
 
 - **The update check now applies the update.** `Tools ▸ HAF ▸ Check for Updates…`, on finding a newer release,
