@@ -29,7 +29,7 @@ an advanced shortcut, not an easier start; it's described in [Multi-Mod.md](Mult
 | **The Humankind ModTools SDK** | Turns a Unity project into a Humankind mod project. | [Games2Gether modding](https://www.games2gether.com/amplitude-studios/humankind/modding) |
 | **The HAF authoring tools** | The Model Factory and every Lab, as a Unity package. | [Installation §3](Installation.md#3-the-authoring-tools) |
 | **Blender** (free, optional) | Only for tri-reduction, part-stripping and animated bakes. A static model needs none. | [blender.org/download](https://www.blender.org/download/) |
-| **A 3D model** | HAF is the *pipeline*, not an art library — bring a licensed **GLB / glTF / FBX / OBJ**. Prefer a **game-ready** model. | [Sketchfab](https://sketchfab.com/features/free-3d-models) — every model HAF ships came from there. Filter by **Downloadable** + a **CC** licence; **CC-BY** means free to use *with credit*. Record yours in [CREDITS.md](../CREDITS.md). |
+| **A 3D model** | HAF is the *pipeline*, not an art library — bring a licensed model — **.glb preferred** (also glTF / OBJ / FBX / .blend). Prefer a **game-ready** model. | [Sketchfab](https://sketchfab.com/features/free-3d-models) — every model HAF ships came from there. Filter by **Downloadable** + a **CC** licence; **CC-BY** means free to use *with credit*. Record yours in [CREDITS.md](../CREDITS.md). |
 
 > **Look for "game ready".** It is a real tag on Sketchfab and it is the single best predictor of a smooth bake: a
 > low, sane triangle count, one or few materials, proper UVs and a baked texture. The opposite — a CAD or
@@ -59,7 +59,7 @@ Full detail, and what to do if that isn't what you see: [**Installation.md §3**
 
 Open **`Tools ▸ HAF ▸ Model Factory`**, then:
 
-1. **Model file** — Browse to your `.glb`/`.obj`.
+1. **Model file** — Browse to your model. **Prefer `.glb`**: it is one self-contained file (mesh + textures + rig), Sketchfab's default download, and imports through the shipped converter with **no Blender needed**. `.obj`/`.gltf` also work Blender-free; `.fbx` and `.blend` import through Blender, so they need it installed.
 2. **Resource name** — one token, e.g. `MyTank` (letters/digits/`_`/`-`, **no spaces**).
 3. **Pawn description** — **Pick** the vanilla unit your model replaces (its `PresentationPawnDefinition`).
 4. Leave the shading/geometry defaults; set **Size** to roughly the unit's real scale.
