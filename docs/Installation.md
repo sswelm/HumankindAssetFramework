@@ -80,12 +80,21 @@ are **off**, and your project is not modified until you turn them on in `Tools �
 
 ### Updating the tools
 
-**Updates do not announce themselves.** A git-installed package has no registry to ask, so Package Manager shows
-your installed version with a green check no matter what has shipped since — the check means "matches your lock
-file", not "latest". (Verified live: a restart and a refresh after a new release showed nothing.)
+**Unity tells you nothing about updates to a git package** — no registry to ask, so Package Manager shows your
+installed version under a green check no matter what has shipped, and neither a restart nor its refresh button
+changes that (verified live). The tools carry their own update system instead; every part of it was verified
+live going 0.4.4 → 0.4.10:
 
-To update: select **HAF Authoring Tools** in Package Manager and press **Update** — it re-fetches the repository
-and installs the newest version. One click; verified live going 0.4.4 → 0.4.5.
+- **You are told when a release exists.** Once a day, an installed package reads one public file from its own
+  repository (`editor/package.json` — anonymous, read-only, nothing sent) and prints a single console line when
+  something newer is out. Disable with EditorPrefs `HAF.UpdateCheck = false`.
+- **`Tools ▸ HAF ▸ Check for Updates…`** asks on demand — it answers *"up to date"* or offers **Update now**,
+  which hands the fetch to Package Manager for you (the same operation as its Update button) and logs
+  `[HAF] updated — X.Y.Z is installed` when done. One click, no Package Manager trip.
+- Package Manager's own **Update** button on the HAF row works too, as the manual fallback.
+- **View changelog** on the package opens the release notes
+  ([`editor/CHANGELOG.md`](https://github.com/sswelm/HumankindAssetFramework/blob/master/editor/CHANGELOG.md)) —
+  read it to decide whether an update is worth taking.
 
 **Nothing of yours is touched by an update.** The package is read-only (it lives in Unity's package cache); your
 authored data — the pack registry, baked assets, skins, sounds, settings — lives in *your* project and your
@@ -94,11 +103,11 @@ authored data — the pack registry, baked assets, skins, sounds, settings — l
 **To pin instead** (a fixed version that never moves until you choose): append a release tag to the install URL —
 
 ```
-https://github.com/sswelm/HumankindAssetFramework.git?path=/editor#editor-v0.4.5
+https://github.com/sswelm/HumankindAssetFramework.git?path=/editor#editor-v0.4.10
 ```
 
 Releases are tagged `editor-vX.Y.Z`; the [tag list](https://github.com/sswelm/HumankindAssetFramework/tags) is the
-version history. A pinned install ignores the Update button by design — change the tag in the URL to move.
+version history. A pinned install ignores every update path by design — change the tag in the URL to move.
 
 > **Don't use the Releases page for this.** `HumankindAssetFramework-v0.1.0.zip` there is the *runtime plugin* from
 > step 2, not the tools. The URL above is the only install.

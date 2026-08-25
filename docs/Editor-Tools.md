@@ -18,9 +18,19 @@ https://github.com/sswelm/HumankindAssetFramework.git?path=/editor
 ```
 
 The install is inert by design: automatic backups, the asset-delete guard and the console filter all default **off**
-in an installed package and on in ENCReload itself (`HafPackageContext` reads the context from
-`UnityEditor.PackageManager`). See [Getting-Started.md](Getting-Started.md) for the ordered path and the two current
-limits — `Tools/` doesn't ship in the package yet, and pack identity is still fixed to ENC's.
+in an installed package and on in the tools' own development checkout (`HafPackageContext` decides by *how* the
+package is installed — git/registry is a consumer install, `file:`/embedded is the working copy). An installed
+package owns its **own pack** (`haf_packs/<YourProjectName>`, starting empty) and ships the Blender helper scripts
+and the `glbconv` importer inside (`Tools~`), so a static `.glb` bake needs nothing installed beyond the package.
+See [Getting-Started.md](Getting-Started.md) for the ordered path and [Installation.md](Installation.md) for
+install, verification and updating.
+
+### Check for Updates — `Tools ▸ HAF ▸ Check for Updates…`
+Unity never reports updates for a git package, so the tools do it themselves: this asks the package's own
+repository and either answers *"up to date"* or offers **Update now**, which hands the fetch to Package Manager
+(the same operation as its Update button). An installed package also checks once a day and prints one console line
+when a release exists — read-only, nothing sent, off via EditorPrefs `HAF.UpdateCheck = false`. Release notes are
+behind the package's *View changelog* link. Details: [Installation.md](Installation.md#updating-the-tools).
 
 ## Where the tools write — the registries
 
