@@ -3,6 +3,13 @@
 The **package** changelog: what changed for someone who installs the tools. (The project-wide engineering log
 lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `editor-vX.Y.Z`.
 
+## 0.4.9 — 2026-08-25
+
+- **The update check now applies the update.** `Tools ▸ HAF ▸ Check for Updates…`, on finding a newer release,
+  offers *Update now* — one click hands the fetch to Package Manager (`Client.Add` with this install's own URL,
+  the same operation as its Update button). The daily check stays a console line on purpose: an unrequested
+  dialog on editor start is exactly the surprise this package promises not to be.
+
 ## 0.4.8 — 2026-08-25
 
 - Version-only bump so the update check shipped in 0.4.6 could be verified live: an install on 0.4.7 should

@@ -55,17 +55,71 @@ internal static class HafUpdateCheck
                 string local = HafPackageContext.Version;
                 if (string.IsNullOrEmpty(local)) local = "0.0.0";
                 if (Newer(remote, local))
-                    UnityEngine.Debug.Log(
-                        $"[HAF] HAF Authoring Tools {remote} is available (installed: {local}). " +
-                        "Window ▸ Package Manager ▸ HAF Authoring Tools ▸ Update — updates never touch your " +
-                        "project's data. (This once-a-day check reads one public file from the package's own " +
-                        $"repository and sends nothing; disable it with EditorPrefs '{PrefAuto}' = false.)");
+                {
+                    // The MANUAL check doesn't just report — it offers to apply. Package Manager's own Update
+                    // button is Client.Add() with the package's install URL, and PackageInfo carries that URL,
+                    // so "found a newer version" can end in one click instead of a trip through another window.
+                    // The DAILY check stays a console line: an unrequested modal dialog on editor start is
+                    // exactly the kind of surprise this package promises not to be.
+                    string installUrl = InstallUrl();
+                    if (manual && installUrl != null && UnityEditor.EditorUtility.DisplayDialog(
+                            "HAF Authoring Tools",
+                            $"{remote} is available (installed: {local}).\n\n" +
+                            "Update now? Package Manager fetches the new version; your project's data — packs, " +
+                            "bakes, skins, settings — is never touched by an update.",
+                            "Update now", "Later"))
+                        ApplyUpdate(installUrl, remote);
+                    else
+                        UnityEngine.Debug.Log(
+                            $"[HAF] HAF Authoring Tools {remote} is available (installed: {local}). " +
+                            "Update from Tools ▸ HAF ▸ Check for Updates…, or Window ▸ Package Manager ▸ " +
+                            "HAF Authoring Tools ▸ Update — updates never touch your project's data. " +
+                            "(This once-a-day check reads one public file from the package's own repository " +
+                            $"and sends nothing; disable it with EditorPrefs '{PrefAuto}' = false.)");
+                }
                 else if (manual)
                     UnityEngine.Debug.Log($"[HAF] up to date — installed {local}; newest release is {remote}.");
             }
             catch (System.Exception e) { if (manual) UnityEngine.Debug.LogWarning("[HAF] update check: " + e.Message); }
             finally { req.Dispose(); }
         };
+    }
+
+    /// The URL this install came from — the part of PackageInfo.packageId after the '@'
+    /// ("com.sswelm.haf-authoring@https://github.com/….git?path=/editor"). Null when it isn't a git install
+    /// (home working copy, registry) — there is nothing sensible to re-Add then.
+    static string InstallUrl()
+    {
+        try
+        {
+            var info = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(HafUpdateCheck).Assembly);
+            if (info == null || info.source != UnityEditor.PackageManager.PackageSource.Git) return null;
+            int at = info.packageId.IndexOf('@');
+            return at > 0 ? info.packageId.Substring(at + 1) : null;
+        }
+        catch { return null; }
+    }
+
+    // Client.Add with the SAME git URL is what Package Manager's Update button does: re-resolve, fetch, update
+    // the lock. The request is polled on the editor tick; the domain reload that installs the new version tears
+    // the poller down mid-flight, which is fine — by then the update is already in Unity's hands.
+    static UnityEditor.PackageManager.Requests.AddRequest updateReq;
+    static void ApplyUpdate(string url, string remote)
+    {
+        UnityEngine.Debug.Log($"[HAF] updating to {remote} — Package Manager is fetching {url} …");
+        updateReq = UnityEditor.PackageManager.Client.Add(url);
+        UnityEditor.EditorApplication.update += PollUpdate;
+    }
+    static void PollUpdate()
+    {
+        if (updateReq == null || !updateReq.IsCompleted) return;
+        UnityEditor.EditorApplication.update -= PollUpdate;
+        if (updateReq.Status == UnityEditor.PackageManager.StatusCode.Success)
+            UnityEngine.Debug.Log($"[HAF] updated — HAF Authoring Tools {updateReq.Result.version} is installed.");
+        else
+            UnityEngine.Debug.LogWarning("[HAF] update failed: " + updateReq.Error?.message +
+                                         " — Window ▸ Package Manager ▸ HAF Authoring Tools ▸ Update works as the fallback.");
+        updateReq = null;
     }
 
     // a > b for "X.Y.Z" (missing segments count as 0; non-numeric segments as 0 — additive-only versioning here)
