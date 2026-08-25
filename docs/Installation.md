@@ -78,6 +78,28 @@ are **off**, and your project is not modified until you turn them on in `Tools �
   animated conversion — won't find its scripts. Set `targetTris` to `0` and bring your mesh in at the polycount you
   want.
 
+### Updating the tools
+
+**Updates do not announce themselves.** A git-installed package has no registry to ask, so Package Manager shows
+your installed version with a green check no matter what has shipped since — the check means "matches your lock
+file", not "latest". (Verified live: a restart and a refresh after a new release showed nothing.)
+
+To update: select **HAF Authoring Tools** in Package Manager and press **Update** — it re-fetches the repository
+and installs the newest version. One click; verified live going 0.4.4 → 0.4.5.
+
+**Nothing of yours is touched by an update.** The package is read-only (it lives in Unity's package cache); your
+authored data — the pack registry, baked assets, skins, sounds, settings — lives in *your* project and your
+`BepInEx/config`, which an update never writes.
+
+**To pin instead** (a fixed version that never moves until you choose): append a release tag to the install URL —
+
+```
+https://github.com/sswelm/HumankindAssetFramework.git?path=/editor#editor-v0.4.5
+```
+
+Releases are tagged `editor-vX.Y.Z`; the [tag list](https://github.com/sswelm/HumankindAssetFramework/tags) is the
+version history. A pinned install ignores the Update button by design — change the tag in the URL to move.
+
 > **Don't use the Releases page for this.** `HumankindAssetFramework-v0.1.0.zip` there is the *runtime plugin* from
 > step 2, not the tools. The URL above is the only install.
 
