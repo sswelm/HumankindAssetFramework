@@ -92,7 +92,8 @@ The deployed module lands in Humankind's `Community` folder as a normal mod.
 3. Open **`BepInEx/config/haf_load_report.txt`** — your pack should be listed with its model count and no conflicts.
 
 Your unit now renders with the custom model. If it doesn't, the load report and the Factory's own failure messages name
-the fix (start with the troubleshooting table in [Factory-Manual.md](Factory-Manual.md)).
+the fix. Start from the symptom in [**Troubleshooting.md**](Troubleshooting.md); it routes installation, bake, bundle,
+pack, texture, animation, district, sound, binding, and performance failures to their authoritative sections.
 
 ---
 

@@ -16,6 +16,7 @@ This page is the map of the docs themselves.
 | I want to… | Go to |
 |---|---|
 | **Put my first model on a unit** | [**Getting-Started.md**](Getting-Started.md) — the ordered path, bake → build → launch |
+| **Diagnose something that is broken** | [**Troubleshooting.md**](Troubleshooting.md) — start from the symptom and follow the evidence to its owning guide |
 | **Look up a Factory field, or fix a bad bake** | [Factory-Manual.md](Factory-Manual.md) — the main guide, every field + troubleshooting |
 | **Find the right authoring window** | [Editor-Tools.md](Editor-Tools.md) — every window under `Tools ▸ HAF`, and what each one writes |
 | **Make my model move** | [Animated-Models.md](Animated-Models.md) — can HAF import *your* rig? |
@@ -31,7 +32,9 @@ This page is the map of the docs themselves.
 ## The pages
 
 ### Get started
+- [**Installation.md**](Installation.md) — install BepInEx, the runtime plugin, and the Unity authoring package; verify each layer.
 - [**Getting-Started.md**](Getting-Started.md) — **new here? start here.** Nothing → a custom unit on the map, each step linked to its deep doc.
+- [**Troubleshooting.md**](Troubleshooting.md) — **something failed? start with the symptom.** Evidence order and direct routes to each maintained failure catalog.
 - [**Building.md**](Building.md) — build the plugin; the Blender dependency.
 - [**Backup.md**](Backup.md) — the four-layer safety net for the un-versioned working set: manual versions, daily auto-versions, an undoable delete guard, offsite zips.
 

@@ -88,7 +88,7 @@ follows the new size.
 
 The multiply is applied as a **ratio, not an absolute**: each mesh records the factor currently baked into its
 vertices, and a new target multiplies by `target / applied`. Re-scaling is therefore idempotent and reversible
-instead of compounding — which is what makes [era anchoring](#era-anchoring-working) able to resize a unit *while
+instead of compounding — which is what makes [era anchoring](#era-ageing--the-global-era-lab) able to resize a unit *while
 the game runs*. The record is **self-verifying**: it also stores the first vertex exactly as it was left, so if the
 engine ever reloads its Fx content (menu round trip, streaming) the probe stops matching and the plugin re-scales
 from vanilla instead of trusting stale bookkeeping — closing both double-scaling and silent under-scaling.

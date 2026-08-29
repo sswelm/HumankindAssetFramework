@@ -8,6 +8,7 @@
 
 - [Getting Started](Getting-Started)
 - [Installation](Installation)
+- [Troubleshooting](Troubleshooting)
 - [Building](Building)
 - [Backup](Backup)
 

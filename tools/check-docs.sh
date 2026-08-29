@@ -4,35 +4,84 @@
 # Added 2026-08-20 with the docs/notes/ archive split. The docs are published three ways (the repo, the GitHub
 # Pages site via jekyll-relative-links, and the wiki via tools/sync_wiki.sh) and every one of them resolves
 # RELATIVE links — so one moved file breaks all three at once, silently. This guards what that split can break:
-#   1. every relative Markdown link resolves to a file that exists;
+#   1. every relative Markdown link resolves to a file and every #anchor resolves to a generated heading id;
 #   2. every page in docs/notes/ carries the ARCHIVED NOTE banner (the convention that makes the split mean something);
 #   3. no basename collides across docs/ and docs/notes/ (the wiki page namespace is FLAT — one would overwrite the other);
 #   4. schema version and shared-field count agree with code;
 #   5. maintained Pages links do not escape to repo-root relative URLs;
 #   6. the generated wiki has complete navigation and valid page targets;
 #   7. retired architecture claims do not return to current guides.
-# Anchors (#section) are NOT checked — only the file half of each link.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 fail=0
 broken="$(mktemp)"
+broken_anchors="$(mktemp)"
 wiki_tmp="$(mktemp -d)"
-trap 'rm -f "$broken"; rm -rf "$wiki_tmp"' EXIT
+trap 'rm -f "$broken" "$broken_anchors"; rm -rf "$wiki_tmp"' EXIT
+md_files="$(git ls-files --cached --others --exclude-standard '*.md')"
+
+heading_slugs() {
+  awk '
+    /^#{1,6}[[:space:]]+/ {
+      line = $0
+      sub(/\r$/, "", line)
+      sub(/^#{1,6}[[:space:]]+/, "", line)
+      sub(/[[:space:]]+#+[[:space:]]*$/, "", line)
+      gsub(/<[^>]*>/, "", line)
+      while (match(line, /\[[^]]+\]\([^)]*\)/)) {
+        token = substr(line, RSTART, RLENGTH)
+        label = token
+        sub(/^\[/, "", label)
+        sub(/\]\([^)]*\)$/, "", label)
+        line = substr(line, 1, RSTART - 1) label substr(line, RSTART + RLENGTH)
+      }
+      line = tolower(line)
+      gsub(/[^[:alnum:] _-]/, "", line)
+      gsub(/[[:space:]]/, "-", line)
+      if (line == "") next
+      n = seen[line]++
+      print n == 0 ? line : line "-" n
+    }
+  ' "$1"
+}
+
+declare -A anchors_loaded=()
+declare -A anchor_ids=()
+load_anchors() {
+  local file="$1" slug
+  [ "${anchors_loaded[$file]:-}" = 1 ] && return
+  while IFS= read -r slug; do anchor_ids["$file#$slug"]=1; done < <(heading_slugs "$file")
+  anchors_loaded["$file"]=1
+}
 
 # ---- 1. relative links resolve -------------------------------------------------------------------------------
-for f in $(git ls-files '*.md'); do
+for f in $md_files; do
   # This source becomes GitHub wiki's _Sidebar.md; its extensionless targets are wiki page names, not repo files.
   # The generated-wiki phase below validates every one against the emitted page set.
   [ "$f" = "tools/wiki-sidebar.md" ] && continue
   d="$(dirname "$f")"
   for target in $(grep -oE '\]\([^) ]+\)' "$f" | sed -e 's/^](//' -e 's/)$//'); do
-    case "$target" in http:*|https:*|mailto:*|'#'*) continue ;; esac
+    case "$target" in http:*|https:*|mailto:*) continue ;; esac
     path="${target%%#*}"                       # drop the anchor
-    [ -z "$path" ] && continue                 # was a pure anchor
-    [ -e "$d/$path" ] || printf '  BROKEN LINK  %s -> %s\n' "$f" "$target" >> "$broken"
+    if [ -n "$path" ] && [ ! -e "$d/$path" ]; then
+      printf '  BROKEN LINK  %s -> %s\n' "$f" "$target" >> "$broken"
+      continue
+    fi
+    case "$target" in
+      *'#'*)
+        anchor="${target#*#}"
+        [ -n "$anchor" ] || continue
+        if [ -z "$path" ]; then target_file="$f"; else target_file="$d/$path"; fi
+        [ -f "$target_file" ] || continue
+        load_anchors "$target_file"
+        [ "${anchor_ids["$target_file#$anchor"]:-}" = 1 ] ||
+          printf '  BROKEN ANCHOR  %s -> %s\n' "$f" "$target" >> "$broken_anchors"
+        ;;
+    esac
   done
 done
 if [ -s "$broken" ]; then cat "$broken"; fail=1; fi
+if [ -s "$broken_anchors" ]; then cat "$broken_anchors"; fail=1; fi
 
 # ---- 2. every archived note carries the banner ---------------------------------------------------------------
 for f in docs/notes/*.md; do
@@ -116,5 +165,5 @@ if grep -nEi "$retired" "${current_guides[@]}"; then
   fail=1
 fi
 
-[ "$fail" -eq 0 ] && echo "docs: OK — repo/Pages/wiki links, sidebar coverage, archive rules, schema claims, and current architecture agree"
+[ "$fail" -eq 0 ] && echo "docs: OK — repo/Pages/wiki links + anchors, sidebar coverage, archive rules, schema claims, and current architecture agree"
 exit "$fail"

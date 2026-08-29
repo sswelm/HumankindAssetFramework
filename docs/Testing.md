@@ -60,7 +60,8 @@ The docs publish **three** ways — the repo, the [Pages site](https://sswelm.gi
 (which rewrites relative `.md` links via `jekyll-relative-links`), and the wiki (`tools/sync_wiki.sh`) — and all
 three resolve *relative* links. So one moved page breaks three surfaces at once, silently. The guard checks:
 
-1. **every relative Markdown link resolves** to a file that exists (anchors are not checked, only the path);
+1. **every relative Markdown link and `#anchor` resolves** — anchors are derived from the target's headings using
+   GitHub's lowercase/punctuation/whitespace and duplicate-suffix rules;
 2. **every page in `docs/notes/` opens with the `ARCHIVED NOTE` banner** — the convention that makes the
    maintained-vs-archived split mean something rather than being a folder name;
 3. **no basename collides across `docs/` and `docs/notes/`** — the wiki page namespace is flat, so a collision
@@ -72,7 +73,7 @@ three resolve *relative* links. So one moved page breaks three surfaces at once,
 7. **retired pre-package claims stay out of current guides** (cross-repo editor paths, missing helpers, hardcoded
    guest identity). Historical review pages remain intentionally untouched.
 
-Fault-injected on the day it was written (2026-08-20): a planted dead link, a banner-less note, and a planted
+Fault-injected: a dead file link, a valid file with a nonexistent heading anchor, a banner-less note, and a planted
 `docs/notes/Textures.md` collision were each caught with a named failure, and the baseline returned to green.
 
 Run it any time by hand: `bash tools/check.sh`. **Enable the hook once per clone:**

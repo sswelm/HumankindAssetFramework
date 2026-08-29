@@ -6,7 +6,7 @@ whose dummy count and layout you author in the Unity SDK, and the plugin injects
 repoints the unit at load. Fully reversible: delete the link and the unit is vanilla next launch.
 
 > Status: **VERIFIED IN-GAME 2026-07-28** — 12-, 16-, 19- and 32-model units render correctly (all models on the
-> hex, banner centered). The fix is count-agnostic; the vanilla 9/10 ceiling is gone. See [The >9 story](#the-9-story).
+> hex, banner centered). The fix is count-agnostic; the vanilla 9/10 ceiling is gone. See [The >9 story](#the-9-story-the-vanilla-dummy-pool-ceiling).
 > Model **scale** is built with two selectable modes — solved for spacing and non-human models, WIP on vanilla
 > humans; see [Model scale](#model-scale-two-modes-and-their-limits) before using it.
 
@@ -60,7 +60,7 @@ eras progress" without touching every unit definition.
    dummies + XYZ fields.
 2. **Author** it: add/remove dummies (each needs 6 `CoordinatePerDirection` entries), set positions, keep the six
    `ColumnsCountPerRow` arrays consistent (cell counts must equal the dummy count). Inconsistent grids make the game
-   throw at load — see [Troubleshooting](#troubleshooting).
+   throw at load — see [Troubleshooting](#troubleshooting-read-bepinexlogoutputlog).
 3. **Link** it: open **Tools ▸ HAF ▸ Formation Override**, **Pick** the unit (`PresentationUnitDefinition` name,
    e.g. `PresentationLandUnit_Era1_Common_Warriors_Default`), **Pick** the formation asset, **Save link**.
 4. **Launch** — no rebuild. The plugin reads `haf_formations.json` from `BepInEx/config`, rebuilds the formation as a

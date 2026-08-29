@@ -27,12 +27,14 @@ so an agent can crawl the whole doc set from here with no authentication. The hu
 
 ## Common questions → where to look
 - **First time — where do I start?** docs/Getting-Started.md (the ordered zero-to-in-game path).
+- **Something is broken — how do I diagnose it?** docs/Troubleshooting.md (symptom-first router + minimum evidence packet).
 - **Add a static unit model?** docs/Factory-Manual.md (static workflow).
 - **Add an animated vehicle or character?** docs/Animated-Models.md (what's importable), then docs/Factory-Manual.md §16.
 - **Ship a separate HAF asset pack?** docs/Multi-Mod.md (pack format + the `haf_packs/` drop folder).
 
 ## Start here
 - [docs/Getting-Started.md](docs/Getting-Started.md): the ordered zero-to-in-game path (bake → build & deploy → launch & verify), each step linked to its deep doc. New authors start here.
+- [docs/Troubleshooting.md](docs/Troubleshooting.md): symptom-first diagnosis across installation, bake, bundle, pack, texture, animation, districts, sound, bindings, and performance; routes to the authoritative failure catalog rather than duplicating it.
 - [docs/Decisions.md](docs/Decisions.md): the ADR log — settled decisions + the *why* (pack ordering, reflection strategy, ownership split, rotation-only animation, testing stance). Read before proposing a change to any of them.
 - [README.md](README.md): project overview — what HAF is, the seven axes, the full feature list, tech stack, and status.
 - [docs/README.md](docs/README.md): the documentation index, grouped by task.
@@ -73,7 +75,7 @@ so an agent can crawl the whole doc set from here with no authentication. The hu
 - [CHANGELOG.md](CHANGELOG.md): the dated milestone log and the war stories behind each capability.
 - [docs/Framework-Review.md](docs/Framework-Review.md): verified code-review findings (prioritized) and the hardening order.
 - [docs/Review-Backlog.md](docs/Review-Backlog.md): the open review backlog.
-- [docs/Testing.md](docs/Testing.md): the testing strategy — what's unit-tested, what's covered by in-editor instruments, and why. Also the two gate lanes: `check.sh` as the pre-push hook (everything, incl. the guards needing Unity) vs GitHub Actions (the source-only subset, because a hook is per-clone config a `--no-verify` walks past), and the cross-repo schema parity that now runs from both repos. Owns the unit-test count.
+- [docs/Testing.md](docs/Testing.md): the testing strategy — what's unit-tested, what's covered by in-editor instruments, and why. Also the two gate lanes: `check.sh` as the pre-push hook (including checks that need Unity) vs GitHub Actions (the source-only subset), the in-repo schema parity guard, and the documentation/link guard. Owns the unit-test count.
 - [docs/Headless-CLI.md](docs/Headless-CLI.md): the headless CLI reference — re-bake models and run the full Humankind mod build+deploy from the command line (Unity batch mode via `-executeMethod`), so scripts/CI/agents drive HAF without the GUI. Built + verified.
 
 ## Optional
