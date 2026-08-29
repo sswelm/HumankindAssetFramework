@@ -31,9 +31,9 @@ render/cull cost).
 > decoupled, and the registry is the public API other mods build against. *("Model Factory" names one window of the
 > suite — the historical first one; in-editor the whole suite lives under `Tools ▸ HAF`.)*
 
-## The six axes
+## The seven axes
 
-HAF adds custom content in six places. Four inject custom **assets**; two retune units the game already ships, with no
+HAF adds custom content in seven places. Five inject custom **assets**; two retune units the game already ships, with no
 bake and nothing to undo but a deleted line. Each is proven in-game with a shipped example.
 
 | Axis | What it does | Assets? | Deep dive |
@@ -270,7 +270,7 @@ The full documentation set, grouped by task (get started · author · ship a pac
 - **Project history:** [CHANGELOG.md](CHANGELOG.md) — the dated milestone log and the war stories.
 
 ## Status & roadmap
-HAF is a **working, in-game-proven framework**. All six axes ship with a verified example, the runtime merges packs from
+HAF is a **working, in-game-proven framework**. All seven axes ship with a verified example, the runtime merges packs from
 multiple authors, and the ENC reference pack drives a roster of modern-era units. The plugin is stable, has a unit-test
 suite over its pure-data layer plus an in-game smoke harness, and a full documentation set.
 

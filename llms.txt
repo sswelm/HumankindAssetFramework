@@ -8,8 +8,9 @@ HAF has two halves that talk only through a JSON pack registry: the **Authoring 
 **runtime plugin** (inject, in the game). It is multi-mod by design — the runtime merges asset packs from many mods at once.
 Custom units ride the game's own GPU-instanced renderer, so repeated instances are cheap; cost scales with distinct model *types*, not units on screen.
 
-HAF adds custom content along **six axes**: units, districts, pawn props, and projectiles (each injects baked assets), plus
-formations and unit size (data-only retunes of existing units). Animation, audio, and retexturing are cross-cutting features.
+HAF adds custom content along **seven axes**: units, districts, wonders, pawn props, and projectiles (each injects baked
+assets), plus formations and unit size (data-only retunes of existing units). Animation, audio, and retexturing are
+cross-cutting features.
 
 This file is an AI-readable map of the documentation. Every link points to full Markdown and is **directly fetchable** —
 this file and all of its targets are public raw files under `https://raw.githubusercontent.com/sswelm/HumankindAssetFramework/master/`,
@@ -33,7 +34,7 @@ so an agent can crawl the whole doc set from here with no authentication. The hu
 ## Start here
 - [docs/Getting-Started.md](docs/Getting-Started.md): the ordered zero-to-in-game path (bake → build & deploy → launch & verify), each step linked to its deep doc. New authors start here.
 - [docs/Decisions.md](docs/Decisions.md): the ADR log — settled decisions + the *why* (pack ordering, reflection strategy, ownership split, rotation-only animation, testing stance). Read before proposing a change to any of them.
-- [README.md](README.md): project overview — what HAF is, the six axes, the full feature list, tech stack, and status.
+- [README.md](README.md): project overview — what HAF is, the seven axes, the full feature list, tech stack, and status.
 - [docs/README.md](docs/README.md): the documentation index, grouped by task.
 - [docs/Building.md](docs/Building.md): build the plugin and set up the Blender dependency.
 
