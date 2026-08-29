@@ -17,7 +17,7 @@
 # ModelEntry inherit, so the write type and the read type are the SAME declaration — compiler-enforced, can't diverge.
 #
 # Source-text comparison, no build coupling. Run before committing a registry-schema change:
-#   Tools/check_schema_parity.sh [ENCReload_root] [HumankindAssetFramework_root]
+#   bash tools/check_schema_parity.sh
 set -u
 # BOTH halves now live in THIS repo (the tools moved to editor/ on 2026-08-24), so this stopped being a
 # cross-repo guard: no ENCReload checkout, no [SKIP] branch, nothing to be one-directional about.

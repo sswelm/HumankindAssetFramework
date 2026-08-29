@@ -12,9 +12,10 @@ If you change code and one of these stops being true, update this page in the sa
 
 ## 1. The shape: two halves, one contract
 
-- **Editor half** — the HAF Authoring Tools in Unity ([ENCReload](https://github.com/sswelm/ENCReload)). It *bakes*:
-  turns a model into Amplitude `Skeleton` / `ClipCollection` / mesh / atlas assets and writes `pack.json`.
-- **Runtime half** — this repo, a BepInEx plugin. It *injects*: reads the packs, registers the baked assets in the
+- **Editor half** — the installable HAF Authoring Tools in [`editor/`](https://github.com/sswelm/HumankindAssetFramework/tree/master/editor). It *bakes*: turns a model into
+  Amplitude `Skeleton` / `ClipCollection` / mesh / atlas assets and writes `pack.json`; ENCReload is the reference
+  Unity project that consumes the package.
+- **Runtime half** — the BepInEx plugin in this repo. It *injects*: reads the packs, registers the baked assets in the
   live game, repoints pawns and districts onto them.
 - **The contract** — a JSON pack, whose shared fields are defined **once** in `Haf.Schema` (netstandard2.0) and
   inherited by both halves' model classes ([Shared-Schema.md](Shared-Schema.md)). The pre-push gate's parity check
@@ -24,8 +25,8 @@ If you change code and one of these stops being true, update this page in the sa
 string-based reflection (§4). That is why CI builds from public sources with no game files, and why the test suite can
 host the plugin in a plain xUnit process.
 
-**Invariant:** there is **no cross-repo copy** of editor code in this repo ([Decisions](Decisions.md): "a cross-repo
-copy is either authoritative or it doesn't exist"). The `baker/` snapshot was deleted 2026-08-21; do not bring one back.
+**Invariant:** there is exactly **one authoritative editor source**, under `editor/`. Do not recreate the deleted
+`baker/` editor snapshot or copy the package back into ENCReload; consumers install the package instead.
 
 ## 2. Threads
 

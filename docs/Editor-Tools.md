@@ -41,13 +41,14 @@ pinpointed corruption and one-click recovery in each window). The runtime plugin
 
 | Registry | Live path | Repo backup | Written by |
 |---|---|---|---|
-| **Model registry** (`pack.json`) | `config/haf_packs/ENCReload/pack.json` | `Assets/Pack/ENCReload/pack.json` | Model Factory, Animation Lab, Resize Lab, Unit Retexture, Sound Studio, Global Era Lab |
+| **Model registry** (`pack.json`) | `config/haf_packs/<PackName>/pack.json` | `Assets/Pack/<PackName>/pack.json` | Model Factory, Animation Lab, Resize Lab, Unit Retexture, Sound Studio, Global Era Lab |
 | **Districts** (`haf_districts.json`) | `config/haf_districts.json` (artifact) | `Assets/Databases/haf_districts.backup.json` (THE source — historical name) | District Factory |
 | **Formations** (`haf_formations.json`) | `config/haf_formations.json` (artifact) | `Assets/Databases/haf_formations.backup.json` (THE source — historical name) | Formation Override |
 | **Sound overrides** (`haf_sounds.json`) | `config/haf_sounds.json` | project backup | Game Sound Lab |
 | **Props** (`haf_props.json`) | `Assets/Databases/haf_props.json` | — | Prop Lab (editor-side recipe store; the runtime reads the baked GUIDs, not this file) |
 
-> `pack.json` is ENC's own **pack** (see [Multi-Mod.md](Multi-Mod.md)). Older docs/config call the base model file
+> `<PackName>` is `ENCReload` in the home project and is derived from the host project by `HafPackageContext` in a
+> guest package install. `pack.json` is that project's own **pack** (see [Multi-Mod.md](Multi-Mod.md)). Older docs/config call the base model file
 > `haf_models.json` colloquially — the real shipped filename is `pack.json` in the pack folder. Baked assets
 > (`<name>_ModelMesh` / `_Skeleton` / `_Atlas`) go under `Assets/Resources`.
 

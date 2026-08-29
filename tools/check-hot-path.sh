@@ -21,7 +21,7 @@ F=Plugin.cs
 
 start=$(grep -n "^        private void Update()" "$F" | head -1 | cut -d: -f1)
 [ -n "$start" ] || { echo "[FAIL] could not find Plugin.Update() — was it renamed? (this guard would silently pass)"; exit 2; }
-end=$(awk -v s="$start" 'NR>s && /^        }$/ {print NR; exit}' "$F")
+end=$(awk -v s="$start" 'NR>s { sub(/\r$/, ""); if ($0 == "        }") { print NR; exit } }' "$F")
 [ -n "$end" ] || { echo "[FAIL] could not find the end of Plugin.Update()"; exit 2; }
 
 # CASE-INSENSITIVE, both halves (2026-08-22). The gate shipped case-sensitive and therefore passed on three live

@@ -6,12 +6,10 @@ ship a config file plus your assets; the runtime discovers, merges, and reports.
 
 This is the *loader* contract. For how to **bake** a model into the assets a pack references, see [`Factory-Manual.md`](Factory-Manual.md).
 
-> **One honest caveat, and it is on the *authoring* side only.** Everything on this page — discovery, resolution,
-> merge, conflicts, declared overrides, the tuning tables — is fully multi-pack **today**, and every runtime-only entry
-> (retexture, tint, sound, formation, unit size) needs no bake at all: hand-write the JSON below and you are done. The
-> **authoring tools**, however, still write one hardcoded pack identity (`haf_packs/ENCReload`, `modId: "enc"`), because
-> they live inside the ENCReload Unity project. That is deliberate until the tools are packaged — see
-> [Decisions](Decisions.md) — so baking a *new model* into *your own* pack is the one step that waits on it.
+> **Authoring is multi-pack too.** Everything on this page — discovery, resolution, merge, conflicts, declared
+> overrides, and tuning tables — is fully multi-pack. Runtime-only entries (retexture, tint, sound, formation, unit
+> size) can still be written directly as JSON. For baked models, the packaged authoring tools derive a guest
+> project's pack identity through `HafPackageContext`; the ENC home project keeps `ENCReload` / `enc` as its defaults.
 
 ## What a pack is
 
@@ -62,7 +60,7 @@ The split is structural, so you can always check it rather than guess:
 | The **`int[]` GUID arrays** (`skel`, `atlas`, `clip*`) | **the contract** — asset handles the Factory fills in; omit them entirely for a runtime-only entry |
 | Everything else `ModelDef` declares (non-`int[]`) | **bake-time only** — ignored by the runtime |
 
-`Tools/check_schema_parity.sh` prints the current bake-time-only list under its `INFO` line, so the set is derived
+`tools/check_schema_parity.sh` prints the current bake-time-only list under its `INFO` line, so the set is derived
 from the code rather than from this page. See [Shared-Schema.md](Shared-Schema.md) for the field taxonomy.
 
 **Backward compatible:** a legacy bare `{ "models": [...] }` with no wrapper still loads — it just gets default metadata

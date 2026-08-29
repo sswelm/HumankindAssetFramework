@@ -29,13 +29,13 @@ an advanced shortcut, not an easier start; it's described in [Multi-Mod.md](Mult
 | **The Humankind ModTools SDK** | Turns a Unity project into a Humankind mod project. | [Games2Gether modding](https://www.games2gether.com/amplitude-studios/humankind/modding) |
 | **The HAF authoring tools** | The Model Factory and every Lab, as a Unity package. | [Installation §3](Installation.md#3-the-authoring-tools) |
 | **Blender** (free, optional) | Only for tri-reduction, part-stripping and animated bakes. A static model needs none. | [blender.org/download](https://www.blender.org/download/) |
-| **A 3D model** | HAF is the *pipeline*, not an art library — bring a licensed model — **.glb preferred** (also glTF / OBJ / FBX / .blend). Prefer a **game-ready** model. | [Sketchfab](https://sketchfab.com/features/free-3d-models) — every model HAF ships came from there. Filter by **Downloadable** + a **CC** licence; **CC-BY** means free to use *with credit*. Record yours in [CREDITS.md](../CREDITS.md). |
+| **A 3D model** | HAF is the *pipeline*, not an art library — bring a licensed model — **.glb preferred** (also glTF / OBJ / FBX / .blend). Prefer a **game-ready** model. | [Sketchfab](https://sketchfab.com/features/free-3d-models) — every model HAF ships came from there. Filter by **Downloadable** + a **CC** licence; **CC-BY** means free to use *with credit*. Record yours in [CREDITS.md](https://github.com/sswelm/HumankindAssetFramework/blob/master/CREDITS.md). |
 
 > **Look for "game ready".** It is a real tag on Sketchfab and it is the single best predictor of a smooth bake: a
 > low, sane triangle count, one or few materials, proper UVs and a baked texture. The opposite — a CAD or
 > "sketch" model — arrives tessellated into hundreds of thousands of triangles, often single-sided, sometimes with
 > no UVs at all. HAF *can* rescue those (a vertex reducer, a winding fix, height-based UVs, an N-material atlas
-> packer), and the LCAC hovercraft in [CREDITS.md](../CREDITS.md) is one that had to be replaced outright by a clean
+> packer), and the LCAC hovercraft in [CREDITS.md](https://github.com/sswelm/HumankindAssetFramework/blob/master/CREDITS.md) is one that had to be replaced outright by a clean
 > remodel. Starting game-ready skips that entire class of problem.
 
 ---

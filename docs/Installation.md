@@ -72,11 +72,11 @@ are **off**, and your project is not modified until you turn them on in `Tools �
   authorable via the `HAF.Pack.Name` / `HAF.Pack.ModId` EditorPrefs — starting **empty**. An installed package never
   reads, shows, or bakes another mod's pack.
 
-### One current limit
+### Blender helpers
 
-- **Blender helpers aren't in the package yet.** Anything that shells out to Blender — tri-reduction, part-stripping,
-  animated conversion — won't find its scripts. Set `targetTris` to `0` and bring your mesh in at the polycount you
-  want.
+The package includes its Blender and converter helpers under `editor/Tools~`. Model Factory resolves those packaged
+tools automatically, so tri-reduction, part-stripping, `.blend` import, and animated conversion work from a Git URL
+installation. Use the Blender override in HAF Settings only when auto-detection cannot find `blender.exe`.
 
 ### Updating the tools
 
