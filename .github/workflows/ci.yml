@@ -7,6 +7,11 @@ on:
   push:
     branches: [master]
   pull_request:
+
+# Read-only by default. Only the post-CI wiki publisher below receives a narrowly scoped write token.
+permissions:
+  contents: read
+
 jobs:
   build-test:
     runs-on: windows-latest
@@ -85,3 +90,47 @@ jobs:
       - name: Package meta (every editor/ path has one)
         shell: bash
         run: bash tools/check-package-meta.sh
+
+  # Publish only code that has already passed the complete source-only CI job. Pull requests never enter this job,
+  # so unmerged workflow changes cannot obtain a write token or alter the public wiki. Running on every master push
+  # is deliberate: sync_wiki.sh is deterministic and the staged-diff check makes non-doc pushes a cheap no-op.
+  publish-wiki:
+    name: Publish wiki
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: build-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: haf-wiki-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Clone wiki
+        shell: bash
+        env:
+          WIKI_URL: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.wiki.git
+        run: git clone --quiet --depth 1 "$WIKI_URL" "$RUNNER_TEMP/haf-wiki"
+
+      - name: Generate validated wiki
+        shell: bash
+        run: bash tools/sync_wiki.sh "$RUNNER_TEMP/haf-wiki"
+
+      - name: Publish changed pages
+        shell: bash
+        run: |
+          wiki="$RUNNER_TEMP/haf-wiki"
+          git -C "$wiki" add -A
+          if git -C "$wiki" diff --cached --quiet; then
+            echo "Wiki already matches ${GITHUB_SHA}." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          git -C "$wiki" config user.name "github-actions[bot]"
+          git -C "$wiki" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$wiki" commit -m "docs: sync wiki from ${GITHUB_SHA::7}"
+          git -C "$wiki" push origin HEAD:master
+          echo "Published wiki pages generated from ${GITHUB_SHA}." >> "$GITHUB_STEP_SUMMARY"
