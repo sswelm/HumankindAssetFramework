@@ -21,6 +21,9 @@ trap 'rm -f "$broken"; rm -rf "$wiki_tmp"' EXIT
 
 # ---- 1. relative links resolve -------------------------------------------------------------------------------
 for f in $(git ls-files '*.md'); do
+  # This source becomes GitHub wiki's _Sidebar.md; its extensionless targets are wiki page names, not repo files.
+  # The generated-wiki phase below validates every one against the emitted page set.
+  [ "$f" = "tools/wiki-sidebar.md" ] && continue
   d="$(dirname "$f")"
   for target in $(grep -oE '\]\([^) ]+\)' "$f" | sed -e 's/^](//' -e 's/)$//'); do
     case "$target" in http:*|https:*|mailto:*|'#'*) continue ;; esac
