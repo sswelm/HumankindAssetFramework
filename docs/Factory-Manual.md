@@ -59,13 +59,15 @@ That's the whole loop. Everything below is detail and the animated workflow.
 
 ### The registry is ONE file (collapsed 2026-08-19)
 
-**The source** — git-tracked, the one you (or any tool) edit — is `Assets/Pack/ENCReload/pack.json`. The
-**deployed copy** under `<Humankind>\BepInEx\config\haf_packs\ENCReload\pack.json` is a **build artifact**,
+**The source** — git-tracked, the one you (or any tool) edit — is `Assets/Pack/<PackName>/pack.json`. The
+**deployed copy** under `<Humankind>\BepInEx\config\haf_packs\<PackName>\pack.json` is a **build artifact**,
 exactly like the deployed DLLs: regenerated atomically on every Save/Bake, recreated on load if the game was
 reinstalled, and never read by the editor. A hand-edit to the deployed copy is detected and warned about in the
 Console — it will be overwritten by the next Save; edit the source instead. (Historically the deployed copy was
 authoritative with the project file as a dual-written shadow; the split surprised every external tool and is
-gone. A one-time migration adopts a machine's deployed state into the source on first load after the change.)
+gone. A one-time migration adopts a machine's deployed state into the source on first load after the change.) In the
+ENC home project `<PackName>` defaults to `ENCReload`; an installed package derives the guest project's identity
+through `HafPackageContext`.
 The Factory shows the same yellow **Form ≠ registry** banner the Lab has when its form and the registry
 disagree (after a compile or an outside edit *of the source*), with an explicit choice: *↻ Reload entry* (take
 the registry) or *Save/Bake* (keep the form).
@@ -569,9 +571,9 @@ The guards, in pyramid order:
   T-62 "engine contract" silently breaking the m114 (invisible / microscopic / crossed legs) that this guard now catches.
   The CLI form prints the line-level diff and re-blesses goldens with `--capture` (only after re-verifying that model
   in-game — review the `git diff Tools/deploy_golden/`). *Menu item and CLI share the same scripts + goldens.*
-- **Schema parity** — `bash Tools/check_schema_parity.sh`. The registry is written by the baker (`ModelDef`, JsonUtility)
-  and read by the plugin two ways (`ModelEntry` via Newtonsoft, plus a regex fallback) across two separate repos, kept in
-  sync by hand. The guard makes drift loud: it asserts (1) the Newtonsoft and regex read paths read the **same** key set,
+- **Schema parity** — `bash tools/check_schema_parity.sh`. The registry is written by the baker (`ModelDef`, JsonUtility)
+  and read by the plugin two ways (`ModelEntry` via Newtonsoft, plus a regex fallback) in this repository. The shared
+  schema is compiler-enforced; the guard makes the remaining hand-maintained shapes loud: it asserts (1) the Newtonsoft and regex read paths read the **same** key set,
   (2) every read key is a field the baker writes (plugin ⊆ ModelDef, with an allowlist for deliberate plugin-only overrides
   like `scale`), and (3) each read cast's type matches ModelDef's declared type; bake-time-only fields are listed as INFO.
   Catches a silent rename/drop/type-change that would otherwise make a feature quietly default-off.
@@ -1212,7 +1214,7 @@ naturally around the muzzle) and *multi-mount fire* (rotate successive fire even
 > black, Material mode, reuseExtracted…), the symptom-indexed failure catalog (pale wash, silver panels,
 > white parts, vanished skins), and the runtime re-skin system: [Textures.md](Textures.md).
 
-## 15. Clone, Bake lock & entry-state coherence (2026-07-27)
+## 18. Clone, Bake lock & entry-state coherence (2026-07-27)
 
 Three workflow tools born from the T-62 marathon's aftermath — the first two user-designed:
 

@@ -20,7 +20,8 @@ Needs the **.NET SDK**. The project file is `HumankindAssetFramework.csproj`. Pu
 (nuget.org, the BepInEx release, BepInEx's unstripped-Unity mirror) — this is what CI uses; it never overwrites
 DLLs you already copied from the game. GitHub Actions builds + runs the full test suite on every push
 (`.github/workflows/ci.yml`), along with every source-only guard — docs links, binding-catalog surface, hot path,
-parse shape, and the cross-repo registry schema parity (which checks the editor repo out to do it). See
+parse shape, editor source, and registry schema parity. Both halves now live in this repo, so parity needs no sibling
+checkout. See
 [Testing.md](Testing.md) for which guards run in which lane, and why the hook is not enough on its own.
 
 Then:
@@ -33,19 +34,17 @@ and copy **both** `bin\Release\HumankindAssetFramework.dll` **and** `bin\Release
 — or just run `bash tools/deploy-plugin.sh`, which copies both. `Haf.Schema.dll` (netstandard2.0) is the **shared model
 schema** that `ModelDef` (editor) and `ModelEntry` (plugin) both inherit — the build produces it automatically via a
 `ProjectReference`, but the plugin **won't load without it** (BepInEx reports the missing dependency), so the two ship
-together. The editor half consumes the same DLL from `ENCReload/Assets/Plugins/HafSchema/Haf.Schema.dll` (drop it there
-after a build, like the other managed plugins in `Assets/Plugins`).
+together. The editor package consumes the same tracked DLL from `editor/Plugins/Haf.Schema.dll`.
 
-> **That copy is by hand, and it goes stale silently.** The editor compiles against the **deployed** DLL, not the
-> source, so a change to `Haf.Schema` is invisible on the editor side until the file is copied across — and the failure
+> **Refresh the tracked editor DLL when `Haf.Schema` changes.** The editor compiles against the DLL under `editor/`, not
+> the source project, so a schema change is invisible on the editor side until that in-repo artifact is refreshed — and the failure
 > looks like a compile error naming a type that plainly does exist (`'PackValidator' does not contain a definition for
 > 'ValidatePack'`), which reads as *your* mistake rather than a stale binary. Hit exactly this on 2026-08-23 adding the
-> wrapper rules. If `Tools/editor_compile_check.sh` reports a member that you can see in `Haf.Schema/`, copy the DLL
+> wrapper rules. If `tools/editor_compile_check.sh` reports a member that you can see in `Haf.Schema/`, copy the DLL
 > before believing it:
 >
 > ```
-> cp Haf.Schema/bin/Release/netstandard2.0/Haf.Schema.dll \
->    ../ENCReload/Assets/Plugins/HafSchema/Haf.Schema.dll
+> cp Haf.Schema/bin/Release/netstandard2.0/Haf.Schema.dll editor/Plugins/Haf.Schema.dll
 > ```
 
 ## Blender (optional dependency)
@@ -53,12 +52,12 @@ after a build, like the other managed plugins in `Assets/Plugins`).
 **Blender** is needed for `.blend` import, **animated-model import**, **Strip parts**, and Reduce-to-tris decimation —
 auto-detected under `Program Files`, or point the Factory Settings override / `EditorPrefs 'ENC.blenderPath'` at
 `blender.exe`. Static GLB/OBJ/FBX bakes with neither Strip nor Reduce need **no** Blender: the GLB path uses the
-self-contained `Tools/glbconv/glbconv.exe` (no .NET install required, and its `Weld & simplify` option decimates without
+self-contained packaged `editor/Tools~/glbconv/glbconv.exe` (no .NET install required, and its `Weld & simplify` option decimates without
 Blender). A `dotnet glbconv.dll` fallback exists for local dev.
 
 ### Why Blender does the geometry work (design rationale)
 
-The heavy geometry passes shell out to headless Blender (`Tools/prep_model.py`, `rig_anim.py`, `blend_export.py`)
+The heavy geometry passes shell out to headless Blender (`editor/Tools~/prep_model.py`, `rig_anim.py`, `blend_export.py`)
 rather than being written in C#. The scripts are Python, but **Python is only the remote control** — the actual
 decimation/import/export executes inside Blender's C/C++ core:
 
@@ -122,27 +121,19 @@ player. It excludes the bake-test fixtures by the same three prefixes the delete
 (`__feat_` / `__smoketest__` / `__convgate__`) — a leftover fixture is newer than everything and would otherwise
 fail every package.
 
-## Editor tooling — in ENCReload, not here
+## Editor tooling — installable package in this repository
 
-The Model Factory and the other authoring windows live — and are edited, compiled, and run — **only in the
-ENCReload Unity project** (`Assets/Scripts/Editor/`, git-tracked there since 2026-07-03). To get the
-**Tools ▸ HAF ▸ Model Factory** window, use that project. There is no copy of them in this repo: the stale
-reference snapshot that used to sit in `baker/` was **deleted on 2026-08-21** (~7,000 lines) because it silently
-omitted fields the plugin reads, so anything baked from it produced quietly wrong packs — reasoning in
-`baker/README.md` and [Decisions.md](Decisions.md).
-
-**They are also single-tenant, on purpose.** Living in one project means they write one pack identity —
-`haf_packs/ENCReload`, `modId: "enc"` — hardcoded rather than configurable. Packaging the tools is what turns that into
-an authored setting; until then, a second author bakes by pointing this project at their model, not by re-aiming the
-tools. The runtime has no such limit (see [Multi-Mod.md](Multi-Mod.md)), and the full reasoning is in
-[Decisions.md](Decisions.md).
+The Model Factory and other authoring windows live in [`editor/`](https://github.com/sswelm/HumankindAssetFramework/tree/master/editor) and install through Unity Package
+Manager. They compile and run in the host Unity project; ENCReload is the reference consumer. Packaged Blender and
+converter helpers live under `editor/Tools~`, and `HafPackageContext` supplies safe guest-project defaults and derives
+the guest pack identity. The deleted `baker/` editor snapshot must not return: it was a drifting second source.
 
 ## What `baker/` still holds
 
 Two live things that exist **only** here, and are built from here:
 
 - **`baker/glbconv/`** — the single source of truth for the GLB→OBJ converter (2026-08-17). Build with
-  `dotnet publish -c Release`, deploy the exe to `<ENCReload>/Tools/glbconv/`, and **A/B-diff the OBJ output
-  before deploying** (procedure in ENCReload's `Tools/glbconv/BUILD.md`).
+  `dotnet publish -c Release`, deploy the exe to `editor/Tools~/glbconv/`, and **A/B-diff the OBJ output
+  before deploying** (procedure in `baker/glbconv/BUILD.md`).
 - **`baker/reactor_silhouette.py`** — the headless-Blender district silhouette helper
   ([District-Dedicated-Visual.md](District-Dedicated-Visual.md)).

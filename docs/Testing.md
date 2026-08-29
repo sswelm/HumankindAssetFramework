@@ -4,7 +4,7 @@ HAF is verified in **three tiers**, each a machine, each at the level where its 
 
 | Tier | Runs | Guards |
 |---|---|---|
-| **Unit tests** — **705 as of 2026-08-23** | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers** |
+| **Unit tests** — **713 as of 2026-08-29** | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers** |
 | **Headless game checks** | `tools/check-catalog.sh` in the push gate; `tools/check-bindings.sh` on demand / after a game update | **two halves of one claim**: `check-catalog.sh` proves the catalog **covers the code** (every by-name literal at a reflection site is catalogued or allowlisted with a reason), `bindcheck` proves it **resolves** against the real DLLs; `typeprobe --find` / `--exact` locate a seam or a member's owner before a binding is written |
 | **In-game smoke test** — `[load]` automatic, `[full]` on the F8 button | every load (a few ms, once), and on request | the injecting half, read from the **engine**: bindings, registry, roles, assets, sounds, files, GPU budget, district tiles and textures, patched seams — and, on the button, every live pawn on *our* skeleton, pose-hook liveness, the sub-pawn walk vs a scene scan, the write-back self-test |
 
@@ -24,8 +24,8 @@ dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release
 
 ## The fast gates — two lanes, `check.sh` and CI
 
-The fast guards used to be separate scripts you had to remember to run. They're now one command per repo
-(`check.sh`), wired as a **pre-push hook** — and, since 2026-08-23, the guards that need nothing but source also run
+The fast guards used to be separate scripts you had to remember to run. They're now one in-repo command
+(`tools/check.sh`), wired as a **pre-push hook** — and, since 2026-08-23, the guards that need nothing but source also run
 in **GitHub Actions**. Both lanes matter, and for different reasons:
 
 - **The hook** runs *everything*, including the guards that need a licensed Unity install or the game. It is the
@@ -34,40 +34,25 @@ in **GitHub Actions**. Both lanes matter, and for different reasons:
   contributor may never have set, and `git push --no-verify` — or a GitHub web edit, which runs no hook whatsoever —
   walks straight past it. CI is the lane that survives all three.
 
-| Repo | `check.sh` (pre-push hook) | also in CI | ~time |
+| Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
-| **HumankindAssetFramework** (plugin) | `dotnet build` · `dotnet test` · **docs guard** · **binding-catalog surface** · **hot path** · **parse shape** · **member shape** · registry schema parity | all of them | seconds |
-| **ENCReload** (editor) | Roslyn editor compile-check · registry schema parity · hand-list gate (4 blocks) | parity + hand-list — **not** the compile check | ~30 s |
+| **Runtime + shared contract** | `dotnet build` · `dotnet test` · docs guard · binding-catalog surface · hot path · parse shape · member shape · schema parity | all source-only checks | seconds |
+| **Editor package** | Roslyn editor compile-check · schema parity · hand-list gate | parity + hand-list; compile check stays local | ~30 s |
 
-The one guard CI cannot run is **`Tools/editor_compile_check.sh`**: it needs a licensed Unity 2021.3.1f1 install
+The one guard CI cannot run is **`tools/editor_compile_check.sh`**: it needs a licensed Unity 2021.3.1f1 install
 (`UnityEditor.dll`, the MonoBleedingEdge 4.7.1 profile, every `UnityEngine` module), none of which is
 redistributable or present on a hosted runner. It stays in the hook, where the Unity install already is. So the
 editor's compile check is the one check a `--no-verify` still gets past — worth knowing before you use one.
 
-### Schema parity now runs from **both** sides
+### Schema parity is in-repo and mandatory
 
-`check.sh` has always run the cross-repo parity guard *best-effort* — "when the sibling checkout is present" — and
-on a runner it never is, so it took the `[SKIP]` branch every time. The result was one-directional: an **editor**
-change was checked whenever ENCReload was pushed, but a **plugin** change to the regex fallback in `ParseModels` was
-guarded by nothing at all until somebody happened to push the *other* repo. That is precisely the failure class that
-is invisible at runtime by construction — a key the fallback forgot is silently lost from a malformed-JSON pack, no
-throw, no log.
+The editor package, shared `Haf.Schema`, runtime `ModelEntry`, and regex fallback now live together. Therefore
+`tools/check_schema_parity.sh` has no sibling checkout and no best-effort `[SKIP]` path: every push compares the
+writer, generic reader, regex fallback, GUID hand-lists, and shared types from the same revision. A missing fallback
+key is still dangerous because malformed JSON can silently lose it, but the guard is now symmetric by construction.
 
-Both workflows now check the sibling repo out (into `_enc/` and `_haf/` respectively) and run the one parity script,
-which lives in ENCReload because it is that repo's schema too. Consequences worth knowing:
-
-- **A red parity step can mean the *other* repo moved.** That is the drift the guard exists to make loud; read the
-  failure before blaming the pull request.
-- A plugin-side schema change still only trips ENCReload's copy on its next push. `workflow_dispatch` is enabled on
-  both so parity can be re-run by hand, and ENCReload's workflow carries a commented-out weekly `schedule:` for the
-  day that becomes worth automating.
-- The plugin's `.csproj` excludes `_enc\**` from its default `**/*.cs` glob. The workflow already orders that
-  checkout after the build, but the exclude is what makes a future step-reorder harmless — verified load-bearing by
-  reverting it and watching a planted invalid `.cs` under `_enc/` break the build with real `CS` errors.
-
-Both CI guards were **fault-injected before being trusted**, the same standard as every other gate here: a UI-edited
-field with no ownership-list entry, and a deleted `Regex.Matches` line in `ParseModels`, each turned the matching
-step red with `rc=1` and named the offending field.
+The parity and hand-list guards were **fault-injected before being trusted**: a UI-edited field with no ownership-list
+entry and a deleted `Regex.Matches` line each turned the matching step red and named the offending field.
 
 ### The docs guard (`tools/check-docs.sh`)
 
@@ -79,7 +64,13 @@ three resolve *relative* links. So one moved page breaks three surfaces at once,
 2. **every page in `docs/notes/` opens with the `ARCHIVED NOTE` banner** — the convention that makes the
    maintained-vs-archived split mean something rather than being a folder name;
 3. **no basename collides across `docs/` and `docs/notes/`** — the wiki page namespace is flat, so a collision
-   would have one page silently overwrite the other.
+   would have one page silently overwrite the other;
+4. **schema version and the shared-field count agree with code**, rather than with another prose copy;
+5. **maintained Pages docs do not use `../` links** that Jekyll would publish outside the project site;
+6. **a fresh wiki generation succeeds**, contains no empty/missing internal targets, and its tracked sidebar includes
+   every maintained page;
+7. **retired pre-package claims stay out of current guides** (cross-repo editor paths, missing helpers, hardcoded
+   guest identity). Historical review pages remain intentionally untouched.
 
 Fault-injected on the day it was written (2026-08-20): a planted dead link, a banner-less note, and a planted
 `docs/notes/Textures.md` collision were each caught with a named failure, and the baseline returned to green.
@@ -102,7 +93,7 @@ package install reports, and which rows need Blender). The
 gate earned its keep on day one: standing it up surfaced three latent schema drifts (a wrapper field the plugin read but
 the baker never wrote, two runtime-only keys, and a `float?`-cast the parity script mis-classified), all fixed to green.
 
-### The hand-list gate (`ENCReload/Tools/check_handlists.sh`) — four blocks
+### The hand-list gate (`tools/check_handlists.sh`) — four blocks
 
 This project's signature bug class is a **hand-maintained list of fields that must stay in step with a type**. Each
 instance shipped a real bug before it was gated, and each gate compares the list against the type mechanically, so

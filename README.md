@@ -177,11 +177,12 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
 The complete capability list and known limitations are in [**Capabilities.md**](docs/Capabilities.md).
 
 ## How it works
-**Editor — the Model Factory** (*Tools ▸ HAF ▸ Model Factory*, in [ENCReload](https://github.com/sswelm/ENCReload)): pick a target unit + a model file, set
+**Editor — the Model Factory** (*Tools ▸ HAF ▸ Model Factory*, from the installable [`editor/`](editor/) Unity package): pick a target unit + a model file, set
 transform / size / shading, **Bake**. Static models bake an Amplitude `Skeleton` on the proven single-bone vehicle rig +
 a packed atlas; ticking **Animated** takes a parallel path (`UniversalBaker.BuildAnimated`) that keeps the model's **own
 armature + clip** (Blender slims it, then bakes `Skeleton` + `ClipCollection` + atlas, with the clip isolated in a
-per-model `anim/` subfolder). `ModelRegistry` writes the pack's `pack.json` into the auto-detected `BepInEx/config/haf_packs/ENCReload/`.
+per-model `anim/` subfolder). `ModelRegistry` writes the pack's `pack.json` to `Assets/Pack/<PackName>/` and deploys it
+to the auto-detected `BepInEx/config/haf_packs/<PackName>/`; guest projects derive `<PackName>` from their own identity.
 
 **Runtime — `UniversalInject`** (`Patches/`): one patch, any number of models. Reads the registry, registers each baked
 skeleton, and on `AddOn.Load` repoints the matching pawn by **self-discovery** (reads the host's body-mesh name, renames
@@ -201,7 +202,7 @@ hang — the danger was malformed skeletons, not custom ones per se.*
 | Runtime plugin (this repo) | **BepInEx 5.4** plugin in C#, targeting **.NET Framework 4.7.1** (the game's Mono runtime); builds with just the .NET SDK (`dotnet build`, no Unity needed) |
 | Game patching | **Harmony** (`0Harmony`) runtime patches against the game's **`Amplitude.Mercury`** assemblies — no executable modification |
 | Registry parsing | **Newtonsoft.Json** (shipped with the game, via mod.io) — `UnityEngine.JsonUtility` silently returns empty objects under the game's Mono runtime |
-| Editor tooling ([ENCReload](https://github.com/sswelm/ENCReload)) | **Unity 2021.3.1f1** (Humankind's own engine version) + the **official Amplitude modding SDK**, which bakes the native `Skeleton` / `ClipCollection` / mesh / atlas assets; editor scripts live only there (the stale `baker/` mirror was deleted 2026-08-21) |
+| Editor tooling ([`editor/`](editor/)) | Installable **Unity 2021.3.1f1** package + the **official Amplitude modding SDK**, which bakes the native `Skeleton` / `ClipCollection` / mesh / atlas assets; ENCReload is the reference consumer, not the source of the tools |
 | `glbconv` converter | Standalone C# console app on **.NET 8** (self-contained single-file exe — adopters need no .NET install), built on **SharpGLTF** |
 | Model-prep scripts | **Python** run headless inside **Blender** (`blender -b --python …`, `bpy` API) — rigging, decimation, clip extraction |
 | Editor ↔ runtime contract | A plain **JSON** registry (the pack's `pack.json`), its shared fields (see [Shared-Schema](docs/Shared-Schema.md) for the exact count) defined once in a **`Haf.Schema`** netstandard2.0 DLL both halves inherit — so the schema can't drift |
@@ -229,16 +230,15 @@ path, build on it. Two things the MIT grant does *not* cover, because they aren'
 describe (decompiled `Amplitude.*` code remains Amplitude Studios' property; the required game DLLs are gitignored
 and must be copied from your own install), and any 3D model you bake (each stays under its own license — see
 [CREDITS.md](CREDITS.md)). The ENC mod's own **content** — game data, and the pack's skins and sounds — lives in the
-[ENCReload](https://github.com/sswelm/ENCReload) repo and is **all rights reserved** there. That repo's
-[LICENSE](https://github.com/sswelm/ENCReload/blob/master/LICENSE) grants MIT over **its editor code and scripts only**
-(`Assets/Scripts/`, `Tools/` — the HAF authoring tools), so the tooling is as free as the plugin while the mod's content
-is not.
+[ENCReload](https://github.com/sswelm/ENCReload) repo and is **all rights reserved** there. The reusable HAF authoring
+tools live in this repository's [`editor/`](editor/) package and are covered by this repository's MIT license; ENCReload
+remains only their reference project and content pack.
 
 ## Config
-The plugin reads `<Humankind>\BepInEx\config\haf_packs\ENCReload\pack.json` — ENC's **pack** (one entry per model: pawn description,
-skeleton + atlas GUIDs, transform, shading flags; animated entries add `clip` + `animated`/`animClip`/`animateBones`),
-wrapped with pack metadata (`schemaVersion`/`modId`). It then merges any additional packs in `BepInEx/config/haf_packs/*.json`
-and writes a `haf_load_report.txt` of what loaded. The Factory writes ENC's registry and auto-detects the path; the
+The plugin discovers packs under `<Humankind>\BepInEx\config\haf_packs\<PackName>\pack.json` (one entry per model:
+pawn description, skeleton + atlas GUIDs, transform, shading flags; animated entries add clip data), resolves their
+metadata (`schemaVersion`/`modId`/dependencies), merges them, and writes `haf_load_report.txt`. The Factory writes the
+selected project's source registry and deploys it to the auto-detected game path; the
 field-by-field breakdown is in the [Factory Manual](docs/Factory-Manual.md) and the pack format in [Multi-Mod.md](docs/Multi-Mod.md).
 The plugin's own cfg (`…\community.humankind.haf.cfg`) — press **F8** in-game for the status/authoring window
 (binding-health banner, Smoke Test, live GPU-budget readout, retexture/sound aids; see
@@ -274,28 +274,9 @@ HAF is a **working, in-game-proven framework**. All seven axes ship with a verif
 multiple authors, and the ENC reference pack drives a roster of modern-era units. The plugin is stable, has a unit-test
 suite over its pure-data layer plus an in-game smoke harness, and a full documentation set.
 
-The remaining work is **productizing the authoring tools for third-party distribution** — the framework itself is done;
-this is packaging:
-- ~~**Package scaffolding**~~ — **DONE 2026-08-24.** The tools are a Unity package, installed from the Unity menu
-  (`Window ▸ Package Manager ▸ + ▸ Add package from git URL…`) with
-  `https://github.com/sswelm/HumankindAssetFramework.git?path=/editor`. First install into a project that was *not*
-  ENCReload immediately found two defects invisible from inside it: missing `.meta` files (Unity generates them
-  silently under `Assets/`, but a package folder is immutable, so the asmdef was **ignored** and nothing compiled),
-  and four `[InitializeOnLoad]` behaviours defaulting **on** — hooking a stranger's asset deletes, backing their
-  project up to a `D:/HAF_Backups` default, and replacing the console log handler. Both fixed; defaults are now
-  contextual (`HafPackageContext`). **Still open in the package:** `Tools/` lives outside `Assets/` so the Blender
-  helpers don't ship, and single-DLL plugin packaging.
-- **Pack identity in the tools** — the authoring windows write **one hardcoded pack** (`haf_packs/ENCReload`,
-  `modId: "enc"`); packaging turns that into an authored setting. Deliberate until then — one project, one pack, so the
-  setting would today have exactly one legal value; the reasoning is in
-  [Decisions](docs/Decisions.md). *(Menu naming is already neutral — every window is under `Tools ▸ HAF`.)*
-- **An install guide + quickstart** for adopters bringing their own models.
+The authoring tools are now a third-party-ready Unity package: install from the Git URL above, use the packaged Blender
+helpers, and bake into a pack identity derived from the host project. The install guide and ordered quickstart are
+[Installation](docs/Installation.md) and [Getting Started](docs/Getting-Started.md).
 
-> **This gates baking, not shipping a pack.** At **runtime** a third-party pack is already a first-class citizen:
-> hand-write a `pack.json`, drop it in `haf_packs/`, and retextures, tints, sounds, formations and unit sizes all work
-> with no editor at all ([Multi-Mod.md](docs/Multi-Mod.md)). What waits on the packaging work is *baking your own model
-> into your own pack*.
-
-Already in place toward that goal: zero-config path auto-detection, the self-contained converter (no .NET dependency), one
-consolidated injection path, full multi-material GLB support, one-click animated import, bake-time skin controls,
-configurable atlas sizing + bundle slimming, the multi-mod pack loader, and an MIT license on all code.
+Remaining release work is incremental rather than architectural: polish workflows, widen real-world model coverage,
+and keep compatibility guards current as Humankind and Unity environments change.

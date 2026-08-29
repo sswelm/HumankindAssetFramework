@@ -110,4 +110,4 @@ naming the page that replaced it. They are kept for the reasoning, not for readi
 auth, fully crawlable), or the browsable site at <https://sswelm.github.io/HumankindAssetFramework/>.
 
 **Project history** — the dated milestone log (what was proven when, and the war stories behind it) is the
-[CHANGELOG](../CHANGELOG.md).
+[CHANGELOG](https://github.com/sswelm/HumankindAssetFramework/blob/master/CHANGELOG.md).

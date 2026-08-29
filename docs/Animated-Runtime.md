@@ -233,7 +233,7 @@ Per bone, per pose slot (`ApplyPose` → `GetPoseTRS`):
   compute shaders themselves live in the `InstancingAndFx` bundle (not extracted — the C# mirrors
   `GetBoneTRS`/`ApplyPose` have matched observed behavior everywhere tested, litmus included).
 
-## 6. Per-instance phase (`animPhaseSpread`) — don't let a unit move as one body
+## 7. Per-instance phase (`animPhaseSpread`) — don't let a unit move as one body
 
 Every pawn of a model is fed the same `Pose0.Time` (`Time.time / dur`), so a multi-pawn unit animates in perfect
 lockstep: twelve canoes rocking as a single rigid raft, eight monsters swinging their heads in unison. Uncanny, and
@@ -263,7 +263,7 @@ injected models: we overwrite `Pose0.Time` every frame, discarding whatever the 
 holds the entry — its in-memory copy is written back on Save/Bake. Set it in the Lab. (`ModelFactoryWindow`'s
 rebase list carries it for the same reason `keepTranslations` is there.)
 
-## 7. The wrong-skeleton net, and why it must be armed BEFORE the first pawn
+## 8. The wrong-skeleton net, and why it must be armed BEFORE the first pawn
 
 `OnPawnAdded` matches a pawn to one of our entries **by our baked skeleton id**, and falls back to matching by
 **descriptor id** — that fallback is the safety net for the pawn the game spawns on the *donor* skeleton (a unit's

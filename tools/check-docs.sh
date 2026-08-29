@@ -6,15 +6,24 @@
 # RELATIVE links — so one moved file breaks all three at once, silently. This guards what that split can break:
 #   1. every relative Markdown link resolves to a file that exists;
 #   2. every page in docs/notes/ carries the ARCHIVED NOTE banner (the convention that makes the split mean something);
-#   3. no basename collides across docs/ and docs/notes/ (the wiki page namespace is FLAT — one would overwrite the other).
+#   3. no basename collides across docs/ and docs/notes/ (the wiki page namespace is FLAT — one would overwrite the other);
+#   4. schema version and shared-field count agree with code;
+#   5. maintained Pages links do not escape to repo-root relative URLs;
+#   6. the generated wiki has complete navigation and valid page targets;
+#   7. retired architecture claims do not return to current guides.
 # Anchors (#section) are NOT checked — only the file half of each link.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 fail=0
-broken="$(mktemp)"; trap 'rm -f "$broken"' EXIT
+broken="$(mktemp)"
+wiki_tmp="$(mktemp -d)"
+trap 'rm -f "$broken"; rm -rf "$wiki_tmp"' EXIT
 
 # ---- 1. relative links resolve -------------------------------------------------------------------------------
 for f in $(git ls-files '*.md'); do
+  # This source becomes GitHub wiki's _Sidebar.md; its extensionless targets are wiki page names, not repo files.
+  # The generated-wiki phase below validates every one against the emitted page set.
+  [ "$f" = "tools/wiki-sidebar.md" ] && continue
   d="$(dirname "$f")"
   for target in $(grep -oE '\]\([^) ]+\)' "$f" | sed -e 's/^](//' -e 's/)$//'); do
     case "$target" in http:*|https:*|mailto:*|'#'*) continue ;; esac
@@ -58,5 +67,54 @@ else
     fail=1; }
 fi
 
-[ "$fail" -eq 0 ] && echo "docs: OK — links resolve, notes banners present, no flat-namespace collisions, schema version agrees with the code"
+# ---- 5. the documented shared-field count agrees with its code owner -----------------------------------------
+code_fields="$(grep -cE '^[[:space:]]+public ' Haf.Schema/HafModelSchema.cs)"
+code_fields=$((code_fields - 1)) # the public class declaration is not a schema field
+for claim in "holds the **$code_fields fields stored identically**" \
+             "| $code_fields identical fields" \
+             "all $code_fields shared"; do
+  grep -Fq "$claim" docs/Shared-Schema.md || {
+    printf '  FIELD COUNT  docs/Shared-Schema.md is missing the code-derived claim "%s"\n' "$claim"
+    fail=1
+  }
+done
+
+# ---- 6. maintained Pages docs may not use ../ links to repo-root files ---------------------------------------
+# Jekyll publishes docs/ at the site root, so ../CREDITS.md resolves outside this project and 404s. Archived notes
+# may use ../ to reach maintained docs and are checked by the ordinary file resolver above.
+for f in docs/*.md; do
+  [ -e "$f" ] || continue
+  if grep -nE '\]\(\.\./' "$f"; then
+    printf '  PAGES LINK  %s uses ../; link repo-root files with an absolute GitHub URL\n' "$f"
+    fail=1
+  fi
+done
+
+# ---- 7. generated wiki and tracked sidebar are complete ------------------------------------------------------
+mkdir "$wiki_tmp/wiki"
+git init -q "$wiki_tmp/wiki"
+bash tools/sync_wiki.sh "$wiki_tmp/wiki" >/dev/null || {
+  printf '  WIKI OUTPUT  tools/sync_wiki.sh rejected its generated output\n'
+  fail=1
+}
+for f in docs/*.md; do
+  b="$(basename "$f" .md)"
+  [ "$b" = "README" ] && continue
+  grep -Fq "($b)" tools/wiki-sidebar.md || {
+    printf '  WIKI SIDEBAR  docs/%s.md is missing from tools/wiki-sidebar.md\n' "$b"
+    fail=1
+  }
+done
+
+# ---- 8. retired claims stay out of current guides ------------------------------------------------------------
+current_guides=(README.md docs/Architecture.md docs/Building.md docs/Code-Map.md docs/Decisions.md
+                docs/Editor-Tools.md docs/Factory-Manual.md docs/Installation.md docs/Multi-Mod.md
+                docs/Shared-Schema.md docs/Testing.md)
+retired='Blender helpers aren.t in the package yet|Editor tooling — in ENCReload, not here|across two separate repos|check the sibling repo out|one hardcoded pack identity|ENCReload/Assets/Scripts/Editor|ENCReload/Assets/Plugins/HafSchema'
+if grep -nEi "$retired" "${current_guides[@]}"; then
+  printf '  RETIRED CLAIM  a current guide reintroduced a pre-package architecture statement\n'
+  fail=1
+fi
+
+[ "$fail" -eq 0 ] && echo "docs: OK — repo/Pages/wiki links, sidebar coverage, archive rules, schema claims, and current architecture agree"
 exit "$fail"

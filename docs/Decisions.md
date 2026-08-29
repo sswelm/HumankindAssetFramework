@@ -36,55 +36,20 @@ unnoticed (see [Review-Backlog](Review-Backlog.md)). The resolver is pure, so bo
 tests even when the game can only reach one: 9 tests, 4 mutations drilled (inverted precedence, dropped height
 guard, a partial-merge leak, and a reason that stops naming the district — 4/2/1/3 failures respectively).
 
-## The authoring tools are single-tenant until they are packaged (2026-08-23)
-The **runtime** is multi-tenant by construction: `haf_packs/*.json` is discovered, resolved in Humankind's own mod
-order, merged, and conflict-reported, and a stranger's pack is a first-class citizen there ([Multi-Mod.md](Multi-Mod.md)).
-**The editor half is not.** The tools write exactly one pack identity, hardcoded:
+## Package context owns pack identity (decided 2026-08-23; completed 2026-08-24)
 
-| Site (in the ENCReload project) | Hardcoded |
-|---|---|
-| `ModelRegistry.PackLiveDir` / `PackRepoDir` | `haf_packs/ENCReload` and `Assets/Pack/ENCReload` — 19 call sites across 4 windows |
-| `PackDef.modId` | defaults to `"enc"`; no window field edits it |
-| `DistrictFactoryWindow` / `ShipStatusWindow` / `HafCli` | glob the built bundle as `ENCReload.*` |
+The original authoring tools were single-tenant because they lived inside ENCReload: paths and `modId` were hardcoded
+to ENC. The 2026-08-23 review deliberately deferred isolated path substitutions until the tools had a real package
+context; changing nineteen call sites independently would have created a misleading setting with no second tenant.
 
-**This is deliberate, not an oversight.** The tools live, compile and run only inside the ENCReload Unity project
-([Building.md](Building.md) — *"Editor tooling — in ENCReload, not here"*). One project, one pack: a pack-identity
-setting today would be a setting with exactly one legal value, plus a fresh class of user error (baking into the wrong
-folder). Parameterising the write target is part of **packaging** the tools — it is not something to bolt on before
-the tools have a package to live in.
+That condition is now resolved. The authoritative tools live in [`editor/`](https://github.com/sswelm/HumankindAssetFramework/tree/master/editor), packaged helpers ship under
+`Tools~`, and `HafPackageContext` distinguishes the ENC home project from an installed guest package. The home project
+keeps its historical `ENCReload` / `enc` defaults; a guest derives its own source directory, deployed pack directory,
+and mod identity. Runtime and authoring are therefore both multi-pack.
 
-**What a third party can do today, fully supported:** hand-write a `pack.json`, drop it in `haf_packs/`. Retextures,
-tints, sounds, formations, unit sizes — every runtime-only entry — work with no editor at all, as does any entry
-referencing an already-baked GUID. What needs the packaging work is *baking into your own pack*.
-
-**What settles it:** when the tools move out of ENCReload into a distributable Unity package, pack identity becomes an
-authored field (a Settings entry defaulting to the host project's own mod id) and these sites read it. Until that day
-the constant is the *honest* description of the tool, and a settings field would be a lie about what it can do.
-
-> **Update 2026-08-24 — the package exists; pack identity is now the *only* thing left.** The tools install from the
-> Unity menu (`package.json` + asmdef, `?path=/Assets/Scripts/Editor`), so "they live only inside ENCReload" no longer
-> blocks a second tenant. The first install into a real second project found two defects that were **invisible from
-> inside the home project by construction** — exactly the class this decision predicted:
->
-> - **Missing `.meta` files.** Unity generates them silently under `Assets/`, so the 39 scripts had theirs and the two
->   new files never needed them. A package folder is *immutable*: Unity cannot generate them there, so it **ignored
->   the asmdef** — and package scripts are not added to the predefined assemblies, so nothing compiled. The package
->   installed, resolved, and displayed its version and description while being functionally empty.
-> - **Four `[InitializeOnLoad]` behaviours defaulting ON** — the asset-delete guard, the daily auto-backup (to a
->   `D:/HAF_Backups` default), its offsite zip, and the console-log-handler replacement. All wanted here; in a guest
->   project they are an authoring tool hooking a stranger's deletes and writing their assets to an invented drive
->   letter. Now contextual via `HafPackageContext` (`PackageInfo.FindForAssembly` is null for `Assets/`-compiled
->   scripts, non-null for a resolved package): home unchanged, guest inert until asked.
->
-> Both share this decision's root cause — **the tools assume they ARE the project.** Pack identity is that same
-> assumption wearing a third hat, and it is now the last one standing, alongside `Tools/` not shipping (which is the
-> assumption again: a helper path resolved against the *host's* project root).
-
-**Why it is written down:** a 2026-08-23 critical review flagged it as the highest structural finding, and from the
-code it reads exactly that way — the two halves of one framework disagree about how many mods exist. Worth recording
-so the next reader does not "fix" it in isolation. It also corrected the README, which called what remained *"neutral
-naming"*: the naming is **done** (32 `MenuItem`s, all under `Tools ▸ HAF`, none carrying ENC). The write target is
-what is left. See the [Review-Backlog](Review-Backlog.md) entry.
+**Invariant:** code that needs project identity or helper paths asks `HafPackageContext`; it does not introduce a new
+ENC literal or resolve package helpers against the host project's root. This preserves the useful part of the original
+decision — one owner for context — after its temporary single-tenant limitation has expired.
 
 ## Per-frame cost is a number in the F8 panel, never an estimate (2026-08-21)
 Asked what a day of changes cost per frame, the answer given was a reasoned estimate: "under 1%". The first
