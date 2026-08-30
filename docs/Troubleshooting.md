@@ -23,6 +23,7 @@ before changing geometry.
 
 | Symptom | Go to |
 |---|---|
+| Mod Editor stops at **Application Version** with `There is an error in XML document (2, 10)` | [Repair the Mod Editor `version.xml`](Mod-Editor-Version-XML-Recovery.md). A project path in the numeric `Build` field is the known cause; do not upgrade Unity to compensate. |
 | Package Manager shows HAF, but **`Tools ▸ HAF` is missing** or Unity reports compile errors | [Installation → What a correct install looks like](Installation.md#what-a-correct-install-looks-like), then [Updating the tools](Installation.md#updating-the-tools). |
 | HAF cannot find Blender or a conversion helper | [Installation → Blender helpers](Installation.md#blender-helpers) and [Factory settings](Factory-Manual.md#settings--game--blender-path-foldout-at-the-top). Packaged scripts live under `Tools~`; only `blender.exe` is external. |
 | Bake fails, produces zero vertices, or reports an import/conversion error | [Factory Manual → Troubleshooting](Factory-Manual.md#8-troubleshooting). Keep the **first** Console error; later Unity errors are often consequences. |

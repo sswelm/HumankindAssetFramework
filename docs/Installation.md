@@ -112,6 +112,10 @@ version history. A pinned install ignores every update path by design — change
 > **Don't use the Releases page for this.** `HumankindAssetFramework-v0.1.0.zip` there is the *runtime plugin* from
 > step 2, not the tools. The URL above is the only install.
 
+> **Mod Editor stuck at Application Version after a reload?** If it reports `There is an error in XML document
+> (2, 10)`, do not change Unity versions. Follow [Fix the Mod Editor `version.xml` error](Mod-Editor-Version-XML-Recovery.md);
+> the known failure is a project path written into a numeric `Build` attribute.
+
 ---
 
 ## Check it worked
