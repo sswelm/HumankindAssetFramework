@@ -9,6 +9,7 @@
 - [Getting Started](Getting-Started)
 - [Installation](Installation)
 - [Troubleshooting](Troubleshooting)
+- [Mod Editor version.xml Recovery](Mod-Editor-Version-XML-Recovery)
 - [Building](Building)
 - [Backup](Backup)
 

@@ -35,6 +35,7 @@ This page is the map of the docs themselves.
 - [**Installation.md**](Installation.md) — install BepInEx, the runtime plugin, and the Unity authoring package; verify each layer.
 - [**Getting-Started.md**](Getting-Started.md) — **new here? start here.** Nothing → a custom unit on the map, each step linked to its deep doc.
 - [**Troubleshooting.md**](Troubleshooting.md) — **something failed? start with the symptom.** Evidence order and direct routes to each maintained failure catalog.
+- [**Mod-Editor-Version-XML-Recovery.md**](Mod-Editor-Version-XML-Recovery.md) — repair the Mod Editor's `XML document (2, 10)` Application Version failure without changing Unity versions.
 - [**Building.md**](Building.md) — build the plugin; the Blender dependency.
 - [**Backup.md**](Backup.md) — the four-layer safety net for the un-versioned working set: manual versions, daily auto-versions, an undoable delete guard, offsite zips.
 
