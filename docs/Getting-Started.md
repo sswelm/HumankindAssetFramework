@@ -99,7 +99,8 @@ pack, texture, animation, district, sound, binding, and performance failures to 
 
 ## 5. Go deeper
 
-- **Animate it** — [Animated-Models.md](Animated-Models.md) · [Donor-Clip-Flight.md](Donor-Clip-Flight.md) ·
+- **Animate a static vehicle/helicopter** — [Vehicle-Lab-Quickstart.md](Vehicle-Lab-Quickstart.md)
+- **Import an existing rig or go deeper** — [Animated-Models.md](Animated-Models.md) · [Donor-Clip-Flight.md](Donor-Clip-Flight.md) ·
   [Turn-Ease.md](Turn-Ease.md)
 - **Texture / reskin** — [Textures.md](Textures.md)
 - **Other injection axes** — [districts](District-Visuals.md) · [pawn props](Pawn-Props.md) ·

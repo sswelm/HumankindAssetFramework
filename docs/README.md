@@ -19,6 +19,7 @@ This page is the map of the docs themselves.
 | **Diagnose something that is broken** | [**Troubleshooting.md**](Troubleshooting.md) — start from the symptom and follow the evidence to its owning guide |
 | **Look up a Factory field, or fix a bad bake** | [Factory-Manual.md](Factory-Manual.md) — the main guide, every field + troubleshooting |
 | **Find the right authoring window** | [Editor-Tools.md](Editor-Tools.md) — every window under `Tools ▸ HAF`, and what each one writes |
+| **Animate a static vehicle or helicopter** | [Vehicle-Lab-Quickstart.md](Vehicle-Lab-Quickstart.md) — raw model → generated rig → animated bake → game |
 | **Make my model move** | [Animated-Models.md](Animated-Models.md) — can HAF import *your* rig? |
 | **Understand why my animation looks wrong** | [Animation-Pitfalls.md](Animation-Pitfalls.md) — the failure catalogue |
 | **Ship my own pack, without touching ENC** | [Multi-Mod.md](Multi-Mod.md) — the pack format + the `haf_packs/` drop folder |
@@ -42,6 +43,7 @@ This page is the map of the docs themselves.
 ### Author content
 - [**Editor-Tools.md**](Editor-Tools.md) — the **editor reference**: every window under `Tools ▸ HAF`, its menu path, and which registry it writes. *Start here to find the right tool.*
 - [**Factory-Manual.md**](Factory-Manual.md) — the main guide: every field, the static + animated workflows, the troubleshooting table. *Start here to add a model.*
+- [**Vehicle-Lab-Quickstart.md**](Vehicle-Lab-Quickstart.md) — the short end-to-end workflow for adding wheels, tracks, guns, trails, or rotors to a static vehicle model.
 - [**Ship-Status.md**](Ship-Status.md) — baked ≠ built. Which bakes the game hasn't seen yet, plus guarded delete of stale/orphaned output.
 - [**Textures.md**](Textures.md) — the atlas pipeline: every knob, the complete failure catalogue, runtime re-skins.
 - [**Game-Sound-Lab.md**](Game-Sound-Lab.md) — game-*wide* audio overrides: silence or replace any vanilla Wwise event, with in-game F8 audition.
@@ -56,7 +58,9 @@ This page is the map of the docs themselves.
 *(Extending the plugin rather than authoring? The engine-side companion is [Animated-Runtime.md](Animated-Runtime.md), under Internals.)*
 
 ### The injection axes
-Each axis adds custom content in a different place, from the same JSON registry.
+Each axis adds custom content in a different place. Unit models and their cross-cutting settings live in the pack
+`pack.json`; some specialized authoring tools keep their own registry and ship the resulting assets with the mod.
+Follow the linked page rather than assuming every axis is a `models[]` field.
 
 | Axis | Page | Bake? |
 |---|---|---|

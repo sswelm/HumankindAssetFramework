@@ -94,8 +94,8 @@ bake-side copy is removed; **one dial, one application, previewed live**.
 1. **Vehicle Lab**: classify the rotors (`R` main / `L` tail), make sure no extra articulated bones exist
    between Root and the rotors (a Gun/Turret bone shifts the channel indices — mark those parts Body for a
    donor-clip model). Level the airframe in Orientation if desired (yaw first, then pitch/roll — the
-   sliders act on the model as you see it, but only take effect on the next Vehicleize run).
-2. **Vehicleize** (regenerate the rig). **This step is mandatory after any script/marking change** — see
+   sliders act on the model as you see it, but only take effect on the next Generate rig run).
+2. **Generate rig** (regenerate the rig). **This step is mandatory after any script/marking change** — see
    the stale-rig trap below.
 3. **Animation Lab**: bake as usual (continuous, convertRig ON — the standard vehicle settings).
 4. **Model Factory**: tick **Use donor animation clip** (Runtime section). It's a registry field —
@@ -111,7 +111,7 @@ bake-side copy is removed; **one dial, one application, previewed live**.
 | Rotor spins on a fixed but wrong axis (rolls) | ancestor rest conjugation (export -90°X or facing) | plugin rebase handles it — check the `[Rest]` dump ran *before* Apply |
 | Rotor detached, orbiting the aircraft | rest **positions** shifted (rotations folded without translations) | fixed in rebase v2+ — world positions are preserved |
 | Rotor loops vertically after a re-bake | facing rotation became a Root rest | fixed in rebase v3+ (ALL ancestors flatten) |
-| Rotor twists although the bake "was updated" | **stale rig**: Animation Lab reused the last rig GLB | run Vehicle Lab **Vehicleize**, then rebake. Signature: both rotor rests dump as the same permutation quat `(-0.5,-0.5,-0.5,0.5)` |
+| Rotor twists although the bake "was updated" | **stale rig**: Animation Lab reused the last rig GLB | run Vehicle Lab **Generate rig**, then rebake. Signature: both rotor rests dump as the same permutation quat `(-0.5,-0.5,-0.5,0.5)` |
 | Canted tail fan wobbles out of its ring | tail bone frame not authored (local X ≠ fan axle) | regenerate with the current `vehicle_rig.py` |
 | Fan spins backwards | handedness of the constructed frame | negate the axle (sign flip in the rig script) |
 | Whole unit moves like a zeppelin | `useDonorClip` lost from the pack | it's a Factory checkbox now; re-tick and rebuild |
