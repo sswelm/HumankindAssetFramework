@@ -3,6 +3,9 @@
 # first sync — this is now actually it). Usage:
 #   git clone https://github.com/sswelm/HumankindAssetFramework.wiki.git <dir>
 #   tools/sync_wiki.sh <dir>     # then commit+push inside <dir>
+# Since 2026-09 CI's publish-wiki job (.github/workflows/ci.yml) runs this on every push to master and pushes
+# the result itself. A manual run is the fallback; a manual PUSH races the bot (a non-fast-forward rejection at
+# worst — harmless, the next master push republishes).
 # Mapping: docs/README.md -> Home, repo README.md -> Overview, CHANGELOG.md -> Changelog, docs/X.md -> X,
 #          docs/notes/X.md -> X  (the wiki page namespace is FLAT — see the collision guard below).
 # Links: page links become flat wiki page names; directory landing pages get explicit destinations; repo-only files

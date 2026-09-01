@@ -87,6 +87,19 @@ the mismatch has already eaten files once, commit `db40e73`.) The hook (`tools/g
 version-controlled) then blocks a failing push; bypass only in a real emergency
 with `git push --no-verify`. Deliberately **not** in the gate (too slow / need Unity, Blender, or the game): the Blender
 golden-master `deploy_regression.sh`, the in-editor bake tests, and the in-game binding report — those stay manual.
+
+### Wiki publication after CI
+
+The public GitHub Wiki is a separate Git repository, so merging Markdown into `master` does not update it by itself.
+The CI workflow's `publish-wiki` job closes that gap: after `build-test` succeeds on a **push to `master`**, it clones
+the wiki into the runner's temporary directory, runs `tools/sync_wiki.sh`, stages the generated result, and pushes only
+when the staged tree changed. A non-documentation merge is therefore a no-op.
+
+The write boundary is intentional: the workflow defaults to `contents: read`; only this job receives
+`contents: write`, and its event condition excludes pull requests. The sync generator still owns stale-page cleanup and
+link validation (sidebar coverage is enforced by `check-docs.sh` in `build-test`), so a broken generation fails before
+the wiki commit is created.
+
 The in-editor tests all run from **one window** — `Tools ▸ HAF ▸ Bake Tests…` (Smoke / Features / Conversion rows,
 each with a plain-language explanation, live per-row PASS/FAIL, and a durable `Logs/haf_bake_tests_report.txt` per
 run; see [Factory-Manual.md](Factory-Manual.md) §11 — including what SKIPPED means, what a fresh
