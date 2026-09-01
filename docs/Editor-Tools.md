@@ -20,8 +20,9 @@ https://github.com/sswelm/HumankindAssetFramework.git?path=/editor
 The install is inert by design: automatic backups, the asset-delete guard and the console filter all default **off**
 in an installed package and on in the tools' own development checkout (`HafPackageContext` decides by *how* the
 package is installed — git/registry is a consumer install, `file:`/embedded is the working copy). An installed
-package owns its **own pack** (`haf_packs/<YourProjectName>`, starting empty) and ships the Blender helper scripts
-and the `glbconv` importer inside (`Tools~`), so a static `.glb` bake needs nothing installed beyond the package.
+package owns its **own pack source** (`Assets/Pack/<YourPackName>/pack.json`, starting empty) and deploys a derived copy
+under `BepInEx/config/haf_packs/`. It also ships the Blender helper scripts and the `glbconv` importer inside (`Tools~`),
+so a static `.glb` bake needs nothing installed beyond the package.
 See [Getting-Started.md](Getting-Started.md) for the ordered path and [Installation.md](Installation.md) for
 install, verification and updating.
 
@@ -115,9 +116,10 @@ The deploy block's **Wheel bones (roll while moving)** + axle axis / loop frames
 >   `Deploy[N..N]` holds it up. Axis is the world horizontal perpendicular to the tube and the **sign is chosen**, as
 >   the trails' is, by testing which way actually lifts the muzzle.
 >
-> **THE THREE GUN ROLES — one bone, three meanings (2026-08-22).** **Gun**, **Cradle** and **Muzzle** all weld to the
-> single `Gun` bone, because all three elevate together about the trunnions. None of them gets a bone of its own.
-> What separates them is what else they mean:
+> **THE THREE GUN ROLES — one elevation assembly, three meanings (2026-08-22).** With recoil off, **Gun**, **Cradle**
+> and **Muzzle** all weld to the single `Gun` bone because they elevate together about the trunnions. With recoil on,
+> the generator adds a `Barrel` child: Gun + Muzzle ride it while Cradle stays on `Gun`. None of the three roles creates
+> an independent bone by itself. What separates them is what else they mean:
 >
 > | role | is | in the breech→muzzle span? | when recoil lands |
 > |---|---|---|---|
@@ -277,13 +279,16 @@ for dialing it in: **Pause**, **◀/▶ frame-step**, and a **Level line** (hori
 Rotor bones are authored as **axle frames** (main: local Y = mast; tail fan: local X = the canted fan axle) so the
 donor's own clip can drive them — see [Donor-Clip-Flight.md](Donor-Clip-Flight.md). Two workflow notes: Orientation
 composes **yaw-first** (Pitch/Roll act on the grid-aligned model as you see it), and the sliders only take effect on
-the next **Vehicleize** run — which is also a *mandatory separate step* before an Animation Lab rebake (the Lab
-reuses the last rig GLB; skipping Vehicleize bakes the OLD rig).
+the next **Generate rig** run — which is also a *mandatory separate step* before an Animation Lab rebake (the Lab
+reuses the last rig GLB; skipping Generate rig bakes the OLD rig).
 
-**Materials survive here, but are proven later.** Vehicleize joins the classified parts into a skinned mesh while
+**Materials survive here, but are proven later.** Generate rig joins the classified parts into a skinned mesh while
 preserving the source's material slots. The HAF atlas is not created until Model Factory/Animation Lab bakes that GLB.
 For multi-material vehicles, start that bake with **Material mode Auto/Multi** and **Reduce to ~tris = 0**; only lower
 the triangle ceiling after the post-Bake mapping is correct. See [Textures.md](Textures.md) for the failure catalog.
+
+New to the workflow? Follow [Vehicle Lab quickstart](Vehicle-Lab-Quickstart.md) for the complete raw-model → rig →
+animated bake → game sequence.
 
 ---
 

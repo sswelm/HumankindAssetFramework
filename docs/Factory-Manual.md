@@ -5,6 +5,9 @@ How to put your own 3D model onto a Humankind unit, step by step. This is the pr
 The Factory is a Unity editor window (**Tools ▸ HAF ▸ Model Factory**). You give it a model file and a target unit, set
 a few options, press **Bake**, then rebuild the mod. The in-game plugin reads what you baked and renders it.
 
+> **Starting with a static vehicle or helicopter that needs moving parts?** Follow the shorter
+> [Vehicle Lab quickstart](Vehicle-Lab-Quickstart.md) first; return here for the complete field reference.
+
 > **Shipping a standalone pack?** The runtime is a multi-mod host — you can distribute your models as their own **pack**
 > (a config file + assets) that merges on top of ENC without editing it. See [**Multi-Mod.md**](Multi-Mod.md) for the pack
 > format and the `haf_packs/` drop folder.
@@ -317,14 +320,14 @@ and bone pickers read it directly).
 > Factory performs, and the troubleshooting map for floating heads, smearing parts, and wrong orientations.
 
 > **Only a STATIC vehicle model (no rig at all)?** `Tools ▸ HAF ▸ Vehicle Lab` builds the rigged Spin GLB for you —
-> probe the parts, mark wheels & turret (keyboard review, recipes, a Verify report), press **Vehicleize**, and the
+> probe the parts, mark wheels & turret (keyboard review, recipes, a Verify report), press **Generate rig**, and the
 > output feeds this exact workflow. Full guide: [Animated-Models.md](Animated-Models.md) → *"Authoring the spin
 > rig"*. Verified in-game: the shipped ArmouredCar runs a Lab-generated rig. **Tanks:** mark the tread loop
 > **C (Caterpillar)** and the barrel **G (Gun)** — the Lab instances the track as rigid links riding a measured
 > belt path (see *"Caterpillar tracks — treadize"* there; bake with **Keep bone translations ✓**).
 > **UX (2026-08-01):** recipes load from the top-row **Edit existing** dropdown (`＜new model＞` starts fresh);
 > **Wave rock** (idle sway for floating hulls, e.g. the canoe) has an **Enable** checkbox, off by default — leave it off
-> for wheeled/tracked units. After Vehicleize, the Animation Lab's **Auto-detect** button fills the bake config from the
+> for wheeled/tracked units. After Generate rig, the Animation Lab's **Auto-detect** button fills the bake config from the
 > generated `Spin` clip in one click. **Part isolation:** the height bracket (*Hide below/above*) is joined by a
 > **left/right slice** (*Hide left/right of (side)* on the width axis) — bracket both to isolate one wheel, then mark it.
 > All slider defaults are padded so nothing hides until you drag.

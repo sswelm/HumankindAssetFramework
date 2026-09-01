@@ -85,14 +85,14 @@ legs, landing gear, a crane, turrets. Very common for Sketchfab vehicles.
 **Automatic: `Tools ▸ HAF ▸ Vehicle Lab` — VERIFIED end-to-end 2026-07-25; the shipped ArmouredCar now runs a
 Lab-generated rig.** Browse the static model → **Probe parts** (headless Blender lists the mesh parts; a single
 combined mesh is split into loose parts; roles auto-guessed from names) → mark the **Wheels** (and Turret) →
-**Vehicleize**. The GLB path lands on your clipboard; bake settings are printed on success. The review scales to
+**Generate rig**. The GLB path lands on your clipboard; bake settings are printed on success. The review scales to
 real game-rips (the Ehrhardt probes into 3,350 shards in ~7 s since 2026-08-20 — it was 2 minutes: the
 escape-ray visibility pass now shoots through one combined BVH and the preview exports unskinned):
 
 - **Review UI** — click a row to zoom + yellow-highlight that part in the turntable (on the source-skeleton fast
   path a **bone** row highlights every shard weighted to that bone — since 2026-08-20; bone rows never could before); **↑/↓** walk the list;
   **W/T/B/I** mark Wheel/Turret/Body/Ignore, **C** = Caterpillar (tread loop — see the treadize section below),
-  **G** = Gun (one bone for the barrel assembly, rides the Turret when there is one), **D** = Default
+  **G** = Gun (the elevation assembly, rides the Turret when there is one; recoil can add a child `Barrel`), **D** = Default
   (undecided), **E** = Edgecase ("not sure, revisit later" — rigs static like Body and stays visible in the
   undecided filter). Four hide sliders (min verts, min
   size, height-below, height-above — the height pair brackets a horizontal slab: turret-only or chassis-only
@@ -101,7 +101,7 @@ escape-ray visibility pass now shoots through one combined BVH and the preview e
 - **Recipes** — Save/Load the whole configuration (source, output, per-part roles, knobs) as JSON; all window
   state also survives domain reloads, so a recompile can never eat a marking session, and a saved recipe
   reproduces the rig exactly.
-- **Verify** — a non-blocking report that previews the *exact* wheel bones a Vehicleize would build (same
+- **Verify** — a non-blocking report that previews the *exact* wheel bones Generate rig would build (same
   clustering as the rig script) and flags stray clusters, axle disagreement, unpaired wheels, turret outliers
   and undecided leftovers; every flagged part has a **Show** button that jumps both preview and list to it.
 - **The generated rig** — wheel parts **cluster per hub**: the biggest part (the tire) anchors each wheel — its
@@ -122,7 +122,7 @@ Save (no bake) + relaunch.
 **If the rip is already rigged — the SKM fast path (built 2026-07-25):** the probe detects an armature with
 ≥90% of vertices weighted (`SKM_` prefix is the tell) and the Lab flips into **bone-marking mode** (a toggle;
 on by default when detected): the list shows the source skeleton's deform bones with their weighted-vert counts
-and bounds, wheel-named bones pre-marked, and **Vehicleize (fast path)** authors the Spin action directly on the
+and bounds, wheel-named bones pre-marked, and **Generate rig (fast path)** authors the Spin action directly on the
 marked bones — per bone the local axis closest to the world axle, signed so mirrored left/right bones turn the
 same world way — shipping the artist skeleton unchanged (pivots, weights, weapon/socket bones like the
 Ehrhardt's four `MW_*` mounts all kept, so the hand-rig-era fire-effect calibration applies verbatim). The
@@ -135,7 +135,8 @@ why the shipped ArmouredCar runs the shard-path rig.
 
 Tanks and halftracks add a part no wheel bone can carry: the **tread loop**. Mark it **C (Caterpillar)** in the
 review (the gun barrel gets **G (Gun)** — one bone, parented to `Turret` when there is one, else `Root`;
-casemate guns like the Jagdpanzer hang off Root). Vehicleize then builds the tread the way the industry's
+casemate guns like the Jagdpanzer hang off Root; recoil can split the tube onto a child `Barrel`). Generate rig then
+builds the tread the way the industry's
 "curve/path-based instancing" recipe does, translated to bakeable skeletal form:
 
 1. **Link pitch is measured from the mesh** — circular autocorrelation of the cleat x-positions along the

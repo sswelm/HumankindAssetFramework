@@ -30,7 +30,8 @@ so an agent can crawl the whole doc set from here with no authentication. The hu
 - **Something is broken — how do I diagnose it?** docs/Troubleshooting.md (symptom-first router + minimum evidence packet).
 - **Mod Editor says `XML document (2, 10)` at Application Version?** docs/Mod-Editor-Version-XML-Recovery.md (repair a non-numeric `Build` value; keep Unity 2021.3.1f1).
 - **Add a static unit model?** docs/Factory-Manual.md (static workflow).
-- **Add an animated vehicle or character?** docs/Animated-Models.md (what's importable), then docs/Factory-Manual.md §16.
+- **Animate a static vehicle or helicopter?** docs/Vehicle-Lab-Quickstart.md (raw model → generated rig → animated bake → game).
+- **Import an existing animated vehicle or character rig?** docs/Animated-Models.md (what's importable), then docs/Factory-Manual.md §16.
 - **Ship a separate HAF asset pack?** docs/Multi-Mod.md (pack format + the `haf_packs/` drop folder).
 
 ## Start here
@@ -45,6 +46,7 @@ so an agent can crawl the whole doc set from here with no authentication. The hu
 ## Authoring content
 - [docs/Editor-Tools.md](docs/Editor-Tools.md): the **editor reference** — every authoring window under `Tools ▸ HAF`, its menu path, purpose, controls, and which registry it writes. The map of the authoring surface; start here to find the right tool.
 - [docs/Factory-Manual.md](docs/Factory-Manual.md): the main authoring guide — every field, the static and animated workflows, a troubleshooting table. Also covers unit/creature audio (§13–14).
+- [docs/Vehicle-Lab-Quickstart.md](docs/Vehicle-Lab-Quickstart.md): the task-oriented workflow for turning a static vehicle or helicopter into a generated rig, handing it to Animation Lab/Model Factory, proving multi-material mapping, and verifying it in-game.
 - [docs/Animated-Models.md](docs/Animated-Models.md): can HAF import your model? Clean rigs, rigid-part machines, and full character rigs, in plain language.
 - [docs/Textures.md](docs/Textures.md): the atlas pipeline — every knob, the complete failure catalog, and runtime re-skins.
 - [docs/Game-Sound-Lab.md](docs/Game-Sound-Lab.md): game-wide audio overrides — silence or replace any vanilla Wwise event by name, with in-game F8 audition.

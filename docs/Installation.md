@@ -35,7 +35,8 @@ The runtime half — it reads your pack and injects the baked assets into the ru
 2. Drop both into `…\Humankind\BepInEx\plugins\`.
 3. Launch the game. Press **F8** — HAF's status window should open.
 
-It auto-detects your game and Blender paths, so there's nothing to configure.
+The runtime plugin has no Blender dependency. The authoring tools in step 3 auto-detect the game and Blender paths;
+only configure an override there when detection fails.
 
 > **Not needed for projectiles.** A custom munition mesh rides Humankind's own data path: your unit's presentation
 > pawn already names a `Projectile` asset, and that's ordinary moddable data in your mod. No plugin, no pack.
@@ -64,13 +65,15 @@ One white line in the console naming the menu, and **no errors**. That's the con
 rather than working around it.
 
 The tools ship with automatic backups, an asset-delete guard and a console filter. In an installed package all three
-are **off**, and your project is not modified until you turn them on in `Tools ▸ HAF ▸ Backup & Restore`.
+are **off**, and your project is not modified until you turn them on in `Tools ▸ HAF ▸ Backup and Restore`.
 
 ### What it reads and writes
 
-- **Your pack is your own.** The tools read and write `haf_packs/<YourProjectName>` — derived from the project name,
-  authorable via the `HAF.Pack.Name` / `HAF.Pack.ModId` EditorPrefs — starting **empty**. An installed package never
-  reads, shows, or bakes another mod's pack.
+- **Your pack is your own.** The git-tracked authoring source is
+  `Assets/Pack/<YourPackName>/pack.json`; `<YourPackName>` defaults from the project name and can be overridden with
+  `HAF.Pack.Name` / `HAF.Pack.ModId`. Save/Bake derives the deployed artifact at
+  `BepInEx/config/haf_packs/<YourPackName>/pack.json`. Edit the project source, not that deployed copy. A guest project
+  starts empty, and an installed package never reads, shows, or bakes another mod's project source.
 
 ### Blender helpers
 
