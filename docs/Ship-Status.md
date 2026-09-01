@@ -1,5 +1,8 @@
 # Ship Status — which bakes has the game not seen yet?
 
+This page covers the **Bake → Build** boundary. For every authoring boundary—including registry-only Save and live
+dials—see [Authoring state and deployment](Authoring-State-and-Deployment.md).
+
 **Tools ▸ HAF ▸ Ship Status** (in the ENCReload Unity project). Built 2026-08-18, the same evening its reason
 for existing was caught live: a submarine re-baked at 19:34 against a mod build from 19:29 — five minutes of
 staleness, and the game resolved a dead skeleton GUID (the boot pre-flight's warning:

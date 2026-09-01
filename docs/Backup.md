@@ -2,13 +2,12 @@
 
 **Menu:** `Tools ▸ HAF ▸ Backup and Restore` (window title *Backup &amp; Restore*).
 
-A safety net for the working set git does **not** cover. The ENCReload repo tracks its code — including
-`Assets/Scripts/Editor` and `Tools/`, since 2026-07-03 — and `Assets/Databases`; but the heavyweight rest — the
-licensed source models, the baked assets, and the **live BepInEx runtime config the plugin reads** — lives on
-disk with no version control. The window layers four independent protections over it, from "I clicked the wrong
-thing" up to "the machine burned down."
+A safety net that complements git. Git protects committed code and project registry sources; it does not protect
+uncommitted edits, licensed source models, generated bakes, or the **live BepInEx runtime files**. The window captures
+both irreplaceable data and known-good generated versions, with five protections ranging from "I clicked the wrong
+thing" to "the machine burned down."
 
-## The four layers
+## The five protections
 
 | Layer | Trigger | What it writes | Retention |
 | --- | --- | --- | --- |
@@ -18,8 +17,9 @@ thing" up to "the machine burned down."
 | **Offsite zip** | Rides along with any manual/auto backup (optional: set the *Offsite folder*) | ONE `HAF_<timestamp>.zip` per backup, in a second — ideally cloud-synced — folder. **Skipped entirely when nothing changed** since the last upload (see *Space*) | Never overwritten |
 | **Factory remove-undo** | The Model Factory's **Remove** (always) | `_removed_<timestamp>_<name>/` with the entry's JSON + the exact baked-output whitelist, taken BEFORE anything is deleted; restore via the **Undo remove** button next to Remove OR the window's *Factory remove snapshots* section — both do the full restore (baked assets + registry entry) through one shared implementation | Never auto-deleted |
 
-Every layer feeds the **same restorable list**: each entry, whether manual, auto, or delete-guard, has a
-**Restore** button and the same safety guards.
+Every **local snapshot type** feeds the same restorable list: manual, auto, pre-restore, delete-guard, and Factory-remove
+entries have a **Restore** button and the same safety guards. Offsite zips are disaster copies outside that list; copy or
+extract one back to an accessible backup location before restoring it.
 
 ## Space — why a daily 1.4 GB backup costs ~65 MB
 
@@ -79,7 +79,7 @@ Each group is an independent toggle with a live size readout (the daily auto-ver
 | Baked assets | `Assets/Resources` (skeletons, atlases, clip collections, PNGs) |
 | ENC Databases | `Assets/Databases` |
 | Tools | `Tools/` (Blender rig/convert scripts, `glbconv`) |
-| Runtime config | `BepInEx/config/haf_*.json` + **`haf_packs/` (the model registry — MISSING until 2026-08-17, found mid recovery-drill)** + `haf_skins/` + `haf_sounds/` (the regenerable `haf_atlas_dump/` is skipped) |
+| Runtime config | `BepInEx/config/haf_*.json` + `haf_*.txt` + `community.humankind.haf.cfg` + `haf_packs/`, `haf_skins/`, `haf_sounds/`, `haf_ground_tex/`, and `haf_state/`. Logs stay out; the regenerable `haf_atlas_dump/` is skipped. The `haf_packs` copy is deployed recovery material—the project `Assets/Pack/<PackName>/pack.json` remains authoritative. |
 
 ## The delete guard
 
@@ -180,8 +180,8 @@ the originals. The code is safe on GitHub; the source models and bakes are not. 
   size — arguably the pause you want before deleting 900 MB of source models).
 - The background auto-version could copy a file mid-write if a bake runs at the exact moment of editor load — a
   torn copy of one file in one auto-version, healed by the next day's version.
-- `_deleted_` snapshots accumulate until pruned by hand (that's the never-lose rule; the *Delete* button is the
-  valve).
+- `_deleted_` snapshots accumulate until the configured age retention prunes them (default 14 days; `0` keeps them
+  forever). The window's *Delete* button remains the manual valve.
 
 ## Notes
 

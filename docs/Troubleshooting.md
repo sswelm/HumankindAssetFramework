@@ -29,7 +29,7 @@ before changing geometry.
 | Bake fails, produces zero vertices, or reports an import/conversion error | [Factory Manual → Troubleshooting](Factory-Manual.md#8-troubleshooting). Keep the **first** Console error; later Unity errors are often consequences. |
 | A model is invisible, see-through, microscopic, enormous, grey, or oriented incorrectly | [Factory Manual → Troubleshooting](Factory-Manual.md#8-troubleshooting) owns the symptom table and corrective bake fields. |
 | Vehicle Lab animation works, but the baked vehicle is flat, all black, or has scrambled material regions | [Textures → Failure catalog](Textures.md#failure-catalog--match-your-symptom). Use Auto/Multi and make a control bake with **Reduce to ~tris = 0** before editing textures. |
-| The preview or registry changed, but the game did not | [Ship Status → The trap it closes](Ship-Status.md#the-trap-it-closes) and [Factory Manual → rebuild the mod](Factory-Manual.md#6-after-baking-rebuild-the-mod-dont-skip-this). |
+| The preview or registry changed, but the game did not | Use the [change-to-action matrix](Authoring-State-and-Deployment.md#change--required-actions): baked assets need a mod build; saved runtime settings need a game relaunch. Then use [Ship Status → The trap it closes](Ship-Status.md#the-trap-it-closes) for the Bake → Build boundary. |
 
 ## Textures and materials
 

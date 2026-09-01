@@ -9,6 +9,7 @@
 - [Getting Started](Getting-Started)
 - [Installation](Installation)
 - [Troubleshooting](Troubleshooting)
+- [Authoring State and Deployment](Authoring-State-and-Deployment)
 - [Mod Editor version.xml Recovery](Mod-Editor-Version-XML-Recovery)
 - [Building](Building)
 - [Backup](Backup)

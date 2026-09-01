@@ -17,6 +17,7 @@ This page is the map of the docs themselves.
 |---|---|
 | **Put my first model on a unit** | [**Getting-Started.md**](Getting-Started.md) — the ordered path, bake → build → launch |
 | **Diagnose something that is broken** | [**Troubleshooting.md**](Troubleshooting.md) — start from the symptom and follow the evidence to its owning guide |
+| **Know whether to Save, Bake, Build, or Relaunch** | [Authoring-State-and-Deployment.md](Authoring-State-and-Deployment.md) — the change-to-action matrix and source/artifact map |
 | **Look up a Factory field, or fix a bad bake** | [Factory-Manual.md](Factory-Manual.md) — the main guide, every field + troubleshooting |
 | **Find the right authoring window** | [Editor-Tools.md](Editor-Tools.md) — every window under `Tools ▸ HAF`, and what each one writes |
 | **Animate a static vehicle or helicopter** | [Vehicle-Lab-Quickstart.md](Vehicle-Lab-Quickstart.md) — raw model → generated rig → animated bake → game |
@@ -36,9 +37,10 @@ This page is the map of the docs themselves.
 - [**Installation.md**](Installation.md) — install BepInEx, the runtime plugin, and the Unity authoring package; verify each layer.
 - [**Getting-Started.md**](Getting-Started.md) — **new here? start here.** Nothing → a custom unit on the map, each step linked to its deep doc.
 - [**Troubleshooting.md**](Troubleshooting.md) — **something failed? start with the symptom.** Evidence order and direct routes to each maintained failure catalog.
+- [**Authoring-State-and-Deployment.md**](Authoring-State-and-Deployment.md) — what each stage writes, which changes need Save/Bake/Build/Relaunch, and which copy is authoritative.
 - [**Mod-Editor-Version-XML-Recovery.md**](Mod-Editor-Version-XML-Recovery.md) — repair the Mod Editor's `XML document (2, 10)` Application Version failure without changing Unity versions.
 - [**Building.md**](Building.md) — build the plugin; the Blender dependency.
-- [**Backup.md**](Backup.md) — the four-layer safety net for the un-versioned working set: manual versions, daily auto-versions, an undoable delete guard, offsite zips.
+- [**Backup.md**](Backup.md) — five complementary protections for uncommitted, irreplaceable, generated, and deployed working data.
 
 ### Author content
 - [**Editor-Tools.md**](Editor-Tools.md) — the **editor reference**: every window under `Tools ▸ HAF`, its menu path, and which registry it writes. *Start here to find the right tool.*
