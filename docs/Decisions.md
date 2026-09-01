@@ -289,8 +289,9 @@ lived (see Editor-Tools.md, Smoke Test), and decision logic that *can* be pure i
 "the seams are untestable" does not — they are testable in the one place they are real.
 
 ## A focused unit suite, not broad coverage or an in-game test framework (settled)
-The plugin has a bounded suite (**111 tests**) over the **pure logic that runs outside the game** (parse / schema /
+The plugin has a bounded suite over the **pure logic that runs outside the game** (parse / schema /
 reflection-resolution / the smoke-verdict rule); everything engine-coupled is verified by in-editor instruments (Feature
 Test, smoke test) plus in-game. **Why:** the game can't run in a test host, so a coverage *target* over engine-coupled
 code would be theatre — the suite guards where bugs have actually hidden and stops there. Broad automated testing is
-revisited at the public-package push. See [Testing.md](Testing.md).
+revisited at the public-package push. [Testing.md](Testing.md) owns the current test count so this settled decision
+cannot drift every time the suite grows.

@@ -76,6 +76,9 @@ can import *your* model? [**Animated-Models.md**](Animated-Models.md) answers th
 Baking writes assets into the project; the game loads them from a built **asset bundle**, so you package + deploy once
 per set of changes:
 
+> Unsure whether a later edit needs Save, Bake, Build, or only a relaunch? Use the
+> [authoring-state action matrix](Authoring-State-and-Deployment.md#change--required-actions).
+
 - **Headless (simplest):** `haf build` runs the full Mod Editor build + deploy from the command line. See
   [**Headless-CLI.md**](Headless-CLI.md).
 - **In the editor:** run the Humankind Mod Editor build, then deploy — or use `Tools\haf-deploy.bat` (a pure file copy,

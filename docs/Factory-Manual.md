@@ -123,9 +123,13 @@ dial into a float. The keel readout + ground/water reference makes such stale di
 
 ### Baked ≠ built: Ship Status ([full page](Ship-Status.md))
 
+For the complete **Generate rig / Save / Bake / Build / Relaunch** decision table, see
+[Authoring state and deployment](Authoring-State-and-Deployment.md).
+
 Baked assets (the `_Skeleton/_Atlas/_ModelMesh/_Mat/_Model` outputs in `Assets/Resources`) reach the game **only
-through a mod build** — the registry, skins and sounds are read directly from `BepInEx/config` and are always
-current. A fresh bake is therefore invisible in-game (the boot pre-flight warns about its unresolved GUIDs) until
+through a mod build** — saved registry settings, skins and sounds are read directly from `BepInEx/config` on the next
+runtime load and do not need that bundle build. A fresh bake is therefore invisible in-game (the boot pre-flight warns
+about its unresolved GUIDs) until
 the next build. Two surfaces keep this honest (2026-08-18, born from a real catch: a submarine re-baked five
 minutes *after* the last mod build):
 
@@ -935,7 +939,7 @@ one clip per role folder, and the game loads the resulting ClipCollections by GU
 - **Attack repeats** *(shown when an Attack clip is set)* — how many times the Attack clip replays per trigger
   (window = repeats × clip duration). The sim fires ONCE per attack, so a short recoil-pop source clip (`shootAR2s`
   = 0.17 s) reads as a blip at 1; **18 ≈ 3 s of sustained automatic fire** (verified in-game). **RUNTIME-ONLY**:
-  *Save (no bake)* + rebuild the mod is enough — no re-bake.
+  *Save (no bake)* + game relaunch is enough — no re-bake or mod build.
 - **Clip slicing** — every clip field (the primary Clip/Idle included) accepts `clipName[start..end]`: the range is
   cut from the source clip at bake time, `start>end` plays it REVERSED, a single frame becomes a held stance
   (auto-padded). A **speed step** `clipName[start..end/N]` keeps every Nth frame — the slice plays N× faster

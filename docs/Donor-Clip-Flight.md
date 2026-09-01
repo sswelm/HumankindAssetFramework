@@ -67,7 +67,8 @@ Idempotent, logged as `[Rest] <name>: rests rebased (...)`, and followed by the 
 **Placement (the stealth-helicopter arc, resolved 2026-08-07):** a model's **Position offset is a RUNTIME
 mechanism on the animated path** — the plugin adds the registry `position` to the pawn **every frame**
 (`ApplyPositionOffset`: X/Y rotated into the pawn's frame so the offset turns with the unit, Z as world-up), in
-true game units, with **no re-bake needed** (Save settings + mod rebuild). The editor previews draw it **live**.
+true game units, with **no re-bake or mod build needed** (Save settings + game relaunch). The editor previews draw it
+**live**.
 
 The war story, so nobody repeats it: believing the knob was dead on the animated path, a bake-time application was
 added — and every animated model then carried the offset **twice** (runtime + baked): the helicopter flew at
@@ -114,7 +115,7 @@ bake-side copy is removed; **one dial, one application, previewed live**.
 | Rotor twists although the bake "was updated" | **stale rig**: Animation Lab reused the last rig GLB | run Vehicle Lab **Generate rig**, then rebake. Signature: both rotor rests dump as the same permutation quat `(-0.5,-0.5,-0.5,0.5)` |
 | Canted tail fan wobbles out of its ring | tail bone frame not authored (local X ≠ fan axle) | regenerate with the current `vehicle_rig.py` |
 | Fan spins backwards | handedness of the constructed frame | negate the axle (sign flip in the rig script) |
-| Whole unit moves like a zeppelin | `useDonorClip` lost from the pack | it's a Factory checkbox now; re-tick and rebuild |
+| Whole unit moves like a zeppelin | `useDonorClip` lost from the pack | re-tick **Use donor animation clip**, Save settings, and relaunch |
 
 ## Flight character
 
