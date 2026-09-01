@@ -7,6 +7,9 @@ on:
   push:
     branches: [master]
   pull_request:
+  # workflow_dispatch: lets publish-wiki be exercised deliberately and RE-RUN after a failure without an empty
+  # commit. The job's ref check keeps it master-only; a dispatch on any other branch is a no-op.
+  workflow_dispatch:
 
 # Read-only by default. Only the post-CI wiki publisher below receives a narrowly scoped write token.
 permissions:
@@ -96,7 +99,7 @@ jobs:
   # is deliberate: sync_wiki.sh is deterministic and the staged-diff check makes non-doc pushes a cheap no-op.
   publish-wiki:
     name: Publish wiki
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/master'
     needs: build-test
     runs-on: ubuntu-latest
     permissions:

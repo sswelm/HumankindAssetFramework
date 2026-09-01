@@ -95,8 +95,9 @@ the wiki into the runner's temporary directory, runs `tools/sync_wiki.sh`, stage
 when the staged tree changed. A non-documentation merge is therefore a no-op.
 
 The write boundary is intentional: the workflow defaults to `contents: read`; only this job receives
-`contents: write`, and its event condition excludes pull requests. The sync generator still owns stale-page cleanup,
-sidebar coverage, and link validation, so a broken generation fails before the wiki commit is created.
+`contents: write`, and its event condition excludes pull requests. The sync generator still owns stale-page cleanup and
+link validation (sidebar coverage is enforced by `check-docs.sh` in `build-test`), so a broken generation fails before
+the wiki commit is created.
 
 The in-editor tests all run from **one window** — `Tools ▸ HAF ▸ Bake Tests…` (Smoke / Features / Conversion rows,
 each with a plain-language explanation, live per-row PASS/FAIL, and a durable `Logs/haf_bake_tests_report.txt` per

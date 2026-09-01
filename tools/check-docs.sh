@@ -92,7 +92,10 @@ done
 
 # ---- 7. generated wiki and tracked sidebar are complete ------------------------------------------------------
 mkdir "$wiki_tmp/wiki"
-git init -q "$wiki_tmp/wiki"
+# Under a git HOOK, git exports GIT_DIR (and sometimes GIT_WORK_TREE/GIT_INDEX_FILE) - and `git init <dir>` then
+# initialises THAT repo instead of creating <dir>/.git, so sync_wiki.sh refused the target ("not a git clone").
+# The pre-push gate was broken this way from 2026-08-29 (this step's arrival) until the first push after it.
+env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git init -q "$wiki_tmp/wiki"
 bash tools/sync_wiki.sh "$wiki_tmp/wiki" >/dev/null || {
   printf '  WIKI OUTPUT  tools/sync_wiki.sh rejected its generated output\n'
   fail=1
