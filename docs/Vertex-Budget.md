@@ -69,6 +69,11 @@ the rest of the roster.
 
 **buffer used = Σ (vertices of each *distinct loaded model type*)** — independent of instance count.
 
+Do not confuse that vertex total with Model Factory's **Reduce to ~tris** field. The field is a Blender triangle
+ceiling; it is not a vertex target and there is no stable tris→verts conversion. UV seams, material boundaries, skin
+weights, and import splitting can make the baked vertex count substantially higher than the triangle count. Use the
+bake log for the model's actual `verts=` cost and F8 for the roster-wide total.
+
 - **Not units on screen** — instancing; copies are free.
 - **Not the whole catalog** — only meshes that are **loaded** register. The layer held 695 meshes while
   ~10 units were visible, so it's "loaded types," far more than what's on screen, but not everything

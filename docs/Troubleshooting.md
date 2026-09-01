@@ -28,6 +28,7 @@ before changing geometry.
 | HAF cannot find Blender or a conversion helper | [Installation → Blender helpers](Installation.md#blender-helpers) and [Factory settings](Factory-Manual.md#settings--game--blender-path-foldout-at-the-top). Packaged scripts live under `Tools~`; only `blender.exe` is external. |
 | Bake fails, produces zero vertices, or reports an import/conversion error | [Factory Manual → Troubleshooting](Factory-Manual.md#8-troubleshooting). Keep the **first** Console error; later Unity errors are often consequences. |
 | A model is invisible, see-through, microscopic, enormous, grey, or oriented incorrectly | [Factory Manual → Troubleshooting](Factory-Manual.md#8-troubleshooting) owns the symptom table and corrective bake fields. |
+| Vehicle Lab animation works, but the baked vehicle is flat, all black, or has scrambled material regions | [Textures → Failure catalog](Textures.md#failure-catalog--match-your-symptom). Use Auto/Multi and make a control bake with **Reduce to ~tris = 0** before editing textures. |
 | The preview or registry changed, but the game did not | [Ship Status → The trap it closes](Ship-Status.md#the-trap-it-closes) and [Factory Manual → rebuild the mod](Factory-Manual.md#6-after-baking-rebuild-the-mod-dont-skip-this). |
 
 ## Textures and materials
@@ -35,6 +36,9 @@ before changing geometry.
 Use [Textures → Failure catalog](Textures.md#failure-catalog--match-your-symptom) for pale/washed output, white
 parts, silver or collaged panels, blurry atlases, missing skins, non-[0,1] UVs, poisoned previews, and magenta UI
 images. That page also distinguishes a **baked atlas problem** from a runtime PNG re-skin problem.
+
+Treat the three preview surfaces differently: Vehicle Lab checks rigging (Checker overrides materials), the post-Bake
+Factory preview checks atlas mapping but uses editor lighting, and the game is authoritative for final appearance.
 
 If the model is otherwise correct, do not change skeleton or scale fields to fix a texture symptom.
 

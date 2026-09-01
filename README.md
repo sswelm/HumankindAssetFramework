@@ -111,7 +111,7 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
 - **Correct, isolated skins** out of the box — glTF/OBJ V-convention reconciled, off-tile UVs shifted back in range, and
   each model gets a private layer so its skin never bleeds onto the donor.
 - **Bake-time skin tuning** — albedo brightness/saturation, a keep-black toggle for glass canopies, and atlas sizing
-  (256–2048, DXT1) that keeps each shipped skin ~0.1–2 MB.
+  (256–2048, DXT1 for opaque or DXT5 when static material alpha must survive) that keeps shipped skins compact.
 - **Runtime retexture / recolour without a bake** — a hot-loaded PNG or a live desaturate + RGB adjust, per unit, free on
   the vertex budget. Works on baked custom models too.
 
