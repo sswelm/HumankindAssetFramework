@@ -11,7 +11,9 @@ the tooling or a one-checkbox recipe below.
 At bake time, each source material's **albedo** is extracted to
 `Assets/FactorySource/<Model>/<Model>_matNN_<matname>_albedo.png` (Blender-side, from the GLB/FBX's textures).
 The baker then packs all of them into **one atlas** (`<Model>_Atlas`), remaps every submesh's UVs into its
-material's rect, merges the submeshes, and compresses to **DXT1** (alpha is discarded — see the BLEND caveat).
+material's rect, merges the submeshes, and block-compresses the result. Opaque atlases use **DXT1**; the static
+multi-material path preserves meaningful source alpha and uses **DXT5**. The animated multi-material path still
+forces the atlas opaque — see the BLEND caveat.
 The game renders exactly this atlas; the source textures never ship. Anything wrong at any stage — extraction,
 packing, matching, remapping, post-processing — shows up as "the texture looks wrong" with very different
 root causes, which is why the failure catalog below leads with symptoms.
@@ -20,8 +22,8 @@ root causes, which is why the failure catalog below leads with symptoms.
 
 | Knob | What it really does | Recipe guidance |
 | --- | --- | --- |
-| **Atlas size** | The packed atlas's max dimension. | **Budget ~texture-area per material**: 100 materials in a 512 = ~50px each = mush. A multi-material vehicle wants **2048**. Cost: 2048 DXT1 ≈ 2.7 MB in the bundle. |
-| **Material mode** | Single collapses everything to one material; Auto/Multi keep slots for per-material atlas rects. | Multi-material sources need Auto/Multi. NOTE: on the **animated** path, Multi rebuilds the mesh and needs tangents (see Animated-Models). |
+| **Atlas size** | The packed atlas's max dimension. | **Budget ~texture-area per material**: 100 materials in a 512 = ~50px each = mush. A multi-material vehicle wants **2048**. Cost: 2048 DXT1 ≈ 2.7 MB with mipmaps; alpha-bearing DXT5 is roughly double. |
+| **Material mode** | Single collapses every polygon to material slot 0; Auto/Multi keep slots for per-material atlas rects. | Multi-material sources need Auto/Multi. NOTE: on the **animated** path, Multi rebuilds the mesh and needs tangents (see Animated-Models). |
 | **Keep black (glass/cockpit)** | OFF (default) replaces every near-black texel (<32,32,32) with pale grey-blue (160,160,168) — a rescue for models whose "glass" is solid black. | **Dark/camo models MUST turn this ON** — otherwise every shadow, dark camo spot and rubber part paints pale grey-blue ("the washed-out tank"). |
 | **Albedo brightness / saturation** | Post-multipliers on the packed atlas. | Leave 1/1 unless the source is uniformly too dark/garish; they cannot fix mapping problems. |
 | **Keep extracted texture (reuseExtracted)** | The Blender step does NOT regenerate the extracted albedos. | **Required whenever you hand-edit an extracted file** (e.g. the white-swatch recipe below) — otherwise the next bake overwrites your edit. |
@@ -54,9 +56,10 @@ into [0,1) at remap time. Diagnose via the OBJ's `vt` range or a GLB accessor sc
 [3.0..4.0], this was it (pre-fix bakes).
 
 **Subtle washed "dirt" layer differs from the source render** → the source material is **alphaMode=BLEND**
-(Sketchfab layering: dirt/decals in alpha, blended over the layer beneath). The bake is opaque albedo-only and
-DXT1 drops alpha, so semi-transparent texels show raw RGB. Usually acceptable; no fix shipped yet (candidate:
-composite low-alpha texels over the texture's opaque-average at atlas time).
+(Sketchfab layering: dirt/decals in alpha, blended over the layer beneath). DXT5 can preserve an alpha channel on
+the static multi-material path, but HAF does not composite layered source materials into one final albedo; the
+animated multi-material path also forces alpha opaque. Semi-transparent dirt/decal RGB can therefore differ from
+the source render. Usually acceptable; no compositing fix has shipped yet.
 
 **Preview looks wrong but you suspect the bake is fine** → previews flatten materials and can hold **persisted
 wrong texture bindings**: Unity resolves FBX auto-material textures BY NAME SEARCH in the folder subtree and
@@ -64,6 +67,14 @@ writes the remap into the import settings. Two rules: (1) **never place foreign 
 FactorySource folder** (the raw scrubber caches live in the shared `FactorySource/raw/` tree for exactly this
 reason); (2) if a preview got poisoned, moving the intruder out is NOT enough — **rebake the entry** to
 regenerate the import. The game renders baked assets, not previews: when in doubt, the in-game look is truth.
+
+**Vehicle Lab looked acceptable, but the animated Factory bake is flat, black, or scrambled** → separate the two
+stages. Vehicle Lab's **Checker** is an intentional material override and its normal view is a rigging aid, not the
+packed HAF atlas. In Model Factory, use **Auto/Multi** (Single deliberately assigns every polygon to slot 0) and make a
+control bake with **Reduce to ~tris = 0**. If the control is correct, reduction—not the source texture—crossed a
+topology/material threshold; raise the ceiling gradually and keep the lowest verified value. This is not theoretical:
+one animated rotorcraft failed at 20,000 triangles and mapped correctly at 24,000. **Keep black** only controls the
+near-black→grey substitution; it does not repair material assignment or UV remapping.
 
 **Portraits/UI images** are a different system entirely — Amplitude references them by nibble-swapped
 {a,b,c,d} GUIDs, which makes their path irrelevant. Since 2026-07-28 they ALL live in
@@ -91,6 +102,9 @@ game is sampling, and the starting point for hand-painted variants.
 4. **Check the source's material flags** (glTF JSON: `baseColorTexture` present? `alphaMode`?) before blaming
    the pipeline — some models are genuinely untextured or alpha-layered at the source.
 5. Only then reach for brightness/saturation — they are taste knobs, not repair knobs.
+
+For Vehicle Lab outputs, insert one extra control before step 1: bake once with **Auto/Multi** and reduction **off**.
+That distinguishes source/material extraction from damage introduced while simplifying the animated mesh.
 
 Cross-references: [Factory-Manual.md](Factory-Manual.md) (the windows and bake flow),
 [Animated-Models.md](Animated-Models.md) (multi-material on the animated path, tangents),

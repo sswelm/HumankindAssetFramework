@@ -2,7 +2,7 @@
 
 How to put your own 3D model onto a Humankind unit, step by step. This is the practical guide.
 
-The Factory is a Unity editor window (**Tools ▸ Model Factory**). You give it a model file and a target unit, set
+The Factory is a Unity editor window (**Tools ▸ HAF ▸ Model Factory**). You give it a model file and a target unit, set
 a few options, press **Bake**, then rebuild the mod. The in-game plugin reads what you baked and renders it.
 
 > **Shipping a standalone pack?** The runtime is a multi-mod host — you can distribute your models as their own **pack**
@@ -25,7 +25,7 @@ a few options, press **Bake**, then rebuild the mod. The in-game plugin reads wh
 
 ## 2. Quick start (static model)
 
-1. **Tools ▸ Model Factory**.
+1. **Tools ▸ HAF ▸ Model Factory**.
 2. **Pawn description → Pick** — choose the unit your model replaces (e.g. `Era6_Common_Hovercrafts_01`). A **Resource
    name** is suggested; keep or edit it.
 3. **Model file → Browse** — pick your `.glb`/`.obj`/`.fbx`.
@@ -210,14 +210,19 @@ their settings and work together**:
   kit** (a towed gun's wheels/legs/barrel each on their own material) where otherwise every part samples the wrong region
   (e.g. the wheel comes out scrambled). Costs atlas space. *(Works for both static and ANIMATED models now — the animated
   path was single-material only before.)* If a dark part (rubber tyre) shows light patches, also tick **Keep black**. Re-bake to apply.
-- **Atlas size** (256 / 512 / 1024 / 2048) — longest side of the baked atlas. It's DXT1-compressed into the shipped
-  `_Atlas.asset`, so **smaller = smaller mod bundle**. A unit is ~80 px at map zoom and its info card uses your 2D
+- **Atlas size** (256 / 512 / 1024 / 2048) — longest side of the baked atlas. Opaque atlases are DXT1-compressed;
+  a static multi-material atlas with meaningful source alpha uses DXT5, so **smaller = smaller mod bundle**. A unit is
+  ~80 px at map zoom and its info card uses your 2D
   portrait (not the model), so **512–1024 is ample** (256 for very simple units); pick 2048 only for a unit you zoom in
   on closely. Default 512. (Before this existed, atlases baked uncompressed at up to 4096×8192 — a single `_Atlas.asset`
   could be 128 MB. DXT1 sizes: 2048 ≈ 2 MB, 1024 ≈ 0.5 MB, 512 ≈ 0.1 MB, 256 ≈ 32 KB.) Re-bake to apply.
 - **Reduce to ~tris (0 = off)** — quadric-decimate a heavy model to about this many triangles (via Blender) to fit the
-  engine's shared mesh buffer (~25k per model is the practical ceiling). It's a **ceiling, not a quota**: a model already
-  under it passes through untouched. No Blender? Use **Weld & simplify** instead (below).
+  engine's shared mesh buffer. The value is a **triangle ceiling, not a vertex count or quota**: a model already under it
+  passes through untouched, and the imported vertex count may be higher because UV/material seams split vertices. There
+  is no fixed per-model engine ceiling; the current pawn layer is a shared ~1,000,000-vertex pool for all loaded model
+  types. The 24,000 default is a roster-friendly starting point, not a correctness requirement. Use the F8 mesh-budget
+  readout and the bake's `verts=`/`tris=` lines to make the final trade-off. No Blender? Use **Weld & simplify** instead
+  (below).
 - **Strip parts (names)** *(Pick)* — comma-separated object-name substrings to **DELETE from *your* model** before baking
   (each match takes its children too). The **mirror of Hide-donor**, but on your source mesh: use it to drop a part you
   don't want baked in — most importantly a **helicopter's own rotor(s)**, so the **donor's animated rotor spins through** in
@@ -267,8 +272,23 @@ An interactive 3D preview is embedded near the bottom of the window (drag to orb
 after every Bake** and when you pick a resource from the **3D resource** dropdown — so you see the baked result *in the
 window*, no hunting in the Project view. It renders the baked prefab: `<name>_Preview.prefab` for **animated** models (a
 static, textured, upright copy of the injected mesh — not itself injected) or `<name>_Model.prefab` for **static** models.
-Use it to judge geometry, skin, and — with the **Reduce to ~tris** field + the Console vert/tri count — to dial in the
-lowest triangle count with no visible loss: drop the count → Bake → watch the model degrade live, then step back up.
+Use it to judge geometry and **texture mapping/material boundaries**, and — with the **Reduce to ~tris** field + the
+Console vert/tri count — to dial in the lowest triangle count with no visible loss: drop the count → Bake → watch the
+model degrade live, then step back up. Do not use its Standard-shader lighting to judge final brightness, gloss, or
+in-game colour; inspect the baked atlas and verify in-game for those.
+
+**Animated multi-material safety pass.** A Vehicle Lab output changes the source into one skinned mesh with separate
+material slots. The animated bake then optionally quadric-decimates that mesh before building one atlas and remapping
+each material's UVs. That makes reduction a texture variable as well as a geometry variable. For a new animated vehicle:
+
+1. Bake once with **Material mode = Auto** (or **Multi**), **Reduce to ~tris = 0**, and **Keep black** on when black glass,
+   rubber, or cockpit materials are intentional.
+2. If the mapping is correct, lower the triangle ceiling gradually and re-bake after each change. A small threshold
+   change can matter: a real rotorcraft mapped incorrectly at 20,000 and correctly at 24,000.
+3. If the whole vehicle takes one material's colour, check **Material mode** before editing textures: **Single** deliberately
+   collapses every polygon to material slot 0. If only intentional black became grey, that is **Keep black**, not mapping.
+4. If a reduced bake scrambles or flattens materials, return to `0` to prove the source/material pipeline, then choose the
+   lowest known-good ceiling. Do not compensate with brightness or saturation.
 
 ---
 
@@ -280,7 +300,8 @@ lowest triangle count with no visible loss: drop the count → Bake → watch th
    UVs** or a **Weld & simplify > 0**.
 4. **Renders invisible / see-through in-game?** it's a single-sided/CAD mesh — enable **Winding fix**, or **Double-sided**
    for non-convex shells.
-5. **Heavy model?** set **Reduce to ~tris** (default 24000). Overflowing the shared buffer drops geometry silently.
+5. **Heavy model?** set **Reduce to ~tris** (default 24000), then check F8's shared pawn-layer headroom. Overflow rejects
+   a mesh at registration; there is no universal per-model triangle limit.
 6. Set **Size** / **Rotation** / **Position**. **Bake** → rebuild mod → relaunch. Tweak and re-bake (Model file empty) as
    needed.
 
@@ -392,13 +413,15 @@ strategic map.
 | **Bake fails: "needs Blender"** | Install Blender or set its path in **Settings**. For static decimation without Blender, use **Weld & simplify** instead of Reduce-to-tris. |
 | **Re-baked static model is 90° off / tipped up in-game** (preview looks fine) | An older Factory shipped a **stale skeleton** on re-bake (the static outputs were overwritten in place, so the skeleton baked from cached geometry). Fixed now — the static path deletes its outputs and force-reimports before baking the skeleton, so a re-bake matches a first bake. Just **re-bake → rebuild → relaunch**. |
 | **Texture looks stale in the editor** | A Unity texture-residency quirk after a multi-material bake — open the source textures in the Project view and back. The in-game result is correct. |
+| **Vehicle Lab preview has a checker skin or does not show the final texture** | The Vehicle Lab is a rigging preview. **Checker** intentionally overrides the source materials so motion is readable, and neither state represents the packed HAF atlas. Use it for part assignment, pivots, axes, and animation; use the **post-Bake Model Factory preview**, the exported `<name>_Atlas`, and finally the game for materials. |
+| **Animated multi-material model is one flat colour / entirely dark after Vehicle Lab** | First set **Material mode = Auto or Multi**; **Single** collapses all polygons to material slot 0. Then set **Reduce to ~tris = 0** and re-bake. If that restores the mapping, decimation crossed a topology/material threshold: increase the ceiling gradually (20k failed while 24k worked on one rotorcraft). Turn on **Keep black** only to preserve intentional black; it cannot repair wrong UV/material mapping. |
 | **Multi-material GLB comes out untextured / grey** | Fixed — `glbconv` now emits `usemtl` groups + a `.mtl` (and solid-colour swatches for flat parts), so a multi-material GLB atlases like FBX. **Re-bake** an older GLB model to pick this up (it was baked before the converter preserved materials). Keep **Weld & simplify = 0** (faithful mode; material grouping only runs there). |
 | **Baked skin is flat / missing in-game but looks perfect in Blender** (no error) | The model UV-maps into a **non-[0,1] tile** (e.g. the whole hull sits in V 1→2) and leans on the shader's texture **wrap** to repeat the skin. Blender wraps, so it looks right there; the atlas baker packs each texture into a fixed rect and **can't wrap**, so out-of-range UVs sample *outside* the rect and the skin vanishes. Fixed — `glbconv` now **integer-shifts** each island's UVs back into [0,1] before the V-flip (integer shift, so it never tears tile-crossing triangles). **Re-bake** with **"Keep extracted texture" unticked** (static path: that also re-extracts the OBJ) to pick it up. Diagnose by checking the extracted `FactorySource/<name>/<name>.obj` `vt` range — if U/V aren't within [0,1], that was it. Note: genuine *repeat*-tiling (a small texture meant to span [0,N] and repeat N×) still isn't atlas-supportable — none of the shipped models need it. |
 | **Multi-material model bakes all-grey (at 512) or near-black (Keep black on)** — camo/markings gone (no error) | Same non-[0,1] UV cause as the row above, but the materials each sit in a *different* tile, so `glbconv`'s single **global** shift can't gather them. The atlas remapper now also **folds per-vertex** (`u -= floor(u)`) when placing each sub-mesh into its rect, which does cover the per-material case. **Re-bake** to pick it up. (If you saw *grey* it was the near-black→grey neutralize masking the miss; *black* is the raw miss with **Keep black** on.) Proven on the AH-1 Cobra (51 materials, U 0→23). Diagnose per-material with `awk` grouping the OBJ's `vt` by `usemtl`. Once mapped correctly, remaining softness is just **Atlas size** — bump 512→1024/2048 for crisp markings. |
 | **Bake FAILED: `IndexOutOfRangeException` in `MeshCollection.ImportMeshes`** (any animated model) | The animated **skeleton bake** (`Skeleton.Reimport`) reads **tangents** off the skinned mesh; with none, Amplitude indexes an empty tangent array and throws. Fixed: the animated path **always keeps tangents** (`importTangents = CalculateMikk`), regardless of material count — the tangent-strip size optimization is **static-path-only**. (It bit twice: the multi-material howitzer, then the single-material drone.) The baker now also dumps a `SKMESH … bones=/bindposes=/maxBoneIdxUsed=/tangents=` line before the bake and flags a bone-index mismatch, so the opaque crash becomes a readable cause. Related: the **weld pre-pass** is single-material **and single-bone** only (welding across bone-part seams corrupts skinning). If you hit this after a baker change, check the `SKMESH` line — `tangents=0` on an animated model is the tell. |
-| **A part is missing in-game but present in the Factory preview** (a mast, antenna — typically small parts, no error anywhere) | **Shared vertex-buffer overflow.** All injected models + the game's own fx meshes share one ~100k-vertex GPU buffer; overflow is **silently truncated from the tail of the last-registered model's mesh** — so late-order parts of your newest model vanish while its body renders fine. The preview is immune (it renders the mesh asset directly). Diagnosed live: a 48k-vert bake lost its rotor mast; visible again after **Reduce to ~tris** brought it down. Watch the bake log's `verts=` line — stay well under ~25k verts per model (UV-seam splitting means verts ≈ 2× tris on textured models, so a 12000-tri target ≈ 24k verts). |
+| **A part/model is missing in-game but present in the Factory preview** (mast, antenna, or an entire mesh) | Check `BepInEx/LogOutput.log` for `vertex buffer is not large enough` and F8's **GPU mesh buffer (live)** readout. The pawn layer is a shared ~1,000,000-vertex pool and rejects a mesh that no longer fits; the preview is immune because it renders the asset directly. Lower **Reduce to ~tris**, remove invisible interior parts, or deliberately raise the buffer override. Budget by the bake's actual `verts=` count—not by a mythical 25k per-model cap. See [Vertex-Budget.md](Vertex-Budget.md). |
 | **Re-bake has no effect in-game** (still the old shape/orientation; preview shows the new one) | You re-baked but didn't **rebuild the mod**. A re-bake keeps the **same skeleton GUID**, so the registry doesn't change and the game silently keeps rendering the old geometry from the previously built bundle — no error, nothing to see in the log. Every geometry change needs bake → **rebuild mod** → relaunch. (Quick sanity test: bake with a wild rotation offset — if the game doesn't tilt, your build isn't reaching it.) |
-| **Registry gone after a game reinstall / "verify files"** | Open the Factory window — it auto-restores from the git-tracked backup and writes it back to `BepInEx\config` (console: `restored N model(s) from the project backup`). See §10 "Registry safety net". |
+| **Deployed registry gone after a game reinstall / "verify files"** | The git-tracked project source `Assets/Pack/<PackName>/pack.json` is authoritative. Open the Factory window; it recreates the missing `BepInEx/config/haf_packs/<PackName>/pack.json` artifact from that source. See §10 "Registry safety net". |
 | **Source folder created with the wrong case** (e.g. `attackHelicopter/` not `AttackHelicopter/`) | Cosmetic, bake-time only. Windows/Unity is case-insensitive + case-preserving, so the folder inherits the spelling of any pre-existing differently-cased asset of that name (e.g. a vanilla `attackHelicopter512.png`). Baked assets, registry, and in-game loading are all correctly cased. Use a non-colliding `resourceName` (e.g. `AH1Cobra`) if you want the folder capitalised. |
 
 > **Diagnostic tip — trust the atlas, not the preview.** The Factory preview lights the mesh with a Standard (PBR) shader, so a smooth hull reads dark/glossy even when the baked skin is light and correct — don't judge textures from it. To see the *actual* baked skin, select the `<name>_Atlas.asset` in the Project view and run **Tools ▸ HAF ▸ Export selected atlas to PNG** (writes to `C:/tmp` and logs the average RGB). For UV problems, `awk` the extracted OBJ's `vt` lines for the U/V range. Both beat staring at the preview.
@@ -420,31 +443,32 @@ strategic map.
   (static); animated adds `_Clips.asset` and a `<name>/anim/<name>_anim.fbx`.
 - **Bake inputs (NOT shipped):** the imported model + extracted OBJ/albedo sit in `Assets/FactorySource/<name>/`, kept out
   of the built mod so licensed source models aren't redistributed. Safe to delete to reclaim space (a re-bake re-extracts).
-- **Registry:** `<Humankind>\BepInEx\config\haf_models.json` — one entry per model (pawn description, `skel`/`atlas` GUIDs,
-  transform, flags; animated adds `clip` + `animated`/`animClip`/`animateBones`).
-- **Registry backup (versioned):** `Assets/Databases/haf_models.backup.json` — a git-tracked shadow copy, rewritten on
-  every Save/bake. See "Registry safety net" below.
+- **Registry source of truth:** `Assets/Pack/<PackName>/pack.json` — git-tracked and read/written by the editor. It holds
+  the pack header plus model entries (pawn description, asset GUIDs, transforms, runtime flags, and animation settings).
+- **Deployed registry artifact:** `<Humankind>\BepInEx\config\haf_packs\<PackName>\pack.json` — regenerated from the
+  project source on Save/Bake. Do not hand-edit it. See "Registry safety net" below.
 - **Runtime log:** `<Humankind>\BepInEx\LogOutput.log` — `[Uni] …` lines show what was injected (and the donor fragment
   names the Hide-donor Pick reads).
 
 ## 10. Registry safety net
 
-The registry is the one Factory artifact that lives in the *game* folder, so it's the one a game reinstall or a Steam
-"verify files" can wipe. Three layers protect it — all automatic, nothing to configure:
+The registry has one authoritative copy: the git-tracked project file
+`Assets/Pack/<PackName>/pack.json`. The copy in the game folder is only a deployed artifact. Four layers protect the
+source and make recovery explicit:
 
 - **Atomic writes.** Every Save fills a `.tmp` file and swaps it in (`File.Replace`). An interrupted or locked write can
   never leave a truncated registry. If the swap itself fails (antivirus / indexer / the running game holding the file),
   the bake status says **"Baked, but REGISTRY SAVE FAILED"** — the asset is baked; close the lock and re-bake to write
   the entry.
-- **Corrupt-file guard.** If the registry exists but won't parse (a hand-edit typo, a half-written file), it is copied
-  aside to `haf_models.json.corrupt.json` and **Save refuses to run** until you fix or delete the original — so a bake
-  can never overwrite your unreadable-but-recoverable registry with a fresh empty list.
-- **Versioned backup + auto-restore.** Every Save also writes `Assets/Databases/haf_models.backup.json` inside the mod
-  repo (git-tracked → full history, survives anything that happens to the game folder). If the game registry is
-  **missing** — fresh install, verified files — the next `Load()` restores it from this backup and writes it back to
-  `BepInEx\config` automatically. Just **opening the Factory window** triggers this (the console logs
-  `restored N model(s) from the project backup`); no re-bake needed. The restore covers the registry only — BepInEx,
-  the plugin DLL, and the built mod (which carries the baked assets) come from your normal install/build steps.
+- **Corrupt-source guard.** If the project `pack.json` won't parse, it is preserved beside the source as a timestamped
+  `.corrupt-YYYYMMDD_HHMMSS.json` file. Save/Bake stays locked, and the red Factory banner reports the JSON line/column
+  instead of replacing the unreadable registry with an empty one.
+- **One-click recovery.** The corruption banner offers **Restore last deploy** (usually the freshest valid artifact) and
+  **Restore last commit**. Each candidate is parsed and required to contain models before it can replace the source; the
+  corrupt copy remains available for hand-merging.
+- **Artifact recreation and drift warning.** Opening the Factory recreates a missing deployed `pack.json` from the
+  project source. If somebody hand-edited the deployed copy, the editor warns that it differs and the next Save
+  overwrites it from the source. A missing project source can adopt a valid deployed artifact as a last-resort recovery.
 
 ## 11. Regression guards (run before committing baker changes)
 

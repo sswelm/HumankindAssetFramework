@@ -97,7 +97,8 @@ The deploy block's **Wheel bones (roll while moving)** + axle axis / loop frames
 > these are the arms of a split-trail carriage, each ending in a spade; **Leg** is deliberately left free for a
 > walking mech limb. The **preview picks the clip** when a rig has more than one, so `Spin` and `Deploy` can each
 > be judged on the turntable before a bake, and **Checker** paints a high-contrast skin so rotation is visible at
-> all — an untextured wheel looks identical spinning or still.
+> all — an untextured wheel looks identical spinning or still. Checker is a deliberate material override: this preview
+> validates moving parts, pivots, and axes, **not** the final atlas or in-game texture.
 
 > **THE GUN COMES UP WITH THE TRAILS (2026-08-22).** Two dials in that same section, both only live when parts are
 > marked **Gun**:
@@ -279,6 +280,11 @@ composes **yaw-first** (Pitch/Roll act on the grid-aligned model as you see it),
 the next **Vehicleize** run — which is also a *mandatory separate step* before an Animation Lab rebake (the Lab
 reuses the last rig GLB; skipping Vehicleize bakes the OLD rig).
 
+**Materials survive here, but are proven later.** Vehicleize joins the classified parts into a skinned mesh while
+preserving the source's material slots. The HAF atlas is not created until Model Factory/Animation Lab bakes that GLB.
+For multi-material vehicles, start that bake with **Material mode Auto/Multi** and **Reduce to ~tris = 0**; only lower
+the triangle ceiling after the post-Bake mapping is correct. See [Textures.md](Textures.md) for the failure catalog.
+
 ---
 
 ## The injection-axis tools
@@ -359,7 +365,7 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   copy-on-write into "New Additions"). New-tech creation / +prereq are noted not-yet-implemented.
 - **Pawn Rig Dump** — `Tools ▸ HAF ▸ Diagnostics ▸ Pawn Rig Dump`. Dump every matching `PresentationPawnDefinition`'s full
   serialized graph (skeleton, clip collections, assets) to `rig_dump.txt` for rig investigation.
-- **Export selected atlas to PNG** — `Tools ▸ HAF ▸ Export selected atlas to PNG`. Blit a selected (DXT1) atlas through a
+- **Export selected atlas to PNG** — `Tools ▸ HAF ▸ Export selected atlas to PNG`. Blit a selected compressed atlas through a
   linear RT to a readable PNG in `C:/tmp` + log average RGB. (`AtlasDebug.cs`.)
 - **Suppressed Console Noise** — `Tools ▸ HAF ▸ Suppressed Console Noise — open/clear log`. An `[InitializeOnLoad]` filter
   that hides known-harmless vanilla SDK console spam and re-logs matches to `Logs/SuppressedConsoleNoise.log`.

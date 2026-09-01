@@ -133,7 +133,8 @@ see the [Factory Manual](Factory-Manual.md).
   would otherwise flatten.
 - **Small shipped bundle.** Bake *inputs* (the source model + extracted OBJ/albedos) live in `Assets/FactorySource/`,
   which is **not** part of the shipped mod — so licensed source models are never redistributed. The baked atlas is capped
-  by a configurable **Atlas size** (256 / 512 / 1024 / 2048, default 512) and DXT1-compressed, so each shipped skin is
+  by a configurable **Atlas size** (256 / 512 / 1024 / 2048, default 512) and block-compressed (DXT1 opaque; DXT5 when
+  static multi-material source alpha must survive), so each shipped skin is
   ~0.1–2 MB (a big airship wants 1024; a small unit is fine at 512).
 - **Freeze the donor's animation (static models).** A rigid model on an animated ground/hover donor inherits the donor's
   idle/move bob. The **Freeze donor animation** runtime flag pins the donor's pose so the mesh holds still while the pawn
