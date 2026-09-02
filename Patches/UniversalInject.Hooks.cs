@@ -10,6 +10,21 @@ using Newtonsoft.Json.Linq;             // provided by the game (mod.io); robust
 
 namespace HumankindAssetFramework
 {
+    // The load-seam seal, deliberately OUTSIDE any [HarmonyPatch] class: LoadSeamTests exercises Step, and merely
+    // touching a Harmony-attributed type from the test host loads HarmonyLib, whose runtime StackTrace fix then
+    // breaks Exception.ToString on dynamic frames — failing UNRELATED tests by ordering luck (CI caught
+    // PollIsolationTests NRE'ing inside StackTraceFixes.GetMethodFix, 2026-09-02, while the same suite passed
+    // locally). Tests must be able to reach the seal without waking Harmony.
+    internal static class LoadSeam
+    {
+        // A throwing step must neither propagate (this runs inside the game's own load path) nor stop later steps.
+        internal static void Step(string what, Action a)
+        {
+            try { a(); }
+            catch (Exception e) { Plugin.Log?.LogError($"[Uni] load-seam step '{what}' FAILED — the remaining steps still run, but this session's {what} may be degraded: {e}"); }
+        }
+    }
+
     [HarmonyPatch]
     internal static class UniRegisterHook
     {
@@ -32,16 +47,10 @@ namespace HumankindAssetFramework
         {
             if (!hookLogged) { hookLogged = true; Plugin.Diag("[Uni] UniRegisterHook POSTFIX fired"); }
             Prober.AnimMgr = __instance;
-            Step("model re-arm", () => UniversalInject.RearmModelRegistration());
-            Step("registration", () => UniversalInject.EnsureRegistered(__instance));
-            Step("formation overrides", FormationOverride.OnAnimationLoad);
-            Step("preflight", UniversalInject.RunPreflight);   // pre-flight AFTER registration: skeletons + clip ids exist to validate against
-        }
-        // internal: LoadSeamTests pins the seal semantic (a throwing step must neither propagate nor stop later steps).
-        internal static void Step(string what, Action a)
-        {
-            try { a(); }
-            catch (Exception e) { Plugin.Log?.LogError($"[Uni] load-seam step '{what}' FAILED — the remaining steps still run, but this session's {what} may be degraded: {e}"); }
+            LoadSeam.Step("model re-arm", () => UniversalInject.RearmModelRegistration());
+            LoadSeam.Step("registration", () => UniversalInject.EnsureRegistered(__instance));
+            LoadSeam.Step("formation overrides", FormationOverride.OnAnimationLoad);
+            LoadSeam.Step("preflight", UniversalInject.RunPreflight);   // pre-flight AFTER registration: skeletons + clip ids exist to validate against
         }
     }
 
