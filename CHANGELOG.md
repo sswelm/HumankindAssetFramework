@@ -2740,6 +2740,23 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Textures & meshes
 
+- **THE RED WAS NEVER A SYMPTOM — IT WAS THE ROOT, WEARING THREE DISGUISES (2026-09-02, editor 0.5.0–0.5.2).**
+  A SketchUp-style Bell H-13 — Vehicle-Lab-rigged, 10 flat-colour materials, no textures — would not bake right
+  across four sessions, and every layer peeled off it was real: (1) its garbage source UVs sampled neighbouring
+  atlas rects, fixed by **pinning flat-swatch submeshes to their rect centre** (0.5.0); (2) re-pointing the entry
+  at a different GLB left a **chimera extraction** (old 10-mat MTL + new single albedo under a fresh stamp) the
+  bake silently consumed, fixed by purging derived artifacts on any source change (0.5.1); (3) the registry's
+  **two-window clobber** — an open Lab's stale snapshot re-saving over the Factory's `materialMode` change — kept
+  reverting Multi to Single, so the multi path never even ran while its fixes were being judged. And under all
+  three: **`Texture2D.LoadImage` decodes only PNG/JPG**, while glbconv writes flat-colour swatches as 8×8 `.tga`
+  — the animated loader had been baking Unity's 8×8 *red* placeholder for every flat material since the swatches
+  existed, and the static loader skipped `.tga` outright (grey tile), its own comment documenting the exact trap
+  the animated loader fell into. One shared TGA decoder (0.5.2) closed both, plus loud warnings on every
+  rect-shifting drop a hand-edited MTL can cause. Verified in-game (light-blue lattice, true-black bubble) and by
+  the full 44-test bake suite. Lessons, again: the durable action log settled every "the fix didn't work" report
+  — each time the log showed the fixed path *never ran*; and a backlog note from a month earlier had named the
+  `.tga` red placeholder as a hypothesis, unranked and unmeasured, while it was live in every flat-colour bake
+  ever made.
 - **Multiple static models live**, no new code each: a **Zeppelin**, an **LCAC Hovercraft**, a fully-textured **USS
   Zumwalt stealth cruiser**, and a **RAH-66 Comanche** helicopter — correct orientation, correct skin, at the waterline.
 - **Heavy / single-sided / multi-material meshes, handled** — a built-in vertex reducer, a winding fix + double-sided

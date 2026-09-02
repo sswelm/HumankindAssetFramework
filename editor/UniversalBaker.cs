@@ -1663,11 +1663,17 @@ public static class UniversalBaker
         var list = new List<KeyValuePair<string, Texture2D>>();
         string mtl = Path.Combine(fsResDir, name + ".mtl");
         if (!File.Exists(mtl)) return list;
+        // Any material that yields no texture still SHIFTS every later material's rect (list order == rect order),
+        // so both drop paths below warn: glbconv guarantees a map_Kd per material, but a hand-edited MTL may not.
         string cur = null;
         foreach (var raw in File.ReadAllLines(mtl))
         {
             var t = raw.Trim();
-            if (t.StartsWith("newmtl ")) cur = t.Substring(7).Trim();
+            if (t.StartsWith("newmtl "))
+            {
+                if (cur != null) Debug.LogWarning($"[Factory] MTL material '{cur}' has no map_Kd line — dropped from the atlas order; every later material shifts one rect.");
+                cur = t.Substring(7).Trim();
+            }
             else if (t.StartsWith("map_Kd ") && cur != null)
             {
                 string p = Path.Combine(fsResDir, t.Substring(7).Trim());
@@ -1676,6 +1682,7 @@ public static class UniversalBaker
                 cur = null;
             }
         }
+        if (cur != null) Debug.LogWarning($"[Factory] MTL material '{cur}' has no map_Kd line — dropped from the atlas order.");
         return list;
     }
 

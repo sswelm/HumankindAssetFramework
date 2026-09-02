@@ -435,8 +435,10 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
 - ~~**PropBaker**~~ — FIXED 2026-07-19: `FindType` is cached (the per-repaint full-AppDomain scan is gone) and null
   Amplitude GUIDs now fail the bake with the rebuild-then-re-bake guidance instead of writing zero-GUIDs.
 - ~~**DatabaseBrowser**~~ — FIXED 2026-07-19: `ExitGUIException` is rethrown before the generic catch.
-- **Animated multi-material albedos**: `LoadOrderedAlbedos` drops no-`map_Kd` materials (index shift → wrong rects) and
-  can't load `.tga` (red placeholder) — the static path handles both.
+- ~~**Animated multi-material albedos**~~ — **FIXED 2026-09-02 (editor 0.5.2)**, and this note undersold itself: the
+  `.tga` red placeholder wasn't hypothetical, it was live in every flat-colour bake ever made (the all-red Bell H-13)
+  — and the static path did NOT "handle both": it skipped `.tga` entirely (grey tile). Both paths now share a TGA
+  decoder, and every rect-shifting drop (no `map_Kd` line, missing albedo file, undecodable file) warns loudly.
 - ~~**Regex-fallback parser drift** (plugin)~~ — **STALE, closed 2026-08-23 sweep.** `ModelChunks` anchors on `"models"s*:s*[` and brace-counts inside it, so an `overrides` array can never be read as models; index alignment was retired the same day (each entry is read from its OWN object text). Original:: overrides-array objects parsed as models when `models` is empty; count
   truncation via min(pd,skel,atlas); early-entry key omission misaligns later entries; resourceName default differs.
 - **Misc small:** ~~registry Save wipes hand-edited pack wrapper metadata~~ (**STALE, closed 2026-08-23 sweep**:
