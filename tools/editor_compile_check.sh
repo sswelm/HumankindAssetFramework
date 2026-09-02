@@ -54,7 +54,11 @@ for f in "$ROOT"/editor/*.cs; do printf '"%s/editor/%s"\n' "$WROOT" "$(basename 
 
 OUT=$(dotnet "$CSC" "@$FULL" 2>&1); rc=$?
 if [ "$rc" -ne 0 ]; then
-  echo "$OUT" | grep -E "error|not found|Could not" | head -30
+  shown=$(echo "$OUT" | grep -E "error|not found|Could not" | head -30)
+  # The dotnet host localizes its messages (this project's own machine runs Dutch Windows) — a failure whose
+  # text matches none of the patterns above must still show its reason, never a bare exit code.
+  [ -n "$shown" ] || shown=$(echo "$OUT" | head -15)
+  echo "$shown"
   echo "FAIL — csc exited $rc ($n_src sources)"
   exit 1
 fi
