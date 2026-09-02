@@ -1164,6 +1164,11 @@ namespace HumankindAssetFramework
             var list = entries;
             if (list != null)
                 foreach (var e in list)
+                // ONE CORPSE ENTRY CANNOT SKIP THE REST (PR #13 review): Destroy on a half-torn-down session-1 clone
+                // can throw mid-loop, and without this seal every entry AFTER it silently kept stale session-1 ids —
+                // the mixed state the hook-level seal would then let registration proceed over. Sealed per entry,
+                // loud, and the sweep finishes.
+                try
                 {
                     e.skeletonId = -1; e.animId = -1; e.descId = -1; e.repointed = false; e.lastPoseHookAt = -1f;   // session-scoped ids re-learn
                     foreach (var b in e.Roles) b.animId = -1;                                   // every clip role's id re-resolves (the table, not a hand-list)
@@ -1203,6 +1208,7 @@ namespace HumankindAssetFramework
                     e.customSources.Clear(); e.loopHoldUntil.Clear(); e.engineLastPos.Clear(); e.engineMoving.Clear(); e.engineEmitterGuids.Clear(); e.engineLoudSince.Clear(); e.enginePlayingIds.Clear();
                     e.idleNextAt.Clear(); e.attackSoundNextAt.Clear();   // were UNBOUNDED across reloads (never cleared) — session-scoped sub-pawn ids / attacker hashcodes
                 }
+                catch (Exception ex) { Plugin.Log?.LogError($"[Session] re-arm: entry '{e.resourceName}' reset FAILED — later entries still reset, but this one may keep stale session-1 ids: {ex}"); }
             deployMoveState = null;                                  // diagnostic map, unit GUIDs are session-scoped
             // DISTRICT axis session state (same bug class): the FxManager and each entry's tiles/private clone were
             // captured from session-1 presentation objects — reusing them in a second game points at torn-down GPU

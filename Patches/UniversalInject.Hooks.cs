@@ -20,7 +20,10 @@ namespace HumankindAssetFramework
         }
         static bool hookLogged;
         // THE LOAD SEAM, SEALED PER STEP (review 2026-09-02): this postfix rides the game's own AnimationLoad — the
-        // most critical once-per-session chain in the plugin — and was its LAST unguarded call chain: one throw
+        // most critical once-per-session chain in the plugin — and was its LAST unguarded call chain (an AUDITED
+        // fact, not an assertion — the previous "only unguarded body" comment below was never verified and was
+        // false: all ~40 other patch bodies were checked this date and each opens with try or delegates to a
+        // whole-body-sealed callee): one throw
         // inside the re-arm aborted registration, the formation apply AND preflight for the whole session, then
         // propagated into the game's load path. Each step now fails alone and LOUD, and the rest still run — they
         // tolerate a degraded predecessor (registration latches lazily, preflight validates whatever exists). The
@@ -34,7 +37,8 @@ namespace HumankindAssetFramework
             Step("formation overrides", FormationOverride.OnAnimationLoad);
             Step("preflight", UniversalInject.RunPreflight);   // pre-flight AFTER registration: skeletons + clip ids exist to validate against
         }
-        static void Step(string what, Action a)
+        // internal: LoadSeamTests pins the seal semantic (a throwing step must neither propagate nor stop later steps).
+        internal static void Step(string what, Action a)
         {
             try { a(); }
             catch (Exception e) { Plugin.Log?.LogError($"[Uni] load-seam step '{what}' FAILED — the remaining steps still run, but this session's {what} may be degraded: {e}"); }
