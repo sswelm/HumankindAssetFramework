@@ -323,7 +323,7 @@ namespace HumankindAssetFramework
         // A4 — the game version the catalog was last VERIFIED against. Update after re-verifying on a new game build.
         // "" = not pinned. Gives the report context: a NOT FOUND on a matching version is a real regression; on a
         // different version it's most likely just an untested game update.
-        internal const string VerifiedGameVersion = "1.30";   // verified 2026-08-02; update after re-checking on a new build
+        internal const string VerifiedGameVersion = "1.31";   // verified 2026-09-02 (bindcheck 132/132, in-game Smoke Test full PASS); update after re-checking on a new build
 
         static string VersionNote()
         {
