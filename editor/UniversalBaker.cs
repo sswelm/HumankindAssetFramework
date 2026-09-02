@@ -497,6 +497,20 @@ public static class UniversalBaker
                             && File.Exists(stampPath) && File.ReadAllText(stampPath).Trim() == stamp;
             if (!mtlFresh && !(cfg.keepTexture && File.Exists(mtlPath)))
             {
+                // STALE-EXTRACTION HYGIENE (the Bell H-13 chimera, 2026-09-02). glbconv writes an MTL only for
+                // MULTI-material sources, so extracting a 1-material model over a 10-material extraction leaves the
+                // old MTL (and its stamp then claims the new source!) — and the single `_albedo.png` carries no
+                // stamp at all. The result was a directory mixing two models' extractions, silently consumed by the
+                // next bake. On a source change, remove every derived artifact before re-extracting; keepTexture
+                // (checked above) still protects hand-edited files by skipping this whole block.
+                // Each delete takes its .meta along — File.Delete bypasses the AssetDatabase, and a left-behind meta
+                // makes Unity's next refresh print one "asset can't be found" line per file.
+                void DeleteWithMeta(string p) { File.Delete(p); if (File.Exists(p + ".meta")) File.Delete(p + ".meta"); }
+                foreach (var stale in Directory.GetFiles(fsResDir, name + "_mat*_albedo.*"))
+                    if (!stale.EndsWith(".meta")) DeleteWithMeta(stale);
+                if (File.Exists(mtlPath)) DeleteWithMeta(mtlPath);
+                string singleAlb = Path.Combine(fsResDir, name + "_albedo.png");
+                if (File.Exists(singleAlb)) { DeleteWithMeta(singleAlb); Debug.Log($"[Factory] {name}: source model changed — removed the stale extracted albedo (it belonged to the previous source)."); }
                 Debug.Log($"[Factory] {name}: extracting per-material albedos (glbconv) for the multi-material animated atlas…");
                 if (!ConvertGlb(cfg.modelFile, fsResDir, name, 0))
                     Debug.LogWarning($"[Factory] {name}: glbconv extraction FAILED — a multi-material model will fall back to a SINGLE atlas (every part samples material 0). See the [glbconv] Console error.");
@@ -511,6 +525,13 @@ public static class UniversalBaker
         // the albedos are actually present (>1); it just can't conjure a multi-atlas from nothing.
         bool multiMat = orderedAlb.Count > 1
                         && (cfg.materialMode == MaterialMode.Multi || cfg.materialMode == MaterialMode.Auto);
+        // A MULTI-MATERIAL SOURCE BAKED SINGLE MUST SAY SO (2026-09-02). Material mode Single with a 10-material
+        // extraction on disk baked one atlas that every part sampled whole — mis-coloured everywhere — and the log
+        // said nothing. Silent wrong output is the one failure class this project does not tolerate.
+        if (orderedAlb.Count > 1 && !multiMat)
+            Debug.LogWarning($"[Factory] {name}: the extraction lists {orderedAlb.Count} materials but Material mode is " +
+                             "Single — baking ONE atlas that every part samples whole. If parts come out mis-coloured, " +
+                             "set Material mode to Multi (or Auto) and re-bake.");
 
         // --- 2) import the FBX: Generic rig, import animation, scale so the longest axis ~= size ---
         var imp = AssetImporter.GetAtPath(fbxRel) as ModelImporter;
@@ -1506,20 +1527,21 @@ public static class UniversalBaker
         string png = null;
         if (Directory.Exists(fsDir) && !string.IsNullOrEmpty(texName))
         {
-            // Match png/jpg/jpeg (all decodable by Texture2D.LoadImage). glbconv emits jpgs for models whose GLB embeds
-            // JPEG (e.g. the AH-1's per-part albedos); a solid-colour swatch is a .tga, which LoadImage can't decode, so
-            // those are deliberately left to the mat.mainTexture fallback below.
+            // Match png/jpg/jpeg (decodable by Texture2D.LoadImage) plus .tga — glbconv's solid-colour swatches, which
+            // LoadAlbedoFile decodes itself. Before that decoder existed a flat material fell through to mainTexture,
+            // which a flat (untextured) material doesn't HAVE, and landed on the grey tile — colour lost silently.
             var pngs = Directory.GetFiles(fsDir)
-                .Where(p => { var e = Path.GetExtension(p).ToLowerInvariant(); return e == ".png" || e == ".jpg" || e == ".jpeg"; })
-                .Where(p => { var f = Path.GetFileNameWithoutExtension(p).ToLowerInvariant(); return !f.Contains("backup") && !f.Contains("orig"); }).ToArray();
+                .Where(p => { var e = Path.GetExtension(p).ToLowerInvariant(); return e == ".png" || e == ".jpg" || e == ".jpeg" || e == ".tga"; })
+                .Where(p => { var f = Path.GetFileNameWithoutExtension(p).ToLowerInvariant(); return !f.Contains("backup") && !f.Contains("orig"); })
+                .OrderBy(p => Path.GetExtension(p).ToLowerInvariant() == ".tga" ? 1 : 0)   // on an ambiguous Contains match, a real texture outranks a swatch
+                .ToArray();
             png = pngs.FirstOrDefault(p => Path.GetFileNameWithoutExtension(p).Equals(texName, StringComparison.OrdinalIgnoreCase))
                ?? pngs.FirstOrDefault(p => Path.GetFileNameWithoutExtension(p).IndexOf(texName, StringComparison.OrdinalIgnoreCase) >= 0)
                ?? pngs.FirstOrDefault(p => texName.IndexOf(Path.GetFileNameWithoutExtension(p), StringComparison.OrdinalIgnoreCase) >= 0);
         }
         if (png != null && File.Exists(png))
         {
-            var t = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = texName ?? Path.GetFileNameWithoutExtension(png) };
-            t.LoadImage(File.ReadAllBytes(png));
+            var t = LoadAlbedoFile(png, texName ?? Path.GetFileNameWithoutExtension(png));
             Debug.Log($"[Factory]   material '{(mat != null ? mat.name : "?")}' -> albedo {Path.GetFileName(png)}");
             return t;
         }
@@ -1646,19 +1668,69 @@ public static class UniversalBaker
         var list = new List<KeyValuePair<string, Texture2D>>();
         string mtl = Path.Combine(fsResDir, name + ".mtl");
         if (!File.Exists(mtl)) return list;
+        // Any material that yields no texture still SHIFTS every later material's rect (list order == rect order),
+        // so both drop paths below warn: glbconv guarantees a map_Kd per material, but a hand-edited MTL may not.
         string cur = null;
         foreach (var raw in File.ReadAllLines(mtl))
         {
             var t = raw.Trim();
-            if (t.StartsWith("newmtl ")) cur = t.Substring(7).Trim();
+            if (t.StartsWith("newmtl "))
+            {
+                if (cur != null) Debug.LogWarning($"[Factory] MTL material '{cur}' has no map_Kd line — dropped from the atlas order; every later material shifts one rect.");
+                cur = t.Substring(7).Trim();
+            }
             else if (t.StartsWith("map_Kd ") && cur != null)
             {
                 string p = Path.Combine(fsResDir, t.Substring(7).Trim());
-                if (File.Exists(p)) { var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = cur }; tex.LoadImage(File.ReadAllBytes(p)); list.Add(new KeyValuePair<string, Texture2D>(cur, tex)); }
+                if (File.Exists(p)) list.Add(new KeyValuePair<string, Texture2D>(cur, LoadAlbedoFile(p, cur)));
+                else Debug.LogWarning($"[Factory] MTL references missing albedo '{Path.GetFileName(p)}' — material '{cur}' dropped from the atlas order; every later material shifts one rect.");
                 cur = null;
             }
         }
+        if (cur != null) Debug.LogWarning($"[Factory] MTL material '{cur}' has no map_Kd line — dropped from the atlas order.");
         return list;
+    }
+
+    // Decode one albedo file from disk into a readable texture. Texture2D.LoadImage handles ONLY png/jpg — feed it a
+    // .tga and it returns false, leaving Unity's 8x8 RED placeholder, which then packs into the atlas as if it were
+    // the material's colour. glbconv writes exactly such .tga files for flat-colour (untextured) materials, so every
+    // multi-material bake with flat parts shipped red/wrong since those swatches existed (the all-red Bell H-13,
+    // 2026-09-02). Swatches are glbconv's own type-2 uncompressed TGAs — decoded here; any undecodable file WARNS
+    // instead of silently baking the placeholder.
+    static Texture2D LoadAlbedoFile(string path, string texName)
+    {
+        var bytes = File.ReadAllBytes(path);
+        var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = texName };
+        bool ok = Path.GetExtension(path).ToLowerInvariant() == ".tga" ? TryDecodeTga(bytes, tex) : tex.LoadImage(bytes);
+        if (!ok) Debug.LogWarning($"[Factory] could not decode '{Path.GetFileName(path)}' (TGA support covers uncompressed 24/32-bit only) — this material will bake as the red placeholder.");
+        return tex;
+    }
+
+    static bool TryDecodeTga(byte[] b, Texture2D tex)
+    {
+        try
+        {
+            if (b.Length < 18 || b[2] != 2) return false;               // type 2 = uncompressed true-colour (what glbconv writes)
+            int idLen = b[0], w = b[12] | (b[13] << 8), h = b[14] | (b[15] << 8), bpp = b[16];
+            if (w <= 0 || h <= 0 || (bpp != 24 && bpp != 32)) return false;
+            int stride = bpp / 8, off = 18 + idLen;
+            if (b.Length < off + (long)w * h * stride) return false;
+            bool topLeftOrigin = (b[17] & 0x20) != 0;                   // Texture2D rows run bottom-up
+            var px = new Color32[w * h];
+            for (int y = 0; y < h; y++)
+            {
+                int srcRow = topLeftOrigin ? (h - 1 - y) : y;
+                for (int x = 0; x < w; x++)
+                {
+                    int i = off + (srcRow * w + x) * stride;            // pixel order is BGR(A)
+                    px[y * w + x] = new Color32(b[i + 2], b[i + 1], b[i], stride == 4 ? b[i + 3] : (byte)255);
+                }
+            }
+            tex.Reinitialize(w, h);
+            tex.SetPixels32(px); tex.Apply();
+            return true;
+        }
+        catch { return false; }
     }
 
     static string SimplifyMat(string s) => (s ?? "").ToLowerInvariant().Replace("material", "").Replace("mat", "").Replace("_", "").Replace(" ", "").Replace(":", "");
