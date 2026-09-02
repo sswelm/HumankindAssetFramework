@@ -3,6 +3,17 @@
 The **package** changelog: what changed for someone who installs the tools. (The project-wide engineering log
 lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `editor-vX.Y.Z`.
 
+## 0.5.1 — 2026-09-02
+
+- **Changing a model's source file can no longer bake against the previous source's extraction.** glbconv writes
+  an MTL only for multi-material sources, so re-pointing an entry at a different file could leave a *chimera*
+  extraction folder (old MTL + swatches, new stamp + albedo) that the next bake silently consumed — the first
+  0.5.0 re-bake of the Bell H-13 sampled a leftover 256×32 palette strip from the previous source and came out
+  dark chaos. On a source change every derived extraction artifact is now removed before re-extracting
+  (*Reuse extracted files* still protects hand-edited textures by skipping the refresh entirely).
+- **A multi-material source baked with Material mode Single now warns**, naming the material count and the fix —
+  before this the log said nothing while every part sampled one atlas whole.
+
 ## 0.5.0 — 2026-09-02
 
 - **Flat-colour (untextured) multi-material models bake correctly — no external atlasing step.** A SketchUp-style

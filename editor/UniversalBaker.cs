@@ -497,6 +497,17 @@ public static class UniversalBaker
                             && File.Exists(stampPath) && File.ReadAllText(stampPath).Trim() == stamp;
             if (!mtlFresh && !(cfg.keepTexture && File.Exists(mtlPath)))
             {
+                // STALE-EXTRACTION HYGIENE (the Bell H-13 chimera, 2026-09-02). glbconv writes an MTL only for
+                // MULTI-material sources, so extracting a 1-material model over a 10-material extraction leaves the
+                // old MTL (and its stamp then claims the new source!) — and the single `_albedo.png` carries no
+                // stamp at all. The result was a directory mixing two models' extractions, silently consumed by the
+                // next bake. On a source change, remove every derived artifact before re-extracting; keepTexture
+                // (checked above) still protects hand-edited files by skipping this whole block.
+                foreach (var stale in Directory.GetFiles(fsResDir, name + "_mat*_albedo.*"))
+                    if (!stale.EndsWith(".meta")) File.Delete(stale);
+                if (File.Exists(mtlPath)) File.Delete(mtlPath);
+                string singleAlb = Path.Combine(fsResDir, name + "_albedo.png");
+                if (File.Exists(singleAlb)) { File.Delete(singleAlb); Debug.Log($"[Factory] {name}: source model changed — removed the stale extracted albedo (it belonged to the previous source)."); }
                 Debug.Log($"[Factory] {name}: extracting per-material albedos (glbconv) for the multi-material animated atlas…");
                 if (!ConvertGlb(cfg.modelFile, fsResDir, name, 0))
                     Debug.LogWarning($"[Factory] {name}: glbconv extraction FAILED — a multi-material model will fall back to a SINGLE atlas (every part samples material 0). See the [glbconv] Console error.");
@@ -511,6 +522,13 @@ public static class UniversalBaker
         // the albedos are actually present (>1); it just can't conjure a multi-atlas from nothing.
         bool multiMat = orderedAlb.Count > 1
                         && (cfg.materialMode == MaterialMode.Multi || cfg.materialMode == MaterialMode.Auto);
+        // A MULTI-MATERIAL SOURCE BAKED SINGLE MUST SAY SO (2026-09-02). Material mode Single with a 10-material
+        // extraction on disk baked one atlas that every part sampled whole — mis-coloured everywhere — and the log
+        // said nothing. Silent wrong output is the one failure class this project does not tolerate.
+        if (orderedAlb.Count > 1 && !multiMat)
+            Debug.LogWarning($"[Factory] {name}: the extraction lists {orderedAlb.Count} materials but Material mode is " +
+                             "Single — baking ONE atlas that every part samples whole. If parts come out mis-coloured, " +
+                             "set Material mode to Multi (or Auto) and re-bake.");
 
         // --- 2) import the FBX: Generic rig, import animation, scale so the longest axis ~= size ---
         var imp = AssetImporter.GetAtPath(fbxRel) as ModelImporter;
