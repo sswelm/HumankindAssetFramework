@@ -3,6 +3,25 @@
 The **package** changelog: what changed for someone who installs the tools. (The project-wide engineering log
 lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `editor-vX.Y.Z`.
 
+## 0.5.3 — 2026-09-02
+
+- **A failed re-bake can no longer ship a mismatched normal map.** The output whitelist behind the E5
+  rollback, the cross-path sweep, and Remove was missing the static path's three surface atlases
+  (`_NormalAtlas` / `_RoughAtlas` / `_NormalAtlasPrev`) — so a re-bake that failed after packing them
+  restored the *old* colour atlas next to the *new* normal atlas (different packing rects, silently wrong
+  shading), and removing a model orphaned all three in the shipped Resources folder. Found by a critical
+  review, not an incident.
+- **The suffix list now exists exactly once.** Both bake-test cleanups carried their own hand-copies of that
+  whitelist; the Tier-2 copy had already drifted (state-driven `_ClipsMove`/`_ClipsAttack`… outputs were never
+  deleted, stranding throwaway fixtures in shipped Resources). Both now reference the baker's own list —
+  a fourth place to update no longer exists.
+- **A district that layers on a model's outputs is no longer swept in silence.** A district bake builds on a
+  same-named model's `_Atlas` and overwrites the atlas trio with processed versions — so a model re-bake or
+  Remove could yank those out from under it with no word said. The Remove dialog now names the layered district
+  *before* the decision, and every sweep logs which district needs a re-bake afterwards.
+- The E5 rollback test's fixture gained a `Textures/` normal map, so the restore assertion now covers the
+  surface atlases too — the exact whitelist entries this release added would otherwise have stayed untested.
+
 ## 0.5.2 — 2026-09-02
 
 - **Flat-colour swatches now actually load — no more red parts.** glbconv writes each untextured material's

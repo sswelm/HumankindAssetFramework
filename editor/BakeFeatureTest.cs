@@ -171,29 +171,41 @@ public static class BakeFeatureTest
             //      ORIGINAL Unity GUIDs (the registry resolves by GUID) + mesh content — which also catches a non-atomic
             //      or GUID-losing restore (a broken restore leaves the asset missing or with a fresh GUID). ----
             {
-                var good = Cfg("e5", cube1);
+                // The fixture is the TWO-material cube with a Textures/ normal map, so the good bake also packs the
+                // surface atlases (_NormalAtlas trio) — the whitelist entries a critical review found missing from the
+                // rollback (2026-09-02): a failed re-bake restored the old colour atlas beside the NEW normal atlas.
+                // A cube1 fixture would leave those list entries forever untested.
+                string texDir = Path.Combine(Path.GetDirectoryName(cube2), "Textures");
+                Directory.CreateDirectory(texDir);
+                WriteAlbedo(Path.Combine(texDir, "matA_Normal.png"), new Color(0.7f, 0.4f, 1f));
+                var good = Cfg("e5", cube2); good.materialMode = MaterialMode.Multi;
                 var m0 = Bake(good, used, out var r0);
                 string skelPath = "Assets/Resources/" + good.resourceName + "_Skeleton.asset";
                 string atlasPath = "Assets/Resources/" + good.resourceName + "_Atlas.asset";
+                string normPath = "Assets/Resources/" + good.resourceName + "_NormalAtlas.asset";
                 string skelGuid0 = AssetDatabase.AssetPathToGUID(skelPath);
                 string atlasGuid0 = AssetDatabase.AssetPathToGUID(atlasPath);
+                string normGuid0 = AssetDatabase.AssetPathToGUID(normPath);
                 int verts0 = m0 != null ? m0.vertexCount : -1;
                 if (m0 == null || string.IsNullOrEmpty(skelGuid0))
                     Check(res, ref pass, ref fail, "E5 rollback restores a failed re-bake", false, "setup bake produced no assets (" + r0.error + ")");
+                else if (string.IsNullOrEmpty(normGuid0))
+                    Check(res, ref pass, ref fail, "E5 rollback restores a failed re-bake", false, "setup bake packed no _NormalAtlas — the surface-atlas half of this test can't run (Textures/matA_Normal.png fixture broken?)");
                 else
                 {
                     // Force a deterministic failure of the SAME resource: a missing model file makes Build throw at the
                     // File.Copy in extraction -> ok:false, well after E5's BackupOutputs ran. Same resourceName => same
                     // output paths the good bake owns, so RestoreOutputs must bring them back.
-                    var bad = Cfg("e5", cube1); bad.modelFile = Path.Combine(tmp, "does_not_exist.obj");
+                    var bad = Cfg("e5", cube2); bad.materialMode = MaterialMode.Multi; bad.modelFile = Path.Combine(tmp, "does_not_exist.obj");
                     var rBad = UniversalBaker.Build(bad);
                     var mR = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Resources/" + good.resourceName + "_ModelMesh.asset");
                     string skelGuid1 = AssetDatabase.AssetPathToGUID(skelPath);
                     string atlasGuid1 = AssetDatabase.AssetPathToGUID(atlasPath);
+                    string normGuid1 = AssetDatabase.AssetPathToGUID(normPath);
                     bool restored = !rBad.ok && mR != null && mR.vertexCount == verts0
-                                    && skelGuid1 == skelGuid0 && atlasGuid1 == atlasGuid0;
-                    Check(res, ref pass, ref fail, "E5 rollback restores a failed re-bake (GUIDs + content)", restored,
-                        $"rebakeFailed={!rBad.ok}, verts {verts0}->{(mR != null ? mR.vertexCount : -1)}, skelGuidKept={skelGuid1 == skelGuid0}, atlasGuidKept={atlasGuid1 == atlasGuid0}");
+                                    && skelGuid1 == skelGuid0 && atlasGuid1 == atlasGuid0 && normGuid1 == normGuid0;
+                    Check(res, ref pass, ref fail, "E5 rollback restores a failed re-bake (GUIDs + content, surface atlases incl.)", restored,
+                        $"rebakeFailed={!rBad.ok}, verts {verts0}->{(mR != null ? mR.vertexCount : -1)}, skelGuidKept={skelGuid1 == skelGuid0}, atlasGuidKept={atlasGuid1 == atlasGuid0}, normalAtlasGuidKept={normGuid1 == normGuid0}");
                 }
             }
         }
@@ -340,8 +352,11 @@ public static class BakeFeatureTest
     {
         foreach (var n in names.Distinct())
         {
-            foreach (var s in new[] { "_ModelMesh.asset", "_Atlas.asset", "_Mat.mat", "_Model.prefab", "_Skeleton.asset", "_Clips.asset", "_ClipsPoseData.bytes" })
-                AssetDatabase.DeleteAsset("Assets/Resources/" + n + s);   // pose bytes incl. — Tier-2 animated runs used to strand them in the SHIPPED Resources root
+            // The baker's own whitelist, NOT a copy: this was the third hand-copy of the suffix list, and it had
+            // drifted — Tier-2 borrows real state-driven registry models, whose _ClipsMove/_ClipsAttack/… outputs
+            // this 7-item copy never deleted, stranding them in the SHIPPED Resources root.
+            foreach (var s in UniversalBaker.OutputSuffixes)
+                AssetDatabase.DeleteAsset("Assets/Resources/" + n + s);
             AssetDatabase.DeleteAsset("Assets/FactorySource/" + n);
         }
     }

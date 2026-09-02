@@ -299,13 +299,9 @@ public static class ConversionGateTest
         catch (Exception ex) { Debug.LogError($"[ConvGate] {testName}: exception {ex.GetType().Name}: {ex.Message}"); return fails + 1; }
         finally
         {
-            foreach (var suffix in new[] {
-                "_Skeleton.asset", "_Atlas.asset", "_PreviewMesh.asset",
-                "_Clips.asset", "_ClipsPoseData.bytes",
-                "_ClipsMove.asset", "_ClipsMovePoseData.bytes", "_ClipsAfter.asset", "_ClipsAfterPoseData.bytes",
-                "_ClipsAttack.asset", "_ClipsAttackPoseData.bytes", "_ClipsPreMove.asset", "_ClipsPreMovePoseData.bytes",
-                "_ClipsIdle.asset", "_ClipsIdlePoseData.bytes", "_ClipsCombat.asset", "_ClipsCombatPoseData.bytes",
-                "_ClipsIdleAlt.asset", "_ClipsIdleAltPoseData.bytes", "_ClipsIdleAlt2.asset", "_ClipsIdleAlt2PoseData.bytes" })
+            // The baker's own whitelist, NOT a copy (this was the fourth hand-copy of the suffix list). Preview
+            // meshes need no entry: they live under FactorySource, which the directory delete below removes whole.
+            foreach (var suffix in UniversalBaker.OutputSuffixes)
                 AssetDatabase.DeleteAsset($"Assets/Resources/{testName}{suffix}");
             AssetDatabase.DeleteAsset($"Assets/FactorySource/{testName}");
             AssetDatabase.Refresh();

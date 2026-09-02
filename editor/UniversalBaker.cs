@@ -116,7 +116,12 @@ public static class UniversalBaker
                                                 "_ClipsPreMove.asset", "_ClipsPreMovePoseData.bytes",
                                                 "_ClipsIdleAlt.asset", "_ClipsIdleAltPoseData.bytes",
                                                 "_ClipsIdleAlt2.asset", "_ClipsIdleAlt2PoseData.bytes",
-                                                "_ClipsIdle.asset", "_ClipsIdlePoseData.bytes" };   // state-driven role collections
+                                                "_ClipsIdle.asset", "_ClipsIdlePoseData.bytes",     // state-driven role collections
+                                                // Surface atlases (static multi-material path) — MISSED until 2026-09-02: a failed
+                                                // re-bake's E5 rollback restored the OLD _Atlas but kept the NEW _NormalAtlas with
+                                                // different packing rects (shipped normal map silently indexing wrong rects), and
+                                                // Remove/sweep orphaned all three in force-shipped Resources.
+                                                "_NormalAtlas.asset", "_RoughAtlas.asset", "_NormalAtlasPrev.asset" };
 
     // CROSS-PATH SWEEP: each bake path deletes-then-recreates only its OWN assets, so re-baking a model on the OTHER
     // path (animated <-> static) used to orphan the previous path's outputs in shipped Resources — Unity force-ships
@@ -128,6 +133,15 @@ public static class UniversalBaker
     // Halftrack's card portrait '<name>512.png' died to a manual 'rm <name>*' on 2026-07-27 — magenta unit card).
     internal static void SweepAllOutputs(string name)
     {
+        // A district entry with the same resourceName LAYERS on these outputs by design (its bake reads the model's
+        // _Atlas and overwrites _Atlas/_NormalAtlas/_RoughAtlas with processed versions), so sweeping them is
+        // sometimes exactly right (a re-bake rebuilds them raw) — but never silently.
+        try
+        {
+            if (DistrictRegistry.Load().Any(d => string.Equals(d.resourceName, name, StringComparison.OrdinalIgnoreCase)))
+                Debug.LogWarning($"[Factory] {name}: a DISTRICT entry layers on this model's baked outputs (shared _Atlas / _NormalAtlas / _RoughAtlas) — re-bake the district after this, or it keeps pointing at raw or missing atlases.");
+        }
+        catch (Exception e) { Debug.LogWarning($"[Factory] {name}: district-layering check skipped ({e.Message})."); }
         foreach (var s in OutputSuffixes)
             AssetDatabase.DeleteAsset("Assets/Resources/" + name + s);
     }
