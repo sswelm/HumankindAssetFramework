@@ -51,9 +51,10 @@ run "registry schema parity" bash "$ROOT/tools/check_schema_parity.sh"
 # 5) editor source guards — also in-repo since the move. Both guard editor/, so they belong with it.
 #    5a) The editor compiles. Roslyn against Unity's own reference assemblies — the ONE check that needs a licensed
 #        Unity install (UnityEditor.dll + the MonoBleedingEdge profile), so it stays hook-only and never runs in CI.
-if [ -d "${UNITY_ROOT:-/c/Program Files/Unity/Hub/Editor}" ] || [ -f "$ROOT/tools/editor_compile_check.rsp" ]; then
-  run "editor scripts compile (Roslyn)" bash "$ROOT/tools/editor_compile_check.sh"
-fi
+# No guard: the script itself fails LOUD when Unity/dotnet/Newtonsoft are absent. The old guard here was
+# always-true (it accepted the committed .rsp as proof of Unity), and the script then PASSed while compiling
+# nothing on any machine without Unity at the author's path — a fabricated green found 2026-09-02.
+run "editor scripts compile (Roslyn)" bash "$ROOT/tools/editor_compile_check.sh"
 #    5b) The ownership-rebase hand-lists. A field the UI edits but the window's rebase doesn't re-apply is thrown
 #        away on every Save — silent, and the reason this gate exists. Pure source analysis, so CI can run it too.
 run "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"
