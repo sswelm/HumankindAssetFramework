@@ -3,6 +3,16 @@
 The **package** changelog: what changed for someone who installs the tools. (The project-wide engineering log
 lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `editor-vX.Y.Z`.
 
+## 0.5.2 — 2026-09-02
+
+- **Flat-colour swatches now actually load — no more red parts.** glbconv writes each untextured material's
+  colour as an 8×8 `.tga` swatch, but both bake paths loaded albedos with `Texture2D.LoadImage`, which decodes
+  only PNG/JPG: on the animated path every swatch silently became Unity's 8×8 **red** placeholder (the all-red
+  Bell H-13 — this bug predates 0.5.0 and was the true root of the whole flat-colour saga), and on the static
+  path swatches were skipped entirely, landing flat materials on the grey tile. Both loaders now share one
+  decoder that reads glbconv's TGAs directly, and any file that still can't be decoded — or an MTL entry whose
+  albedo file is missing — logs a loud `[Factory]` warning naming the file instead of baking a placeholder.
+
 ## 0.5.1 — 2026-09-02
 
 - **Changing a model's source file can no longer bake against the previous source's extraction.** glbconv writes

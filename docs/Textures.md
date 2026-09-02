@@ -42,6 +42,13 @@ bilinear-sampled the padding between rects. The bake now pins every vertex of a 
 Lab rig with 10 flat materials.) To *repaint* one of those parts, edit its swatch file
 (`<Model>_matNN_<name>_albedo.png`) to any size ≥ 16 px — a larger file returns that part to normal UV mapping.
 
+**Flat-colour parts bake pure RED (animated path) or the grey tile (static path)** → **FIXED 2026-09-02
+(0.5.2)** — just re-bake. The 8×8 solid-colour swatches glbconv extracts for untextured materials are `.tga`
+files, and the bake loaded albedos with `Texture2D.LoadImage`, which decodes only PNG/JPG: the animated path
+got Unity's 8×8 *red* placeholder per swatch (an all-red model once 0.5.0's centre-pinning faithfully sampled
+it), the static path skipped the swatch and fell to the grey tile. Both paths now decode the TGAs directly;
+any albedo that still fails to decode logs a `[Factory]` warning naming the file instead of baking silently.
+
 **Washed-out / pale grey-blue wash over dark areas** → the **Keep black substitution** (see knob above). The
 substitute color is literally (160,160,168); if your "damage" is that exact pale blue-grey, this is it.
 
