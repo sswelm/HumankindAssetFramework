@@ -1532,7 +1532,9 @@ public static class UniversalBaker
             // which a flat (untextured) material doesn't HAVE, and landed on the grey tile — colour lost silently.
             var pngs = Directory.GetFiles(fsDir)
                 .Where(p => { var e = Path.GetExtension(p).ToLowerInvariant(); return e == ".png" || e == ".jpg" || e == ".jpeg" || e == ".tga"; })
-                .Where(p => { var f = Path.GetFileNameWithoutExtension(p).ToLowerInvariant(); return !f.Contains("backup") && !f.Contains("orig"); }).ToArray();
+                .Where(p => { var f = Path.GetFileNameWithoutExtension(p).ToLowerInvariant(); return !f.Contains("backup") && !f.Contains("orig"); })
+                .OrderBy(p => Path.GetExtension(p).ToLowerInvariant() == ".tga" ? 1 : 0)   // on an ambiguous Contains match, a real texture outranks a swatch
+                .ToArray();
             png = pngs.FirstOrDefault(p => Path.GetFileNameWithoutExtension(p).Equals(texName, StringComparison.OrdinalIgnoreCase))
                ?? pngs.FirstOrDefault(p => Path.GetFileNameWithoutExtension(p).IndexOf(texName, StringComparison.OrdinalIgnoreCase) >= 0)
                ?? pngs.FirstOrDefault(p => texName.IndexOf(Path.GetFileNameWithoutExtension(p), StringComparison.OrdinalIgnoreCase) >= 0);

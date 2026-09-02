@@ -34,8 +34,9 @@ public static class BakeFeatureTest
         {
             if (Directory.Exists(tmp)) Directory.Delete(tmp, true);
             Directory.CreateDirectory(tmp);
-            string cube1 = WriteCube(tmp, "cube1", false);   // single-material
-            string cube2 = WriteCube(tmp, "cube2", true);    // two-material
+            string cube1 = WriteCube(tmp, "cube1", false);            // single-material
+            string cube2 = WriteCube(tmp, "cube2", true);             // two-material
+            string cube3 = WriteCube(tmp, "cube3", true, true);       // two flat-colour materials (8x8 .tga swatches)
 
             // ---- baseline (KeepModel, no features) — the reference for ratio/relative checks ----
             var mBase = Bake(Cfg("base", cube1), used, out var rBase);
@@ -128,6 +129,20 @@ public static class BakeFeatureTest
                 var c = Cfg("multi", cube2); c.materialMode = MaterialMode.Multi;
                 var t = BakeAtlas(c, used);
                 Check(res, ref pass, ref fail, "materialMode=Multi bakes a 2-material model", t != null, t != null ? $"atlas {t.width}x{t.height}" : "no atlas");
+            }
+
+            // ---- flat-colour .tga swatches (0.5.2): glbconv writes untextured materials as 8x8 TGAs, which
+            //      Texture2D.LoadImage cannot decode — before the shared decoder they baked as Unity's red
+            //      placeholder (animated path) or the grey tile (static). Assert both swatch COLOURS actually
+            //      reach the packed atlas: a decode failure makes both distances huge and this fails loudly. ----
+            {
+                var c = Cfg("flat", cube3); c.materialMode = MaterialMode.Multi;
+                var t = BakeAtlas(c, used);
+                if (t == null) { Check(res, ref pass, ref fail, "flat-swatch (.tga) 2-material model bakes", false, "no atlas"); }
+                else if (TryNearestColour(t, SwatchGreen, out float dG) && TryNearestColour(t, SwatchBlue, out float dB))
+                    Check(res, ref pass, ref fail, "flat .tga swatch colours reach the atlas (TGA decode + pack)",
+                        dG <= 40f && dB <= 40f, $"nearest-texel Δ green={dG:0}, blue={dB:0} (tolerance 40; red placeholder / grey tile = decode failed)");
+                else { Skip(res, "flat .tga swatches", "baked atlas not CPU-readable"); skip++; }
             }
 
             // ---- albedoBrightness (best-effort pixel read): brighter atlas than baseline ----
@@ -331,8 +346,15 @@ public static class BakeFeatureTest
         }
     }
 
-    // ---- synthetic model: a unit cube (single- or two-material) + a 512px vertical-gradient orange albedo ----
-    static string WriteCube(string dir, string name, bool twoMats)
+    // The two flat-swatch fixture colours: far from Unity's red decode-failure placeholder and from the grey tile,
+    // so a fixed swatch is unmistakable in the atlas and a broken one cannot pass by accident.
+    static readonly Color32 SwatchGreen = new Color32(40, 200, 70, 255), SwatchBlue = new Color32(50, 90, 220, 255);
+
+    // ---- synthetic model: a unit cube (single- or two-material) + a 512px vertical-gradient orange albedo.
+    //      flatTga swaps the two-material albedos for glbconv-style 8x8 flat-colour TGA swatches (type-2
+    //      uncompressed 32-bit, top-left origin) — the exact bytes an untextured GLB material produces, which
+    //      Texture2D.LoadImage cannot decode. ----
+    static string WriteCube(string dir, string name, bool twoMats, bool flatTga = false)
     {
         var d = Path.Combine(dir, name);
         Directory.CreateDirectory(d);
@@ -360,10 +382,19 @@ public static class BakeFeatureTest
         {
             sb.AppendLine("usemtl matA"); Emit(0, 3);
             sb.AppendLine("usemtl matB"); Emit(3, 6);
-            mtl.AppendLine("newmtl matA"); mtl.AppendLine("map_Kd " + name + "A_albedo.png");
-            mtl.AppendLine("newmtl matB"); mtl.AppendLine("map_Kd " + name + "B_albedo.png");
-            WriteAlbedo(Path.Combine(d, name + "A_albedo.png"), new Color(1f, 0.55f, 0.2f));
-            WriteAlbedo(Path.Combine(d, name + "B_albedo.png"), new Color(0.3f, 0.5f, 1f));
+            string ext = flatTga ? "_albedo.tga" : "_albedo.png";
+            mtl.AppendLine("newmtl matA"); mtl.AppendLine("map_Kd " + name + "A" + ext);
+            mtl.AppendLine("newmtl matB"); mtl.AppendLine("map_Kd " + name + "B" + ext);
+            if (flatTga)
+            {
+                WriteSwatchTga(Path.Combine(d, name + "A" + ext), SwatchGreen);
+                WriteSwatchTga(Path.Combine(d, name + "B" + ext), SwatchBlue);
+            }
+            else
+            {
+                WriteAlbedo(Path.Combine(d, name + "A" + ext), new Color(1f, 0.55f, 0.2f));
+                WriteAlbedo(Path.Combine(d, name + "B" + ext), new Color(0.3f, 0.5f, 1f));
+            }
         }
         else
         {
@@ -374,6 +405,35 @@ public static class BakeFeatureTest
         File.WriteAllText(Path.Combine(d, name + ".obj"), sb.ToString());
         File.WriteAllText(Path.Combine(d, name + ".mtl"), mtl.ToString());
         return Path.Combine(d, name + ".obj");
+    }
+
+    // glbconv's swatch format, byte for byte: 18-byte header, type 2 (uncompressed true-colour), 8x8, 32bpp,
+    // descriptor 0x28 (top-left origin + 8 attribute bits), BGRA pixel order.
+    static void WriteSwatchTga(string path, Color32 c)
+    {
+        const int S = 8;
+        var b = new byte[18 + S * S * 4];
+        b[2] = 2; b[12] = S; b[14] = S; b[16] = 32; b[17] = 0x28;
+        for (int i = 18; i < b.Length; i += 4) { b[i] = c.b; b[i + 1] = c.g; b[i + 2] = c.r; b[i + 3] = 255; }
+        File.WriteAllBytes(path, b);
+    }
+
+    // Smallest per-channel max-difference between any atlas texel and the target colour (best-effort pixel read).
+    static bool TryNearestColour(Texture2D t, Color32 target, out float best)
+    {
+        best = 255f;
+        if (t == null) return false;
+        try
+        {
+            var px = t.GetPixels32(); if (px.Length == 0) return false;
+            foreach (var p in px)
+            {
+                float d = Mathf.Max(Mathf.Abs(p.r - target.r), Mathf.Max(Mathf.Abs(p.g - target.g), Mathf.Abs(p.b - target.b)));
+                if (d < best) best = d;
+            }
+            return true;
+        }
+        catch { return false; }
     }
 
     static void WriteAlbedo(string path, Color tint)
