@@ -1193,9 +1193,11 @@ public static class UniversalBaker
         }
         bool multiMat = matList.Count > 1;
         Texture2D packedAtlas = null; Rect[] atlasRects = null;
+        bool[] flatSwatch = null;   // per matList index: albedo is a <=8px solid swatch (flat-colour material) — see the animated path's note
         if (multiMat)
         {
             var albs = matList.Select(mm => LoadReadableAlbedo(fsResDir, mm)).ToArray();
+            flatSwatch = albs.Select(a => a != null && a.width <= 8 && a.height <= 8).ToArray();
             // Does any source albedo carry REAL transparency (alpha-MASK foliage cards etc.)? Checked BEFORE packing:
             // the old unconditional a=255 below silently flattened cutout foliage into solid triangles (the beech-tree
             // hunt). Opaque-source models keep the exact old behavior, so their re-bakes stay byte-identical.
@@ -1268,6 +1270,9 @@ public static class UniversalBaker
                     var smat = (mats != null && mats.Length > 0) ? mats[Mathf.Min(s, mats.Length - 1)] : null;
                     int mi = smat != null ? matList.IndexOf(smat) : -1;
                     Rect r = (mi >= 0 && atlasRects != null && mi < atlasRects.Length) ? atlasRects[mi] : new Rect(0, 0, 1, 1);
+                    // Flat-colour material: the source UVs carry nothing — pin every vertex to the rect centre
+                    // (same reasoning and detection as the animated path's flatSwatch note).
+                    bool flat = flatSwatch != null && mi >= 0 && mi < flatSwatch.Length && flatSwatch[mi];
                     var tris = m.GetTriangles(s);
                     var remap = new Dictionary<int, int>();
                     foreach (int oldI in tris)
@@ -1284,7 +1289,8 @@ public static class UniversalBaker
                             // subtract the same integer -> no distortion; only a triangle straddling a tile edge
                             // smears slightly, which is unavoidable when emulating wrap on a packed atlas.
                             u.x -= Mathf.Floor(u.x); u.y -= Mathf.Floor(u.y);
-                            cUV.Add(new Vector2(r.x + u.x * r.width, r.y + u.y * r.height));
+                            cUV.Add(flat ? new Vector2(r.x + r.width * 0.5f, r.y + r.height * 0.5f)
+                                         : new Vector2(r.x + u.x * r.width, r.y + u.y * r.height));
                             cNorm.Add(mNorm ? local.MultiplyVector(nr[oldI]).normalized : Vector3.up);
                         }
                         cTris.Add(ni);
@@ -1665,6 +1671,18 @@ public static class UniversalBaker
     {
         remappedPreviewMeshes = new List<Mesh>();
         var albs = orderedAlb.Select(kv => kv.Value).ToArray();
+        // FLAT-COLOUR SWATCHES (the Bell H-13 class, 2026-09-02): a textureless material's "albedo" is glbconv's
+        // 8x8 solid swatch — pure colour, no image content. Sampling it like a texture is all downside: the source
+        // UVs are whatever the DCC left (SketchUp parks islands anywhere, including outside 0..1 — the glbconv
+        // UDIM warning), the fold-to-[0,1) stretches every part across a tiny rect, and part EDGES then
+        // bilinear-sample the padding between rects (grey fringes; wrong-colour faces when UVs strayed). The
+        // ONLY correct way to sample a solid colour is one interior point, so such submeshes get every vertex
+        // pinned to the CENTRE of their rect below — immune to garbage UVs, seam folds, padding bleed and mip
+        // averaging. This is exactly what the external "flat-colour atlas" workaround did by hand; now the bake
+        // does it. Detected by size (<=8 px per side, precisely what glbconv writes for factor-only materials);
+        // hand-editing an extracted swatch into a larger real texture automatically returns that part to normal
+        // UV mapping.
+        var flatSwatch = albs.Select(a => a != null && a.width <= 8 && a.height <= 8).ToArray();
         var atlas = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = name + "_Atlas" };
         var rects = atlas.PackTextures(albs, 2, cfg.atlasMaxDim > 0 ? cfg.atlasMaxDim : AtlasMaxDimDefault);
         var apx = atlas.GetPixels32();
@@ -1707,6 +1725,14 @@ public static class UniversalBaker
                 if (ri < 0) ri = s;   // fall back to index (submesh order == MTL order)
                 if (ri < 0 || ri >= rects.Length) { Debug.LogWarning($"[Factory] {name} submesh {s} ('{(sm != null ? sm.name : "null")}') no atlas rect — left unmapped"); continue; }
                 var r = rects[ri];
+                if (ri < flatSwatch.Length && flatSwatch[ri])
+                {
+                    // Solid colour: pin to the rect centre (see flatSwatch above) — the source UVs carry nothing.
+                    var cuv = new Vector2(r.x + r.width * 0.5f, r.y + r.height * 0.5f);
+                    foreach (int vi in mesh.GetTriangles(s)) if (!doneVert[vi]) { uv[vi] = cuv; doneVert[vi] = true; }
+                    Debug.Log($"[Factory]   submesh {s} '{(sm != null ? sm.name : "null")}' -> rect[{ri}] '{orderedAlb[ri].Key}' (flat swatch — UVs pinned to rect centre)");
+                    continue;
+                }
                 // Fold each UV into [0,1) first: atlas cells have no wrap, but source models often park a material's
                 // island in a distant integer tile relying on texture wrap — unfolded it flies outside its rect into
                 // the black gaps. Whole-in-one-tile islands subtract a uniform integer (no distortion); see the static path.

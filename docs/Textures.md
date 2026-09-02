@@ -32,6 +32,16 @@ root causes, which is why the failure catalog below leads with symptoms.
 
 ## Failure catalog — match your symptom
 
+**Flat-colour (untextured) model comes out with wrong colours on some faces / grey fringes at part edges** →
+**FIXED 2026-09-02 (0.5.0)** — just re-bake. A SketchUp-style model whose materials are pure colours (no image:
+`paint`, `glass`, `copper`…) packs an 8×8 solid swatch per material, but the mesh's source UVs are garbage on
+such models (islands parked anywhere, even outside 0..1), so faces sampled *neighbouring* rects and part edges
+bilinear-sampled the padding between rects. The bake now pins every vertex of a flat-swatch submesh to the
+**centre of its rect** — the per-submesh log says `(flat swatch — UVs pinned to rect centre)`. No external
+"flat-colour atlas" rebuild of the GLB is needed any more; bake the original. (Found on the Bell H-13, a Vehicle
+Lab rig with 10 flat materials.) To *repaint* one of those parts, edit its swatch file
+(`<Model>_matNN_<name>_albedo.png`) to any size ≥ 16 px — a larger file returns that part to normal UV mapping.
+
 **Washed-out / pale grey-blue wash over dark areas** → the **Keep black substitution** (see knob above). The
 substitute color is literally (160,160,168); if your "damage" is that exact pale blue-grey, this is it.
 

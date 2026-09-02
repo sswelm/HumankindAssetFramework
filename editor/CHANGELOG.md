@@ -3,6 +3,20 @@
 The **package** changelog: what changed for someone who installs the tools. (The project-wide engineering log
 lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `editor-vX.Y.Z`.
 
+## 0.5.0 — 2026-09-02
+
+- **Flat-colour (untextured) multi-material models bake correctly — no external atlasing step.** A SketchUp-style
+  model whose materials are pure colours (`glass`, `paint`, `copper`… with no texture) already got an 8×8 solid
+  swatch per material in the packed atlas, but its submeshes kept their source UVs — which such models fill with
+  garbage (islands parked anywhere, even outside 0..1), so faces sampled neighbouring rects (wrong colours) and
+  part edges bilinear-sampled the padding between rects (grey fringes). The bake now pins every vertex of a
+  flat-swatch submesh to the **centre of its rect** — one interior sample point, immune to bad UVs, seam folds,
+  padding bleed and mip averaging. Applied on both the animated and static multi-material paths; the per-submesh
+  bake log says `(flat swatch — UVs pinned to rect centre)` when it fires. Hand-editing an extracted swatch into
+  a larger real texture returns that part to normal UV mapping automatically. (Driven by the Bell H-13: rigged in
+  the Vehicle Lab, 10 flat materials, previously only bakeable after an external "flat-colour atlas" rebuild of
+  the GLB.)
+
 ## 0.4.13 — 2026-08-25
 
 - **A menu click is answered with a dialog.** Every outcome of `Check for Updates…` now shows one — *up to
