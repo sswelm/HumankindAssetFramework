@@ -3,6 +3,19 @@
 The **package** changelog: what changed for someone who installs the tools. (The project-wide engineering log
 lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `editor-vX.Y.Z`.
 
+## 0.5.3 — 2026-09-02
+
+- **A failed re-bake can no longer ship a mismatched normal map.** The output whitelist behind the E5
+  rollback, the cross-path sweep, and Remove was missing the static path's three surface atlases
+  (`_NormalAtlas` / `_RoughAtlas` / `_NormalAtlasPrev`) — so a re-bake that failed after packing them
+  restored the *old* colour atlas next to the *new* normal atlas (different packing rects, silently wrong
+  shading), and removing a model orphaned all three in the shipped Resources folder. Found by a critical
+  review, not an incident.
+- **The suffix list now exists exactly once.** Both bake-test cleanups carried their own hand-copies of that
+  whitelist; the Tier-2 copy had already drifted (state-driven `_ClipsMove`/`_ClipsAttack`… outputs were never
+  deleted, stranding throwaway fixtures in shipped Resources). Both now reference the baker's own list —
+  a fourth place to update no longer exists.
+
 ## 0.5.2 — 2026-09-02
 
 - **Flat-colour swatches now actually load — no more red parts.** glbconv writes each untextured material's

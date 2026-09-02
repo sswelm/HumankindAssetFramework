@@ -340,8 +340,11 @@ public static class BakeFeatureTest
     {
         foreach (var n in names.Distinct())
         {
-            foreach (var s in new[] { "_ModelMesh.asset", "_Atlas.asset", "_Mat.mat", "_Model.prefab", "_Skeleton.asset", "_Clips.asset", "_ClipsPoseData.bytes" })
-                AssetDatabase.DeleteAsset("Assets/Resources/" + n + s);   // pose bytes incl. — Tier-2 animated runs used to strand them in the SHIPPED Resources root
+            // The baker's own whitelist, NOT a copy: this was the third hand-copy of the suffix list, and it had
+            // drifted — Tier-2 borrows real state-driven registry models, whose _ClipsMove/_ClipsAttack/… outputs
+            // this 7-item copy never deleted, stranding them in the SHIPPED Resources root.
+            foreach (var s in UniversalBaker.OutputSuffixes)
+                AssetDatabase.DeleteAsset("Assets/Resources/" + n + s);
             AssetDatabase.DeleteAsset("Assets/FactorySource/" + n);
         }
     }

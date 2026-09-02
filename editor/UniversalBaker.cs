@@ -116,7 +116,12 @@ public static class UniversalBaker
                                                 "_ClipsPreMove.asset", "_ClipsPreMovePoseData.bytes",
                                                 "_ClipsIdleAlt.asset", "_ClipsIdleAltPoseData.bytes",
                                                 "_ClipsIdleAlt2.asset", "_ClipsIdleAlt2PoseData.bytes",
-                                                "_ClipsIdle.asset", "_ClipsIdlePoseData.bytes" };   // state-driven role collections
+                                                "_ClipsIdle.asset", "_ClipsIdlePoseData.bytes",     // state-driven role collections
+                                                // Surface atlases (static multi-material path) — MISSED until 2026-09-02: a failed
+                                                // re-bake's E5 rollback restored the OLD _Atlas but kept the NEW _NormalAtlas with
+                                                // different packing rects (shipped normal map silently indexing wrong rects), and
+                                                // Remove/sweep orphaned all three in force-shipped Resources.
+                                                "_NormalAtlas.asset", "_RoughAtlas.asset", "_NormalAtlasPrev.asset" };
 
     // CROSS-PATH SWEEP: each bake path deletes-then-recreates only its OWN assets, so re-baking a model on the OTHER
     // path (animated <-> static) used to orphan the previous path's outputs in shipped Resources — Unity force-ships
