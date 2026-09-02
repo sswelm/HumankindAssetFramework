@@ -503,11 +503,14 @@ public static class UniversalBaker
                 // stamp at all. The result was a directory mixing two models' extractions, silently consumed by the
                 // next bake. On a source change, remove every derived artifact before re-extracting; keepTexture
                 // (checked above) still protects hand-edited files by skipping this whole block.
+                // Each delete takes its .meta along — File.Delete bypasses the AssetDatabase, and a left-behind meta
+                // makes Unity's next refresh print one "asset can't be found" line per file.
+                void DeleteWithMeta(string p) { File.Delete(p); if (File.Exists(p + ".meta")) File.Delete(p + ".meta"); }
                 foreach (var stale in Directory.GetFiles(fsResDir, name + "_mat*_albedo.*"))
-                    if (!stale.EndsWith(".meta")) File.Delete(stale);
-                if (File.Exists(mtlPath)) File.Delete(mtlPath);
+                    if (!stale.EndsWith(".meta")) DeleteWithMeta(stale);
+                if (File.Exists(mtlPath)) DeleteWithMeta(mtlPath);
                 string singleAlb = Path.Combine(fsResDir, name + "_albedo.png");
-                if (File.Exists(singleAlb)) { File.Delete(singleAlb); Debug.Log($"[Factory] {name}: source model changed — removed the stale extracted albedo (it belonged to the previous source)."); }
+                if (File.Exists(singleAlb)) { DeleteWithMeta(singleAlb); Debug.Log($"[Factory] {name}: source model changed — removed the stale extracted albedo (it belonged to the previous source)."); }
                 Debug.Log($"[Factory] {name}: extracting per-material albedos (glbconv) for the multi-material animated atlas…");
                 if (!ConvertGlb(cfg.modelFile, fsResDir, name, 0))
                     Debug.LogWarning($"[Factory] {name}: glbconv extraction FAILED — a multi-material model will fall back to a SINGLE atlas (every part samples material 0). See the [glbconv] Console error.");
