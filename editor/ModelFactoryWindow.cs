@@ -759,8 +759,18 @@ public class ModelFactoryWindow : EditorWindow
                         // ONE dialog with the delete question built in (was two sequential modals — the second could be
                         // missed, and once the entry was gone it could NEVER be re-triggered, leaving orphan baked assets
                         // with no in-editor cleanup). DisplayDialogComplex → 0 = ok / 1 = cancel / 2 = alt.
+                        // A same-named district layers on this model's outputs (reads _Atlas, overwrites the atlas
+                        // trio with processed versions) — say so IN the dialog, before the decision, not in a
+                        // console line after it.
+                        string districtNote = "";
+                        try
+                        {
+                            if (DistrictRegistry.Load().Any(d => string.Equals(d.resourceName, name, StringComparison.OrdinalIgnoreCase)))
+                                districtNote = $"\n\nNOTE: district '{name}' BUILDS ON this model's baked outputs — deleting the files breaks that district until it is re-baked.";
+                        }
+                        catch { /* advisory only — a corrupt district registry must not block Remove */ }
                         int choice = EditorUtility.DisplayDialogComplex("Remove model",
-                            $"Remove '{name}' from the registry? The plugin will stop injecting it on next launch.\n\n" +
+                            $"Remove '{name}' from the registry? The plugin will stop injecting it on next launch.{districtNote}\n\n" +
                             "Also delete its BAKED assets (skeleton, atlas, clips, pose data, mesh, prefab) from " +
                             "Assets/Resources? Only the baker's own outputs are deleted — unit portraits and other " +
                             "unit-side files are never touched, and the FactorySource working folder is left alone.",

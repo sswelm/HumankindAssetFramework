@@ -15,6 +15,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   whitelist; the Tier-2 copy had already drifted (state-driven `_ClipsMove`/`_ClipsAttack`… outputs were never
   deleted, stranding throwaway fixtures in shipped Resources). Both now reference the baker's own list —
   a fourth place to update no longer exists.
+- **A district that layers on a model's outputs is no longer swept in silence.** A district bake builds on a
+  same-named model's `_Atlas` and overwrites the atlas trio with processed versions — so a model re-bake or
+  Remove could yank those out from under it with no word said. The Remove dialog now names the layered district
+  *before* the decision, and every sweep logs which district needs a re-bake afterwards.
+- The E5 rollback test's fixture gained a `Textures/` normal map, so the restore assertion now covers the
+  surface atlases too — the exact whitelist entries this release added would otherwise have stayed untested.
 
 ## 0.5.2 — 2026-09-02
 
