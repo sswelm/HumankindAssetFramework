@@ -1755,67 +1755,6 @@ public static class UniversalBaker
 
     static string SimplifyMat(string s) => (s ?? "").ToLowerInvariant().Replace("material", "").Replace("mat", "").Replace("_", "").Replace(" ", "").Replace(":", "");
 
-    // Append a reversed, inward-nudged copy of every triangle so single-sided source geometry renders from BOTH
-    // sides in-game — the animated (skinned-mesh) twin of the static double-sided block. SUBMESH-AWARE: the atlas
-    // remap assigned per-submesh UVs, so each material's back faces must stay in ITS submesh (a single merged
-    // SetTriangles, as the static path uses, would scramble the material→rect mapping). Carries bone weights
-    // (each back vertex weights to its front twin's bones, so bindposes/bone list are unchanged and the skeleton
-    // bake's bone-index check still passes), tangents (bitangent handedness flipped for the reversed winding), and
-    // normals (negated). The back shell is nudged inward by `off` so it isn't coincident with the front — coincident
-    // faces make the game's alpha-to-coverage shader read ~50% transparent (the same trick the static block uses).
-    internal static void DoubleSideMesh(Mesh m, float off)
-    {
-        if (m == null) return;
-        // NEVER wipe a mesh we can't read: reading vertices/normals off a non-readable mesh throws AFTER m.Clear(),
-        // leaving 0 verts and no model (2026-09-03). Caller is expected to pass a readable clone; refuse otherwise.
-        if (!m.isReadable) { Debug.LogWarning($"[Factory] DoubleSideMesh: '{m.name}' is not readable — skipped (left single-sided)."); return; }
-        int vn = m.vertexCount;
-        var sv = m.vertices;
-        var sn = m.normals;      bool hasN = sn != null && sn.Length == vn;
-        var su = m.uv;           bool hasU = su != null && su.Length == vn;
-        var stn = m.tangents;    bool hasT = stn != null && stn.Length == vn;
-        var sw = m.boneWeights;  bool hasW = sw != null && sw.Length == vn;
-
-        var nv = new Vector3[vn * 2];
-        var nn = hasN ? new Vector3[vn * 2] : null;
-        var nu = hasU ? new Vector2[vn * 2] : null;
-        var nt = hasT ? new List<Vector4>(vn * 2) : null;
-        var nw = hasW ? new BoneWeight[vn * 2] : null;
-        if (hasT) { for (int i = 0; i < vn * 2; i++) nt.Add(default); }
-        for (int i = 0; i < vn; i++)
-        {
-            nv[i] = sv[i];
-            nv[vn + i] = hasN ? sv[i] - sn[i].normalized * off : sv[i];
-            if (hasN) { nn[i] = sn[i]; nn[vn + i] = -sn[i]; }
-            if (hasU) { nu[i] = su[i]; nu[vn + i] = su[i]; }
-            if (hasT) { nt[i] = stn[i]; var t = stn[i]; t.w = -t.w; nt[vn + i] = t; }
-            if (hasW) { nw[i] = sw[i]; nw[vn + i] = sw[i]; }
-        }
-        int sub = m.subMeshCount;
-        var subTris = new int[sub][];
-        for (int s = 0; s < sub; s++)
-        {
-            var tris = m.GetTriangles(s);
-            var doubled = new int[tris.Length * 2];
-            System.Array.Copy(tris, doubled, tris.Length);
-            for (int i = 0; i < tris.Length; i += 3)
-            { doubled[tris.Length + i] = tris[i] + vn; doubled[tris.Length + i + 1] = tris[i + 2] + vn; doubled[tris.Length + i + 2] = tris[i + 1] + vn; }
-            subTris[s] = doubled;
-        }
-        var bindposes = m.bindposes;
-        m.Clear();
-        m.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-        m.SetVertices(nv);
-        if (hasN) m.SetNormals(nn);
-        if (hasU) m.SetUVs(0, nu);
-        if (hasT) m.SetTangents(nt);
-        if (hasW) m.boneWeights = nw;
-        if (bindposes != null) m.bindposes = bindposes;
-        m.subMeshCount = sub;
-        for (int s = 0; s < sub; s++) m.SetTriangles(subTris[s], s);
-        m.RecalculateBounds();
-    }
-
     // Pack the per-material albedos into ONE atlas and remap the FBX's SKINNED mesh UVs per-submesh into their packed rect,
     // so each part samples its own texture. The mesh is CLONED (we never mutate the imported asset) and re-assigned to the
     // renderer, so the skeleton bake (SetPrefab, run after this) reads the remapped UVs. Submesh->rect is matched by material
