@@ -566,11 +566,6 @@ public static class UniversalBaker
         // ON: measure at TRUE scale then bake with the unit scale ON (the howitzer needs this; its shallow rig
         //   tolerates the sandwich). No single rule fits both — hence the toggle stays per-model.
         imp.useFileScale = false;   // ALWAYS measure raw; the bake either keeps this (OFF) or re-enables it (ON, below)
-        // ONLY when double-siding: the doubling reads vertices/normals/tangents off the (multi-path) skinned-mesh
-        // clone, which inherits the source FBX mesh's readability — a non-readable mesh throws "isReadable is false"
-        // and the read-then-Clear wiped it to 0 verts (2026-09-03). Left OFF otherwise so a normal animated bake
-        // isn't restamped with a CPU-copy flag it doesn't need.
-        if (cfg.doubleSided) imp.isReadable = true;
         imp.SaveAndReimport();
         var fbxGo = AssetDatabase.LoadAssetAtPath<GameObject>(fbxRel);
         float longest = MeasureLongestAxis(fbxGo);
@@ -623,40 +618,11 @@ public static class UniversalBaker
         AssetDatabase.CreateAsset(atlas, atlasPath);
         AssetDatabase.SaveAssets();
 
-        // --- 3.6) double-sided (ANIMATED): single-sided / CAD source faces render see-through in-game (backface
-        // culling). On this path the geometry is the rigged FBX's skinned mesh, so the static double-sided block
-        // (Build) never runs — until 2026-09-03 the flag only HALVED the reduce target here and did nothing else.
-        // Apply the doubling to every skinned mesh SetPrefab will bake AND to the preview clones (so the preview
-        // shows it, not just the game). The reduce prep already halved the target when this is on, so the doubling
-        // lands the final geometry back at the budget the user set. Bone weights/bindposes are carried, so the
-        // skeleton bake's bone-index check still passes and back faces deform with their front twins.
-        if (cfg.doubleSided)
-        {
-            float off = Mathf.Max(0.002f, cfg.size * 0.004f);
-            int nDoubled = 0;
-            foreach (var smr in fbxGo.GetComponentsInChildren<SkinnedMeshRenderer>())
-            {
-                var mesh = smr.sharedMesh;
-                if (mesh == null) continue;
-                // Mutate ONLY a runtime clone. On the multi-material path this mesh IS the atlas-remapped clone
-                // (persisted downstream as _PreviewMesh), so doubling it in place also doubles the preview AND keeps
-                // a valid asset reference — a throwaway clone here was garbage-collected after the bake, leaving the
-                // Animation Lab's _PropFit prefab with a NULL mesh ("nothing rendered", 2026-09-03).
-                // The single-material path leaves the RAW IMPORTED FBX mesh on the renderer — an asset Unity forbids
-                // modifying (Clear/SetVertices throws, failing the whole bake) with no persisted clone to reference.
-                // Skip it with a clear reason (single-sided still bakes) rather than corrupt/fail. AssetDatabase
-                // .Contains distinguishes the two: true = imported sub-asset, false = the runtime remap clone.
-                if (AssetDatabase.Contains(mesh))
-                {
-                    Debug.LogWarning($"[Factory] {name}: '{smr.name}' is a single-material rig — animated Double-sided isn't supported for it yet; baking single-sided. (Multi-material rigs double correctly; a see-through single-material rig can be fixed in the source with a Solidify modifier.)");
-                    continue;
-                }
-                if (!mesh.isReadable) { Debug.LogWarning($"[Factory] {name}: '{smr.name}' mesh not readable — double-sided skipped; the model bakes single-sided."); continue; }
-                DoubleSideMesh(mesh, off);
-                nDoubled++;
-            }
-            Debug.Log($"[Factory] {name} double-sided (animated): reversed faces appended on {nDoubled} skinned mesh(es).");
-        }
+        // Double-sided for ANIMATED models is applied AT THE SOURCE — the Vehicle Lab's "Double-sided" option makes
+        // vehicle_rig.py export a genuinely two-sided Spin GLB (reversed, inset faces). So there is NO runtime mesh
+        // doubling here: the rigged FBX arrives already double-sided, and the rig, the atlas-remapped _PreviewMesh
+        // and the baked skeleton all share the same vertex count — which is why the preview needs no special-casing
+        // (the runtime doubling's count mismatch was the root of the whole half/grey/transparent preview saga).
 
         // --- 4) bake Skeleton from the FBX's own armature + skinned mesh (SetPrefab + Reimport, as the SDK inspector does) ---
         var skelType = FindAmpType("Amplitude.Mercury.Animation.Skeleton");

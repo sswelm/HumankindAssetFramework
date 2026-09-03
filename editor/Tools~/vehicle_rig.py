@@ -258,6 +258,9 @@ recoil_frames = max(3, int(float(argv[39]))) if len(argv) > 39 and argv[39].stri
 # when its own strike clock says so, and that clock is an estimate that can fire while the gun is still slewing —
 # padding the front of the clip is the one part of the timing we control outright. 0 = kick immediately.
 recoil_lead = max(0, int(float(argv[40]))) if len(argv) > 40 and argv[40].strip() else 0
+# DOUBLE-SIDED (argv[41], opt-in): append reversed faces to every mesh before export so the Spin GLB is genuinely
+# two-sided at the source (the fix runs just before export_scene.gltf below).
+double_sided = len(argv) > 41 and argv[41].strip() == "1"
 recoil_bone = None               # set to "RecoilArm" when the split actually happens — the bone the clip ROTATES
 recoil_geom = None               # (pivot, axis, bore_dir, slide, R) for the arc that fakes the slide
 # Residual tilt the arc leaves on the tube. The slide is faked by swinging the barrel on a long arm, so some pitch
@@ -2011,6 +2014,34 @@ for _oa2 in [a for a in bpy.data.actions if a.name not in ("Spin", "Deploy", "Re
 for _o2 in bpy.data.objects:
     if _o2.type != 'ARMATURE' and _o2.animation_data is not None:
         _o2.animation_data_clear()
+
+# DOUBLE-SIDED (argv[41], opt-in, 2026-09-03): the game culls backfaces, so single-sided / CAD source faces (thin
+# spokes, flat plates) render see-through in-game. Append a REVERSED copy of every face here, at the SOURCE, so the
+# exported Spin GLB is genuinely double-sided and every downstream stage (the animated bake, both previews) treats
+# it as ordinary geometry — no runtime doubling, no vertex-count mismatch. bmesh.ops.duplicate copies the deform
+# layer, so each duplicated vertex keeps its bone weights (no vert falls to bone 0 -> the skeleton bake still
+# validates). The back shell is nudged INWARD along the normal by a small fraction of the model size, so front and
+# back faces are NOT coincident — coincident faces make the game's alpha-to-coverage shader read ~50% transparent.
+if double_sided:
+    _dsn = 0
+    for _dso in [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]:
+        _dm = _dso.data
+        _db = bmesh.new(); _db.from_mesh(_dm); _db.normal_update()
+        _dext = [v.co for v in _db.verts]
+        _ddim = max((max(c[i] for c in _dext) - min(c[i] for c in _dext)) for i in range(3)) if _dext else 1.0
+        _doff = max(1e-5, _ddim * 0.0015)
+        _dsrc = list(_db.faces)
+        _dret = bmesh.ops.duplicate(_db, geom=_dsrc)
+        _dverts = [g for g in _dret['geom'] if isinstance(g, bmesh.types.BMVert)]
+        _dfaces = [g for g in _dret['geom'] if isinstance(g, bmesh.types.BMFace)]
+        for _v in _dverts:
+            _v.co = _v.co - _v.normal * _doff
+        bmesh.ops.reverse_faces(_db, faces=_dfaces)
+        _v0 = len(_dm.vertices)
+        _db.to_mesh(_dm); _db.free()
+        _dsn += 1
+        print("VEHICLE double-sided '%s': %d -> %d verts (back shell inset %.4f)" % (_dso.name, _v0, len(_dm.vertices), _doff))
+    print("VEHICLE double-sided: %d mesh(es) made two-sided at the source" % _dsn)
 
 bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
 if preview_fbx:
