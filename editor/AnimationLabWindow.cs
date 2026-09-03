@@ -178,21 +178,15 @@ public class AnimationLabWindow : EditorWindow
                 r.sharedMaterials = mats;
             }
             if (pool == null || !(r is SkinnedMeshRenderer smr) || smr.sharedMesh == null) continue;
-            // Exact vertex-count match pairs each renderer to its baked clone; a DOUBLE-SIDED bake persists a clone
-            // with 2x the verts (the live FBX instance here is never doubled), so fall back to a 2x match — its bind
-            // poses + bone weights are still valid for this rig (checked below), so it substitutes cleanly.
+            // Match each renderer to its persisted atlas-UV clone by EXACT vertex count (the same geometry-identity
+            // pairing LoadFitPreview uses) — never by name, since CreateAsset renames the clone to its filename.
             int hit = pool.FindIndex(s => s.vertexCount == smr.sharedMesh.vertexCount);
-            if (hit < 0) hit = pool.FindIndex(s => s.vertexCount == 2 * smr.sharedMesh.vertexCount);
             if (hit < 0) continue;
             var sub = pool[hit]; pool.RemoveAt(hit);
             if (sub.bindposes.Length == smr.sharedMesh.bindposes.Length && sub.boneWeights.Length == sub.vertexCount)
             { smr.sharedMesh = sub; subUsed++; }
             else subSkipped++;
         }
-        // ANIMATED-INSTANCE dump (2026-09-03): this instance is what's DISPLAYED (the static fitDraws are skipped
-        // while a clip plays), so dump ITS state — bodyMat null => renderers keep the FBX default white material.
-        Debug.Log($"[AnimLab] anim-inst dump: res='{res}' bodyMat={(bodyMat == null ? "NULL" : bodyMat.name + " tex=" + (bodyMat.mainTexture == null ? "NULL" : bodyMat.mainTexture.name))} subUsed={subUsed} " +
-                  $"renderers=[{string.Join(",", fitAnimInst.GetComponentsInChildren<Renderer>(true).Select(r => (r is SkinnedMeshRenderer s ? s.sharedMesh?.vertexCount ?? -1 : -1) + ":" + (r.sharedMaterial == null ? "null" : r.sharedMaterial.name + "/" + (r.sharedMaterial.mainTexture == null ? "NOTEX" : "tex"))))}]");
         fitPRU.AddSingleGO(fitAnimInst);
         fitAnimT = 0f; fitAnimTick = EditorApplication.timeSinceStartup; fitAnimBoundsValid = false;
         status = fitAnimClip != null
@@ -264,7 +258,6 @@ public class AnimationLabWindow : EditorWindow
             if (pool != null && r is SkinnedMeshRenderer)
             {
                 int hit = pool.FindIndex(s => s.vertexCount == m.vertexCount);
-                if (hit < 0) hit = pool.FindIndex(s => s.vertexCount == 2 * m.vertexCount);   // double-sided bake: clone carries 2x verts
                 if (hit >= 0) { m = pool[hit]; pool.RemoveAt(hit); subUsed++; }
             }
             var mtx = r.transform.localToWorldMatrix;
@@ -273,11 +266,6 @@ public class AnimationLabWindow : EditorWindow
             if (first) { fitBounds = wb; first = false; } else fitBounds.Encapsulate(wb);
         }
         if (fitDraws.Count == 0) fitDraws = null;
-        // TEXTURE-BINDING dump (2026-09-03): stale double-sided model renders WHITE after a restart — is the
-        // atlas texture actually bound on the material, and does the restored mesh still carry normals?
-        else foreach (var (dm, dmats, _) in fitDraws)
-            Debug.Log($"[AnimLab] draw dump: mesh='{dm.name}' verts={dm.vertexCount} sub={dm.subMeshCount} normals={(dm.normals?.Length ?? 0)} readable={dm.isReadable} " +
-                      $"mats=[{string.Join(",", (dmats ?? new Material[0]).Select(x => x == null ? "null" : $"{x.name} shader={x.shader?.name} tex={(x.mainTexture == null ? "NULL" : x.mainTexture.name + " " + x.mainTexture.width + "px")}"))}]");
         // Loud diagnostic (the Factory drill lesson: a silent no-match is how this fix hid its failure twice)
         if (subTotal > 0)
             Debug.Log("[AnimLab] fit-preview UV substitution: " +
