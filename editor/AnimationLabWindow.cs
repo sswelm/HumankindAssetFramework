@@ -108,13 +108,22 @@ public class AnimationLabWindow : EditorWindow
         // subfolder in the persisted path; a model with no _PreviewMesh (single-material) just passes null.
         if (!string.IsNullOrEmpty(previewPath))
         {
-            var resDir = System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(previewPath));
-            LoadFitPreview(previewPath, UniversalBaker.LoadPreviewSubstitutes(resDir));   // the SHARED loader — multi-SMR set
-            // ...and RESUME the clip if one was playing — the SAME two steps RebuildFitPreviews runs after a bake.
-            // This restore forgot it, so a restart showed the STATIC _PropFit while a bake showed the LIVE animated
-            // instance: a texture/shading mismatch that "rebake fixed" (2026-09-03). The one-forgotten-call-site
-            // pattern this very block's comment warns about, struck again — now both paths do both steps.
-            if (!string.IsNullOrEmpty(fitAnimRole)) BuildAnimPreview(fitAnimRole);
+            // DEFER to after the domain-reload asset-import window (2026-09-03): building the preview inside OnEnable
+            // reads meshes/atlas that Unity may not have finished importing, so the doubled model rendered with a
+            // stale/placeholder atlas — data was correct on inspection, but the render was baked at a bad moment and
+            // never refreshed ("rebake fixed it"). delayCall runs once the editor is idle and imports have settled.
+            EditorApplication.delayCall += () =>
+            {
+                if (this == null || string.IsNullOrEmpty(previewPath)) return;
+                var resDir = System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(previewPath));
+                LoadFitPreview(previewPath, UniversalBaker.LoadPreviewSubstitutes(resDir));   // the SHARED loader — multi-SMR set
+                // ...and RESUME the clip if one was playing — the SAME two steps RebuildFitPreviews runs after a bake.
+                // This restore forgot it, so a restart showed the STATIC _PropFit while a bake showed the LIVE animated
+                // instance: a texture/shading mismatch that "rebake fixed" (2026-09-03). The one-forgotten-call-site
+                // pattern this very block's comment warns about, struck again — now both paths do both steps.
+                if (!string.IsNullOrEmpty(fitAnimRole)) BuildAnimPreview(fitAnimRole);
+                Repaint();
+            };
         }
     }
     void OnDisable() { DestroyFitPreview(); }
