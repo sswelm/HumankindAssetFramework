@@ -3,6 +3,19 @@
 The **package** changelog: what changed for someone who installs the tools. (The project-wide engineering log
 lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `editor-vX.Y.Z`.
 
+## 0.5.5 — 2026-09-04
+
+- **Rowing — a galley oar bank, animated from merged meshes.** A new **Oar** role (hotkey `O`) in the Vehicle Lab.
+  A galley's oars usually arrive as a few merged meshes — poles in one, blades in another (often split front/back) —
+  each holding *every* oar across *both* banks. Mark those meshes Oar and, uniquely among the roles, one marked mesh
+  becomes **many** bones: the rig recovers each individual oar (projecting the geometry onto the plane perpendicular
+  to the common pole direction, where the oars separate cleanly — naive distance clustering fails because the poles
+  converge at the oarlocks and fan to the blades), gives each a bone at its oarlock, skins it rigid, and bakes a
+  unison stroke into `Spin` — a fore-aft **Sweep** about the oarlock plus a phase-locked **Dip** (blades drop on the
+  aft drive, lift on the recovery), a seamless loop. The new **"Oars — a galley rowing"** section exposes **Sweep**,
+  **Dip**, and **Stroke frames**, tuned against the preview loop. Adds one bone per oar (~60 on a full galley), well
+  within the skeleton budget. The oars row whenever the movement clip plays. Validated headless on a 64-oar galley.
+
 ## 0.5.4 — 2026-09-03
 
 - **Double-sided for animated vehicles — now a Vehicle Lab option, applied at the source.** The engine culls

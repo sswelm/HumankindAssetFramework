@@ -64,6 +64,7 @@ axle disagreement, unpaired wheels, turret outliers, and visible interior geomet
 | **Cradle** | Gun support that elevates with the tube but remains fixed during recoil. |
 | **Muzzle** | Muzzle brake/flash-hider; refines the measured muzzle end and follows the tube (`Gun`, or `Barrel` when recoil creates that split). |
 | **Trail** | Split-trail arm; receives a body-end hinge and the generated `Deploy` action. |
+| **Oar** (`O`) | A galley oar bank — one merged mesh of poles/blades spanning **both** sides. Split into one bone per oar with a baked rowing stroke. |
 | **Ignore** (`I`) | Deleted from the generated GLB. Use for genuinely invisible internals or unwanted variants. |
 | **Default / Edgecase** (`D` / `E`) | Root-weighted review markers: undecided, or deliberately parked for another pass. |
 
@@ -91,6 +92,17 @@ is in the exported GLB, it just works in every preview (this turntable, the Mode
 in-game — no Model Factory option is involved (that checkbox was removed). It **doubles the triangle count**; the
 Model Factory's **Reduce to ~tris** still caps the shipped mesh, so lower that if you are near the vertex budget.
 Leave it **off** for models that are already solid.
+
+**Oars (galley rowing).** A galley's oars usually arrive as a **few merged meshes** — all the poles in one, all the
+blades in another (often split front/back) — each mesh holding *every* oar across *both* banks. Mark those meshes
+**Oar** (`O`). Unlike any other role, one marked mesh becomes **many** bones: the rig recovers each individual oar
+(by projecting the geometry onto the plane perpendicular to the common pole direction, where each oar separates
+cleanly), gives it a bone at its oarlock, and bakes a unison rowing stroke into `Spin` — a fore-aft **Sweep** about
+the oarlock plus a phase-locked **Dip** (blades drop into the water on the aft drive, lift clear on the recovery). It
+adds one bone per oar (~60 on a full galley), well within the skeleton budget. Tune **Sweep**, **Dip**, and **Stroke
+frames** while watching the preview loop — the believable-from-a-distance amplitudes are a judgement made on the
+moving turntable, not a still frame. The oars row whenever the movement clip plays; no Model Factory option is
+involved.
 
 Press **Verify**, resolve meaningful warnings, optionally **Save recipe**, then press **Generate rig**. The output path is
 copied to the clipboard and the generated animation appears in the preview. Re-run **Generate rig** after changing any
