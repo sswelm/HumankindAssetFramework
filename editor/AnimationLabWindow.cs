@@ -173,7 +173,11 @@ public class AnimationLabWindow : EditorWindow
                 r.sharedMaterials = mats;
             }
             if (pool == null || !(r is SkinnedMeshRenderer smr) || smr.sharedMesh == null) continue;
+            // Exact vertex-count match pairs each renderer to its baked clone; a DOUBLE-SIDED bake persists a clone
+            // with 2x the verts (the live FBX instance here is never doubled), so fall back to a 2x match — its bind
+            // poses + bone weights are still valid for this rig (checked below), so it substitutes cleanly.
             int hit = pool.FindIndex(s => s.vertexCount == smr.sharedMesh.vertexCount);
+            if (hit < 0) hit = pool.FindIndex(s => s.vertexCount == 2 * smr.sharedMesh.vertexCount);
             if (hit < 0) continue;
             var sub = pool[hit]; pool.RemoveAt(hit);
             if (sub.bindposes.Length == smr.sharedMesh.bindposes.Length && sub.boneWeights.Length == sub.vertexCount)
@@ -251,6 +255,7 @@ public class AnimationLabWindow : EditorWindow
             if (pool != null && r is SkinnedMeshRenderer)
             {
                 int hit = pool.FindIndex(s => s.vertexCount == m.vertexCount);
+                if (hit < 0) hit = pool.FindIndex(s => s.vertexCount == 2 * m.vertexCount);   // double-sided bake: clone carries 2x verts
                 if (hit >= 0) { m = pool[hit]; pool.RemoveAt(hit); subUsed++; }
             }
             var mtx = r.transform.localToWorldMatrix;
