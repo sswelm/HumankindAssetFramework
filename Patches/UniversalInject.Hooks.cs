@@ -10,6 +10,21 @@ using Newtonsoft.Json.Linq;             // provided by the game (mod.io); robust
 
 namespace HumankindAssetFramework
 {
+    // The load-seam seal, deliberately OUTSIDE any [HarmonyPatch] class: LoadSeamTests exercises Step, and merely
+    // touching a Harmony-attributed type from the test host loads HarmonyLib, whose runtime StackTrace fix then
+    // breaks Exception.ToString on dynamic frames — failing UNRELATED tests by ordering luck (CI caught
+    // PollIsolationTests NRE'ing inside StackTraceFixes.GetMethodFix, 2026-09-02, while the same suite passed
+    // locally). Tests must be able to reach the seal without waking Harmony.
+    internal static class LoadSeam
+    {
+        // A throwing step must neither propagate (this runs inside the game's own load path) nor stop later steps.
+        internal static void Step(string what, Action a)
+        {
+            try { a(); }
+            catch (Exception e) { Plugin.Log?.LogError($"[Uni] load-seam step '{what}' FAILED — the remaining steps still run, but this session's {what} may be degraded: {e}"); }
+        }
+    }
+
     [HarmonyPatch]
     internal static class UniRegisterHook
     {
@@ -19,7 +34,24 @@ namespace HumankindAssetFramework
             return t != null ? AccessTools.Method(t, "AnimationLoad") : null;
         }
         static bool hookLogged;
-        static void Postfix(object __instance) { if (!hookLogged) { hookLogged = true; Plugin.Diag("[Uni] UniRegisterHook POSTFIX fired"); } Prober.AnimMgr = __instance; UniversalInject.RearmModelRegistration(); UniversalInject.EnsureRegistered(__instance); FormationOverride.OnAnimationLoad(); UniversalInject.RunPreflight(); }   // pre-flight AFTER registration: skeletons + clip ids exist to validate against
+        // THE LOAD SEAM, SEALED PER STEP (review 2026-09-02): this postfix rides the game's own AnimationLoad — the
+        // most critical once-per-session chain in the plugin — and was its LAST unguarded call chain (an AUDITED
+        // fact, not an assertion — the previous "only unguarded body" comment below was never verified and was
+        // false: all ~40 other patch bodies were checked this date and each opens with try or delegates to a
+        // whole-body-sealed callee): one throw
+        // inside the re-arm aborted registration, the formation apply AND preflight for the whole session, then
+        // propagated into the game's load path. Each step now fails alone and LOUD, and the rest still run — they
+        // tolerate a degraded predecessor (registration latches lazily, preflight validates whatever exists). The
+        // seal lives HERE, at the hook, so it holds structurally even if a callee's internal guard regresses.
+        static void Postfix(object __instance)
+        {
+            if (!hookLogged) { hookLogged = true; Plugin.Diag("[Uni] UniRegisterHook POSTFIX fired"); }
+            Prober.AnimMgr = __instance;
+            LoadSeam.Step("model re-arm", () => UniversalInject.RearmModelRegistration());
+            LoadSeam.Step("registration", () => UniversalInject.EnsureRegistered(__instance));
+            LoadSeam.Step("formation overrides", FormationOverride.OnAnimationLoad);
+            LoadSeam.Step("preflight", UniversalInject.RunPreflight);   // pre-flight AFTER registration: skeletons + clip ids exist to validate against
+        }
     }
 
     [HarmonyPatch]
@@ -31,7 +63,13 @@ namespace HumankindAssetFramework
             var animMgr = GameBinding.AnimationManager;
             return (addon != null && animMgr != null) ? AccessTools.Method(addon, "Load", new[] { animMgr }) : null;
         }
-        static void Postfix(object __instance, object __0) { UniversalInject.RepointMatch(__instance, __0); FormationOverride.MaybeScaleFragments(__instance, __0); }
+        // Sealed like UniRegisterHook (both callees also guard internally — this is the structural layer): a throw
+        // here would break the game's own PresentationPawnDefinitionAddOn.Load. Fires per definition, so log once.
+        static void Postfix(object __instance, object __0)
+        {
+            try { UniversalInject.RepointMatch(__instance, __0); FormationOverride.MaybeScaleFragments(__instance, __0); }
+            catch (Exception e) { Plugin.LogOnceWarning("repoint-hook-seal", "[Uni] repoint hook FAILED (sealed, logged once): " + e); }
+        }
     }
 
     // muzzleBone: the donor's fire clip fires the muzzle flash from ITS weapon socket (e.g. an AA gun's "Canon"); that bone
@@ -132,8 +170,9 @@ namespace HumankindAssetFramework
                 if (!UniversalInject.AudioTraceOn) return;
                 if (UniversalInject.SeenEvents.Add(en)) Plugin.Diag($"[AudioTrace] NEW event: '{en}'");
             }
-            // This was the ONLY unguarded patch body in the plugin, sitting inside the game's own audio call path — a
-            // destroyed handle whose .name throws must never break AudioManager.PostEvent (review 2026-07-19).
+            // Sits inside the game's own audio call path — a destroyed handle whose .name throws must never break
+            // AudioManager.PostEvent (review 2026-07-19). NOTE: this comment once claimed to mark "the ONLY unguarded
+            // patch body" — that was false while UniRegisterHook's load chain ran bare (found 2026-09-02, now sealed).
             catch { }
         }
     }
