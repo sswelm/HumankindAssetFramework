@@ -618,6 +618,12 @@ public static class UniversalBaker
         AssetDatabase.CreateAsset(atlas, atlasPath);
         AssetDatabase.SaveAssets();
 
+        // Double-sided for ANIMATED models is applied AT THE SOURCE — the Vehicle Lab's "Double-sided" option makes
+        // vehicle_rig.py export a genuinely two-sided Spin GLB (reversed, inset faces). So there is NO runtime mesh
+        // doubling here: the rigged FBX arrives already double-sided, and the rig, the atlas-remapped _PreviewMesh
+        // and the baked skeleton all share the same vertex count — which is why the preview needs no special-casing
+        // (the runtime doubling's count mismatch was the root of the whole half/grey/transparent preview saga).
+
         // --- 4) bake Skeleton from the FBX's own armature + skinned mesh (SetPrefab + Reimport, as the SDK inspector does) ---
         var skelType = FindAmpType("Amplitude.Mercury.Animation.Skeleton");
         if (skelType == null) return Fail("Amplitude Skeleton type not found");

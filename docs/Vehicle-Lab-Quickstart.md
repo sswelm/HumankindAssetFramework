@@ -83,6 +83,15 @@ For a helicopter:
 - use **Tail-rotor axle** and yaw/pitch trim only when Auto does not keep the fan flat in its ring;
 - judge the rotation plane with Pause and frame-step, not from one still frame.
 
+**Double-sided (fix see-through parts).** The game culls backfaces, so a single-sided / CAD-style source (thin
+wheel spokes, flat plates, an open frame) renders see-through from the wrong angle. Tick **Double-sided** and the
+rig export appends a reversed copy of every face to the Spin GLB — genuinely two-sided geometry, nudged slightly
+inward so it never reads as ~50% transparent, with the skin weights carried onto the new faces. Because the fix
+is in the exported GLB, it just works in every preview (this turntable, the Model Factory, the Animation Lab) and
+in-game — no Model Factory option is involved (that checkbox was removed). It **doubles the triangle count**; the
+Model Factory's **Reduce to ~tris** still caps the shipped mesh, so lower that if you are near the vertex budget.
+Leave it **off** for models that are already solid.
+
 Press **Verify**, resolve meaningful warnings, optionally **Save recipe**, then press **Generate rig**. The output path is
 copied to the clipboard and the generated animation appears in the preview. Re-run **Generate rig** after changing any
 role, orientation, axle, or motion control; Animation Lab otherwise keeps using the older GLB on disk.

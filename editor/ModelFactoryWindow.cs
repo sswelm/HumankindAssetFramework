@@ -694,13 +694,9 @@ public class ModelFactoryWindow : EditorWindow
         var names = ModelRegistry.Load().Select(e => e.resourceName).ToList();
         names.Insert(0, "<New>");
         existing = names.ToArray();
-        // The dropdown INDEX follows the form's COMMITTED identity (loadedName), NEVER the editable name field
-        // (cur.resourceName) — the same rule the rest of this file keys on (see lines ~55, ~855, ~1936). Keying on
-        // the name field made the dropdown LIE: an unsaved <New> form holding a typed name that the Lab then created
-        // in the registry showed that entry as selected while loadedName was still empty, so the collision check
-        // reported the name clashing with ITSELF and Bake stayed blocked until the user re-picked from the dropdown
-        // (2026-09-03). loadedName empty => IndexOf(-1) => <New>, the honest state for a form not loaded from an entry.
-        selected = Array.IndexOf(existing, loadedName);
+        // The dropdown INDEX follows the loaded entry by NAME — the list is rebuilt on every reload, so a persisted
+        // numeric index can silently point at a different entry than the form holds.
+        selected = Array.IndexOf(existing, cur.resourceName);
         if (selected < 0) selected = 0;
     }
 
@@ -1109,10 +1105,11 @@ public class ModelFactoryWindow : EditorWindow
                 "Rewind faces outward so single-sided / CAD 'sketch' meshes render single-sided instead of culling to invisible " +
                 "(e.g. a hovercraft skirt). Lighter than double-sided (no extra geometry). Assumes a roughly convex hull — " +
                 "true for vehicles/ships. Preferred for CAD hulls; use Double-sided for genuinely non-convex thin shells."), cur.windingFix, GUILayout.Width(190));
-            cur.doubleSided = EditorGUILayout.ToggleLeft(new GUIContent("Double-sided (single-sided/CAD)",
-                "Add a back face to every surface so single-sided or CAD 'sketch' meshes don't render invisible in-game (the " +
-                "engine culls backfaces). Enable for models with missing / see-through parts — e.g. a hovercraft skirt. " +
-                "Doubles the triangle count."), cur.doubleSided, GUILayout.Width(235));
+            // Double-sided checkbox removed from the Factory (2026-09-03, user request): for ANIMATED models it's
+            // applied at the source in the Vehicle Lab ("Double-sided" when generating the rig), and the Factory had
+            // no runtime doubling left — so a Factory checkbox only did nothing and invited "why is it see-through".
+            // The static-path doubling code and the `doubleSided` field remain, so any existing entry still bakes as
+            // saved; there's just no UI to set it here. Winding fix (above) stays as the light single-sided repair.
         }
         // Albedo tone (baked into the atlas). The injection path ships a FLAT albedo — the donor's PBR normal/metallic/
         // roughness maps are neutralized so its camo can't bleed onto our model — so a skin that relied on shiny metal,

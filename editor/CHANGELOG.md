@@ -3,6 +3,27 @@
 The **package** changelog: what changed for someone who installs the tools. (The project-wide engineering log
 lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `editor-vX.Y.Z`.
 
+## 0.5.4 — 2026-09-03
+
+- **Double-sided for animated vehicles — now a Vehicle Lab option, applied at the source.** The engine culls
+  backfaces, so a single-sided / CAD-style source (thin spokes, flat plates) renders see-through from the wrong
+  angle. The Vehicle Lab gained a **"Double-sided (fix see-through parts)"** checkbox: when set, the rig export
+  appends a reversed copy of every face to the Spin GLB itself, nudged slightly inward so front and back aren't
+  coincident (coincident faces read ~50% transparent under the game's alpha-to-coverage shader). Bone weights are
+  carried on the duplicated vertices, so the skeleton bake still validates. Because the fix lives in the source
+  geometry, the rig, the preview meshes and the baked model are all the same vertex count — so it just works in
+  the Vehicle Lab turntable, the Model Factory preview, the Animation Lab and in-game, with no runtime doubling
+  and no preview special-casing. Doubles the triangle count; the Factory's **Reduce to ~tris** still caps the
+  shipped mesh. (This replaced an earlier runtime-doubling attempt whose rig-vs-baked vertex-count mismatch caused
+  a long string of preview glitches — half-rendered, grey, and partially-transparent models.)
+- **The Model Factory's Double-sided checkbox is removed.** Double-siding for rigged models is a source-geometry
+  concern owned by the Vehicle Lab; the Factory had no runtime doubling, so a checkbox there only did nothing for
+  animated models. One fewer knob. (The static-bake path's own doubling and the `doubleSided` field remain for
+  backward compatibility — existing entries bake as saved.)
+- **The Animation Lab's runtime Position offset now shows on a *playing* clip too** — it was only applied to the
+  static rest pose, so an offset model looked mispositioned in the Lab versus the Factory; and the domain-reload
+  restore resumes the clip.
+
 ## 0.5.3 — 2026-09-02
 
 - **A failed re-bake can no longer ship a mismatched normal map.** The output whitelist behind the E5

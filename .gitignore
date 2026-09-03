@@ -22,3 +22,7 @@ References/
 *.gltf
 *.usdz
 
+
+# Blender bytecode cache
+editor/Tools~/__pycache__/
+__pycache__/

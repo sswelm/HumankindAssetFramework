@@ -198,8 +198,11 @@ their settings and work together**:
   skirt low, grey hull high). For untextured CAD models that just need a simple gradient skin.
 - **Winding fix (CAD/convex)** — rewind faces outward so single-sided / CAD "sketch" meshes render instead of culling to
   invisible. Lightest fix; assumes a roughly convex hull (vehicles/ships).
-- **Double-sided (single-sided/CAD)** — add a back face to every surface (heavier fallback for genuinely non-convex thin
-  shells). Doubles the triangle count — and **halves the effective Reduce-to-tris** automatically.
+- **Double-sided** — for **animated (rigged) vehicles** this moved to the **Vehicle Lab** in 0.5.4 (its
+  *Double-sided (fix see-through parts)* checkbox, applied to the source Spin GLB when you generate the rig). The
+  Factory no longer has the checkbox for animated models. For **static** single-sided/CAD shells, use **Winding
+  fix** above (the light repair); genuinely non-convex static shells that need a real back face are the one case
+  the retired static double-sided path still covers via a hand-set `doubleSided` in the pack entry.
 - **Albedo brightness** / **Albedo saturation** — tone-correct the baked skin (both `1.0` = unchanged). The injection
   path ships a **flat albedo** — the donor's PBR normal/metallic/roughness maps are neutralized so its camo can't bleed
   onto your model — so a skin that relied on shiny metal, or a dark/washed-out texture, reads **muddy** in-game.
@@ -305,8 +308,9 @@ each material's UVs. That makes reduction a texture variable as well as a geomet
 2. Model file (Browse).
 3. **Textured model?** leave **Weld & simplify = 0** (preserves UV seams). Untextured CAD model? consider **Height-based
    UVs** or a **Weld & simplify > 0**.
-4. **Renders invisible / see-through in-game?** it's a single-sided/CAD mesh — enable **Winding fix**, or **Double-sided**
-   for non-convex shells.
+4. **Renders invisible / see-through in-game?** it's a single-sided/CAD mesh. For an **animated vehicle**, tick
+   **Double-sided** in the **Vehicle Lab** and regenerate the rig (it's baked into the source GLB). For a **static**
+   model, enable **Winding fix**.
 5. **Heavy model?** set **Reduce to ~tris** (default 24000), then check F8's shared pawn-layer headroom. Overflow rejects
    a mesh at registration; there is no universal per-model triangle limit.
 6. Set **Size** / **Rotation** / **Position**. **Bake** → rebuild mod → relaunch. Tweak and re-bake (Model file empty) as
@@ -398,7 +402,7 @@ strategic map.
 
 | Symptom | Cause → fix |
 |---|---|
-| **Model invisible / see-through** | Single-sided/CAD mesh (backface-culled) → **Winding fix** or **Double-sided**. Or it overflowed the shared buffer → lower **Reduce to ~tris**. |
+| **Model invisible / see-through** | Single-sided/CAD mesh (backface-culled). **Animated:** tick **Double-sided** in the **Vehicle Lab** and regenerate the rig. **Static:** **Winding fix**. Or it overflowed the shared buffer → lower **Reduce to ~tris**. |
 | **Model tiny (a speck) or huge** | **Size** is the world length — set it to what looks right; the Console logs the scale. |
 | **ANIMATED model bakes huge & floats high in the sky** (fine in the Factory *preview*, wrong only in-game) | The rig's FBX embeds a metre→centimetre unit scale the SDK skeleton over-applies → ~100× oversize. **Tick "Fix 100× oversize (FBX unit scale)"** (Animation section) and re-bake at the real Size — the baker measures the FBX at true scale then bakes with the unit scale on, so Size = in-game units. It's a **per-model** toggle (no universal rule: some exports need it, some break with it). |
 | **ANIMATED model vanishes / shrinks to a speck after ticking "Fix 100× oversize"** | That model's FBX does **not** carry the metre→cm scale, so the fix over-shrinks it. **Untick "Fix 100× oversize"** and re-bake — most rigs (e.g. the drone) bake correctly with it off. |
