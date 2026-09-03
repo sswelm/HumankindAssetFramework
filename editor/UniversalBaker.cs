@@ -566,9 +566,11 @@ public static class UniversalBaker
         // ON: measure at TRUE scale then bake with the unit scale ON (the howitzer needs this; its shallow rig
         //   tolerates the sandwich). No single rule fits both — hence the toggle stays per-model.
         imp.useFileScale = false;   // ALWAYS measure raw; the bake either keeps this (OFF) or re-enables it (ON, below)
-        imp.isReadable = true;      // CPU-readable mesh: the double-sided pass (and any Instantiate clone) must read
-                                    // vertices/normals/tangents — a non-readable FBX mesh throws "isReadable is false"
-                                    // and the read-then-Clear wiped the mesh to 0 verts (2026-09-03).
+        // ONLY when double-siding: the doubling reads vertices/normals/tangents off the (multi-path) skinned-mesh
+        // clone, which inherits the source FBX mesh's readability — a non-readable mesh throws "isReadable is false"
+        // and the read-then-Clear wiped it to 0 verts (2026-09-03). Left OFF otherwise so a normal animated bake
+        // isn't restamped with a CPU-copy flag it doesn't need.
+        if (cfg.doubleSided) imp.isReadable = true;
         imp.SaveAndReimport();
         var fbxGo = AssetDatabase.LoadAssetAtPath<GameObject>(fbxRel);
         float longest = MeasureLongestAxis(fbxGo);
@@ -636,14 +638,20 @@ public static class UniversalBaker
             {
                 var mesh = smr.sharedMesh;
                 if (mesh == null) continue;
-                // Double IN PLACE the mesh already on the renderer — do NOT swap in a fresh clone. On the multi path
-                // this mesh IS the atlas-remapped clone that gets persisted as _PreviewMesh, so doubling it here also
-                // doubles the preview (same object) AND keeps a valid asset reference. A throwaway clone assigned
-                // here was garbage-collected after the bake, leaving the Animation Lab's _PropFit prefab with a NULL
-                // mesh — "nothing rendered" (diagnosed 2026-09-03 via rendererMeshVerts=[null]).
-                // Non-readable = the raw imported FBX mesh (single-material rig, no remap clone): skip — can't read
-                // it, and replacing it would reintroduce the null-reference bug without a persisted clone.
-                if (!mesh.isReadable) { Debug.LogWarning($"[Factory] {name}: '{smr.name}' mesh not readable (single-material rig) — double-sided skipped; the model bakes single-sided."); continue; }
+                // Mutate ONLY a runtime clone. On the multi-material path this mesh IS the atlas-remapped clone
+                // (persisted downstream as _PreviewMesh), so doubling it in place also doubles the preview AND keeps
+                // a valid asset reference — a throwaway clone here was garbage-collected after the bake, leaving the
+                // Animation Lab's _PropFit prefab with a NULL mesh ("nothing rendered", 2026-09-03).
+                // The single-material path leaves the RAW IMPORTED FBX mesh on the renderer — an asset Unity forbids
+                // modifying (Clear/SetVertices throws, failing the whole bake) with no persisted clone to reference.
+                // Skip it with a clear reason (single-sided still bakes) rather than corrupt/fail. AssetDatabase
+                // .Contains distinguishes the two: true = imported sub-asset, false = the runtime remap clone.
+                if (AssetDatabase.Contains(mesh))
+                {
+                    Debug.LogWarning($"[Factory] {name}: '{smr.name}' is a single-material rig — animated Double-sided isn't supported for it yet; baking single-sided. (Multi-material rigs double correctly; a see-through single-material rig can be fixed in the source with a Solidify modifier.)");
+                    continue;
+                }
+                if (!mesh.isReadable) { Debug.LogWarning($"[Factory] {name}: '{smr.name}' mesh not readable — double-sided skipped; the model bakes single-sided."); continue; }
                 DoubleSideMesh(mesh, off);
                 nDoubled++;
             }

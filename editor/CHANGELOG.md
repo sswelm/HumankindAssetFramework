@@ -17,7 +17,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   referencing a garbage-collected mesh (the model rendered as *nothing*) — now the renderer's own persisted mesh
   is doubled in place, so its reference stays valid; and the runtime **Position offset** now shows on a *playing*
   clip too (it was only applied to the static rest pose, so an offset model looked mispositioned in the Lab
-  versus the Factory).
+  versus the Factory). Double-sided currently covers **multi-material** animated rigs; a single-material animated
+  rig skips it with a note (its mesh is the raw imported asset, which can't be doubled in place) — fix a
+  see-through single-material rig in the source with a Solidify modifier for now.
 
 ## 0.5.3 — 2026-09-02
 
