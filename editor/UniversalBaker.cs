@@ -634,19 +634,20 @@ public static class UniversalBaker
             int nDoubled = 0;
             foreach (var smr in fbxGo.GetComponentsInChildren<SkinnedMeshRenderer>())
             {
-                var src = smr.sharedMesh;
-                if (src == null) continue;
-                if (!src.isReadable) { Debug.LogWarning($"[Factory] {name}: skinned mesh '{smr.name}' not readable — double-sided skipped (the model still bakes, single-sided)."); continue; }
-                // Operate on a CLONE, never the imported asset (the multi path already handed us a clone; the single
-                // path's is the raw asset). Instantiate yields a readable, mutable copy either way.
-                var clone = UnityEngine.Object.Instantiate(src); clone.name = src.name;
-                DoubleSideMesh(clone, off);
-                smr.sharedMesh = clone;
+                var mesh = smr.sharedMesh;
+                if (mesh == null) continue;
+                // Double IN PLACE the mesh already on the renderer — do NOT swap in a fresh clone. On the multi path
+                // this mesh IS the atlas-remapped clone that gets persisted as _PreviewMesh, so doubling it here also
+                // doubles the preview (same object) AND keeps a valid asset reference. A throwaway clone assigned
+                // here was garbage-collected after the bake, leaving the Animation Lab's _PropFit prefab with a NULL
+                // mesh — "nothing rendered" (diagnosed 2026-09-03 via rendererMeshVerts=[null]).
+                // Non-readable = the raw imported FBX mesh (single-material rig, no remap clone): skip — can't read
+                // it, and replacing it would reintroduce the null-reference bug without a persisted clone.
+                if (!mesh.isReadable) { Debug.LogWarning($"[Factory] {name}: '{smr.name}' mesh not readable (single-material rig) — double-sided skipped; the model bakes single-sided."); continue; }
+                DoubleSideMesh(mesh, off);
                 nDoubled++;
             }
-            if (previewMeshes != null) foreach (var pm in previewMeshes) DoubleSideMesh(pm, off);   // these are clones we own
-            Debug.Log($"[Factory] {name} double-sided (animated): reversed faces appended on {nDoubled} skinned mesh(es)" +
-                      (previewMeshes != null && previewMeshes.Count > 0 ? $" + {previewMeshes.Count} preview mesh(es)" : ""));
+            Debug.Log($"[Factory] {name} double-sided (animated): reversed faces appended on {nDoubled} skinned mesh(es).");
         }
 
         // --- 4) bake Skeleton from the FBX's own armature + skinned mesh (SetPrefab + Reimport, as the SDK inspector does) ---
