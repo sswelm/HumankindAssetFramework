@@ -13,6 +13,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   gets a reversed, slightly inset back face, per-submesh so material/atlas mapping is preserved, carrying bone
   weights so the skeleton bake still validates. Found via a see-through Gatling gun. Verify in-game as always,
   but the preview now reflects it.
+- **Two Animation Lab preview fixes that rode in with it:** a double-sided bake left the Lab's fit-preview prefab
+  referencing a garbage-collected mesh (the model rendered as *nothing*) — now the renderer's own persisted mesh
+  is doubled in place, so its reference stays valid; and the runtime **Position offset** now shows on a *playing*
+  clip too (it was only applied to the static rest pose, so an offset model looked mispositioned in the Lab
+  versus the Factory).
 
 ## 0.5.3 — 2026-09-02
 
