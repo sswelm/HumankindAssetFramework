@@ -261,6 +261,14 @@ recoil_lead = max(0, int(float(argv[40]))) if len(argv) > 40 and argv[40].strip(
 # DOUBLE-SIDED (argv[41], opt-in): append reversed faces to every mesh before export so the Spin GLB is genuinely
 # two-sided at the source (the fix runs just before export_scene.gltf below).
 double_sided = len(argv) > 41 and argv[41].strip() == "1"
+# ROWING (argv[42..45], opt-in): a galley oar bank. Each marked oar part is ONE merged mesh holding every oar across
+# BOTH sides; the rig recovers each oar as its own bone at its oarlock (clustering, below) and bakes the stroke into
+# `Spin` — a unison fore-aft sweep about the vertical plus a phase-locked dip (blades drop on the aft drive, lift on
+# the recovery). One clip, keyed on the oar bones, so the oars row whenever the movement clip plays.
+oar_names  = namelist(argv[42]) if len(argv) > 42 and argv[42].strip() else []
+oar_sweep  = float(argv[43]) if len(argv) > 43 and argv[43].strip() else 24.0   # fore-aft stroke amplitude, degrees
+oar_dip    = float(argv[44]) if len(argv) > 44 and argv[44].strip() else 18.0   # vertical dip amplitude, degrees
+oar_frames = max(4, int(float(argv[45]))) if len(argv) > 45 and argv[45].strip() else 24
 recoil_bone = None               # set to "RecoilArm" when the split actually happens — the bone the clip ROTATES
 recoil_geom = None               # (pivot, axis, bore_dir, slide, R) for the arc that fakes the slide
 # Residual tilt the arc leaves on the tube. The slide is faked by swinging the barrel on a long arm, so some pitch
@@ -820,6 +828,127 @@ for i, tn in enumerate(track_names):
         eb.parent = eb_body
         names.append(eb.name)
     track_infos.append((tn, names, front_cl, rear_cl, c.copy(), roadF_cl, roadR_cl))
+
+# ---- OAR bones (galley rowing): one merged oar mesh -> one bone per physical oar ----
+# The marked oar parts (poles + blades, each mesh spanning BOTH banks) are split into individual oars by projecting
+# every connected island onto the plane PERPENDICULAR to the common pole direction — where each oar collapses to a
+# point — then single-linkage clustering. Naive distance clustering fails: poles converge at the oarlocks and fan to
+# the blades, so within-oar spans dwarf the inter-oar gap. Each oar gets a bone at its oarlock (~30% out from the
+# handle) parented to the body; every vertex of that oar skins 100% to it (rigid). Both banks handled; side = sign of
+# the beam coordinate (Y, the rig's convention after orientation). Proven headless on the Khalandion (64 oars).
+oar_by_name = set()
+oar_skin = {}       # oar-part object name -> {vertex_index: bone name}
+oar_bake = []       # (bone name, pivot world, side(+1/-1), dip-axis world) for the Rowing keyframes
+if oar_names:
+    _OAR_EPS = 0.085
+    def _oar_islands(_o):
+        _me = _o.data; _bm = bmesh.new(); _bm.from_mesh(_me); _bm.verts.ensure_lookup_table()
+        _seen = set(); _out = []
+        for _v in _bm.verts:
+            if _v.index in _seen:
+                continue
+            _stack = [_v]; _seen.add(_v.index); _idx = []
+            while _stack:
+                _x = _stack.pop(); _idx.append(_x.index)
+                for _e in _x.link_edges:
+                    _w = _e.other_vert(_x)
+                    if _w.index not in _seen:
+                        _seen.add(_w.index); _stack.append(_w)
+            _wc = [_o.matrix_world @ _me.vertices[_i].co for _i in _idx]
+            _out.append((_idx, _wc, sum(_wc, Vector((0, 0, 0))) / len(_wc)))
+        _bm.free(); return _out
+    def _oar_pc1(_pts):
+        _m = sum(_pts, Vector((0, 0, 0))) / len(_pts)
+        _cov = [[0.0] * 3 for _ in range(3)]
+        for _p in _pts:
+            _d = _p - _m
+            for _a in range(3):
+                for _b in range(3):
+                    _cov[_a][_b] += _d[_a] * _d[_b]
+        _v = Vector((1.0, 0.3, 0.1))
+        for _ in range(40):
+            _nv = Vector((sum(_cov[0][_k] * _v[_k] for _k in range(3)),
+                          sum(_cov[1][_k] * _v[_k] for _k in range(3)),
+                          sum(_cov[2][_k] * _v[_k] for _k in range(3))))
+            if _nv.length == 0:
+                break
+            _nv.normalize(); _v = _nv
+        return _v
+    _oar_objs = []
+    for _on in oar_names:
+        _oo = find(_on)
+        if _oo is None:
+            print("VEHICLE WARN: oar part '%s' not found — skipped" % _on); continue
+        oar_by_name.add(_oo.name); oar_skin[_oo.name] = {}; _oar_objs.append(_oo)
+    _isl = {_oo.name: _oar_islands(_oo) for _oo in _oar_objs}   # compute connectivity once
+    _oid = 0
+    for _side in (1, -1):
+        # common pole direction from each island's own PC1 (within-oar — not the row spread, which points along X)
+        _dp = Vector((0, 0, 0)); _ref = None
+        for _oo in _oar_objs:
+            for _idx, _wc, _ctr in _isl[_oo.name]:
+                if (_ctr.y > 0) != (_side > 0):
+                    continue
+                _pv = _oar_pc1(_wc); _m = sum(_wc, Vector((0, 0, 0))) / len(_wc)
+                _span = max((_p - _m).dot(_pv) for _p in _wc) - min((_p - _m).dot(_pv) for _p in _wc)
+                if _span < 0.15:
+                    continue
+                if _ref is None:
+                    _ref = _pv
+                if _pv.dot(_ref) < 0:
+                    _pv = -_pv
+                _dp += _pv * _span
+        if _dp.length < 1e-6:
+            continue
+        _dp.normalize()
+        _tmp = Vector((0, 0, 1)) if abs(_dp.z) < 0.9 else Vector((1, 0, 0))
+        _e1 = _dp.cross(_tmp).normalized(); _e2 = _dp.cross(_e1).normalized()
+        _items = []   # (objname, idx, wc, (u, v)) for every island on this side
+        for _oo in _oar_objs:
+            for _idx, _wc, _ctr in _isl[_oo.name]:
+                if (_ctr.y > 0) != (_side > 0):
+                    continue
+                _items.append((_oo.name, _idx, _wc, (_ctr.dot(_e1), _ctr.dot(_e2))))
+        _n = len(_items)
+        if _n == 0:
+            continue
+        _parent = list(range(_n)); _grid = {}
+        def _find(_a, _parent=_parent):
+            while _parent[_a] != _a:
+                _parent[_a] = _parent[_parent[_a]]; _a = _parent[_a]
+            return _a
+        for _i, _it in enumerate(_items):
+            _grid.setdefault((int(_it[3][0] / _OAR_EPS), int(_it[3][1] / _OAR_EPS)), []).append(_i)
+        for _i, _it in enumerate(_items):
+            _gx, _gy = int(_it[3][0] / _OAR_EPS), int(_it[3][1] / _OAR_EPS)
+            for _dx in (-1, 0, 1):
+                for _dy in (-1, 0, 1):
+                    for _j in _grid.get((_gx + _dx, _gy + _dy), []):
+                        if _j > _i and math.hypot(_it[3][0] - _items[_j][3][0], _it[3][1] - _items[_j][3][1]) <= _OAR_EPS:
+                            _ra, _rb = _find(_i), _find(_j)
+                            if _ra != _rb:
+                                _parent[_ra] = _rb
+        _labels = {}
+        for _i in range(_n):
+            _labels.setdefault(_find(_i), []).append(_i)
+        for _root, _mem in _labels.items():
+            _bn = "Oar_%03d" % _oid; _oid += 1
+            _allwc = []
+            for _i in _mem:
+                _onm, _idx, _wc, _ = _items[_i]
+                for _vi in _idx:
+                    oar_skin[_onm][_vi] = _bn
+                _allwc += _wc
+            _ys = [abs(_p.y) for _p in _allwc]; _yg = min(_ys) + 0.30 * (max(_ys) - min(_ys))
+            _piv = min(_allwc, key=lambda _p: abs(abs(_p.y) - _yg))       # oarlock: ~30% out from the handle
+            _d = _oar_pc1(_allwc); _h = Vector((_d.x, _d.y, 0.0))
+            _h = _h.normalized() if _h.length > 1e-6 else Vector((1.0, 0.0, 0.0))
+            _dax = Vector((-_h.y, _h.x, 0.0)).normalized()               # dip axis: horizontal, perp to the oar
+            _eb = arm_data.edit_bones.new(_bn)
+            _eb.head = _piv; _eb.tail = _piv + _d * 0.6; _eb.parent = eb_body
+            oar_bake.append((_bn, _piv.copy(), float(_side), _dax))
+    print("VEHICLE ROWING: recovered %d oar(s) from %d part(s) into individual bones" % (len(oar_bake), len(_oar_objs)))
+
 bpy.ops.object.mode_set(mode='OBJECT')
 
 # rigid skinning: each part full-weight on its bone (wheels/turret) or Root (body). TREAD parts skin
@@ -832,6 +961,18 @@ _link_pitch = {}   # part -> measured track-link pitch (conveyor advance = one p
 _link_fund = {}    # part -> physical link length (autocorrelation fundamental) for rigid link cells
 _link_jobs = {}    # part -> path-instanced rigid-link job (cells, ring path, rest transforms)
 for o in objs:
+    if o.name in oar_by_name:
+        # OARS skin PER-VERTEX into their individual oar bones (like treads, one mesh -> many bones)
+        for g in list(o.vertex_groups):
+            o.vertex_groups.remove(g)
+        _obygrp = {}
+        for _vi, _bn in oar_skin.get(o.name, {}).items():
+            _obygrp.setdefault(_bn, []).append(_vi)
+        for _bn, _vis in _obygrp.items():
+            o.vertex_groups.new(name=_bn).add(_vis, 1.0, 'REPLACE')
+        md = o.modifiers.new("Armature", 'ARMATURE'); md.object = arm
+        o.parent = arm
+        continue
     if o.name in _track_by_name:
         _tn, _tnames, _fcl, _rcl, _tc, _rfcl, _rrcl = _track_by_name[o.name]
         _botb, _topb, _rampfb, _ramprb, _ramprtb, _wrapfb, _wraprb, _wrapgfb, _wrapgrb = _tnames
@@ -1431,7 +1572,11 @@ def _join_per_bone():
     groups = {}
     for o in objs:
         # tread parts are multi-bone-skinned (four regions) — each stays its OWN mesh, never merged
-        _k = ("__track__" + o.name) if o.name in _track_by_name else bone_of.get(o.name, body_bone)
+        # oars, like treads, are multi-bone-skinned — give each its OWN key so it is never merged into one bone
+        if o.name in oar_by_name:
+            _k = "__oar__" + o.name
+        else:
+            _k = ("__track__" + o.name) if o.name in _track_by_name else bone_of.get(o.name, body_bone)
         groups.setdefault(_k, []).append(o)
     joined = []
     for bname, members in groups.items():
@@ -1507,6 +1652,42 @@ if rock_on:
              rock_pitch_deg, rock_pitch_cycles, rock_pitch_phase, _pitch_ax.x, _pitch_ax.y, _pitch_ax.z,
              rock_frames, _steps + 1, body_bone, _axis_why,
              (", heading %+.0f deg" % rock_heading) if abs(rock_heading) > 1e-6 else ""))
+
+
+# ROWING stroke: bake the unison sweep + phase-locked dip onto every oar bone, INTO the Spin (movement) clip, as a
+# seamless sine cycle (frame 0 == frame N, so the loop restart is invisible). Sampled densely because the pipeline
+# keys LINEAR (a sparse sine reads as a triangle wave). Sweep is fore-aft about the world vertical through the oarlock;
+# dip drops the blade on the aft drive and lifts it on the recovery. Both are mirrored per side (the sign carried from
+# clustering) so port and starboard pull aft together. The bind pose is the armature rest (oars as modelled), so an
+# offset at frame 0 is fine — the oars simply oscillate around their modelled rake.
+if oar_bake:
+    bpy.context.scene.frame_end = max(bpy.context.scene.frame_end, oar_frames)
+    _osteps = max(24, oar_frames)
+    _oaw = math.radians(oar_sweep); _oad = math.radians(oar_dip)
+    for _bn, _piv, _oside, _dax in oar_bake:
+        _db = arm.data.bones.get(_bn); _pb = arm.pose.bones.get(_bn)
+        if _db is None or _pb is None:
+            continue
+        _m3 = (arm.matrix_world @ _db.matrix_local).to_3x3()
+        _lz = (_m3.inverted() @ Vector((0.0, 0.0, 1.0))).normalized()   # world vertical, in bone-local space
+        _ld = (_m3.inverted() @ _dax).normalized()                      # dip axis, in bone-local space
+        _pb.rotation_mode = 'QUATERNION'
+        for _i in range(_osteps + 1):
+            _t = _i / float(_osteps); _f = int(round(_t * oar_frames)); _phi = 2.0 * math.pi * _t
+            _ths = _oaw * (-math.cos(_phi)) * _oside     # fore-aft: catch forward -> drive aft -> recover forward
+            _thd = _oad * (math.sin(_phi)) * _oside      # dip: blade down on the drive, up on the recovery
+            _pb.rotation_quaternion = Quaternion(_lz, _ths) @ Quaternion(_ld, _thd)
+            _pb.keyframe_insert('rotation_quaternion', frame=_f)
+    try:
+        _afcs = list(act.fcurves)
+    except AttributeError:
+        _afcs = [fc for l in act.layers for s in l.strips for cb in s.channelbags for fc in cb.fcurves]
+    for _fc in _afcs:                                    # oar keys must interpolate LINEAR, like the rest of Spin
+        if _fc.data_path.startswith('pose.bones["Oar_'):
+            for _kp in _fc.keyframe_points:
+                _kp.interpolation = 'LINEAR'
+    print("VEHICLE ROWING clip: %d oars sweep %.0f deg + dip %.0f deg over %d frames (unison, into 'Spin')"
+          % (len(oar_bake), oar_sweep, oar_dip, oar_frames))
 
 
 # ROLLING-CONTACT wheel speeds (user field report: the small road wheels looked draggy — "they should be
