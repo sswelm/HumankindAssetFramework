@@ -1105,10 +1105,11 @@ public class ModelFactoryWindow : EditorWindow
                 "Rewind faces outward so single-sided / CAD 'sketch' meshes render single-sided instead of culling to invisible " +
                 "(e.g. a hovercraft skirt). Lighter than double-sided (no extra geometry). Assumes a roughly convex hull — " +
                 "true for vehicles/ships. Preferred for CAD hulls; use Double-sided for genuinely non-convex thin shells."), cur.windingFix, GUILayout.Width(190));
-            cur.doubleSided = EditorGUILayout.ToggleLeft(new GUIContent("Double-sided (single-sided/CAD)",
-                "Add a back face to every surface so single-sided or CAD 'sketch' meshes don't render invisible in-game (the " +
-                "engine culls backfaces). Enable for models with missing / see-through parts — e.g. a hovercraft skirt. " +
-                "Doubles the triangle count."), cur.doubleSided, GUILayout.Width(235));
+            // Double-sided checkbox removed from the Factory (2026-09-03, user request): for ANIMATED models it's
+            // applied at the source in the Vehicle Lab ("Double-sided" when generating the rig), and the Factory had
+            // no runtime doubling left — so a Factory checkbox only did nothing and invited "why is it see-through".
+            // The static-path doubling code and the `doubleSided` field remain, so any existing entry still bakes as
+            // saved; there's just no UI to set it here. Winding fix (above) stays as the light single-sided repair.
         }
         // Albedo tone (baked into the atlas). The injection path ships a FLAT albedo — the donor's PBR normal/metallic/
         // roughness maps are neutralized so its camo can't bleed onto our model — so a skin that relied on shiny metal,
