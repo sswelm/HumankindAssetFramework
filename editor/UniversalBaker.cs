@@ -566,6 +566,9 @@ public static class UniversalBaker
         // ON: measure at TRUE scale then bake with the unit scale ON (the howitzer needs this; its shallow rig
         //   tolerates the sandwich). No single rule fits both — hence the toggle stays per-model.
         imp.useFileScale = false;   // ALWAYS measure raw; the bake either keeps this (OFF) or re-enables it (ON, below)
+        imp.isReadable = true;      // CPU-readable mesh: the double-sided pass (and any Instantiate clone) must read
+                                    // vertices/normals/tangents — a non-readable FBX mesh throws "isReadable is false"
+                                    // and the read-then-Clear wiped the mesh to 0 verts (2026-09-03).
         imp.SaveAndReimport();
         var fbxGo = AssetDatabase.LoadAssetAtPath<GameObject>(fbxRel);
         float longest = MeasureLongestAxis(fbxGo);
@@ -630,8 +633,18 @@ public static class UniversalBaker
             float off = Mathf.Max(0.002f, cfg.size * 0.004f);
             int nDoubled = 0;
             foreach (var smr in fbxGo.GetComponentsInChildren<SkinnedMeshRenderer>())
-                if (smr.sharedMesh != null) { DoubleSideMesh(smr.sharedMesh, off); nDoubled++; }
-            if (previewMeshes != null) foreach (var pm in previewMeshes) DoubleSideMesh(pm, off);
+            {
+                var src = smr.sharedMesh;
+                if (src == null) continue;
+                if (!src.isReadable) { Debug.LogWarning($"[Factory] {name}: skinned mesh '{smr.name}' not readable — double-sided skipped (the model still bakes, single-sided)."); continue; }
+                // Operate on a CLONE, never the imported asset (the multi path already handed us a clone; the single
+                // path's is the raw asset). Instantiate yields a readable, mutable copy either way.
+                var clone = UnityEngine.Object.Instantiate(src); clone.name = src.name;
+                DoubleSideMesh(clone, off);
+                smr.sharedMesh = clone;
+                nDoubled++;
+            }
+            if (previewMeshes != null) foreach (var pm in previewMeshes) DoubleSideMesh(pm, off);   // these are clones we own
             Debug.Log($"[Factory] {name} double-sided (animated): reversed faces appended on {nDoubled} skinned mesh(es)" +
                       (previewMeshes != null && previewMeshes.Count > 0 ? $" + {previewMeshes.Count} preview mesh(es)" : ""));
         }
@@ -1778,6 +1791,9 @@ public static class UniversalBaker
     internal static void DoubleSideMesh(Mesh m, float off)
     {
         if (m == null) return;
+        // NEVER wipe a mesh we can't read: reading vertices/normals off a non-readable mesh throws AFTER m.Clear(),
+        // leaving 0 verts and no model (2026-09-03). Caller is expected to pass a readable clone; refuse otherwise.
+        if (!m.isReadable) { Debug.LogWarning($"[Factory] DoubleSideMesh: '{m.name}' is not readable — skipped (left single-sided)."); return; }
         int vn = m.vertexCount;
         var sv = m.vertices;
         var sn = m.normals;      bool hasN = sn != null && sn.Length == vn;
