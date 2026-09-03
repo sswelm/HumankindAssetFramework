@@ -3,6 +3,17 @@
 The **package** changelog: what changed for someone who installs the tools. (The project-wide engineering log
 lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `editor-vX.Y.Z`.
 
+## 0.5.4 — 2026-09-03
+
+- **Double-sided now works on animated models.** The engine culls backfaces, so a single-sided or CAD-style
+  source (thin spokes, flat plates) renders see-through from the wrong angle. The Double-sided repair only ever
+  ran on the *static* path — on an animated model the flag was passed to the Blender converter, which never
+  implemented it, so it silently **halved the triangle target and did nothing else**. The doubling is now applied
+  to the animated skinned mesh directly (and to the preview clones, so the preview shows it too): every triangle
+  gets a reversed, slightly inset back face, per-submesh so material/atlas mapping is preserved, carrying bone
+  weights so the skeleton bake still validates. Found via a see-through Gatling gun. Verify in-game as always,
+  but the preview now reflects it.
+
 ## 0.5.3 — 2026-09-02
 
 - **A failed re-bake can no longer ship a mismatched normal map.** The output whitelist behind the E5

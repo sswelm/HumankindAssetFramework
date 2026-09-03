@@ -199,7 +199,9 @@ their settings and work together**:
 - **Winding fix (CAD/convex)** — rewind faces outward so single-sided / CAD "sketch" meshes render instead of culling to
   invisible. Lightest fix; assumes a roughly convex hull (vehicles/ships).
 - **Double-sided (single-sided/CAD)** — add a back face to every surface (heavier fallback for genuinely non-convex thin
-  shells). Doubles the triangle count — and **halves the effective Reduce-to-tris** automatically.
+  shells, e.g. wheel spokes). Doubles the triangle count — and **halves the effective Reduce-to-tris** automatically.
+  Works on **both** static and animated models (fixed 0.5.4 — before that it did nothing on animated models but still
+  halved the target); the preview reflects it.
 - **Albedo brightness** / **Albedo saturation** — tone-correct the baked skin (both `1.0` = unchanged). The injection
   path ships a **flat albedo** — the donor's PBR normal/metallic/roughness maps are neutralized so its camo can't bleed
   onto your model — so a skin that relied on shiny metal, or a dark/washed-out texture, reads **muddy** in-game.

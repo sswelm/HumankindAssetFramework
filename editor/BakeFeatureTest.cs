@@ -52,6 +52,34 @@ public static class BakeFeatureTest
                 Check(res, ref pass, ref fail, "doubleSided doubles triangles", m != null && t == 2 * T0, $"{T0} -> {t} (expected {2 * T0})");
             }
 
+            // ---- DoubleSideMesh (the ANIMATED-path helper): the real bake doubles a skinned mesh via Blender/a rig,
+            //      which Tier 1 can't build — so test the helper directly on a synthetic 2-submesh skinned mesh.
+            //      Asserts it doubles verts AND per-submesh tris, PRESERVES submesh boundaries (the atlas-rect mapping),
+            //      carries bone weights, and reverses the appended winding. This is the part that would silently
+            //      regress (a merged SetTriangles would scramble materials; a dropped boneWeight copy would fail the
+            //      skeleton bake's bone-index check). ----
+            {
+                var m = new Mesh { indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+                m.SetVertices(new List<Vector3> { new Vector3(0,0,0), new Vector3(1,0,0), new Vector3(0,1,0), new Vector3(1,1,0) });
+                m.SetNormals(new List<Vector3> { Vector3.forward, Vector3.forward, Vector3.forward, Vector3.forward });
+                m.subMeshCount = 2;
+                m.SetTriangles(new[] { 0, 1, 2 }, 0);   // submesh 0: one tri
+                m.SetTriangles(new[] { 1, 3, 2 }, 1);   // submesh 1: one tri
+                m.boneWeights = Enumerable.Repeat(new BoneWeight { boneIndex0 = 0, weight0 = 1f }, 4).ToArray();
+                m.bindposes = new[] { Matrix4x4.identity };
+                int v0 = m.vertexCount, s0t0 = m.GetTriangles(0).Length, s0t1 = m.GetTriangles(1).Length;
+                UniversalBaker.DoubleSideMesh(m, 0.01f);
+                var s1t0 = m.GetTriangles(0); var s1t1 = m.GetTriangles(1);
+                bool ok = m.vertexCount == 2 * v0 && m.subMeshCount == 2
+                          && s1t0.Length == 2 * s0t0 && s1t1.Length == 2 * s0t1
+                          && m.boneWeights.Length == 2 * v0
+                          // the appended tri (second half of submesh 0) reverses winding: original 0,1,2 -> 0+vn,2+vn,1+vn
+                          && s1t0[3] == 0 + v0 && s1t0[4] == 2 + v0 && s1t0[5] == 1 + v0;
+                Check(res, ref pass, ref fail, "DoubleSideMesh doubles a skinned mesh, keeps submeshes + bone weights, reverses winding",
+                    ok, $"verts {v0}->{m.vertexCount}, submeshes={m.subMeshCount}, s0 tris {s0t0/3}->{s1t0.Length/3}, s1 tris {s0t1/3}->{s1t1.Length/3}, weights={m.boneWeights.Length}");
+                UnityEngine.Object.DestroyImmediate(m);
+            }
+
             // ---- Faceted normals: unwelds so each triangle corner is its own vertex -> vertexCount == index count ----
             {
                 var c = Cfg("faceted", cube1); c.normals = NormalsMode.Faceted;
