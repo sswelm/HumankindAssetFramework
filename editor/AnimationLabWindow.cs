@@ -269,6 +269,11 @@ public class AnimationLabWindow : EditorWindow
             if (first) { fitBounds = wb; first = false; } else fitBounds.Encapsulate(wb);
         }
         if (fitDraws.Count == 0) fitDraws = null;
+        // TEXTURE-BINDING dump (2026-09-03): stale double-sided model renders WHITE after a restart — is the
+        // atlas texture actually bound on the material, and does the restored mesh still carry normals?
+        else foreach (var (dm, dmats, _) in fitDraws)
+            Debug.Log($"[AnimLab] draw dump: mesh='{dm.name}' verts={dm.vertexCount} sub={dm.subMeshCount} normals={(dm.normals?.Length ?? 0)} readable={dm.isReadable} " +
+                      $"mats=[{string.Join(",", (dmats ?? new Material[0]).Select(x => x == null ? "null" : $"{x.name} shader={x.shader?.name} tex={(x.mainTexture == null ? "NULL" : x.mainTexture.name + " " + x.mainTexture.width + "px")}"))}]");
         // Loud diagnostic (the Factory drill lesson: a silent no-match is how this fix hid its failure twice)
         if (subTotal > 0)
             Debug.Log("[AnimLab] fit-preview UV substitution: " +
