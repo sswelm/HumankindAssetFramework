@@ -189,6 +189,10 @@ public class AnimationLabWindow : EditorWindow
             { smr.sharedMesh = sub; subUsed++; }
             else subSkipped++;
         }
+        // ANIMATED-INSTANCE dump (2026-09-03): this instance is what's DISPLAYED (the static fitDraws are skipped
+        // while a clip plays), so dump ITS state — bodyMat null => renderers keep the FBX default white material.
+        Debug.Log($"[AnimLab] anim-inst dump: res='{res}' bodyMat={(bodyMat == null ? "NULL" : bodyMat.name + " tex=" + (bodyMat.mainTexture == null ? "NULL" : bodyMat.mainTexture.name))} subUsed={subUsed} " +
+                  $"renderers=[{string.Join(",", fitAnimInst.GetComponentsInChildren<Renderer>(true).Select(r => (r is SkinnedMeshRenderer s ? s.sharedMesh?.vertexCount ?? -1 : -1) + ":" + (r.sharedMaterial == null ? "null" : r.sharedMaterial.name + "/" + (r.sharedMaterial.mainTexture == null ? "NOTEX" : "tex"))))}]");
         fitPRU.AddSingleGO(fitAnimInst);
         fitAnimT = 0f; fitAnimTick = EditorApplication.timeSinceStartup; fitAnimBoundsValid = false;
         status = fitAnimClip != null
