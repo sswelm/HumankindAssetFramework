@@ -2023,13 +2023,21 @@ for _o2 in bpy.data.objects:
 # validates). The back shell is nudged INWARD along the normal by a small fraction of the model size, so front and
 # back faces are NOT coincident — coincident faces make the game's alpha-to-coverage shader read ~50% transparent.
 if double_sided:
+    # The inset is a fraction of the WHOLE model, not each part. A per-mesh dimension would give a tiny single-sided
+    # part (a bolt, an antenna) a tiny inset that can fall below depth precision -> that part reads transparent again.
+    # So take one world-space extent across every mesh, derive one world-space offset, and convert it into each
+    # mesh's own local units (verts and normals are local) so a scaled part still gets the same visible inset.
+    _dmeshes = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]
+    _wpts = [_dso.matrix_world @ Vector(_c) for _dso in _dmeshes for _c in _dso.bound_box]
+    _wdim = max((max(p[i] for p in _wpts) - min(p[i] for p in _wpts)) for i in range(3)) if _wpts else 1.0
+    _woff = max(1e-5, _wdim * 0.0015)
     _dsn = 0
-    for _dso in [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]:
+    for _dso in _dmeshes:
         _dm = _dso.data
+        _ws = _dso.matrix_world.to_scale()
+        _wsavg = (abs(_ws.x) + abs(_ws.y) + abs(_ws.z)) / 3.0
+        _doff = _woff / _wsavg if _wsavg > 1e-9 else _woff   # world offset -> this mesh's local units
         _db = bmesh.new(); _db.from_mesh(_dm); _db.normal_update()
-        _dext = [v.co for v in _db.verts]
-        _ddim = max((max(c[i] for c in _dext) - min(c[i] for c in _dext)) for i in range(3)) if _dext else 1.0
-        _doff = max(1e-5, _ddim * 0.0015)
         _dsrc = list(_db.faces)
         _dret = bmesh.ops.duplicate(_db, geom=_dsrc)
         _dverts = [g for g in _dret['geom'] if isinstance(g, bmesh.types.BMVert)]
@@ -2040,8 +2048,8 @@ if double_sided:
         _v0 = len(_dm.vertices)
         _db.to_mesh(_dm); _db.free()
         _dsn += 1
-        print("VEHICLE double-sided '%s': %d -> %d verts (back shell inset %.4f)" % (_dso.name, _v0, len(_dm.vertices), _doff))
-    print("VEHICLE double-sided: %d mesh(es) made two-sided at the source" % _dsn)
+        print("VEHICLE double-sided '%s': %d -> %d verts (back shell inset %.4f local)" % (_dso.name, _v0, len(_dm.vertices), _doff))
+    print("VEHICLE double-sided: %d mesh(es) made two-sided at the source (whole-model inset %.4f world)" % (_dsn, _woff))
 
 bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
 if preview_fbx:
