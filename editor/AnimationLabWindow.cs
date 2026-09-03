@@ -329,6 +329,13 @@ public class AnimationLabWindow : EditorWindow
                 if (fitAnimPlaying) fitAnimT = Mathf.Repeat(fitAnimT + dt * fitAnimSpeed, fitAnimClip.length);
                 fitAnimClip.SampleAnimation(fitAnimInst, fitAnimT);
             }
+            // LIVE Position offset on the animated instance too. The static rest-pose path applies liveOff to its
+            // draw matrices, but a PLAYING clip renders this instance through the camera, which liveOff never
+            // touches — so the offset vanished exactly when a clip played (the gun sat un-offset in the Lab while
+            // the Factory showed it moved). Set the root AFTER sampling (the clip is rotation-only, so root stays 0)
+            // and BEFORE the bounds framing below, using the same registry->preview axis map as the Factory.
+            fitAnimInst.transform.position = (fitGrounded && cur != null && cur.position != Vector3.zero)
+                ? new Vector3(cur.position.x, cur.position.z, cur.position.y) : Vector3.zero;
             if (!fitAnimBoundsValid)
             {   // framed ONCE from the posed instance — re-framing per frame would breathe with the animation
                 bool first = true;
