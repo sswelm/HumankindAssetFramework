@@ -694,9 +694,13 @@ public class ModelFactoryWindow : EditorWindow
         var names = ModelRegistry.Load().Select(e => e.resourceName).ToList();
         names.Insert(0, "<New>");
         existing = names.ToArray();
-        // The dropdown INDEX follows the loaded entry by NAME — the list is rebuilt on every reload, so a persisted
-        // numeric index can silently point at a different entry than the form holds.
-        selected = Array.IndexOf(existing, cur.resourceName);
+        // The dropdown INDEX follows the form's COMMITTED identity (loadedName), NEVER the editable name field
+        // (cur.resourceName) — the same rule the rest of this file keys on (see lines ~55, ~855, ~1936). Keying on
+        // the name field made the dropdown LIE: an unsaved <New> form holding a typed name that the Lab then created
+        // in the registry showed that entry as selected while loadedName was still empty, so the collision check
+        // reported the name clashing with ITSELF and Bake stayed blocked until the user re-picked from the dropdown
+        // (2026-09-03). loadedName empty => IndexOf(-1) => <New>, the honest state for a form not loaded from an entry.
+        selected = Array.IndexOf(existing, loadedName);
         if (selected < 0) selected = 0;
     }
 
