@@ -110,6 +110,11 @@ public class AnimationLabWindow : EditorWindow
         {
             var resDir = System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(previewPath));
             LoadFitPreview(previewPath, UniversalBaker.LoadPreviewSubstitutes(resDir));   // the SHARED loader — multi-SMR set
+            // ...and RESUME the clip if one was playing — the SAME two steps RebuildFitPreviews runs after a bake.
+            // This restore forgot it, so a restart showed the STATIC _PropFit while a bake showed the LIVE animated
+            // instance: a texture/shading mismatch that "rebake fixed" (2026-09-03). The one-forgotten-call-site
+            // pattern this very block's comment warns about, struck again — now both paths do both steps.
+            if (!string.IsNullOrEmpty(fitAnimRole)) BuildAnimPreview(fitAnimRole);
         }
     }
     void OnDisable() { DestroyFitPreview(); }
