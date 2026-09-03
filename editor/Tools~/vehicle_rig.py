@@ -12,7 +12,7 @@
 #       AXLE AUTO = the axis of each wheel's SMALLEST bbox extent (a wheel is thin along its axle) — per wheel, so
 #       mirrored side wheels resolve independently.
 # Frame 0 deliberately equals the rest pose: `Spin[0..0]` is the motionless Idle (see Factory-Manual / Law 2 notes).
-import bpy, sys, math, time
+import bpy, bmesh, sys, math, time
 _T0 = time.time()
 def _lap(label):
     global _T0
