@@ -263,6 +263,11 @@ public class AnimationLabWindow : EditorWindow
             var wb = TransformBounds(mtx, m.bounds);
             if (first) { fitBounds = wb; first = false; } else fitBounds.Encapsulate(wb);
         }
+        // GROUND-TRUTH diagnostic (2026-09-03): a "nothing renders" report after the double-sided change kept
+        // contradicting my count reasoning — so log what actually loaded. Draw count 0 = the real "nothing".
+        Debug.Log($"[AnimLab] fit-preview build: prefab='{previewPath}' renderers={go.GetComponentsInChildren<Renderer>(true).Length} draws={fitDraws.Count} " +
+                  $"rendererMeshVerts=[{string.Join(",", go.GetComponentsInChildren<Renderer>(true).Select(r => (r is SkinnedMeshRenderer s ? s.sharedMesh : r.GetComponent<MeshFilter>()?.sharedMesh)?.vertexCount.ToString() ?? "null"))}] " +
+                  $"poolVerts=[{string.Join(",", (uvSubstitutes ?? new List<Mesh>()).Where(s => s != null).Select(s => s.vertexCount))}]");
         if (fitDraws.Count == 0) fitDraws = null;
         // Loud diagnostic (the Factory drill lesson: a silent no-match is how this fix hid its failure twice)
         if (subTotal > 0)
