@@ -5,21 +5,24 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.4 — 2026-09-03
 
-- **Double-sided now works on animated models.** The engine culls backfaces, so a single-sided or CAD-style
-  source (thin spokes, flat plates) renders see-through from the wrong angle. The Double-sided repair only ever
-  ran on the *static* path — on an animated model the flag was passed to the Blender converter, which never
-  implemented it, so it silently **halved the triangle target and did nothing else**. The doubling is now applied
-  to the animated skinned mesh directly (and to the preview clones, so the preview shows it too): every triangle
-  gets a reversed, slightly inset back face, per-submesh so material/atlas mapping is preserved, carrying bone
-  weights so the skeleton bake still validates. Found via a see-through Gatling gun. Verify in-game as always,
-  but the preview now reflects it.
-- **Two Animation Lab preview fixes that rode in with it:** a double-sided bake left the Lab's fit-preview prefab
-  referencing a garbage-collected mesh (the model rendered as *nothing*) — now the renderer's own persisted mesh
-  is doubled in place, so its reference stays valid; and the runtime **Position offset** now shows on a *playing*
-  clip too (it was only applied to the static rest pose, so an offset model looked mispositioned in the Lab
-  versus the Factory). Double-sided currently covers **multi-material** animated rigs; a single-material animated
-  rig skips it with a note (its mesh is the raw imported asset, which can't be doubled in place) — fix a
-  see-through single-material rig in the source with a Solidify modifier for now.
+- **Double-sided for animated vehicles — now a Vehicle Lab option, applied at the source.** The engine culls
+  backfaces, so a single-sided / CAD-style source (thin spokes, flat plates) renders see-through from the wrong
+  angle. The Vehicle Lab gained a **"Double-sided (fix see-through parts)"** checkbox: when set, the rig export
+  appends a reversed copy of every face to the Spin GLB itself, nudged slightly inward so front and back aren't
+  coincident (coincident faces read ~50% transparent under the game's alpha-to-coverage shader). Bone weights are
+  carried on the duplicated vertices, so the skeleton bake still validates. Because the fix lives in the source
+  geometry, the rig, the preview meshes and the baked model are all the same vertex count — so it just works in
+  the Vehicle Lab turntable, the Model Factory preview, the Animation Lab and in-game, with no runtime doubling
+  and no preview special-casing. Doubles the triangle count; the Factory's **Reduce to ~tris** still caps the
+  shipped mesh. (This replaced an earlier runtime-doubling attempt whose rig-vs-baked vertex-count mismatch caused
+  a long string of preview glitches — half-rendered, grey, and partially-transparent models.)
+- **The Model Factory's Double-sided checkbox is removed.** Double-siding for rigged models is a source-geometry
+  concern owned by the Vehicle Lab; the Factory had no runtime doubling, so a checkbox there only did nothing for
+  animated models. One fewer knob. (The static-bake path's own doubling and the `doubleSided` field remain for
+  backward compatibility — existing entries bake as saved.)
+- **The Animation Lab's runtime Position offset now shows on a *playing* clip too** — it was only applied to the
+  static rest pose, so an offset model looked mispositioned in the Lab versus the Factory; and the domain-reload
+  restore resumes the clip.
 
 ## 0.5.3 — 2026-09-02
 

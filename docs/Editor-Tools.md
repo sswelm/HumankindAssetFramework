@@ -60,7 +60,7 @@ pinpointed corruption and one-click recovery in each window). The runtime plugin
 ### Model Factory — `Tools ▸ HAF ▸ Model Factory`
 Author a static model (or the *model half* of an animated one): pick/create a resource, a target pawn, and a model file;
 tune geometry and shading; **Bake** → produces a `Skeleton` + `Atlas` and a registry entry. *Key controls:* target pawn,
-model file, Size, Strip parts, reduce-to-tris, height-UVs, winding fix, double-sided, albedo brightness/saturation,
+model file, Size, Strip parts, reduce-to-tris, height-UVs, winding fix, albedo brightness/saturation,
 keep-black, atlas size (256–4096), material mode, hide-donor, freeze-donor, re-spawn-after-load, embedded 3D preview.
 The preview stands the model on a true-size tile hex at the true in-game surface level — sunk or floating bakes
 preview that way (static entries show the shipped mesh; animated entries the rest-pose rig, the same faithful view as
