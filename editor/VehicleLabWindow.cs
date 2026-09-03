@@ -42,7 +42,10 @@ public class VehicleLabWindow : EditorWindow
     // Trail (2026-08-22, the M114 deploy): a split-trail ARM that swings OPEN when the gun deploys — one bone hinged at
     // the end nearest the body, rotating about the vertical, mirrored per side. ("Leg" is deliberately NOT used —
     // it is reserved for a walking mech limb.) Dropdown-only for now: no shortcut key.
-    enum Role { Body, Wheel, Turret, Ignore, Default, Edgecase, Caterpillar, Gun, Rotor, TailRotor, Trail, Muzzle, Cradle }
+    // Oar (2026-09-04, the Khalandion galley): a MERGED oar mesh — every oar across both banks in one part — that the
+    // rigger splits into one bone per physical oar and bakes a rowing stroke (sweep + dip) into Spin. Unlike every other
+    // role, ONE marked part becomes MANY bones. Appended LAST so saved-recipe role ints stay valid. Hotkey: O.
+    enum Role { Body, Wheel, Turret, Ignore, Default, Edgecase, Caterpillar, Gun, Rotor, TailRotor, Trail, Muzzle, Cradle, Oar }
     [Serializable] class Part { public string name; public int verts; public Vector3 center, size; public Role role;
         public int vis = -1;   // probe's escape-ray verdict: 1 = external (visible from outside), 0 = interior (never visible — strippable), -1 = unclassified (pre-visibility probe)
         public string bone = ""; }   // rigged sources: the bone this shard is weighted to (probe 2026-08-20) — lets a BONE row highlight its shards
@@ -68,6 +71,10 @@ public class VehicleLabWindow : EditorWindow
     // TRAILS (2026-08-22): how far each split-trail arm swings open when the gun deploys, and over how many
     // frames. Mirrored per side, hinged at the arm's body end — the rigger authors it as a separate "Deploy" action.
     [SerializeField] float trailSpreadDeg = 35f; [SerializeField] int trailFrames = 12;
+    // OARS (2026-09-04): the rowing stroke baked onto every recovered oar bone — a fore-aft sweep about the oarlock
+    // plus a phase-locked dip (blade down on the drive, up on the recovery), unison across the whole bank. Tunable
+    // because "believable from a distance" is a call made watching the preview loop, not from any one frame.
+    [SerializeField] float oarSweepDeg = 24f; [SerializeField] float oarDipDeg = 18f; [SerializeField] int oarFrames = 24;
     // GUN PIVOT: where the Gun bone sits along the assembly — the runtime elevation rotates about it, so this IS
     // the trunnion. 0.5 = bbox centre (unchanged default); an artillery piece wants ~0.4 (measured on the M114).
     [SerializeField] float gunPivot = 0.5f;
@@ -108,7 +115,7 @@ public class VehicleLabWindow : EditorWindow
     const int RockFps = 24;                       // Blender's scene fps — the clip's real-time length
     // The two motion sections fold independently (Sound Studio pattern): a model is almost always EITHER a wheeled
     // vehicle OR a floating one, so ~10 permanently-irrelevant rows were on screen at all times.
-    [SerializeField] bool foldSpin = true, foldWave = false, foldOrient = false, foldTrails = false;
+    [SerializeField] bool foldSpin = true, foldWave = false, foldOrient = false, foldTrails = false, foldOars = false;
     // Straighten a source that imports crooked / on its side. Baked into the vertex data BEFORE the rig is built,
     // so wheel axles, tread side detection and the rock's auto hull-length axis all read the corrected pose.
     [SerializeField] Vector3 modelRot = Vector3.zero;
@@ -124,7 +131,7 @@ public class VehicleLabWindow : EditorWindow
     static float MaxDim(Part p) => Mathf.Max(p.size.x, Mathf.Max(p.size.y, p.size.z));
     bool VisiblePart(Part x) => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.center.z >= minHeight && x.center.z <= maxHeight && x.center.y >= minWidth && x.center.y <= maxWidth;
     [SerializeField] int partFilter;      // list filter: 0 = all; see FilterOptions (Unreviewed = Default + Edgecase)
-    static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase", "Caterpillar", "Gun", "Rotor", "Tail rotor", "Trail", "Muzzle", "Cradle" };
+    static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase", "Caterpillar", "Gun", "Rotor", "Tail rotor", "Trail", "Muzzle", "Cradle", "Oar" };
     bool MatchesFilter(Role r) => partFilter == 1 ? (r == Role.Default || r == Role.Edgecase)
                                 : partFilter == 2 ? r == Role.Default
                                 : partFilter == 3 ? r == Role.Wheel
@@ -138,7 +145,8 @@ public class VehicleLabWindow : EditorWindow
                                 : partFilter == 11 ? r == Role.TailRotor
                                 : partFilter == 12 ? r == Role.Trail
                                 : partFilter == 13 ? r == Role.Muzzle
-                                : partFilter == 14 ? r == Role.Cradle : true;
+                                : partFilter == 14 ? r == Role.Cradle
+                                : partFilter == 15 ? r == Role.Oar : true;
     // Roles that SPIN (get a bone + the Spin action): wheels and both rotor kinds. Used for the Generate-enable gate,
     // the spin-section summary, Verify, and the "inside the wheel" test — so a rotorcraft with no Wheel parts still rigs.
     static bool IsSpinner(Role r) => r == Role.Wheel || r == Role.Rotor || r == Role.TailRotor;
@@ -171,6 +179,7 @@ public class VehicleLabWindow : EditorWindow
         public bool tracksStatic = false;
         public bool spinEnabled = true;    // default true: recipes that predate the field keep their spin (absent-field = old behavior)
         public bool doubleSided = false;   // source double-siding (absent-field = old behavior: off)
+        public float oarSweepDeg = 24f; public float oarDipDeg = 18f; public int oarFrames = 24;   // rowing stroke (absent = live defaults)
         public Vector3 modelRot = Vector3.zero;
         public bool waveEnabled = false;
         public float rockDegrees = 0f;
@@ -372,7 +381,7 @@ public class VehicleLabWindow : EditorWindow
                     GUIUtility.keyboardControl = 0;                    // a focused slider/popup must not swallow the arrows
                     ev.Use(); Repaint();
                 }
-                else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I || ev.keyCode == KeyCode.D || ev.keyCode == KeyCode.E || ev.keyCode == KeyCode.C || ev.keyCode == KeyCode.G || ev.keyCode == KeyCode.R || ev.keyCode == KeyCode.L))
+                else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I || ev.keyCode == KeyCode.D || ev.keyCode == KeyCode.E || ev.keyCode == KeyCode.C || ev.keyCode == KeyCode.G || ev.keyCode == KeyCode.R || ev.keyCode == KeyCode.L || ev.keyCode == KeyCode.O))
                 {
                     shown[idx].role = ev.keyCode == KeyCode.W ? Role.Wheel
                                     : ev.keyCode == KeyCode.T ? Role.Turret
@@ -382,6 +391,7 @@ public class VehicleLabWindow : EditorWindow
                                     : ev.keyCode == KeyCode.C ? Role.Caterpillar
                                     : ev.keyCode == KeyCode.G ? Role.Gun
                                     : ev.keyCode == KeyCode.R ? Role.Rotor
+                                    : ev.keyCode == KeyCode.O ? Role.Oar
                                     : ev.keyCode == KeyCode.L ? Role.TailRotor : Role.Body;
                     // If the new role falls outside the active filter, the part leaves the list — advance to the
                     // next one so the sweep continues instead of the selection dying with the removed row.
@@ -593,6 +603,30 @@ public class VehicleLabWindow : EditorWindow
                 }
             }
 
+            // OARS — a galley's rowing bank. Unlike every other role, ONE marked oar mesh (poles + blades, each
+            // spanning both sides) becomes MANY bones: the rig splits it into one bone per oar and bakes the stroke.
+            if (Section(ref foldOars, "Oars — a galley rowing",
+                    ActiveParts.Count(p => p.role == Role.Oar) == 0 ? "no oars marked"
+                        : $"{ActiveParts.Count(p => p.role == Role.Oar)} oar part(s) · sweep {oarSweepDeg:0.#}° · dip {oarDipDeg:0.#}° over {oarFrames} frames"))
+            {
+                using (new EditorGUI.DisabledScope(ActiveParts.Count(p => p.role == Role.Oar) == 0))
+                {
+                    oarSweepDeg = EditorGUILayout.Slider(new GUIContent("Sweep (deg)",
+                        "How far each oar swings fore-and-aft about its oarlock (peak amplitude). The whole bank strokes " +
+                        "in unison — the galley drum-beat. ~20–30° reads clearly from the game's distance."), oarSweepDeg, 0f, 60f);
+                    oarDipDeg = EditorGUILayout.Slider(new GUIContent("Dip (deg)",
+                        "How far the blades drop into the water on the aft drive and lift clear on the recovery — a " +
+                        "second rotation phase-locked to the sweep. 0 = a flat fore-aft sweep with no dip."), oarDipDeg, 0f, 45f);
+                    oarFrames = EditorGUILayout.IntSlider(new GUIContent("Stroke frames",
+                        "Length of one full stroke, baked into Spin as a seamless loop. The runtime plays it at 24 fps, " +
+                        "so ~24 frames ≈ one second per stroke."), oarFrames, 4, 90);
+                }
+                EditorGUILayout.HelpBox("Mark the oar meshes (O) — poles and blades, each a single merged mesh spanning " +
+                    "both banks. The rig recovers every oar to its own bone and bakes the stroke into Spin, so the oars " +
+                    "row whenever the movement clip plays. Adds one bone per oar (~60 on a galley) — well within budget.",
+                    MessageType.None);
+            }
+
             // WAVE ROCK — a FLOATING unit's idle sway. Independent of wheels: a boat marks nothing but Ignore
             // (to strip parts) and rocks. Rotation-only on a Hull bone, so no Keep-translations needed downstream.
             if (Section(ref foldWave, "Wave rock — floating units",
@@ -642,10 +676,11 @@ public class VehicleLabWindow : EditorWindow
             EditorGUILayout.Space(4);
 
             int wheels = list.Count(x => IsSpinner(x.role));
-            bool canRig = wheels > 0 || (waveEnabled && (rockDegrees > 0f || rockPitchDeg > 0f));
+            int oars = list.Count(x => x.role == Role.Oar);
+            bool canRig = wheels > 0 || oars > 0 || (waveEnabled && (rockDegrees > 0f || rockPitchDeg > 0f));
             using (new EditorGUI.DisabledScope(!canRig || string.IsNullOrEmpty(outGlb)))
                 if (GUILayout.Button(new GUIContent($"Generate rig{(useSourceRig && boneParts.Count > 0 ? " (fast path)" : "")}  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
-                        !canRig ? "Mark at least one entry as Wheel / Rotor / Tail rotor — or set a Wave rock amplitude (a floating unit needs no wheels)." : "Runs Blender: rig + Spin action + GLB export + preview."), GUILayout.Height(28)))
+                        !canRig ? "Mark at least one entry as Wheel / Rotor / Tail rotor / Oar — or set a Wave rock amplitude (a floating unit needs no wheels)." : "Runs Blender: rig + Spin action + GLB export + preview."), GUILayout.Height(28)))
                     Vehicleize();
         }
 
@@ -760,6 +795,7 @@ public class VehicleLabWindow : EditorWindow
             p.role = keptMap.TryGetValue(p.name, out var kr) ? kr
                    : low.Contains("tail") && (low.Contains("rotor") || low.Contains("prop")) ? Role.TailRotor  // "tail rotor" before the generic rotor guess
                    : low.Contains("fantail") || low.Contains("fenestron") ? Role.TailRotor
+                   : low.Contains("oar") ? Role.Oar   // before the generic "blade" -> Rotor guess: an oar blade contains "blade"
                    : low.Contains("rotor") || low.Contains("helix") || low.Contains("blade") || low.Contains("propeller") ? Role.Rotor
                    : low.Contains("wheel") || low.Contains("tyre") || low.Contains("tire") ? Role.Wheel
                    : low.Contains("turret") ? Role.Turret : Role.Default;
@@ -1084,7 +1120,7 @@ public class VehicleLabWindow : EditorWindow
             srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
             parts = parts, boneParts = boneParts, useSourceRig = useSourceRig, treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink,
             // orientation + tread isolation + wave rock — the rest of what the bake command consumes
-            tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, modelRot = modelRot, waveEnabled = waveEnabled,
+            tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, modelRot = modelRot, waveEnabled = waveEnabled,
             trailSpreadDeg = trailSpreadDeg, trailFrames = trailFrames, gunPivot = gunPivot, gunDeployElev = gunDeployElev, recoilDist = recoilDist, recoilFrames = recoilFrames, recoilLead = recoilLead,
             rockDegrees = rockDegrees, rockFrames = rockFrames, rockAxisChoice = rockAxisChoice, rockHeading = rockHeading,
             rockPitchDeg = rockPitchDeg, rockRollCycles = rockRollCycles, rockPitchCycles = rockPitchCycles, rockPitchPhase = rockPitchPhase,
@@ -1122,6 +1158,7 @@ public class VehicleLabWindow : EditorWindow
             // rock and vice-versa — no leak between models). off/zero is the safe neutral for a pre-2026-08-01 recipe;
             // the counted fields guard against a missing-key 0 the way treadAdvCells does.
             modelRot = r.modelRot; tracksStatic = r.tracksStatic; spinEnabled = r.spinEnabled; doubleSided = r.doubleSided;
+            oarSweepDeg = r.oarSweepDeg; oarDipDeg = r.oarDipDeg; oarFrames = r.oarFrames;
             trailSpreadDeg = r.trailSpreadDeg; trailFrames = r.trailFrames; gunPivot = r.gunPivot; gunDeployElev = r.gunDeployElev; recoilDist = r.recoilDist; recoilFrames = r.recoilFrames; recoilLead = r.recoilLead;
             waveEnabled = r.waveEnabled; rockDegrees = r.rockDegrees; rockAxisChoice = r.rockAxisChoice; rockHeading = r.rockHeading;
             rockPitchDeg = r.rockPitchDeg; rockPitchPhase = r.rockPitchPhase;
@@ -1277,10 +1314,15 @@ public class VehicleLabWindow : EditorWindow
         // Once recoil exists it is the part that STAYS while the barrel kicks back — the reason it is its own role.
         string cradlesFile = Path.Combine(projRoot, prevDir, baseName + "_cradles.txt").Replace('\\', '/');
         File.WriteAllLines(cradlesFile, src.Where(p => p.role == Role.Cradle).Select(p => p.name).ToArray());
+        // OARS (2026-09-04, the Khalandion galley): the merged oar meshes (poles + blades, each spanning both banks).
+        // Unlike every other role each marked mesh becomes MANY bones — the rigger clusters it into individual oars and
+        // bakes the rowing stroke (sweep + dip) into Spin. Empty file = no oars, and the rig regenerates unchanged.
+        string oarsFile = Path.Combine(projRoot, prevDir, baseName + "_oars.txt").Replace('\\', '/');
+        File.WriteAllLines(oarsFile, src.Where(p => p.role == Role.Oar).Select(p => p.name).ToArray());
         string axis = axisChoice == 0 ? "AUTO" : AxisOptions[axisChoice];
         string tailAxis = tailAxisChoice == 0 ? "AUTO" : AxisOptions[tailAxisChoice];
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")}", out string stdout)) return;   // argv[41]: double-sided
+        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")} \"@{oarsFile}\" {oarSweepDeg.ToString("0.##", inv)} {oarDipDeg.ToString("0.##", inv)} {oarFrames}", out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames
         // SUCCESS = THE SCRIPT'S OWN FINAL MARKER (the documented Blender trap: it exits 0 even when the python
         // script crashes mid-way — without this gate a half-run printed a fake "DONE" with no file on disk).
         string done = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE RIG DONE"));
