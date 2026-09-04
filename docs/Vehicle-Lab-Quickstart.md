@@ -105,11 +105,11 @@ models that need both sides everywhere; when combined, this fix runs first.
 
 **Sails.** Mark the canvas **Sail** (`S`). All sail parts weld to one `Sail` bone and are **always exported
 double-sided** — canvas must read from both tacks — with the artist's winding untouched. The rig also authors a
-separate **`Furl` clip** that strikes the canvas below the hull over half a second (frame 0 raised, frame 12
-struck) while `Spin` stays a pure seamless loop with the sails up. Assign after baking, exactly the Deploy
-pattern: Idle stance = `Furl[12..12]` (a ship under oars, no canvas) · Movement = `Spin` · After-move = `Furl`
-(strike sails) · Pre-move = `Furl[12..0]` (raise them as the ship gets underway), with **Keep bone translations
-ON** so the conversion carries the channel.
+separate **`Furl` clip** that switches the canvas **on/off**: raised at frame 0, struck below the hull at frame 1 —
+the sharpest cut the LINEAR clip format allows (~one frame), because a visible descent reads as the sail sinking
+through the deck. `Spin` stays a pure seamless loop with the sails up. Assign after baking, exactly the Deploy
+pattern: Idle stance = `Furl[1..1]` (a ship under oars, no canvas) · Movement = `Spin` · After-move = `Furl` (off)
+· Pre-move = `Furl[1..0]` (on), with **Keep bone translations ON** so the conversion carries the channel.
 
 **Oars (galley rowing).** A galley's oars usually arrive as a **few merged meshes** — all the poles in one, all the
 blades in another (often split front/back) — each mesh holding *every* oar across *both* banks. Mark those meshes

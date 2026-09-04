@@ -1786,15 +1786,14 @@ if oar_bake:
     print("VEHICLE ROWING clip: %d oars sweep %.0f deg + dip %.0f deg, %d cycle(s) over shared %d-frame 'Spin'"
           % (len(oar_bake), oar_sweep, oar_dip, _oar_repeats, _clip_frames))
 
-# SAIL strike/raise — its OWN `Furl` clip, exactly the trails' Deploy pattern. The hide was first keyed INSIDE
-# Spin (down at frame 0, up at frame 1) and every loop restart plunged the canvas for one frame ("at the end of
-# the oars cycle the sails twitch") — and skipping frame 0 via Movement = Spin[1..N] would clip a frame off the
-# oar cycle instead. So Spin stays pure seamless motion (sails simply up = rest), and Furl lowers the Sail bone
-# below the hull over half a second: frame 0 = raised, frame 12 = struck. The state machine uses it like Deploy:
-# Idle stance = Furl[12..12], Movement = Spin, After-move = Furl, Pre-move = Furl[12..0] — the sails visibly come
-# down when the ship stops and rise as it gets underway. Translation, not scale (the clip format carries no
-# scale) — Keep bone translations ON downstream.
-SAIL_FURL_FRAMES = 12
+# SAIL on/off — its OWN `Furl` clip, used like the trails' Deploy. Two designs were rejected in the field: keying
+# the hide inside Spin twitched the canvas at every loop restart, and a 12-frame visible descent read wrong ("in
+# reality it would not go down this way") — a sail does not sink through the deck. So the strike is an ON/OFF
+# SWITCH: raised at frame 0, struck below the hull at frame 1. The clip format keys LINEAR (no step curves), so
+# one frame apart is the sharpest possible cut — ~40 ms, reads as visible-or-not. State recipe: Idle stance =
+# Furl[1..1], Movement = Spin, After-move = Furl (off), Pre-move = Furl[1..0] (on). Translation, not scale (the
+# clip format carries no scale) — Keep bone translations ON downstream.
+SAIL_FURL_FRAMES = 1
 if sail_found and arm.pose.bones.get("Sail") is not None:
     _model_min_z = min((_o5.matrix_world @ Vector(_c5)).z
                        for _o5 in bpy.context.scene.objects if _o5.type == 'MESH' and _o5.data.vertices
@@ -1823,7 +1822,7 @@ if sail_found and arm.pose.bones.get("Sail") is not None:
             _kp.interpolation = 'LINEAR'
     _pbS.location = Vector((0.0, 0.0, 0.0))                       # leave the POSE raised for the later bakes
     arm.animation_data.action = act                               # 'Spin' stays the active action, as before
-    print("VEHICLE SAIL 'Furl' clip: canvas lowers %.2f over 0..%d — Idle stance Furl[%d..%d], Movement Spin, After-move Furl, Pre-move Furl[%d..0], Keep bone translations ON"
+    print("VEHICLE SAIL 'Furl' clip: on/off switch, canvas drops %.2f between frames 0 and %d — Idle stance Furl[%d..%d], Movement Spin, After-move Furl, Pre-move Furl[%d..0], Keep bone translations ON"
           % (_sdrop, SAIL_FURL_FRAMES, SAIL_FURL_FRAMES, SAIL_FURL_FRAMES, SAIL_FURL_FRAMES))
 
 
