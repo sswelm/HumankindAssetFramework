@@ -2266,17 +2266,22 @@ if fix_inside_out:
 # layer, so each duplicated vertex keeps its bone weights (no vert falls to bone 0 -> the skeleton bake still
 # validates). The back shell is nudged INWARD along the normal by a small fraction of the model size, so front and
 # back faces are NOT coincident — coincident faces make the game's alpha-to-coverage shader read ~50% transparent.
-if double_sided:
+# Marked OAR meshes are ALWAYS double-sided, even when the global checkbox is off: a blade is a zero-thickness
+# sheet that ROTATES through the stroke, so a single side vanishes for half the sweep no matter how it is wound —
+# and the outward recalc cannot orient a sheet at all (field report: some blades rendered, some culled, arbitrary
+# per island). The hull stays single-sided under the recalc; only the oars pay the doubling.
+_dall = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]
+_dtargets = _dall if double_sided else [o for o in _dall if any(g.name.startswith("Oar_") for g in o.vertex_groups)]
+if _dtargets:
     # The inset is a fraction of the WHOLE model, not each part. A per-mesh dimension would give a tiny single-sided
     # part (a bolt, an antenna) a tiny inset that can fall below depth precision -> that part reads transparent again.
     # So take one world-space extent across every mesh, derive one world-space offset, and convert it into each
     # mesh's own local units (verts and normals are local) so a scaled part still gets the same visible inset.
-    _dmeshes = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]
-    _wpts = [_dso.matrix_world @ Vector(_c) for _dso in _dmeshes for _c in _dso.bound_box]
+    _wpts = [_dso.matrix_world @ Vector(_c) for _dso in _dall for _c in _dso.bound_box]
     _wdim = max((max(p[i] for p in _wpts) - min(p[i] for p in _wpts)) for i in range(3)) if _wpts else 1.0
     _woff = max(1e-5, _wdim * 0.0015)
     _dsn = 0
-    for _dso in _dmeshes:
+    for _dso in _dtargets:
         _dm = _dso.data
         _ws = _dso.matrix_world.to_scale()
         _wsavg = (abs(_ws.x) + abs(_ws.y) + abs(_ws.z)) / 3.0
@@ -2293,7 +2298,8 @@ if double_sided:
         _db.to_mesh(_dm); _db.free()
         _dsn += 1
         print("VEHICLE double-sided '%s': %d -> %d verts (back shell inset %.4f local)" % (_dso.name, _v0, len(_dm.vertices), _doff))
-    print("VEHICLE double-sided: %d mesh(es) made two-sided at the source (whole-model inset %.4f world)" % (_dsn, _woff))
+    print("VEHICLE double-sided: %d mesh(es) made two-sided at the source%s (whole-model inset %.4f world)"
+          % (_dsn, "" if double_sided else " (oar blades only — sheets must read from both sides mid-stroke)", _woff))
 
 bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
 if preview_fbx:
