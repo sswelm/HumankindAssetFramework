@@ -290,6 +290,9 @@ oar_frames = max(4, int(float(argv[45]))) if len(argv) > 45 and argv[45].strip()
 # instead of paying double-sided's 2x triangles. Runs BEFORE the double-sided step when both are on, so a doubled
 # shell insets its back copy the right way. Winding only: vertices, weights and UVs are untouched.
 fix_inside_out = len(argv) > 46 and argv[46].strip() == "1"
+# BLADE ROLL (argv[47]): degrees each oar is spun about its own long axis in the REST geometry, for sources whose
+# blades are modelled feathered (face parallel to the stroke — they knife through the water edge-on). 0 = untouched.
+oar_blade_roll = float(argv[47]) if len(argv) > 47 and argv[47].strip() else 0.0
 recoil_bone = None               # set to "RecoilArm" when the split actually happens — the bone the clip ROTATES
 recoil_geom = None               # (pivot, axis, bore_dir, slide, R) for the arc that fakes the slide
 # Residual tilt the arc leaves on the tube. The slide is faked by swinging the barrel on a long arm, so some pitch
@@ -904,6 +907,7 @@ if oar_names:
             print("VEHICLE WARN: oar part '%s' not found — skipped" % _on); continue
         oar_by_name.add(_oo.name); oar_skin[_oo.name] = {}; _oar_objs.append(_oo)
     _isl = {_oo.name: _oar_islands(_oo) for _oo in _oar_objs}   # compute connectivity once
+    _objbyname = {_oo.name: _oo for _oo in _oar_objs}
     # All recovery tolerances are fractions of the marked geometry's own diagonal. The previous fixed world-unit
     # values worked only at the validation model's import scale: centimetre/metre variants either recovered zero
     # oars or merged a whole bank. The centreline is likewise geometry-derived; imported models need not sit at Y=0.
@@ -974,6 +978,24 @@ if oar_names:
                 for _vi in _idx:
                     oar_skin[_onm][_vi] = _bn
                 _allwc += _wc
+            # BLADE ROLL (argv[47]): spin the whole oar about its OWN long axis. Some sources model the blades
+            # feathered — the flat face parallel to the stroke — so they knife through the water edge-on instead of
+            # scooping (the Khalandion needs 90). Rolling the ENTIRE oar leaves the cylindrical pole visually
+            # unchanged and turns only the blade face, with no seam at the blade root. Applied to the REST geometry
+            # before the pivot is measured, so the bone and the whole stroke carry the corrected face.
+            if abs(oar_blade_roll) > 0.01:
+                _rax = _oar_pc1(_allwc)
+                _rc = sum(_allwc, Vector((0, 0, 0))) / len(_allwc)
+                _RQ = Quaternion(_rax, math.radians(oar_blade_roll))
+                for _i in _mem:
+                    _onm, _idx, _wc, _ = _items[_i]
+                    _oo2 = _objbyname[_onm]; _minv = _oo2.matrix_world.inverted()
+                    for _k, _vi in enumerate(_idx):
+                        _wc[_k] = _rc + _RQ @ (_wc[_k] - _rc)
+                        _oo2.data.vertices[_vi].co = _minv @ _wc[_k]
+                _allwc = []
+                for _i in _mem:
+                    _allwc += _items[_i][2]
             _ys = [abs(_p.y - _oar_beam_mid) for _p in _allwc]; _yg = min(_ys) + 0.30 * (max(_ys) - min(_ys))
             _piv = min(_allwc, key=lambda _p: abs(abs(_p.y - _oar_beam_mid) - _yg))  # oarlock: ~30% out from the handle
             _d = _oar_pc1(_allwc); _h = Vector((_d.x, _d.y, 0.0))

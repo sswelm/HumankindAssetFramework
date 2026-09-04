@@ -108,7 +108,10 @@ cleanly), gives it a bone at its oarlock, and bakes a unison rowing stroke into 
 the oarlock plus a phase-locked **Dip** (blades drop into the water on the aft drive, lift clear on the recovery). It
 adds one bone per oar (~60 on a full galley), well within the skeleton budget. Tune **Sweep**, **Dip**, and **Stroke
 frames** while watching the preview loop — the believable-from-a-distance amplitudes are a judgement made on the
-moving turntable, not a still frame. The oars row whenever the movement clip plays; no Model Factory option is
+moving turntable, not a still frame. If the blades knife through the water edge-on instead of scooping, the source
+models them *feathered* — set **Blade roll (deg)** (typically 90) to spin each oar about its own long axis in the
+rest geometry; the cylindrical pole shows no change, only the blade face squares to the water. The oars row
+whenever the movement clip plays; no Model Factory option is
 involved. Marked oar meshes **keep their authored winding**: blades usually ship as front/back sheet pairs (already
 two-sided by construction), so the **Fix inside-out faces** recalc skips them — recalculating an open sheet picks
 an arbitrary side and culls half the blades. The rest of the model follows the Double-sided / inside-out checkboxes. For a rigged source, turn off **Use source skeleton (fast path)** first: oar recovery needs the merged mesh

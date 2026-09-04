@@ -75,6 +75,9 @@ public class VehicleLabWindow : EditorWindow
     // plus a phase-locked dip (blade down on the drive, up on the recovery), unison across the whole bank. Tunable
     // because "believable from a distance" is a call made watching the preview loop, not from any one frame.
     [SerializeField] float oarSweepDeg = 24f; [SerializeField] float oarDipDeg = 18f; [SerializeField] int oarFrames = 24;
+    // BLADE ROLL: some sources model the blades feathered — flat face parallel to the stroke — so they knife through
+    // the water edge-on. Spins each oar about its own long axis in the rest geometry (the Khalandion wants 90).
+    [SerializeField] float oarBladeRollDeg = 0f;
     // GUN PIVOT: where the Gun bone sits along the assembly — the runtime elevation rotates about it, so this IS
     // the trunnion. 0.5 = bbox centre (unchanged default); an artillery piece wants ~0.4 (measured on the M114).
     [SerializeField] float gunPivot = 0.5f;
@@ -182,6 +185,7 @@ public class VehicleLabWindow : EditorWindow
         public bool doubleSided = false;   // source double-siding (absent-field = old behavior: off)
         public bool fixInsideOut = false;  // outward normal recalc (absent-field = old behavior: off)
         public float oarSweepDeg = 24f; public float oarDipDeg = 18f; public int oarFrames = 24;   // rowing stroke (absent = live defaults)
+        public float oarBladeRollDeg = 0f;   // rest-pose blade squaring (absent-key 0 == the do-nothing default)
         public Vector3 modelRot = Vector3.zero;
         public bool waveEnabled = false;
         public float rockDegrees = 0f;
@@ -625,6 +629,11 @@ public class VehicleLabWindow : EditorWindow
                         "Preferred length of one stroke. When another Spin motion uses a longer clip, Vehicle Lab fits " +
                         "the nearest whole number of strokes across it so every subsystem loops without a pause or snap. " +
                         "The runtime plays at 24 fps, so ~24 frames ≈ one second per stroke."), oarFrames, 4, 90);
+                    oarBladeRollDeg = EditorGUILayout.Slider(new GUIContent("Blade roll (deg)",
+                        "Spins each oar about its own long axis in the rest geometry, for sources whose blades are " +
+                        "modelled FEATHERED — flat face parallel to the stroke, knifing through the water edge-on " +
+                        "instead of scooping. 90 squares such a blade to the water; 0 = leave the source untouched. " +
+                        "The cylindrical pole shows no change — only the blade face turns."), oarBladeRollDeg, -180f, 180f);
                 }
                 EditorGUILayout.HelpBox("Mark the oar meshes (O) — poles and blades, each a single merged mesh spanning " +
                     "both banks. The rig recovers every oar to its own bone and bakes the stroke into Spin, so the oars " +
@@ -1133,7 +1142,7 @@ public class VehicleLabWindow : EditorWindow
             srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
             parts = parts, boneParts = boneParts, useSourceRig = useSourceRig, treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink,
             // orientation + tread isolation + wave rock — the rest of what the bake command consumes
-            tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, modelRot = modelRot, waveEnabled = waveEnabled,
+            tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, modelRot = modelRot, waveEnabled = waveEnabled,
             trailSpreadDeg = trailSpreadDeg, trailFrames = trailFrames, gunPivot = gunPivot, gunDeployElev = gunDeployElev, recoilDist = recoilDist, recoilFrames = recoilFrames, recoilLead = recoilLead,
             rockDegrees = rockDegrees, rockFrames = rockFrames, rockAxisChoice = rockAxisChoice, rockHeading = rockHeading,
             rockPitchDeg = rockPitchDeg, rockRollCycles = rockRollCycles, rockPitchCycles = rockPitchCycles, rockPitchPhase = rockPitchPhase,
@@ -1178,6 +1187,7 @@ public class VehicleLabWindow : EditorWindow
             oarSweepDeg = Has("oarSweepDeg") ? r.oarSweepDeg : 24f;
             oarDipDeg = Has("oarDipDeg") ? r.oarDipDeg : 18f;
             oarFrames = Has("oarFrames") ? r.oarFrames : 24;
+            oarBladeRollDeg = r.oarBladeRollDeg;   // absent-key 0 IS the do-nothing default — no migration needed
             trailSpreadDeg = r.trailSpreadDeg; trailFrames = r.trailFrames; gunPivot = r.gunPivot; gunDeployElev = r.gunDeployElev; recoilDist = r.recoilDist; recoilFrames = r.recoilFrames; recoilLead = r.recoilLead;
             waveEnabled = r.waveEnabled; rockDegrees = r.rockDegrees; rockAxisChoice = r.rockAxisChoice; rockHeading = r.rockHeading;
             rockPitchDeg = r.rockPitchDeg; rockPitchPhase = r.rockPitchPhase;
@@ -1346,7 +1356,7 @@ public class VehicleLabWindow : EditorWindow
         string axis = axisChoice == 0 ? "AUTO" : AxisOptions[axisChoice];
         string tailAxis = tailAxisChoice == 0 ? "AUTO" : AxisOptions[tailAxisChoice];
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")} \"@{oarsFile}\" {oarSweepDeg.ToString("0.##", inv)} {oarDipDeg.ToString("0.##", inv)} {oarFrames} {(fixInsideOut ? "1" : "0")}", out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix
+        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")} \"@{oarsFile}\" {oarSweepDeg.ToString("0.##", inv)} {oarDipDeg.ToString("0.##", inv)} {oarFrames} {(fixInsideOut ? "1" : "0")} {oarBladeRollDeg.ToString("0.##", inv)}", out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll
         // SUCCESS = THE SCRIPT'S OWN FINAL MARKER (the documented Blender trap: it exits 0 even when the python
         // script crashes mid-way — without this gate a half-run printed a fake "DONE" with no file on disk).
         string done = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE RIG DONE"));

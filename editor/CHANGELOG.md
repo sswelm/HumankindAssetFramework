@@ -28,6 +28,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   the raw source's sails and hull vanish under culling, the fixed export draws solid. Marked **Oar** meshes are
   excluded from the recalc — blades ship as authored front/back sheet pairs, and reorienting an open sheet picks
   an arbitrary side (the recalc had culled half the blades; their artist winding is correct as-is).
+- **Blade roll — square feathered blades to the water.** Some sources model the oar blades *feathered* (flat face
+  parallel to the stroke), so they knife through the water edge-on instead of scooping. The Oars section's new
+  **Blade roll (deg)** spins each recovered oar about its own long axis in the rest geometry — the cylindrical
+  pole shows no change, only the blade face turns, with no seam at the blade root. 0 (the default) leaves the
+  source untouched; the Khalandion wants 90. Measured: the blade sheet normal turns by exactly the dialed angle.
 
 ## 0.5.4 — 2026-09-03
 
