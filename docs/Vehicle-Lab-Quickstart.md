@@ -102,7 +102,10 @@ the oarlock plus a phase-locked **Dip** (blades drop into the water on the aft d
 adds one bone per oar (~60 on a full galley), well within the skeleton budget. Tune **Sweep**, **Dip**, and **Stroke
 frames** while watching the preview loop — the believable-from-a-distance amplitudes are a judgement made on the
 moving turntable, not a still frame. The oars row whenever the movement clip plays; no Model Factory option is
-involved.
+involved. For a rigged source, turn off **Use source skeleton (fast path)** first: oar recovery needs the merged mesh
+geometry, not the source skeleton's bone rows. If wheel spin or wave rock requests a longer `Spin` clip, Stroke frames
+is treated as the preferred period and the nearest whole number of strokes is fitted across the shared clip so it
+loops without a pause or snap.
 
 Press **Verify**, resolve meaningful warnings, optionally **Save recipe**, then press **Generate rig**. The output path is
 copied to the clipboard and the generated animation appears in the preview. Re-run **Generate rig** after changing any

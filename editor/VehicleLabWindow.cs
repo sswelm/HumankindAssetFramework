@@ -618,8 +618,9 @@ public class VehicleLabWindow : EditorWindow
                         "How far the blades drop into the water on the aft drive and lift clear on the recovery — a " +
                         "second rotation phase-locked to the sweep. 0 = a flat fore-aft sweep with no dip."), oarDipDeg, 0f, 45f);
                     oarFrames = EditorGUILayout.IntSlider(new GUIContent("Stroke frames",
-                        "Length of one full stroke, baked into Spin as a seamless loop. The runtime plays it at 24 fps, " +
-                        "so ~24 frames ≈ one second per stroke."), oarFrames, 4, 90);
+                        "Preferred length of one stroke. When another Spin motion uses a longer clip, Vehicle Lab fits " +
+                        "the nearest whole number of strokes across it so every subsystem loops without a pause or snap. " +
+                        "The runtime plays at 24 fps, so ~24 frames ≈ one second per stroke."), oarFrames, 4, 90);
                 }
                 EditorGUILayout.HelpBox("Mark the oar meshes (O) — poles and blades, each a single merged mesh spanning " +
                     "both banks. The rig recovers every oar to its own bone and bakes the stroke into Spin, so the oars " +
@@ -677,10 +678,18 @@ public class VehicleLabWindow : EditorWindow
 
             int wheels = list.Count(x => IsSpinner(x.role));
             int oars = list.Count(x => x.role == Role.Oar);
-            bool canRig = wheels > 0 || oars > 0 || (waveEnabled && (rockDegrees > 0f || rockPitchDeg > 0f));
+            // Oar recovery needs shard geometry and cannot run against source-bone rows. Keep this gate aligned
+            // with vehicle_rig.py's defensive rigfast rejection so the UI can never report a successful no-op.
+            bool fastPathOars = FastPath && oars > 0;
+            bool canRig = !fastPathOars && (wheels > 0 || oars > 0 || (waveEnabled && (rockDegrees > 0f || rockPitchDeg > 0f)));
+            if (fastPathOars)
+                EditorGUILayout.HelpBox("Oar recovery is not available on the source-skeleton fast path. Disable " +
+                    "Use source skeleton, Probe parts, and mark the merged oar meshes instead.", MessageType.Warning);
             using (new EditorGUI.DisabledScope(!canRig || string.IsNullOrEmpty(outGlb)))
                 if (GUILayout.Button(new GUIContent($"Generate rig{(useSourceRig && boneParts.Count > 0 ? " (fast path)" : "")}  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
-                        !canRig ? "Mark at least one entry as Wheel / Rotor / Tail rotor / Oar — or set a Wave rock amplitude (a floating unit needs no wheels)." : "Runs Blender: rig + Spin action + GLB export + preview."), GUILayout.Height(28)))
+                        fastPathOars ? "Disable the source-skeleton fast path before recovering oars from merged mesh geometry."
+                        : !canRig ? "Mark at least one entry as Wheel / Rotor / Tail rotor / Oar — or set a Wave rock amplitude (a floating unit needs no wheels)."
+                        : "Runs Blender: rig + Spin action + GLB export + preview."), GUILayout.Height(28)))
                     Vehicleize();
         }
 
@@ -1144,12 +1153,14 @@ public class VehicleLabWindow : EditorWindow
             // wave config "loss" took GLB forensics to diagnose). JsonUtility can't tell absent from default,
             // so key-presence in the raw text is the honest signal; one representative key per feature era.
             var predates = new List<string>();
-            void Chk(string key, string label) { if (!json.Contains("\"" + key + "\"")) predates.Add(label); }
+            bool Has(string key) => json.Contains("\"" + key + "\"");
+            void Chk(string key, string label) { if (!Has(key)) predates.Add(label); }
             Chk("boneParts", "source-rig fast path");
             Chk("treadAdvCells", "tread dials");
             Chk("tracksStatic", "orientation + static tracks");
             Chk("waveEnabled", "wave rock");
             Chk("spinEnabled", "spin switch");
+            Chk("oarSweepDeg", "oar stroke");
             DestroyPreview();
             srcFile = r.srcFile; outGlb = r.outGlb; frames = r.frames; axisChoice = r.axisChoice; minVerts = r.minVerts; degrees = r.degrees;
             treadAdvCells = r.treadAdvCells > 0 ? r.treadAdvCells : 3;   // pre-knob recipes default to road-wheel sync
@@ -1158,7 +1169,11 @@ public class VehicleLabWindow : EditorWindow
             // rock and vice-versa — no leak between models). off/zero is the safe neutral for a pre-2026-08-01 recipe;
             // the counted fields guard against a missing-key 0 the way treadAdvCells does.
             modelRot = r.modelRot; tracksStatic = r.tracksStatic; spinEnabled = r.spinEnabled; doubleSided = r.doubleSided;
-            oarSweepDeg = r.oarSweepDeg; oarDipDeg = r.oarDipDeg; oarFrames = r.oarFrames;
+            // JsonUtility.FromJson assigns default(T), not field initializers, to keys absent from old recipes.
+            // Preserve a deliberately saved zero amplitude, but migrate a pre-0.5.5 recipe to the live defaults.
+            oarSweepDeg = Has("oarSweepDeg") ? r.oarSweepDeg : 24f;
+            oarDipDeg = Has("oarDipDeg") ? r.oarDipDeg : 18f;
+            oarFrames = Has("oarFrames") ? r.oarFrames : 24;
             trailSpreadDeg = r.trailSpreadDeg; trailFrames = r.trailFrames; gunPivot = r.gunPivot; gunDeployElev = r.gunDeployElev; recoilDist = r.recoilDist; recoilFrames = r.recoilFrames; recoilLead = r.recoilLead;
             waveEnabled = r.waveEnabled; rockDegrees = r.rockDegrees; rockAxisChoice = r.rockAxisChoice; rockHeading = r.rockHeading;
             rockPitchDeg = r.rockPitchDeg; rockPitchPhase = r.rockPitchPhase;
@@ -1258,6 +1273,11 @@ public class VehicleLabWindow : EditorWindow
 
     void Vehicleize()
     {
+        if (FastPath && ActiveParts.Any(p => p.role == Role.Oar))
+        {
+            status = "Oar recovery needs mesh parts. Disable Use source skeleton, Probe parts, then mark the merged oar meshes.";
+            return;
+        }
         // OVERWRITE GUARD: the output path is explicit and user-owned — an existing file (e.g. a HAND-MADE rig like
         // the original Ehrhardt_Spin.glb) is never clobbered without an explicit yes.
         if (File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?",

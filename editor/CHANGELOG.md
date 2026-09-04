@@ -15,6 +15,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   aft drive, lift on the recovery), a seamless loop. The new **"Oars — a galley rowing"** section exposes **Sweep**,
   **Dip**, and **Stroke frames**, tuned against the preview loop. Adds one bone per oar (~60 on a full galley), well
   within the skeleton budget. The oars row whenever the movement clip plays. Validated headless on a 64-oar galley.
+  Recovery tolerances and bank centre are derived from the marked geometry, so uniformly scaled or translated source
+  models behave the same. When wave, wheel, and rowing periods differ, each motion is fitted to a whole number of
+  cycles over the shared `Spin` range instead of freezing at its last key. Older recipes migrate to the rowing defaults;
+  source-skeleton fast-path generation now blocks Oar roles with instructions to probe the mesh parts instead.
 
 ## 0.5.4 — 2026-09-03
 

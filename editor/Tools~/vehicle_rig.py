@@ -14,6 +14,15 @@
 # Frame 0 deliberately equals the rest pose: `Spin[0..0]` is the motionless Idle (see Factory-Manual / Law 2 notes).
 import bpy, bmesh, sys, math, time
 _T0 = time.time()
+def _fitted_cycle_count(clip_frames, requested_period):
+    """Nearest positive whole-cycle count that keeps both ends of a shared action on the same pose."""
+    return max(1, int(round(clip_frames / float(max(1, requested_period)))))
+
+def _oar_recovery_metrics(min_xyz, max_xyz):
+    """Scale-relative recovery tolerances plus the model-relative beam centre."""
+    diagonal = max(math.sqrt(sum((max_xyz[i] - min_xyz[i]) ** 2 for i in range(3))), 1e-6)
+    return diagonal, 0.0051 * diagonal, 0.0090 * diagonal, 0.5 * (min_xyz[1] + max_xyz[1])
+
 def _lap(label):
     global _T0
     now = time.time(); print("VEHICLE timing: %-12s %6.1fs" % (label, now - _T0)); _T0 = now
@@ -355,6 +364,9 @@ if tracks_static and track_names:
 # axis is the LOCAL basis axis closest to the world axle direction, SIGNED so every wheel turns the same world
 # way (artist rigs mirror left/right bones — an unsigned shared channel would counter-rotate one side).
 if mode == "rigfast":
+    if oar_names:
+        print("VEHICLE ERROR: Oar recovery needs mesh parts; disable the source-skeleton fast path and probe the merged oar meshes")
+        sys.exit(1)
     def _fast():
         global objs
         arms = [o for o in bpy.context.scene.objects if o.type == 'ARMATURE']
@@ -840,7 +852,6 @@ oar_by_name = set()
 oar_skin = {}       # oar-part object name -> {vertex_index: bone name}
 oar_bake = []       # (bone name, pivot world, side(+1/-1), dip-axis world) for the Rowing keyframes
 if oar_names:
-    _OAR_EPS = 0.085
     def _oar_islands(_o):
         _me = _o.data; _bm = bmesh.new(); _bm.from_mesh(_me); _bm.verts.ensure_lookup_table()
         _seen = set(); _out = []
@@ -881,17 +892,29 @@ if oar_names:
             print("VEHICLE WARN: oar part '%s' not found — skipped" % _on); continue
         oar_by_name.add(_oo.name); oar_skin[_oo.name] = {}; _oar_objs.append(_oo)
     _isl = {_oo.name: _oar_islands(_oo) for _oo in _oar_objs}   # compute connectivity once
+    # All recovery tolerances are fractions of the marked geometry's own diagonal. The previous fixed world-unit
+    # values worked only at the validation model's import scale: centimetre/metre variants either recovered zero
+    # oars or merged a whole bank. The centreline is likewise geometry-derived; imported models need not sit at Y=0.
+    _oar_points = [_p for _oo in _oar_objs for _idx, _wc, _ctr in _isl[_oo.name] for _p in _wc]
+    if _oar_points:
+        _omn = Vector((min(_p.x for _p in _oar_points), min(_p.y for _p in _oar_points), min(_p.z for _p in _oar_points)))
+        _omx = Vector((max(_p.x for _p in _oar_points), max(_p.y for _p in _oar_points), max(_p.z for _p in _oar_points)))
+        _oscale, _OAR_EPS, _OAR_MIN_SPAN, _oar_beam_mid = _oar_recovery_metrics(tuple(_omn), tuple(_omx))
+        print("VEHICLE ROWING recovery scale: diagonal %.4f, merge eps %.5f, min span %.5f, beam centre Y %.4f"
+              % (_oscale, _OAR_EPS, _OAR_MIN_SPAN, _oar_beam_mid))
+    else:
+        _OAR_EPS = 1e-6; _OAR_MIN_SPAN = 1e-6; _oar_beam_mid = 0.0
     _oid = 0
     for _side in (1, -1):
         # common pole direction from each island's own PC1 (within-oar — not the row spread, which points along X)
         _dp = Vector((0, 0, 0)); _ref = None
         for _oo in _oar_objs:
             for _idx, _wc, _ctr in _isl[_oo.name]:
-                if (_ctr.y > 0) != (_side > 0):
+                if (_ctr.y >= _oar_beam_mid) != (_side > 0):
                     continue
                 _pv = _oar_pc1(_wc); _m = sum(_wc, Vector((0, 0, 0))) / len(_wc)
                 _span = max((_p - _m).dot(_pv) for _p in _wc) - min((_p - _m).dot(_pv) for _p in _wc)
-                if _span < 0.15:
+                if _span < _OAR_MIN_SPAN:
                     continue
                 if _ref is None:
                     _ref = _pv
@@ -906,7 +929,7 @@ if oar_names:
         _items = []   # (objname, idx, wc, (u, v)) for every island on this side
         for _oo in _oar_objs:
             for _idx, _wc, _ctr in _isl[_oo.name]:
-                if (_ctr.y > 0) != (_side > 0):
+                if (_ctr.y >= _oar_beam_mid) != (_side > 0):
                     continue
                 _items.append((_oo.name, _idx, _wc, (_ctr.dot(_e1), _ctr.dot(_e2))))
         _n = len(_items)
@@ -939,8 +962,8 @@ if oar_names:
                 for _vi in _idx:
                     oar_skin[_onm][_vi] = _bn
                 _allwc += _wc
-            _ys = [abs(_p.y) for _p in _allwc]; _yg = min(_ys) + 0.30 * (max(_ys) - min(_ys))
-            _piv = min(_allwc, key=lambda _p: abs(abs(_p.y) - _yg))       # oarlock: ~30% out from the handle
+            _ys = [abs(_p.y - _oar_beam_mid) for _p in _allwc]; _yg = min(_ys) + 0.30 * (max(_ys) - min(_ys))
+            _piv = min(_allwc, key=lambda _p: abs(abs(_p.y - _oar_beam_mid) - _yg))  # oarlock: ~30% out from the handle
             _d = _oar_pc1(_allwc); _h = Vector((_d.x, _d.y, 0.0))
             _h = _h.normalized() if _h.length > 1e-6 else Vector((1.0, 0.0, 0.0))
             _dax = Vector((-_h.y, _h.x, 0.0)).normalized()               # dip axis: horizontal, perp to the oar
@@ -1603,8 +1626,21 @@ try:
 except Exception:
     pass
 bpy.context.scene.frame_start = 0
-# the clip must cover the SLOWEST authored motion — a wave cycle is typically far longer than a wheel loop
-bpy.context.scene.frame_end = max(frames, rock_frames) if rock_on else frames
+# The action must cover the slowest requested subsystem, while every faster subsystem completes an INTEGER number
+# of cycles across that shared range. Otherwise Blender holds its last key until the action ends (the original
+# 24-frame rowing + 120-frame wave combination rowed once, froze for 96 frames, then snapped on loop restart).
+_motion_periods = [frames]
+if rock_on:
+    _motion_periods.append(rock_frames)
+if oar_bake:
+    _motion_periods.append(oar_frames)
+_clip_frames = max(_motion_periods)
+def _fitted_repeats(_period):
+    return _fitted_cycle_count(_clip_frames, _period)
+_spin_repeats = _fitted_repeats(frames)
+_rock_repeats = _fitted_repeats(rock_frames) if rock_on else 0
+_oar_repeats = _fitted_repeats(oar_frames) if oar_bake else 0
+bpy.context.scene.frame_end = _clip_frames
 
 # WAVE ROCK keys on the Hull bone: roll = A·sin(2πt) about X (longitudinal), pitch = 0.4A·sin(4πt) about Y.
 # Both vanish at t=0 and t=1, so frame 0 IS the rest pose (bind==frame0) and the loop restart is seamless.
@@ -1635,22 +1671,23 @@ if rock_on:
     _pb_hull.rotation_mode = 'XYZ'
     # sample density scales with the pitch frequency — the fastest component needs the keys, and the pipeline
     # keys LINEAR (a sparse sine reads as a triangle wave)
-    _steps = max(24, 16 * max(rock_roll_cycles, rock_pitch_cycles))   # keys enough for the FASTEST wave (LINEAR keying)
+    _steps = max(_clip_frames, 24 * _rock_repeats,
+                 16 * max(rock_roll_cycles, rock_pitch_cycles) * _rock_repeats)  # keys enough for the FASTEST wave
     _roll_amp = math.radians(rock_deg)
     _pitch_amp = math.radians(rock_pitch_deg)
     _phase = math.radians(rock_pitch_phase)
     for _i in range(_steps + 1):
         _t = _i / float(_steps)
-        _f = int(round(_t * rock_frames))
+        _f = int(round(_t * _clip_frames))
         bpy.context.scene.frame_set(_f)
-        _q = (Quaternion(_roll_ax, _roll_amp * math.sin(2.0 * math.pi * rock_roll_cycles * _t)) @
-              Quaternion(_pitch_ax, _pitch_amp * math.sin(2.0 * math.pi * rock_pitch_cycles * _t + _phase)))
+        _q = (Quaternion(_roll_ax, _roll_amp * math.sin(2.0 * math.pi * rock_roll_cycles * _rock_repeats * _t)) @
+              Quaternion(_pitch_ax, _pitch_amp * math.sin(2.0 * math.pi * rock_pitch_cycles * _rock_repeats * _t + _phase)))
         _pb_hull.rotation_euler = _q.to_euler('XYZ')
         _pb_hull.keyframe_insert("rotation_euler", frame=_f)
     print("VEHICLE wave rock: roll %.1f deg x%d about (%.2f,%.2f,%.2f) | pitch %.1f deg x%d phase %.0f about (%.2f,%.2f,%.2f) | %d frames, %d keys on '%s' — %s%s"
           % (rock_deg, rock_roll_cycles, _roll_ax.x, _roll_ax.y, _roll_ax.z,
              rock_pitch_deg, rock_pitch_cycles, rock_pitch_phase, _pitch_ax.x, _pitch_ax.y, _pitch_ax.z,
-             rock_frames, _steps + 1, body_bone, _axis_why,
+             _clip_frames, _steps + 1, body_bone, _axis_why,
              (", heading %+.0f deg" % rock_heading) if abs(rock_heading) > 1e-6 else ""))
 
 
@@ -1661,8 +1698,6 @@ if rock_on:
 # clustering) so port and starboard pull aft together. The bind pose is the armature rest (oars as modelled), so an
 # offset at frame 0 is fine — the oars simply oscillate around their modelled rake.
 if oar_bake:
-    bpy.context.scene.frame_end = max(bpy.context.scene.frame_end, oar_frames)
-    _osteps = max(24, oar_frames)
     _oaw = math.radians(oar_sweep); _oad = math.radians(oar_dip)
     for _bn, _piv, _oside, _dax in oar_bake:
         _db = arm.data.bones.get(_bn); _pb = arm.pose.bones.get(_bn)
@@ -1672,8 +1707,8 @@ if oar_bake:
         _lz = (_m3.inverted() @ Vector((0.0, 0.0, 1.0))).normalized()   # world vertical, in bone-local space
         _ld = (_m3.inverted() @ _dax).normalized()                      # dip axis, in bone-local space
         _pb.rotation_mode = 'QUATERNION'
-        for _i in range(_osteps + 1):
-            _t = _i / float(_osteps); _f = int(round(_t * oar_frames)); _phi = 2.0 * math.pi * _t
+        for _f in range(_clip_frames + 1):
+            _t = _f / float(_clip_frames); _phi = 2.0 * math.pi * _oar_repeats * _t
             _ths = _oaw * (-math.cos(_phi)) * _oside     # fore-aft: catch forward -> drive aft -> recover forward
             _thd = _oad * (math.sin(_phi)) * _oside      # dip: blade down on the drive, up on the recovery
             _pb.rotation_quaternion = Quaternion(_lz, _ths) @ Quaternion(_ld, _thd)
@@ -1686,8 +1721,8 @@ if oar_bake:
         if _fc.data_path.startswith('pose.bones["Oar_'):
             for _kp in _fc.keyframe_points:
                 _kp.interpolation = 'LINEAR'
-    print("VEHICLE ROWING clip: %d oars sweep %.0f deg + dip %.0f deg over %d frames (unison, into 'Spin')"
-          % (len(oar_bake), oar_sweep, oar_dip, oar_frames))
+    print("VEHICLE ROWING clip: %d oars sweep %.0f deg + dip %.0f deg, %d cycle(s) over shared %d-frame 'Spin'"
+          % (len(oar_bake), oar_sweep, oar_dip, _oar_repeats, _clip_frames))
 
 
 # ROLLING-CONTACT wheel speeds (user field report: the small road wheels looked draggy — "they should be
@@ -1822,21 +1857,21 @@ for bname in cluster_bones:
         # ROTOR own-clip spin: the bone frame now embeds the axle (main: local Y = axle; tail: local X = axle,
         # matching the donor channels' axes), so spin about that LOCAL axis. Keyed EVERY frame — a start/end
         # quaternion pair slerps the short way and cannot represent >180 deg; per-frame keys are exact.
-        _tot = math.radians(_wheel_final_deg.get(bname, degrees))
+        _tot = math.radians(_wheel_final_deg.get(bname, degrees) * _spin_repeats)
         _lax = Vector((1, 0, 0)) if clusters[_ci].get("is_tail") else Vector((0, 1, 0))
         pb.rotation_mode = 'QUATERNION'
-        for _f in range(frames + 1):
+        for _f in range(_clip_frames + 1):
             bpy.context.scene.frame_set(_f)
-            pb.rotation_quaternion = Quaternion(_lax, _tot * (_f / float(frames)))
+            pb.rotation_quaternion = Quaternion(_lax, _tot * (_f / float(_clip_frames)))
             pb.keyframe_insert("rotation_quaternion", frame=_f)
         continue
     pb.rotation_mode = 'XYZ'
     bpy.context.scene.frame_set(0)
     pb.rotation_euler = (0, 0, 0)
     pb.keyframe_insert("rotation_euler", frame=0)
-    bpy.context.scene.frame_set(frames)
-    pb.rotation_euler = (0, math.radians(_wheel_final_deg.get(bname, degrees)), 0)   # local Y = the axle
-    pb.keyframe_insert("rotation_euler", frame=frames)
+    bpy.context.scene.frame_set(_clip_frames)
+    pb.rotation_euler = (0, math.radians(_wheel_final_deg.get(bname, degrees) * _spin_repeats), 0)   # local Y = the axle
+    pb.keyframe_insert("rotation_euler", frame=_clip_frames)
 if _wheel_final_deg:
     _chg = {b: d for b, d in _wheel_final_deg.items() if abs(d - degrees) > 0.5}
     if _chg:
@@ -1870,12 +1905,12 @@ if track_infos and clusters:
                 pb.rotation_mode = 'XYZ'
                 _restM[_ci] = arm.data.bones[_bn].matrix_local.copy()
                 _P0s[_ci], _t0s[_ci] = _path_eval(_job, _job["s_rest"][_ci])
-            for _f in range(frames + 1):
+            for _f in range(_clip_frames + 1):
                 bpy.context.scene.frame_set(_f)
                 for _ci in _job["cells"]:
                     _bn = "%sL%02d" % (_job["prefix"], _ci)
                     pb = arm.pose.bones[_bn]
-                    _P1, _t1 = _path_eval(_job, _job["s_rest"][_ci] + _adv_link * _f / frames)
+                    _P1, _t1 = _path_eval(_job, _job["s_rest"][_ci] + _adv_link * _spin_repeats * _f / _clip_frames)
                     _q = _t0s[_ci].rotation_difference(_t1)
                     _M = Matrix.Translation(_P1) @ _q.to_matrix().to_4x4() @ Matrix.Translation(-_P0s[_ci])
                     pb.matrix = _M @ _restM[_ci]
@@ -1895,9 +1930,9 @@ if track_infos and clusters:
                 bpy.context.scene.frame_set(0)
                 pb.location = (0.0, 0.0, 0.0)
                 pb.keyframe_insert("location", frame=0)
-                bpy.context.scene.frame_set(frames)
-                pb.location = _local
-                pb.keyframe_insert("location", frame=frames)
+                bpy.context.scene.frame_set(_clip_frames)
+                pb.location = _local * _spin_repeats
+                pb.keyframe_insert("location", frame=_clip_frames)
             print("VEHICLE tread '%s' HYBRID conveyor: %d link bones on wraps + %d shuttle(s), advance %.3f/loop"
                   % (_tn, len(_job["cells"]), len(_job["runs"]), abs(_adv_link)))
             continue
@@ -1921,9 +1956,9 @@ if track_infos and clusters:
             bpy.context.scene.frame_set(0)
             pb.rotation_euler = (0, 0, 0)
             pb.keyframe_insert("rotation_euler", frame=0)
-            bpy.context.scene.frame_set(frames)
-            pb.rotation_euler = (0, math.radians(_theta), 0)
-            pb.keyframe_insert("rotation_euler", frame=frames)
+            bpy.context.scene.frame_set(_clip_frames)
+            pb.rotation_euler = (0, math.radians(_theta * _spin_repeats), 0)
+            pb.keyframe_insert("rotation_euler", frame=_clip_frames)
         _fdir, _rdir, _rtdir = _tread_dirs.get(_tn, (Vector((-1, 0, 0)), Vector((-1, 0, 0)), Vector((1, 0, 0))))
         _moves = ((_botb, Vector((-1.0, 0.0, 0.0)) * _flow),       # bottom runs backward
                   (_topb, Vector((1.0, 0.0, 0.0)) * _flow),        # top runs forward
@@ -1938,9 +1973,9 @@ if track_infos and clusters:
             bpy.context.scene.frame_set(0)
             pb.location = (0.0, 0.0, 0.0)
             pb.keyframe_insert("location", frame=0)
-            bpy.context.scene.frame_set(frames)
-            pb.location = _local
-            pb.keyframe_insert("location", frame=frames)
+            bpy.context.scene.frame_set(_clip_frames)
+            pb.location = _local * _spin_repeats
+            pb.keyframe_insert("location", frame=_clip_frames)
     print("VEHICLE tread conveyor v5: %d tread(s), tread quantum %.1f deg (wheels %.1f), advance %.3f/loop (drive d=%.2f): wraps ride DEDICATED wrap bones, ramps slide their slope, straights shuttle"
           % (len(track_infos), _conv_deg, degrees, _advance, _drive_d))
 # Blender 5.x REMOVED Action.fcurves (slotted/layered actions): curves live under layers->strips->channelbags.
@@ -2237,5 +2272,5 @@ if preview_fbx:
     bpy.ops.export_scene.fbx(filepath=preview_fbx, add_leaf_bones=False, bake_anim=True)
 print("VEHICLE RIG DONE: %d wheel part(s) clustered into %d wheel(s) %s, %d turret part(s) on one Turret bone, %d gun part(s) on one Gun bone%s, %d track loop(s) on own static bones, Spin 0..%d %.0f deg%s -> %s"
       % (len(wheel_names), len(clusters), {b: wheel_axes[b] for b in cluster_bones}, len(turret_names),
-         len(gun_names), " (child of Turret)" if (gun_names and turret_names) else "", len(track_names), frames, degrees,
-         (", wave rock %.1f deg over %d frames" % (rock_deg, rock_frames)) if rock_on else "", out_glb))
+         len(gun_names), " (child of Turret)" if (gun_names and turret_names) else "", len(track_names), _clip_frames, degrees,
+         (", wave rock %.1f deg x%d fitted cycle(s)" % (rock_deg, _rock_repeats)) if rock_on else "", out_glb))
