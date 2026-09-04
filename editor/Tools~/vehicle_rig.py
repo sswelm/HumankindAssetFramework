@@ -2274,18 +2274,82 @@ for _o2 in bpy.data.objects:
 # sheets (sails) keep exactly one visible side — pick Double-sided instead/as well when both sides must show.
 # Runs BEFORE double-sided so a doubled shell insets its back copy the right way. Weights/UVs untouched.
 if fix_inside_out:
-    # Marked OAR meshes are EXCLUDED: their blades ship as authored front/back sheet PAIRS (already two-sided by
-    # construction), and recalc on an open sheet picks an arbitrary orientation per island — the field sequence:
-    # the recalc culled half the blades, auto-doubling them then z-shimmered against the authored back sheets.
-    # The artist's oar winding is correct; leave it alone.
-    _fxn = 0
-    for _fo in [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]:
+    # NOT a blind recalc (tried 2026-09-04, twice wrong): bmesh.ops.recalc_face_normals RE-SOLVES orientation for
+    # every island, and "outward" is ambiguous for open sheets — it culled half the authored oar blades, and then
+    # flipped the DECK invisible from above. Instead, flip ONLY the islands that are provably inside-out: those
+    # whose faces consistently point at the ship's INTERIOR, judged against the radial direction from the hull's
+    # length axis (the rig convention: length along X). A side plank wound inward scores ~-1 -> flipped; the deck
+    # (normals up, radial up from the axis) scores ~+1 -> kept; sails and masts (normals along the axis or mixed)
+    # score ~0 -> kept, the artist's winding wins every ambiguous call. Marked OAR meshes are excluded entirely
+    # (authored front/back sheet pairs). Winding only: vertices, weights and UVs untouched.
+    # Open SHEETS whose orientation is ambiguous (a sail's normal runs along the ship, so the radial score is ~0)
+    # cannot be fixed by any flip — a sheet has two real sides. Those get the reversed-inset-copy treatment
+    # (field report: "the sails should become double sided"). Sheet = a meaningful fraction of boundary edges;
+    # a mast or rope tube is closed and never qualifies. Clearly-outward sheets (the deck: normals up, radial up)
+    # stay single — their good side is the seen side.
+    _fwdim = 1.0
+    _fall = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]
+    _fpts = [_o3.matrix_world @ Vector(_c3) for _o3 in _fall for _c3 in _o3.bound_box]
+    if _fpts:
+        _fwdim = max((max(p[i] for p in _fpts) - min(p[i] for p in _fpts)) for i in range(3))
+    _foff = max(1e-5, _fwdim * 0.0015)
+    _fxn = 0; _fxkept = 0; _fxdbl = 0
+    for _fo in _fall:
         if any(g.name.startswith("Oar_") for g in _fo.vertex_groups):
             continue
-        _fb = bmesh.new(); _fb.from_mesh(_fo.data)
-        bmesh.ops.recalc_face_normals(_fb, faces=_fb.faces)
-        _fb.to_mesh(_fo.data); _fb.free(); _fxn += 1
-    print("VEHICLE inside-out fix: face normals recalculated outward on %d mesh(es) (oar meshes keep their authored winding)" % _fxn)
+        _fb = bmesh.new(); _fb.from_mesh(_fo.data); _fb.normal_update()
+        _fb.verts.ensure_lookup_table(); _fb.faces.ensure_lookup_table()
+        # The judgement axis must run INSIDE the hull belly. A bbox centre gets dragged to mast height, putting
+        # the DECK below the axis — its up-normals then read "interior-facing" and it got flipped invisible
+        # (field report). Y: bbox centre (banks are symmetric). Z: the 25th percentile of vertex height — inside
+        # the hull mass, below the deck, unmoved by masts and sails. A surface near the axis scores ~0 and can
+        # only be kept or sheet-doubled, never wrongly flipped.
+        _fmn = Vector((min(v.co.x for v in _fb.verts), min(v.co.y for v in _fb.verts), min(v.co.z for v in _fb.verts)))
+        _fmx = Vector((max(v.co.x for v in _fb.verts), max(v.co.y for v in _fb.verts), max(v.co.z for v in _fb.verts)))
+        _fcy = 0.5 * (_fmn.y + _fmx.y)
+        _fstep = max(1, len(_fb.verts) // 5000)
+        _fzs = sorted(_v4.co.z for _i4, _v4 in enumerate(_fb.verts) if _i4 % _fstep == 0)
+        _fcz = _fzs[len(_fzs) // 4]
+        _seenf = set(); _dblfaces = []
+        for _f0 in _fb.faces:
+            if _f0.index in _seenf:
+                continue
+            _stackf = [_f0]; _seenf.add(_f0.index); _ifaces = []
+            _dsum = 0.0; _dn = 0; _bedges = 0; _tedges = 0
+            while _stackf:
+                _fc = _stackf.pop(); _ifaces.append(_fc)
+                _ctr2 = _fc.calc_center_median()
+                _rad = Vector((0.0, _ctr2.y - _fcy, _ctr2.z - _fcz))     # radial from the hull's length axis
+                if _rad.length > 1e-6:
+                    _dsum += _fc.normal.dot(_rad.normalized()); _dn += 1
+                for _e2 in _fc.edges:
+                    _tedges += 1
+                    if len(_e2.link_faces) < 2:
+                        _bedges += 1
+                    for _lf in _e2.link_faces:
+                        if _lf.index not in _seenf:
+                            _seenf.add(_lf.index); _stackf.append(_lf)
+            _score = (_dsum / _dn) if _dn > 0 else 0.0
+            _sheet = _tedges > 0 and (float(_bedges) / _tedges) > 0.05
+            if _score < -0.25:                                           # provably inward -> reverse (cheap)
+                bmesh.ops.reverse_faces(_fb, faces=_ifaces); _fxn += 1
+            elif _sheet and _score < 0.25:                               # ambiguous open sheet -> needs both sides
+                _dblfaces += _ifaces; _fxdbl += 1
+            else:
+                _fxkept += 1
+        if _dblfaces:
+            _ws3 = _fo.matrix_world.to_scale()
+            _ws3a = (abs(_ws3.x) + abs(_ws3.y) + abs(_ws3.z)) / 3.0
+            _loff = _foff / _ws3a if _ws3a > 1e-9 else _foff
+            _dret2 = bmesh.ops.duplicate(_fb, geom=_dblfaces)
+            _dv2 = [g for g in _dret2['geom'] if isinstance(g, bmesh.types.BMVert)]
+            _df2 = [g for g in _dret2['geom'] if isinstance(g, bmesh.types.BMFace)]
+            for _v2 in _dv2:
+                _v2.co = _v2.co - _v2.normal * _loff
+            bmesh.ops.reverse_faces(_fb, faces=_df2)
+        _fb.to_mesh(_fo.data); _fb.free()
+    print("VEHICLE inside-out fix: %d island(s) reversed (interior-facing), %d sheet island(s) double-sided (sails/flags), %d kept as authored; oar meshes untouched"
+          % (_fxn, _fxdbl, _fxkept))
 
 # DOUBLE-SIDED (argv[41], opt-in, 2026-09-03): the game culls backfaces, so single-sided / CAD source faces (thin
 # spokes, flat plates) render see-through in-game. Append a REVERSED copy of every face here, at the SOURCE, so the

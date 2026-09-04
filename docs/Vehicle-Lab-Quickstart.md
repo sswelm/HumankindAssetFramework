@@ -93,12 +93,15 @@ in-game — no Model Factory option is involved (that checkbox was removed). It 
 Model Factory's **Reduce to ~tris** still caps the shipped mesh, so lower that if you are near the vertex budget.
 Leave it **off** for models that are already solid.
 
-**Fix inside-out faces (recalc outward).** Some sources ship with their winding consistently **inverted** — from
-outside you see through the near hull wall while the far wall's *interior* renders. Tick this and the rig
-recalculates every face normal to point outward (Blender's Shift+N) at export: the cheap, single-sided fix — no
-extra triangles. It orients per connected shell, so a closed hull corrects robustly; zero-thickness sheets (sails,
-flags) still show only one side — reach for **Double-sided** when both sides of a sheet must render. The two can
-be combined: the recalc runs first, so a doubled shell insets its back copy the right way.
+**Fix inside-out faces.** Some sources ship with part of their winding **inverted** — from outside you see through
+the near hull wall while the far wall's *interior* renders. Tick this and at export each connected island is judged
+against the hull's interior (an axis through the hull belly): islands that provably face *inward* (inverted side
+planking) are **reversed** — the cheap, no-extra-triangles fix; open sheets whose facing is ambiguous (sails,
+flags — their normals run along the ship) are **double-sided**, because no flip can ever show both sides of a
+sheet; everything else — the deck, masts, and anything the test cannot call decisively — keeps the artist's
+winding, as do marked **Oar** meshes. A blunt whole-model recalc was tried first and rejected: it re-solves every
+island and flipped authored surfaces (half the oar blades, then the deck). Global **Double-sided** remains for
+models that need both sides everywhere; when combined, this fix runs first.
 
 **Oars (galley rowing).** A galley's oars usually arrive as a **few merged meshes** — all the poles in one, all the
 blades in another (often split front/back) — each mesh holding *every* oar across *both* banks. Mark those meshes

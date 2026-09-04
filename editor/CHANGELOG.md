@@ -19,15 +19,16 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   models behave the same. When wave, wheel, and rowing periods differ, each motion is fitted to a whole number of
   cycles over the shared `Spin` range instead of freezing at its last key. Older recipes migrate to the rowing defaults;
   source-skeleton fast-path generation now blocks Oar roles with instructions to probe the mesh parts instead.
-- **Fix inside-out faces — the single-sided repair for inverted winding.** A source whose faces ship consistently
-  wrong-way-out (the Khalandion's hull sides) reads see-through from outside while showing the far wall's interior.
-  The new Vehicle Lab checkbox recalculates every face normal to point outward (Blender's Shift+N) at export — no
-  extra triangles, weights and UVs untouched. Orients per connected shell, so a closed hull corrects robustly;
-  zero-thickness sheets still show one side only (that is what **Double-sided** is for, and the two combine — the
-  recalc runs first so a doubled shell insets its back copy correctly). Verified with backface-culled renders:
-  the raw source's sails and hull vanish under culling, the fixed export draws solid. Marked **Oar** meshes are
-  excluded from the recalc — blades ship as authored front/back sheet pairs, and reorienting an open sheet picks
-  an arbitrary side (the recalc had culled half the blades; their artist winding is correct as-is).
+- **Fix inside-out faces — a targeted winding repair, not a blunt recalc.** A source whose side planking ships
+  wrong-way-out (the Khalandion) reads see-through from outside while showing the far wall's interior. The new
+  Vehicle Lab checkbox judges each connected island against the hull's interior (an axis through the hull belly —
+  a bbox centre gets dragged to mast height and mis-judges the deck): islands provably facing *inward* are
+  **reversed** (no extra triangles); open sheets whose facing is ambiguous — sails, flags, their normals run along
+  the ship — are **double-sided**, because no flip shows both sides of a sheet; everything the test cannot call
+  decisively keeps the artist's winding, as do marked **Oar** meshes (authored front/back blade pairs). A
+  whole-model `Shift+N` recalc was tried first and rejected: it re-solves every island and flipped authored
+  surfaces — half the oar blades, then the deck. Verified with backface-culled renders from above and both beams:
+  deck solid, hull solid, sails visible from both sides, blades untouched. Weights and UVs untouched throughout.
 - **Blade roll — square feathered blades to the water.** Some sources model the oar blades *feathered* (flat face
   parallel to the stroke), so they knife through the water edge-on instead of scooping. The Oars section's new
   **Blade roll (deg)** spins each recovered oar about its own long axis in the rest geometry — the cylindrical
