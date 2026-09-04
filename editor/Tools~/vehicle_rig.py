@@ -285,14 +285,19 @@ oar_sweep  = float(argv[43]) if len(argv) > 43 and argv[43].strip() else 24.0   
 oar_dip    = float(argv[44]) if len(argv) > 44 and argv[44].strip() else 18.0   # vertical dip amplitude, degrees
 oar_frames = max(4, int(float(argv[45]))) if len(argv) > 45 and argv[45].strip() else 24
 # FIX INSIDE-OUT FACES (argv[46], opt-in): some sources ship with their winding consistently inverted (the
-# Khalandion's hull sides read see-through from outside while showing the far wall's interior). Recalculate face
-# normals to point OUTWARD — Blender's Shift+N — on every mesh just before export, keeping the geometry single-sided
-# instead of paying double-sided's 2x triangles. Runs BEFORE the double-sided step when both are on, so a doubled
-# shell insets its back copy the right way. Winding only: vertices, weights and UVs are untouched.
+# Khalandion's hull sides read see-through from outside while showing the far wall's interior). Reverse the islands
+# that provably face the hull's interior, just before export — winding only: vertices, weights and UVs untouched.
 fix_inside_out = len(argv) > 46 and argv[46].strip() == "1"
 # BLADE ROLL (argv[47]): degrees each oar is spun about its own long axis in the REST geometry, for sources whose
 # blades are modelled feathered (face parallel to the stroke — they knife through the water edge-on). 0 = untouched.
 oar_blade_roll = float(argv[47]) if len(argv) > 47 and argv[47].strip() else 0.0
+# SAIL parts (argv[48]): explicitly MARKED canvas — a role, not a heuristic (the auto-detection attempts broke on
+# every next surface; the user's verdict: "instead of a complex algorithm, why not just mark it?"). All sail parts
+# weld to ONE `Sail` bone: always exported double-sided (canvas must read from both tacks), kept out of the
+# inside-out flip (authored winding is irrelevant once doubled), and HIDDEN AT IDLE — frame 0 of Spin translates
+# the bone below the hull so `Spin[0..0]` (the Idle stance) shows no canvas; frames 1..N hold it raised. Configure
+# Movement = Spin[1..N] and Keep bone translations ON downstream.
+sail_names = namelist(argv[48]) if len(argv) > 48 and argv[48].strip() else []
 recoil_bone = None               # set to "RecoilArm" when the split actually happens — the bone the clip ROTATES
 recoil_geom = None               # (pivot, axis, bore_dir, slide, R) for the arc that fakes the slide
 # Residual tilt the arc leaves on the tube. The slide is faked by swinging the barrel on a long arm, so some pitch
@@ -855,6 +860,26 @@ for i, tn in enumerate(track_names):
         eb.parent = eb_body
         names.append(eb.name)
     track_infos.append((tn, names, front_cl, rear_cl, c.copy(), roadF_cl, roadR_cl))
+
+# ---- SAIL bone: every marked sail part welds to ONE bone so the canvas lowers/raises as a unit ----
+sail_found = []
+sail_top_z = 0.0
+if sail_names:
+    for _sn in sail_names:
+        _so = find(_sn)
+        if _so is None:
+            print("VEHICLE WARN: sail part '%s' not found — skipped" % _sn); continue
+        sail_found.append(_so.name); bone_of[_so.name] = "Sail"
+    if sail_found:
+        _scorners = [bpy.data.objects[_n].matrix_world @ Vector(_c) for _n in sail_found for _c in bpy.data.objects[_n].bound_box]
+        _smn = Vector((min(p.x for p in _scorners), min(p.y for p in _scorners), min(p.z for p in _scorners)))
+        _smx = Vector((max(p.x for p in _scorners), max(p.y for p in _scorners), max(p.z for p in _scorners)))
+        sail_top_z = _smx.z
+        _sebn = arm_data.edit_bones.new("Sail")
+        _sebn.head = Vector((0.5 * (_smn.x + _smx.x), 0.5 * (_smn.y + _smx.y), _smn.z))
+        _sebn.tail = _sebn.head + Vector((0.0, 0.0, max(0.3, 0.25 * (_smx.z - _smn.z))))
+        _sebn.parent = eb_body
+        print("VEHICLE SAIL: %d part(s) on one Sail bone (double-sided at export; lowered at Spin frame 0)" % len(sail_found))
 
 # ---- OAR bones (galley rowing): one merged oar mesh -> one bone per physical oar ----
 # The marked oar parts (poles + blades, each mesh spanning BOTH banks) are split into individual oars by projecting
@@ -1761,6 +1786,35 @@ if oar_bake:
     print("VEHICLE ROWING clip: %d oars sweep %.0f deg + dip %.0f deg, %d cycle(s) over shared %d-frame 'Spin'"
           % (len(oar_bake), oar_sweep, oar_dip, _oar_repeats, _clip_frames))
 
+# SAIL raise/lower: the canvas is HIDDEN at idle and visible while moving. The clip format carries rotations plus
+# opt-in translations (never scale), so the hide is a TRANSLATION: frame 0 drops the Sail bone far enough that the
+# entire canvas sits below the hull's lowest point (under the waterline in-game — `Spin[0..0]`, the Idle stance,
+# shows no sail); frames 1..N hold it raised. The 0->1 rise is one frame of LINEAR — configure Movement =
+# Spin[1..N] so it never flashes, and Keep bone translations ON so the conversion carries the channel.
+if sail_found and arm.pose.bones.get("Sail") is not None:
+    _model_min_z = min((_o5.matrix_world @ Vector(_c5)).z
+                       for _o5 in bpy.context.scene.objects if _o5.type == 'MESH' and _o5.data.vertices
+                       for _c5 in _o5.bound_box)
+    _sdrop = (sail_top_z - _model_min_z) * 1.05 + 0.05
+    _pbS = arm.pose.bones["Sail"]; _dbS = arm.data.bones["Sail"]
+    _m3S = (arm.matrix_world @ _dbS.matrix_local).to_3x3()
+    _dropL = _m3S.inverted() @ Vector((0.0, 0.0, -_sdrop))
+    _pbS.location = _dropL
+    _pbS.keyframe_insert('location', frame=0)
+    _pbS.location = Vector((0.0, 0.0, 0.0))
+    _pbS.keyframe_insert('location', frame=1)
+    _pbS.keyframe_insert('location', frame=_clip_frames)
+    try:
+        _sfcs = list(act.fcurves)
+    except AttributeError:
+        _sfcs = [fc for l in act.layers for s in l.strips for cb in s.channelbags for fc in cb.fcurves]
+    for _fc in _sfcs:
+        if _fc.data_path.startswith('pose.bones["Sail"]'):
+            for _kp in _fc.keyframe_points:
+                _kp.interpolation = 'LINEAR'
+    print("VEHICLE SAIL clip: canvas lowered %.2f at frame 0 (Idle = Spin[0..0] hides it), raised frames 1..%d — set Movement = Spin[1..%d], Keep bone translations ON"
+          % (_sdrop, _clip_frames, _clip_frames))
+
 
 # ROLLING-CONTACT wheel speeds (user field report: the small road wheels looked draggy — "they should be
 # turning faster compared to the big wheel"): every wheel rolls on the same tread/ground, so angular speed
@@ -2282,20 +2336,15 @@ if fix_inside_out:
     # (normals up, radial up from the axis) scores ~+1 -> kept; sails and masts (normals along the axis or mixed)
     # score ~0 -> kept, the artist's winding wins every ambiguous call. Marked OAR meshes are excluded entirely
     # (authored front/back sheet pairs). Winding only: vertices, weights and UVs untouched.
-    # Open SHEETS whose orientation is ambiguous (a sail's normal runs along the ship, so the radial score is ~0)
-    # cannot be fixed by any flip — a sheet has two real sides. Those get the reversed-inset-copy treatment
-    # (field report: "the sails should become double sided"). Sheet = a meaningful fraction of boundary edges;
-    # a mast or rope tube is closed and never qualifies. Clearly-outward sheets (the deck: normals up, radial up)
-    # stay single — their good side is the seen side.
-    _fwdim = 1.0
+    # Flip ONLY — no sheet classification. Earlier revisions tried to auto-detect sails here (boundary-edge
+    # fractions, verticality scores); every heuristic broke on the next surface, and the user's verdict stands:
+    # "instead of a complex algorithm, why not just mark it?" Sails are now a ROLE (marked in the Lab, always
+    # double-sided, hidden at idle); this pass only reverses what is provably wound inward. Marked Sail and Oar
+    # meshes keep their authored winding.
     _fall = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]
-    _fpts = [_o3.matrix_world @ Vector(_c3) for _o3 in _fall for _c3 in _o3.bound_box]
-    if _fpts:
-        _fwdim = max((max(p[i] for p in _fpts) - min(p[i] for p in _fpts)) for i in range(3))
-    _foff = max(1e-5, _fwdim * 0.0015)
-    _fxn = 0; _fxkept = 0; _fxdbl = 0
+    _fxn = 0; _fxkept = 0
     for _fo in _fall:
-        if any(g.name.startswith("Oar_") for g in _fo.vertex_groups):
+        if any(g.name.startswith("Oar_") or g.name == "Sail" for g in _fo.vertex_groups):
             continue
         _fb = bmesh.new(); _fb.from_mesh(_fo.data); _fb.normal_update()
         _fb.verts.ensure_lookup_table(); _fb.faces.ensure_lookup_table()
@@ -2310,12 +2359,12 @@ if fix_inside_out:
         _fstep = max(1, len(_fb.verts) // 5000)
         _fzs = sorted(_v4.co.z for _i4, _v4 in enumerate(_fb.verts) if _i4 % _fstep == 0)
         _fcz = _fzs[len(_fzs) // 4]
-        _seenf = set(); _dblfaces = []
+        _seenf = set()
         for _f0 in _fb.faces:
             if _f0.index in _seenf:
                 continue
             _stackf = [_f0]; _seenf.add(_f0.index); _ifaces = []
-            _dsum = 0.0; _dn = 0; _bedges = 0; _tedges = 0
+            _dsum = 0.0; _dn = 0
             while _stackf:
                 _fc = _stackf.pop(); _ifaces.append(_fc)
                 _ctr2 = _fc.calc_center_median()
@@ -2323,33 +2372,16 @@ if fix_inside_out:
                 if _rad.length > 1e-6:
                     _dsum += _fc.normal.dot(_rad.normalized()); _dn += 1
                 for _e2 in _fc.edges:
-                    _tedges += 1
-                    if len(_e2.link_faces) < 2:
-                        _bedges += 1
                     for _lf in _e2.link_faces:
                         if _lf.index not in _seenf:
                             _seenf.add(_lf.index); _stackf.append(_lf)
-            _score = (_dsum / _dn) if _dn > 0 else 0.0
-            _sheet = _tedges > 0 and (float(_bedges) / _tedges) > 0.05
-            if _score < -0.25:                                           # provably inward -> reverse (cheap)
+            if _dn > 0 and (_dsum / _dn) < -0.25:                        # provably inward -> reverse (cheap)
                 bmesh.ops.reverse_faces(_fb, faces=_ifaces); _fxn += 1
-            elif _sheet and _score < 0.25:                               # ambiguous open sheet -> needs both sides
-                _dblfaces += _ifaces; _fxdbl += 1
             else:
                 _fxkept += 1
-        if _dblfaces:
-            _ws3 = _fo.matrix_world.to_scale()
-            _ws3a = (abs(_ws3.x) + abs(_ws3.y) + abs(_ws3.z)) / 3.0
-            _loff = _foff / _ws3a if _ws3a > 1e-9 else _foff
-            _dret2 = bmesh.ops.duplicate(_fb, geom=_dblfaces)
-            _dv2 = [g for g in _dret2['geom'] if isinstance(g, bmesh.types.BMVert)]
-            _df2 = [g for g in _dret2['geom'] if isinstance(g, bmesh.types.BMFace)]
-            for _v2 in _dv2:
-                _v2.co = _v2.co - _v2.normal * _loff
-            bmesh.ops.reverse_faces(_fb, faces=_df2)
         _fb.to_mesh(_fo.data); _fb.free()
-    print("VEHICLE inside-out fix: %d island(s) reversed (interior-facing), %d sheet island(s) double-sided (sails/flags), %d kept as authored; oar meshes untouched"
-          % (_fxn, _fxdbl, _fxkept))
+    print("VEHICLE inside-out fix: %d island(s) reversed (interior-facing), %d kept as authored; Sail/Oar meshes untouched"
+          % (_fxn, _fxkept))
 
 # DOUBLE-SIDED (argv[41], opt-in, 2026-09-03): the game culls backfaces, so single-sided / CAD source faces (thin
 # spokes, flat plates) render see-through in-game. Append a REVERSED copy of every face here, at the SOURCE, so the
@@ -2358,12 +2390,11 @@ if fix_inside_out:
 # layer, so each duplicated vertex keeps its bone weights (no vert falls to bone 0 -> the skeleton bake still
 # validates). The back shell is nudged INWARD along the normal by a small fraction of the model size, so front and
 # back faces are NOT coincident — coincident faces make the game's alpha-to-coverage shader read ~50% transparent.
-# (2026-09-04, reverted same day: oar meshes briefly got doubled unconditionally on a "zero-thickness sheet"
-# theory — but the Khalandion's blades ship as authored front/back sheet PAIRS, already two-sided, and doubling
-# them z-shimmered four near-coincident layers. The real cause of the culled blades was the inside-out recalc
-# flipping authored sheets; oars are excluded from that recalc instead — see the block above.)
+# Marked SAIL meshes are ALWAYS double-sided — the role says so, no guessing: canvas must read from both tacks.
+# (Oar meshes are NOT: the Khalandion's blades ship as authored front/back sheet pairs, already two-sided —
+# doubling them z-shimmered four near-coincident layers. A role gets doubled only when being a sheet is its nature.)
 _dall = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]
-_dtargets = _dall if double_sided else []
+_dtargets = _dall if double_sided else [o for o in _dall if any(g.name == "Sail" for g in o.vertex_groups)]
 if _dtargets:
     # The inset is a fraction of the WHOLE model, not each part. A per-mesh dimension would give a tiny single-sided
     # part (a bolt, an antenna) a tiny inset that can fall below depth precision -> that part reads transparent again.

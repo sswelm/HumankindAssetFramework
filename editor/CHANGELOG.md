@@ -21,14 +21,19 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   source-skeleton fast-path generation now blocks Oar roles with instructions to probe the mesh parts instead.
 - **Fix inside-out faces — a targeted winding repair, not a blunt recalc.** A source whose side planking ships
   wrong-way-out (the Khalandion) reads see-through from outside while showing the far wall's interior. The new
-  Vehicle Lab checkbox judges each connected island against the hull's interior (an axis through the hull belly —
-  a bbox centre gets dragged to mast height and mis-judges the deck): islands provably facing *inward* are
-  **reversed** (no extra triangles); open sheets whose facing is ambiguous — sails, flags, their normals run along
-  the ship — are **double-sided**, because no flip shows both sides of a sheet; everything the test cannot call
-  decisively keeps the artist's winding, as do marked **Oar** meshes (authored front/back blade pairs). A
-  whole-model `Shift+N` recalc was tried first and rejected: it re-solves every island and flipped authored
-  surfaces — half the oar blades, then the deck. Verified with backface-culled renders from above and both beams:
-  deck solid, hull solid, sails visible from both sides, blades untouched. Weights and UVs untouched throughout.
+  Vehicle Lab checkbox reverses the islands that provably face the hull's interior (judged against an axis through
+  the hull *belly* — a bbox centre gets dragged to mast height and mis-judges the deck); everything the test cannot
+  call decisively keeps the artist's winding, as do marked **Sail** and **Oar** meshes (a whole-model `Shift+N`
+  recalc, and then a sheet-detection heuristic, were both tried and rejected — each flipped or missed authored
+  surfaces). No extra triangles; weights and UVs untouched. Verified with backface-culled renders: deck solid from
+  above, hull solid from both beams.
+- **Sail — marked canvas, double-sided, hidden at idle.** A new **Sail** role (hotkey `S`): explicit marking
+  replaces sail auto-detection outright. All sail parts weld to one `Sail` bone, are **always exported
+  double-sided** (canvas reads from both tacks, artist winding untouched), and the canvas is **lowered out of
+  sight at `Spin` frame 0** and raised from frame 1 on — so Idle = `Spin[0..0]` shows a ship under oars alone and
+  Movement = `Spin[1..N]` sails it (the clip format carries no scale, so the hide is a translation; Keep bone
+  translations ON). Verified on the baked GLB: the sail bank sits 9.8 units down at frame 0 and at rest height
+  mid-clip, with only the sail mesh doubled.
 - **Blade roll — square feathered blades to the water.** Some sources model the oar blades *feathered* (flat face
   parallel to the stroke), so they knife through the water edge-on instead of scooping. The Oars section's new
   **Blade roll (deg)** spins each recovered oar about its own long axis in the rest geometry — the cylindrical

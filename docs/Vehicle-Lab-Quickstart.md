@@ -65,6 +65,7 @@ axle disagreement, unpaired wheels, turret outliers, and visible interior geomet
 | **Muzzle** | Muzzle brake/flash-hider; refines the measured muzzle end and follows the tube (`Gun`, or `Barrel` when recoil creates that split). |
 | **Trail** | Split-trail arm; receives a body-end hinge and the generated `Deploy` action. |
 | **Oar** (`O`) | A galley oar bank — one merged mesh of poles/blades spanning **both** sides. Split into one bone per oar with a baked rowing stroke. |
+| **Sail** (`S`) | Marked canvas. Always exported double-sided, kept out of the inside-out flip, and **hidden at idle**: lowered out of sight at `Spin` frame 0, raised from frame 1 on. |
 | **Ignore** (`I`) | Deleted from the generated GLB. Use for genuinely invisible internals or unwanted variants. |
 | **Default / Edgecase** (`D` / `E`) | Root-weighted review markers: undecided, or deliberately parked for another pass. |
 
@@ -94,14 +95,19 @@ Model Factory's **Reduce to ~tris** still caps the shipped mesh, so lower that i
 Leave it **off** for models that are already solid.
 
 **Fix inside-out faces.** Some sources ship with part of their winding **inverted** — from outside you see through
-the near hull wall while the far wall's *interior* renders. Tick this and at export each connected island is judged
-against the hull's interior (an axis through the hull belly): islands that provably face *inward* (inverted side
-planking) are **reversed** — the cheap, no-extra-triangles fix; open sheets whose facing is ambiguous (sails,
-flags — their normals run along the ship) are **double-sided**, because no flip can ever show both sides of a
-sheet; everything else — the deck, masts, and anything the test cannot call decisively — keeps the artist's
-winding, as do marked **Oar** meshes. A blunt whole-model recalc was tried first and rejected: it re-solves every
-island and flipped authored surfaces (half the oar blades, then the deck). Global **Double-sided** remains for
+the near hull wall while the far wall's *interior* renders. Tick this and at export the islands that provably face
+the hull's interior (inverted side planking, judged against an axis through the hull belly) are **reversed** — the
+cheap, no-extra-triangles fix. Everything the test cannot call decisively keeps the artist's winding, as do marked
+**Sail** and **Oar** meshes. Do not expect it to fix sails or flags: no flip can show both sides of a sheet — mark
+those **Sail** instead. (A blunt whole-model recalc, and then a sheet-detection heuristic, were both tried and
+rejected: each flipped or missed authored surfaces; explicit marking wins.) Global **Double-sided** remains for
 models that need both sides everywhere; when combined, this fix runs first.
+
+**Sails.** Mark the canvas **Sail** (`S`). All sail parts weld to one `Sail` bone and are **always exported
+double-sided** — canvas must read from both tacks — with the artist's winding untouched. Sails are also **hidden
+at idle**: `Spin` frame 0 lowers the bone below the hull (under the waterline in-game), frames 1 onward hold it
+raised. After baking, set Idle = `Spin[0..0]` (no sails) and Movement = `Spin[1..N]` (sails up, skipping the
+one-frame raise), with **Keep bone translations ON** so the conversion carries the channel.
 
 **Oars (galley rowing).** A galley's oars usually arrive as a **few merged meshes** — all the poles in one, all the
 blades in another (often split front/back) — each mesh holding *every* oar across *both* banks. Mark those meshes

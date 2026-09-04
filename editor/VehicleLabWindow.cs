@@ -45,7 +45,11 @@ public class VehicleLabWindow : EditorWindow
     // Oar (2026-09-04, the Khalandion galley): a MERGED oar mesh — every oar across both banks in one part — that the
     // rigger splits into one bone per physical oar and bakes a rowing stroke (sweep + dip) into Spin. Unlike every other
     // role, ONE marked part becomes MANY bones. Appended LAST so saved-recipe role ints stay valid. Hotkey: O.
-    enum Role { Body, Wheel, Turret, Ignore, Default, Edgecase, Caterpillar, Gun, Rotor, TailRotor, Trail, Muzzle, Cradle, Oar }
+    // Sail (2026-09-04): marked canvas — a role, not a heuristic (auto-detecting sails broke on every next surface;
+    // the user's verdict: "instead of a complex algorithm, why not just mark it?"). All sail parts weld to ONE Sail
+    // bone: always exported double-sided, excluded from the inside-out flip, and HIDDEN at idle — Spin frame 0 drops
+    // the bone below the hull, frames 1..N hold it raised (Movement = Spin[1..N]). Appended LAST. Hotkey: S.
+    enum Role { Body, Wheel, Turret, Ignore, Default, Edgecase, Caterpillar, Gun, Rotor, TailRotor, Trail, Muzzle, Cradle, Oar, Sail }
     [Serializable] class Part { public string name; public int verts; public Vector3 center, size; public Role role;
         public int vis = -1;   // probe's escape-ray verdict: 1 = external (visible from outside), 0 = interior (never visible — strippable), -1 = unclassified (pre-visibility probe)
         public string bone = ""; }   // rigged sources: the bone this shard is weighted to (probe 2026-08-20) — lets a BONE row highlight its shards
@@ -135,7 +139,7 @@ public class VehicleLabWindow : EditorWindow
     static float MaxDim(Part p) => Mathf.Max(p.size.x, Mathf.Max(p.size.y, p.size.z));
     bool VisiblePart(Part x) => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.center.z >= minHeight && x.center.z <= maxHeight && x.center.y >= minWidth && x.center.y <= maxWidth;
     [SerializeField] int partFilter;      // list filter: 0 = all; see FilterOptions (Unreviewed = Default + Edgecase)
-    static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase", "Caterpillar", "Gun", "Rotor", "Tail rotor", "Trail", "Muzzle", "Cradle", "Oar" };
+    static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase", "Caterpillar", "Gun", "Rotor", "Tail rotor", "Trail", "Muzzle", "Cradle", "Oar", "Sail" };
     bool MatchesFilter(Role r) => partFilter == 1 ? (r == Role.Default || r == Role.Edgecase)
                                 : partFilter == 2 ? r == Role.Default
                                 : partFilter == 3 ? r == Role.Wheel
@@ -150,7 +154,8 @@ public class VehicleLabWindow : EditorWindow
                                 : partFilter == 12 ? r == Role.Trail
                                 : partFilter == 13 ? r == Role.Muzzle
                                 : partFilter == 14 ? r == Role.Cradle
-                                : partFilter == 15 ? r == Role.Oar : true;
+                                : partFilter == 15 ? r == Role.Oar
+                                : partFilter == 16 ? r == Role.Sail : true;
     // Roles that SPIN (get a bone + the Spin action): wheels and both rotor kinds. Used for the Generate-enable gate,
     // the spin-section summary, Verify, and the "inside the wheel" test — so a rotorcraft with no Wheel parts still rigs.
     static bool IsSpinner(Role r) => r == Role.Wheel || r == Role.Rotor || r == Role.TailRotor;
@@ -387,7 +392,7 @@ public class VehicleLabWindow : EditorWindow
                     GUIUtility.keyboardControl = 0;                    // a focused slider/popup must not swallow the arrows
                     ev.Use(); Repaint();
                 }
-                else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I || ev.keyCode == KeyCode.D || ev.keyCode == KeyCode.E || ev.keyCode == KeyCode.C || ev.keyCode == KeyCode.G || ev.keyCode == KeyCode.R || ev.keyCode == KeyCode.L || ev.keyCode == KeyCode.O))
+                else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I || ev.keyCode == KeyCode.D || ev.keyCode == KeyCode.E || ev.keyCode == KeyCode.C || ev.keyCode == KeyCode.G || ev.keyCode == KeyCode.R || ev.keyCode == KeyCode.L || ev.keyCode == KeyCode.O || ev.keyCode == KeyCode.S))
                 {
                     shown[idx].role = ev.keyCode == KeyCode.W ? Role.Wheel
                                     : ev.keyCode == KeyCode.T ? Role.Turret
@@ -398,6 +403,7 @@ public class VehicleLabWindow : EditorWindow
                                     : ev.keyCode == KeyCode.G ? Role.Gun
                                     : ev.keyCode == KeyCode.R ? Role.Rotor
                                     : ev.keyCode == KeyCode.O ? Role.Oar
+                                    : ev.keyCode == KeyCode.S ? Role.Sail
                                     : ev.keyCode == KeyCode.L ? Role.TailRotor : Role.Body;
                     // If the new role falls outside the active filter, the part leaves the list — advance to the
                     // next one so the sweep continues instead of the selection dying with the removed row.
@@ -459,7 +465,9 @@ public class VehicleLabWindow : EditorWindow
                 doubleSided = EditorGUILayout.ToggleLeft(new GUIContent("  Double-sided (fix see-through parts)",
                     "The game culls backfaces, so single-sided / CAD parts (thin spokes, flat plates) render see-through from the wrong angle. On: the exported Spin GLB gets a reversed, slightly-inset copy of every face, making it genuinely two-sided at the source — the animated bake and both previews then just work. Doubles the triangle count; leave off for already-solid models."), doubleSided);
                 fixInsideOut = EditorGUILayout.ToggleLeft(new GUIContent("  Fix inside-out faces",
-                    "For a source whose winding ships partly INVERTED — you see through the near hull wall from outside while the far wall's interior renders. On: each connected island is judged against the hull's interior at export. Provably interior-facing islands (inverted side planking) are REVERSED — no extra triangles; open sheets whose facing is ambiguous (sails, flags) are DOUBLE-SIDED, since a sheet has two real sides; everything else (the deck, masts) keeps the artist's winding, as do marked Oar meshes."), fixInsideOut);
+                    "For a source whose winding ships partly INVERTED — you see through the near hull wall from outside while the far wall's interior renders. On: islands that provably face the hull's interior (inverted side planking) are REVERSED at export — no extra triangles; everything else keeps the artist's winding, as do marked Sail and Oar meshes. Sails are a ROLE (S): mark the canvas instead of relying on any detection — marked sails are always double-sided and hide at idle."), fixInsideOut);
+                if (ActiveParts.Count(p => p.role == Role.Sail) > 0)
+                    EditorGUILayout.HelpBox("Sails marked: the canvas is lowered out of sight at Spin frame 0 and raised from frame 1 on — after baking, set Idle = Spin[0..0] (no sails) and Movement = Spin[1..N] (sails up, skipping the one-frame raise), with Keep bone translations ON so the conversion carries the channel.", MessageType.None);
                 // SPIN GATING (2026-08-19, user: "really confusing that this is also present [on a boat] — we
                 // should be able to disable it"): with NO wheel/rotor/turret marked, spin is inert by definition,
                 // so the dials gray out instead of inviting tuning that does nothing. The ONE honest exception is
@@ -818,6 +826,7 @@ public class VehicleLabWindow : EditorWindow
                    : low.Contains("tail") && (low.Contains("rotor") || low.Contains("prop")) ? Role.TailRotor  // "tail rotor" before the generic rotor guess
                    : low.Contains("fantail") || low.Contains("fenestron") ? Role.TailRotor
                    : low.Contains("oar") ? Role.Oar   // before the generic "blade" -> Rotor guess: an oar blade contains "blade"
+                   : low.Contains("sail") ? Role.Sail
                    : low.Contains("rotor") || low.Contains("helix") || low.Contains("blade") || low.Contains("propeller") ? Role.Rotor
                    : low.Contains("wheel") || low.Contains("tyre") || low.Contains("tire") ? Role.Wheel
                    : low.Contains("turret") ? Role.Turret : Role.Default;
@@ -1353,10 +1362,13 @@ public class VehicleLabWindow : EditorWindow
         // bakes the rowing stroke (sweep + dip) into Spin. Empty file = no oars, and the rig regenerates unchanged.
         string oarsFile = Path.Combine(projRoot, prevDir, baseName + "_oars.txt").Replace('\\', '/');
         File.WriteAllLines(oarsFile, src.Where(p => p.role == Role.Oar).Select(p => p.name).ToArray());
+        // SAILS (2026-09-04): marked canvas. One Sail bone, always double-sided at export, hidden at Spin frame 0.
+        string sailsFile = Path.Combine(projRoot, prevDir, baseName + "_sails.txt").Replace('\\', '/');
+        File.WriteAllLines(sailsFile, src.Where(p => p.role == Role.Sail).Select(p => p.name).ToArray());
         string axis = axisChoice == 0 ? "AUTO" : AxisOptions[axisChoice];
         string tailAxis = tailAxisChoice == 0 ? "AUTO" : AxisOptions[tailAxisChoice];
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")} \"@{oarsFile}\" {oarSweepDeg.ToString("0.##", inv)} {oarDipDeg.ToString("0.##", inv)} {oarFrames} {(fixInsideOut ? "1" : "0")} {oarBladeRollDeg.ToString("0.##", inv)}", out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll
+        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")} \"@{oarsFile}\" {oarSweepDeg.ToString("0.##", inv)} {oarDipDeg.ToString("0.##", inv)} {oarFrames} {(fixInsideOut ? "1" : "0")} {oarBladeRollDeg.ToString("0.##", inv)} \"@{sailsFile}\"", out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll; argv[48]: sail parts
         // SUCCESS = THE SCRIPT'S OWN FINAL MARKER (the documented Blender trap: it exits 0 even when the python
         // script crashes mid-way — without this gate a half-run printed a fake "DONE" with no file on disk).
         string done = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE RIG DONE"));
