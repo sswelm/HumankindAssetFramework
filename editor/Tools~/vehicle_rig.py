@@ -19,9 +19,15 @@ def _fitted_cycle_count(clip_frames, requested_period):
     return max(1, int(round(clip_frames / float(max(1, requested_period)))))
 
 def _oar_recovery_metrics(min_xyz, max_xyz):
-    """Scale-relative recovery tolerances plus the model-relative beam centre."""
+    """Scale-relative recovery tolerances plus the model-relative beam centre.
+
+    The fractions are CALIBRATED to the drill-validated Khalandion absolutes (oar-bank diagonal 10.8132:
+    merge eps 0.085, min island span 0.15 recover exactly 64 oars — one bone per physical oar). A smaller
+    eps fraction over-splits: 0.0051 measured 104 "oars" on the same model, ~40 of them a pole and blade
+    pivoting about different oarlocks. Change these only against a recovered-count drill on a real bank.
+    """
     diagonal = max(math.sqrt(sum((max_xyz[i] - min_xyz[i]) ** 2 for i in range(3))), 1e-6)
-    return diagonal, 0.0051 * diagonal, 0.0090 * diagonal, 0.5 * (min_xyz[1] + max_xyz[1])
+    return diagonal, 0.00786 * diagonal, 0.01387 * diagonal, 0.5 * (min_xyz[1] + max_xyz[1])
 
 def _lap(label):
     global _T0
