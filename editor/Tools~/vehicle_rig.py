@@ -1716,7 +1716,10 @@ if oar_bake:
         for _f in range(_clip_frames + 1):
             _t = _f / float(_clip_frames); _phi = 2.0 * math.pi * _oar_repeats * _t
             _ths = _oaw * (-math.cos(_phi)) * _oside     # fore-aft: catch forward -> drive aft -> recover forward
-            _thd = _oad * (math.sin(_phi)) * _oside      # dip: blade down on the drive, up on the recovery
+            # NO side factor on the dip: _dax already mirrors per bank (it follows the oar's own horizontal
+            # direction), so adding the side sign double-mirrored it — one bank dipped while the other lifted
+            # (the field report: "port and starboard are not in sync", seen end-on as a seesaw).
+            _thd = _oad * math.sin(_phi)                 # dip: both banks drop and lift together
             _pb.rotation_quaternion = Quaternion(_lz, _ths) @ Quaternion(_ld, _thd)
             _pb.keyframe_insert('rotation_quaternion', frame=_f)
     try:
