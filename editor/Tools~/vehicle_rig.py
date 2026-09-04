@@ -284,6 +284,12 @@ oar_names  = namelist(argv[42]) if len(argv) > 42 and argv[42].strip() else []
 oar_sweep  = float(argv[43]) if len(argv) > 43 and argv[43].strip() else 24.0   # fore-aft stroke amplitude, degrees
 oar_dip    = float(argv[44]) if len(argv) > 44 and argv[44].strip() else 18.0   # vertical dip amplitude, degrees
 oar_frames = max(4, int(float(argv[45]))) if len(argv) > 45 and argv[45].strip() else 24
+# FIX INSIDE-OUT FACES (argv[46], opt-in): some sources ship with their winding consistently inverted (the
+# Khalandion's hull sides read see-through from outside while showing the far wall's interior). Recalculate face
+# normals to point OUTWARD — Blender's Shift+N — on every mesh just before export, keeping the geometry single-sided
+# instead of paying double-sided's 2x triangles. Runs BEFORE the double-sided step when both are on, so a doubled
+# shell insets its back copy the right way. Winding only: vertices, weights and UVs are untouched.
+fix_inside_out = len(argv) > 46 and argv[46].strip() == "1"
 recoil_bone = None               # set to "RecoilArm" when the split actually happens — the bone the clip ROTATES
 recoil_geom = None               # (pivot, axis, bore_dir, slide, R) for the arc that fakes the slide
 # Residual tilt the arc leaves on the tube. The slide is faked by swinging the barrel on a long arm, so some pitch
@@ -2239,6 +2245,19 @@ for _oa2 in [a for a in bpy.data.actions if a.name not in ("Spin", "Deploy", "Re
 for _o2 in bpy.data.objects:
     if _o2.type != 'ARMATURE' and _o2.animation_data is not None:
         _o2.animation_data_clear()
+
+# FIX INSIDE-OUT FACES (argv[46], opt-in, 2026-09-04): recalculate every mesh's face normals to point outward
+# (Shift+N), for sources whose winding ships consistently inverted — the cheap single-sided alternative to
+# double-siding a hull that is only wrong-way-out. Per connected shell, so a closed hull orients robustly; open
+# sheets (sails) keep exactly one visible side — pick Double-sided instead/as well when both sides must show.
+# Runs BEFORE double-sided so a doubled shell insets its back copy the right way. Weights/UVs untouched.
+if fix_inside_out:
+    _fxn = 0
+    for _fo in [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]:
+        _fb = bmesh.new(); _fb.from_mesh(_fo.data)
+        bmesh.ops.recalc_face_normals(_fb, faces=_fb.faces)
+        _fb.to_mesh(_fo.data); _fb.free(); _fxn += 1
+    print("VEHICLE inside-out fix: face normals recalculated outward on %d mesh(es)" % _fxn)
 
 # DOUBLE-SIDED (argv[41], opt-in, 2026-09-03): the game culls backfaces, so single-sided / CAD source faces (thin
 # spokes, flat plates) render see-through in-game. Append a REVERSED copy of every face here, at the SOURCE, so the

@@ -19,6 +19,13 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   models behave the same. When wave, wheel, and rowing periods differ, each motion is fitted to a whole number of
   cycles over the shared `Spin` range instead of freezing at its last key. Older recipes migrate to the rowing defaults;
   source-skeleton fast-path generation now blocks Oar roles with instructions to probe the mesh parts instead.
+- **Fix inside-out faces — the single-sided repair for inverted winding.** A source whose faces ship consistently
+  wrong-way-out (the Khalandion's hull sides) reads see-through from outside while showing the far wall's interior.
+  The new Vehicle Lab checkbox recalculates every face normal to point outward (Blender's Shift+N) at export — no
+  extra triangles, weights and UVs untouched. Orients per connected shell, so a closed hull corrects robustly;
+  zero-thickness sheets still show one side only (that is what **Double-sided** is for, and the two combine — the
+  recalc runs first so a doubled shell insets its back copy correctly). Verified with backface-culled renders:
+  the raw source's sails and hull vanish under culling, the fixed export draws solid.
 
 ## 0.5.4 — 2026-09-03
 
