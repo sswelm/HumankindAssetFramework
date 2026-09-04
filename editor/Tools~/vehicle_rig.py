@@ -1786,13 +1786,13 @@ if oar_bake:
     print("VEHICLE ROWING clip: %d oars sweep %.0f deg + dip %.0f deg, %d cycle(s) over shared %d-frame 'Spin'"
           % (len(oar_bake), oar_sweep, oar_dip, _oar_repeats, _clip_frames))
 
-# SAIL on/off — its OWN `Furl` clip, used like the trails' Deploy. Two designs were rejected in the field: keying
-# the hide inside Spin twitched the canvas at every loop restart, and a 12-frame visible descent read wrong ("in
-# reality it would not go down this way") — a sail does not sink through the deck. So the strike is an ON/OFF
-# SWITCH: raised at frame 0, struck below the hull at frame 1. The clip format keys LINEAR (no step curves), so
-# one frame apart is the sharpest possible cut — ~40 ms, reads as visible-or-not. State recipe: Idle stance =
-# Furl[1..1], Movement = Spin, After-move = Furl (off), Pre-move = Furl[1..0] (on). Translation, not scale (the
-# clip format carries no scale) — Keep bone translations ON downstream.
+# SAIL on/off — its OWN `Furl` clip, used as a STANCE, never played. Three designs were rejected in the field:
+# keying the hide inside Spin twitched the canvas at every loop restart; a 12-frame visible descent read wrong
+# ("in reality it would not go down this way"); and even the 1-frame drop showed travel when the transition clip
+# was PLAYED (After-move/Pre-move). The clip format carries only bone rotation+translation — no visibility, no
+# alpha, no scale — so out-of-sight IS the only disappear it can express; the clean cut comes from never playing
+# the move: Idle stance = Furl[1..1] (struck below the hull), Movement = Spin (raised), After-move / Pre-move
+# EMPTY — the state change swaps the pose in one tick. Keep bone translations ON downstream.
 SAIL_FURL_FRAMES = 1
 if sail_found and arm.pose.bones.get("Sail") is not None:
     _model_min_z = min((_o5.matrix_world @ Vector(_c5)).z
@@ -1822,8 +1822,8 @@ if sail_found and arm.pose.bones.get("Sail") is not None:
             _kp.interpolation = 'LINEAR'
     _pbS.location = Vector((0.0, 0.0, 0.0))                       # leave the POSE raised for the later bakes
     arm.animation_data.action = act                               # 'Spin' stays the active action, as before
-    print("VEHICLE SAIL 'Furl' clip: on/off switch, canvas drops %.2f between frames 0 and %d — Idle stance Furl[%d..%d], Movement Spin, After-move Furl, Pre-move Furl[%d..0], Keep bone translations ON"
-          % (_sdrop, SAIL_FURL_FRAMES, SAIL_FURL_FRAMES, SAIL_FURL_FRAMES, SAIL_FURL_FRAMES))
+    print("VEHICLE SAIL 'Furl' stance: canvas struck %.2f below at frame %d — Idle stance Furl[%d..%d], Movement Spin, After-move/Pre-move EMPTY (never play the move), Keep bone translations ON"
+          % (_sdrop, SAIL_FURL_FRAMES, SAIL_FURL_FRAMES, SAIL_FURL_FRAMES))
 
 
 # ROLLING-CONTACT wheel speeds (user field report: the small road wheels looked draggy — "they should be
