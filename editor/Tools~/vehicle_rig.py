@@ -2252,12 +2252,18 @@ for _o2 in bpy.data.objects:
 # sheets (sails) keep exactly one visible side — pick Double-sided instead/as well when both sides must show.
 # Runs BEFORE double-sided so a doubled shell insets its back copy the right way. Weights/UVs untouched.
 if fix_inside_out:
+    # Marked OAR meshes are EXCLUDED: their blades ship as authored front/back sheet PAIRS (already two-sided by
+    # construction), and recalc on an open sheet picks an arbitrary orientation per island — the field sequence:
+    # the recalc culled half the blades, auto-doubling them then z-shimmered against the authored back sheets.
+    # The artist's oar winding is correct; leave it alone.
     _fxn = 0
     for _fo in [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]:
+        if any(g.name.startswith("Oar_") for g in _fo.vertex_groups):
+            continue
         _fb = bmesh.new(); _fb.from_mesh(_fo.data)
         bmesh.ops.recalc_face_normals(_fb, faces=_fb.faces)
         _fb.to_mesh(_fo.data); _fb.free(); _fxn += 1
-    print("VEHICLE inside-out fix: face normals recalculated outward on %d mesh(es)" % _fxn)
+    print("VEHICLE inside-out fix: face normals recalculated outward on %d mesh(es) (oar meshes keep their authored winding)" % _fxn)
 
 # DOUBLE-SIDED (argv[41], opt-in, 2026-09-03): the game culls backfaces, so single-sided / CAD source faces (thin
 # spokes, flat plates) render see-through in-game. Append a REVERSED copy of every face here, at the SOURCE, so the
@@ -2266,12 +2272,12 @@ if fix_inside_out:
 # layer, so each duplicated vertex keeps its bone weights (no vert falls to bone 0 -> the skeleton bake still
 # validates). The back shell is nudged INWARD along the normal by a small fraction of the model size, so front and
 # back faces are NOT coincident — coincident faces make the game's alpha-to-coverage shader read ~50% transparent.
-# Marked OAR meshes are ALWAYS double-sided, even when the global checkbox is off: a blade is a zero-thickness
-# sheet that ROTATES through the stroke, so a single side vanishes for half the sweep no matter how it is wound —
-# and the outward recalc cannot orient a sheet at all (field report: some blades rendered, some culled, arbitrary
-# per island). The hull stays single-sided under the recalc; only the oars pay the doubling.
+# (2026-09-04, reverted same day: oar meshes briefly got doubled unconditionally on a "zero-thickness sheet"
+# theory — but the Khalandion's blades ship as authored front/back sheet PAIRS, already two-sided, and doubling
+# them z-shimmered four near-coincident layers. The real cause of the culled blades was the inside-out recalc
+# flipping authored sheets; oars are excluded from that recalc instead — see the block above.)
 _dall = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]
-_dtargets = _dall if double_sided else [o for o in _dall if any(g.name.startswith("Oar_") for g in o.vertex_groups)]
+_dtargets = _dall if double_sided else []
 if _dtargets:
     # The inset is a fraction of the WHOLE model, not each part. A per-mesh dimension would give a tiny single-sided
     # part (a bolt, an antenna) a tiny inset that can fall below depth precision -> that part reads transparent again.
@@ -2298,8 +2304,7 @@ if _dtargets:
         _db.to_mesh(_dm); _db.free()
         _dsn += 1
         print("VEHICLE double-sided '%s': %d -> %d verts (back shell inset %.4f local)" % (_dso.name, _v0, len(_dm.vertices), _doff))
-    print("VEHICLE double-sided: %d mesh(es) made two-sided at the source%s (whole-model inset %.4f world)"
-          % (_dsn, "" if double_sided else " (oar blades only — sheets must read from both sides mid-stroke)", _woff))
+    print("VEHICLE double-sided: %d mesh(es) made two-sided at the source (whole-model inset %.4f world)" % (_dsn, _woff))
 
 bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
 if preview_fbx:

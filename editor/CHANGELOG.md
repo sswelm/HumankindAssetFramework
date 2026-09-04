@@ -25,7 +25,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   extra triangles, weights and UVs untouched. Orients per connected shell, so a closed hull corrects robustly;
   zero-thickness sheets still show one side only (that is what **Double-sided** is for, and the two combine — the
   recalc runs first so a doubled shell insets its back copy correctly). Verified with backface-culled renders:
-  the raw source's sails and hull vanish under culling, the fixed export draws solid.
+  the raw source's sails and hull vanish under culling, the fixed export draws solid. Marked **Oar** meshes are
+  excluded from the recalc — blades ship as authored front/back sheet pairs, and reorienting an open sheet picks
+  an arbitrary side (the recalc had culled half the blades; their artist winding is correct as-is).
 
 ## 0.5.4 — 2026-09-03
 
