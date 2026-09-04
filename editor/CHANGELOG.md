@@ -27,13 +27,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   recalc, and then a sheet-detection heuristic, were both tried and rejected — each flipped or missed authored
   surfaces). No extra triangles; weights and UVs untouched. Verified with backface-culled renders: deck solid from
   above, hull solid from both beams.
-- **Sail — marked canvas, double-sided, hidden at idle.** A new **Sail** role (hotkey `S`): explicit marking
-  replaces sail auto-detection outright. All sail parts weld to one `Sail` bone, are **always exported
-  double-sided** (canvas reads from both tacks, artist winding untouched), and the canvas is **lowered out of
-  sight at `Spin` frame 0** and raised from frame 1 on — so Idle = `Spin[0..0]` shows a ship under oars alone and
-  Movement = `Spin[1..N]` sails it (the clip format carries no scale, so the hide is a translation; Keep bone
-  translations ON). Verified on the baked GLB: the sail bank sits 9.8 units down at frame 0 and at rest height
-  mid-clip, with only the sail mesh doubled.
+- **Sail — marked canvas, double-sided, struck at idle via its own `Furl` clip.** A new **Sail** role (hotkey
+  `S`): explicit marking replaces sail auto-detection outright. All sail parts weld to one `Sail` bone and are
+  **always exported double-sided** (canvas reads from both tacks, artist winding untouched). The hide is its own
+  generated **`Furl` clip** — frame 0 raised, frame 12 struck below the hull — while `Spin` stays a pure seamless
+  loop with the sails up (a first cut keyed the hide inside Spin's frame 0 and the canvas twitched at every loop
+  restart). Assign like Deploy: Idle stance = `Furl[12..12]`, Movement = `Spin`, After-move = `Furl`, Pre-move =
+  `Furl[12..0]` — the sails visibly come down when the ship stops and rise as it gets underway. The clip format
+  carries no scale, so the strike is a translation: Keep bone translations ON. Verified on the baked GLB: `Furl`
+  ramps the bank 9.8 units down over 12 frames, `Spin`'s sail channels are constant, only the sail mesh doubled.
 - **Blade roll — square feathered blades to the water.** Some sources model the oar blades *feathered* (flat face
   parallel to the stroke), so they knife through the water edge-on instead of scooping. The Oars section's new
   **Blade roll (deg)** spins each recovered oar about its own long axis in the rest geometry — the cylindrical

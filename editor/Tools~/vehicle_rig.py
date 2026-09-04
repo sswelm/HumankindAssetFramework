@@ -879,7 +879,7 @@ if sail_names:
         _sebn.head = Vector((0.5 * (_smn.x + _smx.x), 0.5 * (_smn.y + _smx.y), _smn.z))
         _sebn.tail = _sebn.head + Vector((0.0, 0.0, max(0.3, 0.25 * (_smx.z - _smn.z))))
         _sebn.parent = eb_body
-        print("VEHICLE SAIL: %d part(s) on one Sail bone (double-sided at export; lowered at Spin frame 0)" % len(sail_found))
+        print("VEHICLE SAIL: %d part(s) on one Sail bone (double-sided at export; struck/raised by the 'Furl' clip)" % len(sail_found))
 
 # ---- OAR bones (galley rowing): one merged oar mesh -> one bone per physical oar ----
 # The marked oar parts (poles + blades, each mesh spanning BOTH banks) are split into individual oars by projecting
@@ -1786,34 +1786,45 @@ if oar_bake:
     print("VEHICLE ROWING clip: %d oars sweep %.0f deg + dip %.0f deg, %d cycle(s) over shared %d-frame 'Spin'"
           % (len(oar_bake), oar_sweep, oar_dip, _oar_repeats, _clip_frames))
 
-# SAIL raise/lower: the canvas is HIDDEN at idle and visible while moving. The clip format carries rotations plus
-# opt-in translations (never scale), so the hide is a TRANSLATION: frame 0 drops the Sail bone far enough that the
-# entire canvas sits below the hull's lowest point (under the waterline in-game — `Spin[0..0]`, the Idle stance,
-# shows no sail); frames 1..N hold it raised. The 0->1 rise is one frame of LINEAR — configure Movement =
-# Spin[1..N] so it never flashes, and Keep bone translations ON so the conversion carries the channel.
+# SAIL strike/raise — its OWN `Furl` clip, exactly the trails' Deploy pattern. The hide was first keyed INSIDE
+# Spin (down at frame 0, up at frame 1) and every loop restart plunged the canvas for one frame ("at the end of
+# the oars cycle the sails twitch") — and skipping frame 0 via Movement = Spin[1..N] would clip a frame off the
+# oar cycle instead. So Spin stays pure seamless motion (sails simply up = rest), and Furl lowers the Sail bone
+# below the hull over half a second: frame 0 = raised, frame 12 = struck. The state machine uses it like Deploy:
+# Idle stance = Furl[12..12], Movement = Spin, After-move = Furl, Pre-move = Furl[12..0] — the sails visibly come
+# down when the ship stops and rise as it gets underway. Translation, not scale (the clip format carries no
+# scale) — Keep bone translations ON downstream.
+SAIL_FURL_FRAMES = 12
 if sail_found and arm.pose.bones.get("Sail") is not None:
     _model_min_z = min((_o5.matrix_world @ Vector(_c5)).z
                        for _o5 in bpy.context.scene.objects if _o5.type == 'MESH' and _o5.data.vertices
                        for _c5 in _o5.bound_box)
     _sdrop = (sail_top_z - _model_min_z) * 1.05 + 0.05
+    _furl = bpy.data.actions.new("Furl")
+    arm.animation_data.action = _furl
+    try:
+        if getattr(_furl, "slots", None):
+            arm.animation_data.action_slot = _furl.slots.new(id_type='OBJECT', name=arm.name)
+    except Exception:
+        pass
     _pbS = arm.pose.bones["Sail"]; _dbS = arm.data.bones["Sail"]
     _m3S = (arm.matrix_world @ _dbS.matrix_local).to_3x3()
     _dropL = _m3S.inverted() @ Vector((0.0, 0.0, -_sdrop))
-    _pbS.location = _dropL
-    _pbS.keyframe_insert('location', frame=0)
     _pbS.location = Vector((0.0, 0.0, 0.0))
-    _pbS.keyframe_insert('location', frame=1)
-    _pbS.keyframe_insert('location', frame=_clip_frames)
+    _pbS.keyframe_insert('location', frame=0)                     # raised — matches Spin's rest pose
+    _pbS.location = _dropL
+    _pbS.keyframe_insert('location', frame=SAIL_FURL_FRAMES)      # struck — canvas below the hull
     try:
-        _sfcs = list(act.fcurves)
+        _sfcs = list(_furl.fcurves)
     except AttributeError:
-        _sfcs = [fc for l in act.layers for s in l.strips for cb in s.channelbags for fc in cb.fcurves]
+        _sfcs = [fc for l in _furl.layers for s in l.strips for cb in s.channelbags for fc in cb.fcurves]
     for _fc in _sfcs:
-        if _fc.data_path.startswith('pose.bones["Sail"]'):
-            for _kp in _fc.keyframe_points:
-                _kp.interpolation = 'LINEAR'
-    print("VEHICLE SAIL clip: canvas lowered %.2f at frame 0 (Idle = Spin[0..0] hides it), raised frames 1..%d — set Movement = Spin[1..%d], Keep bone translations ON"
-          % (_sdrop, _clip_frames, _clip_frames))
+        for _kp in _fc.keyframe_points:
+            _kp.interpolation = 'LINEAR'
+    _pbS.location = Vector((0.0, 0.0, 0.0))                       # leave the POSE raised for the later bakes
+    arm.animation_data.action = act                               # 'Spin' stays the active action, as before
+    print("VEHICLE SAIL 'Furl' clip: canvas lowers %.2f over 0..%d — Idle stance Furl[%d..%d], Movement Spin, After-move Furl, Pre-move Furl[%d..0], Keep bone translations ON"
+          % (_sdrop, SAIL_FURL_FRAMES, SAIL_FURL_FRAMES, SAIL_FURL_FRAMES, SAIL_FURL_FRAMES))
 
 
 # ROLLING-CONTACT wheel speeds (user field report: the small road wheels looked draggy — "they should be
@@ -2315,8 +2326,8 @@ if recoil_bone is not None and gun_axis is not None:
                           "point (Z %.2f)" % (_clear, _ground))
     arm.animation_data.action = act        # 'Spin' stays the active action, as before
 
-for _oa2 in [a for a in bpy.data.actions if a.name not in ("Spin", "Deploy", "Recoil")]:
-    print("VEHICLE purged leftover source clip '%s' (only 'Spin'/'Deploy'/'Recoil' are authored here)" % _oa2.name)
+for _oa2 in [a for a in bpy.data.actions if a.name not in ("Spin", "Deploy", "Recoil", "Furl")]:
+    print("VEHICLE purged leftover source clip '%s' (only 'Spin'/'Deploy'/'Recoil'/'Furl' are authored here)" % _oa2.name)
     bpy.data.actions.remove(_oa2)
 for _o2 in bpy.data.objects:
     if _o2.type != 'ARMATURE' and _o2.animation_data is not None:
