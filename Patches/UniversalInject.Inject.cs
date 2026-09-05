@@ -870,7 +870,6 @@ namespace HumankindAssetFramework
         // archaeology with one log line per injected unit: every layer the mesh occupies, its PPC, the 255xPPC
         // ceiling, and a LOUD "OVER by N" when the clamp is eating geometry.
         [ProcessLived("diagnostic once-per-name dump dedup")] static readonly HashSet<string> budgetDumped = new HashSet<string>();
-        [ProcessLived("diagnostic once-per-layer-type dump dedup")] static readonly HashSet<string> budgetTypesDumped = new HashSet<string>();
         static void DumpLayerBudget(ModelEntry e, string bodyName, object animMgr)
         {
             try
@@ -890,26 +889,13 @@ namespace HumankindAssetFramework
                     if (buf == null || fxIdx >= buf.Length) continue;
                     uint prim = MemberUInt(buf.GetValue((int)fxIdx), "PrimitiveCount", 0);
                     if (prim == 0) continue;   // mesh not present in this layer
-                    if (!TryMemberInt(lay, "primitivePerParticleCount", out int ppc) || ppc <= 0)
-                    {
-                        // The unit ContentLayer's class doesn't carry the district layer's field name. DISCOVER it:
-                        // dump every numeric field/property once per layer type+index, so the real PPC-like member
-                        // (and its value — the ceiling divisor) is identified from one log instead of guessed.
-                        Plugin.Log.LogWarning($"[Uni][BUDGET] '{e.resourceName}' layer {li}: prim={prim} but primitivePerParticleCount unreadable — type {lay.GetType().FullName}");
-                        if (budgetTypesDumped.Add(lay.GetType().FullName + "#" + li))
-                        {
-                            var sb = new System.Text.StringBuilder($"[Uni][BUDGET] layer {li} ({lay.GetType().Name}) numeric members:\n");
-                            const BindingFlags BFA = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-                            foreach (var f in lay.GetType().GetFields(BFA))
-                                if (f.FieldType == typeof(int) || f.FieldType == typeof(uint) || f.FieldType == typeof(long) || f.FieldType == typeof(ushort) || f.FieldType == typeof(byte))
-                                    try { sb.Append($"  field {f.Name} = {f.GetValue(lay)}\n"); } catch { }
-                            foreach (var p in lay.GetType().GetProperties(BFA))
-                                if (p.CanRead && p.GetIndexParameters().Length == 0 && (p.PropertyType == typeof(int) || p.PropertyType == typeof(uint) || p.PropertyType == typeof(long)))
-                                    try { sb.Append($"  prop  {p.Name} = {p.GetValue(lay)}\n"); } catch { }
-                            Plugin.Log.LogInfo(sb.ToString().TrimEnd());
-                        }
-                        continue;
-                    }
+                    // PPC lives on the FxOUTPUTLayer, not this ContentLayer (measured 2026-09-05: the unit
+                    // output layer ships 64; SiegeHowitzersCar's fragment 0x5C = 92 = ceil(5853/64) proved it).
+                    // Read our PRIVATE clone (possibly boosted above); stock 64 is the fallback for units
+                    // without one. Runs AFTER ReloadFragments, so a boosted layer reports its lifted ceiling.
+                    int ppc = 0;
+                    if (e.isolatedLayer != null) TryMemberInt(e.isolatedLayer, "primitivePerParticleCount", out ppc);
+                    if (ppc <= 0) ppc = 64;
                     long ceiling = 255L * ppc;
                     Plugin.Log.LogInfo($"[Uni][BUDGET] '{e.resourceName}' layer {li}: mesh prim={prim}, PPC={ppc}, ceiling=255x{ppc}={ceiling}"
                         + (prim > ceiling ? $" — OVER by {prim - ceiling}: that geometry is silently NOT DRAWN" : " — fits"));
@@ -1445,6 +1431,34 @@ namespace HumankindAssetFramework
                 var folField = AccessTools.Field(fragType, "fxOutputLayer");
                 var encField = AccessTools.Field(fragType, "EncodedMeshAndVisualParticleCount"); // 0 => fragment renders nothing
                 var load = AccessTools.Method(fragType, "Load");
+                // UNIT MESH DENSITY BOOST (2026-09-05, the galley's vanishing masts): the fragment encode packs
+                // ceil(PrimitiveCount / outputLayer.PrimitivePerParticleCount) into 8 bits — clamped at 255, the
+                // excess silently never drawn (stock unit PPC 64 -> 16,320-quad ceiling; the galley shipped 33,828
+                // and drew 48%). PPC is per-OUTPUT-LAYER data and we already hold a PRIVATE clone per custom unit
+                // (texture isolation below), so raise the clone's PPC to exactly fit the body mesh BEFORE Load()
+                // computes the encoding. Same total GPU work — the draw side derives triangle counts from the same
+                // live property — and no other unit shares the clone. Sized here, applied inside the clone block.
+                uint bodyPrim = 0; int neededPpc = 0;
+                if (e != null && !string.IsNullOrEmpty(e.layerHint) && skel != null
+                    && (Plugin.UnitMeshDensityBoost == null || Plugin.UnitMeshDensityBoost.Value))
+                {
+                    var gmi = AccessTools.Method(skel.GetType(), "GetFxMeshIndex", new[] { typeof(string) });
+                    var idxObj = gmi?.Invoke(skel, new object[] { e.layerHint });
+                    if (idxObj != null)
+                    {
+                        uint fxIdx = Convert.ToUInt32(idxObj);
+                        var mlayers = GetMember(mcm, "Layers") as Array ?? AccessTools.Field(mcm.GetType(), "layers")?.GetValue(mcm) as Array;
+                        if (mlayers != null && layer >= 0 && layer < mlayers.Length)
+                        {
+                            var mbuf = GetMember(mlayers.GetValue(layer), "HxFxOneMeshComputeBufferData") as Array;
+                            if (mbuf != null && fxIdx < mbuf.Length)
+                                bodyPrim = MemberUInt(mbuf.GetValue((int)fxIdx), "PrimitiveCount", 0);
+                        }
+                        // ceil(prim/255) is the minimum PPC that fits; round up to a multiple of 16 for headroom
+                        // (33,828 prims -> 133 minimum -> 144 -> 235 sub-particles, comfortably under 255).
+                        if (bodyPrim > 0) { neededPpc = (int)((bodyPrim + 254) / 255); neededPpc = (neededPpc + 15) & ~15; }
+                    }
+                }
                 var hides = (e?.hideMeshes ?? "").Split(',').Select(s => s.Trim()).Where(s => s.Length > 0).ToArray();
                 var hiddenIdx = new System.Collections.Generic.List<int>();
                 for (int i = 0; i < frags.Length; i++)
@@ -1487,7 +1501,26 @@ namespace HumankindAssetFramework
                             e.isolatedLayer = clone;
                             Plugin.Diag($"[Uni] cloned output layer for {e.resourceName} -> '{clone.name}'");
                         }
-                        if (e.isolatedLayer != null) folField.SetValue(item, e.isolatedLayer);
+                        if (e.isolatedLayer != null)
+                        {
+                            // DENSITY BOOST (sized above): must land before Load() below — Load registers the layer
+                            // and computes EncodedMeshAndVisualParticleCount from its PPC. Idempotent: only ever
+                            // raises, so a repeat inject with the clamp already lifted is a no-op.
+                            if (neededPpc > 0)
+                            {
+                                var ppcF = AccessTools.Field(e.isolatedLayer.GetType(), "primitivePerParticleCount");
+                                if (ppcF?.GetValue(e.isolatedLayer) is int curPpc)
+                                {
+                                    if (neededPpc > curPpc)
+                                    {
+                                        ppcF.SetValue(e.isolatedLayer, neededPpc);
+                                        Plugin.Log.LogInfo($"[Uni][BUDGET] '{e.resourceName}' private output-layer PPC {curPpc} -> {neededPpc}: body mesh {bodyPrim} prims = {(bodyPrim + neededPpc - 1) / neededPpc} sub-particles (ceiling now 255x{neededPpc}={255L * neededPpc})");
+                                    }
+                                }
+                                else Plugin.Log.LogWarning($"[Uni][BUDGET] '{e.resourceName}': primitivePerParticleCount field not found on {e.isolatedLayer.GetType().Name} — mesh stays clamped at 255x64 quads");
+                            }
+                            folField.SetValue(item, e.isolatedLayer);
+                        }
                     }
                     try { load?.Invoke(item, new object[] { skel, renderer, mcm, layer }); }
                     catch (Exception ex) { Plugin.Log.LogWarning("[Uni] frag reload: " + (ex.InnerException ?? ex).Message); }
