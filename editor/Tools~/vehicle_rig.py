@@ -2514,7 +2514,9 @@ print("VEHICLE export totals: %d verts, %d tris across %d mesh(es)" % (_xt_v, _x
 bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
 if preview_fbx:
     bpy.ops.export_scene.fbx(filepath=preview_fbx, add_leaf_bones=False, bake_anim=True)
-print("VEHICLE RIG DONE: %d wheel part(s) clustered into %d wheel(s) %s, %d turret part(s) on one Turret bone, %d gun part(s) on one Gun bone%s, %d track loop(s) on own static bones, Spin 0..%d %.0f deg%s -> %s"
+# The export totals ride INSIDE the DONE line (user request 2026-09-05: the Lab's status box surfaces only this
+# one line, so a separate totals print never reached the eye that asked for it).
+print("VEHICLE RIG DONE: %d wheel part(s) clustered into %d wheel(s) %s, %d turret part(s) on one Turret bone, %d gun part(s) on one Gun bone%s, %d track loop(s) on own static bones, Spin 0..%d %.0f deg%s, exported %d verts / %d tris -> %s"
       % (len(wheel_names), len(clusters), {b: wheel_axes[b] for b in cluster_bones}, len(turret_names),
          len(gun_names), " (child of Turret)" if (gun_names and turret_names) else "", len(track_names), _clip_frames, degrees,
-         (", wave rock %.1f deg x%d fitted cycle(s)" % (rock_deg, _rock_repeats)) if rock_on else "", out_glb))
+         (", wave rock %.1f deg x%d fitted cycle(s)" % (rock_deg, _rock_repeats)) if rock_on else "", _xt_v, _xt_t, out_glb))
