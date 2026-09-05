@@ -323,6 +323,11 @@ flag_names = namelist(argv[55]) if len(argv) > 55 and argv[55].strip() else []
 # whose oars are modelled raked steeply into the water (the Khalandion: "at -30 they almost go vertically") rides
 # too deep at ANY dip; positive lift tilts every oar up toward horizontal and the dip oscillates around that.
 oar_lift = float(argv[56]) if len(argv) > 56 and argv[56].strip() else 0.0
+# OAR RAKE (argv[57]): the horizontal twin of LIFT — a CONSTANT fore/aft rotation about the oarlock re-centring
+# the sweep arc. A source whose oars are modelled raked far aft (the Khalandion: ~50 deg) swings "48 back, nothing
+# forward" at ANY sweep, because the arc is symmetric about that modelled rake; rake shifts the whole arc toward
+# the bow. Same sign convention as Sweep (bow-direction dependent — flip if it goes the wrong way).
+oar_rake = float(argv[57]) if len(argv) > 57 and argv[57].strip() else 0.0
 recoil_bone = None               # set to "RecoilArm" when the split actually happens — the bone the clip ROTATES
 recoil_geom = None               # (pivot, axis, bore_dir, slide, R) for the arc that fakes the slide
 # Residual tilt the arc leaves on the tube. The slide is faked by swinging the barrel on a long arm, so some pitch
@@ -1851,7 +1856,7 @@ if oar_bake:
     # Sweep is the TOTAL fore-aft arc, split evenly about the rest rake (user convention 2026-09-05: "a sweep of
     # 24 degrees should make the oars sweep 12 degrees forward and then 12 degrees backwards") — the amplitude
     # each way is half the dial. Dip stays a per-direction amplitude (blades drop A_d, lift A_d).
-    _oaw = math.radians(oar_sweep) * 0.5; _oad = math.radians(oar_dip); _oal = math.radians(oar_lift)
+    _oaw = math.radians(oar_sweep) * 0.5; _oad = math.radians(oar_dip); _oal = math.radians(oar_lift); _oark = math.radians(oar_rake)
     for _bn, _piv, _oside, _dax in oar_bake:
         _db = arm.data.bones.get(_bn); _pb = arm.pose.bones.get(_bn)
         if _db is None or _pb is None:
@@ -1862,7 +1867,7 @@ if oar_bake:
         _pb.rotation_mode = 'QUATERNION'
         for _f in range(_clip_frames + 1):
             _t = _f / float(_clip_frames); _phi = 2.0 * math.pi * _oar_repeats * _t
-            _ths = _oaw * (-math.cos(_phi)) * _oside     # fore-aft: catch forward -> drive aft -> recover forward
+            _ths = (_oark + _oaw * (-math.cos(_phi))) * _oside   # sweep about the RAKED stroke centre; per-side mirror
             # NO side factor on the dip: _dax already mirrors per bank (it follows the oar's own horizontal
             # direction), so adding the side sign double-mirrored it — one bank dipped while the other lifted
             # (the field report: "port and starboard are not in sync", seen end-on as a seesaw).
@@ -1878,8 +1883,8 @@ if oar_bake:
         if _fc.data_path.startswith('pose.bones["Oar_'):
             for _kp in _fc.keyframe_points:
                 _kp.interpolation = 'LINEAR'
-    print("VEHICLE ROWING clip: %d oars sweep %.0f deg total arc (%.0f each way of rest) + dip %.0f deg, lift %.0f deg, %d cycle(s) over shared %d-frame 'Spin'"
-          % (len(oar_bake), abs(oar_sweep), abs(oar_sweep) * 0.5, oar_dip, oar_lift, _oar_repeats, _clip_frames))
+    print("VEHICLE ROWING clip: %d oars sweep %.0f deg total arc (%.0f each way of centre) + dip %.0f deg, lift %.0f deg, rake %.0f deg, %d cycle(s) over shared %d-frame 'Spin'"
+          % (len(oar_bake), abs(oar_sweep), abs(oar_sweep) * 0.5, oar_dip, oar_lift, oar_rake, _oar_repeats, _clip_frames))
 
 # SAIL on/off — its OWN `Furl` clip, used as a STANCE, never played. Three designs were rejected in the field:
 # keying the hide inside Spin twitched the canvas at every loop restart; a 12-frame visible descent read wrong
