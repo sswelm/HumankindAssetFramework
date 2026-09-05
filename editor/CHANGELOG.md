@@ -78,6 +78,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   ARC, with the sweep oscillating around it. A source that models the oars raked far aft (the Khalandion: ~50°)
   swings "all backward, nothing forward" at any sweep, because the arc is symmetric about that modelled rake;
   rake it toward the bow until the stroke straddles the perpendicular. Same sign convention as Sweep.
+- **Pivot (%)** — where the oarlock, the fulcrum every stroke rotation happens about, sits along each oar
+  (percentage of its inboard→outboard extent). 0 = at the handle, the whole oar swings; higher = further out,
+  less oar moves and the handle counter-swings more. 30 was the hardcoded value through the whole build.
 - **The Animation Lab preview floats boats at the calibrated water level.** It drew its hex at ground height
   (-0.02) even for boat pawns — water-blue in colour, ground in height — so the Factory showed oar blades in the
   water while the Animation Lab showed them dry. Both panes now share the pack's one-source-of-truth

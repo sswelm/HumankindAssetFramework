@@ -328,6 +328,10 @@ oar_lift = float(argv[56]) if len(argv) > 56 and argv[56].strip() else 0.0
 # forward" at ANY sweep, because the arc is symmetric about that modelled rake; rake shifts the whole arc toward
 # the bow. Same sign convention as Sweep (bow-direction dependent — flip if it goes the wrong way).
 oar_rake = float(argv[57]) if len(argv) > 57 and argv[57].strip() else 0.0
+# OAR PIVOT (argv[58]): where the oarlock sits ALONG each oar, as a percentage of its inboard->outboard extent.
+# 0 = at the handle (the whole oar swings), 100 = at the blade. 30 was the hardcoded value through the whole
+# build; the dial exists because the fulcrum position changes how much oar shows outboard and how the stroke arcs.
+oar_pivot = min(95.0, max(0.0, float(argv[58]))) if len(argv) > 58 and argv[58].strip() else 30.0
 recoil_bone = None               # set to "RecoilArm" when the split actually happens — the bone the clip ROTATES
 recoil_geom = None               # (pivot, axis, bore_dir, slide, R) for the arc that fakes the slide
 # Residual tilt the arc leaves on the tube. The slide is faked by swinging the barrel on a long arm, so some pitch
@@ -1119,8 +1123,8 @@ if oar_names:
                 _allwc = []
                 for _i in _mem:
                     _allwc += _items[_i][2]
-            _ys = [abs(_p.y - _oar_beam_mid) for _p in _allwc]; _yg = min(_ys) + 0.30 * (max(_ys) - min(_ys))
-            _piv = min(_allwc, key=lambda _p: abs(abs(_p.y - _oar_beam_mid) - _yg))  # oarlock: ~30% out from the handle
+            _ys = [abs(_p.y - _oar_beam_mid) for _p in _allwc]; _yg = min(_ys) + (oar_pivot / 100.0) * (max(_ys) - min(_ys))
+            _piv = min(_allwc, key=lambda _p: abs(abs(_p.y - _oar_beam_mid) - _yg))  # oarlock: oar_pivot% out from the handle (dial)
             _d = _oar_pc1(_allwc); _h = Vector((_d.x, _d.y, 0.0))
             _h = _h.normalized() if _h.length > 1e-6 else Vector((1.0, 0.0, 0.0))
             _dax = Vector((-_h.y, _h.x, 0.0)).normalized()               # dip axis: horizontal, perp to the oar
@@ -1889,8 +1893,8 @@ if oar_bake:
         if _fc.data_path.startswith('pose.bones["Oar_'):
             for _kp in _fc.keyframe_points:
                 _kp.interpolation = 'LINEAR'
-    print("VEHICLE ROWING clip: %d oars sweep %.0f deg total arc (%.0f each way of centre) + dip %.0f deg, lift %.0f deg, rake %.0f deg, %d cycle(s) over shared %d-frame 'Spin'"
-          % (len(oar_bake), abs(oar_sweep), abs(oar_sweep) * 0.5, oar_dip, oar_lift, oar_rake, _oar_repeats, _clip_frames))
+    print("VEHICLE ROWING clip: %d oars sweep %.0f deg total arc (%.0f each way of centre) + dip %.0f deg, lift %.0f deg, rake %.0f deg, pivot %.0f%%, %d cycle(s) over shared %d-frame 'Spin'"
+          % (len(oar_bake), abs(oar_sweep), abs(oar_sweep) * 0.5, oar_dip, oar_lift, oar_rake, oar_pivot, _oar_repeats, _clip_frames))
 
 # SAIL on/off — its OWN `Furl` clip, used as a STANCE, never played. Three designs were rejected in the field:
 # keying the hide inside Spin twitched the canvas at every loop restart; a 12-frame visible descent read wrong
