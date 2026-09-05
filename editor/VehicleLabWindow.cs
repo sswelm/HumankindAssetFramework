@@ -456,7 +456,10 @@ public class VehicleLabWindow : EditorWindow
                 EditorGUILayout.LabelField("  (probe preview unavailable — part focus needs the probe's preview FBX; re-Probe after recompiling)", EditorStyles.miniLabel);
             else
                 EditorGUILayout.LabelField("  Click a row to zoom + highlight it in the preview below; click again for the full view.", EditorStyles.miniLabel);
-            // ORIENTATION first: it changes what every measurement below sees, so it reads as step one.
+            // PREVIEW directly under the part list (2026-09-05 user request): classification is click-a-row →
+            // look at the yellow highlight, so the turntable belongs next to the rows, not at the window's bottom.
+            DrawTurntablePreview();
+            // ORIENTATION first among the knobs: it changes what every measurement below sees, so it reads as step one.
             if (Section(ref foldOrient, "Orientation — straighten the model",
                     modelRot == Vector3.zero ? "as imported" : $"{modelRot.x:0}° / {modelRot.y:0}° / {modelRot.z:0}°"))
             {
@@ -770,8 +773,14 @@ public class VehicleLabWindow : EditorWindow
         }
 
         if (!string.IsNullOrEmpty(status)) EditorGUILayout.HelpBox(status, MessageType.None);
+        EditorGUILayout.EndScrollView();
+    }
 
-        // turntable preview (the real imported preview FBX playing its Spin clip)
+    // turntable preview (the real imported preview FBX playing its Spin clip) — drawn directly UNDER the part
+    // list (2026-09-05 user request: classifying parts means click-a-row → look at the highlight, and with the
+    // preview at the window's bottom every row cost a scroll).
+    void DrawTurntablePreview()
+    {
         if (inst != null)
         {
             using (new EditorGUILayout.HorizontalScope())
@@ -834,7 +843,6 @@ public class VehicleLabWindow : EditorWindow
             if (Event.current.type == EventType.Repaint) RenderPreview(rect);
             previewHeight = EditorGUILayout.IntSlider(new GUIContent("Preview height", "Taller preview, or shorter to keep the knobs on screen. The window scrolls either way."), previewHeight, 220, 900);
         }
-        EditorGUILayout.EndScrollView();
     }
 
     void Probe()
