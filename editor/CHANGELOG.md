@@ -46,6 +46,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   pole shows no change, only the blade face turns, with no seam at the blade root. 0 (the default) leaves the
   source untouched; the Khalandion wants 90. Measured: the blade sheet normal turns by exactly the dialed angle.
 
+- **Rigging — selective source-side decimation for rope geometry.** A new **Rigging** role: dense line/rope
+  meshes are often a model's single biggest vertex sink while being barely visible at game distance (the
+  Khalandion's ropes alone: 65k verts). Mark them Rigging and the new **Rigging reduce (%)** dial
+  collapse-decimates exactly those parts at Generate, at the source — the previews, the clustering, the winding
+  fix and the bake all see the slim mesh, and the Factory's global *Reduce to ~tris* budget stops being spent on
+  invisible ropes. Per-part before/after vert counts are printed so an over-aggressive dial is loud, not silent.
+- **Sweep accepts negative** — if the galley rows backwards, flip the sign (the wheels' Spin-degrees convention);
+  the dip phase stays put, so blades still bury on the reversed drive.
+
 ## 0.5.4 — 2026-09-03
 
 - **Double-sided for animated vehicles — now a Vehicle Lab option, applied at the source.** The engine culls

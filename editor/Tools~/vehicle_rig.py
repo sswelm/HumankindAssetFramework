@@ -298,6 +298,12 @@ oar_blade_roll = float(argv[47]) if len(argv) > 47 and argv[47].strip() else 0.0
 # the bone below the hull so `Spin[0..0]` (the Idle stance) shows no canvas; frames 1..N hold it raised. Configure
 # Movement = Spin[1..N] and Keep bone translations ON downstream.
 sail_names = namelist(argv[48]) if len(argv) > 48 and argv[48].strip() else []
+# RIGGING parts (argv[49..50]): marked rope/line geometry — dense tube meshes that are barely visible at game
+# distance (the Khalandion's rigging alone is 65k verts). Decimated by a user-dialed PERCENTAGE right here at the
+# source, before any rigging-dependent step, so the clustering, skinning, winding fix, previews and the bake all
+# see the slimmed mesh. A role, not a heuristic — the user marks what deserves the axe.
+rigging_names = namelist(argv[49]) if len(argv) > 49 and argv[49].strip() else []
+rigging_reduce = min(95.0, max(0.0, float(argv[50]))) if len(argv) > 50 and argv[50].strip() else 0.0
 recoil_bone = None               # set to "RecoilArm" when the split actually happens — the bone the clip ROTATES
 recoil_geom = None               # (pivot, axis, bore_dir, slide, R) for the arc that fakes the slide
 # Residual tilt the arc leaves on the tube. The slide is faked by swinging the barrel on a long arm, so some pitch
@@ -593,6 +599,33 @@ for grp, is_tail in ((rotor_names, False), (tailrotor_names, True)):
     print("VEHICLE %s rotor: %d part(s), pivot (%.2f,%.2f,%.2f), axle (%.3f,%.3f,%.3f) [%s]"
           % ("tail" if is_tail else "main", len(grp), hub_c.x, hub_c.y, hub_c.z, axle.x, axle.y, axle.z, axle_src))
     print("VEHICLE rotor hub: %d part(s) -> bone at hub (%.2f,%.2f,%.2f), axle=%s (least-spread of centres)" % (len(grp), hub_c.x, hub_c.y, hub_c.z, tuple(axle)))
+
+# ---- RIGGING decimation (argv[49..50]): marked rope/line parts slimmed at the SOURCE ----
+# Runs BEFORE the armature is built so bone placement, skinning, the winding fix, doubling and the export all see
+# the reduced mesh. Collapse-decimate per part; the print names each part's before/after so a too-aggressive dial
+# is loud, not silent.
+if rigging_names and rigging_reduce > 0.5:
+    try:
+        bpy.ops.object.mode_set(mode='OBJECT')
+    except Exception:
+        pass
+    _rr_ratio = 1.0 - rigging_reduce / 100.0
+    _rr_v0 = 0; _rr_v1 = 0; _rr_n = 0
+    for _rn in rigging_names:
+        _ro2 = find(_rn)
+        if _ro2 is None:
+            print("VEHICLE WARN: rigging part '%s' not found — skipped" % _rn); continue
+        _v0 = len(_ro2.data.vertices)
+        bpy.ops.object.select_all(action='DESELECT')
+        _ro2.select_set(True); bpy.context.view_layer.objects.active = _ro2
+        _dm2 = _ro2.modifiers.new("HAFRiggingDecimate", 'DECIMATE')
+        _dm2.ratio = _rr_ratio
+        bpy.ops.object.modifier_apply(modifier=_dm2.name)
+        _v1 = len(_ro2.data.vertices)
+        _rr_v0 += _v0; _rr_v1 += _v1; _rr_n += 1
+        print("VEHICLE RIGGING '%s': %d -> %d verts (reduce %.0f%%)" % (_rn, _v0, _v1, rigging_reduce))
+    if _rr_n:
+        print("VEHICLE RIGGING: %d part(s) decimated, %d -> %d verts total" % (_rr_n, _rr_v0, _rr_v1))
 
 # armature: Root at origin + ONE bone per wheel cluster (tail along the axle => local Y IS the axle) + Turret
 arm_data = bpy.data.armatures.new("VehicleRig")

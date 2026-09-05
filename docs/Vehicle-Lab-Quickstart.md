@@ -66,6 +66,7 @@ axle disagreement, unpaired wheels, turret outliers, and visible interior geomet
 | **Trail** | Split-trail arm; receives a body-end hinge and the generated `Deploy` action. |
 | **Oar** (`O`) | A galley oar bank — one merged mesh of poles/blades spanning **both** sides. Split into one bone per oar with a baked rowing stroke. |
 | **Sail** (`S`) | Marked canvas. Always exported double-sided, kept out of the inside-out flip, and struck/raised by its own generated `Furl` clip — hidden at idle, up while moving. |
+| **Rigging** | Rope/line geometry — dense but barely visible at game distance. Decimated at Generate by the **Rigging reduce (%)** dial, at the source. |
 | **Ignore** (`I`) | Deleted from the generated GLB. Use for genuinely invisible internals or unwanted variants. |
 | **Default / Edgecase** (`D` / `E`) | Root-weighted review markers: undecided, or deliberately parked for another pass. |
 
