@@ -628,6 +628,10 @@ for _rlabel, _rnames, _rpct in (("RIGGING", rigging_names, rigging_reduce), ("ST
         _rb = bmesh.new(); _rb.from_mesh(_ro2.data)
         bmesh.ops.dissolve_limit(_rb, angle_limit=math.radians(5.0), use_dissolve_boundaries=False,
                                  verts=list(_rb.verts), edges=list(_rb.edges))
+        # TRIANGULATE the dissolved result immediately: the dissolve leaves long, often non-planar/concave n-gons,
+        # and Unity's FBX importer DISCARDS self-intersecting polygons on import (a wall of warnings + holes in the
+        # preview). Blender's ear-clipping handles these fine; no n-gon ever reaches an exporter. Adds no vertices.
+        bmesh.ops.triangulate(_rb, faces=list(_rb.faces))
         _rb.to_mesh(_ro2.data); _rb.free()
         _vmid = len(_ro2.data.vertices)
         _target = max(8, int(_v0 * (1.0 - _rpct / 100.0)))
