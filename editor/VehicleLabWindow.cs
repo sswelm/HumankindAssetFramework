@@ -1563,8 +1563,12 @@ public class VehicleLabWindow : EditorWindow
         DestroyPreview();
         var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prevRel);
         if (prefab == null) return;
+        // Spin FIRST (2026-09-05 user request): plain OrderBy put "Furl" alphabetically ahead of "Spin", so the
+        // preview opened on the sail stance instead of the motion everyone actually judges. Spin is the primary
+        // clip everywhere else in the pipeline — it leads here too; the rest stay alphabetical after it.
         previewClips = AssetDatabase.LoadAllAssetsAtPath(prevRel).OfType<AnimationClip>()
-                                    .Where(c => c != null && !c.name.StartsWith("__preview")).OrderBy(c => c.name).ToList();
+                                    .Where(c => c != null && !c.name.StartsWith("__preview"))
+                                    .OrderBy(c => c.name.EndsWith("Spin") ? 0 : 1).ThenBy(c => c.name).ToList();
         if (previewClipIdx >= previewClips.Count) previewClipIdx = 0;
         spinClip = previewClips.Count > 0 ? previewClips[previewClipIdx] : null;
         if (pru == null) pru = new PreviewRenderUtility();
