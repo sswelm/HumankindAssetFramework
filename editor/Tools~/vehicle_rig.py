@@ -548,6 +548,16 @@ def find(name):
             return o
     print("VEHICLE ERROR: part '%s' not found. Parts: %s" % (name, [o.name for o in objs])); sys.exit(1)
 
+def find_opt(name):
+    """Like find(), but a missing part returns None instead of aborting the run. For the marked-ROLE loops
+    (reduce tiers, sail, flag, rudder, oar) that warn and skip a stale name — a re-exported source can rename
+    parts out from under a saved recipe, and losing one rope must not kill the whole Generate. The structural
+    roles (wheels, tracks, guns) keep the hard-exit find(): a missing wheel IS a broken rig."""
+    for o in objs:
+        if o.name == name:
+            return o
+    return None
+
 def axle_axis(s):
     if axis_arg in ("X", "Y", "Z"):
         return {"X": Vector((1, 0, 0)), "Y": Vector((0, 1, 0)), "Z": Vector((0, 0, 1))}[axis_arg]
@@ -657,7 +667,7 @@ for _rlabel, _rnames, _rpct in (("RIGGING", rigging_names, rigging_reduce), ("ST
         pass
     _rr_v0 = 0; _rr_v1 = 0; _rr_n = 0
     for _rn in _rnames:
-        _ro2 = find(_rn)
+        _ro2 = find_opt(_rn)
         if _ro2 is None:
             print("VEHICLE WARN: %s part '%s' not found — skipped" % (_rlabel.lower(), _rn)); continue
         _v0 = len(_ro2.data.vertices)
@@ -957,7 +967,7 @@ sail_found = []
 sail_top_z = 0.0
 if sail_names:
     for _sn in sail_names:
-        _so = find(_sn)
+        _so = find_opt(_sn)
         if _so is None:
             print("VEHICLE WARN: sail part '%s' not found — skipped" % _sn); continue
         sail_found.append(_so.name); bone_of[_so.name] = "Sail"
@@ -983,7 +993,7 @@ if sail_names:
 # export for the double-siding, and at the flip pass for the exclusion), skinned to the body like Body parts ----
 rudder_by_name = set()
 for _fn3 in rudder_names:
-    _fo3 = find(_fn3)
+    _fo3 = find_opt(_fn3)
     if _fo3 is None:
         print("VEHICLE WARN: rudder part '%s' not found — skipped" % _fn3); continue
     rudder_by_name.add(_fo3.name)
@@ -994,7 +1004,7 @@ if rudder_by_name:
 flag_found = []
 if flag_names:
     for _gn in flag_names:
-        _go = find(_gn)
+        _go = find_opt(_gn)
         if _go is None:
             print("VEHICLE WARN: flag part '%s' not found — skipped" % _gn); continue
         flag_found.append(_go.name); bone_of[_go.name] = "Flag"
@@ -1057,7 +1067,7 @@ if oar_names:
         return _v
     _oar_objs = []
     for _on in oar_names:
-        _oo = find(_on)
+        _oo = find_opt(_on)
         if _oo is None:
             print("VEHICLE WARN: oar part '%s' not found — skipped" % _on); continue
         oar_by_name.add(_oo.name); oar_skin[_oo.name] = {}; _oar_objs.append(_oo)
