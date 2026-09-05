@@ -257,6 +257,7 @@ namespace HumankindAssetFramework
                 InjectHandProp(addon, animMgr, e.skeleton, e);
                 ApplyTexture(e, animMgr);
                 DumpFxIndices(donorSkel0, e, bodyName, animMgr);   // ghost hunt: donor vs our FxMeshIndex + StartIndex needle + descriptor scan
+                DumpLayerBudget(e, bodyName, animMgr);             // render-ceiling report: PPC + 255xPPC vs this mesh's PrimitiveCount
                 if (!e.repointed) { e.repointed = true; anyRescuable = null; MarkSubPawnsDirty(); Plugin.Diag($"[Uni] repointed '{name}' -> {e.resourceName} (mesh '{bodyName}', layer '{e.layerHint}')"); }
             }
             catch (Exception ex) { NoteInjectionError("repoint"); Plugin.Log.LogError("[Uni] repoint: " + ex); }
@@ -859,6 +860,43 @@ namespace HumankindAssetFramework
                 Plugin.Diag($"[Uni][LAYER] '{e.resourceName}': PRUNED clone renderOutputs {ros.Length} -> 1 (kept [0] — the opaque body pass; the transparent blur pass is gone)");
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[Uni] PruneCloneRenderOutputs: " + ex.Message); }
+        }
+
+        // UNIT MESH RENDER BUDGET (2026-09-05, the Great Galley's vanishing masts): a unit mesh renders as
+        // sub-particles, count = ceil(PrimitiveCount / the layer's primitivePerParticleCount), and that count is
+        // packed into 8 bits -> HARD-CLAMPED at 255. Primitives past 255 x PPC are silently never drawn — the
+        // district grove class (see DistrictMeshDensityBoost), one pipeline over. The galley bracketed the unit
+        // layer's ceiling at just under 39,279 quads by four bakes and five screenshots; this dump replaces that
+        // archaeology with one log line per injected unit: every layer the mesh occupies, its PPC, the 255xPPC
+        // ceiling, and a LOUD "OVER by N" when the clamp is eating geometry.
+        [ProcessLived("diagnostic once-per-name dump dedup")] static readonly HashSet<string> budgetDumped = new HashSet<string>();
+        static void DumpLayerBudget(ModelEntry e, string bodyName, object animMgr)
+        {
+            try
+            {
+                if (e?.skeleton == null || string.IsNullOrEmpty(bodyName) || !budgetDumped.Add(e.resourceName)) return;
+                var mi = AccessTools.Method(e.skeleton.GetType(), "GetFxMeshIndex", new[] { typeof(string) });
+                var idxObj = mi?.Invoke(e.skeleton, new object[] { bodyName });
+                if (idxObj == null) return;
+                uint fxIdx = Convert.ToUInt32(idxObj);
+                var mcm = GetMember(animMgr, "FxComponentMeshContentManager");
+                var layers = GetMember(mcm, "Layers") as Array ?? AccessTools.Field(mcm.GetType(), "layers")?.GetValue(mcm) as Array;
+                if (layers == null) { Plugin.Log.LogWarning("[Uni][BUDGET] mesh content layers not found — cannot report the render ceiling"); return; }
+                for (int li = 0; li < layers.Length; li++)
+                {
+                    var lay = layers.GetValue(li);
+                    var buf = GetMember(lay, "HxFxOneMeshComputeBufferData") as Array;
+                    if (buf == null || fxIdx >= buf.Length) continue;
+                    uint prim = MemberUInt(buf.GetValue((int)fxIdx), "PrimitiveCount", 0);
+                    if (prim == 0) continue;   // mesh not present in this layer
+                    if (!TryMemberInt(lay, "primitivePerParticleCount", out int ppc) || ppc <= 0)
+                    { Plugin.Log.LogWarning($"[Uni][BUDGET] '{e.resourceName}' layer {li}: prim={prim} but primitivePerParticleCount unreadable"); continue; }
+                    long ceiling = 255L * ppc;
+                    Plugin.Log.LogInfo($"[Uni][BUDGET] '{e.resourceName}' layer {li}: mesh prim={prim}, PPC={ppc}, ceiling=255x{ppc}={ceiling}"
+                        + (prim > ceiling ? $" — OVER by {prim - ceiling}: that geometry is silently NOT DRAWN" : " — fits"));
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] layer budget dump: " + ex.Message); }
         }
 
         // FX-INDEX RESOLUTION (ghost hunt): the GPU descriptor encodes an FxMeshIndex in ITS OWN numbering (not
