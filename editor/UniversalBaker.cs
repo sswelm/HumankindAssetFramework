@@ -649,6 +649,8 @@ public static class UniversalBaker
         EditorUtility.SetDirty(skel);
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
 
+        ReportBakedQuads(skelType, skel, name);
+
         // --- 5) bake ClipCollection: set its skeleton guid, SetFromDirectory (populate clips), Reimport (bake poseData) ---
         var clipType = FindAmpType("Amplitude.Mercury.Animation.ClipCollection");
         if (clipType == null) return Fail("Amplitude ClipCollection type not found");
@@ -1531,12 +1533,75 @@ public static class UniversalBaker
         if (!InvokeReq(skelType, "Reimport", Type.EmptyTypes, skel, null, out err)) return Fail(err);
         EditorUtility.SetDirty(skel);
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
+        ReportBakedQuads(skelType, skel, name);
 
         string skelGuid = AmplitudeGuid(skel), atlasGuid = AmplitudeGuid(atlas);
         // empty GUID = the SDK skeleton bake produced nothing -> fail loudly instead of writing a dead registry entry.
         if (string.IsNullOrEmpty(skelGuid) || skelGuid == "0,0,0,0") return Fail($"{name}: skeleton bake produced an empty GUID (SetPrefab/Reimport did nothing).");
         Debug.Log($"[Factory] {name} DONE. skeleton={skelGuid} atlas={atlasGuid}");
         return new BakeResult { ok = true, skeletonGuid = skelGuid, atlasGuid = atlasGuid, bbox = dims };
+    }
+
+    // QUAD REPORT (2026-09-06, "how to see the quads after bake?"): the engine draws AT MOST 16,320 quads per baked
+    // mesh — 255 sub-particles (an 8-bit descriptor field) x 64 primitives each, the 64 hardcoded in the pawn compute
+    // shader — and the overrun is SILENT in-game: the mesh stores fully, the tail (whatever baked last: the galley's
+    // masts and sails) simply never draws. Say the number right after the skeleton bake, where the dial that fixes it
+    // (Reduce to ~tris) lives — so dialing to the limit needs no game launch, just this line after each Bake.
+    const int EngineQuadCeiling = 255 * 64;   // 16,320 — per MESH; a future multi-mesh split gets this budget per part
+    // GetField does NOT see a base class's private fields — skinnedMeshInfos lives on Skeleton's BASE type
+    // (MeshCollection), so the flat lookup returned null and the first version of this report silently did
+    // nothing through an entire evening of over-ceiling bakes. Walk the hierarchy, and fail LOUDLY.
+    static FieldInfo FindFieldDeep(Type t, string fieldName)
+    {
+        for (; t != null; t = t.BaseType)
+        {
+            var f = t.GetField(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (f != null) return f;
+        }
+        return null;
+    }
+    static void ReportBakedQuads(Type skelType, UnityEngine.Object skel, string name)
+    {
+        try
+        {
+            var smisF = FindFieldDeep(skelType, "skinnedMeshInfos");
+            if (!(smisF?.GetValue(skel) is System.Collections.IEnumerable smis))
+            {
+                Debug.LogWarning($"[Factory] {name}: quad report could not read skinnedMeshInfos on {skelType.FullName} — the {EngineQuadCeiling:N0}-quad ceiling was NOT verified this bake.");
+                return;
+            }
+            var over = new List<string>();
+            foreach (var smi in smis)
+            {
+                var smiT = smi.GetType();
+                string mn = FindFieldDeep(smiT, "MeshName")?.GetValue(smi) as string ?? "?";
+                var fmc = FindFieldDeep(smiT, "FxMeshContent")?.GetValue(smi);
+                if (fmc == null) { Debug.LogWarning($"[Factory] {name}: quad report found no FxMeshContent on '{mn}' — that mesh was NOT verified."); continue; }
+                var fmcT = fmc.GetType();
+                int qc = (int)(FindFieldDeep(fmcT, "quadCount")?.GetValue(fmc) ?? 0);
+                int vc = (int)(FindFieldDeep(fmcT, "vertexCount")?.GetValue(fmc) ?? 0);
+                if (qc == 0) { Debug.LogWarning($"[Factory] {name}: quad report read 0 quads on '{mn}' (field missing or empty mesh) — NOT verified."); continue; }
+                if (qc > EngineQuadCeiling)
+                {
+                    Debug.LogWarning($"[Factory] {name} BAKED MESH '{mn}': {qc:N0} quads / {vc:N0} verts — OVER the engine's {EngineQuadCeiling:N0}-quad draw ceiling by {qc - EngineQuadCeiling:N0}: that geometry will SILENTLY NOT RENDER in-game (the last-baked parts vanish first). Lower 'Reduce to ~tris' until this says 'fits'.");
+                    over.Add($"'{mn}': {qc:N0} quads ({qc - EngineQuadCeiling:N0} over)");
+                }
+                else
+                    Debug.Log($"[Factory] {name} BAKED MESH '{mn}': {qc:N0} quads / {vc:N0} verts — fits the engine's {EngineQuadCeiling:N0}-quad draw ceiling ({EngineQuadCeiling - qc:N0} to spare).");
+            }
+            // A DIALOG, not just a console line (user request 2026-09-06): the in-game failure is SILENT — a
+            // console warning scrolled past is how the galley shipped without masts through five bakes. The bake
+            // still succeeds (the asset is valid; only the overflow won't draw), so this informs rather than
+            // aborts. Skipped in batch mode so automated bake tests never block on a modal.
+            if (over.Count > 0 && !Application.isBatchMode)
+                EditorUtility.DisplayDialog("Mesh over the engine's draw ceiling",
+                    $"{name}: the baked mesh exceeds the engine's per-mesh draw ceiling of {EngineQuadCeiling:N0} quads " +
+                    "(255 sub-particles × 64 primitives).\n\n" + string.Join("\n", over) +
+                    "\n\nThe overflow will SILENTLY not render in-game — the last-baked parts (masts, rigging…) vanish " +
+                    "first, with no error anywhere. Lower 'Reduce to ~tris' and re-bake until the console line says 'fits'.",
+                    "Understood");
+        }
+        catch (Exception qex) { Debug.LogWarning("[Factory] quad report: " + qex.Message); }
     }
 
     // A readable albedo for one material, for multi-material atlas packing. Prefer the extracted png on disk whose name

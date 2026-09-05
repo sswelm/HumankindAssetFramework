@@ -14,6 +14,21 @@
 # Frame 0 deliberately equals the rest pose: `Spin[0..0]` is the motionless Idle (see Factory-Manual / Law 2 notes).
 import bpy, bmesh, sys, math, time
 _T0 = time.time()
+def _fitted_cycle_count(clip_frames, requested_period):
+    """Nearest positive whole-cycle count that keeps both ends of a shared action on the same pose."""
+    return max(1, int(round(clip_frames / float(max(1, requested_period)))))
+
+def _oar_recovery_metrics(min_xyz, max_xyz):
+    """Scale-relative recovery tolerances plus the model-relative beam centre.
+
+    The fractions are CALIBRATED to the drill-validated Khalandion absolutes (oar-bank diagonal 10.8132:
+    merge eps 0.085, min island span 0.15 recover exactly 64 oars — one bone per physical oar). A smaller
+    eps fraction over-splits: 0.0051 measured 104 "oars" on the same model, ~40 of them a pole and blade
+    pivoting about different oarlocks. Change these only against a recovered-count drill on a real bank.
+    """
+    diagonal = max(math.sqrt(sum((max_xyz[i] - min_xyz[i]) ** 2 for i in range(3))), 1e-6)
+    return diagonal, 0.00786 * diagonal, 0.01387 * diagonal, 0.5 * (min_xyz[1] + max_xyz[1])
+
 def _lap(label):
     global _T0
     now = time.time(); print("VEHICLE timing: %-12s %6.1fs" % (label, now - _T0)); _T0 = now
@@ -261,6 +276,75 @@ recoil_lead = max(0, int(float(argv[40]))) if len(argv) > 40 and argv[40].strip(
 # DOUBLE-SIDED (argv[41], opt-in): append reversed faces to every mesh before export so the Spin GLB is genuinely
 # two-sided at the source (the fix runs just before export_scene.gltf below).
 double_sided = len(argv) > 41 and argv[41].strip() == "1"
+# ROWING (argv[42..45], opt-in): a galley oar bank. Each marked oar part is ONE merged mesh holding every oar across
+# BOTH sides; the rig recovers each oar as its own bone at its oarlock (clustering, below) and bakes the stroke into
+# `Spin` — a unison fore-aft sweep about the vertical plus a phase-locked dip (blades drop on the aft drive, lift on
+# the recovery). One clip, keyed on the oar bones, so the oars row whenever the movement clip plays.
+oar_names  = namelist(argv[42]) if len(argv) > 42 and argv[42].strip() else []
+oar_sweep  = float(argv[43]) if len(argv) > 43 and argv[43].strip() else 24.0   # fore-aft stroke amplitude, degrees
+oar_dip    = float(argv[44]) if len(argv) > 44 and argv[44].strip() else 18.0   # vertical dip amplitude, degrees
+oar_frames = max(4, int(float(argv[45]))) if len(argv) > 45 and argv[45].strip() else 24
+# FIX INSIDE-OUT FACES (argv[46], opt-in): some sources ship with their winding consistently inverted (the
+# Khalandion's hull sides read see-through from outside while showing the far wall's interior). Reverse the islands
+# that provably face the hull's interior, just before export — winding only: vertices, weights and UVs untouched.
+fix_inside_out = len(argv) > 46 and argv[46].strip() == "1"
+# BLADE ROLL (argv[47]): degrees each oar is spun about its own long axis in the REST geometry, for sources whose
+# blades are modelled feathered (face parallel to the stroke — they knife through the water edge-on). 0 = untouched.
+oar_blade_roll = float(argv[47]) if len(argv) > 47 and argv[47].strip() else 0.0
+# SAIL parts (argv[48]): explicitly MARKED canvas — a role, not a heuristic (the auto-detection attempts broke on
+# every next surface; the user's verdict: "instead of a complex algorithm, why not just mark it?"). All sail parts
+# weld to ONE `Sail` bone: always exported double-sided (canvas must read from both tacks), kept out of the
+# inside-out flip (authored winding is irrelevant once doubled), and HIDDEN AT IDLE — frame 0 of Spin translates
+# the bone below the hull so `Spin[0..0]` (the Idle stance) shows no canvas; frames 1..N hold it raised. Configure
+# Movement = Spin[1..N] and Keep bone translations ON downstream.
+sail_names = namelist(argv[48]) if len(argv) > 48 and argv[48].strip() else []
+# RIGGING parts (argv[49..50]): marked rope/line geometry — dense tube meshes that are barely visible at game
+# distance (the Khalandion's rigging alone is 65k verts). Decimated by a user-dialed PERCENTAGE right here at the
+# source, before any rigging-dependent step, so the clustering, skinning, winding fix, previews and the bake all
+# see the slimmed mesh. A role, not a heuristic — the user marks what deserves the axe.
+rigging_names = namelist(argv[49]) if len(argv) > 49 and argv[49].strip() else []
+rigging_reduce = min(95.0, max(0.0, float(argv[50]))) if len(argv) > 50 and argv[50].strip() else 0.0
+# STRUCTURE parts (argv[51..52]): the second reduction tier — small-but-dense DETAIL geometry (railings, a carved
+# bow figure: another 65k verts each on the Khalandion) that is more visible than rigging, so it gets its own,
+# usually gentler, percentage dial. Same dissolve+collapse treatment, separate knob.
+structure_names = namelist(argv[51]) if len(argv) > 51 and argv[51].strip() else []
+structure_reduce = min(95.0, max(0.0, float(argv[52]))) if len(argv) > 52 and argv[52].strip() else 0.0
+# BODY reduction (argv[53..54]): the third tier — parts explicitly marked Body. Default 0 (untouched): the hull is
+# the model's face and usually deserves the Factory's smarter global Reduce instead; this dial exists for sources
+# whose reviewed body geometry is itself needlessly dense.
+body_names = namelist(argv[53]) if len(argv) > 53 and argv[53].strip() else []
+body_reduce = min(95.0, max(0.0, float(argv[54]))) if len(argv) > 54 and argv[54].strip() else 0.0
+# FLAG parts (argv[55]): banners/pennants — the OPPOSITE of sails (2026-09-05): they fly AT ANCHOR and are struck
+# while the ship moves. One Flag bone, held flipped below the keel THROUGH the Spin clip (movement = hidden); the
+# idle stance shows them at rest. Double-sided at export, artist winding kept.
+flag_names = namelist(argv[55]) if len(argv) > 55 and argv[55].strip() else []
+# RUDDER parts (argv[60]): the always-visible double-sided treatment flags USED to have (the two roles shared a
+# file until flags learned to hide underway — a rudder must never vanish). No bone, no clip, welds to the body.
+rudder_names = namelist(argv[60]) if len(argv) > 60 and argv[60].strip() else []
+# OAR / SAIL reduction (argv[61..62]): the marked-role meshes can themselves be dense (the Khalandion's oars are
+# three merged meshes holding all ~64 oars). Same dissolve+collapse tier as rigging/structure/body, and it runs in
+# the same pre-armature pass — clustering, bone placement and skinning all land on the slim mesh. Islands survive
+# decimation (collapse never bridges disconnected components), so the per-oar recovery is unaffected.
+oar_reduce = min(95.0, max(0.0, float(argv[61]))) if len(argv) > 61 and argv[61].strip() else 0.0
+sail_reduce = min(95.0, max(0.0, float(argv[62]))) if len(argv) > 62 and argv[62].strip() else 0.0
+# OAR LIFT (argv[56]): a CONSTANT tilt about the dip axis, re-centring the whole stroke — the knob the dip sign
+# cannot be (±dip is the same oscillation, phase-flipped; the blades visit the same depths either way). A source
+# whose oars are modelled raked steeply into the water (the Khalandion: "at -30 they almost go vertically") rides
+# too deep at ANY dip; positive lift tilts every oar up toward horizontal and the dip oscillates around that.
+oar_lift = float(argv[56]) if len(argv) > 56 and argv[56].strip() else 0.0
+# OAR RAKE (argv[57]): the horizontal twin of LIFT — a CONSTANT fore/aft rotation about the oarlock re-centring
+# the sweep arc. A source whose oars are modelled raked far aft (the Khalandion: ~50 deg) swings "48 back, nothing
+# forward" at ANY sweep, because the arc is symmetric about that modelled rake; rake shifts the whole arc toward
+# the bow. Same sign convention as Sweep (bow-direction dependent — flip if it goes the wrong way).
+oar_rake = float(argv[57]) if len(argv) > 57 and argv[57].strip() else 0.0
+# OAR PIVOT (argv[58]): where the oarlock sits ALONG each oar, as a percentage of its inboard->outboard extent.
+# 0 = at the handle (the whole oar swings), 100 = at the blade. 30 was the hardcoded value through the whole
+# build; the dial exists because the fulcrum position changes how much oar shows outboard and how the stroke arcs.
+oar_pivot = min(95.0, max(0.0, float(argv[58]))) if len(argv) > 58 and argv[58].strip() else 30.0
+# OAR LENGTH (argv[59]): stretch each oar along its own fitted axis ABOUT THE OARLOCK, percent of the modelled
+# length (100 = untouched). The pivot stays planted at the hull; the blade reaches further out and down. Pure
+# axial scale — blade width and pole thickness are untouched.
+oar_length = min(300.0, max(25.0, float(argv[59]))) if len(argv) > 59 and argv[59].strip() else 100.0
 recoil_bone = None               # set to "RecoilArm" when the split actually happens — the bone the clip ROTATES
 recoil_geom = None               # (pivot, axis, bore_dir, slide, R) for the arc that fakes the slide
 # Residual tilt the arc leaves on the tube. The slide is faked by swinging the barrel on a long arm, so some pitch
@@ -347,6 +431,9 @@ if tracks_static and track_names:
 # axis is the LOCAL basis axis closest to the world axle direction, SIGNED so every wheel turns the same world
 # way (artist rigs mirror left/right bones — an unsigned shared channel would counter-rotate one side).
 if mode == "rigfast":
+    if oar_names:
+        print("VEHICLE ERROR: Oar recovery needs mesh parts; disable the source-skeleton fast path and probe the merged oar meshes")
+        sys.exit(1)
     def _fast():
         global objs
         arms = [o for o in bpy.context.scene.objects if o.type == 'ARMATURE']
@@ -461,6 +548,16 @@ def find(name):
             return o
     print("VEHICLE ERROR: part '%s' not found. Parts: %s" % (name, [o.name for o in objs])); sys.exit(1)
 
+def find_opt(name):
+    """Like find(), but a missing part returns None instead of aborting the run. For the marked-ROLE loops
+    (reduce tiers, sail, flag, rudder, oar) that warn and skip a stale name — a re-exported source can rename
+    parts out from under a saved recipe, and losing one rope must not kill the whole Generate. The structural
+    roles (wheels, tracks, guns) keep the hard-exit find(): a missing wheel IS a broken rig."""
+    for o in objs:
+        if o.name == name:
+            return o
+    return None
+
 def axle_axis(s):
     if axis_arg in ("X", "Y", "Z"):
         return {"X": Vector((1, 0, 0)), "Y": Vector((0, 1, 0)), "Z": Vector((0, 0, 1))}[axis_arg]
@@ -553,6 +650,50 @@ for grp, is_tail in ((rotor_names, False), (tailrotor_names, True)):
     print("VEHICLE %s rotor: %d part(s), pivot (%.2f,%.2f,%.2f), axle (%.3f,%.3f,%.3f) [%s]"
           % ("tail" if is_tail else "main", len(grp), hub_c.x, hub_c.y, hub_c.z, axle.x, axle.y, axle.z, axle_src))
     print("VEHICLE rotor hub: %d part(s) -> bone at hub (%.2f,%.2f,%.2f), axle=%s (least-spread of centres)" % (len(grp), hub_c.x, hub_c.y, hub_c.z, tuple(axle)))
+
+# ---- SOURCE-SIDE reduction tiers: RIGGING/STRUCTURE/BODY (argv[49..54]) + OAR/SAIL (argv[61..62]) ----
+# Runs BEFORE the armature is built so bone placement, skinning, the winding fix, doubling and the export all see
+# the reduced mesh. Two passes per part: LIMITED DISSOLVE first (tube/extruded geometry is massively redundant
+# along straight runs — a plain ratio collapse bottomed out at a 68% cut on the Khalandion's ropes because
+# thousands of tiny disconnected islands each keep minimum topology), then COLLAPSE toward the dial's target
+# measured against the ORIGINAL count, so the percentage means what it says or better. The print carries all
+# three numbers so a too-aggressive dial is loud, not silent.
+for _rlabel, _rnames, _rpct in (("RIGGING", rigging_names, rigging_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce)):
+    if not _rnames or _rpct <= 0.5:
+        continue
+    try:
+        bpy.ops.object.mode_set(mode='OBJECT')
+    except Exception:
+        pass
+    _rr_v0 = 0; _rr_v1 = 0; _rr_n = 0
+    for _rn in _rnames:
+        _ro2 = find_opt(_rn)
+        if _ro2 is None:
+            print("VEHICLE WARN: %s part '%s' not found — skipped" % (_rlabel.lower(), _rn)); continue
+        _v0 = len(_ro2.data.vertices)
+        _rb = bmesh.new(); _rb.from_mesh(_ro2.data)
+        bmesh.ops.dissolve_limit(_rb, angle_limit=math.radians(5.0), use_dissolve_boundaries=False,
+                                 verts=list(_rb.verts), edges=list(_rb.edges))
+        # TRIANGULATE the dissolved result immediately: the dissolve leaves long, often non-planar/concave n-gons,
+        # and Unity's FBX importer DISCARDS self-intersecting polygons on import (a wall of warnings + holes in the
+        # preview). Blender's ear-clipping handles these fine; no n-gon ever reaches an exporter. Adds no vertices.
+        bmesh.ops.triangulate(_rb, faces=list(_rb.faces))
+        _rb.to_mesh(_ro2.data); _rb.free()
+        _vmid = len(_ro2.data.vertices)
+        _target = max(8, int(_v0 * (1.0 - _rpct / 100.0)))
+        if _vmid > _target:
+            bpy.ops.object.select_all(action='DESELECT')
+            _ro2.select_set(True); bpy.context.view_layer.objects.active = _ro2
+            _dm2 = _ro2.modifiers.new("HAFReduce", 'DECIMATE')
+            _dm2.ratio = max(0.02, float(_target) / float(_vmid))
+            bpy.ops.object.modifier_apply(modifier=_dm2.name)
+        _v1 = len(_ro2.data.vertices)
+        _rr_v0 += _v0; _rr_v1 += _v1; _rr_n += 1
+        print("VEHICLE %s '%s': %d -> %d verts (dissolve pass: %d; dial %.0f%% = target %d)"
+              % (_rlabel, _rn, _v0, _v1, _vmid, _rpct, _target))
+    if _rr_n:
+        print("VEHICLE %s: %d part(s) reduced, %d -> %d verts total (%.0f%% cut)"
+              % (_rlabel, _rr_n, _rr_v0, _rr_v1, 100.0 * (1.0 - float(_rr_v1) / max(1, _rr_v0))))
 
 # armature: Root at origin + ONE bone per wheel cluster (tail along the axle => local Y IS the axle) + Turret
 arm_data = bpy.data.armatures.new("VehicleRig")
@@ -820,6 +961,250 @@ for i, tn in enumerate(track_names):
         eb.parent = eb_body
         names.append(eb.name)
     track_infos.append((tn, names, front_cl, rear_cl, c.copy(), roadF_cl, roadR_cl))
+
+# ---- SAIL bone: every marked sail part welds to ONE bone so the canvas lowers/raises as a unit ----
+sail_found = []
+sail_top_z = 0.0
+if sail_names:
+    for _sn in sail_names:
+        _so = find_opt(_sn)
+        if _so is None:
+            print("VEHICLE WARN: sail part '%s' not found — skipped" % _sn); continue
+        sail_found.append(_so.name); bone_of[_so.name] = "Sail"
+    if sail_found:
+        _scorners = [bpy.data.objects[_n].matrix_world @ Vector(_c) for _n in sail_found for _c in bpy.data.objects[_n].bound_box]
+        _smn = Vector((min(p.x for p in _scorners), min(p.y for p in _scorners), min(p.z for p in _scorners)))
+        _smx = Vector((max(p.x for p in _scorners), max(p.y for p in _scorners), max(p.z for p in _scorners)))
+        sail_top_z = _smx.z
+        # The bone head sits at the KEEL LINE, not the sail foot: the Furl stance is a 180-degree FLIP about this
+        # head (rotation — the pipeline's native, Deploy-proven currency; translation stances fought the converter's
+        # rest-fold/strip and shipped misplaced), and a flip about the keel puts the mirrored canvas entirely BELOW
+        # the hull — underwater in-game — with nothing peeking out beside the hull sides.
+        _skeel = min((bpy.data.objects[_n2].matrix_world @ Vector(_c2)).z
+                     for _n2 in [o.name for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.vertices]
+                     for _c2 in bpy.data.objects[_n2].bound_box)
+        _sebn = arm_data.edit_bones.new("Sail")
+        _sebn.head = Vector((0.5 * (_smn.x + _smx.x), 0.5 * (_smn.y + _smx.y), _skeel - 0.05))
+        _sebn.tail = _sebn.head + Vector((0.0, 0.0, max(0.3, 0.25 * (_smx.z - _smn.z))))
+        _sebn.parent = eb_body
+        print("VEHICLE SAIL: %d part(s) on one Sail bone (double-sided at export; struck/raised by the 'Furl' clip)" % len(sail_found))
+
+# ---- RUDDER parts: resolved to a name set — they keep their own mesh through the join (identity is needed at
+# export for the double-siding, and at the flip pass for the exclusion), skinned to the body like Body parts ----
+rudder_by_name = set()
+for _fn3 in rudder_names:
+    _fo3 = find_opt(_fn3)
+    if _fo3 is None:
+        print("VEHICLE WARN: rudder part '%s' not found — skipped" % _fn3); continue
+    rudder_by_name.add(_fo3.name)
+if rudder_by_name:
+    print("VEHICLE RUDDER: %d part(s) — double-sided at export, always visible, authored winding kept" % len(rudder_by_name))
+
+# ---- FLAG bone: every marked flag welds to ONE bone so the banners can be struck as a unit (hidden underway) ----
+flag_found = []
+if flag_names:
+    for _gn in flag_names:
+        _go = find_opt(_gn)
+        if _go is None:
+            print("VEHICLE WARN: flag part '%s' not found — skipped" % _gn); continue
+        flag_found.append(_go.name); bone_of[_go.name] = "Flag"
+    if flag_found:
+        _gcorners = [bpy.data.objects[_n].matrix_world @ Vector(_c) for _n in flag_found for _c in bpy.data.objects[_n].bound_box]
+        _gmn = Vector((min(p.x for p in _gcorners), min(p.y for p in _gcorners), min(p.z for p in _gcorners)))
+        _gmx = Vector((max(p.x for p in _gcorners), max(p.y for p in _gcorners), max(p.z for p in _gcorners)))
+        _gkeel = min((bpy.data.objects[_n2].matrix_world @ Vector(_c2)).z
+                     for _n2 in [o.name for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.vertices]
+                     for _c2 in bpy.data.objects[_n2].bound_box)
+        _gebn = arm_data.edit_bones.new("Flag")
+        _gebn.head = Vector((0.5 * (_gmn.x + _gmx.x), 0.5 * (_gmn.y + _gmx.y), _gkeel - 0.05))
+        _gebn.tail = _gebn.head + Vector((0.0, 0.0, max(0.3, 0.25 * (_gmx.z - _gmn.z))))
+        _gebn.parent = eb_body
+        print("VEHICLE FLAG: %d part(s) on one Flag bone — flies at anchor, struck below the keel through Spin (the opposite of sails); double-sided at export" % len(flag_found))
+
+# ---- OAR bones (galley rowing): one merged oar mesh -> one bone per physical oar ----
+# The marked oar parts (poles + blades, each mesh spanning BOTH banks) are split into individual oars by projecting
+# every connected island onto the plane PERPENDICULAR to the common pole direction — where each oar collapses to a
+# point — then single-linkage clustering. Naive distance clustering fails: poles converge at the oarlocks and fan to
+# the blades, so within-oar spans dwarf the inter-oar gap. Each oar gets a bone at its oarlock (~30% out from the
+# handle) parented to the body; every vertex of that oar skins 100% to it (rigid). Both banks handled; side = sign of
+# the beam coordinate (Y, the rig's convention after orientation). Proven headless on the Khalandion (64 oars).
+oar_by_name = set()
+oar_skin = {}       # oar-part object name -> {vertex_index: bone name}
+oar_bake = []       # (bone name, pivot world, side(+1/-1), dip-axis world) for the Rowing keyframes
+if oar_names:
+    def _oar_islands(_o):
+        _me = _o.data; _bm = bmesh.new(); _bm.from_mesh(_me); _bm.verts.ensure_lookup_table()
+        _seen = set(); _out = []
+        for _v in _bm.verts:
+            if _v.index in _seen:
+                continue
+            _stack = [_v]; _seen.add(_v.index); _idx = []
+            while _stack:
+                _x = _stack.pop(); _idx.append(_x.index)
+                for _e in _x.link_edges:
+                    _w = _e.other_vert(_x)
+                    if _w.index not in _seen:
+                        _seen.add(_w.index); _stack.append(_w)
+            _wc = [_o.matrix_world @ _me.vertices[_i].co for _i in _idx]
+            _out.append((_idx, _wc, sum(_wc, Vector((0, 0, 0))) / len(_wc)))
+        _bm.free(); return _out
+    def _oar_pc1(_pts):
+        _m = sum(_pts, Vector((0, 0, 0))) / len(_pts)
+        _cov = [[0.0] * 3 for _ in range(3)]
+        for _p in _pts:
+            _d = _p - _m
+            for _a in range(3):
+                for _b in range(3):
+                    _cov[_a][_b] += _d[_a] * _d[_b]
+        _v = Vector((1.0, 0.3, 0.1))
+        for _ in range(40):
+            _nv = Vector((sum(_cov[0][_k] * _v[_k] for _k in range(3)),
+                          sum(_cov[1][_k] * _v[_k] for _k in range(3)),
+                          sum(_cov[2][_k] * _v[_k] for _k in range(3))))
+            if _nv.length == 0:
+                break
+            _nv.normalize(); _v = _nv
+        return _v
+    _oar_objs = []
+    for _on in oar_names:
+        _oo = find_opt(_on)
+        if _oo is None:
+            print("VEHICLE WARN: oar part '%s' not found — skipped" % _on); continue
+        oar_by_name.add(_oo.name); oar_skin[_oo.name] = {}; _oar_objs.append(_oo)
+    _isl = {_oo.name: _oar_islands(_oo) for _oo in _oar_objs}   # compute connectivity once
+    _objbyname = {_oo.name: _oo for _oo in _oar_objs}
+    # All recovery tolerances are fractions of the marked geometry's own diagonal. The previous fixed world-unit
+    # values worked only at the validation model's import scale: centimetre/metre variants either recovered zero
+    # oars or merged a whole bank. The centreline is likewise geometry-derived; imported models need not sit at Y=0.
+    _oar_points = [_p for _oo in _oar_objs for _idx, _wc, _ctr in _isl[_oo.name] for _p in _wc]
+    if _oar_points:
+        _omn = Vector((min(_p.x for _p in _oar_points), min(_p.y for _p in _oar_points), min(_p.z for _p in _oar_points)))
+        _omx = Vector((max(_p.x for _p in _oar_points), max(_p.y for _p in _oar_points), max(_p.z for _p in _oar_points)))
+        _oscale, _OAR_EPS, _OAR_MIN_SPAN, _oar_beam_mid = _oar_recovery_metrics(tuple(_omn), tuple(_omx))
+        print("VEHICLE ROWING recovery scale: diagonal %.4f, merge eps %.5f, min span %.5f, beam centre Y %.4f"
+              % (_oscale, _OAR_EPS, _OAR_MIN_SPAN, _oar_beam_mid))
+    else:
+        _OAR_EPS = 1e-6; _OAR_MIN_SPAN = 1e-6; _oar_beam_mid = 0.0
+    _oid = 0
+    for _side in (1, -1):
+        # common pole direction from each island's own PC1 (within-oar — not the row spread, which points along X)
+        _dp = Vector((0, 0, 0)); _ref = None
+        for _oo in _oar_objs:
+            for _idx, _wc, _ctr in _isl[_oo.name]:
+                if (_ctr.y >= _oar_beam_mid) != (_side > 0):
+                    continue
+                _pv = _oar_pc1(_wc); _m = sum(_wc, Vector((0, 0, 0))) / len(_wc)
+                _span = max((_p - _m).dot(_pv) for _p in _wc) - min((_p - _m).dot(_pv) for _p in _wc)
+                if _span < _OAR_MIN_SPAN:
+                    continue
+                if _ref is None:
+                    _ref = _pv
+                if _pv.dot(_ref) < 0:
+                    _pv = -_pv
+                _dp += _pv * _span
+        if _dp.length < 1e-6:
+            continue
+        _dp.normalize()
+        # CALIBRATION PRINT (2026-09-05): the sweep/rake are centred on THIS modelled rake — surface the number so
+        # the Rake dial isn't guesswork ("the oars still don't move 24 degrees forward": the arc was symmetric
+        # about a rake the user couldn't see). Rake ~= this value centres the stroke on the perpendicular.
+        _rakedeg = math.degrees(math.atan2(abs(_dp.x), abs(_dp.y))) if (abs(_dp.x) + abs(_dp.y)) > 1e-6 else 0.0
+        print("VEHICLE ROWING side %+d: modelled oar rake %.0f deg off the perpendicular — Rake ~%.0f (sign per bow) centres the stroke on the beam line"
+              % (_side, _rakedeg, _rakedeg))
+        _tmp = Vector((0, 0, 1)) if abs(_dp.z) < 0.9 else Vector((1, 0, 0))
+        _e1 = _dp.cross(_tmp).normalized(); _e2 = _dp.cross(_e1).normalized()
+        _items = []   # (objname, idx, wc, (u, v)) for every island on this side
+        for _oo in _oar_objs:
+            for _idx, _wc, _ctr in _isl[_oo.name]:
+                if (_ctr.y >= _oar_beam_mid) != (_side > 0):
+                    continue
+                _items.append((_oo.name, _idx, _wc, (_ctr.dot(_e1), _ctr.dot(_e2))))
+        _n = len(_items)
+        if _n == 0:
+            continue
+        _parent = list(range(_n)); _grid = {}
+        def _find(_a, _parent=_parent):
+            while _parent[_a] != _a:
+                _parent[_a] = _parent[_parent[_a]]; _a = _parent[_a]
+            return _a
+        for _i, _it in enumerate(_items):
+            _grid.setdefault((int(_it[3][0] / _OAR_EPS), int(_it[3][1] / _OAR_EPS)), []).append(_i)
+        for _i, _it in enumerate(_items):
+            _gx, _gy = int(_it[3][0] / _OAR_EPS), int(_it[3][1] / _OAR_EPS)
+            for _dx in (-1, 0, 1):
+                for _dy in (-1, 0, 1):
+                    for _j in _grid.get((_gx + _dx, _gy + _dy), []):
+                        if _j > _i and math.hypot(_it[3][0] - _items[_j][3][0], _it[3][1] - _items[_j][3][1]) <= _OAR_EPS:
+                            _ra, _rb = _find(_i), _find(_j)
+                            if _ra != _rb:
+                                _parent[_ra] = _rb
+        _labels = {}
+        for _i in range(_n):
+            _labels.setdefault(_find(_i), []).append(_i)
+        for _root, _mem in _labels.items():
+            _bn = "Oar_%03d" % _oid; _oid += 1
+            _allwc = []
+            for _i in _mem:
+                _onm, _idx, _wc, _ = _items[_i]
+                for _vi in _idx:
+                    oar_skin[_onm][_vi] = _bn
+                _allwc += _wc
+            # BLADE ROLL (argv[47]): spin the whole oar about its OWN long axis. Some sources model the blades
+            # feathered — the flat face parallel to the stroke — so they knife through the water edge-on instead of
+            # scooping (the Khalandion needs 90). Rolling the ENTIRE oar leaves the cylindrical pole visually
+            # unchanged and turns only the blade face, with no seam at the blade root. Applied to the REST geometry
+            # before the pivot is measured, so the bone and the whole stroke carry the corrected face.
+            if abs(oar_blade_roll) > 0.01:
+                _rax = _oar_pc1(_allwc)
+                _rc = sum(_allwc, Vector((0, 0, 0))) / len(_allwc)
+                _RQ = Quaternion(_rax, math.radians(oar_blade_roll))
+                for _i in _mem:
+                    _onm, _idx, _wc, _ = _items[_i]
+                    _oo2 = _objbyname[_onm]; _minv = _oo2.matrix_world.inverted()
+                    for _k, _vi in enumerate(_idx):
+                        _wc[_k] = _rc + _RQ @ (_wc[_k] - _rc)
+                        _oo2.data.vertices[_vi].co = _minv @ _wc[_k]
+                _allwc = []
+                for _i in _mem:
+                    _allwc += _items[_i][2]
+            _ys = [abs(_p.y - _oar_beam_mid) for _p in _allwc]; _yg = min(_ys) + (oar_pivot / 100.0) * (max(_ys) - min(_ys))
+            _d = _oar_pc1(_allwc); _h = Vector((_d.x, _d.y, 0.0))
+            _h = _h.normalized() if _h.length > 1e-6 else Vector((1.0, 0.0, 0.0))
+            _dax = Vector((-_h.y, _h.x, 0.0)).normalized()               # dip axis: horizontal, perp to the oar
+            # PIVOT: ANALYTIC, on the oar's own fitted axis at the dialed beam-distance — NOT snapped to a vertex.
+            # The snap version jumped across gaps in the geometry (many oars have no verts near an inboard target),
+            # parking the fulcrum at the pole's end no matter the dial ("Pivot % has no effect"). The axis crossing
+            # exists whether or not a vertex does; a fulcrum slightly off the mesh is a perfectly good oarlock.
+            _mctr = sum(_allwc, Vector((0, 0, 0))) / len(_allwc)
+            _sgn = 1.0 if _side > 0 else -1.0
+            if _d.y * _sgn < 0:
+                _d = -_d                                                  # point the axis OUTBOARD on this side
+            _yt = _oar_beam_mid + _sgn * _yg                              # target absolute beam coordinate
+            if abs(_d.y) > 1e-5:
+                _piv = _mctr + _d * ((_yt - _mctr.y) / _d.y)
+            else:                                                         # degenerate (oar parallel to hull): old snap
+                _piv = min(_allwc, key=lambda _p: abs(abs(_p.y - _oar_beam_mid) - _yg))
+            # LENGTH (argv[59]): stretch the oar along its axis about the oarlock — the pivot stays planted, the
+            # blade reaches further. Applied to the REST geometry so skinning, previews and the bake all see it.
+            if abs(oar_length - 100.0) > 0.1:
+                _lsc = oar_length / 100.0
+                for _i in _mem:
+                    _onm, _idx, _wc, _ = _items[_i]
+                    _oo2 = _objbyname[_onm]; _minv = _oo2.matrix_world.inverted()
+                    for _k, _vi in enumerate(_idx):
+                        _wc[_k] = _wc[_k] + _d * ((_wc[_k] - _piv).dot(_d) * (_lsc - 1.0))
+                        _oo2.data.vertices[_vi].co = _minv @ _wc[_k]
+            _eb = arm_data.edit_bones.new(_bn)
+            _eb.head = _piv; _eb.tail = _piv + _d * 0.6; _eb.parent = eb_body
+            oar_bake.append((_bn, _piv.copy(), float(_side), _dax))
+    if oar_bake:
+        # PIVOT DIAGNOSTIC (2026-09-05, "Pivot % has no effect"): the dial targets a beam-distance along each
+        # oar's [min..max] span — surface where the pivots actually landed so a snap-to-the-end bug is visible.
+        _pvy = [abs(_p2.y - _oar_beam_mid) for _b2, _p2, _s2, _d2 in oar_bake]
+        print("VEHICLE ROWING pivots: chosen beam-distance mean %.3f, range [%.3f .. %.3f] (dial %.0f%%)"
+              % (sum(_pvy) / len(_pvy), min(_pvy), max(_pvy), oar_pivot))
+    print("VEHICLE ROWING: recovered %d oar(s) from %d part(s) into individual bones" % (len(oar_bake), len(_oar_objs)))
+
 bpy.ops.object.mode_set(mode='OBJECT')
 
 # rigid skinning: each part full-weight on its bone (wheels/turret) or Root (body). TREAD parts skin
@@ -832,6 +1217,18 @@ _link_pitch = {}   # part -> measured track-link pitch (conveyor advance = one p
 _link_fund = {}    # part -> physical link length (autocorrelation fundamental) for rigid link cells
 _link_jobs = {}    # part -> path-instanced rigid-link job (cells, ring path, rest transforms)
 for o in objs:
+    if o.name in oar_by_name:
+        # OARS skin PER-VERTEX into their individual oar bones (like treads, one mesh -> many bones)
+        for g in list(o.vertex_groups):
+            o.vertex_groups.remove(g)
+        _obygrp = {}
+        for _vi, _bn in oar_skin.get(o.name, {}).items():
+            _obygrp.setdefault(_bn, []).append(_vi)
+        for _bn, _vis in _obygrp.items():
+            o.vertex_groups.new(name=_bn).add(_vis, 1.0, 'REPLACE')
+        md = o.modifiers.new("Armature", 'ARMATURE'); md.object = arm
+        o.parent = arm
+        continue
     if o.name in _track_by_name:
         _tn, _tnames, _fcl, _rcl, _tc, _rfcl, _rrcl = _track_by_name[o.name]
         _botb, _topb, _rampfb, _ramprb, _ramprtb, _wrapfb, _wraprb, _wrapgfb, _wrapgrb = _tnames
@@ -1431,7 +1828,16 @@ def _join_per_bone():
     groups = {}
     for o in objs:
         # tread parts are multi-bone-skinned (four regions) — each stays its OWN mesh, never merged
-        _k = ("__track__" + o.name) if o.name in _track_by_name else bone_of.get(o.name, body_bone)
+        # oars, like treads, are multi-bone-skinned — give each its OWN key so it is never merged into one bone.
+        # RUDDERS keep their own mesh too: they skin to the body like Body parts, but the export doubling and the
+        # inside-out exclusion need to find them after the join. (Flags need no key: bone_of routes them to the
+        # Flag bone, so they merge into Mesh_Flag on their own.)
+        if o.name in oar_by_name:
+            _k = "__oar__" + o.name
+        elif o.name in rudder_by_name:
+            _k = "__rud__" + o.name
+        else:
+            _k = ("__track__" + o.name) if o.name in _track_by_name else bone_of.get(o.name, body_bone)
         groups.setdefault(_k, []).append(o)
     joined = []
     for bname, members in groups.items():
@@ -1458,8 +1864,21 @@ try:
 except Exception:
     pass
 bpy.context.scene.frame_start = 0
-# the clip must cover the SLOWEST authored motion — a wave cycle is typically far longer than a wheel loop
-bpy.context.scene.frame_end = max(frames, rock_frames) if rock_on else frames
+# The action must cover the slowest requested subsystem, while every faster subsystem completes an INTEGER number
+# of cycles across that shared range. Otherwise Blender holds its last key until the action ends (the original
+# 24-frame rowing + 120-frame wave combination rowed once, froze for 96 frames, then snapped on loop restart).
+_motion_periods = [frames]
+if rock_on:
+    _motion_periods.append(rock_frames)
+if oar_bake:
+    _motion_periods.append(oar_frames)
+_clip_frames = max(_motion_periods)
+def _fitted_repeats(_period):
+    return _fitted_cycle_count(_clip_frames, _period)
+_spin_repeats = _fitted_repeats(frames)
+_rock_repeats = _fitted_repeats(rock_frames) if rock_on else 0
+_oar_repeats = _fitted_repeats(oar_frames) if oar_bake else 0
+bpy.context.scene.frame_end = _clip_frames
 
 # WAVE ROCK keys on the Hull bone: roll = A·sin(2πt) about X (longitudinal), pitch = 0.4A·sin(4πt) about Y.
 # Both vanish at t=0 and t=1, so frame 0 IS the rest pose (bind==frame0) and the loop restart is seamless.
@@ -1490,23 +1909,149 @@ if rock_on:
     _pb_hull.rotation_mode = 'XYZ'
     # sample density scales with the pitch frequency — the fastest component needs the keys, and the pipeline
     # keys LINEAR (a sparse sine reads as a triangle wave)
-    _steps = max(24, 16 * max(rock_roll_cycles, rock_pitch_cycles))   # keys enough for the FASTEST wave (LINEAR keying)
+    _steps = max(_clip_frames, 24 * _rock_repeats,
+                 16 * max(rock_roll_cycles, rock_pitch_cycles) * _rock_repeats)  # keys enough for the FASTEST wave
     _roll_amp = math.radians(rock_deg)
     _pitch_amp = math.radians(rock_pitch_deg)
     _phase = math.radians(rock_pitch_phase)
     for _i in range(_steps + 1):
         _t = _i / float(_steps)
-        _f = int(round(_t * rock_frames))
+        _f = int(round(_t * _clip_frames))
         bpy.context.scene.frame_set(_f)
-        _q = (Quaternion(_roll_ax, _roll_amp * math.sin(2.0 * math.pi * rock_roll_cycles * _t)) @
-              Quaternion(_pitch_ax, _pitch_amp * math.sin(2.0 * math.pi * rock_pitch_cycles * _t + _phase)))
+        _q = (Quaternion(_roll_ax, _roll_amp * math.sin(2.0 * math.pi * rock_roll_cycles * _rock_repeats * _t)) @
+              Quaternion(_pitch_ax, _pitch_amp * math.sin(2.0 * math.pi * rock_pitch_cycles * _rock_repeats * _t + _phase)))
         _pb_hull.rotation_euler = _q.to_euler('XYZ')
         _pb_hull.keyframe_insert("rotation_euler", frame=_f)
     print("VEHICLE wave rock: roll %.1f deg x%d about (%.2f,%.2f,%.2f) | pitch %.1f deg x%d phase %.0f about (%.2f,%.2f,%.2f) | %d frames, %d keys on '%s' — %s%s"
           % (rock_deg, rock_roll_cycles, _roll_ax.x, _roll_ax.y, _roll_ax.z,
              rock_pitch_deg, rock_pitch_cycles, rock_pitch_phase, _pitch_ax.x, _pitch_ax.y, _pitch_ax.z,
-             rock_frames, _steps + 1, body_bone, _axis_why,
+             _clip_frames, _steps + 1, body_bone, _axis_why,
              (", heading %+.0f deg" % rock_heading) if abs(rock_heading) > 1e-6 else ""))
+
+
+# ROWING stroke: bake the unison sweep + phase-locked dip onto every oar bone, INTO the Spin (movement) clip, as a
+# seamless sine cycle (frame 0 == frame N, so the loop restart is invisible). Sampled densely because the pipeline
+# keys LINEAR (a sparse sine reads as a triangle wave). Sweep is fore-aft about the world vertical through the oarlock;
+# dip drops the blade on the aft drive and lifts it on the recovery. Both are mirrored per side (the sign carried from
+# clustering) so port and starboard pull aft together. The bind pose is the armature rest (oars as modelled), so an
+# offset at frame 0 is fine — the oars simply oscillate around their modelled rake.
+if oar_bake:
+    # Sweep is the TOTAL fore-aft arc, split evenly about the rest rake (user convention 2026-09-05: "a sweep of
+    # 24 degrees should make the oars sweep 12 degrees forward and then 12 degrees backwards") — the amplitude
+    # each way is half the dial. Dip stays a per-direction amplitude (blades drop A_d, lift A_d).
+    # Sweep NEGATED (2026-09-05 sign flip, user request): the field-verified forward stroke needed a negative
+    # dial while positive Rake already shifted toward the bow — so the sweep's sense flips here, making POSITIVE
+    # the forward default and aligning the two dials' conventions. (Recipes saved before the flip must negate
+    # their Sweep once.)
+    _oaw = -math.radians(oar_sweep) * 0.5; _oad = math.radians(oar_dip); _oal = math.radians(oar_lift); _oark = math.radians(oar_rake)
+    for _bn, _piv, _oside, _dax in oar_bake:
+        _db = arm.data.bones.get(_bn); _pb = arm.pose.bones.get(_bn)
+        if _db is None or _pb is None:
+            continue
+        _m3 = (arm.matrix_world @ _db.matrix_local).to_3x3()
+        _lz = (_m3.inverted() @ Vector((0.0, 0.0, 1.0))).normalized()   # world vertical, in bone-local space
+        _ld = (_m3.inverted() @ _dax).normalized()                      # dip axis, in bone-local space
+        _pb.rotation_mode = 'QUATERNION'
+        for _f in range(_clip_frames + 1):
+            _t = _f / float(_clip_frames); _phi = 2.0 * math.pi * _oar_repeats * _t
+            _ths = (_oark + _oaw * (-math.cos(_phi))) * _oside   # sweep about the RAKED stroke centre; per-side mirror
+            # NO side factor on the dip: _dax already mirrors per bank (it follows the oar's own horizontal
+            # direction), so adding the side sign double-mirrored it — one bank dipped while the other lifted
+            # (the field report: "port and starboard are not in sync", seen end-on as a seesaw).
+            # negative dip-term = blade UP (measured on the trajectory drill), so positive lift SUBTRACTS
+            _thd = -_oal + _oad * math.sin(_phi)         # dip about the LIFTED stroke centre; both banks together
+            _pb.rotation_quaternion = Quaternion(_lz, _ths) @ Quaternion(_ld, _thd)
+            _pb.keyframe_insert('rotation_quaternion', frame=_f)
+    try:
+        _afcs = list(act.fcurves)
+    except AttributeError:
+        _afcs = [fc for l in act.layers for s in l.strips for cb in s.channelbags for fc in cb.fcurves]
+    for _fc in _afcs:                                    # oar keys must interpolate LINEAR, like the rest of Spin
+        if _fc.data_path.startswith('pose.bones["Oar_'):
+            for _kp in _fc.keyframe_points:
+                _kp.interpolation = 'LINEAR'
+    print("VEHICLE ROWING clip: %d oars sweep %.0f deg total arc (%.0f each way of centre) + dip %.0f deg, lift %.0f deg, rake %.0f deg, pivot %.0f%%, length %.0f%%, %d cycle(s) over shared %d-frame 'Spin'"
+          % (len(oar_bake), abs(oar_sweep), abs(oar_sweep) * 0.5, oar_dip, oar_lift, oar_rake, oar_pivot, oar_length, _oar_repeats, _clip_frames))
+
+# SAIL on/off — its OWN `Furl` clip, used as a STANCE, never played. Three designs were rejected in the field:
+# keying the hide inside Spin twitched the canvas at every loop restart; a 12-frame visible descent read wrong
+# ("in reality it would not go down this way"); and even the 1-frame drop showed travel when the transition clip
+# was PLAYED (After-move/Pre-move). The clip format carries only bone rotation+translation — no visibility, no
+# alpha, no scale — so out-of-sight IS the only disappear it can express; the clean cut comes from never playing
+# the move: Idle/reference = Spin[0..0] (defines the REST — never put Furl here: the conversion adopts the
+# reference's frame 0 as the canonical rest, and a struck reference turns the whole bind upside-down), Idle
+# stance (override) = Furl[1..1] (struck below the hull, the Deploy-stance mechanism), Movement = Spin (raised),
+# After-move / Pre-move EMPTY — the state change swaps the pose in one tick. Rotation-only: Keep translations OFF.
+SAIL_FURL_FRAMES = 1
+if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and arm.pose.bones.get("Flag") is not None):
+    # ROTATION, not translation (2026-09-05): the strike is a 180-degree flip of the Sail bone about the keel-line
+    # head, mirroring the canvas below the hull. The translation version fought the converter — the rest-fold made
+    # the struck pose the rest, the strip classified the raise as residue, and the kept-curve fix still shipped the
+    # stance misplaced in BOTH clips (field: "sails visible on the idle clip too / not on the correct location").
+    # Rotation stances are the pipeline's native currency, proven end-to-end by the trails' Deploy — and they need
+    # no Keep-bone-translations at all.
+    _furl = bpy.data.actions.new("Furl")
+    arm.animation_data.action = _furl
+    try:
+        if getattr(_furl, "slots", None):
+            arm.animation_data.action_slot = _furl.slots.new(id_type='OBJECT', name=arm.name)
+    except Exception:
+        pass
+    if sail_found and arm.pose.bones.get("Sail") is not None:
+        _pbS = arm.pose.bones["Sail"]; _dbS = arm.data.bones["Sail"]
+        _m3S = (arm.matrix_world @ _dbS.matrix_local).to_3x3()
+        _flipax = (_m3S.inverted() @ Vector((1.0, 0.0, 0.0))).normalized()   # hull-length axis, in bone-local space
+        _pbS.rotation_mode = 'QUATERNION'
+        _pbS.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
+        _pbS.keyframe_insert('rotation_quaternion', frame=0)                 # raised — matches Spin's rest pose
+        _pbS.rotation_quaternion = Quaternion(_flipax, math.pi)
+        _pbS.keyframe_insert('rotation_quaternion', frame=SAIL_FURL_FRAMES)  # struck — canvas mirrored below the keel
+        _pbS.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))          # leave the POSE raised for the later bakes
+    # FLAGS keyed EXPLICITLY at identity in Furl — flying at anchor. An unkeyed bone inherits whatever pose the
+    # previous evaluation left (the preview sampling Spin first left the flag STRUCK; field report: "the flags
+    # seem to be down when the sails are down"), and the conversion's snapshots share the hazard. Every stance
+    # bone is keyed in BOTH clips so no consumer ever depends on leftover pose.
+    if flag_found and arm.pose.bones.get("Flag") is not None:
+        _pbG2 = arm.pose.bones["Flag"]
+        _pbG2.rotation_mode = 'QUATERNION'
+        _pbG2.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
+        _pbG2.keyframe_insert('rotation_quaternion', frame=0)
+        _pbG2.keyframe_insert('rotation_quaternion', frame=SAIL_FURL_FRAMES)
+    try:
+        _sfcs = list(_furl.fcurves)
+    except AttributeError:
+        _sfcs = [fc for l in _furl.layers for s in l.strips for cb in s.channelbags for fc in cb.fcurves]
+    for _fc in _sfcs:
+        for _kp in _fc.keyframe_points:
+            _kp.interpolation = 'LINEAR'
+    arm.animation_data.action = act                                      # 'Spin' stays the active action, as before
+    print("VEHICLE 'Furl' stance: %s — Idle/reference Spin[0..0], Idle stance (override) Furl[%d..%d], Movement Spin, After-move/Pre-move EMPTY, Keep bone translations OFF"
+          % (("sails FLIPPED below the keel" + (", flags keyed flying" if flag_found else "")) if sail_found else "flags keyed flying (no sails)",
+             SAIL_FURL_FRAMES, SAIL_FURL_FRAMES))
+
+# SAIL held raised THROUGH Spin — explicit identity keys, the same stale-pose hazard in the other direction:
+# sampling Furl then Spin would leave the canvas struck without them.
+if sail_found and arm.pose.bones.get("Sail") is not None:
+    _pbS3 = arm.pose.bones["Sail"]
+    _pbS3.rotation_mode = 'QUATERNION'
+    _pbS3.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
+    _pbS3.keyframe_insert('rotation_quaternion', frame=0)
+    _pbS3.keyframe_insert('rotation_quaternion', frame=_clip_frames)
+
+# FLAG strike THROUGH Spin — the opposite of the sails (2026-09-05): banners fly AT ANCHOR (the idle stance
+# leaves the Flag bone at rest) and are held flipped below the keel for the entire movement clip. Constant
+# rotation keys at the clip's ends; rotations are the pipeline's native currency, and the conversion's
+# visual-keyed rebake keeps every clip faithful to its snapshot wherever the canonical rest lands.
+if flag_found and arm.pose.bones.get("Flag") is not None:
+    _pbG = arm.pose.bones["Flag"]; _dbG = arm.data.bones["Flag"]
+    _m3G = (arm.matrix_world @ _dbG.matrix_local).to_3x3()
+    _gflip = (_m3G.inverted() @ Vector((1.0, 0.0, 0.0))).normalized()    # hull-length axis, in bone-local space
+    _pbG.rotation_mode = 'QUATERNION'
+    _pbG.rotation_quaternion = Quaternion(_gflip, math.pi)
+    _pbG.keyframe_insert('rotation_quaternion', frame=0)
+    _pbG.keyframe_insert('rotation_quaternion', frame=_clip_frames)
+    _pbG.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))          # leave the POSE at rest for later bakes
+    print("VEHICLE FLAG clip: banners held below the keel through Spin 0..%d — visible at idle only (the opposite of sails)" % _clip_frames)
 
 
 # ROLLING-CONTACT wheel speeds (user field report: the small road wheels looked draggy — "they should be
@@ -1641,21 +2186,21 @@ for bname in cluster_bones:
         # ROTOR own-clip spin: the bone frame now embeds the axle (main: local Y = axle; tail: local X = axle,
         # matching the donor channels' axes), so spin about that LOCAL axis. Keyed EVERY frame — a start/end
         # quaternion pair slerps the short way and cannot represent >180 deg; per-frame keys are exact.
-        _tot = math.radians(_wheel_final_deg.get(bname, degrees))
+        _tot = math.radians(_wheel_final_deg.get(bname, degrees) * _spin_repeats)
         _lax = Vector((1, 0, 0)) if clusters[_ci].get("is_tail") else Vector((0, 1, 0))
         pb.rotation_mode = 'QUATERNION'
-        for _f in range(frames + 1):
+        for _f in range(_clip_frames + 1):
             bpy.context.scene.frame_set(_f)
-            pb.rotation_quaternion = Quaternion(_lax, _tot * (_f / float(frames)))
+            pb.rotation_quaternion = Quaternion(_lax, _tot * (_f / float(_clip_frames)))
             pb.keyframe_insert("rotation_quaternion", frame=_f)
         continue
     pb.rotation_mode = 'XYZ'
     bpy.context.scene.frame_set(0)
     pb.rotation_euler = (0, 0, 0)
     pb.keyframe_insert("rotation_euler", frame=0)
-    bpy.context.scene.frame_set(frames)
-    pb.rotation_euler = (0, math.radians(_wheel_final_deg.get(bname, degrees)), 0)   # local Y = the axle
-    pb.keyframe_insert("rotation_euler", frame=frames)
+    bpy.context.scene.frame_set(_clip_frames)
+    pb.rotation_euler = (0, math.radians(_wheel_final_deg.get(bname, degrees) * _spin_repeats), 0)   # local Y = the axle
+    pb.keyframe_insert("rotation_euler", frame=_clip_frames)
 if _wheel_final_deg:
     _chg = {b: d for b, d in _wheel_final_deg.items() if abs(d - degrees) > 0.5}
     if _chg:
@@ -1689,12 +2234,12 @@ if track_infos and clusters:
                 pb.rotation_mode = 'XYZ'
                 _restM[_ci] = arm.data.bones[_bn].matrix_local.copy()
                 _P0s[_ci], _t0s[_ci] = _path_eval(_job, _job["s_rest"][_ci])
-            for _f in range(frames + 1):
+            for _f in range(_clip_frames + 1):
                 bpy.context.scene.frame_set(_f)
                 for _ci in _job["cells"]:
                     _bn = "%sL%02d" % (_job["prefix"], _ci)
                     pb = arm.pose.bones[_bn]
-                    _P1, _t1 = _path_eval(_job, _job["s_rest"][_ci] + _adv_link * _f / frames)
+                    _P1, _t1 = _path_eval(_job, _job["s_rest"][_ci] + _adv_link * _spin_repeats * _f / _clip_frames)
                     _q = _t0s[_ci].rotation_difference(_t1)
                     _M = Matrix.Translation(_P1) @ _q.to_matrix().to_4x4() @ Matrix.Translation(-_P0s[_ci])
                     pb.matrix = _M @ _restM[_ci]
@@ -1714,9 +2259,9 @@ if track_infos and clusters:
                 bpy.context.scene.frame_set(0)
                 pb.location = (0.0, 0.0, 0.0)
                 pb.keyframe_insert("location", frame=0)
-                bpy.context.scene.frame_set(frames)
-                pb.location = _local
-                pb.keyframe_insert("location", frame=frames)
+                bpy.context.scene.frame_set(_clip_frames)
+                pb.location = _local * _spin_repeats
+                pb.keyframe_insert("location", frame=_clip_frames)
             print("VEHICLE tread '%s' HYBRID conveyor: %d link bones on wraps + %d shuttle(s), advance %.3f/loop"
                   % (_tn, len(_job["cells"]), len(_job["runs"]), abs(_adv_link)))
             continue
@@ -1740,9 +2285,9 @@ if track_infos and clusters:
             bpy.context.scene.frame_set(0)
             pb.rotation_euler = (0, 0, 0)
             pb.keyframe_insert("rotation_euler", frame=0)
-            bpy.context.scene.frame_set(frames)
-            pb.rotation_euler = (0, math.radians(_theta), 0)
-            pb.keyframe_insert("rotation_euler", frame=frames)
+            bpy.context.scene.frame_set(_clip_frames)
+            pb.rotation_euler = (0, math.radians(_theta * _spin_repeats), 0)
+            pb.keyframe_insert("rotation_euler", frame=_clip_frames)
         _fdir, _rdir, _rtdir = _tread_dirs.get(_tn, (Vector((-1, 0, 0)), Vector((-1, 0, 0)), Vector((1, 0, 0))))
         _moves = ((_botb, Vector((-1.0, 0.0, 0.0)) * _flow),       # bottom runs backward
                   (_topb, Vector((1.0, 0.0, 0.0)) * _flow),        # top runs forward
@@ -1757,9 +2302,9 @@ if track_infos and clusters:
             bpy.context.scene.frame_set(0)
             pb.location = (0.0, 0.0, 0.0)
             pb.keyframe_insert("location", frame=0)
-            bpy.context.scene.frame_set(frames)
-            pb.location = _local
-            pb.keyframe_insert("location", frame=frames)
+            bpy.context.scene.frame_set(_clip_frames)
+            pb.location = _local * _spin_repeats
+            pb.keyframe_insert("location", frame=_clip_frames)
     print("VEHICLE tread conveyor v5: %d tread(s), tread quantum %.1f deg (wheels %.1f), advance %.3f/loop (drive d=%.2f): wraps ride DEDICATED wrap bones, ramps slide their slope, straights shuttle"
           % (len(track_infos), _conv_deg, degrees, _advance, _drive_d))
 # Blender 5.x REMOVED Action.fcurves (slotted/layered actions): curves live under layers->strips->channelbags.
@@ -2008,12 +2553,73 @@ if recoil_bone is not None and gun_axis is not None:
                           "point (Z %.2f)" % (_clear, _ground))
     arm.animation_data.action = act        # 'Spin' stays the active action, as before
 
-for _oa2 in [a for a in bpy.data.actions if a.name not in ("Spin", "Deploy", "Recoil")]:
-    print("VEHICLE purged leftover source clip '%s' (only 'Spin'/'Deploy'/'Recoil' are authored here)" % _oa2.name)
+for _oa2 in [a for a in bpy.data.actions if a.name not in ("Spin", "Deploy", "Recoil", "Furl")]:
+    print("VEHICLE purged leftover source clip '%s' (only 'Spin'/'Deploy'/'Recoil'/'Furl' are authored here)" % _oa2.name)
     bpy.data.actions.remove(_oa2)
 for _o2 in bpy.data.objects:
     if _o2.type != 'ARMATURE' and _o2.animation_data is not None:
         _o2.animation_data_clear()
+
+# FIX INSIDE-OUT FACES (argv[46], opt-in, 2026-09-04): recalculate every mesh's face normals to point outward
+# (Shift+N), for sources whose winding ships consistently inverted — the cheap single-sided alternative to
+# double-siding a hull that is only wrong-way-out. Per connected shell, so a closed hull orients robustly; open
+# sheets (sails) keep exactly one visible side — pick Double-sided instead/as well when both sides must show.
+# Runs BEFORE double-sided so a doubled shell insets its back copy the right way. Weights/UVs untouched.
+if fix_inside_out:
+    # NOT a blind recalc (tried 2026-09-04, twice wrong): bmesh.ops.recalc_face_normals RE-SOLVES orientation for
+    # every island, and "outward" is ambiguous for open sheets — it culled half the authored oar blades, and then
+    # flipped the DECK invisible from above. Instead, flip ONLY the islands that are provably inside-out: those
+    # whose faces consistently point at the ship's INTERIOR, judged against the radial direction from the hull's
+    # length axis (the rig convention: length along X). A side plank wound inward scores ~-1 -> flipped; the deck
+    # (normals up, radial up from the axis) scores ~+1 -> kept; sails and masts (normals along the axis or mixed)
+    # score ~0 -> kept, the artist's winding wins every ambiguous call. Marked OAR meshes are excluded entirely
+    # (authored front/back sheet pairs). Winding only: vertices, weights and UVs untouched.
+    # Flip ONLY — no sheet classification. Earlier revisions tried to auto-detect sails here (boundary-edge
+    # fractions, verticality scores); every heuristic broke on the next surface, and the user's verdict stands:
+    # "instead of a complex algorithm, why not just mark it?" Sails are now a ROLE (marked in the Lab, always
+    # double-sided, hidden at idle); this pass only reverses what is provably wound inward. Marked Sail and Oar
+    # meshes keep their authored winding.
+    _fall = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]
+    _fxn = 0; _fxkept = 0
+    for _fo in _fall:
+        if any(g.name.startswith("Oar_") or g.name in ("Sail", "Flag") for g in _fo.vertex_groups) or _fo.name.startswith("Mesh___rud__"):
+            continue
+        _fb = bmesh.new(); _fb.from_mesh(_fo.data); _fb.normal_update()
+        _fb.verts.ensure_lookup_table(); _fb.faces.ensure_lookup_table()
+        # The judgement axis must run INSIDE the hull belly. A bbox centre gets dragged to mast height, putting
+        # the DECK below the axis — its up-normals then read "interior-facing" and it got flipped invisible
+        # (field report). Y: bbox centre (banks are symmetric). Z: the 25th percentile of vertex height — inside
+        # the hull mass, below the deck, unmoved by masts and sails. A surface near the axis scores ~0 and can
+        # only be kept or sheet-doubled, never wrongly flipped.
+        _fmn = Vector((min(v.co.x for v in _fb.verts), min(v.co.y for v in _fb.verts), min(v.co.z for v in _fb.verts)))
+        _fmx = Vector((max(v.co.x for v in _fb.verts), max(v.co.y for v in _fb.verts), max(v.co.z for v in _fb.verts)))
+        _fcy = 0.5 * (_fmn.y + _fmx.y)
+        _fstep = max(1, len(_fb.verts) // 5000)
+        _fzs = sorted(_v4.co.z for _i4, _v4 in enumerate(_fb.verts) if _i4 % _fstep == 0)
+        _fcz = _fzs[len(_fzs) // 4]
+        _seenf = set()
+        for _f0 in _fb.faces:
+            if _f0.index in _seenf:
+                continue
+            _stackf = [_f0]; _seenf.add(_f0.index); _ifaces = []
+            _dsum = 0.0; _dn = 0
+            while _stackf:
+                _fc = _stackf.pop(); _ifaces.append(_fc)
+                _ctr2 = _fc.calc_center_median()
+                _rad = Vector((0.0, _ctr2.y - _fcy, _ctr2.z - _fcz))     # radial from the hull's length axis
+                if _rad.length > 1e-6:
+                    _dsum += _fc.normal.dot(_rad.normalized()); _dn += 1
+                for _e2 in _fc.edges:
+                    for _lf in _e2.link_faces:
+                        if _lf.index not in _seenf:
+                            _seenf.add(_lf.index); _stackf.append(_lf)
+            if _dn > 0 and (_dsum / _dn) < -0.25:                        # provably inward -> reverse (cheap)
+                bmesh.ops.reverse_faces(_fb, faces=_ifaces); _fxn += 1
+            else:
+                _fxkept += 1
+        _fb.to_mesh(_fo.data); _fb.free()
+    print("VEHICLE inside-out fix: %d island(s) reversed (interior-facing), %d kept as authored; Sail/Oar meshes untouched"
+          % (_fxn, _fxkept))
 
 # DOUBLE-SIDED (argv[41], opt-in, 2026-09-03): the game culls backfaces, so single-sided / CAD source faces (thin
 # spokes, flat plates) render see-through in-game. Append a REVERSED copy of every face here, at the SOURCE, so the
@@ -2022,17 +2628,25 @@ for _o2 in bpy.data.objects:
 # layer, so each duplicated vertex keeps its bone weights (no vert falls to bone 0 -> the skeleton bake still
 # validates). The back shell is nudged INWARD along the normal by a small fraction of the model size, so front and
 # back faces are NOT coincident — coincident faces make the game's alpha-to-coverage shader read ~50% transparent.
-if double_sided:
+# Marked SAIL, FLAG and RUDDER meshes are ALWAYS double-sided — the role says so, no guessing.
+# Marked OAR meshes are NEVER doubled — not even under the global switch (review find 2026-09-05: the global
+# path used to include them): the Khalandian's blades ship as authored front/back sheet pairs, already
+# two-sided, and doubling them z-shimmered four near-coincident layers. The role's nature decides, both ways.
+_dall = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]
+_dtargets = ([o for o in _dall if not any(g.name.startswith("Oar_") for g in o.vertex_groups)]
+             if double_sided else
+             [o for o in _dall
+              if any(g.name in ("Sail", "Flag") for g in o.vertex_groups) or o.name.startswith("Mesh___rud__")])
+if _dtargets:
     # The inset is a fraction of the WHOLE model, not each part. A per-mesh dimension would give a tiny single-sided
     # part (a bolt, an antenna) a tiny inset that can fall below depth precision -> that part reads transparent again.
     # So take one world-space extent across every mesh, derive one world-space offset, and convert it into each
     # mesh's own local units (verts and normals are local) so a scaled part still gets the same visible inset.
-    _dmeshes = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]
-    _wpts = [_dso.matrix_world @ Vector(_c) for _dso in _dmeshes for _c in _dso.bound_box]
+    _wpts = [_dso.matrix_world @ Vector(_c) for _dso in _dall for _c in _dso.bound_box]
     _wdim = max((max(p[i] for p in _wpts) - min(p[i] for p in _wpts)) for i in range(3)) if _wpts else 1.0
     _woff = max(1e-5, _wdim * 0.0015)
     _dsn = 0
-    for _dso in _dmeshes:
+    for _dso in _dtargets:
         _dm = _dso.data
         _ws = _dso.matrix_world.to_scale()
         _wsavg = (abs(_ws.x) + abs(_ws.y) + abs(_ws.z)) / 3.0
@@ -2051,10 +2665,23 @@ if double_sided:
         print("VEHICLE double-sided '%s': %d -> %d verts (back shell inset %.4f local)" % (_dso.name, _v0, len(_dm.vertices), _doff))
     print("VEHICLE double-sided: %d mesh(es) made two-sided at the source (whole-model inset %.4f world)" % (_dsn, _woff))
 
+# EXPORT TOTALS (2026-09-05, user request: "where can I see the vertices difference between raw and generated?"):
+# one honest line with what actually ships. Compare TRIANGLES against the raw source, not vertices — the per-bone
+# join and the export split verts at normal/UV seams (storage bookkeeping), so the vert count can rise even after
+# a decimation that removed a fifth of the triangles.
+_xt_v = 0; _xt_t = 0; _xt_m = 0
+for _xo in bpy.context.scene.objects:
+    if _xo.type != 'MESH' or not _xo.data.vertices:
+        continue
+    _xo.data.calc_loop_triangles()
+    _xt_v += len(_xo.data.vertices); _xt_t += len(_xo.data.loop_triangles); _xt_m += 1
+print("VEHICLE export totals: %d verts, %d tris across %d mesh(es)" % (_xt_v, _xt_t, _xt_m))
 bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
 if preview_fbx:
     bpy.ops.export_scene.fbx(filepath=preview_fbx, add_leaf_bones=False, bake_anim=True)
-print("VEHICLE RIG DONE: %d wheel part(s) clustered into %d wheel(s) %s, %d turret part(s) on one Turret bone, %d gun part(s) on one Gun bone%s, %d track loop(s) on own static bones, Spin 0..%d %.0f deg%s -> %s"
+# The export totals ride INSIDE the DONE line (user request 2026-09-05: the Lab's status box surfaces only this
+# one line, so a separate totals print never reached the eye that asked for it).
+print("VEHICLE RIG DONE: %d wheel part(s) clustered into %d wheel(s) %s, %d turret part(s) on one Turret bone, %d gun part(s) on one Gun bone%s, %d track loop(s) on own static bones, Spin 0..%d %.0f deg%s, exported %d verts / %d tris -> %s"
       % (len(wheel_names), len(clusters), {b: wheel_axes[b] for b in cluster_bones}, len(turret_names),
-         len(gun_names), " (child of Turret)" if (gun_names and turret_names) else "", len(track_names), frames, degrees,
-         (", wave rock %.1f deg over %d frames" % (rock_deg, rock_frames)) if rock_on else "", out_glb))
+         len(gun_names), " (child of Turret)" if (gun_names and turret_names) else "", len(track_names), _clip_frames, degrees,
+         (", wave rock %.1f deg x%d fitted cycle(s)" % (rock_deg, _rock_repeats)) if rock_on else "", _xt_v, _xt_t, out_glb))

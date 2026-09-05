@@ -42,7 +42,20 @@ public class VehicleLabWindow : EditorWindow
     // Trail (2026-08-22, the M114 deploy): a split-trail ARM that swings OPEN when the gun deploys — one bone hinged at
     // the end nearest the body, rotating about the vertical, mirrored per side. ("Leg" is deliberately NOT used —
     // it is reserved for a walking mech limb.) Dropdown-only for now: no shortcut key.
-    enum Role { Body, Wheel, Turret, Ignore, Default, Edgecase, Caterpillar, Gun, Rotor, TailRotor, Trail, Muzzle, Cradle }
+    // Oar (2026-09-04, the Khalandion galley): a MERGED oar mesh — every oar across both banks in one part — that the
+    // rigger splits into one bone per physical oar and bakes a rowing stroke (sweep + dip) into Spin. Unlike every other
+    // role, ONE marked part becomes MANY bones. Appended LAST so saved-recipe role ints stay valid. Hotkey: O.
+    // Sail (2026-09-04): marked canvas — a role, not a heuristic (auto-detecting sails broke on every next surface;
+    // the user's verdict: "instead of a complex algorithm, why not just mark it?"). All sail parts weld to ONE Sail
+    // bone: always exported double-sided, excluded from the inside-out flip, and HIDDEN at idle — Spin frame 0 drops
+    // the bone below the hull, frames 1..N hold it raised (Movement = Spin[1..N]). Appended LAST. Hotkey: S.
+    // Rigging (2026-09-05): marked rope/line geometry — dense tube meshes barely visible at game distance (the
+    // Khalandion's ropes alone are 65k verts). Decimated by the user-dialed percentage at Generate, at the source,
+    // so every downstream stage sees the slim mesh. Body-like otherwise (welds to Root). Dropdown-only, no hotkey.
+    // Structure (2026-09-05): the second reduction tier — small-but-dense DETAIL geometry (railings, a carved bow
+    // figure) that is more visible than rigging, so it gets its own, usually gentler, percentage dial. Same
+    // dissolve+collapse treatment at Generate; Body-like otherwise. Dropdown-only, no hotkey.
+    enum Role { Body, Wheel, Turret, Ignore, Default, Edgecase, Caterpillar, Gun, Rotor, TailRotor, Trail, Muzzle, Cradle, Oar, Sail, Rigging, Structure, Flag, Rudder }
     [Serializable] class Part { public string name; public int verts; public Vector3 center, size; public Role role;
         public int vis = -1;   // probe's escape-ray verdict: 1 = external (visible from outside), 0 = interior (never visible — strippable), -1 = unclassified (pre-visibility probe)
         public string bone = ""; }   // rigged sources: the bone this shard is weighted to (probe 2026-08-20) — lets a BONE row highlight its shards
@@ -68,6 +81,37 @@ public class VehicleLabWindow : EditorWindow
     // TRAILS (2026-08-22): how far each split-trail arm swings open when the gun deploys, and over how many
     // frames. Mirrored per side, hinged at the arm's body end — the rigger authors it as a separate "Deploy" action.
     [SerializeField] float trailSpreadDeg = 35f; [SerializeField] int trailFrames = 12;
+    // OARS (2026-09-04): the rowing stroke baked onto every recovered oar bone — a fore-aft sweep about the oarlock
+    // plus a phase-locked dip (blade down on the drive, up on the recovery), unison across the whole bank. Tunable
+    // because "believable from a distance" is a call made watching the preview loop, not from any one frame.
+    [SerializeField] float oarSweepDeg = 24f; [SerializeField] float oarDipDeg = 18f; [SerializeField] int oarFrames = 24;
+    // OAR LIFT: constant tilt re-centring the stroke height — a source whose oars are modelled raked steeply into
+    // the water rides too deep at any dip; positive lifts every oar toward horizontal, dip oscillates around it.
+    [SerializeField] float oarLiftDeg = 0f;
+    // OAR RAKE: the horizontal twin — constant fore/aft rotation re-centring the sweep arc. A source whose oars
+    // are modelled raked far aft swings "all backward" at any sweep; rake shifts the whole arc toward the bow.
+    [SerializeField] float oarRakeDeg = 0f;
+    // OAR PIVOT: where the oarlock (the fulcrum every rotation happens about) sits along each oar, % of its
+    // inboard->outboard extent. 30 was the build's hardcoded value; lower = nearer the handle = more oar swings.
+    [SerializeField] float oarPivotPct = 30f;
+    // OAR LENGTH: stretch each oar along its own axis about the oarlock — the pivot stays planted at the hull,
+    // the blade reaches further out and down. Pure axial scale; blade width and pole thickness untouched.
+    [SerializeField] float oarLengthPct = 100f;
+    // BLADE ROLL: some sources model the blades feathered — flat face parallel to the stroke — so they knife through
+    // the water edge-on. Spins each oar about its own long axis in the rest geometry (the Khalandion wants 90).
+    [SerializeField] float oarBladeRollDeg = 0f;
+    // RIGGING REDUCE: percentage of vertices removed from Rigging-marked parts at Generate (collapse decimate,
+    // at the source). 0 = untouched even when parts are marked.
+    [SerializeField] float riggingReducePct = 75f;
+    // STRUCTURE REDUCE: the second tier — visible-but-dense detail (railings, bow carving), usually cut gentler.
+    [SerializeField] float structureReducePct = 50f;
+    // BODY REDUCE: the third tier — parts explicitly marked Body. Default 0 (untouched): the hull is the model's
+    // face and usually deserves the Factory's global Reduce instead.
+    [SerializeField] float bodyReducePct = 0f;
+    // OAR / SAIL REDUCE: the marked-role meshes themselves (the Khalandion's three merged oar meshes are dense).
+    // Cut in the same pre-armature pass, so clustering/skinning land on the slim mesh. Default 0 = untouched.
+    [SerializeField] float oarReducePct = 0f;
+    [SerializeField] float sailReducePct = 0f;
     // GUN PIVOT: where the Gun bone sits along the assembly — the runtime elevation rotates about it, so this IS
     // the trunnion. 0.5 = bbox centre (unchanged default); an artillery piece wants ~0.4 (measured on the M114).
     [SerializeField] float gunPivot = 0.5f;
@@ -94,6 +138,7 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] bool tracksStatic = false; // isolation switch: rig tread loops rigid to the hull (no link bones, no conveyor)
     [SerializeField] bool spinEnabled = true;   // MASTER spin switch (2026-08-19, user request: disabling spin on a wheeled vehicle meant unmarking every wheel — the wave-checkbox lesson again). Off = generate with 0 spin degrees + static tracks; bones/markings all kept.
     [SerializeField] bool doubleSided = false;  // DOUBLE-SIDED at the source (2026-09-03): the game culls backfaces, so single-sided / CAD parts (thin spokes, plates) render see-through. On = vehicle_rig.py appends reversed, slightly-inset faces so the exported Spin GLB is genuinely two-sided — no runtime doubling, no preview mismatch.
+    [SerializeField] bool fixInsideOut = false; // FIX INSIDE-OUT FACES (2026-09-04): a source whose winding ships consistently inverted (the Khalandion hull) reads see-through from outside while showing the far wall's interior. On = vehicle_rig.py recalculates face normals outward (Shift+N) — the cheap single-sided fix; no extra triangles.
     // WAVE ROCK (2026-07-31): slow idle sway for FLOATING units, authored on a Hull bone under Root. 0 = off.
     [SerializeField] float rockDegrees = 0f;
     [SerializeField] int rockFrames = 120;
@@ -108,7 +153,7 @@ public class VehicleLabWindow : EditorWindow
     const int RockFps = 24;                       // Blender's scene fps — the clip's real-time length
     // The two motion sections fold independently (Sound Studio pattern): a model is almost always EITHER a wheeled
     // vehicle OR a floating one, so ~10 permanently-irrelevant rows were on screen at all times.
-    [SerializeField] bool foldSpin = true, foldWave = false, foldOrient = false, foldTrails = false;
+    [SerializeField] bool foldSpin = true, foldWave = false, foldOrient = false, foldTrails = false, foldOars = false, foldReduce = false, foldParts = true;
     // Straighten a source that imports crooked / on its side. Baked into the vertex data BEFORE the rig is built,
     // so wheel axles, tread side detection and the rock's auto hull-length axis all read the corrected pose.
     [SerializeField] Vector3 modelRot = Vector3.zero;
@@ -124,7 +169,7 @@ public class VehicleLabWindow : EditorWindow
     static float MaxDim(Part p) => Mathf.Max(p.size.x, Mathf.Max(p.size.y, p.size.z));
     bool VisiblePart(Part x) => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.center.z >= minHeight && x.center.z <= maxHeight && x.center.y >= minWidth && x.center.y <= maxWidth;
     [SerializeField] int partFilter;      // list filter: 0 = all; see FilterOptions (Unreviewed = Default + Edgecase)
-    static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase", "Caterpillar", "Gun", "Rotor", "Tail rotor", "Trail", "Muzzle", "Cradle" };
+    static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase", "Caterpillar", "Gun", "Rotor", "Tail rotor", "Trail", "Muzzle", "Cradle", "Oar", "Sail", "Rigging", "Structure", "Flag", "Rudder" };
     bool MatchesFilter(Role r) => partFilter == 1 ? (r == Role.Default || r == Role.Edgecase)
                                 : partFilter == 2 ? r == Role.Default
                                 : partFilter == 3 ? r == Role.Wheel
@@ -138,7 +183,13 @@ public class VehicleLabWindow : EditorWindow
                                 : partFilter == 11 ? r == Role.TailRotor
                                 : partFilter == 12 ? r == Role.Trail
                                 : partFilter == 13 ? r == Role.Muzzle
-                                : partFilter == 14 ? r == Role.Cradle : true;
+                                : partFilter == 14 ? r == Role.Cradle
+                                : partFilter == 15 ? r == Role.Oar
+                                : partFilter == 16 ? r == Role.Sail
+                                : partFilter == 17 ? r == Role.Rigging
+                                : partFilter == 18 ? r == Role.Structure
+                                : partFilter == 19 ? r == Role.Flag
+                                : partFilter == 20 ? r == Role.Rudder : true;
     // Roles that SPIN (get a bone + the Spin action): wheels and both rotor kinds. Used for the Generate-enable gate,
     // the spin-section summary, Verify, and the "inside the wheel" test — so a rotorcraft with no Wheel parts still rigs.
     static bool IsSpinner(Role r) => r == Role.Wheel || r == Role.Rotor || r == Role.TailRotor;
@@ -171,6 +222,18 @@ public class VehicleLabWindow : EditorWindow
         public bool tracksStatic = false;
         public bool spinEnabled = true;    // default true: recipes that predate the field keep their spin (absent-field = old behavior)
         public bool doubleSided = false;   // source double-siding (absent-field = old behavior: off)
+        public bool fixInsideOut = false;  // outward normal recalc (absent-field = old behavior: off)
+        public float oarSweepDeg = 24f; public float oarDipDeg = 18f; public int oarFrames = 24;   // rowing stroke (absent = live defaults)
+        public float oarBladeRollDeg = 0f;   // rest-pose blade squaring (absent-key 0 == the do-nothing default)
+        public float oarLiftDeg = 0f;        // stroke-height re-centre (absent-key 0 == the do-nothing default)
+        public float oarRakeDeg = 0f;        // sweep-arc fore/aft re-centre (absent-key 0 == the do-nothing default)
+        public float oarPivotPct = 30f;      // oarlock position along the oar (guarded by Has() on load: 30 ≠ 0)
+        public float oarLengthPct = 100f;    // axial oar stretch about the oarlock (guarded by Has(): 100 ≠ 0)
+        public float riggingReducePct = 75f; // rigging decimation percentage (guarded by Has() on load)
+        public float structureReducePct = 50f; // structure decimation percentage (guarded by Has() on load)
+        public float bodyReducePct = 0f;       // body decimation percentage (absent-key 0 == the do-nothing default)
+        public float oarReducePct = 0f;        // oar decimation percentage (absent-key 0 == the do-nothing default)
+        public float sailReducePct = 0f;       // sail decimation percentage (absent-key 0 == the do-nothing default)
         public Vector3 modelRot = Vector3.zero;
         public bool waveEnabled = false;
         public float rockDegrees = 0f;
@@ -253,7 +316,7 @@ public class VehicleLabWindow : EditorWindow
             for (int i = 0; i < rfiles.Length; i++) if (names[i + 1] == loadedRecipe) { cur = i + 1; break; }
 
             int sel = EditorGUILayout.Popup(new GUIContent("Edit existing",
-                "Load a saved recipe, or ＜new model＞ to start fresh. Recipes live in " + RecipesDir + "; Save recipe… adds to this list."), cur, labels);
+                "Load a saved recipe, or ＜new model＞ to start fresh. Recipes live in " + RecipesDir + "; Save writes the current one in place."), cur, labels);
             if (sel != cur)
             {
                 bool dirty = parts.Count > 0 || boneParts.Count > 0;
@@ -306,7 +369,7 @@ public class VehicleLabWindow : EditorWindow
                 if (GUILayout.Button(new GUIContent("Probe parts", "Headless Blender lists the model's mesh parts (a single combined mesh is split into loose parts). Roles are auto-guessed from names."), GUILayout.Height(24)))
                     Probe();
             using (new EditorGUI.DisabledScope(parts.Count == 0 && boneParts.Count == 0))
-                if (GUILayout.Button(new GUIContent("Save recipe…", "Save the whole configuration (source, output, roles, knobs) as JSON — it then appears in the Edit-existing dropdown above."), GUILayout.Width(110), GUILayout.Height(24)))
+                if (GUILayout.Button(new GUIContent("Save", "Save the whole configuration (source, output, roles, knobs) to the current recipe file — no dialog, no rename: the loaded recipe (or, for a new session, one named after the source model) is written in place under " + RecipesDir + " and appears in the Edit-existing dropdown above."), GUILayout.Width(70), GUILayout.Height(24)))
                     SaveRecipe();
             using (new EditorGUI.DisabledScope(parts.Count == 0 && boneParts.Count == 0))
                 if (GUILayout.Button(new GUIContent("Verify", "Sanity-check the classification: shows the wheel bones the rig step would build (clustering preview) and flags stray clusters, axle disagreement, unpaired wheels, turret outliers and undecided leftovers."), GUILayout.Width(70), GUILayout.Height(24)))
@@ -319,97 +382,110 @@ public class VehicleLabWindow : EditorWindow
                 useSourceRig = EditorGUILayout.ToggleLeft(new GUIContent($"Use source skeleton (fast path) — the model ships fully rigged ({boneParts.Count} bones)",
                     "The probe found an artist skeleton with full vertex weights. ON: mark which BONES spin and the rig step reuses that skeleton unchanged (artist axle pivots, weapon/socket bones kept). OFF: the static shard-marking flow."), useSourceRig);
             var list = ActiveParts;
-            // Tiny-fragment collapse: a triangle-soup FBX probes into THOUSANDS of 3-4-vert shards — they all belong
-            // to Body anyway (anything not marked wheel/turret skins to Root). Only substantial parts are listed.
-            minVerts = EditorGUILayout.IntSlider(new GUIContent("Hide parts under (verts)",
-                "Parts smaller than this are collapsed into Body automatically (they skin to Root). Raise it if the list is still noisy; lower it if a small wheel is missing."), minVerts, 1, 2000);
-            minPartSize = EditorGUILayout.Slider(new GUIContent("Hide parts under (size)",
-                "Parts whose largest bbox dimension is below this are hidden (they stay on the hull, like the verts filter). Drop the verts slider and raise this to find LARGE parts with only a few vertices — flat discs and plates."), minPartSize, 0f, 2f);
-            // Height filter: slider range auto-fits the model's actual vertical span (probe center heights, Z-up).
-            // PAD the ends a hair BEYOND the outermost part (user finding 2026-08-01): the default clamps to the exact
-            // min/max, but the slider rounds slightly inside, clipping the edge part ("1 hidden by the sliders" at rest).
-            // With the pad, "fully open" sits just past the parts, so nothing hides until you actually drag inward.
-            float zLo = list.Min(x => x.center.z), zHi = list.Max(x => x.center.z), zPad = Mathf.Max(0.02f, (zHi - zLo) * 0.02f);
-            minHeight = EditorGUILayout.Slider(new GUIContent("Hide parts below (height)",
-                "Parts whose center height is below this are hidden. Slide up past the hull deck to isolate turret-level parts."), Mathf.Clamp(minHeight, zLo - zPad, zHi + zPad), zLo - zPad, zHi + zPad);
-            maxHeight = EditorGUILayout.Slider(new GUIContent("Hide parts above (height)",
-                "Parts whose center height is above this are hidden. Slide down to strip the superstructure and isolate wheel/chassis-level parts."), Mathf.Clamp(maxHeight, zLo - zPad, zHi + zPad), zLo - zPad, zHi + zPad);
-            // Left/right (width) filter (user request 2026-08-01): the horizontal companion to the height bracket —
-            // slice along the WIDTH axis (center.y, where the two wheels mirror) to isolate ONE side's wheel. Same
-            // end-padding so a fresh model hides nothing until you drag.
-            float yLo = list.Min(x => x.center.y), yHi = list.Max(x => x.center.y), yPad = Mathf.Max(0.02f, (yHi - yLo) * 0.02f);
-            minWidth = EditorGUILayout.Slider(new GUIContent("Hide parts left of (side)",
-                "Parts whose center is LEFT of this on the width axis are hidden — bracket with the next slider to keep just one side's wheel. (Straighten the model in Orientation first so the two wheels split along this axis.)"), Mathf.Clamp(minWidth, yLo - yPad, yHi + yPad), yLo - yPad, yHi + yPad);
-            maxWidth = EditorGUILayout.Slider(new GUIContent("Hide parts right of (side)",
-                "Parts whose center is RIGHT of this on the width axis are hidden. Slide the two together onto one wheel to isolate it, then mark it Wheel."), Mathf.Clamp(maxWidth, yLo - yPad, yHi + yPad), yLo - yPad, yHi + yPad);
-            partFilter = EditorGUILayout.Popup(new GUIContent("Show only",
-                "Filter the list to one classification. Marking a part out of the current filter removes it from the list and auto-advances to the next."), partFilter, FilterOptions);
-            int interiorN = list.Count(x => x.vis == 0);
-            visFilter = EditorGUILayout.Popup(new GUIContent("Visibility",
-                "The probe's escape-ray verdict per part: External = some surface point can see out; Interior = provably " +
-                "never visible from outside (cockpit gear, engine guts) — mark those Ignore to reclaim triangle budget. " +
-                "Probed before this feature existed? Re-Probe to classify." + (interiorN > 0 ? $"  ({interiorN} interior found)" : "")),
-                visFilter, VisFilterOptions);
-            var shown = list.Where(x => VisiblePart(x) && MatchesFilter(x.role) && MatchesVis(x)).ToList();
-            int hidden = list.Count(x => !VisiblePart(x));
-            int unreviewed = list.Count(x => VisiblePart(x) && x.role == Role.Default);
-            int edgecases = list.Count(x => VisiblePart(x) && x.role == Role.Edgecase);
-            EditorGUILayout.LabelField($"{(useSourceRig && boneParts.Count > 0 ? "Source BONES" : "Parts")} ({shown.Count} shown{(hidden > 0 ? $", {hidden} hidden by the sliders" : "")}{(unreviewed > 0 ? $", {unreviewed} undecided" : ", all decided")}{(edgecases > 0 ? $", {edgecases} edge-case" : "")}) — mark {(useSourceRig && boneParts.Count > 0 ? "the bones that SPIN (Wheel)" : "the wheels & turret")}:", EditorStyles.boldLabel);
-            if (useSourceRig && boneParts.Count > 0)   // 2026-08-20: a user hunted for the turret's shards here — in this mode they are ONE row
-                EditorGUILayout.LabelField("Each row is one BONE of the shipped skeleton; all the shards skinned to it count as that row (the turret's parts = the Turret bone). Untick the fast path to list and mark individual parts.", EditorStyles.wordWrappedMiniLabel);
-            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   W/T/B = Wheel/Turret/Body   ·   R = Rotor (main, spins about the mast)   ·   L = taiL rotor (spins about the lateral axis)   ·   G = Gun (rides the Turret; muzzle/socket anchor)   ·   C = Caterpillar (tread loop)   ·   I = Ignore (DELETED)   ·   D = Default   ·   E = Edgecase", EditorStyles.miniLabel);
-            // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
-            // part's role — the whole list can be reviewed without mousing between rows and dropdowns.
-            var ev = Event.current;
-            if (ev.type == EventType.KeyDown && shown.Count > 0 && !EditorGUIUtility.editingTextField)
+            // PARTS SECTION (2026-09-05 user request): the whole filter + marking list folds away once the roles
+            // are decided, so the preview and the tuning sections below are reachable without scrolling past it.
+            // (Folded = the keyboard review loop is off too; it lives inside.)
+            int foldUndecided = list.Count(x => x.role == Role.Default);
+            if (Section(ref foldParts, "Parts — filter & mark the roles",
+                    $"{list.Count} part(s) · {(foldUndecided > 0 ? $"{foldUndecided} undecided" : "all decided")}"))
             {
-                int idx = shown.FindIndex(x => x.name == selectedPart);
-                if (ev.keyCode == KeyCode.UpArrow || ev.keyCode == KeyCode.DownArrow)
+                // Tiny-fragment collapse: a triangle-soup FBX probes into THOUSANDS of 3-4-vert shards — they all belong
+                // to Body anyway (anything not marked wheel/turret skins to Root). Only substantial parts are listed.
+                minVerts = EditorGUILayout.IntSlider(new GUIContent("Hide parts under (verts)",
+                    "Parts smaller than this are collapsed into Body automatically (they skin to Root). Raise it if the list is still noisy; lower it if a small wheel is missing."), minVerts, 1, 2000);
+                minPartSize = EditorGUILayout.Slider(new GUIContent("Hide parts under (size)",
+                    "Parts whose largest bbox dimension is below this are hidden (they stay on the hull, like the verts filter). Drop the verts slider and raise this to find LARGE parts with only a few vertices — flat discs and plates."), minPartSize, 0f, 2f);
+                // Height filter: slider range auto-fits the model's actual vertical span (probe center heights, Z-up).
+                // PAD the ends a hair BEYOND the outermost part (user finding 2026-08-01): the default clamps to the exact
+                // min/max, but the slider rounds slightly inside, clipping the edge part ("1 hidden by the sliders" at rest).
+                // With the pad, "fully open" sits just past the parts, so nothing hides until you actually drag inward.
+                float zLo = list.Min(x => x.center.z), zHi = list.Max(x => x.center.z), zPad = Mathf.Max(0.02f, (zHi - zLo) * 0.02f);
+                minHeight = EditorGUILayout.Slider(new GUIContent("Hide parts below (height)",
+                    "Parts whose center height is below this are hidden. Slide up past the hull deck to isolate turret-level parts."), Mathf.Clamp(minHeight, zLo - zPad, zHi + zPad), zLo - zPad, zHi + zPad);
+                maxHeight = EditorGUILayout.Slider(new GUIContent("Hide parts above (height)",
+                    "Parts whose center height is above this are hidden. Slide down to strip the superstructure and isolate wheel/chassis-level parts."), Mathf.Clamp(maxHeight, zLo - zPad, zHi + zPad), zLo - zPad, zHi + zPad);
+                // Left/right (width) filter (user request 2026-08-01): the horizontal companion to the height bracket —
+                // slice along the WIDTH axis (center.y, where the two wheels mirror) to isolate ONE side's wheel. Same
+                // end-padding so a fresh model hides nothing until you drag.
+                float yLo = list.Min(x => x.center.y), yHi = list.Max(x => x.center.y), yPad = Mathf.Max(0.02f, (yHi - yLo) * 0.02f);
+                minWidth = EditorGUILayout.Slider(new GUIContent("Hide parts left of (side)",
+                    "Parts whose center is LEFT of this on the width axis are hidden — bracket with the next slider to keep just one side's wheel. (Straighten the model in Orientation first so the two wheels split along this axis.)"), Mathf.Clamp(minWidth, yLo - yPad, yHi + yPad), yLo - yPad, yHi + yPad);
+                maxWidth = EditorGUILayout.Slider(new GUIContent("Hide parts right of (side)",
+                    "Parts whose center is RIGHT of this on the width axis are hidden. Slide the two together onto one wheel to isolate it, then mark it Wheel."), Mathf.Clamp(maxWidth, yLo - yPad, yHi + yPad), yLo - yPad, yHi + yPad);
+                partFilter = EditorGUILayout.Popup(new GUIContent("Show only",
+                    "Filter the list to one classification. Marking a part out of the current filter removes it from the list and auto-advances to the next."), partFilter, FilterOptions);
+                int interiorN = list.Count(x => x.vis == 0);
+                visFilter = EditorGUILayout.Popup(new GUIContent("Visibility",
+                    "The probe's escape-ray verdict per part: External = some surface point can see out; Interior = provably " +
+                    "never visible from outside (cockpit gear, engine guts) — mark those Ignore to reclaim triangle budget. " +
+                    "Probed before this feature existed? Re-Probe to classify." + (interiorN > 0 ? $"  ({interiorN} interior found)" : "")),
+                    visFilter, VisFilterOptions);
+                var shown = list.Where(x => VisiblePart(x) && MatchesFilter(x.role) && MatchesVis(x)).ToList();
+                int hidden = list.Count(x => !VisiblePart(x));
+                int unreviewed = list.Count(x => VisiblePart(x) && x.role == Role.Default);
+                int edgecases = list.Count(x => VisiblePart(x) && x.role == Role.Edgecase);
+                EditorGUILayout.LabelField($"{(useSourceRig && boneParts.Count > 0 ? "Source BONES" : "Parts")} ({shown.Count} shown{(hidden > 0 ? $", {hidden} hidden by the sliders" : "")}{(unreviewed > 0 ? $", {unreviewed} undecided" : ", all decided")}{(edgecases > 0 ? $", {edgecases} edge-case" : "")}) — mark {(useSourceRig && boneParts.Count > 0 ? "the bones that SPIN (Wheel)" : "the wheels & turret")}:", EditorStyles.boldLabel);
+                if (useSourceRig && boneParts.Count > 0)   // 2026-08-20: a user hunted for the turret's shards here — in this mode they are ONE row
+                    EditorGUILayout.LabelField("Each row is one BONE of the shipped skeleton; all the shards skinned to it count as that row (the turret's parts = the Turret bone). Untick the fast path to list and mark individual parts.", EditorStyles.wordWrappedMiniLabel);
+                EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   W/T/B = Wheel/Turret/Body   ·   R = Rotor (main, spins about the mast)   ·   L = taiL rotor (spins about the lateral axis)   ·   G = Gun (rides the Turret; muzzle/socket anchor)   ·   C = Caterpillar (tread loop)   ·   I = Ignore (DELETED)   ·   D = Default   ·   E = Edgecase", EditorStyles.miniLabel);
+                // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
+                // part's role — the whole list can be reviewed without mousing between rows and dropdowns.
+                var ev = Event.current;
+                if (ev.type == EventType.KeyDown && shown.Count > 0 && !EditorGUIUtility.editingTextField)
                 {
-                    idx = ev.keyCode == KeyCode.DownArrow ? Mathf.Min(idx + 1, shown.Count - 1) : Mathf.Max(idx - 1, 0);
-                    SelectPart(shown[idx].name);
-                    partsScroll.y = Mathf.Max(0f, idx * 20f - 120f);   // keep the selected row in view (~20px rows)
-                    GUIUtility.keyboardControl = 0;                    // a focused slider/popup must not swallow the arrows
-                    ev.Use(); Repaint();
-                }
-                else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I || ev.keyCode == KeyCode.D || ev.keyCode == KeyCode.E || ev.keyCode == KeyCode.C || ev.keyCode == KeyCode.G || ev.keyCode == KeyCode.R || ev.keyCode == KeyCode.L))
-                {
-                    shown[idx].role = ev.keyCode == KeyCode.W ? Role.Wheel
-                                    : ev.keyCode == KeyCode.T ? Role.Turret
-                                    : ev.keyCode == KeyCode.I ? Role.Ignore
-                                    : ev.keyCode == KeyCode.D ? Role.Default
-                                    : ev.keyCode == KeyCode.E ? Role.Edgecase
-                                    : ev.keyCode == KeyCode.C ? Role.Caterpillar
-                                    : ev.keyCode == KeyCode.G ? Role.Gun
-                                    : ev.keyCode == KeyCode.R ? Role.Rotor
-                                    : ev.keyCode == KeyCode.L ? Role.TailRotor : Role.Body;
-                    // If the new role falls outside the active filter, the part leaves the list — advance to the
-                    // next one so the sweep continues instead of the selection dying with the removed row.
-                    if (partFilter != 0 && !MatchesFilter(shown[idx].role))
+                    int idx = shown.FindIndex(x => x.name == selectedPart);
+                    if (ev.keyCode == KeyCode.UpArrow || ev.keyCode == KeyCode.DownArrow)
                     {
-                        SelectPart(idx + 1 < shown.Count ? shown[idx + 1].name : idx > 0 ? shown[idx - 1].name : "");
-                        partsScroll.y = Mathf.Max(0f, idx * 20f - 120f);
+                        idx = ev.keyCode == KeyCode.DownArrow ? Mathf.Min(idx + 1, shown.Count - 1) : Mathf.Max(idx - 1, 0);
+                        SelectPart(shown[idx].name);
+                        partsScroll.y = Mathf.Max(0f, idx * 20f - 120f);   // keep the selected row in view (~20px rows)
+                        GUIUtility.keyboardControl = 0;                    // a focused slider/popup must not swallow the arrows
+                        ev.Use(); Repaint();
                     }
-                    ev.Use(); Repaint();
+                    else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I || ev.keyCode == KeyCode.D || ev.keyCode == KeyCode.E || ev.keyCode == KeyCode.C || ev.keyCode == KeyCode.G || ev.keyCode == KeyCode.R || ev.keyCode == KeyCode.L || ev.keyCode == KeyCode.O || ev.keyCode == KeyCode.S))
+                    {
+                        shown[idx].role = ev.keyCode == KeyCode.W ? Role.Wheel
+                                        : ev.keyCode == KeyCode.T ? Role.Turret
+                                        : ev.keyCode == KeyCode.I ? Role.Ignore
+                                        : ev.keyCode == KeyCode.D ? Role.Default
+                                        : ev.keyCode == KeyCode.E ? Role.Edgecase
+                                        : ev.keyCode == KeyCode.C ? Role.Caterpillar
+                                        : ev.keyCode == KeyCode.G ? Role.Gun
+                                        : ev.keyCode == KeyCode.R ? Role.Rotor
+                                        : ev.keyCode == KeyCode.O ? Role.Oar
+                                        : ev.keyCode == KeyCode.S ? Role.Sail
+                                        : ev.keyCode == KeyCode.L ? Role.TailRotor : Role.Body;
+                        // If the new role falls outside the active filter, the part leaves the list — advance to the
+                        // next one so the sweep continues instead of the selection dying with the removed row.
+                        if (partFilter != 0 && !MatchesFilter(shown[idx].role))
+                        {
+                            SelectPart(idx + 1 < shown.Count ? shown[idx + 1].name : idx > 0 ? shown[idx - 1].name : "");
+                            partsScroll.y = Mathf.Max(0f, idx * 20f - 120f);
+                        }
+                        ev.Use(); Repaint();
+                    }
                 }
+                partsScroll = EditorGUILayout.BeginScrollView(partsScroll, GUILayout.Height(280));   // fixed: a greedy child inside the window scroll would never let it scroll
+                foreach (var p in shown)
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        p.role = (Role)EditorGUILayout.EnumPopup(p.role, GUILayout.Width(70));
+                        // the row label is a BUTTON: click = zoom the preview onto this part and tint it yellow
+                        bool isSel = selectedPart == p.name;
+                        var st = isSel ? EditorStyles.whiteMiniLabel : EditorStyles.miniLabel;
+                        if (GUILayout.Button($"{(isSel ? "◉ " : "")}{p.name}   ({p.verts} verts, size {p.size.x:0.00}×{p.size.y:0.00}×{p.size.z:0.00})", st))
+                            SelectPart(isSel ? "" : p.name);   // click again = back to full view
+                    }
+                EditorGUILayout.EndScrollView();
+                if (inst == null)
+                    EditorGUILayout.LabelField("  (probe preview unavailable — part focus needs the probe's preview FBX; re-Probe after recompiling)", EditorStyles.miniLabel);
+                else
+                    EditorGUILayout.LabelField("  Click a row to zoom + highlight it in the preview below; click again for the full view.", EditorStyles.miniLabel);
             }
-            partsScroll = EditorGUILayout.BeginScrollView(partsScroll, GUILayout.Height(280));   // fixed: a greedy child inside the window scroll would never let it scroll
-            foreach (var p in shown)
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    p.role = (Role)EditorGUILayout.EnumPopup(p.role, GUILayout.Width(70));
-                    // the row label is a BUTTON: click = zoom the preview onto this part and tint it yellow
-                    bool isSel = selectedPart == p.name;
-                    var st = isSel ? EditorStyles.whiteMiniLabel : EditorStyles.miniLabel;
-                    if (GUILayout.Button($"{(isSel ? "◉ " : "")}{p.name}   ({p.verts} verts, size {p.size.x:0.00}×{p.size.y:0.00}×{p.size.z:0.00})", st))
-                        SelectPart(isSel ? "" : p.name);   // click again = back to full view
-                }
-            EditorGUILayout.EndScrollView();
-            if (inst == null)
-                EditorGUILayout.LabelField("  (probe preview unavailable — part focus needs the probe's preview FBX; re-Probe after recompiling)", EditorStyles.miniLabel);
-            else
-                EditorGUILayout.LabelField("  Click a row to zoom + highlight it in the preview below; click again for the full view.", EditorStyles.miniLabel);
-            // ORIENTATION first: it changes what every measurement below sees, so it reads as step one.
+            // PREVIEW directly under the part list (2026-09-05 user request): classification is click-a-row →
+            // look at the yellow highlight, so the turntable belongs next to the rows, not at the window's bottom.
+            DrawTurntablePreview();
+            // ORIENTATION first among the knobs: it changes what every measurement below sees, so it reads as step one.
             if (Section(ref foldOrient, "Orientation — straighten the model",
                     modelRot == Vector3.zero ? "as imported" : $"{modelRot.x:0}° / {modelRot.y:0}° / {modelRot.z:0}°"))
             {
@@ -440,8 +516,8 @@ public class VehicleLabWindow : EditorWindow
                 // static tracks — bones and markings all survive for re-enabling. Dials stay visible, disabled.
                 spinEnabled = EditorGUILayout.ToggleLeft(new GUIContent("  Enable spin animation",
                     "Off: the rig is generated with zero wheel/rotor rotation and static tracks — every bone and marking is kept, nothing turns. On: normal spin. Markings and dial values survive toggling."), spinEnabled);
-                doubleSided = EditorGUILayout.ToggleLeft(new GUIContent("  Double-sided (fix see-through parts)",
-                    "The game culls backfaces, so single-sided / CAD parts (thin spokes, flat plates) render see-through from the wrong angle. On: the exported Spin GLB gets a reversed, slightly-inset copy of every face, making it genuinely two-sided at the source — the animated bake and both previews then just work. Doubles the triangle count; leave off for already-solid models."), doubleSided);
+                if (ActiveParts.Count(p => p.role == Role.Sail) > 0)
+                    EditorGUILayout.HelpBox("Sails marked: the rig authors a separate 'Furl' clip whose frame 1 FLIPS the canvas below the keel (rotation-only, the Deploy-proven stance mechanism) — a STANCE, never an animation to play. Assign after baking: Idle/reference = Spin[0..0] (defines the rest — never put Furl here, or the bind adopts the struck pose) · Idle stance (override) = Furl[1..1] (no sails) · Movement = Spin (sails up) · After-move and Pre-move EMPTY — the state change swaps the pose in one tick. Keep bone translations can stay OFF: the strike is pure rotation.", MessageType.None);
                 // SPIN GATING (2026-08-19, user: "really confusing that this is also present [on a boat] — we
                 // should be able to disable it"): with NO wheel/rotor/turret marked, spin is inert by definition,
                 // so the dials gray out instead of inviting tuning that does nothing. The ONE honest exception is
@@ -480,6 +556,62 @@ public class VehicleLabWindow : EditorWindow
                     // (both proven manually via dials first, then automated at the user's request)
                 }
                 }   // end spin-inert DisabledScope
+            }
+
+            // VERTICES CONTROL — its own section (2026-09-05 user requests: the reduce dials and the two facing
+            // checkboxes lived inside Spin, where they had no business). Everything here reshapes the exported
+            // GEOMETRY at Generate: facing fixes (double-sided, winding) + the three source-side reduction tiers.
+            {
+                int nRig = ActiveParts.Count(p => p.role == Role.Rigging), nStr = ActiveParts.Count(p => p.role == Role.Structure), nBod = ActiveParts.Count(p => p.role == Role.Body);
+                int nOar = ActiveParts.Count(p => p.role == Role.Oar), nSail = ActiveParts.Count(p => p.role == Role.Sail);
+                string facingSummary = (doubleSided ? "2-sided" : null);
+                if (fixInsideOut) facingSummary = facingSummary == null ? "winding fix" : facingSummary + " · winding fix";
+                // Only tiers with parts marked make the header — five always-on entries would drown it.
+                string reduceSummary = null;
+                void Tier(int n, string label, float pct) { if (n > 0) reduceSummary = (reduceSummary == null ? "" : reduceSummary + " · ") + $"{n} {label} @ {pct:0}%"; }
+                Tier(nRig, "rigging", riggingReducePct); Tier(nStr, "structure", structureReducePct); Tier(nBod, "body", bodyReducePct); Tier(nOar, "oar", oarReducePct); Tier(nSail, "sail", sailReducePct);
+                if (Section(ref foldReduce, "Vertices control — facing & density at the source",
+                        facingSummary == null && reduceSummary == null ? "geometry exported as authored"
+                            : facingSummary == null ? reduceSummary
+                            : reduceSummary == null ? facingSummary : facingSummary + " · " + reduceSummary))
+                {
+                    doubleSided = EditorGUILayout.ToggleLeft(new GUIContent("  Double-sided (fix see-through parts)",
+                        "The game culls backfaces, so single-sided / CAD parts (thin spokes, flat plates) render see-through from the wrong angle. On: the exported Spin GLB gets a reversed, slightly-inset copy of every face, making it genuinely two-sided at the source — the animated bake and both previews then just work. Doubles the triangle count; leave off for already-solid models. Marked Oar meshes are never doubled — galley blades are authored as front/back pairs, and doubling them z-shimmers."), doubleSided);
+                    fixInsideOut = EditorGUILayout.ToggleLeft(new GUIContent("  Fix inside-out faces",
+                        "For a source whose winding ships partly INVERTED — you see through the near hull wall from outside while the far wall's interior renders. On: islands that provably face the hull's interior (inverted side planking) are REVERSED at export — no extra triangles; everything else keeps the artist's winding, as do marked Sail and Oar meshes. Sails are a ROLE (S): mark the canvas instead of relying on any detection — marked sails are always double-sided and hide at idle."), fixInsideOut);
+                    EditorGUILayout.LabelField("  Reduction cuts marked parts at Generate (dissolve + collapse) — the previews and the bake all see the slim mesh. The Generate log prints each part's real before/after.", EditorStyles.miniLabel);
+                    using (new EditorGUI.DisabledScope(nRig == 0))
+                        riggingReducePct = EditorGUILayout.Slider(new GUIContent("Rigging reduce (%)",
+                            "Percentage of vertices REMOVED from Rigging-marked parts at Generate (dissolve + collapse, at the " +
+                            "source — every preview and the bake see the slim mesh). Rope/line geometry is dense but barely " +
+                            "visible at game distance; mark it Rigging in the dropdown and dial how hard to cut. 0 = untouched."),
+                            riggingReducePct, 0f, 95f);
+                    using (new EditorGUI.DisabledScope(nStr == 0))
+                        structureReducePct = EditorGUILayout.Slider(new GUIContent("Structure reduce (%)",
+                            "The SECOND reduction tier: small-but-dense DETAIL geometry (railings, a carved bow figure) that " +
+                            "is more visible than rigging, so it usually takes a gentler cut. Mark parts Structure in the " +
+                            "dropdown; same dissolve + collapse treatment at Generate, separate dial. 0 = untouched."),
+                            structureReducePct, 0f, 95f);
+                    using (new EditorGUI.DisabledScope(nBod == 0))
+                        bodyReducePct = EditorGUILayout.Slider(new GUIContent("Body reduce (%)",
+                            "The THIRD reduction tier: parts explicitly marked Body. Default 0 = untouched — the hull is the " +
+                            "model's face, and the Factory's global 'Reduce to ~tris' is usually the smarter place to slim " +
+                            "it. Use this only when the reviewed body geometry is itself needlessly dense at the source."),
+                            bodyReducePct, 0f, 95f);
+                    using (new EditorGUI.DisabledScope(nOar == 0))
+                        oarReducePct = EditorGUILayout.Slider(new GUIContent("Oar reduce (%)",
+                            "Cuts the Oar-marked meshes themselves (a galley's merged oar meshes can be very dense). " +
+                            "Runs BEFORE the per-oar clustering and skinning, so the bones and weights land on the slim " +
+                            "mesh; separate oars stay separate. Keep it gentle — the blades are thin sheets and over-" +
+                            "cutting shows at the waterline. 0 = untouched."),
+                            oarReducePct, 0f, 95f);
+                    using (new EditorGUI.DisabledScope(nSail == 0))
+                        sailReducePct = EditorGUILayout.Slider(new GUIContent("Sail reduce (%)",
+                            "Cuts the Sail-marked canvas at the source. Worth a look because sails are exported DOUBLE-" +
+                            "sided — every vertex kept here ships twice — but the canvas curvature is the sail's whole " +
+                            "shape, so cut gently. 0 = untouched."),
+                            sailReducePct, 0f, 95f);
+                }
             }
 
             // TRAILS — a split-trail gun's DEPLOY. The arms marked Trail get a bone hinged at their body end and a
@@ -593,6 +725,65 @@ public class VehicleLabWindow : EditorWindow
                 }
             }
 
+            // OARS — a galley's rowing bank. Unlike every other role, ONE marked oar mesh (poles + blades, each
+            // spanning both sides) becomes MANY bones: the rig splits it into one bone per oar and bakes the stroke.
+            if (Section(ref foldOars, "Oars — a galley rowing",
+                    ActiveParts.Count(p => p.role == Role.Oar) == 0 ? "no oars marked"
+                        : $"{ActiveParts.Count(p => p.role == Role.Oar)} oar part(s) · sweep {oarSweepDeg:0.#}° · dip {oarDipDeg:0.#}° over {oarFrames} frames"))
+            {
+                using (new EditorGUI.DisabledScope(ActiveParts.Count(p => p.role == Role.Oar) == 0))
+                {
+                    oarSweepDeg = EditorGUILayout.Slider(new GUIContent("Sweep (deg)",
+                        "The TOTAL fore-aft arc each oar swings about its oarlock, split evenly around the stroke " +
+                        "centre — 24 means 12° forward and 12° back. POSITIVE rows the ship forward on a correctly " +
+                        "oriented model (bow toward the forward arrow) — same convention as Rake; flip the sign if it " +
+                        "rows backwards (the Spin-degrees convention for wheels). ~24–48° total reads clearly from " +
+                        "the game's distance."), oarSweepDeg, -90f, 90f);
+                    oarDipDeg = EditorGUILayout.Slider(new GUIContent("Dip (deg)",
+                        "How far the blades drop into the water on the drive and lift clear on the recovery — a second " +
+                        "rotation phase-locked to the sweep. NEGATIVE flips WHICH half of the stroke is submerged — the " +
+                        "other way to reverse the rowing direction (flip either Sweep or Dip, not both: both flips " +
+                        "cancel). 0 = a flat fore-aft sweep with no dip. Keep |Sweep| above ~2x the dip so the stroke " +
+                        "reads directional instead of churning."), oarDipDeg, -45f, 45f);
+                    oarLiftDeg = EditorGUILayout.Slider(new GUIContent("Lift (deg)",
+                        "Re-centres the WHOLE stroke's height: a constant tilt about the dip axis, with the dip " +
+                        "oscillating around it. Positive raises every oar toward horizontal — the fix when the source " +
+                        "models the oars raked steeply into the water and they ride too deep at any dip (the dip's " +
+                        "sign cannot do this: ±dip is the same oscillation, phase-flipped). 0 = the modelled rake."),
+                        oarLiftDeg, -60f, 60f);
+                    oarRakeDeg = EditorGUILayout.Slider(new GUIContent("Rake (deg)",
+                        "Re-centres the sweep ARC fore/aft: a constant rotation about the oarlock, with the sweep " +
+                        "oscillating around it — the horizontal twin of Lift. A source that models the oars raked far " +
+                        "aft swings 'all backward, nothing forward' at any sweep; rake the arc toward the bow until the " +
+                        "stroke straddles the perpendicular. Same sign convention as Sweep — flip if it shifts the " +
+                        "wrong way. 0 = the modelled rake."), oarRakeDeg, -90f, 90f);
+                    oarPivotPct = EditorGUILayout.Slider(new GUIContent("Pivot (%)",
+                        "Where the oarlock — the fulcrum every sweep/dip/lift/rake rotates about — sits along each " +
+                        "oar, as a percentage of its inboard→outboard extent. 0 = at the handle (the whole oar " +
+                        "swings), higher = further out toward the blade (less oar moves, and the inboard handle " +
+                        "counter-swings more). 30 is the historical default. Needs a re-Generate: the pivot is the " +
+                        "bone's position."), oarPivotPct, 0f, 90f);
+                    oarLengthPct = EditorGUILayout.Slider(new GUIContent("Length (%)",
+                        "Stretches each oar along its own axis ABOUT THE OARLOCK — the pivot stays planted at the " +
+                        "hull, the blade reaches further out and down (and the handle further in). Pure lengthening: " +
+                        "blade width and pole thickness are untouched. 100 = the modelled length. Needs a re-Generate: " +
+                        "it reshapes the rest geometry."), oarLengthPct, 50f, 200f);
+                    oarFrames = EditorGUILayout.IntSlider(new GUIContent("Stroke frames",
+                        "Preferred length of one stroke. When another Spin motion uses a longer clip, Vehicle Lab fits " +
+                        "the nearest whole number of strokes across it so every subsystem loops without a pause or snap. " +
+                        "The runtime plays at 24 fps, so ~24 frames ≈ one second per stroke."), oarFrames, 4, 90);
+                    oarBladeRollDeg = EditorGUILayout.Slider(new GUIContent("Blade roll (deg)",
+                        "Spins each oar about its own long axis in the rest geometry, for sources whose blades are " +
+                        "modelled FEATHERED — flat face parallel to the stroke, knifing through the water edge-on " +
+                        "instead of scooping. 90 squares such a blade to the water; 0 = leave the source untouched. " +
+                        "The cylindrical pole shows no change — only the blade face turns."), oarBladeRollDeg, -180f, 180f);
+                }
+                EditorGUILayout.HelpBox("Mark the oar meshes (O) — poles and blades, each a single merged mesh spanning " +
+                    "both banks. The rig recovers every oar to its own bone and bakes the stroke into Spin, so the oars " +
+                    "row whenever the movement clip plays. Adds one bone per oar (~60 on a galley) — well within budget.",
+                    MessageType.None);
+            }
+
             // WAVE ROCK — a FLOATING unit's idle sway. Independent of wheels: a boat marks nothing but Ignore
             // (to strip parts) and rocks. Rotation-only on a Hull bone, so no Keep-translations needed downstream.
             if (Section(ref foldWave, "Wave rock — floating units",
@@ -642,21 +833,42 @@ public class VehicleLabWindow : EditorWindow
             EditorGUILayout.Space(4);
 
             int wheels = list.Count(x => IsSpinner(x.role));
-            bool canRig = wheels > 0 || (waveEnabled && (rockDegrees > 0f || rockPitchDeg > 0f));
+            int oars = list.Count(x => x.role == Role.Oar);
+            // Oar recovery needs shard geometry and cannot run against source-bone rows. Keep this gate aligned
+            // with vehicle_rig.py's defensive rigfast rejection so the UI can never report a successful no-op.
+            bool fastPathOars = FastPath && oars > 0;
+            bool canRig = !fastPathOars && (wheels > 0 || oars > 0 || (waveEnabled && (rockDegrees > 0f || rockPitchDeg > 0f)));
+            if (fastPathOars)
+                EditorGUILayout.HelpBox("Oar recovery is not available on the source-skeleton fast path. Disable " +
+                    "Use source skeleton, Probe parts, and mark the merged oar meshes instead.", MessageType.Warning);
             using (new EditorGUI.DisabledScope(!canRig || string.IsNullOrEmpty(outGlb)))
                 if (GUILayout.Button(new GUIContent($"Generate rig{(useSourceRig && boneParts.Count > 0 ? " (fast path)" : "")}  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
-                        !canRig ? "Mark at least one entry as Wheel / Rotor / Tail rotor — or set a Wave rock amplitude (a floating unit needs no wheels)." : "Runs Blender: rig + Spin action + GLB export + preview."), GUILayout.Height(28)))
+                        fastPathOars ? "Disable the source-skeleton fast path before recovering oars from merged mesh geometry."
+                        : !canRig ? "Mark at least one entry as Wheel / Rotor / Tail rotor / Oar — or set a Wave rock amplitude (a floating unit needs no wheels)."
+                        : "Runs Blender: rig + Spin action + GLB export + preview."), GUILayout.Height(28)))
                     Vehicleize();
         }
 
         if (!string.IsNullOrEmpty(status)) EditorGUILayout.HelpBox(status, MessageType.None);
+        EditorGUILayout.EndScrollView();
+    }
 
-        // turntable preview (the real imported preview FBX playing its Spin clip)
+    // turntable preview (the real imported preview FBX playing its Spin clip) — drawn directly UNDER the part
+    // list (2026-09-05 user request: classifying parts means click-a-row → look at the highlight, and with the
+    // preview at the window's bottom every row cost a scroll).
+    void DrawTurntablePreview()
+    {
         if (inst != null)
         {
+            EditorGUILayout.LabelField("Preview   (drag = orbit · middle/right-drag = pan · scroll = zoom · click a part row to focus)", EditorStyles.miniBoldLabel);
+            // the VIEW first, its size dial second, the option buttons last (2026-09-05 user request: the options
+            // moved below Preview height)
+            var rect = GUILayoutUtility.GetRect(200f, 4000f, previewHeight, previewHeight, GUILayout.ExpandWidth(true));
+            HandlePreviewInput(rect);
+            if (Event.current.type == EventType.Repaint) RenderPreview(rect);
+            previewHeight = EditorGUILayout.IntSlider(new GUIContent("Preview height", "Taller preview, or shorter to keep the knobs on screen. The window scrolls either way."), previewHeight, 220, 900);
             using (new EditorGUILayout.HorizontalScope())
             {
-                EditorGUILayout.LabelField("Preview   (drag = orbit · middle/right-drag = pan · scroll = zoom · click a part row to focus)", EditorStyles.miniBoldLabel);
                 // WHICH CLIP (2026-08-22): the rig authors `Spin` (wheels) and, for a split-trail gun, `Deploy`
                 // (the arms swinging open). Judge either here rather than waiting for a bake.
                 if (previewClips != null && previewClips.Count > 1)
@@ -707,14 +919,7 @@ public class VehicleLabWindow : EditorWindow
                     EditorStyles.miniButton, GUILayout.Width(70));
                 if (wantChecker != previewChecker) { previewChecker = wantChecker; ApplyChecker(previewChecker); Repaint(); }
             }
-            // min 400 tall and greedy: the inspection view claims all leftover window height (was fixed 260,
-            // leaving dead grey space below in a tall window).
-            var rect = GUILayoutUtility.GetRect(200f, 4000f, previewHeight, previewHeight, GUILayout.ExpandWidth(true));
-            HandlePreviewInput(rect);
-            if (Event.current.type == EventType.Repaint) RenderPreview(rect);
-            previewHeight = EditorGUILayout.IntSlider(new GUIContent("Preview height", "Taller preview, or shorter to keep the knobs on screen. The window scrolls either way."), previewHeight, 220, 900);
         }
-        EditorGUILayout.EndScrollView();
     }
 
     void Probe()
@@ -760,6 +965,12 @@ public class VehicleLabWindow : EditorWindow
             p.role = keptMap.TryGetValue(p.name, out var kr) ? kr
                    : low.Contains("tail") && (low.Contains("rotor") || low.Contains("prop")) ? Role.TailRotor  // "tail rotor" before the generic rotor guess
                    : low.Contains("fantail") || low.Contains("fenestron") ? Role.TailRotor
+                   : low.Contains("oar") ? Role.Oar   // before the generic "blade" -> Rotor guess: an oar blade contains "blade"
+                   : low.Contains("sail") ? Role.Sail
+                   : low.Contains("rigging") || low.Contains("rope") ? Role.Rigging
+                   : low.Contains("railing") ? Role.Structure
+                   : low.Contains("flag") || low.Contains("banner") || low.Contains("pennant") ? Role.Flag
+                   : low.Contains("rudder") ? Role.Rudder
                    : low.Contains("rotor") || low.Contains("helix") || low.Contains("blade") || low.Contains("propeller") ? Role.Rotor
                    : low.Contains("wheel") || low.Contains("tyre") || low.Contains("tire") ? Role.Wheel
                    : low.Contains("turret") ? Role.Turret : Role.Default;
@@ -953,7 +1164,7 @@ public class VehicleLabWindow : EditorWindow
         parts.Clear(); boneParts.Clear(); useSourceRig = false;
         frames = 15; degrees = -360f; axisChoice = 0;
         treadAdvCells = 3; treadCellsPerLink = 4f; tracksStatic = false;
-        rockDegrees = 0f; rockFrames = 120; rockAxisChoice = 0; rockHeading = 0f; rockPitchDeg = 2.4f; rockRollCycles = 1; rockPitchCycles = 1; rockPitchPhase = 90f; waveEnabled = false; foldSpin = true; foldWave = false; foldOrient = false; modelRot = Vector3.zero;
+        rockDegrees = 0f; rockFrames = 120; rockAxisChoice = 0; rockHeading = 0f; rockPitchDeg = 2.4f; rockRollCycles = 1; rockPitchCycles = 1; rockPitchPhase = 90f; waveEnabled = false; foldSpin = true; foldWave = false; foldOrient = false; foldParts = true; modelRot = Vector3.zero;
         minVerts = 50; minPartSize = 0f; minHeight = -999f; maxHeight = 999f; minWidth = -999f; maxWidth = 999f;
         partFilter = 0; selectedPart = ""; partsScroll = Vector2.zero; previewPan = Vector2.zero;
         DestroyPreview();
@@ -1073,18 +1284,18 @@ public class VehicleLabWindow : EditorWindow
     {
         string projRoot = Directory.GetParent(Application.dataPath).FullName;
         Directory.CreateDirectory(Path.Combine(projRoot, RecipesDir));
-        // Default to the CURRENT recipe's name, not the source model's (2026-08-19 user find: saved as prod3,
-        // the next Save suggested prod2 again — the srcFile-derived default silently reverted the name).
-        string def = !string.IsNullOrEmpty(loadedRecipe) ? loadedRecipe
-                   : Path.GetFileNameWithoutExtension(string.IsNullOrEmpty(srcFile) ? "vehicle" : srcFile);
-        string p = EditorUtility.SaveFilePanel("Save vehicleize recipe", Path.Combine(projRoot, RecipesDir), def, "json");
-        if (string.IsNullOrEmpty(p)) return;
+        // NO file dialog (2026-09-05 user request: "simply save the current recipe" — the save-as panel only
+        // invited accidental renames). The recipe's identity is the loaded name, or the source model's name for
+        // a fresh session; Save always writes that one file, in place.
+        string name = !string.IsNullOrEmpty(loadedRecipe) ? loadedRecipe
+                    : Path.GetFileNameWithoutExtension(string.IsNullOrEmpty(srcFile) ? "vehicle" : srcFile);
+        string p = Path.Combine(projRoot, RecipesDir, name + ".json");
         var r = new Recipe
         {
             srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
             parts = parts, boneParts = boneParts, useSourceRig = useSourceRig, treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink,
             // orientation + tread isolation + wave rock — the rest of what the bake command consumes
-            tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, modelRot = modelRot, waveEnabled = waveEnabled,
+            tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, modelRot = modelRot, waveEnabled = waveEnabled,
             trailSpreadDeg = trailSpreadDeg, trailFrames = trailFrames, gunPivot = gunPivot, gunDeployElev = gunDeployElev, recoilDist = recoilDist, recoilFrames = recoilFrames, recoilLead = recoilLead,
             rockDegrees = rockDegrees, rockFrames = rockFrames, rockAxisChoice = rockAxisChoice, rockHeading = rockHeading,
             rockPitchDeg = rockPitchDeg, rockRollCycles = rockRollCycles, rockPitchCycles = rockPitchCycles, rockPitchPhase = rockPitchPhase,
@@ -1108,12 +1319,14 @@ public class VehicleLabWindow : EditorWindow
             // wave config "loss" took GLB forensics to diagnose). JsonUtility can't tell absent from default,
             // so key-presence in the raw text is the honest signal; one representative key per feature era.
             var predates = new List<string>();
-            void Chk(string key, string label) { if (!json.Contains("\"" + key + "\"")) predates.Add(label); }
+            bool Has(string key) => json.Contains("\"" + key + "\"");
+            void Chk(string key, string label) { if (!Has(key)) predates.Add(label); }
             Chk("boneParts", "source-rig fast path");
             Chk("treadAdvCells", "tread dials");
             Chk("tracksStatic", "orientation + static tracks");
             Chk("waveEnabled", "wave rock");
             Chk("spinEnabled", "spin switch");
+            Chk("oarSweepDeg", "oar stroke");
             DestroyPreview();
             srcFile = r.srcFile; outGlb = r.outGlb; frames = r.frames; axisChoice = r.axisChoice; minVerts = r.minVerts; degrees = r.degrees;
             treadAdvCells = r.treadAdvCells > 0 ? r.treadAdvCells : 3;   // pre-knob recipes default to road-wheel sync
@@ -1121,7 +1334,21 @@ public class VehicleLabWindow : EditorWindow
             // orientation + tread isolation + wave rock: fully RESTORE them (so a wheeled recipe overwrites a boat's
             // rock and vice-versa — no leak between models). off/zero is the safe neutral for a pre-2026-08-01 recipe;
             // the counted fields guard against a missing-key 0 the way treadAdvCells does.
-            modelRot = r.modelRot; tracksStatic = r.tracksStatic; spinEnabled = r.spinEnabled; doubleSided = r.doubleSided;
+            modelRot = r.modelRot; tracksStatic = r.tracksStatic; spinEnabled = r.spinEnabled; doubleSided = r.doubleSided; fixInsideOut = r.fixInsideOut;
+            // JsonUtility.FromJson assigns default(T), not field initializers, to keys absent from old recipes.
+            // Preserve a deliberately saved zero amplitude, but migrate a pre-0.5.5 recipe to the live defaults.
+            oarSweepDeg = Has("oarSweepDeg") ? r.oarSweepDeg : 24f;
+            oarDipDeg = Has("oarDipDeg") ? r.oarDipDeg : 18f;
+            oarFrames = Has("oarFrames") ? r.oarFrames : 24;
+            oarBladeRollDeg = r.oarBladeRollDeg;   // absent-key 0 IS the do-nothing default — no migration needed
+            oarLiftDeg = r.oarLiftDeg;             // same: absent-key 0 == do-nothing
+            oarRakeDeg = r.oarRakeDeg;             // same: absent-key 0 == do-nothing
+            oarPivotPct = Has("oarPivotPct") ? r.oarPivotPct : 30f;   // 30 ≠ 0: absent key must not slam the pivot to the handle
+            oarLengthPct = Has("oarLengthPct") ? r.oarLengthPct : 100f;   // 100 ≠ 0: absent key must not crush the oars
+            riggingReducePct = Has("riggingReducePct") ? r.riggingReducePct : 75f;
+            structureReducePct = Has("structureReducePct") ? r.structureReducePct : 50f;
+            bodyReducePct = r.bodyReducePct;   // absent-key 0 IS the do-nothing default — no migration needed
+            oarReducePct = r.oarReducePct; sailReducePct = r.sailReducePct;   // same: absent-key 0 == untouched
             trailSpreadDeg = r.trailSpreadDeg; trailFrames = r.trailFrames; gunPivot = r.gunPivot; gunDeployElev = r.gunDeployElev; recoilDist = r.recoilDist; recoilFrames = r.recoilFrames; recoilLead = r.recoilLead;
             waveEnabled = r.waveEnabled; rockDegrees = r.rockDegrees; rockAxisChoice = r.rockAxisChoice; rockHeading = r.rockHeading;
             rockPitchDeg = r.rockPitchDeg; rockPitchPhase = r.rockPitchPhase;
@@ -1221,6 +1448,11 @@ public class VehicleLabWindow : EditorWindow
 
     void Vehicleize()
     {
+        if (FastPath && ActiveParts.Any(p => p.role == Role.Oar))
+        {
+            status = "Oar recovery needs mesh parts. Disable Use source skeleton, Probe parts, then mark the merged oar meshes.";
+            return;
+        }
         // OVERWRITE GUARD: the output path is explicit and user-owned — an existing file (e.g. a HAND-MADE rig like
         // the original Ehrhardt_Spin.glb) is never clobbered without an explicit yes.
         if (File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?",
@@ -1277,10 +1509,35 @@ public class VehicleLabWindow : EditorWindow
         // Once recoil exists it is the part that STAYS while the barrel kicks back — the reason it is its own role.
         string cradlesFile = Path.Combine(projRoot, prevDir, baseName + "_cradles.txt").Replace('\\', '/');
         File.WriteAllLines(cradlesFile, src.Where(p => p.role == Role.Cradle).Select(p => p.name).ToArray());
+        // OARS (2026-09-04, the Khalandion galley): the merged oar meshes (poles + blades, each spanning both banks).
+        // Unlike every other role each marked mesh becomes MANY bones — the rigger clusters it into individual oars and
+        // bakes the rowing stroke (sweep + dip) into Spin. Empty file = no oars, and the rig regenerates unchanged.
+        string oarsFile = Path.Combine(projRoot, prevDir, baseName + "_oars.txt").Replace('\\', '/');
+        File.WriteAllLines(oarsFile, src.Where(p => p.role == Role.Oar).Select(p => p.name).ToArray());
+        // SAILS (2026-09-04): marked canvas. One Sail bone, always double-sided at export, hidden at Spin frame 0.
+        string sailsFile = Path.Combine(projRoot, prevDir, baseName + "_sails.txt").Replace('\\', '/');
+        File.WriteAllLines(sailsFile, src.Where(p => p.role == Role.Sail).Select(p => p.name).ToArray());
+        // RIGGING (2026-09-05): marked rope/line geometry, decimated at the source by riggingReducePct.
+        string riggingFile = Path.Combine(projRoot, prevDir, baseName + "_rigging.txt").Replace('\\', '/');
+        File.WriteAllLines(riggingFile, src.Where(p => p.role == Role.Rigging).Select(p => p.name).ToArray());
+        // STRUCTURE (2026-09-05): dense detail geometry (railings, bow carving), the second reduction tier.
+        string structureFile = Path.Combine(projRoot, prevDir, baseName + "_structure.txt").Replace('\\', '/');
+        File.WriteAllLines(structureFile, src.Where(p => p.role == Role.Structure).Select(p => p.name).ToArray());
+        // BODY reduce (2026-09-05): the third tier — explicitly-marked Body parts, default dial 0 (untouched).
+        string bodiesFile = Path.Combine(projRoot, prevDir, baseName + "_bodies.txt").Replace('\\', '/');
+        File.WriteAllLines(bodiesFile, src.Where(p => p.role == Role.Body).Select(p => p.name).ToArray());
+        // FLAGS (2026-09-05, split from rudders same day): banners fly AT ANCHOR and are struck while moving —
+        // the opposite of sails (one Flag bone, held flipped below the keel through Spin). Double-sided at export.
+        string flagsFile = Path.Combine(projRoot, prevDir, baseName + "_flags.txt").Replace('\\', '/');
+        File.WriteAllLines(flagsFile, src.Where(p => p.role == Role.Flag).Select(p => p.name).ToArray());
+        // RUDDERS: the always-visible double-sided treatment (a closed slab with one face-side wound inward
+        // scores ~0 in the inside-out flip — the halves cancel — so doubling is the only repair). No bone, no clip.
+        string ruddersFile = Path.Combine(projRoot, prevDir, baseName + "_rudders.txt").Replace('\\', '/');
+        File.WriteAllLines(ruddersFile, src.Where(p => p.role == Role.Rudder).Select(p => p.name).ToArray());
         string axis = axisChoice == 0 ? "AUTO" : AxisOptions[axisChoice];
         string tailAxis = tailAxisChoice == 0 ? "AUTO" : AxisOptions[tailAxisChoice];
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")}", out string stdout)) return;   // argv[41]: double-sided
+        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")} \"@{oarsFile}\" {oarSweepDeg.ToString("0.##", inv)} {oarDipDeg.ToString("0.##", inv)} {oarFrames} {(fixInsideOut ? "1" : "0")} {oarBladeRollDeg.ToString("0.##", inv)} \"@{sailsFile}\" \"@{riggingFile}\" {riggingReducePct.ToString("0.#", inv)} \"@{structureFile}\" {structureReducePct.ToString("0.#", inv)} \"@{bodiesFile}\" {bodyReducePct.ToString("0.#", inv)} \"@{flagsFile}\" {oarLiftDeg.ToString("0.##", inv)} {oarRakeDeg.ToString("0.##", inv)} {oarPivotPct.ToString("0.#", inv)} {oarLengthPct.ToString("0.#", inv)} \"@{ruddersFile}\" {oarReducePct.ToString("0.#", inv)} {sailReducePct.ToString("0.#", inv)}", out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll; argv[48]: sail parts; argv[49..50]: rigging parts, reduce %; argv[51..52]: structure parts, reduce %; argv[53..54]: body parts, reduce %; argv[55]: flag parts; argv[61..62]: oar reduce %, sail reduce %
         // SUCCESS = THE SCRIPT'S OWN FINAL MARKER (the documented Blender trap: it exits 0 even when the python
         // script crashes mid-way — without this gate a half-run printed a fake "DONE" with no file on disk).
         string done = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE RIG DONE"));
@@ -1357,8 +1614,12 @@ public class VehicleLabWindow : EditorWindow
         DestroyPreview();
         var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prevRel);
         if (prefab == null) return;
+        // Spin FIRST (2026-09-05 user request): plain OrderBy put "Furl" alphabetically ahead of "Spin", so the
+        // preview opened on the sail stance instead of the motion everyone actually judges. Spin is the primary
+        // clip everywhere else in the pipeline — it leads here too; the rest stay alphabetical after it.
         previewClips = AssetDatabase.LoadAllAssetsAtPath(prevRel).OfType<AnimationClip>()
-                                    .Where(c => c != null && !c.name.StartsWith("__preview")).OrderBy(c => c.name).ToList();
+                                    .Where(c => c != null && !c.name.StartsWith("__preview"))
+                                    .OrderBy(c => c.name.EndsWith("Spin") ? 0 : 1).ThenBy(c => c.name).ToList();
         if (previewClipIdx >= previewClips.Count) previewClipIdx = 0;
         spinClip = previewClips.Count > 0 ? previewClips[previewClipIdx] : null;
         if (pru == null) pru = new PreviewRenderUtility();
