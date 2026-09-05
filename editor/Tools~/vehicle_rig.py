@@ -309,6 +309,11 @@ rigging_reduce = min(95.0, max(0.0, float(argv[50]))) if len(argv) > 50 and argv
 # usually gentler, percentage dial. Same dissolve+collapse treatment, separate knob.
 structure_names = namelist(argv[51]) if len(argv) > 51 and argv[51].strip() else []
 structure_reduce = min(95.0, max(0.0, float(argv[52]))) if len(argv) > 52 and argv[52].strip() else 0.0
+# BODY reduction (argv[53..54]): the third tier — parts explicitly marked Body. Default 0 (untouched): the hull is
+# the model's face and usually deserves the Factory's smarter global Reduce instead; this dial exists for sources
+# whose reviewed body geometry is itself needlessly dense.
+body_names = namelist(argv[53]) if len(argv) > 53 and argv[53].strip() else []
+body_reduce = min(95.0, max(0.0, float(argv[54]))) if len(argv) > 54 and argv[54].strip() else 0.0
 recoil_bone = None               # set to "RecoilArm" when the split actually happens — the bone the clip ROTATES
 recoil_geom = None               # (pivot, axis, bore_dir, slide, R) for the arc that fakes the slide
 # Residual tilt the arc leaves on the tube. The slide is faked by swinging the barrel on a long arm, so some pitch
@@ -612,7 +617,7 @@ for grp, is_tail in ((rotor_names, False), (tailrotor_names, True)):
 # thousands of tiny disconnected islands each keep minimum topology), then COLLAPSE toward the dial's target
 # measured against the ORIGINAL count, so the percentage means what it says or better. The print carries all
 # three numbers so a too-aggressive dial is loud, not silent.
-for _rlabel, _rnames, _rpct in (("RIGGING", rigging_names, rigging_reduce), ("STRUCTURE", structure_names, structure_reduce)):
+for _rlabel, _rnames, _rpct in (("RIGGING", rigging_names, rigging_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce)):
     if not _rnames or _rpct <= 0.5:
         continue
     try:

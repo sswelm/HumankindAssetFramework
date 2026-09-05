@@ -56,6 +56,8 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   bow figure — another 65k verts each on the Khalandion) is more visible than rigging, so it takes its own,
   usually gentler **Structure reduce (%)**. Same dissolve+collapse treatment at Generate; both tiers print
   original → dissolved → final against the dial's target.
+- **Body reduce (%)** completes the tiers — parts explicitly marked Body, default 0 (untouched: the hull is the
+  model's face, and the Factory's global *Reduce to ~tris* is usually the smarter place to slim it).
 - **Sweep accepts negative** — if the galley rows backwards, flip the sign (the wheels' Spin-degrees convention);
   the dip phase stays put, so blades still bury on the reversed drive.
 
