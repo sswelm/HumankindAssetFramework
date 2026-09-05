@@ -95,6 +95,10 @@ namespace HumankindAssetFramework
         internal static ConfigEntry<string> AssetNameFilter; // [Debug] substring filter for the ENCProof scan dumps (Prober.RunScan)
         internal static ConfigEntry<KeyCode> ToggleKey;      // open/close the feedback window (Shift+ToggleKey = dump GPU mesh-buffer usage)
         internal static ConfigEntry<bool>   UniversalInjectOn; // registry-driven universal injector (Model Factory)
+        // (UnitMeshDensityBoost removed 2026-09-05, the day it was built: the pawn compute shader's 64-primitive
+        // sub-particle stride is compiled in — a raised output-layer PPC re-encodes correctly, the descriptor
+        // snapshot follows, and the pawn still shreds. The 255x64=16,320-quad ceiling is per FRAGMENT; the way
+        // past it is multiple meshes/fragments per unit, not a bigger stride.)
         internal static ConfigEntry<string> DumpPawnRig;      // CATERPILLAR investigation: pawn-name substring (e.g. "MediumTanks"); when that VANILLA addon loads, dump its skeleton bone tables + clip fields once (how do vanilla tank treads roll?). "" = off.
         internal static ConfigEntry<int>    RespawnDelayFrames; // frames to wait after a borrowed-rotor unit renders before re-spawning it (first-instance rotor fix)
         internal static ConfigEntry<bool>   PersistUnitFacing;  // persist each army's on-screen facing to a HAF side-file on save and restore it on load (the standard save has no facing field)
