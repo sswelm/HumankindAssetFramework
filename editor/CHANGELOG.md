@@ -3,6 +3,15 @@
 The **package** changelog: what changed for someone who installs the tools. (The project-wide engineering log
 lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `editor-vX.Y.Z`.
 
+## 0.5.5 — 2026-09-06
+
+- **Split disconnected GLB parts** — a new `Tools ▸ HAF ▸ Model Tools ▸ Split disconnected GLB parts…` command
+  turns every disconnected geometry island inside a GLB mesh node into its own selectable child part. The source
+  is never overwritten. Materials, transforms, skins, animation targets, textures and original vertex data are
+  preserved; the tool appends only filtered index accessors and child nodes, verifies the triangle total, and writes
+  a new `<name>_split_parts.glb`. Duplicate vertices at UV/normal seams are welded with a tight scale-relative
+  tolerance, so a visually continuous surface is not split merely because its shading data has a seam.
+
 ## 0.5.4 — 2026-09-03
 
 - **Double-sided for animated vehicles — now a Vehicle Lab option, applied at the source.** The engine culls

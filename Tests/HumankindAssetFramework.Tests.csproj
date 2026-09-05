@@ -17,6 +17,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\HumankindAssetFramework.csproj" />
+    <!-- Pure GLB core: production compiles it in the Unity editor assembly; tests compile the same source with
+         UNITY_EDITOR absent, so the menu wrapper is excluded and the binary transformation remains testable. -->
+    <Compile Include="..\editor\GlbDisconnectedParts.cs" Link="GlbDisconnectedParts.cs" />
   </ItemGroup>
 
   <!-- compile-time references the TEST code uses directly -->
