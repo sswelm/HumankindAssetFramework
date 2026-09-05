@@ -257,6 +257,7 @@ namespace HumankindAssetFramework
                 InjectHandProp(addon, animMgr, e.skeleton, e);
                 ApplyTexture(e, animMgr);
                 DumpFxIndices(donorSkel0, e, bodyName, animMgr);   // ghost hunt: donor vs our FxMeshIndex + StartIndex needle + descriptor scan
+                DumpLayerBudget(e, bodyName, animMgr);             // render-ceiling report: PPC + 255xPPC vs this mesh's PrimitiveCount
                 if (!e.repointed) { e.repointed = true; anyRescuable = null; MarkSubPawnsDirty(); Plugin.Diag($"[Uni] repointed '{name}' -> {e.resourceName} (mesh '{bodyName}', layer '{e.layerHint}')"); }
             }
             catch (Exception ex) { NoteInjectionError("repoint"); Plugin.Log.LogError("[Uni] repoint: " + ex); }
@@ -861,6 +862,48 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogWarning("[Uni] PruneCloneRenderOutputs: " + ex.Message); }
         }
 
+        // UNIT MESH RENDER BUDGET (2026-09-05, the Great Galley's vanishing masts): a unit mesh renders as
+        // sub-particles, count = ceil(PrimitiveCount / the layer's primitivePerParticleCount), and that count is
+        // packed into 8 bits -> HARD-CLAMPED at 255. Primitives past 255 x PPC are silently never drawn — the
+        // district grove class (see DistrictMeshDensityBoost), one pipeline over. The galley bracketed the unit
+        // layer's ceiling at just under 39,279 quads by four bakes and five screenshots; this dump replaces that
+        // archaeology with one log line per injected unit: every layer the mesh occupies, its PPC, the 255xPPC
+        // ceiling, and a LOUD "OVER by N" when the clamp is eating geometry.
+        [ProcessLived("diagnostic once-per-name dump dedup")] static readonly HashSet<string> budgetDumped = new HashSet<string>();
+        static void DumpLayerBudget(ModelEntry e, string bodyName, object animMgr)
+        {
+            try
+            {
+                if (e?.skeleton == null || string.IsNullOrEmpty(bodyName) || !budgetDumped.Add(e.resourceName)) return;
+                var mi = AccessTools.Method(e.skeleton.GetType(), "GetFxMeshIndex", new[] { typeof(string) });
+                var idxObj = mi?.Invoke(e.skeleton, new object[] { bodyName });
+                if (idxObj == null) return;
+                uint fxIdx = Convert.ToUInt32(idxObj);
+                var mcm = GetMember(animMgr, "FxComponentMeshContentManager");
+                var layers = GetMember(mcm, "Layers") as Array ?? AccessTools.Field(mcm.GetType(), "layers")?.GetValue(mcm) as Array;
+                if (layers == null) { Plugin.Log.LogWarning("[Uni][BUDGET] mesh content layers not found — cannot report the render ceiling"); return; }
+                for (int li = 0; li < layers.Length; li++)
+                {
+                    var lay = layers.GetValue(li);
+                    var buf = GetMember(lay, "HxFxOneMeshComputeBufferData") as Array;
+                    if (buf == null || fxIdx >= buf.Length) continue;
+                    uint prim = MemberUInt(buf.GetValue((int)fxIdx), "PrimitiveCount", 0);
+                    if (prim == 0) continue;   // mesh not present in this layer
+                    // PPC lives on the FxOUTPUTLayer, not this ContentLayer (measured 2026-09-05: the unit
+                    // output layer ships 64; SiegeHowitzersCar's fragment 0x5C = 92 = ceil(5853/64) proved it).
+                    // Read our PRIVATE clone (possibly boosted above); stock 64 is the fallback for units
+                    // without one. Runs AFTER ReloadFragments, so a boosted layer reports its lifted ceiling.
+                    int ppc = 0;
+                    if (e.isolatedLayer != null) TryMemberInt(e.isolatedLayer, "primitivePerParticleCount", out ppc);
+                    if (ppc <= 0) ppc = 64;
+                    long ceiling = 255L * ppc;
+                    Plugin.Log.LogInfo($"[Uni][BUDGET] '{e.resourceName}' layer {li}: mesh prim={prim}, PPC={ppc}, ceiling=255x{ppc}={ceiling}"
+                        + (prim > ceiling ? $" — OVER by {prim - ceiling}: that geometry is silently NOT DRAWN" : " — fits"));
+                }
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] layer budget dump: " + ex.Message); }
+        }
+
         // FX-INDEX RESOLUTION (ghost hunt): the GPU descriptor encodes an FxMeshIndex in ITS OWN numbering (not
         // skinnedMeshInfos.MeshIndex). GetFxMeshIndex(name) on a mesh collection resolves name -> that numbering
         // (the formation clone path uses it). Log the DONOR skeleton's index for the donor body mesh and OURS for the
@@ -1388,6 +1431,13 @@ namespace HumankindAssetFramework
                 var folField = AccessTools.Field(fragType, "fxOutputLayer");
                 var encField = AccessTools.Field(fragType, "EncodedMeshAndVisualParticleCount"); // 0 => fragment renders nothing
                 var load = AccessTools.Method(fragType, "Load");
+                // NO DENSITY BOOST HERE (removed 2026-09-05, same day it was built): raising the private clone's
+                // PrimitivePerParticleCount re-encodes correctly and the descriptor snapshot follows (verified in
+                // the field: encode 235 particles @ PPC 144, snapshot enc+layerIdx in full agreement) — and the
+                // pawn STILL renders as shreds, because the pawn compute shader's 64-primitive sub-particle stride
+                // is COMPILED IN (the pipeline sets no PPC uniform; only the district/visual-particle path feeds
+                // perLayerDataCB). The 255 x 64 = 16,320-quad ceiling is per FRAGMENT and immovable from C#; the
+                // supported way past it is MULTIPLE fragments/meshes per unit — see unit-mesh-render-clamp notes.
                 var hides = (e?.hideMeshes ?? "").Split(',').Select(s => s.Trim()).Where(s => s.Length > 0).ToArray();
                 var hiddenIdx = new System.Collections.Generic.List<int>();
                 for (int i = 0; i < frags.Length; i++)
@@ -1434,6 +1484,11 @@ namespace HumankindAssetFramework
                     }
                     try { load?.Invoke(item, new object[] { skel, renderer, mcm, layer }); }
                     catch (Exception ex) { Plugin.Log.LogWarning("[Uni] frag reload: " + (ex.InnerException ?? ex).Message); }
+                    if (e != null && !e.fragsLogged)
+                    {
+                        var aLayObj = GetMember(item, "FxOutputLayer");
+                        Plugin.Diag($"[Uni] {e.resourceName} frag[{i}] post-Load: mesh='{mnField?.GetValue(item)}' enc=0x{MemberUInt(item, "EncodedMeshAndVisualParticleCount", 0):X8} layer='{(aLayObj as UnityEngine.Object)?.name}' layerIdx={MemberUInt(aLayObj, "LayerIndex", 0)} ppc={MemberUInt(aLayObj, "PrimitivePerParticleCount", 0)}");
+                    }
                     frags.SetValue(item, i);
                 }
                 // DESCRIPTOR-LEVEL HIDE (the tread spike plague, part 2 — 2026-07-26): the GPU pawn descriptor
@@ -1477,6 +1532,44 @@ namespace HumankindAssetFramework
                                 changed = true;
                                 Plugin.Diag($"[Uni] {e?.resourceName}: descriptor[{defId}] hide patched IN PLACE ({patched} donor fragment(s) zeroed on the GPU snapshot)");
                             }
+                            // LIVE FRAGMENT SYNC (the tread spike plague, part 4 — 2026-09-05, the shredded galley):
+                            // the snapshot holds FOUR fields per fragment, and the draw side finds its layer data
+                            // (PrimitivePerParticleCount included) through FxOutputLayerIndex — snapshotted BEFORE this
+                            // hook swapped in our skeleton and cloned the output layer. The density boost raised PPC on
+                            // the CLONE, the encode used it, but the stale snapshot still pointed the draw at the DONOR
+                            // layer (PPC 64): every sub-particle offset into the wrong primitive range = shreds. Sync
+                            // encoded + BoneIndex + FxOutputLayerIndex from the freshly Load()ed addon fragments, the
+                            // same in-place write the hide patch and BonesCount sync already do.
+                            try
+                            {
+                                var boneGpuF = feType.GetField("BoneIndex");
+                                var layGpuF = feType.GetField("FxOutputLayerIndex");
+                                int synced = 0;
+                                for (int fi = 0; fi < count && fi < frags.Length; fi++)
+                                {
+                                    if (hiddenIdx.Contains(fi)) continue;   // hidden stays zeroed
+                                    var af = frags.GetValue(fi);
+                                    if (af == null) continue;
+                                    uint aEnc = MemberUInt(af, "EncodedMeshAndVisualParticleCount", 0);
+                                    if (aEnc == 0) continue;                // fragment renders nothing — leave the snapshot alone
+                                    uint aBone = MemberUInt(af, "BoneIndex", 0);
+                                    uint aLay = MemberUInt(GetMember(af, "FxOutputLayer"), "LayerIndex", 0);
+                                    var ge2 = gfrags.GetValue((int)(start + fi));
+                                    uint gEnc = (uint)encGpuF.GetValue(ge2);
+                                    uint gLay = layGpuF != null ? (uint)layGpuF.GetValue(ge2) : 0;
+                                    if (gEnc != aEnc || gLay != aLay)
+                                    {
+                                        encGpuF.SetValue(ge2, aEnc);
+                                        boneGpuF?.SetValue(ge2, aBone);
+                                        layGpuF?.SetValue(ge2, aLay);
+                                        gfrags.SetValue(ge2, (int)(start + fi));
+                                        synced++;
+                                        Plugin.Diag($"[Uni][DESC] {e?.resourceName}: frag[{fi}] SYNCED enc 0x{gEnc:X8}->0x{aEnc:X8}, layerIdx {gLay}->{aLay}, bone {aBone}");
+                                    }
+                                }
+                                if (synced > 0) changed = true;
+                            }
+                            catch (Exception sx) { Plugin.Log.LogWarning("[Uni] fragment live-sync: " + sx.Message); }
                             // BONES-COUNT SYNC (the tread spike plague, part 3): RegisterPawnDefinition snapshots
                             // BonesCount from the addon's Skeleton BEFORE our skeleton swap — the descriptor still
                             // says the DONOR's count (MediumTanks: 34). Every vert weighted to a bone past that
@@ -1516,7 +1609,8 @@ namespace HumankindAssetFramework
                                 {
                                     var ge = gfrags.GetValue((int)(start + fi));
                                     uint enc = (uint)encGpuF.GetValue(ge);
-                                    Plugin.Diag($"[Uni][DESC]   frag[{fi}] encoded=0x{enc:X8} (lo16={enc & 0xFFFF} hi16={enc >> 16})");
+                                    uint gsk = MemberUInt(ge, "SkinnedMeshIndex", 0), gbn = MemberUInt(ge, "BoneIndex", 0), gly = MemberUInt(ge, "FxOutputLayerIndex", 0);
+                                    Plugin.Diag($"[Uni][DESC]   frag[{fi}] encoded=0x{enc:X8} (start=0x{enc & 0xFFFFFF:X6} particles={enc >> 24}) skinnedMesh={gsk} bone={gbn} outLayerIdx={gly}");
                                 }
                             }
                             catch (Exception dex) { Plugin.Log.LogWarning("[Uni] descriptor dump: " + dex.Message); }
