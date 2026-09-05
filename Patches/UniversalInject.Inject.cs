@@ -870,6 +870,7 @@ namespace HumankindAssetFramework
         // archaeology with one log line per injected unit: every layer the mesh occupies, its PPC, the 255xPPC
         // ceiling, and a LOUD "OVER by N" when the clamp is eating geometry.
         [ProcessLived("diagnostic once-per-name dump dedup")] static readonly HashSet<string> budgetDumped = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-layer-type dump dedup")] static readonly HashSet<string> budgetTypesDumped = new HashSet<string>();
         static void DumpLayerBudget(ModelEntry e, string bodyName, object animMgr)
         {
             try
@@ -890,7 +891,25 @@ namespace HumankindAssetFramework
                     uint prim = MemberUInt(buf.GetValue((int)fxIdx), "PrimitiveCount", 0);
                     if (prim == 0) continue;   // mesh not present in this layer
                     if (!TryMemberInt(lay, "primitivePerParticleCount", out int ppc) || ppc <= 0)
-                    { Plugin.Log.LogWarning($"[Uni][BUDGET] '{e.resourceName}' layer {li}: prim={prim} but primitivePerParticleCount unreadable"); continue; }
+                    {
+                        // The unit ContentLayer's class doesn't carry the district layer's field name. DISCOVER it:
+                        // dump every numeric field/property once per layer type+index, so the real PPC-like member
+                        // (and its value — the ceiling divisor) is identified from one log instead of guessed.
+                        Plugin.Log.LogWarning($"[Uni][BUDGET] '{e.resourceName}' layer {li}: prim={prim} but primitivePerParticleCount unreadable — type {lay.GetType().FullName}");
+                        if (budgetTypesDumped.Add(lay.GetType().FullName + "#" + li))
+                        {
+                            var sb = new System.Text.StringBuilder($"[Uni][BUDGET] layer {li} ({lay.GetType().Name}) numeric members:\n");
+                            const BindingFlags BFA = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+                            foreach (var f in lay.GetType().GetFields(BFA))
+                                if (f.FieldType == typeof(int) || f.FieldType == typeof(uint) || f.FieldType == typeof(long) || f.FieldType == typeof(ushort) || f.FieldType == typeof(byte))
+                                    try { sb.Append($"  field {f.Name} = {f.GetValue(lay)}\n"); } catch { }
+                            foreach (var p in lay.GetType().GetProperties(BFA))
+                                if (p.CanRead && p.GetIndexParameters().Length == 0 && (p.PropertyType == typeof(int) || p.PropertyType == typeof(uint) || p.PropertyType == typeof(long)))
+                                    try { sb.Append($"  prop  {p.Name} = {p.GetValue(lay)}\n"); } catch { }
+                            Plugin.Log.LogInfo(sb.ToString().TrimEnd());
+                        }
+                        continue;
+                    }
                     long ceiling = 255L * ppc;
                     Plugin.Log.LogInfo($"[Uni][BUDGET] '{e.resourceName}' layer {li}: mesh prim={prim}, PPC={ppc}, ceiling=255x{ppc}={ceiling}"
                         + (prim > ceiling ? $" — OVER by {prim - ceiling}: that geometry is silently NOT DRAWN" : " — fits"));
