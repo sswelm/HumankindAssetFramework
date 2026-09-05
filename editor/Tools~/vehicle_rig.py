@@ -875,8 +875,15 @@ if sail_names:
         _smn = Vector((min(p.x for p in _scorners), min(p.y for p in _scorners), min(p.z for p in _scorners)))
         _smx = Vector((max(p.x for p in _scorners), max(p.y for p in _scorners), max(p.z for p in _scorners)))
         sail_top_z = _smx.z
+        # The bone head sits at the KEEL LINE, not the sail foot: the Furl stance is a 180-degree FLIP about this
+        # head (rotation — the pipeline's native, Deploy-proven currency; translation stances fought the converter's
+        # rest-fold/strip and shipped misplaced), and a flip about the keel puts the mirrored canvas entirely BELOW
+        # the hull — underwater in-game — with nothing peeking out beside the hull sides.
+        _skeel = min((bpy.data.objects[_n2].matrix_world @ Vector(_c2)).z
+                     for _n2 in [o.name for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.vertices]
+                     for _c2 in bpy.data.objects[_n2].bound_box)
         _sebn = arm_data.edit_bones.new("Sail")
-        _sebn.head = Vector((0.5 * (_smn.x + _smx.x), 0.5 * (_smn.y + _smx.y), _smn.z))
+        _sebn.head = Vector((0.5 * (_smn.x + _smx.x), 0.5 * (_smn.y + _smx.y), _skeel - 0.05))
         _sebn.tail = _sebn.head + Vector((0.0, 0.0, max(0.3, 0.25 * (_smx.z - _smn.z))))
         _sebn.parent = eb_body
         print("VEHICLE SAIL: %d part(s) on one Sail bone (double-sided at export; struck/raised by the 'Furl' clip)" % len(sail_found))
@@ -1791,14 +1798,18 @@ if oar_bake:
 # ("in reality it would not go down this way"); and even the 1-frame drop showed travel when the transition clip
 # was PLAYED (After-move/Pre-move). The clip format carries only bone rotation+translation — no visibility, no
 # alpha, no scale — so out-of-sight IS the only disappear it can express; the clean cut comes from never playing
-# the move: Idle stance = Furl[1..1] (struck below the hull), Movement = Spin (raised), After-move / Pre-move
-# EMPTY — the state change swaps the pose in one tick. Keep bone translations ON downstream.
+# the move: Idle/reference = Spin[0..0] (defines the REST — never put Furl here: the conversion adopts the
+# reference's frame 0 as the canonical rest, and a struck reference turns the whole bind upside-down), Idle
+# stance (override) = Furl[1..1] (struck below the hull, the Deploy-stance mechanism), Movement = Spin (raised),
+# After-move / Pre-move EMPTY — the state change swaps the pose in one tick. Rotation-only: Keep translations OFF.
 SAIL_FURL_FRAMES = 1
 if sail_found and arm.pose.bones.get("Sail") is not None:
-    _model_min_z = min((_o5.matrix_world @ Vector(_c5)).z
-                       for _o5 in bpy.context.scene.objects if _o5.type == 'MESH' and _o5.data.vertices
-                       for _c5 in _o5.bound_box)
-    _sdrop = (sail_top_z - _model_min_z) * 1.05 + 0.05
+    # ROTATION, not translation (2026-09-05): the strike is a 180-degree flip of the Sail bone about the keel-line
+    # head, mirroring the canvas below the hull. The translation version fought the converter — the rest-fold made
+    # the struck pose the rest, the strip classified the raise as residue, and the kept-curve fix still shipped the
+    # stance misplaced in BOTH clips (field: "sails visible on the idle clip too / not on the correct location").
+    # Rotation stances are the pipeline's native currency, proven end-to-end by the trails' Deploy — and they need
+    # no Keep-bone-translations at all.
     _furl = bpy.data.actions.new("Furl")
     arm.animation_data.action = _furl
     try:
@@ -1808,11 +1819,12 @@ if sail_found and arm.pose.bones.get("Sail") is not None:
         pass
     _pbS = arm.pose.bones["Sail"]; _dbS = arm.data.bones["Sail"]
     _m3S = (arm.matrix_world @ _dbS.matrix_local).to_3x3()
-    _dropL = _m3S.inverted() @ Vector((0.0, 0.0, -_sdrop))
-    _pbS.location = Vector((0.0, 0.0, 0.0))
-    _pbS.keyframe_insert('location', frame=0)                     # raised — matches Spin's rest pose
-    _pbS.location = _dropL
-    _pbS.keyframe_insert('location', frame=SAIL_FURL_FRAMES)      # struck — canvas below the hull
+    _flipax = (_m3S.inverted() @ Vector((1.0, 0.0, 0.0))).normalized()   # hull-length axis, in bone-local space
+    _pbS.rotation_mode = 'QUATERNION'
+    _pbS.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
+    _pbS.keyframe_insert('rotation_quaternion', frame=0)                 # raised — matches Spin's rest pose
+    _pbS.rotation_quaternion = Quaternion(_flipax, math.pi)
+    _pbS.keyframe_insert('rotation_quaternion', frame=SAIL_FURL_FRAMES)  # struck — canvas mirrored below the keel
     try:
         _sfcs = list(_furl.fcurves)
     except AttributeError:
@@ -1820,10 +1832,10 @@ if sail_found and arm.pose.bones.get("Sail") is not None:
     for _fc in _sfcs:
         for _kp in _fc.keyframe_points:
             _kp.interpolation = 'LINEAR'
-    _pbS.location = Vector((0.0, 0.0, 0.0))                       # leave the POSE raised for the later bakes
-    arm.animation_data.action = act                               # 'Spin' stays the active action, as before
-    print("VEHICLE SAIL 'Furl' stance: canvas struck %.2f below at frame %d — Idle stance Furl[%d..%d], Movement Spin, After-move/Pre-move EMPTY (never play the move), Keep bone translations ON"
-          % (_sdrop, SAIL_FURL_FRAMES, SAIL_FURL_FRAMES, SAIL_FURL_FRAMES))
+    _pbS.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))          # leave the POSE raised for the later bakes
+    arm.animation_data.action = act                                      # 'Spin' stays the active action, as before
+    print("VEHICLE SAIL 'Furl' stance: canvas FLIPPED below the keel at frame %d (rotation-only) — Idle/reference Spin[0..0], Idle stance (override) Furl[%d..%d], Movement Spin, After-move/Pre-move EMPTY, Keep bone translations OFF"
+          % (SAIL_FURL_FRAMES, SAIL_FURL_FRAMES, SAIL_FURL_FRAMES))
 
 
 # ROLLING-CONTACT wheel speeds (user field report: the small road wheels looked draggy — "they should be

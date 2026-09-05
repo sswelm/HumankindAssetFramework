@@ -105,13 +105,15 @@ models that need both sides everywhere; when combined, this fix runs first.
 
 **Sails.** Mark the canvas **Sail** (`S`). All sail parts weld to one `Sail` bone and are **always exported
 double-sided** — canvas must read from both tacks — with the artist's winding untouched. The rig also authors a
-separate **`Furl` clip** whose frame 1 holds the canvas struck below the hull. Use it as a **stance, never as an
-animation to play**: the clip format carries only bone rotation and translation — no visibility, no alpha — so
-out-of-sight *is* the disappear, and the clean on/off comes from never playing the move. Assign after baking:
-Idle stance = `Furl[1..1]` (a ship under oars, no canvas) · Movement = `Spin` (sails up) · leave **After-move and
-Pre-move empty** — the state change swaps the pose in one tick, no visible travel. **Keep bone translations ON**
-so the conversion carries the channel. (Playing `Furl` in the preview's clip picker shows the two-frame drop;
-in-game, with the stance-only recipe, it is never played.)
+separate **`Furl` clip** whose frame 1 **flips the canvas 180° below the keel** (rotation-only — the same
+Deploy-proven stance mechanism the trails use; an earlier translation-based strike fought the converter's
+rest-fold and location-strip and shipped misplaced). Use it as a **stance, never as an animation to play**: the
+clip format has no visibility or alpha, so out-of-sight *is* the disappear, and the clean on/off comes from never
+playing the move. Assign after baking: Idle/reference = `Spin[0..0]` (this defines the model's REST — never put
+`Furl` in the reference field, or the conversion adopts the struck pose as the bind) · Idle stance (override) =
+`Furl[1..1]` (a ship under oars, no canvas) · Movement = `Spin` (sails up) · **After-move and Pre-move empty** —
+the state change swaps the pose in one tick. **Keep bone translations** can stay **OFF**: the strike is pure
+rotation.
 
 **Oars (galley rowing).** A galley's oars usually arrive as a **few merged meshes** — all the poles in one, all the
 blades in another (often split front/back) — each mesh holding *every* oar across *both* banks. Mark those meshes

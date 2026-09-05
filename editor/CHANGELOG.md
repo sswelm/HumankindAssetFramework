@@ -30,14 +30,16 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 - **Sail — marked canvas, double-sided, switched on/off via its own `Furl` clip.** A new **Sail** role (hotkey
   `S`): explicit marking replaces sail auto-detection outright. All sail parts weld to one `Sail` bone and are
   **always exported double-sided** (canvas reads from both tacks, artist winding untouched). The hide is its own
-  generated **`Furl` clip** whose frame 1 holds the canvas struck below the hull — used as a **stance, never
-  played**. The clip format carries only bone rotation + translation (no visibility, alpha, or scale), so
-  out-of-sight is the only disappear it can express; the clean on/off comes from never playing the move. (Three
-  designs were rejected in the field: the hide keyed inside Spin's frame 0 twitched the canvas at every loop
-  restart; a 12-frame visible descent read as the sail sinking through the deck; and even a 1-frame drop showed
-  travel when the transition was played.) Assign: Idle stance = `Furl[1..1]`, Movement = `Spin` (a pure seamless
-  loop, sails up — its sail channels are constant), **After-move / Pre-move empty** — the state change swaps the
-  pose in one tick. Keep bone translations ON.
+  generated **`Furl` clip** whose frame 1 **flips the canvas 180° below the keel** — rotation-only, the same
+  Deploy-proven stance mechanism the trails use — used as a **stance, never played**. The clip format carries no
+  visibility or alpha, so out-of-sight is the only disappear it can express; the clean on/off comes from never
+  playing the move. (Four designs were rejected in the field: the hide keyed inside Spin's frame 0 twitched at
+  every loop restart; a 12-frame visible descent read as the sail sinking through the deck; a 1-frame drop showed
+  travel when the transition was played; and a translation-based stance fought the converter's rest-fold and
+  location-strip and shipped misplaced in both clips.) Assign: Idle/reference = `Spin[0..0]` (defines the rest —
+  never put `Furl` in the reference field, or the bind adopts the struck pose), Idle stance (override) =
+  `Furl[1..1]`, Movement = `Spin`, **After-move / Pre-move empty** — the state change swaps the pose in one tick.
+  Keep bone translations can stay OFF: the strike is pure rotation.
 - **Blade roll — square feathered blades to the water.** Some sources model the oar blades *feathered* (flat face
   parallel to the stroke), so they knife through the water edge-on instead of scooping. The Oars section's new
   **Blade roll (deg)** spins each recovered oar about its own long axis in the rest geometry — the cylindrical
