@@ -95,7 +95,10 @@ namespace HumankindAssetFramework
         internal static ConfigEntry<string> AssetNameFilter; // [Debug] substring filter for the ENCProof scan dumps (Prober.RunScan)
         internal static ConfigEntry<KeyCode> ToggleKey;      // open/close the feedback window (Shift+ToggleKey = dump GPU mesh-buffer usage)
         internal static ConfigEntry<bool>   UniversalInjectOn; // registry-driven universal injector (Model Factory)
-        internal static ConfigEntry<bool>   UnitMeshDensityBoost; // auto-raise a custom unit's PRIVATE output-layer PrimitivePerParticleCount when its baked mesh needs more than 255 sub-particles (the galley's vanishing-mast clamp: 255 x PPC(64) = 16,320 quads max, excess silently undrawn)
+        // (UnitMeshDensityBoost removed 2026-09-05, the day it was built: the pawn compute shader's 64-primitive
+        // sub-particle stride is compiled in — a raised output-layer PPC re-encodes correctly, the descriptor
+        // snapshot follows, and the pawn still shreds. The 255x64=16,320-quad ceiling is per FRAGMENT; the way
+        // past it is multiple meshes/fragments per unit, not a bigger stride.)
         internal static ConfigEntry<string> DumpPawnRig;      // CATERPILLAR investigation: pawn-name substring (e.g. "MediumTanks"); when that VANILLA addon loads, dump its skeleton bone tables + clip fields once (how do vanilla tank treads roll?). "" = off.
         internal static ConfigEntry<int>    RespawnDelayFrames; // frames to wait after a borrowed-rotor unit renders before re-spawning it (first-instance rotor fix)
         internal static ConfigEntry<bool>   PersistUnitFacing;  // persist each army's on-screen facing to a HAF side-file on save and restore it on load (the standard save has no facing field)
@@ -174,16 +177,6 @@ namespace HumankindAssetFramework
             UniversalInjectOn = Config.Bind("Factory", "UniversalInject", true,
                                   "Registry-driven universal model injector (the Model Factory). Reads the model registry JSON " +
                                   "from this config folder and repoints each listed pawn definition onto its baked skeleton.");
-            UnitMeshDensityBoost = Config.Bind("Factory", "UnitMeshDensityBoost", false,
-                                  "Auto-raise a custom unit's render ceiling when its baked mesh is too dense for the engine's default. " +
-                                  "A unit mesh renders as sub-particles — count packed into 8 bits (max 255), each covering the output layer's " +
-                                  "PrimitivePerParticleCount primitives (stock: 64) — so at most 16,320 quads draw and the excess is silently " +
-                                  "skipped (the Great Galley shipped without masts and sails). When a unit needs more, this raises PPC on that " +
-                                  "unit's PRIVATE output-layer clone to exactly fit — same total GPU work, fewer-but-larger sub-particles; no " +
-                                  "other unit is touched (the district DistrictMeshDensityBoost mechanism, one pipeline over). " +
-                                  "EXPERIMENTAL, default OFF: field-tested 2026-09-05 — the ENCODE honored the raised PPC but the pawn DRAW " +
-                                  "side kept expanding at stock 64, shredding the mesh (particles offset into the wrong primitive ranges). " +
-                                  "Leave off until the pawn pipeline's PPC consumer is found and patched to match.");
             // --- [Debug] (2026-08-21): investigation dials + superseded proof modes live in their own section, so the play-facing
             //     sections stay small. Moving a key between sections resets it to its default for existing .cfg files (BepInEx
             //     orphans the old entry) — deliberate: these should be OFF in normal play. Dead keys (TargetMod,

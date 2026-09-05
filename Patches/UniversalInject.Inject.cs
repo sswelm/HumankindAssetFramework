@@ -1431,34 +1431,13 @@ namespace HumankindAssetFramework
                 var folField = AccessTools.Field(fragType, "fxOutputLayer");
                 var encField = AccessTools.Field(fragType, "EncodedMeshAndVisualParticleCount"); // 0 => fragment renders nothing
                 var load = AccessTools.Method(fragType, "Load");
-                // UNIT MESH DENSITY BOOST (2026-09-05, the galley's vanishing masts): the fragment encode packs
-                // ceil(PrimitiveCount / outputLayer.PrimitivePerParticleCount) into 8 bits — clamped at 255, the
-                // excess silently never drawn (stock unit PPC 64 -> 16,320-quad ceiling; the galley shipped 33,828
-                // and drew 48%). PPC is per-OUTPUT-LAYER data and we already hold a PRIVATE clone per custom unit
-                // (texture isolation below), so raise the clone's PPC to exactly fit the body mesh BEFORE Load()
-                // computes the encoding. Same total GPU work — the draw side derives triangle counts from the same
-                // live property — and no other unit shares the clone. Sized here, applied inside the clone block.
-                uint bodyPrim = 0; int neededPpc = 0;
-                if (e != null && !string.IsNullOrEmpty(e.layerHint) && skel != null
-                    && (Plugin.UnitMeshDensityBoost == null || Plugin.UnitMeshDensityBoost.Value))
-                {
-                    var gmi = AccessTools.Method(skel.GetType(), "GetFxMeshIndex", new[] { typeof(string) });
-                    var idxObj = gmi?.Invoke(skel, new object[] { e.layerHint });
-                    if (idxObj != null)
-                    {
-                        uint fxIdx = Convert.ToUInt32(idxObj);
-                        var mlayers = GetMember(mcm, "Layers") as Array ?? AccessTools.Field(mcm.GetType(), "layers")?.GetValue(mcm) as Array;
-                        if (mlayers != null && layer >= 0 && layer < mlayers.Length)
-                        {
-                            var mbuf = GetMember(mlayers.GetValue(layer), "HxFxOneMeshComputeBufferData") as Array;
-                            if (mbuf != null && fxIdx < mbuf.Length)
-                                bodyPrim = MemberUInt(mbuf.GetValue((int)fxIdx), "PrimitiveCount", 0);
-                        }
-                        // ceil(prim/255) is the minimum PPC that fits; round up to a multiple of 16 for headroom
-                        // (33,828 prims -> 133 minimum -> 144 -> 235 sub-particles, comfortably under 255).
-                        if (bodyPrim > 0) { neededPpc = (int)((bodyPrim + 254) / 255); neededPpc = (neededPpc + 15) & ~15; }
-                    }
-                }
+                // NO DENSITY BOOST HERE (removed 2026-09-05, same day it was built): raising the private clone's
+                // PrimitivePerParticleCount re-encodes correctly and the descriptor snapshot follows (verified in
+                // the field: encode 235 particles @ PPC 144, snapshot enc+layerIdx in full agreement) — and the
+                // pawn STILL renders as shreds, because the pawn compute shader's 64-primitive sub-particle stride
+                // is COMPILED IN (the pipeline sets no PPC uniform; only the district/visual-particle path feeds
+                // perLayerDataCB). The 255 x 64 = 16,320-quad ceiling is per FRAGMENT and immovable from C#; the
+                // supported way past it is MULTIPLE fragments/meshes per unit — see unit-mesh-render-clamp notes.
                 var hides = (e?.hideMeshes ?? "").Split(',').Select(s => s.Trim()).Where(s => s.Length > 0).ToArray();
                 var hiddenIdx = new System.Collections.Generic.List<int>();
                 for (int i = 0; i < frags.Length; i++)
@@ -1501,26 +1480,7 @@ namespace HumankindAssetFramework
                             e.isolatedLayer = clone;
                             Plugin.Diag($"[Uni] cloned output layer for {e.resourceName} -> '{clone.name}'");
                         }
-                        if (e.isolatedLayer != null)
-                        {
-                            // DENSITY BOOST (sized above): must land before Load() below — Load registers the layer
-                            // and computes EncodedMeshAndVisualParticleCount from its PPC. Idempotent: only ever
-                            // raises, so a repeat inject with the clamp already lifted is a no-op.
-                            if (neededPpc > 0)
-                            {
-                                var ppcF = AccessTools.Field(e.isolatedLayer.GetType(), "primitivePerParticleCount");
-                                if (ppcF?.GetValue(e.isolatedLayer) is int curPpc)
-                                {
-                                    if (neededPpc > curPpc)
-                                    {
-                                        ppcF.SetValue(e.isolatedLayer, neededPpc);
-                                        Plugin.Log.LogInfo($"[Uni][BUDGET] '{e.resourceName}' private output-layer PPC {curPpc} -> {neededPpc}: body mesh {bodyPrim} prims = {(bodyPrim + neededPpc - 1) / neededPpc} sub-particles (ceiling now 255x{neededPpc}={255L * neededPpc})");
-                                    }
-                                }
-                                else Plugin.Log.LogWarning($"[Uni][BUDGET] '{e.resourceName}': primitivePerParticleCount field not found on {e.isolatedLayer.GetType().Name} — mesh stays clamped at 255x64 quads");
-                            }
-                            folField.SetValue(item, e.isolatedLayer);
-                        }
+                        if (e.isolatedLayer != null) folField.SetValue(item, e.isolatedLayer);
                     }
                     try { load?.Invoke(item, new object[] { skel, renderer, mcm, layer }); }
                     catch (Exception ex) { Plugin.Log.LogWarning("[Uni] frag reload: " + (ex.InnerException ?? ex).Message); }
