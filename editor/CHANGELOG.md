@@ -64,7 +64,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   closed slab with one face-side wound inward scores ~0 in the inside-out flip (the halves cancel), so no
   whole-island flip can repair it; doubling can.
 - **Sweep accepts negative** — if the galley rows backwards, flip the sign (the wheels' Spin-degrees convention);
-  the dip phase stays put, so blades still bury on the reversed drive.
+  the dip phase stays put, so blades still bury on the reversed drive. **Sweep is the TOTAL arc**, split evenly
+  about the rest rake: 24 = 12° forward + 12° back (it was a half-amplitude before — a 24 dial swung 48°, all of
+  it reading as "backward" against the Khalandion's already-aft modelled rake). Slider range widened to ±90.
 
 ## 0.5.4 — 2026-09-03
 

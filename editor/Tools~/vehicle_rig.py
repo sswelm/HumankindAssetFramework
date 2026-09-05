@@ -1843,7 +1843,10 @@ if rock_on:
 # clustering) so port and starboard pull aft together. The bind pose is the armature rest (oars as modelled), so an
 # offset at frame 0 is fine — the oars simply oscillate around their modelled rake.
 if oar_bake:
-    _oaw = math.radians(oar_sweep); _oad = math.radians(oar_dip)
+    # Sweep is the TOTAL fore-aft arc, split evenly about the rest rake (user convention 2026-09-05: "a sweep of
+    # 24 degrees should make the oars sweep 12 degrees forward and then 12 degrees backwards") — the amplitude
+    # each way is half the dial. Dip stays a per-direction amplitude (blades drop A_d, lift A_d).
+    _oaw = math.radians(oar_sweep) * 0.5; _oad = math.radians(oar_dip)
     for _bn, _piv, _oside, _dax in oar_bake:
         _db = arm.data.bones.get(_bn); _pb = arm.pose.bones.get(_bn)
         if _db is None or _pb is None:
@@ -1869,8 +1872,8 @@ if oar_bake:
         if _fc.data_path.startswith('pose.bones["Oar_'):
             for _kp in _fc.keyframe_points:
                 _kp.interpolation = 'LINEAR'
-    print("VEHICLE ROWING clip: %d oars sweep %.0f deg + dip %.0f deg, %d cycle(s) over shared %d-frame 'Spin'"
-          % (len(oar_bake), oar_sweep, oar_dip, _oar_repeats, _clip_frames))
+    print("VEHICLE ROWING clip: %d oars sweep %.0f deg total arc (%.0f each way of rest) + dip %.0f deg, %d cycle(s) over shared %d-frame 'Spin'"
+          % (len(oar_bake), abs(oar_sweep), abs(oar_sweep) * 0.5, oar_dip, _oar_repeats, _clip_frames))
 
 # SAIL on/off — its OWN `Furl` clip, used as a STANCE, never played. Three designs were rejected in the field:
 # keying the hide inside Spin twitched the canvas at every loop restart; a 12-frame visible descent read wrong
