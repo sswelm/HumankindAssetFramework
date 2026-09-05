@@ -58,6 +58,14 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   original → dissolved → final against the dial's target.
 - **Body reduce (%)** completes the tiers — parts explicitly marked Body, default 0 (untouched: the hull is the
   model's face, and the Factory's global *Reduce to ~tris* is usually the smarter place to slim it).
+- **Oar reduce (%) / Sail reduce (%)** extend the tiers to the animated roles (a galley's merged oar meshes are
+  dense; sail canvas ships twice, once per side). Both run in the same pre-armature pass, so the per-oar
+  clustering, bones and weights land on the slim mesh — verified identical cluster recovery at 0% and 50%.
+  Defaults 0. Note the dials are floors: the dissolve pass can overshoot on flat canvas (a 30% sail dial cut 66%
+  on the Khalandion), so any non-zero sail value already cuts hard.
+- **All five reduce dials + the two facing checkboxes now live in their own "Vertices control" section** —
+  everything that reshapes exported geometry at Generate in one foldout, out of Spin where it had no business.
+  The collapsed header summarizes the active facing fixes and each marked tier's dial.
 - **Flag is now the OPPOSITE of sails** (2026-09-05): banners fly AT ANCHOR and are struck below the keel while
   the ship moves — one Flag bone held flipped through the whole Spin clip; the idle stance shows them at rest.
   Rudder split into its OWN parts file to keep the always-visible treatment (a rudder must never vanish).

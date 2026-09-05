@@ -321,6 +321,12 @@ flag_names = namelist(argv[55]) if len(argv) > 55 and argv[55].strip() else []
 # RUDDER parts (argv[60]): the always-visible double-sided treatment flags USED to have (the two roles shared a
 # file until flags learned to hide underway — a rudder must never vanish). No bone, no clip, welds to the body.
 rudder_names = namelist(argv[60]) if len(argv) > 60 and argv[60].strip() else []
+# OAR / SAIL reduction (argv[61..62]): the marked-role meshes can themselves be dense (the Khalandion's oars are
+# three merged meshes holding all ~64 oars). Same dissolve+collapse tier as rigging/structure/body, and it runs in
+# the same pre-armature pass — clustering, bone placement and skinning all land on the slim mesh. Islands survive
+# decimation (collapse never bridges disconnected components), so the per-oar recovery is unaffected.
+oar_reduce = min(95.0, max(0.0, float(argv[61]))) if len(argv) > 61 and argv[61].strip() else 0.0
+sail_reduce = min(95.0, max(0.0, float(argv[62]))) if len(argv) > 62 and argv[62].strip() else 0.0
 # OAR LIFT (argv[56]): a CONSTANT tilt about the dip axis, re-centring the whole stroke — the knob the dip sign
 # cannot be (±dip is the same oscillation, phase-flipped; the blades visit the same depths either way). A source
 # whose oars are modelled raked steeply into the water (the Khalandion: "at -30 they almost go vertically") rides
@@ -635,14 +641,14 @@ for grp, is_tail in ((rotor_names, False), (tailrotor_names, True)):
           % ("tail" if is_tail else "main", len(grp), hub_c.x, hub_c.y, hub_c.z, axle.x, axle.y, axle.z, axle_src))
     print("VEHICLE rotor hub: %d part(s) -> bone at hub (%.2f,%.2f,%.2f), axle=%s (least-spread of centres)" % (len(grp), hub_c.x, hub_c.y, hub_c.z, tuple(axle)))
 
-# ---- SOURCE-SIDE reduction tiers (argv[49..52]): RIGGING and STRUCTURE parts slimmed at the SOURCE ----
+# ---- SOURCE-SIDE reduction tiers: RIGGING/STRUCTURE/BODY (argv[49..54]) + OAR/SAIL (argv[61..62]) ----
 # Runs BEFORE the armature is built so bone placement, skinning, the winding fix, doubling and the export all see
 # the reduced mesh. Two passes per part: LIMITED DISSOLVE first (tube/extruded geometry is massively redundant
 # along straight runs — a plain ratio collapse bottomed out at a 68% cut on the Khalandion's ropes because
 # thousands of tiny disconnected islands each keep minimum topology), then COLLAPSE toward the dial's target
 # measured against the ORIGINAL count, so the percentage means what it says or better. The print carries all
 # three numbers so a too-aggressive dial is loud, not silent.
-for _rlabel, _rnames, _rpct in (("RIGGING", rigging_names, rigging_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce)):
+for _rlabel, _rnames, _rpct in (("RIGGING", rigging_names, rigging_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce)):
     if not _rnames or _rpct <= 0.5:
         continue
     try:
