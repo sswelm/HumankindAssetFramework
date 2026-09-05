@@ -1057,6 +1057,12 @@ if oar_names:
         if _dp.length < 1e-6:
             continue
         _dp.normalize()
+        # CALIBRATION PRINT (2026-09-05): the sweep/rake are centred on THIS modelled rake — surface the number so
+        # the Rake dial isn't guesswork ("the oars still don't move 24 degrees forward": the arc was symmetric
+        # about a rake the user couldn't see). Rake ~= this value centres the stroke on the perpendicular.
+        _rakedeg = math.degrees(math.atan2(abs(_dp.x), abs(_dp.y))) if (abs(_dp.x) + abs(_dp.y)) > 1e-6 else 0.0
+        print("VEHICLE ROWING side %+d: modelled oar rake %.0f deg off the perpendicular — Rake ~%.0f (sign per bow) centres the stroke on the beam line"
+              % (_side, _rakedeg, _rakedeg))
         _tmp = Vector((0, 0, 1)) if abs(_dp.z) < 0.9 else Vector((1, 0, 0))
         _e1 = _dp.cross(_tmp).normalized(); _e2 = _dp.cross(_e1).normalized()
         _items = []   # (objname, idx, wc, (u, v)) for every island on this side
