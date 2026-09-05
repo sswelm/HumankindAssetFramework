@@ -1124,13 +1124,31 @@ if oar_names:
                 for _i in _mem:
                     _allwc += _items[_i][2]
             _ys = [abs(_p.y - _oar_beam_mid) for _p in _allwc]; _yg = min(_ys) + (oar_pivot / 100.0) * (max(_ys) - min(_ys))
-            _piv = min(_allwc, key=lambda _p: abs(abs(_p.y - _oar_beam_mid) - _yg))  # oarlock: oar_pivot% out from the handle (dial)
             _d = _oar_pc1(_allwc); _h = Vector((_d.x, _d.y, 0.0))
             _h = _h.normalized() if _h.length > 1e-6 else Vector((1.0, 0.0, 0.0))
             _dax = Vector((-_h.y, _h.x, 0.0)).normalized()               # dip axis: horizontal, perp to the oar
+            # PIVOT: ANALYTIC, on the oar's own fitted axis at the dialed beam-distance — NOT snapped to a vertex.
+            # The snap version jumped across gaps in the geometry (many oars have no verts near an inboard target),
+            # parking the fulcrum at the pole's end no matter the dial ("Pivot % has no effect"). The axis crossing
+            # exists whether or not a vertex does; a fulcrum slightly off the mesh is a perfectly good oarlock.
+            _mctr = sum(_allwc, Vector((0, 0, 0))) / len(_allwc)
+            _sgn = 1.0 if _side > 0 else -1.0
+            if _d.y * _sgn < 0:
+                _d = -_d                                                  # point the axis OUTBOARD on this side
+            _yt = _oar_beam_mid + _sgn * _yg                              # target absolute beam coordinate
+            if abs(_d.y) > 1e-5:
+                _piv = _mctr + _d * ((_yt - _mctr.y) / _d.y)
+            else:                                                         # degenerate (oar parallel to hull): old snap
+                _piv = min(_allwc, key=lambda _p: abs(abs(_p.y - _oar_beam_mid) - _yg))
             _eb = arm_data.edit_bones.new(_bn)
             _eb.head = _piv; _eb.tail = _piv + _d * 0.6; _eb.parent = eb_body
             oar_bake.append((_bn, _piv.copy(), float(_side), _dax))
+    if oar_bake:
+        # PIVOT DIAGNOSTIC (2026-09-05, "Pivot % has no effect"): the dial targets a beam-distance along each
+        # oar's [min..max] span — surface where the pivots actually landed so a snap-to-the-end bug is visible.
+        _pvy = [abs(_p2.y - _oar_beam_mid) for _b2, _p2, _s2, _d2 in oar_bake]
+        print("VEHICLE ROWING pivots: chosen beam-distance mean %.3f, range [%.3f .. %.3f] (dial %.0f%%)"
+              % (sum(_pvy) / len(_pvy), min(_pvy), max(_pvy), oar_pivot))
     print("VEHICLE ROWING: recovered %d oar(s) from %d part(s) into individual bones" % (len(oar_bake), len(_oar_objs)))
 
 bpy.ops.object.mode_set(mode='OBJECT')
