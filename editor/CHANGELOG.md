@@ -118,6 +118,18 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   (-0.02) even for boat pawns — water-blue in colour, ground in height — so the Factory showed oar blades in the
   water while the Animation Lab showed them dry. Both panes now share the pack's one-source-of-truth
   `ModelRegistry.WaterLevel`; the forward arrow and reference man ride the same plane.
+- **Split disconnected GLB parts** — a new `Tools ▸ HAF ▸ Model Tools ▸ Split disconnected GLB parts…` command
+  turns every disconnected geometry island inside a GLB mesh node into its own selectable child part. The source
+  is never overwritten. Materials, transforms, skins, animation targets, textures and original vertex data are
+  preserved; the tool appends only filtered index accessors and child nodes, verifies the triangle total, and writes
+  a new `<name>_split_parts.glb`. Duplicate vertices at UV/normal seams are welded with a tight scale-relative
+  tolerance, so a visually continuous surface is not split merely because its shading data has a seam.
+- **Model Workshop — the aimed version of the splitter.** `Tools ▸ HAF ▸ Model Workshop`: Probe lists every
+  mesh-carrying node with its triangle count and disconnected-island count; check exactly the parts hiding
+  floating junk and Split writes a GLB where ONLY those become `_Part_NNN` children (same lossless method).
+  Born from the galley: junk islands welded into hull-shared parts could not be marked Ignore in the Vehicle
+  Lab, and the split-everything command exploded the rigging into ~1,500 parts. Feed the output to the Vehicle
+  Lab, mark the junk Ignore, rig as usual.
 
 ## 0.5.4 — 2026-09-03
 

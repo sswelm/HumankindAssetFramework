@@ -360,6 +360,10 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
 
 ## Utilities, diagnostics & safety
 
+- **Split disconnected GLB parts** — `Tools ▸ HAF ▸ Model Tools ▸ Split disconnected GLB parts…`. Pick a `.glb`
+  and write a new `_split_parts.glb` in which every unattached geometry island is a separately selectable child
+  node. The source is protected from overwrite, triangle totals are verified, and existing materials, transforms,
+  skins, animations, textures and vertex data are retained. Duplicate UV/normal seam vertices remain attached.
 - **Backup & Restore** — `Tools ▸ HAF ▸ Backup and Restore`. A safety net for everything git doesn't track (editor
   scripts, `FactorySource`, baked Resources, ENC databases, `Tools/`, live `BepInEx/config`). Timestamped, additive,
   guarded restore (auto-snapshots current state first). **Deep dive:** [Backup.md](Backup.md).
