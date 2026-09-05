@@ -174,13 +174,16 @@ namespace HumankindAssetFramework
             UniversalInjectOn = Config.Bind("Factory", "UniversalInject", true,
                                   "Registry-driven universal model injector (the Model Factory). Reads the model registry JSON " +
                                   "from this config folder and repoints each listed pawn definition onto its baked skeleton.");
-            UnitMeshDensityBoost = Config.Bind("Factory", "UnitMeshDensityBoost", true,
+            UnitMeshDensityBoost = Config.Bind("Factory", "UnitMeshDensityBoost", false,
                                   "Auto-raise a custom unit's render ceiling when its baked mesh is too dense for the engine's default. " +
                                   "A unit mesh renders as sub-particles — count packed into 8 bits (max 255), each covering the output layer's " +
                                   "PrimitivePerParticleCount primitives (stock: 64) — so at most 16,320 quads draw and the excess is silently " +
                                   "skipped (the Great Galley shipped without masts and sails). When a unit needs more, this raises PPC on that " +
                                   "unit's PRIVATE output-layer clone to exactly fit — same total GPU work, fewer-but-larger sub-particles; no " +
-                                  "other unit is touched (the district DistrictMeshDensityBoost mechanism, one pipeline over). false = vanilla clamp.");
+                                  "other unit is touched (the district DistrictMeshDensityBoost mechanism, one pipeline over). " +
+                                  "EXPERIMENTAL, default OFF: field-tested 2026-09-05 — the ENCODE honored the raised PPC but the pawn DRAW " +
+                                  "side kept expanding at stock 64, shredding the mesh (particles offset into the wrong primitive ranges). " +
+                                  "Leave off until the pawn pipeline's PPC consumer is found and patched to match.");
             // --- [Debug] (2026-08-21): investigation dials + superseded proof modes live in their own section, so the play-facing
             //     sections stay small. Moving a key between sections resets it to its default for existing .cfg files (BepInEx
             //     orphans the old entry) — deliberate: these should be OFF in normal play. Dead keys (TargetMod,
