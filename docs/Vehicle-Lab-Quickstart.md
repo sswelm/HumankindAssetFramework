@@ -69,6 +69,7 @@ axle disagreement, unpaired wheels, turret outliers, and visible interior geomet
 | **Rigging** | Rope/line geometry — dense but barely visible at game distance. Reduced at Generate by the **Rigging reduce (%)** dial, at the source. |
 | **Structure** | Dense detail geometry (railings, a carved bow) — more visible than rigging, so its own usually-gentler **Structure reduce (%)** dial. |
 | **Flag** | Banners/pennants — double-sided like sails, but **never hidden**: a flag keeps flying at anchor. No bone, no clip; welds to the body. |
+| **Rudder** | Same treatment as Flag (double-sided, always visible, winding kept) under its own name — for slabs the inside-out test cannot decide (a half-inverted rudder scores ~0; no flip can repair it). |
 | **Ignore** (`I`) | Deleted from the generated GLB. Use for genuinely invisible internals or unwanted variants. |
 | **Default / Edgecase** (`D` / `E`) | Root-weighted review markers: undecided, or deliberately parked for another pass. |
 

@@ -60,7 +60,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   model's face, and the Factory's global *Reduce to ~tris* is usually the smarter place to slim it).
 - **Flag — double-sided like a sail, but never hidden.** Banners and pennants must read from both sides, yet a
   flag keeps flying at anchor — so the new role gets the sail's doubling and winding protection without the Furl
-  strike: no bone, no clip, welded to the body.
+  strike: no bone, no clip, welded to the body. **Rudder** shares the exact treatment under its own name — a
+  closed slab with one face-side wound inward scores ~0 in the inside-out flip (the halves cancel), so no
+  whole-island flip can repair it; doubling can.
 - **Sweep accepts negative** — if the galley rows backwards, flip the sign (the wheels' Spin-degrees convention);
   the dip phase stays put, so blades still bury on the reversed drive.
 

@@ -55,7 +55,7 @@ public class VehicleLabWindow : EditorWindow
     // Structure (2026-09-05): the second reduction tier — small-but-dense DETAIL geometry (railings, a carved bow
     // figure) that is more visible than rigging, so it gets its own, usually gentler, percentage dial. Same
     // dissolve+collapse treatment at Generate; Body-like otherwise. Dropdown-only, no hotkey.
-    enum Role { Body, Wheel, Turret, Ignore, Default, Edgecase, Caterpillar, Gun, Rotor, TailRotor, Trail, Muzzle, Cradle, Oar, Sail, Rigging, Structure, Flag }
+    enum Role { Body, Wheel, Turret, Ignore, Default, Edgecase, Caterpillar, Gun, Rotor, TailRotor, Trail, Muzzle, Cradle, Oar, Sail, Rigging, Structure, Flag, Rudder }
     [Serializable] class Part { public string name; public int verts; public Vector3 center, size; public Role role;
         public int vis = -1;   // probe's escape-ray verdict: 1 = external (visible from outside), 0 = interior (never visible — strippable), -1 = unclassified (pre-visibility probe)
         public string bone = ""; }   // rigged sources: the bone this shard is weighted to (probe 2026-08-20) — lets a BONE row highlight its shards
@@ -153,7 +153,7 @@ public class VehicleLabWindow : EditorWindow
     static float MaxDim(Part p) => Mathf.Max(p.size.x, Mathf.Max(p.size.y, p.size.z));
     bool VisiblePart(Part x) => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.center.z >= minHeight && x.center.z <= maxHeight && x.center.y >= minWidth && x.center.y <= maxWidth;
     [SerializeField] int partFilter;      // list filter: 0 = all; see FilterOptions (Unreviewed = Default + Edgecase)
-    static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase", "Caterpillar", "Gun", "Rotor", "Tail rotor", "Trail", "Muzzle", "Cradle", "Oar", "Sail", "Rigging", "Structure", "Flag" };
+    static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase", "Caterpillar", "Gun", "Rotor", "Tail rotor", "Trail", "Muzzle", "Cradle", "Oar", "Sail", "Rigging", "Structure", "Flag", "Rudder" };
     bool MatchesFilter(Role r) => partFilter == 1 ? (r == Role.Default || r == Role.Edgecase)
                                 : partFilter == 2 ? r == Role.Default
                                 : partFilter == 3 ? r == Role.Wheel
@@ -172,7 +172,8 @@ public class VehicleLabWindow : EditorWindow
                                 : partFilter == 16 ? r == Role.Sail
                                 : partFilter == 17 ? r == Role.Rigging
                                 : partFilter == 18 ? r == Role.Structure
-                                : partFilter == 19 ? r == Role.Flag : true;
+                                : partFilter == 19 ? r == Role.Flag
+                                : partFilter == 20 ? r == Role.Rudder : true;
     // Roles that SPIN (get a bone + the Spin action): wheels and both rotor kinds. Used for the Generate-enable gate,
     // the spin-section summary, Verify, and the "inside the wheel" test — so a rotorcraft with no Wheel parts still rigs.
     static bool IsSpinner(Role r) => r == Role.Wheel || r == Role.Rotor || r == Role.TailRotor;
@@ -870,6 +871,7 @@ public class VehicleLabWindow : EditorWindow
                    : low.Contains("rigging") || low.Contains("rope") ? Role.Rigging
                    : low.Contains("railing") ? Role.Structure
                    : low.Contains("flag") || low.Contains("banner") || low.Contains("pennant") ? Role.Flag
+                   : low.Contains("rudder") ? Role.Rudder
                    : low.Contains("rotor") || low.Contains("helix") || low.Contains("blade") || low.Contains("propeller") ? Role.Rotor
                    : low.Contains("wheel") || low.Contains("tyre") || low.Contains("tire") ? Role.Wheel
                    : low.Contains("turret") ? Role.Turret : Role.Default;
@@ -1420,9 +1422,12 @@ public class VehicleLabWindow : EditorWindow
         // BODY reduce (2026-09-05): the third tier — explicitly-marked Body parts, default dial 0 (untouched).
         string bodiesFile = Path.Combine(projRoot, prevDir, baseName + "_bodies.txt").Replace('\\', '/');
         File.WriteAllLines(bodiesFile, src.Where(p => p.role == Role.Body).Select(p => p.name).ToArray());
-        // FLAGS (2026-09-05): banners/pennants — double-sided like sails, but never hidden (a flag flies at anchor).
+        // FLAGS + RUDDERS (2026-09-05): both take the same treatment — double-sided at export, always visible,
+        // authored winding kept — so they share one parts file; the roles exist separately only for the user's
+        // semantics (a rudder is not a flag). Rudder case: a closed slab with one face-side wound inward scores
+        // ~0 in the inside-out flip (the halves cancel), so no whole-island flip can repair it — doubling can.
         string flagsFile = Path.Combine(projRoot, prevDir, baseName + "_flags.txt").Replace('\\', '/');
-        File.WriteAllLines(flagsFile, src.Where(p => p.role == Role.Flag).Select(p => p.name).ToArray());
+        File.WriteAllLines(flagsFile, src.Where(p => p.role == Role.Flag || p.role == Role.Rudder).Select(p => p.name).ToArray());
         string axis = axisChoice == 0 ? "AUTO" : AxisOptions[axisChoice];
         string tailAxis = tailAxisChoice == 0 ? "AUTO" : AxisOptions[tailAxisChoice];
         var inv = System.Globalization.CultureInfo.InvariantCulture;
