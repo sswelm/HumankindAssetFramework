@@ -74,6 +74,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   around it. The knob the dip sign cannot be (±dip is the same oscillation, phase-flipped): a source whose oars
   are modelled raked steeply into the water rides too deep at any dip; positive lift brings the bank toward
   horizontal. Measured: lift 30 raises the Khalandion blade path ~0.5 units, deepest point 0.45 shallower.
+- **The Animation Lab preview floats boats at the calibrated water level.** It drew its hex at ground height
+  (-0.02) even for boat pawns — water-blue in colour, ground in height — so the Factory showed oar blades in the
+  water while the Animation Lab showed them dry. Both panes now share the pack's one-source-of-truth
+  `ModelRegistry.WaterLevel`; the forward arrow and reference man ride the same plane.
 
 ## 0.5.4 — 2026-09-03
 
