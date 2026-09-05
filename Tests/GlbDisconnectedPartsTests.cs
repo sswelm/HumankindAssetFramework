@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -76,6 +77,34 @@ public class GlbDisconnectedPartsTests
         Assert.Equal(new[] { 2, 3 }, channels.Select(c => c["target"].Value<int>("node")).ToArray());
         Assert.All(channels, c => Assert.Equal("weights", (string)c["target"]["path"]));
         Assert.All(channels, c => Assert.Equal(0, c.Value<int>("sampler")));
+    }
+
+    [Fact]
+    public void Selective_split_only_touches_named_nodes_and_analyze_reports_islands()
+    {
+        byte[] source = BuildGlb(new[] {
+            0f, 0f, 0f,  1f, 0f, 0f,  0f, 1f, 0f,
+            10f, 0f, 0f, 11f, 0f, 0f, 10f, 1f, 0f
+        });
+
+        // Analyze: read-only picker data — one row for the Hull node, two islands, two triangles.
+        var infos = GlbDisconnectedParts.Analyze(source);
+        var hull = Assert.Single(infos, i => i.NodeName == "Hull");
+        Assert.Equal(2, hull.Islands);
+        Assert.Equal(2, hull.Triangles);
+        Assert.Null(hull.Blocked);
+
+        // A filter that names no present node splits nothing — the unchecked part stays whole.
+        var none = GlbDisconnectedParts.Split(source, new HashSet<string> { "SomethingElse" });
+        Assert.False(none.Changed);
+        Assert.Equal(0, none.ChildPartsCreated);
+
+        // Naming the node reproduces the full split exactly.
+        var chosen = GlbDisconnectedParts.Split(source, new HashSet<string> { "Hull" });
+        Assert.True(chosen.Changed);
+        Assert.Equal(2, chosen.ChildPartsCreated);
+        Assert.Equal(2, chosen.SourceTriangles);
+        Assert.Equal(2, chosen.OutputTriangles);
     }
 
     static byte[] BuildGlb(float[] positions, bool withWeightAnimation = false)

@@ -218,7 +218,63 @@ public static class GlbDisconnectedParts
         }
     }
 
-    public static Result Split(byte[] source)
+    // ONE ROW PER MESH-CARRYING NODE, for a picker UI (the Model Workshop): how many disconnected islands the
+    // node's mesh holds (1 = nothing to split), its triangle count, and — when the analyzer must skip it — why.
+    // Read-only: nothing is written, so probing a 500k-triangle ship is safe and fast.
+    public sealed class PartInfo
+    {
+        public string NodeName;
+        public string MeshName;
+        public int Triangles;
+        public int Islands;
+        public string Blocked;   // non-null = unsupported for splitting (compressed, instanced, non-triangle…)
+    }
+
+    public static List<PartInfo> Analyze(byte[] source)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        Document document = Parse(source);
+        JObject root = document.Root;
+        JArray nodes = root["nodes"] as JArray ?? new JArray();
+        JArray meshes = root["meshes"] as JArray ?? throw new InvalidDataException("GLB has no meshes array.");
+        JArray buffers = root["buffers"] as JArray ?? throw new InvalidDataException("GLB has no buffers array.");
+        if (buffers.Count != 1 || buffers[0]?["uri"] != null)
+            throw new InvalidDataException("Lossless splitting requires one embedded GLB buffer.");
+        byte[] sourceBin = document.Chunks[document.BinIndex].Data;
+        var reader = new Accessors(root, sourceBin.Take(buffers[0].Value<int>("byteLength")).ToArray());
+
+        var byMesh = new Dictionary<int, MeshPlan>();
+        var blockedByMesh = new Dictionary<int, string>();
+        var infos = new List<PartInfo>();
+        foreach (JObject node in nodes.OfType<JObject>())
+        {
+            if (node["mesh"] == null) continue;
+            int meshIndex = node.Value<int>("mesh");
+            var info = new PartInfo { NodeName = (string)node["name"] ?? ("node " + infos.Count), MeshName = (string)meshes[meshIndex]?["name"] ?? ("mesh " + meshIndex) };
+            if (node["extensions"]?["EXT_mesh_gpu_instancing"] != null)
+                info.Blocked = "GPU-instanced node";
+            else if (blockedByMesh.TryGetValue(meshIndex, out string why))
+                info.Blocked = why;
+            else if (!byMesh.TryGetValue(meshIndex, out MeshPlan plan))
+            {
+                try { byMesh[meshIndex] = plan = AnalyzeMesh(meshIndex, (JObject)meshes[meshIndex], reader, keepSingle: true); }
+                catch (Exception ex) when (ex is InvalidDataException || ex is OverflowException)
+                { blockedByMesh[meshIndex] = info.Blocked = ex.Message; }
+            }
+            if (info.Blocked == null && byMesh.TryGetValue(meshIndex, out MeshPlan p) && p != null)
+            { info.Triangles = p.TriangleCount; info.Islands = p.Components.Count; }
+            else if (info.Blocked == null) { info.Islands = 1; }   // empty/primitive-less mesh: nothing to split
+            infos.Add(info);
+        }
+        return infos;
+    }
+
+    public static Result Split(byte[] source) => Split(source, null);
+
+    // onlyNodeNames: when non-null, ONLY nodes whose name is in the set are split (the Model Workshop's
+    // selective mode — a hull keeps its junk-free parts whole while the one island-soup part is exploded).
+    // Original meshes are never removed, so a mesh shared with an unselected node keeps rendering there.
+    public static Result Split(byte[] source, ISet<string> onlyNodeNames)
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
         Document document = Parse(source);
@@ -243,6 +299,7 @@ public static class GlbDisconnectedParts
         foreach (JObject node in nodes.OfType<JObject>())
         {
             if (node["mesh"] == null) continue;
+            if (onlyNodeNames != null && !onlyNodeNames.Contains((string)node["name"])) continue;
             int meshIndex = node.Value<int>("mesh");
             referencedMeshes.Add(meshIndex);
             if (node["extensions"]?["EXT_mesh_gpu_instancing"] != null) instancedMeshes.Add(meshIndex);
@@ -307,6 +364,7 @@ public static class GlbDisconnectedParts
         {
             var node = nodes[nodeIndex] as JObject;
             if (node?["mesh"] == null) continue;
+            if (onlyNodeNames != null && !onlyNodeNames.Contains((string)node["name"])) continue;
             MeshPlan plan;
             if (!plans.TryGetValue(node.Value<int>("mesh"), out plan)) continue;
 
@@ -376,16 +434,18 @@ public static class GlbDisconnectedParts
         }
     }
 
-    public static Result SplitFile(string inputPath, string outputPath)
+    public static Result SplitFile(string inputPath, string outputPath) => SplitFile(inputPath, outputPath, null);
+
+    public static Result SplitFile(string inputPath, string outputPath, ISet<string> onlyNodeNames)
     {
         if (string.Equals(Path.GetFullPath(inputPath), Path.GetFullPath(outputPath), StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Choose a new output path; the source GLB is never overwritten.");
-        Result result = Split(File.ReadAllBytes(inputPath));
+        Result result = Split(File.ReadAllBytes(inputPath), onlyNodeNames);
         if (result.Changed) File.WriteAllBytes(outputPath, result.Bytes);
         return result;
     }
 
-    static MeshPlan AnalyzeMesh(int meshIndex, JObject mesh, Accessors reader)
+    static MeshPlan AnalyzeMesh(int meshIndex, JObject mesh, Accessors reader, bool keepSingle = false)
     {
         JArray primitives = mesh["primitives"] as JArray;
         if (primitives == null || primitives.Count == 0) return null;
@@ -454,7 +514,7 @@ public static class GlbDisconnectedParts
             UpdateBounds(component.Min, component.Max, vertices[triangle.VB].Position);
             UpdateBounds(component.Min, component.Max, vertices[triangle.VC].Position);
         }
-        if (byRoot.Count <= 1) return null;
+        if (byRoot.Count <= 1 && !keepSingle) return null;   // keepSingle: Analyze wants the row (islands=1) anyway
         var components = byRoot.Values.OrderBy(c => c.Min[0]).ThenBy(c => c.Min[1]).ThenBy(c => c.Min[2]).ThenBy(c => c.FirstTriangle).ToList();
         return new MeshPlan {
             MeshIndex = meshIndex,
