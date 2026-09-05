@@ -34,6 +34,16 @@ class VehicleRigMathTests(unittest.TestCase):
         self.assertAlmostEqual(base[1] * 100.0, scaled[1])
         self.assertAlmostEqual(base[2] * 100.0, scaled[2])
 
+    def test_khalandion_absolute_calibration(self):
+        """Pin the drill-validated ABSOLUTES, not just the scaling law: the validation model's oar-bank
+        diagonal 10.8132 must map to merge eps 0.085 and min island span 0.15 (exactly 64 recovered oars).
+        The scaling tests alone let the 104-oar bug through — eps 0.0051x also scales linearly."""
+        metrics = NAMESPACE["_oar_recovery_metrics"]
+        diagonal, eps, span, _ = metrics((0.0, 0.0, 0.0), (10.8132, 0.0, 0.0))
+        self.assertAlmostEqual(10.8132, diagonal)
+        self.assertAlmostEqual(0.085, eps, places=3)
+        self.assertAlmostEqual(0.15, span, places=3)
+
     def test_beam_centre_tracks_translation_instead_of_world_zero(self):
         metrics = NAMESPACE["_oar_recovery_metrics"]
         base = metrics((-8.0, -3.0, -1.0), (8.0, 3.0, 1.0))
