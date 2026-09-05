@@ -629,7 +629,9 @@ public class VehicleLabWindow : EditorWindow
                 {
                     oarSweepDeg = EditorGUILayout.Slider(new GUIContent("Sweep (deg)",
                         "How far each oar swings fore-and-aft about its oarlock (peak amplitude). The whole bank strokes " +
-                        "in unison — the galley drum-beat. ~20–30° reads clearly from the game's distance."), oarSweepDeg, 0f, 60f);
+                        "in unison — the galley drum-beat. ~20–30° reads clearly from the game's distance. NEGATIVE " +
+                        "reverses the stroke — if the ship rows backwards, flip the sign (the same convention as Spin " +
+                        "degrees for wheels that roll the wrong way)."), oarSweepDeg, -60f, 60f);
                     oarDipDeg = EditorGUILayout.Slider(new GUIContent("Dip (deg)",
                         "How far the blades drop into the water on the aft drive and lift clear on the recovery — a " +
                         "second rotation phase-locked to the sweep. 0 = a flat fore-aft sweep with no dip."), oarDipDeg, 0f, 45f);

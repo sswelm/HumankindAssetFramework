@@ -123,7 +123,8 @@ cleanly), gives it a bone at its oarlock, and bakes a unison rowing stroke into 
 the oarlock plus a phase-locked **Dip** (blades drop into the water on the aft drive, lift clear on the recovery). It
 adds one bone per oar (~60 on a full galley), well within the skeleton budget. Tune **Sweep**, **Dip**, and **Stroke
 frames** while watching the preview loop — the believable-from-a-distance amplitudes are a judgement made on the
-moving turntable, not a still frame. If the blades knife through the water edge-on instead of scooping, the source
+moving turntable, not a still frame. If the ship **rows backwards** (blades push water toward the bow while in the
+water), make **Sweep negative** — the same sign convention as Spin degrees for wheels that roll the wrong way. If the blades knife through the water edge-on instead of scooping, the source
 models them *feathered* — set **Blade roll (deg)** (typically 90) to spin each oar about its own long axis in the
 rest geometry; the cylindrical pole shows no change, only the blade face squares to the water. The oars row
 whenever the movement clip plays; no Model Factory option is
