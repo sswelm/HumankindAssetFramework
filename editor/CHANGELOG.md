@@ -70,6 +70,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   **Dip accepts negative too** — it flips which half of the stroke is submerged, the second independent way to
   reverse the rowing direction (flip either Sweep or Dip, not both: both flips cancel). Keep |Sweep| above ~2× the
   dip, or the dip's fore-aft component on a raked oar drowns the sweep and the stroke churns instead of pulling.
+- **Lift (deg)** re-centres the stroke height — a constant tilt about the dip axis with the dip oscillating
+  around it. The knob the dip sign cannot be (±dip is the same oscillation, phase-flipped): a source whose oars
+  are modelled raked steeply into the water rides too deep at any dip; positive lift brings the bank toward
+  horizontal. Measured: lift 30 raises the Khalandion blade path ~0.5 units, deepest point 0.45 shallower.
 
 ## 0.5.4 — 2026-09-03
 

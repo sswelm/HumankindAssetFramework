@@ -318,6 +318,11 @@ body_reduce = min(95.0, max(0.0, float(argv[54]))) if len(argv) > 54 and argv[54
 # a flag keeps flying at anchor. Double-sided at export, artist winding kept (excluded from the inside-out flip),
 # welded to the body like any Body part, no bone and no clip of their own.
 flag_names = namelist(argv[55]) if len(argv) > 55 and argv[55].strip() else []
+# OAR LIFT (argv[56]): a CONSTANT tilt about the dip axis, re-centring the whole stroke — the knob the dip sign
+# cannot be (±dip is the same oscillation, phase-flipped; the blades visit the same depths either way). A source
+# whose oars are modelled raked steeply into the water (the Khalandion: "at -30 they almost go vertically") rides
+# too deep at ANY dip; positive lift tilts every oar up toward horizontal and the dip oscillates around that.
+oar_lift = float(argv[56]) if len(argv) > 56 and argv[56].strip() else 0.0
 recoil_bone = None               # set to "RecoilArm" when the split actually happens — the bone the clip ROTATES
 recoil_geom = None               # (pivot, axis, bore_dir, slide, R) for the arc that fakes the slide
 # Residual tilt the arc leaves on the tube. The slide is faked by swinging the barrel on a long arm, so some pitch
@@ -1846,7 +1851,7 @@ if oar_bake:
     # Sweep is the TOTAL fore-aft arc, split evenly about the rest rake (user convention 2026-09-05: "a sweep of
     # 24 degrees should make the oars sweep 12 degrees forward and then 12 degrees backwards") — the amplitude
     # each way is half the dial. Dip stays a per-direction amplitude (blades drop A_d, lift A_d).
-    _oaw = math.radians(oar_sweep) * 0.5; _oad = math.radians(oar_dip)
+    _oaw = math.radians(oar_sweep) * 0.5; _oad = math.radians(oar_dip); _oal = math.radians(oar_lift)
     for _bn, _piv, _oside, _dax in oar_bake:
         _db = arm.data.bones.get(_bn); _pb = arm.pose.bones.get(_bn)
         if _db is None or _pb is None:
@@ -1861,7 +1866,8 @@ if oar_bake:
             # NO side factor on the dip: _dax already mirrors per bank (it follows the oar's own horizontal
             # direction), so adding the side sign double-mirrored it — one bank dipped while the other lifted
             # (the field report: "port and starboard are not in sync", seen end-on as a seesaw).
-            _thd = _oad * math.sin(_phi)                 # dip: both banks drop and lift together
+            # negative dip-term = blade UP (measured on the trajectory drill), so positive lift SUBTRACTS
+            _thd = -_oal + _oad * math.sin(_phi)         # dip about the LIFTED stroke centre; both banks together
             _pb.rotation_quaternion = Quaternion(_lz, _ths) @ Quaternion(_ld, _thd)
             _pb.keyframe_insert('rotation_quaternion', frame=_f)
     try:
@@ -1872,8 +1878,8 @@ if oar_bake:
         if _fc.data_path.startswith('pose.bones["Oar_'):
             for _kp in _fc.keyframe_points:
                 _kp.interpolation = 'LINEAR'
-    print("VEHICLE ROWING clip: %d oars sweep %.0f deg total arc (%.0f each way of rest) + dip %.0f deg, %d cycle(s) over shared %d-frame 'Spin'"
-          % (len(oar_bake), abs(oar_sweep), abs(oar_sweep) * 0.5, oar_dip, _oar_repeats, _clip_frames))
+    print("VEHICLE ROWING clip: %d oars sweep %.0f deg total arc (%.0f each way of rest) + dip %.0f deg, lift %.0f deg, %d cycle(s) over shared %d-frame 'Spin'"
+          % (len(oar_bake), abs(oar_sweep), abs(oar_sweep) * 0.5, oar_dip, oar_lift, _oar_repeats, _clip_frames))
 
 # SAIL on/off — its OWN `Furl` clip, used as a STANCE, never played. Three designs were rejected in the field:
 # keying the hide inside Spin twitched the canvas at every loop restart; a 12-frame visible descent read wrong
