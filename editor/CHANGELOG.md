@@ -19,6 +19,8 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   models behave the same. When wave, wheel, and rowing periods differ, each motion is fitted to a whole number of
   cycles over the shared `Spin` range instead of freezing at its last key. Older recipes migrate to the rowing defaults;
   source-skeleton fast-path generation now blocks Oar roles with instructions to probe the mesh parts instead.
+  Marked Oar meshes are excluded from BOTH double-siding paths, the global checkbox included — galley blades ship
+  as authored front/back sheet pairs, and doubling them z-shimmers four near-coincident layers.
 - **Fix inside-out faces — a targeted winding repair, not a blunt recalc.** A source whose side planking ships
   wrong-way-out (the Khalandion) reads see-through from outside while showing the far wall's interior. The new
   Vehicle Lab checkbox reverses the islands that provably face the hull's interior (judged against an axis through

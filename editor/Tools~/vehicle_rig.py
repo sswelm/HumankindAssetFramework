@@ -2629,11 +2629,14 @@ if fix_inside_out:
 # validates). The back shell is nudged INWARD along the normal by a small fraction of the model size, so front and
 # back faces are NOT coincident — coincident faces make the game's alpha-to-coverage shader read ~50% transparent.
 # Marked SAIL, FLAG and RUDDER meshes are ALWAYS double-sided — the role says so, no guessing.
-# (Oar meshes are NOT: the Khalandion's blades ship as authored front/back sheet pairs, already two-sided —
-# doubling them z-shimmered four near-coincident layers. A role gets doubled only when being a sheet is its nature.)
+# Marked OAR meshes are NEVER doubled — not even under the global switch (review find 2026-09-05: the global
+# path used to include them): the Khalandian's blades ship as authored front/back sheet pairs, already
+# two-sided, and doubling them z-shimmered four near-coincident layers. The role's nature decides, both ways.
 _dall = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]
-_dtargets = _dall if double_sided else [o for o in _dall
-                                        if any(g.name in ("Sail", "Flag") for g in o.vertex_groups) or o.name.startswith("Mesh___rud__")]
+_dtargets = ([o for o in _dall if not any(g.name.startswith("Oar_") for g in o.vertex_groups)]
+             if double_sided else
+             [o for o in _dall
+              if any(g.name in ("Sail", "Flag") for g in o.vertex_groups) or o.name.startswith("Mesh___rud__")])
 if _dtargets:
     # The inset is a fraction of the WHOLE model, not each part. A per-mesh dimension would give a tiny single-sided
     # part (a bolt, an antenna) a tiny inset that can fall below depth precision -> that part reads transparent again.
