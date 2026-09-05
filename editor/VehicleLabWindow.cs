@@ -129,6 +129,7 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] float tailYawAdj = 0f;    // manual trim on the tail axle: swing about vertical, degrees
     [SerializeField] float tailPitchAdj = 0f;  // manual trim on the tail axle: tilt up/down, degrees
     [SerializeField] string loadedRecipe = "";   // the recipe shown in the "Edit existing" combobox ("" = ＜new model＞); tracked by NAME so the frame-rebuilt file list can't desync it
+    [SerializeField] bool recipeReadThisSession = false;   // Save's overwrite guard: true once THIS window instance has read (or written) the recipe file — survives domain reloads via window serialization, resets to false in a fresh window, which is exactly the state whose reflex-Save once ate a tuned recipe
     [SerializeField] int treadAdvCells = 3;   // tread advance per loop in cells
     [SerializeField] float treadCellsPerLink = 4f; // tread detail: cells per molded link = the BONES dial (4 = smoothest; 0.25 = one bone per four links)
     static readonly float[] TreadDetailValues = { 4f, 2f, 1f, 0.5f, 0.25f };
@@ -1160,7 +1161,7 @@ public class VehicleLabWindow : EditorWindow
     // bug this button exists to kill (stale bone rows silently kept the SKM fast path on for an unrigged model).
     void NewModel()
     {
-        srcFile = ""; outGlb = ""; lastOutGlb = ""; loadedRecipe = "";
+        srcFile = ""; outGlb = ""; lastOutGlb = ""; loadedRecipe = ""; recipeReadThisSession = false;
         parts.Clear(); boneParts.Clear(); useSourceRig = false;
         frames = 15; degrees = -360f; axisChoice = 0;
         treadAdvCells = 3; treadCellsPerLink = 4f; tracksStatic = false;
@@ -1290,6 +1291,22 @@ public class VehicleLabWindow : EditorWindow
         string name = !string.IsNullOrEmpty(loadedRecipe) ? loadedRecipe
                     : Path.GetFileNameWithoutExtension(string.IsNullOrEmpty(srcFile) ? "vehicle" : srcFile);
         string p = Path.Combine(projRoot, RecipesDir, name + ".json");
+        // OVERWRITE GUARD (2026-09-06, the eaten galley stroke): an editor restart can hand this window
+        // factory-default knobs while loadedRecipe/srcFile still name a TUNED recipe on disk — one reflex Save
+        // then silently replaced Sweep 40/Dip 24/Roll 90 with 24/18/0. Two layers so that can never cost work
+        // again: (1) overwriting a file this window has not READ this session needs one explicit click;
+        // (2) whatever is overwritten is first copied to <name>.json.bak~ (the ~ keeps Unity from importing
+        // it), so even a confirmed mistake is one file-rename from recovered.
+        if (File.Exists(p) && !recipeReadThisSession &&
+            !EditorUtility.DisplayDialog("Overwrite saved recipe?",
+                $"'{name}.json' exists on disk, but this window has not loaded it since it was opened — its saved " +
+                "knobs may be newer than what the window shows (a reopened window starts with defaults).\n\n" +
+                "Overwrite it with the current window state? A backup of the old file is kept as " + name + ".json.bak~.",
+                "Overwrite", "Cancel"))
+        { status = "Save cancelled — load the recipe first (Edit existing) if you meant to continue from it."; return; }
+        if (File.Exists(p))
+            try { File.Copy(p, Path.Combine(projRoot, RecipesDir, name + ".json.bak~"), true); }
+            catch (Exception bex) { Debug.LogWarning("[VehicleLab] recipe backup failed: " + bex.Message); }
         var r = new Recipe
         {
             srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
@@ -1303,6 +1320,7 @@ public class VehicleLabWindow : EditorWindow
         File.WriteAllText(p, JsonUtility.ToJson(r, true));
         AssetDatabase.Refresh();
         loadedRecipe = Path.GetFileNameWithoutExtension(p);   // reflect the just-saved recipe in the combobox
+        recipeReadThisSession = true;   // this window state IS the file now — further saves are continuations
         status = "Recipe saved: " + p;
     }
 
@@ -1359,6 +1377,7 @@ public class VehicleLabWindow : EditorWindow
             boneParts = r.boneParts ?? new List<Part>();   // pre-fast-path recipes have no bone list
             useSourceRig = r.useSourceRig && boneParts.Count > 0;
             loadedRecipe = Path.GetFileNameWithoutExtension(p);   // reflect the loaded recipe in the combobox
+            recipeReadThisSession = true;   // the window now derives from the file — Save may overwrite silently
             status = $"Recipe loaded ({parts.Count} parts{(boneParts.Count > 0 ? $", {boneParts.Count} source bones, fast path {(useSourceRig ? "ON" : "off")}" : "")}, {ActiveParts.Count(x => x.role == Role.Wheel)} wheels). " +
                      "generate the rig directly — or press Probe to list ALL parts for review (your marked roles are kept, plus the preview returns for click-to-highlight)." +
                      (predates.Count > 0 ? $"\nNOTE — recipe predates: {string.Join(", ", predates)}. Those loaded as safe defaults; check the dials and Save to modernize it." : "");

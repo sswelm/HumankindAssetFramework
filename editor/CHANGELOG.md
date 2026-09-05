@@ -65,6 +65,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   clustering, bones and weights land on the slim mesh — verified identical cluster recovery at 0% and 50%.
   Defaults 0. Note the dials are floors: the dissolve pass can overshoot on flat canvas (a 30% sail dial cut 66%
   on the Khalandion), so any non-zero sail value already cuts hard.
+- **Save can no longer silently eat a tuned recipe.** A reopened Vehicle Lab window starts with default knobs
+  while still naming the saved recipe — one reflex Save then replaced a tuned rowing stroke with defaults.
+  Overwriting a recipe this window has not read since it was opened now asks first, and every overwrite leaves
+  a `<name>.json.bak~` backup beside the recipe (the `~` keeps Unity from importing it) — a confirmed mistake
+  is one rename from recovered.
 - **The Factory reports every baked mesh's quad count against the engine's draw ceiling** — Humankind renders a
   unit mesh as at most 255 sub-particles × 64 primitives = **16,320 quads**, and the overrun is silent in-game:
   the mesh stores fully, the last-baked parts (masts, rigging, sails) simply never draw (how the Great Galley
