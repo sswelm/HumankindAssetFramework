@@ -153,7 +153,7 @@ public class VehicleLabWindow : EditorWindow
     const int RockFps = 24;                       // Blender's scene fps — the clip's real-time length
     // The two motion sections fold independently (Sound Studio pattern): a model is almost always EITHER a wheeled
     // vehicle OR a floating one, so ~10 permanently-irrelevant rows were on screen at all times.
-    [SerializeField] bool foldSpin = true, foldWave = false, foldOrient = false, foldTrails = false, foldOars = false, foldReduce = false;
+    [SerializeField] bool foldSpin = true, foldWave = false, foldOrient = false, foldTrails = false, foldOars = false, foldReduce = false, foldParts = true;
     // Straighten a source that imports crooked / on its side. Baked into the vertex data BEFORE the rig is built,
     // so wheel axles, tread side detection and the rock's auto hull-length axis all read the corrected pose.
     [SerializeField] Vector3 modelRot = Vector3.zero;
@@ -382,98 +382,106 @@ public class VehicleLabWindow : EditorWindow
                 useSourceRig = EditorGUILayout.ToggleLeft(new GUIContent($"Use source skeleton (fast path) — the model ships fully rigged ({boneParts.Count} bones)",
                     "The probe found an artist skeleton with full vertex weights. ON: mark which BONES spin and the rig step reuses that skeleton unchanged (artist axle pivots, weapon/socket bones kept). OFF: the static shard-marking flow."), useSourceRig);
             var list = ActiveParts;
-            // Tiny-fragment collapse: a triangle-soup FBX probes into THOUSANDS of 3-4-vert shards — they all belong
-            // to Body anyway (anything not marked wheel/turret skins to Root). Only substantial parts are listed.
-            minVerts = EditorGUILayout.IntSlider(new GUIContent("Hide parts under (verts)",
-                "Parts smaller than this are collapsed into Body automatically (they skin to Root). Raise it if the list is still noisy; lower it if a small wheel is missing."), minVerts, 1, 2000);
-            minPartSize = EditorGUILayout.Slider(new GUIContent("Hide parts under (size)",
-                "Parts whose largest bbox dimension is below this are hidden (they stay on the hull, like the verts filter). Drop the verts slider and raise this to find LARGE parts with only a few vertices — flat discs and plates."), minPartSize, 0f, 2f);
-            // Height filter: slider range auto-fits the model's actual vertical span (probe center heights, Z-up).
-            // PAD the ends a hair BEYOND the outermost part (user finding 2026-08-01): the default clamps to the exact
-            // min/max, but the slider rounds slightly inside, clipping the edge part ("1 hidden by the sliders" at rest).
-            // With the pad, "fully open" sits just past the parts, so nothing hides until you actually drag inward.
-            float zLo = list.Min(x => x.center.z), zHi = list.Max(x => x.center.z), zPad = Mathf.Max(0.02f, (zHi - zLo) * 0.02f);
-            minHeight = EditorGUILayout.Slider(new GUIContent("Hide parts below (height)",
-                "Parts whose center height is below this are hidden. Slide up past the hull deck to isolate turret-level parts."), Mathf.Clamp(minHeight, zLo - zPad, zHi + zPad), zLo - zPad, zHi + zPad);
-            maxHeight = EditorGUILayout.Slider(new GUIContent("Hide parts above (height)",
-                "Parts whose center height is above this are hidden. Slide down to strip the superstructure and isolate wheel/chassis-level parts."), Mathf.Clamp(maxHeight, zLo - zPad, zHi + zPad), zLo - zPad, zHi + zPad);
-            // Left/right (width) filter (user request 2026-08-01): the horizontal companion to the height bracket —
-            // slice along the WIDTH axis (center.y, where the two wheels mirror) to isolate ONE side's wheel. Same
-            // end-padding so a fresh model hides nothing until you drag.
-            float yLo = list.Min(x => x.center.y), yHi = list.Max(x => x.center.y), yPad = Mathf.Max(0.02f, (yHi - yLo) * 0.02f);
-            minWidth = EditorGUILayout.Slider(new GUIContent("Hide parts left of (side)",
-                "Parts whose center is LEFT of this on the width axis are hidden — bracket with the next slider to keep just one side's wheel. (Straighten the model in Orientation first so the two wheels split along this axis.)"), Mathf.Clamp(minWidth, yLo - yPad, yHi + yPad), yLo - yPad, yHi + yPad);
-            maxWidth = EditorGUILayout.Slider(new GUIContent("Hide parts right of (side)",
-                "Parts whose center is RIGHT of this on the width axis are hidden. Slide the two together onto one wheel to isolate it, then mark it Wheel."), Mathf.Clamp(maxWidth, yLo - yPad, yHi + yPad), yLo - yPad, yHi + yPad);
-            partFilter = EditorGUILayout.Popup(new GUIContent("Show only",
-                "Filter the list to one classification. Marking a part out of the current filter removes it from the list and auto-advances to the next."), partFilter, FilterOptions);
-            int interiorN = list.Count(x => x.vis == 0);
-            visFilter = EditorGUILayout.Popup(new GUIContent("Visibility",
-                "The probe's escape-ray verdict per part: External = some surface point can see out; Interior = provably " +
-                "never visible from outside (cockpit gear, engine guts) — mark those Ignore to reclaim triangle budget. " +
-                "Probed before this feature existed? Re-Probe to classify." + (interiorN > 0 ? $"  ({interiorN} interior found)" : "")),
-                visFilter, VisFilterOptions);
-            var shown = list.Where(x => VisiblePart(x) && MatchesFilter(x.role) && MatchesVis(x)).ToList();
-            int hidden = list.Count(x => !VisiblePart(x));
-            int unreviewed = list.Count(x => VisiblePart(x) && x.role == Role.Default);
-            int edgecases = list.Count(x => VisiblePart(x) && x.role == Role.Edgecase);
-            EditorGUILayout.LabelField($"{(useSourceRig && boneParts.Count > 0 ? "Source BONES" : "Parts")} ({shown.Count} shown{(hidden > 0 ? $", {hidden} hidden by the sliders" : "")}{(unreviewed > 0 ? $", {unreviewed} undecided" : ", all decided")}{(edgecases > 0 ? $", {edgecases} edge-case" : "")}) — mark {(useSourceRig && boneParts.Count > 0 ? "the bones that SPIN (Wheel)" : "the wheels & turret")}:", EditorStyles.boldLabel);
-            if (useSourceRig && boneParts.Count > 0)   // 2026-08-20: a user hunted for the turret's shards here — in this mode they are ONE row
-                EditorGUILayout.LabelField("Each row is one BONE of the shipped skeleton; all the shards skinned to it count as that row (the turret's parts = the Turret bone). Untick the fast path to list and mark individual parts.", EditorStyles.wordWrappedMiniLabel);
-            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   W/T/B = Wheel/Turret/Body   ·   R = Rotor (main, spins about the mast)   ·   L = taiL rotor (spins about the lateral axis)   ·   G = Gun (rides the Turret; muzzle/socket anchor)   ·   C = Caterpillar (tread loop)   ·   I = Ignore (DELETED)   ·   D = Default   ·   E = Edgecase", EditorStyles.miniLabel);
-            // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
-            // part's role — the whole list can be reviewed without mousing between rows and dropdowns.
-            var ev = Event.current;
-            if (ev.type == EventType.KeyDown && shown.Count > 0 && !EditorGUIUtility.editingTextField)
+            // PARTS SECTION (2026-09-05 user request): the whole filter + marking list folds away once the roles
+            // are decided, so the preview and the tuning sections below are reachable without scrolling past it.
+            // (Folded = the keyboard review loop is off too; it lives inside.)
+            int foldUndecided = list.Count(x => x.role == Role.Default);
+            if (Section(ref foldParts, "Parts — filter & mark the roles",
+                    $"{list.Count} part(s) · {(foldUndecided > 0 ? $"{foldUndecided} undecided" : "all decided")}"))
             {
-                int idx = shown.FindIndex(x => x.name == selectedPart);
-                if (ev.keyCode == KeyCode.UpArrow || ev.keyCode == KeyCode.DownArrow)
+                // Tiny-fragment collapse: a triangle-soup FBX probes into THOUSANDS of 3-4-vert shards — they all belong
+                // to Body anyway (anything not marked wheel/turret skins to Root). Only substantial parts are listed.
+                minVerts = EditorGUILayout.IntSlider(new GUIContent("Hide parts under (verts)",
+                    "Parts smaller than this are collapsed into Body automatically (they skin to Root). Raise it if the list is still noisy; lower it if a small wheel is missing."), minVerts, 1, 2000);
+                minPartSize = EditorGUILayout.Slider(new GUIContent("Hide parts under (size)",
+                    "Parts whose largest bbox dimension is below this are hidden (they stay on the hull, like the verts filter). Drop the verts slider and raise this to find LARGE parts with only a few vertices — flat discs and plates."), minPartSize, 0f, 2f);
+                // Height filter: slider range auto-fits the model's actual vertical span (probe center heights, Z-up).
+                // PAD the ends a hair BEYOND the outermost part (user finding 2026-08-01): the default clamps to the exact
+                // min/max, but the slider rounds slightly inside, clipping the edge part ("1 hidden by the sliders" at rest).
+                // With the pad, "fully open" sits just past the parts, so nothing hides until you actually drag inward.
+                float zLo = list.Min(x => x.center.z), zHi = list.Max(x => x.center.z), zPad = Mathf.Max(0.02f, (zHi - zLo) * 0.02f);
+                minHeight = EditorGUILayout.Slider(new GUIContent("Hide parts below (height)",
+                    "Parts whose center height is below this are hidden. Slide up past the hull deck to isolate turret-level parts."), Mathf.Clamp(minHeight, zLo - zPad, zHi + zPad), zLo - zPad, zHi + zPad);
+                maxHeight = EditorGUILayout.Slider(new GUIContent("Hide parts above (height)",
+                    "Parts whose center height is above this are hidden. Slide down to strip the superstructure and isolate wheel/chassis-level parts."), Mathf.Clamp(maxHeight, zLo - zPad, zHi + zPad), zLo - zPad, zHi + zPad);
+                // Left/right (width) filter (user request 2026-08-01): the horizontal companion to the height bracket —
+                // slice along the WIDTH axis (center.y, where the two wheels mirror) to isolate ONE side's wheel. Same
+                // end-padding so a fresh model hides nothing until you drag.
+                float yLo = list.Min(x => x.center.y), yHi = list.Max(x => x.center.y), yPad = Mathf.Max(0.02f, (yHi - yLo) * 0.02f);
+                minWidth = EditorGUILayout.Slider(new GUIContent("Hide parts left of (side)",
+                    "Parts whose center is LEFT of this on the width axis are hidden — bracket with the next slider to keep just one side's wheel. (Straighten the model in Orientation first so the two wheels split along this axis.)"), Mathf.Clamp(minWidth, yLo - yPad, yHi + yPad), yLo - yPad, yHi + yPad);
+                maxWidth = EditorGUILayout.Slider(new GUIContent("Hide parts right of (side)",
+                    "Parts whose center is RIGHT of this on the width axis are hidden. Slide the two together onto one wheel to isolate it, then mark it Wheel."), Mathf.Clamp(maxWidth, yLo - yPad, yHi + yPad), yLo - yPad, yHi + yPad);
+                partFilter = EditorGUILayout.Popup(new GUIContent("Show only",
+                    "Filter the list to one classification. Marking a part out of the current filter removes it from the list and auto-advances to the next."), partFilter, FilterOptions);
+                int interiorN = list.Count(x => x.vis == 0);
+                visFilter = EditorGUILayout.Popup(new GUIContent("Visibility",
+                    "The probe's escape-ray verdict per part: External = some surface point can see out; Interior = provably " +
+                    "never visible from outside (cockpit gear, engine guts) — mark those Ignore to reclaim triangle budget. " +
+                    "Probed before this feature existed? Re-Probe to classify." + (interiorN > 0 ? $"  ({interiorN} interior found)" : "")),
+                    visFilter, VisFilterOptions);
+                var shown = list.Where(x => VisiblePart(x) && MatchesFilter(x.role) && MatchesVis(x)).ToList();
+                int hidden = list.Count(x => !VisiblePart(x));
+                int unreviewed = list.Count(x => VisiblePart(x) && x.role == Role.Default);
+                int edgecases = list.Count(x => VisiblePart(x) && x.role == Role.Edgecase);
+                EditorGUILayout.LabelField($"{(useSourceRig && boneParts.Count > 0 ? "Source BONES" : "Parts")} ({shown.Count} shown{(hidden > 0 ? $", {hidden} hidden by the sliders" : "")}{(unreviewed > 0 ? $", {unreviewed} undecided" : ", all decided")}{(edgecases > 0 ? $", {edgecases} edge-case" : "")}) — mark {(useSourceRig && boneParts.Count > 0 ? "the bones that SPIN (Wheel)" : "the wheels & turret")}:", EditorStyles.boldLabel);
+                if (useSourceRig && boneParts.Count > 0)   // 2026-08-20: a user hunted for the turret's shards here — in this mode they are ONE row
+                    EditorGUILayout.LabelField("Each row is one BONE of the shipped skeleton; all the shards skinned to it count as that row (the turret's parts = the Turret bone). Untick the fast path to list and mark individual parts.", EditorStyles.wordWrappedMiniLabel);
+                EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   W/T/B = Wheel/Turret/Body   ·   R = Rotor (main, spins about the mast)   ·   L = taiL rotor (spins about the lateral axis)   ·   G = Gun (rides the Turret; muzzle/socket anchor)   ·   C = Caterpillar (tread loop)   ·   I = Ignore (DELETED)   ·   D = Default   ·   E = Edgecase", EditorStyles.miniLabel);
+                // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
+                // part's role — the whole list can be reviewed without mousing between rows and dropdowns.
+                var ev = Event.current;
+                if (ev.type == EventType.KeyDown && shown.Count > 0 && !EditorGUIUtility.editingTextField)
                 {
-                    idx = ev.keyCode == KeyCode.DownArrow ? Mathf.Min(idx + 1, shown.Count - 1) : Mathf.Max(idx - 1, 0);
-                    SelectPart(shown[idx].name);
-                    partsScroll.y = Mathf.Max(0f, idx * 20f - 120f);   // keep the selected row in view (~20px rows)
-                    GUIUtility.keyboardControl = 0;                    // a focused slider/popup must not swallow the arrows
-                    ev.Use(); Repaint();
-                }
-                else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I || ev.keyCode == KeyCode.D || ev.keyCode == KeyCode.E || ev.keyCode == KeyCode.C || ev.keyCode == KeyCode.G || ev.keyCode == KeyCode.R || ev.keyCode == KeyCode.L || ev.keyCode == KeyCode.O || ev.keyCode == KeyCode.S))
-                {
-                    shown[idx].role = ev.keyCode == KeyCode.W ? Role.Wheel
-                                    : ev.keyCode == KeyCode.T ? Role.Turret
-                                    : ev.keyCode == KeyCode.I ? Role.Ignore
-                                    : ev.keyCode == KeyCode.D ? Role.Default
-                                    : ev.keyCode == KeyCode.E ? Role.Edgecase
-                                    : ev.keyCode == KeyCode.C ? Role.Caterpillar
-                                    : ev.keyCode == KeyCode.G ? Role.Gun
-                                    : ev.keyCode == KeyCode.R ? Role.Rotor
-                                    : ev.keyCode == KeyCode.O ? Role.Oar
-                                    : ev.keyCode == KeyCode.S ? Role.Sail
-                                    : ev.keyCode == KeyCode.L ? Role.TailRotor : Role.Body;
-                    // If the new role falls outside the active filter, the part leaves the list — advance to the
-                    // next one so the sweep continues instead of the selection dying with the removed row.
-                    if (partFilter != 0 && !MatchesFilter(shown[idx].role))
+                    int idx = shown.FindIndex(x => x.name == selectedPart);
+                    if (ev.keyCode == KeyCode.UpArrow || ev.keyCode == KeyCode.DownArrow)
                     {
-                        SelectPart(idx + 1 < shown.Count ? shown[idx + 1].name : idx > 0 ? shown[idx - 1].name : "");
-                        partsScroll.y = Mathf.Max(0f, idx * 20f - 120f);
+                        idx = ev.keyCode == KeyCode.DownArrow ? Mathf.Min(idx + 1, shown.Count - 1) : Mathf.Max(idx - 1, 0);
+                        SelectPart(shown[idx].name);
+                        partsScroll.y = Mathf.Max(0f, idx * 20f - 120f);   // keep the selected row in view (~20px rows)
+                        GUIUtility.keyboardControl = 0;                    // a focused slider/popup must not swallow the arrows
+                        ev.Use(); Repaint();
                     }
-                    ev.Use(); Repaint();
+                    else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I || ev.keyCode == KeyCode.D || ev.keyCode == KeyCode.E || ev.keyCode == KeyCode.C || ev.keyCode == KeyCode.G || ev.keyCode == KeyCode.R || ev.keyCode == KeyCode.L || ev.keyCode == KeyCode.O || ev.keyCode == KeyCode.S))
+                    {
+                        shown[idx].role = ev.keyCode == KeyCode.W ? Role.Wheel
+                                        : ev.keyCode == KeyCode.T ? Role.Turret
+                                        : ev.keyCode == KeyCode.I ? Role.Ignore
+                                        : ev.keyCode == KeyCode.D ? Role.Default
+                                        : ev.keyCode == KeyCode.E ? Role.Edgecase
+                                        : ev.keyCode == KeyCode.C ? Role.Caterpillar
+                                        : ev.keyCode == KeyCode.G ? Role.Gun
+                                        : ev.keyCode == KeyCode.R ? Role.Rotor
+                                        : ev.keyCode == KeyCode.O ? Role.Oar
+                                        : ev.keyCode == KeyCode.S ? Role.Sail
+                                        : ev.keyCode == KeyCode.L ? Role.TailRotor : Role.Body;
+                        // If the new role falls outside the active filter, the part leaves the list — advance to the
+                        // next one so the sweep continues instead of the selection dying with the removed row.
+                        if (partFilter != 0 && !MatchesFilter(shown[idx].role))
+                        {
+                            SelectPart(idx + 1 < shown.Count ? shown[idx + 1].name : idx > 0 ? shown[idx - 1].name : "");
+                            partsScroll.y = Mathf.Max(0f, idx * 20f - 120f);
+                        }
+                        ev.Use(); Repaint();
+                    }
                 }
+                partsScroll = EditorGUILayout.BeginScrollView(partsScroll, GUILayout.Height(280));   // fixed: a greedy child inside the window scroll would never let it scroll
+                foreach (var p in shown)
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        p.role = (Role)EditorGUILayout.EnumPopup(p.role, GUILayout.Width(70));
+                        // the row label is a BUTTON: click = zoom the preview onto this part and tint it yellow
+                        bool isSel = selectedPart == p.name;
+                        var st = isSel ? EditorStyles.whiteMiniLabel : EditorStyles.miniLabel;
+                        if (GUILayout.Button($"{(isSel ? "◉ " : "")}{p.name}   ({p.verts} verts, size {p.size.x:0.00}×{p.size.y:0.00}×{p.size.z:0.00})", st))
+                            SelectPart(isSel ? "" : p.name);   // click again = back to full view
+                    }
+                EditorGUILayout.EndScrollView();
+                if (inst == null)
+                    EditorGUILayout.LabelField("  (probe preview unavailable — part focus needs the probe's preview FBX; re-Probe after recompiling)", EditorStyles.miniLabel);
+                else
+                    EditorGUILayout.LabelField("  Click a row to zoom + highlight it in the preview below; click again for the full view.", EditorStyles.miniLabel);
             }
-            partsScroll = EditorGUILayout.BeginScrollView(partsScroll, GUILayout.Height(280));   // fixed: a greedy child inside the window scroll would never let it scroll
-            foreach (var p in shown)
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    p.role = (Role)EditorGUILayout.EnumPopup(p.role, GUILayout.Width(70));
-                    // the row label is a BUTTON: click = zoom the preview onto this part and tint it yellow
-                    bool isSel = selectedPart == p.name;
-                    var st = isSel ? EditorStyles.whiteMiniLabel : EditorStyles.miniLabel;
-                    if (GUILayout.Button($"{(isSel ? "◉ " : "")}{p.name}   ({p.verts} verts, size {p.size.x:0.00}×{p.size.y:0.00}×{p.size.z:0.00})", st))
-                        SelectPart(isSel ? "" : p.name);   // click again = back to full view
-                }
-            EditorGUILayout.EndScrollView();
-            if (inst == null)
-                EditorGUILayout.LabelField("  (probe preview unavailable — part focus needs the probe's preview FBX; re-Probe after recompiling)", EditorStyles.miniLabel);
-            else
-                EditorGUILayout.LabelField("  Click a row to zoom + highlight it in the preview below; click again for the full view.", EditorStyles.miniLabel);
             // PREVIEW directly under the part list (2026-09-05 user request): classification is click-a-row →
             // look at the yellow highlight, so the turntable belongs next to the rows, not at the window's bottom.
             DrawTurntablePreview();
@@ -1156,7 +1164,7 @@ public class VehicleLabWindow : EditorWindow
         parts.Clear(); boneParts.Clear(); useSourceRig = false;
         frames = 15; degrees = -360f; axisChoice = 0;
         treadAdvCells = 3; treadCellsPerLink = 4f; tracksStatic = false;
-        rockDegrees = 0f; rockFrames = 120; rockAxisChoice = 0; rockHeading = 0f; rockPitchDeg = 2.4f; rockRollCycles = 1; rockPitchCycles = 1; rockPitchPhase = 90f; waveEnabled = false; foldSpin = true; foldWave = false; foldOrient = false; modelRot = Vector3.zero;
+        rockDegrees = 0f; rockFrames = 120; rockAxisChoice = 0; rockHeading = 0f; rockPitchDeg = 2.4f; rockRollCycles = 1; rockPitchCycles = 1; rockPitchPhase = 90f; waveEnabled = false; foldSpin = true; foldWave = false; foldOrient = false; foldParts = true; modelRot = Vector3.zero;
         minVerts = 50; minPartSize = 0f; minHeight = -999f; maxHeight = 999f; minWidth = -999f; maxWidth = 999f;
         partFilter = 0; selectedPart = ""; partsScroll = Vector2.zero; previewPan = Vector2.zero;
         DestroyPreview();

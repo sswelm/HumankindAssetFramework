@@ -63,6 +63,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   clustering, bones and weights land on the slim mesh — verified identical cluster recovery at 0% and 50%.
   Defaults 0. Note the dials are floors: the dissolve pass can overshoot on flat canvas (a 30% sail dial cut 66%
   on the Khalandion), so any non-zero sail value already cuts hard.
+- **The part filter + marking list is a foldable "Parts" section** — collapse it once the roles are decided to
+  reach the preview and tuning sections without scrolling past 280px of rows; the header keeps the part count
+  and how many are still undecided. (Folding it also parks the keyboard review loop.)
 - **All five reduce dials + the two facing checkboxes now live in their own "Vertices control" section** —
   everything that reshapes exported geometry at Generate in one foldout, out of Spin where it had no business.
   The collapsed header summarizes the active facing fixes and each marked tier's dial.
