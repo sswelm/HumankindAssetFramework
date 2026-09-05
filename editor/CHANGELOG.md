@@ -52,6 +52,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   collapse-decimates exactly those parts at Generate, at the source — the previews, the clustering, the winding
   fix and the bake all see the slim mesh, and the Factory's global *Reduce to ~tris* budget stops being spent on
   invisible ropes. Per-part before/after vert counts are printed so an over-aggressive dial is loud, not silent.
+- **Structure — a second reduction tier with its own dial.** Small-but-dense detail geometry (railings, a carved
+  bow figure — another 65k verts each on the Khalandion) is more visible than rigging, so it takes its own,
+  usually gentler **Structure reduce (%)**. Same dissolve+collapse treatment at Generate; both tiers print
+  original → dissolved → final against the dial's target.
 - **Sweep accepts negative** — if the galley rows backwards, flip the sign (the wheels' Spin-degrees convention);
   the dip phase stays put, so blades still bury on the reversed drive.
 

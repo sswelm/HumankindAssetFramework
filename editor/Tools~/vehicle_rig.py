@@ -304,6 +304,11 @@ sail_names = namelist(argv[48]) if len(argv) > 48 and argv[48].strip() else []
 # see the slimmed mesh. A role, not a heuristic — the user marks what deserves the axe.
 rigging_names = namelist(argv[49]) if len(argv) > 49 and argv[49].strip() else []
 rigging_reduce = min(95.0, max(0.0, float(argv[50]))) if len(argv) > 50 and argv[50].strip() else 0.0
+# STRUCTURE parts (argv[51..52]): the second reduction tier — small-but-dense DETAIL geometry (railings, a carved
+# bow figure: another 65k verts each on the Khalandion) that is more visible than rigging, so it gets its own,
+# usually gentler, percentage dial. Same dissolve+collapse treatment, separate knob.
+structure_names = namelist(argv[51]) if len(argv) > 51 and argv[51].strip() else []
+structure_reduce = min(95.0, max(0.0, float(argv[52]))) if len(argv) > 52 and argv[52].strip() else 0.0
 recoil_bone = None               # set to "RecoilArm" when the split actually happens — the bone the clip ROTATES
 recoil_geom = None               # (pivot, axis, bore_dir, slide, R) for the arc that fakes the slide
 # Residual tilt the arc leaves on the tube. The slide is faked by swinging the barrel on a long arm, so some pitch
@@ -600,46 +605,45 @@ for grp, is_tail in ((rotor_names, False), (tailrotor_names, True)):
           % ("tail" if is_tail else "main", len(grp), hub_c.x, hub_c.y, hub_c.z, axle.x, axle.y, axle.z, axle_src))
     print("VEHICLE rotor hub: %d part(s) -> bone at hub (%.2f,%.2f,%.2f), axle=%s (least-spread of centres)" % (len(grp), hub_c.x, hub_c.y, hub_c.z, tuple(axle)))
 
-# ---- RIGGING decimation (argv[49..50]): marked rope/line parts slimmed at the SOURCE ----
+# ---- SOURCE-SIDE reduction tiers (argv[49..52]): RIGGING and STRUCTURE parts slimmed at the SOURCE ----
 # Runs BEFORE the armature is built so bone placement, skinning, the winding fix, doubling and the export all see
-# the reduced mesh. Collapse-decimate per part; the print names each part's before/after so a too-aggressive dial
-# is loud, not silent.
-if rigging_names and rigging_reduce > 0.5:
+# the reduced mesh. Two passes per part: LIMITED DISSOLVE first (tube/extruded geometry is massively redundant
+# along straight runs — a plain ratio collapse bottomed out at a 68% cut on the Khalandion's ropes because
+# thousands of tiny disconnected islands each keep minimum topology), then COLLAPSE toward the dial's target
+# measured against the ORIGINAL count, so the percentage means what it says or better. The print carries all
+# three numbers so a too-aggressive dial is loud, not silent.
+for _rlabel, _rnames, _rpct in (("RIGGING", rigging_names, rigging_reduce), ("STRUCTURE", structure_names, structure_reduce)):
+    if not _rnames or _rpct <= 0.5:
+        continue
     try:
         bpy.ops.object.mode_set(mode='OBJECT')
     except Exception:
         pass
     _rr_v0 = 0; _rr_v1 = 0; _rr_n = 0
-    for _rn in rigging_names:
+    for _rn in _rnames:
         _ro2 = find(_rn)
         if _ro2 is None:
-            print("VEHICLE WARN: rigging part '%s' not found — skipped" % _rn); continue
+            print("VEHICLE WARN: %s part '%s' not found — skipped" % (_rlabel.lower(), _rn)); continue
         _v0 = len(_ro2.data.vertices)
-        # PASS 1 — LIMITED DISSOLVE: rope geometry is extruded tubes whose segment rings are ~coplanar along every
-        # straight run, so a 100-ring straight rope is 100x redundant. Dissolve merges those runs into single long
-        # faces — this is what actually breaks the collapse floor (a plain ratio collapse bottomed out at a 68% cut
-        # on the Khalandion's ropes: thousands of tiny disconnected islands each keep minimum topology).
         _rb = bmesh.new(); _rb.from_mesh(_ro2.data)
         bmesh.ops.dissolve_limit(_rb, angle_limit=math.radians(5.0), use_dissolve_boundaries=False,
                                  verts=list(_rb.verts), edges=list(_rb.edges))
         _rb.to_mesh(_ro2.data); _rb.free()
         _vmid = len(_ro2.data.vertices)
-        # PASS 2 — COLLAPSE toward the dial's target measured against the ORIGINAL count, so the percentage means
-        # what it says (or better, when the dissolve alone already beat it).
-        _target = max(8, int(_v0 * (1.0 - rigging_reduce / 100.0)))
+        _target = max(8, int(_v0 * (1.0 - _rpct / 100.0)))
         if _vmid > _target:
             bpy.ops.object.select_all(action='DESELECT')
             _ro2.select_set(True); bpy.context.view_layer.objects.active = _ro2
-            _dm2 = _ro2.modifiers.new("HAFRiggingDecimate", 'DECIMATE')
+            _dm2 = _ro2.modifiers.new("HAFReduce", 'DECIMATE')
             _dm2.ratio = max(0.02, float(_target) / float(_vmid))
             bpy.ops.object.modifier_apply(modifier=_dm2.name)
         _v1 = len(_ro2.data.vertices)
         _rr_v0 += _v0; _rr_v1 += _v1; _rr_n += 1
-        print("VEHICLE RIGGING '%s': %d -> %d verts (dissolve pass: %d; dial %.0f%% = target %d)"
-              % (_rn, _v0, _v1, _vmid, rigging_reduce, _target))
+        print("VEHICLE %s '%s': %d -> %d verts (dissolve pass: %d; dial %.0f%% = target %d)"
+              % (_rlabel, _rn, _v0, _v1, _vmid, _rpct, _target))
     if _rr_n:
-        print("VEHICLE RIGGING: %d part(s) reduced, %d -> %d verts total (%.0f%% cut)"
-              % (_rr_n, _rr_v0, _rr_v1, 100.0 * (1.0 - float(_rr_v1) / max(1, _rr_v0))))
+        print("VEHICLE %s: %d part(s) reduced, %d -> %d verts total (%.0f%% cut)"
+              % (_rlabel, _rr_n, _rr_v0, _rr_v1, 100.0 * (1.0 - float(_rr_v1) / max(1, _rr_v0))))
 
 # armature: Root at origin + ONE bone per wheel cluster (tail along the axle => local Y IS the axle) + Turret
 arm_data = bpy.data.armatures.new("VehicleRig")
