@@ -1548,22 +1548,39 @@ public static class UniversalBaker
     // masts and sails) simply never draws. Say the number right after the skeleton bake, where the dial that fixes it
     // (Reduce to ~tris) lives — so dialing to the limit needs no game launch, just this line after each Bake.
     const int EngineQuadCeiling = 255 * 64;   // 16,320 — per MESH; a future multi-mesh split gets this budget per part
+    // GetField does NOT see a base class's private fields — skinnedMeshInfos lives on Skeleton's BASE type
+    // (MeshCollection), so the flat lookup returned null and the first version of this report silently did
+    // nothing through an entire evening of over-ceiling bakes. Walk the hierarchy, and fail LOUDLY.
+    static FieldInfo FindFieldDeep(Type t, string fieldName)
+    {
+        for (; t != null; t = t.BaseType)
+        {
+            var f = t.GetField(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (f != null) return f;
+        }
+        return null;
+    }
     static void ReportBakedQuads(Type skelType, UnityEngine.Object skel, string name)
     {
         try
         {
-            var smisF = skelType.GetField("skinnedMeshInfos", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (!(smisF?.GetValue(skel) is System.Collections.IEnumerable smis)) return;
+            var smisF = FindFieldDeep(skelType, "skinnedMeshInfos");
+            if (!(smisF?.GetValue(skel) is System.Collections.IEnumerable smis))
+            {
+                Debug.LogWarning($"[Factory] {name}: quad report could not read skinnedMeshInfos on {skelType.FullName} — the {EngineQuadCeiling:N0}-quad ceiling was NOT verified this bake.");
+                return;
+            }
             var over = new List<string>();
             foreach (var smi in smis)
             {
                 var smiT = smi.GetType();
-                string mn = smiT.GetField("MeshName")?.GetValue(smi) as string ?? "?";
-                var fmc = smiT.GetField("FxMeshContent")?.GetValue(smi);
-                if (fmc == null) continue;
+                string mn = FindFieldDeep(smiT, "MeshName")?.GetValue(smi) as string ?? "?";
+                var fmc = FindFieldDeep(smiT, "FxMeshContent")?.GetValue(smi);
+                if (fmc == null) { Debug.LogWarning($"[Factory] {name}: quad report found no FxMeshContent on '{mn}' — that mesh was NOT verified."); continue; }
                 var fmcT = fmc.GetType();
-                int qc = (int)(fmcT.GetField("quadCount", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(fmc) ?? 0);
-                int vc = (int)(fmcT.GetField("vertexCount", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(fmc) ?? 0);
+                int qc = (int)(FindFieldDeep(fmcT, "quadCount")?.GetValue(fmc) ?? 0);
+                int vc = (int)(FindFieldDeep(fmcT, "vertexCount")?.GetValue(fmc) ?? 0);
+                if (qc == 0) { Debug.LogWarning($"[Factory] {name}: quad report read 0 quads on '{mn}' (field missing or empty mesh) — NOT verified."); continue; }
                 if (qc > EngineQuadCeiling)
                 {
                     Debug.LogWarning($"[Factory] {name} BAKED MESH '{mn}': {qc:N0} quads / {vc:N0} verts — OVER the engine's {EngineQuadCeiling:N0}-quad draw ceiling by {qc - EngineQuadCeiling:N0}: that geometry will SILENTLY NOT RENDER in-game (the last-baked parts vanish first). Lower 'Reduce to ~tris' until this says 'fits'.");
