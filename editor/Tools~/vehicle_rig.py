@@ -314,10 +314,13 @@ structure_reduce = min(95.0, max(0.0, float(argv[52]))) if len(argv) > 52 and ar
 # whose reviewed body geometry is itself needlessly dense.
 body_names = namelist(argv[53]) if len(argv) > 53 and argv[53].strip() else []
 body_reduce = min(95.0, max(0.0, float(argv[54]))) if len(argv) > 54 and argv[54].strip() else 0.0
-# FLAG parts (argv[55]): banners/pennants — sheets that must read from BOTH sides like sails, but that never hide:
-# a flag keeps flying at anchor. Double-sided at export, artist winding kept (excluded from the inside-out flip),
-# welded to the body like any Body part, no bone and no clip of their own.
+# FLAG parts (argv[55]): banners/pennants — the OPPOSITE of sails (2026-09-05): they fly AT ANCHOR and are struck
+# while the ship moves. One Flag bone, held flipped below the keel THROUGH the Spin clip (movement = hidden); the
+# idle stance shows them at rest. Double-sided at export, artist winding kept.
 flag_names = namelist(argv[55]) if len(argv) > 55 and argv[55].strip() else []
+# RUDDER parts (argv[60]): the always-visible double-sided treatment flags USED to have (the two roles shared a
+# file until flags learned to hide underway — a rudder must never vanish). No bone, no clip, welds to the body.
+rudder_names = namelist(argv[60]) if len(argv) > 60 and argv[60].strip() else []
 # OAR LIFT (argv[56]): a CONSTANT tilt about the dip axis, re-centring the whole stroke — the knob the dip sign
 # cannot be (±dip is the same oscillation, phase-flipped; the blades visit the same depths either way). A source
 # whose oars are modelled raked steeply into the water (the Khalandion: "at -30 they almost go vertically") rides
@@ -970,16 +973,37 @@ if sail_names:
         _sebn.parent = eb_body
         print("VEHICLE SAIL: %d part(s) on one Sail bone (double-sided at export; struck/raised by the 'Furl' clip)" % len(sail_found))
 
-# ---- FLAG parts: resolved to a name set — they keep their own mesh through the join (identity is needed at
+# ---- RUDDER parts: resolved to a name set — they keep their own mesh through the join (identity is needed at
 # export for the double-siding, and at the flip pass for the exclusion), skinned to the body like Body parts ----
-flag_by_name = set()
-for _fn3 in flag_names:
+rudder_by_name = set()
+for _fn3 in rudder_names:
     _fo3 = find(_fn3)
     if _fo3 is None:
-        print("VEHICLE WARN: flag part '%s' not found — skipped" % _fn3); continue
-    flag_by_name.add(_fo3.name)
-if flag_by_name:
-    print("VEHICLE FLAG: %d part(s) — double-sided at export, always visible, authored winding kept" % len(flag_by_name))
+        print("VEHICLE WARN: rudder part '%s' not found — skipped" % _fn3); continue
+    rudder_by_name.add(_fo3.name)
+if rudder_by_name:
+    print("VEHICLE RUDDER: %d part(s) — double-sided at export, always visible, authored winding kept" % len(rudder_by_name))
+
+# ---- FLAG bone: every marked flag welds to ONE bone so the banners can be struck as a unit (hidden underway) ----
+flag_found = []
+if flag_names:
+    for _gn in flag_names:
+        _go = find(_gn)
+        if _go is None:
+            print("VEHICLE WARN: flag part '%s' not found — skipped" % _gn); continue
+        flag_found.append(_go.name); bone_of[_go.name] = "Flag"
+    if flag_found:
+        _gcorners = [bpy.data.objects[_n].matrix_world @ Vector(_c) for _n in flag_found for _c in bpy.data.objects[_n].bound_box]
+        _gmn = Vector((min(p.x for p in _gcorners), min(p.y for p in _gcorners), min(p.z for p in _gcorners)))
+        _gmx = Vector((max(p.x for p in _gcorners), max(p.y for p in _gcorners), max(p.z for p in _gcorners)))
+        _gkeel = min((bpy.data.objects[_n2].matrix_world @ Vector(_c2)).z
+                     for _n2 in [o.name for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.vertices]
+                     for _c2 in bpy.data.objects[_n2].bound_box)
+        _gebn = arm_data.edit_bones.new("Flag")
+        _gebn.head = Vector((0.5 * (_gmn.x + _gmx.x), 0.5 * (_gmn.y + _gmx.y), _gkeel - 0.05))
+        _gebn.tail = _gebn.head + Vector((0.0, 0.0, max(0.3, 0.25 * (_gmx.z - _gmn.z))))
+        _gebn.parent = eb_body
+        print("VEHICLE FLAG: %d part(s) on one Flag bone — flies at anchor, struck below the keel through Spin (the opposite of sails); double-sided at export" % len(flag_found))
 
 # ---- OAR bones (galley rowing): one merged oar mesh -> one bone per physical oar ----
 # The marked oar parts (poles + blades, each mesh spanning BOTH banks) are split into individual oars by projecting
@@ -1789,12 +1813,13 @@ def _join_per_bone():
     for o in objs:
         # tread parts are multi-bone-skinned (four regions) — each stays its OWN mesh, never merged
         # oars, like treads, are multi-bone-skinned — give each its OWN key so it is never merged into one bone.
-        # FLAGS keep their own mesh too: they skin to the body like Body parts, but the export doubling and the
-        # inside-out exclusion need to find them after the join.
+        # RUDDERS keep their own mesh too: they skin to the body like Body parts, but the export doubling and the
+        # inside-out exclusion need to find them after the join. (Flags need no key: bone_of routes them to the
+        # Flag bone, so they merge into Mesh_Flag on their own.)
         if o.name in oar_by_name:
             _k = "__oar__" + o.name
-        elif o.name in flag_by_name:
-            _k = "__flag__" + o.name
+        elif o.name in rudder_by_name:
+            _k = "__rud__" + o.name
         else:
             _k = ("__track__" + o.name) if o.name in _track_by_name else bone_of.get(o.name, body_bone)
         groups.setdefault(_k, []).append(o)
@@ -1975,6 +2000,21 @@ if sail_found and arm.pose.bones.get("Sail") is not None:
     arm.animation_data.action = act                                      # 'Spin' stays the active action, as before
     print("VEHICLE SAIL 'Furl' stance: canvas FLIPPED below the keel at frame %d (rotation-only) — Idle/reference Spin[0..0], Idle stance (override) Furl[%d..%d], Movement Spin, After-move/Pre-move EMPTY, Keep bone translations OFF"
           % (SAIL_FURL_FRAMES, SAIL_FURL_FRAMES, SAIL_FURL_FRAMES))
+
+# FLAG strike THROUGH Spin — the opposite of the sails (2026-09-05): banners fly AT ANCHOR (the idle stance
+# leaves the Flag bone at rest) and are held flipped below the keel for the entire movement clip. Constant
+# rotation keys at the clip's ends; rotations are the pipeline's native currency, and the conversion's
+# visual-keyed rebake keeps every clip faithful to its snapshot wherever the canonical rest lands.
+if flag_found and arm.pose.bones.get("Flag") is not None:
+    _pbG = arm.pose.bones["Flag"]; _dbG = arm.data.bones["Flag"]
+    _m3G = (arm.matrix_world @ _dbG.matrix_local).to_3x3()
+    _gflip = (_m3G.inverted() @ Vector((1.0, 0.0, 0.0))).normalized()    # hull-length axis, in bone-local space
+    _pbG.rotation_mode = 'QUATERNION'
+    _pbG.rotation_quaternion = Quaternion(_gflip, math.pi)
+    _pbG.keyframe_insert('rotation_quaternion', frame=0)
+    _pbG.keyframe_insert('rotation_quaternion', frame=_clip_frames)
+    _pbG.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))          # leave the POSE at rest for later bakes
+    print("VEHICLE FLAG clip: banners held below the keel through Spin 0..%d — visible at idle only (the opposite of sails)" % _clip_frames)
 
 
 # ROLLING-CONTACT wheel speeds (user field report: the small road wheels looked draggy — "they should be
@@ -2505,7 +2545,7 @@ if fix_inside_out:
     _fall = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]
     _fxn = 0; _fxkept = 0
     for _fo in _fall:
-        if any(g.name.startswith("Oar_") or g.name == "Sail" for g in _fo.vertex_groups) or _fo.name.startswith("Mesh___flag__"):
+        if any(g.name.startswith("Oar_") or g.name in ("Sail", "Flag") for g in _fo.vertex_groups) or _fo.name.startswith("Mesh___rud__"):
             continue
         _fb = bmesh.new(); _fb.from_mesh(_fo.data); _fb.normal_update()
         _fb.verts.ensure_lookup_table(); _fb.faces.ensure_lookup_table()
@@ -2551,12 +2591,12 @@ if fix_inside_out:
 # layer, so each duplicated vertex keeps its bone weights (no vert falls to bone 0 -> the skeleton bake still
 # validates). The back shell is nudged INWARD along the normal by a small fraction of the model size, so front and
 # back faces are NOT coincident — coincident faces make the game's alpha-to-coverage shader read ~50% transparent.
-# Marked SAIL and FLAG meshes are ALWAYS double-sided — the role says so, no guessing: canvas must read from both tacks.
+# Marked SAIL, FLAG and RUDDER meshes are ALWAYS double-sided — the role says so, no guessing.
 # (Oar meshes are NOT: the Khalandion's blades ship as authored front/back sheet pairs, already two-sided —
 # doubling them z-shimmered four near-coincident layers. A role gets doubled only when being a sheet is its nature.)
 _dall = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]
 _dtargets = _dall if double_sided else [o for o in _dall
-                                        if any(g.name == "Sail" for g in o.vertex_groups) or o.name.startswith("Mesh___flag__")]
+                                        if any(g.name in ("Sail", "Flag") for g in o.vertex_groups) or o.name.startswith("Mesh___rud__")]
 if _dtargets:
     # The inset is a fraction of the WHOLE model, not each part. A per-mesh dimension would give a tiny single-sided
     # part (a bolt, an antenna) a tiny inset that can fall below depth precision -> that part reads transparent again.

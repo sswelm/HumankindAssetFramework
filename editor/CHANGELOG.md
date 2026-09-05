@@ -58,6 +58,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   original → dissolved → final against the dial's target.
 - **Body reduce (%)** completes the tiers — parts explicitly marked Body, default 0 (untouched: the hull is the
   model's face, and the Factory's global *Reduce to ~tris* is usually the smarter place to slim it).
+- **Flag is now the OPPOSITE of sails** (2026-09-05): banners fly AT ANCHOR and are struck below the keel while
+  the ship moves — one Flag bone held flipped through the whole Spin clip; the idle stance shows them at rest.
+  Rudder split into its OWN parts file to keep the always-visible treatment (a rudder must never vanish).
 - **Flag — double-sided like a sail, but never hidden.** Banners and pennants must read from both sides, yet a
   flag keeps flying at anchor — so the new role gets the sail's doubling and winding protection without the Furl
   strike: no bone, no clip, welded to the body. **Rudder** shares the exact treatment under its own name — a
