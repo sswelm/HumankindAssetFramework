@@ -65,6 +65,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   clustering, bones and weights land on the slim mesh — verified identical cluster recovery at 0% and 50%.
   Defaults 0. Note the dials are floors: the dissolve pass can overshoot on flat canvas (a 30% sail dial cut 66%
   on the Khalandion), so any non-zero sail value already cuts hard.
+- **The Factory reports every baked mesh's quad count against the engine's draw ceiling** — Humankind renders a
+  unit mesh as at most 255 sub-particles × 64 primitives = **16,320 quads**, and the overrun is silent in-game:
+  the mesh stores fully, the last-baked parts (masts, rigging, sails) simply never draw (how the Great Galley
+  shipped mastless through five bakes). After each Bake the console prints per-mesh `N quads — fits (M to spare)`
+  or a warning naming the excess, and an over-ceiling bake also raises a dialog. Dial *Reduce to ~tris* against
+  this line — no game launch needed to know.
 - **The part filter + marking list is a foldable "Parts" section** — collapse it once the roles are decided to
   reach the preview and tuning sections without scrolling past 280px of rows; the header keeps the part count
   and how many are still undecided. (Folding it also parks the keyboard review loop.)

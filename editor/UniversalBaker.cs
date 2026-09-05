@@ -1554,6 +1554,7 @@ public static class UniversalBaker
         {
             var smisF = skelType.GetField("skinnedMeshInfos", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             if (!(smisF?.GetValue(skel) is System.Collections.IEnumerable smis)) return;
+            var over = new List<string>();
             foreach (var smi in smis)
             {
                 var smiT = smi.GetType();
@@ -1564,10 +1565,24 @@ public static class UniversalBaker
                 int qc = (int)(fmcT.GetField("quadCount", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(fmc) ?? 0);
                 int vc = (int)(fmcT.GetField("vertexCount", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(fmc) ?? 0);
                 if (qc > EngineQuadCeiling)
+                {
                     Debug.LogWarning($"[Factory] {name} BAKED MESH '{mn}': {qc:N0} quads / {vc:N0} verts — OVER the engine's {EngineQuadCeiling:N0}-quad draw ceiling by {qc - EngineQuadCeiling:N0}: that geometry will SILENTLY NOT RENDER in-game (the last-baked parts vanish first). Lower 'Reduce to ~tris' until this says 'fits'.");
+                    over.Add($"'{mn}': {qc:N0} quads ({qc - EngineQuadCeiling:N0} over)");
+                }
                 else
                     Debug.Log($"[Factory] {name} BAKED MESH '{mn}': {qc:N0} quads / {vc:N0} verts — fits the engine's {EngineQuadCeiling:N0}-quad draw ceiling ({EngineQuadCeiling - qc:N0} to spare).");
             }
+            // A DIALOG, not just a console line (user request 2026-09-06): the in-game failure is SILENT — a
+            // console warning scrolled past is how the galley shipped without masts through five bakes. The bake
+            // still succeeds (the asset is valid; only the overflow won't draw), so this informs rather than
+            // aborts. Skipped in batch mode so automated bake tests never block on a modal.
+            if (over.Count > 0 && !Application.isBatchMode)
+                EditorUtility.DisplayDialog("Mesh over the engine's draw ceiling",
+                    $"{name}: the baked mesh exceeds the engine's per-mesh draw ceiling of {EngineQuadCeiling:N0} quads " +
+                    "(255 sub-particles × 64 primitives).\n\n" + string.Join("\n", over) +
+                    "\n\nThe overflow will SILENTLY not render in-game — the last-baked parts (masts, rigging…) vanish " +
+                    "first, with no error anywhere. Lower 'Reduce to ~tris' and re-bake until the console line says 'fits'.",
+                    "Understood");
         }
         catch (Exception qex) { Debug.LogWarning("[Factory] quad report: " + qex.Message); }
     }
