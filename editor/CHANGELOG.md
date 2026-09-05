@@ -67,6 +67,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   the dip phase stays put, so blades still bury on the reversed drive. **Sweep is the TOTAL arc**, split evenly
   about the rest rake: 24 = 12° forward + 12° back (it was a half-amplitude before — a 24 dial swung 48°, all of
   it reading as "backward" against the Khalandion's already-aft modelled rake). Slider range widened to ±90.
+  **Dip accepts negative too** — it flips which half of the stroke is submerged, the second independent way to
+  reverse the rowing direction (flip either Sweep or Dip, not both: both flips cancel). Keep |Sweep| above ~2× the
+  dip, or the dip's fore-aft component on a raked oar drowns the sweep and the stroke churns instead of pulling.
 
 ## 0.5.4 — 2026-09-03
 

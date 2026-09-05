@@ -673,8 +673,11 @@ public class VehicleLabWindow : EditorWindow
                         "ship rows backwards, flip the sign (the Spin-degrees convention for wheels that roll the " +
                         "wrong way)."), oarSweepDeg, -90f, 90f);
                     oarDipDeg = EditorGUILayout.Slider(new GUIContent("Dip (deg)",
-                        "How far the blades drop into the water on the aft drive and lift clear on the recovery — a " +
-                        "second rotation phase-locked to the sweep. 0 = a flat fore-aft sweep with no dip."), oarDipDeg, 0f, 45f);
+                        "How far the blades drop into the water on the drive and lift clear on the recovery — a second " +
+                        "rotation phase-locked to the sweep. NEGATIVE flips WHICH half of the stroke is submerged — the " +
+                        "other way to reverse the rowing direction (flip either Sweep or Dip, not both: both flips " +
+                        "cancel). 0 = a flat fore-aft sweep with no dip. Keep |Sweep| above ~2x the dip so the stroke " +
+                        "reads directional instead of churning."), oarDipDeg, -45f, 45f);
                     oarFrames = EditorGUILayout.IntSlider(new GUIContent("Stroke frames",
                         "Preferred length of one stroke. When another Spin motion uses a longer clip, Vehicle Lab fits " +
                         "the nearest whole number of strokes across it so every subsystem loops without a pause or snap. " +
