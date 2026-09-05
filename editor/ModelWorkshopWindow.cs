@@ -6,10 +6,12 @@
 // PR #19) but it explodes EVERY part — the Khalandion's rigging alone became ~1,500 objects, far past reviewable.
 //
 // The Workshop is the aimed version of the same lossless splitter: Probe lists every mesh-carrying node with its
-// triangle count and how many disconnected islands it holds; you check exactly the parts that hide junk; Split
-// writes a new GLB in which ONLY those become _Part_NNN children (GlbDisconnectedParts' method untouched:
-// byte-identical vertex data, appended index accessors, triangle-total verification). The output then goes
-// through the normal pipeline: Vehicle Lab probe → mark the junk Ignore → rig → Factory bake.
+// triangle count and how many disconnected islands it holds — AND shows the model in a turntable (the Vehicle
+// Lab's proven preview, minus clips) where clicking a row highlights that part, because an island count without
+// eyes is guesswork. Check exactly the parts that hide junk; Split writes a new GLB in which ONLY those become
+// _Part_NNN children (GlbDisconnectedParts' method untouched: byte-identical vertex data, appended index
+// accessors, triangle-total verification). The output then goes through the normal pipeline: Vehicle Lab probe →
+// mark the junk Ignore → rig → Factory bake.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -33,11 +35,25 @@ public class ModelWorkshopWindow : EditorWindow
         public bool split;       // the checkbox
     }
 
+    const string PreviewDir = "Assets/FactorySource/ModelWorkshop";
+
     [SerializeField] string srcFile = "";
     [SerializeField] string outGlb = "";
     [SerializeField] List<Row> rows = new List<Row>();
     [SerializeField] Vector2 scroll;
     string status = "Pick a GLB and press Probe parts.";
+
+    // ---- turntable preview state (the Vehicle Lab's proven camera, minus clips/waterline) ----
+    GameObject inst; PreviewRenderUtility pru;
+    [SerializeField] Vector2 orbit = new Vector2(30f, -20f);
+    [SerializeField] float zoom = 1.5f;
+    Vector2 previewPan;
+    Bounds bounds; bool boundsValid; float fullRadius;
+    string selectedRow = "";
+    Material highlightMat;
+    List<Renderer> highlightedRenderers; List<Material[]> highlightedOriginals;
+
+    void OnDisable() => DestroyPreview();
 
     void OnGUI()
     {
@@ -50,7 +66,7 @@ public class ModelWorkshopWindow : EditorWindow
             if (GUILayout.Button("…", GUILayout.Width(28)))
             {
                 string p = EditorUtility.OpenFilePanel("Choose the source GLB", string.IsNullOrEmpty(srcFile) ? "D:/3DModels" : Path.GetDirectoryName(srcFile), "glb");
-                if (!string.IsNullOrEmpty(p)) { srcFile = p.Replace('\\', '/'); outGlb = ""; rows.Clear(); }
+                if (!string.IsNullOrEmpty(p)) { srcFile = p.Replace('\\', '/'); outGlb = ""; rows.Clear(); DestroyPreview(); }
             }
         }
         if (string.IsNullOrEmpty(outGlb) && !string.IsNullOrEmpty(srcFile))
@@ -66,14 +82,14 @@ public class ModelWorkshopWindow : EditorWindow
         }
 
         using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(srcFile) || !File.Exists(srcFile)))
-            if (GUILayout.Button(new GUIContent("Probe parts", "Read the GLB (no Blender, nothing written) and list every mesh-carrying node with its triangle count and disconnected-island count."), GUILayout.Height(24)))
+            if (GUILayout.Button(new GUIContent("Probe parts", "List every mesh-carrying node with triangle and island counts (instant, pure C#), and build the turntable preview (headless Blender export) so a clicked row lights up in yellow."), GUILayout.Height(24)))
                 Probe();
 
         if (rows.Count > 0)
         {
             int splittable = rows.Count(r => r.islands > 1 && r.blocked == null);
             int chosen = rows.Count(r => r.split);
-            EditorGUILayout.LabelField($"Parts ({rows.Count} node(s), {splittable} with more than one island) — check the parts to split:", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField($"Parts ({rows.Count} node(s), {splittable} with more than one island) — click a row to highlight it below; check the parts to split:", EditorStyles.boldLabel);
             using (new EditorGUILayout.HorizontalScope())
             {
                 if (GUILayout.Button("Check all splittable", GUILayout.Width(140))) foreach (var r in rows) r.split = r.islands > 1 && r.blocked == null;
@@ -81,17 +97,30 @@ public class ModelWorkshopWindow : EditorWindow
                 // A 300-island rope part is a legitimate but LOUD choice — say what a check costs before Split.
                 EditorGUILayout.LabelField(chosen > 0 ? $"{chosen} checked → +{rows.Where(r => r.split).Sum(r => r.islands) - chosen} new part(s) in the output" : " ", EditorStyles.miniLabel);
             }
-            scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(Mathf.Min(320, 22 * rows.Count + 8)));
+            scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(Mathf.Min(220, 22 * rows.Count + 8)));
             foreach (var r in rows)
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     using (new EditorGUI.DisabledScope(r.islands <= 1 || r.blocked != null))
                         r.split = EditorGUILayout.Toggle(r.split, GUILayout.Width(20));
-                    string label = r.blocked != null ? $"{r.node}   — skipped: {r.blocked}"
-                                 : $"{r.node}   ({r.tris:N0} tris, {(r.islands == 1 ? "1 island — already whole" : r.islands.ToString("N0") + " islands")})";
-                    EditorGUILayout.LabelField(label, r.islands > 1 && r.blocked == null ? EditorStyles.label : EditorStyles.miniLabel);
+                    bool isSel = selectedRow == r.node;
+                    string label = r.blocked != null ? $"{(isSel ? "◉ " : "")}{r.node}   — skipped: {r.blocked}"
+                                 : $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {(r.islands == 1 ? "1 island — already whole" : r.islands.ToString("N0") + " islands")})";
+                    // the row label is a BUTTON, exactly like the Vehicle Lab: click = highlight + frame in the preview
+                    if (GUILayout.Button(label, isSel ? EditorStyles.whiteLabel : (r.islands > 1 && r.blocked == null ? EditorStyles.label : EditorStyles.miniLabel)))
+                        SelectRow(isSel ? "" : r.node);
                 }
             EditorGUILayout.EndScrollView();
+
+            if (inst != null)
+            {
+                EditorGUILayout.LabelField("Preview   (drag = orbit · middle/right-drag = pan · scroll = zoom · click a part row to highlight)", EditorStyles.miniBoldLabel);
+                var rect = GUILayoutUtility.GetRect(200f, 4000f, 300f, 300f, GUILayout.ExpandWidth(true));
+                HandlePreviewInput(rect);
+                if (Event.current.type == EventType.Repaint) RenderPreview(rect);
+            }
+            else if (rows.Count > 0)
+                EditorGUILayout.LabelField("  (no preview — the Blender probe export failed or is still pending; the list and Split still work)", EditorStyles.miniLabel);
 
             using (new EditorGUI.DisabledScope(chosen == 0 || string.IsNullOrEmpty(outGlb)))
                 if (GUILayout.Button(new GUIContent($"Split {chosen} checked part(s)  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
@@ -113,7 +142,120 @@ public class ModelWorkshopWindow : EditorWindow
             status = multi == 0 ? "Every part is a single attached island — nothing to split."
                    : $"{rows.Count} part(s); {multi} hold more than one island. Check the ones hiding junk (a huge island count usually means ropes/rigging — splitting those explodes the part list; usually leave them whole).";
         }
-        catch (Exception e) { rows.Clear(); status = "Probe failed: " + e.Message; }
+        catch (Exception e) { rows.Clear(); status = "Probe failed: " + e.Message; return; }
+        BuildPreviewViaBlender();
+    }
+
+    // ---- preview build: the Vehicle Lab's probe export (headless Blender writes an FBX of the model), imported
+    // and instanced with AddSingleGO. Node names survive the trip, so rows highlight renderers by name. ----
+    void BuildPreviewViaBlender()
+    {
+        DestroyPreview();
+        try
+        {
+            string projRoot = Directory.GetParent(Application.dataPath).FullName;
+            Directory.CreateDirectory(Path.Combine(projRoot, PreviewDir));
+            string prevRel = PreviewDir + "/" + Path.GetFileNameWithoutExtension(srcFile) + "_wprobe.fbx";
+            string prevFull = Path.Combine(projRoot, prevRel).Replace('\\', '/');
+            string script = HafPackageContext.ToolPath("vehicle_rig.py");
+            if (!File.Exists(script)) { status += "\n(no preview: Tools/vehicle_rig.py missing)"; return; }
+            EditorUtility.DisplayProgressBar("Model Workshop", "Exporting preview via Blender…", 0.4f);
+            var p = new System.Diagnostics.Process();
+            p.StartInfo.FileName = UniversalBaker.FindBlender();
+            p.StartInfo.Arguments = $"--background --python \"{script}\" -- probe \"{srcFile}\" \"{prevFull}\"";
+            p.StartInfo.UseShellExecute = false; p.StartInfo.CreateNoWindow = true;
+            p.StartInfo.RedirectStandardOutput = true; p.StartInfo.RedirectStandardError = true;
+            p.Start();
+            if (!UniversalBaker.RunBounded(p, 300000, out _, out _)) { status += "\n(no preview: Blender timed out)"; return; }
+            if (!File.Exists(prevFull)) { status += "\n(no preview: Blender wrote no FBX)"; return; }
+            AssetDatabase.ImportAsset(prevRel, ImportAssetOptions.ForceUpdate);
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prevRel);
+            if (prefab == null) { status += "\n(no preview: FBX import failed)"; return; }
+            if (pru == null) pru = new PreviewRenderUtility();
+            inst = Instantiate(prefab);
+            pru.AddSingleGO(inst);
+            boundsValid = false; previewPan = Vector2.zero; zoom = 1.5f;
+        }
+        catch (Exception e) { status += "\n(no preview: " + e.Message + ")"; }
+        finally { EditorUtility.ClearProgressBar(); }
+    }
+
+    void DestroyPreview()
+    {
+        SelectRow("");
+        if (inst != null) DestroyImmediate(inst);
+        inst = null;
+        if (pru != null) { pru.Cleanup(); pru = null; }
+    }
+
+    // Click a row → tint that part's renderer(s) yellow and frame them with context (the Vehicle Lab mechanism,
+    // name-matched: probe part names ARE the glTF node names, with StartsWith for Blender's collision suffixes).
+    void SelectRow(string name)
+    {
+        if (highlightedRenderers != null)
+            for (int i = 0; i < highlightedRenderers.Count; i++)
+                try { if (highlightedRenderers[i] != null) highlightedRenderers[i].sharedMaterials = highlightedOriginals[i]; } catch { }
+        highlightedRenderers = null; highlightedOriginals = null;
+        selectedRow = name;
+        boundsValid = false;
+        previewPan = Vector2.zero;
+        if (inst == null || string.IsNullOrEmpty(name)) return;
+        var all = inst.GetComponentsInChildren<Renderer>();
+        var hits = all.Where(x => x != null && (x.gameObject.name == name || x.gameObject.name.StartsWith(name))).ToList();
+        if (hits.Count == 0) return;
+        if (highlightMat == null)
+        {
+            var sh = Shader.Find("Unlit/Color") ?? Shader.Find("Standard");
+            highlightMat = new Material(sh) { color = new Color(1f, 0.85f, 0.1f), hideFlags = HideFlags.HideAndDontSave };
+        }
+        highlightedRenderers = hits;
+        highlightedOriginals = hits.Select(r => r.sharedMaterials).ToList();
+        Bounds b = hits[0].bounds;
+        foreach (var r in hits)
+        {
+            r.sharedMaterials = Enumerable.Repeat(highlightMat, r.sharedMaterials.Length).ToArray();
+            b.Encapsulate(r.bounds);
+        }
+        bounds = b; bounds.Expand(bounds.size.magnitude * 0.6f + 0.1f); boundsValid = true;
+        Repaint();
+    }
+
+    void HandlePreviewInput(Rect rect)
+    {
+        var e = Event.current;
+        if (!rect.Contains(e.mousePosition)) return;
+        if (e.type == EventType.ScrollWheel) { zoom = Mathf.Clamp(zoom * Mathf.Pow(1.12f, e.delta.y > 0 ? 1f : -1f), 0.2f, 50f); e.Use(); Repaint(); }
+        else if (e.type == EventType.MouseDrag && e.button == 0) { orbit += new Vector2(e.delta.x, -e.delta.y) * 0.7f; orbit.y = Mathf.Clamp(orbit.y, -89f, 89f); e.Use(); Repaint(); }
+        else if (e.type == EventType.MouseDrag && (e.button == 1 || e.button == 2)) { previewPan += new Vector2(-e.delta.x, e.delta.y) * 0.0035f; e.Use(); Repaint(); }
+    }
+
+    void RenderPreview(Rect rect)
+    {
+        if (inst == null || pru == null) return;
+        if (!boundsValid)
+        {
+            bool first = true;
+            foreach (var r in inst.GetComponentsInChildren<Renderer>())
+            { if (r == null) continue; if (first) { bounds = r.bounds; first = false; } else bounds.Encapsulate(r.bounds); }
+            boundsValid = !first;
+            if (boundsValid) fullRadius = bounds.extents.magnitude;
+        }
+        if (!boundsValid) return;
+        pru.BeginPreview(rect, GUIStyle.none);
+        var cam = pru.camera;
+        float radius = Mathf.Max(bounds.extents.magnitude, 0.1f);
+        float dist = radius * 2f * zoom;
+        var rot = Quaternion.Euler(-orbit.y, orbit.x, 0f);
+        var lookAt = bounds.center + rot * new Vector3(previewPan.x, previewPan.y, 0f) * dist;
+        cam.transform.position = lookAt + rot * (Vector3.back * dist);
+        cam.transform.rotation = Quaternion.LookRotation(lookAt - cam.transform.position);
+        cam.nearClipPlane = 0.01f; cam.farClipPlane = dist + Mathf.Max(radius, fullRadius) * 4f; cam.fieldOfView = 30f;
+        pru.lights[0].intensity = 1.3f;
+        pru.lights[0].transform.rotation = Quaternion.Euler(45f, 45f, 0f);
+        if (pru.lights.Length > 1) pru.lights[1].intensity = 0.6f;
+        pru.ambientColor = new Color(0.3f, 0.3f, 0.3f);
+        cam.Render();
+        GUI.DrawTexture(rect, pru.EndPreview(), ScaleMode.StretchToFill, false);
     }
 
     void SplitChecked()
