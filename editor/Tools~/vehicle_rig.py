@@ -314,6 +314,10 @@ structure_reduce = min(95.0, max(0.0, float(argv[52]))) if len(argv) > 52 and ar
 # whose reviewed body geometry is itself needlessly dense.
 body_names = namelist(argv[53]) if len(argv) > 53 and argv[53].strip() else []
 body_reduce = min(95.0, max(0.0, float(argv[54]))) if len(argv) > 54 and argv[54].strip() else 0.0
+# FLAG parts (argv[55]): banners/pennants — sheets that must read from BOTH sides like sails, but that never hide:
+# a flag keeps flying at anchor. Double-sided at export, artist winding kept (excluded from the inside-out flip),
+# welded to the body like any Body part, no bone and no clip of their own.
+flag_names = namelist(argv[55]) if len(argv) > 55 and argv[55].strip() else []
 recoil_bone = None               # set to "RecoilArm" when the split actually happens — the bone the clip ROTATES
 recoil_geom = None               # (pivot, axis, bore_dir, slide, R) for the arc that fakes the slide
 # Residual tilt the arc leaves on the tube. The slide is faked by swinging the barrel on a long arm, so some pitch
@@ -947,6 +951,17 @@ if sail_names:
         _sebn.tail = _sebn.head + Vector((0.0, 0.0, max(0.3, 0.25 * (_smx.z - _smn.z))))
         _sebn.parent = eb_body
         print("VEHICLE SAIL: %d part(s) on one Sail bone (double-sided at export; struck/raised by the 'Furl' clip)" % len(sail_found))
+
+# ---- FLAG parts: resolved to a name set — they keep their own mesh through the join (identity is needed at
+# export for the double-siding, and at the flip pass for the exclusion), skinned to the body like Body parts ----
+flag_by_name = set()
+for _fn3 in flag_names:
+    _fo3 = find(_fn3)
+    if _fo3 is None:
+        print("VEHICLE WARN: flag part '%s' not found — skipped" % _fn3); continue
+    flag_by_name.add(_fo3.name)
+if flag_by_name:
+    print("VEHICLE FLAG: %d part(s) — double-sided at export, always visible, authored winding kept" % len(flag_by_name))
 
 # ---- OAR bones (galley rowing): one merged oar mesh -> one bone per physical oar ----
 # The marked oar parts (poles + blades, each mesh spanning BOTH banks) are split into individual oars by projecting
@@ -1721,9 +1736,13 @@ def _join_per_bone():
     groups = {}
     for o in objs:
         # tread parts are multi-bone-skinned (four regions) — each stays its OWN mesh, never merged
-        # oars, like treads, are multi-bone-skinned — give each its OWN key so it is never merged into one bone
+        # oars, like treads, are multi-bone-skinned — give each its OWN key so it is never merged into one bone.
+        # FLAGS keep their own mesh too: they skin to the body like Body parts, but the export doubling and the
+        # inside-out exclusion need to find them after the join.
         if o.name in oar_by_name:
             _k = "__oar__" + o.name
+        elif o.name in flag_by_name:
+            _k = "__flag__" + o.name
         else:
             _k = ("__track__" + o.name) if o.name in _track_by_name else bone_of.get(o.name, body_bone)
         groups.setdefault(_k, []).append(o)
@@ -2426,7 +2445,7 @@ if fix_inside_out:
     _fall = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]
     _fxn = 0; _fxkept = 0
     for _fo in _fall:
-        if any(g.name.startswith("Oar_") or g.name == "Sail" for g in _fo.vertex_groups):
+        if any(g.name.startswith("Oar_") or g.name == "Sail" for g in _fo.vertex_groups) or _fo.name.startswith("Mesh___flag__"):
             continue
         _fb = bmesh.new(); _fb.from_mesh(_fo.data); _fb.normal_update()
         _fb.verts.ensure_lookup_table(); _fb.faces.ensure_lookup_table()
@@ -2472,11 +2491,12 @@ if fix_inside_out:
 # layer, so each duplicated vertex keeps its bone weights (no vert falls to bone 0 -> the skeleton bake still
 # validates). The back shell is nudged INWARD along the normal by a small fraction of the model size, so front and
 # back faces are NOT coincident — coincident faces make the game's alpha-to-coverage shader read ~50% transparent.
-# Marked SAIL meshes are ALWAYS double-sided — the role says so, no guessing: canvas must read from both tacks.
+# Marked SAIL and FLAG meshes are ALWAYS double-sided — the role says so, no guessing: canvas must read from both tacks.
 # (Oar meshes are NOT: the Khalandion's blades ship as authored front/back sheet pairs, already two-sided —
 # doubling them z-shimmered four near-coincident layers. A role gets doubled only when being a sheet is its nature.)
 _dall = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]
-_dtargets = _dall if double_sided else [o for o in _dall if any(g.name == "Sail" for g in o.vertex_groups)]
+_dtargets = _dall if double_sided else [o for o in _dall
+                                        if any(g.name == "Sail" for g in o.vertex_groups) or o.name.startswith("Mesh___flag__")]
 if _dtargets:
     # The inset is a fraction of the WHOLE model, not each part. A per-mesh dimension would give a tiny single-sided
     # part (a bolt, an antenna) a tiny inset that can fall below depth precision -> that part reads transparent again.

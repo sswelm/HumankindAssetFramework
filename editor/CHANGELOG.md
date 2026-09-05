@@ -58,6 +58,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   original → dissolved → final against the dial's target.
 - **Body reduce (%)** completes the tiers — parts explicitly marked Body, default 0 (untouched: the hull is the
   model's face, and the Factory's global *Reduce to ~tris* is usually the smarter place to slim it).
+- **Flag — double-sided like a sail, but never hidden.** Banners and pennants must read from both sides, yet a
+  flag keeps flying at anchor — so the new role gets the sail's doubling and winding protection without the Furl
+  strike: no bone, no clip, welded to the body.
 - **Sweep accepts negative** — if the galley rows backwards, flip the sign (the wheels' Spin-degrees convention);
   the dip phase stays put, so blades still bury on the reversed drive.
 
