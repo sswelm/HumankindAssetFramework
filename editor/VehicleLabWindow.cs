@@ -686,11 +686,11 @@ public class VehicleLabWindow : EditorWindow
                 using (new EditorGUI.DisabledScope(ActiveParts.Count(p => p.role == Role.Oar) == 0))
                 {
                     oarSweepDeg = EditorGUILayout.Slider(new GUIContent("Sweep (deg)",
-                        "The TOTAL fore-aft arc each oar swings about its oarlock, split evenly around the rest rake — " +
-                        "24 means 12° forward and 12° back. The whole bank strokes in unison, the galley drum-beat; " +
-                        "~24–48° total reads clearly from the game's distance. NEGATIVE reverses the stroke — if the " +
-                        "ship rows backwards, flip the sign (the Spin-degrees convention for wheels that roll the " +
-                        "wrong way)."), oarSweepDeg, -90f, 90f);
+                        "The TOTAL fore-aft arc each oar swings about its oarlock, split evenly around the stroke " +
+                        "centre — 24 means 12° forward and 12° back. POSITIVE rows the ship forward on a correctly " +
+                        "oriented model (bow toward the forward arrow) — same convention as Rake; flip the sign if it " +
+                        "rows backwards (the Spin-degrees convention for wheels). ~24–48° total reads clearly from " +
+                        "the game's distance."), oarSweepDeg, -90f, 90f);
                     oarDipDeg = EditorGUILayout.Slider(new GUIContent("Dip (deg)",
                         "How far the blades drop into the water on the drive and lift clear on the recovery — a second " +
                         "rotation phase-locked to the sweep. NEGATIVE flips WHICH half of the stroke is submerged — the " +

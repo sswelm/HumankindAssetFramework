@@ -63,6 +63,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   strike: no bone, no clip, welded to the body. **Rudder** shares the exact treatment under its own name — a
   closed slab with one face-side wound inward scores ~0 in the inside-out flip (the halves cancel), so no
   whole-island flip can repair it; doubling can.
+- **Positive Sweep rows forward** (2026-09-05 sign flip): the field-verified forward stroke needed a negative
+  dial while positive Rake already shifted toward the bow — the sweep sense flipped so both dials agree that
+  positive points at the bow. Recipes saved before the flip negate their Sweep once.
 - **Sweep accepts negative** — if the galley rows backwards, flip the sign (the wheels' Spin-degrees convention);
   the dip phase stays put, so blades still bury on the reversed drive. **Sweep is the TOTAL arc**, split evenly
   about the rest rake: 24 = 12° forward + 12° back (it was a half-amplitude before — a 24 dial swung 48°, all of

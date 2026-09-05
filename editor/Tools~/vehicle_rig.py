@@ -1898,7 +1898,11 @@ if oar_bake:
     # Sweep is the TOTAL fore-aft arc, split evenly about the rest rake (user convention 2026-09-05: "a sweep of
     # 24 degrees should make the oars sweep 12 degrees forward and then 12 degrees backwards") — the amplitude
     # each way is half the dial. Dip stays a per-direction amplitude (blades drop A_d, lift A_d).
-    _oaw = math.radians(oar_sweep) * 0.5; _oad = math.radians(oar_dip); _oal = math.radians(oar_lift); _oark = math.radians(oar_rake)
+    # Sweep NEGATED (2026-09-05 sign flip, user request): the field-verified forward stroke needed a negative
+    # dial while positive Rake already shifted toward the bow — so the sweep's sense flips here, making POSITIVE
+    # the forward default and aligning the two dials' conventions. (Recipes saved before the flip must negate
+    # their Sweep once.)
+    _oaw = -math.radians(oar_sweep) * 0.5; _oad = math.radians(oar_dip); _oal = math.radians(oar_lift); _oark = math.radians(oar_rake)
     for _bn, _piv, _oside, _dax in oar_bake:
         _db = arm.data.bones.get(_bn); _pb = arm.pose.bones.get(_bn)
         if _db is None or _pb is None:
