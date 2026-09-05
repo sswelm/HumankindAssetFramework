@@ -310,7 +310,7 @@ public class VehicleLabWindow : EditorWindow
             for (int i = 0; i < rfiles.Length; i++) if (names[i + 1] == loadedRecipe) { cur = i + 1; break; }
 
             int sel = EditorGUILayout.Popup(new GUIContent("Edit existing",
-                "Load a saved recipe, or ＜new model＞ to start fresh. Recipes live in " + RecipesDir + "; Save recipe… adds to this list."), cur, labels);
+                "Load a saved recipe, or ＜new model＞ to start fresh. Recipes live in " + RecipesDir + "; Save writes the current one in place."), cur, labels);
             if (sel != cur)
             {
                 bool dirty = parts.Count > 0 || boneParts.Count > 0;
@@ -363,7 +363,7 @@ public class VehicleLabWindow : EditorWindow
                 if (GUILayout.Button(new GUIContent("Probe parts", "Headless Blender lists the model's mesh parts (a single combined mesh is split into loose parts). Roles are auto-guessed from names."), GUILayout.Height(24)))
                     Probe();
             using (new EditorGUI.DisabledScope(parts.Count == 0 && boneParts.Count == 0))
-                if (GUILayout.Button(new GUIContent("Save recipe…", "Save the whole configuration (source, output, roles, knobs) as JSON — it then appears in the Edit-existing dropdown above."), GUILayout.Width(110), GUILayout.Height(24)))
+                if (GUILayout.Button(new GUIContent("Save", "Save the whole configuration (source, output, roles, knobs) to the current recipe file — no dialog, no rename: the loaded recipe (or, for a new session, one named after the source model) is written in place under " + RecipesDir + " and appears in the Edit-existing dropdown above."), GUILayout.Width(70), GUILayout.Height(24)))
                     SaveRecipe();
             using (new EditorGUI.DisabledScope(parts.Count == 0 && boneParts.Count == 0))
                 if (GUILayout.Button(new GUIContent("Verify", "Sanity-check the classification: shows the wheel bones the rig step would build (clustering preview) and flags stray clusters, axle disagreement, unpaired wheels, turret outliers and undecided leftovers."), GUILayout.Width(70), GUILayout.Height(24)))
@@ -1236,12 +1236,12 @@ public class VehicleLabWindow : EditorWindow
     {
         string projRoot = Directory.GetParent(Application.dataPath).FullName;
         Directory.CreateDirectory(Path.Combine(projRoot, RecipesDir));
-        // Default to the CURRENT recipe's name, not the source model's (2026-08-19 user find: saved as prod3,
-        // the next Save suggested prod2 again — the srcFile-derived default silently reverted the name).
-        string def = !string.IsNullOrEmpty(loadedRecipe) ? loadedRecipe
-                   : Path.GetFileNameWithoutExtension(string.IsNullOrEmpty(srcFile) ? "vehicle" : srcFile);
-        string p = EditorUtility.SaveFilePanel("Save vehicleize recipe", Path.Combine(projRoot, RecipesDir), def, "json");
-        if (string.IsNullOrEmpty(p)) return;
+        // NO file dialog (2026-09-05 user request: "simply save the current recipe" — the save-as panel only
+        // invited accidental renames). The recipe's identity is the loaded name, or the source model's name for
+        // a fresh session; Save always writes that one file, in place.
+        string name = !string.IsNullOrEmpty(loadedRecipe) ? loadedRecipe
+                    : Path.GetFileNameWithoutExtension(string.IsNullOrEmpty(srcFile) ? "vehicle" : srcFile);
+        string p = Path.Combine(projRoot, RecipesDir, name + ".json");
         var r = new Recipe
         {
             srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
