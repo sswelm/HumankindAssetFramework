@@ -2478,6 +2478,17 @@ if _dtargets:
         print("VEHICLE double-sided '%s': %d -> %d verts (back shell inset %.4f local)" % (_dso.name, _v0, len(_dm.vertices), _doff))
     print("VEHICLE double-sided: %d mesh(es) made two-sided at the source (whole-model inset %.4f world)" % (_dsn, _woff))
 
+# EXPORT TOTALS (2026-09-05, user request: "where can I see the vertices difference between raw and generated?"):
+# one honest line with what actually ships. Compare TRIANGLES against the raw source, not vertices — the per-bone
+# join and the export split verts at normal/UV seams (storage bookkeeping), so the vert count can rise even after
+# a decimation that removed a fifth of the triangles.
+_xt_v = 0; _xt_t = 0; _xt_m = 0
+for _xo in bpy.context.scene.objects:
+    if _xo.type != 'MESH' or not _xo.data.vertices:
+        continue
+    _xo.data.calc_loop_triangles()
+    _xt_v += len(_xo.data.vertices); _xt_t += len(_xo.data.loop_triangles); _xt_m += 1
+print("VEHICLE export totals: %d verts, %d tris across %d mesh(es)" % (_xt_v, _xt_t, _xt_m))
 bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
 if preview_fbx:
     bpy.ops.export_scene.fbx(filepath=preview_fbx, add_leaf_bones=False, bake_anim=True)
