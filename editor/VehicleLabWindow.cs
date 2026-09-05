@@ -94,6 +94,9 @@ public class VehicleLabWindow : EditorWindow
     // OAR PIVOT: where the oarlock (the fulcrum every rotation happens about) sits along each oar, % of its
     // inboard->outboard extent. 30 was the build's hardcoded value; lower = nearer the handle = more oar swings.
     [SerializeField] float oarPivotPct = 30f;
+    // OAR LENGTH: stretch each oar along its own axis about the oarlock — the pivot stays planted at the hull,
+    // the blade reaches further out and down. Pure axial scale; blade width and pole thickness untouched.
+    [SerializeField] float oarLengthPct = 100f;
     // BLADE ROLL: some sources model the blades feathered — flat face parallel to the stroke — so they knife through
     // the water edge-on. Spins each oar about its own long axis in the rest geometry (the Khalandion wants 90).
     [SerializeField] float oarBladeRollDeg = 0f;
@@ -221,6 +224,7 @@ public class VehicleLabWindow : EditorWindow
         public float oarLiftDeg = 0f;        // stroke-height re-centre (absent-key 0 == the do-nothing default)
         public float oarRakeDeg = 0f;        // sweep-arc fore/aft re-centre (absent-key 0 == the do-nothing default)
         public float oarPivotPct = 30f;      // oarlock position along the oar (guarded by Has() on load: 30 ≠ 0)
+        public float oarLengthPct = 100f;    // axial oar stretch about the oarlock (guarded by Has(): 100 ≠ 0)
         public float riggingReducePct = 75f; // rigging decimation percentage (guarded by Has() on load)
         public float structureReducePct = 50f; // structure decimation percentage (guarded by Has() on load)
         public float bodyReducePct = 0f;       // body decimation percentage (absent-key 0 == the do-nothing default)
@@ -711,6 +715,11 @@ public class VehicleLabWindow : EditorWindow
                         "swings), higher = further out toward the blade (less oar moves, and the inboard handle " +
                         "counter-swings more). 30 is the historical default. Needs a re-Generate: the pivot is the " +
                         "bone's position."), oarPivotPct, 0f, 90f);
+                    oarLengthPct = EditorGUILayout.Slider(new GUIContent("Length (%)",
+                        "Stretches each oar along its own axis ABOUT THE OARLOCK — the pivot stays planted at the " +
+                        "hull, the blade reaches further out and down (and the handle further in). Pure lengthening: " +
+                        "blade width and pole thickness are untouched. 100 = the modelled length. Needs a re-Generate: " +
+                        "it reshapes the rest geometry."), oarLengthPct, 50f, 200f);
                     oarFrames = EditorGUILayout.IntSlider(new GUIContent("Stroke frames",
                         "Preferred length of one stroke. When another Spin motion uses a longer clip, Vehicle Lab fits " +
                         "the nearest whole number of strokes across it so every subsystem loops without a pause or snap. " +
@@ -1238,7 +1247,7 @@ public class VehicleLabWindow : EditorWindow
             srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
             parts = parts, boneParts = boneParts, useSourceRig = useSourceRig, treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink,
             // orientation + tread isolation + wave rock — the rest of what the bake command consumes
-            tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, modelRot = modelRot, waveEnabled = waveEnabled,
+            tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, modelRot = modelRot, waveEnabled = waveEnabled,
             trailSpreadDeg = trailSpreadDeg, trailFrames = trailFrames, gunPivot = gunPivot, gunDeployElev = gunDeployElev, recoilDist = recoilDist, recoilFrames = recoilFrames, recoilLead = recoilLead,
             rockDegrees = rockDegrees, rockFrames = rockFrames, rockAxisChoice = rockAxisChoice, rockHeading = rockHeading,
             rockPitchDeg = rockPitchDeg, rockRollCycles = rockRollCycles, rockPitchCycles = rockPitchCycles, rockPitchPhase = rockPitchPhase,
@@ -1287,6 +1296,7 @@ public class VehicleLabWindow : EditorWindow
             oarLiftDeg = r.oarLiftDeg;             // same: absent-key 0 == do-nothing
             oarRakeDeg = r.oarRakeDeg;             // same: absent-key 0 == do-nothing
             oarPivotPct = Has("oarPivotPct") ? r.oarPivotPct : 30f;   // 30 ≠ 0: absent key must not slam the pivot to the handle
+            oarLengthPct = Has("oarLengthPct") ? r.oarLengthPct : 100f;   // 100 ≠ 0: absent key must not crush the oars
             riggingReducePct = Has("riggingReducePct") ? r.riggingReducePct : 75f;
             structureReducePct = Has("structureReducePct") ? r.structureReducePct : 50f;
             bodyReducePct = r.bodyReducePct;   // absent-key 0 IS the do-nothing default — no migration needed
@@ -1476,7 +1486,7 @@ public class VehicleLabWindow : EditorWindow
         string axis = axisChoice == 0 ? "AUTO" : AxisOptions[axisChoice];
         string tailAxis = tailAxisChoice == 0 ? "AUTO" : AxisOptions[tailAxisChoice];
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")} \"@{oarsFile}\" {oarSweepDeg.ToString("0.##", inv)} {oarDipDeg.ToString("0.##", inv)} {oarFrames} {(fixInsideOut ? "1" : "0")} {oarBladeRollDeg.ToString("0.##", inv)} \"@{sailsFile}\" \"@{riggingFile}\" {riggingReducePct.ToString("0.#", inv)} \"@{structureFile}\" {structureReducePct.ToString("0.#", inv)} \"@{bodiesFile}\" {bodyReducePct.ToString("0.#", inv)} \"@{flagsFile}\" {oarLiftDeg.ToString("0.##", inv)} {oarRakeDeg.ToString("0.##", inv)} {oarPivotPct.ToString("0.#", inv)}", out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll; argv[48]: sail parts; argv[49..50]: rigging parts, reduce %; argv[51..52]: structure parts, reduce %; argv[53..54]: body parts, reduce %; argv[55]: flag parts
+        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")} \"@{oarsFile}\" {oarSweepDeg.ToString("0.##", inv)} {oarDipDeg.ToString("0.##", inv)} {oarFrames} {(fixInsideOut ? "1" : "0")} {oarBladeRollDeg.ToString("0.##", inv)} \"@{sailsFile}\" \"@{riggingFile}\" {riggingReducePct.ToString("0.#", inv)} \"@{structureFile}\" {structureReducePct.ToString("0.#", inv)} \"@{bodiesFile}\" {bodyReducePct.ToString("0.#", inv)} \"@{flagsFile}\" {oarLiftDeg.ToString("0.##", inv)} {oarRakeDeg.ToString("0.##", inv)} {oarPivotPct.ToString("0.#", inv)} {oarLengthPct.ToString("0.#", inv)}", out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll; argv[48]: sail parts; argv[49..50]: rigging parts, reduce %; argv[51..52]: structure parts, reduce %; argv[53..54]: body parts, reduce %; argv[55]: flag parts
         // SUCCESS = THE SCRIPT'S OWN FINAL MARKER (the documented Blender trap: it exits 0 even when the python
         // script crashes mid-way — without this gate a half-run printed a fake "DONE" with no file on disk).
         string done = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE RIG DONE"));

@@ -81,6 +81,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 - **Pivot (%)** — where the oarlock, the fulcrum every stroke rotation happens about, sits along each oar
   (percentage of its inboard→outboard extent). 0 = at the handle, the whole oar swings; higher = further out,
   less oar moves and the handle counter-swings more. 30 was the hardcoded value through the whole build.
+- **Length (%)** — stretches each oar along its own axis ABOUT the oarlock: the pivot stays planted at the
+  hull, the blade reaches further out and down, the handle further in. Pure axial scale — blade width and pole
+  thickness untouched. 100 = the modelled length.
 - **The Animation Lab preview floats boats at the calibrated water level.** It drew its hex at ground height
   (-0.02) even for boat pawns — water-blue in colour, ground in height — so the Factory showed oar blades in the
   water while the Animation Lab showed them dry. Both panes now share the pack's one-source-of-truth
