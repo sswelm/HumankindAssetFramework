@@ -1967,7 +1967,7 @@ if oar_bake:
 # stance (override) = Furl[1..1] (struck below the hull, the Deploy-stance mechanism), Movement = Spin (raised),
 # After-move / Pre-move EMPTY — the state change swaps the pose in one tick. Rotation-only: Keep translations OFF.
 SAIL_FURL_FRAMES = 1
-if sail_found and arm.pose.bones.get("Sail") is not None:
+if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and arm.pose.bones.get("Flag") is not None):
     # ROTATION, not translation (2026-09-05): the strike is a 180-degree flip of the Sail bone about the keel-line
     # head, mirroring the canvas below the hull. The translation version fought the converter — the rest-fold made
     # the struck pose the rest, the strip classified the raise as residue, and the kept-curve fix still shipped the
@@ -1981,14 +1981,26 @@ if sail_found and arm.pose.bones.get("Sail") is not None:
             arm.animation_data.action_slot = _furl.slots.new(id_type='OBJECT', name=arm.name)
     except Exception:
         pass
-    _pbS = arm.pose.bones["Sail"]; _dbS = arm.data.bones["Sail"]
-    _m3S = (arm.matrix_world @ _dbS.matrix_local).to_3x3()
-    _flipax = (_m3S.inverted() @ Vector((1.0, 0.0, 0.0))).normalized()   # hull-length axis, in bone-local space
-    _pbS.rotation_mode = 'QUATERNION'
-    _pbS.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
-    _pbS.keyframe_insert('rotation_quaternion', frame=0)                 # raised — matches Spin's rest pose
-    _pbS.rotation_quaternion = Quaternion(_flipax, math.pi)
-    _pbS.keyframe_insert('rotation_quaternion', frame=SAIL_FURL_FRAMES)  # struck — canvas mirrored below the keel
+    if sail_found and arm.pose.bones.get("Sail") is not None:
+        _pbS = arm.pose.bones["Sail"]; _dbS = arm.data.bones["Sail"]
+        _m3S = (arm.matrix_world @ _dbS.matrix_local).to_3x3()
+        _flipax = (_m3S.inverted() @ Vector((1.0, 0.0, 0.0))).normalized()   # hull-length axis, in bone-local space
+        _pbS.rotation_mode = 'QUATERNION'
+        _pbS.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
+        _pbS.keyframe_insert('rotation_quaternion', frame=0)                 # raised — matches Spin's rest pose
+        _pbS.rotation_quaternion = Quaternion(_flipax, math.pi)
+        _pbS.keyframe_insert('rotation_quaternion', frame=SAIL_FURL_FRAMES)  # struck — canvas mirrored below the keel
+        _pbS.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))          # leave the POSE raised for the later bakes
+    # FLAGS keyed EXPLICITLY at identity in Furl — flying at anchor. An unkeyed bone inherits whatever pose the
+    # previous evaluation left (the preview sampling Spin first left the flag STRUCK; field report: "the flags
+    # seem to be down when the sails are down"), and the conversion's snapshots share the hazard. Every stance
+    # bone is keyed in BOTH clips so no consumer ever depends on leftover pose.
+    if flag_found and arm.pose.bones.get("Flag") is not None:
+        _pbG2 = arm.pose.bones["Flag"]
+        _pbG2.rotation_mode = 'QUATERNION'
+        _pbG2.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
+        _pbG2.keyframe_insert('rotation_quaternion', frame=0)
+        _pbG2.keyframe_insert('rotation_quaternion', frame=SAIL_FURL_FRAMES)
     try:
         _sfcs = list(_furl.fcurves)
     except AttributeError:
@@ -1996,10 +2008,19 @@ if sail_found and arm.pose.bones.get("Sail") is not None:
     for _fc in _sfcs:
         for _kp in _fc.keyframe_points:
             _kp.interpolation = 'LINEAR'
-    _pbS.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))          # leave the POSE raised for the later bakes
     arm.animation_data.action = act                                      # 'Spin' stays the active action, as before
-    print("VEHICLE SAIL 'Furl' stance: canvas FLIPPED below the keel at frame %d (rotation-only) — Idle/reference Spin[0..0], Idle stance (override) Furl[%d..%d], Movement Spin, After-move/Pre-move EMPTY, Keep bone translations OFF"
-          % (SAIL_FURL_FRAMES, SAIL_FURL_FRAMES, SAIL_FURL_FRAMES))
+    print("VEHICLE 'Furl' stance: %s — Idle/reference Spin[0..0], Idle stance (override) Furl[%d..%d], Movement Spin, After-move/Pre-move EMPTY, Keep bone translations OFF"
+          % (("sails FLIPPED below the keel" + (", flags keyed flying" if flag_found else "")) if sail_found else "flags keyed flying (no sails)",
+             SAIL_FURL_FRAMES, SAIL_FURL_FRAMES))
+
+# SAIL held raised THROUGH Spin — explicit identity keys, the same stale-pose hazard in the other direction:
+# sampling Furl then Spin would leave the canvas struck without them.
+if sail_found and arm.pose.bones.get("Sail") is not None:
+    _pbS3 = arm.pose.bones["Sail"]
+    _pbS3.rotation_mode = 'QUATERNION'
+    _pbS3.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
+    _pbS3.keyframe_insert('rotation_quaternion', frame=0)
+    _pbS3.keyframe_insert('rotation_quaternion', frame=_clip_frames)
 
 # FLAG strike THROUGH Spin — the opposite of the sails (2026-09-05): banners fly AT ANCHOR (the idle stance
 # leaves the Flag bone at rest) and are held flipped below the keel for the entire movement clip. Constant
