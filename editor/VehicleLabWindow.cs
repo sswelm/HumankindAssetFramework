@@ -502,10 +502,6 @@ public class VehicleLabWindow : EditorWindow
                 // static tracks — bones and markings all survive for re-enabling. Dials stay visible, disabled.
                 spinEnabled = EditorGUILayout.ToggleLeft(new GUIContent("  Enable spin animation",
                     "Off: the rig is generated with zero wheel/rotor rotation and static tracks — every bone and marking is kept, nothing turns. On: normal spin. Markings and dial values survive toggling."), spinEnabled);
-                doubleSided = EditorGUILayout.ToggleLeft(new GUIContent("  Double-sided (fix see-through parts)",
-                    "The game culls backfaces, so single-sided / CAD parts (thin spokes, flat plates) render see-through from the wrong angle. On: the exported Spin GLB gets a reversed, slightly-inset copy of every face, making it genuinely two-sided at the source — the animated bake and both previews then just work. Doubles the triangle count; leave off for already-solid models."), doubleSided);
-                fixInsideOut = EditorGUILayout.ToggleLeft(new GUIContent("  Fix inside-out faces",
-                    "For a source whose winding ships partly INVERTED — you see through the near hull wall from outside while the far wall's interior renders. On: islands that provably face the hull's interior (inverted side planking) are REVERSED at export — no extra triangles; everything else keeps the artist's winding, as do marked Sail and Oar meshes. Sails are a ROLE (S): mark the canvas instead of relying on any detection — marked sails are always double-sided and hide at idle."), fixInsideOut);
                 if (ActiveParts.Count(p => p.role == Role.Sail) > 0)
                     EditorGUILayout.HelpBox("Sails marked: the rig authors a separate 'Furl' clip whose frame 1 FLIPS the canvas below the keel (rotation-only, the Deploy-proven stance mechanism) — a STANCE, never an animation to play. Assign after baking: Idle/reference = Spin[0..0] (defines the rest — never put Furl here, or the bind adopts the struck pose) · Idle stance (override) = Furl[1..1] (no sails) · Movement = Spin (sails up) · After-move and Pre-move EMPTY — the state change swaps the pose in one tick. Keep bone translations can stay OFF: the strike is pure rotation.", MessageType.None);
                 // SPIN GATING (2026-08-19, user: "really confusing that this is also present [on a boat] — we
@@ -548,18 +544,25 @@ public class VehicleLabWindow : EditorWindow
                 }   // end spin-inert DisabledScope
             }
 
-            // TRAILS — a split-trail gun's DEPLOY. The arms marked Trail get a bone hinged at their body end and a
-            // separate "Deploy" action that swings them open, mirrored per side; `Spin` keeps the wheels rolling
-            // VERTEX REDUCTION — its own section (2026-09-05 user request: these dials lived inside Spin, where
-            // they had no business). Three source-side tiers, applied at Generate; each dial disabled until parts
-            // of its role are marked.
+            // VERTICES CONTROL — its own section (2026-09-05 user requests: the reduce dials and the two facing
+            // checkboxes lived inside Spin, where they had no business). Everything here reshapes the exported
+            // GEOMETRY at Generate: facing fixes (double-sided, winding) + the three source-side reduction tiers.
             {
                 int nRig = ActiveParts.Count(p => p.role == Role.Rigging), nStr = ActiveParts.Count(p => p.role == Role.Structure), nBod = ActiveParts.Count(p => p.role == Role.Body);
-                if (Section(ref foldReduce, "Reduce — trim dense parts at the source",
-                        nRig + nStr + nBod == 0 ? "no Rigging / Structure / Body parts marked"
-                            : $"{nRig} rigging @ {riggingReducePct:0}% · {nStr} structure @ {structureReducePct:0}% · {nBod} body @ {bodyReducePct:0}%"))
+                string facingSummary = (doubleSided ? "2-sided" : null);
+                if (fixInsideOut) facingSummary = facingSummary == null ? "winding fix" : facingSummary + " · winding fix";
+                string reduceSummary = nRig + nStr + nBod == 0 ? null
+                    : $"{nRig} rigging @ {riggingReducePct:0}% · {nStr} structure @ {structureReducePct:0}% · {nBod} body @ {bodyReducePct:0}%";
+                if (Section(ref foldReduce, "Vertices control — facing & density at the source",
+                        facingSummary == null && reduceSummary == null ? "geometry exported as authored"
+                            : facingSummary == null ? reduceSummary
+                            : reduceSummary == null ? facingSummary : facingSummary + " · " + reduceSummary))
                 {
-                    EditorGUILayout.LabelField("  Cuts marked parts at Generate (dissolve + collapse) — the previews and the bake all see the slim mesh. The Generate log prints each part's real before/after.", EditorStyles.miniLabel);
+                    doubleSided = EditorGUILayout.ToggleLeft(new GUIContent("  Double-sided (fix see-through parts)",
+                        "The game culls backfaces, so single-sided / CAD parts (thin spokes, flat plates) render see-through from the wrong angle. On: the exported Spin GLB gets a reversed, slightly-inset copy of every face, making it genuinely two-sided at the source — the animated bake and both previews then just work. Doubles the triangle count; leave off for already-solid models."), doubleSided);
+                    fixInsideOut = EditorGUILayout.ToggleLeft(new GUIContent("  Fix inside-out faces",
+                        "For a source whose winding ships partly INVERTED — you see through the near hull wall from outside while the far wall's interior renders. On: islands that provably face the hull's interior (inverted side planking) are REVERSED at export — no extra triangles; everything else keeps the artist's winding, as do marked Sail and Oar meshes. Sails are a ROLE (S): mark the canvas instead of relying on any detection — marked sails are always double-sided and hide at idle."), fixInsideOut);
+                    EditorGUILayout.LabelField("  Reduction cuts marked parts at Generate (dissolve + collapse) — the previews and the bake all see the slim mesh. The Generate log prints each part's real before/after.", EditorStyles.miniLabel);
                     using (new EditorGUI.DisabledScope(nRig == 0))
                         riggingReducePct = EditorGUILayout.Slider(new GUIContent("Rigging reduce (%)",
                             "Percentage of vertices REMOVED from Rigging-marked parts at Generate (dissolve + collapse, at the " +
@@ -581,6 +584,8 @@ public class VehicleLabWindow : EditorWindow
                 }
             }
 
+            // TRAILS — a split-trail gun's DEPLOY. The arms marked Trail get a bone hinged at their body end and a
+            // separate "Deploy" action that swings them open, mirrored per side; `Spin` keeps the wheels rolling
             // with the arms at their folded rest. Assign in the Lab as: Idle/reference `Deploy`, Idle stance
             // `Deploy[N..N]`, Movement `Spin`, After-move `Deploy`, Pre-move `Deploy[N..0]`.
             if (Section(ref foldTrails, "Deploy — a split-trail gun coming into action",
