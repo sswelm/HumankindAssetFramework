@@ -649,6 +649,8 @@ public static class UniversalBaker
         EditorUtility.SetDirty(skel);
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
 
+        ReportBakedQuads(skelType, skel, name);
+
         // --- 5) bake ClipCollection: set its skeleton guid, SetFromDirectory (populate clips), Reimport (bake poseData) ---
         var clipType = FindAmpType("Amplitude.Mercury.Animation.ClipCollection");
         if (clipType == null) return Fail("Amplitude ClipCollection type not found");
@@ -1531,12 +1533,43 @@ public static class UniversalBaker
         if (!InvokeReq(skelType, "Reimport", Type.EmptyTypes, skel, null, out err)) return Fail(err);
         EditorUtility.SetDirty(skel);
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
+        ReportBakedQuads(skelType, skel, name);
 
         string skelGuid = AmplitudeGuid(skel), atlasGuid = AmplitudeGuid(atlas);
         // empty GUID = the SDK skeleton bake produced nothing -> fail loudly instead of writing a dead registry entry.
         if (string.IsNullOrEmpty(skelGuid) || skelGuid == "0,0,0,0") return Fail($"{name}: skeleton bake produced an empty GUID (SetPrefab/Reimport did nothing).");
         Debug.Log($"[Factory] {name} DONE. skeleton={skelGuid} atlas={atlasGuid}");
         return new BakeResult { ok = true, skeletonGuid = skelGuid, atlasGuid = atlasGuid, bbox = dims };
+    }
+
+    // QUAD REPORT (2026-09-06, "how to see the quads after bake?"): the engine draws AT MOST 16,320 quads per baked
+    // mesh — 255 sub-particles (an 8-bit descriptor field) x 64 primitives each, the 64 hardcoded in the pawn compute
+    // shader — and the overrun is SILENT in-game: the mesh stores fully, the tail (whatever baked last: the galley's
+    // masts and sails) simply never draws. Say the number right after the skeleton bake, where the dial that fixes it
+    // (Reduce to ~tris) lives — so dialing to the limit needs no game launch, just this line after each Bake.
+    const int EngineQuadCeiling = 255 * 64;   // 16,320 — per MESH; a future multi-mesh split gets this budget per part
+    static void ReportBakedQuads(Type skelType, UnityEngine.Object skel, string name)
+    {
+        try
+        {
+            var smisF = skelType.GetField("skinnedMeshInfos", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (!(smisF?.GetValue(skel) is System.Collections.IEnumerable smis)) return;
+            foreach (var smi in smis)
+            {
+                var smiT = smi.GetType();
+                string mn = smiT.GetField("MeshName")?.GetValue(smi) as string ?? "?";
+                var fmc = smiT.GetField("FxMeshContent")?.GetValue(smi);
+                if (fmc == null) continue;
+                var fmcT = fmc.GetType();
+                int qc = (int)(fmcT.GetField("quadCount", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(fmc) ?? 0);
+                int vc = (int)(fmcT.GetField("vertexCount", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(fmc) ?? 0);
+                if (qc > EngineQuadCeiling)
+                    Debug.LogWarning($"[Factory] {name} BAKED MESH '{mn}': {qc:N0} quads / {vc:N0} verts — OVER the engine's {EngineQuadCeiling:N0}-quad draw ceiling by {qc - EngineQuadCeiling:N0}: that geometry will SILENTLY NOT RENDER in-game (the last-baked parts vanish first). Lower 'Reduce to ~tris' until this says 'fits'.");
+                else
+                    Debug.Log($"[Factory] {name} BAKED MESH '{mn}': {qc:N0} quads / {vc:N0} verts — fits the engine's {EngineQuadCeiling:N0}-quad draw ceiling ({EngineQuadCeiling - qc:N0} to spare).");
+            }
+        }
+        catch (Exception qex) { Debug.LogWarning("[Factory] quad report: " + qex.Message); }
     }
 
     // A readable albedo for one material, for multi-material atlas packing. Prefer the extracted png on disk whose name
