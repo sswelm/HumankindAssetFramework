@@ -812,9 +812,15 @@ public class VehicleLabWindow : EditorWindow
     {
         if (inst != null)
         {
+            EditorGUILayout.LabelField("Preview   (drag = orbit · middle/right-drag = pan · scroll = zoom · click a part row to focus)", EditorStyles.miniBoldLabel);
+            // the VIEW first, its size dial second, the option buttons last (2026-09-05 user request: the options
+            // moved below Preview height)
+            var rect = GUILayoutUtility.GetRect(200f, 4000f, previewHeight, previewHeight, GUILayout.ExpandWidth(true));
+            HandlePreviewInput(rect);
+            if (Event.current.type == EventType.Repaint) RenderPreview(rect);
+            previewHeight = EditorGUILayout.IntSlider(new GUIContent("Preview height", "Taller preview, or shorter to keep the knobs on screen. The window scrolls either way."), previewHeight, 220, 900);
             using (new EditorGUILayout.HorizontalScope())
             {
-                EditorGUILayout.LabelField("Preview   (drag = orbit · middle/right-drag = pan · scroll = zoom · click a part row to focus)", EditorStyles.miniBoldLabel);
                 // WHICH CLIP (2026-08-22): the rig authors `Spin` (wheels) and, for a split-trail gun, `Deploy`
                 // (the arms swinging open). Judge either here rather than waiting for a bake.
                 if (previewClips != null && previewClips.Count > 1)
@@ -865,12 +871,6 @@ public class VehicleLabWindow : EditorWindow
                     EditorStyles.miniButton, GUILayout.Width(70));
                 if (wantChecker != previewChecker) { previewChecker = wantChecker; ApplyChecker(previewChecker); Repaint(); }
             }
-            // min 400 tall and greedy: the inspection view claims all leftover window height (was fixed 260,
-            // leaving dead grey space below in a tall window).
-            var rect = GUILayoutUtility.GetRect(200f, 4000f, previewHeight, previewHeight, GUILayout.ExpandWidth(true));
-            HandlePreviewInput(rect);
-            if (Event.current.type == EventType.Repaint) RenderPreview(rect);
-            previewHeight = EditorGUILayout.IntSlider(new GUIContent("Preview height", "Taller preview, or shorter to keep the knobs on screen. The window scrolls either way."), previewHeight, 220, 900);
         }
     }
 
