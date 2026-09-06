@@ -2165,6 +2165,20 @@ if had_static_tracks and not _wrap_carrier_idx and clusters:
     print("VEHICLE wrap carriers classified geometrically (static tracks): %d carrier(s), %d idler(s)"
           % (len(_wrap_carrier_idx), len(_idler_idx)))
 _wheel_final_deg = {}
+# GROUNDED TEST (2026-09-06, the Sikorsky's four propellers marked Wheel: "the second rotor is rotating twice as
+# fast" — rolling-contact scaled it to 540 deg because its measured diameter was smaller): 1/diameter scaling is
+# the physics of rolling on a shared GROUND, so it only applies to wheels whose cluster actually reaches the
+# model's ground band (bottom within 15% of model height above the global minimum). Propellers and fans hang at
+# wing height — they keep the dialed degrees, all spinning at the same rate, like the rotor exclusion below.
+_gnd_pts = [(o.matrix_world @ Vector(_c9)) for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.vertices for _c9 in o.bound_box]
+_gz_min = min(_p9.z for _p9 in _gnd_pts) if _gnd_pts else 0.0
+_gz_h = (max(_p9.z for _p9 in _gnd_pts) - _gz_min) if _gnd_pts else 1.0
+def _cluster_grounded(_ci9):
+    _cc9 = clusters[_ci9].get("c")
+    if _cc9 is None:
+        return True
+    return (_cc9.z - 0.5 * clusters[_ci9].get("m", 0.0)) <= _gz_min + 0.15 * max(_gz_h, 1e-6)
+_airborne = []
 for _bi2, bname in enumerate(cluster_bones):
     _deg_i = degrees
     if _bi2 in _idler_idx:
@@ -2183,6 +2197,11 @@ for _bi2, bname in enumerate(cluster_bones):
             print("VEHICLE idler %s: symmetry %d-fold (%.1f deg steps), auto pop-free %.1f deg (target %.1f)"
                   % (bname, _nsym, _stepd, _snap, _deg_i))
             _deg_i = _snap
+    elif (_dd_ref > 1e-6 and _bi2 < len(clusters) and clusters[_bi2].get("m", 0.0) > 1e-6
+            and _bi2 not in _wrap_carrier_idx and not clusters[_bi2].get("is_rotor")
+            and not _cluster_grounded(_bi2)):
+        # AIRBORNE wheel (a propeller/fan marked Wheel): rolling-contact does not apply — keep the dialed degrees.
+        _airborne.append(bname)
     elif (_dd_ref > 1e-6 and _bi2 < len(clusters) and clusters[_bi2].get("m", 0.0) > 1e-6
             and _bi2 not in _wrap_carrier_idx and not clusters[_bi2].get("is_rotor")):
         # (ROTORS excluded: rolling-contact size-scaling makes a smaller wheel spin faster to match ground speed —
@@ -2229,6 +2248,9 @@ if _wheel_final_deg:
     if _chg:
         print("VEHICLE rolling-contact speeds (largest wheel keeps %.0f deg): %s"
               % (degrees, ", ".join("%s=%.1f" % (b, d) for b, d in sorted(_chg.items()))))
+if _airborne:
+    print("VEHICLE rolling-contact: %d wheel(s) above the ground band keep the dialed %.0f deg (propellers/fans do not roll): %s"
+          % (len(_airborne), degrees, ", ".join(sorted(_airborne))))
 
 # TREAD CONVEYOR v2: bottom run slides opposite the roll, top run WITH it, both by one drive-wheel surface
 # distance per loop (the wrap arcs need no keys — they're skinned to the rotating sprocket/idler bones). Use
