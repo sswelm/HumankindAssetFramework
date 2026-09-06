@@ -1110,6 +1110,30 @@ public class VehicleLabWindow : EditorWindow
         if (edge > 0) report.Add(($"• {edge} Edgecase part(s) — rig static (like Body), safe.", null));
         if (!warn) report.Add(("Looks sane — ready to generate the rig.", null));
 
+        // STATISTICS (2026-09-06 user request: "when I press verify I expect it to list all statistics like
+        // vertices"): per-role part and vertex totals from the probe data, with the source-reduce dials applied
+        // as a PROJECTION — so the budget conversation starts here, before a Generate is spent. Verts only: the
+        // probe does not carry triangles; the Generate log's RIG DONE line and the Factory's quad report own the
+        // exact shipped numbers.
+        {
+            report.Add(("", null));
+            report.Add(("— Statistics (probe verts; projected = after the source-reduce dials) —", null));
+            float DialFor(Role r) => r == Role.Rigging ? riggingReducePct : r == Role.Structure ? structureReducePct
+                                   : r == Role.Body ? bodyReducePct : r == Role.Oar ? oarReducePct : r == Role.Sail ? sailReducePct : 0f;
+            long totalV = 0, totalProj = 0;
+            foreach (var grp in vlist.Where(p => p.role != Role.Ignore).GroupBy(p => p.role).OrderByDescending(g => g.Sum(p => (long)p.verts)))
+            {
+                long v = grp.Sum(p => (long)p.verts);
+                float dial = DialFor(grp.Key);
+                long proj = dial > 0 ? (long)(v * (1.0 - dial / 100.0)) : v;
+                totalV += v; totalProj += proj;
+                report.Add(($"  {grp.Key}: {grp.Count()} part(s), {v:N0} verts" + (dial > 0 ? $" → ~{proj:N0} at {dial:0}% reduce" : ""), null));
+            }
+            long ignored = vlist.Where(p => p.role == Role.Ignore).Sum(p => (long)p.verts);
+            if (ignored > 0) report.Add(($"  Ignore: {vlist.Count(p => p.role == Role.Ignore)} part(s), {ignored:N0} verts DELETED at generate", null));
+            report.Add(($"  TOTAL: {totalV:N0} verts → projected ~{totalProj:N0} after the dials (doubling for Sail/Flag/Rudder and seam splits add on top; the RIG DONE line has the exact export).", null));
+        }
+
         Debug.Log("[VehicleLab] Verify:\n" + string.Join("\n", report.Select(r => r.text)));
         VerifyReportWindow.Open(this, report, warn);
         status = (warn ? "Verify: warnings (report window / Console). " : "Verify: looks sane. ") + report[0].text;
