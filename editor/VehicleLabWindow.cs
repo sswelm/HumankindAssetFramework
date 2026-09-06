@@ -48,7 +48,8 @@ public class VehicleLabWindow : EditorWindow
     // Sail (2026-09-04): marked canvas — a role, not a heuristic (auto-detecting sails broke on every next surface;
     // the user's verdict: "instead of a complex algorithm, why not just mark it?"). All sail parts weld to ONE Sail
     // bone: always exported double-sided, excluded from the inside-out flip, and HIDDEN at idle — Spin frame 0 drops
-    // the bone below the hull, frames 1..N hold it raised (Movement = Spin[1..N]). Appended LAST. Hotkey: S.
+    // the bone below the hull, frames 1..N hold it raised (Movement = Spin[1..N]). Appended LAST. Dropdown-only
+    // since 2026-09-06: S now marks Structure (user request — a review pass marks far more railings than canvases).
     // Rigging (2026-09-05): marked rope/line geometry — dense tube meshes barely visible at game distance (the
     // Khalandion's ropes alone are 65k verts). Decimated by the user-dialed percentage at Generate, at the source,
     // so every downstream stage sees the slim mesh. Body-like otherwise (welds to Root). Dropdown-only, no hotkey.
@@ -434,7 +435,7 @@ public class VehicleLabWindow : EditorWindow
                 EditorGUILayout.LabelField($"{(useSourceRig && boneParts.Count > 0 ? "Source BONES" : "Parts")} ({shown.Count} shown{(hidden > 0 ? $", {hidden} hidden by the sliders" : "")}{(unreviewed > 0 ? $", {unreviewed} undecided" : ", all decided")}{(edgecases > 0 ? $", {edgecases} edge-case" : "")}) — mark {(useSourceRig && boneParts.Count > 0 ? "the bones that SPIN (Wheel)" : "the wheels & turret")}:", EditorStyles.boldLabel);
                 if (useSourceRig && boneParts.Count > 0)   // 2026-08-20: a user hunted for the turret's shards here — in this mode they are ONE row
                     EditorGUILayout.LabelField("Each row is one BONE of the shipped skeleton; all the shards skinned to it count as that row (the turret's parts = the Turret bone). Untick the fast path to list and mark individual parts.", EditorStyles.wordWrappedMiniLabel);
-                EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   W/T/B = Wheel/Turret/Body   ·   R = Rotor (main, spins about the mast)   ·   L = taiL rotor (spins about the lateral axis)   ·   G = Gun (rides the Turret; muzzle/socket anchor)   ·   C = Caterpillar (tread loop)   ·   I = Ignore (DELETED)   ·   D = Default   ·   E = Edgecase", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   W/T/B = Wheel/Turret/Body   ·   R = Rotor (main, spins about the mast)   ·   L = taiL rotor (spins about the lateral axis)   ·   G = Gun (rides the Turret; muzzle/socket anchor)   ·   C = Caterpillar (tread loop)   ·   O = Oar   ·   S = Structure   ·   I = Ignore (DELETED)   ·   D = Default   ·   E = Edgecase", EditorStyles.miniLabel);
                 // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
                 // part's role — the whole list can be reviewed without mousing between rows and dropdowns.
                 var ev = Event.current;
@@ -460,7 +461,7 @@ public class VehicleLabWindow : EditorWindow
                                         : ev.keyCode == KeyCode.G ? Role.Gun
                                         : ev.keyCode == KeyCode.R ? Role.Rotor
                                         : ev.keyCode == KeyCode.O ? Role.Oar
-                                        : ev.keyCode == KeyCode.S ? Role.Sail
+                                        : ev.keyCode == KeyCode.S ? Role.Structure   // S = Structure (2026-09-06 user request; Sail is dropdown-only — a review pass marks far more railings than canvases)
                                         : ev.keyCode == KeyCode.L ? Role.TailRotor : Role.Body;
                         // If the new role falls outside the active filter, the part leaves the list — advance to the
                         // next one so the sweep continues instead of the selection dying with the removed row.
@@ -585,7 +586,7 @@ public class VehicleLabWindow : EditorWindow
                     doubleSided = EditorGUILayout.ToggleLeft(new GUIContent("  Double-sided (fix see-through parts)",
                         "The game culls backfaces, so single-sided / CAD parts (thin spokes, flat plates) render see-through from the wrong angle. On: the exported Spin GLB gets a reversed, slightly-inset copy of every face, making it genuinely two-sided at the source — the animated bake and both previews then just work. Doubles the triangle count; leave off for already-solid models. Marked Oar meshes are never doubled — galley blades are authored as front/back pairs, and doubling them z-shimmers."), doubleSided);
                     fixInsideOut = EditorGUILayout.ToggleLeft(new GUIContent("  Fix inside-out faces",
-                        "For a source whose winding ships partly INVERTED — you see through the near hull wall from outside while the far wall's interior renders. On: islands that provably face the hull's interior (inverted side planking) are REVERSED at export — no extra triangles; everything else keeps the artist's winding, as do marked Sail and Oar meshes. Sails are a ROLE (S): mark the canvas instead of relying on any detection — marked sails are always double-sided and hide at idle."), fixInsideOut);
+                        "For a source whose winding ships partly INVERTED — you see through the near hull wall from outside while the far wall's interior renders. On: islands that provably face the hull's interior (inverted side planking) are REVERSED at export — no extra triangles; everything else keeps the artist's winding, as do marked Sail and Oar meshes. Sails are a ROLE (dropdown): mark the canvas instead of relying on any detection — marked sails are always double-sided and hide at idle."), fixInsideOut);
                     EditorGUILayout.LabelField("  Reduction cuts marked parts at Generate (dissolve + collapse) — the previews and the bake all see the slim mesh. The Generate log prints each part's real before/after.", EditorStyles.miniLabel);
                     using (new EditorGUI.DisabledScope(nRig == 0))
                         riggingReducePct = EditorGUILayout.Slider(new GUIContent("Rigging reduce (%)",

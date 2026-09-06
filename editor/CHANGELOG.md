@@ -29,8 +29,8 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   recalc, and then a sheet-detection heuristic, were both tried and rejected — each flipped or missed authored
   surfaces). No extra triangles; weights and UVs untouched. Verified with backface-culled renders: deck solid from
   above, hull solid from both beams.
-- **Sail — marked canvas, double-sided, switched on/off via its own `Furl` clip.** A new **Sail** role (hotkey
-  `S`): explicit marking replaces sail auto-detection outright. All sail parts weld to one `Sail` bone and are
+- **Sail — marked canvas, double-sided, switched on/off via its own `Furl` clip.** A new **Sail** role
+  (dropdown; the `S` hotkey marks Structure): explicit marking replaces sail auto-detection outright. All sail parts weld to one `Sail` bone and are
   **always exported double-sided** (canvas reads from both tacks, artist winding untouched). The hide is its own
   generated **`Furl` clip** whose frame 1 **flips the canvas 180° below the keel** — rotation-only, the same
   Deploy-proven stance mechanism the trails use — used as a **stance, never played**. The clip format carries no

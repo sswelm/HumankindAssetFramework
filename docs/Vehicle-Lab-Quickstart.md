@@ -65,9 +65,9 @@ axle disagreement, unpaired wheels, turret outliers, and visible interior geomet
 | **Muzzle** | Muzzle brake/flash-hider; refines the measured muzzle end and follows the tube (`Gun`, or `Barrel` when recoil creates that split). |
 | **Trail** | Split-trail arm; receives a body-end hinge and the generated `Deploy` action. |
 | **Oar** (`O`) | A galley oar bank — one merged mesh of poles/blades spanning **both** sides. Split into one bone per oar with a baked rowing stroke. Optional **Oar reduce (%)** dial (runs before clustering, so bones land on the slim mesh). |
-| **Sail** (`S`) | Marked canvas. Always exported double-sided, kept out of the inside-out flip, and struck/raised by its own generated `Furl` clip — hidden at idle, up while moving. Optional **Sail reduce (%)** dial — every vertex kept ships twice (double-sided), but the first non-zero step already cuts hard on flat canvas, so go gently. |
+| **Sail** | Marked canvas. Always exported double-sided, kept out of the inside-out flip, and struck/raised by its own generated `Furl` clip — hidden at idle, up while moving. Optional **Sail reduce (%)** dial — every vertex kept ships twice (double-sided), but the first non-zero step already cuts hard on flat canvas, so go gently. |
 | **Rigging** | Rope/line geometry — dense but barely visible at game distance. Reduced at Generate by the **Rigging reduce (%)** dial, at the source. |
-| **Structure** | Dense detail geometry (railings, a carved bow) — more visible than rigging, so its own usually-gentler **Structure reduce (%)** dial. |
+| **Structure** (`S`) | Dense detail geometry (railings, a carved bow) — more visible than rigging, so its own usually-gentler **Structure reduce (%)** dial. |
 | **Flag** | Banners/pennants — the **opposite of sails**: they fly at anchor and are struck below the keel while the ship moves (one Flag bone, held flipped through `Spin`). Double-sided. |
 | **Rudder** | Double-sided and **always visible**, winding kept — for slabs the inside-out test cannot decide (a half-inverted rudder scores ~0; no flip can repair it). No bone, no clip. |
 | **Ignore** (`I`) | Deleted from the generated GLB. Use for genuinely invisible internals or unwanted variants. |
@@ -107,7 +107,7 @@ those **Sail** instead. (A blunt whole-model recalc, and then a sheet-detection 
 rejected: each flipped or missed authored surfaces; explicit marking wins.) Global **Double-sided** remains for
 models that need both sides everywhere; when combined, this fix runs first.
 
-**Sails.** Mark the canvas **Sail** (`S`). All sail parts weld to one `Sail` bone and are **always exported
+**Sails.** Mark the canvas **Sail** (dropdown; `S` marks Structure). All sail parts weld to one `Sail` bone and are **always exported
 double-sided** — canvas must read from both tacks — with the artist's winding untouched. The rig also authors a
 separate **`Furl` clip** whose frame 1 **flips the canvas 180° below the keel** (rotation-only — the same
 Deploy-proven stance mechanism the trails use; an earlier translation-based strike fought the converter's
