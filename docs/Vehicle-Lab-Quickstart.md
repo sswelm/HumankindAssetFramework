@@ -55,7 +55,7 @@ axle disagreement, unpaired wheels, turret outliers, and visible interior geomet
 | Role | Meaning |
 |---|---|
 | **Body** (`B`) | Reviewed, static geometry; weighted to Root. |
-| **Wheel** (`W`) | Spins about its inferred or selected axle; nearby wheel shards form one hub. |
+| **Wheel** (`W`) | Spins about its inferred or selected axle; nearby wheel shards form one hub. Optional **Wheel reduce (%)** dial (CAD rims are dense for what reads as a spinning disc; runs before clustering). Rolling-contact speed scaling applies only to wheels that reach the ground — a propeller marked Wheel keeps the dialed speed. |
 | **Turret** (`T`) | Joins the shared Turret bone. |
 | **Rotor** | Main rotor group; fused to one hub and spun about the mast axis. |
 | **Tail rotor** (`L`) | Tail fan group; fused to one hub with its own lateral axle and trim controls. |

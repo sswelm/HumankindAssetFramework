@@ -124,6 +124,14 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   preserved; the tool appends only filtered index accessors and child nodes, verifies the triangle total, and writes
   a new `<name>_split_parts.glb`. Duplicate vertices at UV/normal seams are welded with a tight scale-relative
   tolerance, so a visually continuous surface is not split merely because its shading data has a seam.
+- **Rudder reduce (%) and Wheel reduce (%)** complete the source-tier set at seven. Rudders ship double-sided
+  (every kept vertex counts twice), and CAD-style rims carry far more vertices than a spinning disc shows;
+  both cuts run before doubling/clustering. Each reduced part keeps at least 8 verts, so triangle-soup wheels
+  cut less than the dial asks — the Generate log prints the real totals.
+- **Rolling-contact wheel speeds apply only to wheels that reach the ground.** Four propellers marked Wheel on
+  a biplane: one spun at 540° because the 1/diameter ground-rolling scaling hit something hanging at wing
+  height. A wheel cluster now scales only when its bottom lies within 15% of model height above the global
+  minimum; airborne wheels (props, fans) keep the dialed degrees uniformly, and the log names the exemptions.
 - **Preserve — a role that keeps a part exactly as authored.** No reduction, no inside-out flip, no doubling
   (the global Double-sided switch included); welds to the hull like Body but ships as its own untouched mesh.
   The escape hatch for parts every automatic pass keeps getting wrong.
