@@ -1216,6 +1216,10 @@ public class VehicleLabWindow : EditorWindow
         doubleSided = false; fixInsideOut = false;
         oarSweepDeg = 24f; oarDipDeg = 18f; oarFrames = 24; oarBladeRollDeg = 0f; oarLiftDeg = 0f; oarRakeDeg = 0f; oarPivotPct = 30f; oarLengthPct = 100f;
         riggingReducePct = 75f; structureReducePct = 50f; bodyReducePct = 0f; oarReducePct = 0f; sailReducePct = 0f; rudderReducePct = 0f;
+        // …and the pre-0.5.4 generation dials the reset had ALWAYS skipped (review round 2): a tuned trail
+        // spread, gun trunnion, recoil or tail-rotor trim silently carried into the next model too.
+        spinEnabled = true; trailSpreadDeg = 35f; trailFrames = 12; gunPivot = 0.5f; gunDeployElev = 0f;
+        recoilDist = 0f; recoilFrames = 16; recoilLead = 0; tailAxisChoice = 0; tailYawAdj = 0f; tailPitchAdj = 0f;
         minVerts = 50; minPartSize = 0f; minHeight = -999f; maxHeight = 999f; minWidth = -999f; maxWidth = 999f;
         partFilter = 0; selectedPart = ""; partsScroll = Vector2.zero; previewPan = Vector2.zero;
         DestroyPreview();
@@ -1375,7 +1379,12 @@ public class VehicleLabWindow : EditorWindow
             rockDegrees = rockDegrees, rockFrames = rockFrames, rockAxisChoice = rockAxisChoice, rockHeading = rockHeading,
             rockPitchDeg = rockPitchDeg, rockRollCycles = rockRollCycles, rockPitchCycles = rockPitchCycles, rockPitchPhase = rockPitchPhase,
         };
-        File.WriteAllText(p, JsonUtility.ToJson(r, true));
+        // ATOMIC replacement (review find 2026-09-06): a direct WriteAllText interrupted mid-write truncates
+        // the live recipe — and the NEXT save would then copy the damaged file over the backup. Write to a
+        // temp sibling, then swap in one filesystem move; the live file is never half-written.
+        string tmp = p + ".tmp~";
+        File.WriteAllText(tmp, JsonUtility.ToJson(r, true));
+        if (File.Exists(p)) { File.Replace(tmp, p, null); } else { File.Move(tmp, p); }
         AssetDatabase.Refresh();
         loadedRecipe = Path.GetFileNameWithoutExtension(p);   // reflect the just-saved recipe in the combobox
         recipeReadThisSession = true;   // this window state IS the file now — further saves are continuations

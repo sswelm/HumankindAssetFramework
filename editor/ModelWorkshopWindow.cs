@@ -56,7 +56,8 @@ public class ModelWorkshopWindow : EditorWindow
     [SerializeField] float zoom = 1.5f;
     Vector2 previewPan;
     Bounds bounds; bool boundsValid; float fullRadius;
-    string selectedRow = "";
+    string selectedRow = "";   // the highlighted part's NAME (renderer matching in the Blender preview is name-based)
+    int selectedIdx = -1;      // the selected ROW's identity (node index — names can be duplicated)
     Material highlightMat;
     List<Renderer> highlightedRenderers; List<Material[]> highlightedOriginals;
 
@@ -89,9 +90,10 @@ public class ModelWorkshopWindow : EditorWindow
         }
 
         float newMergePct = EditorGUILayout.Slider(new GUIContent("Merge closer than (%)",
-            "Islands nearer than this (percent of each part's own size) count as ONE part — so a segmented rope stays " +
-            "one rope instead of shredding into hundreds of 3-vert fragments, while genuinely distant junk still " +
-            "separates. 0 = pure topology. Release the slider and the island counts recount (no Blender re-run)."),
+            "Islands whose VERTICES come nearer than this (percent of each part's own size) count as ONE part — so a " +
+            "segmented rope stays one rope instead of shredding into hundreds of 3-vert fragments, while genuinely " +
+            "distant junk still separates. Measured between vertices (a long edge passing near a vertex is not seen), " +
+            "accurate to about one grid cell. 0 = pure topology. Release the slider and the counts recount (no Blender re-run)."),
             mergePct, 0f, 10f);
         if (!Mathf.Approximately(newMergePct, mergePct)) { mergePct = newMergePct; analyzePending = rows.Count > 0; }
         // DEFERRED recount (review find 2026-09-06): running Analyze mid-OnGUI replaced `rows` between IMGUI's
@@ -126,12 +128,12 @@ public class ModelWorkshopWindow : EditorWindow
                 {
                     using (new EditorGUI.DisabledScope(r.islands <= 1 || r.blocked != null))
                         r.split = EditorGUILayout.Toggle(r.split, GUILayout.Width(20));
-                    bool isSel = selectedRow == r.node;
+                    bool isSel = selectedIdx == r.nodeIndex;
                     string label = r.blocked != null ? $"{(isSel ? "◉ " : "")}{r.node}   — skipped: {r.blocked}"
                                  : $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {(r.islands == 1 ? "1 island — already whole" : r.islands.ToString("N0") + " islands")})";
                     // the row label is a BUTTON, exactly like the Vehicle Lab: click = highlight + frame in the preview
                     if (GUILayout.Button(label, isSel ? EditorStyles.whiteLabel : (r.islands > 1 && r.blocked == null ? EditorStyles.label : EditorStyles.miniLabel)))
-                        SelectRow(isSel ? "" : r.node);
+                    { selectedIdx = isSel ? -1 : r.nodeIndex; SelectRow(isSel ? "" : r.node); }
                 }
             EditorGUILayout.EndScrollView();
 
@@ -164,11 +166,12 @@ public class ModelWorkshopWindow : EditorWindow
     // Object_2 follows Object_1 and Object_10 comes after Object_9 — trailing digits compare as numbers.
     bool Analyze()
     {
-        var kept = new HashSet<string>(rows.Where(r => r.split).Select(r => r.node));
+        // kept-state keyed by NODE INDEX (review round 2): keying by name re-checked every duplicate namesake.
+        var kept = new HashSet<int>(rows.Where(r => r.split).Select(r => r.nodeIndex));
         try
         {
             rows = GlbDisconnectedParts.Analyze(File.ReadAllBytes(srcFile), mergePct / 100.0)
-                .Select(p => new Row { nodeIndex = p.NodeIndex, node = p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, split = kept.Contains(p.NodeName) })
+                .Select(p => new Row { nodeIndex = p.NodeIndex, node = p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, split = kept.Contains(p.NodeIndex) })
                 .OrderBy(r => NaturalPrefix(r.node), StringComparer.OrdinalIgnoreCase)
                 .ThenBy(r => NaturalNumber(r.node))
                 .ThenBy(r => r.node, StringComparer.OrdinalIgnoreCase).ToList();
@@ -230,6 +233,7 @@ public class ModelWorkshopWindow : EditorWindow
 
     void DestroyPreview()
     {
+        selectedIdx = -1;
         SelectRow("");
         if (inst != null) DestroyImmediate(inst);
         inst = null;

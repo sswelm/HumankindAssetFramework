@@ -630,11 +630,18 @@ public static class GlbDisconnectedParts
                 double lateralTol = 0.35 * eps;
                 return perp2 <= lateralTol * lateralTol;
             }
-            // TRUE surface distance via a spatial hash of every component's sample points (review find
-            // 2026-09-06: a bounding-box gap reads ZERO for an island floating anywhere INSIDE a big part's
-            // box — the default merge then hid exactly the junk this tool exists to expose). Two components
-            // merge only when two of their actual points lie within eps of each other.
-            var grid = new Dictionary<long, List<int>>();
+            // VERTEX distance via a spatial hash (review find 2026-09-06: a bounding-box gap reads ZERO for an
+            // island floating anywhere INSIDE a big part's box — the default merge then hid exactly the junk
+            // this tool exists to expose). Two components merge when vertices of theirs lie within eps.
+            // BOUNDED (review round 2): storing every triangle corner and scanning every prior point in the
+            // neighbourhood degraded quadratically on dense meshes (benchmarked seconds at a few thousand
+            // triangles — a real hull would freeze the Workshop). The grid now keeps ONE representative vertex
+            // per (component, cell): candidate generation is exact at cell granularity, the kept-vs-kept
+            // distance test stays exact, and only sub-cell duplicates are skipped — merge decisions are
+            // accurate to about one eps-cell, plenty for a junk-vs-junk dial. Distances are VERTEX distances:
+            // a long edge passing near a vertex is not seen (documented in the slider's tooltip).
+            var grid = new Dictionary<long, List<int>>();          // cell -> representative entries
+            var repCell = new HashSet<(long cell, int comp)>();     // (component, cell) dedup
             var gridPts = new List<Vec3>();
             var gridComp = new List<int>();
             long CellKey(long cx, long cy, long cz) => (cx & 0x1FFFFF) | ((cy & 0x1FFFFF) << 21) | ((cz & 0x1FFFFF) << 42);
@@ -642,6 +649,8 @@ public static class GlbDisconnectedParts
                 foreach (Vec3 p in components[i].Points)
                 {
                     long cx = (long)Math.Floor(p.X / eps), cy = (long)Math.Floor(p.Y / eps), cz = (long)Math.Floor(p.Z / eps);
+                    long key = CellKey(cx, cy, cz);
+                    if (!repCell.Add((key, i))) continue;   // this component already represents this cell
                     for (long dx = -1; dx <= 1; dx++) for (long dy = -1; dy <= 1; dy++) for (long dz = -1; dz <= 1; dz++)
                     {
                         if (!grid.TryGetValue(CellKey(cx + dx, cy + dy, cz + dz), out List<int> cell)) continue;
@@ -654,7 +663,6 @@ public static class GlbDisconnectedParts
                             if (ddx * ddx + ddy * ddy + ddz * ddz <= eps * eps && DirectionOk(i, j)) cd.Union(i, j);
                         }
                     }
-                    long key = CellKey(cx, cy, cz);
                     if (!grid.TryGetValue(key, out List<int> home)) grid.Add(key, home = new List<int>());
                     home.Add(gridPts.Count);
                     gridPts.Add(p); gridComp.Add(i);
