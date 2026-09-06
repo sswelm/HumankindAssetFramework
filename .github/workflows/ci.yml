@@ -26,6 +26,13 @@ jobs:
         run: dotnet build HumankindAssetFramework.csproj -c Release --nologo
       - name: Run tests
         run: dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release --nologo
+      # VEHICLE LAB PURE MATH — ast-extracts the two pure helpers from vehicle_rig.py and checks the oar-recovery
+      # calibration (the exact eps regression that once split 64 oars into 104) plus the shared-clip cycle fitting.
+      # Blender-free by construction, so the runner's stock Python is enough. Wired 2026-09-05: the file existed
+      # since the calibration fix but ran only by hand — a guard nobody runs guards nothing.
+      - name: Vehicle Lab math tests (oar calibration guard)
+        shell: bash
+        run: python Tests/test_vehicle_rig_math.py
       # Needs neither the game nor Unity — pure Markdown/link checking, so it belongs on the runner too.
       # It was in the pre-push gate only, which a --no-verify (or a web edit) walks straight past.
       - name: Docs guard (links + notes convention)

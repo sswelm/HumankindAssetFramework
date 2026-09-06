@@ -55,15 +55,22 @@ axle disagreement, unpaired wheels, turret outliers, and visible interior geomet
 | Role | Meaning |
 |---|---|
 | **Body** (`B`) | Reviewed, static geometry; weighted to Root. |
-| **Wheel** (`W`) | Spins about its inferred or selected axle; nearby wheel shards form one hub. |
+| **Wheel** (`W`) | Spins about its inferred or selected axle; nearby wheel shards form one hub. Optional **Wheel reduce (%)** dial (CAD rims are dense for what reads as a spinning disc; runs before clustering). Rolling-contact speed scaling applies only to wheels that reach the ground — a propeller marked Wheel keeps the dialed speed. |
 | **Turret** (`T`) | Joins the shared Turret bone. |
-| **Rotor** (`R`) | Main rotor group; fused to one hub and spun about the mast axis. |
+| **Rotor** | Main rotor group; fused to one hub and spun about the mast axis. |
 | **Tail rotor** (`L`) | Tail fan group; fused to one hub with its own lateral axle and trim controls. |
 | **Caterpillar** (`C`) | Tread loop; enables the path-instanced rigid-link controls. |
 | **Gun** (`G`) | Barrel assembly on the Gun bone; rides the Turret when one exists. |
 | **Cradle** | Gun support that elevates with the tube but remains fixed during recoil. |
 | **Muzzle** | Muzzle brake/flash-hider; refines the measured muzzle end and follows the tube (`Gun`, or `Barrel` when recoil creates that split). |
 | **Trail** | Split-trail arm; receives a body-end hinge and the generated `Deploy` action. |
+| **Oar** (`O`) | A galley oar bank — one merged mesh of poles/blades spanning **both** sides. Split into one bone per oar with a baked rowing stroke. Optional **Oar reduce (%)** dial (runs before clustering, so bones land on the slim mesh). |
+| **Sail** | Marked canvas. Always exported double-sided, kept out of the inside-out flip, and struck/raised by its own generated `Furl` clip — hidden at idle, up while moving. Optional **Sail reduce (%)** dial — every vertex kept ships twice (double-sided), but the first non-zero step already cuts hard on flat canvas, so go gently. |
+| **Rigging** (`R`) | Rope/line geometry — dense but barely visible at game distance. Reduced at Generate by the **Rigging reduce (%)** dial, at the source. |
+| **Structure** (`S`) | Dense detail geometry (railings, a carved bow) — more visible than rigging, so its own usually-gentler **Structure reduce (%)** dial. |
+| **Flag** | Banners/pennants — the **opposite of sails**: they fly at anchor and are struck below the keel while the ship moves (one Flag bone, held flipped through `Spin`). Double-sided. |
+| **Rudder** | Double-sided and **always visible**, winding kept — for slabs the inside-out test cannot decide (a half-inverted rudder scores ~0; no flip can repair it). No bone, no clip. |
+| **Preserve** | Shipped exactly as authored: never reduced, never winding-flipped, never doubled (not even under the global Double-sided switch). For parts every automatic pass keeps getting wrong. |
 | **Ignore** (`I`) | Deleted from the generated GLB. Use for genuinely invisible internals or unwanted variants. |
 | **Default / Edgecase** (`D` / `E`) | Root-weighted review markers: undecided, or deliberately parked for another pass. |
 
@@ -91,6 +98,47 @@ is in the exported GLB, it just works in every preview (this turntable, the Mode
 in-game — no Model Factory option is involved (that checkbox was removed). It **doubles the triangle count**; the
 Model Factory's **Reduce to ~tris** still caps the shipped mesh, so lower that if you are near the vertex budget.
 Leave it **off** for models that are already solid.
+
+**Fix inside-out faces.** Some sources ship with part of their winding **inverted** — from outside you see through
+the near hull wall while the far wall's *interior* renders. Tick this and at export the islands that provably face
+the hull's interior (inverted side planking, judged against an axis through the hull belly) are **reversed** — the
+cheap, no-extra-triangles fix. Everything the test cannot call decisively keeps the artist's winding, as do marked
+**Sail** and **Oar** meshes. Do not expect it to fix sails or flags: no flip can show both sides of a sheet — mark
+those **Sail** instead. (A blunt whole-model recalc, and then a sheet-detection heuristic, were both tried and
+rejected: each flipped or missed authored surfaces; explicit marking wins.) Global **Double-sided** remains for
+models that need both sides everywhere; when combined, this fix runs first.
+
+**Sails.** Mark the canvas **Sail** (dropdown; `S` marks Structure). All sail parts weld to one `Sail` bone and are **always exported
+double-sided** — canvas must read from both tacks — with the artist's winding untouched. The rig also authors a
+separate **`Furl` clip** whose frame 1 **flips the canvas 180° below the keel** (rotation-only — the same
+Deploy-proven stance mechanism the trails use; an earlier translation-based strike fought the converter's
+rest-fold and location-strip and shipped misplaced). Use it as a **stance, never as an animation to play**: the
+clip format has no visibility or alpha, so out-of-sight *is* the disappear, and the clean on/off comes from never
+playing the move. Assign after baking: Idle/reference = `Spin[0..0]` (this defines the model's REST — never put
+`Furl` in the reference field, or the conversion adopts the struck pose as the bind) · Idle stance (override) =
+`Furl[1..1]` (a ship under oars, no canvas) · Movement = `Spin` (sails up) · **After-move and Pre-move empty** —
+the state change swaps the pose in one tick. **Keep bone translations** can stay **OFF**: the strike is pure
+rotation.
+
+**Oars (galley rowing).** A galley's oars usually arrive as a **few merged meshes** — all the poles in one, all the
+blades in another (often split front/back) — each mesh holding *every* oar across *both* banks. Mark those meshes
+**Oar** (`O`). Unlike any other role, one marked mesh becomes **many** bones: the rig recovers each individual oar
+(by projecting the geometry onto the plane perpendicular to the common pole direction, where each oar separates
+cleanly), gives it a bone at its oarlock, and bakes a unison rowing stroke into `Spin` — a fore-aft **Sweep** about
+the oarlock plus a phase-locked **Dip** (blades drop into the water on the aft drive, lift clear on the recovery). It
+adds one bone per oar (~60 on a full galley), well within the skeleton budget. Tune **Sweep**, **Dip**, and **Stroke
+frames** while watching the preview loop — the believable-from-a-distance amplitudes are a judgement made on the
+moving turntable, not a still frame. If the ship **rows backwards** (blades push water toward the bow while in the
+water), make **Sweep negative** — the same sign convention as Spin degrees for wheels that roll the wrong way. If the blades knife through the water edge-on instead of scooping, the source
+models them *feathered* — set **Blade roll (deg)** (typically 90) to spin each oar about its own long axis in the
+rest geometry; the cylindrical pole shows no change, only the blade face squares to the water. The oars row
+whenever the movement clip plays; no Model Factory option is
+involved. Marked oar meshes **keep their authored winding**: blades usually ship as front/back sheet pairs (already
+two-sided by construction), so the **Fix inside-out faces** recalc skips them — recalculating an open sheet picks
+an arbitrary side and culls half the blades. The rest of the model follows the Double-sided / inside-out checkboxes. For a rigged source, turn off **Use source skeleton (fast path)** first: oar recovery needs the merged mesh
+geometry, not the source skeleton's bone rows. If wheel spin or wave rock requests a longer `Spin` clip, Stroke frames
+is treated as the preferred period and the nearest whole number of strokes is fitted across the shared clip so it
+loops without a pause or snap.
 
 Press **Verify**, resolve meaningful warnings, optionally **Save recipe**, then press **Generate rig**. The output path is
 copied to the clipboard and the generated animation appears in the preview. Re-run **Generate rig** after changing any
@@ -149,6 +197,48 @@ actually verified, then check the bake's `verts=` count and F8's shared pawn-buf
 After Bake, **rebuild and deploy the Humankind mod**. A correct editor preview does not update the bundle already loaded
 by the game. Launch Humankind, enable the mod, load the target unit, and use F8 plus
 `BepInEx/LogOutput.log` when the runtime result differs.
+
+## 9. Large models — fitting the engine's draw ceiling
+
+The engine draws **at most 16,320 quads per baked unit mesh** (255 sub-particles × 64 primitives, a hard 8-bit
+field) and the overrun is **silent**: the mesh stores fully, but whatever baked last — masts, rigging, sails —
+simply never renders in-game, with no error anywhere. Every preview shows the full model; only the game clips.
+The tooling now surfaces this at both ends: the Factory prints a per-mesh
+`BAKED MESH … fits (N to spare)` / `OVER by N` line after each bake (over-ceiling also raises a dialog), and the
+plugin logs a `[Uni][BUDGET]` audit line per injected unit at load, catching units baked before the check
+existed.
+
+A 395k-vertex source (a fully rigged galley: 64+ oars, sails, flags, rigging) fits under that ceiling at full
+visual quality with this workflow — **delete and cut per role at the source, so the Factory's blind global
+reduction never has to choose what survives**:
+
+1. **Amputate before you diet.** Open the source in the **Model Workshop** (`Tools ▸ HAF ▸ Model Workshop`):
+   Probe lists every part's disconnected-island count; split the parts hiding floating junk (the merge-distance
+   slider keeps segmented ropes and trim lines whole — only genuinely distant debris separates); then, in the
+   Vehicle Lab, mark the junk **Ignore**. Deleting invisible geometry is free quality — on the galley this
+   removed three quarters of the raw source before any reduction ran.
+2. **Cut where nobody looks, spare the silhouette.** In **Vertices control**, set the per-role reduce dials by
+   visibility, not uniformly: Rigging 85–90 (ropes read as lines at game distance), Structure ~80, Body to
+   taste — but keep **Oar around 40 and Sail at or below 50**: blades and canvas *are* the unit's identity, and
+   thin sheets are what decimation destroys first (half-blades and tattered sails read worse than fewer ropes).
+   Cutting a rope past ~90 leaves floating dash fragments — lower the dial or Ignore the part outright.
+3. **Read the projection before generating.** **Verify** now ends with per-role vertex statistics and the
+   post-dial projection. Aim the generated GLB below roughly **30k triangles**: then the Factory bakes with
+   **Reduce to ~tris = 0** — no global decimation at all — and still fits the ceiling.
+4. **Trust the bake line, not the previews.** After Bake, the console's `BAKED MESH` line is the verdict. If it
+   says OVER, lower dials or Ignore more; do not ship it — the missing geometry will be exactly the parts you
+   care about, and the game will not tell you.
+5. **The escape hatches for stubborn parts.** A surface see-through from one side (mirrored halves import with
+   inverted winding; bow/stern-facing surfaces sit in the inside-out fix's deliberate blind spot; artists leave
+   backfaces behind occluders you may Ignore away) → mark it **Rudder** (always double-sided, winding-proof).
+   A part every automatic pass keeps damaging → **Preserve** (shipped byte-identical). Sail-attached fittings
+   must be marked **Sail** or they hang in mid-air when the canvas strikes; mast fittings stay **Structure**.
+6. **Re-point, don't re-classify.** When a Workshop split (or any re-export) produces a new GLB: load the
+   recipe, **Browse** to the new file (marked roles are kept), **Probe** (roles re-apply by part name — only the
+   new `_Part_NNN` rows need marking), Save. Every Save keeps a `.bak~` of what it overwrites.
+
+Beyond the single-mesh ceiling, the engine-native path is multiple meshes per unit (each gets its own 16,320
+budget, as vanilla's detailed units do) — a planned framework feature, not yet available.
 
 ## Fast symptom map
 

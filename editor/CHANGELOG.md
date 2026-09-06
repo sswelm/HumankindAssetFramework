@@ -3,6 +3,145 @@
 The **package** changelog: what changed for someone who installs the tools. (The project-wide engineering log
 lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `editor-vX.Y.Z`.
 
+## 0.5.5 — 2026-09-04
+
+- **Rowing — a galley oar bank, animated from merged meshes.** A new **Oar** role (hotkey `O`) in the Vehicle Lab.
+  A galley's oars usually arrive as a few merged meshes — poles in one, blades in another (often split front/back) —
+  each holding *every* oar across *both* banks. Mark those meshes Oar and, uniquely among the roles, one marked mesh
+  becomes **many** bones: the rig recovers each individual oar (projecting the geometry onto the plane perpendicular
+  to the common pole direction, where the oars separate cleanly — naive distance clustering fails because the poles
+  converge at the oarlocks and fan to the blades), gives each a bone at its oarlock, skins it rigid, and bakes a
+  unison stroke into `Spin` — a fore-aft **Sweep** about the oarlock plus a phase-locked **Dip** (blades drop on the
+  aft drive, lift on the recovery), a seamless loop. The new **"Oars — a galley rowing"** section exposes **Sweep**,
+  **Dip**, and **Stroke frames**, tuned against the preview loop. Adds one bone per oar (~60 on a full galley), well
+  within the skeleton budget. The oars row whenever the movement clip plays. Validated headless on a 64-oar galley.
+  Recovery tolerances and bank centre are derived from the marked geometry, so uniformly scaled or translated source
+  models behave the same. When wave, wheel, and rowing periods differ, each motion is fitted to a whole number of
+  cycles over the shared `Spin` range instead of freezing at its last key. Older recipes migrate to the rowing defaults;
+  source-skeleton fast-path generation now blocks Oar roles with instructions to probe the mesh parts instead.
+  Marked Oar meshes are excluded from BOTH double-siding paths, the global checkbox included — galley blades ship
+  as authored front/back sheet pairs, and doubling them z-shimmers four near-coincident layers.
+- **Fix inside-out faces — a targeted winding repair, not a blunt recalc.** A source whose side planking ships
+  wrong-way-out (the Khalandion) reads see-through from outside while showing the far wall's interior. The new
+  Vehicle Lab checkbox reverses the islands that provably face the hull's interior (judged against an axis through
+  the hull *belly* — a bbox centre gets dragged to mast height and mis-judges the deck); everything the test cannot
+  call decisively keeps the artist's winding, as do marked **Sail** and **Oar** meshes (a whole-model `Shift+N`
+  recalc, and then a sheet-detection heuristic, were both tried and rejected — each flipped or missed authored
+  surfaces). No extra triangles; weights and UVs untouched. Verified with backface-culled renders: deck solid from
+  above, hull solid from both beams.
+- **Sail — marked canvas, double-sided, switched on/off via its own `Furl` clip.** A new **Sail** role
+  (dropdown; the `S` hotkey marks Structure): explicit marking replaces sail auto-detection outright. All sail parts weld to one `Sail` bone and are
+  **always exported double-sided** (canvas reads from both tacks, artist winding untouched). The hide is its own
+  generated **`Furl` clip** whose frame 1 **flips the canvas 180° below the keel** — rotation-only, the same
+  Deploy-proven stance mechanism the trails use — used as a **stance, never played**. The clip format carries no
+  visibility or alpha, so out-of-sight is the only disappear it can express; the clean on/off comes from never
+  playing the move. (Four designs were rejected in the field: the hide keyed inside Spin's frame 0 twitched at
+  every loop restart; a 12-frame visible descent read as the sail sinking through the deck; a 1-frame drop showed
+  travel when the transition was played; and a translation-based stance fought the converter's rest-fold and
+  location-strip and shipped misplaced in both clips.) Assign: Idle/reference = `Spin[0..0]` (defines the rest —
+  never put `Furl` in the reference field, or the bind adopts the struck pose), Idle stance (override) =
+  `Furl[1..1]`, Movement = `Spin`, **After-move / Pre-move empty** — the state change swaps the pose in one tick.
+  Keep bone translations can stay OFF: the strike is pure rotation.
+- **Blade roll — square feathered blades to the water.** Some sources model the oar blades *feathered* (flat face
+  parallel to the stroke), so they knife through the water edge-on instead of scooping. The Oars section's new
+  **Blade roll (deg)** spins each recovered oar about its own long axis in the rest geometry — the cylindrical
+  pole shows no change, only the blade face turns, with no seam at the blade root. 0 (the default) leaves the
+  source untouched; the Khalandion wants 90. Measured: the blade sheet normal turns by exactly the dialed angle.
+
+- **Rigging — selective source-side decimation for rope geometry.** A new **Rigging** role: dense line/rope
+  meshes are often a model's single biggest vertex sink while being barely visible at game distance (the
+  Khalandion's ropes alone: 65k verts). Mark them Rigging and the new **Rigging reduce (%)** dial
+  collapse-decimates exactly those parts at Generate, at the source — the previews, the clustering, the winding
+  fix and the bake all see the slim mesh, and the Factory's global *Reduce to ~tris* budget stops being spent on
+  invisible ropes. Per-part before/after vert counts are printed so an over-aggressive dial is loud, not silent.
+- **Structure — a second reduction tier with its own dial.** Small-but-dense detail geometry (railings, a carved
+  bow figure — another 65k verts each on the Khalandion) is more visible than rigging, so it takes its own,
+  usually gentler **Structure reduce (%)**. Same dissolve+collapse treatment at Generate; both tiers print
+  original → dissolved → final against the dial's target.
+- **Body reduce (%)** completes the tiers — parts explicitly marked Body, default 0 (untouched: the hull is the
+  model's face, and the Factory's global *Reduce to ~tris* is usually the smarter place to slim it).
+- **Oar reduce (%) / Sail reduce (%)** extend the tiers to the animated roles (a galley's merged oar meshes are
+  dense; sail canvas ships twice, once per side). Both run in the same pre-armature pass, so the per-oar
+  clustering, bones and weights land on the slim mesh — verified identical cluster recovery at 0% and 50%.
+  Defaults 0. Note the dials are floors: the dissolve pass can overshoot on flat canvas (a 30% sail dial cut 66%
+  on the Khalandion), so any non-zero sail value already cuts hard.
+- **Save can no longer silently eat a tuned recipe.** A reopened Vehicle Lab window starts with default knobs
+  while still naming the saved recipe — one reflex Save then replaced a tuned rowing stroke with defaults.
+  Overwriting a recipe this window has not read since it was opened now asks first, and every overwrite leaves
+  a `<name>.json.bak~` backup beside the recipe (the `~` keeps Unity from importing it) — a confirmed mistake
+  is one rename from recovered.
+- **The Factory reports every baked mesh's quad count against the engine's draw ceiling** — Humankind renders a
+  unit mesh as at most 255 sub-particles × 64 primitives = **16,320 quads**, and the overrun is silent in-game:
+  the mesh stores fully, the last-baked parts (masts, rigging, sails) simply never draw (how the Great Galley
+  shipped mastless through five bakes). After each Bake the console prints per-mesh `N quads — fits (M to spare)`
+  or a warning naming the excess, and an over-ceiling bake also raises a dialog. Dial *Reduce to ~tris* against
+  this line — no game launch needed to know.
+- **The part filter + marking list is a foldable "Parts" section** — collapse it once the roles are decided to
+  reach the preview and tuning sections without scrolling past 280px of rows; the header keeps the part count
+  and how many are still undecided. (Folding it also parks the keyboard review loop.)
+- **All five reduce dials + the two facing checkboxes now live in their own "Vertices control" section** —
+  everything that reshapes exported geometry at Generate in one foldout, out of Spin where it had no business.
+  The collapsed header summarizes the active facing fixes and each marked tier's dial.
+- **Flag is now the OPPOSITE of sails** (2026-09-05): banners fly AT ANCHOR and are struck below the keel while
+  the ship moves — one Flag bone held flipped through the whole Spin clip; the idle stance shows them at rest.
+  Rudder split into its OWN parts file to keep the always-visible treatment (a rudder must never vanish).
+- **Flag — double-sided like a sail, but never hidden.** Banners and pennants must read from both sides, yet a
+  flag keeps flying at anchor — so the new role gets the sail's doubling and winding protection without the Furl
+  strike: no bone, no clip, welded to the body. **Rudder** shares the exact treatment under its own name — a
+  closed slab with one face-side wound inward scores ~0 in the inside-out flip (the halves cancel), so no
+  whole-island flip can repair it; doubling can.
+- **Positive Sweep rows forward** (2026-09-05 sign flip): the field-verified forward stroke needed a negative
+  dial while positive Rake already shifted toward the bow — the sweep sense flipped so both dials agree that
+  positive points at the bow. Recipes saved before the flip negate their Sweep once.
+- **Sweep accepts negative** — if the galley rows backwards, flip the sign (the wheels' Spin-degrees convention);
+  the dip phase stays put, so blades still bury on the reversed drive. **Sweep is the TOTAL arc**, split evenly
+  about the rest rake: 24 = 12° forward + 12° back (it was a half-amplitude before — a 24 dial swung 48°, all of
+  it reading as "backward" against the Khalandion's already-aft modelled rake). Slider range widened to ±90.
+  **Dip accepts negative too** — it flips which half of the stroke is submerged, the second independent way to
+  reverse the rowing direction (flip either Sweep or Dip, not both: both flips cancel). Keep |Sweep| above ~2× the
+  dip, or the dip's fore-aft component on a raked oar drowns the sweep and the stroke churns instead of pulling.
+- **Lift (deg)** re-centres the stroke height — a constant tilt about the dip axis with the dip oscillating
+  around it. The knob the dip sign cannot be (±dip is the same oscillation, phase-flipped): a source whose oars
+  are modelled raked steeply into the water rides too deep at any dip; positive lift brings the bank toward
+  horizontal. Measured: lift 30 raises the Khalandion blade path ~0.5 units, deepest point 0.45 shallower.
+- **Rake (deg)** — the horizontal twin: a constant fore/aft rotation about the oarlock re-centring the sweep
+  ARC, with the sweep oscillating around it. A source that models the oars raked far aft (the Khalandion: ~50°)
+  swings "all backward, nothing forward" at any sweep, because the arc is symmetric about that modelled rake;
+  rake it toward the bow until the stroke straddles the perpendicular. Same sign convention as Sweep.
+- **Pivot (%)** — where the oarlock, the fulcrum every stroke rotation happens about, sits along each oar
+  (percentage of its inboard→outboard extent). 0 = at the handle, the whole oar swings; higher = further out,
+  less oar moves and the handle counter-swings more. 30 was the hardcoded value through the whole build.
+- **Length (%)** — stretches each oar along its own axis ABOUT the oarlock: the pivot stays planted at the
+  hull, the blade reaches further out and down, the handle further in. Pure axial scale — blade width and pole
+  thickness untouched. 100 = the modelled length.
+- **The Animation Lab preview floats boats at the calibrated water level.** It drew its hex at ground height
+  (-0.02) even for boat pawns — water-blue in colour, ground in height — so the Factory showed oar blades in the
+  water while the Animation Lab showed them dry. Both panes now share the pack's one-source-of-truth
+  `ModelRegistry.WaterLevel`; the forward arrow and reference man ride the same plane.
+- **Split disconnected GLB parts** — a new `Tools ▸ HAF ▸ Model Tools ▸ Split disconnected GLB parts…` command
+  turns every disconnected geometry island inside a GLB mesh node into its own selectable child part. The source
+  is never overwritten. Materials, transforms, skins, animation targets, textures and original vertex data are
+  preserved; the tool appends only filtered index accessors and child nodes, verifies the triangle total, and writes
+  a new `<name>_split_parts.glb`. Duplicate vertices at UV/normal seams are welded with a tight scale-relative
+  tolerance, so a visually continuous surface is not split merely because its shading data has a seam.
+- **Rudder reduce (%) and Wheel reduce (%)** complete the source-tier set at seven. Rudders ship double-sided
+  (every kept vertex counts twice), and CAD-style rims carry far more vertices than a spinning disc shows;
+  both cuts run before doubling/clustering. Each reduced part keeps at least 8 verts, so triangle-soup wheels
+  cut less than the dial asks — the Generate log prints the real totals.
+- **Rolling-contact wheel speeds apply only to wheels that reach the ground.** Four propellers marked Wheel on
+  a biplane: one spun at 540° because the 1/diameter ground-rolling scaling hit something hanging at wing
+  height. A wheel cluster now scales only when its bottom lies within 15% of model height above the global
+  minimum; airborne wheels (props, fans) keep the dialed degrees uniformly, and the log names the exemptions.
+- **Preserve — a role that keeps a part exactly as authored.** No reduction, no inside-out flip, no doubling
+  (the global Double-sided switch included); welds to the hull like Body but ships as its own untouched mesh.
+  The escape hatch for parts every automatic pass keeps getting wrong.
+- **Model Workshop — the aimed version of the splitter.** `Tools ▸ HAF ▸ Model Workshop`: Probe lists every
+  mesh-carrying node with its triangle count and disconnected-island count; check exactly the parts hiding
+  floating junk and Split writes a GLB where ONLY those become `_Part_NNN` children (same lossless method).
+  Born from the galley: junk islands welded into hull-shared parts could not be marked Ignore in the Vehicle
+  Lab, and the split-everything command exploded the rigging into ~1,500 parts. Feed the output to the Vehicle
+  Lab, mark the junk Ignore, rig as usual.
+
 ## 0.5.4 — 2026-09-03
 
 - **Double-sided for animated vehicles — now a Vehicle Lab option, applied at the source.** The engine culls

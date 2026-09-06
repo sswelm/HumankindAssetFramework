@@ -360,6 +360,16 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
 
 ## Utilities, diagnostics & safety
 
+- **Split disconnected GLB parts** — `Tools ▸ HAF ▸ Model Tools ▸ Split disconnected GLB parts…`. Pick a `.glb`
+  and write a new `_split_parts.glb` in which every unattached geometry island is a separately selectable child
+  node. The source is protected from overwrite, triangle totals are verified, and existing materials, transforms,
+  skins, animations, textures and vertex data are retained. Duplicate UV/normal seam vertices remain attached.
+- **Model Workshop** — `Tools ▸ HAF ▸ Model Workshop`. The *selective* version of the splitter: **Probe parts**
+  lists every mesh-carrying node with its triangle and disconnected-island counts; check just the parts whose
+  islands you need to separate (floating junk welded into a hull part, say) and **Split** writes a new GLB where
+  only those gain `_Part_NNN` children — same lossless method, so the rest of the model is byte-identical. Feed
+  the output to the Vehicle Lab and mark the junk islands Ignore. Splitting a many-island part (ropes, rigging)
+  explodes the part list; usually leave those whole.
 - **Backup & Restore** — `Tools ▸ HAF ▸ Backup and Restore`. A safety net for everything git doesn't track (editor
   scripts, `FactorySource`, baked Resources, ENC databases, `Tools/`, live `BepInEx/config`). Timestamped, additive,
   guarded restore (auto-snapshots current state first). **Deep dive:** [Backup.md](Backup.md).

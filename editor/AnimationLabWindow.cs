@@ -351,9 +351,14 @@ public class AnimationLabWindow : EditorWindow
         try
         {
             var cam = fitPRU.camera;
+            // PLANE HEIGHT (2026-09-05 parity fix): boats float at the CALIBRATED game water level (the pack's
+            // one-source-of-truth ModelRegistry.WaterLevel — the same plane the Factory's water preview uses).
+            // This pane drew its hex at ground height (-0.02) even for boat pawns, so the Factory showed blades
+            // in the water while this preview showed them dry — two waterlines, one of them lying.
+            float planeY = ModelFactoryWindow.IsBoatPawn(cur?.pawnDescription) ? ModelRegistry.WaterLevel : -0.02f;
             // frame the ground square too when it's drawn — a square outside the frustum reads as "no square"
             var frame = fitAnimInst != null && fitAnimBoundsValid ? fitAnimBounds : fitBounds;
-            if (fitGrounded) frame.Encapsulate(new Bounds(new Vector3(0f, -0.02f, 0f),
+            if (fitGrounded) frame.Encapsulate(new Bounds(new Vector3(0f, planeY, 0f),
                 new Vector3(2f * ModelFactoryWindow.TileCornerRadius, 0.04f, 2f * ModelFactoryWindow.TileInradius)));
             float radius = Mathf.Max(frame.extents.magnitude, 0.1f);
             float dist = radius * 2.0f * fitZoom;
@@ -379,15 +384,15 @@ public class AnimationLabWindow : EditorWindow
                 // boats float on water-blue (the pawn's own Boat capability profile — characteristic, not name)
                 fitGroundMat.color = ModelFactoryWindow.IsBoatPawn(cur?.pawnDescription)
                     ? new Color(0.23f, 0.36f, 0.47f) : new Color(0.33f, 0.40f, 0.29f);
-                fitPRU.DrawMesh(fitGroundMesh, Matrix4x4.Translate(new Vector3(0f, -0.02f, 0f)), fitGroundMat, 0);
+                fitPRU.DrawMesh(fitGroundMesh, Matrix4x4.Translate(new Vector3(0f, planeY, 0f)), fitGroundMat, 0);
                 if (fitArrowMesh == null) fitArrowMesh = ModelFactoryWindow.BuildForwardArrow("AnimLabForwardArrow");
-                fitPRU.DrawMesh(fitArrowMesh, Matrix4x4.Translate(new Vector3(0f, -0.01f, 0f)), fitFallbackMat, 0);
+                fitPRU.DrawMesh(fitArrowMesh, Matrix4x4.Translate(new Vector3(0f, planeY + 0.01f, 0f)), fitFallbackMat, 0);
                 // REFERENCE MAN (2026-08-19) — shared with the Factory (one mesh builder, one height constant)
                 if (fitRefMan)
                 {
                     if (fitRefManMesh == null) fitRefManMesh = ModelFactoryWindow.BuildRefMan("AnimLabRefMan");
                     // at the USER-DIALED spot (header fields) — mirrors the Factory
-                    fitPRU.DrawMesh(fitRefManMesh, Matrix4x4.TRS(new Vector3(fitRefManPos.x, -0.02f, fitRefManPos.y), Quaternion.identity, Vector3.one * ModelFactoryWindow.HumanRefHeight), fitFallbackMat, 0);
+                    fitPRU.DrawMesh(fitRefManMesh, Matrix4x4.TRS(new Vector3(fitRefManPos.x, planeY, fitRefManPos.y), Quaternion.identity, Vector3.one * ModelFactoryWindow.HumanRefHeight), fitFallbackMat, 0);
                 }
             }
             bool anyDead = false;

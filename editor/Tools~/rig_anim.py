@@ -680,19 +680,26 @@ try:
                 print("RIGANIM single-frame clip '%s' padded to 2 identical frames (stance)" % _oa.name)
             # pre-pass: which bones genuinely translate within THIS clip? (varying basis translation, not a
             # constant offset — the gate that keeps all legacy models byte-identical)
+            # keepTranslations ADDITIONALLY keeps bones whose translation is CONSTANT within the clip but clearly
+            # OFF THEIR REST (>1mm) — a deliberate STANCE difference, not corrective residue (the fold has already
+            # zeroed those). The galley finding (2026-09-04): with the idle REFERENCE a Furl stance slice, the rest
+            # normalizes to sails-STRUCK, and Spin's sails-raised became a constant +9.8 location offset — which
+            # this gate then classified as residue and stripped, so the sails never rose during movement. Legacy
+            # models (keepTranslations off) are untouched: the varying-only gate still applies to them.
             _trans_bones = set()
             for pb in arm.pose.bones:
                 _pn = _parent_of[pb.name]
-                _lo = None; _hi = None
+                _lo = None; _hi = None; _maxoff = 0.0
                 for _f in _frames:
                     _world = _snaps[_oa][_f]
                     _localf = (_world[_pn].inverted() @ _world[pb.name]) if _pn else _world[pb.name]
                     _t = (_rest_local[pb.name].inverted() @ _localf).to_translation()
+                    if _t.length > _maxoff: _maxoff = _t.length
                     if _lo is None: _lo = _t.copy(); _hi = _t.copy()
                     else:
                         _lo = Vector((min(_lo.x, _t.x), min(_lo.y, _t.y), min(_lo.z, _t.z)))
                         _hi = Vector((max(_hi.x, _t.x), max(_hi.y, _t.y), max(_hi.z, _t.z)))
-                if _lo is not None and (_hi - _lo).length > 1e-4:
+                if _lo is not None and ((_hi - _lo).length > 1e-4 or (keep_translations and _maxoff > 1e-3)):
                     _trans_bones.add(pb.name)
             if _trans_bones:
                 print("RIGANIM TRANSLATION-animated bone(s) in '%s': %s%s" % (_oa.name, sorted(_trans_bones),
@@ -720,6 +727,13 @@ try:
         bpy.context.view_layer.update()
         _worst = 0.0; _scaleref = 0.0
         for pb in arm.pose.bones:
+            # A kept-TRANSLATION bone (keepTranslations) legitimately sits off its rest at frame 0 — the offset is
+            # PLAYED by its location curves (visual-keyed per frame in the rebake above), not a displaced rest that
+            # would ship rigid. The galley finding (2026-09-04): with the idle reference a Furl stance slice, the
+            # Sail bone's deliberate strike offset tripped this assert. With keepTranslations OFF those curves get
+            # stripped, so the check still guards the head-off-shoulders class there.
+            if keep_translations and ('pose.bones["%s"].location' % pb.name) in _KEEP_LOC_PATHS:
+                continue
             _d = (pb.matrix.translation - arm.data.bones[pb.name].matrix_local.translation).length
             if _d > _worst: _worst = _d
             _rl = arm.data.bones[pb.name].matrix_local.translation.length
