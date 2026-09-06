@@ -1098,6 +1098,38 @@ namespace HumankindAssetFramework
         }
 
         [ProcessLived("literal field-name table")] static readonly string[] RenderMatFields = { "currentRenderMaterial", "runTimeRenderMaterial" };   // hoisted — was a new[] per RenderOutput per FRAME
+
+        // Which of OUR material bindings has the game taken back? null = all still ours. The recovery used to
+        // test only _MainTex, but the game's rebuild can re-bind just the overlay maps (leaving our albedo in
+        // place) — the check said "already ours", skipped, and the donor's AO/roughness + the empire colour
+        // mask stayed smeared across the model with OUR UVs (the galley's washed-out skin that only flashed
+        // right, 2026-09-06). Reference compares only; HasProperty guards keep a map-less material from
+        // reading as permanently drifted (SetTexture on a missing property is a silent no-op).
+        static string OurBindingsDrifted(UnityEngine.Material mat, UnityEngine.Texture2D tex)
+        {
+            if (!ReferenceEquals(mat.GetTexture("_MainTex"), tex)) return "_MainTex";
+            if (_flatN == null) return "_MainTex";   // solids not built yet — nothing was ever painted; full paint follows
+            if (mat.HasProperty("_NormalMap") && !ReferenceEquals(mat.GetTexture("_NormalMap"), _flatN)) return "_NormalMap";
+            if (mat.HasProperty("_AmbiantOcclusionMap") && !ReferenceEquals(mat.GetTexture("_AmbiantOcclusionMap"), _white)) return "_AmbiantOcclusionMap";
+            if (mat.HasProperty("_ColorMask") && !ReferenceEquals(mat.GetTexture("_ColorMask"), _black)) return "_ColorMask";
+            if (mat.HasProperty("_RoughnessMap") && !ReferenceEquals(mat.GetTexture("_RoughnessMap"), _grey)) return "_RoughnessMap";
+            if (mat.HasProperty("_MetallicMap") && !ReferenceEquals(mat.GetTexture("_MetallicMap"), _black)) return "_MetallicMap";
+            if (mat.GetTextureScale("_MainTex") != UnityEngine.Vector2.one) return "_MainTex_ST.scale";
+            if (mat.GetTextureOffset("_MainTex") != UnityEngine.Vector2.zero) return "_MainTex_ST.offset";
+            return null;
+        }
+
+        // Repaint diagnostics, decade-throttled (1, 10, 100, 1000, then every 10000th): says WHICH binding the
+        // game took back and how often — a fast-growing count means an every-frame rebinder that the 5-frame
+        // recovery can only chase (hook its rebuild event instead); a slow one is event-driven and fully fixed.
+        [ProcessLived("diagnostic counters")] static readonly Dictionary<string, int> repaintCounts = new Dictionary<string, int>();
+        static void NoteRepaint(string name, string field)
+        {
+            int n; repaintCounts.TryGetValue(name, out n); repaintCounts[name] = ++n;
+            if (n == 1 || n == 10 || n == 100 || n == 1000 || (n % 10000) == 0)
+                Plugin.Diag($"[Uni] '{name}': game re-bound {field} on our painted material (repaint #{n})");
+        }
+
         static void TickOne(ModelEntry e)
         {
             // GREY retry: if the skin wasn't ready when ApplyGrey ran (build returned null), build it now from the
@@ -1112,11 +1144,14 @@ namespace HumankindAssetFramework
                         foreach (var fld in RenderMatFields)
                             if (GetMember(ro, fld) is UnityEngine.Material mat)
                             {
-                                // Already ours -> skip the 7 texture sets. The re-set stays as the RECOVERY path (the
-                                // game can recreate/reset the material, which this check detects by reference), but it
-                                // no longer runs redundantly every frame on a stable material (perf pass 2026-07-19).
-                                if (ReferenceEquals(mat.GetTexture("_MainTex"), e.tex)) continue;
+                                // All bindings still ours -> skip the 7 texture sets. The re-set stays as the RECOVERY
+                                // path (the game can recreate/reset the material — including PARTIAL resets that leave
+                                // our _MainTex but re-bind the overlay maps), but it no longer runs redundantly every
+                                // frame on a stable material (perf pass 2026-07-19).
+                                string drift = OurBindingsDrifted(mat, e.tex);
+                                if (drift == null) continue;
                                 if (_flatN == null) { _flatN = Solid(0.5f, 0.5f, 1f); _white = Solid(1f, 1f, 1f); _black = Solid(0f, 0f, 0f); _grey = Solid(0.5f, 0.5f, 0.5f); }
+                                NoteRepaint(e.resourceName, drift);
                                 if (!stLogged) { stLogged = true; Plugin.Diag($"[Uni] {e.resourceName} host _MainTex_ST scale={mat.GetTextureScale("_MainTex")} offset={mat.GetTextureOffset("_MainTex")}"); }
                                 mat.SetTexture("_MainTex", e.tex);
                                 // Reset the atlas UV transform. The host's material crops _MainTex to its slice of a SHARED
@@ -1147,13 +1182,14 @@ namespace HumankindAssetFramework
             try
             {
                 if (!(GetMember(layer, "RenderOutputs") is Array ros)) return;
-                int painted = 0;
                 foreach (var ro in ros)
                     foreach (var fld in RenderMatFields)
                         if (GetMember(ro, fld) is UnityEngine.Material mat)
                         {
-                            if (ReferenceEquals(mat.GetTexture("_MainTex"), tex)) continue;
+                            string drift = OurBindingsDrifted(mat, tex);
+                            if (drift == null) continue;
                             if (_flatN == null) { _flatN = Solid(0.5f, 0.5f, 1f); _white = Solid(1f, 1f, 1f); _black = Solid(0f, 0f, 0f); _grey = Solid(0.5f, 0.5f, 0.5f); }
+                            NoteRepaint("prop:" + tag, drift);
                             mat.SetTexture("_MainTex", tex);
                             mat.SetTextureScale("_MainTex", UnityEngine.Vector2.one);
                             mat.SetTextureOffset("_MainTex", UnityEngine.Vector2.zero);
@@ -1162,10 +1198,9 @@ namespace HumankindAssetFramework
                             mat.SetTexture("_ColorMask", _black);
                             mat.SetTexture("_RoughnessMap", _grey);
                             mat.SetTexture("_MetallicMap", _black);
-                            painted++;
                         }
-                if (painted > 0)   // silent when stable (per-tick recovery path) — logs only actual (re)paints
-                    Plugin.Diag($"[Props] '{tag}' prop layer painted ({painted} material(s), atlas {tex.width}x{tex.height})");
+                // repaint logging now lives in NoteRepaint (decade-throttled) — an every-frame rebinder on a
+                // prop layer would have turned the old per-repaint Diag into a log flood
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[Props] PaintLayer: " + ex.Message); }
         }
