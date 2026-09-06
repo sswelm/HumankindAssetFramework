@@ -258,6 +258,7 @@ namespace HumankindAssetFramework
                 ApplyTexture(e, animMgr);
                 DumpFxIndices(donorSkel0, e, bodyName, animMgr);   // ghost hunt: donor vs our FxMeshIndex + StartIndex needle + descriptor scan
                 DumpLayerBudget(e, bodyName, animMgr);             // render-ceiling report: PPC + 255xPPC vs this mesh's PrimitiveCount
+                CheckPawnBufferCapacity(e.resourceName);           // shared-buffer fill check — every injection, band-transition logged
                 if (!e.repointed) { e.repointed = true; anyRescuable = null; MarkSubPawnsDirty(); Plugin.Diag($"[Uni] repointed '{name}' -> {e.resourceName} (mesh '{bodyName}', layer '{e.layerHint}')"); }
             }
             catch (Exception ex) { NoteInjectionError("repoint"); Plugin.Log.LogError("[Uni] repoint: " + ex); }
@@ -902,6 +903,51 @@ namespace HumankindAssetFramework
                 }
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[Uni] layer budget dump: " + ex.Message); }
+        }
+
+        // SHARED-BUFFER CAPACITY (user request 2026-09-06; reshaped by PR #20 review): the PAWN content layer's
+        // vertex/index buffers and mesh-slot registry are FIXED — once full, further geometry is dropped silently
+        // (the draw-ceiling failure class, one buffer up). The smoke test alarms at 95% but only when RUN; this
+        // check fires on EVERY model injection (deliberately outside the once-per-name dump dedup — a save load
+        // or registration rebuild re-checks), watches ONLY the pawn layer (the 'Visual' district layer runs
+        // near-full BY DESIGN and would cry wolf on every unit), and logs on band TRANSITIONS so a stable state
+        // never spams. Band 3 reports fullness as FACT and loss as likelihood: a cursor at the end cannot prove
+        // which mesh (if any) was truncated, and a rejected oversize mesh can even leave the cursor short.
+        // Bands: 0 = fine, 1 = >=85% (warn), 2 = >=95% (error), 3 = any capacity at/past its end (error).
+        internal static int BudgetBand(int verts, int vertsMax, int idx, int idxMax, int meshes, int meshesMax)
+        {
+            bool full = (vertsMax > 0 && verts >= vertsMax) || (idxMax > 0 && idx >= idxMax) || (meshesMax > 0 && meshes >= meshesMax);
+            if (full) return 3;
+            int worst = 0;
+            void Rate(int a, int b) { if (b <= 0) return; int p = (int)(100.0 * a / b); worst = Math.Max(worst, p >= 95 ? 2 : p >= 85 ? 1 : 0); }
+            Rate(verts, vertsMax); Rate(idx, idxMax); Rate(meshes, meshesMax);
+            return worst;
+        }
+        [ProcessLived("last reported band per pawn layer — re-logs only on a band increase")] static int pawnBudgetBand = -1;
+        static void CheckPawnBufferCapacity(string modelName)
+        {
+            try
+            {
+                var lb = ReadMeshBudget(out string _, out int pawnLayer);
+                if (pawnLayer < 0 || pawnLayer >= lb.Count) return;
+                var b = lb[pawnLayer];
+                if (b.Name == null || b.VertsMax <= 0) return;
+                int band = BudgetBand(b.Verts, b.VertsMax, b.Idx, b.IdxMax, b.Meshes, b.MeshesMax);
+                if (band <= pawnBudgetBand) { pawnBudgetBand = band; return; }
+                pawnBudgetBand = band;
+                if (band == 0) return;
+                int vp = (int)(100.0 * b.Verts / Math.Max(1, b.VertsMax));
+                int xp = b.IdxMax > 0 ? (int)(100.0 * b.Idx / b.IdxMax) : 0;
+                string state = $"verts {vp}% ({b.Verts:n0}/{b.VertsMax:n0}) | idx {xp}% | meshes {b.Meshes}/{b.MeshesMax}";
+                string remedy = $" Raise Buffers.BufferOverrides (e.g. \"{b.Name}:verts=+500000,idx=+1000000,meshes=+500\").";
+                if (band == 3)
+                    Plugin.Log.LogError($"[Uni][BUDGET] pawn layer '{b.Name}' is FULL ({state}; checked at load of '{modelName}') — anything that did not fit has been dropped SILENTLY, and nothing further will fit." + remedy);
+                else if (band == 2)
+                    Plugin.Log.LogError($"[Uni][BUDGET] pawn layer '{b.Name}' nearly full: {state} (checked at load of '{modelName}') — a full buffer drops geometry silently." + remedy);
+                else
+                    Plugin.Log.LogWarning($"[Uni][BUDGET] pawn layer '{b.Name}' filling up: {state} (checked at load of '{modelName}')." + remedy);
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Uni] pawn buffer capacity check: " + ex.Message); }
         }
 
         // FX-INDEX RESOLUTION (ghost hunt): the GPU descriptor encodes an FxMeshIndex in ITS OWN numbering (not
