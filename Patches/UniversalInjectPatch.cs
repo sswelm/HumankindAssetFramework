@@ -168,7 +168,7 @@ namespace HumankindAssetFramework
         static volatile bool reloadRearmPending;   // set by the per-session seams (Sandbox.Load / PawnManager.Load, possibly off the main thread); consumed on the main-thread Update tick so RearmModelRegistration's Unity Destroys run safely
         static volatile bool districtResetSync;    // Sandbox.Load requested its own district reset (via districtResetPending) for the pending rearm — the deferred consume then skips a redundant district reset (a New Game leaves this false so the consume does it)
         static volatile bool districtResetPending; // Sandbox.Load (possibly off the main thread) asks for the district reset; CONSUMED on the main thread — by the next Update tick or by the first district presentation hook of the rebuild, whichever comes first (review 2026-08-21: the reset used to run inline on the sim thread, Clear()ing ~13 collections the main thread reads per frame)
-        static UnityEngine.Texture2D _flatN, _white, _black, _grey;   // neutral overlay maps (kill the host's detail/camo)
+        static UnityEngine.Texture2D _flatN, _white, _black, _grey, _cmask;   // neutral overlay maps (kill the host's detail/camo); _cmask = the empire-colour mask level, separate from _black so it can be tuned alone
 
         // A discovered mod PACK: one registry file's wrapper metadata + its models. HAF (Humankind Asset Framework)
         // multi-mod support merges many packs into `entries`, so ENC is just one mod among many — any modder ships their
