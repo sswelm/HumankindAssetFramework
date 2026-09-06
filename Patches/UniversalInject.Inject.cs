@@ -900,6 +900,31 @@ namespace HumankindAssetFramework
                     Plugin.Log.LogInfo($"[Uni][BUDGET] '{e.resourceName}' layer {li}: mesh prim={prim}, PPC={ppc}, ceiling=255x{ppc}={ceiling}"
                         + (prim > ceiling ? $" — OVER by {prim - ceiling}: that geometry is silently NOT DRAWN" : " — fits"));
                 }
+                // SHARED-BUFFER CAPACITY (user request 2026-09-06, on seeing the layer at 47%): the content layer's
+                // vertex/index buffers are FIXED — once a running cursor passes the end, later meshes lose their
+                // overflow silently (vertices simply fall away; the same failure class as the draw ceiling, one
+                // buffer up). The smoke test alarms at 95% but only when RUN; this check fires at the moment that
+                // matters — every model load — and names the remedy. Warn at 85, shout at 95.
+                var lb = ReadMeshBudget(out string _, out int _);
+                for (int li2 = 0; li2 < lb.Count; li2++)
+                {
+                    var b = lb[li2];
+                    if (b.Name == null || b.VertsMax <= 0) continue;
+                    int vp = (int)(100.0 * b.Verts / b.VertsMax);
+                    int xp = b.IdxMax > 0 ? (int)(100.0 * b.Idx / b.IdxMax) : 0;
+                    if (vp < 85 && xp < 85) continue;
+                    string remedy = $" Raise Buffers.BufferOverrides (e.g. \"{b.Name}:verts=+500000,idx=+1000000\").";
+                    if (b.Verts >= b.VertsMax || (b.IdxMax > 0 && b.Idx >= b.IdxMax))
+                        // AT/PAST the end is not a warning — it is a loss report: everything appended after the
+                        // cursor hit the wall is already gone from the screen.
+                        Plugin.Log.LogError($"[Uni][BUDGET] layer L{li2} '{b.Name}' OVERFLOWED ({vp}% verts / {xp}% idx) — geometry of recently loaded meshes has been LOST (vertices past the buffer end are silently dropped)." + remedy);
+                    else
+                    {
+                        string msg = $"[Uni][BUDGET] layer L{li2} '{b.Name}' at {vp}% verts / {xp}% idx after loading '{e.resourceName}'" +
+                                     " — a full buffer drops later meshes' geometry SILENTLY." + remedy;
+                        if (vp >= 95 || xp >= 95) Plugin.Log.LogError(msg); else Plugin.Log.LogWarning(msg);
+                    }
+                }
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[Uni] layer budget dump: " + ex.Message); }
         }
