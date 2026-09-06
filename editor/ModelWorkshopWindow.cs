@@ -40,6 +40,7 @@ public class ModelWorkshopWindow : EditorWindow
     [SerializeField] string srcFile = "";
     [SerializeField] string outGlb = "";
     [SerializeField] List<Row> rows = new List<Row>();
+    [SerializeField] bool hideWhole = false;   // filter: hide "1 island — already whole" rows (nothing to split there)
     [SerializeField] Vector2 scroll;
     string status = "Pick a GLB and press Probe parts.";
 
@@ -94,11 +95,14 @@ public class ModelWorkshopWindow : EditorWindow
             {
                 if (GUILayout.Button("Check all splittable", GUILayout.Width(140))) foreach (var r in rows) r.split = r.islands > 1 && r.blocked == null;
                 if (GUILayout.Button("Uncheck all", GUILayout.Width(100))) foreach (var r in rows) r.split = false;
+                hideWhole = EditorGUILayout.ToggleLeft(new GUIContent("Hide already-whole parts",
+                    "Hide the rows with a single island — there is nothing to split in them, they only pad the list."), hideWhole, GUILayout.Width(180));
                 // A 300-island rope part is a legitimate but LOUD choice — say what a check costs before Split.
                 EditorGUILayout.LabelField(chosen > 0 ? $"{chosen} checked → +{rows.Where(r => r.split).Sum(r => r.islands) - chosen} new part(s) in the output" : " ", EditorStyles.miniLabel);
             }
-            scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(Mathf.Min(220, 22 * rows.Count + 8)));
-            foreach (var r in rows)
+            var shown = hideWhole ? rows.Where(r => r.islands > 1 || r.blocked != null).ToList() : rows;
+            scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(Mathf.Min(220, 22 * shown.Count + 8)));
+            foreach (var r in shown)
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     using (new EditorGUI.DisabledScope(r.islands <= 1 || r.blocked != null))
