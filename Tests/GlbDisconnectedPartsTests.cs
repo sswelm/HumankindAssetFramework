@@ -128,6 +128,27 @@ public class GlbDisconnectedPartsTests
         Assert.Equal(3, result.OutputTriangles);
     }
 
+    [Fact]
+    public void Direction_gate_keeps_parallel_dashed_lines_as_separate_parts()
+    {
+        // Two parallel dashed lines 0.3 apart: thin slivers along X, two dashes per line (in-line gap 0.5).
+        // Distance alone would chain all four into one blob (0.3 < the 5% reach); the direction gate lets a dash
+        // reach only ALONG its own axis, so each line chains to itself and the result is exactly two parts.
+        byte[] source = BuildGlb(new[] {
+            0f, 0f, 0f,     1f, 0f, 0f,     0f, 0.02f, 0f,
+            1.5f, 0f, 0f,   2.5f, 0f, 0f,   1.5f, 0.02f, 0f,
+            0f, 0.3f, 0f,   1f, 0.3f, 0f,   0f, 0.32f, 0f,
+            1.5f, 0.3f, 0f, 2.5f, 0.3f, 0f, 1.5f, 0.32f, 0f
+        });
+
+        Assert.Equal(4, GlbDisconnectedParts.Analyze(source).Single(i => i.NodeName == "Hull").Islands);
+        Assert.Equal(2, GlbDisconnectedParts.Analyze(source, 0.25).Single(i => i.NodeName == "Hull").Islands);
+        var result = GlbDisconnectedParts.Split(source, new HashSet<string> { "Hull" }, 0.25);
+        Assert.Equal(2, result.ChildPartsCreated);
+        Assert.Equal(4, result.SourceTriangles);
+        Assert.Equal(4, result.OutputTriangles);
+    }
+
     static byte[] BuildGlb(float[] positions, bool withWeightAnimation = false)
     {
         byte[] positionBytes = new byte[positions.Length * 4];

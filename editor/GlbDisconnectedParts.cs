@@ -93,6 +93,49 @@ public static class GlbDisconnectedParts
         public readonly double[] Max = { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
         public int FirstTriangle = int.MaxValue;
         public int TriangleCount;
+        public readonly List<Vec3> Points = new List<Vec3>();   // sample positions for the direction test (distance merge)
+
+        // DIRECTION (the dashed-line problem): a rope/trim dash is ELONGATED — its bbox has one dominant axis.
+        // The merge may then only reach ALONG that axis, so a hull trim line and a sail luff line that pass close
+        // never chain into one part through a crossing ("vertices must not be connected indirectly"). Blobby
+        // islands (aspect < 3) merge on distance alone. Direction = PC1 by power iteration (the galley oar method).
+        public bool Elongated
+        {
+            get
+            {
+                double[] e = { Max[0] - Min[0], Max[1] - Min[1], Max[2] - Min[2] };
+                Array.Sort(e);
+                return e[2] > 3 * Math.Max(e[1], 1e-12);
+            }
+        }
+        public Vec3 Centroid()
+        {
+            double x = 0, y = 0, z = 0;
+            foreach (var p in Points) { x += p.X; y += p.Y; z += p.Z; }
+            int n = Math.Max(1, Points.Count);
+            return new Vec3 { X = x / n, Y = y / n, Z = z / n };
+        }
+        public Vec3 Direction()
+        {
+            Vec3 m = Centroid();
+            var cov = new double[3, 3];
+            foreach (var p in Points)
+            {
+                double[] d = { p.X - m.X, p.Y - m.Y, p.Z - m.Z };
+                for (int a = 0; a < 3; a++) for (int b = 0; b < 3; b++) cov[a, b] += d[a] * d[b];
+            }
+            double vx = 1, vy = 0.3, vz = 0.1;
+            for (int i = 0; i < 24; i++)
+            {
+                double nx = cov[0, 0] * vx + cov[0, 1] * vy + cov[0, 2] * vz;
+                double ny = cov[1, 0] * vx + cov[1, 1] * vy + cov[1, 2] * vz;
+                double nz = cov[2, 0] * vx + cov[2, 1] * vy + cov[2, 2] * vz;
+                double len = Math.Sqrt(nx * nx + ny * ny + nz * nz);
+                if (len < 1e-12) break;
+                vx = nx / len; vy = ny / len; vz = nz / len;
+            }
+            return new Vec3 { X = vx, Y = vy, Z = vz };
+        }
     }
 
     sealed class MeshPlan
@@ -520,6 +563,9 @@ public static class GlbDisconnectedParts
             UpdateBounds(component.Min, component.Max, vertices[triangle.VA].Position);
             UpdateBounds(component.Min, component.Max, vertices[triangle.VB].Position);
             UpdateBounds(component.Min, component.Max, vertices[triangle.VC].Position);
+            component.Points.Add(vertices[triangle.VA].Position);
+            component.Points.Add(vertices[triangle.VB].Position);
+            component.Points.Add(vertices[triangle.VC].Position);
         }
         if (byRoot.Count <= 1 && !keepSingle) return null;   // keepSingle: Analyze wants the row (islands=1) anyway
         var components = byRoot.Values.OrderBy(c => c.Min[0]).ThenBy(c => c.Min[1]).ThenBy(c => c.Min[2]).ThenBy(c => c.FirstTriangle).ToList();
@@ -532,7 +578,15 @@ public static class GlbDisconnectedParts
         {
             double eps = diagonal * mergeFraction;
             var cd = new DisjointSet();
-            for (int i = 0; i < components.Count; i++) cd.Add();
+            var elong = new bool[components.Count];
+            var dir = new Vec3[components.Count];
+            var ctr = new Vec3[components.Count];
+            for (int i = 0; i < components.Count; i++)
+            {
+                cd.Add();
+                elong[i] = components[i].Elongated;
+                if (elong[i]) { dir[i] = components[i].Direction(); ctr[i] = components[i].Centroid(); }
+            }
             for (int i = 0; i < components.Count; i++)
                 for (int j = i + 1; j < components.Count; j++)
                 {
@@ -543,7 +597,31 @@ public static class GlbDisconnectedParts
                                             components[i].Min[axis] - components[j].Max[axis]);
                         if (g > 0) gap += g * g;
                     }
-                    if (gap <= eps * eps) cd.Union(i, j);
+                    if (gap > eps * eps) continue;
+                    // TWO ELONGATED islands only chain when they are the same LINE: parallel directions AND the
+                    // step between them runs along that direction. A hull trim dash and a sail luff dash that pass
+                    // close are near but perpendicular-stepped — they stay separate lines instead of one indirect
+                    // blob. Blobby islands keep pure distance merging.
+                    if (elong[i] && elong[j])
+                    {
+                        double dd = Math.Abs(dir[i].X * dir[j].X + dir[i].Y * dir[j].Y + dir[i].Z * dir[j].Z);
+                        if (dd < 0.85) continue;
+                        // COLINEARITY, not step angle: a diagonal hop to the NEXT dash of a neighbouring parallel
+                        // line can look "along the axis" (the leak that chained two lines stepwise). What separates
+                        // lines is the PERPENDICULAR offset of one dash's centre from the other's axis — near zero
+                        // for the same line, the full line spacing for a neighbour.
+                        double sx = ctr[j].X - ctr[i].X, sy = ctr[j].Y - ctr[i].Y, sz = ctr[j].Z - ctr[i].Z;
+                        double s2 = sx * sx + sy * sy + sz * sz;
+                        if (s2 > 1e-18)
+                        {
+                            double alongI = sx * dir[i].X + sy * dir[i].Y + sz * dir[i].Z;
+                            double alongJ = sx * dir[j].X + sy * dir[j].Y + sz * dir[j].Z;
+                            double perp2 = Math.Min(s2 - alongI * alongI, s2 - alongJ * alongJ);
+                            double lateralTol = 0.35 * eps;
+                            if (perp2 > lateralTol * lateralTol) continue;   // off-axis — a different line
+                        }
+                    }
+                    cd.Union(i, j);
                 }
             var merged = new Dictionary<int, Component>();
             for (int i = 0; i < components.Count; i++)
