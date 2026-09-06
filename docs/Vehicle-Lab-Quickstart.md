@@ -198,6 +198,48 @@ After Bake, **rebuild and deploy the Humankind mod**. A correct editor preview d
 by the game. Launch Humankind, enable the mod, load the target unit, and use F8 plus
 `BepInEx/LogOutput.log` when the runtime result differs.
 
+## 9. Large models — fitting the engine's draw ceiling
+
+The engine draws **at most 16,320 quads per baked unit mesh** (255 sub-particles × 64 primitives, a hard 8-bit
+field) and the overrun is **silent**: the mesh stores fully, but whatever baked last — masts, rigging, sails —
+simply never renders in-game, with no error anywhere. Every preview shows the full model; only the game clips.
+The tooling now surfaces this at both ends: the Factory prints a per-mesh
+`BAKED MESH … fits (N to spare)` / `OVER by N` line after each bake (over-ceiling also raises a dialog), and the
+plugin logs a `[Uni][BUDGET]` audit line per injected unit at load, catching units baked before the check
+existed.
+
+A 395k-vertex source (a fully rigged galley: 64+ oars, sails, flags, rigging) fits under that ceiling at full
+visual quality with this workflow — **delete and cut per role at the source, so the Factory's blind global
+reduction never has to choose what survives**:
+
+1. **Amputate before you diet.** Open the source in the **Model Workshop** (`Tools ▸ HAF ▸ Model Workshop`):
+   Probe lists every part's disconnected-island count; split the parts hiding floating junk (the merge-distance
+   slider keeps segmented ropes and trim lines whole — only genuinely distant debris separates); then, in the
+   Vehicle Lab, mark the junk **Ignore**. Deleting invisible geometry is free quality — on the galley this
+   removed three quarters of the raw source before any reduction ran.
+2. **Cut where nobody looks, spare the silhouette.** In **Vertices control**, set the per-role reduce dials by
+   visibility, not uniformly: Rigging 85–90 (ropes read as lines at game distance), Structure ~80, Body to
+   taste — but keep **Oar around 40 and Sail at or below 50**: blades and canvas *are* the unit's identity, and
+   thin sheets are what decimation destroys first (half-blades and tattered sails read worse than fewer ropes).
+   Cutting a rope past ~90 leaves floating dash fragments — lower the dial or Ignore the part outright.
+3. **Read the projection before generating.** **Verify** now ends with per-role vertex statistics and the
+   post-dial projection. Aim the generated GLB below roughly **30k triangles**: then the Factory bakes with
+   **Reduce to ~tris = 0** — no global decimation at all — and still fits the ceiling.
+4. **Trust the bake line, not the previews.** After Bake, the console's `BAKED MESH` line is the verdict. If it
+   says OVER, lower dials or Ignore more; do not ship it — the missing geometry will be exactly the parts you
+   care about, and the game will not tell you.
+5. **The escape hatches for stubborn parts.** A surface see-through from one side (mirrored halves import with
+   inverted winding; bow/stern-facing surfaces sit in the inside-out fix's deliberate blind spot; artists leave
+   backfaces behind occluders you may Ignore away) → mark it **Rudder** (always double-sided, winding-proof).
+   A part every automatic pass keeps damaging → **Preserve** (shipped byte-identical). Sail-attached fittings
+   must be marked **Sail** or they hang in mid-air when the canvas strikes; mast fittings stay **Structure**.
+6. **Re-point, don't re-classify.** When a Workshop split (or any re-export) produces a new GLB: load the
+   recipe, **Browse** to the new file (marked roles are kept), **Probe** (roles re-apply by part name — only the
+   new `_Part_NNN` rows need marking), Save. Every Save keeps a `.bak~` of what it overwrites.
+
+Beyond the single-mesh ceiling, the engine-native path is multiple meshes per unit (each gets its own 16,320
+budget, as vanilla's detailed units do) — a planned framework feature, not yet available.
+
 ## Fast symptom map
 
 | Symptom | First check |
