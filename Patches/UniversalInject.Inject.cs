@@ -1552,8 +1552,10 @@ namespace HumankindAssetFramework
                                     if (af == null) continue;
                                     uint aEnc = MemberUInt(af, "EncodedMeshAndVisualParticleCount", 0);
                                     if (aEnc == 0) continue;                // fragment renders nothing — leave the snapshot alone
+                                    var aLayObj = GetMember(af, "FxOutputLayer");
+                                    if (aLayObj == null) continue;          // encoded but layerless: never write index 0 over a live snapshot
                                     uint aBone = MemberUInt(af, "BoneIndex", 0);
-                                    uint aLay = MemberUInt(GetMember(af, "FxOutputLayer"), "LayerIndex", 0);
+                                    uint aLay = MemberUInt(aLayObj, "LayerIndex", 0);
                                     var ge2 = gfrags.GetValue((int)(start + fi));
                                     uint gEnc = (uint)encGpuF.GetValue(ge2);
                                     uint gLay = layGpuF != null ? (uint)layGpuF.GetValue(ge2) : 0;

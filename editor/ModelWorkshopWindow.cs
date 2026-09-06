@@ -45,6 +45,7 @@ public class ModelWorkshopWindow : EditorWindow
     // of 3-vert parts millimetres apart. Islands within this % of a part's own diagonal count as ONE part, so
     // only genuinely distant geometry — the floating junk — separates. 0 = pure topology.
     [SerializeField] float mergePct = 1f;
+    bool analyzePending;   // slider moved: recount on the first Layout pass after the drag releases
     [SerializeField] Vector2 scroll;
     string status = "Pick a GLB and press Probe parts.";
 
@@ -89,16 +90,19 @@ public class ModelWorkshopWindow : EditorWindow
         float newMergePct = EditorGUILayout.Slider(new GUIContent("Merge closer than (%)",
             "Islands nearer than this (percent of each part's own size) count as ONE part — so a segmented rope stays " +
             "one rope instead of shredding into hundreds of 3-vert fragments, while genuinely distant junk still " +
-            "separates. 0 = pure topology. Changing it re-analyzes the counts instantly (press Probe if the list is stale)."),
+            "separates. 0 = pure topology. Release the slider and the island counts recount (no Blender re-run)."),
             mergePct, 0f, 10f);
-        bool mergeChanged = !Mathf.Approximately(newMergePct, mergePct);
-        mergePct = newMergePct;
+        if (!Mathf.Approximately(newMergePct, mergePct)) { mergePct = newMergePct; analyzePending = rows.Count > 0; }
+        // DEFERRED recount (review find 2026-09-06): running Analyze mid-OnGUI replaced `rows` between IMGUI's
+        // Layout and event passes (control-count mismatch exceptions), and doing it per drag-tick re-parsed the
+        // whole GLB on every mouse move (seconds per tick on a real ship). Recount once, on the first Layout
+        // pass AFTER the drag ends.
+        if (analyzePending && Event.current.type == EventType.Layout && GUIUtility.hotControl == 0)
+        { analyzePending = false; Analyze(); }
 
         using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(srcFile) || !File.Exists(srcFile)))
             if (GUILayout.Button(new GUIContent("Probe parts", "List every mesh-carrying node with triangle and island counts (instant, pure C#), and build the turntable preview (headless Blender export) so a clicked row lights up in yellow."), GUILayout.Height(24)))
                 Probe();
-        // Slider moved with rows on screen: recount instantly (pure C#) without re-running the Blender preview.
-        if (mergeChanged && rows.Count > 0 && Event.current.type != EventType.Layout) Analyze();
 
         if (rows.Count > 0)
         {
