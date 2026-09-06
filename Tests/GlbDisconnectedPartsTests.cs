@@ -165,6 +165,22 @@ public class GlbDisconnectedPartsTests
     }
 
     [Fact]
+    public void Merge_compares_every_vertex_not_just_a_cell_representative()
+    {
+        // Review round 3 regression: two islands whose CLOSEST vertices (0.58 and 0.61 — 0.03 apart, well
+        // under the ~0.594 threshold) are neither island's first vertex in its grid cell. The per-cell
+        // representative shortcut compared only first-comers (0,0,0) vs (0.61,0,0) = 0.61 -> "separate",
+        // a false negative. Exact comparison must merge them into one island.
+        byte[] source = BuildGlb(new[] {
+            0f, 0f, 0f,     0.02f, 0.3f, 0f,  0.58f, 0f, 0f,
+            0.61f, 0f, 0f,  1.1f, 0.3f, 0f,   1.15f, 0f, 0f
+        });
+
+        Assert.Equal(2, GlbDisconnectedParts.Analyze(source).Single(i => i.NodeName == "Hull").Islands);
+        Assert.Equal(1, GlbDisconnectedParts.Analyze(source, 0.5).Single(i => i.NodeName == "Hull").Islands);
+    }
+
+    [Fact]
     public void Unnamed_nodes_split_by_index()
     {
         // A node with no name: Analyze must still list it (placeholder name, real index), and splitting by

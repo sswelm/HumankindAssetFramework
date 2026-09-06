@@ -253,6 +253,12 @@ public class ModelWorkshopWindow : EditorWindow
         previewPan = Vector2.zero;
         if (inst == null || string.IsNullOrEmpty(name)) return;
         var all = inst.GetComponentsInChildren<Renderer>();
+        // DUPLICATE NAMES (review round 3): split/check identity is the node INDEX, but the Blender preview
+        // round-trip carries only names — namesake rows all light the same renderers. Rare in this pipeline
+        // (the splitter uniquifies its output names); when it happens, say so instead of pretending precision.
+        int namesakes = rows.Count(r => r.node == name);
+        if (namesakes > 1)
+            status = $"⚠ {namesakes} parts share the name '{name}' — the preview highlight shows all of them; checkbox and Split still target exactly the row you clicked (by node index).";
         // EXACT name first; the fallback only accepts Blender's collision suffix ("Object_2.001"), never a mere
         // prefix — a bare StartsWith made "Object_2" light up Object_20..Object_29 too (half the ship in yellow).
         var hits = all.Where(x => x != null && x.gameObject.name == name).ToList();

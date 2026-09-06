@@ -632,40 +632,40 @@ public static class GlbDisconnectedParts
             }
             // VERTEX distance via a spatial hash (review find 2026-09-06: a bounding-box gap reads ZERO for an
             // island floating anywhere INSIDE a big part's box — the default merge then hid exactly the junk
-            // this tool exists to expose). Two components merge when vertices of theirs lie within eps.
-            // BOUNDED (review round 2): storing every triangle corner and scanning every prior point in the
-            // neighbourhood degraded quadratically on dense meshes (benchmarked seconds at a few thousand
-            // triangles — a real hull would freeze the Workshop). The grid now keeps ONE representative vertex
-            // per (component, cell): candidate generation is exact at cell granularity, the kept-vs-kept
-            // distance test stays exact, and only sub-cell duplicates are skipped — merge decisions are
-            // accurate to about one eps-cell, plenty for a junk-vs-junk dial. Distances are VERTEX distances:
-            // a long edge passing near a vertex is not seen (documented in the slider's tooltip).
-            var grid = new Dictionary<long, List<int>>();          // cell -> representative entries
-            var repCell = new HashSet<(long cell, int comp)>();     // (component, cell) dedup
-            var gridPts = new List<Vec3>();
-            var gridComp = new List<int>();
+            // this tool exists to expose). Two components merge when vertices of theirs lie within eps — the
+            // comparison is EXACT (review round 3: a per-cell representative produced false negatives — two
+            // vertices 0.01 apart missed because neither was its cell's first). Fast because the cost drivers
+            // are handled structurally instead of by dropping data:
+            //   - exact duplicate positions (glTF seam splits) dedup on insert;
+            //   - cells store vertices GROUPED BY COMPONENT, so the same-root skip is one check per component
+            //     per cell — the dense same-component clusters that caused the earlier quadratic blowup cost
+            //     O(1) per visit now — and a cross-component scan stops at its first hit (union).
             long CellKey(long cx, long cy, long cz) => (cx & 0x1FFFFF) | ((cy & 0x1FFFFF) << 21) | ((cz & 0x1FFFFF) << 42);
+            var cellMap = new Dictionary<long, Dictionary<int, List<Vec3>>>();
+            var seenVert = new HashSet<(int comp, double x, double y, double z)>();
             for (int i = 0; i < components.Count; i++)
                 foreach (Vec3 p in components[i].Points)
                 {
+                    if (!seenVert.Add((i, p.X, p.Y, p.Z))) continue;   // seam-duplicate position — no new information
                     long cx = (long)Math.Floor(p.X / eps), cy = (long)Math.Floor(p.Y / eps), cz = (long)Math.Floor(p.Z / eps);
-                    long key = CellKey(cx, cy, cz);
-                    if (!repCell.Add((key, i))) continue;   // this component already represents this cell
                     for (long dx = -1; dx <= 1; dx++) for (long dy = -1; dy <= 1; dy++) for (long dz = -1; dz <= 1; dz++)
                     {
-                        if (!grid.TryGetValue(CellKey(cx + dx, cy + dy, cz + dz), out List<int> cell)) continue;
-                        foreach (int e in cell)
+                        if (!cellMap.TryGetValue(CellKey(cx + dx, cy + dy, cz + dz), out Dictionary<int, List<Vec3>> byComp)) continue;
+                        foreach (var kv in byComp)
                         {
-                            int j = gridComp[e];
-                            if (cd.Find(j) == cd.Find(i)) continue;
-                            Vec3 q = gridPts[e];
-                            double ddx = p.X - q.X, ddy = p.Y - q.Y, ddz = p.Z - q.Z;
-                            if (ddx * ddx + ddy * ddy + ddz * ddz <= eps * eps && DirectionOk(i, j)) cd.Union(i, j);
+                            int j = kv.Key;
+                            if (cd.Find(j) == cd.Find(i) || !DirectionOk(i, j)) continue;
+                            foreach (Vec3 q in kv.Value)
+                            {
+                                double ddx = p.X - q.X, ddy = p.Y - q.Y, ddz = p.Z - q.Z;
+                                if (ddx * ddx + ddy * ddy + ddz * ddz <= eps * eps) { cd.Union(i, j); break; }
+                            }
                         }
                     }
-                    if (!grid.TryGetValue(key, out List<int> home)) grid.Add(key, home = new List<int>());
-                    home.Add(gridPts.Count);
-                    gridPts.Add(p); gridComp.Add(i);
+                    long key = CellKey(cx, cy, cz);
+                    if (!cellMap.TryGetValue(key, out Dictionary<int, List<Vec3>> home)) cellMap.Add(key, home = new Dictionary<int, List<Vec3>>());
+                    if (!home.TryGetValue(i, out List<Vec3> mine)) home.Add(i, mine = new List<Vec3>());
+                    mine.Add(p);
                 }
             var merged = new Dictionary<int, Component>();
             for (int i = 0; i < components.Count; i++)
