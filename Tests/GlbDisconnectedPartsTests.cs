@@ -149,7 +149,42 @@ public class GlbDisconnectedPartsTests
         Assert.Equal(4, result.OutputTriangles);
     }
 
-    static byte[] BuildGlb(float[] positions, bool withWeightAnimation = false)
+    [Fact]
+    public void Merge_uses_surface_distance_not_bounding_boxes()
+    {
+        // A long diagonal sliver whose bounding box covers the whole area, plus a small triangle floating
+        // INSIDE that box but ~8 units from any of the sliver's geometry. The bbox-gap version read the gap
+        // as ZERO and merged at every non-zero setting — hiding exactly the floating junk the Workshop exists
+        // to expose. True surface distance keeps them apart.
+        byte[] source = BuildGlb(new[] {
+            0f, 0f, 0f,   10f, 10f, 0f,  0f, 0.05f, 0f,
+            8f, 1f, 0f,   8.6f, 1f, 0f,  8f, 1.6f, 0f
+        });
+
+        Assert.Equal(2, GlbDisconnectedParts.Analyze(source, 0.05).Single(i => i.NodeName == "Hull").Islands);
+    }
+
+    [Fact]
+    public void Unnamed_nodes_split_by_index()
+    {
+        // A node with no name: Analyze must still list it (placeholder name, real index), and splitting by
+        // NodeIndex must work — name-based selection can never match null (the review-caught dead end).
+        byte[] source = BuildGlb(new[] {
+            0f, 0f, 0f,  1f, 0f, 0f,  0f, 1f, 0f,
+            10f, 0f, 0f, 11f, 0f, 0f, 10f, 1f, 0f
+        }, nodeName: null);
+
+        var info = GlbDisconnectedParts.Analyze(source).Single(i => i.Islands > 1);
+        Assert.Equal(0, info.NodeIndex);
+        Assert.False(string.IsNullOrEmpty(info.NodeName));   // display placeholder, never null
+
+        var result = GlbDisconnectedParts.Split(source, new HashSet<int> { info.NodeIndex }, 0);
+        Assert.True(result.Changed);
+        Assert.Equal(2, result.ChildPartsCreated);
+        Assert.Equal(2, result.OutputTriangles);
+    }
+
+    static byte[] BuildGlb(float[] positions, bool withWeightAnimation = false, string nodeName = "Hull")
     {
         byte[] positionBytes = new byte[positions.Length * 4];
         for (int i = 0; i < positions.Length; i++)
@@ -168,7 +203,9 @@ public class GlbDisconnectedPartsTests
             ["scene"] = 0,
             ["scenes"] = new JArray(new JObject { ["nodes"] = new JArray(0) }),
             ["nodes"] = new JArray(
-                new JObject { ["name"] = "Hull", ["mesh"] = 0, ["children"] = new JArray(1), ["translation"] = new JArray(2, 3, 4) },
+                nodeName == null
+                    ? new JObject { ["mesh"] = 0, ["children"] = new JArray(1), ["translation"] = new JArray(2, 3, 4) }
+                    : new JObject { ["name"] = nodeName, ["mesh"] = 0, ["children"] = new JArray(1), ["translation"] = new JArray(2, 3, 4) },
                 new JObject { ["name"] = "ExistingChild" }),
             ["meshes"] = new JArray(new JObject {
                 ["name"] = "HullMesh",

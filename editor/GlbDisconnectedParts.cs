@@ -266,6 +266,7 @@ public static class GlbDisconnectedParts
     // Read-only: nothing is written, so probing a 500k-triangle ship is safe and fast.
     public sealed class PartInfo
     {
+        public int NodeIndex;    // THE stable identity for selective splitting — names can be null or duplicated
         public string NodeName;
         public string MeshName;
         public int Triangles;
@@ -291,11 +292,12 @@ public static class GlbDisconnectedParts
         var byMesh = new Dictionary<int, MeshPlan>();
         var blockedByMesh = new Dictionary<int, string>();
         var infos = new List<PartInfo>();
-        foreach (JObject node in nodes.OfType<JObject>())
+        for (int nodeIndex = 0; nodeIndex < nodes.Count; nodeIndex++)
         {
-            if (node["mesh"] == null) continue;
+            var node = nodes[nodeIndex] as JObject;
+            if (node?["mesh"] == null) continue;
             int meshIndex = node.Value<int>("mesh");
-            var info = new PartInfo { NodeName = (string)node["name"] ?? ("node " + infos.Count), MeshName = (string)meshes[meshIndex]?["name"] ?? ("mesh " + meshIndex) };
+            var info = new PartInfo { NodeIndex = nodeIndex, NodeName = (string)node["name"] ?? ("node " + nodeIndex), MeshName = (string)meshes[meshIndex]?["name"] ?? ("mesh " + meshIndex) };
             if (node["extensions"]?["EXT_mesh_gpu_instancing"] != null)
                 info.Blocked = "GPU-instanced node";
             else if (blockedByMesh.TryGetValue(meshIndex, out string why))
@@ -314,15 +316,22 @@ public static class GlbDisconnectedParts
         return infos;
     }
 
-    public static Result Split(byte[] source) => Split(source, null, 0);
+    public static Result Split(byte[] source) => SplitCore(source, null, null, 0);
 
-    public static Result Split(byte[] source, ISet<string> onlyNodeNames) => Split(source, onlyNodeNames, 0);
+    public static Result Split(byte[] source, ISet<string> onlyNodeNames) => SplitCore(source, onlyNodeNames, null, 0);
 
-    // onlyNodeNames: when non-null, ONLY nodes whose name is in the set are split (the Model Workshop's
+    public static Result Split(byte[] source, ISet<string> onlyNodeNames, double mergeFraction) => SplitCore(source, onlyNodeNames, null, mergeFraction);
+
+    // Selection by NODE INDEX — the stable identity (review find 2026-09-06: a null-named node could be listed
+    // by Analyze but never matched by name, and duplicate names split every namesake). Names remain supported
+    // for callers that have them; Analyze's PartInfo.NodeIndex feeds this overload.
+    public static Result Split(byte[] source, ISet<int> onlyNodeIndices, double mergeFraction) => SplitCore(source, null, onlyNodeIndices, mergeFraction);
+
+    // onlyNodeNames/onlyNodeIndices: when non-null, ONLY matching nodes are split (the Model Workshop's
     // selective mode — a hull keeps its junk-free parts whole while the one island-soup part is exploded).
     // Original meshes are never removed, so a mesh shared with an unselected node keeps rendering there.
     // mergeFraction: islands within this fraction of a mesh's own diagonal fuse into one part (0 = topology only).
-    public static Result Split(byte[] source, ISet<string> onlyNodeNames, double mergeFraction)
+    static Result SplitCore(byte[] source, ISet<string> onlyNodeNames, ISet<int> onlyNodeIndices, double mergeFraction)
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
         Document document = Parse(source);
@@ -342,12 +351,15 @@ public static class GlbDisconnectedParts
         var result = new Result();
         var reader = new Accessors(root, originalData);
 
+        bool Selected(int idx, JObject nd) => onlyNodeIndices != null ? onlyNodeIndices.Contains(idx)
+                                            : onlyNodeNames == null || onlyNodeNames.Contains((string)nd["name"]);
         var referencedMeshes = new SortedSet<int>();
         var instancedMeshes = new HashSet<int>();
-        foreach (JObject node in nodes.OfType<JObject>())
+        for (int ni = 0; ni < nodes.Count; ni++)
         {
-            if (node["mesh"] == null) continue;
-            if (onlyNodeNames != null && !onlyNodeNames.Contains((string)node["name"])) continue;
+            var node = nodes[ni] as JObject;
+            if (node?["mesh"] == null) continue;
+            if (!Selected(ni, node)) continue;
             int meshIndex = node.Value<int>("mesh");
             referencedMeshes.Add(meshIndex);
             if (node["extensions"]?["EXT_mesh_gpu_instancing"] != null) instancedMeshes.Add(meshIndex);
@@ -412,7 +424,7 @@ public static class GlbDisconnectedParts
         {
             var node = nodes[nodeIndex] as JObject;
             if (node?["mesh"] == null) continue;
-            if (onlyNodeNames != null && !onlyNodeNames.Contains((string)node["name"])) continue;
+            if (!Selected(nodeIndex, node)) continue;
             MeshPlan plan;
             if (!plans.TryGetValue(node.Value<int>("mesh"), out plan)) continue;
 
@@ -482,17 +494,30 @@ public static class GlbDisconnectedParts
         }
     }
 
-    public static Result SplitFile(string inputPath, string outputPath) => SplitFile(inputPath, outputPath, null, 0);
+    public static Result SplitFile(string inputPath, string outputPath) => SplitFile(inputPath, outputPath, (ISet<string>)null, 0);
 
     public static Result SplitFile(string inputPath, string outputPath, ISet<string> onlyNodeNames) => SplitFile(inputPath, outputPath, onlyNodeNames, 0);
 
     public static Result SplitFile(string inputPath, string outputPath, ISet<string> onlyNodeNames, double mergeFraction)
     {
-        if (string.Equals(Path.GetFullPath(inputPath), Path.GetFullPath(outputPath), StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Choose a new output path; the source GLB is never overwritten.");
-        Result result = Split(File.ReadAllBytes(inputPath), onlyNodeNames, mergeFraction);
+        GuardPaths(inputPath, outputPath);
+        Result result = SplitCore(File.ReadAllBytes(inputPath), onlyNodeNames, null, mergeFraction);
         if (result.Changed) File.WriteAllBytes(outputPath, result.Bytes);
         return result;
+    }
+
+    public static Result SplitFile(string inputPath, string outputPath, ISet<int> onlyNodeIndices, double mergeFraction)
+    {
+        GuardPaths(inputPath, outputPath);
+        Result result = SplitCore(File.ReadAllBytes(inputPath), null, onlyNodeIndices, mergeFraction);
+        if (result.Changed) File.WriteAllBytes(outputPath, result.Bytes);
+        return result;
+    }
+
+    static void GuardPaths(string inputPath, string outputPath)
+    {
+        if (string.Equals(Path.GetFullPath(inputPath), Path.GetFullPath(outputPath), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Choose a new output path; the source GLB is never overwritten.");
     }
 
     static MeshPlan AnalyzeMesh(int meshIndex, JObject mesh, Accessors reader, bool keepSingle = false, double mergeFraction = 0)
@@ -587,41 +612,52 @@ public static class GlbDisconnectedParts
                 elong[i] = components[i].Elongated;
                 if (elong[i]) { dir[i] = components[i].Direction(); ctr[i] = components[i].Centroid(); }
             }
+            // TWO ELONGATED islands only chain when they are the same LINE: parallel directions and a colinear
+            // step (the perpendicular offset from either axis stays small). A hull trim dash and a sail luff
+            // dash that pass close are near but off-axis — separate lines, never one indirect blob. Blobby
+            // islands merge on distance alone.
+            bool DirectionOk(int i, int j)
+            {
+                if (!elong[i] || !elong[j]) return true;
+                double dd = Math.Abs(dir[i].X * dir[j].X + dir[i].Y * dir[j].Y + dir[i].Z * dir[j].Z);
+                if (dd < 0.85) return false;
+                double sx = ctr[j].X - ctr[i].X, sy = ctr[j].Y - ctr[i].Y, sz = ctr[j].Z - ctr[i].Z;
+                double s2 = sx * sx + sy * sy + sz * sz;
+                if (s2 <= 1e-18) return true;
+                double alongI = sx * dir[i].X + sy * dir[i].Y + sz * dir[i].Z;
+                double alongJ = sx * dir[j].X + sy * dir[j].Y + sz * dir[j].Z;
+                double perp2 = Math.Min(s2 - alongI * alongI, s2 - alongJ * alongJ);
+                double lateralTol = 0.35 * eps;
+                return perp2 <= lateralTol * lateralTol;
+            }
+            // TRUE surface distance via a spatial hash of every component's sample points (review find
+            // 2026-09-06: a bounding-box gap reads ZERO for an island floating anywhere INSIDE a big part's
+            // box — the default merge then hid exactly the junk this tool exists to expose). Two components
+            // merge only when two of their actual points lie within eps of each other.
+            var grid = new Dictionary<long, List<int>>();
+            var gridPts = new List<Vec3>();
+            var gridComp = new List<int>();
+            long CellKey(long cx, long cy, long cz) => (cx & 0x1FFFFF) | ((cy & 0x1FFFFF) << 21) | ((cz & 0x1FFFFF) << 42);
             for (int i = 0; i < components.Count; i++)
-                for (int j = i + 1; j < components.Count; j++)
+                foreach (Vec3 p in components[i].Points)
                 {
-                    double gap = 0;
-                    for (int axis = 0; axis < 3; axis++)
+                    long cx = (long)Math.Floor(p.X / eps), cy = (long)Math.Floor(p.Y / eps), cz = (long)Math.Floor(p.Z / eps);
+                    for (long dx = -1; dx <= 1; dx++) for (long dy = -1; dy <= 1; dy++) for (long dz = -1; dz <= 1; dz++)
                     {
-                        double g = Math.Max(components[j].Min[axis] - components[i].Max[axis],
-                                            components[i].Min[axis] - components[j].Max[axis]);
-                        if (g > 0) gap += g * g;
-                    }
-                    if (gap > eps * eps) continue;
-                    // TWO ELONGATED islands only chain when they are the same LINE: parallel directions AND the
-                    // step between them runs along that direction. A hull trim dash and a sail luff dash that pass
-                    // close are near but perpendicular-stepped — they stay separate lines instead of one indirect
-                    // blob. Blobby islands keep pure distance merging.
-                    if (elong[i] && elong[j])
-                    {
-                        double dd = Math.Abs(dir[i].X * dir[j].X + dir[i].Y * dir[j].Y + dir[i].Z * dir[j].Z);
-                        if (dd < 0.85) continue;
-                        // COLINEARITY, not step angle: a diagonal hop to the NEXT dash of a neighbouring parallel
-                        // line can look "along the axis" (the leak that chained two lines stepwise). What separates
-                        // lines is the PERPENDICULAR offset of one dash's centre from the other's axis — near zero
-                        // for the same line, the full line spacing for a neighbour.
-                        double sx = ctr[j].X - ctr[i].X, sy = ctr[j].Y - ctr[i].Y, sz = ctr[j].Z - ctr[i].Z;
-                        double s2 = sx * sx + sy * sy + sz * sz;
-                        if (s2 > 1e-18)
+                        if (!grid.TryGetValue(CellKey(cx + dx, cy + dy, cz + dz), out List<int> cell)) continue;
+                        foreach (int e in cell)
                         {
-                            double alongI = sx * dir[i].X + sy * dir[i].Y + sz * dir[i].Z;
-                            double alongJ = sx * dir[j].X + sy * dir[j].Y + sz * dir[j].Z;
-                            double perp2 = Math.Min(s2 - alongI * alongI, s2 - alongJ * alongJ);
-                            double lateralTol = 0.35 * eps;
-                            if (perp2 > lateralTol * lateralTol) continue;   // off-axis — a different line
+                            int j = gridComp[e];
+                            if (cd.Find(j) == cd.Find(i)) continue;
+                            Vec3 q = gridPts[e];
+                            double ddx = p.X - q.X, ddy = p.Y - q.Y, ddz = p.Z - q.Z;
+                            if (ddx * ddx + ddy * ddy + ddz * ddz <= eps * eps && DirectionOk(i, j)) cd.Union(i, j);
                         }
                     }
-                    cd.Union(i, j);
+                    long key = CellKey(cx, cy, cz);
+                    if (!grid.TryGetValue(key, out List<int> home)) grid.Add(key, home = new List<int>());
+                    home.Add(gridPts.Count);
+                    gridPts.Add(p); gridComp.Add(i);
                 }
             var merged = new Dictionary<int, Component>();
             for (int i = 0; i < components.Count; i++)

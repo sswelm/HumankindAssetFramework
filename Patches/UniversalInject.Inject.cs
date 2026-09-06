@@ -1559,7 +1559,8 @@ namespace HumankindAssetFramework
                                     var ge2 = gfrags.GetValue((int)(start + fi));
                                     uint gEnc = (uint)encGpuF.GetValue(ge2);
                                     uint gLay = layGpuF != null ? (uint)layGpuF.GetValue(ge2) : 0;
-                                    if (gEnc != aEnc || gLay != aLay)
+                                    uint gBone = boneGpuF != null ? (uint)boneGpuF.GetValue(ge2) : 0;
+                                    if (gEnc != aEnc || gLay != aLay || gBone != aBone)
                                     {
                                         encGpuF.SetValue(ge2, aEnc);
                                         boneGpuF?.SetValue(ge2, aBone);

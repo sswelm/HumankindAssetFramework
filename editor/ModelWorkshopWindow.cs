@@ -27,7 +27,8 @@ public class ModelWorkshopWindow : EditorWindow
     [Serializable]
     class Row
     {
-        public string node;      // the node name Split filters on
+        public int nodeIndex;    // the STABLE identity Split filters on (names can be null or duplicated)
+        public string node;      // display name
         public string mesh;
         public int tris;
         public int islands;      // 1 = nothing to split (row disabled)
@@ -167,7 +168,7 @@ public class ModelWorkshopWindow : EditorWindow
         try
         {
             rows = GlbDisconnectedParts.Analyze(File.ReadAllBytes(srcFile), mergePct / 100.0)
-                .Select(p => new Row { node = p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, split = kept.Contains(p.NodeName) })
+                .Select(p => new Row { nodeIndex = p.NodeIndex, node = p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, split = kept.Contains(p.NodeName) })
                 .OrderBy(r => NaturalPrefix(r.node), StringComparer.OrdinalIgnoreCase)
                 .ThenBy(r => NaturalNumber(r.node))
                 .ThenBy(r => r.node, StringComparer.OrdinalIgnoreCase).ToList();
@@ -315,8 +316,8 @@ public class ModelWorkshopWindow : EditorWindow
         try
         {
             EditorUtility.DisplayProgressBar("Model Workshop", "Splitting checked parts…", 0.4f);
-            var names = new HashSet<string>(rows.Where(r => r.split).Select(r => r.node));
-            var result = GlbDisconnectedParts.SplitFile(srcFile, outGlb, names, mergePct / 100.0);
+            var picked = new HashSet<int>(rows.Where(r => r.split).Select(r => r.nodeIndex));
+            var result = GlbDisconnectedParts.SplitFile(srcFile, outGlb, picked, mergePct / 100.0);
             if (!result.Changed) { status = "Nothing changed — the checked parts produced no split (see warnings in the console)."; return; }
             foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
             status = $"Split done: {result.NodesSplit} part(s) → {result.ChildPartsCreated} sub-parts, {result.SourceTriangles:N0} triangles preserved.\n{outGlb}\nNext: open it in the Vehicle Lab, Probe parts, and mark the junk islands Ignore.";

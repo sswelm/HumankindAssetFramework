@@ -1210,7 +1210,12 @@ public class VehicleLabWindow : EditorWindow
         parts.Clear(); boneParts.Clear(); useSourceRig = false;
         frames = 15; degrees = -360f; axisChoice = 0;
         treadAdvCells = 3; treadCellsPerLink = 4f; tracksStatic = false;
-        rockDegrees = 0f; rockFrames = 120; rockAxisChoice = 0; rockHeading = 0f; rockPitchDeg = 2.4f; rockRollCycles = 1; rockPitchCycles = 1; rockPitchPhase = 90f; waveEnabled = false; foldSpin = true; foldWave = false; foldOrient = false; foldParts = true; modelRot = Vector3.zero;
+        rockDegrees = 0f; rockFrames = 120; rockAxisChoice = 0; rockHeading = 0f; rockPitchDeg = 2.4f; rockRollCycles = 1; rockPitchCycles = 1; rockPitchPhase = 90f; waveEnabled = false; foldSpin = true; foldWave = false; foldOrient = false; foldParts = true; foldOars = false; foldReduce = false; foldTrails = false; modelRot = Vector3.zero;
+        // 0.5.4/0.5.5 fields (review find 2026-09-06: "new model" silently carried a 95% reduce or a tuned
+        // stroke into the next model) — reset to the live defaults, same values as a fresh window.
+        doubleSided = false; fixInsideOut = false;
+        oarSweepDeg = 24f; oarDipDeg = 18f; oarFrames = 24; oarBladeRollDeg = 0f; oarLiftDeg = 0f; oarRakeDeg = 0f; oarPivotPct = 30f; oarLengthPct = 100f;
+        riggingReducePct = 75f; structureReducePct = 50f; bodyReducePct = 0f; oarReducePct = 0f; sailReducePct = 0f; rudderReducePct = 0f;
         minVerts = 50; minPartSize = 0f; minHeight = -999f; maxHeight = 999f; minWidth = -999f; maxWidth = 999f;
         partFilter = 0; selectedPart = ""; partsScroll = Vector2.zero; previewPan = Vector2.zero;
         DestroyPreview();
@@ -1351,7 +1356,15 @@ public class VehicleLabWindow : EditorWindow
         { status = "Save cancelled — load the recipe first (Edit existing) if you meant to continue from it."; return; }
         if (File.Exists(p))
             try { File.Copy(p, Path.Combine(projRoot, RecipesDir, name + ".json.bak~"), true); }
-            catch (Exception bex) { Debug.LogWarning("[VehicleLab] recipe backup failed: " + bex.Message); }
+            catch (Exception bex)
+            {
+                // NO backup, NO overwrite (review find 2026-09-06): proceeding here would destroy the tuned
+                // recipe while the dialog above just promised recovery — the exact broken promise this guard
+                // was built to end. A locked .bak~ is rare; a silent loss is forever.
+                status = "Save ABORTED — could not write the backup (" + bex.Message + "); the recipe on disk is untouched.";
+                Debug.LogError("[VehicleLab] " + status);
+                return;
+            }
         var r = new Recipe
         {
             srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
