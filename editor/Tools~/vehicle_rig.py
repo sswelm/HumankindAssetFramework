@@ -334,6 +334,10 @@ preserve_names = namelist(argv[63]) if len(argv) > 63 and argv[63].strip() else 
 # RUDDER reduction (argv[64], 2026-09-06): the sixth tier — rudders are double-sided at export (every kept vertex
 # ships twice), so a dense one pays double. Same dissolve+collapse pass, before doubling. 0 = untouched.
 rudder_reduce = min(95.0, max(0.0, float(argv[64]))) if len(argv) > 64 and argv[64].strip() else 0.0
+# WHEEL reduction (argv[65], 2026-09-06): the seventh tier — CAD-style wheels (bolted rims, spoked hubs) can be
+# absurdly dense for something that mostly reads as a spinning disc. Runs in the same pre-armature pass, so the
+# proximity clustering and the axle inference (thinnest bbox extent — bbox survives decimation) see the slim mesh.
+wheel_reduce = min(95.0, max(0.0, float(argv[65]))) if len(argv) > 65 and argv[65].strip() else 0.0
 # OAR LIFT (argv[56]): a CONSTANT tilt about the dip axis, re-centring the whole stroke — the knob the dip sign
 # cannot be (±dip is the same oscillation, phase-flipped; the blades visit the same depths either way). A source
 # whose oars are modelled raked steeply into the water (the Khalandion: "at -30 they almost go vertically") rides
@@ -665,7 +669,7 @@ for grp, is_tail in ((rotor_names, False), (tailrotor_names, True)):
 # thousands of tiny disconnected islands each keep minimum topology), then COLLAPSE toward the dial's target
 # measured against the ORIGINAL count, so the percentage means what it says or better. The print carries all
 # three numbers so a too-aggressive dial is loud, not silent.
-for _rlabel, _rnames, _rpct in (("RIGGING", rigging_names, rigging_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce), ("RUDDER", rudder_names, rudder_reduce)):
+for _rlabel, _rnames, _rpct in (("RIGGING", rigging_names, rigging_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce), ("RUDDER", rudder_names, rudder_reduce), ("WHEEL", wheel_names, wheel_reduce)):
     if not _rnames or _rpct <= 0.5:
         continue
     try:
