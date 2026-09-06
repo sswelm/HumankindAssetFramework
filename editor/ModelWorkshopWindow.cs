@@ -259,11 +259,10 @@ public class ModelWorkshopWindow : EditorWindow
         int namesakes = rows.Count(r => r.node == name);
         if (namesakes > 1)
             status = $"⚠ {namesakes} parts share the name '{name}' — the preview highlight shows all of them; checkbox and Split still target exactly the row you clicked (by node index).";
-        // EXACT name first; the fallback only accepts Blender's collision suffix ("Object_2.001"), never a mere
-        // prefix — a bare StartsWith made "Object_2" light up Object_20..Object_29 too (half the ship in yellow).
-        var hits = all.Where(x => x != null && x.gameObject.name == name).ToList();
-        if (hits.Count == 0)
-            hits = all.Where(x => x != null && x.gameObject.name.StartsWith(name + ".")).ToList();
+        // EXACT name PLUS Blender's collision-suffix form ("Object_2.001") — combined, not fallback (review
+        // round 4: exact-only found the first namesake and starved the suffix branch, so duplicate rows lit the
+        // same renderer). Never a mere prefix — a bare StartsWith made "Object_2" light up Object_20..Object_29.
+        var hits = all.Where(x => x != null && (x.gameObject.name == name || x.gameObject.name.StartsWith(name + "."))).ToList();
         if (hits.Count == 0) return;
         if (highlightMat == null)
         {

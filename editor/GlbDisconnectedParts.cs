@@ -643,6 +643,13 @@ public static class GlbDisconnectedParts
             long CellKey(long cx, long cy, long cz) => (cx & 0x1FFFFF) | ((cy & 0x1FFFFF) << 21) | ((cz & 0x1FFFFF) << 42);
             var cellMap = new Dictionary<long, Dictionary<int, List<Vec3>>>();
             var seenVert = new HashSet<(int comp, double x, double y, double z)>();
+            // PAIR BUDGET (review round 4): two dense components hovering NEAR each other without ever merging
+            // (parallel shells just over eps, or direction-gated lines) re-scan each other's vertices for every
+            // probe — quadratic again (benchmarked seconds at 20k triangles). Each unordered component pair gets
+            // a bounded number of failed comparisons; past it the pair resolves as SEPARATE. The bias is the safe
+            // direction for a junk-exposure tool: giving up shows MORE islands, never silently fuses junk away.
+            const int PairComparisonBudget = 4096;
+            var pairSpent = new Dictionary<long, int>();
             for (int i = 0; i < components.Count; i++)
                 foreach (Vec3 p in components[i].Points)
                 {
@@ -655,11 +662,17 @@ public static class GlbDisconnectedParts
                         {
                             int j = kv.Key;
                             if (cd.Find(j) == cd.Find(i) || !DirectionOk(i, j)) continue;
+                            long pk = i < j ? ((long)i << 32) | (uint)j : ((long)j << 32) | (uint)i;
+                            pairSpent.TryGetValue(pk, out int spent);
+                            if (spent > PairComparisonBudget) continue;
+                            int used = 0; bool fused = false;
                             foreach (Vec3 q in kv.Value)
                             {
+                                used++;
                                 double ddx = p.X - q.X, ddy = p.Y - q.Y, ddz = p.Z - q.Z;
-                                if (ddx * ddx + ddy * ddy + ddz * ddz <= eps * eps) { cd.Union(i, j); break; }
+                                if (ddx * ddx + ddy * ddy + ddz * ddz <= eps * eps) { cd.Union(i, j); fused = true; break; }
                             }
+                            if (!fused) pairSpent[pk] = spent + used;
                         }
                     }
                     long key = CellKey(cx, cy, cz);

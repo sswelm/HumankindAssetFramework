@@ -575,6 +575,51 @@ def axle_axis(s):
     # AUTO: a wheel is THIN along its axle -> smallest extent
     return [Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1))][min(range(3), key=lambda i: s[i])]
 
+# ---- SOURCE-SIDE reduction tiers: RIGGING/STRUCTURE/BODY (argv[49..54]) + OAR/SAIL (argv[61..62]) ----
+# Runs BEFORE the wheel clustering below and the armature build, so cluster/axle inference, bone placement,
+# skinning, the winding fix, doubling and the export ALL see the reduced mesh (review round 4: this block used
+# to sit after the clustering, so the "clustering reads the slim mesh" contract in the tooltips was false). Two passes per part: LIMITED DISSOLVE first (tube/extruded geometry is massively redundant
+# along straight runs — a plain ratio collapse bottomed out at a 68% cut on the Khalandion's ropes because
+# thousands of tiny disconnected islands each keep minimum topology), then COLLAPSE toward the dial's target
+# measured against the ORIGINAL count, so the percentage means what it says or better. The print carries all
+# three numbers so a too-aggressive dial is loud, not silent.
+for _rlabel, _rnames, _rpct in (("RIGGING", rigging_names, rigging_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce), ("RUDDER", rudder_names, rudder_reduce), ("WHEEL", wheel_names, wheel_reduce)):
+    if not _rnames or _rpct <= 0.5:
+        continue
+    try:
+        bpy.ops.object.mode_set(mode='OBJECT')
+    except Exception:
+        pass
+    _rr_v0 = 0; _rr_v1 = 0; _rr_n = 0
+    for _rn in _rnames:
+        _ro2 = find_opt(_rn)
+        if _ro2 is None:
+            print("VEHICLE WARN: %s part '%s' not found — skipped" % (_rlabel.lower(), _rn)); continue
+        _v0 = len(_ro2.data.vertices)
+        _rb = bmesh.new(); _rb.from_mesh(_ro2.data)
+        bmesh.ops.dissolve_limit(_rb, angle_limit=math.radians(5.0), use_dissolve_boundaries=False,
+                                 verts=list(_rb.verts), edges=list(_rb.edges))
+        # TRIANGULATE the dissolved result immediately: the dissolve leaves long, often non-planar/concave n-gons,
+        # and Unity's FBX importer DISCARDS self-intersecting polygons on import (a wall of warnings + holes in the
+        # preview). Blender's ear-clipping handles these fine; no n-gon ever reaches an exporter. Adds no vertices.
+        bmesh.ops.triangulate(_rb, faces=list(_rb.faces))
+        _rb.to_mesh(_ro2.data); _rb.free()
+        _vmid = len(_ro2.data.vertices)
+        _target = max(8, int(_v0 * (1.0 - _rpct / 100.0)))
+        if _vmid > _target:
+            bpy.ops.object.select_all(action='DESELECT')
+            _ro2.select_set(True); bpy.context.view_layer.objects.active = _ro2
+            _dm2 = _ro2.modifiers.new("HAFReduce", 'DECIMATE')
+            _dm2.ratio = max(0.02, float(_target) / float(_vmid))
+            bpy.ops.object.modifier_apply(modifier=_dm2.name)
+        _v1 = len(_ro2.data.vertices)
+        _rr_v0 += _v0; _rr_v1 += _v1; _rr_n += 1
+        print("VEHICLE %s '%s': %d -> %d verts (dissolve pass: %d; dial %.0f%% = target %d)"
+              % (_rlabel, _rn, _v0, _v1, _vmid, _rpct, _target))
+    if _rr_n:
+        print("VEHICLE %s: %d part(s) reduced, %d -> %d verts total (%.0f%% cut)"
+              % (_rlabel, _rr_n, _rr_v0, _rr_v1, 100.0 * (1.0 - float(_rr_v1) / max(1, _rr_v0))))
+
 # ---- wheel clustering ----
 # A wheel is usually MANY shards (tire, rim, spokes, bolts...). Bones must NOT be per-shard: a spoke spinning
 # about its own bbox center pinwheels in place and the wheel shreds. Cluster the wheel parts by proximity —
@@ -661,50 +706,6 @@ for grp, is_tail in ((rotor_names, False), (tailrotor_names, True)):
     print("VEHICLE %s rotor: %d part(s), pivot (%.2f,%.2f,%.2f), axle (%.3f,%.3f,%.3f) [%s]"
           % ("tail" if is_tail else "main", len(grp), hub_c.x, hub_c.y, hub_c.z, axle.x, axle.y, axle.z, axle_src))
     print("VEHICLE rotor hub: %d part(s) -> bone at hub (%.2f,%.2f,%.2f), axle=%s (least-spread of centres)" % (len(grp), hub_c.x, hub_c.y, hub_c.z, tuple(axle)))
-
-# ---- SOURCE-SIDE reduction tiers: RIGGING/STRUCTURE/BODY (argv[49..54]) + OAR/SAIL (argv[61..62]) ----
-# Runs BEFORE the armature is built so bone placement, skinning, the winding fix, doubling and the export all see
-# the reduced mesh. Two passes per part: LIMITED DISSOLVE first (tube/extruded geometry is massively redundant
-# along straight runs — a plain ratio collapse bottomed out at a 68% cut on the Khalandion's ropes because
-# thousands of tiny disconnected islands each keep minimum topology), then COLLAPSE toward the dial's target
-# measured against the ORIGINAL count, so the percentage means what it says or better. The print carries all
-# three numbers so a too-aggressive dial is loud, not silent.
-for _rlabel, _rnames, _rpct in (("RIGGING", rigging_names, rigging_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce), ("RUDDER", rudder_names, rudder_reduce), ("WHEEL", wheel_names, wheel_reduce)):
-    if not _rnames or _rpct <= 0.5:
-        continue
-    try:
-        bpy.ops.object.mode_set(mode='OBJECT')
-    except Exception:
-        pass
-    _rr_v0 = 0; _rr_v1 = 0; _rr_n = 0
-    for _rn in _rnames:
-        _ro2 = find_opt(_rn)
-        if _ro2 is None:
-            print("VEHICLE WARN: %s part '%s' not found — skipped" % (_rlabel.lower(), _rn)); continue
-        _v0 = len(_ro2.data.vertices)
-        _rb = bmesh.new(); _rb.from_mesh(_ro2.data)
-        bmesh.ops.dissolve_limit(_rb, angle_limit=math.radians(5.0), use_dissolve_boundaries=False,
-                                 verts=list(_rb.verts), edges=list(_rb.edges))
-        # TRIANGULATE the dissolved result immediately: the dissolve leaves long, often non-planar/concave n-gons,
-        # and Unity's FBX importer DISCARDS self-intersecting polygons on import (a wall of warnings + holes in the
-        # preview). Blender's ear-clipping handles these fine; no n-gon ever reaches an exporter. Adds no vertices.
-        bmesh.ops.triangulate(_rb, faces=list(_rb.faces))
-        _rb.to_mesh(_ro2.data); _rb.free()
-        _vmid = len(_ro2.data.vertices)
-        _target = max(8, int(_v0 * (1.0 - _rpct / 100.0)))
-        if _vmid > _target:
-            bpy.ops.object.select_all(action='DESELECT')
-            _ro2.select_set(True); bpy.context.view_layer.objects.active = _ro2
-            _dm2 = _ro2.modifiers.new("HAFReduce", 'DECIMATE')
-            _dm2.ratio = max(0.02, float(_target) / float(_vmid))
-            bpy.ops.object.modifier_apply(modifier=_dm2.name)
-        _v1 = len(_ro2.data.vertices)
-        _rr_v0 += _v0; _rr_v1 += _v1; _rr_n += 1
-        print("VEHICLE %s '%s': %d -> %d verts (dissolve pass: %d; dial %.0f%% = target %d)"
-              % (_rlabel, _rn, _v0, _v1, _vmid, _rpct, _target))
-    if _rr_n:
-        print("VEHICLE %s: %d part(s) reduced, %d -> %d verts total (%.0f%% cut)"
-              % (_rlabel, _rr_n, _rr_v0, _rr_v1, 100.0 * (1.0 - float(_rr_v1) / max(1, _rr_v0))))
 
 # armature: Root at origin + ONE bone per wheel cluster (tail along the axle => local Y IS the axle) + Turret
 arm_data = bpy.data.armatures.new("VehicleRig")
@@ -2177,7 +2178,12 @@ def _cluster_grounded(_ci9):
     _cc9 = clusters[_ci9].get("c")
     if _cc9 is None:
         return True
-    return (_cc9.z - 0.5 * clusters[_ci9].get("m", 0.0)) <= _gz_min + 0.15 * max(_gz_h, 1e-6)
+    # VERTICAL half-extent, not the largest dimension (review round 4): a wide flat cluster measured by its
+    # max dimension "reached" metres below its real bottom and re-classified as grounded — the exact case
+    # this test exists to exclude.
+    _sz9 = clusters[_ci9].get("s")
+    _half9 = 0.5 * (_sz9.z if hasattr(_sz9, "z") else clusters[_ci9].get("m", 0.0))
+    return (_cc9.z - _half9) <= _gz_min + 0.15 * max(_gz_h, 1e-6)
 _airborne = []
 for _bi2, bname in enumerate(cluster_bones):
     _deg_i = degrees
