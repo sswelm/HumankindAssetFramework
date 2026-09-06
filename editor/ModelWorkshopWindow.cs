@@ -115,7 +115,7 @@ public class ModelWorkshopWindow : EditorWindow
             if (inst != null)
             {
                 EditorGUILayout.LabelField("Preview   (drag = orbit · middle/right-drag = pan · scroll = zoom · click a part row to highlight)", EditorStyles.miniBoldLabel);
-                var rect = GUILayoutUtility.GetRect(200f, 4000f, 300f, 300f, GUILayout.ExpandWidth(true));
+                var rect = GUILayoutUtility.GetRect(200f, 4000f, 600f, 600f, GUILayout.ExpandWidth(true));
                 HandlePreviewInput(rect);
                 if (Event.current.type == EventType.Repaint) RenderPreview(rect);
             }
