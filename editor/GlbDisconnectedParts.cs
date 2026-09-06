@@ -230,7 +230,9 @@ public static class GlbDisconnectedParts
         public string Blocked;   // non-null = unsupported for splitting (compressed, instanced, non-triangle…)
     }
 
-    public static List<PartInfo> Analyze(byte[] source)
+    public static List<PartInfo> Analyze(byte[] source) => Analyze(source, 0);
+
+    public static List<PartInfo> Analyze(byte[] source, double mergeFraction)
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
         Document document = Parse(source);
@@ -257,7 +259,7 @@ public static class GlbDisconnectedParts
                 info.Blocked = why;
             else if (!byMesh.TryGetValue(meshIndex, out MeshPlan plan))
             {
-                try { byMesh[meshIndex] = plan = AnalyzeMesh(meshIndex, (JObject)meshes[meshIndex], reader, keepSingle: true); }
+                try { byMesh[meshIndex] = plan = AnalyzeMesh(meshIndex, (JObject)meshes[meshIndex], reader, keepSingle: true, mergeFraction: mergeFraction); }
                 catch (Exception ex) when (ex is InvalidDataException || ex is OverflowException)
                 { blockedByMesh[meshIndex] = info.Blocked = ex.Message; }
             }
@@ -269,12 +271,15 @@ public static class GlbDisconnectedParts
         return infos;
     }
 
-    public static Result Split(byte[] source) => Split(source, null);
+    public static Result Split(byte[] source) => Split(source, null, 0);
+
+    public static Result Split(byte[] source, ISet<string> onlyNodeNames) => Split(source, onlyNodeNames, 0);
 
     // onlyNodeNames: when non-null, ONLY nodes whose name is in the set are split (the Model Workshop's
     // selective mode — a hull keeps its junk-free parts whole while the one island-soup part is exploded).
     // Original meshes are never removed, so a mesh shared with an unselected node keeps rendering there.
-    public static Result Split(byte[] source, ISet<string> onlyNodeNames)
+    // mergeFraction: islands within this fraction of a mesh's own diagonal fuse into one part (0 = topology only).
+    public static Result Split(byte[] source, ISet<string> onlyNodeNames, double mergeFraction)
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
         Document document = Parse(source);
@@ -317,7 +322,7 @@ public static class GlbDisconnectedParts
             }
             try
             {
-                MeshPlan plan = AnalyzeMesh(meshIndex, (JObject)meshes[meshIndex], reader);
+                MeshPlan plan = AnalyzeMesh(meshIndex, (JObject)meshes[meshIndex], reader, keepSingle: false, mergeFraction: mergeFraction);
                 if (plan != null) plans.Add(meshIndex, plan);
             }
             catch (Exception ex) when (ex is InvalidDataException || ex is OverflowException)
@@ -434,18 +439,20 @@ public static class GlbDisconnectedParts
         }
     }
 
-    public static Result SplitFile(string inputPath, string outputPath) => SplitFile(inputPath, outputPath, null);
+    public static Result SplitFile(string inputPath, string outputPath) => SplitFile(inputPath, outputPath, null, 0);
 
-    public static Result SplitFile(string inputPath, string outputPath, ISet<string> onlyNodeNames)
+    public static Result SplitFile(string inputPath, string outputPath, ISet<string> onlyNodeNames) => SplitFile(inputPath, outputPath, onlyNodeNames, 0);
+
+    public static Result SplitFile(string inputPath, string outputPath, ISet<string> onlyNodeNames, double mergeFraction)
     {
         if (string.Equals(Path.GetFullPath(inputPath), Path.GetFullPath(outputPath), StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Choose a new output path; the source GLB is never overwritten.");
-        Result result = Split(File.ReadAllBytes(inputPath), onlyNodeNames);
+        Result result = Split(File.ReadAllBytes(inputPath), onlyNodeNames, mergeFraction);
         if (result.Changed) File.WriteAllBytes(outputPath, result.Bytes);
         return result;
     }
 
-    static MeshPlan AnalyzeMesh(int meshIndex, JObject mesh, Accessors reader, bool keepSingle = false)
+    static MeshPlan AnalyzeMesh(int meshIndex, JObject mesh, Accessors reader, bool keepSingle = false, double mergeFraction = 0)
     {
         JArray primitives = mesh["primitives"] as JArray;
         if (primitives == null || primitives.Count == 0) return null;
@@ -516,6 +523,49 @@ public static class GlbDisconnectedParts
         }
         if (byRoot.Count <= 1 && !keepSingle) return null;   // keepSingle: Analyze wants the row (islands=1) anyway
         var components = byRoot.Values.OrderBy(c => c.Min[0]).ThenBy(c => c.Min[1]).ThenBy(c => c.Min[2]).ThenBy(c => c.FirstTriangle).ToList();
+        // DISTANCE MERGE (2026-09-06, the 602-island rope): topology alone shreds segmented geometry into
+        // hundreds of 3-vert parts that are millimetres apart — useless to review, worse to rig. Islands whose
+        // bounding boxes lie within mergeFraction of THIS mesh's own diagonal fuse back into one part, so only
+        // geometry that is genuinely far away (the floating junk this tool exists for) separates. 0 = pure
+        // topology, byte-compatible with the original behavior.
+        if (mergeFraction > 0 && components.Count > 1)
+        {
+            double eps = diagonal * mergeFraction;
+            var cd = new DisjointSet();
+            for (int i = 0; i < components.Count; i++) cd.Add();
+            for (int i = 0; i < components.Count; i++)
+                for (int j = i + 1; j < components.Count; j++)
+                {
+                    double gap = 0;
+                    for (int axis = 0; axis < 3; axis++)
+                    {
+                        double g = Math.Max(components[j].Min[axis] - components[i].Max[axis],
+                                            components[i].Min[axis] - components[j].Max[axis]);
+                        if (g > 0) gap += g * g;
+                    }
+                    if (gap <= eps * eps) cd.Union(i, j);
+                }
+            var merged = new Dictionary<int, Component>();
+            for (int i = 0; i < components.Count; i++)
+            {
+                int root = cd.Find(i);
+                if (!merged.TryGetValue(root, out Component into)) { merged.Add(root, components[i]); continue; }
+                foreach (var kv in components[i].Indices)
+                {
+                    if (!into.Indices.TryGetValue(kv.Key, out List<uint> list)) into.Indices.Add(kv.Key, kv.Value);
+                    else list.AddRange(kv.Value);
+                }
+                for (int axis = 0; axis < 3; axis++)
+                {
+                    into.Min[axis] = Math.Min(into.Min[axis], components[i].Min[axis]);
+                    into.Max[axis] = Math.Max(into.Max[axis], components[i].Max[axis]);
+                }
+                into.FirstTriangle = Math.Min(into.FirstTriangle, components[i].FirstTriangle);
+                into.TriangleCount += components[i].TriangleCount;
+            }
+            components = merged.Values.OrderBy(c => c.Min[0]).ThenBy(c => c.Min[1]).ThenBy(c => c.Min[2]).ThenBy(c => c.FirstTriangle).ToList();
+            if (components.Count <= 1 && !keepSingle) return null;   // everything within reach of everything: nothing to split
+        }
         return new MeshPlan {
             MeshIndex = meshIndex,
             Name = (string)mesh["name"] ?? ("Mesh_" + meshIndex),

@@ -41,6 +41,10 @@ public class ModelWorkshopWindow : EditorWindow
     [SerializeField] string outGlb = "";
     [SerializeField] List<Row> rows = new List<Row>();
     [SerializeField] bool hideWhole = false;   // filter: hide "1 island — already whole" rows (nothing to split there)
+    // DISTANCE MERGE (2026-09-06, the 602-island rope): topology alone shreds segmented geometry into hundreds
+    // of 3-vert parts millimetres apart. Islands within this % of a part's own diagonal count as ONE part, so
+    // only genuinely distant geometry — the floating junk — separates. 0 = pure topology.
+    [SerializeField] float mergePct = 1f;
     [SerializeField] Vector2 scroll;
     string status = "Pick a GLB and press Probe parts.";
 
@@ -82,9 +86,19 @@ public class ModelWorkshopWindow : EditorWindow
             }
         }
 
+        float newMergePct = EditorGUILayout.Slider(new GUIContent("Merge closer than (%)",
+            "Islands nearer than this (percent of each part's own size) count as ONE part — so a segmented rope stays " +
+            "one rope instead of shredding into hundreds of 3-vert fragments, while genuinely distant junk still " +
+            "separates. 0 = pure topology. Changing it re-analyzes the counts instantly (press Probe if the list is stale)."),
+            mergePct, 0f, 10f);
+        bool mergeChanged = !Mathf.Approximately(newMergePct, mergePct);
+        mergePct = newMergePct;
+
         using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(srcFile) || !File.Exists(srcFile)))
             if (GUILayout.Button(new GUIContent("Probe parts", "List every mesh-carrying node with triangle and island counts (instant, pure C#), and build the turntable preview (headless Blender export) so a clicked row lights up in yellow."), GUILayout.Height(24)))
                 Probe();
+        // Slider moved with rows on screen: recount instantly (pure C#) without re-running the Blender preview.
+        if (mergeChanged && rows.Count > 0 && Event.current.type != EventType.Layout) Analyze();
 
         if (rows.Count > 0)
         {
@@ -137,22 +151,30 @@ public class ModelWorkshopWindow : EditorWindow
 
     void Probe()
     {
+        if (Analyze()) BuildPreviewViaBlender();
+    }
+
+    // The list half of Probe: pure C#, fast enough to re-run live when the merge slider moves. Checked state
+    // survives a recount by part name (island counts change; the chosen parts don't). NATURAL name order:
+    // Object_2 follows Object_1 and Object_10 comes after Object_9 — trailing digits compare as numbers.
+    bool Analyze()
+    {
+        var kept = new HashSet<string>(rows.Where(r => r.split).Select(r => r.node));
         try
         {
-            // NATURAL name order (user request 2026-09-06): Object_2 follows Object_1 and Object_10 comes after
-            // Object_9 — the list reads like the source's own part numbering, not by island count and not the
-            // lexicographic trap (Object_1, Object_10, Object_2…). Trailing digits compare as numbers.
-            rows = GlbDisconnectedParts.Analyze(File.ReadAllBytes(srcFile))
-                .Select(p => new Row { node = p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked })
+            rows = GlbDisconnectedParts.Analyze(File.ReadAllBytes(srcFile), mergePct / 100.0)
+                .Select(p => new Row { node = p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, split = kept.Contains(p.NodeName) })
                 .OrderBy(r => NaturalPrefix(r.node), StringComparer.OrdinalIgnoreCase)
                 .ThenBy(r => NaturalNumber(r.node))
                 .ThenBy(r => r.node, StringComparer.OrdinalIgnoreCase).ToList();
+            foreach (var r in rows) if (r.islands <= 1 || r.blocked != null) r.split = false;   // no longer splittable at this distance
             int multi = rows.Count(r => r.islands > 1 && r.blocked == null);
-            status = multi == 0 ? "Every part is a single attached island — nothing to split."
-                   : $"{rows.Count} part(s); {multi} hold more than one island. Check the ones hiding junk (a huge island count usually means ropes/rigging — splitting those explodes the part list; usually leave them whole).";
+            status = multi == 0 ? "Every part is a single attached island (at this merge distance) — nothing to split."
+                   : $"{rows.Count} part(s); {multi} hold more than one island at merge distance {mergePct:0.#}%. Check the ones hiding junk; raise the slider if a part still shreds into fragments.";
+            Repaint();
+            return true;
         }
-        catch (Exception e) { rows.Clear(); status = "Probe failed: " + e.Message; return; }
-        BuildPreviewViaBlender();
+        catch (Exception e) { rows.Clear(); status = "Probe failed: " + e.Message; return false; }
     }
 
     // "Object_12" -> ("Object_", 12): sort names by prefix, then by the trailing number as a NUMBER.
@@ -290,7 +312,7 @@ public class ModelWorkshopWindow : EditorWindow
         {
             EditorUtility.DisplayProgressBar("Model Workshop", "Splitting checked parts…", 0.4f);
             var names = new HashSet<string>(rows.Where(r => r.split).Select(r => r.node));
-            var result = GlbDisconnectedParts.SplitFile(srcFile, outGlb, names);
+            var result = GlbDisconnectedParts.SplitFile(srcFile, outGlb, names, mergePct / 100.0);
             if (!result.Changed) { status = "Nothing changed — the checked parts produced no split (see warnings in the console)."; return; }
             foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
             status = $"Split done: {result.NodesSplit} part(s) → {result.ChildPartsCreated} sub-parts, {result.SourceTriangles:N0} triangles preserved.\n{outGlb}\nNext: open it in the Vehicle Lab, Probe parts, and mark the junk islands Ignore.";

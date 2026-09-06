@@ -107,6 +107,27 @@ public class GlbDisconnectedPartsTests
         Assert.Equal(2, chosen.OutputTriangles);
     }
 
+    [Fact]
+    public void Distance_merge_fuses_near_islands_and_keeps_far_junk_separate()
+    {
+        // Three disconnected triangles: two 0.5 apart (a segmented rope), one 50 away (floating junk).
+        byte[] source = BuildGlb(new[] {
+            0f, 0f, 0f,    1f, 0f, 0f,    0f, 1f, 0f,
+            1.5f, 0f, 0f,  2.5f, 0f, 0f,  1.5f, 1f, 0f,
+            50f, 0f, 0f,   51f, 0f, 0f,   50f, 1f, 0f
+        });
+
+        // Pure topology: three islands.
+        Assert.Equal(3, GlbDisconnectedParts.Analyze(source).Single(i => i.NodeName == "Hull").Islands);
+
+        // 5% of the ~51-unit diagonal ≈ 2.5 merge reach: the rope halves fuse, the junk stays its own part.
+        Assert.Equal(2, GlbDisconnectedParts.Analyze(source, 0.05).Single(i => i.NodeName == "Hull").Islands);
+        var result = GlbDisconnectedParts.Split(source, new HashSet<string> { "Hull" }, 0.05);
+        Assert.Equal(2, result.ChildPartsCreated);
+        Assert.Equal(3, result.SourceTriangles);
+        Assert.Equal(3, result.OutputTriangles);
+    }
+
     static byte[] BuildGlb(float[] positions, bool withWeightAnimation = false)
     {
         byte[] positionBytes = new byte[positions.Length * 4];
