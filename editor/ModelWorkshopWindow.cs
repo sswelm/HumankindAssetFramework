@@ -218,7 +218,11 @@ public class ModelWorkshopWindow : EditorWindow
         previewPan = Vector2.zero;
         if (inst == null || string.IsNullOrEmpty(name)) return;
         var all = inst.GetComponentsInChildren<Renderer>();
-        var hits = all.Where(x => x != null && (x.gameObject.name == name || x.gameObject.name.StartsWith(name))).ToList();
+        // EXACT name first; the fallback only accepts Blender's collision suffix ("Object_2.001"), never a mere
+        // prefix — a bare StartsWith made "Object_2" light up Object_20..Object_29 too (half the ship in yellow).
+        var hits = all.Where(x => x != null && x.gameObject.name == name).ToList();
+        if (hits.Count == 0)
+            hits = all.Where(x => x != null && x.gameObject.name.StartsWith(name + ".")).ToList();
         if (hits.Count == 0) return;
         if (highlightMat == null)
         {
