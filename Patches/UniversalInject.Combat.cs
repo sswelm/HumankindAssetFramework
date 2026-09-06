@@ -1111,7 +1111,7 @@ namespace HumankindAssetFramework
             if (_flatN == null) return "_MainTex";   // solids not built yet — nothing was ever painted; full paint follows
             if (mat.HasProperty("_NormalMap") && !ReferenceEquals(mat.GetTexture("_NormalMap"), _flatN)) return "_NormalMap";
             if (mat.HasProperty("_AmbiantOcclusionMap") && !ReferenceEquals(mat.GetTexture("_AmbiantOcclusionMap"), _white)) return "_AmbiantOcclusionMap";
-            if (mat.HasProperty("_ColorMask") && !ReferenceEquals(mat.GetTexture("_ColorMask"), _black)) return "_ColorMask";
+            if (mat.HasProperty("_ColorMask") && !ReferenceEquals(mat.GetTexture("_ColorMask"), _cmask)) return "_ColorMask";
             if (mat.HasProperty("_RoughnessMap") && !ReferenceEquals(mat.GetTexture("_RoughnessMap"), _grey)) return "_RoughnessMap";
             if (mat.HasProperty("_MetallicMap") && !ReferenceEquals(mat.GetTexture("_MetallicMap"), _black)) return "_MetallicMap";
             if (mat.GetTextureScale("_MainTex") != UnityEngine.Vector2.one) return "_MainTex_ST.scale";
@@ -1150,7 +1150,7 @@ namespace HumankindAssetFramework
                                 // frame on a stable material (perf pass 2026-07-19).
                                 string drift = OurBindingsDrifted(mat, e.tex);
                                 if (drift == null) continue;
-                                if (_flatN == null) { _flatN = Solid(0.5f, 0.5f, 1f); _white = Solid(1f, 1f, 1f); _black = Solid(0f, 0f, 0f); _grey = Solid(0.5f, 0.5f, 0.5f); }
+                                if (_flatN == null) { _flatN = Solid(0.5f, 0.5f, 1f); _white = Solid(1f, 1f, 1f); _black = Solid(0f, 0f, 0f); _grey = Solid(NeutralRoughness, NeutralRoughness, NeutralRoughness); _cmask = Solid(NeutralColorMask, NeutralColorMask, NeutralColorMask); }
                                 NoteRepaint(e.resourceName, drift);
                                 if (!stLogged) { stLogged = true; Plugin.Diag($"[Uni] {e.resourceName} host _MainTex_ST scale={mat.GetTextureScale("_MainTex")} offset={mat.GetTextureOffset("_MainTex")}"); }
                                 mat.SetTexture("_MainTex", e.tex);
@@ -1163,7 +1163,7 @@ namespace HumankindAssetFramework
                                 // UVs -> they'd smear the host's detail/camo across the model, worst at the stern).
                                 mat.SetTexture("_NormalMap", _flatN);
                                 mat.SetTexture("_AmbiantOcclusionMap", _white);
-                                mat.SetTexture("_ColorMask", _black);
+                                mat.SetTexture("_ColorMask", _cmask);
                                 mat.SetTexture("_RoughnessMap", _grey);
                                 mat.SetTexture("_MetallicMap", _black);
                             }
@@ -1173,6 +1173,26 @@ namespace HumankindAssetFramework
 
         static UnityEngine.Texture2D Solid(float r, float g, float b)
         { var t = new UnityEngine.Texture2D(1, 1); t.SetPixel(0, 0, new UnityEngine.Color(r, g, b, 1f)); t.Apply(); return t; }
+
+        // Neutral overlay-map values for injected skins, live-tunable from the F8 window (config: Factory/
+        // SkinRoughness + Factory/SkinColorMask, applied at startup). Chasing the galley's washed-out deck
+        // (2026-09-06): the wash ignores in-place edits of the shared 1x1s, so the pawn pipeline likely
+        // SNAPSHOTS material textures (the district perLayerDataCB precedent) — each setter therefore
+        // allocates a NEW 1x1: the drift check sees the new object and repaints via SetTexture, a material
+        // change a snapshotting pipeline can notice. The old 1x1s are deliberately NOT destroyed (a material
+        // still referencing one would flash pink); the leak is a few bytes per slider notch, user-bounded.
+        internal static float NeutralRoughness { get; private set; } = 0.5f;   // _RoughnessMap: 0.5 = the historic semi-gloss constant
+        internal static float NeutralColorMask { get; private set; } = 1f;     // _ColorMask: Amplitude's convention is INVERTED from the obvious one — black = FULL empire tint, white = none (galley drill 2026-09-06: the old black solid painted the empire's white secondary over the whole ship; the deck-wide wash). 1 = untinted.
+        internal static void SetNeutralRoughness(float v)
+        {
+            NeutralRoughness = UnityEngine.Mathf.Clamp01(v);
+            if (_grey != null) _grey = Solid(NeutralRoughness, NeutralRoughness, NeutralRoughness);
+        }
+        internal static void SetNeutralColorMask(float v)
+        {
+            NeutralColorMask = UnityEngine.Mathf.Clamp01(v);
+            if (_cmask != null) _cmask = Solid(NeutralColorMask, NeutralColorMask, NeutralColorMask);
+        }
 
         // Paint an atlas onto a (cloned) output layer's render materials — the TickOne recipe generalized for props:
         // _MainTex swapped, the atlas UV transform reset to 1:1 (the host cropped a slice of a SHARED atlas), and the
@@ -1188,14 +1208,14 @@ namespace HumankindAssetFramework
                         {
                             string drift = OurBindingsDrifted(mat, tex);
                             if (drift == null) continue;
-                            if (_flatN == null) { _flatN = Solid(0.5f, 0.5f, 1f); _white = Solid(1f, 1f, 1f); _black = Solid(0f, 0f, 0f); _grey = Solid(0.5f, 0.5f, 0.5f); }
+                            if (_flatN == null) { _flatN = Solid(0.5f, 0.5f, 1f); _white = Solid(1f, 1f, 1f); _black = Solid(0f, 0f, 0f); _grey = Solid(NeutralRoughness, NeutralRoughness, NeutralRoughness); _cmask = Solid(NeutralColorMask, NeutralColorMask, NeutralColorMask); }
                             NoteRepaint("prop:" + tag, drift);
                             mat.SetTexture("_MainTex", tex);
                             mat.SetTextureScale("_MainTex", UnityEngine.Vector2.one);
                             mat.SetTextureOffset("_MainTex", UnityEngine.Vector2.zero);
                             mat.SetTexture("_NormalMap", _flatN);
                             mat.SetTexture("_AmbiantOcclusionMap", _white);
-                            mat.SetTexture("_ColorMask", _black);
+                            mat.SetTexture("_ColorMask", _cmask);
                             mat.SetTexture("_RoughnessMap", _grey);
                             mat.SetTexture("_MetallicMap", _black);
                         }

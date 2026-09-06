@@ -101,6 +101,8 @@ namespace HumankindAssetFramework
         // past it is multiple meshes/fragments per unit, not a bigger stride.)
         internal static ConfigEntry<string> DumpPawnRig;      // CATERPILLAR investigation: pawn-name substring (e.g. "MediumTanks"); when that VANILLA addon loads, dump its skeleton bone tables + clip fields once (how do vanilla tank treads roll?). "" = off.
         internal static ConfigEntry<int>    RespawnDelayFrames; // frames to wait after a borrowed-rotor unit renders before re-spawning it (first-instance rotor fix)
+        internal static ConfigEntry<string> SkinRoughness;      // neutral _RoughnessMap value painted on injected-model materials (0..1); live-tunable from the F8 window (angle-dependent sky-sheen fix)
+        internal static ConfigEntry<string> SkinColorMask;      // neutral _ColorMask value (0..1) painted on injected-model materials. INVERTED convention: 0 (black) = full empire tint (the galley's washed deck), 1 (white) = untinted — the default
         internal static ConfigEntry<bool>   PersistUnitFacing;  // persist each army's on-screen facing to a HAF side-file on save and restore it on load (the standard save has no facing field)
         // --- EXPERIMENTAL: district visual repoint (the second injection axis; see docs/District-Visuals.md) ---
         internal static ConfigEntry<bool>   DistrictRepointOn;   // master enable for the district-visual repoint hook
@@ -191,6 +193,18 @@ namespace HumankindAssetFramework
                                   "Frames to wait after a borrowed-rotor unit (a model with respawnAfterLoad set) renders before " +
                                   "the plugin re-spawns it to clear the first-instance low-rotor bug. 1 = near-instant (default). " +
                                   "Increase (e.g. 30 = ~0.5s at 60fps) only if a slower machine briefly shows the low rotor before it corrects.");
+
+            SkinRoughness = Config.Bind("Factory", "SkinRoughness", "0.5",
+                                  "Neutral roughness-map value (0..1) painted on every injected model's material when HAF " +
+                                  "neutralizes the donor's overlay maps. 0.5 (the old constant) is semi-gloss — big flat " +
+                                  "surfaces like a ship's deck mirror the pale sky at some headings and look washed out. " +
+                                  "Tune LIVE with the F8 window's slider until the sheen is gone, then this remembers it.");
+            UniversalInject.SetNeutralRoughness(CfgFloat(SkinRoughness, 0.5f));
+            SkinColorMask = Config.Bind("Factory", "SkinColorMask", "1",
+                                  "Neutral empire-colour-mask value (0..1) painted on every injected model's material. The game's " +
+                                  "convention is INVERTED: 0 (black) = FULL empire tint — the pale deck-wide wash the galley showed " +
+                                  "(2026-09-06) — and 1 (white) = untinted, the correct neutral. Tune LIVE with the F8 slider.");
+            UniversalInject.SetNeutralColorMask(CfgFloat(SkinColorMask, 1f));
 
             PersistUnitFacing = Config.Bind("Factory", "PersistUnitFacing", true,
                                   "Persist each army's on-screen facing (FormationAngle) to a HAF side-file " +
@@ -655,6 +669,27 @@ namespace HumankindAssetFramework
                 float nv = GUILayout.HorizontalSlider(h, 0.02f, 1f, GUILayout.Width(160));
                 if (Mathf.Abs(nv - h) > 0.001f) DistrictInject.SetFlatHeight(nv);
                 if (overriding && GUILayout.Button("Reset", GUILayout.Width(55))) DistrictInject.ClearFlatHeightOverride();
+            }
+            GUILayout.Space(4);
+            // Injected-skin roughness — the neutral _RoughnessMap HAF paints on every injected model. LIVE:
+            // dragging edits the shared 1x1 in place, so all injected units update the same frame. Drag until
+            // the angle-dependent sky sheen on big flat surfaces (a ship's deck) disappears; the value persists
+            // via the Factory/SkinRoughness config entry.
+            using (new GUILayout.HorizontalScope())
+            {
+                float rq = UniversalInject.NeutralRoughness;
+                GUILayout.Label($"Injected-skin roughness (sky-sheen test — drag until the wash is gone): {rq:0.00}", GUILayout.Width(420));
+                float nrq = GUILayout.HorizontalSlider(rq, 0f, 1f, GUILayout.Width(180));
+                if (Mathf.Abs(nrq - rq) > 0.005f)
+                { UniversalInject.SetNeutralRoughness(nrq); SkinRoughness.Value = nrq.ToString(System.Globalization.CultureInfo.InvariantCulture); }
+            }
+            using (new GUILayout.HorizontalScope())
+            {
+                float cm = UniversalInject.NeutralColorMask;
+                GUILayout.Label($"Injected-skin colour mask (0 = full empire tint, 1 = untinted): {cm:0.00}", GUILayout.Width(420));
+                float ncm = GUILayout.HorizontalSlider(cm, 0f, 1f, GUILayout.Width(180));
+                if (Mathf.Abs(ncm - cm) > 0.005f)
+                { UniversalInject.SetNeutralColorMask(ncm); SkinColorMask.Value = ncm.ToString(System.Globalization.CultureInfo.InvariantCulture); }
             }
             GUILayout.Space(4);
             GUILayout.Label("GPU mesh buffer (live) — Shift+F8 also logs it:");
