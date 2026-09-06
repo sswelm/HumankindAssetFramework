@@ -441,7 +441,7 @@ public class VehicleLabWindow : EditorWindow
                 EditorGUILayout.LabelField($"{(useSourceRig && boneParts.Count > 0 ? "Source BONES" : "Parts")} ({shown.Count} shown{(hidden > 0 ? $", {hidden} hidden by the sliders" : "")}{(unreviewed > 0 ? $", {unreviewed} undecided" : ", all decided")}{(edgecases > 0 ? $", {edgecases} edge-case" : "")}) — mark {(useSourceRig && boneParts.Count > 0 ? "the bones that SPIN (Wheel)" : "the wheels & turret")}:", EditorStyles.boldLabel);
                 if (useSourceRig && boneParts.Count > 0)   // 2026-08-20: a user hunted for the turret's shards here — in this mode they are ONE row
                     EditorGUILayout.LabelField("Each row is one BONE of the shipped skeleton; all the shards skinned to it count as that row (the turret's parts = the Turret bone). Untick the fast path to list and mark individual parts.", EditorStyles.wordWrappedMiniLabel);
-                EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   W/T/B = Wheel/Turret/Body   ·   R = Rotor (main, spins about the mast)   ·   L = taiL rotor (spins about the lateral axis)   ·   G = Gun (rides the Turret; muzzle/socket anchor)   ·   C = Caterpillar (tread loop)   ·   O = Oar   ·   S = Structure   ·   I = Ignore (DELETED)   ·   D = Default   ·   E = Edgecase", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   W/T/B = Wheel/Turret/Body   ·   R = Rigging   ·   L = taiL rotor (spins about the lateral axis)   ·   G = Gun (rides the Turret; muzzle/socket anchor)   ·   C = Caterpillar (tread loop)   ·   O = Oar   ·   S = Structure   ·   I = Ignore (DELETED)   ·   D = Default   ·   E = Edgecase", EditorStyles.miniLabel);
                 // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
                 // part's role — the whole list can be reviewed without mousing between rows and dropdowns.
                 var ev = Event.current;
@@ -465,7 +465,7 @@ public class VehicleLabWindow : EditorWindow
                                         : ev.keyCode == KeyCode.E ? Role.Edgecase
                                         : ev.keyCode == KeyCode.C ? Role.Caterpillar
                                         : ev.keyCode == KeyCode.G ? Role.Gun
-                                        : ev.keyCode == KeyCode.R ? Role.Rotor
+                                        : ev.keyCode == KeyCode.R ? Role.Rigging   // R = Rigging (2026-09-06 user request; Rotor is dropdown-only — ropes are marked by the dozen, rotors once per helicopter)
                                         : ev.keyCode == KeyCode.O ? Role.Oar
                                         : ev.keyCode == KeyCode.S ? Role.Structure   // S = Structure (2026-09-06 user request; Sail is dropdown-only — a review pass marks far more railings than canvases)
                                         : ev.keyCode == KeyCode.L ? Role.TailRotor : Role.Body;

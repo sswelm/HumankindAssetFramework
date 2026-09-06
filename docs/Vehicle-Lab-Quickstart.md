@@ -57,7 +57,7 @@ axle disagreement, unpaired wheels, turret outliers, and visible interior geomet
 | **Body** (`B`) | Reviewed, static geometry; weighted to Root. |
 | **Wheel** (`W`) | Spins about its inferred or selected axle; nearby wheel shards form one hub. |
 | **Turret** (`T`) | Joins the shared Turret bone. |
-| **Rotor** (`R`) | Main rotor group; fused to one hub and spun about the mast axis. |
+| **Rotor** | Main rotor group; fused to one hub and spun about the mast axis. |
 | **Tail rotor** (`L`) | Tail fan group; fused to one hub with its own lateral axle and trim controls. |
 | **Caterpillar** (`C`) | Tread loop; enables the path-instanced rigid-link controls. |
 | **Gun** (`G`) | Barrel assembly on the Gun bone; rides the Turret when one exists. |
@@ -66,7 +66,7 @@ axle disagreement, unpaired wheels, turret outliers, and visible interior geomet
 | **Trail** | Split-trail arm; receives a body-end hinge and the generated `Deploy` action. |
 | **Oar** (`O`) | A galley oar bank — one merged mesh of poles/blades spanning **both** sides. Split into one bone per oar with a baked rowing stroke. Optional **Oar reduce (%)** dial (runs before clustering, so bones land on the slim mesh). |
 | **Sail** | Marked canvas. Always exported double-sided, kept out of the inside-out flip, and struck/raised by its own generated `Furl` clip — hidden at idle, up while moving. Optional **Sail reduce (%)** dial — every vertex kept ships twice (double-sided), but the first non-zero step already cuts hard on flat canvas, so go gently. |
-| **Rigging** | Rope/line geometry — dense but barely visible at game distance. Reduced at Generate by the **Rigging reduce (%)** dial, at the source. |
+| **Rigging** (`R`) | Rope/line geometry — dense but barely visible at game distance. Reduced at Generate by the **Rigging reduce (%)** dial, at the source. |
 | **Structure** (`S`) | Dense detail geometry (railings, a carved bow) — more visible than rigging, so its own usually-gentler **Structure reduce (%)** dial. |
 | **Flag** | Banners/pennants — the **opposite of sails**: they fly at anchor and are struck below the keel while the ship moves (one Flag bone, held flipped through `Spin`). Double-sided. |
 | **Rudder** | Double-sided and **always visible**, winding kept — for slabs the inside-out test cannot decide (a half-inverted rudder scores ~0; no flip can repair it). No bone, no clip. |
