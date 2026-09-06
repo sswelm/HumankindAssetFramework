@@ -327,6 +327,10 @@ rudder_names = namelist(argv[60]) if len(argv) > 60 and argv[60].strip() else []
 # decimation (collapse never bridges disconnected components), so the per-oar recovery is unaffected.
 oar_reduce = min(95.0, max(0.0, float(argv[61]))) if len(argv) > 61 and argv[61].strip() else 0.0
 sail_reduce = min(95.0, max(0.0, float(argv[62]))) if len(argv) > 62 and argv[62].strip() else 0.0
+# PRESERVE parts (argv[63], 2026-09-06): shipped byte-identical — no reduce dial reaches them, the inside-out
+# flip skips them, and NEITHER double-siding path touches them (global switch included). They weld to the body
+# like Body parts but keep their OWN mesh through the join so the export passes can identify them by name.
+preserve_names = namelist(argv[63]) if len(argv) > 63 and argv[63].strip() else []
 # OAR LIFT (argv[56]): a CONSTANT tilt about the dip axis, re-centring the whole stroke — the knob the dip sign
 # cannot be (±dip is the same oscillation, phase-flipped; the blades visit the same depths either way). A source
 # whose oars are modelled raked steeply into the water (the Khalandion: "at -30 they almost go vertically") rides
@@ -999,6 +1003,16 @@ for _fn3 in rudder_names:
     rudder_by_name.add(_fo3.name)
 if rudder_by_name:
     print("VEHICLE RUDDER: %d part(s) — double-sided at export, always visible, authored winding kept" % len(rudder_by_name))
+
+# ---- PRESERVE parts: resolved to a name set — own mesh through the join, exempt from every mutating pass ----
+preserve_by_name = set()
+for _pn9 in preserve_names:
+    _po9 = find_opt(_pn9)
+    if _po9 is None:
+        print("VEHICLE WARN: preserve part '%s' not found — skipped" % _pn9); continue
+    preserve_by_name.add(_po9.name)
+if preserve_by_name:
+    print("VEHICLE PRESERVE: %d part(s) — shipped byte-identical (no reduce, no winding fix, no doubling)" % len(preserve_by_name))
 
 # ---- FLAG bone: every marked flag welds to ONE bone so the banners can be struck as a unit (hidden underway) ----
 flag_found = []
@@ -1836,6 +1850,8 @@ def _join_per_bone():
             _k = "__oar__" + o.name
         elif o.name in rudder_by_name:
             _k = "__rud__" + o.name
+        elif o.name in preserve_by_name:
+            _k = "__keep__" + o.name   # PRESERVE: own mesh, so the flip and doubling passes can exempt it by name
         else:
             _k = ("__track__" + o.name) if o.name in _track_by_name else bone_of.get(o.name, body_bone)
         groups.setdefault(_k, []).append(o)
@@ -2582,7 +2598,7 @@ if fix_inside_out:
     _fall = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]
     _fxn = 0; _fxkept = 0
     for _fo in _fall:
-        if any(g.name.startswith("Oar_") or g.name in ("Sail", "Flag") for g in _fo.vertex_groups) or _fo.name.startswith("Mesh___rud__"):
+        if any(g.name.startswith("Oar_") or g.name in ("Sail", "Flag") for g in _fo.vertex_groups) or _fo.name.startswith("Mesh___rud__") or _fo.name.startswith("Mesh___keep__"):
             continue
         _fb = bmesh.new(); _fb.from_mesh(_fo.data); _fb.normal_update()
         _fb.verts.ensure_lookup_table(); _fb.faces.ensure_lookup_table()
@@ -2633,7 +2649,7 @@ if fix_inside_out:
 # path used to include them): the Khalandian's blades ship as authored front/back sheet pairs, already
 # two-sided, and doubling them z-shimmered four near-coincident layers. The role's nature decides, both ways.
 _dall = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]
-_dtargets = ([o for o in _dall if not any(g.name.startswith("Oar_") for g in o.vertex_groups)]
+_dtargets = ([o for o in _dall if not any(g.name.startswith("Oar_") for g in o.vertex_groups) and not o.name.startswith("Mesh___keep__")]
              if double_sided else
              [o for o in _dall
               if any(g.name in ("Sail", "Flag") for g in o.vertex_groups) or o.name.startswith("Mesh___rud__")])

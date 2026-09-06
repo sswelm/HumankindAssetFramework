@@ -124,6 +124,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   preserved; the tool appends only filtered index accessors and child nodes, verifies the triangle total, and writes
   a new `<name>_split_parts.glb`. Duplicate vertices at UV/normal seams are welded with a tight scale-relative
   tolerance, so a visually continuous surface is not split merely because its shading data has a seam.
+- **Preserve — a role that keeps a part exactly as authored.** No reduction, no inside-out flip, no doubling
+  (the global Double-sided switch included); welds to the hull like Body but ships as its own untouched mesh.
+  The escape hatch for parts every automatic pass keeps getting wrong.
 - **Model Workshop — the aimed version of the splitter.** `Tools ▸ HAF ▸ Model Workshop`: Probe lists every
   mesh-carrying node with its triangle count and disconnected-island count; check exactly the parts hiding
   floating junk and Split writes a GLB where ONLY those become `_Part_NNN` children (same lossless method).
