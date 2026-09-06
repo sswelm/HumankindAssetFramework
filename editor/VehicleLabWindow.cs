@@ -1402,8 +1402,10 @@ public class VehicleLabWindow : EditorWindow
         if (inst == null || string.IsNullOrEmpty(name)) return;
         var all = inst.GetComponentsInChildren<Renderer>();
         var hits = new List<Renderer>();
+        // the fallback accepts only Blender's collision suffix ("Object_2.001"), never a bare prefix — a bare
+        // StartsWith would pick Object_20 for a missing Object_2 (the Workshop hit this; hardened here too)
         var byName = all.FirstOrDefault(x => x != null && x.gameObject.name == name)
-                  ?? all.FirstOrDefault(x => x != null && x.gameObject.name.StartsWith(name));
+                  ?? all.FirstOrDefault(x => x != null && x.gameObject.name.StartsWith(name + "."));
         if (byName != null) hits.Add(byName);
         else if (ShardsByBone(all).TryGetValue(name, out var shards)) hits.AddRange(shards);
         if (hits.Count == 0) return;
