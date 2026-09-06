@@ -135,15 +135,32 @@ public class ModelWorkshopWindow : EditorWindow
     {
         try
         {
+            // NATURAL name order (user request 2026-09-06): Object_2 follows Object_1 and Object_10 comes after
+            // Object_9 — the list reads like the source's own part numbering, not by island count and not the
+            // lexicographic trap (Object_1, Object_10, Object_2…). Trailing digits compare as numbers.
             rows = GlbDisconnectedParts.Analyze(File.ReadAllBytes(srcFile))
                 .Select(p => new Row { node = p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked })
-                .OrderByDescending(r => r.islands).ThenBy(r => r.node, StringComparer.OrdinalIgnoreCase).ToList();
+                .OrderBy(r => NaturalPrefix(r.node), StringComparer.OrdinalIgnoreCase)
+                .ThenBy(r => NaturalNumber(r.node))
+                .ThenBy(r => r.node, StringComparer.OrdinalIgnoreCase).ToList();
             int multi = rows.Count(r => r.islands > 1 && r.blocked == null);
             status = multi == 0 ? "Every part is a single attached island — nothing to split."
                    : $"{rows.Count} part(s); {multi} hold more than one island. Check the ones hiding junk (a huge island count usually means ropes/rigging — splitting those explodes the part list; usually leave them whole).";
         }
         catch (Exception e) { rows.Clear(); status = "Probe failed: " + e.Message; return; }
         BuildPreviewViaBlender();
+    }
+
+    // "Object_12" -> ("Object_", 12): sort names by prefix, then by the trailing number as a NUMBER.
+    static string NaturalPrefix(string s)
+    {
+        int i = s.Length; while (i > 0 && char.IsDigit(s[i - 1])) i--;
+        return s.Substring(0, i);
+    }
+    static long NaturalNumber(string s)
+    {
+        int i = s.Length; while (i > 0 && char.IsDigit(s[i - 1])) i--;
+        return i < s.Length && long.TryParse(s.Substring(i), out long n) ? n : -1;
     }
 
     // ---- preview build: the Vehicle Lab's probe export (headless Blender writes an FBX of the model), imported
