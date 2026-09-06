@@ -347,7 +347,13 @@ public class VehicleLabWindow : EditorWindow
                 var p = EditorUtility.OpenFilePanel("Pick the static vehicle model", Path.GetDirectoryName(string.IsNullOrEmpty(srcFile) ? "D:/3DModels" : srcFile), "glb,gltf,fbx,obj,blend");
                 if (!string.IsNullOrEmpty(p))
                 {
-                    srcFile = p; parts.Clear(); status = "";
+                    // KEEP the marked roles (2026-09-06, "I had to redo everything again"): re-pointing a recipe at a
+                    // revised export (a Workshop-split GLB, a re-decimated source) is the NORMAL flow, and Probe already
+                    // merges by part name — clearing here silently defeated that merge and threw away a whole
+                    // classification. Parts absent from the new file drop out at the next Probe on their own;
+                    // <new model> in Edit-existing is the deliberate fresh start.
+                    srcFile = p;
+                    status = parts.Count > 0 ? $"Source changed; {parts.Count} marked part(s) KEPT — press Probe parts to re-list against the new file (roles re-apply by name)." : "";
                     outGlb = Path.Combine(Path.GetDirectoryName(p), Path.GetFileNameWithoutExtension(p) + "_Spin.glb").Replace('\\', '/');   // suggestion only — fully editable below
                 }
             }
