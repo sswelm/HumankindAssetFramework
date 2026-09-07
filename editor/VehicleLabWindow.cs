@@ -871,17 +871,35 @@ public class VehicleLabWindow : EditorWindow
 
             int wheels = list.Count(x => IsSpinner(x.role));
             int oars = list.Count(x => x.role == Role.Oar);
-            // Oar recovery needs shard geometry and cannot run against source-bone rows. Keep this gate aligned
-            // with vehicle_rig.py's defensive rigfast rejection so the UI can never report a successful no-op.
+            // FAST-PATH SUPPORT MATRIX (review finding 9, 2026-09-07): rigfast spins WHEEL bones only — it
+            // parsed but silently ignored Rotor/Tail rotor lists and wave rock, while this gate counted all
+            // three spinner roles and accepted wave alone: Generate reported DONE and nothing moved. Keep this
+            // gate aligned with vehicle_rig.py's rigfast rejections so the UI can never report a successful
+            // no-op. (On the fast path a spinning bone marked Wheel works today — the rejection says so.)
             bool fastPathOars = FastPath && oars > 0;
-            bool canRig = !fastPathOars && (wheels > 0 || oars > 0 || (waveEnabled && (rockDegrees > 0f || rockPitchDeg > 0f)));
+            int fastRotors = FastPath ? list.Count(x => x.role == Role.Rotor || x.role == Role.TailRotor) : 0;
+            bool wantWave = waveEnabled && (rockDegrees > 0f || rockPitchDeg > 0f);
+            bool fastWave = FastPath && wantWave;
+            int fastWheels = FastPath ? list.Count(x => x.role == Role.Wheel) : 0;
+            bool canRig = FastPath ? (!fastPathOars && fastRotors == 0 && !fastWave && fastWheels > 0)
+                                   : (wheels > 0 || oars > 0 || wantWave);
             if (fastPathOars)
                 EditorGUILayout.HelpBox("Oar recovery is not available on the source-skeleton fast path. Disable " +
                     "Use source skeleton, Probe parts, and mark the merged oar meshes instead.", MessageType.Warning);
+            if (fastRotors > 0)
+                EditorGUILayout.HelpBox("Rotor / Tail rotor roles don't run on the source-skeleton fast path — mark the " +
+                    "spinning source BONE as Wheel instead (fast-path bones spin about their own axis), or disable " +
+                    "Use source skeleton to rig the mesh parts.", MessageType.Warning);
+            if (fastWave)
+                EditorGUILayout.HelpBox("Wave rock doesn't run on the source-skeleton fast path — disable Use source " +
+                    "skeleton to rig the mesh with a rocking hull.", MessageType.Warning);
             using (new EditorGUI.DisabledScope(!canRig || string.IsNullOrEmpty(outGlb)))
                 if (GUILayout.Button(new GUIContent($"Generate rig{(useSourceRig && boneParts.Count > 0 ? " (fast path)" : "")}  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
                         fastPathOars ? "Disable the source-skeleton fast path before recovering oars from merged mesh geometry."
-                        : !canRig ? "Mark at least one entry as Wheel / Rotor / Tail rotor / Oar — or set a Wave rock amplitude (a floating unit needs no wheels)."
+                        : fastRotors > 0 ? "Mark the spinning source bone as Wheel, or disable the source-skeleton fast path."
+                        : fastWave ? "Disable the source-skeleton fast path to use Wave rock."
+                        : !canRig ? (FastPath ? "Mark at least one source bone as Wheel — the fast path spins wheel bones."
+                                              : "Mark at least one entry as Wheel / Rotor / Tail rotor / Oar — or set a Wave rock amplitude (a floating unit needs no wheels).")
                         : "Runs Blender: rig + Spin action + GLB export + preview."), GUILayout.Height(28)))
                     Vehicleize();
         }
@@ -1556,6 +1574,19 @@ public class VehicleLabWindow : EditorWindow
         if (FastPath && ActiveParts.Any(p => p.role == Role.Oar))
         {
             status = "Oar recovery needs mesh parts. Disable Use source skeleton, Probe parts, then mark the merged oar meshes.";
+            return;
+        }
+        // Mirror of the Generate gate (review finding 9): rigfast spins WHEEL bones only — a Rotor/TailRotor
+        // marking or wave rock would be silently dropped by the fast path, so refuse here too (the script also
+        // hard-rejects, this just keeps the message in the window instead of the console).
+        if (FastPath && ActiveParts.Any(p => p.role == Role.Rotor || p.role == Role.TailRotor))
+        {
+            status = "Rotor / Tail rotor roles don't run on the fast path. Mark the spinning source bone as Wheel, or disable Use source skeleton.";
+            return;
+        }
+        if (FastPath && waveEnabled && (rockDegrees > 0f || rockPitchDeg > 0f))
+        {
+            status = "Wave rock doesn't run on the fast path. Disable Use source skeleton to rig the mesh with a rocking hull.";
             return;
         }
         // OVERWRITE GUARD: the output path is explicit and user-owned — an existing file (e.g. a HAND-MADE rig like

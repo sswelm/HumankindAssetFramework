@@ -5,6 +5,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.6 — unreleased
 
+- **The source-skeleton fast path says NO instead of silently doing nothing.** The fast path spins **Wheel**
+  bones only — but the Generate gate accepted Rotor / Tail rotor markings and Wave rock on it, the script
+  parsed and ignored them, and the result was "RIG DONE" with nothing moving. Both roles and wave rock are now
+  rejected loudly on the fast path, in the window (gate + warning boxes with the workaround: mark the spinning
+  source bone as Wheel, or disable the fast path) and in the script (hard error, like the existing Oar guard).
 - **Typing a different source path into the Workshop resets the probe.** Only the Browse button cleared the
   part list — typing or pasting another file's path kept the previous probe's rows, checked node indices,
   preview and output path live, so Split would carve the *new* file by the *old* file's node indices and write
