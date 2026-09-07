@@ -5,6 +5,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.6 — unreleased
 
+- **External review hardening (three finds on this release's own fixes).** A kept failed-restore backup is no
+  longer destroyed by simply retrying the bake — each bake attempt backs up into its own unique directory, so
+  an unresolved recovery backup survives until you delete it. The Workshop's output path now *tracks* the
+  source file while auto-derived (typing a source no longer freezes the output at the first keystroke's
+  fragment); editing the field takes ownership. And the Factory's Browse unit-scale guess disarms the moment a
+  save or bake persists it, closing the window where a stale guess could overwrite a newer Lab-saved value.
 - **Recipe loading: absent-key defaults have one source of truth.** The load path carried hand-written
   fallbacks for keys missing from old recipes, justified by a comment claiming JsonUtility ignores field
   initializers — measured false (Unity 2021.3.1f1 batch probe): initializers DO run, and absent keys keep

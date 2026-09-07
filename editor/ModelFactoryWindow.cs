@@ -2058,7 +2058,7 @@ public class ModelFactoryWindow : EditorWindow
         cur.fireOnAttack = false; cur.deployOnStop = false;
         cur.deployPoseTime = 0f; cur.deploySpeed = 0f; cur.recoilSpeed = 0f;
         bool saved = ModelRegistry.Upsert(cur);
-        if (saved) { formDiffersFromRegistry = false; loadedName = cur.resourceName; }   // form is now the saved truth
+        if (saved) { formDiffersFromRegistry = false; loadedName = cur.resourceName; browseUnitFixGuess = -1; }   // form is now the saved truth; a just-persisted Browse unit-fix guess DISARMS here — waiting for the next rebase to notice left a window where it could overwrite a newer Lab-saved value (external review of PR #22)
         RefreshList();
         status = saved
             ? $"'{cur.resourceName}' animation configuration DELETED from the registry — the next Bake is static. (Relaunch also stops the animated override.)"
@@ -2093,7 +2093,7 @@ public class ModelFactoryWindow : EditorWindow
             modelFileChanged = !string.Equals(regE.modelFile ?? "", cur.modelFile, StringComparison.OrdinalIgnoreCase);
         }
         bool saved = ModelRegistry.Upsert(cur);
-        if (saved) { formDiffersFromRegistry = false; loadedName = cur.resourceName; }   // form is now the saved truth
+        if (saved) { formDiffersFromRegistry = false; loadedName = cur.resourceName; browseUnitFixGuess = -1; }   // form is now the saved truth; a just-persisted Browse unit-fix guess DISARMS here — waiting for the next rebase to notice left a window where it could overwrite a newer Lab-saved value (external review of PR #22)
         string renameNote = saved ? FinishRename() : "";
         RefreshList();
         selected = System.Array.IndexOf(existing, cur.resourceName); if (selected < 0) selected = 0;
@@ -2208,7 +2208,7 @@ public class ModelFactoryWindow : EditorWindow
         cur.clipIdleAlt = cfg.animated && cfg.animStateDriven && !string.IsNullOrEmpty(r.clipIdleAltGuid) ? ModelRegistry.ParseGuid(r.clipIdleAltGuid) : new int[4];
         cur.clipIdleAlt2 = cfg.animated && cfg.animStateDriven && !string.IsNullOrEmpty(r.clipIdleAlt2Guid) ? ModelRegistry.ParseGuid(r.clipIdleAlt2Guid) : new int[4];
         bool saved = ModelRegistry.Upsert(cur);
-        if (saved) { formDiffersFromRegistry = false; loadedName = cur.resourceName; }   // form is now the saved truth
+        if (saved) { formDiffersFromRegistry = false; loadedName = cur.resourceName; browseUnitFixGuess = -1; }   // form is now the saved truth; a just-persisted Browse unit-fix guess DISARMS here — waiting for the next rebase to notice left a window where it could overwrite a newer Lab-saved value (external review of PR #22)
         bakedNotShipped = ShipStatus.IsBakedNotShipped(loadedName);   // a fresh bake is always newer than the build — show the ship notice immediately
         string renameNote = saved ? FinishRename() : "";
         RefreshList();

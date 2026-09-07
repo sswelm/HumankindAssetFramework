@@ -170,14 +170,19 @@ public static class UniversalBaker
     static string ResourcesFull() => Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Assets", "Resources");
 
     // Copy whatever outputs currently exist for `name` (+ their .meta) to a fresh temp dir. Never throws.
+    // The directory is UNIQUE PER ATTEMPT (external review of PR #22, 2026-09-07): the old deterministic
+    // path was deleted at the start of every backup — so after a FAILED restore (whose backup is deliberately
+    // kept as the sole surviving copy of the previous bake), simply retrying the bake destroyed that kept
+    // backup and replaced it with the broken, partially-restored current state. A kept backup is now never
+    // touched by later attempts; DiscardBackup removes only its own attempt's directory.
     static OutputBackup BackupOutputs(string name)
     {
         var b = new OutputBackup { name = name ?? "" };
         if (string.IsNullOrEmpty(name)) return b;
-        b.dir = Path.Combine(Path.GetTempPath(), "haf_rebake_backup", name);
+        b.dir = Path.Combine(Path.GetTempPath(), "haf_rebake_backup",
+                             name + "_" + DateTime.UtcNow.ToString("yyyyMMdd_HHmmssfff"));
         try
         {
-            if (Directory.Exists(b.dir)) Directory.Delete(b.dir, true);
             string res = ResourcesFull();
             foreach (var s in OutputSuffixes)
                 foreach (var ext in new[] { "", ".meta" })
