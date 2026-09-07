@@ -5,6 +5,13 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.6 — unreleased
 
+- **The Factory's "Save settings" can no longer write dead baked-asset GUIDs.** The ownership rebase carried the
+  *form's* copies of the skeleton/atlas/clip GUIDs into the save — but a Lab rebake of the same entry regenerates
+  those GUIDs without refreshing an open Factory form, so a later "Save settings" wrote the old, dead ones next to
+  the live role clips (unresolved-GUID warnings; the unit stopped injecting until the next bake). Baked GUIDs now
+  always come from the registry's saved copy, and the button runs the save path that restores the full GUID family
+  (which also brings the richer status line: what applies on load vs what still needs a Bake, and a note when the
+  Model file differs from the last bake).
 - **Cutout transparency survives on every atlas path, not just one.** The fix that kept alpha-mask foliage
   intact (transparent texels preserved, DXT5 chosen at compression) had landed only on the static
   multi-material branch — the animated multi-material path and the shared single-material path still forced
