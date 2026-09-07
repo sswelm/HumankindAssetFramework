@@ -1748,7 +1748,15 @@ public static class UniversalBaker
             atlas.LoadImage(File.ReadAllBytes(albedo));
             var px = atlas.GetPixels32();
             AdjustAlbedo(px, brightness, saturation);   // optional brightness/saturation lift (baked in)
-            for (int i = 0; i < px.Length; i++) px[i].a = 255;
+            // Cutout-alpha detection (review finding 4, 2026-09-07): the beech-tree fix covered only the static
+            // multi-material branch — this shared single-material path still forced a=255 on every texel,
+            // flattening cutout foliage into solid triangles and steering FinalizeAtlas to DXT1. Same rule as
+            // there: >1% transparent samples = intentional alpha; opaque sources keep the exact old behavior.
+            int tr = 0, seen = 0;
+            for (int i = 0; i < px.Length; i += 97) { seen++; if (px[i].a < 250) tr++; }
+            bool srcHasAlpha = tr > seen / 100;
+            if (!srcHasAlpha) for (int i = 0; i < px.Length; i++) px[i].a = 255;
+            else Debug.Log($"[Factory] {name}: source albedo carries transparency — atlas keeps alpha (cutout foliage etc.).");
             atlas.SetPixels32(px); atlas.Apply();
             Debug.Log($"[Factory] {name} albedo: {atlas.width}x{atlas.height} ({Path.GetFileName(albedo)})");
         }
@@ -1857,12 +1865,29 @@ public static class UniversalBaker
         // hand-editing an extracted swatch into a larger real texture automatically returns that part to normal
         // UV mapping.
         var flatSwatch = albs.Select(a => a != null && a.width <= 8 && a.height <= 8).ToArray();
+        // Cutout-alpha detection, MIRRORING the static multi branch (review finding 4, 2026-09-07: the beech-tree
+        // fix landed only there — this path still forced a=255, flattening animated cutout foliage into solid
+        // triangles and steering FinalizeAtlas to DXT1). Opaque sources keep the exact old behavior.
+        bool srcHasAlpha = false;
+        foreach (var a in albs)
+        {
+            if (a == null || srcHasAlpha) continue;
+            var sp = a.GetPixels32(); int tr = 0, seen = 0;
+            for (int i = 0; i < sp.Length; i += 97) { seen++; if (sp[i].a < 250) tr++; }
+            if (tr > seen / 100) srcHasAlpha = true;   // >1% transparent samples = intentional alpha, not noise
+        }
         var atlas = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = name + "_Atlas" };
         var rects = atlas.PackTextures(albs, 2, cfg.atlasMaxDim > 0 ? cfg.atlasMaxDim : AtlasMaxDimDefault);
         var apx = atlas.GetPixels32();
         AdjustAlbedo(apx, cfg.albedoBrightness, cfg.albedoSaturation);
-        for (int i = 0; i < apx.Length; i++) { apx[i].a = 255; if (!cfg.keepBlack && apx[i].r < 32 && apx[i].g < 32 && apx[i].b < 32) { apx[i].r = 160; apx[i].g = 160; apx[i].b = 168; } }
+        for (int i = 0; i < apx.Length; i++)
+        {
+            if (!srcHasAlpha) apx[i].a = 255;
+            else if (apx[i].a < 250) continue;   // transparent texel: keep as-is (cutout territory)
+            if (!cfg.keepBlack && apx[i].r < 32 && apx[i].g < 32 && apx[i].b < 32) { apx[i].r = 160; apx[i].g = 160; apx[i].b = 168; }
+        }
         atlas.SetPixels32(apx); atlas.Apply();
+        if (srcHasAlpha) Debug.Log($"[Factory] {name}: source albedo carries transparency — atlas keeps alpha (cutout foliage etc.).");
         Debug.Log($"[Factory] {name} ANIMATED MULTI-MATERIAL: {albs.Length} materials [{string.Join(", ", orderedAlb.Select(kv => kv.Key))}] -> packed atlas {atlas.width}x{atlas.height}");
         foreach (var a in albs) if (a != null) UnityEngine.Object.DestroyImmediate(a);   // E8: free the packed source albedos (packing copied them into the atlas); only orderedAlb's KEYS are used below
 

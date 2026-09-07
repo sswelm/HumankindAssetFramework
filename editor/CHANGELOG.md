@@ -5,6 +5,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.6 — unreleased
 
+- **Cutout transparency survives on every atlas path, not just one.** The fix that kept alpha-mask foliage
+  intact (transparent texels preserved, DXT5 chosen at compression) had landed only on the static
+  multi-material branch — the animated multi-material path and the shared single-material path still forced
+  every texel opaque, flattening cutout cards into solid triangles. All four paths now run the same detection
+  (>1% transparent samples = intentional alpha); fully opaque sources bake byte-identical to before.
 - **A failed albedo extraction now fails the bake instead of shipping a flat-grey model as a success.** On the
   animated path, the stale-extraction cleanup deletes every extracted albedo before re-running glbconv; when
   glbconv then failed (missing dotnet, a broken GLB), the bake logged one warning and carried on to a grey
