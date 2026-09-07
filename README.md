@@ -31,6 +31,9 @@ render/cull cost).
 > decoupled, and the registry is the public API other mods build against. *("Model Factory" names one window of the
 > suite — the historical first one; in-editor the whole suite lives under `Tools ▸ HAF`.)*
 
+**Choose your next step:** [install HAF](docs/Installation.md), [bake a first model](docs/Getting-Started.md),
+[find an authoring tool](docs/Editor-Tools.md), or [browse the complete documentation](docs/README.md).
+
 ## The seven axes
 
 HAF adds custom content in seven places. Five inject custom **assets**; two retune units the game already ships, with no
@@ -48,10 +51,31 @@ bake and nothing to undo but a deleted line. Each is proven in-game with a shipp
 
 Formations + unit size together cover both halves of R.E.D.-style rebalancing — count and scale.
 
-## Features
+## Highlights
 
 **Animation, audio, and retexturing are cross-cutting** — a unit model can carry its own baked animation, engine or
 custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the same JSON registry, no code.
+
+- **Guided authoring:** Unity windows handle models, animation, vehicles, districts, props, projectiles, textures,
+  sounds, formations, and scale. Pickers, previews, validation, and explicit Save/Bake/Build guidance replace manual
+  registry editing for normal workflows.
+- **Static and animated models:** import GLB, glTF, OBJ, FBX, or `.blend`; bake a static replacement, keep a source rig,
+  or generate one for wheels, tracks, rotors, turrets, guns, trails, and ships.
+- **Isolated materials and audio:** private texture layers prevent donor bleed; atlas generation handles multiple
+  materials; runtime skins, tints, engine sounds, custom WAVs, and game-wide sound overrides need no per-model code.
+- **Multi-mod packs:** independent packs merge in Humankind's mod order, with dependency checks, declared overrides,
+  conflict reporting, and a machine-readable load report.
+- **Operational safety:** atomic registries, guarded removal, recovery snapshots, pre-bake and boot-time validation,
+  Ship Status, compatibility reports, and in-game smoke/performance tools make failures visible and recoverable.
+- **Measured limits:** HAF reports the shared GPU vertex budget and its own runtime cost. Animation remains constrained
+  by Humankind's clip and skeleton contracts; the authoring tools diagnose or work around the common cases.
+
+For the maintained reference, including exact limits and exceptions, see
+[Capabilities](docs/Capabilities.md). The detailed inventory below is retained for readers who want the implementation
+history and shipped examples.
+
+<details>
+<summary><strong>Expand the detailed feature inventory</strong></summary>
 
 **Custom unit models**
 - Static or animated model replacement from **GLB / glTF / OBJ / FBX / `.blend`**, correctly oriented, textured, and
@@ -176,7 +200,10 @@ custom-WAV movement sound, and a runtime-hot-loaded skin or tint, all from the s
 **The full story** — how each capability was proven and the war stories behind it — is in [**CHANGELOG.md**](CHANGELOG.md).
 The complete capability list and known limitations are in [**Capabilities.md**](docs/Capabilities.md).
 
+</details>
+
 ## How it works
+
 **Editor — the Model Factory** (*Tools ▸ HAF ▸ Model Factory*, from the installable [`editor/`](editor/) Unity package): pick a target unit + a model file, set
 transform / size / shading, **Bake**. Static models bake an Amplitude `Skeleton` on the proven single-bone vehicle rig +
 a packed atlas; ticking **Animated** takes a parallel path (`UniversalBaker.BuildAnimated`) that keeps the model's **own

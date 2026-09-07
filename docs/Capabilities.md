@@ -1,7 +1,10 @@
 # Capabilities — what the Factory does (proven in-game)
 
-The full, detailed capability list. The README carries the highlights; this is the reference. For *how to use* these
-see the [Factory Manual](Factory-Manual.md).
+This is the detailed capability reference, including engine constraints and known limitations. It records what HAF
+can do; it is not an ordered tutorial. Start with [Getting started](Getting-Started.md) to build something, or use the
+[Factory Manual](Factory-Manual.md) to look up controls.
+
+## Models and visible behavior
 
 - **Animated custom models — a first, now one-click.** A **quadcopter drone** injected onto a land-vehicle unit renders
   full-size and textured **and spins its own propellers from its own baked animation** — no engine mod, no GPU-skinning
@@ -11,6 +14,15 @@ see the [Factory Manual](Factory-Manual.md).
   `ClipCollection` + atlas and writes the registry; at runtime the clip is registered and a `PawnManager.AddPawnEntry`
   hook drives the pawn's pose onto it — normalized by clip duration so it plays at real speed. Works for **any number of
   instances**. Clip/bone/hide-donor fields are **Pick-driven** (read from the model's glTF + the plugin log).
+
+- **STATE-DRIVEN characters (2026-07-19, verified in-game):** a model can play different clips per state — Idle
+  standing, a Movement loop while traveling (the Combine soldier RUNS), an optional After-movement one-shot on
+  stopping, an ATTACK clip when the unit actually fires (hooked into the game's per-pawn ranged-fire sequence, with
+  an Attack-repeats knob that loops a short pop into sustained fire — runtime-only, no re-bake), and a COMBAT-IDLE
+  stance while the army is locked in a battle. Priority attack > move > after > combat > idle. Configured in the
+  Animation Lab (State-driven toggle + five clip pickers); all roles bake against one shared skeleton in a single
+  pass; the runtime switches the pawn's Pose0 clip from a ~20×/s state poll that samples map armies AND
+  battle-deployed units (a battle spawns a second presentation unit per combatant on its combat tile).
 - **A full HUMANOID character from a raw auto-rig (2026-07-19).** A Sketchfab **Combine soldier** (62-bone ValveBiped)
   replaces a vehicle unit: right-sized, upright, head on, **turning with movement**, idling on its own clip, and still
   launching its kamikaze-drone projectile. Enabled by the automatic **raw-rig conversion** (Factory-Manual §16):
@@ -75,6 +87,9 @@ see the [Factory Manual](Factory-Manual.md).
   which overrides the donor's. And for a **static** model that only suffers the donor's *whole-body* idle/move bob (e.g. a
   rigid airship on a hovering drone donor), the **Freeze donor animation** runtime flag pins the donor's pose so the mesh
   holds rigid while still gliding tile-to-tile — no re-bake. Choose the donor accordingly; see the drone case study in the docs.
+
+## Geometry, materials, and textures
+
 - **Any number of materials — GLB *and* FBX, STATIC and ANIMATED.** A model with N materials (the Zeppelin has 4; the
   AH-1 Cobra has **51**; the M114 howitzer has 6) is packed into one atlas and each sub-mesh's UVs are remapped into its
   rect — no per-model code, no material cap. The `glbconv` converter emits per-material `usemtl` groups + a `.mtl` (and an
@@ -136,6 +151,9 @@ see the [Factory Manual](Factory-Manual.md).
   by a configurable **Atlas size** (256 / 512 / 1024 / 2048, default 512) and block-compressed (DXT1 opaque; DXT5 when
   static multi-material source alpha must survive), so each shipped skin is
   ~0.1–2 MB (a big airship wants 1024; a small unit is fine at 512).
+
+## Runtime controls and authoring safety
+
 - **Freeze the donor's animation (static models).** A rigid model on an animated ground/hover donor inherits the donor's
   idle/move bob. The **Freeze donor animation** runtime flag pins the donor's pose so the mesh holds still while the pawn
   still glides tile-to-tile — matched across every instance the same way animated models are (descriptor + forced
@@ -233,14 +251,6 @@ the mechanics are detailed in [Animated-Runtime §3b](Animated-Runtime.md#3b-run
   runtime. Rigs that animate positions can't play as-is — the automatic conversion (Factory-Manual §16) re-expresses
   them as rotations (rest normalization + visual rebake). Genuine translation *motion* (a sliding recoil) still needs
   the far-pivot rotation trick (`deploy_convert.py`).
-- **STATE-DRIVEN characters (2026-07-19, verified in-game):** a model can play different clips per state — Idle
-  standing, a Movement loop while traveling (the Combine soldier RUNS), an optional After-movement one-shot on
-  stopping, an ATTACK clip when the unit actually fires (hooked into the game's per-pawn ranged-fire sequence, with
-  an Attack-repeats knob that loops a short pop into sustained fire — runtime-only, no re-bake), and a COMBAT-IDLE
-  stance while the army is locked in a battle. Priority attack > move > after > combat > idle. Configured in the
-  Animation Lab (State-driven toggle + five clip pickers); all roles bake against one shared skeleton in a single
-  pass; the runtime switches the pawn's Pose0 clip from a ~20×/s state poll that samples map armies AND
-  battle-deployed units (a battle spawns a second presentation unit per combatant on its combat tile).
 - **Preview orientation ≠ game orientation for animated models:** the embedded preview applies fixed display flips —
   judge orientation IN-GAME only, probing Rotation one axis at a time. The conversion path is selected by the explicit
   **"Convert raw rig"** checkbox (2026-07-18 gate refactor — it used to trigger on any non-zero Rotation, forcing a

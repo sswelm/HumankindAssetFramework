@@ -1,13 +1,12 @@
 # HAF documentation
 
-**HAF gives a Humankind unit a genuinely custom 3D model** — a ship, vehicle, creature, or mech, animated and textured —
-not just a reskin of the game's existing (human) units, which is where modding stopped before. It also handles districts,
-pawn props, projectiles, textures, sounds, formations, and unit scaling, all from a JSON pack registry. You **supply the
-model** (a licensed download, a commission, or your own build); HAF bakes and injects it, coexisting with other mods'
-asset packs. Within engine bounds (rotation-only animation, a shared GPU budget).
+HAF adds custom models and presentation to Humankind units, districts, wonders, props, and projectiles. It also covers
+textures, sounds, formations, and unit scale. You supply the source model; the authoring tools bake it, and the runtime
+loads it from a pack alongside other mods.
 
 The [project overview and feature list](https://github.com/sswelm/HumankindAssetFramework#readme) live on the repo home.
-This page is the map of the docs themselves.
+This page is a map, not a reading list. If this is your first visit, open
+[Getting started](Getting-Started.md) and follow that page in order.
 
 ---
 
@@ -30,10 +29,10 @@ This page is the map of the docs themselves.
 
 ---
 
-
 ## The pages
 
 ### Get started
+
 - [**Installation.md**](Installation.md) — install BepInEx, the runtime plugin, and the Unity authoring package; verify each layer.
 - [**Getting-Started.md**](Getting-Started.md) — **new here? start here.** Nothing → a custom unit on the map, each step linked to its deep doc.
 - [**Troubleshooting.md**](Troubleshooting.md) — **something failed? start with the symptom.** Evidence order and direct routes to each maintained failure catalog.
@@ -43,6 +42,7 @@ This page is the map of the docs themselves.
 - [**Backup.md**](Backup.md) — five complementary protections for uncommitted, irreplaceable, generated, and deployed working data.
 
 ### Author content
+
 - [**Editor-Tools.md**](Editor-Tools.md) — the **editor reference**: every window under `Tools ▸ HAF`, its menu path, and which registry it writes. *Start here to find the right tool.*
 - [**Factory-Manual.md**](Factory-Manual.md) — the main guide: every field, the static + animated workflows, the troubleshooting table. *Start here to add a model.*
 - [**Vehicle-Lab-Quickstart.md**](Vehicle-Lab-Quickstart.md) — the short end-to-end workflow for adding wheels, tracks, guns, trails, or rotors to a static vehicle model.
@@ -52,6 +52,7 @@ This page is the map of the docs themselves.
 - *Unit & creature audio* (engine sounds, custom WAVs, creature voices) lives in [Factory-Manual.md](Factory-Manual.md) §13–14.
 
 #### Animation — four pages, in reading order
+
 1. [**Animated-Models.md**](Animated-Models.md) — *can HAF import my model?* The plain-language answer in three levels (clean rigs → rigid-part machines → full character rigs). **Start here.**
 2. [**Animation-Pitfalls.md**](Animation-Pitfalls.md) — it baked but looks wrong: the field guide to every trap, each hit for real.
 3. [**Donor-Clip-Flight.md**](Donor-Clip-Flight.md) — play the **donor's own animation on your rig** (`useDonorClip`): the measured engine contract and the failure catalogue. Proven on the helicopter.
@@ -60,6 +61,7 @@ This page is the map of the docs themselves.
 *(Extending the plugin rather than authoring? The engine-side companion is [Animated-Runtime.md](Animated-Runtime.md), under Internals.)*
 
 ### The injection axes
+
 Each axis adds custom content in a different place. Unit models and their cross-cutting settings live in the pack
 `pack.json`; some specialized authoring tools keep their own registry and ship the resulting assets with the mod.
 Follow the linked page rather than assuming every axis is a `models[]` field.
@@ -76,9 +78,11 @@ Follow the linked page rather than assuming every axis is a `models[]` field.
 | **Unit size** | [Unit-Size.md](Unit-Size.md) — how big any unit renders, vanilla included, incl. era scaling. | data only |
 
 ### Ship a pack
+
 - [**Multi-Mod.md**](Multi-Mod.md) — the pack format, the `haf_packs/` drop folder, how packs merge and conflict, and the load report. Read this to add assets **without touching ENC**. Template: [haf-pack.example.json](haf-pack.example.json).
 
 ### Internals — for anyone extending the plugin
+
 - [**Performance.md**](Performance.md) — what HAF costs per frame (the F8 meter, today's baseline by bucket, the rules that keep it there, what to do when a number grows). Measured, not estimated.
 - [**Architecture.md**](Architecture.md) — **read this before changing the runtime.** The invariants no compiler enforces — threads, session re-arm order, the reflection contract, the two district ledgers — each with the failure it was learned from.
 - [**Code-Map.md**](Code-Map.md) — where everything lives in the plugin source.
@@ -92,6 +96,7 @@ Follow the linked page rather than assuming every axis is a `models[]` field.
 - [**Headless-CLI.md**](Headless-CLI.md) — run re-bake and the full mod build + deploy from the command line, so a script, CI, or an agent can drive HAF without the GUI.
 
 ### Project & process — maintainer-facing
+
 - [**Decisions.md**](Decisions.md) — the **ADR log**: settled decisions and the *why*. Check here before proposing a change to any of them.
 - [**Testing.md**](Testing.md) — the testing strategy: what's unit-tested, what's covered by in-editor instruments, and what deliberately isn't.
 - [**Framework-Review.md**](Framework-Review.md) — the living hardening roadmap: verified review findings, prioritized, with what was done when.
