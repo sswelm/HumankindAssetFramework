@@ -919,8 +919,12 @@ public class ModelFactoryWindow : EditorWindow
                     // Prefill "Fix 100x oversize" from the model's TRUE size (only on an explicit new pick, so a loaded
                     // entry keeps its saved value). Best-effort guess the user can override — see SuggestUnitFix.
                     float sz; bool guess = SuggestUnitFix(p, out sz);
-                    if (sz > 0f) { cur.animUnitFix = guess; status = $"Auto-set 'Fix 100× oversize' = {(guess ? "ON" : "off")} (model true size ≈ {sz:0.###}u). Override if the bake comes out wrong. " +
-                        "(Carried by the next Bake; 'Save settings' alone won't keep it — it's an animation-owned field the save rebases from the registry.)"; }   // 2026-08-19 audit: honest about the ownership rebase
+                    // The guess is ARMED (browseUnitFixGuess) so it survives the ownership rebase until a save or
+                    // bake persists it — animUnitFix is a Lab-owned field, and the rebase used to silently revert
+                    // the guess right before an existing entry's bake (review finding 6, 2026-09-07: the status
+                    // line promised "carried by the next Bake" while DoBake's rebase discarded it -> 100x bake).
+                    if (sz > 0f) { cur.animUnitFix = guess; browseUnitFixGuess = guess ? 1 : 0; status = $"Auto-set 'Fix 100× oversize' = {(guess ? "ON" : "off")} (model true size ≈ {sz:0.###}u). Override if the bake comes out wrong. " +
+                        "(Sticks until the next Bake or 'Save settings' writes it; the Animation Lab's checkbox owns it after that.)"; }
                 }
             }
         }
@@ -1383,9 +1387,14 @@ public class ModelFactoryWindow : EditorWindow
         !string.IsNullOrWhiteSpace(d.animateBones) ||
         (d.clip != null && d.clip.Length == 4 && !(d.clip[0] == 0 && d.clip[1] == 0 && d.clip[2] == 0 && d.clip[3] == 0));
 
+    // -1 = no un-persisted Browse auto-guess; 0/1 = a "Fix 100x oversize" value guessed for a freshly-browsed
+    // model file, reapplied after the ownership rebase until a save/bake persists it (review finding 6).
+    int browseUnitFixGuess = -1;
+
     void OnSelectResource()
     {
         formDiffersFromRegistry = false;   // loading fresh = in sync by definition
+        browseUnitFixGuess = -1;           // the guess belonged to the previous form's browsed file
         if (selected <= 0) { cur = new ModelDef(); loadedName = ""; status = ""; LoadPreview(null); return; }
         var e = ModelRegistry.Load().FirstOrDefault(x => x.resourceName == existing[selected]);
         if (e == null) return;
@@ -1996,6 +2005,18 @@ public class ModelFactoryWindow : EditorWindow
         // registry value on every Save ("I tried to save but the offset reset to 0"). The schema-parity gate
         // does NOT check this list. When adding a Factory field: schema, regex fallback, UI, and THIS list.
         cur.animated = regE.animated || form.animated;   // one-way OR: a prior animated bake wins; a static Factory re-bake must not silently un-animate the entry
+        // BROWSE AUTO-GUESS CARRY-THROUGH (review finding 6, 2026-09-07): animUnitFix is Lab-owned, so the
+        // rebase rightly pulls the registry value — but that silently discarded the "Fix 100x oversize" guess
+        // Browse just made for a freshly-picked model (the status line promised it would carry to the bake;
+        // DoBake's rebase reverted it -> 100x-giant bake). While a guess is armed, reapply it here; the moment
+        // the registry already carries the guessed value (a save or bake persisted it) the guess DISARMS and
+        // the Lab's checkbox owns the field again.
+        if (browseUnitFixGuess >= 0)
+        {
+            bool g = browseUnitFixGuess == 1;
+            if (cur.animUnitFix == g) browseUnitFixGuess = -1;
+            else cur.animUnitFix = g;
+        }
     }
 
     // ANIMATED -> STATIC downgrade that STICKS (user verdict 2026-07-26: "when I removed the animation
@@ -2015,6 +2036,7 @@ public class ModelFactoryWindow : EditorWindow
             "(which will be STATIC).\n\nThe model file, transform, size and shading settings are kept.",
             "Make static", "Cancel")) return;
         cur.animated = false;
+        browseUnitFixGuess = -1;   // Make static is a deliberate clear — an armed Browse guess must not resurrect animUnitFix through the rebase
         cur.animClip = ""; cur.animateBones = ""; cur.staticParts = ""; cur.localNodeAnim = false; cur.animUnitFix = false;
         cur.convertRig = false; cur.autoGroundWheels = false; cur.keepTranslations = false;
         cur.deployConvert = false; cur.deployStart = 0; cur.deployEnd = 0; cur.deployStrip = ""; cur.deployStripExtra = "";

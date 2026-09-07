@@ -5,6 +5,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.6 — unreleased
 
+- **Browse's "Fix 100× oversize" auto-guess now actually reaches the bake.** The guess is a Lab-owned field,
+  so on an already-saved entry the Factory's ownership rebase silently reverted it right before baking — the
+  status line promised "carried by the next Bake" while the bake ran with the old value (a 100×-giant or
+  floating result on metre-scale rigged GLBs). The guess now stays armed through the rebase until a Bake or
+  "Save settings" persists it, after which the Animation Lab's checkbox owns the field again; picking another
+  entry or using Make static disarms it.
 - **The Factory's "Save settings" can no longer write dead baked-asset GUIDs.** The ownership rebase carried the
   *form's* copies of the skeleton/atlas/clip GUIDs into the save — but a Lab rebake of the same entry regenerates
   those GUIDs without refreshing an open Factory form, so a later "Save settings" wrote the old, dead ones next to
