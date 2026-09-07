@@ -369,7 +369,10 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   islands you need to separate (floating junk welded into a hull part, say) and **Split** writes a new GLB where
   only those gain `_Part_NNN` children — same lossless method, so the rest of the model is byte-identical. Feed
   the output to the Vehicle Lab and mark the junk islands Ignore. Splitting a many-island part (ropes, rigging)
-  explodes the part list; usually leave those whole.
+  explodes the part list; usually leave those whole — or raise the **Merge closer than (%)** slider, which counts
+  near islands as one part (rotation-invariant since 0.5.6: diagonal dashed lines gate correctly too). The
+  **Output GLB** auto-follows the source file until you edit it, and changing the source — typed or browsed —
+  resets the probe so a stale part list can never split the wrong file.
 - **Backup & Restore** — `Tools ▸ HAF ▸ Backup and Restore`. A safety net for everything git doesn't track (editor
   scripts, `FactorySource`, baked Resources, ENC databases, `Tools/`, live `BepInEx/config`). Timestamped, additive,
   guarded restore (auto-snapshots current state first). **Deep dive:** [Backup.md](Backup.md).

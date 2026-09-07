@@ -272,7 +272,10 @@ their settings and work together**:
   the Blender step re-runs exactly when one of its inputs changed (Rotation, Reduce-to-tris, Clip, Animate-only-bones,
   Material mode, Model file) and is skipped otherwise, so your changes always take effect with no checkbox management
   (the old "ticked box silently ignores your Rotation change" trap is gone). For **static** models it additionally
-  reuses the extracted OBJ (skip re-import, fast iteration), as before.
+  reuses the extracted OBJ (skip re-import, fast iteration), as before. *Since 0.5.6 the protection also covers
+  **single-material** sources — before that the extraction hygiene deleted the hand-edited `_albedo.png` on every
+  bake regardless of the checkbox.* Keeping an extraction that no longer matches the source logs a warning (untick
+  for one bake to re-extract fresh).
 
 ### Bake / Reset
 - **Bake** runs the pipeline and writes the registry. **Reset** clears the form.
@@ -362,7 +365,9 @@ one of its inputs changed — **Rotation, Reduce-to-tris, Clip, Animate-only-bon
 and is skipped otherwise (fast). You never manage this. The checkbox (now labelled **"Keep extracted texture
 (hand-edits)"**) has ONE job on the animated path: protect a hand-edited extracted albedo from being regenerated when
 the re-slim runs. (Earlier today it also gated the geometry, which made Rotation silently unresponsive while ticked —
-that trap is gone.) For static models it additionally reuses the extracted OBJ, as before.
+that trap is gone. And since 0.5.6 the protection actually works for **single-material** sources too — it previously
+hinged on a file only multi-material extractions have.) For static models it additionally reuses the extracted OBJ,
+as before.
 
 ---
 
@@ -410,6 +415,9 @@ strategic map.
 | **Model looks dark / grey / washed-out in-game** | Expected for skins that relied on PBR shine or a dark texture — the injection path ships flat albedo (donor PBR neutralized). Raise **Albedo brightness** and/or **Albedo saturation** and re-bake. Judge the amount in-game, not in the dim preview. |
 | **A black part (glass canopy, cockpit) renders grey in-game** (multi-material model) | The near-black→grey neutralize step (which hides UV dead-zones) is flattening an intentionally black material. Tick **Keep black (glass/cockpit)** and re-bake. |
 | **Change didn't show in-game** | You didn't **rebuild the mod** (§6) — baked assets only reach the game through the bundle; a registry-only change (runtime flags) needs just a relaunch. (Since 2026-07-18 the re-slim runs automatically when a Blender-step setting changed — the "checkbox swallowed my change" failure mode no longer exists.) |
+| **Bake fails: "glbconv albedo extraction failed…"** | glbconv couldn't extract the albedos (missing dotnet/glbconv install, or a broken GLB) — see the `[glbconv]` Console error for the specific cause, fix it, and re-bake. Since 0.5.6 this **fails the bake** instead of silently shipping a flat-grey model as a success; the previous baked assets are rolled back automatically and the registry is untouched. |
+| **Re-bake failed** ("re-bake FAILED — restored the previous N baked asset(s)") | Normal rollback: the previous bake's assets were restored from the automatic backup, your working model is intact, the registry unchanged. Fix the logged cause and re-bake. |
+| **"re-bake RESTORE failed mid-copy — the backup is KEPT at …"** | The rollback itself hit a locked file (antivirus/indexer). Your previous bake survives ONLY in the named backup folder (`%TEMP%\haf_rebake_backup\<name>_<timestamp>`) — close whatever holds the lock, copy that folder's contents (assets **and** `.meta`) into `Assets/Resources` overwriting, and let Unity refresh. Retrying the bake is safe: each attempt backs up into its own directory and never touches a kept one (since 0.5.6). |
 | **Animated toggle greyed out** | The model has no animation the probe can see (OBJ, or a glTF with no `animations`). Use a rigged glb/fbx. FBX/.blend can't be probed cheaply, so the toggle stays enabled — type the clip/bones by hand. |
 | **"No clips readable from this model"** | Clip/Bone Pick works for glTF/GLB only. For FBX/.blend, type the clip name and bone prefixes manually. |
 | **Animated model plays the wrong motion** (parts assemble/explode) | You baked the wrong clip → set **Clip name** to the loop (e.g. `hover`), not `exploded_view`. |
