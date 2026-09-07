@@ -513,24 +513,32 @@ public static class UniversalBaker
             // with its source path+mtime and re-extract on any mismatch.
             string stampPath = mtlPath + ".src";
             string stamp = cfg.modelFile.Replace('\\', '/') + "|" + File.GetLastWriteTimeUtc(cfg.modelFile).Ticks;
-            bool mtlFresh = File.Exists(mtlPath) && File.GetLastWriteTimeUtc(cfg.modelFile) <= File.GetLastWriteTimeUtc(mtlPath)
-                            && File.Exists(stampPath) && File.ReadAllText(stampPath).Trim() == stamp;
-            if (!mtlFresh && !(cfg.keepTexture && File.Exists(mtlPath)))
+            // FRESHNESS BY STAMP, PRESENCE BY EITHER SHAPE (review finding 2, 2026-09-07). glbconv writes an MTL
+            // only for MULTI-material sources, so the old "MTL exists and is newer" freshness test read PERMANENTLY
+            // stale for a 1-material GLB — the hygiene below then deleted <name>_albedo.png and re-ran glbconv on
+            // EVERY bake. Worse, the keepTexture bypass also demanded the MTL, so the checkbox could never protect
+            // a single-material model's hand-edited albedo: it was deleted and re-extracted pristine each bake —
+            // the exact loss the checkbox exists to prevent. The stamp (source path + mtime, written after every
+            // successful extraction regardless of shape) is the freshness test for both shapes now.
+            string singleAlbPath = Path.Combine(fsResDir, name + "_albedo.png");
+            bool extractedExists = File.Exists(mtlPath) || File.Exists(singleAlbPath);
+            bool extractFresh = extractedExists && File.Exists(stampPath) && File.ReadAllText(stampPath).Trim() == stamp;
+            if (cfg.keepTexture && extractedExists && !extractFresh)
+                Debug.LogWarning($"[Factory] {name}: 'Reuse extracted files' is ON but the extraction on disk was made from a different (or older) source than '{cfg.modelFile}' — baking with the KEPT files anyway. Untick it for one bake if you want a fresh extraction.");
+            if (!extractFresh && !(cfg.keepTexture && extractedExists))
             {
-                // STALE-EXTRACTION HYGIENE (the Bell H-13 chimera, 2026-09-02). glbconv writes an MTL only for
-                // MULTI-material sources, so extracting a 1-material model over a 10-material extraction leaves the
-                // old MTL (and its stamp then claims the new source!) — and the single `_albedo.png` carries no
-                // stamp at all. The result was a directory mixing two models' extractions, silently consumed by the
-                // next bake. On a source change, remove every derived artifact before re-extracting; keepTexture
-                // (checked above) still protects hand-edited files by skipping this whole block.
+                // STALE-EXTRACTION HYGIENE (the Bell H-13 chimera, 2026-09-02). Extracting a 1-material model over
+                // a 10-material extraction leaves the old MTL claiming the new source, mixing two models'
+                // extractions in one directory, silently consumed by the next bake. On a source change, remove
+                // every derived artifact before re-extracting; keepTexture (checked above) still protects
+                // hand-edited files by skipping this whole block.
                 // Each delete takes its .meta along — File.Delete bypasses the AssetDatabase, and a left-behind meta
                 // makes Unity's next refresh print one "asset can't be found" line per file.
                 void DeleteWithMeta(string p) { File.Delete(p); if (File.Exists(p + ".meta")) File.Delete(p + ".meta"); }
                 foreach (var stale in Directory.GetFiles(fsResDir, name + "_mat*_albedo.*"))
                     if (!stale.EndsWith(".meta")) DeleteWithMeta(stale);
                 if (File.Exists(mtlPath)) DeleteWithMeta(mtlPath);
-                string singleAlb = Path.Combine(fsResDir, name + "_albedo.png");
-                if (File.Exists(singleAlb)) { DeleteWithMeta(singleAlb); Debug.Log($"[Factory] {name}: source model changed — removed the stale extracted albedo (it belonged to the previous source)."); }
+                if (File.Exists(singleAlbPath)) { DeleteWithMeta(singleAlbPath); Debug.Log($"[Factory] {name}: source model changed — removed the stale extracted albedo (it belonged to the previous source)."); }
                 Debug.Log($"[Factory] {name}: extracting per-material albedos (glbconv) for the multi-material animated atlas…");
                 if (!ConvertGlb(cfg.modelFile, fsResDir, name, 0))
                     Debug.LogWarning($"[Factory] {name}: glbconv extraction FAILED — a multi-material model will fall back to a SINGLE atlas (every part samples material 0). See the [glbconv] Console error.");

@@ -5,6 +5,13 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.6 — unreleased
 
+- **"Reuse extracted files" now actually protects a single-material model's hand-edited albedo.** The
+  protection (and the freshness test) hinged on the extraction's MTL file — which glbconv writes only for
+  multi-material sources. A 1-material GLB therefore read as permanently stale: every bake deleted
+  `<name>_albedo.png` (hand-edits included, the exact loss the checkbox prevents) and re-ran the extraction.
+  Freshness is now judged by the extraction stamp, which both shapes get, and the checkbox protects whichever
+  extraction shape exists. Keeping an extraction that no longer matches the source warns instead of staying
+  silent.
 - **A failed re-bake restore no longer destroys its own backup.** The rollback path deletes the current outputs
   before copying the backup back; if that copy then failed (a file locked by antivirus or an indexer), the cleanup
   still wiped the backup directory — old assets gone, partial new assets gone, backup gone, git the only recovery.
