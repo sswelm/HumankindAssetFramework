@@ -3,6 +3,72 @@
 The **package** changelog: what changed for someone who installs the tools. (The project-wide engineering log
 lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `editor-vX.Y.Z`.
 
+## 0.5.6 — unreleased
+
+- **External review hardening (three finds on this release's own fixes).** A kept failed-restore backup is no
+  longer destroyed by simply retrying the bake — each bake attempt backs up into its own unique directory, so
+  an unresolved recovery backup survives until you delete it. The Workshop's output path now *tracks* the
+  source file while auto-derived (typing a source no longer freezes the output at the first keystroke's
+  fragment); editing the field takes ownership. And the Factory's Browse unit-scale guess disarms the moment a
+  save or bake persists it, closing the window where a stale guess could overwrite a newer Lab-saved value.
+- **Recipe loading: absent-key defaults have one source of truth.** The load path carried hand-written
+  fallbacks for keys missing from old recipes, justified by a comment claiming JsonUtility ignores field
+  initializers — measured false (Unity 2021.3.1f1 batch probe): initializers DO run, and absent keys keep
+  them. The duplicated fallback constants (a silent-divergence hazard) are gone; the DTO initializers alone
+  define what an old recipe loads as. No recipe loads differently — every removed fallback equaled its
+  initializer.
+- **The source-skeleton fast path says NO instead of silently doing nothing.** The fast path spins **Wheel**
+  bones only — but the Generate gate accepted Rotor / Tail rotor markings and Wave rock on it, the script
+  parsed and ignored them, and the result was "RIG DONE" with nothing moving. Both roles and wave rock are now
+  rejected loudly on the fast path, in the window (gate + warning boxes with the workaround: mark the spinning
+  source bone as Wheel, or disable the fast path) and in the script (hard error, like the existing Oar guard).
+- **Typing a different source path into the Workshop resets the probe.** Only the Browse button cleared the
+  part list — typing or pasting another file's path kept the previous probe's rows, checked node indices,
+  preview and output path live, so Split would carve the *new* file by the *old* file's node indices and write
+  over the old file's `_split.glb`. Any source change (however entered) now clears the probe state and asks
+  for a fresh Probe; the output path re-derives from the new file.
+- **The Workshop's distance merge recognizes diagonal dashes.** The direction gate — which stops two parallel
+  dashed lines from fusing into one part through a near crossing — judged "elongated" by the axis-aligned
+  bounding box, so a dash at 45° read as a blob (two equal extents), skipped the gate, and parallel diagonal
+  rigging lines merged into one part. Elongation is now measured in the island's own frame (principal-component
+  aspect, rotation-invariant); axis-aligned models behave exactly as before. Locked by a regression test that
+  is the original gate fixture rotated 45°.
+- **Browse's "Fix 100× oversize" auto-guess now actually reaches the bake.** The guess is a Lab-owned field,
+  so on an already-saved entry the Factory's ownership rebase silently reverted it right before baking — the
+  status line promised "carried by the next Bake" while the bake ran with the old value (a 100×-giant or
+  floating result on metre-scale rigged GLBs). The guess now stays armed through the rebase until a Bake or
+  "Save settings" persists it, after which the Animation Lab's checkbox owns the field again; picking another
+  entry or using Make static disarms it.
+- **The Factory's "Save settings" can no longer write dead baked-asset GUIDs.** The ownership rebase carried the
+  *form's* copies of the skeleton/atlas/clip GUIDs into the save — but a Lab rebake of the same entry regenerates
+  those GUIDs without refreshing an open Factory form, so a later "Save settings" wrote the old, dead ones next to
+  the live role clips (unresolved-GUID warnings; the unit stopped injecting until the next bake). Baked GUIDs now
+  always come from the registry's saved copy, and the button runs the save path that restores the full GUID family
+  (which also brings the richer status line: what applies on load vs what still needs a Bake, and a note when the
+  Model file differs from the last bake).
+- **Cutout transparency survives on every atlas path, not just one.** The fix that kept alpha-mask foliage
+  intact (transparent texels preserved, DXT5 chosen at compression) had landed only on the static
+  multi-material branch — the animated multi-material path and the shared single-material path still forced
+  every texel opaque, flattening cutout cards into solid triangles. All four paths now run the same detection
+  (>1% transparent samples = intentional alpha); fully opaque sources bake byte-identical to before.
+- **A failed albedo extraction now fails the bake instead of shipping a flat-grey model as a success.** On the
+  animated path, the stale-extraction cleanup deletes every extracted albedo before re-running glbconv; when
+  glbconv then failed (missing dotnet, a broken GLB), the bake logged one warning and carried on to a grey
+  atlas, a green "Baked" toast, and an updated registry. The extraction failure is now a bake failure with the
+  cause and the fix in the error text. (The static path already failed properly.)
+- **"Reuse extracted files" now actually protects a single-material model's hand-edited albedo.** The
+  protection (and the freshness test) hinged on the extraction's MTL file — which glbconv writes only for
+  multi-material sources. A 1-material GLB therefore read as permanently stale: every bake deleted
+  `<name>_albedo.png` (hand-edits included, the exact loss the checkbox prevents) and re-ran the extraction.
+  Freshness is now judged by the extraction stamp, which both shapes get, and the checkbox protects whichever
+  extraction shape exists. Keeping an extraction that no longer matches the source warns instead of staying
+  silent.
+- **A failed re-bake restore no longer destroys its own backup.** The rollback path deletes the current outputs
+  before copying the backup back; if that copy then failed (a file locked by antivirus or an indexer), the cleanup
+  still wiped the backup directory — old assets gone, partial new assets gone, backup gone, git the only recovery.
+  The backup is now discarded only after a **successful** restore; on a failed one it is kept and the error names
+  its path with copy-back instructions.
+
 ## 0.5.5 — 2026-09-04
 
 - **Rowing — a galley oar bank, animated from merged meshes.** A new **Oar** role (hotkey `O`) in the Vehicle Lab.

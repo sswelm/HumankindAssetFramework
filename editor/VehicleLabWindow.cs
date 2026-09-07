@@ -235,10 +235,13 @@ public class VehicleLabWindow : EditorWindow
         public float oarBladeRollDeg = 0f;   // rest-pose blade squaring (absent-key 0 == the do-nothing default)
         public float oarLiftDeg = 0f;        // stroke-height re-centre (absent-key 0 == the do-nothing default)
         public float oarRakeDeg = 0f;        // sweep-arc fore/aft re-centre (absent-key 0 == the do-nothing default)
-        public float oarPivotPct = 30f;      // oarlock position along the oar (guarded by Has() on load: 30 ≠ 0)
-        public float oarLengthPct = 100f;    // axial oar stretch about the oarlock (guarded by Has(): 100 ≠ 0)
-        public float riggingReducePct = 75f; // rigging decimation percentage (guarded by Has() on load)
-        public float structureReducePct = 50f; // structure decimation percentage (guarded by Has() on load)
+        // These initializers ARE the absent-key defaults: JsonUtility.FromJson runs field initializers and only
+        // overwrites keys present in the JSON (measured, Unity 2021.3.1f1 batch probe 2026-09-07 — review
+        // finding 10; the load path used to duplicate each value in a Has() guard built on the opposite belief).
+        public float oarPivotPct = 30f;      // oarlock position along the oar
+        public float oarLengthPct = 100f;    // axial oar stretch about the oarlock
+        public float riggingReducePct = 75f; // rigging decimation percentage
+        public float structureReducePct = 50f; // structure decimation percentage
         public float bodyReducePct = 0f;       // body decimation percentage (absent-key 0 == the do-nothing default)
         public float oarReducePct = 0f;        // oar decimation percentage (absent-key 0 == the do-nothing default)
         public float sailReducePct = 0f;       // sail decimation percentage (absent-key 0 == the do-nothing default)
@@ -871,17 +874,35 @@ public class VehicleLabWindow : EditorWindow
 
             int wheels = list.Count(x => IsSpinner(x.role));
             int oars = list.Count(x => x.role == Role.Oar);
-            // Oar recovery needs shard geometry and cannot run against source-bone rows. Keep this gate aligned
-            // with vehicle_rig.py's defensive rigfast rejection so the UI can never report a successful no-op.
+            // FAST-PATH SUPPORT MATRIX (review finding 9, 2026-09-07): rigfast spins WHEEL bones only — it
+            // parsed but silently ignored Rotor/Tail rotor lists and wave rock, while this gate counted all
+            // three spinner roles and accepted wave alone: Generate reported DONE and nothing moved. Keep this
+            // gate aligned with vehicle_rig.py's rigfast rejections so the UI can never report a successful
+            // no-op. (On the fast path a spinning bone marked Wheel works today — the rejection says so.)
             bool fastPathOars = FastPath && oars > 0;
-            bool canRig = !fastPathOars && (wheels > 0 || oars > 0 || (waveEnabled && (rockDegrees > 0f || rockPitchDeg > 0f)));
+            int fastRotors = FastPath ? list.Count(x => x.role == Role.Rotor || x.role == Role.TailRotor) : 0;
+            bool wantWave = waveEnabled && (rockDegrees > 0f || rockPitchDeg > 0f);
+            bool fastWave = FastPath && wantWave;
+            int fastWheels = FastPath ? list.Count(x => x.role == Role.Wheel) : 0;
+            bool canRig = FastPath ? (!fastPathOars && fastRotors == 0 && !fastWave && fastWheels > 0)
+                                   : (wheels > 0 || oars > 0 || wantWave);
             if (fastPathOars)
                 EditorGUILayout.HelpBox("Oar recovery is not available on the source-skeleton fast path. Disable " +
                     "Use source skeleton, Probe parts, and mark the merged oar meshes instead.", MessageType.Warning);
+            if (fastRotors > 0)
+                EditorGUILayout.HelpBox("Rotor / Tail rotor roles don't run on the source-skeleton fast path — mark the " +
+                    "spinning source BONE as Wheel instead (fast-path bones spin about their own axis), or disable " +
+                    "Use source skeleton to rig the mesh parts.", MessageType.Warning);
+            if (fastWave)
+                EditorGUILayout.HelpBox("Wave rock doesn't run on the source-skeleton fast path — disable Use source " +
+                    "skeleton to rig the mesh with a rocking hull.", MessageType.Warning);
             using (new EditorGUI.DisabledScope(!canRig || string.IsNullOrEmpty(outGlb)))
                 if (GUILayout.Button(new GUIContent($"Generate rig{(useSourceRig && boneParts.Count > 0 ? " (fast path)" : "")}  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
                         fastPathOars ? "Disable the source-skeleton fast path before recovering oars from merged mesh geometry."
-                        : !canRig ? "Mark at least one entry as Wheel / Rotor / Tail rotor / Oar — or set a Wave rock amplitude (a floating unit needs no wheels)."
+                        : fastRotors > 0 ? "Mark the spinning source bone as Wheel, or disable the source-skeleton fast path."
+                        : fastWave ? "Disable the source-skeleton fast path to use Wave rock."
+                        : !canRig ? (FastPath ? "Mark at least one source bone as Wheel — the fast path spins wheel bones."
+                                              : "Mark at least one entry as Wheel / Rotor / Tail rotor / Oar — or set a Wave rock amplitude (a floating unit needs no wheels).")
                         : "Runs Blender: rig + Spin action + GLB export + preview."), GUILayout.Height(28)))
                     Vehicleize();
         }
@@ -1436,19 +1457,21 @@ public class VehicleLabWindow : EditorWindow
             // rock and vice-versa — no leak between models). off/zero is the safe neutral for a pre-2026-08-01 recipe;
             // the counted fields guard against a missing-key 0 the way treadAdvCells does.
             modelRot = r.modelRot; tracksStatic = r.tracksStatic; spinEnabled = r.spinEnabled; doubleSided = r.doubleSided; fixInsideOut = r.fixInsideOut;
-            // JsonUtility.FromJson assigns default(T), not field initializers, to keys absent from old recipes.
-            // Preserve a deliberately saved zero amplitude, but migrate a pre-0.5.5 recipe to the live defaults.
-            oarSweepDeg = Has("oarSweepDeg") ? r.oarSweepDeg : 24f;
-            oarDipDeg = Has("oarDipDeg") ? r.oarDipDeg : 18f;
-            oarFrames = Has("oarFrames") ? r.oarFrames : 24;
-            oarBladeRollDeg = r.oarBladeRollDeg;   // absent-key 0 IS the do-nothing default — no migration needed
-            oarLiftDeg = r.oarLiftDeg;             // same: absent-key 0 == do-nothing
-            oarRakeDeg = r.oarRakeDeg;             // same: absent-key 0 == do-nothing
-            oarPivotPct = Has("oarPivotPct") ? r.oarPivotPct : 30f;   // 30 ≠ 0: absent key must not slam the pivot to the handle
-            oarLengthPct = Has("oarLengthPct") ? r.oarLengthPct : 100f;   // 100 ≠ 0: absent key must not crush the oars
-            riggingReducePct = Has("riggingReducePct") ? r.riggingReducePct : 75f;
-            structureReducePct = Has("structureReducePct") ? r.structureReducePct : 50f;
-            bodyReducePct = r.bodyReducePct;   // absent-key 0 IS the do-nothing default — no migration needed
+            // MEASURED (review finding 10, Unity 2021.3.1f1 batch probe 2026-09-07): JsonUtility.FromJson DOES
+            // run field initializers — a key absent from an old recipe keeps the DTO initializer, which is that
+            // field's live default by construction. The Has() ternaries that duplicated each default here were
+            // built on the opposite (wrong) assumption; being wrong they were dead code, and a silently
+            // diverging copy of a default constant was the only thing they could ever contribute. Absent-key
+            // migration is the DTO initializer's job ALONE now. Has() itself stays: key PRESENCE is still the
+            // honest signal for the predates-note above (JsonUtility can't tell absent from saved-default).
+            oarSweepDeg = r.oarSweepDeg; oarDipDeg = r.oarDipDeg; oarFrames = r.oarFrames;
+            oarBladeRollDeg = r.oarBladeRollDeg;   // DTO initializer 0 = do-nothing
+            oarLiftDeg = r.oarLiftDeg;
+            oarRakeDeg = r.oarRakeDeg;
+            oarPivotPct = r.oarPivotPct;           // DTO initializer 30 — an absent key cannot slam the pivot to the handle
+            oarLengthPct = r.oarLengthPct;         // DTO initializer 100 — an absent key cannot crush the oars
+            riggingReducePct = r.riggingReducePct; structureReducePct = r.structureReducePct;
+            bodyReducePct = r.bodyReducePct;   // DTO initializer 0 = do-nothing
             oarReducePct = r.oarReducePct; sailReducePct = r.sailReducePct; rudderReducePct = r.rudderReducePct; wheelReducePct = r.wheelReducePct;   // same: absent-key 0 == untouched
             tailAxisChoice = r.tailAxisChoice; tailYawAdj = r.tailYawAdj; tailPitchAdj = r.tailPitchAdj;   // absent-key 0 == Auto/no trim, the old effective behavior
             trailSpreadDeg = r.trailSpreadDeg; trailFrames = r.trailFrames; gunPivot = r.gunPivot; gunDeployElev = r.gunDeployElev; recoilDist = r.recoilDist; recoilFrames = r.recoilFrames; recoilLead = r.recoilLead;
@@ -1556,6 +1579,19 @@ public class VehicleLabWindow : EditorWindow
         if (FastPath && ActiveParts.Any(p => p.role == Role.Oar))
         {
             status = "Oar recovery needs mesh parts. Disable Use source skeleton, Probe parts, then mark the merged oar meshes.";
+            return;
+        }
+        // Mirror of the Generate gate (review finding 9): rigfast spins WHEEL bones only — a Rotor/TailRotor
+        // marking or wave rock would be silently dropped by the fast path, so refuse here too (the script also
+        // hard-rejects, this just keeps the message in the window instead of the console).
+        if (FastPath && ActiveParts.Any(p => p.role == Role.Rotor || p.role == Role.TailRotor))
+        {
+            status = "Rotor / Tail rotor roles don't run on the fast path. Mark the spinning source bone as Wheel, or disable Use source skeleton.";
+            return;
+        }
+        if (FastPath && waveEnabled && (rockDegrees > 0f || rockPitchDeg > 0f))
+        {
+            status = "Wave rock doesn't run on the fast path. Disable Use source skeleton to rig the mesh with a rocking hull.";
             return;
         }
         // OVERWRITE GUARD: the output path is explicit and user-owned — an existing file (e.g. a HAND-MADE rig like

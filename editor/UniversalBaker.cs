@@ -170,14 +170,19 @@ public static class UniversalBaker
     static string ResourcesFull() => Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Assets", "Resources");
 
     // Copy whatever outputs currently exist for `name` (+ their .meta) to a fresh temp dir. Never throws.
+    // The directory is UNIQUE PER ATTEMPT (external review of PR #22, 2026-09-07): the old deterministic
+    // path was deleted at the start of every backup — so after a FAILED restore (whose backup is deliberately
+    // kept as the sole surviving copy of the previous bake), simply retrying the bake destroyed that kept
+    // backup and replaced it with the broken, partially-restored current state. A kept backup is now never
+    // touched by later attempts; DiscardBackup removes only its own attempt's directory.
     static OutputBackup BackupOutputs(string name)
     {
         var b = new OutputBackup { name = name ?? "" };
         if (string.IsNullOrEmpty(name)) return b;
-        b.dir = Path.Combine(Path.GetTempPath(), "haf_rebake_backup", name);
+        b.dir = Path.Combine(Path.GetTempPath(), "haf_rebake_backup",
+                             name + "_" + DateTime.UtcNow.ToString("yyyyMMdd_HHmmssfff"));
         try
         {
-            if (Directory.Exists(b.dir)) Directory.Delete(b.dir, true);
             string res = ResourcesFull();
             foreach (var s in OutputSuffixes)
                 foreach (var ext in new[] { "", ".meta" })
@@ -200,6 +205,8 @@ public static class UniversalBaker
 
     // Restore the backed-up outputs (called only on a FAILED bake): wipe any partial new outputs, copy the backups back
     // verbatim (asset + meta -> original GUIDs), and reimport. A no-op when nothing was backed up (a first bake).
+    // The backup is discarded ONLY after a successful restore — a failed restore is the one moment the backup is
+    // the sole surviving copy (the old outputs are already deleted here), so it is KEPT and its path logged.
     static void RestoreOutputs(OutputBackup b)
     {
         if (b == null || b.files.Count == 0) { DiscardBackup(b); return; }
@@ -214,8 +221,12 @@ public static class UniversalBaker
             int n = b.files.Count(f => !f.EndsWith(".meta"));
             Debug.LogWarning($"[Factory] {b.name}: re-bake FAILED — restored the previous {n} baked asset(s) from backup. Your working model is intact (the registry was not changed).");
         }
-        catch (Exception e) { Debug.LogError("[Factory] re-bake RESTORE failed — recover the model from git or the project backup: " + e); }
-        finally { DiscardBackup(b); }
+        catch (Exception e)
+        {
+            Debug.LogError($"[Factory] re-bake RESTORE failed mid-copy — the backup is KEPT at '{b.dir}'. Close whatever locks the files, then copy its contents into 'Assets/Resources' (assets + .meta, overwriting) and let Unity refresh; or recover from git: " + e);
+            return;   // keep the backup: it is now the only copy of the previous bake
+        }
+        DiscardBackup(b);
     }
 
     // DEPLOY CONVERSION AS PART OF THE RECIPE (2026-07-19, user-designed): run Tools/deploy_convert.py on the RAW
@@ -507,29 +518,40 @@ public static class UniversalBaker
             // with its source path+mtime and re-extract on any mismatch.
             string stampPath = mtlPath + ".src";
             string stamp = cfg.modelFile.Replace('\\', '/') + "|" + File.GetLastWriteTimeUtc(cfg.modelFile).Ticks;
-            bool mtlFresh = File.Exists(mtlPath) && File.GetLastWriteTimeUtc(cfg.modelFile) <= File.GetLastWriteTimeUtc(mtlPath)
-                            && File.Exists(stampPath) && File.ReadAllText(stampPath).Trim() == stamp;
-            if (!mtlFresh && !(cfg.keepTexture && File.Exists(mtlPath)))
+            // FRESHNESS BY STAMP, PRESENCE BY EITHER SHAPE (review finding 2, 2026-09-07). glbconv writes an MTL
+            // only for MULTI-material sources, so the old "MTL exists and is newer" freshness test read PERMANENTLY
+            // stale for a 1-material GLB — the hygiene below then deleted <name>_albedo.png and re-ran glbconv on
+            // EVERY bake. Worse, the keepTexture bypass also demanded the MTL, so the checkbox could never protect
+            // a single-material model's hand-edited albedo: it was deleted and re-extracted pristine each bake —
+            // the exact loss the checkbox exists to prevent. The stamp (source path + mtime, written after every
+            // successful extraction regardless of shape) is the freshness test for both shapes now.
+            string singleAlbPath = Path.Combine(fsResDir, name + "_albedo.png");
+            bool extractedExists = File.Exists(mtlPath) || File.Exists(singleAlbPath);
+            bool extractFresh = extractedExists && File.Exists(stampPath) && File.ReadAllText(stampPath).Trim() == stamp;
+            if (cfg.keepTexture && extractedExists && !extractFresh)
+                Debug.LogWarning($"[Factory] {name}: 'Reuse extracted files' is ON but the extraction on disk was made from a different (or older) source than '{cfg.modelFile}' — baking with the KEPT files anyway. Untick it for one bake if you want a fresh extraction.");
+            if (!extractFresh && !(cfg.keepTexture && extractedExists))
             {
-                // STALE-EXTRACTION HYGIENE (the Bell H-13 chimera, 2026-09-02). glbconv writes an MTL only for
-                // MULTI-material sources, so extracting a 1-material model over a 10-material extraction leaves the
-                // old MTL (and its stamp then claims the new source!) — and the single `_albedo.png` carries no
-                // stamp at all. The result was a directory mixing two models' extractions, silently consumed by the
-                // next bake. On a source change, remove every derived artifact before re-extracting; keepTexture
-                // (checked above) still protects hand-edited files by skipping this whole block.
+                // STALE-EXTRACTION HYGIENE (the Bell H-13 chimera, 2026-09-02). Extracting a 1-material model over
+                // a 10-material extraction leaves the old MTL claiming the new source, mixing two models'
+                // extractions in one directory, silently consumed by the next bake. On a source change, remove
+                // every derived artifact before re-extracting; keepTexture (checked above) still protects
+                // hand-edited files by skipping this whole block.
                 // Each delete takes its .meta along — File.Delete bypasses the AssetDatabase, and a left-behind meta
                 // makes Unity's next refresh print one "asset can't be found" line per file.
                 void DeleteWithMeta(string p) { File.Delete(p); if (File.Exists(p + ".meta")) File.Delete(p + ".meta"); }
                 foreach (var stale in Directory.GetFiles(fsResDir, name + "_mat*_albedo.*"))
                     if (!stale.EndsWith(".meta")) DeleteWithMeta(stale);
                 if (File.Exists(mtlPath)) DeleteWithMeta(mtlPath);
-                string singleAlb = Path.Combine(fsResDir, name + "_albedo.png");
-                if (File.Exists(singleAlb)) { DeleteWithMeta(singleAlb); Debug.Log($"[Factory] {name}: source model changed — removed the stale extracted albedo (it belonged to the previous source)."); }
+                if (File.Exists(singleAlbPath)) { DeleteWithMeta(singleAlbPath); Debug.Log($"[Factory] {name}: source model changed — removed the stale extracted albedo (it belonged to the previous source)."); }
                 Debug.Log($"[Factory] {name}: extracting per-material albedos (glbconv) for the multi-material animated atlas…");
+                // A FAILED EXTRACTION MUST FAIL THE BAKE (review finding 3, 2026-09-07): the hygiene above has
+                // already deleted every extracted albedo, so continuing from here bakes a flat-grey atlas and
+                // reports SUCCESS — the old warning even promised a "single atlas" fallback whose inputs were
+                // just deleted. Silent wrong output is the one failure class this project does not tolerate.
                 if (!ConvertGlb(cfg.modelFile, fsResDir, name, 0))
-                    Debug.LogWarning($"[Factory] {name}: glbconv extraction FAILED — a multi-material model will fall back to a SINGLE atlas (every part samples material 0). See the [glbconv] Console error.");
-                else
-                    File.WriteAllText(stampPath, stamp);
+                    return Fail("glbconv albedo extraction failed, and the previous extraction was already removed — continuing would bake a flat-grey atlas. See the [glbconv] Console error (missing dotnet/glbconv, or a broken GLB), then re-bake.");
+                File.WriteAllText(stampPath, stamp);
             }
         }
         var orderedAlb = LoadOrderedAlbedos(fsResDir, name);   // MTL-ordered (materialName -> albedo texture)
@@ -1731,7 +1753,15 @@ public static class UniversalBaker
             atlas.LoadImage(File.ReadAllBytes(albedo));
             var px = atlas.GetPixels32();
             AdjustAlbedo(px, brightness, saturation);   // optional brightness/saturation lift (baked in)
-            for (int i = 0; i < px.Length; i++) px[i].a = 255;
+            // Cutout-alpha detection (review finding 4, 2026-09-07): the beech-tree fix covered only the static
+            // multi-material branch — this shared single-material path still forced a=255 on every texel,
+            // flattening cutout foliage into solid triangles and steering FinalizeAtlas to DXT1. Same rule as
+            // there: >1% transparent samples = intentional alpha; opaque sources keep the exact old behavior.
+            int tr = 0, seen = 0;
+            for (int i = 0; i < px.Length; i += 97) { seen++; if (px[i].a < 250) tr++; }
+            bool srcHasAlpha = tr > seen / 100;
+            if (!srcHasAlpha) for (int i = 0; i < px.Length; i++) px[i].a = 255;
+            else Debug.Log($"[Factory] {name}: source albedo carries transparency — atlas keeps alpha (cutout foliage etc.).");
             atlas.SetPixels32(px); atlas.Apply();
             Debug.Log($"[Factory] {name} albedo: {atlas.width}x{atlas.height} ({Path.GetFileName(albedo)})");
         }
@@ -1840,12 +1870,29 @@ public static class UniversalBaker
         // hand-editing an extracted swatch into a larger real texture automatically returns that part to normal
         // UV mapping.
         var flatSwatch = albs.Select(a => a != null && a.width <= 8 && a.height <= 8).ToArray();
+        // Cutout-alpha detection, MIRRORING the static multi branch (review finding 4, 2026-09-07: the beech-tree
+        // fix landed only there — this path still forced a=255, flattening animated cutout foliage into solid
+        // triangles and steering FinalizeAtlas to DXT1). Opaque sources keep the exact old behavior.
+        bool srcHasAlpha = false;
+        foreach (var a in albs)
+        {
+            if (a == null || srcHasAlpha) continue;
+            var sp = a.GetPixels32(); int tr = 0, seen = 0;
+            for (int i = 0; i < sp.Length; i += 97) { seen++; if (sp[i].a < 250) tr++; }
+            if (tr > seen / 100) srcHasAlpha = true;   // >1% transparent samples = intentional alpha, not noise
+        }
         var atlas = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = name + "_Atlas" };
         var rects = atlas.PackTextures(albs, 2, cfg.atlasMaxDim > 0 ? cfg.atlasMaxDim : AtlasMaxDimDefault);
         var apx = atlas.GetPixels32();
         AdjustAlbedo(apx, cfg.albedoBrightness, cfg.albedoSaturation);
-        for (int i = 0; i < apx.Length; i++) { apx[i].a = 255; if (!cfg.keepBlack && apx[i].r < 32 && apx[i].g < 32 && apx[i].b < 32) { apx[i].r = 160; apx[i].g = 160; apx[i].b = 168; } }
+        for (int i = 0; i < apx.Length; i++)
+        {
+            if (!srcHasAlpha) apx[i].a = 255;
+            else if (apx[i].a < 250) continue;   // transparent texel: keep as-is (cutout territory)
+            if (!cfg.keepBlack && apx[i].r < 32 && apx[i].g < 32 && apx[i].b < 32) { apx[i].r = 160; apx[i].g = 160; apx[i].b = 168; }
+        }
         atlas.SetPixels32(apx); atlas.Apply();
+        if (srcHasAlpha) Debug.Log($"[Factory] {name}: source albedo carries transparency — atlas keeps alpha (cutout foliage etc.).");
         Debug.Log($"[Factory] {name} ANIMATED MULTI-MATERIAL: {albs.Length} materials [{string.Join(", ", orderedAlb.Select(kv => kv.Key))}] -> packed atlas {atlas.width}x{atlas.height}");
         foreach (var a in albs) if (a != null) UnityEngine.Object.DestroyImmediate(a);   // E8: free the packed source albedos (packing copied them into the atlas); only orderedAlb's KEYS are used below
 

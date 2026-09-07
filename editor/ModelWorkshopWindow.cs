@@ -40,6 +40,8 @@ public class ModelWorkshopWindow : EditorWindow
 
     [SerializeField] string srcFile = "";
     [SerializeField] string outGlb = "";
+    [SerializeField] bool outGlbAuto = true;   // output path is auto-derived from srcFile and TRACKS it until the user edits the field to something else (external review of PR #22)
+    [SerializeField] string probedFile = "";   // the file `rows` (and the checks/preview/output path) were built from — serialized so a domain reload doesn't read surviving rows as stale (review finding 8)
     [SerializeField] List<Row> rows = new List<Row>();
     [SerializeField] bool hideWhole = false;   // filter: hide "1 island — already whole" rows (nothing to split there)
     // DISTANCE MERGE (2026-09-06, the 602-island rope): topology alone shreds segmented geometry into hundreds
@@ -74,19 +76,27 @@ public class ModelWorkshopWindow : EditorWindow
             if (GUILayout.Button("…", GUILayout.Width(28)))
             {
                 string p = EditorUtility.OpenFilePanel("Choose the source GLB", string.IsNullOrEmpty(srcFile) ? "D:/3DModels" : Path.GetDirectoryName(srcFile), "glb");
-                if (!string.IsNullOrEmpty(p)) { srcFile = p.Replace('\\', '/'); outGlb = ""; rows.Clear(); DestroyPreview(); }
+                if (!string.IsNullOrEmpty(p)) { srcFile = p.Replace('\\', '/'); outGlbAuto = true; rows.Clear(); DestroyPreview(); }
             }
         }
-        if (string.IsNullOrEmpty(outGlb) && !string.IsNullOrEmpty(srcFile))
-            outGlb = Path.Combine(Path.GetDirectoryName(srcFile), Path.GetFileNameWithoutExtension(srcFile) + "_split.glb").Replace('\\', '/');
+        // AUTO-DERIVED OUTPUT that TRACKS the source (external review of PR #22, 2026-09-07): the old
+        // fill-when-empty derived exactly once — typing a source path derived from the FIRST keystroke's
+        // fragment and then stuck (the reset below fires only while rows exist), so Split could write the
+        // completed source's output to a "sh_split.glb" stub, over whatever lived there. While the user
+        // hasn't overridden the field it now re-derives every pass; an edit that differs takes ownership.
+        string autoOut = string.IsNullOrEmpty(srcFile) ? ""
+            : Path.Combine(Path.GetDirectoryName(srcFile), Path.GetFileNameWithoutExtension(srcFile) + "_split.glb").Replace('\\', '/');
+        if (outGlbAuto && !string.IsNullOrEmpty(autoOut)) outGlb = autoOut;
         using (new EditorGUILayout.HorizontalScope())
         {
-            outGlb = EditorGUILayout.TextField(new GUIContent("Output GLB", "Where the split copy is written — feed THIS file to the Vehicle Lab afterwards."), outGlb);
-            if (GUILayout.Button("…", GUILayout.Width(28)))
-            {
-                string p = EditorUtility.SaveFilePanel("Write split GLB", Path.GetDirectoryName(srcFile), Path.GetFileNameWithoutExtension(srcFile) + "_split", "glb");
-                if (!string.IsNullOrEmpty(p)) outGlb = p.Replace('\\', '/');
-            }
+            string typedOut = EditorGUILayout.TextField(new GUIContent("Output GLB", "Where the split copy is written — feed THIS file to the Vehicle Lab afterwards. Auto-follows the source file until you edit it."), outGlb);
+            if (typedOut != outGlb) { outGlb = typedOut; outGlbAuto = SamePath(typedOut, autoOut); }
+            using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(srcFile)))
+                if (GUILayout.Button("…", GUILayout.Width(28)))
+                {
+                    string p = EditorUtility.SaveFilePanel("Write split GLB", Path.GetDirectoryName(srcFile), Path.GetFileNameWithoutExtension(srcFile) + "_split", "glb");
+                    if (!string.IsNullOrEmpty(p)) { outGlb = p.Replace('\\', '/'); outGlbAuto = SamePath(outGlb, autoOut); }
+                }
         }
 
         float newMergePct = EditorGUILayout.Slider(new GUIContent("Merge closer than (%)",
@@ -102,6 +112,16 @@ public class ModelWorkshopWindow : EditorWindow
         // pass AFTER the drag ends.
         if (analyzePending && Event.current.type == EventType.Layout && GUIUtility.hotControl == 0)
         { analyzePending = false; Analyze(); }
+        // SOURCE-SWITCH HYGIENE (review finding 8, 2026-09-07): only the Browse button cleared the probe state —
+        // TYPING or pasting a different path kept the previous file's rows, checked node indices, preview and
+        // output path live: Split then ran the NEW file with the OLD file's node indices (splitting whatever
+        // those happen to be there) and wrote over the OLD file's _split.glb. Deferred to the Layout pass like
+        // the recount above (clearing `rows` mid-pass is the control-count exception this window documents).
+        if (rows.Count > 0 && Event.current.type == EventType.Layout && GUIUtility.hotControl == 0 && !SamePath(srcFile, probedFile))
+        {
+            rows.Clear(); outGlbAuto = true; selectedIdx = -1; selectedRow = ""; DestroyPreview();
+            status = "Source file changed — press Probe parts to analyze the new file.";
+        }
 
         using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(srcFile) || !File.Exists(srcFile)))
             if (GUILayout.Button(new GUIContent("Probe parts", "List every mesh-carrying node with triangle and island counts (instant, pure C#), and build the turntable preview (headless Blender export) so a clicked row lights up in yellow."), GUILayout.Height(24)))
@@ -161,6 +181,11 @@ public class ModelWorkshopWindow : EditorWindow
         if (Analyze()) BuildPreviewViaBlender();
     }
 
+    // Path identity for the source-switch hygiene: separator- and case-insensitive (Windows paths), so retyping
+    // the same file with the other slash style is not read as a switch.
+    static bool SamePath(string a, string b) =>
+        string.Equals((a ?? "").Replace('\\', '/').Trim(), (b ?? "").Replace('\\', '/').Trim(), StringComparison.OrdinalIgnoreCase);
+
     // The list half of Probe: pure C#, fast enough to re-run live when the merge slider moves. Checked state
     // survives a recount by part name (island counts change; the chosen parts don't). NATURAL name order:
     // Object_2 follows Object_1 and Object_10 comes after Object_9 — trailing digits compare as numbers.
@@ -177,6 +202,7 @@ public class ModelWorkshopWindow : EditorWindow
                 .ThenBy(r => r.node, StringComparer.OrdinalIgnoreCase).ToList();
             foreach (var r in rows) if (r.islands <= 1 || r.blocked != null) r.split = false;   // no longer splittable at this distance
             int multi = rows.Count(r => r.islands > 1 && r.blocked == null);
+            probedFile = srcFile;   // the rows now describe THIS file (the source-switch hygiene above keys on it)
             status = multi == 0 ? "Every part is a single attached island (at this merge distance) — nothing to split."
                    : $"{rows.Count} part(s); {multi} hold more than one island at merge distance {mergePct:0.#}%. Check the ones hiding junk; raise the slider if a part still shreds into fragments.";
             Repaint();

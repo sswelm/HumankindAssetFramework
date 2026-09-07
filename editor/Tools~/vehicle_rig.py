@@ -445,6 +445,15 @@ if mode == "rigfast":
     if oar_names:
         print("VEHICLE ERROR: Oar recovery needs mesh parts; disable the source-skeleton fast path and probe the merged oar meshes")
         sys.exit(1)
+    # Review finding 9 (2026-09-07): the fast path spins WHEEL bones only — rotor/tail-rotor lists and wave
+    # rock were parsed but silently ignored, so Generate printed RIG DONE and nothing moved. Reject loudly,
+    # like the oar guard above; the Vehicle Lab gates the same combinations before ever calling this.
+    if rotor_names or tailrotor_names:
+        print("VEHICLE ERROR: Rotor / Tail rotor roles are ignored by the source-skeleton fast path — mark the spinning source BONE as Wheel (fast-path bones spin about their own axis), or disable the fast path to rig the mesh parts")
+        sys.exit(1)
+    if rock_on:
+        print("VEHICLE ERROR: Wave rock is not supported on the source-skeleton fast path — disable the fast path to rig the mesh with a rocking hull")
+        sys.exit(1)
     def _fast():
         global objs
         arms = [o for o in bpy.context.scene.objects if o.type == 'ARMATURE']

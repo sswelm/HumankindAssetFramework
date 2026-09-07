@@ -919,8 +919,12 @@ public class ModelFactoryWindow : EditorWindow
                     // Prefill "Fix 100x oversize" from the model's TRUE size (only on an explicit new pick, so a loaded
                     // entry keeps its saved value). Best-effort guess the user can override — see SuggestUnitFix.
                     float sz; bool guess = SuggestUnitFix(p, out sz);
-                    if (sz > 0f) { cur.animUnitFix = guess; status = $"Auto-set 'Fix 100× oversize' = {(guess ? "ON" : "off")} (model true size ≈ {sz:0.###}u). Override if the bake comes out wrong. " +
-                        "(Carried by the next Bake; 'Save settings' alone won't keep it — it's an animation-owned field the save rebases from the registry.)"; }   // 2026-08-19 audit: honest about the ownership rebase
+                    // The guess is ARMED (browseUnitFixGuess) so it survives the ownership rebase until a save or
+                    // bake persists it — animUnitFix is a Lab-owned field, and the rebase used to silently revert
+                    // the guess right before an existing entry's bake (review finding 6, 2026-09-07: the status
+                    // line promised "carried by the next Bake" while DoBake's rebase discarded it -> 100x bake).
+                    if (sz > 0f) { cur.animUnitFix = guess; browseUnitFixGuess = guess ? 1 : 0; status = $"Auto-set 'Fix 100× oversize' = {(guess ? "ON" : "off")} (model true size ≈ {sz:0.###}u). Override if the bake comes out wrong. " +
+                        "(Sticks until the next Bake or 'Save settings' writes it; the Animation Lab's checkbox owns it after that.)"; }
                 }
             }
         }
@@ -1284,7 +1288,7 @@ public class ModelFactoryWindow : EditorWindow
                     "Write this entry's settings to the registry WITHOUT re-baking — for the runtime knobs " +
                     "(turn ease, terrain hug, donor clip, VFX/sound flags, rotation/position/textures). Rebuild " +
                     "the mod afterwards; no relaunch of Blender, no new assets."), GUILayout.Height(34), GUILayout.Width(110)))
-                    SaveSettingsOnly();
+                    SaveOnly();
             if (GUILayout.Button("Reset", GUILayout.Height(34), GUILayout.Width(72))) { cur = new ModelDef(); selected = 0; status = ""; GUI.FocusControl(null); }
         }
         if (!canBake)
@@ -1383,9 +1387,14 @@ public class ModelFactoryWindow : EditorWindow
         !string.IsNullOrWhiteSpace(d.animateBones) ||
         (d.clip != null && d.clip.Length == 4 && !(d.clip[0] == 0 && d.clip[1] == 0 && d.clip[2] == 0 && d.clip[3] == 0));
 
+    // -1 = no un-persisted Browse auto-guess; 0/1 = a "Fix 100x oversize" value guessed for a freshly-browsed
+    // model file, reapplied after the ownership rebase until a save/bake persists it (review finding 6).
+    int browseUnitFixGuess = -1;
+
     void OnSelectResource()
     {
         formDiffersFromRegistry = false;   // loading fresh = in sync by definition
+        browseUnitFixGuess = -1;           // the guess belonged to the previous form's browsed file
         if (selected <= 0) { cur = new ModelDef(); loadedName = ""; status = ""; LoadPreview(null); return; }
         var e = ModelRegistry.Load().FirstOrDefault(x => x.resourceName == existing[selected]);
         if (e == null) return;
@@ -1904,9 +1913,10 @@ public class ModelFactoryWindow : EditorWindow
     };
 
     // ENFORCED OWNERSHIP (2026-08-01, fail-safe AND fully type-safe). The Model Factory owns only the model geometry /
-    // transform / shading / its own bake GUIDs + the runtime toggles it actually shows; the ANIMATION / sound / skin /
-    // resize fields belong to their own windows. Whenever THIS window writes the registry, we must keep their freshest
-    // SAVED values so a stale Factory copy can't clobber a value changed elsewhere since `cur` was loaded here.
+    // transform / shading + the runtime toggles it actually shows; the ANIMATION / sound / skin / resize fields — and
+    // the BAKED GUIDs (see the note in the rebase) — belong to the registry's saved copy. Whenever THIS window writes
+    // the registry, we must keep their freshest SAVED values so a stale Factory copy can't clobber a value changed
+    // elsewhere since `cur` was loaded here.
     //
     // Structure mirrors the Lab's already-fail-safe RebaseOnRegistry: START from the saved entry (so every field the
     // Factory does NOT own is preserved), then OVERLAY only the Factory-owned fields from the form. Overwriting cur in
@@ -1915,24 +1925,9 @@ public class ModelFactoryWindow : EditorWindow
     // 'disabled' silently un-disabled; ~13 Sound fields never listed) is structurally impossible: a new field is kept
     // BY DEFAULT. And unlike a reflection loop, every overlay line below is a plain compile-checked assignment — a typo
     // or a renamed field is a BUILD error, not a silent revert.
-    // Persist the form to the registry with NO bake — see the "Save settings" button. Runtime-only knobs take
-    // effect on the next mod rebuild; baked assets (skeleton/atlas/clips) are carried over untouched by the
-    // ownership rebase, so this can never orphan them.
-    void SaveSettingsOnly()
-    {
-        if (BlockedByRenameClobber()) return;
-        RebaseLabOwnedOnRegistry();
-        bool saved = ModelRegistry.Upsert(cur);
-        if (saved) { formDiffersFromRegistry = false; loadedName = cur.resourceName; }   // form is now the saved truth
-        string renameNote = saved ? FinishRename() : "";
-        RefreshList();
-        selected = System.Array.IndexOf(existing, cur.resourceName); if (selected < 0) selected = 0;
-        status = (saved
-            ? $"Saved '{cur.resourceName}' settings (no bake). Rebuild the mod to apply them in-game."
-            : "REGISTRY SAVE FAILED (see Console) — settings were NOT written.") + renameNote;
-        Debug.Log("[Factory] " + status);
-        GUI.FocusControl(null);
-    }
+    // (The old SaveSettingsOnly — which the button called until 2026-09-07 — carried the form's GUID copies through
+    // the rebase and could write DEAD skel/atlas/clip after a Lab rebake of the same entry; the button now calls
+    // SaveOnly below, which restores every baked GUID from the registry. Review finding 5.)
 
     // The registry key the form was LOADED under. `existing[selected]` is the same reliable signal the Remove
     // button keys on (see the Remove handler): it tracks the loaded entry and is "<New>"/absent for a fresh or
@@ -1994,7 +1989,12 @@ public class ModelFactoryWindow : EditorWindow
         cur.albedoBrightness = form.albedoBrightness; cur.albedoSaturation = form.albedoSaturation; cur.keepBlack = form.keepBlack;
         cur.materialMode = form.materialMode; cur.atlasMaxDim = form.atlasMaxDim; cur.targetTris = form.targetTris;
         cur.stripParts = form.stripParts; cur.hideMeshes = form.hideMeshes;
-        cur.skel = form.skel; cur.atlas = form.atlas; cur.clip = form.clip;
+        // BAKED GUIDs (skel/atlas/clip) are deliberately NOT overlaid from the form (review finding 5, 2026-09-07):
+        // every bake regenerates them, and a Lab rebake of the same entry never refreshes an open Factory form — the
+        // form's copies were the one thing here that could be STALER than the registry, and overlaying them let a
+        // "Save settings" write dead GUIDs next to live role clips (unresolved-GUID warnings; unit not injected).
+        // The registry copy (already in cur via the FromJsonOverwrite above) is always at-least-as-fresh; a Factory
+        // bake overwrites cur's GUIDs from the fresh assets right after this rebase anyway.
         cur.respawnAfterLoad = form.respawnAfterLoad; cur.freezeDonorAnim = form.freezeDonorAnim; cur.silenceDonorVfx = form.silenceDonorVfx;
         cur.useDonorClip = form.useDonorClip;
         cur.turnRate = form.turnRate; cur.turnBank = form.turnBank;
@@ -2005,6 +2005,18 @@ public class ModelFactoryWindow : EditorWindow
         // registry value on every Save ("I tried to save but the offset reset to 0"). The schema-parity gate
         // does NOT check this list. When adding a Factory field: schema, regex fallback, UI, and THIS list.
         cur.animated = regE.animated || form.animated;   // one-way OR: a prior animated bake wins; a static Factory re-bake must not silently un-animate the entry
+        // BROWSE AUTO-GUESS CARRY-THROUGH (review finding 6, 2026-09-07): animUnitFix is Lab-owned, so the
+        // rebase rightly pulls the registry value — but that silently discarded the "Fix 100x oversize" guess
+        // Browse just made for a freshly-picked model (the status line promised it would carry to the bake;
+        // DoBake's rebase reverted it -> 100x-giant bake). While a guess is armed, reapply it here; the moment
+        // the registry already carries the guessed value (a save or bake persisted it) the guess DISARMS and
+        // the Lab's checkbox owns the field again.
+        if (browseUnitFixGuess >= 0)
+        {
+            bool g = browseUnitFixGuess == 1;
+            if (cur.animUnitFix == g) browseUnitFixGuess = -1;
+            else cur.animUnitFix = g;
+        }
     }
 
     // ANIMATED -> STATIC downgrade that STICKS (user verdict 2026-07-26: "when I removed the animation
@@ -2024,6 +2036,7 @@ public class ModelFactoryWindow : EditorWindow
             "(which will be STATIC).\n\nThe model file, transform, size and shading settings are kept.",
             "Make static", "Cancel")) return;
         cur.animated = false;
+        browseUnitFixGuess = -1;   // Make static is a deliberate clear — an armed Browse guess must not resurrect animUnitFix through the rebase
         cur.animClip = ""; cur.animateBones = ""; cur.staticParts = ""; cur.localNodeAnim = false; cur.animUnitFix = false;
         cur.convertRig = false; cur.autoGroundWheels = false; cur.keepTranslations = false;
         cur.deployConvert = false; cur.deployStart = 0; cur.deployEnd = 0; cur.deployStrip = ""; cur.deployStripExtra = "";
@@ -2045,7 +2058,7 @@ public class ModelFactoryWindow : EditorWindow
         cur.fireOnAttack = false; cur.deployOnStop = false;
         cur.deployPoseTime = 0f; cur.deploySpeed = 0f; cur.recoilSpeed = 0f;
         bool saved = ModelRegistry.Upsert(cur);
-        if (saved) { formDiffersFromRegistry = false; loadedName = cur.resourceName; }   // form is now the saved truth
+        if (saved) { formDiffersFromRegistry = false; loadedName = cur.resourceName; browseUnitFixGuess = -1; }   // form is now the saved truth; a just-persisted Browse unit-fix guess DISARMS here — waiting for the next rebase to notice left a window where it could overwrite a newer Lab-saved value (external review of PR #22)
         RefreshList();
         status = saved
             ? $"'{cur.resourceName}' animation configuration DELETED from the registry — the next Bake is static. (Relaunch also stops the animated override.)"
@@ -2053,10 +2066,12 @@ public class ModelFactoryWindow : EditorWindow
         Debug.Log("[Factory] " + status);
     }
 
-    // Registry-only save — the button the runtime section deserved all along (user request, 2026-07-26, after
-    // the hideMeshes spike-fix had no way to save without a full re-bake): writes the entry with the current
-    // Factory-owned fields, Lab-owned fields rebased from the registry, and the BAKED GUIDs taken from the
-    // registry too (assets are untouched, so this window's possibly-stale GUID copies must never be written).
+    // "Save settings" (registry-only save, no bake — user request 2026-07-26, after the hideMeshes spike-fix had
+    // no way to save without a full re-bake): writes the entry with the current Factory-owned fields, Lab-owned
+    // fields rebased from the registry, and the BAKED GUIDs taken from the registry too (assets are untouched, so
+    // this window's possibly-stale GUID copies must never be written). The explicit GUID restore below is now
+    // belt-and-braces — the rebase itself keeps the registry GUIDs since review finding 5 (2026-09-07) — but it
+    // also covers the role-clip GUID family and stays as the documented contract.
     void SaveOnly()
     {
         cur.resourceName = (cur.resourceName ?? "").Trim();
@@ -2078,7 +2093,7 @@ public class ModelFactoryWindow : EditorWindow
             modelFileChanged = !string.Equals(regE.modelFile ?? "", cur.modelFile, StringComparison.OrdinalIgnoreCase);
         }
         bool saved = ModelRegistry.Upsert(cur);
-        if (saved) { formDiffersFromRegistry = false; loadedName = cur.resourceName; }   // form is now the saved truth
+        if (saved) { formDiffersFromRegistry = false; loadedName = cur.resourceName; browseUnitFixGuess = -1; }   // form is now the saved truth; a just-persisted Browse unit-fix guess DISARMS here — waiting for the next rebase to notice left a window where it could overwrite a newer Lab-saved value (external review of PR #22)
         string renameNote = saved ? FinishRename() : "";
         RefreshList();
         selected = System.Array.IndexOf(existing, cur.resourceName); if (selected < 0) selected = 0;
@@ -2092,6 +2107,7 @@ public class ModelFactoryWindow : EditorWindow
               (modelFileChanged ? "  NOTE: the Model file differs from what was last baked — the assets on disk are still the old bake." : "")
             : "REGISTRY SAVE FAILED (see Console). Close whatever's locking the registry and retry.") + renameNote;
         Debug.Log("[Factory] " + status);
+        GUI.FocusControl(null);   // defocus so an in-edit field commits and the status line repaints (kept from the old button handler)
     }
 
     void DoBake()
@@ -2192,7 +2208,7 @@ public class ModelFactoryWindow : EditorWindow
         cur.clipIdleAlt = cfg.animated && cfg.animStateDriven && !string.IsNullOrEmpty(r.clipIdleAltGuid) ? ModelRegistry.ParseGuid(r.clipIdleAltGuid) : new int[4];
         cur.clipIdleAlt2 = cfg.animated && cfg.animStateDriven && !string.IsNullOrEmpty(r.clipIdleAlt2Guid) ? ModelRegistry.ParseGuid(r.clipIdleAlt2Guid) : new int[4];
         bool saved = ModelRegistry.Upsert(cur);
-        if (saved) { formDiffersFromRegistry = false; loadedName = cur.resourceName; }   // form is now the saved truth
+        if (saved) { formDiffersFromRegistry = false; loadedName = cur.resourceName; browseUnitFixGuess = -1; }   // form is now the saved truth; a just-persisted Browse unit-fix guess DISARMS here — waiting for the next rebase to notice left a window where it could overwrite a newer Lab-saved value (external review of PR #22)
         bakedNotShipped = ShipStatus.IsBakedNotShipped(loadedName);   // a fresh bake is always newer than the build — show the ship notice immediately
         string renameNote = saved ? FinishRename() : "";
         RefreshList();
