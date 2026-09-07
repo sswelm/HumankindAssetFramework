@@ -5,6 +5,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.6 — unreleased
 
+- **A failed albedo extraction now fails the bake instead of shipping a flat-grey model as a success.** On the
+  animated path, the stale-extraction cleanup deletes every extracted albedo before re-running glbconv; when
+  glbconv then failed (missing dotnet, a broken GLB), the bake logged one warning and carried on to a grey
+  atlas, a green "Baked" toast, and an updated registry. The extraction failure is now a bake failure with the
+  cause and the fix in the error text. (The static path already failed properly.)
 - **"Reuse extracted files" now actually protects a single-material model's hand-edited albedo.** The
   protection (and the freshness test) hinged on the extraction's MTL file — which glbconv writes only for
   multi-material sources. A 1-material GLB therefore read as permanently stale: every bake deleted

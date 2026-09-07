@@ -540,10 +540,13 @@ public static class UniversalBaker
                 if (File.Exists(mtlPath)) DeleteWithMeta(mtlPath);
                 if (File.Exists(singleAlbPath)) { DeleteWithMeta(singleAlbPath); Debug.Log($"[Factory] {name}: source model changed — removed the stale extracted albedo (it belonged to the previous source)."); }
                 Debug.Log($"[Factory] {name}: extracting per-material albedos (glbconv) for the multi-material animated atlas…");
+                // A FAILED EXTRACTION MUST FAIL THE BAKE (review finding 3, 2026-09-07): the hygiene above has
+                // already deleted every extracted albedo, so continuing from here bakes a flat-grey atlas and
+                // reports SUCCESS — the old warning even promised a "single atlas" fallback whose inputs were
+                // just deleted. Silent wrong output is the one failure class this project does not tolerate.
                 if (!ConvertGlb(cfg.modelFile, fsResDir, name, 0))
-                    Debug.LogWarning($"[Factory] {name}: glbconv extraction FAILED — a multi-material model will fall back to a SINGLE atlas (every part samples material 0). See the [glbconv] Console error.");
-                else
-                    File.WriteAllText(stampPath, stamp);
+                    return Fail("glbconv albedo extraction failed, and the previous extraction was already removed — continuing would bake a flat-grey atlas. See the [glbconv] Console error (missing dotnet/glbconv, or a broken GLB), then re-bake.");
+                File.WriteAllText(stampPath, stamp);
             }
         }
         var orderedAlb = LoadOrderedAlbedos(fsResDir, name);   // MTL-ordered (materialName -> albedo texture)
