@@ -200,6 +200,8 @@ public static class UniversalBaker
 
     // Restore the backed-up outputs (called only on a FAILED bake): wipe any partial new outputs, copy the backups back
     // verbatim (asset + meta -> original GUIDs), and reimport. A no-op when nothing was backed up (a first bake).
+    // The backup is discarded ONLY after a successful restore — a failed restore is the one moment the backup is
+    // the sole surviving copy (the old outputs are already deleted here), so it is KEPT and its path logged.
     static void RestoreOutputs(OutputBackup b)
     {
         if (b == null || b.files.Count == 0) { DiscardBackup(b); return; }
@@ -214,8 +216,12 @@ public static class UniversalBaker
             int n = b.files.Count(f => !f.EndsWith(".meta"));
             Debug.LogWarning($"[Factory] {b.name}: re-bake FAILED — restored the previous {n} baked asset(s) from backup. Your working model is intact (the registry was not changed).");
         }
-        catch (Exception e) { Debug.LogError("[Factory] re-bake RESTORE failed — recover the model from git or the project backup: " + e); }
-        finally { DiscardBackup(b); }
+        catch (Exception e)
+        {
+            Debug.LogError($"[Factory] re-bake RESTORE failed mid-copy — the backup is KEPT at '{b.dir}'. Close whatever locks the files, then copy its contents into 'Assets/Resources' (assets + .meta, overwriting) and let Unity refresh; or recover from git: " + e);
+            return;   // keep the backup: it is now the only copy of the previous bake
+        }
+        DiscardBackup(b);
     }
 
     // DEPLOY CONVERSION AS PART OF THE RECIPE (2026-07-19, user-designed): run Tools/deploy_convert.py on the RAW

@@ -3,6 +3,14 @@
 The **package** changelog: what changed for someone who installs the tools. (The project-wide engineering log
 lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `editor-vX.Y.Z`.
 
+## 0.5.6 — unreleased
+
+- **A failed re-bake restore no longer destroys its own backup.** The rollback path deletes the current outputs
+  before copying the backup back; if that copy then failed (a file locked by antivirus or an indexer), the cleanup
+  still wiped the backup directory — old assets gone, partial new assets gone, backup gone, git the only recovery.
+  The backup is now discarded only after a **successful** restore; on a failed one it is kept and the error names
+  its path with copy-back instructions.
+
 ## 0.5.5 — 2026-09-04
 
 - **Rowing — a galley oar bank, animated from merged meshes.** A new **Oar** role (hotkey `O`) in the Vehicle Lab.
