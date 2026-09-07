@@ -11,9 +11,11 @@ the tooling or a one-checkbox recipe below.
 At bake time, each source material's **albedo** is extracted to
 `Assets/FactorySource/<Model>/<Model>_matNN_<matname>_albedo.png` (Blender-side, from the GLB/FBX's textures).
 The baker then packs all of them into **one atlas** (`<Model>_Atlas`), remaps every submesh's UVs into its
-material's rect, merges the submeshes, and block-compresses the result. Opaque atlases use **DXT1**; the static
-multi-material path preserves meaningful source alpha and uses **DXT5**. The animated multi-material path still
-forces the atlas opaque — see the BLEND caveat.
+material's rect, merges the submeshes, and block-compresses the result. Opaque atlases use **DXT1**; when a
+source albedo carries meaningful alpha (>1% transparent samples — cutout foliage, rigging cards), **every**
+atlas path preserves it and compresses **DXT5** (since editor 0.5.6; before that only the static
+multi-material path did — animated and single-material bakes flattened cutouts into solid triangles). See the
+BLEND caveat for layered semi-transparency.
 The game renders exactly this atlas; the source textures never ship. Anything wrong at any stage — extraction,
 packing, matching, remapping, post-processing — shows up as "the texture looks wrong" with very different
 root causes, which is why the failure catalog below leads with symptoms.
@@ -73,10 +75,10 @@ into [0,1) at remap time. Diagnose via the OBJ's `vt` range or a GLB accessor sc
 [3.0..4.0], this was it (pre-fix bakes).
 
 **Subtle washed "dirt" layer differs from the source render** → the source material is **alphaMode=BLEND**
-(Sketchfab layering: dirt/decals in alpha, blended over the layer beneath). DXT5 can preserve an alpha channel on
-the static multi-material path, but HAF does not composite layered source materials into one final albedo; the
-animated multi-material path also forces alpha opaque. Semi-transparent dirt/decal RGB can therefore differ from
-the source render. Usually acceptable; no compositing fix has shipped yet.
+(Sketchfab layering: dirt/decals in alpha, blended over the layer beneath). The atlas preserves the alpha
+channel (DXT5, all paths since editor 0.5.6), but HAF does not **composite** layered source materials into one
+final albedo — semi-transparent dirt/decal RGB can therefore differ from the source render. Usually acceptable;
+no compositing fix has shipped yet.
 
 **Preview looks wrong but you suspect the bake is fine** → previews flatten materials and can hold **persisted
 wrong texture bindings**: Unity resolves FBX auto-material textures BY NAME SEARCH in the folder subtree and

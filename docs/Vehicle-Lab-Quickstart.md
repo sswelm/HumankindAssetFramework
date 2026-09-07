@@ -47,6 +47,11 @@ If the source is already skinned and at least 90% of its vertices are weighted, 
 skeleton (fast path)**. In that mode each row is a bone, not an individual mesh shard. Leave it enabled to preserve the
 artist's pivots and weights; disable it when those weights are the problem or you need shard-level control.
 
+**The fast path spins Wheel-marked bones only.** Mark any bone that should spin — a helicopter rotor included — as
+**Wheel** (fast-path bones spin about their own axis, which is exactly what a rotor bone wants). Rotor / Tail rotor
+roles, Oar recovery, and Wave rock all need the mesh rig: Generate refuses them on the fast path with the workaround
+in the warning (since 0.5.6 — before that the rig generated and the marked parts silently didn't move).
+
 ## 3. Assign roles
 
 Resolve every **Default** row before generating the rig. **Verify** reports undecided parts, unexpected wheel clusters,
