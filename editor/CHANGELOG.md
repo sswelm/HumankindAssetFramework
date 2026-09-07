@@ -3,7 +3,7 @@
 The **package** changelog: what changed for someone who installs the tools. (The project-wide engineering log
 lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `editor-vX.Y.Z`.
 
-## 0.5.6 — unreleased
+## 0.5.6 — 2026-09-07
 
 - **External review hardening (three finds on this release's own fixes).** A kept failed-restore backup is no
   longer destroyed by simply retrying the bake — each bake attempt backs up into its own unique directory, so
