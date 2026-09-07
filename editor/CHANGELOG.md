@@ -5,6 +5,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.6 — unreleased
 
+- **Typing a different source path into the Workshop resets the probe.** Only the Browse button cleared the
+  part list — typing or pasting another file's path kept the previous probe's rows, checked node indices,
+  preview and output path live, so Split would carve the *new* file by the *old* file's node indices and write
+  over the old file's `_split.glb`. Any source change (however entered) now clears the probe state and asks
+  for a fresh Probe; the output path re-derives from the new file.
 - **The Workshop's distance merge recognizes diagonal dashes.** The direction gate — which stops two parallel
   dashed lines from fusing into one part through a near crossing — judged "elongated" by the axis-aligned
   bounding box, so a dash at 45° read as a blob (two equal extents), skipped the gate, and parallel diagonal
