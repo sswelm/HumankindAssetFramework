@@ -150,6 +150,25 @@ public class GlbDisconnectedPartsTests
     }
 
     [Fact]
+    public void Direction_gate_keeps_parallel_DIAGONAL_dashed_lines_as_separate_parts()
+    {
+        // Review finding 7 regression: the fixture above rotated 45° about Z. Rotation preserves every
+        // distance, so the correct result is unchanged (4 raw islands, 2 lines after the merge) — but the old
+        // axis-aligned bbox aspect saw each diagonal dash with two EQUAL extents (0.72 x 0.72), classified it
+        // blobby, skipped the direction gate, and fused all four dashes into ONE part. Elongation judged in
+        // the island's own frame (PCA aspect) must keep the two diagonal lines apart.
+        byte[] source = BuildGlb(new[] {
+            0f, 0f, 0f,             0.70711f, 0.70711f, 0f,   -0.01414f, 0.01414f, 0f,
+            1.06066f, 1.06066f, 0f, 1.76777f, 1.76777f, 0f,    1.04652f, 1.07480f, 0f,
+            -0.21213f, 0.21213f, 0f, 0.49497f, 0.91924f, 0f,  -0.22627f, 0.22627f, 0f,
+            0.84853f, 1.27279f, 0f,  1.55563f, 1.97990f, 0f,   0.83439f, 1.28693f, 0f
+        });
+
+        Assert.Equal(4, GlbDisconnectedParts.Analyze(source).Single(i => i.NodeName == "Hull").Islands);
+        Assert.Equal(2, GlbDisconnectedParts.Analyze(source, 0.25).Single(i => i.NodeName == "Hull").Islands);
+    }
+
+    [Fact]
     public void Merge_uses_surface_distance_not_bounding_boxes()
     {
         // A long diagonal sliver whose bounding box covers the whole area, plus a small triangle floating

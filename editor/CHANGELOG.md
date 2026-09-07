@@ -5,6 +5,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.6 — unreleased
 
+- **The Workshop's distance merge recognizes diagonal dashes.** The direction gate — which stops two parallel
+  dashed lines from fusing into one part through a near crossing — judged "elongated" by the axis-aligned
+  bounding box, so a dash at 45° read as a blob (two equal extents), skipped the gate, and parallel diagonal
+  rigging lines merged into one part. Elongation is now measured in the island's own frame (principal-component
+  aspect, rotation-invariant); axis-aligned models behave exactly as before. Locked by a regression test that
+  is the original gate fixture rotated 45°.
 - **Browse's "Fix 100× oversize" auto-guess now actually reaches the bake.** The guess is a Lab-owned field,
   so on an already-saved entry the Factory's ownership rebase silently reverted it right before baking — the
   status line promised "carried by the next Bake" while the bake ran with the old value (a 100×-giant or

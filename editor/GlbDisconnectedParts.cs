@@ -95,19 +95,6 @@ public static class GlbDisconnectedParts
         public int TriangleCount;
         public readonly List<Vec3> Points = new List<Vec3>();   // sample positions for the direction test (distance merge)
 
-        // DIRECTION (the dashed-line problem): a rope/trim dash is ELONGATED — its bbox has one dominant axis.
-        // The merge may then only reach ALONG that axis, so a hull trim line and a sail luff line that pass close
-        // never chain into one part through a crossing ("vertices must not be connected indirectly"). Blobby
-        // islands (aspect < 3) merge on distance alone. Direction = PC1 by power iteration (the galley oar method).
-        public bool Elongated
-        {
-            get
-            {
-                double[] e = { Max[0] - Min[0], Max[1] - Min[1], Max[2] - Min[2] };
-                Array.Sort(e);
-                return e[2] > 3 * Math.Max(e[1], 1e-12);
-            }
-        }
         public Vec3 Centroid()
         {
             double x = 0, y = 0, z = 0;
@@ -115,7 +102,20 @@ public static class GlbDisconnectedParts
             int n = Math.Max(1, Points.Count);
             return new Vec3 { X = x / n, Y = y / n, Z = z / n };
         }
-        public Vec3 Direction()
+
+        // DIRECTION + ELONGATION in one pass (the dashed-line problem): a rope/trim dash is ELONGATED, so the
+        // merge may only reach ALONG its axis — a hull trim line and a sail luff line that pass close never
+        // chain into one part through a crossing ("vertices must not be connected indirectly"). Blobby islands
+        // (aspect < 3) merge on distance alone.
+        // Elongation is judged in the island's OWN frame (review finding 7, 2026-09-07): the old axis-aligned
+        // bbox aspect read a 45-degree dash as blobby (two equal extents), so parallel DIAGONAL dashed lines
+        // bypassed the direction gate entirely and fused — the exact failure the gate was built to prevent.
+        // PC1 by power iteration (the galley oar method), PC2 by iterating the SAME covariance while projecting
+        // each step orthogonal to PC1 (no explicit deflation, so no deflation drift); aspect =
+        // sqrt(var1/var2) is rotation-invariant and matches the old extent-ratio threshold for uniform dashes.
+        // The PC1 seed leans on the bbox diagonal (plus small fixed offsets) so it cannot start exactly
+        // perpendicular to the true axis.
+        public void PrincipalAxes(out Vec3 pc1, out double aspect)
         {
             Vec3 m = Centroid();
             var cov = new double[3, 3];
@@ -124,17 +124,54 @@ public static class GlbDisconnectedParts
                 double[] d = { p.X - m.X, p.Y - m.Y, p.Z - m.Z };
                 for (int a = 0; a < 3; a++) for (int b = 0; b < 3; b++) cov[a, b] += d[a] * d[b];
             }
-            double vx = 1, vy = 0.3, vz = 0.1;
+            double v1x, v1y, v1z;
+            double var1 = PowerIterate(cov, Max[0] - Min[0] + 0.017, Max[1] - Min[1] + 0.013, Max[2] - Min[2] + 0.011,
+                                       0, 0, 0, out v1x, out v1y, out v1z);
+            pc1 = new Vec3 { X = v1x, Y = v1y, Z = v1z };
+            double var2 = PowerIterate(cov, 0.31, 0.68, 0.55, v1x, v1y, v1z, out _, out _, out _);
+            aspect = Math.Sqrt((var1 + 1e-24) / Math.Max(var2, 1e-24));
+        }
+
+        // Power iteration on a 3x3 covariance; with a non-zero (ox,oy,oz) every step (seed included) is projected
+        // orthogonal to it, so the iteration converges to the dominant eigenvector of the orthogonal subspace
+        // (= PC2 when given PC1). Returns the variance along the converged direction (Rayleigh quotient).
+        static double PowerIterate(double[,] c, double sx, double sy, double sz, double ox, double oy, double oz,
+                                   out double vx, out double vy, out double vz)
+        {
+            bool ortho = ox != 0 || oy != 0 || oz != 0;
+            vx = sx; vy = sy; vz = sz;
+            if (ortho)
+            {
+                double sd = vx * ox + vy * oy + vz * oz;
+                vx -= sd * ox; vy -= sd * oy; vz -= sd * oz;
+                if (vx * vx + vy * vy + vz * vz < 1e-18)
+                {   // seed was parallel to the excluded axis — build a guaranteed perpendicular via a cross product
+                    if (Math.Abs(ox) <= Math.Abs(oy) && Math.Abs(ox) <= Math.Abs(oz)) { vx = 0; vy = -oz; vz = oy; }
+                    else if (Math.Abs(oy) <= Math.Abs(oz)) { vx = oz; vy = 0; vz = -ox; }
+                    else { vx = -oy; vy = ox; vz = 0; }
+                }
+            }
+            double len = Math.Sqrt(vx * vx + vy * vy + vz * vz);
+            if (len < 1e-12) { vx = 1; vy = 0; vz = 0; len = 1; }
+            vx /= len; vy /= len; vz /= len;
             for (int i = 0; i < 24; i++)
             {
-                double nx = cov[0, 0] * vx + cov[0, 1] * vy + cov[0, 2] * vz;
-                double ny = cov[1, 0] * vx + cov[1, 1] * vy + cov[1, 2] * vz;
-                double nz = cov[2, 0] * vx + cov[2, 1] * vy + cov[2, 2] * vz;
-                double len = Math.Sqrt(nx * nx + ny * ny + nz * nz);
-                if (len < 1e-12) break;
-                vx = nx / len; vy = ny / len; vz = nz / len;
+                double nx = c[0, 0] * vx + c[0, 1] * vy + c[0, 2] * vz;
+                double ny = c[1, 0] * vx + c[1, 1] * vy + c[1, 2] * vz;
+                double nz = c[2, 0] * vx + c[2, 1] * vy + c[2, 2] * vz;
+                if (ortho)
+                {
+                    double d = nx * ox + ny * oy + nz * oz;
+                    nx -= d * ox; ny -= d * oy; nz -= d * oz;
+                }
+                double l = Math.Sqrt(nx * nx + ny * ny + nz * nz);
+                if (l < 1e-12) break;
+                vx = nx / l; vy = ny / l; vz = nz / l;
             }
-            return new Vec3 { X = vx, Y = vy, Z = vz };
+            double rx = c[0, 0] * vx + c[0, 1] * vy + c[0, 2] * vz;
+            double ry = c[1, 0] * vx + c[1, 1] * vy + c[1, 2] * vz;
+            double rz = c[2, 0] * vx + c[2, 1] * vy + c[2, 2] * vz;
+            return Math.Max(0, vx * rx + vy * ry + vz * rz);
         }
     }
 
@@ -609,8 +646,9 @@ public static class GlbDisconnectedParts
             for (int i = 0; i < components.Count; i++)
             {
                 cd.Add();
-                elong[i] = components[i].Elongated;
-                if (elong[i]) { dir[i] = components[i].Direction(); ctr[i] = components[i].Centroid(); }
+                components[i].PrincipalAxes(out var pc1, out double aspect);   // rotation-invariant (review finding 7): a 45° dash is as elongated as an axis-aligned one
+                elong[i] = aspect > 3;
+                if (elong[i]) { dir[i] = pc1; ctr[i] = components[i].Centroid(); }
             }
             // TWO ELONGATED islands only chain when they are the same LINE: parallel directions and a colinear
             // step (the perpendicular offset from either axis stays small). A hull trim dash and a sail luff
