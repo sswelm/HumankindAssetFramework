@@ -1,27 +1,43 @@
 # Model Factory — User Manual
 
-How to put your own 3D model onto a Humankind unit, step by step. This is the practical guide.
+Use this page as the Model Factory reference. For a first model, follow
+[Getting started](Getting-Started.md) instead and return here when a field or failed bake needs explanation.
 
-The Factory is a Unity editor window (**Tools ▸ HAF ▸ Model Factory**). You give it a model file and a target unit, set
-a few options, press **Bake**, then rebuild the mod. The in-game plugin reads what you baked and renders it.
+The Factory is a Unity editor window (**Tools ▸ HAF ▸ Model Factory**). You choose a source model and target unit,
+configure the bake, then rebuild the mod so the game can load the resulting assets.
 
 > **Starting with a static vehicle or helicopter that needs moving parts?** Follow the shorter
-> [Vehicle Lab quickstart](Vehicle-Lab-Quickstart.md) first; return here for the complete field reference.
+> [Vehicle Lab quickstart](Vehicle-Lab-Quickstart.md) first.
 
-> **Shipping a standalone pack?** The runtime is a multi-mod host — you can distribute your models as their own **pack**
-> (a config file + assets) that merges on top of ENC without editing it. See [**Multi-Mod.md**](Multi-Mod.md) for the pack
-> format and the `haf_packs/` drop folder.
+> **Shipping a standalone pack?** See [Multi-Mod](Multi-Mod.md) for the pack format and the `haf_packs/` folder.
+
+## Find the section you need
+
+| Task | Section |
+|---|---|
+| Bake a first static model | [Quick start](#2-quick-start-static-model) |
+| Look up a Factory control | [The window, field by field](#3-the-window-field-by-field) |
+| Bake an existing rig | [Animated model workflow](#5-animated-model-workflow) |
+| Decide whether to Save, Bake, Build, or relaunch | [After baking](#6-after-baking-rebuild-the-mod-dont-skip-this) and the [action matrix](Authoring-State-and-Deployment.md) |
+| Diagnose a bad result | [Troubleshooting](#8-troubleshooting) |
+| Use texture-only or sound tools | [Unit Retexture](#12-texture-only-reskins--the-unit-retexture-window-no-bake) · [unit sounds](#13-unit-sounds--engine-audio--the-sound-catalog) · [Sound Studio](#14-custom-sound-files--per-clip-volume--the-sound-studio-window) |
+| Configure clips and runtime animation behavior | [Animation Lab](#15-the-animation-lab-window--a-models-animation-in-one-place) |
+| Convert a difficult character rig | [Converting an animated model](#16-converting-an-animated-model--from-raw-rig-to-amplitude-ready) |
+
+Sections 1–8 cover the normal Factory workflow. Sections 9–18 are reference and advanced workflows; read only the
+part that matches your task.
 
 ---
 
 ## 1. Prerequisites
 
-- **The modding Unity project** open (the one with the Humankind SDK + the Factory editor scripts under
-  `Assets/Scripts/Editor/`).
-- **A model file**: `.glb`, `.gltf`, `.obj`, `.fbx`, or `.blend`. It must be **UV-mapped + textured** if you want a skin.
-- **Blender** — required only for: **animated** models, **`.blend`** import, and **Reduce-to-tris** decimation. Static
-  GLB/OBJ/FBX bakes need no Blender. It's auto-detected under `C:\Program Files\Blender Foundation`; if it's elsewhere,
-  set the path in the Factory's **Settings** panel.
+- **A Humankind modding project** open in Unity 2021.3.1f1, with the ModTools SDK and the
+  [HAF Authoring Tools package](Installation.md#3-the-authoring-tools) installed.
+- **A model file:** `.glb`, `.gltf`, `.obj`, `.fbx`, or `.blend`. It must be UV-mapped and textured if you want
+  the original skin.
+- **Blender** for animated models, `.blend` import, part-stripping, and **Reduce-to-tris** decimation. Static GLB,
+  glTF, OBJ, and FBX bakes need no Blender. HAF auto-detects it under `C:\Program Files\Blender Foundation`; use the
+  Factory's **Settings** panel if it is installed elsewhere.
 - **The game installed** (Steam auto-detected). The registry the plugin reads is written into `<Humankind>\BepInEx\config`.
 
 ---
@@ -45,8 +61,9 @@ That's the whole loop. Everything below is detail and the animated workflow.
 ### Settings — game & Blender path (foldout at the top)
 - **Game path** — auto-detected `<Humankind>\BepInEx\config` (where the registry is written). Override if detection
   misses your install. A `⚠` on the header means it wasn't found.
-- **Blender** — the detected `blender.exe`, or `⚠ not detected`. Set the **Override** (or `EditorPrefs 'ENC.blenderPath'`)
-  if Blender is elsewhere or only on `PATH`. Only matters for animated / `.blend` / Reduce-to-tris.
+- **Blender** — the detected `blender.exe`, or `⚠ not detected`. Set the **Override** (or
+  `EditorPrefs 'HAF.BlenderPath'`) if Blender is elsewhere or only on `PATH`. It matters for animated models,
+  `.blend` import, part-stripping, and Reduce-to-tris.
 
 ### 3D resource
 - Dropdown of existing baked models (or `<New>`). Picking one **loads its settings** so you can re-bake with tweaks.

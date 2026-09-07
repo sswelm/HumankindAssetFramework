@@ -1,7 +1,7 @@
 # Getting started
 
-Your first custom unit, from nothing to on the map. This page is the **ordered path**; each step links to the deep
-doc for detail. The rest of the docs are reference — read this first to see how they fit together.
+This is the shortest supported route from an empty project to a custom unit on the map. Follow it in order; use the
+linked reference pages only when a step needs more detail.
 
 HAF has **two halves, and you work in both:**
 
@@ -9,7 +9,14 @@ HAF has **two halves, and you work in both:**
   game-ready assets and register it against a vanilla unit.
 - **Run** — **Humankind** with the **BepInEx** plugin, which injects those baked assets onto the unit at runtime.
 
-So a custom unit is a round trip: **bake in the editor → build & deploy the mod → launch the game → see it.**
+The complete loop is:
+
+| Stage | Where | Result |
+|---|---|---|
+| **1. Install** | Windows, Humankind, and Unity | BepInEx, the runtime plugin, and `Tools ▸ HAF` are available |
+| **2. Bake** | Unity: Model Factory | Game-ready assets and a pack entry are written |
+| **3. Build and deploy** | Humankind Mod Editor or `haf build` | The current assets reach the Community module |
+| **4. Verify** | Humankind | F8 and `haf_load_report.txt` confirm what loaded |
 
 Follow it in order. There *is* a second, editor-free route — hand-writing a `pack.json` for a retexture, tint or
 sound swap — but that means authoring JSON against a schema by hand, with no UI and no validation as you type. It's
@@ -28,7 +35,7 @@ an advanced shortcut, not an easier start; it's described in [Multi-Mod.md](Mult
 | **Unity 2021.3.1f1** | The exact version the Humankind ModTools SDK targets. | [Unity archive](https://unity.com/releases/editor/archive) |
 | **The Humankind ModTools SDK** | Turns a Unity project into a Humankind mod project. | [Games2Gether modding](https://www.games2gether.com/amplitude-studios/humankind/modding) |
 | **The HAF authoring tools** | The Model Factory and every Lab, as a Unity package. | [Installation §3](Installation.md#3-the-authoring-tools) |
-| **Blender** (free, optional) | Only for tri-reduction, part-stripping and animated bakes. A static model needs none. | [blender.org/download](https://www.blender.org/download/) |
+| **Blender** (free, optional) | Needed for tri-reduction, part-stripping, `.blend` import, and animated bakes. Static GLB, glTF, OBJ, and FBX can bake without it. | [blender.org/download](https://www.blender.org/download/) |
 | **A 3D model** | HAF is the *pipeline*, not an art library — bring a licensed model — **.glb preferred** (also glTF / OBJ / FBX / .blend). Prefer a **game-ready** model. | [Sketchfab](https://sketchfab.com/features/free-3d-models) — every model HAF ships came from there. Filter by **Downloadable** + a **CC** licence; **CC-BY** means free to use *with credit*. Record yours in [CREDITS.md](https://github.com/sswelm/HumankindAssetFramework/blob/master/CREDITS.md). |
 
 > **Look for "game ready".** It is a real tag on Sketchfab and it is the single best predictor of a smooth bake: a
@@ -59,7 +66,9 @@ Full detail, and what to do if that isn't what you see: [**Installation.md §3**
 
 Open **`Tools ▸ HAF ▸ Model Factory`**, then:
 
-1. **Model file** — Browse to your model. **Prefer `.glb`**: it is one self-contained file (mesh + textures + rig), Sketchfab's default download, and imports through the shipped converter with **no Blender needed**. `.obj`/`.gltf` also work Blender-free; `.fbx` and `.blend` import through Blender, so they need it installed.
+1. **Model file** — Browse to your model. **Prefer `.glb`**: it is one self-contained file (mesh, textures, and
+   optionally a rig) and imports through the shipped converter without Blender. Static `.gltf`, `.obj`, and `.fbx`
+   files also work without Blender; `.blend` and every animated bake require it.
 2. **Resource name** — one token, e.g. `MyTank` (letters/digits/`_`/`-`, **no spaces**).
 3. **Pawn description** — **Pick** the vanilla unit your model replaces (its `PresentationPawnDefinition`).
 4. Leave the shading/geometry defaults; set **Size** to roughly the unit's real scale.
