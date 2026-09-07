@@ -5,6 +5,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.6 — unreleased
 
+- **Recipe loading: absent-key defaults have one source of truth.** The load path carried hand-written
+  fallbacks for keys missing from old recipes, justified by a comment claiming JsonUtility ignores field
+  initializers — measured false (Unity 2021.3.1f1 batch probe): initializers DO run, and absent keys keep
+  them. The duplicated fallback constants (a silent-divergence hazard) are gone; the DTO initializers alone
+  define what an old recipe loads as. No recipe loads differently — every removed fallback equaled its
+  initializer.
 - **The source-skeleton fast path says NO instead of silently doing nothing.** The fast path spins **Wheel**
   bones only — but the Generate gate accepted Rotor / Tail rotor markings and Wave rock on it, the script
   parsed and ignored them, and the result was "RIG DONE" with nothing moving. Both roles and wave rock are now
