@@ -999,6 +999,13 @@ public class ModelFactoryWindow : EditorWindow
         bool prevWide = EditorGUIUtility.wideMode;
         EditorGUIUtility.wideMode = true;
         cur.rotation = EditorGUILayout.Vector3Field("Rotation offset (XYZ)", cur.rotation);
+        // PATH-SPECIFIC ROTATION (2026-09-09, the Lembos upside-down surprise): the static path ingests a
+        // GLB through glbconv->OBJ (currently Y-up data into the Z-up baker world — see Framework-Review's
+        // deferred unification), the animated path through Blender->FBX. Same field, two axis chains: a value
+        // tuned on a static test-bake does NOT carry to the animated bake.
+        string rotExt = (cur.modelFile ?? "").ToLowerInvariant();
+        if ((rotExt.EndsWith(".glb") || rotExt.EndsWith(".gltf")) && (cur.animated || animProbeState == 1))
+            EditorGUILayout.LabelField("   ⚠ Rotation is PATH-specific: a value tuned on a static test-bake will not carry to the animated bake (different axis chains). Vehicle-Lab rigs bake animated at (0, 90, 0).", EditorStyles.wordWrappedMiniLabel);
         cur.position = EditorGUILayout.Vector3Field(new GUIContent("Position offset (Z = waterline)",
             "Move the model relative to its pawn, in GAME units: X sway, Y fore/aft, Z vertical (− sinks; the Zumwalt " +
             "waterline). STATIC models: baked into the mesh at Bake. ANIMATED models: applied by the PLUGIN at runtime " +

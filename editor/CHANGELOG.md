@@ -15,9 +15,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   to the Sail bone — struck below the keel WITH the canvas at idle, raised underway — but stay **single-sided**
   in their own mesh (never doubled with `Mesh_Sail`). Without marked sails, rigging welds to the hull as
   before.
-- **Blade roll rolls the same way on both banks.** The roll axis came from the raw PC1 (arbitrary sign), so
-  from one dial, opposite banks — or two oars in one bank — could roll their blade faces opposite ways. The
-  axis is now outboard-canonicalized before the roll, the same rule the dip axis got.
+- **Blade roll is mirror-correct across the banks.** Two rounds: the roll axis came from the raw PC1
+  (arbitrary sign), so one dial could roll opposite banks' blade faces opposite ways (measured on the
+  Triconter: sheet tilt 89° starboard vs 49° port). The first fix outboard-canonicalized the axis alone —
+  measured still asymmetric, because the mirror of "roll +θ about an axis" is "roll **−θ** about the
+  mirrored axis" (rotation conjugation). Final rule: outboard-canonical axis AND the angle carries the side
+  sign, making the banks true mirror images.
 - **A Generate can be pure geometry surgery.** The gate required a spinner, oars, or wave rock — a static
   ship needing only Flip, a facing fix or reduction couldn't Generate at all. Geometry work now satisfies the
   gate on the mesh path (drilled: a motion-less rig exports cleanly, `Spin 0..50 0 deg`); the fast path is
