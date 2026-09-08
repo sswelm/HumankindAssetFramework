@@ -12,10 +12,13 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   runs first, so the dip axis mirrors per bank by construction. (The Khalandion was unaffected — its raw
   directions happened to converge outboard on both banks, measured.)
 - **Flip — a winding-surgery role** (hotkey `F`; Flag stays dropdown-only). The marked part's winding is
-  reversed **once** at export, applied on top of the inside-out fix as a pure XOR: a part the fix flips
-  wrongly (a curved deck, a stern overhang — surfaces the belly-radial test mis-judges) lands back on its
-  authored winding, and with the fix off the mark alone corrects a part authored inside-out. Own
-  **Flip reduce (%)** dial.
+  reversed **once** at export, applied on top of the inside-out fix as an XOR **per island**: islands the fix
+  flipped wrongly (a curved deck, a stern overhang — surfaces the belly-radial test mis-judges) land back on
+  their authored winding, and with the fix off (or on islands the fix left alone) the mark alone reverses
+  them. A part whose islands got *mixed* fix verdicts can't be fully repaired by Flip — split it in the
+  Workshop first, or use Rudder (double-sided) there. Own **Flip reduce (%)** dial; mesh rig only (the
+  source-skeleton fast path refuses it loudly, and the whole Vertices-control section now says when the fast
+  path makes it inert).
 - **Preserve gains an opt-in reduce dial.** **Preserve reduce (%)**, default 0 — which keeps the role's
   original byte-identical promise (and is what every older recipe loads as). A non-zero dial opts that one
   mutation in; the other exemptions (no winding fix, no doubling) remain unconditional. The Generate log

@@ -622,9 +622,9 @@ public class VehicleLabWindow : EditorWindow
                             : reduceSummary == null ? facingSummary : facingSummary + " · " + reduceSummary))
                 {
                     doubleSided = EditorGUILayout.ToggleLeft(new GUIContent("  Double-sided (fix see-through parts)",
-                        "The game culls backfaces, so single-sided / CAD parts (thin spokes, flat plates) render see-through from the wrong angle. On: the exported Spin GLB gets a reversed, slightly-inset copy of every face, making it genuinely two-sided at the source — the animated bake and both previews then just work. Doubles the triangle count; leave off for already-solid models. Marked Oar meshes are never doubled — galley blades are authored as front/back pairs, and doubling them z-shimmers."), doubleSided);
+                        "The game culls backfaces, so single-sided / CAD parts (thin spokes, flat plates) render see-through from the wrong angle. On: the exported Spin GLB gets a reversed, slightly-inset copy of every face, making it genuinely two-sided at the source — the animated bake and both previews then just work. Doubles the triangle count; leave off for already-solid models. Marked Oar and Preserve meshes are never doubled — galley blades are authored as front/back pairs, and doubling them z-shimmers (Sail/Flag/Rudder are double-sided by their ROLE regardless of this switch)."), doubleSided);
                     fixInsideOut = EditorGUILayout.ToggleLeft(new GUIContent("  Fix inside-out faces",
-                        "For a source whose winding ships partly INVERTED — you see through the near hull wall from outside while the far wall's interior renders. On: islands that provably face the hull's interior (inverted side planking) are REVERSED at export — no extra triangles; everything else keeps the artist's winding, as do marked Sail and Oar meshes. Sails are a ROLE (dropdown): mark the canvas instead of relying on any detection — marked sails are always double-sided and hide at idle."), fixInsideOut);
+                        "For a source whose winding ships partly INVERTED — you see through the near hull wall from outside while the far wall's interior renders. On: islands that provably face the hull's interior (inverted side planking) are REVERSED at export — no extra triangles; everything else keeps the artist's winding, as do marked Sail, Oar, Rudder and Preserve meshes. A Flip-marked part composes with this as an XOR (per island): where this fix flips, the Flip mark cancels it back. Sails are a ROLE (dropdown): mark the canvas instead of relying on any detection — marked sails are always double-sided and hide at idle."), fixInsideOut);
                     EditorGUILayout.LabelField("  Reduction cuts marked parts at Generate (dissolve + collapse) — the previews and the bake all see the slim mesh. The Generate log prints each part's real before/after.", EditorStyles.miniLabel);
                     using (new EditorGUI.DisabledScope(nRig == 0))
                         riggingReducePct = EditorGUILayout.Slider(new GUIContent("Rigging reduce (%)",
@@ -920,11 +920,24 @@ public class VehicleLabWindow : EditorWindow
             // no-op. (On the fast path a spinning bone marked Wheel works today — the rejection says so.)
             bool fastPathOars = FastPath && oars > 0;
             int fastRotors = FastPath ? list.Count(x => x.role == Role.Rotor || x.role == Role.TailRotor) : 0;
+            // Flip is winding SURGERY — the strongest expectation of effect a mark can carry — and rigfast never
+            // reaches the winding passes. Loud-reject like Oar/Rotor (PR #28 review): a silent no-op here would
+            // ship the see-through part the user just marked to fix.
+            int fastFlip = FastPath ? list.Count(x => x.role == Role.Flip) : 0;
             bool wantWave = waveEnabled && (rockDegrees > 0f || rockPitchDeg > 0f);
             bool fastWave = FastPath && wantWave;
             int fastWheels = FastPath ? list.Count(x => x.role == Role.Wheel) : 0;
-            bool canRig = FastPath ? (!fastPathOars && fastRotors == 0 && !fastWave && fastWheels > 0)
+            bool canRig = FastPath ? (!fastPathOars && fastRotors == 0 && fastFlip == 0 && !fastWave && fastWheels > 0)
                                    : (wheels > 0 || oars > 0 || wantWave);
+            // The rest of Vertices control (facing fixes + reduce dials) is INERT on the fast path — rigfast
+            // exports the source mesh untouched. Not a reject (dials are passive), but say it (PR #28 review:
+            // the section silently did nothing on this path since it existed).
+            if (FastPath && (doubleSided || fixInsideOut || riggingReducePct > 0f || structureReducePct > 0f || bodyReducePct > 0f
+                             || oarReducePct > 0f || sailReducePct > 0f || rudderReducePct > 0f || wheelReducePct > 0f
+                             || flipReducePct > 0f || preserveReducePct > 0f || detailReducePct > 0f))
+                EditorGUILayout.HelpBox("Vertices control (Double-sided, Fix inside-out, and every reduce dial) does not run " +
+                    "on the source-skeleton fast path — rigfast exports the source geometry as-is. Disable Use source " +
+                    "skeleton for facing fixes or reduction.", MessageType.Info);
             if (fastPathOars)
                 EditorGUILayout.HelpBox("Oar recovery is not available on the source-skeleton fast path. Disable " +
                     "Use source skeleton, Probe parts, and mark the merged oar meshes instead.", MessageType.Warning);
@@ -932,6 +945,9 @@ public class VehicleLabWindow : EditorWindow
                 EditorGUILayout.HelpBox("Rotor / Tail rotor roles don't run on the source-skeleton fast path — mark the " +
                     "spinning source BONE as Wheel instead (fast-path bones spin about their own axis), or disable " +
                     "Use source skeleton to rig the mesh parts.", MessageType.Warning);
+            if (fastFlip > 0)
+                EditorGUILayout.HelpBox("Flip (winding surgery) doesn't run on the source-skeleton fast path — rigfast " +
+                    "exports the source geometry as-is. Disable Use source skeleton to flip mesh parts.", MessageType.Warning);
             if (fastWave)
                 EditorGUILayout.HelpBox("Wave rock doesn't run on the source-skeleton fast path — disable Use source " +
                     "skeleton to rig the mesh with a rocking hull.", MessageType.Warning);
@@ -939,6 +955,7 @@ public class VehicleLabWindow : EditorWindow
                 if (GUILayout.Button(new GUIContent($"Generate rig{(useSourceRig && boneParts.Count > 0 ? " (fast path)" : "")}  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
                         fastPathOars ? "Disable the source-skeleton fast path before recovering oars from merged mesh geometry."
                         : fastRotors > 0 ? "Mark the spinning source bone as Wheel, or disable the source-skeleton fast path."
+                        : fastFlip > 0 ? "Disable the source-skeleton fast path to flip mesh-part winding."
                         : fastWave ? "Disable the source-skeleton fast path to use Wave rock."
                         : !canRig ? (FastPath ? "Mark at least one source bone as Wheel — the fast path spins wheel bones."
                                               : "Mark at least one entry as Wheel / Rotor / Tail rotor / Oar — or set a Wave rock amplitude (a floating unit needs no wheels).")
@@ -1631,6 +1648,11 @@ public class VehicleLabWindow : EditorWindow
         if (FastPath && waveEnabled && (rockDegrees > 0f || rockPitchDeg > 0f))
         {
             status = "Wave rock doesn't run on the fast path. Disable Use source skeleton to rig the mesh with a rocking hull.";
+            return;
+        }
+        if (FastPath && ActiveParts.Any(p => p.role == Role.Flip))
+        {
+            status = "Flip (winding surgery) doesn't run on the fast path. Disable Use source skeleton to flip mesh parts.";
             return;
         }
         // OVERWRITE GUARD: the output path is explicit and user-owned — an existing file (e.g. a HAND-MADE rig like

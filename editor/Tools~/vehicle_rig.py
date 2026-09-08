@@ -471,6 +471,9 @@ if mode == "rigfast":
     if rock_on:
         print("VEHICLE ERROR: Wave rock is not supported on the source-skeleton fast path — disable the fast path to rig the mesh with a rocking hull")
         sys.exit(1)
+    if flip_names:
+        print("VEHICLE ERROR: Flip (winding surgery) is not supported on the source-skeleton fast path — rigfast exports the source geometry as-is; disable the fast path to flip mesh parts")
+        sys.exit(1)
     def _fast():
         global objs
         arms = [o for o in bpy.context.scene.objects if o.type == 'ARMATURE']
