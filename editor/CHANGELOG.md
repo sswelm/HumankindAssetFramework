@@ -3,6 +3,26 @@
 The **package** changelog: what changed for someone who installs the tools. (The project-wide engineering log
 lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `editor-vX.Y.Z`.
 
+## 0.5.7 — unreleased
+
+- **Both oar banks finally mirror.** The rowing stroke's dip/lift axis derived from each oar's raw PC1
+  direction — whose sign is arbitrary — and the outboard normalization ran *after* the axis was taken. A bank
+  whose directions converged inboard (the Triconter's port side) got its lift inverted: blades riding a full
+  2× lift below the other bank, pointing at the seabed, while the sweep stayed correct. The outboard fix now
+  runs first, so the dip axis mirrors per bank by construction. (The Khalandion was unaffected — its raw
+  directions happened to converge outboard on both banks, measured.)
+- **Flip — a winding-surgery role** (hotkey `F`; Flag stays dropdown-only). The marked part's winding is
+  reversed **once** at export, applied on top of the inside-out fix as a pure XOR: a part the fix flips
+  wrongly (a curved deck, a stern overhang — surfaces the belly-radial test mis-judges) lands back on its
+  authored winding, and with the fix off the mark alone corrects a part authored inside-out. Own
+  **Flip reduce (%)** dial.
+- **Preserve gains an opt-in reduce dial.** **Preserve reduce (%)**, default 0 — which keeps the role's
+  original byte-identical promise (and is what every older recipe loads as). A non-zero dial opts that one
+  mutation in; the other exemptions (no winding fix, no doubling) remain unconditional. The Generate log
+  states which mode ran.
+- **Detail — a plain reduction tier of its own.** **Detail reduce (%)** for ornament/trim geometry that wants
+  a dial between Structure and Body; welds to the hull like Body, no exemptions.
+
 ## 0.5.6 — 2026-09-07
 
 - **External review hardening (three finds on this release's own fixes).** A kept failed-restore backup is no

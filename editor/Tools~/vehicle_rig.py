@@ -327,7 +327,8 @@ rudder_names = namelist(argv[60]) if len(argv) > 60 and argv[60].strip() else []
 # decimation (collapse never bridges disconnected components), so the per-oar recovery is unaffected.
 oar_reduce = min(95.0, max(0.0, float(argv[61]))) if len(argv) > 61 and argv[61].strip() else 0.0
 sail_reduce = min(95.0, max(0.0, float(argv[62]))) if len(argv) > 62 and argv[62].strip() else 0.0
-# PRESERVE parts (argv[63], 2026-09-06): shipped byte-identical — no reduce dial reaches them, the inside-out
+# PRESERVE parts (argv[63], 2026-09-06): shipped as authored — only their OWN reduce dial (argv[68], default 0
+# = byte-identical) reaches them, the inside-out
 # flip skips them, and NEITHER double-siding path touches them (global switch included). They weld to the body
 # like Body parts but keep their OWN mesh through the join so the export passes can identify them by name.
 preserve_names = namelist(argv[63]) if len(argv) > 63 and argv[63].strip() else []
@@ -338,6 +339,22 @@ rudder_reduce = min(95.0, max(0.0, float(argv[64]))) if len(argv) > 64 and argv[
 # absurdly dense for something that mostly reads as a spinning disc. Runs in the same pre-armature pass, so the
 # proximity clustering and the axle inference (thinnest bbox extent — bbox survives decimation) see the slim mesh.
 wheel_reduce = min(95.0, max(0.0, float(argv[65]))) if len(argv) > 65 and argv[65].strip() else 0.0
+# FLIP parts (argv[66..67], 2026-09-08, the Triconter deck/aft-underside): winding reversed ONCE at export,
+# applied ON TOP of the inside-out fix — pure XOR by user design ("a part that flips due to inside-out would
+# not flip if it's also marked Flip"): the fix's wrong flip and the marked flip cancel back to the authored
+# winding, while with the fix off (or on a part the fix leaves alone) the mark alone reverses a part authored
+# inside-out. Reduced like Body by their own dial; global double-siding applies (doubling makes winding moot).
+# Own mesh through the join so the post-pass can find them by name.
+flip_names = namelist(argv[66]) if len(argv) > 66 and argv[66].strip() else []
+flip_reduce = min(95.0, max(0.0, float(argv[67]))) if len(argv) > 67 and argv[67].strip() else 0.0
+# PRESERVE reduction (argv[68], 2026-09-08): Preserve's byte-identical promise gains ONE opt-in mutation — its
+# own reduce dial, 0 by default (and for every recipe saved before the dial existed). Every other exemption
+# (no winding fix, no doubling) is unconditional as before.
+preserve_reduce = min(95.0, max(0.0, float(argv[68]))) if len(argv) > 68 and argv[68].strip() else 0.0
+# DETAIL parts (argv[69..70], 2026-09-08): a plain reduction tier of its own — ornament/trim geometry that
+# wants a dial between Structure and Body. Welds to the hull like Body; no exemptions, no special handling.
+detail_names = namelist(argv[69]) if len(argv) > 69 and argv[69].strip() else []
+detail_reduce = min(95.0, max(0.0, float(argv[70]))) if len(argv) > 70 and argv[70].strip() else 0.0
 # OAR LIFT (argv[56]): a CONSTANT tilt about the dip axis, re-centring the whole stroke — the knob the dip sign
 # cannot be (±dip is the same oscillation, phase-flipped; the blades visit the same depths either way). A source
 # whose oars are modelled raked steeply into the water (the Khalandion: "at -30 they almost go vertically") rides
@@ -592,7 +609,7 @@ def axle_axis(s):
 # thousands of tiny disconnected islands each keep minimum topology), then COLLAPSE toward the dial's target
 # measured against the ORIGINAL count, so the percentage means what it says or better. The print carries all
 # three numbers so a too-aggressive dial is loud, not silent.
-for _rlabel, _rnames, _rpct in (("RIGGING", rigging_names, rigging_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce), ("RUDDER", rudder_names, rudder_reduce), ("WHEEL", wheel_names, wheel_reduce)):
+for _rlabel, _rnames, _rpct in (("RIGGING", rigging_names, rigging_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce), ("RUDDER", rudder_names, rudder_reduce), ("WHEEL", wheel_names, wheel_reduce), ("FLIP", flip_names, flip_reduce), ("PRESERVE", preserve_names, preserve_reduce), ("DETAIL", detail_names, detail_reduce)):
     if not _rnames or _rpct <= 0.5:
         continue
     try:
@@ -1029,7 +1046,20 @@ for _pn9 in preserve_names:
         print("VEHICLE WARN: preserve part '%s' not found — skipped" % _pn9); continue
     preserve_by_name.add(_po9.name)
 if preserve_by_name:
-    print("VEHICLE PRESERVE: %d part(s) — shipped byte-identical (no reduce, no winding fix, no doubling)" % len(preserve_by_name))
+    print("VEHICLE PRESERVE: %d part(s) — no winding fix, no doubling%s" % (len(preserve_by_name),
+          ("; reduced by dial %.0f%%" % preserve_reduce) if preserve_reduce > 0.5 else "; shipped byte-identical (reduce dial 0)"))
+
+# ---- FLIP parts: resolved to a name set — own mesh through the join so the unconditional post-reversal can
+# find them by name; everything else treats them like Body (reduced by their dial, global doubling applies).
+# They stay IN the inside-out pass's pool: the compose is a pure XOR (fix flips + mark flips = authored). ----
+flip_by_name = set()
+for _sn9 in flip_names:
+    _so9 = find_opt(_sn9)
+    if _so9 is None:
+        print("VEHICLE WARN: flip part '%s' not found — skipped" % _sn9); continue
+    flip_by_name.add(_so9.name)
+if flip_by_name:
+    print("VEHICLE FLIP: %d part(s) — winding reversed once at export (XOR with the inside-out fix)" % len(flip_by_name))
 
 # ---- FLAG bone: every marked flag welds to ONE bone so the banners can be struck as a unit (hidden underway) ----
 flag_found = []
@@ -1199,17 +1229,24 @@ if oar_names:
                 for _i in _mem:
                     _allwc += _items[_i][2]
             _ys = [abs(_p.y - _oar_beam_mid) for _p in _allwc]; _yg = min(_ys) + (oar_pivot / 100.0) * (max(_ys) - min(_ys))
-            _d = _oar_pc1(_allwc); _h = Vector((_d.x, _d.y, 0.0))
+            _d = _oar_pc1(_allwc)
+            # OUTBOARD FIRST (Triconter drill 2026-09-08): PC1's sign is ARBITRARY, and the dip axis below is
+            # derived from the direction's horizontal — computing it before this flip left _dax following the
+            # raw sign, so a bank whose raw PC1s converged INBOARD got its dip/lift axis mirrored the wrong
+            # way: the measured port bank rode a full 2x lift (48 deg) below starboard, blades pointing at the
+            # seabed, while sweep (side-signed independently) stayed correct. The Khalandion happened to
+            # converge outboard on both banks, which is why "dip mirrors per bank" held there.
+            _sgn = 1.0 if _side > 0 else -1.0
+            if _d.y * _sgn < 0:
+                _d = -_d                                                  # point the axis OUTBOARD on this side
+            _h = Vector((_d.x, _d.y, 0.0))
             _h = _h.normalized() if _h.length > 1e-6 else Vector((1.0, 0.0, 0.0))
-            _dax = Vector((-_h.y, _h.x, 0.0)).normalized()               # dip axis: horizontal, perp to the oar
+            _dax = Vector((-_h.y, _h.x, 0.0)).normalized()               # dip axis: horizontal, perp to the OUTBOARD oar direction — mirrors per bank by construction
             # PIVOT: ANALYTIC, on the oar's own fitted axis at the dialed beam-distance — NOT snapped to a vertex.
             # The snap version jumped across gaps in the geometry (many oars have no verts near an inboard target),
             # parking the fulcrum at the pole's end no matter the dial ("Pivot % has no effect"). The axis crossing
             # exists whether or not a vertex does; a fulcrum slightly off the mesh is a perfectly good oarlock.
             _mctr = sum(_allwc, Vector((0, 0, 0))) / len(_allwc)
-            _sgn = 1.0 if _side > 0 else -1.0
-            if _d.y * _sgn < 0:
-                _d = -_d                                                  # point the axis OUTBOARD on this side
             _yt = _oar_beam_mid + _sgn * _yg                              # target absolute beam coordinate
             if abs(_d.y) > 1e-5:
                 _piv = _mctr + _d * ((_yt - _mctr.y) / _d.y)
@@ -1869,6 +1906,8 @@ def _join_per_bone():
             _k = "__rud__" + o.name
         elif o.name in preserve_by_name:
             _k = "__keep__" + o.name   # PRESERVE: own mesh, so the flip and doubling passes can exempt it by name
+        elif o.name in flip_by_name:
+            _k = "__flip__" + o.name   # FLIP: own mesh, so the post-reversal can find it by name
         else:
             _k = ("__track__" + o.name) if o.name in _track_by_name else bone_of.get(o.name, body_bone)
         groups.setdefault(_k, []).append(o)
@@ -2643,7 +2682,7 @@ if fix_inside_out:
     _fxn = 0; _fxkept = 0
     for _fo in _fall:
         if any(g.name.startswith("Oar_") or g.name in ("Sail", "Flag") for g in _fo.vertex_groups) or _fo.name.startswith("Mesh___rud__") or _fo.name.startswith("Mesh___keep__"):
-            continue
+            continue   # (Flip-marked meshes stay IN this pool — the marked reversal below composes with this pass as an XOR)
         _fb = bmesh.new(); _fb.from_mesh(_fo.data); _fb.normal_update()
         _fb.verts.ensure_lookup_table(); _fb.faces.ensure_lookup_table()
         # The judgement axis must run INSIDE the hull belly. A bbox centre gets dragged to mast height, putting
@@ -2680,6 +2719,21 @@ if fix_inside_out:
         _fb.to_mesh(_fo.data); _fb.free()
     print("VEHICLE inside-out fix: %d island(s) reversed (interior-facing), %d kept as authored; Sail/Oar meshes untouched"
           % (_fxn, _fxkept))
+
+# FLIP-marked parts: one UNCONDITIONAL winding reversal, AFTER the inside-out fix so the two compose as an
+# XOR (user design 2026-09-08, the Triconter deck/aft-underside: "a part that flips due to inside-out would
+# not flip if it's also marked Flip"). Runs whether or not the fix is on — with it off, the mark alone
+# corrects a part authored inside-out. Winding only: vertices, weights and UVs untouched.
+_flip_done = 0
+for _fo9 in bpy.context.scene.objects:
+    if _fo9.type == 'MESH' and _fo9.name.startswith("Mesh___flip__") and _fo9.data.polygons:
+        _fb9 = bmesh.new(); _fb9.from_mesh(_fo9.data)
+        _fb9.faces.ensure_lookup_table()
+        bmesh.ops.reverse_faces(_fb9, faces=list(_fb9.faces))
+        _fb9.to_mesh(_fo9.data); _fb9.free()
+        _flip_done += 1
+if _flip_done:
+    print("VEHICLE FLIP applied: %d part(s) winding reversed once%s" % (_flip_done, " (on top of the inside-out fix — cancelling where it flipped)" if fix_inside_out else ""))
 
 # DOUBLE-SIDED (argv[41], opt-in, 2026-09-03): the game culls backfaces, so single-sided / CAD source faces (thin
 # spokes, flat plates) render see-through in-game. Append a REVERSED copy of every face here, at the SOURCE, so the
