@@ -266,6 +266,16 @@ first extraction of this shape; **`DialConfig`** (2026-08-20) is the second, and
 > Find a method that mixes I/O, engine access and a **decision**. Move the decision to a pure static that takes
 > plain data and returns plain data. Leave the I/O where it is. Test the pure half.
 
+**The same move works on the editor half** — the side the 2026-09-07 review showed carries the coverage debt
+(thirteen defects, nearly all in editor code; the tested plugin half came back almost clean). Editor windows can't
+be referenced by the test project (they need `UnityEditor`), but a Unity-free source file can be **compiled into
+the test assembly directly** (`<Compile Include>` in the Tests csproj): `editor/GlbDisconnectedParts.cs` was the
+first, and **`editor/EditorRules.cs`** (2026-09-08) collects the extracted window/baker kernels — the
+extraction-freshness predicate whose wrongness was review finding 2 (it silently failed for a month; nothing
+crashed or logged), and the Workshop's natural name ordering. The bar for what moves there: logic whose wrongness
+is **invisible at use time**. Keep those files free of Unity types and file I/O — the caller gathers facts, the
+kernel decides.
+
 The dials are the clearest case. Four `haf_*.txt` files each inlined their own `key=value` loop inside a `Poll*`
 method, wedged between `File.ReadAllText`, `UnityEngine.Time` and live-pawn reflection — untestable, and all four
 shared one failure: **any line the parser did not understand was `continue`d away in silence.** `radus=6`,

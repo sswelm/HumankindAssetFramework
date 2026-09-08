@@ -20,6 +20,8 @@
     <!-- Pure GLB core: production compiles it in the Unity editor assembly; tests compile the same source with
          UNITY_EDITOR absent, so the menu wrapper is excluded and the binary transformation remains testable. -->
     <Compile Include="..\editor\GlbDisconnectedParts.cs" Link="GlbDisconnectedParts.cs" />
+    <!-- Pure editor decision kernels (extraction freshness, natural ordering) — same pattern. -->
+    <Compile Include="..\editor\EditorRules.cs" Link="EditorRules.cs" />
   </ItemGroup>
 
   <!-- compile-time references the TEST code uses directly -->

@@ -212,16 +212,9 @@ public class ModelWorkshopWindow : EditorWindow
     }
 
     // "Object_12" -> ("Object_", 12): sort names by prefix, then by the trailing number as a NUMBER.
-    static string NaturalPrefix(string s)
-    {
-        int i = s.Length; while (i > 0 && char.IsDigit(s[i - 1])) i--;
-        return s.Substring(0, i);
-    }
-    static long NaturalNumber(string s)
-    {
-        int i = s.Length; while (i > 0 && char.IsDigit(s[i - 1])) i--;
-        return i < s.Length && long.TryParse(s.Substring(i), out long n) ? n : -1;
-    }
+    // The logic lives in the pure NaturalOrder kernel (EditorRules.cs) so NaturalOrderTests can lock it.
+    static string NaturalPrefix(string s) => NaturalOrder.Prefix(s);
+    static long NaturalNumber(string s) => NaturalOrder.Number(s);
 
     // ---- preview build: the Vehicle Lab's probe export (headless Blender writes an FBX of the model), imported
     // and instanced with AddSingleGO. Node names survive the trip, so rows highlight renderers by name. ----

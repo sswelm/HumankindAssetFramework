@@ -527,10 +527,13 @@ public static class UniversalBaker
             // successful extraction regardless of shape) is the freshness test for both shapes now.
             string singleAlbPath = Path.Combine(fsResDir, name + "_albedo.png");
             bool extractedExists = File.Exists(mtlPath) || File.Exists(singleAlbPath);
-            bool extractFresh = extractedExists && File.Exists(stampPath) && File.ReadAllText(stampPath).Trim() == stamp;
-            if (cfg.keepTexture && extractedExists && !extractFresh)
+            bool stampMatches = File.Exists(stampPath) && File.ReadAllText(stampPath).Trim() == stamp;
+            // The decision itself is the pure kernel BakerRules.DecideExtraction (locked by BakerRulesTests) —
+            // this site only gathers the facts and acts on the verdict.
+            var extractionAction = BakerRules.DecideExtraction(extractedExists, stampMatches, cfg.keepTexture);
+            if (extractionAction == BakerRules.ExtractionAction.KeepProtected)
                 Debug.LogWarning($"[Factory] {name}: 'Reuse extracted files' is ON but the extraction on disk was made from a different (or older) source than '{cfg.modelFile}' — baking with the KEPT files anyway. Untick it for one bake if you want a fresh extraction.");
-            if (!extractFresh && !(cfg.keepTexture && extractedExists))
+            if (extractionAction == BakerRules.ExtractionAction.ReExtract)
             {
                 // STALE-EXTRACTION HYGIENE (the Bell H-13 chimera, 2026-09-02). Extracting a 1-material model over
                 // a 10-material extraction leaves the old MTL claiming the new source, mixing two models'
