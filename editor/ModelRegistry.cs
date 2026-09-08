@@ -108,6 +108,9 @@ class RegistryFile
     public List<ModelDef> models = new List<ModelDef>();           // the Factory-generated model entries (unchanged)
     public List<UnitScaleRule> unitScales = new List<UnitScaleRule>();   // Resize Lab: runtime scale rules for ANY unit (vanilla included) — no bake, no assets
     public List<EraScaleRow> eraGrid = new List<EraScaleRow>();          // Global Era Lab: unit-era × current-era modifier grid
+    public bool eraGridEnabled = true;   // Global Era Lab "apply era ageing" toggle — false keeps the grid authored but inert
+                                         // (every cell acts as 1.0 at runtime). Initializer true = a pack saved before this
+                                         // field existed stays enabled (JsonUtility runs initializers, absent key keeps them).
     public List<FormationThreshold> formationThresholds = new List<FormationThreshold>();   // Global Era Lab: swap formation as a unit shrinks
     public float waterLevel = 0.16f;   // HAF WATER STANDARD (2026-08-18): the game's water surface height above a naval
                                        // model's origin (mean ~0.05 + wave allowance ~0.11, calibrated in-game: cruiser
@@ -281,6 +284,7 @@ public static class ModelRegistry
 
     // GLOBAL ERA LAB grid — the registry file's `eraGrid` array, same capture-on-Load / write-on-Save pattern.
     public static List<EraScaleRow> EraGrid = new List<EraScaleRow>();
+    public static bool EraGridEnabled = true;   // registry `eraGridEnabled` — same pattern; false = grid kept but ignored at runtime
 
     // GLOBAL ERA LAB formation thresholds — same capture-on-Load / write-on-Save pattern.
     public static List<FormationThreshold> FormationThresholds = new List<FormationThreshold>();
@@ -426,6 +430,7 @@ public static class ModelRegistry
                                 WaterLevel = d.waterLevel;
                                 CaptureWrapper(d);
                                 EraGrid = d.eraGrid ?? new List<EraScaleRow>();
+                                EraGridEnabled = d.eraGridEnabled;
                                 FormationThresholds = d.formationThresholds ?? new List<FormationThreshold>();
                                 return Migrate(SortByName(d.models), dep);
                             }
@@ -442,6 +447,7 @@ public static class ModelRegistry
             WaterLevel = data != null ? data.waterLevel : 0.16f;
             CaptureWrapper(data);
             EraGrid = data?.eraGrid ?? new List<EraScaleRow>();
+            EraGridEnabled = data == null || data.eraGridEnabled;
             FormationThresholds = data?.formationThresholds ?? new List<FormationThreshold>();
             SyncArtifact(json);   // deployed copy recreated if missing; hand-edit there warned about once
             return Migrate(SortByName(data?.models ?? new List<ModelDef>()), json);
@@ -556,6 +562,7 @@ public static class ModelRegistry
         {
             file.unitScales = UnitScales ?? new List<UnitScaleRule>();
             file.eraGrid = EraGrid ?? new List<EraScaleRow>();
+            file.eraGridEnabled = EraGridEnabled;
             file.formationThresholds = FormationThresholds ?? new List<FormationThreshold>();
         }
         // else: keep file.unitScales/eraGrid/formationThresholds exactly as read from disk — never overwrite with the empty statics

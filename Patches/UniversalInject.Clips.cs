@@ -258,6 +258,7 @@ namespace HumankindAssetFramework
             return effCat != CatHover && effCat != CatPlane ? turnPivot : 0f;
         }
         [ProcessLived("pack tuning table; rebuilt by LoadRegistry")] static readonly Dictionary<int, float[]> eraGridRows = new Dictionary<int, float[]>();  // Global Era Lab: unit era -> modifier per CURRENT era
+        [ProcessLived("pack tuning flag; rebuilt by LoadRegistry")] static bool eraGridDisabled;  // a pack authored a grid but switched it off (eraGridEnabled=false) — F8 says "ignored", not "none authored"
         [ProcessLived("diagnostic once-per-name log dedup (lazy)")] static HashSet<string> unitScaleLogged;
         [SessionScoped] static readonly HashSet<int> vanillaScaledLogged = new HashSet<int>();
 

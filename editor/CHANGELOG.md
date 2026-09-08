@@ -5,6 +5,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **The Era Lab grid can be switched off without losing it.** A new "Apply era ageing" checkbox saves as
+  `eraGridEnabled` in the pack: unchecked, the grid stays authored (and editable) but the runtime treats
+  every cell as 1.0 — units keep their Resize Lab scale in every era. Absent key = enabled, so packs saved
+  before the toggle are unchanged. F8's resize overlay says when a grid is authored-but-disabled instead of
+  reporting "0 rows" as if none existed, and the load report names a disabled pack's grid.
+
 - **The Animation Lab jump unlocks only after Save or Bake.** The Factory's "Open / Edit in Animation Lab"
   buttons handed the Lab a form the registry had never seen — the Lab (which edits the SAVED entry) then
   opened on nothing or a stale namesake, and the two windows fought over who defines the entry, whoever saved

@@ -55,6 +55,7 @@ public class GlobalEraLabWindow : EditorWindow
     float[,] grid;                         // [unitEra, nowEra], absolute indices
     List<FormationThreshold> thresholds;    // second table: swap formation as an aged unit shrinks
     string[] formationNames;                // Pick list: ENC formation entries + vanilla names
+    bool gridEnabled = true;                // registry `eraGridEnabled`: unchecked = grid kept but ignored at runtime
     bool dirty;
     string status = "";
 
@@ -105,6 +106,7 @@ public class GlobalEraLabWindow : EditorWindow
             .Select(t => new FormationThreshold { threshold = t.threshold, formation = t.formation, note = t.note })
             .OrderBy(t => t.threshold).ToList();
         formationNames = null;   // re-gather (the formation registry may have changed since last open)
+        gridEnabled = ModelRegistry.EraGridEnabled;
         dirty = false;
         status = loaded > 0
             ? $"Loaded {loaded} grid cell(s), {thresholds.Count} formation threshold(s)."
@@ -123,6 +125,15 @@ public class GlobalEraLabWindow : EditorWindow
             "cave bears still scale — they just don't drift with the eras).\n\n" +
             "The era is the GLOBAL era (computed from all empires' research, identical for everyone). Runtime-only: " +
             "nothing is baked, and a unit re-scales LIVE when the era turns mid-game.", MessageType.None);
+
+        // The ignore switch: the grid stays authored (and editable) but the runtime treats every cell as 1.0.
+        bool en = EditorGUILayout.ToggleLeft("Apply era ageing (uncheck to ignore this grid without losing it)", gridEnabled);
+        if (en != gridEnabled) { gridEnabled = en; dirty = true; }
+        if (!gridEnabled)
+            EditorGUILayout.HelpBox(
+                "Grid IGNORED at runtime: every unit keeps its Resize Lab scale in every era. The values below are kept " +
+                "and stay editable — re-check to bring the ageing back. Save + relaunch the game to apply either way.",
+                MessageType.Warning);
 
         scroll = EditorGUILayout.BeginScrollView(scroll);
 
@@ -205,11 +216,12 @@ public class GlobalEraLabWindow : EditorWindow
                         rows.Add(row);
                     }
                     ModelRegistry.EraGrid = rows;   // (below) SaveStatics re-reads models from disk so this Lab's stale model snapshot can't revert a bake/edit made in another window
+                    ModelRegistry.EraGridEnabled = gridEnabled;
                     // thresholds are stored ASCENDING so the runtime can take the first match without sorting
                     thresholds = thresholds.Where(t => !string.IsNullOrWhiteSpace(t.formation)).OrderBy(t => t.threshold).ToList();
                     ModelRegistry.FormationThresholds = thresholds;
                     bool ok = ModelRegistry.SaveStatics();   // era/threshold statics only — preserves the on-disk models (this Lab never edits them)
-                    status = ok ? $"Saved a {LastUnitEra - FirstUnitEra + 1}x{LastNowEra - FirstNowEra + 1} grid + {thresholds.Count} formation threshold(s). Relaunch the game to apply."
+                    status = ok ? $"Saved a {LastUnitEra - FirstUnitEra + 1}x{LastNowEra - FirstNowEra + 1} grid ({(gridEnabled ? "applied" : "IGNORED at runtime")}) + {thresholds.Count} formation threshold(s). Relaunch the game to apply."
                                 : "Save FAILED — see the Console (registry locked or corrupt).";
                     dirty = !ok;
                 }

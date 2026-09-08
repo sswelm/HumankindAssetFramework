@@ -30,6 +30,7 @@ namespace HumankindAssetFramework
             {
                 public readonly List<ScaleRule> ScaleRules = new List<ScaleRule>();
                 public readonly Dictionary<int, float[]> EraGridRows = new Dictionary<int, float[]>();
+                public bool EraGridDisabled;   // some pack authored an eraGrid but switched it off (eraGridEnabled=false) — lets F8 say "ignored" instead of "none authored"
                 public readonly List<KeyValuePair<float, string>> FormationBySize = new List<KeyValuePair<float, string>>();   // sorted ascending by threshold
                 public readonly List<string> Notes = new List<string>();      // cross-pack interactions — for the load report + a log warning each
                 public readonly List<string> Warnings = new List<string>();   // a table that failed to parse (the pack's other tables still load)
@@ -103,6 +104,14 @@ namespace HumankindAssetFramework
                     {
                         var arr = Regex.Match(pk.Value ?? "", "\"eraGrid\"\\s*:\\s*\\[(.*)\\]", RegexOptions.Singleline);
                         if (!arr.Success) continue;
+                        // Era Lab ignore switch: `eraGridEnabled: false` keeps the grid authored but inert — skip this
+                        // pack's rows entirely (absent key = enabled, matching the editor's field initializer).
+                        if (Regex.IsMatch(pk.Value ?? "", "\"eraGridEnabled\"\\s*:\\s*false"))
+                        {
+                            r.EraGridDisabled = true;
+                            r.Notes.Add($"eraGrid in '{pk.Key}': authored but DISABLED (eraGridEnabled=false) — its rows are ignored, units keep their Resize Lab scale in every era");
+                            continue;
+                        }
                         foreach (Match rm in Regex.Matches(arr.Groups[1].Value, "\\{[^{}]*\"scales\"\\s*:\\s*\\[[^\\]]*\\][^{}]*\\}", RegexOptions.Singleline))
                         {
                             var me = Regex.Match(rm.Value, "\"unitEra\"\\s*:\\s*(\\d+)");
