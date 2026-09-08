@@ -927,8 +927,19 @@ public class VehicleLabWindow : EditorWindow
             bool wantWave = waveEnabled && (rockDegrees > 0f || rockPitchDeg > 0f);
             bool fastWave = FastPath && wantWave;
             int fastWheels = FastPath ? list.Count(x => x.role == Role.Wheel) : 0;
+            // GEOMETRY-ONLY generates are legitimate (post-merge review of PR #28): a static ship that only
+            // needs Flip surgery, facing fixes or reduction has no spinner/oar/wave — the old gate refused it
+            // even though the mesh path handles a motion-less rig fine. Fast path excluded: geometry work is
+            // inert there (the info box above says so).
+            bool TierActive(Role rr, float pct) => pct > 0.5f && list.Any(x => x.role == rr);
+            bool geometryWork = !FastPath && (doubleSided || fixInsideOut || list.Any(x => x.role == Role.Flip)
+                || TierActive(Role.Rigging, riggingReducePct) || TierActive(Role.Structure, structureReducePct)
+                || TierActive(Role.Body, bodyReducePct) || TierActive(Role.Oar, oarReducePct)
+                || TierActive(Role.Sail, sailReducePct) || TierActive(Role.Rudder, rudderReducePct)
+                || TierActive(Role.Wheel, wheelReducePct) || TierActive(Role.Flip, flipReducePct)
+                || TierActive(Role.Preserve, preserveReducePct) || TierActive(Role.Detail, detailReducePct));
             bool canRig = FastPath ? (!fastPathOars && fastRotors == 0 && fastFlip == 0 && !fastWave && fastWheels > 0)
-                                   : (wheels > 0 || oars > 0 || wantWave);
+                                   : (wheels > 0 || oars > 0 || wantWave || geometryWork);
             // The rest of Vertices control (facing fixes + reduce dials) is INERT on the fast path — rigfast
             // exports the source mesh untouched. Not a reject (dials are passive), but say it (PR #28 review:
             // the section silently did nothing on this path since it existed).
@@ -958,7 +969,7 @@ public class VehicleLabWindow : EditorWindow
                         : fastFlip > 0 ? "Disable the source-skeleton fast path to flip mesh-part winding."
                         : fastWave ? "Disable the source-skeleton fast path to use Wave rock."
                         : !canRig ? (FastPath ? "Mark at least one source bone as Wheel — the fast path spins wheel bones."
-                                              : "Mark at least one entry as Wheel / Rotor / Tail rotor / Oar — or set a Wave rock amplitude (a floating unit needs no wheels).")
+                                              : "Mark at least one entry as Wheel / Rotor / Tail rotor / Oar, set a Wave rock amplitude — or request geometry work (Flip, a facing fix, an active reduce dial): a Generate can be pure geometry surgery.")
                         : "Runs Blender: rig + Spin action + GLB export + preview."), GUILayout.Height(28)))
                     Vehicleize();
         }

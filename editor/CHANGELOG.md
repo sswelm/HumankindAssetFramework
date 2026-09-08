@@ -5,6 +5,18 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Rigging rides the Sail bone.** When sails are marked, Rigging-marked parts (halyards, sheets, stays) weld
+  to the Sail bone — struck below the keel WITH the canvas at idle, raised underway — but stay **single-sided**
+  in their own mesh (never doubled with `Mesh_Sail`). Without marked sails, rigging welds to the hull as
+  before.
+- **Blade roll rolls the same way on both banks.** The roll axis came from the raw PC1 (arbitrary sign), so
+  from one dial, opposite banks — or two oars in one bank — could roll their blade faces opposite ways. The
+  axis is now outboard-canonicalized before the roll, the same rule the dip axis got.
+- **A Generate can be pure geometry surgery.** The gate required a spinner, oars, or wave rock — a static
+  ship needing only Flip, a facing fix or reduction couldn't Generate at all. Geometry work now satisfies the
+  gate on the mesh path (drilled: a motion-less rig exports cleanly, `Spin 0..50 0 deg`); the fast path is
+  unchanged (geometry work is inert there and says so).
+
 - **Both oar banks finally mirror.** The rowing stroke's dip/lift axis derived from each oar's raw PC1
   direction — whose sign is arbitrary — and the outboard normalization ran *after* the axis was taken. A bank
   whose directions converged inboard (the Triconter's port side) got its lift inverted: blades riding a full
