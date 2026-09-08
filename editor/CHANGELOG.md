@@ -5,6 +5,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **The Animation Lab jump unlocks only after Save or Bake.** The Factory's "Open / Edit in Animation Lab"
+  buttons handed the Lab a form the registry had never seen — the Lab (which edits the SAVED entry) then
+  opened on nothing or a stale namesake, and the two windows fought over who defines the entry, whoever saved
+  last clobbering the other. The buttons now grey out until the entry exists in the registry and the form
+  matches it, with the reason in the tooltip and the detection notice.
+
 - **Rigging rides the Sail bone.** When sails are marked, Rigging-marked parts (halyards, sheets, stays) weld
   to the Sail bone — struck below the keel WITH the canvas at idle, raised underway — but stay **single-sided**
   in their own mesh (never doubled with `Mesh_Sail`). Without marked sails, rigging welds to the hull as
