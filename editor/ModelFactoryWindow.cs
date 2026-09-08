@@ -943,6 +943,13 @@ public class ModelFactoryWindow : EditorWindow
         EditorGUILayout.LabelField("Animation", EditorStyles.miniBoldLabel);
         EnsureAnimProbe(cur.modelFile);
         if (!cur.animated && LooksAnimated(cur)) cur.animated = true;   // self-heal a lost flag (entry carries animation config)
+        // THE LAB EDITS THE SAVED ENTRY (2026-09-09 user request, from field pain): jumping there from an
+        // unsaved <New> form handed the Lab nothing — or a stale namesake — and the two windows then fought
+        // over who defines the entry, whoever saved last clobbering the other's copy. The jump unlocks only
+        // once the entry exists in the registry (Save settings or Bake put it there) and the form matches it.
+        bool labReady = !formDiffersFromRegistry && existing != null
+                        && System.Array.IndexOf(existing, (cur.resourceName ?? "").Trim()) >= 0;
+        const string labLockedHint = "Save settings (or Bake) first — the Animation Lab edits the SAVED registry entry, and this form isn't saved yet (or differs from what is).";
         if (cur.animated)
         {
             var beh = new List<string>();
@@ -957,8 +964,9 @@ public class ModelFactoryWindow : EditorWindow
             {
                 EditorGUILayout.HelpBox("ANIMATED — " + (beh.Count > 0 ? string.Join(", ", beh) : "no clip/behaviors configured yet") +
                     "\nAnimation settings are edited in the Animation Lab; Bake here uses them as saved.", MessageType.None);
-                if (GUILayout.Button("Edit in\nAnimation Lab", GUILayout.Width(110), GUILayout.Height(38)))
-                    AnimationLabWindow.OpenFor(cur.resourceName, cur.modelFile, cur.pawnDescription, cur);
+                using (new EditorGUI.DisabledScope(!labReady))
+                    if (GUILayout.Button(new GUIContent("Edit in\nAnimation Lab", labReady ? "Open this saved entry in the Animation Lab." : labLockedHint), GUILayout.Width(110), GUILayout.Height(38)))
+                        AnimationLabWindow.OpenFor(cur.resourceName, cur.modelFile, cur.pawnDescription, cur);
                 // Greyed on a name collision like Bake and Save settings beside it — this button writes the registry
                 // too, and it used to be the one door the guard was not wired to (review 2026-08-22).
                 using (new EditorGUI.DisabledScope(nameCollides))
@@ -976,9 +984,11 @@ public class ModelFactoryWindow : EditorWindow
             using (new EditorGUILayout.HorizontalScope())
             {
                 EditorGUILayout.HelpBox("Animation detected in this model — configure its clip + behaviors in the " +
-                    "Animation Lab (it will bake as ANIMATED from then on).", MessageType.Info);
-                if (GUILayout.Button("Open\nAnimation Lab", GUILayout.Width(110), GUILayout.Height(38)))
-                    AnimationLabWindow.OpenFor(cur.resourceName, cur.modelFile, cur.pawnDescription, cur);
+                    "Animation Lab (it will bake as ANIMATED from then on)." +
+                    (labReady ? "" : "  Save settings first: the Lab edits the SAVED entry."), MessageType.Info);
+                using (new EditorGUI.DisabledScope(!labReady))
+                    if (GUILayout.Button(new GUIContent("Open\nAnimation Lab", labReady ? "Open this saved entry in the Animation Lab." : labLockedHint), GUILayout.Width(110), GUILayout.Height(38)))
+                        AnimationLabWindow.OpenFor(cur.resourceName, cur.modelFile, cur.pawnDescription, cur);
             }
         }
 
@@ -989,6 +999,13 @@ public class ModelFactoryWindow : EditorWindow
         bool prevWide = EditorGUIUtility.wideMode;
         EditorGUIUtility.wideMode = true;
         cur.rotation = EditorGUILayout.Vector3Field("Rotation offset (XYZ)", cur.rotation);
+        // PATH-SPECIFIC ROTATION (2026-09-09, the Lembos upside-down surprise): the static path ingests a
+        // GLB through glbconv->OBJ (currently Y-up data into the Z-up baker world — see Framework-Review's
+        // deferred unification), the animated path through Blender->FBX. Same field, two axis chains: a value
+        // tuned on a static test-bake does NOT carry to the animated bake.
+        string rotExt = (cur.modelFile ?? "").ToLowerInvariant();
+        if ((rotExt.EndsWith(".glb") || rotExt.EndsWith(".gltf")) && (cur.animated || animProbeState == 1))
+            EditorGUILayout.LabelField("   ⚠ Rotation is PATH-specific: a value tuned on a static test-bake will not carry to the animated bake (different axis chains). Vehicle-Lab rigs bake animated at (0, 90, 0).", EditorStyles.wordWrappedMiniLabel);
         cur.position = EditorGUILayout.Vector3Field(new GUIContent("Position offset (Z = waterline)",
             "Move the model relative to its pawn, in GAME units: X sway, Y fore/aft, Z vertical (− sinks; the Zumwalt " +
             "waterline). STATIC models: baked into the mesh at Bake. ANIMATED models: applied by the PLUGIN at runtime " +

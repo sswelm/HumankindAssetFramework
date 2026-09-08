@@ -1236,14 +1236,17 @@ if oar_names:
             # before the pivot is measured, so the bone and the whole stroke carry the corrected face.
             if abs(oar_blade_roll) > 0.01:
                 _rax = _oar_pc1(_allwc)
-                # OUTBOARD canonicalization (post-merge review of PR #28): PC1's sign is arbitrary, and rolling
-                # about +axis vs -axis turns the blade face OPPOSITE ways — from one dial, opposite banks (or
-                # even two oars in one bank) could roll opposite directions. Same rule as the dip axis: point
-                # the roll axis outboard on this side before building the quaternion.
-                if _rax.y * (1.0 if _side > 0 else -1.0) < 0:
+                # MIRROR-CORRECT roll (Triconter drill 2026-09-09, superseding the first canonicalization —
+                # which was measured wrong: same-sign rolls about mirrored axes are NOT mirror images). Two
+                # ingredients: (1) the axis is outboard-canonical, killing PC1's arbitrary sign; (2) the ANGLE
+                # carries the side sign — rotation conjugation says the mirror of R(axis, +t) is
+                # R(mirrored axis, -t), so port must roll the OPPOSITE angle about its outboard axis for the
+                # two banks' blades to be true mirror images (equal tilt from vertical, measured).
+                _rsgn = 1.0 if _side > 0 else -1.0
+                if _rax.y * _rsgn < 0:
                     _rax = -_rax
                 _rc = sum(_allwc, Vector((0, 0, 0))) / len(_allwc)
-                _RQ = Quaternion(_rax, math.radians(oar_blade_roll))
+                _RQ = Quaternion(_rax, math.radians(oar_blade_roll) * _rsgn)
                 for _i in _mem:
                     _onm, _idx, _wc, _ = _items[_i]
                     _oo2 = _objbyname[_onm]; _minv = _oo2.matrix_world.inverted()

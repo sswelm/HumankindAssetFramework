@@ -351,6 +351,18 @@ strangers." Overlaps the deferred list's ENC-branding, Blender-PATH-discovery, a
 
 ## Still deferred (from earlier passes — unchanged)
 
+- **Static-path axis convention for GLB sources — measured wrong, unification deferred (2026-09-09).**
+  The baker's world is Z-up native (Position "Z = waterline", heightUV measures Z, the synthetic test cubes
+  are authored Z-up), but `glbconv` writes glTF's **Y-up** vertices raw — so every static bake of a GLB
+  arrives pitched 90° and the entry's Rotation silently compensates. Evidence: the Lembos static bake's own
+  `raw bbox (17.49, 8.33, 9.01)` puts the 8.3u mast height in **Y** while Blender measures it up; the
+  animated path (Blender converts properly) is the canonical facing — the same file needs Rotation X=180-ish
+  static vs X=0 animated. **The fix is a project, not a patch**: (1) glbconv converts Y-up→Z-up for
+  glTF sources (`(x, y, z) → (x, −z, y)`, normals too); (2) migrate every saved static GLB/glTF entry's
+  rotation (they all hand-compensate the wrong convention — zeppelin, hovercraft, cruiser, canoe…);
+  (3) re-verify the shipped statics (smoke suite + eyeballs) — rotation composition makes the migration the
+  risky half. Until then the Factory warns that Rotation is path-specific.
+
 - **#3 Blender discovery** is Program-Files-only and `BlenderAvailable()` never probes PATH — the biggest
   real gap for adopters (winget/Steam/portable/macOS/Linux installs refused up front).
 - **#4 `registered` never reset across a session** — latent for a main-menu → different-game round-trip
