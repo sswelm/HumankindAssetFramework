@@ -30,6 +30,10 @@ if (Test-Path (Join-Path $Project "Temp\UnityLockfile")) {
 $log = Join-Path ([IO.Path]::GetTempPath()) "haf_editor_tests.log"
 Write-Host "=== headless bake feature tests (Unity batch, about 1 min boot + bakes; log: $log) ==="
 
+# -nographics verified fine (14/14, 2026-09-08). The first run's import failures were NOT graphics: batch
+# -executeMethod runs under the SYSTEM locale (the GUI editor pins invariant culture), and the cube fixture
+# formatted vertices with comma decimals on a Dutch machine - fixed in BakeFeatureTest with an explicit
+# invariant culture. Kept as the reminder that a batch run exercises locale paths the GUI never does.
 & $Unity -batchmode -nographics -projectPath $Project -executeMethod HeadlessBakeTests.Run -logFile $log | Out-Null
 $code = $LASTEXITCODE
 

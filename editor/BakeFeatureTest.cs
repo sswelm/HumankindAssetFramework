@@ -377,7 +377,11 @@ public static class BakeFeatureTest
         sb.AppendLine("mtllib " + name + ".mtl");
         float[,] v = { { -0.5f, -0.5f, -0.5f }, { 0.5f, -0.5f, -0.5f }, { 0.5f, 0.5f, -0.5f }, { -0.5f, 0.5f, -0.5f },
                        { -0.5f, -0.5f, 0.5f }, { 0.5f, -0.5f, 0.5f }, { 0.5f, 0.5f, 0.5f }, { -0.5f, 0.5f, 0.5f } };
-        for (int i = 0; i < 8; i++) sb.AppendLine($"v {v[i, 0]} {v[i, 1]} {v[i, 2]}");
+        // INVARIANT culture (caught by the headless lane's FIRST run, 2026-09-08, on a Dutch-locale machine):
+        // interpolated floats format with the CURRENT culture, so "v -0,5 -0,5 -0,5" reached the OBJ and
+        // Unity's importer refused the whole file — every Tier-1 bake saw 0 vertices.
+        var objInv = System.Globalization.CultureInfo.InvariantCulture;
+        for (int i = 0; i < 8; i++) sb.AppendLine(string.Format(objInv, "v {0} {1} {2}", v[i, 0], v[i, 1], v[i, 2]));
         sb.AppendLine("vt 0 0"); sb.AppendLine("vt 1 0"); sb.AppendLine("vt 1 1"); sb.AppendLine("vt 0 1");
         int[][] faces = {
             new[]{1,2,3,4}, new[]{5,8,7,6}, new[]{1,4,8,5},   // group A (3 quads)
