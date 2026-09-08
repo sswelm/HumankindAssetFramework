@@ -142,7 +142,7 @@ public class ModelWorkshopWindow : EditorWindow
                 EditorGUILayout.LabelField(chosen > 0 ? $"{chosen} checked → +{rows.Where(r => r.split).Sum(r => r.islands) - chosen} new part(s) in the output" : " ", EditorStyles.miniLabel);
             }
             var shown = hideWhole ? rows.Where(r => r.islands > 1 || r.blocked != null).ToList() : rows;
-            scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(Mathf.Min(220, 22 * shown.Count + 8)));
+            scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(Mathf.Min(330, 22 * shown.Count + 8)));   // cap 220 -> 330 (2026-09-08 user request: +50% — a real ship's part list is dozens of rows)
             foreach (var r in shown)
                 using (new EditorGUILayout.HorizontalScope())
                 {
