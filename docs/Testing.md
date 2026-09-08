@@ -356,6 +356,12 @@ substitutes for the other, and a mutation drill is how you find out which one yo
 - **Dependencies:** needs the same gitignored `References\` DLLs as the plugin build; the test project mirrors them
   into its own bin so the plugin assembly's deps resolve at runtime. `Tests\**` is excluded from the plugin's compile
   globs so the xUnit files never leak into the plugin build.
+- **The headless integration lane (opt-in):** `tools/editor_tests.ps1` runs the in-editor **BakeFeatureTest Tier 1**
+  suite through Unity batch mode (`HeadlessBakeTests.Run` exits with the fail count), against a modding project that
+  resolves the HAF package (default `C:\Repo\ENCReload`, override with `-Project`/`HAF_UNITY_PROJECT`). It is
+  deliberately NOT in the per-push gate: a Unity boot costs ~a minute and hosted CI has no licensed Unity. Run it
+  before merging baker changes — the automated form of Factory-Manual §11's instruction. It refuses a project that
+  is currently open in the Unity editor.
 
 ## What is deliberately NOT unit-tested — and why
 

@@ -163,7 +163,120 @@ public class GlbDisconnectedPartsCoverageTests
         Assert.Equal(2, after.Count(i => i.NodeName != null && i.NodeName.Contains("_Part_")));
     }
 
+    [Fact]
+    public void Skinned_node_moves_its_skin_to_the_part_children()
+    {
+        // A skinned part is the Vehicle Lab fast-path's bread and butter: after a selective split the children
+        // must inherit node.skin (and carry the JOINTS/WEIGHTS attributes per island) or the parts detach from
+        // the armature. The parent keeps neither mesh nor skin — the children ARE the geometry now.
+        var bin = new BinBuilder();
+        int posOff = bin.Add(Floats(TwoFarTriangles), 4);
+        int idxOff = bin.Add(Ushorts(0, 1, 2, 3, 4, 5), 2);
+        var joints = new byte[6 * 4];                       // VEC4 ubyte, all joint 0
+        int jntOff = bin.Add(joints, 4);
+        var weights = new float[6 * 4];
+        for (int i = 0; i < 6; i++) weights[i * 4] = 1f;    // VEC4 float, full weight on joint 0
+        int wgtOff = bin.Add(Floats(weights), 4);
+
+        var root = Skeleton("Hull");
+        ((JArray)root["nodes"])[0]["skin"] = 0;
+        root["skins"] = new JArray(new JObject { ["joints"] = new JArray(0) });
+        root["bufferViews"] = new JArray(
+            View(posOff, TwoFarTriangles.Length * 4), View(idxOff, 12), View(jntOff, joints.Length), View(wgtOff, weights.Length * 4));
+        root["accessors"] = new JArray(
+            Vec3Accessor(0, 6), ScalarAccessor(1, 5123, 6),
+            new JObject { ["bufferView"] = 2, ["componentType"] = 5121, ["count"] = 6, ["type"] = "VEC4" },
+            new JObject { ["bufferView"] = 3, ["componentType"] = 5126, ["count"] = 6, ["type"] = "VEC4" });
+        var prim = Primitive(position: 0, indices: 1);
+        ((JObject)prim["attributes"])["JOINTS_0"] = 2;
+        ((JObject)prim["attributes"])["WEIGHTS_0"] = 3;
+        root["meshes"] = new JArray(Mesh(prim));
+        byte[] source = WriteGlb(root, bin.Bytes);
+
+        var result = GlbDisconnectedParts.Split(source, new HashSet<string> { "Hull" }, 0);
+        Assert.Equal(2, result.ChildPartsCreated);
+
+        var outJson = ParseGlbJson(result.Bytes);
+        var outNodes = (JArray)outJson["nodes"];
+        var parts = outNodes.Where(n => (string)n["name"] != null && ((string)n["name"]).Contains("_Part_")).ToList();
+        Assert.Equal(2, parts.Count);
+        Assert.All(parts, p => Assert.Equal(0, (int)p["skin"]));       // the skin followed the geometry
+        Assert.All(parts, p => Assert.NotNull(p["mesh"]));
+        var hull = outNodes.Single(n => (string)n["name"] == "Hull");
+        Assert.Null(hull["mesh"]);                                     // the parent is a pure group now
+    }
+
+    [Fact]
+    public void Malformed_glb_throws_instead_of_corrupting()
+    {
+        // Rejection must be an exception BEFORE any output is produced — never a half-written split.
+        byte[] good = BuildIndexed(TwoFarTriangles, componentType: 5123);
+
+        byte[] badMagic = (byte[])good.Clone();
+        badMagic[0] = (byte)'X';
+        Assert.ThrowsAny<Exception>(() => GlbDisconnectedParts.Split(badMagic, new HashSet<string> { "Hull" }, 0));
+
+        // buffers[0].byteLength claims more than the BIN chunk holds — an accessor could read out of bounds.
+        var bin = new BinBuilder();
+        int posOff = bin.Add(Floats(TwoFarTriangles), 4);
+        int idxOff = bin.Add(Ushorts(0, 1, 2, 3, 4, 5), 2);
+        var root = Skeleton("Hull");
+        root["bufferViews"] = new JArray(View(posOff, TwoFarTriangles.Length * 4), View(idxOff, 12));
+        root["accessors"] = new JArray(Vec3Accessor(0, 6), ScalarAccessor(1, 5123, 6));
+        root["meshes"] = new JArray(Mesh(Primitive(position: 0, indices: 1)));
+        byte[] oversized = WriteGlb(root, bin.Bytes);
+        var json = ParseGlbJson(oversized);
+        json["buffers"][0]["byteLength"] = 1_000_000;                  // lies past the real BIN chunk
+        byte[] lying = WriteGlb(json, ExtractBin(oversized), patchBufferLength: false);
+        Assert.ThrowsAny<Exception>(() => GlbDisconnectedParts.Split(lying, new HashSet<string> { "Hull" }, 0));
+    }
+
+    [Fact]
+    public void Dense_ribbons_chain_under_the_comparison_budget_and_the_gate_keeps_them_parallel()
+    {
+        // Two contracts at once, at density. (1) The pair budget resolves a pair as SEPARATE after too many
+        // failed comparisons — its documented safe bias; the OTHER side of that contract is that 150 genuinely
+        // close slats per ribbon (hundreds of vertices, exact-duplicate seam positions, dense cells) must still
+        // chain into ONE ribbon each. (2) The direction gate must keep the two parallel dashed ribbons apart
+        // even though the merge reach spans the gap between them — the galley rule, now at density.
+        const int slats = 150;                       // 2 tris per slat; slats connect only through the merge
+        var verts = new List<float>();
+        void Ribbon(float y)
+        {
+            for (int i = 0; i < slats; i++)
+            {
+                float x = i * 0.1f;
+                verts.AddRange(new[] { x, y, 0f, x + 0.08f, y, 0f, x, y + 0.02f, 0f });
+                verts.AddRange(new[] { x + 0.08f, y, 0f, x + 0.08f, y + 0.02f, 0f, x, y + 0.02f, 0f });
+            }
+        }
+        Ribbon(0f);          // ribbon A along y = 0
+        Ribbon(0.1f);        // ribbon B parallel, 0.08 between the facing edges
+        byte[] source = BuildIndexed(verts.ToArray(), componentType: 5125);
+
+        // Raw: each slat's two triangles attach through their exact-duplicate seam positions, slats do not.
+        Assert.Equal(2 * slats, GlbDisconnectedParts.Analyze(source).Single(i => i.NodeName == "Hull").Islands);
+        // Merged at 1% (~0.15 reach): the 0.02 slat gaps chain colinearly -> one island per ribbon; the 0.08
+        // cross-ribbon gap is within reach but OFF-AXIS -> the direction gate keeps the ribbons separate.
+        Assert.Equal(2, GlbDisconnectedParts.Analyze(source, 0.01).Single(i => i.NodeName == "Hull").Islands);
+    }
+
     // ---- fixture plumbing ----
+
+    static JObject ParseGlbJson(byte[] glb)
+    {
+        int jsonLength = BitConverter.ToInt32(glb, 12);
+        return JObject.Parse(Encoding.UTF8.GetString(glb, 20, jsonLength));
+    }
+    static byte[] ExtractBin(byte[] glb)
+    {
+        int jsonLength = BitConverter.ToInt32(glb, 12);
+        int binHeader = 20 + jsonLength;
+        int binLength = BitConverter.ToInt32(glb, binHeader);
+        var bin = new byte[binLength];
+        Buffer.BlockCopy(glb, binHeader + 8, bin, 0, binLength);
+        return bin;
+    }
 
     // Single node "name" -> mesh 0, one indexed primitive over `positions` with the given index component type.
     static byte[] BuildIndexed(float[] positions, int componentType)
@@ -244,9 +357,9 @@ public class GlbDisconnectedPartsCoverageTests
         public byte[] Bytes => b.ToArray();
     }
 
-    static byte[] WriteGlb(JObject root, byte[] bin)
+    static byte[] WriteGlb(JObject root, byte[] bin, bool patchBufferLength = true)
     {
-        root["buffers"] = new JArray(new JObject { ["byteLength"] = bin.Length });
+        if (patchBufferLength) root["buffers"] = new JArray(new JObject { ["byteLength"] = bin.Length });
         byte[] json = Encoding.UTF8.GetBytes(root.ToString(Newtonsoft.Json.Formatting.None));
         int jsonLength = (json.Length + 3) & ~3;
         int binLength = (bin.Length + 3) & ~3;
