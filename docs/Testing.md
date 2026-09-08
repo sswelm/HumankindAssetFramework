@@ -266,6 +266,16 @@ first extraction of this shape; **`DialConfig`** (2026-08-20) is the second, and
 > Find a method that mixes I/O, engine access and a **decision**. Move the decision to a pure static that takes
 > plain data and returns plain data. Leave the I/O where it is. Test the pure half.
 
+**The same move works on the editor half** — the side the 2026-09-07 review showed carries the coverage debt
+(thirteen defects, nearly all in editor code; the tested plugin half came back almost clean). Editor windows can't
+be referenced by the test project (they need `UnityEditor`), but a Unity-free source file can be **compiled into
+the test assembly directly** (`<Compile Include>` in the Tests csproj): `editor/GlbDisconnectedParts.cs` was the
+first, and **`editor/EditorRules.cs`** (2026-09-08) collects the extracted window/baker kernels — the
+extraction-freshness predicate whose wrongness was review finding 2 (it silently failed for a month; nothing
+crashed or logged), and the Workshop's natural name ordering. The bar for what moves there: logic whose wrongness
+is **invisible at use time**. Keep those files free of Unity types and file I/O — the caller gathers facts, the
+kernel decides.
+
 The dials are the clearest case. Four `haf_*.txt` files each inlined their own `key=value` loop inside a `Poll*`
 method, wedged between `File.ReadAllText`, `UnityEngine.Time` and live-pawn reflection — untestable, and all four
 shared one failure: **any line the parser did not understand was `continue`d away in silence.** `radus=6`,
@@ -346,6 +356,13 @@ substitutes for the other, and a mutation drill is how you find out which one yo
 - **Dependencies:** needs the same gitignored `References\` DLLs as the plugin build; the test project mirrors them
   into its own bin so the plugin assembly's deps resolve at runtime. `Tests\**` is excluded from the plugin's compile
   globs so the xUnit files never leak into the plugin build.
+- **The headless integration lane (opt-in):** `tools/editor_tests.ps1` runs the in-editor **BakeFeatureTest Tier 1**
+  suite through Unity batch mode (`HeadlessBakeTests.Run` exits 0 on all-pass, 1 on any failure — deliberately
+  binary, since exit codes wrap at 255; the log carries the per-check detail), against a modding project that
+  resolves the HAF package (default `C:\Repo\ENCReload`, override with `-Project`/`HAF_UNITY_PROJECT`). It is
+  deliberately NOT in the per-push gate: a Unity boot costs ~a minute and hosted CI has no licensed Unity. Run it
+  before merging baker changes — the automated form of Factory-Manual §11's instruction. It refuses a project that
+  is currently open in the Unity editor.
 
 ## What is deliberately NOT unit-tested — and why
 
