@@ -483,11 +483,13 @@ public static class BakeFeatureTest
             {
                 float fx = x / (float)n, fy = y / (float)n;
                 float fz = 0.15f * Mathf.Sin(fx * Mathf.PI * 3f) * Mathf.Sin(fy * Mathf.PI * 3f);   // waves so decimation is curvature-driven, not a trivial plane collapse
-                sb.AppendLine($"v {fx - 0.5f} {fy - 0.5f} {fz}");
+                // invariant culture, like WriteCube (PR #26 self-review: the first culture fix claimed the
+                // fixtures were covered while these Tier-2 writers still emitted comma decimals)
+                sb.AppendLine(string.Format(System.Globalization.CultureInfo.InvariantCulture, "v {0} {1} {2}", fx - 0.5f, fy - 0.5f, fz));
             }
         for (int y = 0; y <= n; y++)
             for (int x = 0; x <= n; x++)
-                sb.AppendLine($"vt {x / (float)n} {y / (float)n}");
+                sb.AppendLine(string.Format(System.Globalization.CultureInfo.InvariantCulture, "vt {0} {1}", x / (float)n, y / (float)n));
         sb.AppendLine("usemtl mat");
         for (int y = 0; y < n; y++)
             for (int x = 0; x < n; x++)
@@ -516,7 +518,7 @@ public static class BakeFeatureTest
             sb.AppendLine("o " + objName);
             float[,] vv = { { -0.5f, -0.5f, -0.5f }, { 0.5f, -0.5f, -0.5f }, { 0.5f, 0.5f, -0.5f }, { -0.5f, 0.5f, -0.5f },
                             { -0.5f, -0.5f, 0.5f }, { 0.5f, -0.5f, 0.5f }, { 0.5f, 0.5f, 0.5f }, { -0.5f, 0.5f, 0.5f } };
-            for (int i = 0; i < 8; i++) sb.AppendLine($"v {vv[i, 0] + ox} {vv[i, 1]} {vv[i, 2]}");
+            for (int i = 0; i < 8; i++) sb.AppendLine(string.Format(System.Globalization.CultureInfo.InvariantCulture, "v {0} {1} {2}", vv[i, 0] + ox, vv[i, 1], vv[i, 2]));   // invariant culture, like WriteCube
             sb.AppendLine("usemtl mat");
             int[][] q = { new[]{1,2,3,4}, new[]{5,8,7,6}, new[]{1,4,8,5}, new[]{2,6,7,3}, new[]{1,5,6,2}, new[]{4,3,7,8} };
             foreach (var f in q)

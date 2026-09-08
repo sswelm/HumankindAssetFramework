@@ -84,6 +84,14 @@ public class GlbDisconnectedPartsCoverageTests
         Assert.Equal(2, result.ChildPartsCreated);
         Assert.Equal(2, result.SourceTriangles);
         Assert.Equal(2, result.OutputTriangles);
+        // The bucketing claim needs more than counts (PR #26 self-review: a regression filing every island
+        // under primitive 0 would keep all the totals): each child must carry its OWN primitive's material.
+        var outJson = ParseGlbJson(result.Bytes);
+        var childMats = ((JArray)outJson["nodes"])
+            .Where(n => (string)n["name"] != null && ((string)n["name"]).Contains("_Part_"))
+            .Select(n => (int)outJson["meshes"][(int)n["mesh"]]["primitives"][0]["material"])
+            .OrderBy(m => m).ToArray();
+        Assert.Equal(new[] { 1, 2 }, childMats);
     }
 
     [Fact]
@@ -126,6 +134,18 @@ public class GlbDisconnectedPartsCoverageTests
         Assert.Equal(2, userB.Islands);       // the untouched node still renders BOTH islands
         Assert.Equal(2, userB.Triangles);
         Assert.Equal(2, after.Count(i => i.NodeName != null && i.NodeName.Contains("_Part_")));
+    }
+
+    static void AssertPartChildrenCarry(JObject outJson, params string[] attributes)
+    {
+        var nodes = (JArray)outJson["nodes"];
+        var parts = nodes.Where(n => (string)n["name"] != null && ((string)n["name"]).Contains("_Part_")).ToList();
+        Assert.NotEmpty(parts);
+        foreach (var p in parts)
+        {
+            var attrs = (JObject)outJson["meshes"][(int)p["mesh"]]["primitives"][0]["attributes"];
+            foreach (var a in attributes) Assert.NotNull(attrs[a]);
+        }
     }
 
     [Fact]
@@ -204,6 +224,9 @@ public class GlbDisconnectedPartsCoverageTests
         Assert.All(parts, p => Assert.NotNull(p["mesh"]));
         var hull = outNodes.Single(n => (string)n["name"] == "Hull");
         Assert.Null(hull["mesh"]);                                     // the parent is a pure group now
+        // …and the skinning DATA followed too (PR #26 self-review: the comment claimed this but nothing
+        // asserted it) — each child primitive must still carry its JOINTS_0/WEIGHTS_0 attributes.
+        AssertPartChildrenCarry(outJson, "JOINTS_0", "WEIGHTS_0");
     }
 
     [Fact]
@@ -234,11 +257,13 @@ public class GlbDisconnectedPartsCoverageTests
     [Fact]
     public void Dense_ribbons_chain_under_the_comparison_budget_and_the_gate_keeps_them_parallel()
     {
-        // Two contracts at once, at density. (1) The pair budget resolves a pair as SEPARATE after too many
-        // failed comparisons — its documented safe bias; the OTHER side of that contract is that 150 genuinely
-        // close slats per ribbon (hundreds of vertices, exact-duplicate seam positions, dense cells) must still
-        // chain into ONE ribbon each. (2) The direction gate must keep the two parallel dashed ribbons apart
-        // even though the merge reach spans the gap between them — the galley rule, now at density.
+        // Two contracts at density. (1) 150 genuinely close slats per ribbon (hundreds of vertices,
+        // exact-duplicate seam positions, dense cells) must still chain into ONE ribbon each — the merge's
+        // dense-path structures (seam dedup, per-component cell grouping) under real load. (2) The direction
+        // gate must keep the two parallel dashed ribbons apart even though the merge reach spans the gap
+        // between them — the galley rule, now at density. NOTE the budget-EXHAUSTION path (a pair resolving
+        // separate after 4096 failed comparisons) is still untested: gated pairs never spend budget here, and
+        // building a deterministic exhaustion fixture is open work.
         const int slats = 150;                       // 2 tris per slat; slats connect only through the merge
         var verts = new List<float>();
         void Ribbon(float y)

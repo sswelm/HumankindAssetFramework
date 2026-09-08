@@ -22,9 +22,20 @@ $ErrorActionPreference = "Stop"
 
 if (-not (Test-Path $Unity)) { Write-Host "FAIL: Unity not found at '$Unity' (set -Unity or HAF_UNITY)"; exit 2 }
 if (-not (Test-Path (Join-Path $Project "Assets"))) { Write-Host "FAIL: '$Project' is not a Unity project (set -Project or HAF_UNITY_PROJECT)"; exit 2 }
-if (Test-Path (Join-Path $Project "Temp\UnityLockfile")) {
-    Write-Host "FAIL: '$Project' appears to be open in the Unity editor - close it first (batch mode refuses a locked project)."
-    exit 2
+$lockfile = Join-Path $Project "Temp\UnityLockfile"
+if (Test-Path $lockfile) {
+    # Liveness, not presence (self-review of PR #26): a crashed Unity leaves the lockfile behind CLOSED, and
+    # a presence check then wedges this lane with a misleading "close the editor" until someone deletes the
+    # file by hand. A RUNNING editor holds the lockfile open exclusively, so try to open it ourselves: success
+    # means the file is stale (proceed - Unity batch replaces it); a sharing violation means genuinely open.
+    $stale = $false
+    try { $fs = [IO.File]::Open($lockfile, 'Open', 'ReadWrite', 'None'); $fs.Close(); $stale = $true } catch {}
+    if ($stale) {
+        Write-Host "NOTE: stale UnityLockfile (a previous Unity session crashed) - proceeding."
+    } else {
+        Write-Host "FAIL: '$Project' is open in the Unity editor - close it first (batch mode refuses a locked project)."
+        exit 2
+    }
 }
 
 $log = Join-Path ([IO.Path]::GetTempPath()) "haf_editor_tests.log"

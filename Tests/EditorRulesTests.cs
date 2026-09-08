@@ -75,6 +75,6 @@ public class NaturalOrderTests
         // >19 trailing digits exceed long.TryParse — documented fallback is -1 (sorts with the unnumbered).
         string big = "Part_12345678901234567890";
         Assert.Equal(-1, NaturalOrder.Number(big));
-        Assert.Equal("Part_12345678901234567890", NaturalOrder.Prefix(big) + big.Substring(NaturalOrder.Prefix(big).Length));
+        Assert.Equal("Part_", NaturalOrder.Prefix(big));   // the digit run still strips; only the NUMBER falls back
     }
 }
