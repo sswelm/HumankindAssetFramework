@@ -1030,6 +1030,22 @@ if sail_names:
         _sebn.parent = eb_body
         print("VEHICLE SAIL: %d part(s) on one Sail bone (double-sided at export; struck/raised by the 'Furl' clip)" % len(sail_found))
 
+# ---- RIGGING rides the SAIL bone (2026-09-08 user request: "they will move away like sails except they are
+# one sided"): halyards, sheets and stays belong to the canvas — struck below the keel WITH it at idle,
+# raised underway — but ropes are ordinary single-sided geometry, so they join their OWN mesh (never
+# Mesh_Sail, which the export doubles). Without marked sails there is no Sail bone and no Furl stance:
+# rigging then stays welded to the body exactly as before. ----
+rigging_on_sail = set()
+if sail_found and rigging_names:
+    for _rg8 in rigging_names:
+        _rgo8 = find_opt(_rg8)
+        if _rgo8 is None:
+            continue   # the reduce tier already warns once per stale rigging name
+        bone_of[_rgo8.name] = "Sail"
+        rigging_on_sail.add(_rgo8.name)
+    if rigging_on_sail:
+        print("VEHICLE RIGGING: %d part(s) ride the Sail bone — struck/raised with the canvas, SINGLE-sided (own mesh, never doubled with Mesh_Sail)" % len(rigging_on_sail))
+
 # ---- RUDDER parts: resolved to a name set — they keep their own mesh through the join (identity is needed at
 # export for the double-siding, and at the flip pass for the exclusion), skinned to the body like Body parts ----
 rudder_by_name = set()
@@ -1220,6 +1236,12 @@ if oar_names:
             # before the pivot is measured, so the bone and the whole stroke carry the corrected face.
             if abs(oar_blade_roll) > 0.01:
                 _rax = _oar_pc1(_allwc)
+                # OUTBOARD canonicalization (post-merge review of PR #28): PC1's sign is arbitrary, and rolling
+                # about +axis vs -axis turns the blade face OPPOSITE ways — from one dial, opposite banks (or
+                # even two oars in one bank) could roll opposite directions. Same rule as the dip axis: point
+                # the roll axis outboard on this side before building the quaternion.
+                if _rax.y * (1.0 if _side > 0 else -1.0) < 0:
+                    _rax = -_rax
                 _rc = sum(_allwc, Vector((0, 0, 0))) / len(_allwc)
                 _RQ = Quaternion(_rax, math.radians(oar_blade_roll))
                 for _i in _mem:
@@ -1911,6 +1933,8 @@ def _join_per_bone():
             _k = "__keep__" + o.name   # PRESERVE: own mesh, so the flip and doubling passes can exempt it by name
         elif o.name in flip_by_name:
             _k = "__flip__" + o.name   # FLIP: own mesh, so the post-reversal can find it by name
+        elif o.name in rigging_on_sail:
+            _k = "__rigsail__"   # RIGGING on the Sail bone: ONE mesh of its own — never merged into Mesh_Sail, which the export doubles
         else:
             _k = ("__track__" + o.name) if o.name in _track_by_name else bone_of.get(o.name, body_bone)
         groups.setdefault(_k, []).append(o)
@@ -2753,7 +2777,8 @@ _dall = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.pol
 _dtargets = ([o for o in _dall if not any(g.name.startswith("Oar_") for g in o.vertex_groups) and not o.name.startswith("Mesh___keep__")]
              if double_sided else
              [o for o in _dall
-              if any(g.name in ("Sail", "Flag") for g in o.vertex_groups) or o.name.startswith("Mesh___rud__")])
+              if (any(g.name in ("Sail", "Flag") for g in o.vertex_groups) or o.name.startswith("Mesh___rud__"))
+              and not o.name.startswith("Mesh___rigsail__")])   # rigging rides the Sail BONE but stays SINGLE-sided (2026-09-08) — the vgroup test alone would double it with the canvas
 if _dtargets:
     # The inset is a fraction of the WHOLE model, not each part. A per-mesh dimension would give a tiny single-sided
     # part (a bolt, an antenna) a tiny inset that can fall below depth precision -> that part reads transparent again.
