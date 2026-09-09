@@ -5,6 +5,14 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Sails can FOLD at idle instead of hiding.** A "Fold sail at idle" checkbox (shown when sails are marked)
+  swaps the Furl stance's below-the-keel strike for the vanilla ships' brailed-up look: the canvas gathers
+  into a visible bundle at the yard — an accordion pleat on a generated Sail→SailF1→SailF2 fold chain, the
+  cloth band-skinned in height thirds and the fold bones zigzagged ±160° about the yard axis. Pure rotation
+  by design (per-bone scale is the pipeline's measured AW101 trap), so the bake recipe and stance assignment
+  are unchanged. Rigging keeps standing on the root Sail bone. Rejected loudly on the source-skeleton fast
+  path. Drilled headless on the Khalandion: folded canvas = 0.38× raised height, top pinned at the yard.
+
 - **The Era Lab grid can be switched off without losing it.** A new "Apply era ageing" checkbox saves as
   `eraGridEnabled` in the pack: unchecked, the grid stays authored (and editable) but the runtime treats
   every cell as 1.0 — units keep their Resize Lab scale in every era. Absent key = enabled, so packs saved
