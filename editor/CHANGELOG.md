@@ -15,11 +15,13 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   Follow-up ("moving too fast, in a single frame"): **Fold frames** (default 12) and **Fold angle** (default
   160°) dials — with frames the fold is the split-trail deployment mechanic on canvas: Pre-move `Furl[N..0]`
   lets the sail out as the ship gets under way, After-move `Furl[0..N]` gathers it on arrival, `Furl[N..N]`
-  holds the idle stance; the legacy strike keeps its out-of-sight 1-frame snap. Second field pass ("the
-  underside of the sail should fold to the top of the beam"): the chain grew to four bands (Sail→SailF1..F3)
-  because parity decides where the bottom edge lands — an odd zigzag leaves it a band below the yard, an even
-  one finishes it pointing up AT the beam. Measured: underside 0.07 sail-heights from the beam (was 0.33),
-  bundle 0.31× raised height.
+  holds the idle stance; the legacy strike keeps its out-of-sight 1-frame snap. Two field passes reshaped the
+  fold itself: first the chain grew to four bands (Sail→SailF1..F3) because parity decides where the bottom
+  edge lands ("the underside should fold to the top of the beam"); then the alternating pleat became a CURL —
+  "fold more how an open hand thumb and fingers close" — every joint bending the same way, the Curl dial the
+  TOTAL roll (default 270° = 90° per joint). Measured at 270°: the canvas's foot lands 0.06 sail-heights ABOVE
+  the beam, wrapped onto the yard like fingers on a palm's edge; bundle 0.39× raised, mid-frame 0.50 (the
+  close plays through).
 
 - **The Era Lab grid can be switched off without losing it.** A new "Apply era ageing" checkbox saves as
   `eraGridEnabled` in the pack: unchecked, the grid stays authored (and editable) but the runtime treats

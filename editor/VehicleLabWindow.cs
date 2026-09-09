@@ -135,11 +135,13 @@ public class VehicleLabWindow : EditorWindow
     // Sail bone. The band count is EVEN (4) on purpose: parity puts the canvas's bottom edge AT the yard when
     // folded ("the underside folds to the top of the beam"). Fast path rejects it: needs generated bones.
     [SerializeField] bool sailFoldIdle = false;
-    // FOLD FRAMES / ANGLE (2026-09-09 follow-up: "moving too fast, in a single frame"): frames give the Furl
-    // clip a real span so Pre-move Furl[N..0] / After-move Furl[0..N] can PLAY the gather (the trails' Deploy
-    // pattern); angle is how far each fold bone zigzags — smaller = a looser, taller bundle.
+    // FOLD FRAMES / CURL (2026-09-09 follow-ups: "moving too fast, in a single frame" then "fold more how an
+    // open hand thumb and fingers close"): frames give the Furl clip a real span so Pre-move Furl[N..0] /
+    // After-move Furl[0..N] can PLAY the gather (the trails' Deploy pattern); the angle is the TOTAL curl the
+    // canvas rolls through, split equally over the three fold joints all bending the SAME way — fingers
+    // closing onto a palm. 270 = each joint 90, the canvas's foot lands at the beam in a C-shaped roll.
     [SerializeField] int sailFoldFrames = 12;
-    [SerializeField] float sailFoldAngleDeg = 160f;
+    [SerializeField] float sailFoldAngleDeg = 270f;
     // GUN PIVOT: where the Gun bone sits along the assembly — the runtime elevation rotates about it, so this IS
     // the trunnion. 0.5 = bbox centre (unchanged default); an artillery piece wants ~0.4 (measured on the M114).
     [SerializeField] float gunPivot = 0.5f;
@@ -276,7 +278,7 @@ public class VehicleLabWindow : EditorWindow
         public float detailReducePct = 0f;     // Detail-role decimation percentage (absent-key 0 == the do-nothing default)
         public bool sailFoldIdle = false;      // idle sail FOLDS at the yard instead of hiding below the keel (absent-key false == the legacy strike)
         public int sailFoldFrames = 12;        // Furl clip span in fold mode — lets Pre/After-move PLAY the gather (absent-key 12)
-        public float sailFoldAngleDeg = 160f;  // fold-bone zigzag angle — smaller = looser, taller bundle (absent-key 160)
+        public float sailFoldAngleDeg = 270f;  // TOTAL curl over the three joints, hand-close style (absent-key 270 = foot lands at the beam)
         // TAIL ROTOR (review round 3, 2026-09-06): these fed the Blender command since the helicopter era but
         // were never saved — a tuned tail trim vanished on every recipe reload. Absent-key 0 == Auto/no trim.
         public int tailAxisChoice = 0;
@@ -715,7 +717,7 @@ public class VehicleLabWindow : EditorWindow
                         : string.Join(" · ", new[] {
                             ActiveParts.Count(p => p.role == Role.Trail) > 0 ? $"{ActiveParts.Count(p => p.role == Role.Trail)} trail(s) · {trailSpreadDeg:0.#}° over {trailFrames} frames" : null,
                             gunDeployElev != 0f ? $"gun +{gunDeployElev:0.#}°" : null,
-                            deploySails > 0 ? (sailFoldIdle ? $"sail folds {sailFoldAngleDeg:0.#}° over {Mathf.Max(1, sailFoldFrames)} frames" : "sail hides at idle") : null,
+                            deploySails > 0 ? (sailFoldIdle ? $"sail curls {sailFoldAngleDeg:0.#}° over {Mathf.Max(1, sailFoldFrames)} frames" : "sail hides at idle") : null,
                           }.Where(s => s != null))))
             {
                 using (new EditorGUI.DisabledScope(ActiveParts.Count(p => p.role == Role.Trail) == 0))
@@ -734,8 +736,8 @@ public class VehicleLabWindow : EditorWindow
                 if (deploySails > 0)
                 {
                     EditorGUILayout.HelpBox(sailFoldIdle
-                        ? "Sails marked, FOLD mode: the 'Furl' clip GATHERS the canvas into a bundle at the yard over " +
-                          $"{Mathf.Max(1, sailFoldFrames)} frame(s) (an accordion pleat on generated fold bones — the sail stays visible, " +
+                        ? "Sails marked, FOLD mode: the 'Furl' clip CURLS the canvas up to the yard over " +
+                          $"{Mathf.Max(1, sailFoldFrames)} frame(s) (a hand-close roll on generated fold bones — the sail stays visible, " +
                           "like the vanilla ships'). Assign after baking: Idle/reference = Spin[0..0] (defines the rest — never put Furl " +
                           $"here) · Idle stance (override) = Furl[{Mathf.Max(1, sailFoldFrames)}..{Mathf.Max(1, sailFoldFrames)}] (sails folded) · Movement = Spin (sails up) · " +
                           $"Pre-move = Furl[{Mathf.Max(1, sailFoldFrames)}..0] and After-move = Furl[0..{Mathf.Max(1, sailFoldFrames)}] to PLAY the gather (leave both " +
@@ -759,10 +761,11 @@ public class VehicleLabWindow : EditorWindow
                             "After-move = Furl[0..N] in the Animation Lab and the game PLAYS the fold/unfold at " +
                             "stop/start (the split-trail Deploy pattern); with those empty the pose still swaps in " +
                             "one tick regardless of this number."), Mathf.Max(1, sailFoldFrames), 1, 60);
-                        sailFoldAngleDeg = EditorGUILayout.Slider(new GUIContent("  Fold angle (°)",
-                            "How far each fold bone zigzags at full gather. 160 (default) = a tight pleat bundled at " +
-                            "the yard; smaller = a looser, taller bundle; near 180 risks coplanar cloth " +
-                            "z-fighting."), sailFoldAngleDeg, 30f, 178f);
+                        sailFoldAngleDeg = EditorGUILayout.Slider(new GUIContent("  Curl (° total)",
+                            "TOTAL degrees the canvas rolls through, split over the three fold joints — all bending " +
+                            "the same way, like fingers closing onto a palm. 270 (default) = 90 per joint, the " +
+                            "canvas's foot lands at the beam in a C-shaped roll; less = a looser, more open curl; " +
+                            "360 wraps a full turn."), sailFoldAngleDeg, 90f, 360f);
                     }
                 }
                 // GUN PIVOT lives here rather than with the trails because it is the same kind of knob: where a
@@ -1378,7 +1381,7 @@ public class VehicleLabWindow : EditorWindow
         // stroke into the next model) — reset to the live defaults, same values as a fresh window.
         doubleSided = false; fixInsideOut = false;
         oarSweepDeg = 24f; oarDipDeg = 18f; oarFrames = 24; oarBladeRollDeg = 0f; oarLiftDeg = 0f; oarRakeDeg = 0f; oarPivotPct = 30f; oarLengthPct = 100f;
-        riggingReducePct = 75f; structureReducePct = 50f; bodyReducePct = 0f; oarReducePct = 0f; sailReducePct = 0f; rudderReducePct = 0f; wheelReducePct = 0f; flipReducePct = 0f; preserveReducePct = 0f; detailReducePct = 0f; sailFoldIdle = false; sailFoldFrames = 12; sailFoldAngleDeg = 160f;
+        riggingReducePct = 75f; structureReducePct = 50f; bodyReducePct = 0f; oarReducePct = 0f; sailReducePct = 0f; rudderReducePct = 0f; wheelReducePct = 0f; flipReducePct = 0f; preserveReducePct = 0f; detailReducePct = 0f; sailFoldIdle = false; sailFoldFrames = 12; sailFoldAngleDeg = 270f;
         // …and the pre-0.5.4 generation dials the reset had ALWAYS skipped (review round 2): a tuned trail
         // spread, gun trunnion, recoil or tail-rotor trim silently carried into the next model too.
         spinEnabled = true; trailSpreadDeg = 35f; trailFrames = 12; gunPivot = 0.5f; gunDeployElev = 0f;
@@ -1600,7 +1603,7 @@ public class VehicleLabWindow : EditorWindow
             bodyReducePct = r.bodyReducePct;   // DTO initializer 0 = do-nothing
             oarReducePct = r.oarReducePct; sailReducePct = r.sailReducePct; rudderReducePct = r.rudderReducePct; wheelReducePct = r.wheelReducePct; flipReducePct = r.flipReducePct; preserveReducePct = r.preserveReducePct; detailReducePct = r.detailReducePct;   // same: absent-key 0 == untouched (Preserve: byte-identical)
             sailFoldIdle = r.sailFoldIdle;   // absent-key false == the legacy strike below the keel
-            sailFoldFrames = r.sailFoldFrames <= 0 ? 12 : r.sailFoldFrames; sailFoldAngleDeg = r.sailFoldAngleDeg <= 0f ? 160f : r.sailFoldAngleDeg;   // absent-key: initializer defaults; <=0 guards a hand-edited file
+            sailFoldFrames = r.sailFoldFrames <= 0 ? 12 : r.sailFoldFrames; sailFoldAngleDeg = r.sailFoldAngleDeg <= 0f ? 270f : r.sailFoldAngleDeg;   // absent-key: initializer defaults; <=0 guards a hand-edited file
             tailAxisChoice = r.tailAxisChoice; tailYawAdj = r.tailYawAdj; tailPitchAdj = r.tailPitchAdj;   // absent-key 0 == Auto/no trim, the old effective behavior
             trailSpreadDeg = r.trailSpreadDeg; trailFrames = r.trailFrames; gunPivot = r.gunPivot; gunDeployElev = r.gunDeployElev; recoilDist = r.recoilDist; recoilFrames = r.recoilFrames; recoilLead = r.recoilLead;
             waveEnabled = r.waveEnabled; rockDegrees = r.rockDegrees; rockAxisChoice = r.rockAxisChoice; rockHeading = r.rockHeading;

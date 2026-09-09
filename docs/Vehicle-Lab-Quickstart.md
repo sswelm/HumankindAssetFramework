@@ -128,14 +128,14 @@ the state change swaps the pose in one tick. **Keep bone translations** can stay
 rotation.
 
 **Fold sail at idle** (checkbox under the sails notice) swaps the strike for the vanilla ships' look: instead of
-vanishing below the keel, the idle canvas **gathers into a visible bundle at the yard** — an accordion pleat on a
-generated `Sail → SailF1 → SailF2 → SailF3` fold chain, the canvas band-skinned in height **quarters** and the
-`Furl` clip zigzagging the fold bones about the yard axis. The band count is even on purpose: parity means the
-canvas's **underside finishes its last fold pointing up and lands at the beam**, the way a brailed sail actually
-gathers. Still **pure rotation** (per-bone *scale* is the pipeline's
-known trap — deploy_convert strips it for a reason). Rigging keeps standing — it rides the root `Sail` bone,
-which holds. Two dials: **Fold frames** (default 12) spans the gather over real frames, and **Fold angle**
-(default 160°) sets how tight the pleat closes — smaller = a looser, taller bundle.
+vanishing below the keel, the idle canvas **curls up to the yard** — a hand-close roll on a generated
+`Sail → SailF1 → SailF2 → SailF3` fold chain, the canvas band-skinned in height **quarters** and every fold
+joint bending the **same way**, like fingers closing onto a palm (the top band). At the default 270° total each
+joint bends 90°: the canvas's **foot lands at the beam**, tucked against the yard in a C-shaped roll — the way
+a brailed sail actually gathers, and the gather *moves* like a hand closing. Still **pure rotation** (per-bone
+*scale* is the pipeline's known trap — deploy_convert strips it for a reason). Rigging keeps standing — it
+rides the root `Sail` bone, which holds. Two dials: **Fold frames** (default 12) spans the gather over real
+frames, and **Curl** (default 270° total) sets how far the roll closes — less = a looser, more open curl.
 
 With frames, the fold is the **deployment mechanic** applied to canvas — assign like the split-trail gun:
 Idle/reference = `Spin[0..0]` · Idle stance (override) = `Furl[N..N]` (held folded) · Movement = `Spin` (sails
