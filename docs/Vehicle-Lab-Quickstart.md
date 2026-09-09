@@ -129,12 +129,17 @@ rotation.
 
 **Fold sail at idle** (checkbox under the sails notice) swaps the strike for the vanilla ships' look: instead of
 vanishing below the keel, the idle canvas **gathers into a visible bundle at the yard** — an accordion pleat on a
-generated `Sail → SailF1 → SailF2` fold chain, the canvas band-skinned in height thirds and the `Furl` stance
-zigzagging the fold bones ±160° about the yard axis. Still **pure rotation** (per-bone *scale* is the pipeline's
-known trap — deploy_convert strips it for a reason), so nothing changes in the bake recipe or the stance
-assignment above; only what frame 1 of `Furl` shows. Rigging keeps standing — it rides the root `Sail` bone,
-which holds. Not available on the source-skeleton fast path (the fold needs generated bones and band skinning);
-regenerate and rebake to apply.
+generated `Sail → SailF1 → SailF2` fold chain, the canvas band-skinned in height thirds and the `Furl` clip
+zigzagging the fold bones about the yard axis. Still **pure rotation** (per-bone *scale* is the pipeline's
+known trap — deploy_convert strips it for a reason). Rigging keeps standing — it rides the root `Sail` bone,
+which holds. Two dials: **Fold frames** (default 12) spans the gather over real frames, and **Fold angle**
+(default 160°) sets how tight the pleat closes — smaller = a looser, taller bundle.
+
+With frames, the fold is the **deployment mechanic** applied to canvas — assign like the split-trail gun:
+Idle/reference = `Spin[0..0]` · Idle stance (override) = `Furl[N..N]` (held folded) · Movement = `Spin` (sails
+up) · **Pre-move = `Furl[N..0]`** (the canvas lets out as the ship gets under way) · **After-move =
+`Furl[0..N]`** (it gathers on arrival) — or leave Pre/After empty for a one-tick swap. Not available on the
+source-skeleton fast path (the fold needs generated bones and band skinning); regenerate and rebake to apply.
 
 **Oars (galley rowing).** A galley's oars usually arrive as a **few merged meshes** — all the poles in one, all the
 blades in another (often split front/back) — each mesh holding *every* oar across *both* banks. Mark those meshes

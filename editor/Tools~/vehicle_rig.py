@@ -362,6 +362,13 @@ detail_reduce = min(95.0, max(0.0, float(argv[70]))) if len(argv) > 70 and argv[
 # play per-bone scale faithfully, deploy_convert's AW101 finding, and rotation stances are the pipeline's
 # proven currency). Rigging still rides the root Sail bone, so ropes stay standing while the cloth gathers.
 sail_fold = len(argv) > 71 and argv[71].strip() == "1"
+# FOLD FRAMES / ANGLE (argv[72..73], 2026-09-09 follow-up: "moving too fast, in a single frame"): the fold is
+# still a stance if assigned as Furl[N..N], but with real frames the state machine can PLAY it — the trails'
+# Deploy pattern: Idle stance Furl[N..N], Pre-move Furl[N..0] (canvas lets out as the ship gets under way),
+# After-move Furl[0..N] (gathers on arrival). Angle: how far each fold bone zigzags — smaller = a looser,
+# taller bundle. The legacy strike keeps its 1-frame snap (it happens out of sight below the keel).
+sail_fold_frames = max(1, int(float(argv[72]))) if len(argv) > 72 and argv[72].strip() else 12
+sail_fold_angle = min(178.0, max(30.0, float(argv[73]))) if len(argv) > 73 and argv[73].strip() else 160.0
 # OAR LIFT (argv[56]): a CONSTANT tilt about the dip axis, re-centring the whole stroke — the knob the dip sign
 # cannot be (±dip is the same oscillation, phase-flipped; the blades visit the same depths either way). A source
 # whose oars are modelled raked steeply into the water (the Khalandion: "at -30 they almost go vertically") rides
@@ -2129,7 +2136,9 @@ if oar_bake:
 # reference's frame 0 as the canonical rest, and a struck reference turns the whole bind upside-down), Idle
 # stance (override) = Furl[1..1] (struck below the hull, the Deploy-stance mechanism), Movement = Spin (raised),
 # After-move / Pre-move EMPTY — the state change swaps the pose in one tick. Rotation-only: Keep translations OFF.
-SAIL_FURL_FRAMES = 1
+# FOLD mode instead spans sail_fold_frames so the gather can be PLAYED (Pre-move Furl[N..0] / After-move
+# Furl[0..N], the trails' Deploy pattern) — held as a stance via Furl[N..N] either way.
+SAIL_FURL_FRAMES = sail_fold_frames if (sail_fold and sail_found) else 1
 if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and arm.pose.bones.get("Flag") is not None):
     # ROTATION, not translation (2026-09-05): the strike is a 180-degree flip of the Sail bone about the keel-line
     # head, mirroring the canvas below the hull. The translation version fought the converter — the rest-fold made
@@ -2158,7 +2167,7 @@ if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and ar
             # third as an accordion pleat, vanilla's brailed-up look. 160 degrees, not 180, so the pleats keep
             # a visible wedge instead of z-fighting coplanar cloth.
             _pbS.keyframe_insert('rotation_quaternion', frame=SAIL_FURL_FRAMES)   # root stays raised in the fold stance
-            _folddeg = math.radians(160.0)
+            _folddeg = math.radians(sail_fold_angle)
             for _fbn, _fsgn in (("SailF1", 1.0), ("SailF2", -1.0)):
                 _pbF = arm.pose.bones[_fbn]; _dbF = arm.data.bones[_fbn]
                 _m3F = (arm.matrix_world @ _dbF.matrix_local).to_3x3()
@@ -2191,10 +2200,12 @@ if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and ar
         for _kp in _fc.keyframe_points:
             _kp.interpolation = 'LINEAR'
     arm.animation_data.action = act                                      # 'Spin' stays the active action, as before
-    print("VEHICLE 'Furl' stance: %s — Idle/reference Spin[0..0], Idle stance (override) Furl[%d..%d], Movement Spin, After-move/Pre-move EMPTY, Keep bone translations OFF"
-          % ((("sails FOLDED at the yard (accordion pleat)" if sail_fold else "sails FLIPPED below the keel")
+    print("VEHICLE 'Furl' stance: %s — Idle/reference Spin[0..0], Idle stance (override) Furl[%d..%d], Movement Spin, %s, Keep bone translations OFF"
+          % ((("sails FOLDED at the yard (accordion pleat, %d frame(s), %.0f deg)" % (SAIL_FURL_FRAMES, sail_fold_angle) if sail_fold else "sails FLIPPED below the keel")
               + (", flags keyed flying" if flag_found else "")) if sail_found else "flags keyed flying (no sails)",
-             SAIL_FURL_FRAMES, SAIL_FURL_FRAMES))
+             SAIL_FURL_FRAMES, SAIL_FURL_FRAMES,
+             ("Pre-move Furl[%d..0] / After-move Furl[0..%d] to PLAY the gather (or EMPTY for a one-tick swap)" % (SAIL_FURL_FRAMES, SAIL_FURL_FRAMES))
+             if (sail_fold and sail_found) else "After-move/Pre-move EMPTY"))
 
 # SAIL held raised THROUGH Spin — explicit identity keys, the same stale-pose hazard in the other direction:
 # sampling Furl then Spin would leave the canvas struck without them.

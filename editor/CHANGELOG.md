@@ -12,6 +12,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   by design (per-bone scale is the pipeline's measured AW101 trap), so the bake recipe and stance assignment
   are unchanged. Rigging keeps standing on the root Sail bone. Rejected loudly on the source-skeleton fast
   path. Drilled headless on the Khalandion: folded canvas = 0.38× raised height, top pinned at the yard.
+  Follow-up ("moving too fast, in a single frame"): **Fold frames** (default 12) and **Fold angle** (default
+  160°) dials — with frames the fold is the split-trail deployment mechanic on canvas: Pre-move `Furl[N..0]`
+  lets the sail out as the ship gets under way, After-move `Furl[0..N]` gathers it on arrival, `Furl[N..N]`
+  holds the idle stance; the legacy strike keeps its out-of-sight 1-frame snap.
 
 - **The Era Lab grid can be switched off without losing it.** A new "Apply era ageing" checkbox saves as
   `eraGridEnabled` in the pack: unchecked, the grid stays authored (and editable) but the runtime treats
