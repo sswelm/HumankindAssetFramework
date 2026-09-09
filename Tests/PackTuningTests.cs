@@ -52,6 +52,44 @@ public class PackTuningTests
     }
 
     [Fact]
+    public void EraGrid_disabled_pack_contributes_no_rows_and_is_named()
+    {
+        var r = UniversalInject.PackTuning.Parse(new[] {
+            P("a", "{\"eraGrid\":[{\"unitEra\":1,\"scales\":[1,0.5]}],\"eraGridEnabled\":false}") });
+        Assert.Empty(r.EraGridRows);
+        Assert.True(r.EraGridDisabled);
+        var n = Assert.Single(r.Notes);
+        Assert.Contains("DISABLED", n); Assert.Contains("'a'", n);
+    }
+
+    [Fact]
+    public void EraGrid_enabled_true_and_absent_key_both_parse_normally()
+    {
+        var explicitTrue = UniversalInject.PackTuning.Parse(new[] {
+            P("a", "{\"eraGrid\":[{\"unitEra\":1,\"scales\":[1,0.5]}],\"eraGridEnabled\":true}") });
+        var absent = UniversalInject.PackTuning.Parse(new[] {
+            P("a", "{\"eraGrid\":[{\"unitEra\":1,\"scales\":[1,0.5]}]}") });   // pre-toggle pack: no key = enabled
+        foreach (var r in new[] { explicitTrue, absent })
+        {
+            Assert.Equal(new[] { 1f, 0.5f }, r.EraGridRows[1]);
+            Assert.False(r.EraGridDisabled);
+            Assert.Empty(r.Notes);
+        }
+    }
+
+    [Fact]
+    public void EraGrid_disabled_later_pack_leaves_the_earlier_packs_rows_standing()
+    {
+        var r = UniversalInject.PackTuning.Parse(new[] {
+            P("first",  "{\"eraGrid\":[{\"unitEra\":1,\"scales\":[1,0.7]}]}"),
+            P("second", "{\"eraGrid\":[{\"unitEra\":1,\"scales\":[1,0.2]}],\"eraGridEnabled\":false}") });
+        Assert.Equal(new[] { 1f, 0.7f }, r.EraGridRows[1]);   // a disabled grid behaves like an unauthored one
+        Assert.True(r.EraGridDisabled);
+        var n = Assert.Single(r.Notes);
+        Assert.Contains("'second'", n); Assert.Contains("DISABLED", n);
+    }
+
+    [Fact]
     public void FormationThresholds_whole_table_is_replaced_by_the_later_pack_and_sorted()
     {
         var r = UniversalInject.PackTuning.Parse(new[] {

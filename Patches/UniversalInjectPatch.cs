@@ -304,6 +304,7 @@ namespace HumankindAssetFramework
                 resolution.AddRange(tuning.Notes.Select(n => "TUNING: " + n));
                 unitScaleRules.Clear(); unitScaleRules.AddRange(tuning.ScaleRules);
                 eraGridRows.Clear(); foreach (var kv in tuning.EraGridRows) eraGridRows[kv.Key] = kv.Value;
+                eraGridDisabled = tuning.EraGridDisabled;
                 formationBySize.Clear(); formationBySize.AddRange(tuning.FormationBySize);
                 if (unitScaleRules.Count > 0)
                     Plugin.Diag($"[Resize] {unitScaleRules.Count} unit-scale rule(s): " + string.Join(", ", unitScaleRules.Select(r => $"'{r.match}'x{r.scale:0.###}" + (r.era > 0 ? $" (era {r.era})" : ""))));

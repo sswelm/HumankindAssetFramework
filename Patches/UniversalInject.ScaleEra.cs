@@ -189,7 +189,7 @@ namespace HumankindAssetFramework
             lines.Add(era < 0
                 ? "World era: not in a game yet"
                 : $"Anchor = max(built frontier, world era {aggregateEra}) — built: naval {Front(1)} | land {Front(0)} | air {Front(2)}   (tech era {techEra})");
-            lines.Add($"era-grid rows authored: {eraGridRows.Count}   |   scaled units: {unitScaleByDesc.Count}");
+            lines.Add($"era-grid rows authored: {eraGridRows.Count}{(eraGridDisabled && eraGridRows.Count == 0 ? " (a grid IS authored but DISABLED in the Era Lab — units keep their Resize Lab scale)" : "")}   |   scaled units: {unitScaleByDesc.Count}");
             string[] domName = { "land", "naval", "air", "missile" };
             foreach (var kv in unitScaleByDesc)
             {
