@@ -21,7 +21,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   "fold more how an open hand thumb and fingers close" — every joint bending the same way, the Curl dial the
   TOTAL roll (default 270° = 90° per joint). Measured at 270°: the canvas's foot lands 0.06 sail-heights ABOVE
   the beam, wrapped onto the yard like fingers on a palm's edge; bundle 0.39× raised, mid-frame 0.50 (the
-  close plays through).
+  close plays through). A **Reverse curl direction** checkbox mirrors the roll to the other side of the sail
+  plane — which way is "backwards" depends on the source model's facing, so it can't be auto-derived; the
+  reverse roll curls against the billow camber and bundles a little looser (measured 0.53× vs 0.39×), foot
+  at the beam either way.
 
 - **The Era Lab grid can be switched off without losing it.** A new "Apply era ageing" checkbox saves as
   `eraGridEnabled` in the pack: unchecked, the grid stays authored (and editable) but the runtime treats

@@ -134,8 +134,11 @@ joint bending the **same way**, like fingers closing onto a palm (the top band).
 joint bends 90°: the canvas's **foot lands at the beam**, tucked against the yard in a C-shaped roll — the way
 a brailed sail actually gathers, and the gather *moves* like a hand closing. Still **pure rotation** (per-bone
 *scale* is the pipeline's known trap — deploy_convert strips it for a reason). Rigging keeps standing — it
-rides the root `Sail` bone, which holds. Two dials: **Fold frames** (default 12) spans the gather over real
-frames, and **Curl** (default 270° total) sets how far the roll closes — less = a looser, more open curl.
+rides the root `Sail` bone, which holds. Three controls: **Fold frames** (default 12) spans the gather over
+real frames, **Curl** (default 270° total) sets how far the roll closes — less = a looser, more open curl —
+and **Reverse curl direction** mirrors the roll to the other side of the sail plane (which way is "backwards"
+depends on the source model's facing; the reverse direction curls against the billow camber and bundles a
+little looser).
 
 With frames, the fold is the **deployment mechanic** applied to canvas — assign like the split-trail gun:
 Idle/reference = `Spin[0..0]` · Idle stance (override) = `Furl[N..N]` (held folded) · Movement = `Spin` (sails
