@@ -24,10 +24,13 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   close plays through). A **Reverse curl direction** checkbox mirrors the roll to the other side of the sail
   plane — which way is "backwards" depends on the source model's facing, so it can't be auto-derived; the
   reverse roll curls against the billow camber and bundles a little looser (measured 0.53× vs 0.39×), foot
-  at the beam either way. A **Sag (gravity)** dial (0–1) presses the folded roll flat — per-joint angle
-  LERPed from the open curl toward 170° — so the bundle stops "behaving like in space": at 1.0 the height
-  drops 0.39×→0.30× with no wrap-over above the beam. Known limit: each band keeps its authored billow
-  camber (rotations stack curved sheets, they can't flatten them), so fore-aft depth barely changes.
+  at the beam either way. A **Sag (gravity)** dial (0–1) DRAPES the folded roll so it stops "behaving like
+  in space" — first modeled as extra curl (field verdict: "it's just curling more"), now real drape math:
+  gravity pulls every cloth segment toward hanging vertical, so the segment angles' horizontal component is
+  squashed by (1−sag)² and the per-joint deltas re-derived (all folds share the yard axis, angles compose as
+  scalars). Measured at curl 180: horizontal spread 3.89 → 2.60 → 2.05 across sag 0/0.5/1 — the floor is the
+  canvas's own billow camber (rotations can't flatten a curved sheet), so sag 0.5 roughly halves the
+  protruding roll and 1.0 hangs it flat; the foot stays at the beam throughout.
 
 - **The Era Lab grid can be switched off without losing it.** A new "Apply era ageing" checkbox saves as
   `eraGridEnabled` in the pack: unchecked, the grid stays authored (and editable) but the runtime treats

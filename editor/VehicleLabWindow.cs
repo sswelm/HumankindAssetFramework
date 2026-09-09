@@ -780,9 +780,10 @@ public class VehicleLabWindow : EditorWindow
                             "on the source model's facing, so it can't be auto-derived — if the curl tucks toward the " +
                             "bow (or through the mast), tick this."), sailFoldReverse);
                         sailFoldSag = EditorGUILayout.Slider(new GUIContent("  Sag (gravity)",
-                            "How much gravity presses the folded roll flat. 0 = the open C-curl (a roll in space); " +
-                            "1 = the layers press into a thin flat bundle against the yard (each fold closes toward " +
-                            "170°). Thins the RESULT only — the hand-close motion is unchanged."), sailFoldSag, 0f, 1f);
+                            "Drapes the folded roll: gravity pulls every cloth segment toward hanging vertical, " +
+                            "squashing the roll's horizontal spread while the curl shape survives. 0 = the free " +
+                            "zero-g curl; 0.5 ≈ half the horizontal width; 1 = hangs flat. The hand-close motion " +
+                            "is unchanged."), sailFoldSag, 0f, 1f);
                     }
                 }
                 // GUN PIVOT lives here rather than with the trails because it is the same kind of knob: where a

@@ -377,11 +377,13 @@ sail_fold_angle = min(360.0, max(30.0, float(argv[73]))) if len(argv) > 73 and a
 # side of the sail plane the roll tucks toward depends on the source model's facing, so it cannot be derived —
 # "1" mirrors the curl. Same fix as the blade-roll saga: the mirror of R(a, th) is R(a, -th).
 sail_fold_flip = len(argv) > 74 and argv[74].strip() == "1"
-# SAG (argv[75], 2026-09-09: "fold thinner where gravity exists and not behave like in space"): 0..1. A cloth
-# roll in zero-g holds an open C (the pure curl); under gravity the layers press flat — in joint terms each
-# fold closes toward ~170 degrees (never 180: coplanar cloth z-fights). Sag LERPs the per-joint angle from
-# curl/3 toward 170, so 1.0 is a thin layered roll pressed against the yard and 0 is the open space-curl.
-# The motion is unchanged — all joints still close together like a hand.
+# SAG (argv[75], 2026-09-09: "fold thinner where gravity exists and not behave like in space"; second pass
+# "curl 180 + sag 0.5 should halve the horizontal width"): 0..1 DRAPE, not extra curl (the first model LERPed
+# the joints toward 170 deg — measured verdict: "it's just curling more"). Gravity pulls every cloth segment
+# toward hanging vertical: accumulate the segments' angles from straight-down, squash the horizontal
+# component by (1-sag)^2, re-derive the per-joint deltas (all rotations share the yard axis, so angles
+# compose as scalars). Segment lengths are rigid, so the squash renormalizes — (1-s)^2 makes sag 0.5 land at
+# ~half the horizontal spread, and sag 1 hangs the fold flat. Motion still closes like a hand.
 sail_fold_sag = min(1.0, max(0.0, float(argv[75]))) if len(argv) > 75 and argv[75].strip() else 0.0
 # OAR LIFT (argv[56]): a CONSTANT tilt about the dip axis, re-centring the whole stroke — the knob the dip sign
 # cannot be (±dip is the same oscillation, phase-flipped; the blades visit the same depths either way). A source
@@ -2185,16 +2187,31 @@ if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and ar
             # in — the canvas's foot lands at the beam, tucked against the top band, a C-shaped roll under the
             # yard. Linear interpolation curls all joints together, so the gather MOVES like a hand closing.
             _pbS.keyframe_insert('rotation_quaternion', frame=SAIL_FURL_FRAMES)   # root stays raised in the fold stance
-            _perjoint = (sail_fold_angle / 3.0) * (1.0 - sail_fold_sag) + 170.0 * sail_fold_sag
-            _folddeg = math.radians(_perjoint) * (-1.0 if sail_fold_flip else 1.0)
-            for _fbn, _fsgn in (("SailF1", 1.0), ("SailF2", 1.0), ("SailF3", 1.0)):
+            # DRAPE MATH: theta_k = segment k's angle from straight-down after the pure curl; squash its
+            # horizontal component (sin) by (1-s)^2 and re-aim — atan2 renormalizes, the while-loops unwrap
+            # back into theta's revolution (atan2 wraps at 180). Per-joint key = delta of consecutive
+            # draped angles. s capped at 0.98: at exactly 1 a 90-degree segment hits atan2(0,0).
+            _s98 = min(0.98, sail_fold_sag)
+            _hsquash = (1.0 - _s98) ** 2
+            _jbase = math.radians(sail_fold_angle / 3.0)
+            _jdeltas = []; _thprev = 0.0
+            for _jk in (1, 2, 3):
+                _th = _jbase * _jk
+                _thp = math.atan2(math.sin(_th) * _hsquash, math.cos(_th))
+                while _thp < _th - math.pi:
+                    _thp += 2.0 * math.pi
+                while _thp > _th + math.pi:
+                    _thp -= 2.0 * math.pi
+                _jdeltas.append(_thp - _thprev); _thprev = _thp
+            _fsign = (-1.0 if sail_fold_flip else 1.0)
+            for _fbn, _folddeg in (("SailF1", _jdeltas[0] * _fsign), ("SailF2", _jdeltas[1] * _fsign), ("SailF3", _jdeltas[2] * _fsign)):
                 _pbF = arm.pose.bones[_fbn]; _dbF = arm.data.bones[_fbn]
                 _m3F = (arm.matrix_world @ _dbF.matrix_local).to_3x3()
                 _foldax = (_m3F.inverted() @ sail_fold_yard).normalized()    # yard axis, in bone-local space
                 _pbF.rotation_mode = 'QUATERNION'
                 _pbF.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
                 _pbF.keyframe_insert('rotation_quaternion', frame=0)         # spread — matches Spin's rest pose
-                _pbF.rotation_quaternion = Quaternion(_foldax, _folddeg * _fsgn)
+                _pbF.rotation_quaternion = Quaternion(_foldax, _folddeg)   # flip sign already baked into the delta
                 _pbF.keyframe_insert('rotation_quaternion', frame=SAIL_FURL_FRAMES)
                 _pbF.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))  # leave the POSE spread for the later bakes
         else:
