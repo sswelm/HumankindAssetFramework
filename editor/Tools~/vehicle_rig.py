@@ -373,6 +373,10 @@ sail_fold_frames = max(1, int(float(argv[72]))) if len(argv) > 72 and argv[72].s
 # same way — fingers closing onto the palm (the top band). At 270 (default) the joints bend 90 each and the
 # canvas's foot lands exactly at the beam, curled against the yard like a brailed roll.
 sail_fold_angle = min(360.0, max(30.0, float(argv[73]))) if len(argv) > 73 and argv[73].strip() else 270.0
+# CURL DIRECTION (argv[74], 2026-09-09: "it moves the opposite direction, I want to move it backwards"): which
+# side of the sail plane the roll tucks toward depends on the source model's facing, so it cannot be derived —
+# "1" mirrors the curl. Same fix as the blade-roll saga: the mirror of R(a, th) is R(a, -th).
+sail_fold_flip = len(argv) > 74 and argv[74].strip() == "1"
 # OAR LIFT (argv[56]): a CONSTANT tilt about the dip axis, re-centring the whole stroke — the knob the dip sign
 # cannot be (±dip is the same oscillation, phase-flipped; the blades visit the same depths either way). A source
 # whose oars are modelled raked steeply into the water (the Khalandion: "at -30 they almost go vertically") rides
@@ -2175,7 +2179,7 @@ if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and ar
             # in — the canvas's foot lands at the beam, tucked against the top band, a C-shaped roll under the
             # yard. Linear interpolation curls all joints together, so the gather MOVES like a hand closing.
             _pbS.keyframe_insert('rotation_quaternion', frame=SAIL_FURL_FRAMES)   # root stays raised in the fold stance
-            _folddeg = math.radians(sail_fold_angle / 3.0)
+            _folddeg = math.radians(sail_fold_angle / 3.0) * (-1.0 if sail_fold_flip else 1.0)
             for _fbn, _fsgn in (("SailF1", 1.0), ("SailF2", 1.0), ("SailF3", 1.0)):
                 _pbF = arm.pose.bones[_fbn]; _dbF = arm.data.bones[_fbn]
                 _m3F = (arm.matrix_world @ _dbF.matrix_local).to_3x3()
