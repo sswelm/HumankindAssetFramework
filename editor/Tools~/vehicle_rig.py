@@ -377,6 +377,12 @@ sail_fold_angle = min(360.0, max(30.0, float(argv[73]))) if len(argv) > 73 and a
 # side of the sail plane the roll tucks toward depends on the source model's facing, so it cannot be derived —
 # "1" mirrors the curl. Same fix as the blade-roll saga: the mirror of R(a, th) is R(a, -th).
 sail_fold_flip = len(argv) > 74 and argv[74].strip() == "1"
+# SAG (argv[75], 2026-09-09: "fold thinner where gravity exists and not behave like in space"): 0..1. A cloth
+# roll in zero-g holds an open C (the pure curl); under gravity the layers press flat — in joint terms each
+# fold closes toward ~170 degrees (never 180: coplanar cloth z-fights). Sag LERPs the per-joint angle from
+# curl/3 toward 170, so 1.0 is a thin layered roll pressed against the yard and 0 is the open space-curl.
+# The motion is unchanged — all joints still close together like a hand.
+sail_fold_sag = min(1.0, max(0.0, float(argv[75]))) if len(argv) > 75 and argv[75].strip() else 0.0
 # OAR LIFT (argv[56]): a CONSTANT tilt about the dip axis, re-centring the whole stroke — the knob the dip sign
 # cannot be (±dip is the same oscillation, phase-flipped; the blades visit the same depths either way). A source
 # whose oars are modelled raked steeply into the water (the Khalandion: "at -30 they almost go vertically") rides
@@ -2179,7 +2185,8 @@ if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and ar
             # in — the canvas's foot lands at the beam, tucked against the top band, a C-shaped roll under the
             # yard. Linear interpolation curls all joints together, so the gather MOVES like a hand closing.
             _pbS.keyframe_insert('rotation_quaternion', frame=SAIL_FURL_FRAMES)   # root stays raised in the fold stance
-            _folddeg = math.radians(sail_fold_angle / 3.0) * (-1.0 if sail_fold_flip else 1.0)
+            _perjoint = (sail_fold_angle / 3.0) * (1.0 - sail_fold_sag) + 170.0 * sail_fold_sag
+            _folddeg = math.radians(_perjoint) * (-1.0 if sail_fold_flip else 1.0)
             for _fbn, _fsgn in (("SailF1", 1.0), ("SailF2", 1.0), ("SailF3", 1.0)):
                 _pbF = arm.pose.bones[_fbn]; _dbF = arm.data.bones[_fbn]
                 _m3F = (arm.matrix_world @ _dbF.matrix_local).to_3x3()
@@ -2213,7 +2220,7 @@ if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and ar
             _kp.interpolation = 'LINEAR'
     arm.animation_data.action = act                                      # 'Spin' stays the active action, as before
     print("VEHICLE 'Furl' stance: %s — Idle/reference Spin[0..0], Idle stance (override) Furl[%d..%d], Movement Spin, %s, Keep bone translations OFF"
-          % ((("sails CURLED to the yard (hand-close roll, %d frame(s), %.0f deg total)" % (SAIL_FURL_FRAMES, sail_fold_angle) if sail_fold else "sails FLIPPED below the keel")
+          % ((("sails CURLED to the yard (hand-close roll, %d frame(s), %.0f deg total, sag %.2f)" % (SAIL_FURL_FRAMES, sail_fold_angle, sail_fold_sag) if sail_fold else "sails FLIPPED below the keel")
               + (", flags keyed flying" if flag_found else "")) if sail_found else "flags keyed flying (no sails)",
              SAIL_FURL_FRAMES, SAIL_FURL_FRAMES,
              ("Pre-move Furl[%d..0] / After-move Furl[0..%d] to PLAY the gather (or EMPTY for a one-tick swap)" % (SAIL_FURL_FRAMES, SAIL_FURL_FRAMES))

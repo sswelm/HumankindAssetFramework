@@ -24,7 +24,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   close plays through). A **Reverse curl direction** checkbox mirrors the roll to the other side of the sail
   plane — which way is "backwards" depends on the source model's facing, so it can't be auto-derived; the
   reverse roll curls against the billow camber and bundles a little looser (measured 0.53× vs 0.39×), foot
-  at the beam either way.
+  at the beam either way. A **Sag (gravity)** dial (0–1) presses the folded roll flat — per-joint angle
+  LERPed from the open curl toward 170° — so the bundle stops "behaving like in space": at 1.0 the height
+  drops 0.39×→0.30× with no wrap-over above the beam. Known limit: each band keeps its authored billow
+  camber (rotations stack curved sheets, they can't flatten them), so fore-aft depth barely changes.
 
 - **The Era Lab grid can be switched off without losing it.** A new "Apply era ageing" checkbox saves as
   `eraGridEnabled` in the pack: unchecked, the grid stays authored (and editable) but the runtime treats

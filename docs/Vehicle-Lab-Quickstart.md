@@ -138,7 +138,9 @@ rides the root `Sail` bone, which holds. Three controls: **Fold frames** (defaul
 real frames, **Curl** (default 270° total) sets how far the roll closes — less = a looser, more open curl —
 and **Reverse curl direction** mirrors the roll to the other side of the sail plane (which way is "backwards"
 depends on the source model's facing; the reverse direction curls against the billow camber and bundles a
-little looser).
+little looser). A fourth control, **Sag (gravity)**, presses the folded roll flat: 0 = the open zero-g C-curl,
+1 = the layers fold toward 170° into a thin bundle hugging the yard — thinner in height; the bands' authored
+billow camber survives (rotations can't flatten a curved sheet), so fore-aft depth is set by the source canvas.
 
 With frames, the fold is the **deployment mechanic** applied to canvas — assign like the split-trail gun:
 Idle/reference = `Spin[0..0]` · Idle stance (override) = `Furl[N..N]` (held folded) · Movement = `Spin` (sails
