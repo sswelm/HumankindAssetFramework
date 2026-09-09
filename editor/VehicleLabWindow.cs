@@ -131,8 +131,9 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] float detailReducePct = 0f;   // Detail role: a plain reduction tier for ornament/trim geometry
     // SAIL IDLE FOLD (2026-09-09, vanilla parity): at idle the canvas FOLDS at the yard — visible brailed-up
     // cloth like the vanilla triaconter's — instead of flipping below the keel. Rotation-only by construction
-    // (Sail->SailF1->SailF2 accordion; scale curves are the AW101 trap), rigging stays standing on the root
-    // Sail bone. Fast path rejects it: the fold needs generated bones + band skinning.
+    // (Sail->SailF1..F3 accordion; scale curves are the AW101 trap), rigging stays standing on the root
+    // Sail bone. The band count is EVEN (4) on purpose: parity puts the canvas's bottom edge AT the yard when
+    // folded ("the underside folds to the top of the beam"). Fast path rejects it: needs generated bones.
     [SerializeField] bool sailFoldIdle = false;
     // FOLD FRAMES / ANGLE (2026-09-09 follow-up: "moving too fast, in a single frame"): frames give the Furl
     // clip a real span so Pre-move Furl[N..0] / After-move Furl[0..N] can PLAY the gather (the trails' Deploy
@@ -747,7 +748,7 @@ public class VehicleLabWindow : EditorWindow
                         MessageType.None);
                     sailFoldIdle = EditorGUILayout.ToggleLeft(new GUIContent("  Fold sail at idle (instead of hiding)",
                         "On: the idle stance gathers the canvas into a visible bundle at the yard — the vanilla ships' " +
-                        "brailed-up look — via a Sail→SailF1→SailF2 fold chain, pure rotation keys. Rigging keeps " +
+                        "brailed-up look, the underside folding up to the beam — via a Sail→SailF1..F3 fold chain, pure rotation keys. Rigging keeps " +
                         "standing (it rides the root Sail bone). Off (default): the canvas flips below the keel and " +
                         "disappears at idle, as before. Regenerate + rebake to apply. Not available on the source-" +
                         "skeleton fast path (the fold needs generated bones and band skinning)."), sailFoldIdle);
@@ -759,8 +760,8 @@ public class VehicleLabWindow : EditorWindow
                             "stop/start (the split-trail Deploy pattern); with those empty the pose still swaps in " +
                             "one tick regardless of this number."), Mathf.Max(1, sailFoldFrames), 1, 60);
                         sailFoldAngleDeg = EditorGUILayout.Slider(new GUIContent("  Fold angle (°)",
-                            "How far each fold bone zigzags at full gather. 160 (default) = a tight pleat bundled in " +
-                            "the top third; smaller = a looser, taller bundle; near 180 risks coplanar cloth " +
+                            "How far each fold bone zigzags at full gather. 160 (default) = a tight pleat bundled at " +
+                            "the yard; smaller = a looser, taller bundle; near 180 risks coplanar cloth " +
                             "z-fighting."), sailFoldAngleDeg, 30f, 178f);
                     }
                 }

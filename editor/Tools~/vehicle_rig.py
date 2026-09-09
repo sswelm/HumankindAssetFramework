@@ -1023,7 +1023,7 @@ for i, tn in enumerate(track_names):
 # ---- SAIL bone: every marked sail part welds to ONE bone so the canvas lowers/raises as a unit ----
 sail_found = []
 sail_top_z = 0.0
-sail_fold_z1 = sail_fold_z2 = 0.0          # fold-line z cuts, set with the Sail bone when sail_fold is on
+sail_fold_cuts = []                        # fold-line z cuts (descending), set with the Sail bone when sail_fold is on
 sail_fold_yard = Vector((1.0, 0.0, 0.0))   # fold hinge axis (the yard direction), ditto
 if sail_names:
     for _sn in sail_names:
@@ -1048,25 +1048,26 @@ if sail_names:
         _sebn.tail = _sebn.head + Vector((0.0, 0.0, max(0.3, 0.25 * (_smx.z - _smn.z))))
         _sebn.parent = eb_body
         if sail_fold:
-            # FOLD chain: two child bones whose heads sit ON the fold lines (1/3 and 2/3 down from the yard),
-            # at the sail bbox's horizontal centre. The Furl stance zigzags them so the cloth gathers into the
-            # top third — segment orientations down/up/down, an accordion pleat. The yard axis (fold hinge) is
-            # the sail's LARGER horizontal extent; stored with the band z-cuts for the skinning pass below.
+            # FOLD chain: three child bones whose heads sit ON the fold lines (1/4, 2/4, 3/4 down from the
+            # yard), at the sail bbox's horizontal centre. The Furl stance zigzags them +/-/+ so the cloth
+            # gathers as an accordion pleat — and the band count is EVEN by design (parity, 2026-09-09 field
+            # feedback "the underside of the sail should fold to the top of the beam"): with four bands the
+            # segment orientations run down/up/down/UP, so the canvas's bottom edge finishes its last fold
+            # pointing up and lands AT the yard, not a band below it. The yard axis (fold hinge) is the
+            # sail's LARGER horizontal extent; stored with the band z-cuts for the skinning pass below.
             _sh = max(1e-6, _smx.z - _smn.z)
-            sail_fold_z1 = _smx.z - _sh / 3.0
-            sail_fold_z2 = _smx.z - 2.0 * _sh / 3.0
+            sail_fold_cuts = [_smx.z - _sh * _q / 4.0 for _q in (1, 2, 3)]
             sail_fold_yard = Vector((1.0, 0.0, 0.0)) if (_smx.x - _smn.x) >= (_smx.y - _smn.y) else Vector((0.0, 1.0, 0.0))
             _scx, _scy = 0.5 * (_smn.x + _smx.x), 0.5 * (_smn.y + _smx.y)
-            _sf1 = arm_data.edit_bones.new("SailF1")
-            _sf1.head = Vector((_scx, _scy, sail_fold_z1))
-            _sf1.tail = _sf1.head + Vector((0.0, 0.0, -max(0.1, 0.25 * _sh / 3.0)))
-            _sf1.parent = _sebn
-            _sf2 = arm_data.edit_bones.new("SailF2")
-            _sf2.head = Vector((_scx, _scy, sail_fold_z2))
-            _sf2.tail = _sf2.head + Vector((0.0, 0.0, -max(0.1, 0.25 * _sh / 3.0)))
-            _sf2.parent = _sf1
+            _sfprev = _sebn
+            for _fi, _fz in enumerate(sail_fold_cuts):
+                _sf = arm_data.edit_bones.new("SailF%d" % (_fi + 1))
+                _sf.head = Vector((_scx, _scy, _fz))
+                _sf.tail = _sf.head + Vector((0.0, 0.0, -max(0.1, 0.25 * _sh / 4.0)))
+                _sf.parent = _sfprev
+                _sfprev = _sf
         print("VEHICLE SAIL: %d part(s) on one Sail bone%s (double-sided at export; %s by the 'Furl' clip)"
-              % (len(sail_found), " + SailF1/SailF2 fold chain" if sail_fold else "",
+              % (len(sail_found), " + SailF1..F3 fold chain" if sail_fold else "",
                  "FOLDED at the yard" if sail_fold else "struck/raised"))
 
 # ---- RIGGING rides the SAIL bone (2026-09-08 user request: "they will move away like sails except they are
@@ -1888,15 +1889,17 @@ for o in objs:
     if sail_fold and o.name in sail_found:
         # CANVAS bands for the fold (rigging on the Sail bone is NOT banded — ropes stay standing): each vertex
         # goes 100% to the bone owning its height band, hard cuts at the fold lines — folds ARE creases.
-        _bandvis = {"Sail": [], "SailF1": [], "SailF2": []}
+        _bandnames = ["Sail", "SailF1", "SailF2", "SailF3"]
+        _bandvis = {_bn: [] for _bn in _bandnames}
         for _v in o.data.vertices:
             _wz = (o.matrix_world @ _v.co).z
-            _bandvis["Sail" if _wz >= sail_fold_z1 else ("SailF1" if _wz >= sail_fold_z2 else "SailF2")].append(_v.index)
+            _bi = sum(1 for _cz in sail_fold_cuts if _wz < _cz)   # 0 above the first cut .. 3 below the last
+            _bandvis[_bandnames[_bi]].append(_v.index)
         for _bn9, _vis9 in _bandvis.items():
             if _vis9:
                 o.vertex_groups.new(name=_bn9).add(_vis9, 1.0, 'REPLACE')
-        print("VEHICLE SAIL fold bands '%s': Sail=%d SailF1=%d SailF2=%d vert(s)"
-              % (o.name, len(_bandvis["Sail"]), len(_bandvis["SailF1"]), len(_bandvis["SailF2"])))
+        print("VEHICLE SAIL fold bands '%s': %s vert(s)"
+              % (o.name, " ".join("%s=%d" % (_bn, len(_bandvis[_bn])) for _bn in _bandnames)))
     else:
         vg = o.vertex_groups.new(name=bname)
         vg.add(list(range(len(o.data.vertices))), 1.0, 'REPLACE')
@@ -2162,13 +2165,13 @@ if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and ar
         _pbS.keyframe_insert('rotation_quaternion', frame=0)                 # raised — matches Spin's rest pose
         if sail_fold and arm.pose.bones.get("SailF1") is not None:
             # FOLD stance: the root Sail bone HOLDS (canvas stays at the yard, rigging stands) and the fold
-            # chain zigzags about the yard axis — middle band swings up-and-back (+A), bottom band counter-
-            # rotates (-A) back to hanging. Segment orientations down/up/down: the cloth gathers into the top
-            # third as an accordion pleat, vanilla's brailed-up look. 160 degrees, not 180, so the pleats keep
-            # a visible wedge instead of z-fighting coplanar cloth.
+            # chain zigzags about the yard axis, alternating +A/-A/+A. Segment orientations down/up/down/UP —
+            # the EVEN band count means the canvas's bottom edge finishes pointing up and lands AT the yard
+            # ("the underside folds to the top of the beam"), the whole pleat bundled in the top quarter.
+            # Degrees short of 180 keep the pleats a visible wedge instead of z-fighting coplanar cloth.
             _pbS.keyframe_insert('rotation_quaternion', frame=SAIL_FURL_FRAMES)   # root stays raised in the fold stance
             _folddeg = math.radians(sail_fold_angle)
-            for _fbn, _fsgn in (("SailF1", 1.0), ("SailF2", -1.0)):
+            for _fbn, _fsgn in (("SailF1", 1.0), ("SailF2", -1.0), ("SailF3", 1.0)):
                 _pbF = arm.pose.bones[_fbn]; _dbF = arm.data.bones[_fbn]
                 _m3F = (arm.matrix_world @ _dbF.matrix_local).to_3x3()
                 _foldax = (_m3F.inverted() @ sail_fold_yard).normalized()    # yard axis, in bone-local space
@@ -2210,7 +2213,7 @@ if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and ar
 # SAIL held raised THROUGH Spin — explicit identity keys, the same stale-pose hazard in the other direction:
 # sampling Furl then Spin would leave the canvas struck without them.
 if sail_found and arm.pose.bones.get("Sail") is not None:
-    for _sbn3 in (["Sail", "SailF1", "SailF2"] if sail_fold else ["Sail"]):
+    for _sbn3 in (["Sail", "SailF1", "SailF2", "SailF3"] if sail_fold else ["Sail"]):
         _pbS3 = arm.pose.bones.get(_sbn3)
         if _pbS3 is None:
             continue

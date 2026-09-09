@@ -129,8 +129,10 @@ rotation.
 
 **Fold sail at idle** (checkbox under the sails notice) swaps the strike for the vanilla ships' look: instead of
 vanishing below the keel, the idle canvas **gathers into a visible bundle at the yard** — an accordion pleat on a
-generated `Sail → SailF1 → SailF2` fold chain, the canvas band-skinned in height thirds and the `Furl` clip
-zigzagging the fold bones about the yard axis. Still **pure rotation** (per-bone *scale* is the pipeline's
+generated `Sail → SailF1 → SailF2 → SailF3` fold chain, the canvas band-skinned in height **quarters** and the
+`Furl` clip zigzagging the fold bones about the yard axis. The band count is even on purpose: parity means the
+canvas's **underside finishes its last fold pointing up and lands at the beam**, the way a brailed sail actually
+gathers. Still **pure rotation** (per-bone *scale* is the pipeline's
 known trap — deploy_convert strips it for a reason). Rigging keeps standing — it rides the root `Sail` bone,
 which holds. Two dials: **Fold frames** (default 12) spans the gather over real frames, and **Fold angle**
 (default 160°) sets how tight the pleat closes — smaller = a looser, taller bundle.
