@@ -806,6 +806,22 @@ namespace HumankindAssetFramework
         class MoveHold { public float releaseAt; public float armedAt; }
         [SessionScoped] static readonly Dictionary<object, MoveHold> moveHoldByUnit = new Dictionary<object, MoveHold>();
         static System.Reflection.MethodInfo miTileToVector3;
+        // DIAG (2026-09-12, Triconter field report "aligned move doesn't wait" while the log shows no-turn holds
+        // arming): whenever a FOLD-capable model's hold is REJECTED, name the gate — the log then shows exactly
+        // why a given move rolled off without the unfurl beat. Throttled per unit; only fold models log (the
+        // entry resolve costs two reflection hops, and only the pending-move window ever reaches this).
+        [SessionScoped] static readonly Dictionary<object, float> holdDiagAt = new Dictionary<object, float>();
+        static void DiagNoHold(object unit, string why)
+        {
+            float now = UnityEngine.Time.time;
+            if (holdDiagAt.TryGetValue(unit, out var t) && now - t < 2f) return;
+            string uname = GetMember(GetMember(unit, "UnitDefinition"), "Name")?.ToString() ?? "";
+            var ent = uname.Length > 0 ? FindEntryForUnitDefinition(uname) : null;
+            if (ent == null || !ent.animStateDriven || ent.preMoveAnimId < 0 || ent.preMoveDur <= 0f) return;
+            if (holdDiagAt.Count > 64) holdDiagAt.Clear();
+            holdDiagAt[unit] = now;
+            Plugin.Log.LogInfo($"[Pivot] NOT holding '{uname}' (pre-move fold {ent.preMoveDur:F1} s): {why}");
+        }
         internal static bool ShouldHoldArmyMove(object army)
         {
             if (turnStates.Count == 0) return false;
@@ -823,7 +839,8 @@ namespace HumankindAssetFramework
                 moveHoldByUnit.Remove(unit);
                 return false;
             }
-            if (Convert.ToInt32(GetMember(unit, "MoveAlongTilesState")) != 0) return false;   // not idle (Setup/MoveLoop/Finalize): an EXTENSION of a running move — vanilla
+            int mstate = Convert.ToInt32(GetMember(unit, "MoveAlongTilesState"));
+            if (mstate != 0) { DiagNoHold(unit, $"MoveAlongTilesState={mstate} — an extension of a running move (vanilla rolls on)"); return false; }   // not idle (Setup/MoveLoop/Finalize)
             if (!(GetMember(GetMember(unit, "PresentationEntityHolder"), "Transform") is UnityEngine.Transform ut)) return false;
             var upos = ut.position;
             TurnState st = null; float best = 16f;
@@ -847,8 +864,8 @@ namespace HumankindAssetFramework
             if (!hasFold && !canTurn) return false;
             // FROM A REAL STOP ONLY — a unit that just rolled in keeps rolling (the chunk boundary). The turn state knows
             // when the unit last moved; a model with no turn state falls back to the state poll's moving flag.
-            if (st != null) { if (now - st.lastMovedT < 1f) return false; }
-            else if (ent != null && ent.stateMoving.TryGetValue(GuidToLong(GetMember(unit, "GUID")), out bool mv) && mv) return false;   // map-army key (salt 0L in ProcessAnimStates)
+            if (st != null) { if (now - st.lastMovedT < 1f) { DiagNoHold(unit, $"nearest turn state moved {now - st.lastMovedT:F1} s ago (< 1 s) — not a real stop"); return false; } }
+            else if (ent != null && ent.stateMoving.TryGetValue(GuidToLong(GetMember(unit, "GUID")), out bool mv) && mv) { DiagNoHold(unit, "state poll still flags the unit as moving — not a real stop"); return false; }   // map-army key (salt 0L in ProcessAnimStates)
             // the bearing from the current history tile to the next one (tile centres -> Unity world via the strike aim's ToVector3)
             float turnHold = 0f, diff = 0f, yaw = 0f; bool haveYaw = false; int idx = -1, count = 0;
             var hist = GetMember(army, "positionHistory");
