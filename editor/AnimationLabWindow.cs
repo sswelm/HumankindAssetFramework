@@ -615,10 +615,18 @@ public class AnimationLabWindow : EditorWindow
             cur.animStateDriven = true;
             cur.animClip = (furl != null ? furl : spin) + "[0..0]";                           // Idle/reference = the motionless DEPLOYED frame
             cur.animClipMove = spin;                                                          // Movement = the full linear spin (or the strike hold)
-            cur.animClipAfter = ""; cur.animClipAttack = ""; cur.animClipCombat = ""; cur.animClipPreMove = ""; cur.animClipIdle = "";
+            // KEEP a configured Idle stance that references the rig's own Furl clip (2026-09-13, the SteamTransports:
+            // "auto detect seems to have forgotten the Furl[1..1]"). Auto-detect cannot GUESS the stance — a ship
+            // wants Furl[N..N] (furled at anchor) while a land flag wants it EMPTY (deployed at idle), same rig
+            // structure — but it must not WIPE a stance the user already dialed for this rig either.
+            string keepIdle = furl != null && (cur.animClipIdle ?? "").TrimStart().StartsWith(furl, StringComparison.OrdinalIgnoreCase)
+                ? cur.animClipIdle : "";
+            cur.animClipAfter = ""; cur.animClipAttack = ""; cur.animClipCombat = ""; cur.animClipPreMove = ""; cur.animClipIdle = keepIdle;
             cur.convertRig = true; cur.autoGroundWheels = true; cur.keepTranslations = true; cur.animUnitFix = false; cur.deployConvert = false;
             status = furl != null
-                ? $"Auto-detected a Vehicle Lab FLAG/SAIL rig ('{furl}' + '{spin}' clips):  State-driven ON · Idle/reference = {furl}[0..0] (deployed) · Movement = {spin} · Convert raw rig ON · Auto-ground ON · Keep bone translations ON · Fix 100× OFF.  Review, set Size in the Model Factory if needed, then Bake."
+                ? $"Auto-detected a Vehicle Lab FLAG/SAIL rig ('{furl}' + '{spin}' clips):  State-driven ON · Idle/reference = {furl}[0..0] (deployed) · Movement = {spin}"
+                  + (keepIdle.Length > 0 ? $" · Idle stance KEPT: {keepIdle}" : $" · Idle stance left EMPTY — ships usually want {furl}[N..N] (furled at anchor), land flags leave it empty (deployed); see the Lab's printed recipe")
+                  + " · Convert raw rig ON · Auto-ground ON · Keep bone translations ON · Fix 100× OFF.  Review, set Size in the Model Factory if needed, then Bake."
                 : $"Auto-detected a Vehicle Lab rig ('{spin}' clip):  State-driven ON · Idle/reference = {spin}[0..0] (still) · Movement = {spin} (rolls) · Convert raw rig ON · Auto-ground ON · Keep bone translations ON · Fix 100× OFF.  Review, set Size in the Model Factory if needed, then Bake.";
             Repaint(); return;
         }
