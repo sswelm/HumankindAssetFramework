@@ -645,6 +645,36 @@ if mode == "rigfast":
     _guard(_fast)
     sys.exit(0)
 
+# ---- FLATTEN THE SCENE (2026-09-12, the TOW launcher: horizontal in the probe, 90 deg off after Generate) ----
+# The mesh path builds its OWN rig, so source armatures/empties only carry PLACEMENT — and a raw Sketchfab
+# glTF parents every mesh under a root that holds the importer's Y-up -> Z-up +90 X. The skinning loop later
+# reparents each mesh to the generated armature with a bare `.parent =`, which keeps LOCAL transforms and
+# silently discards that root's contribution; the probe preview flattens at export (world kept), which is why
+# the mismatch only ever showed after Generate. Every earlier mesh-path model was a flat Workshop split
+# (local == world), so the hole stayed invisible. Flatten HERE, once, for BOTH models: bake world transforms
+# into every mesh, clear source skinning (its armature goes), and drop the non-mesh helpers — the straighten
+# below then applies to every mesh uniformly instead of only parent-less ones.
+for _fo in mesh_objects():
+    # the import-time Icosphere purge is conservative (skips skinned ones); on THIS path all skinning is
+    # about to be cleared anyway, so a bone-shape placeholder with vertex groups is equally garbage — the
+    # TOW drill shipped one as a floating 2 m sphere in the output before this line existed
+    if _fo.name.startswith('Icosphere'):
+        print("VEHICLE flatten: purged glTF importer bone-shape artifact: %s" % _fo.name)
+        bpy.data.objects.remove(_fo, do_unlink=True)
+        continue
+    _fmw = _fo.matrix_world.copy()
+    _fo.vertex_groups.clear()
+    for _fm in list(_fo.modifiers):
+        _fo.modifiers.remove(_fm)
+    _fo.parent = None
+    _fo.matrix_world = _fmw
+_fhelpers = [o for o in bpy.context.scene.objects if o.type != 'MESH']
+for _fo in _fhelpers:
+    bpy.data.objects.remove(_fo, do_unlink=True)
+if _fhelpers:
+    print("VEHICLE flatten: %d non-mesh helper(s) dropped (empties/armatures/lights — placement baked into the meshes)" % len(_fhelpers))
+bpy.context.view_layer.update()
+
 objs = mesh_objects()
 if len(objs) == 1 and (wheel_names or turret_names):
     bpy.context.view_layer.objects.active = objs[0]
