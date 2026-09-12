@@ -1095,8 +1095,9 @@ public class VehicleLabWindow : EditorWindow
             bool fastSailFold = FastPath && wantSailFold;
             bool hasModel2 = !string.IsNullOrWhiteSpace(srcFile2);   // a merge is real geometry work: two static hulls may need no spinner at all
             bool fastModel2 = FastPath && hasModel2;
+            bool wantBright = Mathf.Abs(model1Bright - 1f) > 0.005f || (hasModel2 && Mathf.Abs(model2Bright - 1f) > 0.005f);   // PR #34 review P4: the documented standalone brightness must satisfy the gate
             bool canRig = FastPath ? (!fastPathOars && fastRotors == 0 && fastFlip == 0 && !fastWave && !fastSailFold && !fastModel2 && fastWheels > 0)
-                                   : (wheels > 0 || oars > 0 || wantWave || geometryWork || wantSailFold || hasModel2);
+                                   : (wheels > 0 || oars > 0 || wantWave || geometryWork || wantSailFold || hasModel2 || wantBright);
             // The rest of Vertices control (facing fixes + reduce dials) is INERT on the fast path — rigfast
             // exports the source mesh untouched. Not a reject (dials are passive), but say it (PR #28 review:
             // the section silently did nothing on this path since it existed).

@@ -128,21 +128,44 @@ def convert_renderables(scope, tag):
 
 def apply_brightness(scope, factor, tag):
     """Per-SOURCE albedo brightness (2026-09-13, the TOW launcher vs its tripod: 'the merged model should
-    act like a whole unit rather than a patched model'). Multiplies ONLY the base-color channel: textures
-    reached through a Principled BSDF's Base Color input (never normal/roughness/metallic maps — multiplying
-    a normal map breaks shading), and the Base Color value itself for textureless materials. Pixels are
-    edited in place and packed, so the adjustment bakes into the GLB and reaches the preview, the probe and
-    the Factory atlas identically. Factor 1 = untouched; clamped to a sane range at the boundary."""
+    act like a whole unit rather than a patched model'). Adjusts ONLY the base-color channel — and, after
+    the PR #34 review, NEVER edits a shared original in place:
+      - a material also used OUTSIDE the scope is copied and the scope's slots re-pointed (review P1: two
+        sources sharing a material would leak each other's dials);
+      - a base-color image is COPIED, edited, and only the albedo-chain texture nodes re-pointed — the
+        original stays pristine for any other user, including the SAME image feeding roughness/metallic
+        (review P1's second repro: an albedo edit shifted roughness 0.60 -> 0.30);
+      - a tint (mix-multiply) between texture and Base Color absorbs brightening FIRST (review P3: clipping
+        the texture before the 0.2 tint made x4 produce 0.20 instead of 0.64) — the tint rises toward
+        white and only the residual multiplies the pixels, per channel.
+    Factor 1 = untouched; clamped to a sane range at the boundary."""
     factor = min(4.0, max(0.2, factor))
     if abs(factor - 1.0) < 1e-3:
         return
-    _imgs = set(); _mats = set()
-    for _o in scope:
-        if getattr(_o, "type", None) != 'MESH':
-            continue
+    _scope_meshes = [o for o in scope if getattr(o, "type", None) == 'MESH']
+    _scope_set = set(_scope_meshes)
+    # P1: materials shared with objects OUTSIDE the scope get a scope-private copy (Material.copy()
+    # duplicates the node tree, so socket edits below cannot leak)
+    _outside = set()
+    for _ao in bpy.context.scene.objects:
+        if _ao.type == 'MESH' and _ao not in _scope_set:
+            for _sl in _ao.material_slots:
+                if _sl.material:
+                    _outside.add(_sl.material)
+    _mat_copies = {}
+    for _o in _scope_meshes:
         for _sl in _o.material_slots:
-            if _sl.material:
-                _mats.add(_sl.material)
+            if _sl.material and _sl.material in _outside:
+                if _sl.material not in _mat_copies:
+                    _mat_copies[_sl.material] = _sl.material.copy()
+                _sl.material = _mat_copies[_sl.material]
+    _mats = {sl.material for o in _scope_meshes for sl in o.material_slots if sl.material}
+    # image -> [per-channel residual factor, set of texture NODES to re-point at the edited copy]
+    _img_jobs = {}
+    def _job(img, node, resid):
+        _r, _nodes = _img_jobs.setdefault(img, [list(resid), set()])
+        _nodes.add(node)
+    _warn_chain = 0
     for _m in _mats:
         if not _m.use_nodes:
             _dc = _m.diffuse_color
@@ -154,35 +177,80 @@ def apply_brightness(scope, factor, tag):
             _bc = _n.inputs.get('Base Color')
             if _bc is None:
                 continue
-            if _bc.is_linked:
-                # walk to the image feeding Base Color (possibly through a mix/vertex-color node one hop away)
-                _stack = [_l.from_node for _l in _bc.links]
-                _seen = set()
-                while _stack:
-                    _nd = _stack.pop()
-                    if _nd in _seen:
-                        continue
-                    _seen.add(_nd)
-                    if _nd.type == 'TEX_IMAGE' and _nd.image is not None:
-                        _imgs.add(_nd.image)
-                    else:
-                        for _in in _nd.inputs:
-                            for _l2 in _in.links:
-                                _stack.append(_l2.from_node)
-            else:
+            if not _bc.is_linked:
                 _v = _bc.default_value
                 _bc.default_value = (min(1.0, _v[0] * factor), min(1.0, _v[1] * factor), min(1.0, _v[2] * factor), _v[3])
+                continue
+            _src = _bc.links[0].from_node
+            if _src.type == 'TEX_IMAGE' and _src.image is not None:
+                _job(_src.image, _src, (factor, factor, factor))          # direct link: whole factor on pixels
+                continue
+            if _src.type in ('MIX', 'MIX_RGB'):
+                # the glTF importer's baseColorFactor shape: Mix(Multiply) of a TINT color and the texture.
+                # Brighten the TINT first (it has headroom below white), pixels take only the residual.
+                _color_ins = [i for i in _src.inputs if i.type == 'RGBA']
+                _linked = [i for i in _color_ins if i.is_linked]
+                _flat = [i for i in _color_ins if not i.is_linked]
+                _teximg = None
+                if len(_linked) == 1 and len(_flat) >= 1:
+                    _ln = _linked[0].links[0].from_node
+                    if _ln.type == 'TEX_IMAGE' and _ln.image is not None:
+                        _teximg = _ln
+                if _teximg is not None:
+                    _tin = _flat[0]
+                    _t = _tin.default_value
+                    _resid = [1.0, 1.0, 1.0]
+                    _new = [_t[0], _t[1], _t[2], _t[3]]
+                    for _c in range(3):
+                        _want = _t[_c] * factor
+                        _new[_c] = min(1.0, _want)
+                        _resid[_c] = 1.0 if _new[_c] <= 0.0 else _want / _new[_c]
+                    _tin.default_value = _new
+                    _job(_teximg.image, _teximg, _resid)
+                    continue
+            # unrecognized chain (vertex colors, deep node math): fall back to the deep walk — every image
+            # feeding the chain gets the whole factor, with a WARN because a mid-chain tint would clip early
+            _stack = [_l.from_node for _l in _bc.links]
+            _seen = set()
+            while _stack:
+                _nd = _stack.pop()
+                if _nd in _seen:
+                    continue
+                _seen.add(_nd)
+                if _nd.type == 'TEX_IMAGE' and _nd.image is not None:
+                    _job(_nd.image, _nd, (factor, factor, factor)); _warn_chain += 1
+                else:
+                    for _in in _nd.inputs:
+                        for _l2 in _in.links:
+                            _stack.append(_l2.from_node)
     import numpy as _np
-    for _img in _imgs:
+    _edited = 0
+    for _img, (_resid, _nodes) in _img_jobs.items():
         if _img.size[0] == 0 or _img.size[1] == 0:
             continue
+        if all(abs(r - 1.0) < 1e-3 for r in _resid):
+            continue   # the tint absorbed everything — pixels untouched, original stays shared
+        # P1: edit a COPY and re-point only the albedo-chain nodes; the original keeps serving any
+        # roughness/metallic users and the other source untouched. Read from the ORIGINAL, write into a
+        # FRESH image — Image.copy() of a packed image can come up with a black pixel buffer (drilled: the
+        # dual-use asset's base-color copy read all zeros), while foreach_get on the original is the
+        # proven path from the in-place version.
         _px = _np.empty(_img.size[0] * _img.size[1] * 4, dtype=_np.float32)
         _img.pixels.foreach_get(_px)
+        _copy = bpy.data.images.new(_img.name + "_bright", _img.size[0], _img.size[1], alpha=True)
+        _copy.colorspace_settings.name = _img.colorspace_settings.name
         _pa = _px.reshape(-1, 4)
-        _pa[:, :3] = _np.clip(_pa[:, :3] * factor, 0.0, 1.0)
-        _img.pixels.foreach_set(_px)
-        _img.pack()   # the edited buffer, not the untouched source file, must be what the exporter writes
-    print("VEHICLE brightness x%.2f%s: %d base-color image(s), %d material(s) adjusted" % (factor, tag, len(_imgs), len(_mats)))
+        _pa[:, 0] = _np.clip(_pa[:, 0] * _resid[0], 0.0, 1.0)
+        _pa[:, 1] = _np.clip(_pa[:, 1] * _resid[1], 0.0, 1.0)
+        _pa[:, 2] = _np.clip(_pa[:, 2] * _resid[2], 0.0, 1.0)
+        _copy.pixels.foreach_set(_px)
+        _copy.pack()   # the edited buffer, not the untouched source file, must be what the exporter writes
+        for _nd in _nodes:
+            _nd.image = _copy
+        _edited += 1
+    if _warn_chain:
+        print("VEHICLE WARN: %d base-color image(s) sit behind an unrecognized node chain — a mid-chain tint could clip a >1 factor early" % _warn_chain)
+    print("VEHICLE brightness x%.2f%s: %d base-color image(s) copied+adjusted, %d material(s) adjusted" % (factor, tag, _edited, len(_mats)))
 
 # BRIGHTNESS (tagged like merge2 — probe and rig both need it so previews match the bake):
 #   bright=<first model factor>|<second model factor>
@@ -195,6 +263,11 @@ if _brarg:
         _bright2 = float(_b2s) if _b2s.strip() else 1.0
     except ValueError:
         print("VEHICLE ERROR: malformed bright argument: %s" % _brarg); sys.exit(1)
+# P2 (PR #34 review): the FBX previews reference EXTERNAL texture files, so packed brightness edits never
+# reached them (measured: previews at 0.502 while the GLB was 0.251). When brightness is active, previews
+# embed their textures so what the Lab shows is what the bake gets. Off otherwise — no size cost for the
+# common case.
+_embed_previews = {"path_mode": 'COPY', "embed_textures": True} if (abs(_bright1 - 1.0) > 1e-3 or abs(_bright2 - 1.0) > 1e-3) else {}
 
 imp(inp)
 convert_renderables(list(bpy.context.scene.objects), "")
@@ -455,7 +528,7 @@ if mode == "probe":
             _o.matrix_world = _mw
         for _a in [o for o in bpy.context.scene.objects if o.type == 'ARMATURE']:
             bpy.data.objects.remove(_a, do_unlink=True)
-        bpy.ops.export_scene.fbx(filepath=argv[2], object_types={'MESH'}, use_mesh_modifiers=False, add_leaf_bones=False, bake_anim=False)
+        bpy.ops.export_scene.fbx(filepath=argv[2], object_types={'MESH'}, use_mesh_modifiers=False, add_leaf_bones=False, bake_anim=False, **_embed_previews)
         print("VEHICLE probe preview: %s" % argv[2])
         _lap("export")
     sys.exit(0)
@@ -822,7 +895,7 @@ if mode == "rigfast":
                 bpy.data.objects.remove(o, do_unlink=True)
         bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
         if preview_fbx:
-            bpy.ops.export_scene.fbx(filepath=preview_fbx, add_leaf_bones=False, bake_anim=True)
+            bpy.ops.export_scene.fbx(filepath=preview_fbx, add_leaf_bones=False, bake_anim=True, **_embed_previews)
         print("VEHICLE RIG DONE: FAST PATH — %d source bone(s) spun %s on the artist skeleton (%d bones, weights untouched), Spin 0..%d %.0f deg -> %s"
               % (len(wheel_names), spun, len(arm.data.bones), frames, degrees, out_glb))
     _guard(_fast)
@@ -3245,7 +3318,7 @@ for _xo in bpy.context.scene.objects:
 print("VEHICLE export totals: %d verts, %d tris across %d mesh(es)" % (_xt_v, _xt_t, _xt_m))
 bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
 if preview_fbx:
-    bpy.ops.export_scene.fbx(filepath=preview_fbx, add_leaf_bones=False, bake_anim=True)
+    bpy.ops.export_scene.fbx(filepath=preview_fbx, add_leaf_bones=False, bake_anim=True, **_embed_previews)
 # The export totals ride INSIDE the DONE line (user request 2026-09-05: the Lab's status box surfaces only this
 # one line, so a separate totals print never reached the eye that asked for it).
 print("VEHICLE RIG DONE: %d wheel part(s) clustered into %d wheel(s) %s, %d turret part(s) on one Turret bone, %d gun part(s) on one Gun bone%s, %d track loop(s) on own static bones, Spin 0..%d %.0f deg%s, exported %d verts / %d tris -> %s"
