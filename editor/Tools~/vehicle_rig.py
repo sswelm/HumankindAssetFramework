@@ -99,19 +99,32 @@ def convert_renderables(scope, tag):
     for _co in _conv:
         _co.select_set(True)
     bpy.context.view_layer.objects.active = _conv[0]
+    _n_conv = len(_conv)
     bpy.ops.object.convert(target='MESH')
+    # METABALLS collapse as a FAMILY: converting removes every member but the base, leaving dead StructRNA
+    # references in _conv and the caller's list (external review P3, reproduced: a cube + two related
+    # metaballs crashed the wire sweep with ReferenceError). Never touch _conv again — the operator leaves
+    # exactly the SURVIVING converted objects selected, so iterate the selection; and prune the caller's
+    # list of anything that died.
+    def _alive(_ao):
+        try:
+            _ao.name; return True
+        except ReferenceError:
+            return False
+    scope[:] = [o for o in scope if _alive(o)]
+    _converted = [o for o in bpy.context.selected_objects if o.type == 'MESH']
     # an unbeveled curve converts to a face-less WIRE (verts+edges), not an empty mesh (measured: a plain
     # bezier -> 13 verts, 0 faces) — invisible in any render, but it would pollute the part list and weld
     # into the hull as dead weight. Drop the face-less results; real bevel/extrude geometry has faces.
-    _wires = [o for o in _conv if o.type == 'MESH' and len(o.data.polygons) == 0]
+    _wires = [o for o in _converted if len(o.data.polygons) == 0]
     for _wo in _wires:
         try:
             scope.remove(_wo)   # keep the CALLER's list free of dead references (the merge iterates it after)
         except ValueError:
             pass
         bpy.data.objects.remove(_wo, do_unlink=True)
-    print("VEHICLE converted %d renderable non-mesh object(s) (curve/surface/text) to mesh%s%s"
-          % (len(_conv), tag, ", %d face-less wire(s) dropped" % len(_wires) if _wires else ""))
+    print("VEHICLE converted %d renderable non-mesh object(s) (curve/surface/text/metaball) to mesh%s%s"
+          % (_n_conv, tag, ", %d face-less wire(s) dropped" % len(_wires) if _wires else ""))
 
 imp(inp)
 convert_renderables(list(bpy.context.scene.objects), "")
@@ -781,19 +794,20 @@ if _fhelpers:
 bpy.context.view_layer.update()
 
 objs = mesh_objects()
-# PER-SOURCE split, mirroring the probe's rule exactly (PR #33 review P1): the old `len(objs) == 1` counted
-# merged B_ meshes, so a combined-mesh first model rigged unsplit — and roles marked against the probe's
-# synthetic split names hard-exited in find(). Split names match the probe because the rule is identical.
-if wheel_names or turret_names:
-    for _spfx9 in ("", "B_"):
-        _sown9 = [o for o in objs if o.name.startswith("B_") == (_spfx9 == "B_")]
-        if len(_sown9) == 1:
-            bpy.ops.object.select_all(action='DESELECT')
-            bpy.context.view_layer.objects.active = _sown9[0]
-            _sown9[0].select_set(True)
-            bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
-            bpy.ops.mesh.separate(type='LOOSE'); bpy.ops.object.mode_set(mode='OBJECT')
-            objs = mesh_objects()
+# PER-SOURCE split, mirroring the probe's rule exactly (PR #33 review P1 + follow-up P2): the old
+# `len(objs) == 1` counted merged B_ meshes, and the old `wheel_names or turret_names` gate meant a STATIC
+# merge (external repro: Ignore on a probe-split name deleted zero parts, yet Generate reported success)
+# rigged unsplit whenever no spinner was marked — while EVERY role list can reference the probe's synthetic
+# split names. The rule is now identical to the probe's, unconditionally: split names always match.
+for _spfx9 in ("", "B_"):
+    _sown9 = [o for o in objs if o.name.startswith("B_") == (_spfx9 == "B_")]
+    if len(_sown9) == 1:
+        bpy.ops.object.select_all(action='DESELECT')
+        bpy.context.view_layer.objects.active = _sown9[0]
+        _sown9[0].select_set(True)
+        bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
+        bpy.ops.mesh.separate(type='LOOSE'); bpy.ops.object.mode_set(mode='OBJECT')
+        objs = mesh_objects()
 
 # Ignore-marked parts are DELETED from the output — Sketchfab "options" models stack alternative versions of
 # the same part (four skirt sets on the Jagdpanzer); rendering them all is z-fighting soup.

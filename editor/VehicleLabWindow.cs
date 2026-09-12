@@ -1200,14 +1200,18 @@ public class VehicleLabWindow : EditorWindow
         var keptBones = new Dictionary<string, Role>();
         foreach (var b0 in boneParts) if (b0.role != Role.Default) keptBones[b0.name] = b0.role;
         bool hadBones = boneParts.Count > 0;
-        parts.Clear(); boneParts.Clear(); DestroyPreview();
+        // The session is NOT touched until a probe has actually succeeded (external review P1: the old
+        // clear-first flow meant a failed probe — a typo'd second-model path, a crashed Blender — erased
+        // every marking and the preview before the error was even known). Parse into fresh lists; swap in
+        // only when there are rows.
+        var newParts = new List<Part>(); var newBoneParts = new List<Part>();
         // probe also exports a preview FBX of the SPLIT model, so part rows can zoom/highlight in the turntable
         string projRoot = Directory.GetParent(Application.dataPath).FullName;
         string prevDir = "Assets/FactorySource/VehicleLab";
         Directory.CreateDirectory(Path.Combine(projRoot, prevDir));
         string prevRel = prevDir + "/" + Path.GetFileNameWithoutExtension(srcFile) + "_probe.fbx";
         string prevFull = Path.Combine(projRoot, prevRel).Replace('\\', '/');
-        if (!RunBlender($"probe \"{srcFile}\" \"{prevFull}\"{Merge2Arg()}", out string stdout)) return;   // the tagged merge2 arg rides BOTH modes — probe must list the merged pair
+        if (!RunBlender($"probe \"{srcFile}\" \"{prevFull}\"{Merge2Arg()}", out string stdout)) return;   // failed run: session intact, error already in status/Console
         // Lenient float parse: degenerate shards can emit "nan" (python lowercase — .NET rejects it) — such a value
         // becomes 0 instead of killing the whole probe on one bad line out of thousands.
         float F(string s2) => float.TryParse(s2, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var f) ? f : 0f;
@@ -1242,8 +1246,16 @@ public class VehicleLabWindow : EditorWindow
                    : low.Contains("rotor") || low.Contains("helix") || low.Contains("blade") || low.Contains("propeller") ? Role.Rotor
                    : low.Contains("wheel") || low.Contains("tyre") || low.Contains("tire") ? Role.Wheel
                    : low.Contains("turret") ? Role.Turret : Role.Default;
-            (t[0] == "RIGBONE" ? boneParts : parts).Add(p);
+            (t[0] == "RIGBONE" ? newBoneParts : newParts).Add(p);
         }
+        if (newParts.Count == 0 && newBoneParts.Count == 0)
+        {   // Blender ran but listed nothing — keep the session (markings + preview) and say so
+            status = "Probe found no mesh parts — is this a mesh model? Existing markings kept. (See the Console for Blender output.)";
+            return;
+        }
+        parts.Clear(); parts.AddRange(newParts);
+        boneParts.Clear(); boneParts.AddRange(newBoneParts);
+        DestroyPreview();
         if (boneParts.Count > 0 && !hadBones) useSourceRig = true;   // first detection: default to the fast path
         if (File.Exists(prevFull))
         {
