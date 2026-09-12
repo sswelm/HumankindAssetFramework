@@ -22,7 +22,34 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   purpose:** pre-existing static entries re-bake into the unified frame — re-dial their Rotation once
   (typically back to 0,0,0). Direct **.fbx/.obj** static sources (which never pass through the converter) get
   the identical Y-up→Z-up conversion applied in the combine instead, so the unified frame and the Rotation
-  semantics hold for every source format.
+  semantics hold for every source format. Field-verified on the TOW with cross-bakes at (0,0,0), (0,±45,0)
+  and on the X and Z axes — every rotation field now faces static and animated identically (the last fix was
+  a mirror conjugation: the static rotation applies after the importer's handedness flip, so yaw and roll
+  negate internally; pitch, about the mirror axis, doesn't).
+
+- **Flag fold — a Flag-marked part can FOLD at its top hinge instead of the naval strike.** Marking a land
+  unit's stand/tripod **Flag** used to give it the ships' behavior only: mirrored below the keel while moving
+  (the disappear-under-terrain strike). A new **Fold mode** checkbox in the Deploy section (with a fold angle
+  −175..175° and a frames slider) re-homes the Flag bone's hinge to the TOP of the flag geometry and authors
+  the `Furl` clip as a played fold — frame 0 deployed → frame N folded — while `Spin` holds the folded pose.
+  Assign Pre-move `Furl[0..N]` / After-move `Furl[N..0]` and the unit folds before moving and redeploys on
+  arrival, waiting for the fold like the howitzer's trails. Angle 0 in fold mode = the part simply stays
+  deployed while moving; unchecked = the naval strike, byte-identical for every existing ship. Not available
+  on the source-skeleton fast path (needs the generated Flag bone + Furl clip).
+
+- **Idle/reference is `Furl[0..0]` on every flag/sail rig — and Auto-detect knows it.** The reference clip's
+  frame 0 becomes the model's REST pose on the convert path, and a flag rig's `Spin` holds its strike/fold on
+  EVERY frame (deliberately — movement must never flash the deployed pose mid-loop). Referencing `Spin[0..0]`
+  therefore baked the hidden pose into the rest skeleton, and Auto-ground lifted the model by the struck
+  part's depth (the sky-floating TOW). `Furl` frame 0 is always the deployed state, so it is the reference on
+  any rig that has it: Auto-detect now recognizes a FLAG/SAIL rig and fills `Furl[0..0]` itself, and every Lab
+  printout and HelpBox teaches the same. Wheel/rotor rigs (no Furl clip) keep `Spin[0..0]`, unchanged.
+
+- **Small fixes.** The Factory preview no longer shows a leftover animated rig after a static re-bake of a
+  formerly animated entry (it fell through to the fresh static model only when the stale FBX was gone). The
+  Animation section's probe re-runs when the model FILE changes in place, not only when its path changes (a
+  regenerated GLB at the same path used to keep the section stale). "Make static" no longer scars the entry
+  with `attackRepeats: 0` — the registry floors the value at 1 on every save, healing existing entries.
 
 - **Per-source Brightness dials — merged models read as one unit.** The TOW launcher arrived several stops
   lighter than its tripod ("acts more like a whole unit rather than a patched model"): two sliders in the

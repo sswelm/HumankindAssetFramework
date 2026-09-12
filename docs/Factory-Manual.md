@@ -191,12 +191,14 @@ their settings and work together**:
   correctly stays correct on every re-bake); **any non-zero value = the rotation is baked into the rig** in the
   Blender step (rotate + `transform_apply` into vertices + bone rests, object-level anim fcurves stripped) — the fix
   for raw glTF rigs that round-trip lying down (the Sketchfab Combine soldier ships a -90°X armature node and needs
-  `90, 0, 0`). Nominal semantics: x ≈ stand-up pitch, y ≈ heading, z ≈ roll — but the mapping crosses multiple axis
-  conversions, so **probe one axis at a time in 90° steps and judge IN-GAME ONLY**: ⚠ the embedded preview's
-  orientation is meaningless for animated models (fixed display flips; it happened to match the soldier and
-  contradicted the howitzer — chasing it re-baked a working gun onto its side, twice). Rotation needs the **Model
-  file set**; the Blender step re-runs **automatically** when any of its settings changed (see the Reuse note in §5).
-  `deploy_convert.py`-prepared rigs (the howitzer) are correct at `0,0,0` — never give them a rotation.
+  `90, 0, 0`). Semantics — **the same on the static and animated paths** since the 2026-09-12 axis unification,
+  field-verified on every axis and both signs: **X = pitch, Y = heading/yaw, Z = roll**, and one value faces the
+  model identically whichever way the entry bakes. When a bake surprises you, probe one axis at a time in 90°
+  steps, and for animated models judge IN-GAME (⚠ the embedded preview's orientation is meaningless for animated
+  models — fixed display flips; it happened to match the soldier and contradicted the howitzer — chasing it
+  re-baked a working gun onto its side, twice). Rotation needs the **Model file set**; the Blender step re-runs
+  **automatically** when any of its settings changed (see the Reuse note in §5). `deploy_convert.py`-prepared
+  rigs (the howitzer) are correct at `0,0,0` — never give them a rotation.
 - **Position offset (x, y, z = height)** — Static models bake it in (z = waterline; negative sinks a ship). For
   **animated** models it's applied at **runtime, in the pawn's own frame** (2026-07-18): x = sideways, y = fore/aft,
   z = altitude (world-up). The planar part is rotated by the unit's facing each frame, so the nudge **turns with the
@@ -889,6 +891,9 @@ so it does not matter where you press Bake.
 fills the whole animation config in one click, then explains its choice in the status bar (review-only, nothing bakes):
 a **Vehicle Lab `Spin` rig** → State-driven with Idle/reference = `Spin[0..0]` (still) and Movement = `Spin` (rolls),
 Convert-raw-rig + Auto-ground + Keep-translations ON, Fix 100× OFF — the exact recipe the Vehicle Lab prints; a
+**Vehicle Lab FLAG/SAIL rig** (a `Furl` clip is present) → the same, but Idle/reference = `Furl[0..0]` — the
+DEPLOYED frame (`Spin` holds its strike/fold on every frame, so referencing it bakes the hidden pose into the rest
+skeleton and Auto-ground sky-lifts the model; 2026-09-12, the TOW). Stance/Pre/After clips stay yours to fill; a
 **character** (an `idle` + a `run`/`walk`/`move` clip) → State-driven with idle/movement guessed from the names; a
 **single clip** → continuous loop; a **deploy** clip → a hint (deploy frame-ranges can't be inferred from a baked clip).
 
