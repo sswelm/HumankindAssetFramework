@@ -984,6 +984,14 @@ namespace HumankindAssetFramework
                                 moving = true;   // more path queued — a chunk boundary, not an arrival
                         }
                         catch { }
+                    // ... and probe session 4 (09:43) closed the case on signals: the sim feeds a path as SEPARATE
+                    // two-step histories ("history 1/2" per leg), so in a boundary gap's first beat the state is 0,
+                    // doMoveWhenReady is false AND the history is fully consumed — nothing presentation-side says
+                    // "more path coming". Time is the only bridge left: a unit that displaced within the last 2 s
+                    // is still travelling. Cost: a real arrival plays its fold/settle 2 s late (a ship gliding to
+                    // rest reads fine); the flag guards above still cover longer gaps once the next leg queues.
+                    if (!moving && e.stateLastDispAt.TryGetValue(guid, out var ld2) && now - ld2 < 2f)
+                        moving = true;
                     if (!e.stateMoving.TryGetValue(guid, out bool wasMoving)) wasMoving = false;
                     if (wasMoving != moving)
                     {
