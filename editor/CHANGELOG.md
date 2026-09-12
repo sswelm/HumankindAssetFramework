@@ -6,10 +6,19 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 ## 0.5.7 — unreleased
 
 - **The discard warning now knows whether you saved.** The Vehicle Lab's "discard the current session?" dialog
-  fired on every switch, even straight after a Save. Dirty now means "differs from the saved recipe": the
-  window state is serialized and compared byte-identically against the recipe file (both sides canonicalized,
-  so formatting and absent-key defaults can't false-alarm). A cleanly saved session switches silently; real
-  unsaved changes say so explicitly.
+  fired on every switch, even straight after a Save. Dirty now means "differs from the last Save/Load": the
+  window state is serialized and compared byte-identically against a clean-state snapshot taken at that
+  moment (after the load guards run — see the review-hardening entry). A cleanly saved session switches
+  silently; real unsaved changes say so explicitly.
+
+- **Review hardening for the merge** (own 8-angle review + a convergent external one): the single-mesh
+  loose split is now PER SOURCE (a combined-mesh first model kept splitting after a second model was set —
+  both reviews' top finding); a typo'd second-model path fails loudly instead of crashing silently and
+  wiping the probe's markings; the flatten's Icosphere purge also catches `B_`-renamed skinned bone-shape
+  spheres from the second model; the discard dialog compares against a clean-state snapshot taken after the
+  load guards run, so a guard-tripping recipe file no longer reads as eternally dirty; and geometry-producing
+  modifiers (Array/Mirror/Solidify — `.blend` sources) are now BAKED after import, so they reach the part
+  list, previews and output for the first time (they never did — the exporters always ignored them).
 
 - **Two models can merge into one rig.** A collapsible "Second model" section (optional — most vehicles never
   need it) imports a second source into the same scene before the probe: its parts arrive with a `B_` prefix

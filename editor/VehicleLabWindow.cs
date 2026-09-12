@@ -166,6 +166,11 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] float tailYawAdj = 0f;    // manual trim on the tail axle: swing about vertical, degrees
     [SerializeField] float tailPitchAdj = 0f;  // manual trim on the tail axle: tilt up/down, degrees
     [SerializeField] string loadedRecipe = "";   // the recipe shown in the "Edit existing" combobox ("" = ＜new model＞); tracked by NAME so the frame-rebuilt file list can't desync it
+    // The CLEAN-STATE SNAPSHOT (PR #33 review): serialized window state as of the last Save/Load. The dirty
+    // check compares against THIS, not a re-read of the disk file — LoadRecipeFromPath normalizes values on
+    // load (trims, <=0 guards, Clamp01), so a guard-tripping recipe file could never compare byte-identical
+    // to its own round-trip and the discard dialog fired on untouched sessions. "" = no clean state (dirty).
+    [SerializeField] string savedRecipeJson = "";
     [SerializeField] bool recipeReadThisSession = false;   // Save's overwrite guard: true once THIS window instance has read (or written) the recipe file — survives domain reloads via window serialization, resets to false in a fresh window, which is exactly the state whose reflex-Save once ate a tuned recipe
     [SerializeField] int treadAdvCells = 3;   // tread advance per loop in cells
     [SerializeField] float treadCellsPerLink = 4f; // tread detail: cells per molded link = the BONES dial (4 = smoothest; 0.25 = one bone per four links)
@@ -408,7 +413,7 @@ public class VehicleLabWindow : EditorWindow
                     { LoadRecipeFromPath(rfiles[cur - 1]); GUI.FocusControl(null); }
                 if (GUILayout.Button(new GUIContent("Remove", "Delete the selected recipe FILE from disk. The generated GLB and the current session are not touched."), GUILayout.Width(72)))
                     if (EditorUtility.DisplayDialog("Remove recipe", $"Delete recipe '{names[cur]}' from disk?\n\n(The generated GLB and the current session are not touched.)", "Delete", "Cancel"))
-                    { try { File.Delete(rfiles[cur - 1]); AssetDatabase.Refresh(); } catch (Exception e) { status = "Delete failed: " + e.Message; } loadedRecipe = ""; GUI.FocusControl(null); }
+                    { try { File.Delete(rfiles[cur - 1]); AssetDatabase.Refresh(); } catch (Exception e) { status = "Delete failed: " + e.Message; } loadedRecipe = ""; savedRecipeJson = ""; GUI.FocusControl(null); }   // deleted file = the state is no longer recoverable by re-load — dirty
             }
         }
 
@@ -1448,7 +1453,7 @@ public class VehicleLabWindow : EditorWindow
     // bug this button exists to kill (stale bone rows silently kept the SKM fast path on for an unrigged model).
     void NewModel()
     {
-        srcFile = ""; outGlb = ""; lastOutGlb = ""; loadedRecipe = ""; recipeReadThisSession = false;
+        srcFile = ""; outGlb = ""; lastOutGlb = ""; loadedRecipe = ""; recipeReadThisSession = false; savedRecipeJson = "";
         parts.Clear(); boneParts.Clear(); useSourceRig = false;
         frames = 15; degrees = -360f; axisChoice = 0;
         treadAdvCells = 3; treadCellsPerLink = 4f; tracksStatic = false;
@@ -1593,20 +1598,15 @@ public class VehicleLabWindow : EditorWindow
 
     // DIRTY CHECK (2026-09-12, user: "when I save the current model, it still shows this message — it should
     // verify if the last changes were actually saved"): CLEAN = the current window state serializes byte-
-    // identically to the recipe file it was loaded from / last saved to. Both sides pass through JsonUtility
-    // (the disk file is re-serialized after parsing), so formatting and absent-key defaults can't false-alarm;
-    // any real difference — a role changed, a dial moved, a new part probed — reads as dirty.
+    // identically to the SNAPSHOT taken at the last Save/Load. Comparing against the snapshot rather than a
+    // re-read of the disk file (PR #33 review) makes load-time normalization invisible to the check: the
+    // guards in LoadRecipeFromPath run BEFORE the snapshot is taken, so an untouched session is clean even
+    // when the file on disk carries values those guards rewrite. Any real difference — a role changed, a
+    // dial moved, a new part probed — reads as dirty.
     bool RecipeIsSavedClean()
     {
-        try
-        {
-            if (string.IsNullOrEmpty(loadedRecipe)) return false;
-            string p = Path.Combine(Directory.GetParent(Application.dataPath).FullName, RecipesDir, loadedRecipe + ".json");
-            if (!File.Exists(p)) return false;
-            var disk = JsonUtility.FromJson<Recipe>(File.ReadAllText(p));
-            return disk != null && JsonUtility.ToJson(BuildRecipe()) == JsonUtility.ToJson(disk);
-        }
-        catch { return false; }   // unreadable/locked file = assume dirty — the dialog is the safe direction
+        try { return !string.IsNullOrEmpty(savedRecipeJson) && JsonUtility.ToJson(BuildRecipe()) == savedRecipeJson; }
+        catch { return false; }   // serialization failure = assume dirty — the dialog is the safe direction
     }
 
     void SaveRecipe()
@@ -1653,6 +1653,7 @@ public class VehicleLabWindow : EditorWindow
         AssetDatabase.Refresh();
         loadedRecipe = Path.GetFileNameWithoutExtension(p);   // reflect the just-saved recipe in the combobox
         recipeReadThisSession = true;   // this window state IS the file now — further saves are continuations
+        savedRecipeJson = JsonUtility.ToJson(r);   // the clean-state snapshot the discard dialog compares against
         status = "Recipe saved: " + p;
     }
 
@@ -1719,6 +1720,7 @@ public class VehicleLabWindow : EditorWindow
             useSourceRig = r.useSourceRig && boneParts.Count > 0;
             loadedRecipe = Path.GetFileNameWithoutExtension(p);   // reflect the loaded recipe in the combobox
             recipeReadThisSession = true;   // the window now derives from the file — Save may overwrite silently
+            savedRecipeJson = JsonUtility.ToJson(BuildRecipe());   // snapshot AFTER the load guards ran — normalization can't read as dirt
             status = $"Recipe loaded ({parts.Count} parts{(boneParts.Count > 0 ? $", {boneParts.Count} source bones, fast path {(useSourceRig ? "ON" : "off")}" : "")}, {ActiveParts.Count(x => x.role == Role.Wheel)} wheels). " +
                      "generate the rig directly — or press Probe to list ALL parts for review (your marked roles are kept, plus the preview returns for click-to-highlight)." +
                      (predates.Count > 0 ? $"\nNOTE — recipe predates: {string.Join(", ", predates)}. Those loaded as safe defaults; check the dials and Save to modernize it." : "");

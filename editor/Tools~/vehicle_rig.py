@@ -12,7 +12,7 @@
 #       AXLE AUTO = the axis of each wheel's SMALLEST bbox extent (a wheel is thin along its axle) — per wheel, so
 #       mirrored side wheels resolve independently.
 # Frame 0 deliberately equals the rest pose: `Spin[0..0]` is the motionless Idle (see Factory-Manual / Law 2 notes).
-import bpy, bmesh, sys, math, time
+import bpy, bmesh, sys, math, time, os
 _T0 = time.time()
 def _fitted_cycle_count(clip_frames, requested_period):
     """Nearest positive whole-cycle count that keeps both ends of a shared action on the same pose."""
@@ -84,6 +84,11 @@ if _m2arg:
         _m2path, _m2off, _m2rot, _m2scl = _m2arg[len("merge2="):].split("|")
     except ValueError:
         print("VEHICLE ERROR: malformed merge2 argument: %s" % _m2arg); sys.exit(1)
+    # EXISTENCE guard (PR #33 review): srcFile2 is a free-typed TextField — a typo'd path used to raise
+    # RuntimeError OUTSIDE any _guard, so Blender exited with no VEHICLE ERROR line, the Lab read the run as
+    # fine, and a probe wiped the part list (markings gone). Fail loudly instead.
+    if not os.path.isfile(_m2path):
+        print("VEHICLE ERROR: second model not found: %s" % _m2path); sys.exit(1)
     _ext2 = _m2path.lower().rsplit(".", 1)[-1]
     _before2 = set(bpy.data.objects)
     if _ext2 in ("glb", "gltf"):
@@ -143,6 +148,37 @@ if _m2arg:
               % (_m2mn.x, _m2mn.y, _m2mn.z, _m2mx.x, _m2mx.y, _m2mx.z))
     _lap("merge2")
 
+# ---- BAKE GEOMETRY-PRODUCING MODIFIERS (2026-09-13, PR #33 review P2 — made honest) ----
+# Array/Mirror/Solidify geometry never reached ANY output: the final glTF export runs with the exporter's
+# default export_apply=False, the probe preview exports use_mesh_modifiers=False, and every measurement pass
+# reads the BASE mesh — a .blend source built with such modifiers always shipped only its base geometry,
+# silently (pre-existing, not a regression of the flatten). Bake them into the mesh data HERE, before probe
+# and rig diverge, so part lists, previews, reduce tiers and the export all see the same finished geometry.
+# ARMATURE modifiers are deliberately excluded — baking one would freeze the current pose into the verts;
+# they are deform-only and the pipeline handles skinning itself. Only .blend sources can carry Blender
+# modifiers, so every GLB/FBX/OBJ recipe skips this block entirely.
+_bake_mods = [o for o in mesh_objects() if any(m.type != 'ARMATURE' for m in o.modifiers)]
+if _bake_mods:
+    _arm_hidden = []
+    for _bo in _bake_mods:
+        for _bm in _bo.modifiers:
+            if _bm.type == 'ARMATURE' and _bm.show_viewport:
+                _bm.show_viewport = False; _arm_hidden.append(_bm)
+    _dgB = bpy.context.evaluated_depsgraph_get()   # fresh graph — sees the armature toggles
+    for _bo in _bake_mods:
+        _evB = _bo.evaluated_get(_dgB)
+        _meB = bpy.data.meshes.new_from_object(_evB, preserve_all_data_layers=True, depsgraph=_dgB)
+        _oldB = _bo.data
+        _bo.data = _meB
+        if _oldB.users == 0:
+            bpy.data.meshes.remove(_oldB)
+        for _bm in [m for m in _bo.modifiers if m.type != 'ARMATURE']:
+            _bo.modifiers.remove(_bm)
+        print("VEHICLE modifiers baked: '%s' -> %d vert(s)" % (_bo.name, len(_bo.data.vertices)))
+    for _bm in _arm_hidden:
+        _bm.show_viewport = True
+    _lap("bake-mods")
+
 # ---- rigged-source detection (the SKM fast path's foundation) ----
 # A game-rip often ships FULLY skinned (SKM_ prefix): its artist skeleton has perfect axle pivots and extra
 # weapon bones. Report each DEFORM bone with its weighted-vert count + bbox so the caller can offer bone-level
@@ -188,14 +224,22 @@ if mode == "probe":
     rig_report()
     _lap("rig_report")
     objs = mesh_objects()
-    if len(objs) == 1:
-        # a single combined mesh can't be role-assigned — try splitting into loose parts for the caller
-        bpy.context.view_layer.objects.active = objs[0]
-        objs[0].select_set(True)
-        bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
-        bpy.ops.mesh.separate(type='LOOSE'); bpy.ops.object.mode_set(mode='OBJECT')
-        objs = mesh_objects()
-        print("VEHICLE note: single mesh split into %d loose parts (names are synthetic)" % len(objs))
+    # PER-SOURCE split (PR #33 review P1, corroborated: `len(objs) == 1` counted the merged B_ meshes, so a
+    # combined-mesh FIRST model stopped splitting the moment a second model was set — probe listed one giant
+    # unmarkable part, and recipes saved against earlier split names died in rig's find()). Each source is
+    # judged and split on its own; split names stay consistent between Probe and Generate because both run
+    # the identical per-source rule.
+    for _spfx in ("", "B_"):
+        _sown = [o for o in objs if o.name.startswith("B_") == (_spfx == "B_")]
+        if len(_sown) == 1:
+            bpy.ops.object.select_all(action='DESELECT')
+            bpy.context.view_layer.objects.active = _sown[0]
+            _sown[0].select_set(True)
+            bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
+            bpy.ops.mesh.separate(type='LOOSE'); bpy.ops.object.mode_set(mode='OBJECT')
+            objs = mesh_objects()
+            print("VEHICLE note: single %smesh split into %d loose parts (names are synthetic)"
+                  % ("second-model " if _spfx else "", len([o for o in objs if o.name.startswith("B_") == (_spfx == "B_")])))
     _lap("split")
     # ---- visibility classification: EXTERNAL vs INTERIOR ----
     # A part is EXTERNAL if any sampled surface point can shoot a straight "escape ray" to infinity without hitting
@@ -657,8 +701,10 @@ if mode == "rigfast":
 for _fo in mesh_objects():
     # the import-time Icosphere purge is conservative (skips skinned ones); on THIS path all skinning is
     # about to be cleared anyway, so a bone-shape placeholder with vertex groups is equally garbage — the
-    # TOW drill shipped one as a floating 2 m sphere in the output before this line existed
-    if _fo.name.startswith('Icosphere'):
+    # TOW drill shipped one as a floating 2 m sphere in the output before this line existed. B_ prefix
+    # included (PR #33 review, three angles): every second-model object is RENAMED before this runs, so a
+    # skinned Icosphere arriving via the merge would otherwise walk straight past the check.
+    if _fo.name.startswith(('Icosphere', 'B_Icosphere')):
         print("VEHICLE flatten: purged glTF importer bone-shape artifact: %s" % _fo.name)
         bpy.data.objects.remove(_fo, do_unlink=True)
         continue
@@ -676,12 +722,19 @@ if _fhelpers:
 bpy.context.view_layer.update()
 
 objs = mesh_objects()
-if len(objs) == 1 and (wheel_names or turret_names):
-    bpy.context.view_layer.objects.active = objs[0]
-    objs[0].select_set(True)
-    bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
-    bpy.ops.mesh.separate(type='LOOSE'); bpy.ops.object.mode_set(mode='OBJECT')
-    objs = mesh_objects()
+# PER-SOURCE split, mirroring the probe's rule exactly (PR #33 review P1): the old `len(objs) == 1` counted
+# merged B_ meshes, so a combined-mesh first model rigged unsplit — and roles marked against the probe's
+# synthetic split names hard-exited in find(). Split names match the probe because the rule is identical.
+if wheel_names or turret_names:
+    for _spfx9 in ("", "B_"):
+        _sown9 = [o for o in objs if o.name.startswith("B_") == (_spfx9 == "B_")]
+        if len(_sown9) == 1:
+            bpy.ops.object.select_all(action='DESELECT')
+            bpy.context.view_layer.objects.active = _sown9[0]
+            _sown9[0].select_set(True)
+            bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
+            bpy.ops.mesh.separate(type='LOOSE'); bpy.ops.object.mode_set(mode='OBJECT')
+            objs = mesh_objects()
 
 # Ignore-marked parts are DELETED from the output — Sketchfab "options" models stack alternative versions of
 # the same part (four skirt sets on the Jagdpanzer); rendering them all is z-fighting soup.
