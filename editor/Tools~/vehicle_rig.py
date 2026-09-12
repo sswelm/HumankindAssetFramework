@@ -170,6 +170,10 @@ if _m2arg:
     _o2v = [float(v) for v in _m2off.split(",")]
     _r2v = [math.radians(float(v)) for v in _m2rot.split(",")]
     _s2 = float(_m2scl) if _m2scl.strip() else 1.0
+    if _s2 <= 0.0:
+        # the FINAL boundary guard (review finding 7): a zero or negative scale collapses every B mesh to a
+        # degenerate point — whatever upstream formatting or hand-editing produced it, refuse it here.
+        print("VEHICLE WARN: second-model scale %s is not positive — using 1.0" % _m2scl); _s2 = 1.0
     _T2 = (Matrix.Translation(Vector(_o2v))
            @ Matrix.Rotation(_r2v[2], 4, 'Z') @ Matrix.Rotation(_r2v[1], 4, 'Y') @ Matrix.Rotation(_r2v[0], 4, 'X')
            @ Matrix.Scale(_s2, 4))

@@ -402,7 +402,7 @@ public class VehicleLabWindow : EditorWindow
                 int marked = ActiveParts.Count(x => x.role != Role.Default);
                 bool ok = !dirty || EditorUtility.DisplayDialog("Vehicle Lab",
                     (sel == 0 ? "Start a new model — discard the current session?" : $"Load recipe '{names[sel]}' — discard the current session?") + "\n\n" +
-                    (marked > 0 ? marked + " marked part(s) have UNSAVED changes — they will be lost. (Save first to keep them.)\n\n" : "") +
+                    (marked > 0 ? $"This session has UNSAVED changes; its {marked} marked part(s) will be discarded. (Save first — a saved recipe re-loads at its last-saved state.)\n\n" : "") +
                     "The generated GLB on disk is not touched.", sel == 0 ? "Start new" : "Load", "Cancel");
                 if (ok) { if (sel == 0) NewModel(); else LoadRecipeFromPath(rfiles[sel - 1]); }
                 GUI.FocusControl(null);
@@ -480,7 +480,8 @@ public class VehicleLabWindow : EditorWindow
                 model2Scale = EditorGUILayout.FloatField(new GUIContent("Scale",
                     "Uniform scale for the second model. Two sources rarely agree on units (a cm-authored file next " +
                     "to a meter one is 100x off) — this is the dial that reconciles them. 1 = as authored."), model2Scale);
-                if (model2Scale <= 0f) model2Scale = 1f;
+                // NO live guard here (review finding 7: snapping 0 -> 1 mid-keystroke fought typing "0.5") —
+                // the recipe-load guard and the Merge2Arg/rig-script boundary guards own the invariant.
             }
         }
 
@@ -1984,7 +1985,7 @@ public class VehicleLabWindow : EditorWindow
     {
         if (string.IsNullOrWhiteSpace(srcFile2)) return "";
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        string F(float v) => v.ToString("0.###", inv);
+        string F(float v) => v.ToString("0.#####", inv);   // 0.### rounded a sub-0.0005 scale to a literal "0" (review finding 7) — 5 places covers any sane unit factor
         return $" \"merge2={srcFile2.Trim().Replace('\\', '/')}|{F(model2Off.x)},{F(model2Off.y)},{F(model2Off.z)}|{F(model2Rot.x)},{F(model2Rot.y)},{F(model2Rot.z)}|{F(model2Scale <= 0f ? 1f : model2Scale)}\"";
     }
 
