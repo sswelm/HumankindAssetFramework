@@ -135,6 +135,7 @@ public class ModelFactoryWindow : EditorWindow
     // detected (allow + hint), 2 = definitely none (disable the Animated toggle). Keeps the checkbox from being ticked
     // on a static model. Runs once when the path changes, not every OnGUI frame.
     string animProbeFile = "";   // sentinel != any real path so the first real path always probes
+    System.DateTime animProbeStamp;   // the probed file's mtime — a REGENERATED file at the same path must re-probe (2026-09-16, the TOW: its first _Spin.glb carried no animations, the Flag re-generate added them, and the path-only cache kept the Animation section empty; the Refresh button never re-probed either)
     int animProbeState;
     List<string> animClips = new List<string>();                                   // clip names read from the model (Clip picker)
     List<KeyValuePair<string, int>> animBonePrefixes = new List<KeyValuePair<string, int>>();  // bone-name prefix -> count (Bones picker)
@@ -1445,8 +1446,10 @@ public class ModelFactoryWindow : EditorWindow
     void EnsureAnimProbe(string file)
     {
         file = file ?? "";
-        if (file == animProbeFile) return;
-        animProbeFile = file;
+        System.DateTime stamp = System.DateTime.MinValue;
+        try { if (System.IO.File.Exists(file)) stamp = System.IO.File.GetLastWriteTimeUtc(file); } catch { }
+        if (file == animProbeFile && stamp == animProbeStamp) return;
+        animProbeFile = file; animProbeStamp = stamp;
         animProbeState = ProbeAnimation(file);
         (animClips, animBonePrefixes) = InspectModel(file);   // populate the Clip / Bones pickers
     }
