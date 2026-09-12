@@ -171,6 +171,7 @@ namespace HumankindAssetFramework
         internal static Type SkeletonAsset      => CachedDerived("SkeletonAsset",      () => FieldOrPropType(PresentationPawnDefinitionAddOn, "Skeleton"));
         internal static Type SkeletonBoneInfo   => CachedDerived("SkeletonBoneInfo",   () => ElementType(FieldOrPropType(SkeletonAsset, "BoneInfos")));
         internal static Type PresentationArmy   => CachedDerived("PresentationArmy",   () => ElementType(FieldOrPropType(PresentationEntityFactoryController, "PresentationArmyEntities")));
+        internal static Type ArmyInfoStruct     => CachedDerived("ArmyInfoStruct",     () => FieldOrPropType(PresentationArmy, "ArmyInfo"));   // the sim mirror on the presentation army (Interop.ArmyInfo)
         internal static Type BattleReportController => CachedDerived("BattleReportController", () => FieldOrPropType(Presentation, "PresentationBattleReportController"));
         internal static Type PresentationBattle => CachedDerived("PresentationBattle", () => ElementType(FieldOrPropType(BattleReportController, "Battles")));
         // 2026-08-19 first-launch self-validation: the report flagged three members I had attributed to the WRONG
@@ -553,6 +554,7 @@ namespace HumankindAssetFramework
             new Dep(PresentationArmy, nameof(PresentationArmy), "PresentationUnit", "ArmyInfo", "IsLockedByBattle",
                 "UpdateWaitForReadyToMove", "doMoveWhenReady", "positionHistory", "currentIndexInHistory"),   // + pivot-in-place move-start hold (Hk_PivotMoveHold / ShouldHoldArmyMove)
             new Dep(AStarResults, nameof(AStarResults), "Steps", "StepCount"),   // the army's positionHistory: next-tile bearing for the pivot hold
+            new Dep(ArmyInfoStruct, nameof(ArmyInfoStruct), "HasGoToAction"),    // the SIM's "move order still executing" — bridges the leg-boundary gaps the presentation signals all miss (2026-09-12 sail furl)
             new Dep(AstarStep, nameof(AstarStep), "TileIndex"),
             new Dep(BattleReportController, nameof(BattleReportController), "Battles"),
             new Dep(PresentationBattle, nameof(PresentationBattle), "AllUnits"),

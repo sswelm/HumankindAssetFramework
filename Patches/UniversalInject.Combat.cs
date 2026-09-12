@@ -968,30 +968,21 @@ namespace HumankindAssetFramework
                     // routes through UpdateWaitForReadyToMove to start the next chunk). The army-level flag is the
                     // robust signal: doMoveWhenReady stays true while ANY path remains queued, and clears on true
                     // arrival — the same flag the pivot hold gates on.
-                    if (!moving && armyObj != null)
-                        try { if (GetMember(armyObj, "doMoveWhenReady") is bool pend && pend) moving = true; } catch { }
-                    // ... and in the gap's FIRST part even doMoveWhenReady is cold (probe session 3, 09:36: edges
-                    // survived both guards — the gap is the sim-feed pause BEFORE the next chunk is handed over).
-                    // The one signal live across the whole gap is the path itself: positionHistory still holds
-                    // UNCONSUMED steps (the boundary re-holds logged "history 3/4" mid-gap). Time-boxed to 5 s of
-                    // the last real displacement so an abandoned path cannot pin the sail full at anchor.
+                    // ... and the boundary gap defeated every presentation-side guard in turn (probe sessions 2-5:
+                    // unit state 0, army doMoveWhenReady false, positionHistory CONSUMED — the sim feeds a route as
+                    // separate two-step legs, and a 2 s displacement debounce lost to gaps longer than that). The
+                    // authoritative signal lives one level up: the SIM's ArmyInfo.HasGoToAction, mirrored live onto
+                    // the presentation army, stays true from the order until true arrival or cancellation — across
+                    // every leg gap. Time-boxed to 5 s of the last real displacement so a ship parked mid-order
+                    // (movement points spent, order resumes next turn) still furls instead of rowing in place.
                     if (!moving && armyObj != null && e.stateLastDispAt.TryGetValue(guid, out var lastDisp) && now - lastDisp < 5f)
                         try
                         {
-                            var hist9 = GetMember(armyObj, "positionHistory");
-                            if (hist9 != null && GetMember(armyObj, "currentIndexInHistory") is int ix9 &&
-                                GetMember(hist9, "StepCount") is int cnt9 && ix9 >= 0 && ix9 + 1 < cnt9)
-                                moving = true;   // more path queued — a chunk boundary, not an arrival
+                            var info9 = GetMember(armyObj, "ArmyInfo");
+                            if (info9 != null && GetMember(info9, "HasGoToAction") is bool go9 && go9)
+                                moving = true;   // the move ORDER is still executing — a leg gap, not an arrival
                         }
                         catch { }
-                    // ... and probe session 4 (09:43) closed the case on signals: the sim feeds a path as SEPARATE
-                    // two-step histories ("history 1/2" per leg), so in a boundary gap's first beat the state is 0,
-                    // doMoveWhenReady is false AND the history is fully consumed — nothing presentation-side says
-                    // "more path coming". Time is the only bridge left: a unit that displaced within the last 2 s
-                    // is still travelling. Cost: a real arrival plays its fold/settle 2 s late (a ship gliding to
-                    // rest reads fine); the flag guards above still cover longer gaps once the next leg queues.
-                    if (!moving && e.stateLastDispAt.TryGetValue(guid, out var ld2) && now - ld2 < 2f)
-                        moving = true;
                     if (!e.stateMoving.TryGetValue(guid, out bool wasMoving)) wasMoving = false;
                     if (wasMoving != moving)
                     {
