@@ -160,11 +160,14 @@ def apply_brightness(scope, factor, tag):
                     _mat_copies[_sl.material] = _sl.material.copy()
                 _sl.material = _mat_copies[_sl.material]
     _mats = {sl.material for o in _scope_meshes for sl in o.material_slots if sl.material}
-    # image -> [per-channel residual factor, set of texture NODES to re-point at the edited copy]
+    # (image, residual) -> list of (texture node, destination input socket). Keyed by BOTH (review round 3,
+    # P2): two materials sharing one atlas with DIFFERENT tints need different residuals — image-only keying
+    # handed the second material the first one's multiplier. dest=None marks a deep-walk hit (re-point the
+    # node itself; those chains are the WARN path).
     _img_jobs = {}
-    def _job(img, node, resid):
-        _r, _nodes = _img_jobs.setdefault(img, [list(resid), set()])
-        _nodes.add(node)
+    def _job(img, node, dest, resid):
+        _key = (img, tuple(round(r, 4) for r in resid))
+        _img_jobs.setdefault(_key, [list(resid), []])[1].append((node, dest))
     _warn_chain = 0
     for _m in _mats:
         if not _m.use_nodes:
@@ -183,20 +186,25 @@ def apply_brightness(scope, factor, tag):
                 continue
             _src = _bc.links[0].from_node
             if _src.type == 'TEX_IMAGE' and _src.image is not None:
-                _job(_src.image, _src, (factor, factor, factor))          # direct link: whole factor on pixels
+                _job(_src.image, _src, _bc, (factor, factor, factor))     # direct link: whole factor on pixels
                 continue
-            if _src.type in ('MIX', 'MIX_RGB'):
-                # the glTF importer's baseColorFactor shape: Mix(Multiply) of a TINT color and the texture.
-                # Brighten the TINT first (it has headroom below white), pixels take only the residual.
+            # the glTF importer's baseColorFactor shape: Mix set to MULTIPLY at full Factor, of a TINT color
+            # and the texture. ONLY that configuration gets the tint-absorption shortcut (review round 3,
+            # P3: an ADD mix treated as multiply produced 0.30 where 0.20 was right) — anything else falls
+            # through to the deep walk below.
+            if _src.type in ('MIX', 'MIX_RGB') and getattr(_src, 'blend_type', '') == 'MULTIPLY':
+                _fsock = _src.inputs.get('Factor') or _src.inputs.get('Fac')
+                _fullfac = _fsock is not None and not _fsock.is_linked and abs(float(_fsock.default_value) - 1.0) < 1e-3
                 _color_ins = [i for i in _src.inputs if i.type == 'RGBA']
                 _linked = [i for i in _color_ins if i.is_linked]
                 _flat = [i for i in _color_ins if not i.is_linked]
                 _teximg = None
-                if len(_linked) == 1 and len(_flat) >= 1:
+                if _fullfac and len(_linked) == 1 and len(_flat) >= 1:
                     _ln = _linked[0].links[0].from_node
                     if _ln.type == 'TEX_IMAGE' and _ln.image is not None:
                         _teximg = _ln
                 if _teximg is not None:
+                    # Brighten the TINT first (it has headroom below white), pixels take only the residual.
                     _tin = _flat[0]
                     _t = _tin.default_value
                     _resid = [1.0, 1.0, 1.0]
@@ -206,7 +214,7 @@ def apply_brightness(scope, factor, tag):
                         _new[_c] = min(1.0, _want)
                         _resid[_c] = 1.0 if _new[_c] <= 0.0 else _want / _new[_c]
                     _tin.default_value = _new
-                    _job(_teximg.image, _teximg, _resid)
+                    _job(_teximg.image, _teximg, _linked[0], _resid)
                     continue
             # unrecognized chain (vertex colors, deep node math): fall back to the deep walk — every image
             # feeding the chain gets the whole factor, with a WARN because a mid-chain tint would clip early
@@ -218,14 +226,14 @@ def apply_brightness(scope, factor, tag):
                     continue
                 _seen.add(_nd)
                 if _nd.type == 'TEX_IMAGE' and _nd.image is not None:
-                    _job(_nd.image, _nd, (factor, factor, factor)); _warn_chain += 1
+                    _job(_nd.image, _nd, None, (factor, factor, factor)); _warn_chain += 1
                 else:
                     for _in in _nd.inputs:
                         for _l2 in _in.links:
                             _stack.append(_l2.from_node)
     import numpy as _np
     _edited = 0
-    for _img, (_resid, _nodes) in _img_jobs.items():
+    for (_img, _rkey), (_resid, _entries) in _img_jobs.items():
         if _img.size[0] == 0 or _img.size[1] == 0:
             continue
         if all(abs(r - 1.0) < 1e-3 for r in _resid):
@@ -245,8 +253,23 @@ def apply_brightness(scope, factor, tag):
         _pa[:, 2] = _np.clip(_pa[:, 2] * _resid[2], 0.0, 1.0)
         _copy.pixels.foreach_set(_px)
         _copy.pack()   # the edited buffer, not the untouched source file, must be what the exporter writes
-        for _nd in _nodes:
-            _nd.image = _copy
+        for _nd, _dest in _entries:
+            # ONE node can feed albedo AND roughness (review round 3, P1: re-pointing it changed both
+            # channels). When the node's outputs serve more than our albedo link — or when we know the
+            # exact destination socket — give the albedo path its own duplicate node and leave the
+            # original untouched for its other consumers.
+            _out_links = sum(len(_o.links) for _o in _nd.outputs)
+            if _dest is not None and _out_links > 1:
+                _tree = _dest.id_data
+                _dup = _tree.nodes.new('ShaderNodeTexImage')
+                _dup.image = _copy
+                _dup.interpolation = _nd.interpolation; _dup.extension = _nd.extension; _dup.projection = _nd.projection
+                _vecin = _nd.inputs.get('Vector')
+                if _vecin is not None and _vecin.is_linked:
+                    _tree.links.new(_vecin.links[0].from_socket, _dup.inputs['Vector'])
+                _tree.links.new(_dup.outputs['Color'], _dest)   # a single-input socket: the new link replaces the old
+            else:
+                _nd.image = _copy
         _edited += 1
     if _warn_chain:
         print("VEHICLE WARN: %d base-color image(s) sit behind an unrecognized node chain — a mid-chain tint could clip a >1 factor early" % _warn_chain)
