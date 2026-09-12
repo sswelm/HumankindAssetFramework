@@ -2088,7 +2088,7 @@ public class ModelFactoryWindow : EditorWindow
         cur.gunElevMax = 0f; cur.gunElevAxis = 0; cur.gunElevRise = 1f; cur.gunElevHold = 1f; cur.gunElevFall = 1f; cur.animPhaseSpread = 0.5f;
         cur.handPropName = ""; cur.handPropGuid = ""; cur.handPropMat = ""; cur.handPropBone = ""; cur.handPropAngles = "";
         cur.fireOnAttack = false; cur.deployOnStop = false;
-        cur.deployPoseTime = 0f; cur.deploySpeed = 0f; cur.recoilSpeed = 0f;
+        cur.deployPoseTime = 0f; cur.deploySpeed = 1f; cur.recoilSpeed = 1f;   // 1 = the schema default and the validator's floor — clearing to 0 scarred every made-static entry with two per-bake warnings (same family as attackRepeats, 2026-09-13 SteamTransports report)
         bool saved = ModelRegistry.Upsert(cur);
         if (saved) { formDiffersFromRegistry = false; loadedName = cur.resourceName; browseUnitFixGuess = -1; }   // form is now the saved truth; a just-persisted Browse unit-fix guess DISARMS here — waiting for the next rebase to notice left a window where it could overwrite a newer Lab-saved value (external review of PR #22)
         RefreshList();

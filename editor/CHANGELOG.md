@@ -45,6 +45,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   any rig that has it: Auto-detect now recognizes a FLAG/SAIL rig and fills `Furl[0..0]` itself, and every Lab
   printout and HelpBox teaches the same. Wheel/rotor rigs (no Furl clip) keep `Spin[0..0]`, unchanged.
 
+- **A material literally named 'Material' no longer scrambles the animated atlas.** The animated path pairs
+  each submesh with its atlas cell by simplified material name — and simplifying strips the word "material",
+  so a bare 'Material' became an empty string, which the substring fallback matched to the FIRST cell (every
+  string contains ""). The SteamTransports' hull baked wearing the sails' canvas (white streaks) while its
+  static bake — which pairs by object identity, not names — was perfect. Empty simplified names now skip name
+  matching entirely and use the order-correct index fallback. Also from the same import: "Make static" no
+  longer writes `deploySpeed`/`recoilSpeed` = 0 (the schema default is 1; the zeros produced two harmless but
+  permanent per-bake validator warnings), and the registry floors both on every save, healing scarred entries.
+
 - **Small fixes.** The Factory preview no longer shows a leftover animated rig after a static re-bake of a
   formerly animated entry (it fell through to the fresh static model only when the stale FBX was gone). The
   Animation section's probe re-runs when the model FILE changes in place, not only when its path changes (a

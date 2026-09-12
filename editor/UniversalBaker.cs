@@ -1948,12 +1948,20 @@ public static class UniversalBaker
                     // Match by simplified material name, EXACT first: the loose Contains-both-ways match alone lets a
                     // material "Body" grab "Body_Trim"'s atlas rect (simplified "body" is a substring of "bodytrim"),
                     // mapping the wrong texture onto that submesh. Try exact, then substring, else the index below.
+                    // An EMPTY simplified name never name-matches (2026-09-13, the SteamTransports hull): a material
+                    // literally named 'Material' simplifies to "" (SimplifyMat strips the word), and while the exact
+                    // match correctly refuses empty names, the substring branch did not — every string
+                    // Contains("") — so the hull grabbed rect[0] (the sails' canvas: white streaked hull) instead of
+                    // falling through to the index fallback, which is order-correct for a glbconv/rig_anim pair.
                     string bn = SimplifyMat(sm.name);
-                    ri = System.Array.FindIndex(baseNames, b => b.Length > 0 && b == bn);
-                    // duplicate material NAMES exist in the wild (two 'german_gear_8' entries with different
-                    // textures) — among exact ties, prefer the rect at the submesh's own index (order-consistent)
-                    if (ri >= 0 && s < baseNames.Length && baseNames[s] == bn) ri = s;
-                    if (ri < 0) ri = System.Array.FindIndex(baseNames, b => b.Length > 0 && (bn.Contains(b) || b.Contains(bn)));
+                    if (bn.Length > 0)
+                    {
+                        ri = System.Array.FindIndex(baseNames, b => b.Length > 0 && b == bn);
+                        // duplicate material NAMES exist in the wild (two 'german_gear_8' entries with different
+                        // textures) — among exact ties, prefer the rect at the submesh's own index (order-consistent)
+                        if (ri >= 0 && s < baseNames.Length && baseNames[s] == bn) ri = s;
+                        if (ri < 0) ri = System.Array.FindIndex(baseNames, b => b.Length > 0 && (bn.Contains(b) || b.Contains(bn)));
+                    }
                 }
                 if (ri < 0) ri = s;   // fall back to index (submesh order == MTL order)
                 if (ri < 0 || ri >= rects.Length) { Debug.LogWarning($"[Factory] {name} submesh {s} ('{(sm != null ? sm.name : "null")}') no atlas rect — left unmapped"); continue; }

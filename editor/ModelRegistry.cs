@@ -627,6 +627,10 @@ public static class ModelRegistry
         // heal unless the Attack section's slider happened to be drawn (it only draws with an Attack clip set).
         // Flooring here heals every scarred entry on its next Save, whichever window saves it.
         if (def.attackRepeats < 1) def.attackRepeats = 1;
+        // Same family (2026-09-13, the SteamTransports import): the old make-static clear wrote these to 0 too —
+        // the runtime and the Lab sliders treat <=0 as "1 = authored speed", so floor them to the schema default.
+        if (def.deploySpeed <= 0f) def.deploySpeed = 1f;
+        if (def.recoilSpeed <= 0f) def.recoilSpeed = 1f;
         var list = Load();
         // CASE-INSENSITIVE, to match the filesystem the key really lives on (2026-08-22). The replace used ordinal
         // `==` while the Factory's collision guard compares OrdinalIgnoreCase, and that gap had a hole in it: renaming
