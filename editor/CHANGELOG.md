@@ -5,6 +5,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Unified axis (v2) — the static bake's frame finally matches the animated one.** The static path used to
+  ingest a GLB's Y-up vertices raw into the Z-up baker world and then auto-align the longest axis by guess —
+  so the same file needed a different Rotation per path (the Lembos arrived upside-down on one and level on
+  the other). A new per-entry toggle (ON for new entries): glbconv converts Y-up→Z-up (`zup` mode; a pure
+  +90°X rotation, normals included, winding preserved) and the auto-align is skipped — Rotation is the only
+  orientation knob and means the same thing on BOTH paths. Pre-v2 entries keep the legacy frame (absent key)
+  and re-bake byte-identically — A/B-verified against the old converter — with the old path-specific warning
+  now shown only on legacy entries; tick the toggle and re-tune Rotation once to upgrade one.
+
 - **Per-source Brightness dials — merged models read as one unit.** The TOW launcher arrived several stops
   lighter than its tripod ("acts more like a whole unit rather than a patched model"): two sliders in the
   Second-model section (first model / second model, 0.25–2.5, default 1 = untouched) multiply each source's

@@ -8,8 +8,14 @@ using System.Text;
 using SharpGLTF.Schema2;
 
 // GLB/glTF -> OBJ converter with vertex-clustering decimation.
-// usage: <glb> <outdir> [basename] [grid]
+// usage: <glb> <outdir> [basename] [grid] [zup]
 //   grid = cluster cells along the longest axis (higher = more detail/verts). Default 140.
+//   zup  = literal "zup": convert glTF's Y-up frame to the baker's Z-up frame ((x,y,z) -> (x,-z,y), normals
+//          too — a +90° rotation about X, so winding is preserved). WITHOUT it the vertices pass through RAW,
+//          which is the LEGACY convention every pre-v2 static entry's Rotation hand-compensates (measured
+//          2026-09-09: the Lembos' 8.3u mast height sat in Y — pitched 90° against the Z-up baker world, and
+//          against the animated path, which converts properly in Blender). The flag rides per-entry
+//          (staticAxisV2) so old entries re-bake byte-identically forever.
 //
 // MULTI-MATERIAL (faithful mode only): if the model uses >1 material, the OBJ is written with a `mtllib` + one
 // `usemtl` group per material, and a sibling `.mtl` wires each material to an albedo (its extracted BaseColor image,
@@ -30,7 +36,10 @@ class Program
         string baseName = args.Length > 2 ? args[2] : "model";
         int grid = 140;
         if (args.Length > 3 && !int.TryParse(args[3], NumberStyles.Integer, C, out grid))
-        { Console.Error.WriteLine($"ERROR: grid must be an integer, got '{args[3]}' (usage: <glb> <outdir> [basename] [grid])"); return 2; }
+        { Console.Error.WriteLine($"ERROR: grid must be an integer, got '{args[3]}' (usage: <glb> <outdir> [basename] [grid] [zup])"); return 2; }
+        bool zup = args.Length > 4 && args[4] == "zup";
+        if (args.Length > 4 && !zup)
+        { Console.Error.WriteLine($"ERROR: unknown 5th argument '{args[4]}' (only literal 'zup' is accepted)"); return 2; }
         Directory.CreateDirectory(outDir);
 
         var model = ModelRoot.Load(glbPath);
@@ -59,8 +68,13 @@ class Program
                 int b = V.Count;
                 for (int i = 0; i < pos.Count; i++)
                 {
-                    V.Add(Vector3.Transform(pos[i], M));
-                    N.Add(nrm != null ? SafeNorm(Vector3.TransformNormal(nrm[i], M)) : Vector3.UnitY);
+                    var wv = Vector3.Transform(pos[i], M);
+                    var wn = nrm != null ? SafeNorm(Vector3.TransformNormal(nrm[i], M)) : Vector3.UnitY;
+                    // zup: glTF Y-up -> baker Z-up, (x,y,z) -> (x,-z,y). A pure +90° rotation about X (det +1),
+                    // so triangle winding is untouched; normals take the identical rotation.
+                    if (zup) { wv = new Vector3(wv.X, -wv.Z, wv.Y); wn = new Vector3(wn.X, -wn.Z, wn.Y); }
+                    V.Add(wv);
+                    N.Add(wn);
                     U.Add(uv != null ? uv[i] : Vector2.Zero);
                 }
                 foreach (var t in p.GetTriangleIndices())
@@ -70,7 +84,7 @@ class Program
                 }
             }
         }
-        Console.WriteLine($"collected: verts={V.Count} tris={Tri.Count}");
+        Console.WriteLine($"collected: verts={V.Count} tris={Tri.Count}" + (zup ? "  axis: Y-up -> Z-up (v2)" : ""));
 
         // ---- 2) bounds + (optional) vertex-clustering decimation ----
         Vector3 mn = new(float.MaxValue), mx = new(float.MinValue);

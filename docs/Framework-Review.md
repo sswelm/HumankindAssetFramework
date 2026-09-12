@@ -351,6 +351,16 @@ strangers." Overlaps the deferred list's ENC-branding, Blender-PATH-discovery, a
 
 ## Still deferred (from earlier passes — unchanged)
 
+- **RESOLVED 2026-09-16 (convention-versioned, not migrated): Unified axis (v2).** glbconv gained a `zup`
+  mode (Y-up→Z-up, `(x,y,z)→(x,−z,y)`, normals too — a +90°X rotation, winding preserved) and the static
+  combine skips its longest-axis auto-align under the new per-entry `staticAxisV2` flag, so a v2 static bake
+  ingests the GLB in the SAME Z-up frame the animated path uses — one Rotation, one meaning. The planned
+  numeric migration of old entries was deliberately NOT done: the auto-align made each legacy entry's
+  compensation dims-dependent (no safe closed form), so old entries keep `staticAxisV2=false` (absent key)
+  and re-bake **byte-identically** (A/B-verified: legacy output byte-identical old exe vs new). New entries
+  default to v2; a legacy entry upgrades by ticking the toggle and re-tuning Rotation once. Original finding
+  kept below for the record.
+
 - **Static-path axis convention for GLB sources — measured wrong, unification deferred (2026-09-09).**
   The baker's world is Z-up native (Position "Z = waterline", heightUV measures Z, the synthetic test cubes
   are authored Z-up), but `glbconv` writes glTF's **Y-up** vertices raw — so every static bake of a GLB

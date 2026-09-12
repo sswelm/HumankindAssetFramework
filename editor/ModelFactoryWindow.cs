@@ -17,7 +17,10 @@ public class ModelFactoryWindow : EditorWindow
     // [SerializeField] so Unity preserves the form across a DOMAIN RELOAD (any script recompile, entering/exiting Play
     // mode, etc.). Without it these are wiped back to defaults mid-edit — the "fields went empty on their own" bug.
     // (ModelDef is [Serializable], so the whole edited entry round-trips.)
-    [SerializeField] ModelDef cur = new ModelDef();
+    // NEW entries get the v2 axis convention (static frame == animated frame); LOADED entries keep their
+    // saved value — absent key = false = the legacy frame their hand-tuned Rotation was calibrated against.
+    static ModelDef FreshEntry() => new ModelDef { staticAxisV2 = true };
+    [SerializeField] ModelDef cur = FreshEntry();
     [SerializeField] int selected;      // 0 = <New>, else index into `existing`
     string[] existing = { "<New>" };
     string status = "";
@@ -999,13 +1002,24 @@ public class ModelFactoryWindow : EditorWindow
         bool prevWide = EditorGUIUtility.wideMode;
         EditorGUIUtility.wideMode = true;
         cur.rotation = EditorGUILayout.Vector3Field("Rotation offset (XYZ)", cur.rotation);
-        // PATH-SPECIFIC ROTATION (2026-09-09, the Lembos upside-down surprise): the static path ingests a
-        // GLB through glbconv->OBJ (currently Y-up data into the Z-up baker world — see Framework-Review's
-        // deferred unification), the animated path through Blender->FBX. Same field, two axis chains: a value
-        // tuned on a static test-bake does NOT carry to the animated bake.
+        // AXIS UNIFICATION (2026-09-16, resolves Framework-Review's deferred item; the Lembos upside-down
+        // surprise was the trigger): with Unified axis (v2) ON, glbconv converts Y-up->Z-up and the static
+        // combine skips its longest-axis auto-align, so the static frame — and Rotation's meaning — matches
+        // the animated path. OFF = the legacy frame (Y-up raw + auto-align) every pre-v2 entry's Rotation
+        // hand-compensates; those entries re-bake byte-identically as long as the toggle stays off.
         string rotExt = (cur.modelFile ?? "").ToLowerInvariant();
-        if ((rotExt.EndsWith(".glb") || rotExt.EndsWith(".gltf")) && (cur.animated || animProbeState == 1))
-            EditorGUILayout.LabelField("   ⚠ Rotation is PATH-specific: a value tuned on a static test-bake will not carry to the animated bake (different axis chains). Vehicle-Lab rigs bake animated at (0, 90, 0).", EditorStyles.wordWrappedMiniLabel);
+        bool rotIsGltf = rotExt.EndsWith(".glb") || rotExt.EndsWith(".gltf") || rotExt.EndsWith(".blend");
+        if (rotIsGltf)
+        {
+            cur.staticAxisV2 = EditorGUILayout.ToggleLeft(new GUIContent("Unified axis (v2) — static frame matches animated",
+                "ON (default for new entries): the static bake ingests the GLB in the same Z-up frame the animated " +
+                "path uses, and the longest-axis auto-align is skipped — one Rotation value means the same thing on " +
+                "both paths. OFF (legacy): Y-up data into the Z-up baker plus a dims-based auto-align; entries saved " +
+                "before v2 keep this so their hand-tuned Rotation stays valid. Toggling re-extracts and needs a " +
+                "re-tuned Rotation."), cur.staticAxisV2);
+            if (!cur.staticAxisV2 && (cur.animated || animProbeState == 1))
+                EditorGUILayout.LabelField("   ⚠ LEGACY axis: Rotation is PATH-specific here — a value tuned on a static test-bake will not carry to the animated bake. Tick Unified axis (v2) and re-tune Rotation once to unify. Vehicle-Lab rigs bake animated at (0, 90, 0).", EditorStyles.wordWrappedMiniLabel);
+        }
         cur.position = EditorGUILayout.Vector3Field(new GUIContent("Position offset (Z = waterline)",
             "Move the model relative to its pawn, in GAME units: X sway, Y fore/aft, Z vertical (− sinks; the Zumwalt " +
             "waterline). STATIC models: baked into the mesh at Bake. ANIMATED models: applied by the PLUGIN at runtime " +
@@ -1306,7 +1320,7 @@ public class ModelFactoryWindow : EditorWindow
                     "(turn ease, terrain hug, donor clip, VFX/sound flags, rotation/position/textures). Rebuild " +
                     "the mod afterwards; no relaunch of Blender, no new assets."), GUILayout.Height(34), GUILayout.Width(110)))
                     SaveOnly();
-            if (GUILayout.Button("Reset", GUILayout.Height(34), GUILayout.Width(72))) { cur = new ModelDef(); selected = 0; status = ""; GUI.FocusControl(null); }
+            if (GUILayout.Button("Reset", GUILayout.Height(34), GUILayout.Width(72))) { cur = FreshEntry(); selected = 0; status = ""; GUI.FocusControl(null); }
         }
         if (!canBake)
             EditorGUILayout.HelpBox(
@@ -1412,7 +1426,7 @@ public class ModelFactoryWindow : EditorWindow
     {
         formDiffersFromRegistry = false;   // loading fresh = in sync by definition
         browseUnitFixGuess = -1;           // the guess belonged to the previous form's browsed file
-        if (selected <= 0) { cur = new ModelDef(); loadedName = ""; status = ""; LoadPreview(null); return; }
+        if (selected <= 0) { cur = FreshEntry(); loadedName = ""; status = ""; LoadPreview(null); return; }
         var e = ModelRegistry.Load().FirstOrDefault(x => x.resourceName == existing[selected]);
         if (e == null) return;
         cur = JsonUtility.FromJson<ModelDef>(JsonUtility.ToJson(e));   // clone so edits don't mutate the stored copy
@@ -1920,7 +1934,7 @@ public class ModelFactoryWindow : EditorWindow
         albedoBrightness = cur.albedoBrightness, albedoSaturation = cur.albedoSaturation, keepBlack = cur.keepBlack, materialMode = cur.materialMode,
         atlasMaxDim = cur.atlasMaxDim <= 0 ? 512 : cur.atlasMaxDim,
         stripParts = cur.stripParts,
-        animated = cur.animated, animClip = (cur.animClip ?? "").Trim(), animateBones = (cur.animateBones ?? "").Trim(), staticParts = (cur.staticParts ?? "").Trim(), localNodeAnim = cur.localNodeAnim, animUnitFix = cur.animUnitFix, convertRig = cur.convertRig, autoGroundWheels = cur.autoGroundWheels, keepTranslations = cur.keepTranslations, socketBones = (cur.socketBones ?? "").Trim(),
+        animated = cur.animated, animClip = (cur.animClip ?? "").Trim(), animateBones = (cur.animateBones ?? "").Trim(), staticParts = (cur.staticParts ?? "").Trim(), localNodeAnim = cur.localNodeAnim, animUnitFix = cur.animUnitFix, convertRig = cur.convertRig, autoGroundWheels = cur.autoGroundWheels, keepTranslations = cur.keepTranslations, staticAxisV2 = cur.staticAxisV2, socketBones = (cur.socketBones ?? "").Trim(),
         deployConvert = cur.deployConvert, deployStart = cur.deployStart, deployEnd = cur.deployEnd,
         deployStrip = (cur.deployStrip ?? "").Trim(), deployReadyFrame = (cur.deployReadyFrame ?? "").Trim(), deployLegScale = (cur.deployLegScale ?? "").Trim(), deployBarrelScale = (cur.deployBarrelScale ?? "").Trim(),
         deployRecoil = (cur.deployRecoil ?? "").Trim(), deployRecoilStep = (cur.deployRecoilStep ?? "").Trim(), deployRecoilMag = (cur.deployRecoilMag ?? "").Trim(), deployArcR = (cur.deployArcR ?? "").Trim(), deployRecoilReturn = (cur.deployRecoilReturn ?? "").Trim(), deploySlamDeg = (cur.deploySlamDeg ?? "").Trim(), deploySlamSettle = (cur.deploySlamSettle ?? "").Trim(),
@@ -2005,7 +2019,7 @@ public class ModelFactoryWindow : EditorWindow
         cur.reuseExtracted = form.reuseExtracted; cur.doubleSided = form.doubleSided; cur.windingFix = form.windingFix; cur.heightUV = form.heightUV;
         cur.albedoBrightness = form.albedoBrightness; cur.albedoSaturation = form.albedoSaturation; cur.keepBlack = form.keepBlack;
         cur.materialMode = form.materialMode; cur.atlasMaxDim = form.atlasMaxDim; cur.targetTris = form.targetTris;
-        cur.stripParts = form.stripParts; cur.hideMeshes = form.hideMeshes;
+        cur.stripParts = form.stripParts; cur.hideMeshes = form.hideMeshes; cur.staticAxisV2 = form.staticAxisV2;
         // BAKED GUIDs (skel/atlas/clip) are deliberately NOT overlaid from the form (review finding 5, 2026-09-07):
         // every bake regenerates them, and a Lab rebake of the same entry never refreshes an open Factory form — the
         // form's copies were the one thing here that could be STALER than the registry, and overlaying them let a

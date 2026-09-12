@@ -45,6 +45,7 @@ public struct BakeConfig
     public bool    convertRig;      // ANIMATED only: route the Blender step through the RAW-RIG CONVERSION (rest-normalize + rebake, root collapse, topological rename, rotation/scale fold, clean-unit export). THE pipeline switch — rotationEuler is just a rotation again (applied only on this path; the legacy path stays byte-identical).
     public bool    autoGroundWheels;// ANIMATED only: auto-sit a rigged VEHICLE on the terrain — drop the model's lowest point (tyre contact) to the skeleton origin (keel→z=0), so no manual Position-offset dial. Self-correcting; opt-in (a flyer/hover model would be pinned down).
     public bool    keepTranslations;// ANIMATED only (conversion path): keep genuinely translation-animated bone location curves (caterpillar shuttle bones etc.) — otherwise the historical rotation-only strip applies.
+    public bool    staticAxisV2;    // STATIC only (glb/gltf): glbconv Y-up->Z-up + no longest-axis auto-align — the animated path's frame, so Rotation means the same thing on both paths.
     public string  socketBones;     // DONOR SOCKETS: "DonorName=OurBoneSubstr[@x,y,z];..." — bake exact-named zero-weight socket bones so the donor's fire/VFX lookups resolve natively (rig_anim argv[11]; switches the rename prefix to A###_).
     public bool    deployConvert;   // ANIMATED only: run Tools/deploy_convert.py on modelFile first (rigid-parts source -> bone-per-part rig) and bake the converted GLB. All knobs below mirror ModelDef.deploy* (see ModelRegistry.cs for semantics).
     public int     deployStart, deployEnd;
@@ -1130,7 +1131,8 @@ public static class UniversalBaker
             cfg.convertGrid.ToString(sinv),
             (cfg.stripParts ?? "").Trim(),
             cfg.targetTris > 0 ? cfg.targetTris.ToString(sinv) : "0",
-            cfg.doubleSided ? "1" : "0");   // double-sided halves the reduce target -> shapes the OBJ
+            cfg.doubleSided ? "1" : "0",    // double-sided halves the reduce target -> shapes the OBJ
+            cfg.staticAxisV2 ? "v2" : "v1");   // the axis convention shapes every vertex — toggling MUST re-extract
         string extractArgsFull = Path.Combine(projRoot, resDir, name + ".extract.args.txt");
         bool argsChanged = cachedFull != null && (!File.Exists(extractArgsFull) || File.ReadAllText(extractArgsFull) != extractArgsKey);
         if (argsChanged) Debug.Log($"[Factory] {name}: an extract setting changed (source/grid/strip/reduce/double-sided) — re-extracting.");
@@ -1173,13 +1175,13 @@ public static class UniversalBaker
                 if (!ConvertBlend(srcFile, tmpGlb)) return Fail("Blender .blend -> GLB conversion failed (see console)");
                 string fsDir = Path.Combine(Application.dataPath, "FactorySource", name);
                 Directory.CreateDirectory(fsDir);
-                if (!ConvertGlb(tmpGlb, fsDir, name, cfg.convertGrid)) return Fail("GLB conversion failed (see console)");
+                if (!ConvertGlb(tmpGlb, fsDir, name, cfg.convertGrid, cfg.staticAxisV2)) return Fail("GLB conversion failed (see console)");
             }
             else if (ext == ".glb" || ext == ".gltf")
             {
                 string fsDir = Path.Combine(Application.dataPath, "FactorySource", name);
                 Directory.CreateDirectory(fsDir);
-                if (!ConvertGlb(srcFile, fsDir, name, cfg.convertGrid)) return Fail("GLB conversion failed (see console)");
+                if (!ConvertGlb(srcFile, fsDir, name, cfg.convertGrid, cfg.staticAxisV2)) return Fail("GLB conversion failed (see console)");
             }
             else if (ext == ".obj" || ext == ".fbx")
             {
@@ -1384,7 +1386,12 @@ public static class UniversalBaker
         var bb = mesh.bounds; var dims = bb.size;
         float longest = Mathf.Max(dims.x, Mathf.Max(dims.y, dims.z));
         float scl = longest > 0f ? size / longest : 1f;
-        Quaternion align = (dims.x >= dims.y && dims.x >= dims.z) ? Quaternion.FromToRotation(Vector3.right, Vector3.up)
+        // v2 (axis unification, 2026-09-16): the geometry already arrives in the correct Z-up frame from
+        // glbconv, so the heuristic longest-axis auto-align is SKIPPED — Rotation is the only orientation
+        // knob, exactly like the animated path (the auto-align guessing by dims is what made the legacy
+        // static frame model-dependent on top of being pitched).
+        Quaternion align = cfg.staticAxisV2 ? Quaternion.identity
+                         : (dims.x >= dims.y && dims.x >= dims.z) ? Quaternion.FromToRotation(Vector3.right, Vector3.up)
                          : (dims.z >= dims.x && dims.z >= dims.y) ? Quaternion.FromToRotation(Vector3.forward, Vector3.up)
                          : Quaternion.identity;
         Quaternion rot = Quaternion.Euler(cfg.rotationEuler) * align;
@@ -1968,13 +1975,15 @@ public static class UniversalBaker
         return atlas;
     }
 
-    static bool ConvertGlb(string glb, string outDir, string name, int grid)
+    static bool ConvertGlb(string glb, string outDir, string name, int grid, bool zup = false)
     {
         string proj = Directory.GetParent(Application.dataPath).FullName;
         string tools = HafPackageContext.ToolPath("glbconv");
         string exe = Path.Combine(tools, "glbconv.exe");
         string dll = Path.Combine(tools, "glbconv.dll");
-        string args = $"\"{glb}\" \"{outDir}\" \"{name}\" {Mathf.Max(0, grid)}";
+        // zup = staticAxisV2: glbconv converts glTF's Y-up to the baker's Z-up, unifying the static frame with
+        // the animated path. Without it (legacy entries) the vertices pass through raw, byte-identical to before.
+        string args = $"\"{glb}\" \"{outDir}\" \"{name}\" {Mathf.Max(0, grid)}{(zup ? " zup" : "")}";
 
         System.Diagnostics.ProcessStartInfo psi;
         if (File.Exists(exe))
