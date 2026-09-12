@@ -282,6 +282,26 @@ if _brarg:
 # common case.
 _embed_previews = {"path_mode": 'COPY', "embed_textures": True} if (abs(_bright1 - 1.0) > 1e-3 or abs(_bright2 - 1.0) > 1e-3) else {}
 
+# FLAG FOLD (tagged, 2026-09-16 — the TOW tripod: "the tripod is upside down and not animating at all"):
+#   flagfold=<degrees>|<frames>
+# 0 degrees (or no tag) = the legacy naval strike (banners mirrored below the keel through Spin) — ships
+# unchanged, byte-identical. A non-zero angle re-homes the Flag bone's hinge to the TOP of the flag geometry
+# (where a tripod meets its launcher) and FOLDS by that angle: the Furl clip plays the fold over the frames
+# (frame 0 deployed -> frame N folded), Spin holds the folded pose, and the deploy-pattern assignment
+# (Idle stance Furl[0..0] · Pre-move Furl[0..N] · After-move Furl[N..0] · Movement Spin) makes the unit
+# fold before moving and redeploy on arrival — the pivot-hold waits for a pre-move clip automatically.
+# Negative degrees fold the other way (the hinge axis is the flag's larger horizontal extent).
+_ffarg = next((a for a in argv if a.startswith("flagfold=")), None)
+flag_fold_deg = 0.0
+flag_fold_frames = 12
+if _ffarg:
+    try:
+        _ffd, _fff = _ffarg[len("flagfold="):].split("|")
+        flag_fold_deg = max(-175.0, min(175.0, float(_ffd) if _ffd.strip() else 0.0))
+        flag_fold_frames = max(1, int(float(_fff))) if _fff.strip() else 12
+    except ValueError:
+        print("VEHICLE ERROR: malformed flagfold argument: %s" % _ffarg); sys.exit(1)
+
 imp(inp)
 convert_renderables(list(bpy.context.scene.objects), "")
 apply_brightness(list(bpy.context.scene.objects), _bright1, "")
@@ -1545,10 +1565,19 @@ if flag_names:
                      for _n2 in [o.name for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.vertices]
                      for _c2 in bpy.data.objects[_n2].bound_box)
         _gebn = arm_data.edit_bones.new("Flag")
-        _gebn.head = Vector((0.5 * (_gmn.x + _gmx.x), 0.5 * (_gmn.y + _gmx.y), _gkeel - 0.05))
+        if abs(flag_fold_deg) > 0.01:
+            # FOLD mode: the hinge sits at the TOP of the flag geometry (a tripod folds where it meets its
+            # launcher), and the fold axis is the flag's larger horizontal extent — stored for the clip keys.
+            _gebn.head = Vector((0.5 * (_gmn.x + _gmx.x), 0.5 * (_gmn.y + _gmx.y), _gmx.z))
+            flag_fold_axis = Vector((1.0, 0.0, 0.0)) if (_gmx.x - _gmn.x) >= (_gmx.y - _gmn.y) else Vector((0.0, 1.0, 0.0))
+        else:
+            _gebn.head = Vector((0.5 * (_gmn.x + _gmx.x), 0.5 * (_gmn.y + _gmx.y), _gkeel - 0.05))
         _gebn.tail = _gebn.head + Vector((0.0, 0.0, max(0.3, 0.25 * (_gmx.z - _gmn.z))))
         _gebn.parent = eb_body
-        print("VEHICLE FLAG: %d part(s) on one Flag bone — flies at anchor, struck below the keel through Spin (the opposite of sails); double-sided at export" % len(flag_found))
+        print("VEHICLE FLAG: %d part(s) on one Flag bone — %s; double-sided at export"
+              % (len(flag_found),
+                 ("FOLDS %.0f deg at the top hinge over %d frame(s) (deployed at idle, folded underway)" % (flag_fold_deg, flag_fold_frames))
+                 if abs(flag_fold_deg) > 0.01 else "flies at anchor, struck below the keel through Spin (the opposite of sails)"))
 
 # ---- OAR bones (galley rowing): one merged oar mesh -> one bone per physical oar ----
 # The marked oar parts (poles + blades, each mesh spanning BOTH banks) are split into individual oars by projecting
@@ -2618,9 +2647,21 @@ if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and ar
     if flag_found and arm.pose.bones.get("Flag") is not None:
         _pbG2 = arm.pose.bones["Flag"]
         _pbG2.rotation_mode = 'QUATERNION'
-        _pbG2.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
-        _pbG2.keyframe_insert('rotation_quaternion', frame=0)
-        _pbG2.keyframe_insert('rotation_quaternion', frame=SAIL_FURL_FRAMES)
+        if abs(flag_fold_deg) > 0.01:
+            # FOLD mode: the Furl clip PLAYS the fold — frame 0 deployed, frame N folded at the top hinge.
+            # Assign Idle stance Furl[0..0], Pre-move Furl[0..N], After-move Furl[N..0], Movement Spin.
+            _dbG2 = arm.data.bones["Flag"]
+            _m3G2 = (arm.matrix_world @ _dbG2.matrix_local).to_3x3()
+            _ffax = (_m3G2.inverted() @ flag_fold_axis).normalized()
+            _pbG2.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
+            _pbG2.keyframe_insert('rotation_quaternion', frame=0)            # deployed
+            _pbG2.rotation_quaternion = Quaternion(_ffax, math.radians(flag_fold_deg))
+            _pbG2.keyframe_insert('rotation_quaternion', frame=flag_fold_frames)   # folded
+            _pbG2.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))     # leave the POSE deployed for later bakes
+        else:
+            _pbG2.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
+            _pbG2.keyframe_insert('rotation_quaternion', frame=0)
+            _pbG2.keyframe_insert('rotation_quaternion', frame=SAIL_FURL_FRAMES)
     try:
         _sfcs = list(_furl.fcurves)
     except AttributeError:
@@ -2629,12 +2670,16 @@ if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and ar
         for _kp in _fc.keyframe_points:
             _kp.interpolation = 'LINEAR'
     arm.animation_data.action = act                                      # 'Spin' stays the active action, as before
-    print("VEHICLE 'Furl' stance: %s — Idle/reference Spin[0..0], Idle stance (override) Furl[%d..%d], Movement Spin, %s, Keep bone translations OFF"
-          % ((("sails CURLED to the yard (hand-close roll, %d frame(s), %.0f deg total, sag %.2f)" % (SAIL_FURL_FRAMES, sail_fold_angle, sail_fold_sag) if sail_fold else "sails FLIPPED below the keel")
-              + (", flags keyed flying" if flag_found else "")) if sail_found else "flags keyed flying (no sails)",
-             SAIL_FURL_FRAMES, SAIL_FURL_FRAMES,
-             ("Pre-move Furl[%d..0] / After-move Furl[0..%d] to PLAY the gather (or EMPTY for a one-tick swap)" % (SAIL_FURL_FRAMES, SAIL_FURL_FRAMES))
-             if (sail_fold and sail_found) else "After-move/Pre-move EMPTY"))
+    if abs(flag_fold_deg) > 0.01 and flag_found and not sail_found:
+        print("VEHICLE 'Furl' stance: flags FOLD %.0f deg at the top hinge over %d frame(s) — Idle/reference Spin[0..0], Idle stance (override) Furl[0..0] (deployed), Movement Spin (folded), Pre-move Furl[0..%d] (folds — the unit waits), After-move Furl[%d..0] (redeploys), Keep bone translations OFF"
+              % (flag_fold_deg, flag_fold_frames, flag_fold_frames, flag_fold_frames))
+    else:
+        print("VEHICLE 'Furl' stance: %s — Idle/reference Spin[0..0], Idle stance (override) Furl[%d..%d], Movement Spin, %s, Keep bone translations OFF"
+              % ((("sails CURLED to the yard (hand-close roll, %d frame(s), %.0f deg total, sag %.2f)" % (SAIL_FURL_FRAMES, sail_fold_angle, sail_fold_sag) if sail_fold else "sails FLIPPED below the keel")
+                  + (", flags keyed flying" if flag_found else "")) if sail_found else "flags keyed flying (no sails)",
+                 SAIL_FURL_FRAMES, SAIL_FURL_FRAMES,
+                 ("Pre-move Furl[%d..0] / After-move Furl[0..%d] to PLAY the gather (or EMPTY for a one-tick swap)" % (SAIL_FURL_FRAMES, SAIL_FURL_FRAMES))
+                 if (sail_fold and sail_found) else "After-move/Pre-move EMPTY"))
 
 # SAIL held raised THROUGH Spin — explicit identity keys, the same stale-pose hazard in the other direction:
 # sampling Furl then Spin would leave the canvas struck without them.
@@ -2655,13 +2700,21 @@ if sail_found and arm.pose.bones.get("Sail") is not None:
 if flag_found and arm.pose.bones.get("Flag") is not None:
     _pbG = arm.pose.bones["Flag"]; _dbG = arm.data.bones["Flag"]
     _m3G = (arm.matrix_world @ _dbG.matrix_local).to_3x3()
-    _gflip = (_m3G.inverted() @ Vector((1.0, 0.0, 0.0))).normalized()    # hull-length axis, in bone-local space
     _pbG.rotation_mode = 'QUATERNION'
-    _pbG.rotation_quaternion = Quaternion(_gflip, math.pi)
+    if abs(flag_fold_deg) > 0.01:
+        # FOLD mode: Spin holds the FOLDED pose (the tripod stays tucked while moving) — matching Furl's
+        # final frame, so Pre-move Furl[0..N] hands off seamlessly into the movement clip.
+        _gax = (_m3G.inverted() @ flag_fold_axis).normalized()
+        _pbG.rotation_quaternion = Quaternion(_gax, math.radians(flag_fold_deg))
+        _hold_desc = "held FOLDED (%.0f deg at the top hinge)" % flag_fold_deg
+    else:
+        _gflip = (_m3G.inverted() @ Vector((1.0, 0.0, 0.0))).normalized()    # hull-length axis, in bone-local space
+        _pbG.rotation_quaternion = Quaternion(_gflip, math.pi)
+        _hold_desc = "held below the keel"
     _pbG.keyframe_insert('rotation_quaternion', frame=0)
     _pbG.keyframe_insert('rotation_quaternion', frame=_clip_frames)
     _pbG.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))          # leave the POSE at rest for later bakes
-    print("VEHICLE FLAG clip: banners held below the keel through Spin 0..%d — visible at idle only (the opposite of sails)" % _clip_frames)
+    print("VEHICLE FLAG clip: banners %s through Spin 0..%d — visible/deployed at idle only" % (_hold_desc, _clip_frames))
 
 
 # ROLLING-CONTACT wheel speeds (user field report: the small road wheels looked draggy — "they should be
