@@ -351,15 +351,19 @@ strangers." Overlaps the deferred list's ENC-branding, Blender-PATH-discovery, a
 
 ## Still deferred (from earlier passes — unchanged)
 
-- **RESOLVED 2026-09-16 (convention-versioned, not migrated): Unified axis (v2).** glbconv gained a `zup`
-  mode (Y-up→Z-up, `(x,y,z)→(x,−z,y)`, normals too — a +90°X rotation, winding preserved) and the static
-  combine skips its longest-axis auto-align under the new per-entry `staticAxisV2` flag, so a v2 static bake
-  ingests the GLB in the SAME Z-up frame the animated path uses — one Rotation, one meaning. The planned
-  numeric migration of old entries was deliberately NOT done: the auto-align made each legacy entry's
-  compensation dims-dependent (no safe closed form), so old entries keep `staticAxisV2=false` (absent key)
-  and re-bake **byte-identically** (A/B-verified: legacy output byte-identical old exe vs new). New entries
-  default to v2; a legacy entry upgrades by ticking the toggle and re-tuning Rotation once. Original finding
-  kept below for the record.
+- **RESOLVED 2026-09-12 (single convention — the user's ruling): unified static/animated axis frame.**
+  First attempt (2026-09-09) convention-versioned it behind a per-entry `staticAxisV2` flag with byte-identical
+  legacy re-bakes — and the TOW acceptance test failed anyway: the flag didn't survive to bake time (the extract
+  ran keyed `v1`), and a Vehicle-Lab GLB is SKINNED, so glbconv's node-walk read raw bind-space vertices —
+  unassembled parts, pitched frame — regardless of any axis toggle. The user's verdict: *"you try to have it
+  both ways which doesn't work"* — one convention, rebake whatever disagrees. Final form: glbconv ALWAYS
+  converts Y-up→Z-up (`(x,y,z)→(x,−z,y)`, normals too — +90°X, winding preserved) and evaluates skinned
+  primitives at their BIND POSE (`blend(IBM_j · World_j)` — that applies the exporter's root-joint −90°X and
+  the rig's part-assembly offsets); the static combine's longest-axis auto-align is DELETED, the
+  `staticAxisV2` flag/toggle removed, and the extract-cache stamp bumped to `v3` so every cached OBJ
+  re-extracts. Rotation is now the only orientation knob and means the same thing on both paths; pre-existing
+  static entries re-bake into the unified frame and may need one Rotation re-dial. Original finding kept below
+  for the record.
 
 - **Static-path axis convention for GLB sources — measured wrong, unification deferred (2026-09-09).**
   The baker's world is Z-up native (Position "Z = waterline", heightUV measures Z, the synthetic test cubes

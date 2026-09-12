@@ -5,14 +5,18 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
-- **Unified axis (v2) — the static bake's frame finally matches the animated one.** The static path used to
-  ingest a GLB's Y-up vertices raw into the Z-up baker world and then auto-align the longest axis by guess —
-  so the same file needed a different Rotation per path (the Lembos arrived upside-down on one and level on
-  the other). A new per-entry toggle (ON for new entries): glbconv converts Y-up→Z-up (`zup` mode; a pure
-  +90°X rotation, normals included, winding preserved) and the auto-align is skipped — Rotation is the only
-  orientation knob and means the same thing on BOTH paths. Pre-v2 entries keep the legacy frame (absent key)
-  and re-bake byte-identically — A/B-verified against the old converter — with the old path-specific warning
-  now shown only on legacy entries; tick the toggle and re-tune Rotation once to upgrade one.
+- **ONE axis frame — the static bake now matches the animated one, no toggle, no legacy mode.** The static
+  path used to ingest a GLB's Y-up vertices raw into the Z-up baker world and then auto-align the longest
+  axis by guess — so the same file needed a different Rotation per path (the Lembos arrived upside-down on
+  one and level on the other). A first attempt shipped this as a per-entry "Unified axis (v2)" toggle with a
+  byte-identical legacy mode; the TOW acceptance test sank it (the flag didn't reach the bake, and a rigged
+  Vehicle-Lab GLB extracted unassembled either way) and the ruling was one convention, period. Now: glbconv
+  ALWAYS converts Y-up→Z-up (+90°X, normals included, winding preserved) **and evaluates skinned sources at
+  their bind pose** (joint × inverse-bind per vertex — a Vehicle-Lab rig extracts assembled and upright, the
+  TOW tripod under its launcher instead of scattered), the longest-axis auto-align is gone, and Rotation is
+  the only orientation knob with the same meaning on BOTH paths. Every cached extraction re-runs (cache stamp
+  `v3`). **Breaking on purpose:** pre-existing static GLB entries re-bake into the unified frame — re-dial
+  their Rotation once (typically back to 0,0,0).
 
 - **Per-source Brightness dials — merged models read as one unit.** The TOW launcher arrived several stops
   lighter than its tripod ("acts more like a whole unit rather than a patched model"): two sliders in the
