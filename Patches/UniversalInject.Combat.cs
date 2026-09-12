@@ -955,6 +955,13 @@ namespace HumankindAssetFramework
                     // from the moment the hold arms — so the PRE-MOVE one-shot (the howitzer folding) plays DURING the
                     // turn and the unit rolls off already folded, instead of folding on the first metre of travel
                     if (!moving && IsMoveHeld(unit)) moving = true;
+                    // CHUNK BOUNDARIES are not stops (2026-09-12, the Lembos probe log): between path chunks the
+                    // engine parks the unit ~1-2 s with MoveAlongTilesState still nonzero — the position freeze
+                    // flipped this poll to "stopped", the AFTER clip began (the sail folding mid-journey), and the
+                    // resumed chunk replayed the PRE-MOVE. Mid-move machinery counts as moving; a real arrival
+                    // clears the state within a beat, so the arrival fold/settle is barely delayed.
+                    if (!moving)
+                        try { if (Convert.ToInt32(GetMember(unit, "MoveAlongTilesState")) != 0) moving = true; } catch { }
                     if (!e.stateMoving.TryGetValue(guid, out bool wasMoving)) wasMoving = false;
                     if (wasMoving != moving)
                     {

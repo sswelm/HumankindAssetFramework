@@ -898,11 +898,17 @@ namespace HumankindAssetFramework
             // poll tick (~0.1-0.15 s) after this hold's own timer started — so the clip's tail spilled past the
             // release. The stamp below closes that gap; the margin buys the release a settled beat with the
             // canvas (or the howitzer's trails) fully in position before the first metre of travel.
-            float foldHold = hasFold ? UnityEngine.Mathf.Min(ent.preMoveDur + 0.35f, PivotFoldCapSec) : 0f;
+            // FRESH ORDERS ONLY for the fold (2026-09-12, the probe log's smoking gun): at a mid-path chunk
+            // boundary (history idx > 0) the sail is already SET — re-arming the fold hold there parked the
+            // ship ~2.5 s per boundary and REPLAYED the unfold ("[Pivot] holding ... stood 1,2 s, history 3/4"
+            // followed by inPreMove=True). A straight multi-chunk run stuttered at every boundary, which read
+            // as "the unfold only works when turning". idx <= 0 also covers an unreadable history (-1).
+            bool freshPath = idx <= 0;
+            float foldHold = hasFold && freshPath ? UnityEngine.Mathf.Min(ent.preMoveDur + 0.35f, PivotFoldCapSec) : 0f;
             float hold = UnityEngine.Mathf.Max(turnHold, foldHold);
             if (hold <= 0f) return false;
             if (turnHold > 0f) SetAimOverride(upos, yaw, hold);   // the ease target for the hold: the next tile's bearing (AimMaintain reads it; it expires with the hold)
-            if (hasFold)
+            if (hasFold && freshPath)
             {
                 // Open the PRE-MOVE one-shot window NOW, in lockstep with the hold (map-army key: salt 0L, as in
                 // ProcessAnimStates). stateMoving is pre-marked true so the poll's wasMoving!=moving edge doesn't
