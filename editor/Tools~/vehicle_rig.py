@@ -51,8 +51,9 @@ def imp(path):
         bpy.ops.wm.open_mainfile(filepath=path)
     else:
         print("VEHICLE ERROR: unsupported extension .%s" % ext); sys.exit(1)
-    # purge the Blender glTF importer's bone-shape placeholder (unskinned "Icosphere" mesh, not in the file itself)
-    for _ico in [o for o in bpy.data.objects if o.type == 'MESH' and o.name.startswith('Icosphere') and not o.vertex_groups]:
+    # purge the Blender glTF importer's bone-shape placeholder (unskinned "Icosphere" mesh, not in the file
+    # itself) — by SIGNATURE, so a real part that merely kept the default name survives to the probe list
+    for _ico in [o for o in bpy.data.objects if o.type == 'MESH' and not o.vertex_groups and is_icosphere_artifact(o)]:
         print("VEHICLE purged glTF importer bone-shape artifact: %s" % _ico.name)
         bpy.data.objects.remove(_ico, do_unlink=True)
 
@@ -64,6 +65,24 @@ def world_bbox(o):
     mn = Vector((min(p.x for p in pts), min(p.y for p in pts), min(p.z for p in pts)))
     mx = Vector((max(p.x for p in pts), max(p.y for p in pts), max(p.z for p in pts)))
     return (mn + mx) / 2.0, mx - mn
+
+def is_icosphere_artifact(o):
+    """The glTF importer's bone-shape placeholder, identified by SIGNATURE, not name alone (PR #33 review
+    finding 5: Blender authors keep default names, so a real ball/buoy named Icosphere.003 must survive to
+    both the probe list and the rig). The placeholder is an untouched icosphere primitive: an icosphere
+    vertex count (12/42/162/642 for subdivisions 0-3) and a sphere's near-equal local extents. A stretched
+    or re-modelled part fails the test and is treated as geometry."""
+    if not o.name.startswith(('Icosphere', 'B_Icosphere')):
+        return False
+    if len(o.data.vertices) not in (12, 42, 162, 642):
+        return False
+    _xs = [c[0] for c in o.bound_box]; _ys = [c[1] for c in o.bound_box]; _zs = [c[2] for c in o.bound_box]
+    _ex = (max(_xs) - min(_xs), max(_ys) - min(_ys), max(_zs) - min(_zs))
+    # 0.8, not 0.9 (measured): an icosphere primitive's bbox is NOT a cube — subdiv 1 measures extents
+    # (1.79, 1.70, 2.00), ratio 0.85, and orientation shifts it — so 0.9 let authentic artifacts through.
+    # A deliberately stretched ornament (the drill's 0.3-squashed disc: ratio 0.34) still fails by a mile;
+    # an unmodified sphere-like REAL part is protected by its role marking, not by this ratio.
+    return max(_ex) > 0 and min(_ex) > 0.8 * max(_ex)
 
 imp(inp)
 _lap("import")
@@ -101,7 +120,7 @@ if _m2arg:
         # .blend cannot merge — open_mainfile REPLACES the scene, silently discarding the first model
         print("VEHICLE ERROR: second model: unsupported extension .%s (glb/gltf/fbx/obj only)" % _ext2); sys.exit(1)
     _new2 = [o for o in bpy.data.objects if o not in _before2]
-    for _ico2 in [o for o in _new2 if o.type == 'MESH' and o.name.startswith('Icosphere') and not o.vertex_groups]:
+    for _ico2 in [o for o in _new2 if o.type == 'MESH' and not o.vertex_groups and is_icosphere_artifact(o)]:
         print("VEHICLE purged glTF importer bone-shape artifact (second model): %s" % _ico2.name)
         _new2.remove(_ico2); bpy.data.objects.remove(_ico2, do_unlink=True)
     _o2v = [float(v) for v in _m2off.split(",")]
@@ -698,13 +717,21 @@ if mode == "rigfast":
 # (local == world), so the hole stayed invisible. Flatten HERE, once, for BOTH models: bake world transforms
 # into every mesh, clear source skinning (its armature goes), and drop the non-mesh helpers — the straighten
 # below then applies to every mesh uniformly instead of only parent-less ones.
+# A MARKED part is never garbage by definition — any role reference protects it from the artifact purge
+# (PR #33 review finding 5: probe lists a real part named Icosphere.003, the user marks it, and Generate
+# must not then delete it and hard-exit find()). ignore_names is deliberately absent: Ignore means delete.
+_role_marked = set()
+for _rl in (wheel_names, turret_names, track_names, gun_names, rotor_names, tailrotor_names, trail_names,
+            muzzle_names, cradle_names, oar_names, sail_names, rigging_names, structure_names, body_names,
+            flag_names, rudder_names, preserve_names, flip_names, detail_names):
+    _role_marked.update(_rl)
 for _fo in mesh_objects():
     # the import-time Icosphere purge is conservative (skips skinned ones); on THIS path all skinning is
     # about to be cleared anyway, so a bone-shape placeholder with vertex groups is equally garbage — the
-    # TOW drill shipped one as a floating 2 m sphere in the output before this line existed. B_ prefix
-    # included (PR #33 review, three angles): every second-model object is RENAMED before this runs, so a
-    # skinned Icosphere arriving via the merge would otherwise walk straight past the check.
-    if _fo.name.startswith(('Icosphere', 'B_Icosphere')):
+    # TOW drill shipped one as a floating 2 m sphere in the output before this line existed. B_ prefix and
+    # the geometry SIGNATURE are both checked (PR #33 review): renamed second-model placeholders must not
+    # escape, and a real part that kept the default name must not die.
+    if is_icosphere_artifact(_fo) and _fo.name not in _role_marked:
         print("VEHICLE flatten: purged glTF importer bone-shape artifact: %s" % _fo.name)
         bpy.data.objects.remove(_fo, do_unlink=True)
         continue
