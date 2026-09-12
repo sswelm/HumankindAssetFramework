@@ -66,8 +66,12 @@ public class AnimationLabWindow : EditorWindow
     float fitAnimT; double fitAnimTick;
     List<(string label, string dir)> fitRoles; string fitRolesFor;   // role clips that actually exist, cached per resource
     static readonly (string label, string dir)[] FitAnimRoleDirs = {
-        ("Idle / main clip", "anim"), ("Movement", "anim_move"), ("After-move (fold)", "anim_after"),
-        ("Pre-move (unfold)", "anim_premove"), ("Attack", "anim_attack"),
+        // "Idle / main clip" is the REFERENCE (anim/ — a flag/sail rig's deliberately DEPLOYED rest frame);
+        // the Idle stance override bakes to anim_idle/ and is what the game actually plays at idle — without
+        // its own entry here the furled-at-anchor look was invisible in the Lab ("why doesn't it hide the
+        // sails at idle?", the SteamTransports, 2026-09-13). Entries only show for folders that exist.
+        ("Idle / main clip", "anim"), ("Idle stance (override)", "anim_idle"), ("Movement", "anim_move"),
+        ("After-move (fold)", "anim_after"), ("Pre-move (unfold)", "anim_premove"), ("Attack", "anim_attack"),
     };
 
     [MenuItem("Tools/HAF/Animation Lab")]
