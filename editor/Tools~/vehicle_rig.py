@@ -126,8 +126,79 @@ def convert_renderables(scope, tag):
     print("VEHICLE converted %d renderable non-mesh object(s) (curve/surface/text/metaball) to mesh%s%s"
           % (_n_conv, tag, ", %d face-less wire(s) dropped" % len(_wires) if _wires else ""))
 
+def apply_brightness(scope, factor, tag):
+    """Per-SOURCE albedo brightness (2026-09-13, the TOW launcher vs its tripod: 'the merged model should
+    act like a whole unit rather than a patched model'). Multiplies ONLY the base-color channel: textures
+    reached through a Principled BSDF's Base Color input (never normal/roughness/metallic maps — multiplying
+    a normal map breaks shading), and the Base Color value itself for textureless materials. Pixels are
+    edited in place and packed, so the adjustment bakes into the GLB and reaches the preview, the probe and
+    the Factory atlas identically. Factor 1 = untouched; clamped to a sane range at the boundary."""
+    factor = min(4.0, max(0.2, factor))
+    if abs(factor - 1.0) < 1e-3:
+        return
+    _imgs = set(); _mats = set()
+    for _o in scope:
+        if getattr(_o, "type", None) != 'MESH':
+            continue
+        for _sl in _o.material_slots:
+            if _sl.material:
+                _mats.add(_sl.material)
+    for _m in _mats:
+        if not _m.use_nodes:
+            _dc = _m.diffuse_color
+            _m.diffuse_color = (min(1.0, _dc[0] * factor), min(1.0, _dc[1] * factor), min(1.0, _dc[2] * factor), _dc[3])
+            continue
+        for _n in _m.node_tree.nodes:
+            if _n.type != 'BSDF_PRINCIPLED':
+                continue
+            _bc = _n.inputs.get('Base Color')
+            if _bc is None:
+                continue
+            if _bc.is_linked:
+                # walk to the image feeding Base Color (possibly through a mix/vertex-color node one hop away)
+                _stack = [_l.from_node for _l in _bc.links]
+                _seen = set()
+                while _stack:
+                    _nd = _stack.pop()
+                    if _nd in _seen:
+                        continue
+                    _seen.add(_nd)
+                    if _nd.type == 'TEX_IMAGE' and _nd.image is not None:
+                        _imgs.add(_nd.image)
+                    else:
+                        for _in in _nd.inputs:
+                            for _l2 in _in.links:
+                                _stack.append(_l2.from_node)
+            else:
+                _v = _bc.default_value
+                _bc.default_value = (min(1.0, _v[0] * factor), min(1.0, _v[1] * factor), min(1.0, _v[2] * factor), _v[3])
+    import numpy as _np
+    for _img in _imgs:
+        if _img.size[0] == 0 or _img.size[1] == 0:
+            continue
+        _px = _np.empty(_img.size[0] * _img.size[1] * 4, dtype=_np.float32)
+        _img.pixels.foreach_get(_px)
+        _pa = _px.reshape(-1, 4)
+        _pa[:, :3] = _np.clip(_pa[:, :3] * factor, 0.0, 1.0)
+        _img.pixels.foreach_set(_px)
+        _img.pack()   # the edited buffer, not the untouched source file, must be what the exporter writes
+    print("VEHICLE brightness x%.2f%s: %d base-color image(s), %d material(s) adjusted" % (factor, tag, len(_imgs), len(_mats)))
+
+# BRIGHTNESS (tagged like merge2 — probe and rig both need it so previews match the bake):
+#   bright=<first model factor>|<second model factor>
+_brarg = next((a for a in argv if a.startswith("bright=")), None)
+_bright1 = _bright2 = 1.0
+if _brarg:
+    try:
+        _b1s, _b2s = _brarg[len("bright="):].split("|")
+        _bright1 = float(_b1s) if _b1s.strip() else 1.0
+        _bright2 = float(_b2s) if _b2s.strip() else 1.0
+    except ValueError:
+        print("VEHICLE ERROR: malformed bright argument: %s" % _brarg); sys.exit(1)
+
 imp(inp)
 convert_renderables(list(bpy.context.scene.objects), "")
+apply_brightness(list(bpy.context.scene.objects), _bright1, "")
 _lap("import")
 
 # ---- SECOND MODEL MERGE (2026-09-12, user: "combine 2 3d models and merge") ----
@@ -164,6 +235,7 @@ if _m2arg:
         print("VEHICLE ERROR: second model: unsupported extension .%s (glb/gltf/fbx/obj only)" % _ext2); sys.exit(1)
     _new2 = [o for o in bpy.data.objects if o not in _before2]
     convert_renderables(_new2, " (second model)")   # BEFORE the rename/helper classification — curves become B_ parts, not casualties
+    apply_brightness(_new2, _bright2, " (second model)")   # per-source tone matching — the images sets are disjoint (different files)
     for _ico2 in [o for o in _new2 if o.type == 'MESH' and not o.vertex_groups and is_icosphere_artifact(o)]:
         print("VEHICLE purged glTF importer bone-shape artifact (second model): %s" % _ico2.name)
         _new2.remove(_ico2); bpy.data.objects.remove(_ico2, do_unlink=True)

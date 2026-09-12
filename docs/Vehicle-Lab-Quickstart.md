@@ -43,6 +43,11 @@ units; a cm-authored file next to a meter one is 100× off). The Generate log pr
 the part list, so alignment is dialed with numbers, not eyeballs. Not available on the source-skeleton fast path.
 Watch the combined triangle count against the draw ceiling (section 9).
 
+Two sources rarely agree on exposure either: the **Brightness** sliders (one per source, default 1) multiply
+each model's albedo — base-color textures and colors only, never normal/roughness maps — baked into the
+generated GLB, so the preview, the probe and the Factory atlas all show the same tone. Darken the light one
+(or lighten the dark one) until the pair reads as one unit. The first-model dial also works without a merge.
+
 ## 2. Probe and orient
 
 1. Open **`Tools ▸ HAF ▸ Vehicle Lab`**.

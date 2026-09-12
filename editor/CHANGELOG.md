@@ -5,6 +5,14 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Per-source Brightness dials — merged models read as one unit.** The TOW launcher arrived several stops
+  lighter than its tripod ("acts more like a whole unit rather than a patched model"): two sliders in the
+  Second-model section (first model / second model, 0.25–2.5, default 1 = untouched) multiply each source's
+  ALBEDO — base-color textures' pixels and textureless base colors, never normal/roughness maps — baked into
+  the generated GLB in Blender, so the part preview, the probe and the Factory atlas all show the same tone.
+  The first-model dial works with or without a merge. Drilled to the decimal: value materials measure ×0.600
+  exactly at 0.6, and a 0.5-gray texture at ×1.6 measures 0.804 through the full export round trip.
+
 - **The discard warning now knows whether you saved.** The Vehicle Lab's "discard the current session?" dialog
   fired on every switch, even straight after a Save. Dirty now means "differs from the last Save/Load": the
   window state is serialized and compared byte-identically against a clean-state snapshot taken at that
