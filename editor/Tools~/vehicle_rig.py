@@ -84,7 +84,37 @@ def is_icosphere_artifact(o):
     # an unmodified sphere-like REAL part is protected by its role marking, not by this ratio.
     return max(_ex) > 0 and min(_ex) > 0.8 * max(_ex)
 
+def convert_renderables(scope, tag):
+    """CURVE/SURFACE/FONT/META objects are renderable — the glTF exporter used to convert them at export, so
+    the flatten deleting them as 'helpers' (PR #33 review finding 6) silently dropped visible geometry (a
+    .blend ship's curve-object ropes/railings). Convert them to real meshes HERE instead: they join the part
+    list, roles, reduce dials and budgets like anything else — strictly better than the old export-only
+    conversion, which bypassed every measurement pass. In-place convert keeps names, transforms and
+    parenting; a geometry-less curve (a pure path/control object) converts to an empty mesh and stays a
+    helper by the len(vertices) > 0 rule everywhere else."""
+    _conv = [o for o in scope if o.type in ('CURVE', 'SURFACE', 'FONT', 'META')]
+    if not _conv:
+        return
+    bpy.ops.object.select_all(action='DESELECT')
+    for _co in _conv:
+        _co.select_set(True)
+    bpy.context.view_layer.objects.active = _conv[0]
+    bpy.ops.object.convert(target='MESH')
+    # an unbeveled curve converts to a face-less WIRE (verts+edges), not an empty mesh (measured: a plain
+    # bezier -> 13 verts, 0 faces) — invisible in any render, but it would pollute the part list and weld
+    # into the hull as dead weight. Drop the face-less results; real bevel/extrude geometry has faces.
+    _wires = [o for o in _conv if o.type == 'MESH' and len(o.data.polygons) == 0]
+    for _wo in _wires:
+        try:
+            scope.remove(_wo)   # keep the CALLER's list free of dead references (the merge iterates it after)
+        except ValueError:
+            pass
+        bpy.data.objects.remove(_wo, do_unlink=True)
+    print("VEHICLE converted %d renderable non-mesh object(s) (curve/surface/text) to mesh%s%s"
+          % (len(_conv), tag, ", %d face-less wire(s) dropped" % len(_wires) if _wires else ""))
+
 imp(inp)
+convert_renderables(list(bpy.context.scene.objects), "")
 _lap("import")
 
 # ---- SECOND MODEL MERGE (2026-09-12, user: "combine 2 3d models and merge") ----
@@ -120,6 +150,7 @@ if _m2arg:
         # .blend cannot merge — open_mainfile REPLACES the scene, silently discarding the first model
         print("VEHICLE ERROR: second model: unsupported extension .%s (glb/gltf/fbx/obj only)" % _ext2); sys.exit(1)
     _new2 = [o for o in bpy.data.objects if o not in _before2]
+    convert_renderables(_new2, " (second model)")   # BEFORE the rename/helper classification — curves become B_ parts, not casualties
     for _ico2 in [o for o in _new2 if o.type == 'MESH' and not o.vertex_groups and is_icosphere_artifact(o)]:
         print("VEHICLE purged glTF importer bone-shape artifact (second model): %s" % _ico2.name)
         _new2.remove(_ico2); bpy.data.objects.remove(_ico2, do_unlink=True)
@@ -741,7 +772,8 @@ for _fo in mesh_objects():
         _fo.modifiers.remove(_fm)
     _fo.parent = None
     _fo.matrix_world = _fmw
-_fhelpers = [o for o in bpy.context.scene.objects if o.type != 'MESH']
+_fhelpers = [o for o in bpy.context.scene.objects
+             if o.type != 'MESH' or not o.data.vertices]   # + zero-vert husks (an empty curve after convert_renderables)
 for _fo in _fhelpers:
     bpy.data.objects.remove(_fo, do_unlink=True)
 if _fhelpers:

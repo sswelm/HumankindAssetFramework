@@ -18,7 +18,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   spheres from the second model; the discard dialog compares against a clean-state snapshot taken after the
   load guards run, so a guard-tripping recipe file no longer reads as eternally dirty; and geometry-producing
   modifiers (Array/Mirror/Solidify — `.blend` sources) are now BAKED after import, so they reach the part
-  list, previews and output for the first time (they never did — the exporters always ignored them).
+  list, previews and output for the first time (they never did — the exporters always ignored them). The
+  Icosphere artifact purge went from name-only to SIGNATURE + role protection (a real ball that kept the
+  default name lists and survives; a marked part is never purged), and curve/surface/text objects are
+  CONVERTED to meshes at import instead of being swept as helpers — they become ordinary markable parts
+  (face-less wire paths are dropped; they render as nothing anywhere).
 
 - **Two models can merge into one rig.** A collapsible "Second model" section (optional — most vehicles never
   need it) imports a second source into the same scene before the probe: its parts arrive with a `B_` prefix
