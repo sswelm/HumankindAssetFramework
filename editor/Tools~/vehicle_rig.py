@@ -355,6 +355,36 @@ preserve_reduce = min(95.0, max(0.0, float(argv[68]))) if len(argv) > 68 and arg
 # wants a dial between Structure and Body. Welds to the hull like Body; no exemptions, no special handling.
 detail_names = namelist(argv[69]) if len(argv) > 69 and argv[69].strip() else []
 detail_reduce = min(95.0, max(0.0, float(argv[70]))) if len(argv) > 70 and argv[70].strip() else 0.0
+# SAIL IDLE FOLD (argv[71], 2026-09-09, vanilla-parity request): "1" = at idle the canvas FOLDS at the yard
+# (visible bundled sail, like the vanilla triaconter's brailed-up cloth) instead of the 180-degree strike below
+# the keel. ROTATION-ONLY by construction: the canvas is band-skinned to a Sail->SailF1->SailF2 chain and the
+# Furl stance zigzags the fold bones about the yard axis — no scale or translation curves (the engine does not
+# play per-bone scale faithfully, deploy_convert's AW101 finding, and rotation stances are the pipeline's
+# proven currency). Rigging still rides the root Sail bone, so ropes stay standing while the cloth gathers.
+sail_fold = len(argv) > 71 and argv[71].strip() == "1"
+# FOLD FRAMES / ANGLE (argv[72..73], 2026-09-09 follow-up: "moving too fast, in a single frame"): the fold is
+# still a stance if assigned as Furl[N..N], but with real frames the state machine can PLAY it — the trails'
+# Deploy pattern: Idle stance Furl[N..N], Pre-move Furl[N..0] (canvas lets out as the ship gets under way),
+# After-move Furl[0..N] (gathers on arrival). Angle: how far each fold bone zigzags — smaller = a looser,
+# taller bundle. The legacy strike keeps its 1-frame snap (it happens out of sight below the keel).
+sail_fold_frames = max(1, int(float(argv[72]))) if len(argv) > 72 and argv[72].strip() else 12
+# CURL, not pleat (2026-09-09 second field pass: "fold more how an open hand thumb and fingers close"): the
+# angle is the TOTAL curl the canvas rolls through, split equally over the three fold joints, ALL bending the
+# same way — fingers closing onto the palm (the top band). At 270 (default) the joints bend 90 each and the
+# canvas's foot lands exactly at the beam, curled against the yard like a brailed roll.
+sail_fold_angle = min(360.0, max(30.0, float(argv[73]))) if len(argv) > 73 and argv[73].strip() else 270.0
+# CURL DIRECTION (argv[74], 2026-09-09: "it moves the opposite direction, I want to move it backwards"): which
+# side of the sail plane the roll tucks toward depends on the source model's facing, so it cannot be derived —
+# "1" mirrors the curl. Same fix as the blade-roll saga: the mirror of R(a, th) is R(a, -th).
+sail_fold_flip = len(argv) > 74 and argv[74].strip() == "1"
+# SAG (argv[75], 2026-09-09: "fold thinner where gravity exists and not behave like in space"; second pass
+# "curl 180 + sag 0.5 should halve the horizontal width"): 0..1 DRAPE, not extra curl (the first model LERPed
+# the joints toward 170 deg — measured verdict: "it's just curling more"). Gravity pulls every cloth segment
+# toward hanging vertical: accumulate the segments' angles from straight-down, squash the horizontal
+# component by (1-sag)^2, re-derive the per-joint deltas (all rotations share the yard axis, so angles
+# compose as scalars). Segment lengths are rigid, so the squash renormalizes — (1-s)^2 makes sag 0.5 land at
+# ~half the horizontal spread, and sag 1 hangs the fold flat. Motion still closes like a hand.
+sail_fold_sag = min(1.0, max(0.0, float(argv[75]))) if len(argv) > 75 and argv[75].strip() else 0.0
 # OAR LIFT (argv[56]): a CONSTANT tilt about the dip axis, re-centring the whole stroke — the knob the dip sign
 # cannot be (±dip is the same oscillation, phase-flipped; the blades visit the same depths either way). A source
 # whose oars are modelled raked steeply into the water (the Khalandion: "at -30 they almost go vertically") rides
@@ -473,6 +503,9 @@ if mode == "rigfast":
         sys.exit(1)
     if flip_names:
         print("VEHICLE ERROR: Flip (winding surgery) is not supported on the source-skeleton fast path — rigfast exports the source geometry as-is; disable the fast path to flip mesh parts")
+        sys.exit(1)
+    if sail_fold:
+        print("VEHICLE ERROR: Fold sail at idle needs the generated Sail fold chain (new bones + band skinning) — the source-skeleton fast path keeps the artist skeleton; disable the fast path or the fold option")
         sys.exit(1)
     def _fast():
         global objs
@@ -1006,6 +1039,8 @@ for i, tn in enumerate(track_names):
 # ---- SAIL bone: every marked sail part welds to ONE bone so the canvas lowers/raises as a unit ----
 sail_found = []
 sail_top_z = 0.0
+sail_fold_cuts = []                        # fold-line z cuts (descending), set with the Sail bone when sail_fold is on
+sail_fold_yard = Vector((1.0, 0.0, 0.0))   # fold hinge axis (the yard direction), ditto
 if sail_names:
     for _sn in sail_names:
         _so = find_opt(_sn)
@@ -1028,7 +1063,28 @@ if sail_names:
         _sebn.head = Vector((0.5 * (_smn.x + _smx.x), 0.5 * (_smn.y + _smx.y), _skeel - 0.05))
         _sebn.tail = _sebn.head + Vector((0.0, 0.0, max(0.3, 0.25 * (_smx.z - _smn.z))))
         _sebn.parent = eb_body
-        print("VEHICLE SAIL: %d part(s) on one Sail bone (double-sided at export; struck/raised by the 'Furl' clip)" % len(sail_found))
+        if sail_fold:
+            # FOLD chain: three child bones whose heads sit ON the fold lines (1/4, 2/4, 3/4 down from the
+            # yard), at the sail bbox's horizontal centre. The Furl stance zigzags them +/-/+ so the cloth
+            # gathers as an accordion pleat — and the band count is EVEN by design (parity, 2026-09-09 field
+            # feedback "the underside of the sail should fold to the top of the beam"): with four bands the
+            # segment orientations run down/up/down/UP, so the canvas's bottom edge finishes its last fold
+            # pointing up and lands AT the yard, not a band below it. The yard axis (fold hinge) is the
+            # sail's LARGER horizontal extent; stored with the band z-cuts for the skinning pass below.
+            _sh = max(1e-6, _smx.z - _smn.z)
+            sail_fold_cuts = [_smx.z - _sh * _q / 4.0 for _q in (1, 2, 3)]
+            sail_fold_yard = Vector((1.0, 0.0, 0.0)) if (_smx.x - _smn.x) >= (_smx.y - _smn.y) else Vector((0.0, 1.0, 0.0))
+            _scx, _scy = 0.5 * (_smn.x + _smx.x), 0.5 * (_smn.y + _smx.y)
+            _sfprev = _sebn
+            for _fi, _fz in enumerate(sail_fold_cuts):
+                _sf = arm_data.edit_bones.new("SailF%d" % (_fi + 1))
+                _sf.head = Vector((_scx, _scy, _fz))
+                _sf.tail = _sf.head + Vector((0.0, 0.0, -max(0.1, 0.25 * _sh / 4.0)))
+                _sf.parent = _sfprev
+                _sfprev = _sf
+        print("VEHICLE SAIL: %d part(s) on one Sail bone%s (double-sided at export; %s by the 'Furl' clip)"
+              % (len(sail_found), " + SailF1..F3 fold chain" if sail_fold else "",
+                 "FOLDED at the yard" if sail_fold else "struck/raised"))
 
 # ---- RIGGING rides the SAIL bone (2026-09-08 user request: "they will move away like sails except they are
 # one sided"): halyards, sheets and stays belong to the canvas — struck below the keel WITH it at idle,
@@ -1846,8 +1902,23 @@ for o in objs:
     bname = bone_of.get(o.name, body_bone)
     for g in list(o.vertex_groups):
         o.vertex_groups.remove(g)
-    vg = o.vertex_groups.new(name=bname)
-    vg.add(list(range(len(o.data.vertices))), 1.0, 'REPLACE')
+    if sail_fold and o.name in sail_found:
+        # CANVAS bands for the fold (rigging on the Sail bone is NOT banded — ropes stay standing): each vertex
+        # goes 100% to the bone owning its height band, hard cuts at the fold lines — folds ARE creases.
+        _bandnames = ["Sail", "SailF1", "SailF2", "SailF3"]
+        _bandvis = {_bn: [] for _bn in _bandnames}
+        for _v in o.data.vertices:
+            _wz = (o.matrix_world @ _v.co).z
+            _bi = sum(1 for _cz in sail_fold_cuts if _wz < _cz)   # 0 above the first cut .. 3 below the last
+            _bandvis[_bandnames[_bi]].append(_v.index)
+        for _bn9, _vis9 in _bandvis.items():
+            if _vis9:
+                o.vertex_groups.new(name=_bn9).add(_vis9, 1.0, 'REPLACE')
+        print("VEHICLE SAIL fold bands '%s': %s vert(s)"
+              % (o.name, " ".join("%s=%d" % (_bn, len(_bandvis[_bn])) for _bn in _bandnames)))
+    else:
+        vg = o.vertex_groups.new(name=bname)
+        vg.add(list(range(len(o.data.vertices))), 1.0, 'REPLACE')
     md = o.modifiers.new("Armature", 'ARMATURE'); md.object = arm
     o.parent = arm
 
@@ -2084,7 +2155,9 @@ if oar_bake:
 # reference's frame 0 as the canonical rest, and a struck reference turns the whole bind upside-down), Idle
 # stance (override) = Furl[1..1] (struck below the hull, the Deploy-stance mechanism), Movement = Spin (raised),
 # After-move / Pre-move EMPTY — the state change swaps the pose in one tick. Rotation-only: Keep translations OFF.
-SAIL_FURL_FRAMES = 1
+# FOLD mode instead spans sail_fold_frames so the gather can be PLAYED (Pre-move Furl[N..0] / After-move
+# Furl[0..N], the trails' Deploy pattern) — held as a stance via Furl[N..N] either way.
+SAIL_FURL_FRAMES = sail_fold_frames if (sail_fold and sail_found) else 1
 if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and arm.pose.bones.get("Flag") is not None):
     # ROTATION, not translation (2026-09-05): the strike is a 180-degree flip of the Sail bone about the keel-line
     # head, mirroring the canvas below the hull. The translation version fought the converter — the rest-fold made
@@ -2106,8 +2179,44 @@ if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and ar
         _pbS.rotation_mode = 'QUATERNION'
         _pbS.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
         _pbS.keyframe_insert('rotation_quaternion', frame=0)                 # raised — matches Spin's rest pose
-        _pbS.rotation_quaternion = Quaternion(_flipax, math.pi)
-        _pbS.keyframe_insert('rotation_quaternion', frame=SAIL_FURL_FRAMES)  # struck — canvas mirrored below the keel
+        if sail_fold and arm.pose.bones.get("SailF1") is not None:
+            # FOLD stance: the root Sail bone HOLDS (canvas stays at the yard, rigging stands) and the fold
+            # chain CURLS about the yard axis — every joint bends the SAME way, the total split equally, like
+            # fingers closing onto a palm (the user's image; also how a sail is actually brailed into a roll).
+            # At the 270 default each joint bends 90: band1 swings horizontal, band2 climbs, band3 folds back
+            # in — the canvas's foot lands at the beam, tucked against the top band, a C-shaped roll under the
+            # yard. Linear interpolation curls all joints together, so the gather MOVES like a hand closing.
+            _pbS.keyframe_insert('rotation_quaternion', frame=SAIL_FURL_FRAMES)   # root stays raised in the fold stance
+            # DRAPE MATH: theta_k = segment k's angle from straight-down after the pure curl; squash its
+            # horizontal component (sin) by (1-s)^2 and re-aim — atan2 renormalizes, the while-loops unwrap
+            # back into theta's revolution (atan2 wraps at 180). Per-joint key = delta of consecutive
+            # draped angles. s capped at 0.98: at exactly 1 a 90-degree segment hits atan2(0,0).
+            _s98 = min(0.98, sail_fold_sag)
+            _hsquash = (1.0 - _s98) ** 2
+            _jbase = math.radians(sail_fold_angle / 3.0)
+            _jdeltas = []; _thprev = 0.0
+            for _jk in (1, 2, 3):
+                _th = _jbase * _jk
+                _thp = math.atan2(math.sin(_th) * _hsquash, math.cos(_th))
+                while _thp < _th - math.pi:
+                    _thp += 2.0 * math.pi
+                while _thp > _th + math.pi:
+                    _thp -= 2.0 * math.pi
+                _jdeltas.append(_thp - _thprev); _thprev = _thp
+            _fsign = (-1.0 if sail_fold_flip else 1.0)
+            for _fbn, _folddeg in (("SailF1", _jdeltas[0] * _fsign), ("SailF2", _jdeltas[1] * _fsign), ("SailF3", _jdeltas[2] * _fsign)):
+                _pbF = arm.pose.bones[_fbn]; _dbF = arm.data.bones[_fbn]
+                _m3F = (arm.matrix_world @ _dbF.matrix_local).to_3x3()
+                _foldax = (_m3F.inverted() @ sail_fold_yard).normalized()    # yard axis, in bone-local space
+                _pbF.rotation_mode = 'QUATERNION'
+                _pbF.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
+                _pbF.keyframe_insert('rotation_quaternion', frame=0)         # spread — matches Spin's rest pose
+                _pbF.rotation_quaternion = Quaternion(_foldax, _folddeg)   # flip sign already baked into the delta
+                _pbF.keyframe_insert('rotation_quaternion', frame=SAIL_FURL_FRAMES)
+                _pbF.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))  # leave the POSE spread for the later bakes
+        else:
+            _pbS.rotation_quaternion = Quaternion(_flipax, math.pi)
+            _pbS.keyframe_insert('rotation_quaternion', frame=SAIL_FURL_FRAMES)  # struck — canvas mirrored below the keel
         _pbS.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))          # leave the POSE raised for the later bakes
     # FLAGS keyed EXPLICITLY at identity in Furl — flying at anchor. An unkeyed bone inherits whatever pose the
     # previous evaluation left (the preview sampling Spin first left the flag STRUCK; field report: "the flags
@@ -2127,18 +2236,24 @@ if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and ar
         for _kp in _fc.keyframe_points:
             _kp.interpolation = 'LINEAR'
     arm.animation_data.action = act                                      # 'Spin' stays the active action, as before
-    print("VEHICLE 'Furl' stance: %s — Idle/reference Spin[0..0], Idle stance (override) Furl[%d..%d], Movement Spin, After-move/Pre-move EMPTY, Keep bone translations OFF"
-          % (("sails FLIPPED below the keel" + (", flags keyed flying" if flag_found else "")) if sail_found else "flags keyed flying (no sails)",
-             SAIL_FURL_FRAMES, SAIL_FURL_FRAMES))
+    print("VEHICLE 'Furl' stance: %s — Idle/reference Spin[0..0], Idle stance (override) Furl[%d..%d], Movement Spin, %s, Keep bone translations OFF"
+          % ((("sails CURLED to the yard (hand-close roll, %d frame(s), %.0f deg total, sag %.2f)" % (SAIL_FURL_FRAMES, sail_fold_angle, sail_fold_sag) if sail_fold else "sails FLIPPED below the keel")
+              + (", flags keyed flying" if flag_found else "")) if sail_found else "flags keyed flying (no sails)",
+             SAIL_FURL_FRAMES, SAIL_FURL_FRAMES,
+             ("Pre-move Furl[%d..0] / After-move Furl[0..%d] to PLAY the gather (or EMPTY for a one-tick swap)" % (SAIL_FURL_FRAMES, SAIL_FURL_FRAMES))
+             if (sail_fold and sail_found) else "After-move/Pre-move EMPTY"))
 
 # SAIL held raised THROUGH Spin — explicit identity keys, the same stale-pose hazard in the other direction:
 # sampling Furl then Spin would leave the canvas struck without them.
 if sail_found and arm.pose.bones.get("Sail") is not None:
-    _pbS3 = arm.pose.bones["Sail"]
-    _pbS3.rotation_mode = 'QUATERNION'
-    _pbS3.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
-    _pbS3.keyframe_insert('rotation_quaternion', frame=0)
-    _pbS3.keyframe_insert('rotation_quaternion', frame=_clip_frames)
+    for _sbn3 in (["Sail", "SailF1", "SailF2", "SailF3"] if sail_fold else ["Sail"]):
+        _pbS3 = arm.pose.bones.get(_sbn3)
+        if _pbS3 is None:
+            continue
+        _pbS3.rotation_mode = 'QUATERNION'
+        _pbS3.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
+        _pbS3.keyframe_insert('rotation_quaternion', frame=0)
+        _pbS3.keyframe_insert('rotation_quaternion', frame=_clip_frames)
 
 # FLAG strike THROUGH Spin — the opposite of the sails (2026-09-05): banners fly AT ANCHOR (the idle stance
 # leaves the Flag bone at rest) and are held flipped below the keel for the entire movement clip. Constant

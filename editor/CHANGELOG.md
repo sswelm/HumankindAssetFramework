@@ -5,6 +5,33 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Sails can FOLD at idle instead of hiding.** A "Fold sail at idle" checkbox (shown when sails are marked)
+  swaps the Furl stance's below-the-keel strike for the vanilla ships' brailed-up look: the canvas gathers
+  into a visible bundle at the yard — an accordion pleat on a generated Sail→SailF1→SailF2 fold chain, the
+  cloth band-skinned in height thirds and the fold bones zigzagged ±160° about the yard axis. Pure rotation
+  by design (per-bone scale is the pipeline's measured AW101 trap), so the bake recipe and stance assignment
+  are unchanged. Rigging keeps standing on the root Sail bone. Rejected loudly on the source-skeleton fast
+  path. Drilled headless on the Khalandion: folded canvas = 0.38× raised height, top pinned at the yard.
+  Follow-up ("moving too fast, in a single frame"): **Fold frames** (default 12) and **Fold angle** (default
+  160°) dials — with frames the fold is the split-trail deployment mechanic on canvas: Pre-move `Furl[N..0]`
+  lets the sail out as the ship gets under way, After-move `Furl[0..N]` gathers it on arrival, `Furl[N..N]`
+  holds the idle stance; the legacy strike keeps its out-of-sight 1-frame snap. Two field passes reshaped the
+  fold itself: first the chain grew to four bands (Sail→SailF1..F3) because parity decides where the bottom
+  edge lands ("the underside should fold to the top of the beam"); then the alternating pleat became a CURL —
+  "fold more how an open hand thumb and fingers close" — every joint bending the same way, the Curl dial the
+  TOTAL roll (default 270° = 90° per joint). Measured at 270°: the canvas's foot lands 0.06 sail-heights ABOVE
+  the beam, wrapped onto the yard like fingers on a palm's edge; bundle 0.39× raised, mid-frame 0.50 (the
+  close plays through). A **Reverse curl direction** checkbox mirrors the roll to the other side of the sail
+  plane — which way is "backwards" depends on the source model's facing, so it can't be auto-derived; the
+  reverse roll curls against the billow camber and bundles a little looser (measured 0.53× vs 0.39×), foot
+  at the beam either way. A **Sag (gravity)** dial (0–1) DRAPES the folded roll so it stops "behaving like
+  in space" — first modeled as extra curl (field verdict: "it's just curling more"), now real drape math:
+  gravity pulls every cloth segment toward hanging vertical, so the segment angles' horizontal component is
+  squashed by (1−sag)² and the per-joint deltas re-derived (all folds share the yard axis, angles compose as
+  scalars). Measured at curl 180: horizontal spread 3.89 → 2.60 → 2.05 across sag 0/0.5/1 — the floor is the
+  canvas's own billow camber (rotations can't flatten a curved sheet), so sag 0.5 roughly halves the
+  protruding roll and 1.0 hangs it flat; the foot stays at the beam throughout.
+
 - **The Era Lab grid can be switched off without losing it.** A new "Apply era ageing" checkbox saves as
   `eraGridEnabled` in the pack: unchecked, the grid stays authored (and editable) but the runtime treats
   every cell as 1.0 — units keep their Resize Lab scale in every era. Absent key = enabled, so packs saved

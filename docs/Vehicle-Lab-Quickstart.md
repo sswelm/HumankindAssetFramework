@@ -127,6 +127,29 @@ playing the move. Assign after baking: Idle/reference = `Spin[0..0]` (this defin
 the state change swaps the pose in one tick. **Keep bone translations** can stay **OFF**: the strike is pure
 rotation.
 
+**Fold sail at idle** (checkbox under the sails notice) swaps the strike for the vanilla ships' look: instead of
+vanishing below the keel, the idle canvas **curls up to the yard** — a hand-close roll on a generated
+`Sail → SailF1 → SailF2 → SailF3` fold chain, the canvas band-skinned in height **quarters** and every fold
+joint bending the **same way**, like fingers closing onto a palm (the top band). At the default 270° total each
+joint bends 90°: the canvas's **foot lands at the beam**, tucked against the yard in a C-shaped roll — the way
+a brailed sail actually gathers, and the gather *moves* like a hand closing. Still **pure rotation** (per-bone
+*scale* is the pipeline's known trap — deploy_convert strips it for a reason). Rigging keeps standing — it
+rides the root `Sail` bone, which holds. Three controls: **Fold frames** (default 12) spans the gather over
+real frames, **Curl** (default 270° total) sets how far the roll closes — less = a looser, more open curl —
+and **Reverse curl direction** mirrors the roll to the other side of the sail plane (which way is "backwards"
+depends on the source model's facing; the reverse direction curls against the billow camber and bundles a
+little looser). A fourth control, **Sag (gravity)**, drapes the folded roll: gravity pulls each cloth segment
+toward hanging vertical, squashing the roll's horizontal spread — 0 = the free zero-g curl, 0.5 ≈ half the
+protruding width, 1 = hangs flat (and slightly lower, as drooping cloth does). The bands' authored billow
+camber survives (rotations can't flatten a curved sheet), so the last of the fore-aft depth is set by the
+source canvas.
+
+With frames, the fold is the **deployment mechanic** applied to canvas — assign like the split-trail gun:
+Idle/reference = `Spin[0..0]` · Idle stance (override) = `Furl[N..N]` (held folded) · Movement = `Spin` (sails
+up) · **Pre-move = `Furl[N..0]`** (the canvas lets out as the ship gets under way) · **After-move =
+`Furl[0..N]`** (it gathers on arrival) — or leave Pre/After empty for a one-tick swap. Not available on the
+source-skeleton fast path (the fold needs generated bones and band skinning); regenerate and rebake to apply.
+
 **Oars (galley rowing).** A galley's oars usually arrive as a **few merged meshes** — all the poles in one, all the
 blades in another (often split front/back) — each mesh holding *every* oar across *both* banks. Mark those meshes
 **Oar** (`O`). Unlike any other role, one marked mesh becomes **many** bones: the rig recovers each individual oar

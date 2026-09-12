@@ -66,8 +66,8 @@ public class AnimationLabWindow : EditorWindow
     float fitAnimT; double fitAnimTick;
     List<(string label, string dir)> fitRoles; string fitRolesFor;   // role clips that actually exist, cached per resource
     static readonly (string label, string dir)[] FitAnimRoleDirs = {
-        ("Idle / main clip", "anim"), ("Movement", "anim_move"), ("After-move", "anim_after"),
-        ("Pre-move (fold)", "anim_premove"), ("Attack", "anim_attack"),
+        ("Idle / main clip", "anim"), ("Movement", "anim_move"), ("After-move (fold)", "anim_after"),
+        ("Pre-move (unfold)", "anim_premove"), ("Attack", "anim_attack"),
     };
 
     [MenuItem("Tools/HAF/Animation Lab")]
