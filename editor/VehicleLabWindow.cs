@@ -191,7 +191,15 @@ public class VehicleLabWindow : EditorWindow
     const int RockFps = 24;                       // Blender's scene fps — the clip's real-time length
     // The two motion sections fold independently (Sound Studio pattern): a model is almost always EITHER a wheeled
     // vehicle OR a floating one, so ~10 permanently-irrelevant rows were on screen at all times.
-    [SerializeField] bool foldSpin = true, foldWave = false, foldOrient = false, foldTrails = false, foldOars = false, foldReduce = false, foldParts = true;
+    [SerializeField] bool foldSpin = true, foldWave = false, foldOrient = false, foldTrails = false, foldOars = false, foldReduce = false, foldParts = true, foldModel2 = false;
+    // SECOND MODEL (2026-09-12, "combine 2 3d models and merge"): an optional second source imported into the
+    // SAME Blender scene before the probe — its parts arrive with a "B_" prefix and are marked/reduced/rigged
+    // like any others. Offset/rotation/scale place it against the first model (two sources rarely agree on
+    // units — the cm-vs-m disease — hence the scale dial). Mesh path only; collapsible (rarely relevant).
+    [SerializeField] string srcFile2 = "";
+    [SerializeField] Vector3 model2Off = Vector3.zero;
+    [SerializeField] Vector3 model2Rot = Vector3.zero;
+    [SerializeField] float model2Scale = 1f;
     // Straighten a source that imports crooked / on its side. Baked into the vertex data BEFORE the rig is built,
     // so wheel axles, tread side detection and the rock's auto hull-length axis all read the corrected pose.
     [SerializeField] Vector3 modelRot = Vector3.zero;
@@ -288,6 +296,10 @@ public class VehicleLabWindow : EditorWindow
         public float sailFoldAngleDeg = 270f;  // TOTAL curl over the three joints, hand-close style (absent-key 270 = foot lands at the beam)
         public bool sailFoldReverse = false;   // mirror the curl to the other side of the sail plane (absent-key false)
         public float sailFoldSag = 0f;         // 0 = open zero-g curl, 1 = gravity-pressed thin roll (absent-key 0)
+        public string srcFile2 = "";           // optional second model merged into the scene (absent-key "" == none)
+        public Vector3 model2Off = Vector3.zero;    // its placement against the first model
+        public Vector3 model2Rot = Vector3.zero;    // Euler degrees, X then Y then Z, about its own origin
+        public float model2Scale = 1f;         // uniform — reconciles unit mismatches (absent-key... 0 guards to 1 on load)
         // TAIL ROTOR (review round 3, 2026-09-06): these fed the Blender command since the helicopter era but
         // were never saved — a tuned tail trim vanished on every recipe reload. Absent-key 0 == Auto/no trim.
         public int tailAxisChoice = 0;
@@ -424,6 +436,43 @@ public class VehicleLabWindow : EditorWindow
                 var p = EditorUtility.SaveFilePanel("Output GLB", Path.GetDirectoryName(string.IsNullOrEmpty(outGlb) ? srcFile : outGlb),
                     Path.GetFileNameWithoutExtension(string.IsNullOrEmpty(outGlb) ? srcFile + "_Spin" : outGlb), "glb");
                 if (!string.IsNullOrEmpty(p)) outGlb = p.Replace('\\', '/');
+            }
+        }
+
+        // --- SECOND MODEL (optional, collapsible — most vehicles never need it): merged into the same scene
+        //     before the probe, parts arrive prefixed "B_" and are marked/reduced/rigged like any others. ---
+        if (Section(ref foldModel2, "Second model — merge another source",
+                string.IsNullOrWhiteSpace(srcFile2) ? "none"
+                    : $"{Path.GetFileName(srcFile2)} · offset ({model2Off.x:0.##}, {model2Off.y:0.##}, {model2Off.z:0.##})"
+                      + (model2Rot != Vector3.zero ? $" · rot ({model2Rot.x:0.#}, {model2Rot.y:0.#}, {model2Rot.z:0.#})" : "")
+                      + (Mathf.Approximately(model2Scale, 1f) ? "" : $" · x{model2Scale:0.###}")))
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                srcFile2 = EditorGUILayout.TextField(new GUIContent("Second model",
+                    "Optional second source (glb/gltf/fbx/obj — .blend cannot merge) imported into the SAME scene " +
+                    "before the probe. Its parts appear with a B_ prefix and take roles, reduce dials and rigging " +
+                    "like any others. Not available on the source-skeleton fast path."), srcFile2);
+                if (GUILayout.Button("Browse…", GUILayout.Width(70)))
+                {
+                    var p2 = EditorUtility.OpenFilePanel("Pick the second model",
+                        Path.GetDirectoryName(string.IsNullOrEmpty(srcFile2) ? (string.IsNullOrEmpty(srcFile) ? "D:/3DModels" : srcFile) : srcFile2), "glb,gltf,fbx,obj");
+                    if (!string.IsNullOrEmpty(p2)) { srcFile2 = p2.Replace('\\', '/'); status = "Second model set — press Probe parts to list the merged pair (B_ prefix)."; }
+                }
+                if (!string.IsNullOrWhiteSpace(srcFile2) && GUILayout.Button("Clear", GUILayout.Width(50)))
+                { srcFile2 = ""; status = "Second model cleared — press Probe parts to re-list; its B_ parts drop out on their own."; }
+            }
+            using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(srcFile2)))
+            {
+                model2Off = EditorGUILayout.Vector3Field(new GUIContent("Offset (X, Y, Z)",
+                    "Where the second model sits relative to the first, in the first model's units. The Generate log " +
+                    "prints the placed B bbox next to the part list — align with numbers, not eyeballs."), model2Off);
+                model2Rot = EditorGUILayout.Vector3Field(new GUIContent("Rotation (°)",
+                    "Euler degrees applied to the second model (X, then Y, then Z) about its own origin, before the offset."), model2Rot);
+                model2Scale = EditorGUILayout.FloatField(new GUIContent("Scale",
+                    "Uniform scale for the second model. Two sources rarely agree on units (a cm-authored file next " +
+                    "to a meter one is 100x off) — this is the dial that reconciles them. 1 = as authored."), model2Scale);
+                if (model2Scale <= 0f) model2Scale = 1f;
             }
         }
 
@@ -1014,8 +1063,10 @@ public class VehicleLabWindow : EditorWindow
                 || TierActive(Role.Preserve, preserveReducePct) || TierActive(Role.Detail, detailReducePct));
             bool wantSailFold = sailFoldIdle && list.Any(x => x.role == Role.Sail);
             bool fastSailFold = FastPath && wantSailFold;
-            bool canRig = FastPath ? (!fastPathOars && fastRotors == 0 && fastFlip == 0 && !fastWave && !fastSailFold && fastWheels > 0)
-                                   : (wheels > 0 || oars > 0 || wantWave || geometryWork || wantSailFold);
+            bool hasModel2 = !string.IsNullOrWhiteSpace(srcFile2);   // a merge is real geometry work: two static hulls may need no spinner at all
+            bool fastModel2 = FastPath && hasModel2;
+            bool canRig = FastPath ? (!fastPathOars && fastRotors == 0 && fastFlip == 0 && !fastWave && !fastSailFold && !fastModel2 && fastWheels > 0)
+                                   : (wheels > 0 || oars > 0 || wantWave || geometryWork || wantSailFold || hasModel2);
             // The rest of Vertices control (facing fixes + reduce dials) is INERT on the fast path — rigfast
             // exports the source mesh untouched. Not a reject (dials are passive), but say it (PR #28 review:
             // the section silently did nothing on this path since it existed).
@@ -1041,6 +1092,9 @@ public class VehicleLabWindow : EditorWindow
             if (fastSailFold)
                 EditorGUILayout.HelpBox("Fold sail at idle doesn't run on the source-skeleton fast path — the fold " +
                     "needs generated bones and band skinning. Disable Use source skeleton, or the fold option.", MessageType.Warning);
+            if (fastModel2)
+                EditorGUILayout.HelpBox("A second model can't merge on the source-skeleton fast path — rigfast keeps " +
+                    "the artist skeleton and geometry as-is. Disable Use source skeleton, or clear the second model.", MessageType.Warning);
             using (new EditorGUI.DisabledScope(!canRig || string.IsNullOrEmpty(outGlb)))
                 if (GUILayout.Button(new GUIContent($"Generate rig{(useSourceRig && boneParts.Count > 0 ? " (fast path)" : "")}  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
                         fastPathOars ? "Disable the source-skeleton fast path before recovering oars from merged mesh geometry."
@@ -1048,6 +1102,7 @@ public class VehicleLabWindow : EditorWindow
                         : fastFlip > 0 ? "Disable the source-skeleton fast path to flip mesh-part winding."
                         : fastWave ? "Disable the source-skeleton fast path to use Wave rock."
                         : fastSailFold ? "Disable the source-skeleton fast path to use Fold sail at idle."
+                        : fastModel2 ? "Disable the source-skeleton fast path to merge a second model."
                         : !canRig ? (FastPath ? "Mark at least one source bone as Wheel — the fast path spins wheel bones."
                                               : "Mark at least one entry as Wheel / Rotor / Tail rotor / Oar, set a Wave rock amplitude — or request geometry work (Flip, a facing fix, an active reduce dial): a Generate can be pure geometry surgery.")
                         : "Runs Blender: rig + Spin action + GLB export + preview."), GUILayout.Height(28)))
@@ -1144,7 +1199,7 @@ public class VehicleLabWindow : EditorWindow
         Directory.CreateDirectory(Path.Combine(projRoot, prevDir));
         string prevRel = prevDir + "/" + Path.GetFileNameWithoutExtension(srcFile) + "_probe.fbx";
         string prevFull = Path.Combine(projRoot, prevRel).Replace('\\', '/');
-        if (!RunBlender($"probe \"{srcFile}\" \"{prevFull}\"", out string stdout)) return;
+        if (!RunBlender($"probe \"{srcFile}\" \"{prevFull}\"{Merge2Arg()}", out string stdout)) return;   // the tagged merge2 arg rides BOTH modes — probe must list the merged pair
         // Lenient float parse: degenerate shards can emit "nan" (python lowercase — .NET rejects it) — such a value
         // becomes 0 instead of killing the whole probe on one bad line out of thousands.
         float F(string s2) => float.TryParse(s2, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var f) ? f : 0f;
@@ -1399,7 +1454,7 @@ public class VehicleLabWindow : EditorWindow
         // stroke into the next model) — reset to the live defaults, same values as a fresh window.
         doubleSided = false; fixInsideOut = false;
         oarSweepDeg = 24f; oarDipDeg = 18f; oarFrames = 24; oarBladeRollDeg = 0f; oarLiftDeg = 0f; oarRakeDeg = 0f; oarPivotPct = 30f; oarLengthPct = 100f;
-        riggingReducePct = 75f; structureReducePct = 50f; bodyReducePct = 0f; oarReducePct = 0f; sailReducePct = 0f; rudderReducePct = 0f; wheelReducePct = 0f; flipReducePct = 0f; preserveReducePct = 0f; detailReducePct = 0f; sailFoldIdle = false; sailFoldFrames = 12; sailFoldAngleDeg = 270f; sailFoldReverse = false; sailFoldSag = 0f;
+        riggingReducePct = 75f; structureReducePct = 50f; bodyReducePct = 0f; oarReducePct = 0f; sailReducePct = 0f; rudderReducePct = 0f; wheelReducePct = 0f; flipReducePct = 0f; preserveReducePct = 0f; detailReducePct = 0f; sailFoldIdle = false; sailFoldFrames = 12; sailFoldAngleDeg = 270f; sailFoldReverse = false; sailFoldSag = 0f; srcFile2 = ""; model2Off = Vector3.zero; model2Rot = Vector3.zero; model2Scale = 1f;
         // …and the pre-0.5.4 generation dials the reset had ALWAYS skipped (review round 2): a tuned trail
         // spread, gun trunnion, recoil or tail-rotor trim silently carried into the next model too.
         spinEnabled = true; trailSpreadDeg = 35f; trailFrames = 12; gunPivot = 0.5f; gunDeployElev = 0f;
@@ -1558,7 +1613,7 @@ public class VehicleLabWindow : EditorWindow
             srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
             parts = parts, boneParts = boneParts, useSourceRig = useSourceRig, treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink,
             // orientation + tread isolation + wave rock — the rest of what the bake command consumes
-            tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct, wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag, tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, modelRot = modelRot, waveEnabled = waveEnabled,
+            tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct, wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag, srcFile2 = srcFile2, model2Off = model2Off, model2Rot = model2Rot, model2Scale = model2Scale, tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, modelRot = modelRot, waveEnabled = waveEnabled,
             trailSpreadDeg = trailSpreadDeg, trailFrames = trailFrames, gunPivot = gunPivot, gunDeployElev = gunDeployElev, recoilDist = recoilDist, recoilFrames = recoilFrames, recoilLead = recoilLead,
             rockDegrees = rockDegrees, rockFrames = rockFrames, rockAxisChoice = rockAxisChoice, rockHeading = rockHeading,
             rockPitchDeg = rockPitchDeg, rockRollCycles = rockRollCycles, rockPitchCycles = rockPitchCycles, rockPitchPhase = rockPitchPhase,
@@ -1624,6 +1679,8 @@ public class VehicleLabWindow : EditorWindow
             sailFoldFrames = r.sailFoldFrames <= 0 ? 12 : r.sailFoldFrames; sailFoldAngleDeg = r.sailFoldAngleDeg <= 0f ? 270f : r.sailFoldAngleDeg;   // absent-key: initializer defaults; <=0 guards a hand-edited file
             sailFoldReverse = r.sailFoldReverse;   // absent-key false == the drill-verified default direction
             sailFoldSag = Mathf.Clamp01(r.sailFoldSag);   // absent-key 0 == the open zero-g curl
+            srcFile2 = (r.srcFile2 ?? "").Trim(); model2Off = r.model2Off; model2Rot = r.model2Rot;
+            model2Scale = r.model2Scale <= 0f ? 1f : r.model2Scale;   // absent key deserializes 0 for floats inside old recipes? No — initializer 1 holds; <=0 guards a hand-edited file
             tailAxisChoice = r.tailAxisChoice; tailYawAdj = r.tailYawAdj; tailPitchAdj = r.tailPitchAdj;   // absent-key 0 == Auto/no trim, the old effective behavior
             trailSpreadDeg = r.trailSpreadDeg; trailFrames = r.trailFrames; gunPivot = r.gunPivot; gunDeployElev = r.gunDeployElev; recoilDist = r.recoilDist; recoilFrames = r.recoilFrames; recoilLead = r.recoilLead;
             waveEnabled = r.waveEnabled; rockDegrees = r.rockDegrees; rockAxisChoice = r.rockAxisChoice; rockHeading = r.rockHeading;
@@ -1843,7 +1900,7 @@ public class VehicleLabWindow : EditorWindow
         string axis = axisChoice == 0 ? "AUTO" : AxisOptions[axisChoice];
         string tailAxis = tailAxisChoice == 0 ? "AUTO" : AxisOptions[tailAxisChoice];
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")} \"@{oarsFile}\" {oarSweepDeg.ToString("0.##", inv)} {oarDipDeg.ToString("0.##", inv)} {oarFrames} {(fixInsideOut ? "1" : "0")} {oarBladeRollDeg.ToString("0.##", inv)} \"@{sailsFile}\" \"@{riggingFile}\" {riggingReducePct.ToString("0.#", inv)} \"@{structureFile}\" {structureReducePct.ToString("0.#", inv)} \"@{bodiesFile}\" {bodyReducePct.ToString("0.#", inv)} \"@{flagsFile}\" {oarLiftDeg.ToString("0.##", inv)} {oarRakeDeg.ToString("0.##", inv)} {oarPivotPct.ToString("0.#", inv)} {oarLengthPct.ToString("0.#", inv)} \"@{ruddersFile}\" {oarReducePct.ToString("0.#", inv)} {sailReducePct.ToString("0.#", inv)} \"@{preserveFile}\" {rudderReducePct.ToString("0.#", inv)} {wheelReducePct.ToString("0.#", inv)} \"@{flipFile}\" {flipReducePct.ToString("0.#", inv)} {preserveReducePct.ToString("0.#", inv)} \"@{detailFile}\" {detailReducePct.ToString("0.#", inv)} {(sailFoldIdle ? "1" : "0")} {Mathf.Max(1, sailFoldFrames)} {sailFoldAngleDeg.ToString("0.#", inv)} {(sailFoldReverse ? "1" : "0")} {sailFoldSag.ToString("0.##", inv)}", out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll; argv[48]: sail parts; argv[49..50]: rigging parts, reduce %; argv[51..52]: structure parts, reduce %; argv[53..54]: body parts, reduce %; argv[55]: flag parts; argv[61..62]: oar reduce %, sail reduce %; argv[63]: preserve parts; argv[64]: rudder reduce %; argv[65]: wheel reduce %; argv[66..67]: flip parts, reduce %; argv[68]: preserve reduce %; argv[69..70]: detail parts, reduce %; argv[71..75]: fold sail at idle, fold frames, curl total, curl reverse, sag
+        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")} \"@{oarsFile}\" {oarSweepDeg.ToString("0.##", inv)} {oarDipDeg.ToString("0.##", inv)} {oarFrames} {(fixInsideOut ? "1" : "0")} {oarBladeRollDeg.ToString("0.##", inv)} \"@{sailsFile}\" \"@{riggingFile}\" {riggingReducePct.ToString("0.#", inv)} \"@{structureFile}\" {structureReducePct.ToString("0.#", inv)} \"@{bodiesFile}\" {bodyReducePct.ToString("0.#", inv)} \"@{flagsFile}\" {oarLiftDeg.ToString("0.##", inv)} {oarRakeDeg.ToString("0.##", inv)} {oarPivotPct.ToString("0.#", inv)} {oarLengthPct.ToString("0.#", inv)} \"@{ruddersFile}\" {oarReducePct.ToString("0.#", inv)} {sailReducePct.ToString("0.#", inv)} \"@{preserveFile}\" {rudderReducePct.ToString("0.#", inv)} {wheelReducePct.ToString("0.#", inv)} \"@{flipFile}\" {flipReducePct.ToString("0.#", inv)} {preserveReducePct.ToString("0.#", inv)} \"@{detailFile}\" {detailReducePct.ToString("0.#", inv)} {(sailFoldIdle ? "1" : "0")} {Mathf.Max(1, sailFoldFrames)} {sailFoldAngleDeg.ToString("0.#", inv)} {(sailFoldReverse ? "1" : "0")} {sailFoldSag.ToString("0.##", inv)}{Merge2Arg()}", out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll; argv[48]: sail parts; argv[49..50]: rigging parts, reduce %; argv[51..52]: structure parts, reduce %; argv[53..54]: body parts, reduce %; argv[55]: flag parts; argv[61..62]: oar reduce %, sail reduce %; argv[63]: preserve parts; argv[64]: rudder reduce %; argv[65]: wheel reduce %; argv[66..67]: flip parts, reduce %; argv[68]: preserve reduce %; argv[69..70]: detail parts, reduce %; argv[71..75]: fold sail at idle, fold frames, curl total, curl reverse, sag
         // SUCCESS = THE SCRIPT'S OWN FINAL MARKER (the documented Blender trap: it exits 0 even when the python
         // script crashes mid-way — without this gate a half-run printed a fake "DONE" with no file on disk).
         string done = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE RIG DONE"));
@@ -1878,6 +1935,17 @@ public class VehicleLabWindow : EditorWindow
             .Select(l => l.Trim()));
         status = $"DONE → {lastOutGlb}\n{bones}\n{hybrid}\n{done}\n{muzzle}\n\nNext: Factory ▸ Browse this GLB, Size as usual; " + bakeRecipe;
         EditorGUIUtility.systemCopyBuffer = lastOutGlb;   // ready to paste into the Factory's Browse field
+    }
+
+    // The SECOND-MODEL merge argument — TAGGED (merge2=path|off|rot|scale), scanned by the rig script rather
+    // than indexed, because probe and rig have different positional layouts and BOTH need the merged scene.
+    // '|' is illegal in Windows paths, so the split is unambiguous. Empty when no second model is set.
+    string Merge2Arg()
+    {
+        if (string.IsNullOrWhiteSpace(srcFile2)) return "";
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        string F(float v) => v.ToString("0.###", inv);
+        return $" \"merge2={srcFile2.Trim().Replace('\\', '/')}|{F(model2Off.x)},{F(model2Off.y)},{F(model2Off.z)}|{F(model2Rot.x)},{F(model2Rot.y)},{F(model2Rot.z)}|{F(model2Scale <= 0f ? 1f : model2Scale)}\"";
     }
 
     bool RunBlender(string args, out string stdout)

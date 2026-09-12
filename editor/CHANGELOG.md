@@ -5,6 +5,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Two models can merge into one rig.** A collapsible "Second model" section (optional — most vehicles never
+  need it) imports a second source into the same scene before the probe: its parts arrive with a `B_` prefix
+  and take roles, reduce dials and rigging like any others. Offset / Rotation / uniform Scale place it against
+  the first model (the scale dial reconciles cm-vs-m sources), and the Generate log prints the placed `B bbox`
+  so alignment is dialed with numbers. The merge rides a tagged `merge2=` argument that both probe and rig
+  modes scan, `.blend` seconds are rejected (opening one replaces the scene), and the fast path rejects the
+  merge loudly. Drilled headless: Khalandion + half-scale Triconter at (0,40,0)/90° — 92 `B_` parts probed,
+  bbox lands exactly at the dialed transform, full Generate exports the combined 549k-vert scene.
+
 - **Sails can FOLD at idle instead of hiding.** A "Fold sail at idle" checkbox (shown when sails are marked)
   swaps the Furl stance's below-the-keel strike for the vanilla ships' brailed-up look: the canvas gathers
   into a visible bundle at the yard — an accordion pleat on a generated Sail→SailF1→SailF2 fold chain, the

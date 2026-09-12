@@ -34,6 +34,15 @@ bone. The same rule applies to wheels fused into an axle or a gun barrel fused i
 Do not remove material slots to make rigging easier. Vehicle Lab preserves them; Model Factory needs those slots later
 to build the atlas.
 
+**Second model (optional, collapsible).** The Lab can merge a second source (glb/gltf/fbx/obj — .blend cannot merge)
+into the same scene before the probe: a figurehead grafted onto a hull, a different sail on a mast, two hulls into a
+composite. Its parts arrive with a **`B_` prefix** (both sources typically name parts `Object_N`) and take roles,
+reduce dials and rigging exactly like the first model's. Three placement controls — **Offset** (in the first model's
+units), **Rotation** (Euler °, X→Y→Z about its own origin), and **Scale** (uniform — two sources rarely agree on
+units; a cm-authored file next to a meter one is 100× off). The Generate log prints the placed **`B bbox`** next to
+the part list, so alignment is dialed with numbers, not eyeballs. Not available on the source-skeleton fast path.
+Watch the combined triangle count against the draw ceiling (section 9).
+
 ## 2. Probe and orient
 
 1. Open **`Tools ▸ HAF ▸ Vehicle Lab`**.

@@ -68,6 +68,64 @@ def world_bbox(o):
 imp(inp)
 _lap("import")
 
+# ---- SECOND MODEL MERGE (2026-09-12, user: "combine 2 3d models and merge") ----
+# A TAGGED argument, scanned rather than indexed: probe and rig BOTH need the merged scene, and one tag beats
+# maintaining two positional layouts ('|' is illegal in Windows paths, so the split is safe):
+#   merge2=<path>|ox,oy,oz|rx,ry,rz|<uniform scale>
+# The second file is imported into the SAME scene; its parts get a "B_" prefix (both sources typically name
+# parts Object_N — roles, part files and recipes need unambiguous names) and the transform goes onto its
+# top-level objects' matrix_world (downstream passes read world space; children follow the hierarchy).
+_m2arg = next((a for a in argv if a.startswith("merge2=")), None)
+if _m2arg:
+    if mode == "rigfast":
+        print("VEHICLE ERROR: a second model is not supported on the source-skeleton fast path — the merged pair needs the mesh path")
+        sys.exit(1)
+    try:
+        _m2path, _m2off, _m2rot, _m2scl = _m2arg[len("merge2="):].split("|")
+    except ValueError:
+        print("VEHICLE ERROR: malformed merge2 argument: %s" % _m2arg); sys.exit(1)
+    _ext2 = _m2path.lower().rsplit(".", 1)[-1]
+    _before2 = set(bpy.data.objects)
+    if _ext2 in ("glb", "gltf"):
+        bpy.ops.import_scene.gltf(filepath=_m2path)
+    elif _ext2 == "fbx":
+        bpy.ops.import_scene.fbx(filepath=_m2path)
+    elif _ext2 == "obj":
+        (bpy.ops.wm.obj_import if hasattr(bpy.ops.wm, "obj_import") else bpy.ops.import_scene.obj)(filepath=_m2path)
+    else:
+        # .blend cannot merge — open_mainfile REPLACES the scene, silently discarding the first model
+        print("VEHICLE ERROR: second model: unsupported extension .%s (glb/gltf/fbx/obj only)" % _ext2); sys.exit(1)
+    _new2 = [o for o in bpy.data.objects if o not in _before2]
+    for _ico2 in [o for o in _new2 if o.type == 'MESH' and o.name.startswith('Icosphere') and not o.vertex_groups]:
+        print("VEHICLE purged glTF importer bone-shape artifact (second model): %s" % _ico2.name)
+        _new2.remove(_ico2); bpy.data.objects.remove(_ico2, do_unlink=True)
+    _o2v = [float(v) for v in _m2off.split(",")]
+    _r2v = [math.radians(float(v)) for v in _m2rot.split(",")]
+    _s2 = float(_m2scl) if _m2scl.strip() else 1.0
+    _T2 = (Matrix.Translation(Vector(_o2v))
+           @ Matrix.Rotation(_r2v[2], 4, 'Z') @ Matrix.Rotation(_r2v[1], 4, 'Y') @ Matrix.Rotation(_r2v[0], 4, 'X')
+           @ Matrix.Scale(_s2, 4))
+    _new2set = set(_new2)
+    for _o2 in _new2:
+        _o2.name = "B_" + _o2.name
+        if _o2.parent is None or _o2.parent not in _new2set:   # top-level of THIS import only — children ride along
+            _o2.matrix_world = _T2 @ _o2.matrix_world
+    bpy.context.view_layer.update()
+    _m2meshes = [o for o in _new2 if o.type == 'MESH' and o.data.vertices]
+    _m2mn, _m2mx = None, None
+    for _o2 in _m2meshes:
+        _c2, _d2 = world_bbox(_o2)
+        _lo2, _hi2 = _c2 - _d2 / 2.0, _c2 + _d2 / 2.0
+        _m2mn = _lo2 if _m2mn is None else Vector((min(_m2mn.x, _lo2.x), min(_m2mn.y, _lo2.y), min(_m2mn.z, _lo2.z)))
+        _m2mx = _hi2 if _m2mx is None else Vector((max(_m2mx.x, _hi2.x), max(_m2mx.y, _hi2.y), max(_m2mx.z, _hi2.z)))
+    # the ALIGNMENT NUMBERS: both sources' world bboxes, so placement is dialed with data, not eyeballs
+    print("VEHICLE MERGE: second model '%s' -> %d part(s) prefixed B_ | offset (%s) rot (%s) scale %s"
+          % (_m2path.replace("\\", "/").rsplit("/", 1)[-1], len(_m2meshes), _m2off, _m2rot, _m2scl))
+    if _m2mn is not None:
+        print("VEHICLE MERGE: B bbox min (%.2f, %.2f, %.2f) max (%.2f, %.2f, %.2f)"
+              % (_m2mn.x, _m2mn.y, _m2mn.z, _m2mx.x, _m2mx.y, _m2mx.z))
+    _lap("merge2")
+
 # ---- rigged-source detection (the SKM fast path's foundation) ----
 # A game-rip often ships FULLY skinned (SKM_ prefix): its artist skeleton has perfect axle pivots and extra
 # weapon bones. Report each DEFORM bone with its weighted-vert count + bbox so the caller can offer bone-level
