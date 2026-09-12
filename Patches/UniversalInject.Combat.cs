@@ -901,6 +901,7 @@ namespace HumankindAssetFramework
         }
 
         static int stateFrame;
+        [SessionScoped] static readonly Dictionary<ModelEntry, float> dispDiagAt = new Dictionary<ModelEntry, float>();   // DIAG 2026-09-12: 1 s throttle for the cruise-displacement trace
         internal static void ProcessAnimStates()
         {
             var list = entries;
@@ -946,11 +947,23 @@ namespace HumankindAssetFramework
                         foreach (var pawn in pawnSeq)
                             if (GetMember(pawn, "Transform") is UnityEngine.Transform tr0) { upos = tr0.position; hasPos = true; break; }
                     bool moving = false;
+                    float dstep = -1f;
                     if (hasPos)
                     {
-                        if (e.stateLastPos.TryGetValue(guid, out var lastP)) moving = (upos - lastP).sqrMagnitude > 0.1f * 0.1f;
+                        // DUAL THRESHOLD (2026-09-12, probe session 7's measurement: the Lembos "moved" in 1.7 s
+                        // bursts separated by 6-7 s of "stillness", every ~8 s — a slow naval CRUISE sits below the
+                        // old single 0.1 u/poll bar (~0.67 u/s) and read as parked while visibly sailing; only the
+                        // acceleration bursts crossed it. 0.1 u still gates the START (a parked unit nudged by
+                        // combat shuffles must not trigger the fold machinery), but 0.02 u SUSTAINS an underway
+                        // unit, so slow cruise reads as the continuous motion it is.
+                        if (e.stateLastPos.TryGetValue(guid, out var lastP))
+                        {
+                            dstep = (upos - lastP).magnitude;
+                            bool wasMv0 = e.stateMoving.TryGetValue(guid, out var wm0) && wm0;
+                            moving = dstep > (wasMv0 ? 0.02f : 0.1f);
+                        }
                         e.stateLastPos[guid] = upos;
-                        if (moving) e.stateLastDispAt[guid] = now;   // REAL displacement only — anchors the boundary bridge below
+                        if (moving) e.stateLastDispAt[guid] = now;   // REAL displacement only — anchors the stop hysteresis below
                     }
                     // PIVOT IN PLACE (2026-08-22): a unit whose move start HAF is holding while it turns counts as moving
                     // from the moment the hold arms — so the PRE-MOVE one-shot (the howitzer folding) plays DURING the
@@ -983,15 +996,14 @@ namespace HumankindAssetFramework
                                 moving = true;   // the move ORDER is still executing — a leg gap, not an arrival
                         }
                         catch { }
-                    // THE VERDICT after six probe sessions (2026-09-12): no signal anywhere tracks the VISUAL
-                    // journey. The sim resolves a move instantly (HasGoToAction is false while the ship still
-                    // sails), and the presentation's own flags flap at every leg seam; the rendered pauses are
-                    // vanilla pacing, invisible on vanilla units because they have no fold clips. So arrival is
-                    // defined temporally: a stop counts only after 4 s of continuous stillness — above the
-                    // measured pause ceiling (2 s tripped in session 5). Cost: the arrival furl starts ~4 s
-                    // after the halt, a crew taking a moment to brail up.
-                    if (!moving && e.stateLastDispAt.TryGetValue(guid, out var ld2) && now - ld2 < 4f)
+                    // STOP HYSTERESIS: with the sustain threshold honest about slow cruise, this only bridges
+                    // genuine brief zero-displacement beats (tile-center easing, poll jitter) — 1.5 s, so a real
+                    // arrival furls promptly instead of rowing in place (the 4 s version's field regression).
+                    if (!moving && e.stateLastDispAt.TryGetValue(guid, out var ld2) && now - ld2 < 1.5f)
                         moving = true;
+                    // DIAG: the cruise-speed trace that settles the dual-threshold hypothesis with numbers.
+                    if (e.preMoveAnimId >= 0 && dstep >= 0f && (!dispDiagAt.TryGetValue(e, out var tD9) || now - tD9 > 1f))
+                    { dispDiagAt[e] = now; Plugin.Log.LogInfo($"[State] poll '{e.resourceName}' d={dstep:F3} moving={moving} t={now:F1}"); }
                     if (!e.stateMoving.TryGetValue(guid, out bool wasMoving)) wasMoving = false;
                     if (wasMoving != moving)
                     {
@@ -1000,7 +1012,7 @@ namespace HumankindAssetFramework
                         // DIAG (2026-09-12 "only folds when turning"): fold models' state edges are rare — log each
                         // with the IsMoveHeld verdict, so a hold that fails to count as "moving" shows itself.
                         if (e.preMoveAnimId >= 0)
-                            Plugin.Log.LogInfo($"[State] edge '{e.resourceName}' moving->{moving} t={now:F1} (held={IsMoveHeld(unit)}, lastDisp={(e.stateLastDispAt.TryGetValue(guid, out var ldE) ? (now - ldE).ToString("F1") : "-")}s ago)");
+                            Plugin.Log.LogInfo($"[State] edge '{e.resourceName}' moving->{moving} t={now:F1} d={dstep:F3} (held={IsMoveHeld(unit)}, lastDisp={(e.stateLastDispAt.TryGetValue(guid, out var ldE) ? (now - ldE).ToString("F1") : "-")}s ago)");
                     }
                     e.stateMoving[guid] = moving;
                     // combat FLIP timestamp (2026-08-19, combatZ): the ease ramp for the combat height offset starts
