@@ -621,6 +621,12 @@ public static class ModelRegistry
 
     public static bool Upsert(ModelDef def)
     {
+        // NORMALIZE at the one choke point every write path passes (2026-09-12): attackRepeats floors at 1 —
+        // the schema default and the validator's rule. The old "Make static" clear wrote 0, and an entry round-
+        // tripped back to animated then warned "attackRepeats: 0 — must be >= 1" on every bake with no way to
+        // heal unless the Attack section's slider happened to be drawn (it only draws with an Attack clip set).
+        // Flooring here heals every scarred entry on its next Save, whichever window saves it.
+        if (def.attackRepeats < 1) def.attackRepeats = 1;
         var list = Load();
         // CASE-INSENSITIVE, to match the filesystem the key really lives on (2026-08-22). The replace used ordinal
         // `==` while the Factory's collision guard compares OrdinalIgnoreCase, and that gap had a hole in it: renaming

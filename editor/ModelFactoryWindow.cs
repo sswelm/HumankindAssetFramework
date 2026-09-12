@@ -17,8 +17,8 @@ public class ModelFactoryWindow : EditorWindow
     // [SerializeField] so Unity preserves the form across a DOMAIN RELOAD (any script recompile, entering/exiting Play
     // mode, etc.). Without it these are wiped back to defaults mid-edit — the "fields went empty on their own" bug.
     // (ModelDef is [Serializable], so the whole edited entry round-trips.)
-    // NEW entries get the v2 axis convention (static frame == animated frame); LOADED entries keep their
-    // saved value — absent key = false = the legacy frame their hand-tuned Rotation was calibrated against.
+    // One construction seam for new/reset entries. (It briefly initialized the per-entry staticAxisV2 flag,
+    // 2026-09-09..12; the single-convention rework deleted the flag, and the seam stays for the next default.)
     static ModelDef FreshEntry() => new ModelDef();
     [SerializeField] ModelDef cur = FreshEntry();
     [SerializeField] int selected;      // 0 = <New>, else index into `existing`
@@ -133,7 +133,9 @@ public class ModelFactoryWindow : EditorWindow
 
     // Cheap animation probe (no Blender), cached per model-file path. State: 0 = unknown (allow), 1 = animation
     // detected (allow + hint), 2 = definitely none (disable the Animated toggle). Keeps the checkbox from being ticked
-    // on a static model. Runs once when the path changes, not every OnGUI frame.
+    // on a static model. The heavy probe runs only when the path OR the file's mtime changes; the mtime stat
+    // itself runs per OnGUI pass — cheap on a local disk, but a model file on a slow network share would make
+    // the window sluggish (accepted; the stat is what catches an in-place regeneration, the 2026-09-16 TOW fix).
     string animProbeFile = "";   // sentinel != any real path so the first real path always probes
     System.DateTime animProbeStamp;   // the probed file's mtime — a REGENERATED file at the same path must re-probe (2026-09-16, the TOW: its first _Spin.glb carried no animations, the Flag re-generate added them, and the path-only cache kept the Animation section empty; the Refresh button never re-probed either)
     int animProbeState;
@@ -2074,7 +2076,11 @@ public class ModelFactoryWindow : EditorWindow
         cur.animClipCombat = ""; cur.animClipPreMove = ""; cur.animClipIdle = ""; cur.animClipIdleAlt = ""; cur.animClipIdleAlt2 = "";
         cur.clip = new int[4]; cur.clipMove = new int[4]; cur.clipAfter = new int[4]; cur.clipAttack = new int[4];
         cur.clipCombat = new int[4]; cur.clipPreMove = new int[4]; cur.clipIdle = new int[4]; cur.clipIdleAlt = new int[4]; cur.clipIdleAlt2 = new int[4];
-        cur.idleAltInterval = 0; cur.attackRepeats = 0; cur.clearAimLayer = false;
+        // attackRepeats resets to 1, NOT 0 — 1 is the schema default and the validator's floor. Clearing it to 0
+        // left a scar on the static->animated round trip: re-ticking Animated kept the 0 and every later bake
+        // warned "attackRepeats: 0 — must be >= 1" (the runtime tolerates 0 as 1, but the warning never healed
+        // unless the Attack section's slider happened to be drawn; 2026-09-12 TOW field report).
+        cur.idleAltInterval = 0; cur.attackRepeats = 1; cur.clearAimLayer = false;
         cur.turretBone = ""; cur.turretAxis = -1; cur.muzzleBone = ""; cur.muzzleOffset = ""; cur.socketBones = "";
         // 2026-08-19 hand-list audit: these three survived Make static — gunElev is applied at RUNTIME to every
         // non-donor entry, so a leftover gunElevMax kept elevating a made-static gun (the exact "cursed leftover"

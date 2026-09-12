@@ -2675,14 +2675,19 @@ if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and ar
         for _kp in _fc.keyframe_points:
             _kp.interpolation = 'LINEAR'
     arm.animation_data.action = act                                      # 'Spin' stays the active action, as before
+    # IDLE/REFERENCE IS Furl[0..0], NEVER Spin[0..0] (2026-09-12, the sky-floating TOW): the Animation Lab's
+    # convert path bakes the reference clip's frame 0 as the model's REST pose, and Spin holds its strike/fold
+    # pose on EVERY frame — using it as reference bakes the hidden pose into the rest skeleton, and Auto-ground
+    # then lifts the whole model by the struck part's depth. Furl frame 0 is always the deployed state. (Boats
+    # dodged this only because they don't auto-ground; the guidance is now uniform.)
     if flag_fold_on and flag_found and not sail_found:
-        print("VEHICLE 'Furl' stance: flags FOLD %.0f deg at the top hinge over %d frame(s) — Idle/reference Spin[0..0], Idle stance (override) Furl[0..0] (deployed), Movement Spin (folded), Pre-move Furl[0..%d] (folds — the unit waits), After-move Furl[%d..0] (redeploys), Keep bone translations OFF"
+        print("VEHICLE 'Furl' stance: flags FOLD %.0f deg at the top hinge over %d frame(s) — Idle/reference Furl[0..0] (deployed), Movement Spin (folded), Pre-move Furl[0..%d] (folds — the unit waits), After-move Furl[%d..0] (redeploys), Keep bone translations OFF"
               % (flag_fold_deg, flag_fold_frames, flag_fold_frames, flag_fold_frames))
     else:
-        print("VEHICLE 'Furl' stance: %s — Idle/reference Spin[0..0], Idle stance (override) Furl[%d..%d], Movement Spin, %s, Keep bone translations OFF"
+        print("VEHICLE 'Furl' stance: %s — Idle/reference Furl[0..0] (deployed), %sMovement Spin, %s, Keep bone translations OFF"
               % ((("sails CURLED to the yard (hand-close roll, %d frame(s), %.0f deg total, sag %.2f)" % (SAIL_FURL_FRAMES, sail_fold_angle, sail_fold_sag) if sail_fold else "sails FLIPPED below the keel")
                   + (", flags keyed flying" if flag_found else "")) if sail_found else "flags keyed flying (no sails)",
-                 SAIL_FURL_FRAMES, SAIL_FURL_FRAMES,
+                 ("Idle stance (override) Furl[%d..%d] (furled at anchor), " % (SAIL_FURL_FRAMES, SAIL_FURL_FRAMES)) if sail_found else "",
                  ("Pre-move Furl[%d..0] / After-move Furl[0..%d] to PLAY the gather (or EMPTY for a one-tick swap)" % (SAIL_FURL_FRAMES, SAIL_FURL_FRAMES))
                  if (sail_fold and sail_found) else "After-move/Pre-move EMPTY"))
 

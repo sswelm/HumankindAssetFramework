@@ -14,9 +14,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   ALWAYS converts Y-up→Z-up (+90°X, normals included, winding preserved) **and evaluates skinned sources at
   their bind pose** (joint × inverse-bind per vertex — a Vehicle-Lab rig extracts assembled and upright, the
   TOW tripod under its launcher instead of scattered), the longest-axis auto-align is gone, and Rotation is
-  the only orientation knob with the same meaning on BOTH paths. Every cached extraction re-runs (cache stamp
-  `v3`). **Breaking on purpose:** pre-existing static GLB entries re-bake into the unified frame — re-dial
-  their Rotation once (typically back to 0,0,0).
+  the only orientation knob with the same meaning on BOTH paths — including at nonzero values: the static
+  combine applies the registry fields exactly the way the animated path does (X = pitch, Y = heading/yaw,
+  Z = roll, composed roll→pitch→yaw; review P1 — a plain Euler on the Z-up frame would have made Y a roll).
+  The converter reads every JOINTS_n/WEIGHTS_n influence set and judges mirrored winding per vertex from the
+  actual deforming transform (review P2/P3). Every cached extraction re-runs (cache stamp `v3`). **Breaking on
+  purpose:** pre-existing static GLB entries re-bake into the unified frame — re-dial their Rotation once
+  (typically back to 0,0,0). A static **.fbx/.obj** source never passes through the converter, so with the
+  auto-align gone it arrives Y-up in the Z-up combine: expect one Rotation dial of X≈±90 there (none of the
+  shipped entries are affected — all static entries are GLB).
 
 - **Per-source Brightness dials — merged models read as one unit.** The TOW launcher arrived several stops
   lighter than its tripod ("acts more like a whole unit rather than a patched model"): two sliders in the

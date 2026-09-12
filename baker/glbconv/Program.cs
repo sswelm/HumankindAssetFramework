@@ -78,48 +78,77 @@ class Program
                 }
                 skinnedNodes++;
             }
-            // A MIRRORED node (negative-determinant world matrix, e.g. a symmetric vehicle whose right half is the left
+            // MIRRORED geometry (negative-determinant transform, e.g. a symmetric vehicle whose right half is the left
             // half under scale (-1,1,1)) flips the geometry but NOT the triangle index order, so that half winds inward
             // and renders inside-out — invisible under backface culling. Swap two indices per triangle to rewind it
-            // outward when the node is mirrored. (Normals still use TransformNormal; inverse-transpose is a separate low.)
-            // Skinned nodes judge by their first joint matrix instead (the node matrix is ignored at render time).
-            bool mirrored = (jointMats != null && jointMats.Length > 0 ? jointMats[0] : M).GetDeterminant() < 0f;
+            // outward. The judgement is PER VERTEX from the determinant of the transform that actually moved it — the
+            // node matrix for plain meshes, the blended joint matrix for skinned ones (PR #35 review P3: a per-node/
+            // first-joint guess mis-winds a mesh whose vertices weight to a different, mirrored joint) — and each
+            // triangle rewinds by its first vertex's sign. (Normals still use TransformNormal; inverse-transpose is a
+            // separate low.)
+            bool nodeMirrored = M.GetDeterminant() < 0f;
             foreach (var p in node.Mesh.Primitives)
             {
                 var pos = p.GetVertexAccessor("POSITION")?.AsVector3Array();
                 if (pos == null || pos.Count == 0) continue;
                 var uv = p.GetVertexAccessor("TEXCOORD_0")?.AsVector2Array();
                 var nrm = p.GetVertexAccessor("NORMAL")?.AsVector3Array();
-                var jts = jointMats != null ? p.GetVertexAccessor("JOINTS_0")?.AsVector4Array() : null;
-                var wts = jointMats != null ? p.GetVertexAccessor("WEIGHTS_0")?.AsVector4Array() : null;
-                bool skinned = jts != null && wts != null;
+                // ALL influence sets, not only set 0 (PR #35 review P2): a source with >4 influences per vertex
+                // carries JOINTS_1/WEIGHTS_1 (and beyond) — reading set 0 alone drops real weight and deforms the
+                // bind evaluation. Sets are gathered while BOTH accessors of a set exist.
+                var jsets = new List<(IList<Vector4> j, IList<Vector4> w)>();
+                if (jointMats != null)
+                    for (int s = 0; ; s++)
+                    {
+                        var js = p.GetVertexAccessor("JOINTS_" + s)?.AsVector4Array();
+                        var ws = p.GetVertexAccessor("WEIGHTS_" + s)?.AsVector4Array();
+                        if (js == null || ws == null) break;
+                        jsets.Add((js, ws));
+                    }
+                bool skinned = jsets.Count > 0;
                 int mi = p.Material != null ? p.Material.LogicalIndex : -1;
                 int b = V.Count;
+                var flip = new bool[pos.Count];
                 for (int i = 0; i < pos.Count; i++)
                 {
-                    Vector3 wv, wn;
+                    Vector3 wv, wn; bool vFlip;
                     if (skinned)
                     {
-                        var jv = jts[i]; var wt = wts[i];
-                        wv = Vector3.Zero; wn = Vector3.Zero; float wsum = 0f;
-                        for (int k = 0; k < 4; k++)
+                        var blend = default(Matrix4x4); float wsum = 0f;
+                        foreach (var (js, ws) in jsets)
                         {
-                            float w = k == 0 ? wt.X : k == 1 ? wt.Y : k == 2 ? wt.Z : wt.W;
-                            if (w <= 0f) continue;
-                            int ji = (int)(k == 0 ? jv.X : k == 1 ? jv.Y : k == 2 ? jv.Z : jv.W);
-                            if (ji < 0 || ji >= jointMats.Length) continue;
-                            wv += Vector3.Transform(pos[i], jointMats[ji]) * w;
-                            if (nrm != null) wn += Vector3.TransformNormal(nrm[i], jointMats[ji]) * w;
-                            wsum += w;
+                            var jv = js[i]; var wt = ws[i];
+                            for (int k = 0; k < 4; k++)
+                            {
+                                float w = k == 0 ? wt.X : k == 1 ? wt.Y : k == 2 ? wt.Z : wt.W;
+                                if (w <= 0f) continue;
+                                int ji = (int)(k == 0 ? jv.X : k == 1 ? jv.Y : k == 2 ? jv.Z : jv.W);
+                                if (ji < 0 || ji >= jointMats.Length) continue;
+                                blend += jointMats[ji] * w;
+                                wsum += w;
+                            }
                         }
-                        if (wsum > 1e-6f) { wv /= wsum; wn = nrm != null ? SafeNorm(wn) : Vector3.UnitY; }
-                        else { wv = Vector3.Transform(pos[i], M); wn = nrm != null ? SafeNorm(Vector3.TransformNormal(nrm[i], M)) : Vector3.UnitY; }
+                        if (wsum > 1e-6f)
+                        {
+                            blend *= 1f / wsum;
+                            wv = Vector3.Transform(pos[i], blend);
+                            wn = nrm != null ? SafeNorm(Vector3.TransformNormal(nrm[i], blend)) : Vector3.UnitY;
+                            vFlip = blend.GetDeterminant() < 0f;
+                        }
+                        else
+                        {
+                            wv = Vector3.Transform(pos[i], M);
+                            wn = nrm != null ? SafeNorm(Vector3.TransformNormal(nrm[i], M)) : Vector3.UnitY;
+                            vFlip = nodeMirrored;
+                        }
                     }
                     else
                     {
                         wv = Vector3.Transform(pos[i], M);
                         wn = nrm != null ? SafeNorm(Vector3.TransformNormal(nrm[i], M)) : Vector3.UnitY;
+                        vFlip = nodeMirrored;
                     }
+                    flip[i] = vFlip;
                     // glTF Y-up -> baker Z-up, (x,y,z) -> (x,-z,y). A pure +90° rotation about X (det +1), so
                     // triangle winding is untouched; normals take the identical rotation. ALWAYS applied — the
                     // single static convention, matching the animated path's Blender-converted frame.
@@ -131,7 +160,7 @@ class Program
                 }
                 foreach (var t in p.GetTriangleIndices())
                 {
-                    Tri.Add(mirrored ? (t.A + b, t.C + b, t.B + b) : (t.A + b, t.B + b, t.C + b));   // swap B/C to rewind mirrored halves outward
+                    Tri.Add(flip[t.A] ? (t.A + b, t.C + b, t.B + b) : (t.A + b, t.B + b, t.C + b));   // swap B/C to rewind mirrored geometry outward
                     TriMat.Add(mi);
                 }
             }

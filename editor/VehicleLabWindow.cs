@@ -884,9 +884,10 @@ public class VehicleLabWindow : EditorWindow
                         ? "Flags marked, FOLD mode: the 'Furl' clip FOLDS the flag parts " +
                           $"{flagFoldDeg:0.#}° at their TOP hinge over {flagFoldFrames} frame(s) — deployed at idle" +
                           (Mathf.Abs(flagFoldDeg) < 0.01f ? " AND while moving (angle 0 = no fold, never struck)" : ", tucked while moving") +
-                          ". Assign after baking: Idle/reference = Spin[0..0] · Idle stance (override) = Furl[0..0] " +
-                          $"(deployed) · Movement = Spin · Pre-move = Furl[0..{flagFoldFrames}] (folds before moving — the " +
-                          $"unit WAITS for it) · After-move = Furl[{flagFoldFrames}..0] (redeploys on arrival)."
+                          ". Assign after baking (or press Auto-detect): Idle/reference = Furl[0..0] (the DEPLOYED frame — " +
+                          "never Spin[0..0]: Spin holds the folded pose on every frame, and a folded reference bakes into " +
+                          $"the rest skeleton and Auto-ground lifts the model into the sky) · Movement = Spin · Pre-move = Furl[0..{flagFoldFrames}] " +
+                          $"(folds before moving — the unit WAITS for it) · After-move = Furl[{flagFoldFrames}..0] (redeploys on arrival)."
                         : "Flags marked: banners fly at idle and are struck below the keel while moving (an instant stance " +
                           "swap — the naval default). For a tripod/stand, tick Fold mode below: the part then folds at its " +
                           "TOP hinge by the dialed angle — or stays deployed at angle 0 — instead of mirroring under the model.", MessageType.None);
