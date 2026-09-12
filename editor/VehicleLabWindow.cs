@@ -498,12 +498,12 @@ public class VehicleLabWindow : EditorWindow
                 "Multiplies the FIRST model's albedo (base-color textures and colors only — normal/roughness " +
                 "maps untouched), baked into the generated GLB so preview, probe and the Factory atlas all " +
                 "agree. <1 darkens, >1 lightens (clipped at white). 1 = as authored. Regenerate to apply."),
-                model1Bright, 0.25f, 3f);   // ceiling 3 (field request: a very dark source needed more headroom than 2.5)
+                model1Bright, 0.25f, 4f);   // ceiling 4 = the rig-script boundary clamp (field requests kept raising it; a very dark source needs real headroom)
             using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(srcFile2)))
                 model2Bright = EditorGUILayout.Slider(new GUIContent("Brightness — second model",
                     "Same albedo multiplier for the SECOND model — the tone-matching dial that makes a merged " +
                     "pair read as one unit instead of a patched model. 1 = as authored."),
-                    model2Bright, 0.25f, 3f);
+                    model2Bright, 0.25f, 4f);
         }
 
         // --- Actions: probe the source, save the current marking as a recipe (appears above), verify the classification ---
