@@ -54,6 +54,14 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   longer writes `deploySpeed`/`recoilSpeed` = 0 (the schema default is 1; the zeros produced two harmless but
   permanent per-bake validator warnings), and the registry floors both on every save, healing scarred entries.
 
+- **The preview dropdown can show the Idle stance override.** "Why doesn't it hide the sails at idle?" — it
+  did, in game; the Lab just couldn't show it: the stance override bakes to its own `anim_idle/` folder and
+  the dropdown had no entry for it, so the only idle-looking view was the reference (deliberately DEPLOYED on
+  a flag/sail rig). "Idle stance (override)" is now in the dropdown whenever that bake exists — the
+  furled-at-anchor look is verifiable without launching the game. Auto-detect also stopped wiping a
+  configured Furl idle stance: it can't guess one (a ship wants `Furl[N..N]`, a land flag wants it empty —
+  identical rigs), but it now KEEPS what you dialed and says so in the status line.
+
 - **Small fixes.** The Factory preview no longer shows a leftover animated rig after a static re-bake of a
   formerly animated entry (it fell through to the fresh static model only when the stale FBX was gone). The
   Animation section's probe re-runs when the model FILE changes in place, not only when its path changes (a
