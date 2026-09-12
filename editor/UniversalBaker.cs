@@ -1130,7 +1130,8 @@ public static class UniversalBaker
             cfg.convertGrid.ToString(sinv),
             (cfg.stripParts ?? "").Trim(),
             cfg.targetTris > 0 ? cfg.targetTris.ToString(sinv) : "0",
-            cfg.doubleSided ? "1" : "0");   // double-sided halves the reduce target -> shapes the OBJ
+            cfg.doubleSided ? "1" : "0",    // double-sided halves the reduce target -> shapes the OBJ
+            "v3");   // extractor-convention stamp: v3 = single Z-up frame + skinned bind-pose evaluation (2026-09-12) — bumping it re-extracts every cached OBJ
         string extractArgsFull = Path.Combine(projRoot, resDir, name + ".extract.args.txt");
         bool argsChanged = cachedFull != null && (!File.Exists(extractArgsFull) || File.ReadAllText(extractArgsFull) != extractArgsKey);
         if (argsChanged) Debug.Log($"[Factory] {name}: an extract setting changed (source/grid/strip/reduce/double-sided) — re-extracting.");
@@ -1306,12 +1307,23 @@ public static class UniversalBaker
         // Instantiate produced a mesh with the deck markings mapped onto the superstructure. Combine manually
         // (concatenate verts/UVs/normals, remap triangles) so every vertex keeps its own UV.
         var rootInv = src.transform.worldToLocalMatrix;
+        // ONE FRAME FOR EVERY SOURCE (PR #35 review, own finding 2): glbconv-extracted geometry arrives in the
+        // baker's Z-up frame, but a DIRECT .obj/.fbx static source never passes through the converter — Unity
+        // imports it Y-up, and with the auto-align gone it would bake pitched 90°. Apply the identical +90°X
+        // (x,y,z)->(x,-z,y) here for those sources so the unified frame and the registry Rotation semantics hold
+        // regardless of format. The gate mirrors the EXTRACT routing exactly: glb/gltf/blend go through glbconv,
+        // and so does ANY source with strip/reduce prep (prep exports a GLB first) — only a plain, un-prepped
+        // .obj/.fbx is imported directly. (det +1: winding untouched; normals ride the same rotation via `local`.)
+        string srcExtFrame = Path.GetExtension(cfg.modelFile ?? "").ToLowerInvariant();
+        bool viaGlbconv = srcExtFrame == ".glb" || srcExtFrame == ".gltf" || srcExtFrame == ".blend"
+                       || !string.IsNullOrWhiteSpace(cfg.stripParts) || cfg.targetTris > 0;
+        Matrix4x4 srcToBaker = viaGlbconv ? Matrix4x4.identity : Matrix4x4.Rotate(Quaternion.AngleAxis(90f, new Vector3(1f, 0f, 0f)));
         var cVerts = new List<Vector3>(); var cUV = new List<Vector2>(); var cNorm = new List<Vector3>(); var cTris = new List<int>();
         bool haveUV = false, haveNorm = false;
         foreach (var mf in src.GetComponentsInChildren<MeshFilter>())
         {
             var m = mf.sharedMesh; if (m == null) continue;
-            var local = rootInv * mf.transform.localToWorldMatrix;
+            var local = srcToBaker * rootInv * mf.transform.localToWorldMatrix;
             var v = m.vertices; var uv = m.uv; var nr = m.normals;
             bool mUV = uv != null && uv.Length == v.Length, mNorm = nr != null && nr.Length == v.Length;
             if (!multiMat)
@@ -1384,10 +1396,24 @@ public static class UniversalBaker
         var bb = mesh.bounds; var dims = bb.size;
         float longest = Mathf.Max(dims.x, Mathf.Max(dims.y, dims.z));
         float scl = longest > 0f ? size / longest : 1f;
-        Quaternion align = (dims.x >= dims.y && dims.x >= dims.z) ? Quaternion.FromToRotation(Vector3.right, Vector3.up)
-                         : (dims.z >= dims.x && dims.z >= dims.y) ? Quaternion.FromToRotation(Vector3.forward, Vector3.up)
-                         : Quaternion.identity;
-        Quaternion rot = Quaternion.Euler(cfg.rotationEuler) * align;
+        // Single static convention (2026-09-12): the geometry arrives from glbconv already in the baker's Z-up
+        // frame (skinned sources evaluated at bind pose), so there is NO auto-align — Rotation is the only
+        // orientation knob, exactly like the animated path. (The old longest-axis heuristic guessed by dims,
+        // which made the legacy static frame model-dependent on top of being pitched; every pre-2026-09-12
+        // static entry re-bakes into the unified frame and may need its Rotation re-dialed once.)
+        // REGISTRY ROTATION SEMANTICS (PR #35 review P1 — ChatGPT caught it, the (0,0,0) acceptance test
+        // couldn't): the fields mean X = pitch, Y = HEADING/yaw, Z = roll, and rig_anim.py applies them in the
+        // Blender Z-up world as Rz(Y) @ Rx(X) @ Ry(Z) (rig_anim.py "registry semantics" block). This mesh is in
+        // the SAME Z-up frame, so a plain Quaternion.Euler(x,y,z) would spin Y about the FORE/AFT axis (a roll)
+        // — the paths would disagree at every nonzero rotation. Replicate rig_anim's composition on the frame's
+        // component axes: apply Ry(Z) first, then Rx(X), then Rz(Y).
+        // MIRROR CONJUGATION (drilled 2026-09-12, the (0,45,0) cross-bake: the two noses swung to OPPOSITE
+        // sides): both importers x-flip the data (RH file -> LH Unity), but the animated rotation is baked in
+        // Blender BEFORE that flip while this one is applied AFTER it — so this rotation must be the mirror
+        // conjugate, F·R·F⁻¹: same axes, NEGATED yaw and roll angles, pitch (about the mirror axis) unchanged.
+        Quaternion rot = Quaternion.AngleAxis(-cfg.rotationEuler.y, new Vector3(0f, 0f, 1f))   // registry Y = yaw, about frame UP (z) — mirror-negated
+                       * Quaternion.AngleAxis(cfg.rotationEuler.x, new Vector3(1f, 0f, 0f))    // registry X = pitch, about frame SWAY (x) — the mirror axis, unchanged
+                       * Quaternion.AngleAxis(-cfg.rotationEuler.z, new Vector3(0f, 1f, 0f));  // registry Z = roll, about frame FORE/AFT (y) — mirror-negated
         var vv = mesh.vertices; var nrm = mesh.normals;
         for (int i = 0; i < vv.Length; i++) vv[i] = rot * ((vv[i] - bb.center) * scl);
         mesh.vertices = vv;
@@ -1974,6 +2000,9 @@ public static class UniversalBaker
         string tools = HafPackageContext.ToolPath("glbconv");
         string exe = Path.Combine(tools, "glbconv.exe");
         string dll = Path.Combine(tools, "glbconv.dll");
+        // glbconv always emits the baker's Z-up frame and evaluates skinned meshes at their bind pose (the single
+        // static convention, 2026-09-12) — the static and animated paths share one frame, Rotation means the same
+        // thing on both, and a rigged Vehicle Lab GLB extracts assembled.
         string args = $"\"{glb}\" \"{outDir}\" \"{name}\" {Mathf.Max(0, grid)}";
 
         System.Diagnostics.ProcessStartInfo psi;

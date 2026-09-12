@@ -601,17 +601,25 @@ public class AnimationLabWindow : EditorWindow
             return;
         }
         string spin   = clips.FirstOrDefault(c => c.Equals("Spin", StringComparison.OrdinalIgnoreCase));
+        string furl   = clips.FirstOrDefault(c => c.Equals("Furl", StringComparison.OrdinalIgnoreCase));
         string deploy = clips.FirstOrDefault(c => c.IndexOf("deploy", StringComparison.OrdinalIgnoreCase) >= 0);
 
         if (spin != null)
         {
             // Vehicle Lab rig — the recipe that window prints on success: wheels/tracks roll on move, still when parked.
+            // FLAG/SAIL rigs (a 'Furl' clip is present, 2026-09-12 TOW finding): the reference must be Furl[0..0], NOT
+            // Spin[0..0] — the flag rig's Spin holds the strike mirror on EVERY frame (deliberately: movement must never
+            // flash the deployed pose mid-loop), so its frame 0 is the HIDDEN pose. Using it as the reference bakes the
+            // hidden pose into the rest skeleton and Auto-ground then lifts the whole model by the mirrored part's depth
+            // (the sky-floating TOW). Furl frame 0 is the deployed state on every rig the Lab generates.
             cur.animStateDriven = true;
-            cur.animClip = spin + "[0..0]";                                                   // Idle/reference = the motionless rest frame
-            cur.animClipMove = spin;                                                          // Movement = the full linear spin
+            cur.animClip = (furl != null ? furl : spin) + "[0..0]";                           // Idle/reference = the motionless DEPLOYED frame
+            cur.animClipMove = spin;                                                          // Movement = the full linear spin (or the strike hold)
             cur.animClipAfter = ""; cur.animClipAttack = ""; cur.animClipCombat = ""; cur.animClipPreMove = ""; cur.animClipIdle = "";
             cur.convertRig = true; cur.autoGroundWheels = true; cur.keepTranslations = true; cur.animUnitFix = false; cur.deployConvert = false;
-            status = $"Auto-detected a Vehicle Lab rig ('{spin}' clip):  State-driven ON · Idle/reference = {spin}[0..0] (still) · Movement = {spin} (rolls) · Convert raw rig ON · Auto-ground ON · Keep bone translations ON · Fix 100× OFF.  Review, set Size in the Model Factory if needed, then Bake.";
+            status = furl != null
+                ? $"Auto-detected a Vehicle Lab FLAG/SAIL rig ('{furl}' + '{spin}' clips):  State-driven ON · Idle/reference = {furl}[0..0] (deployed) · Movement = {spin} · Convert raw rig ON · Auto-ground ON · Keep bone translations ON · Fix 100× OFF.  Review, set Size in the Model Factory if needed, then Bake."
+                : $"Auto-detected a Vehicle Lab rig ('{spin}' clip):  State-driven ON · Idle/reference = {spin}[0..0] (still) · Movement = {spin} (rolls) · Convert raw rig ON · Auto-ground ON · Keep bone translations ON · Fix 100× OFF.  Review, set Size in the Model Factory if needed, then Bake.";
             Repaint(); return;
         }
         if (deploy != null)

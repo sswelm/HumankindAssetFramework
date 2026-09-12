@@ -8,8 +8,20 @@ using System.Text;
 using SharpGLTF.Schema2;
 
 // GLB/glTF -> OBJ converter with vertex-clustering decimation.
-// usage: <glb> <outdir> [basename] [grid]
+// usage: <glb> <outdir> [basename] [grid] [zup]
 //   grid = cluster cells along the longest axis (higher = more detail/verts). Default 140.
+//   zup  = accepted for caller compatibility and IGNORED: since the 2026-09-12 single-convention rework the
+//          converter ALWAYS emits the baker's Z-up frame ((x,y,z) -> (x,-z,y), normals too — a +90° rotation
+//          about X, det +1, so winding is preserved). The old raw pass-through was the per-entry "legacy"
+//          convention whose Rotation hand-compensation made static and animated bakes disagree; the user's
+//          2026-09-12 ruling: ONE convention, rebake everything that disagrees.
+//
+// SKINNED sources (2026-09-12, the TOW tripod finding): a Vehicle Lab GLB stores vertices in BIND space with
+// the axis conversion AND the part assembly living on the JOINTS (the exporter parks -90°X on the root joint;
+// the Lab's Flag bone carries the tripod's offset). Reading positions with only node.WorldMatrix scatters such
+// a model (unassembled parts, pitched frame). For skinned primitives the vertices are therefore evaluated at
+// the BIND POSE: v' = v * blend(IBM_j * World_j) — deterministic, no animation sampling, and for unskinned
+// primitives nothing changes.
 //
 // MULTI-MATERIAL (faithful mode only): if the model uses >1 material, the OBJ is written with a `mtllib` + one
 // `usemtl` group per material, and a sibling `.mtl` wires each material to an albedo (its extracted BaseColor image,
@@ -30,7 +42,11 @@ class Program
         string baseName = args.Length > 2 ? args[2] : "model";
         int grid = 140;
         if (args.Length > 3 && !int.TryParse(args[3], NumberStyles.Integer, C, out grid))
-        { Console.Error.WriteLine($"ERROR: grid must be an integer, got '{args[3]}' (usage: <glb> <outdir> [basename] [grid])"); return 2; }
+        { Console.Error.WriteLine($"ERROR: grid must be an integer, got '{args[3]}' (usage: <glb> <outdir> [basename] [grid] [zup])"); return 2; }
+        if (args.Length > 4 && args[4] != "zup")
+        { Console.Error.WriteLine($"ERROR: unknown 5th argument '{args[4]}' (only literal 'zup' is accepted)"); return 2; }
+        // "zup" is accepted for old callers but no longer gates anything — the Z-up conversion is ALWAYS applied
+        // (single-convention rework 2026-09-12; see the header note).
         Directory.CreateDirectory(outDir);
 
         var model = ModelRoot.Load(glbPath);
@@ -40,37 +56,117 @@ class Program
         var V = new List<Vector3>(); var N = new List<Vector3>(); var U = new List<Vector2>();
         var Tri = new List<(int a, int b, int c)>();
         var TriMat = new List<int>();       // material LogicalIndex per triangle (-1 = no material)
+        int skinnedNodes = 0;
         foreach (var node in model.LogicalNodes)
         {
             if (node.Mesh == null) continue;
             var M = node.WorldMatrix;
-            // A MIRRORED node (negative-determinant world matrix, e.g. a symmetric vehicle whose right half is the left
+            // SKINNED node: the vertices live in BIND space and the node's own transform is IGNORED at render time
+            // (glTF spec) — the real placement comes from the joints. Evaluate the BIND POSE: per joint j the matrix
+            // IBM_j * World_j (row-vector convention: IBM first, then the joint's world), blended by the vertex
+            // weights. For a Vehicle Lab GLB this is what applies the exporter's root-joint -90°X AND the Flag/part
+            // bone offsets — skipping it shipped an unassembled, pitched model (the TOW tripod, 2026-09-12).
+            var skin = node.Skin;
+            Matrix4x4[] jointMats = null;
+            if (skin != null)
+            {
+                jointMats = new Matrix4x4[skin.JointsCount];
+                for (int j = 0; j < skin.JointsCount; j++)
+                {
+                    var (jointNode, ibm) = skin.GetJoint(j);
+                    jointMats[j] = ibm * jointNode.WorldMatrix;
+                }
+                skinnedNodes++;
+            }
+            // MIRRORED geometry (negative-determinant transform, e.g. a symmetric vehicle whose right half is the left
             // half under scale (-1,1,1)) flips the geometry but NOT the triangle index order, so that half winds inward
             // and renders inside-out — invisible under backface culling. Swap two indices per triangle to rewind it
-            // outward when the node is mirrored. (Normals still use TransformNormal; inverse-transpose is a separate low.)
-            bool mirrored = M.GetDeterminant() < 0f;
+            // outward. The judgement is PER VERTEX from the determinant of the transform that actually moved it — the
+            // node matrix for plain meshes, the blended joint matrix for skinned ones (PR #35 review P3: a per-node/
+            // first-joint guess mis-winds a mesh whose vertices weight to a different, mirrored joint) — and each
+            // triangle rewinds by its first vertex's sign. (Normals still use TransformNormal; inverse-transpose is a
+            // separate low.)
+            bool nodeMirrored = M.GetDeterminant() < 0f;
             foreach (var p in node.Mesh.Primitives)
             {
                 var pos = p.GetVertexAccessor("POSITION")?.AsVector3Array();
                 if (pos == null || pos.Count == 0) continue;
                 var uv = p.GetVertexAccessor("TEXCOORD_0")?.AsVector2Array();
                 var nrm = p.GetVertexAccessor("NORMAL")?.AsVector3Array();
+                // ALL influence sets, not only set 0 (PR #35 review P2): a source with >4 influences per vertex
+                // carries JOINTS_1/WEIGHTS_1 (and beyond) — reading set 0 alone drops real weight and deforms the
+                // bind evaluation. Sets are gathered while BOTH accessors of a set exist.
+                var jsets = new List<(IList<Vector4> j, IList<Vector4> w)>();
+                if (jointMats != null)
+                    for (int s = 0; ; s++)
+                    {
+                        var js = p.GetVertexAccessor("JOINTS_" + s)?.AsVector4Array();
+                        var ws = p.GetVertexAccessor("WEIGHTS_" + s)?.AsVector4Array();
+                        if (js == null || ws == null) break;
+                        jsets.Add((js, ws));
+                    }
+                bool skinned = jsets.Count > 0;
                 int mi = p.Material != null ? p.Material.LogicalIndex : -1;
                 int b = V.Count;
+                var flip = new bool[pos.Count];
                 for (int i = 0; i < pos.Count; i++)
                 {
-                    V.Add(Vector3.Transform(pos[i], M));
-                    N.Add(nrm != null ? SafeNorm(Vector3.TransformNormal(nrm[i], M)) : Vector3.UnitY);
+                    Vector3 wv, wn; bool vFlip;
+                    if (skinned)
+                    {
+                        var blend = default(Matrix4x4); float wsum = 0f;
+                        foreach (var (js, ws) in jsets)
+                        {
+                            var jv = js[i]; var wt = ws[i];
+                            for (int k = 0; k < 4; k++)
+                            {
+                                float w = k == 0 ? wt.X : k == 1 ? wt.Y : k == 2 ? wt.Z : wt.W;
+                                if (w <= 0f) continue;
+                                int ji = (int)(k == 0 ? jv.X : k == 1 ? jv.Y : k == 2 ? jv.Z : jv.W);
+                                if (ji < 0 || ji >= jointMats.Length) continue;
+                                blend += jointMats[ji] * w;
+                                wsum += w;
+                            }
+                        }
+                        if (wsum > 1e-6f)
+                        {
+                            blend *= 1f / wsum;
+                            wv = Vector3.Transform(pos[i], blend);
+                            wn = nrm != null ? SafeNorm(Vector3.TransformNormal(nrm[i], blend)) : Vector3.UnitY;
+                            vFlip = blend.GetDeterminant() < 0f;
+                        }
+                        else
+                        {
+                            wv = Vector3.Transform(pos[i], M);
+                            wn = nrm != null ? SafeNorm(Vector3.TransformNormal(nrm[i], M)) : Vector3.UnitY;
+                            vFlip = nodeMirrored;
+                        }
+                    }
+                    else
+                    {
+                        wv = Vector3.Transform(pos[i], M);
+                        wn = nrm != null ? SafeNorm(Vector3.TransformNormal(nrm[i], M)) : Vector3.UnitY;
+                        vFlip = nodeMirrored;
+                    }
+                    flip[i] = vFlip;
+                    // glTF Y-up -> baker Z-up, (x,y,z) -> (x,-z,y). A pure +90° rotation about X (det +1), so
+                    // triangle winding is untouched; normals take the identical rotation. ALWAYS applied — the
+                    // single static convention, matching the animated path's Blender-converted frame.
+                    wv = new Vector3(wv.X, -wv.Z, wv.Y);
+                    wn = new Vector3(wn.X, -wn.Z, wn.Y);
+                    V.Add(wv);
+                    N.Add(wn);
                     U.Add(uv != null ? uv[i] : Vector2.Zero);
                 }
                 foreach (var t in p.GetTriangleIndices())
                 {
-                    Tri.Add(mirrored ? (t.A + b, t.C + b, t.B + b) : (t.A + b, t.B + b, t.C + b));   // swap B/C to rewind mirrored halves outward
+                    Tri.Add(flip[t.A] ? (t.A + b, t.C + b, t.B + b) : (t.A + b, t.B + b, t.C + b));   // swap B/C to rewind mirrored geometry outward
                     TriMat.Add(mi);
                 }
             }
         }
-        Console.WriteLine($"collected: verts={V.Count} tris={Tri.Count}");
+        Console.WriteLine($"collected: verts={V.Count} tris={Tri.Count}  axis: Y-up -> Z-up (always)"
+                          + (skinnedNodes > 0 ? $"  skinned nodes evaluated at bind pose: {skinnedNodes}" : ""));
 
         // ---- 2) bounds + (optional) vertex-clustering decimation ----
         Vector3 mn = new(float.MaxValue), mx = new(float.MinValue);

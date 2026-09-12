@@ -87,7 +87,7 @@ axle disagreement, unpaired wheels, turret outliers, and visible interior geomet
 | **Sail** | Marked canvas. Always exported double-sided, kept out of the inside-out flip, and struck/raised by its own generated `Furl` clip — hidden at idle, up while moving. Optional **Sail reduce (%)** dial — every vertex kept ships twice (double-sided), but the first non-zero step already cuts hard on flat canvas, so go gently. |
 | **Rigging** (`R`) | Rope/line geometry — dense but barely visible at game distance. Reduced at Generate by the **Rigging reduce (%)** dial, at the source. When sails are marked, rigging **rides the Sail bone**: struck below the keel with the canvas at idle, raised underway — but single-sided (its own mesh, never doubled with the canvas). Without sails it welds to the hull as before. |
 | **Structure** (`S`) | Dense detail geometry (railings, a carved bow) — more visible than rigging, so its own usually-gentler **Structure reduce (%)** dial. |
-| **Flag** | Banners/pennants — the **opposite of sails**: they fly at anchor and are struck below the keel while the ship moves (one Flag bone, held flipped through `Spin`). Double-sided. |
+| **Flag** | Banners/pennants — the **opposite of sails**: they fly at anchor and are struck below the keel while the ship moves (one Flag bone, held flipped through `Spin`). Double-sided. On a land unit the same strike makes the part **disappear into the terrain** while moving (a TOW's tripod); tick **Fold mode** in the Deploy section to fold it at its top hinge instead — see *Flag fold* below. |
 | **Rudder** | Double-sided and **always visible**, winding kept — for slabs the inside-out test cannot decide (a half-inverted rudder scores ~0; no flip can repair it). No bone, no clip. |
 | **Preserve** | Shipped as authored: never winding-flipped, never doubled (not even under the global Double-sided switch). Its **Preserve reduce (%)** dial (default 0 = byte-identical, the original promise) can opt reduction in. For parts every automatic pass keeps getting wrong. |
 | **Flip** (`F`) | Winding reversed **once** at export, applied on top of the inside-out fix — an XOR **per island**: islands the fix flipped land back on their authored winding, and with the fix off (or on islands the fix left alone) the mark alone reverses them. A part whose islands got *mixed* fix verdicts can't be fully repaired by Flip — split it in the Workshop, or use Rudder (double-sided) there. Own **Flip reduce (%)** dial. Mesh rig only (the fast path refuses it loudly). |
@@ -135,11 +135,13 @@ separate **`Furl` clip** whose frame 1 **flips the canvas 180° below the keel**
 Deploy-proven stance mechanism the trails use; an earlier translation-based strike fought the converter's
 rest-fold and location-strip and shipped misplaced). Use it as a **stance, never as an animation to play**: the
 clip format has no visibility or alpha, so out-of-sight *is* the disappear, and the clean on/off comes from never
-playing the move. Assign after baking: Idle/reference = `Spin[0..0]` (this defines the model's REST — never put
-`Furl` in the reference field, or the conversion adopts the struck pose as the bind) · Idle stance (override) =
-`Furl[1..1]` (a ship under oars, no canvas) · Movement = `Spin` (sails up) · **After-move and Pre-move empty** —
-the state change swaps the pose in one tick. **Keep bone translations** can stay **OFF**: the strike is pure
-rotation.
+playing the move. Assign after baking: Idle/reference = **`Furl[0..0]`** (frame 0 of `Furl` is always the fully
+DEPLOYED state, and the reference clip's frame 0 becomes the model's REST — never reference `Spin[0..0]` on a
+rig with flags or sails: `Spin` holds its strike on *every* frame, so the hidden pose would bake into the rest
+skeleton, and on a land unit Auto-ground then lifts the whole model by the struck part's depth — the sky-floating
+TOW, 2026-09-12) · Idle stance (override) = `Furl[1..1]` (a ship under oars, no canvas) · Movement = `Spin`
+(sails up) · **After-move and Pre-move empty** — the state change swaps the pose in one tick. **Keep bone
+translations** can stay **OFF**: the strike is pure rotation.
 
 **Fold sail at idle** (checkbox under the sails notice) swaps the strike for the vanilla ships' look: instead of
 vanishing below the keel, the idle canvas **curls up to the yard** — a hand-close roll on a generated
@@ -159,10 +161,24 @@ camber survives (rotations can't flatten a curved sheet), so the last of the for
 source canvas.
 
 With frames, the fold is the **deployment mechanic** applied to canvas — assign like the split-trail gun:
-Idle/reference = `Spin[0..0]` · Idle stance (override) = `Furl[N..N]` (held folded) · Movement = `Spin` (sails
-up) · **Pre-move = `Furl[N..0]`** (the canvas lets out as the ship gets under way) · **After-move =
-`Furl[0..N]`** (it gathers on arrival) — or leave Pre/After empty for a one-tick swap. Not available on the
-source-skeleton fast path (the fold needs generated bones and band skinning); regenerate and rebake to apply.
+Idle/reference = `Furl[0..0]` (deployed — see the reference rule above) · Idle stance (override) = `Furl[N..N]`
+(held folded) · Movement = `Spin` (sails up) · **Pre-move = `Furl[N..0]`** (the canvas lets out as the ship gets
+under way) · **After-move = `Furl[0..N]`** (it gathers on arrival) — or leave Pre/After empty for a one-tick
+swap. Not available on the source-skeleton fast path (the fold needs generated bones and band skinning);
+regenerate and rebake to apply.
+
+**Flag fold (land units)** *(2026-09-12, the TOW launcher's tripod)*. A **Flag**-marked part defaults to the
+ships' naval strike: deployed at idle, mirrored below the keel while moving — which on land means it
+**disappears into the terrain** (the clip format has no visibility channel; out-of-sight *is* the disappear).
+Assign that default as: Idle/reference = `Furl[0..0]` (deployed) · Movement = `Spin` (struck) · Pre/After
+empty — or just press **Auto-detect**, which recognizes the flag/sail rig. When you'd rather *see* the part
+stow than vanish, tick **Fold mode (instead of the naval strike)** in the Deploy section: the Flag bone's
+hinge moves to the **top of the flag geometry** (where a tripod meets its launcher) and the `Furl` clip plays
+a fold by the dialed angle (−175..175°, ~100° tucks a tripod against its mount; negative folds the other way)
+over the **Flag fold frames**. Assign like any deploy: Idle/reference = `Furl[0..0]` · Movement = `Spin` (holds
+the folded pose) · **Pre-move = `Furl[0..N]`** (folds — the unit waits for it) · **After-move = `Furl[N..0]`**
+(redeploys on arrival). Angle **0** in fold mode means the part simply **stays deployed** while moving — never
+struck. Fold mode is not available on the source-skeleton fast path.
 
 **Oars (galley rowing).** A galley's oars usually arrive as a **few merged meshes** — all the poles in one, all the
 blades in another (often split front/back) — each mesh holding *every* oar across *both* banks. Mark those meshes
@@ -211,6 +227,11 @@ For wheels/tracks, the expected recipe is:
 - **Fix 100× OFF**
 - **Auto-ground ON**
 - **Keep bone translations ON**
+
+For a rig with **flags or sails** (a `Furl` clip exists), Auto-detect fills Idle/reference = `Furl[0..0]`
+instead — the deployed frame; `Spin[0..0]` would bake the struck/folded pose into the rest skeleton and
+Auto-ground would sky-lift a land unit (see *Flags* / *Flag fold* in §4). Add the Idle-stance/Pre/After clips
+from the Lab's printed recipe by hand — Auto-detect leaves them empty.
 
 For rotorcraft, override the generic Spin detection with the recipe Vehicle Lab prints:
 

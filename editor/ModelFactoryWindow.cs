@@ -17,7 +17,10 @@ public class ModelFactoryWindow : EditorWindow
     // [SerializeField] so Unity preserves the form across a DOMAIN RELOAD (any script recompile, entering/exiting Play
     // mode, etc.). Without it these are wiped back to defaults mid-edit — the "fields went empty on their own" bug.
     // (ModelDef is [Serializable], so the whole edited entry round-trips.)
-    [SerializeField] ModelDef cur = new ModelDef();
+    // One construction seam for new/reset entries. (It briefly initialized the per-entry staticAxisV2 flag,
+    // 2026-09-09..12; the single-convention rework deleted the flag, and the seam stays for the next default.)
+    static ModelDef FreshEntry() => new ModelDef();
+    [SerializeField] ModelDef cur = FreshEntry();
     [SerializeField] int selected;      // 0 = <New>, else index into `existing`
     string[] existing = { "<New>" };
     string status = "";
@@ -130,8 +133,11 @@ public class ModelFactoryWindow : EditorWindow
 
     // Cheap animation probe (no Blender), cached per model-file path. State: 0 = unknown (allow), 1 = animation
     // detected (allow + hint), 2 = definitely none (disable the Animated toggle). Keeps the checkbox from being ticked
-    // on a static model. Runs once when the path changes, not every OnGUI frame.
+    // on a static model. The heavy probe runs only when the path OR the file's mtime changes; the mtime stat
+    // itself runs per OnGUI pass — cheap on a local disk, but a model file on a slow network share would make
+    // the window sluggish (accepted; the stat is what catches an in-place regeneration, the 2026-09-16 TOW fix).
     string animProbeFile = "";   // sentinel != any real path so the first real path always probes
+    System.DateTime animProbeStamp;   // the probed file's mtime — a REGENERATED file at the same path must re-probe (2026-09-16, the TOW: its first _Spin.glb carried no animations, the Flag re-generate added them, and the path-only cache kept the Animation section empty; the Refresh button never re-probed either)
     int animProbeState;
     List<string> animClips = new List<string>();                                   // clip names read from the model (Clip picker)
     List<KeyValuePair<string, int>> animBonePrefixes = new List<KeyValuePair<string, int>>();  // bone-name prefix -> count (Bones picker)
@@ -242,8 +248,13 @@ public class ModelFactoryWindow : EditorWindow
         // that prefab is a display-flipped bind pose with no ground plane, so the cure was worse than the disease
         // ("why is it heading up without a surface?"). The real fix must keep THIS route's upright grounded
         // geometry and fix the texture pairing instead — see the atlas-UV preview work.)
-        string path = AssetDatabase.LoadMainAssetAtPath(animFbx) != null ? animFbx
-                    : AssetDatabase.LoadMainAssetAtPath(animPath) != null ? animPath
+        // The rig-FBX routes only apply while the entry IS animated: a static re-bake of a formerly animated entry
+        // deletes _Preview/_PreviewMat/_PreviewMesh (the E7 sweep) but leaves anim/ behind for a later re-animate —
+        // preferring that leftover FBX here showed the OLD rig (grey, its atlas material gone) instead of the fresh
+        // static _Model.prefab (the "nothing/stale after making it static" report, 2026-09-12).
+        bool wantAnim = cur != null && cur.animated;
+        string path = wantAnim && AssetDatabase.LoadMainAssetAtPath(animFbx) != null ? animFbx
+                    : wantAnim && AssetDatabase.LoadMainAssetAtPath(animPath) != null ? animPath
                     : AssetDatabase.LoadMainAssetAtPath(staticPath) != null ? staticPath : null;
         if (path == null) return;
         previewGrounded = path == staticPath || path == animFbx;   // game-space previews only (see the field comment)
@@ -999,13 +1010,11 @@ public class ModelFactoryWindow : EditorWindow
         bool prevWide = EditorGUIUtility.wideMode;
         EditorGUIUtility.wideMode = true;
         cur.rotation = EditorGUILayout.Vector3Field("Rotation offset (XYZ)", cur.rotation);
-        // PATH-SPECIFIC ROTATION (2026-09-09, the Lembos upside-down surprise): the static path ingests a
-        // GLB through glbconv->OBJ (currently Y-up data into the Z-up baker world — see Framework-Review's
-        // deferred unification), the animated path through Blender->FBX. Same field, two axis chains: a value
-        // tuned on a static test-bake does NOT carry to the animated bake.
-        string rotExt = (cur.modelFile ?? "").ToLowerInvariant();
-        if ((rotExt.EndsWith(".glb") || rotExt.EndsWith(".gltf")) && (cur.animated || animProbeState == 1))
-            EditorGUILayout.LabelField("   ⚠ Rotation is PATH-specific: a value tuned on a static test-bake will not carry to the animated bake (different axis chains). Vehicle-Lab rigs bake animated at (0, 90, 0).", EditorStyles.wordWrappedMiniLabel);
+        // AXIS UNIFICATION (final form 2026-09-12 — the user's ruling after the TOW static/animated mismatch):
+        // ONE frame, no toggle. glbconv always emits the baker's Z-up frame (skinned sources evaluated at bind
+        // pose) and the static combine has no auto-align, so the same Rotation faces a model identically on the
+        // static and animated paths. Pre-unification static entries re-bake into this frame and may need their
+        // Rotation re-dialed once (the "Unified axis (v2)" per-entry toggle lived here 2026-09-09..12).
         cur.position = EditorGUILayout.Vector3Field(new GUIContent("Position offset (Z = waterline)",
             "Move the model relative to its pawn, in GAME units: X sway, Y fore/aft, Z vertical (− sinks; the Zumwalt " +
             "waterline). STATIC models: baked into the mesh at Bake. ANIMATED models: applied by the PLUGIN at runtime " +
@@ -1306,7 +1315,7 @@ public class ModelFactoryWindow : EditorWindow
                     "(turn ease, terrain hug, donor clip, VFX/sound flags, rotation/position/textures). Rebuild " +
                     "the mod afterwards; no relaunch of Blender, no new assets."), GUILayout.Height(34), GUILayout.Width(110)))
                     SaveOnly();
-            if (GUILayout.Button("Reset", GUILayout.Height(34), GUILayout.Width(72))) { cur = new ModelDef(); selected = 0; status = ""; GUI.FocusControl(null); }
+            if (GUILayout.Button("Reset", GUILayout.Height(34), GUILayout.Width(72))) { cur = FreshEntry(); selected = 0; status = ""; GUI.FocusControl(null); }
         }
         if (!canBake)
             EditorGUILayout.HelpBox(
@@ -1412,7 +1421,7 @@ public class ModelFactoryWindow : EditorWindow
     {
         formDiffersFromRegistry = false;   // loading fresh = in sync by definition
         browseUnitFixGuess = -1;           // the guess belonged to the previous form's browsed file
-        if (selected <= 0) { cur = new ModelDef(); loadedName = ""; status = ""; LoadPreview(null); return; }
+        if (selected <= 0) { cur = FreshEntry(); loadedName = ""; status = ""; LoadPreview(null); return; }
         var e = ModelRegistry.Load().FirstOrDefault(x => x.resourceName == existing[selected]);
         if (e == null) return;
         cur = JsonUtility.FromJson<ModelDef>(JsonUtility.ToJson(e));   // clone so edits don't mutate the stored copy
@@ -1431,8 +1440,10 @@ public class ModelFactoryWindow : EditorWindow
     void EnsureAnimProbe(string file)
     {
         file = file ?? "";
-        if (file == animProbeFile) return;
-        animProbeFile = file;
+        System.DateTime stamp = System.DateTime.MinValue;
+        try { if (System.IO.File.Exists(file)) stamp = System.IO.File.GetLastWriteTimeUtc(file); } catch { }
+        if (file == animProbeFile && stamp == animProbeStamp) return;
+        animProbeFile = file; animProbeStamp = stamp;
         animProbeState = ProbeAnimation(file);
         (animClips, animBonePrefixes) = InspectModel(file);   // populate the Clip / Bones pickers
     }
@@ -2065,7 +2076,11 @@ public class ModelFactoryWindow : EditorWindow
         cur.animClipCombat = ""; cur.animClipPreMove = ""; cur.animClipIdle = ""; cur.animClipIdleAlt = ""; cur.animClipIdleAlt2 = "";
         cur.clip = new int[4]; cur.clipMove = new int[4]; cur.clipAfter = new int[4]; cur.clipAttack = new int[4];
         cur.clipCombat = new int[4]; cur.clipPreMove = new int[4]; cur.clipIdle = new int[4]; cur.clipIdleAlt = new int[4]; cur.clipIdleAlt2 = new int[4];
-        cur.idleAltInterval = 0; cur.attackRepeats = 0; cur.clearAimLayer = false;
+        // attackRepeats resets to 1, NOT 0 — 1 is the schema default and the validator's floor. Clearing it to 0
+        // left a scar on the static->animated round trip: re-ticking Animated kept the 0 and every later bake
+        // warned "attackRepeats: 0 — must be >= 1" (the runtime tolerates 0 as 1, but the warning never healed
+        // unless the Attack section's slider happened to be drawn; 2026-09-12 TOW field report).
+        cur.idleAltInterval = 0; cur.attackRepeats = 1; cur.clearAimLayer = false;
         cur.turretBone = ""; cur.turretAxis = -1; cur.muzzleBone = ""; cur.muzzleOffset = ""; cur.socketBones = "";
         // 2026-08-19 hand-list audit: these three survived Make static — gunElev is applied at RUNTIME to every
         // non-donor entry, so a leftover gunElevMax kept elevating a made-static gun (the exact "cursed leftover"

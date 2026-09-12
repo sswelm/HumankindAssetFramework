@@ -191,12 +191,14 @@ their settings and work together**:
   correctly stays correct on every re-bake); **any non-zero value = the rotation is baked into the rig** in the
   Blender step (rotate + `transform_apply` into vertices + bone rests, object-level anim fcurves stripped) — the fix
   for raw glTF rigs that round-trip lying down (the Sketchfab Combine soldier ships a -90°X armature node and needs
-  `90, 0, 0`). Nominal semantics: x ≈ stand-up pitch, y ≈ heading, z ≈ roll — but the mapping crosses multiple axis
-  conversions, so **probe one axis at a time in 90° steps and judge IN-GAME ONLY**: ⚠ the embedded preview's
-  orientation is meaningless for animated models (fixed display flips; it happened to match the soldier and
-  contradicted the howitzer — chasing it re-baked a working gun onto its side, twice). Rotation needs the **Model
-  file set**; the Blender step re-runs **automatically** when any of its settings changed (see the Reuse note in §5).
-  `deploy_convert.py`-prepared rigs (the howitzer) are correct at `0,0,0` — never give them a rotation.
+  `90, 0, 0`). Semantics — **the same on the static and animated paths** since the 2026-09-12 axis unification,
+  field-verified on every axis and both signs: **X = pitch, Y = heading/yaw, Z = roll**, and one value faces the
+  model identically whichever way the entry bakes. When a bake surprises you, probe one axis at a time in 90°
+  steps, and for animated models judge IN-GAME (⚠ the embedded preview's orientation is meaningless for animated
+  models — fixed display flips; it happened to match the soldier and contradicted the howitzer — chasing it
+  re-baked a working gun onto its side, twice). Rotation needs the **Model file set**; the Blender step re-runs
+  **automatically** when any of its settings changed (see the Reuse note in §5). `deploy_convert.py`-prepared
+  rigs (the howitzer) are correct at `0,0,0` — never give them a rotation.
 - **Position offset (x, y, z = height)** — Static models bake it in (z = waterline; negative sinks a ship). For
   **animated** models it's applied at **runtime, in the pawn's own frame** (2026-07-18): x = sideways, y = fore/aft,
   z = altitude (world-up). The planar part is rotated by the unit's facing each frame, so the nudge **turns with the
@@ -426,7 +428,7 @@ strategic map.
 |---|---|
 | **Model invisible / see-through** | Single-sided/CAD mesh (backface-culled). **Animated:** tick **Double-sided** in the **Vehicle Lab** and regenerate the rig. **Static:** **Winding fix**. Or it overflowed the shared buffer → lower **Reduce to ~tris**. |
 | **Model tiny (a speck) or huge** | **Size** is the world length — set it to what looks right; the Console logs the scale. |
-| **Model upright on the static bake but upside-down (or pitched) on the animated bake** — or vice versa | **Rotation is path-specific**: the static path ingests a GLB through glbconv→OBJ, the animated path through Blender→FBX — different axis chains, so a Rotation tuned on a static test-bake does not carry to the animated bake. Re-tune per path; Vehicle-Lab rigs bake animated at **(0, 90, 0)** (the galley's shipped values). The underlying convention unification is tracked in Framework-Review. |
+| **Model upright on the static bake but upside-down (or pitched) on the animated bake** — or vice versa | The entry was last baked on the pre-unification **legacy axis frame** (static path: raw Y-up data + longest-axis auto-align, so Rotation meant something different per path). Since the 2026-09-12 axis unification there is ONE frame: just **re-bake** — the extraction re-runs automatically — and re-dial **Rotation** once (typically **(0, 0, 0)**); the same value then faces the model identically on the static and animated paths. |
 | **ANIMATED model bakes huge & floats high in the sky** (fine in the Factory *preview*, wrong only in-game) | The rig's FBX embeds a metre→centimetre unit scale the SDK skeleton over-applies → ~100× oversize. **Tick "Fix 100× oversize (FBX unit scale)"** (Animation section) and re-bake at the real Size — the baker measures the FBX at true scale then bakes with the unit scale on, so Size = in-game units. It's a **per-model** toggle (no universal rule: some exports need it, some break with it). |
 | **ANIMATED model vanishes / shrinks to a speck after ticking "Fix 100× oversize"** | That model's FBX does **not** carry the metre→cm scale, so the fix over-shrinks it. **Untick "Fix 100× oversize"** and re-bake — most rigs (e.g. the drone) bake correctly with it off. |
 | **DEPLOY-CONVERT model (`deployConvert` ON): which way for Fix 100×?** | `deploy_convert` auto-selects a path by part count: **small rigs (≤124 parts — the m114 howitzer class) take the LEGACY path** (`DeployArm`, cm verts) → **Fix 100× ON**; **huge rigs (T-62 class) take the CONTRACT path** (`DeployArmV2`, meter verts) → **Fix 100× OFF**. The Console logs `DEPLOY path: LEGACY/CONTRACT`. If a deploy model is a speck with Fix 100× ON it's on the contract path (turn it OFF) and vice-versa. The contract path also runs bone-slimming + a delta-form rebase, gated to big rigs — applying them to a small rig re-breaks it (invisible / crossed legs), which is what the **deploy golden diff** guard (§11) protects against. |
@@ -889,6 +891,9 @@ so it does not matter where you press Bake.
 fills the whole animation config in one click, then explains its choice in the status bar (review-only, nothing bakes):
 a **Vehicle Lab `Spin` rig** → State-driven with Idle/reference = `Spin[0..0]` (still) and Movement = `Spin` (rolls),
 Convert-raw-rig + Auto-ground + Keep-translations ON, Fix 100× OFF — the exact recipe the Vehicle Lab prints; a
+**Vehicle Lab FLAG/SAIL rig** (a `Furl` clip is present) → the same, but Idle/reference = `Furl[0..0]` — the
+DEPLOYED frame (`Spin` holds its strike/fold on every frame, so referencing it bakes the hidden pose into the rest
+skeleton and Auto-ground sky-lifts the model; 2026-09-12, the TOW). Stance/Pre/After clips stay yours to fill; a
 **character** (an `idle` + a `run`/`walk`/`move` clip) → State-driven with idle/movement guessed from the names; a
 **single clip** → continuous loop; a **deploy** clip → a hint (deploy frame-ranges can't be inferred from a baked clip).
 

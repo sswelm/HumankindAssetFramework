@@ -351,6 +351,26 @@ strangers." Overlaps the deferred list's ENC-branding, Blender-PATH-discovery, a
 
 ## Still deferred (from earlier passes — unchanged)
 
+- **RESOLVED 2026-09-12 (single convention — the user's ruling): unified static/animated axis frame.**
+  First attempt (2026-09-09) convention-versioned it behind a per-entry `staticAxisV2` flag with byte-identical
+  legacy re-bakes — and the TOW acceptance test failed anyway: the flag didn't survive to bake time (the extract
+  ran keyed `v1`), and a Vehicle-Lab GLB is SKINNED, so glbconv's node-walk read raw bind-space vertices —
+  unassembled parts, pitched frame — regardless of any axis toggle. The user's verdict: *"you try to have it
+  both ways which doesn't work"* — one convention, rebake whatever disagrees. Final form: glbconv ALWAYS
+  converts Y-up→Z-up (`(x,y,z)→(x,−z,y)`, normals too — +90°X, winding preserved) and evaluates skinned
+  primitives at their BIND POSE (`blend(IBM_j · World_j)` — that applies the exporter's root-joint −90°X and
+  the rig's part-assembly offsets); the static combine's longest-axis auto-align is DELETED, the
+  `staticAxisV2` flag/toggle removed, and the extract-cache stamp bumped to `v3` so every cached OBJ
+  re-extracts. Rotation is now the only orientation knob and means the same thing on both paths; pre-existing
+  static entries re-bake into the unified frame and may need one Rotation re-dial. Review round 2 (ChatGPT +
+  own pass) hardened it: the static combine replicates rig_anim's exact rotation composition (X pitch,
+  Y heading, Z roll — a plain Euler on the Z-up frame had made Y a roll) **as the mirror conjugate** (the
+  static rotation applies after the importer's handedness flip, so yaw/roll negate internally — caught by the
+  (0,45,0) cross-bake landing on opposite sides); glbconv reads every `JOINTS_n/WEIGHTS_n` set and judges
+  mirrored winding per vertex; direct `.obj/.fbx` static sources get the same Y-up→Z-up conversion in the
+  combine (they never pass glbconv). Field-verified on the TOW: static and animated agree at (0,0,0),
+  (0,±45,0), and on the X and Z axes. Original finding kept below for the record.
+
 - **Static-path axis convention for GLB sources — measured wrong, unification deferred (2026-09-09).**
   The baker's world is Z-up native (Position "Z = waterline", heightUV measures Z, the synthetic test cubes
   are authored Z-up), but `glbconv` writes glTF's **Y-up** vertices raw — so every static bake of a GLB

@@ -149,6 +149,13 @@ public class VehicleLabWindow : EditorWindow
     // C-curl, 1 = layers pressed flat by gravity (per-joint angle LERPed toward ~170 — never 180, coplanar
     // cloth z-fights). Thins the folded bundle without changing the hand-close motion.
     [SerializeField] float sailFoldSag = 0f;
+    // FLAG FOLD (2026-09-16, the TOW tripod: "upside down and not animating at all"): 0 = the legacy naval
+    // strike (banners mirrored below the keel — ships unchanged). Non-zero = the Flag bone's hinge moves to
+    // the TOP of the flag geometry and the Furl clip PLAYS a fold by this angle over the frames — deployed
+    // at idle, tucked while moving, deploy-pattern assignable so the unit waits for the fold.
+    [SerializeField] bool flagFoldOn = false;   // fold MODE is this checkbox, not the angle (field: "make it work at 0") — in fold mode angle 0 = "stays deployed while moving"; unchecked = the naval strike ships rely on
+    [SerializeField] float flagFoldDeg = 0f;
+    [SerializeField] int flagFoldFrames = 12;
     // GUN PIVOT: where the Gun bone sits along the assembly — the runtime elevation rotates about it, so this IS
     // the trunnion. 0.5 = bbox centre (unchanged default); an artillery piece wants ~0.4 (measured on the M114).
     [SerializeField] float gunPivot = 0.5f;
@@ -306,6 +313,9 @@ public class VehicleLabWindow : EditorWindow
         public float sailFoldAngleDeg = 270f;  // TOTAL curl over the three joints, hand-close style (absent-key 270 = foot lands at the beam)
         public bool sailFoldReverse = false;   // mirror the curl to the other side of the sail plane (absent-key false)
         public float sailFoldSag = 0f;         // 0 = open zero-g curl, 1 = gravity-pressed thin roll (absent-key 0)
+        public bool flagFoldOn = false;        // fold mode switch (absent-key false == the naval strike — ships unchanged)
+        public float flagFoldDeg = 0f;         // fold angle at the top hinge; 0 in fold mode = stays deployed while moving (absent-key 0)
+        public int flagFoldFrames = 12;        // Furl span for the flag fold (absent-key 12)
         public string srcFile2 = "";           // optional second model merged into the scene (absent-key "" == none)
         public Vector3 model2Off = Vector3.zero;    // its placement against the first model
         public Vector3 model2Rot = Vector3.zero;    // Euler degrees, X then Y then Z, about its own origin
@@ -865,6 +875,38 @@ public class VehicleLabWindow : EditorWindow
                             "is unchanged."), sailFoldSag, 0f, 1f);
                     }
                 }
+                // FLAG FOLD — the land-unit deploy: a Flag-marked tripod/stand folds at its TOP hinge instead
+                // of the naval below-keel strike, and the fold PLAYS (2026-09-16, the TOW tripod).
+                int deployFlags = ActiveParts.Count(p => p.role == Role.Flag);
+                if (deployFlags > 0)
+                {
+                    EditorGUILayout.HelpBox(flagFoldOn
+                        ? "Flags marked, FOLD mode: the 'Furl' clip FOLDS the flag parts " +
+                          $"{flagFoldDeg:0.#}° at their TOP hinge over {flagFoldFrames} frame(s) — deployed at idle" +
+                          (Mathf.Abs(flagFoldDeg) < 0.01f ? " AND while moving (angle 0 = no fold, never struck)" : ", tucked while moving") +
+                          ". Assign after baking (or press Auto-detect): Idle/reference = Furl[0..0] (the DEPLOYED frame — " +
+                          "never Spin[0..0]: Spin holds the folded pose on every frame, and a folded reference bakes into " +
+                          $"the rest skeleton and Auto-ground lifts the model into the sky) · Movement = Spin · Pre-move = Furl[0..{flagFoldFrames}] " +
+                          $"(folds before moving — the unit WAITS for it) · After-move = Furl[{flagFoldFrames}..0] (redeploys on arrival)."
+                        : "Flags marked: banners fly at idle and are struck below the keel while moving (an instant stance " +
+                          "swap — the naval default). For a tripod/stand, tick Fold mode below: the part then folds at its " +
+                          "TOP hinge by the dialed angle — or stays deployed at angle 0 — instead of mirroring under the model.", MessageType.None);
+                    flagFoldOn = EditorGUILayout.ToggleLeft(new GUIContent("  Fold mode (instead of the naval strike)",
+                        "On: flag parts hinge at the TOP of their geometry and fold by the angle below while moving — " +
+                        "angle 0 means they simply STAY DEPLOYED (never struck). Off: the naval default — banners " +
+                        "mirrored below the keel while moving. Regenerate + rebake to apply."), flagFoldOn);
+                    using (new EditorGUI.DisabledScope(!flagFoldOn))
+                    {
+                        flagFoldDeg = EditorGUILayout.Slider(new GUIContent("  Flag fold (°)",
+                            "How far the flag parts fold about their TOP hinge while the unit moves. 0 = stay deployed; " +
+                            "~100 tucks a tripod against its mount; negative folds the other way."), flagFoldDeg, -175f, 175f);
+                    }
+                    using (new EditorGUI.DisabledScope(!flagFoldOn || Mathf.Abs(flagFoldDeg) < 0.01f))
+                        flagFoldFrames = EditorGUILayout.IntSlider(new GUIContent("  Flag fold frames",
+                            "Frames the fold takes (~24 fps). Assign Pre-move = Furl[0..N] and After-move = Furl[N..0] and " +
+                            "the game plays the fold at move start/stop, waiting for it like the howitzer's trails."),
+                            Mathf.Max(1, flagFoldFrames), 1, 60);
+                }
                 // GUN PIVOT lives here rather than with the trails because it is the same kind of knob: where a
                 // moving part actually turns. The runtime elevation (Animation Lab ▸ "Gun elevation — max") rotates
                 // the Gun bone about ITS OWN ORIGIN, so this IS the trunnion.
@@ -1096,8 +1138,10 @@ public class VehicleLabWindow : EditorWindow
             bool hasModel2 = !string.IsNullOrWhiteSpace(srcFile2);   // a merge is real geometry work: two static hulls may need no spinner at all
             bool fastModel2 = FastPath && hasModel2;
             bool wantBright = Mathf.Abs(model1Bright - 1f) > 0.005f || (hasModel2 && Mathf.Abs(model2Bright - 1f) > 0.005f);   // PR #34 review P4: the documented standalone brightness must satisfy the gate
-            bool canRig = FastPath ? (!fastPathOars && fastRotors == 0 && fastFlip == 0 && !fastWave && !fastSailFold && !fastModel2 && fastWheels > 0)
-                                   : (wheels > 0 || oars > 0 || wantWave || geometryWork || wantSailFold || hasModel2 || wantBright);
+            bool wantFlagFold = flagFoldOn && list.Any(x => x.role == Role.Flag);   // the flag fold needs the generated Flag bone + Furl clip
+            bool fastFlagFold = FastPath && wantFlagFold;
+            bool canRig = FastPath ? (!fastPathOars && fastRotors == 0 && fastFlip == 0 && !fastWave && !fastSailFold && !fastModel2 && !fastFlagFold && fastWheels > 0)
+                                   : (wheels > 0 || oars > 0 || wantWave || geometryWork || wantSailFold || hasModel2 || wantBright || wantFlagFold);
             // The rest of Vertices control (facing fixes + reduce dials) is INERT on the fast path — rigfast
             // exports the source mesh untouched. Not a reject (dials are passive), but say it (PR #28 review:
             // the section silently did nothing on this path since it existed).
@@ -1126,6 +1170,9 @@ public class VehicleLabWindow : EditorWindow
             if (fastModel2)
                 EditorGUILayout.HelpBox("A second model can't merge on the source-skeleton fast path — rigfast keeps " +
                     "the artist skeleton and geometry as-is. Disable Use source skeleton, or clear the second model.", MessageType.Warning);
+            if (fastFlagFold)
+                EditorGUILayout.HelpBox("Flag fold needs the generated Flag bone + Furl clip — not available on the " +
+                    "source-skeleton fast path. Disable Use source skeleton, or set Flag fold back to 0.", MessageType.Warning);
             using (new EditorGUI.DisabledScope(!canRig || string.IsNullOrEmpty(outGlb)))
                 if (GUILayout.Button(new GUIContent($"Generate rig{(useSourceRig && boneParts.Count > 0 ? " (fast path)" : "")}  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
                         fastPathOars ? "Disable the source-skeleton fast path before recovering oars from merged mesh geometry."
@@ -1497,7 +1544,7 @@ public class VehicleLabWindow : EditorWindow
         // stroke into the next model) — reset to the live defaults, same values as a fresh window.
         doubleSided = false; fixInsideOut = false;
         oarSweepDeg = 24f; oarDipDeg = 18f; oarFrames = 24; oarBladeRollDeg = 0f; oarLiftDeg = 0f; oarRakeDeg = 0f; oarPivotPct = 30f; oarLengthPct = 100f;
-        riggingReducePct = 75f; structureReducePct = 50f; bodyReducePct = 0f; oarReducePct = 0f; sailReducePct = 0f; rudderReducePct = 0f; wheelReducePct = 0f; flipReducePct = 0f; preserveReducePct = 0f; detailReducePct = 0f; sailFoldIdle = false; sailFoldFrames = 12; sailFoldAngleDeg = 270f; sailFoldReverse = false; sailFoldSag = 0f; srcFile2 = ""; model2Off = Vector3.zero; model2Rot = Vector3.zero; model2Scale = 1f; model1Bright = 1f; model2Bright = 1f;
+        riggingReducePct = 75f; structureReducePct = 50f; bodyReducePct = 0f; oarReducePct = 0f; sailReducePct = 0f; rudderReducePct = 0f; wheelReducePct = 0f; flipReducePct = 0f; preserveReducePct = 0f; detailReducePct = 0f; sailFoldIdle = false; sailFoldFrames = 12; sailFoldAngleDeg = 270f; sailFoldReverse = false; sailFoldSag = 0f; flagFoldOn = false; flagFoldDeg = 0f; flagFoldFrames = 12; srcFile2 = ""; model2Off = Vector3.zero; model2Rot = Vector3.zero; model2Scale = 1f; model1Bright = 1f; model2Bright = 1f;
         // …and the pre-0.5.4 generation dials the reset had ALWAYS skipped (review round 2): a tuned trail
         // spread, gun trunnion, recoil or tail-rotor trim silently carried into the next model too.
         spinEnabled = true; trailSpreadDeg = 35f; trailFrames = 12; gunPivot = 0.5f; gunDeployElev = 0f;
@@ -1625,7 +1672,7 @@ public class VehicleLabWindow : EditorWindow
         srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
         parts = parts, boneParts = boneParts, useSourceRig = useSourceRig, treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink,
         // orientation + tread isolation + wave rock — the rest of what the bake command consumes
-        tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct, wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag, srcFile2 = srcFile2, model2Off = model2Off, model2Rot = model2Rot, model2Scale = model2Scale, model1Bright = model1Bright, model2Bright = model2Bright, tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, modelRot = modelRot, waveEnabled = waveEnabled,
+        tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct, wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag, flagFoldOn = flagFoldOn, flagFoldDeg = flagFoldDeg, flagFoldFrames = flagFoldFrames, srcFile2 = srcFile2, model2Off = model2Off, model2Rot = model2Rot, model2Scale = model2Scale, model1Bright = model1Bright, model2Bright = model2Bright, tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, modelRot = modelRot, waveEnabled = waveEnabled,
         trailSpreadDeg = trailSpreadDeg, trailFrames = trailFrames, gunPivot = gunPivot, gunDeployElev = gunDeployElev, recoilDist = recoilDist, recoilFrames = recoilFrames, recoilLead = recoilLead,
         rockDegrees = rockDegrees, rockFrames = rockFrames, rockAxisChoice = rockAxisChoice, rockHeading = rockHeading,
         rockPitchDeg = rockPitchDeg, rockRollCycles = rockRollCycles, rockPitchCycles = rockPitchCycles, rockPitchPhase = rockPitchPhase,
@@ -1741,6 +1788,8 @@ public class VehicleLabWindow : EditorWindow
             sailFoldFrames = r.sailFoldFrames <= 0 ? 12 : r.sailFoldFrames; sailFoldAngleDeg = r.sailFoldAngleDeg <= 0f ? 270f : r.sailFoldAngleDeg;   // absent-key: initializer defaults; <=0 guards a hand-edited file
             sailFoldReverse = r.sailFoldReverse;   // absent-key false == the drill-verified default direction
             sailFoldSag = Mathf.Clamp01(r.sailFoldSag);   // absent-key 0 == the open zero-g curl
+            flagFoldOn = r.flagFoldOn;   // absent-key false == the naval strike (ships unchanged)
+            flagFoldDeg = Mathf.Clamp(r.flagFoldDeg, -175f, 175f); flagFoldFrames = r.flagFoldFrames <= 0 ? 12 : r.flagFoldFrames;   // in fold mode, angle 0 == stays deployed
             srcFile2 = (r.srcFile2 ?? "").Trim(); model2Off = r.model2Off; model2Rot = r.model2Rot;
             model2Scale = r.model2Scale <= 0f ? 1f : r.model2Scale;   // absent key deserializes 0 for floats inside old recipes? No — initializer 1 holds; <=0 guards a hand-edited file
             model1Bright = r.model1Bright <= 0f ? 1f : r.model1Bright; model2Bright = r.model2Bright <= 0f ? 1f : r.model2Bright;   // same guard shape
@@ -1964,7 +2013,7 @@ public class VehicleLabWindow : EditorWindow
         string axis = axisChoice == 0 ? "AUTO" : AxisOptions[axisChoice];
         string tailAxis = tailAxisChoice == 0 ? "AUTO" : AxisOptions[tailAxisChoice];
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")} \"@{oarsFile}\" {oarSweepDeg.ToString("0.##", inv)} {oarDipDeg.ToString("0.##", inv)} {oarFrames} {(fixInsideOut ? "1" : "0")} {oarBladeRollDeg.ToString("0.##", inv)} \"@{sailsFile}\" \"@{riggingFile}\" {riggingReducePct.ToString("0.#", inv)} \"@{structureFile}\" {structureReducePct.ToString("0.#", inv)} \"@{bodiesFile}\" {bodyReducePct.ToString("0.#", inv)} \"@{flagsFile}\" {oarLiftDeg.ToString("0.##", inv)} {oarRakeDeg.ToString("0.##", inv)} {oarPivotPct.ToString("0.#", inv)} {oarLengthPct.ToString("0.#", inv)} \"@{ruddersFile}\" {oarReducePct.ToString("0.#", inv)} {sailReducePct.ToString("0.#", inv)} \"@{preserveFile}\" {rudderReducePct.ToString("0.#", inv)} {wheelReducePct.ToString("0.#", inv)} \"@{flipFile}\" {flipReducePct.ToString("0.#", inv)} {preserveReducePct.ToString("0.#", inv)} \"@{detailFile}\" {detailReducePct.ToString("0.#", inv)} {(sailFoldIdle ? "1" : "0")} {Mathf.Max(1, sailFoldFrames)} {sailFoldAngleDeg.ToString("0.#", inv)} {(sailFoldReverse ? "1" : "0")} {sailFoldSag.ToString("0.##", inv)}{Merge2Arg()}{BrightArg()}", out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll; argv[48]: sail parts; argv[49..50]: rigging parts, reduce %; argv[51..52]: structure parts, reduce %; argv[53..54]: body parts, reduce %; argv[55]: flag parts; argv[61..62]: oar reduce %, sail reduce %; argv[63]: preserve parts; argv[64]: rudder reduce %; argv[65]: wheel reduce %; argv[66..67]: flip parts, reduce %; argv[68]: preserve reduce %; argv[69..70]: detail parts, reduce %; argv[71..75]: fold sail at idle, fold frames, curl total, curl reverse, sag
+        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")} \"@{oarsFile}\" {oarSweepDeg.ToString("0.##", inv)} {oarDipDeg.ToString("0.##", inv)} {oarFrames} {(fixInsideOut ? "1" : "0")} {oarBladeRollDeg.ToString("0.##", inv)} \"@{sailsFile}\" \"@{riggingFile}\" {riggingReducePct.ToString("0.#", inv)} \"@{structureFile}\" {structureReducePct.ToString("0.#", inv)} \"@{bodiesFile}\" {bodyReducePct.ToString("0.#", inv)} \"@{flagsFile}\" {oarLiftDeg.ToString("0.##", inv)} {oarRakeDeg.ToString("0.##", inv)} {oarPivotPct.ToString("0.#", inv)} {oarLengthPct.ToString("0.#", inv)} \"@{ruddersFile}\" {oarReducePct.ToString("0.#", inv)} {sailReducePct.ToString("0.#", inv)} \"@{preserveFile}\" {rudderReducePct.ToString("0.#", inv)} {wheelReducePct.ToString("0.#", inv)} \"@{flipFile}\" {flipReducePct.ToString("0.#", inv)} {preserveReducePct.ToString("0.#", inv)} \"@{detailFile}\" {detailReducePct.ToString("0.#", inv)} {(sailFoldIdle ? "1" : "0")} {Mathf.Max(1, sailFoldFrames)} {sailFoldAngleDeg.ToString("0.#", inv)} {(sailFoldReverse ? "1" : "0")} {sailFoldSag.ToString("0.##", inv)}{Merge2Arg()}{BrightArg()}{FlagFoldArg()}", out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll; argv[48]: sail parts; argv[49..50]: rigging parts, reduce %; argv[51..52]: structure parts, reduce %; argv[53..54]: body parts, reduce %; argv[55]: flag parts; argv[61..62]: oar reduce %, sail reduce %; argv[63]: preserve parts; argv[64]: rudder reduce %; argv[65]: wheel reduce %; argv[66..67]: flip parts, reduce %; argv[68]: preserve reduce %; argv[69..70]: detail parts, reduce %; argv[71..75]: fold sail at idle, fold frames, curl total, curl reverse, sag
         // SUCCESS = THE SCRIPT'S OWN FINAL MARKER (the documented Blender trap: it exits 0 even when the python
         // script crashes mid-way — without this gate a half-run printed a fake "DONE" with no file on disk).
         string done = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE RIG DONE"));
@@ -2021,6 +2070,14 @@ public class VehicleLabWindow : EditorWindow
         if (!b1 && !b2) return "";
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         return $" \"bright={model1Bright.ToString("0.###", inv)}|{(b2 ? model2Bright : 1f).ToString("0.###", inv)}\"";
+    }
+
+    // The FLAG FOLD argument — tagged like merge2/bright; empty at the legacy 0 so ships send nothing.
+    string FlagFoldArg()
+    {
+        if (!flagFoldOn) return "";   // MODE is the checkbox — the tag's presence switches the rig script; angle 0 in fold mode = stays deployed
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        return $" \"flagfold={flagFoldDeg.ToString("0.#", inv)}|{Mathf.Max(1, flagFoldFrames)}\"";
     }
 
     bool RunBlender(string args, out string stdout)
