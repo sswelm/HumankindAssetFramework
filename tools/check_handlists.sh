@@ -59,8 +59,9 @@ recipe_fields() {  # every public field declared in the Recipe DTO
     | grep -oE 'public [A-Za-z0-9_<>]+ [a-zA-Z0-9_, ]+' \
     | sed -E 's/public [A-Za-z0-9_<>]+ //' | tr ',' '\n' | sed 's/ //g' | grep -v '^$' | sort -u
 }
-save_fields() {  # LHS names in SaveRecipe's `new Recipe { … }` initializer
-  sed -n '/var r = new Recipe/,/^        };/p' "$VLAB" \
+save_fields() {  # LHS names in BuildRecipe()'s `new Recipe { … }` initializer (extracted from SaveRecipe
+                 # 2026-09-12 so the discard-dialog dirty check shares the ONE serialization site)
+  sed -n '/Recipe BuildRecipe() => new Recipe/,/^    };/p' "$VLAB" \
     | grep -v '^\s*//' | grep -oE '(^|[{, ])[a-zA-Z0-9_]+ =' \
     | grep -oE '[a-zA-Z0-9_]+' | grep -v '^=$' | sort -u
 }

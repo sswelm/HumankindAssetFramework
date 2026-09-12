@@ -5,6 +5,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **The discard warning now knows whether you saved.** The Vehicle Lab's "discard the current session?" dialog
+  fired on every switch, even straight after a Save. Dirty now means "differs from the saved recipe": the
+  window state is serialized and compared byte-identically against the recipe file (both sides canonicalized,
+  so formatting and absent-key defaults can't false-alarm). A cleanly saved session switches silently; real
+  unsaved changes say so explicitly.
+
 - **Two models can merge into one rig.** A collapsible "Second model" section (optional — most vehicles never
   need it) imports a second source into the same scene before the probe: its parts arrive with a `B_` prefix
   and take roles, reduce dials and rigging like any others. Offset / Rotation / uniform Scale place it against

@@ -390,11 +390,14 @@ public class VehicleLabWindow : EditorWindow
                 "Load a saved recipe, or ＜new model＞ to start fresh. Recipes live in " + RecipesDir + "; Save writes the current one in place."), cur, labels);
             if (sel != cur)
             {
-                bool dirty = parts.Count > 0 || boneParts.Count > 0;
+                // DIRTY means "differs from the saved recipe", not "has parts" (2026-09-12 user report: the
+                // discard warning fired right after a Save). A state that round-trips byte-identically to the
+                // file on disk is re-loadable at will — switching away silently is exactly what Save promised.
+                bool dirty = (parts.Count > 0 || boneParts.Count > 0) && !RecipeIsSavedClean();
                 int marked = ActiveParts.Count(x => x.role != Role.Default);
                 bool ok = !dirty || EditorUtility.DisplayDialog("Vehicle Lab",
                     (sel == 0 ? "Start a new model — discard the current session?" : $"Load recipe '{names[sel]}' — discard the current session?") + "\n\n" +
-                    (marked > 0 ? marked + " marked part(s) will be lost unless you saved a recipe.\n\n" : "") +
+                    (marked > 0 ? marked + " marked part(s) have UNSAVED changes — they will be lost. (Save first to keep them.)\n\n" : "") +
                     "The generated GLB on disk is not touched.", sel == 0 ? "Start new" : "Load", "Cancel");
                 if (ok) { if (sel == 0) NewModel(); else LoadRecipeFromPath(rfiles[sel - 1]); }
                 GUI.FocusControl(null);
@@ -1574,6 +1577,38 @@ public class VehicleLabWindow : EditorWindow
         return state;
     }
 
+    // The one place the window state becomes a Recipe — Save writes it, and the discard-dialog dirty check
+    // compares it against the file on disk. A field added to the DTO but not here is caught by the hand-list
+    // round-trip gate, same as before the extraction.
+    Recipe BuildRecipe() => new Recipe
+    {
+        srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
+        parts = parts, boneParts = boneParts, useSourceRig = useSourceRig, treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink,
+        // orientation + tread isolation + wave rock — the rest of what the bake command consumes
+        tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct, wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag, srcFile2 = srcFile2, model2Off = model2Off, model2Rot = model2Rot, model2Scale = model2Scale, tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, modelRot = modelRot, waveEnabled = waveEnabled,
+        trailSpreadDeg = trailSpreadDeg, trailFrames = trailFrames, gunPivot = gunPivot, gunDeployElev = gunDeployElev, recoilDist = recoilDist, recoilFrames = recoilFrames, recoilLead = recoilLead,
+        rockDegrees = rockDegrees, rockFrames = rockFrames, rockAxisChoice = rockAxisChoice, rockHeading = rockHeading,
+        rockPitchDeg = rockPitchDeg, rockRollCycles = rockRollCycles, rockPitchCycles = rockPitchCycles, rockPitchPhase = rockPitchPhase,
+    };
+
+    // DIRTY CHECK (2026-09-12, user: "when I save the current model, it still shows this message — it should
+    // verify if the last changes were actually saved"): CLEAN = the current window state serializes byte-
+    // identically to the recipe file it was loaded from / last saved to. Both sides pass through JsonUtility
+    // (the disk file is re-serialized after parsing), so formatting and absent-key defaults can't false-alarm;
+    // any real difference — a role changed, a dial moved, a new part probed — reads as dirty.
+    bool RecipeIsSavedClean()
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(loadedRecipe)) return false;
+            string p = Path.Combine(Directory.GetParent(Application.dataPath).FullName, RecipesDir, loadedRecipe + ".json");
+            if (!File.Exists(p)) return false;
+            var disk = JsonUtility.FromJson<Recipe>(File.ReadAllText(p));
+            return disk != null && JsonUtility.ToJson(BuildRecipe()) == JsonUtility.ToJson(disk);
+        }
+        catch { return false; }   // unreadable/locked file = assume dirty — the dialog is the safe direction
+    }
+
     void SaveRecipe()
     {
         string projRoot = Directory.GetParent(Application.dataPath).FullName;
@@ -1608,16 +1643,7 @@ public class VehicleLabWindow : EditorWindow
                 Debug.LogError("[VehicleLab] " + status);
                 return;
             }
-        var r = new Recipe
-        {
-            srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
-            parts = parts, boneParts = boneParts, useSourceRig = useSourceRig, treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink,
-            // orientation + tread isolation + wave rock — the rest of what the bake command consumes
-            tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct, wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag, srcFile2 = srcFile2, model2Off = model2Off, model2Rot = model2Rot, model2Scale = model2Scale, tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, modelRot = modelRot, waveEnabled = waveEnabled,
-            trailSpreadDeg = trailSpreadDeg, trailFrames = trailFrames, gunPivot = gunPivot, gunDeployElev = gunDeployElev, recoilDist = recoilDist, recoilFrames = recoilFrames, recoilLead = recoilLead,
-            rockDegrees = rockDegrees, rockFrames = rockFrames, rockAxisChoice = rockAxisChoice, rockHeading = rockHeading,
-            rockPitchDeg = rockPitchDeg, rockRollCycles = rockRollCycles, rockPitchCycles = rockPitchCycles, rockPitchPhase = rockPitchPhase,
-        };
+        var r = BuildRecipe();
         // ATOMIC replacement (review find 2026-09-06): a direct WriteAllText interrupted mid-write truncates
         // the live recipe — and the NEXT save would then copy the damaged file over the backup. Write to a
         // temp sibling, then swap in one filesystem move; the live file is never half-written.
