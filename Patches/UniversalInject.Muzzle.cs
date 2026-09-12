@@ -876,10 +876,23 @@ namespace HumankindAssetFramework
                 diff = UnityEngine.Mathf.Abs(UnityEngine.Mathf.DeltaAngle(st.yaw, yaw));
                 if (diff >= st.pivotDeg) turnHold = UnityEngine.Mathf.Min(diff / st.rate + 0.1f, PivotFailsafeSec);
             }
-            float foldHold = hasFold ? UnityEngine.Mathf.Min(ent.preMoveDur + 0.1f, PivotFoldCapSec) : 0f;
+            // +0.35, not +0.1 (2026-09-12, the Triconter unfurling: "it starts moving before fully unfolded"):
+            // the one-shot window used to open when the STATE POLL first saw the held unit as moving — up to a
+            // poll tick (~0.1-0.15 s) after this hold's own timer started — so the clip's tail spilled past the
+            // release. The stamp below closes that gap; the margin buys the release a settled beat with the
+            // canvas (or the howitzer's trails) fully in position before the first metre of travel.
+            float foldHold = hasFold ? UnityEngine.Mathf.Min(ent.preMoveDur + 0.35f, PivotFoldCapSec) : 0f;
             float hold = UnityEngine.Mathf.Max(turnHold, foldHold);
             if (hold <= 0f) return false;
             if (turnHold > 0f) SetAimOverride(upos, yaw, hold);   // the ease target for the hold: the next tile's bearing (AimMaintain reads it; it expires with the hold)
+            if (hasFold)
+            {
+                // Open the PRE-MOVE one-shot window NOW, in lockstep with the hold (map-army key: salt 0L, as in
+                // ProcessAnimStates). stateMoving is pre-marked true so the poll's wasMoving!=moving edge doesn't
+                // re-stamp a later start over this one.
+                long mk = GuidToLong(GetMember(unit, "GUID"));
+                if (mk != 0) { ent.stateMoveStartedAt[mk] = now; ent.stateMoving[mk] = true; }
+            }
             moveHoldByUnit[unit] = new MoveHold { releaseAt = now + hold, armedAt = now };
             Plugin.Log.LogInfo($"[Pivot] holding army move {hold:F2} s: " +
                 (turnHold > 0f ? $"turn {diff:F0} deg to the next tile at {st.rate:F0} deg/s (threshold {st.pivotDeg:F0})" : "no turn") +
