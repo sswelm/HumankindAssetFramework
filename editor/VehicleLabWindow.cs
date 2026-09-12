@@ -166,6 +166,11 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] float tailYawAdj = 0f;    // manual trim on the tail axle: swing about vertical, degrees
     [SerializeField] float tailPitchAdj = 0f;  // manual trim on the tail axle: tilt up/down, degrees
     [SerializeField] string loadedRecipe = "";   // the recipe shown in the "Edit existing" combobox ("" = ＜new model＞); tracked by NAME so the frame-rebuilt file list can't desync it
+    // The CLEAN-STATE SNAPSHOT (PR #33 review): serialized window state as of the last Save/Load. The dirty
+    // check compares against THIS, not a re-read of the disk file — LoadRecipeFromPath normalizes values on
+    // load (trims, <=0 guards, Clamp01), so a guard-tripping recipe file could never compare byte-identical
+    // to its own round-trip and the discard dialog fired on untouched sessions. "" = no clean state (dirty).
+    [SerializeField] string savedRecipeJson = "";
     [SerializeField] bool recipeReadThisSession = false;   // Save's overwrite guard: true once THIS window instance has read (or written) the recipe file — survives domain reloads via window serialization, resets to false in a fresh window, which is exactly the state whose reflex-Save once ate a tuned recipe
     [SerializeField] int treadAdvCells = 3;   // tread advance per loop in cells
     [SerializeField] float treadCellsPerLink = 4f; // tread detail: cells per molded link = the BONES dial (4 = smoothest; 0.25 = one bone per four links)
@@ -191,7 +196,15 @@ public class VehicleLabWindow : EditorWindow
     const int RockFps = 24;                       // Blender's scene fps — the clip's real-time length
     // The two motion sections fold independently (Sound Studio pattern): a model is almost always EITHER a wheeled
     // vehicle OR a floating one, so ~10 permanently-irrelevant rows were on screen at all times.
-    [SerializeField] bool foldSpin = true, foldWave = false, foldOrient = false, foldTrails = false, foldOars = false, foldReduce = false, foldParts = true;
+    [SerializeField] bool foldSpin = true, foldWave = false, foldOrient = false, foldTrails = false, foldOars = false, foldReduce = false, foldParts = true, foldModel2 = false;
+    // SECOND MODEL (2026-09-12, "combine 2 3d models and merge"): an optional second source imported into the
+    // SAME Blender scene before the probe — its parts arrive with a "B_" prefix and are marked/reduced/rigged
+    // like any others. Offset/rotation/scale place it against the first model (two sources rarely agree on
+    // units — the cm-vs-m disease — hence the scale dial). Mesh path only; collapsible (rarely relevant).
+    [SerializeField] string srcFile2 = "";
+    [SerializeField] Vector3 model2Off = Vector3.zero;
+    [SerializeField] Vector3 model2Rot = Vector3.zero;
+    [SerializeField] float model2Scale = 1f;
     // Straighten a source that imports crooked / on its side. Baked into the vertex data BEFORE the rig is built,
     // so wheel axles, tread side detection and the rock's auto hull-length axis all read the corrected pose.
     [SerializeField] Vector3 modelRot = Vector3.zero;
@@ -288,6 +301,10 @@ public class VehicleLabWindow : EditorWindow
         public float sailFoldAngleDeg = 270f;  // TOTAL curl over the three joints, hand-close style (absent-key 270 = foot lands at the beam)
         public bool sailFoldReverse = false;   // mirror the curl to the other side of the sail plane (absent-key false)
         public float sailFoldSag = 0f;         // 0 = open zero-g curl, 1 = gravity-pressed thin roll (absent-key 0)
+        public string srcFile2 = "";           // optional second model merged into the scene (absent-key "" == none)
+        public Vector3 model2Off = Vector3.zero;    // its placement against the first model
+        public Vector3 model2Rot = Vector3.zero;    // Euler degrees, X then Y then Z, about its own origin
+        public float model2Scale = 1f;         // uniform — reconciles unit mismatches (absent-key... 0 guards to 1 on load)
         // TAIL ROTOR (review round 3, 2026-09-06): these fed the Blender command since the helicopter era but
         // were never saved — a tuned tail trim vanished on every recipe reload. Absent-key 0 == Auto/no trim.
         public int tailAxisChoice = 0;
@@ -378,11 +395,14 @@ public class VehicleLabWindow : EditorWindow
                 "Load a saved recipe, or ＜new model＞ to start fresh. Recipes live in " + RecipesDir + "; Save writes the current one in place."), cur, labels);
             if (sel != cur)
             {
-                bool dirty = parts.Count > 0 || boneParts.Count > 0;
+                // DIRTY means "differs from the saved recipe", not "has parts" (2026-09-12 user report: the
+                // discard warning fired right after a Save). A state that round-trips byte-identically to the
+                // file on disk is re-loadable at will — switching away silently is exactly what Save promised.
+                bool dirty = (parts.Count > 0 || boneParts.Count > 0) && !RecipeIsSavedClean();
                 int marked = ActiveParts.Count(x => x.role != Role.Default);
                 bool ok = !dirty || EditorUtility.DisplayDialog("Vehicle Lab",
                     (sel == 0 ? "Start a new model — discard the current session?" : $"Load recipe '{names[sel]}' — discard the current session?") + "\n\n" +
-                    (marked > 0 ? marked + " marked part(s) will be lost unless you saved a recipe.\n\n" : "") +
+                    (marked > 0 ? $"This session has UNSAVED changes; its {marked} marked part(s) will be discarded. (Save first — a saved recipe re-loads at its last-saved state.)\n\n" : "") +
                     "The generated GLB on disk is not touched.", sel == 0 ? "Start new" : "Load", "Cancel");
                 if (ok) { if (sel == 0) NewModel(); else LoadRecipeFromPath(rfiles[sel - 1]); }
                 GUI.FocusControl(null);
@@ -393,7 +413,7 @@ public class VehicleLabWindow : EditorWindow
                     { LoadRecipeFromPath(rfiles[cur - 1]); GUI.FocusControl(null); }
                 if (GUILayout.Button(new GUIContent("Remove", "Delete the selected recipe FILE from disk. The generated GLB and the current session are not touched."), GUILayout.Width(72)))
                     if (EditorUtility.DisplayDialog("Remove recipe", $"Delete recipe '{names[cur]}' from disk?\n\n(The generated GLB and the current session are not touched.)", "Delete", "Cancel"))
-                    { try { File.Delete(rfiles[cur - 1]); AssetDatabase.Refresh(); } catch (Exception e) { status = "Delete failed: " + e.Message; } loadedRecipe = ""; GUI.FocusControl(null); }
+                    { try { File.Delete(rfiles[cur - 1]); AssetDatabase.Refresh(); } catch (Exception e) { status = "Delete failed: " + e.Message; } loadedRecipe = ""; savedRecipeJson = ""; GUI.FocusControl(null); }   // deleted file = the state is no longer recoverable by re-load — dirty
             }
         }
 
@@ -424,6 +444,44 @@ public class VehicleLabWindow : EditorWindow
                 var p = EditorUtility.SaveFilePanel("Output GLB", Path.GetDirectoryName(string.IsNullOrEmpty(outGlb) ? srcFile : outGlb),
                     Path.GetFileNameWithoutExtension(string.IsNullOrEmpty(outGlb) ? srcFile + "_Spin" : outGlb), "glb");
                 if (!string.IsNullOrEmpty(p)) outGlb = p.Replace('\\', '/');
+            }
+        }
+
+        // --- SECOND MODEL (optional, collapsible — most vehicles never need it): merged into the same scene
+        //     before the probe, parts arrive prefixed "B_" and are marked/reduced/rigged like any others. ---
+        if (Section(ref foldModel2, "Second model — merge another source",
+                string.IsNullOrWhiteSpace(srcFile2) ? "none"
+                    : $"{Path.GetFileName(srcFile2)} · offset ({model2Off.x:0.##}, {model2Off.y:0.##}, {model2Off.z:0.##})"
+                      + (model2Rot != Vector3.zero ? $" · rot ({model2Rot.x:0.#}, {model2Rot.y:0.#}, {model2Rot.z:0.#})" : "")
+                      + (Mathf.Approximately(model2Scale, 1f) ? "" : $" · x{model2Scale:0.###}")))
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                srcFile2 = EditorGUILayout.TextField(new GUIContent("Second model",
+                    "Optional second source (glb/gltf/fbx/obj — .blend cannot merge) imported into the SAME scene " +
+                    "before the probe. Its parts appear with a B_ prefix and take roles, reduce dials and rigging " +
+                    "like any others. Not available on the source-skeleton fast path."), srcFile2);
+                if (GUILayout.Button("Browse…", GUILayout.Width(70)))
+                {
+                    var p2 = EditorUtility.OpenFilePanel("Pick the second model",
+                        Path.GetDirectoryName(string.IsNullOrEmpty(srcFile2) ? (string.IsNullOrEmpty(srcFile) ? "D:/3DModels" : srcFile) : srcFile2), "glb,gltf,fbx,obj");
+                    if (!string.IsNullOrEmpty(p2)) { srcFile2 = p2.Replace('\\', '/'); status = "Second model set — press Probe parts to list the merged pair (B_ prefix)."; }
+                }
+                if (!string.IsNullOrWhiteSpace(srcFile2) && GUILayout.Button("Clear", GUILayout.Width(50)))
+                { srcFile2 = ""; status = "Second model cleared — press Probe parts to re-list; its B_ parts drop out on their own."; }
+            }
+            using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(srcFile2)))
+            {
+                model2Off = EditorGUILayout.Vector3Field(new GUIContent("Offset (X, Y, Z)",
+                    "Where the second model sits relative to the first, in the first model's units. The Generate log " +
+                    "prints the placed B bbox next to the part list — align with numbers, not eyeballs."), model2Off);
+                model2Rot = EditorGUILayout.Vector3Field(new GUIContent("Rotation (°)",
+                    "Euler degrees applied to the second model (X, then Y, then Z) about its own origin, before the offset."), model2Rot);
+                model2Scale = EditorGUILayout.FloatField(new GUIContent("Scale",
+                    "Uniform scale for the second model. Two sources rarely agree on units (a cm-authored file next " +
+                    "to a meter one is 100x off) — this is the dial that reconciles them. 1 = as authored."), model2Scale);
+                // NO live guard here (review finding 7: snapping 0 -> 1 mid-keystroke fought typing "0.5") —
+                // the recipe-load guard and the Merge2Arg/rig-script boundary guards own the invariant.
             }
         }
 
@@ -1014,8 +1072,10 @@ public class VehicleLabWindow : EditorWindow
                 || TierActive(Role.Preserve, preserveReducePct) || TierActive(Role.Detail, detailReducePct));
             bool wantSailFold = sailFoldIdle && list.Any(x => x.role == Role.Sail);
             bool fastSailFold = FastPath && wantSailFold;
-            bool canRig = FastPath ? (!fastPathOars && fastRotors == 0 && fastFlip == 0 && !fastWave && !fastSailFold && fastWheels > 0)
-                                   : (wheels > 0 || oars > 0 || wantWave || geometryWork || wantSailFold);
+            bool hasModel2 = !string.IsNullOrWhiteSpace(srcFile2);   // a merge is real geometry work: two static hulls may need no spinner at all
+            bool fastModel2 = FastPath && hasModel2;
+            bool canRig = FastPath ? (!fastPathOars && fastRotors == 0 && fastFlip == 0 && !fastWave && !fastSailFold && !fastModel2 && fastWheels > 0)
+                                   : (wheels > 0 || oars > 0 || wantWave || geometryWork || wantSailFold || hasModel2);
             // The rest of Vertices control (facing fixes + reduce dials) is INERT on the fast path — rigfast
             // exports the source mesh untouched. Not a reject (dials are passive), but say it (PR #28 review:
             // the section silently did nothing on this path since it existed).
@@ -1041,6 +1101,9 @@ public class VehicleLabWindow : EditorWindow
             if (fastSailFold)
                 EditorGUILayout.HelpBox("Fold sail at idle doesn't run on the source-skeleton fast path — the fold " +
                     "needs generated bones and band skinning. Disable Use source skeleton, or the fold option.", MessageType.Warning);
+            if (fastModel2)
+                EditorGUILayout.HelpBox("A second model can't merge on the source-skeleton fast path — rigfast keeps " +
+                    "the artist skeleton and geometry as-is. Disable Use source skeleton, or clear the second model.", MessageType.Warning);
             using (new EditorGUI.DisabledScope(!canRig || string.IsNullOrEmpty(outGlb)))
                 if (GUILayout.Button(new GUIContent($"Generate rig{(useSourceRig && boneParts.Count > 0 ? " (fast path)" : "")}  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
                         fastPathOars ? "Disable the source-skeleton fast path before recovering oars from merged mesh geometry."
@@ -1048,6 +1111,7 @@ public class VehicleLabWindow : EditorWindow
                         : fastFlip > 0 ? "Disable the source-skeleton fast path to flip mesh-part winding."
                         : fastWave ? "Disable the source-skeleton fast path to use Wave rock."
                         : fastSailFold ? "Disable the source-skeleton fast path to use Fold sail at idle."
+                        : fastModel2 ? "Disable the source-skeleton fast path to merge a second model."
                         : !canRig ? (FastPath ? "Mark at least one source bone as Wheel — the fast path spins wheel bones."
                                               : "Mark at least one entry as Wheel / Rotor / Tail rotor / Oar, set a Wave rock amplitude — or request geometry work (Flip, a facing fix, an active reduce dial): a Generate can be pure geometry surgery.")
                         : "Runs Blender: rig + Spin action + GLB export + preview."), GUILayout.Height(28)))
@@ -1137,14 +1201,18 @@ public class VehicleLabWindow : EditorWindow
         var keptBones = new Dictionary<string, Role>();
         foreach (var b0 in boneParts) if (b0.role != Role.Default) keptBones[b0.name] = b0.role;
         bool hadBones = boneParts.Count > 0;
-        parts.Clear(); boneParts.Clear(); DestroyPreview();
+        // The session is NOT touched until a probe has actually succeeded (external review P1: the old
+        // clear-first flow meant a failed probe — a typo'd second-model path, a crashed Blender — erased
+        // every marking and the preview before the error was even known). Parse into fresh lists; swap in
+        // only when there are rows.
+        var newParts = new List<Part>(); var newBoneParts = new List<Part>();
         // probe also exports a preview FBX of the SPLIT model, so part rows can zoom/highlight in the turntable
         string projRoot = Directory.GetParent(Application.dataPath).FullName;
         string prevDir = "Assets/FactorySource/VehicleLab";
         Directory.CreateDirectory(Path.Combine(projRoot, prevDir));
         string prevRel = prevDir + "/" + Path.GetFileNameWithoutExtension(srcFile) + "_probe.fbx";
         string prevFull = Path.Combine(projRoot, prevRel).Replace('\\', '/');
-        if (!RunBlender($"probe \"{srcFile}\" \"{prevFull}\"", out string stdout)) return;
+        if (!RunBlender($"probe \"{srcFile}\" \"{prevFull}\"{Merge2Arg()}", out string stdout)) return;   // failed run: session intact, error already in status/Console
         // Lenient float parse: degenerate shards can emit "nan" (python lowercase — .NET rejects it) — such a value
         // becomes 0 instead of killing the whole probe on one bad line out of thousands.
         float F(string s2) => float.TryParse(s2, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var f) ? f : 0f;
@@ -1179,8 +1247,16 @@ public class VehicleLabWindow : EditorWindow
                    : low.Contains("rotor") || low.Contains("helix") || low.Contains("blade") || low.Contains("propeller") ? Role.Rotor
                    : low.Contains("wheel") || low.Contains("tyre") || low.Contains("tire") ? Role.Wheel
                    : low.Contains("turret") ? Role.Turret : Role.Default;
-            (t[0] == "RIGBONE" ? boneParts : parts).Add(p);
+            (t[0] == "RIGBONE" ? newBoneParts : newParts).Add(p);
         }
+        if (newParts.Count == 0 && newBoneParts.Count == 0)
+        {   // Blender ran but listed nothing — keep the session (markings + preview) and say so
+            status = "Probe found no mesh parts — is this a mesh model? Existing markings kept. (See the Console for Blender output.)";
+            return;
+        }
+        parts.Clear(); parts.AddRange(newParts);
+        boneParts.Clear(); boneParts.AddRange(newBoneParts);
+        DestroyPreview();
         if (boneParts.Count > 0 && !hadBones) useSourceRig = true;   // first detection: default to the fast path
         if (File.Exists(prevFull))
         {
@@ -1390,7 +1466,7 @@ public class VehicleLabWindow : EditorWindow
     // bug this button exists to kill (stale bone rows silently kept the SKM fast path on for an unrigged model).
     void NewModel()
     {
-        srcFile = ""; outGlb = ""; lastOutGlb = ""; loadedRecipe = ""; recipeReadThisSession = false;
+        srcFile = ""; outGlb = ""; lastOutGlb = ""; loadedRecipe = ""; recipeReadThisSession = false; savedRecipeJson = "";
         parts.Clear(); boneParts.Clear(); useSourceRig = false;
         frames = 15; degrees = -360f; axisChoice = 0;
         treadAdvCells = 3; treadCellsPerLink = 4f; tracksStatic = false;
@@ -1399,7 +1475,7 @@ public class VehicleLabWindow : EditorWindow
         // stroke into the next model) — reset to the live defaults, same values as a fresh window.
         doubleSided = false; fixInsideOut = false;
         oarSweepDeg = 24f; oarDipDeg = 18f; oarFrames = 24; oarBladeRollDeg = 0f; oarLiftDeg = 0f; oarRakeDeg = 0f; oarPivotPct = 30f; oarLengthPct = 100f;
-        riggingReducePct = 75f; structureReducePct = 50f; bodyReducePct = 0f; oarReducePct = 0f; sailReducePct = 0f; rudderReducePct = 0f; wheelReducePct = 0f; flipReducePct = 0f; preserveReducePct = 0f; detailReducePct = 0f; sailFoldIdle = false; sailFoldFrames = 12; sailFoldAngleDeg = 270f; sailFoldReverse = false; sailFoldSag = 0f;
+        riggingReducePct = 75f; structureReducePct = 50f; bodyReducePct = 0f; oarReducePct = 0f; sailReducePct = 0f; rudderReducePct = 0f; wheelReducePct = 0f; flipReducePct = 0f; preserveReducePct = 0f; detailReducePct = 0f; sailFoldIdle = false; sailFoldFrames = 12; sailFoldAngleDeg = 270f; sailFoldReverse = false; sailFoldSag = 0f; srcFile2 = ""; model2Off = Vector3.zero; model2Rot = Vector3.zero; model2Scale = 1f;
         // …and the pre-0.5.4 generation dials the reset had ALWAYS skipped (review round 2): a tuned trail
         // spread, gun trunnion, recoil or tail-rotor trim silently carried into the next model too.
         spinEnabled = true; trailSpreadDeg = 35f; trailFrames = 12; gunPivot = 0.5f; gunDeployElev = 0f;
@@ -1519,6 +1595,33 @@ public class VehicleLabWindow : EditorWindow
         return state;
     }
 
+    // The one place the window state becomes a Recipe — Save writes it, and the discard-dialog dirty check
+    // compares it against the file on disk. A field added to the DTO but not here is caught by the hand-list
+    // round-trip gate, same as before the extraction.
+    Recipe BuildRecipe() => new Recipe
+    {
+        srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
+        parts = parts, boneParts = boneParts, useSourceRig = useSourceRig, treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink,
+        // orientation + tread isolation + wave rock — the rest of what the bake command consumes
+        tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct, wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag, srcFile2 = srcFile2, model2Off = model2Off, model2Rot = model2Rot, model2Scale = model2Scale, tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, modelRot = modelRot, waveEnabled = waveEnabled,
+        trailSpreadDeg = trailSpreadDeg, trailFrames = trailFrames, gunPivot = gunPivot, gunDeployElev = gunDeployElev, recoilDist = recoilDist, recoilFrames = recoilFrames, recoilLead = recoilLead,
+        rockDegrees = rockDegrees, rockFrames = rockFrames, rockAxisChoice = rockAxisChoice, rockHeading = rockHeading,
+        rockPitchDeg = rockPitchDeg, rockRollCycles = rockRollCycles, rockPitchCycles = rockPitchCycles, rockPitchPhase = rockPitchPhase,
+    };
+
+    // DIRTY CHECK (2026-09-12, user: "when I save the current model, it still shows this message — it should
+    // verify if the last changes were actually saved"): CLEAN = the current window state serializes byte-
+    // identically to the SNAPSHOT taken at the last Save/Load. Comparing against the snapshot rather than a
+    // re-read of the disk file (PR #33 review) makes load-time normalization invisible to the check: the
+    // guards in LoadRecipeFromPath run BEFORE the snapshot is taken, so an untouched session is clean even
+    // when the file on disk carries values those guards rewrite. Any real difference — a role changed, a
+    // dial moved, a new part probed — reads as dirty.
+    bool RecipeIsSavedClean()
+    {
+        try { return !string.IsNullOrEmpty(savedRecipeJson) && JsonUtility.ToJson(BuildRecipe()) == savedRecipeJson; }
+        catch { return false; }   // serialization failure = assume dirty — the dialog is the safe direction
+    }
+
     void SaveRecipe()
     {
         string projRoot = Directory.GetParent(Application.dataPath).FullName;
@@ -1553,16 +1656,7 @@ public class VehicleLabWindow : EditorWindow
                 Debug.LogError("[VehicleLab] " + status);
                 return;
             }
-        var r = new Recipe
-        {
-            srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
-            parts = parts, boneParts = boneParts, useSourceRig = useSourceRig, treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink,
-            // orientation + tread isolation + wave rock — the rest of what the bake command consumes
-            tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct, wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag, tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, modelRot = modelRot, waveEnabled = waveEnabled,
-            trailSpreadDeg = trailSpreadDeg, trailFrames = trailFrames, gunPivot = gunPivot, gunDeployElev = gunDeployElev, recoilDist = recoilDist, recoilFrames = recoilFrames, recoilLead = recoilLead,
-            rockDegrees = rockDegrees, rockFrames = rockFrames, rockAxisChoice = rockAxisChoice, rockHeading = rockHeading,
-            rockPitchDeg = rockPitchDeg, rockRollCycles = rockRollCycles, rockPitchCycles = rockPitchCycles, rockPitchPhase = rockPitchPhase,
-        };
+        var r = BuildRecipe();
         // ATOMIC replacement (review find 2026-09-06): a direct WriteAllText interrupted mid-write truncates
         // the live recipe — and the NEXT save would then copy the damaged file over the backup. Write to a
         // temp sibling, then swap in one filesystem move; the live file is never half-written.
@@ -1572,6 +1666,7 @@ public class VehicleLabWindow : EditorWindow
         AssetDatabase.Refresh();
         loadedRecipe = Path.GetFileNameWithoutExtension(p);   // reflect the just-saved recipe in the combobox
         recipeReadThisSession = true;   // this window state IS the file now — further saves are continuations
+        savedRecipeJson = JsonUtility.ToJson(r);   // the clean-state snapshot the discard dialog compares against
         status = "Recipe saved: " + p;
     }
 
@@ -1624,6 +1719,8 @@ public class VehicleLabWindow : EditorWindow
             sailFoldFrames = r.sailFoldFrames <= 0 ? 12 : r.sailFoldFrames; sailFoldAngleDeg = r.sailFoldAngleDeg <= 0f ? 270f : r.sailFoldAngleDeg;   // absent-key: initializer defaults; <=0 guards a hand-edited file
             sailFoldReverse = r.sailFoldReverse;   // absent-key false == the drill-verified default direction
             sailFoldSag = Mathf.Clamp01(r.sailFoldSag);   // absent-key 0 == the open zero-g curl
+            srcFile2 = (r.srcFile2 ?? "").Trim(); model2Off = r.model2Off; model2Rot = r.model2Rot;
+            model2Scale = r.model2Scale <= 0f ? 1f : r.model2Scale;   // absent key deserializes 0 for floats inside old recipes? No — initializer 1 holds; <=0 guards a hand-edited file
             tailAxisChoice = r.tailAxisChoice; tailYawAdj = r.tailYawAdj; tailPitchAdj = r.tailPitchAdj;   // absent-key 0 == Auto/no trim, the old effective behavior
             trailSpreadDeg = r.trailSpreadDeg; trailFrames = r.trailFrames; gunPivot = r.gunPivot; gunDeployElev = r.gunDeployElev; recoilDist = r.recoilDist; recoilFrames = r.recoilFrames; recoilLead = r.recoilLead;
             waveEnabled = r.waveEnabled; rockDegrees = r.rockDegrees; rockAxisChoice = r.rockAxisChoice; rockHeading = r.rockHeading;
@@ -1636,6 +1733,7 @@ public class VehicleLabWindow : EditorWindow
             useSourceRig = r.useSourceRig && boneParts.Count > 0;
             loadedRecipe = Path.GetFileNameWithoutExtension(p);   // reflect the loaded recipe in the combobox
             recipeReadThisSession = true;   // the window now derives from the file — Save may overwrite silently
+            savedRecipeJson = JsonUtility.ToJson(BuildRecipe());   // snapshot AFTER the load guards ran — normalization can't read as dirt
             status = $"Recipe loaded ({parts.Count} parts{(boneParts.Count > 0 ? $", {boneParts.Count} source bones, fast path {(useSourceRig ? "ON" : "off")}" : "")}, {ActiveParts.Count(x => x.role == Role.Wheel)} wheels). " +
                      "generate the rig directly — or press Probe to list ALL parts for review (your marked roles are kept, plus the preview returns for click-to-highlight)." +
                      (predates.Count > 0 ? $"\nNOTE — recipe predates: {string.Join(", ", predates)}. Those loaded as safe defaults; check the dials and Save to modernize it." : "");
@@ -1843,7 +1941,7 @@ public class VehicleLabWindow : EditorWindow
         string axis = axisChoice == 0 ? "AUTO" : AxisOptions[axisChoice];
         string tailAxis = tailAxisChoice == 0 ? "AUTO" : AxisOptions[tailAxisChoice];
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")} \"@{oarsFile}\" {oarSweepDeg.ToString("0.##", inv)} {oarDipDeg.ToString("0.##", inv)} {oarFrames} {(fixInsideOut ? "1" : "0")} {oarBladeRollDeg.ToString("0.##", inv)} \"@{sailsFile}\" \"@{riggingFile}\" {riggingReducePct.ToString("0.#", inv)} \"@{structureFile}\" {structureReducePct.ToString("0.#", inv)} \"@{bodiesFile}\" {bodyReducePct.ToString("0.#", inv)} \"@{flagsFile}\" {oarLiftDeg.ToString("0.##", inv)} {oarRakeDeg.ToString("0.##", inv)} {oarPivotPct.ToString("0.#", inv)} {oarLengthPct.ToString("0.#", inv)} \"@{ruddersFile}\" {oarReducePct.ToString("0.#", inv)} {sailReducePct.ToString("0.#", inv)} \"@{preserveFile}\" {rudderReducePct.ToString("0.#", inv)} {wheelReducePct.ToString("0.#", inv)} \"@{flipFile}\" {flipReducePct.ToString("0.#", inv)} {preserveReducePct.ToString("0.#", inv)} \"@{detailFile}\" {detailReducePct.ToString("0.#", inv)} {(sailFoldIdle ? "1" : "0")} {Mathf.Max(1, sailFoldFrames)} {sailFoldAngleDeg.ToString("0.#", inv)} {(sailFoldReverse ? "1" : "0")} {sailFoldSag.ToString("0.##", inv)}", out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll; argv[48]: sail parts; argv[49..50]: rigging parts, reduce %; argv[51..52]: structure parts, reduce %; argv[53..54]: body parts, reduce %; argv[55]: flag parts; argv[61..62]: oar reduce %, sail reduce %; argv[63]: preserve parts; argv[64]: rudder reduce %; argv[65]: wheel reduce %; argv[66..67]: flip parts, reduce %; argv[68]: preserve reduce %; argv[69..70]: detail parts, reduce %; argv[71..75]: fold sail at idle, fold frames, curl total, curl reverse, sag
+        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")} \"@{oarsFile}\" {oarSweepDeg.ToString("0.##", inv)} {oarDipDeg.ToString("0.##", inv)} {oarFrames} {(fixInsideOut ? "1" : "0")} {oarBladeRollDeg.ToString("0.##", inv)} \"@{sailsFile}\" \"@{riggingFile}\" {riggingReducePct.ToString("0.#", inv)} \"@{structureFile}\" {structureReducePct.ToString("0.#", inv)} \"@{bodiesFile}\" {bodyReducePct.ToString("0.#", inv)} \"@{flagsFile}\" {oarLiftDeg.ToString("0.##", inv)} {oarRakeDeg.ToString("0.##", inv)} {oarPivotPct.ToString("0.#", inv)} {oarLengthPct.ToString("0.#", inv)} \"@{ruddersFile}\" {oarReducePct.ToString("0.#", inv)} {sailReducePct.ToString("0.#", inv)} \"@{preserveFile}\" {rudderReducePct.ToString("0.#", inv)} {wheelReducePct.ToString("0.#", inv)} \"@{flipFile}\" {flipReducePct.ToString("0.#", inv)} {preserveReducePct.ToString("0.#", inv)} \"@{detailFile}\" {detailReducePct.ToString("0.#", inv)} {(sailFoldIdle ? "1" : "0")} {Mathf.Max(1, sailFoldFrames)} {sailFoldAngleDeg.ToString("0.#", inv)} {(sailFoldReverse ? "1" : "0")} {sailFoldSag.ToString("0.##", inv)}{Merge2Arg()}", out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll; argv[48]: sail parts; argv[49..50]: rigging parts, reduce %; argv[51..52]: structure parts, reduce %; argv[53..54]: body parts, reduce %; argv[55]: flag parts; argv[61..62]: oar reduce %, sail reduce %; argv[63]: preserve parts; argv[64]: rudder reduce %; argv[65]: wheel reduce %; argv[66..67]: flip parts, reduce %; argv[68]: preserve reduce %; argv[69..70]: detail parts, reduce %; argv[71..75]: fold sail at idle, fold frames, curl total, curl reverse, sag
         // SUCCESS = THE SCRIPT'S OWN FINAL MARKER (the documented Blender trap: it exits 0 even when the python
         // script crashes mid-way — without this gate a half-run printed a fake "DONE" with no file on disk).
         string done = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE RIG DONE"));
@@ -1878,6 +1976,17 @@ public class VehicleLabWindow : EditorWindow
             .Select(l => l.Trim()));
         status = $"DONE → {lastOutGlb}\n{bones}\n{hybrid}\n{done}\n{muzzle}\n\nNext: Factory ▸ Browse this GLB, Size as usual; " + bakeRecipe;
         EditorGUIUtility.systemCopyBuffer = lastOutGlb;   // ready to paste into the Factory's Browse field
+    }
+
+    // The SECOND-MODEL merge argument — TAGGED (merge2=path|off|rot|scale), scanned by the rig script rather
+    // than indexed, because probe and rig have different positional layouts and BOTH need the merged scene.
+    // '|' is illegal in Windows paths, so the split is unambiguous. Empty when no second model is set.
+    string Merge2Arg()
+    {
+        if (string.IsNullOrWhiteSpace(srcFile2)) return "";
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        string F(float v) => v.ToString("0.#####", inv);   // 0.### rounded a sub-0.0005 scale to a literal "0" (review finding 7) — 5 places covers any sane unit factor
+        return $" \"merge2={srcFile2.Trim().Replace('\\', '/')}|{F(model2Off.x)},{F(model2Off.y)},{F(model2Off.z)}|{F(model2Rot.x)},{F(model2Rot.y)},{F(model2Rot.z)}|{F(model2Scale <= 0f ? 1f : model2Scale)}\"";
     }
 
     bool RunBlender(string args, out string stdout)

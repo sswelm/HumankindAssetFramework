@@ -5,6 +5,34 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **The discard warning now knows whether you saved.** The Vehicle Lab's "discard the current session?" dialog
+  fired on every switch, even straight after a Save. Dirty now means "differs from the last Save/Load": the
+  window state is serialized and compared byte-identically against a clean-state snapshot taken at that
+  moment (after the load guards run — see the review-hardening entry). A cleanly saved session switches
+  silently; real unsaved changes say so explicitly.
+
+- **Review hardening for the merge** (own 8-angle review + a convergent external one): the single-mesh
+  loose split is now PER SOURCE (a combined-mesh first model kept splitting after a second model was set —
+  both reviews' top finding); a typo'd second-model path fails loudly instead of crashing silently and
+  wiping the probe's markings; the flatten's Icosphere purge also catches `B_`-renamed skinned bone-shape
+  spheres from the second model; the discard dialog compares against a clean-state snapshot taken after the
+  load guards run, so a guard-tripping recipe file no longer reads as eternally dirty; and geometry-producing
+  modifiers (Array/Mirror/Solidify — `.blend` sources) are now BAKED after import, so they reach the part
+  list, previews and output for the first time (they never did — the exporters always ignored them). The
+  Icosphere artifact purge went from name-only to SIGNATURE + role protection (a real ball that kept the
+  default name lists and survives; a marked part is never purged), and curve/surface/text objects are
+  CONVERTED to meshes at import instead of being swept as helpers — they become ordinary markable parts
+  (face-less wire paths are dropped; they render as nothing anywhere).
+
+- **Two models can merge into one rig.** A collapsible "Second model" section (optional — most vehicles never
+  need it) imports a second source into the same scene before the probe: its parts arrive with a `B_` prefix
+  and take roles, reduce dials and rigging like any others. Offset / Rotation / uniform Scale place it against
+  the first model (the scale dial reconciles cm-vs-m sources), and the Generate log prints the placed `B bbox`
+  so alignment is dialed with numbers. The merge rides a tagged `merge2=` argument that both probe and rig
+  modes scan, `.blend` seconds are rejected (opening one replaces the scene), and the fast path rejects the
+  merge loudly. Drilled headless: Khalandion + half-scale Triconter at (0,40,0)/90° — 92 `B_` parts probed,
+  bbox lands exactly at the dialed transform, full Generate exports the combined 549k-vert scene.
+
 - **Sails can FOLD at idle instead of hiding.** A "Fold sail at idle" checkbox (shown when sails are marked)
   swaps the Furl stance's below-the-keel strike for the vanilla ships' brailed-up look: the canvas gathers
   into a visible bundle at the yard — an accordion pleat on a generated Sail→SailF1→SailF2 fold chain, the
