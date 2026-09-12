@@ -927,7 +927,7 @@ namespace HumankindAssetFramework
                 // same sim unit: during a battle the army's PresentationUnit still exists at the STACK position while
                 // the battle deploys a SECOND PresentationUnit on its combat tile — same GUID, different objects. A
                 // shared key would ping-pong stateLastPos between the two positions and read as permanently "moving".
-                void SampleUnit(object unit, bool combat, long keySalt)
+                void SampleUnit(object unit, bool combat, long keySalt, object armyObj = null)
                 {
                     if (unit == null) return;
                     // unit -> entry resolved ONCE per PresentationUnit object (null cached too): the per-unit name read
@@ -962,6 +962,13 @@ namespace HumankindAssetFramework
                     // clears the state within a beat, so the arrival fold/settle is barely delayed.
                     if (!moving)
                         try { if (Convert.ToInt32(GetMember(unit, "MoveAlongTilesState")) != 0) moving = true; } catch { }
+                    // ... and the state DROPS TO 0 in the boundary gap itself (probe session 2, 09:31: edges still
+                    // fired at every boundary with the state check in place — the gap is exactly when the engine
+                    // routes through UpdateWaitForReadyToMove to start the next chunk). The army-level flag is the
+                    // robust signal: doMoveWhenReady stays true while ANY path remains queued, and clears on true
+                    // arrival — the same flag the pivot hold gates on.
+                    if (!moving && armyObj != null)
+                        try { if (GetMember(armyObj, "doMoveWhenReady") is bool pend && pend) moving = true; } catch { }
                     if (!e.stateMoving.TryGetValue(guid, out bool wasMoving)) wasMoving = false;
                     if (wasMoving != moving)
                     {
@@ -995,7 +1002,7 @@ namespace HumankindAssetFramework
                     // combat-idle clip while it holds. Reflection-safe: a missing member just reads false.
                     bool combat = false;
                     try { combat = GetMember(army, "IsLockedByBattle") is bool b && b; } catch { }
-                    SampleUnit(GetMember(army, "PresentationUnit"), combat, 0L);
+                    SampleUnit(GetMember(army, "PresentationUnit"), combat, 0L, army);
                 }
                 // BATTLE-DEPLOYED units: a battle spawns its own PresentationBattleUnit list whose PresentationUnits
                 // live on the combat tiles — the army walk's sample sits at the STACK position (27u+ away in the
