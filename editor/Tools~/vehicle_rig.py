@@ -112,6 +112,23 @@ if _m2arg:
             _o2.matrix_world = _T2 @ _o2.matrix_world
     bpy.context.view_layer.update()
     _m2meshes = [o for o in _new2 if o.type == 'MESH' and o.data.vertices]
+    # FLATTEN B (field report 2026-09-12: "aligned in the probe step, not placed like that after generate"):
+    # the rig path later reparents every mesh to the generated armature with a plain `.parent =`, which keeps
+    # LOCAL transforms — so a B mesh whose placement lived on its import ROOT (deep Sketchfab hierarchies)
+    # snapped back to its authored pose. Bake the world transform into each B mesh's own matrix and drop B's
+    # helper objects (empties, source armatures — the rig builds its own). The probe preview always flattened
+    # at export, which is exactly why the mismatch only appeared after Generate.
+    for _o2 in _m2meshes:
+        _mw2 = _o2.matrix_world.copy()
+        _o2.parent = None
+        _o2.matrix_world = _mw2
+    _m2helpers = [o for o in _new2 if o not in _m2meshes]
+    for _o2 in _m2helpers:
+        _new2.remove(_o2)
+        bpy.data.objects.remove(_o2, do_unlink=True)
+    if _m2helpers:
+        print("VEHICLE MERGE: %d helper object(s) of the second model dropped (empties/armatures — placement baked into the meshes)" % len(_m2helpers))
+    bpy.context.view_layer.update()
     _m2mn, _m2mx = None, None
     for _o2 in _m2meshes:
         _c2, _d2 = world_bbox(_o2)
