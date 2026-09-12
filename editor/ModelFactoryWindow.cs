@@ -246,8 +246,13 @@ public class ModelFactoryWindow : EditorWindow
         // that prefab is a display-flipped bind pose with no ground plane, so the cure was worse than the disease
         // ("why is it heading up without a surface?"). The real fix must keep THIS route's upright grounded
         // geometry and fix the texture pairing instead — see the atlas-UV preview work.)
-        string path = AssetDatabase.LoadMainAssetAtPath(animFbx) != null ? animFbx
-                    : AssetDatabase.LoadMainAssetAtPath(animPath) != null ? animPath
+        // The rig-FBX routes only apply while the entry IS animated: a static re-bake of a formerly animated entry
+        // deletes _Preview/_PreviewMat/_PreviewMesh (the E7 sweep) but leaves anim/ behind for a later re-animate —
+        // preferring that leftover FBX here showed the OLD rig (grey, its atlas material gone) instead of the fresh
+        // static _Model.prefab (the "nothing/stale after making it static" report, 2026-09-12).
+        bool wantAnim = cur != null && cur.animated;
+        string path = wantAnim && AssetDatabase.LoadMainAssetAtPath(animFbx) != null ? animFbx
+                    : wantAnim && AssetDatabase.LoadMainAssetAtPath(animPath) != null ? animPath
                     : AssetDatabase.LoadMainAssetAtPath(staticPath) != null ? staticPath : null;
         if (path == null) return;
         previewGrounded = path == staticPath || path == animFbx;   // game-space previews only (see the field comment)
