@@ -1405,12 +1405,15 @@ public static class UniversalBaker
         // couldn't): the fields mean X = pitch, Y = HEADING/yaw, Z = roll, and rig_anim.py applies them in the
         // Blender Z-up world as Rz(Y) @ Rx(X) @ Ry(Z) (rig_anim.py "registry semantics" block). This mesh is in
         // the SAME Z-up frame, so a plain Quaternion.Euler(x,y,z) would spin Y about the FORE/AFT axis (a roll)
-        // — the paths would disagree at every nonzero rotation. Replicate rig_anim's composition exactly on the
-        // frame's component axes: apply Ry(Z) first, then Rx(X), then Rz(Y). (Component-axis AngleAxis is
-        // numerically identical to Blender's Matrix.Rotation — verified: both send +z to +x under +90 about y.)
-        Quaternion rot = Quaternion.AngleAxis(cfg.rotationEuler.y, new Vector3(0f, 0f, 1f))    // registry Y = yaw, about frame UP (z)
-                       * Quaternion.AngleAxis(cfg.rotationEuler.x, new Vector3(1f, 0f, 0f))    // registry X = pitch, about frame SWAY (x)
-                       * Quaternion.AngleAxis(cfg.rotationEuler.z, new Vector3(0f, 1f, 0f));   // registry Z = roll, about frame FORE/AFT (y)
+        // — the paths would disagree at every nonzero rotation. Replicate rig_anim's composition on the frame's
+        // component axes: apply Ry(Z) first, then Rx(X), then Rz(Y).
+        // MIRROR CONJUGATION (drilled 2026-09-12, the (0,45,0) cross-bake: the two noses swung to OPPOSITE
+        // sides): both importers x-flip the data (RH file -> LH Unity), but the animated rotation is baked in
+        // Blender BEFORE that flip while this one is applied AFTER it — so this rotation must be the mirror
+        // conjugate, F·R·F⁻¹: same axes, NEGATED yaw and roll angles, pitch (about the mirror axis) unchanged.
+        Quaternion rot = Quaternion.AngleAxis(-cfg.rotationEuler.y, new Vector3(0f, 0f, 1f))   // registry Y = yaw, about frame UP (z) — mirror-negated
+                       * Quaternion.AngleAxis(cfg.rotationEuler.x, new Vector3(1f, 0f, 0f))    // registry X = pitch, about frame SWAY (x) — the mirror axis, unchanged
+                       * Quaternion.AngleAxis(-cfg.rotationEuler.z, new Vector3(0f, 1f, 0f));  // registry Z = roll, about frame FORE/AFT (y) — mirror-negated
         var vv = mesh.vertices; var nrm = mesh.normals;
         for (int i = 0; i < vv.Length; i++) vv[i] = rot * ((vv[i] - bb.center) * scl);
         mesh.vertices = vv;
