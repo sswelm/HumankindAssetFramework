@@ -292,6 +292,11 @@ _embed_previews = {"path_mode": 'COPY', "embed_textures": True} if (abs(_bright1
 # fold before moving and redeploy on arrival — the pivot-hold waits for a pre-move clip automatically.
 # Negative degrees fold the other way (the hinge axis is the flag's larger horizontal extent).
 _ffarg = next((a for a in argv if a.startswith("flagfold=")), None)
+# FOLD MODE is the TAG'S PRESENCE, not the angle (field follow-up: "can you please also make it work at 0"):
+# in fold mode, angle 0 means "no fold — the flag part simply STAYS DEPLOYED while moving", which is the
+# natural reading of the dial. The naval strike is what happens when the tag is absent (ships' recipes carry
+# no key, so they keep striking below the keel unchanged).
+flag_fold_on = _ffarg is not None
 flag_fold_deg = 0.0
 flag_fold_frames = 12
 if _ffarg:
@@ -1565,7 +1570,7 @@ if flag_names:
                      for _n2 in [o.name for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.vertices]
                      for _c2 in bpy.data.objects[_n2].bound_box)
         _gebn = arm_data.edit_bones.new("Flag")
-        if abs(flag_fold_deg) > 0.01:
+        if flag_fold_on:
             # FOLD mode: the hinge sits at the TOP of the flag geometry (a tripod folds where it meets its
             # launcher), and the fold axis is the flag's larger horizontal extent — stored for the clip keys.
             _gebn.head = Vector((0.5 * (_gmn.x + _gmx.x), 0.5 * (_gmn.y + _gmx.y), _gmx.z))
@@ -1577,7 +1582,7 @@ if flag_names:
         print("VEHICLE FLAG: %d part(s) on one Flag bone — %s; double-sided at export"
               % (len(flag_found),
                  ("FOLDS %.0f deg at the top hinge over %d frame(s) (deployed at idle, folded underway)" % (flag_fold_deg, flag_fold_frames))
-                 if abs(flag_fold_deg) > 0.01 else "flies at anchor, struck below the keel through Spin (the opposite of sails)"))
+                 if flag_fold_on else "flies at anchor, struck below the keel through Spin (the opposite of sails)"))
 
 # ---- OAR bones (galley rowing): one merged oar mesh -> one bone per physical oar ----
 # The marked oar parts (poles + blades, each mesh spanning BOTH banks) are split into individual oars by projecting
@@ -2647,7 +2652,7 @@ if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and ar
     if flag_found and arm.pose.bones.get("Flag") is not None:
         _pbG2 = arm.pose.bones["Flag"]
         _pbG2.rotation_mode = 'QUATERNION'
-        if abs(flag_fold_deg) > 0.01:
+        if flag_fold_on:
             # FOLD mode: the Furl clip PLAYS the fold — frame 0 deployed, frame N folded at the top hinge.
             # Assign Idle stance Furl[0..0], Pre-move Furl[0..N], After-move Furl[N..0], Movement Spin.
             _dbG2 = arm.data.bones["Flag"]
@@ -2670,7 +2675,7 @@ if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and ar
         for _kp in _fc.keyframe_points:
             _kp.interpolation = 'LINEAR'
     arm.animation_data.action = act                                      # 'Spin' stays the active action, as before
-    if abs(flag_fold_deg) > 0.01 and flag_found and not sail_found:
+    if flag_fold_on and flag_found and not sail_found:
         print("VEHICLE 'Furl' stance: flags FOLD %.0f deg at the top hinge over %d frame(s) — Idle/reference Spin[0..0], Idle stance (override) Furl[0..0] (deployed), Movement Spin (folded), Pre-move Furl[0..%d] (folds — the unit waits), After-move Furl[%d..0] (redeploys), Keep bone translations OFF"
               % (flag_fold_deg, flag_fold_frames, flag_fold_frames, flag_fold_frames))
     else:
@@ -2701,7 +2706,7 @@ if flag_found and arm.pose.bones.get("Flag") is not None:
     _pbG = arm.pose.bones["Flag"]; _dbG = arm.data.bones["Flag"]
     _m3G = (arm.matrix_world @ _dbG.matrix_local).to_3x3()
     _pbG.rotation_mode = 'QUATERNION'
-    if abs(flag_fold_deg) > 0.01:
+    if flag_fold_on:
         # FOLD mode: Spin holds the FOLDED pose (the tripod stays tucked while moving) — matching Furl's
         # final frame, so Pre-move Furl[0..N] hands off seamlessly into the movement clip.
         _gax = (_m3G.inverted() @ flag_fold_axis).normalized()
