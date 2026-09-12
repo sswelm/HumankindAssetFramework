@@ -950,6 +950,7 @@ namespace HumankindAssetFramework
                     {
                         if (e.stateLastPos.TryGetValue(guid, out var lastP)) moving = (upos - lastP).sqrMagnitude > 0.1f * 0.1f;
                         e.stateLastPos[guid] = upos;
+                        if (moving) e.stateLastDispAt[guid] = now;   // REAL displacement only — anchors the boundary bridge below
                     }
                     // PIVOT IN PLACE (2026-08-22): a unit whose move start HAF is holding while it turns counts as moving
                     // from the moment the hold arms — so the PRE-MOVE one-shot (the howitzer folding) plays DURING the
@@ -969,6 +970,20 @@ namespace HumankindAssetFramework
                     // arrival — the same flag the pivot hold gates on.
                     if (!moving && armyObj != null)
                         try { if (GetMember(armyObj, "doMoveWhenReady") is bool pend && pend) moving = true; } catch { }
+                    // ... and in the gap's FIRST part even doMoveWhenReady is cold (probe session 3, 09:36: edges
+                    // survived both guards — the gap is the sim-feed pause BEFORE the next chunk is handed over).
+                    // The one signal live across the whole gap is the path itself: positionHistory still holds
+                    // UNCONSUMED steps (the boundary re-holds logged "history 3/4" mid-gap). Time-boxed to 5 s of
+                    // the last real displacement so an abandoned path cannot pin the sail full at anchor.
+                    if (!moving && armyObj != null && e.stateLastDispAt.TryGetValue(guid, out var lastDisp) && now - lastDisp < 5f)
+                        try
+                        {
+                            var hist9 = GetMember(armyObj, "positionHistory");
+                            if (hist9 != null && GetMember(armyObj, "currentIndexInHistory") is int ix9 &&
+                                GetMember(hist9, "StepCount") is int cnt9 && ix9 >= 0 && ix9 + 1 < cnt9)
+                                moving = true;   // more path queued — a chunk boundary, not an arrival
+                        }
+                        catch { }
                     if (!e.stateMoving.TryGetValue(guid, out bool wasMoving)) wasMoving = false;
                     if (wasMoving != moving)
                     {
@@ -1019,7 +1034,7 @@ namespace HumankindAssetFramework
                 {
                     lock (e.stateSamples) { e.stateSamples.Clear(); e.stateSamples.AddRange(fresh[e]); }
                     var sn = seen[e];   // drop gone units from all four per-unit maps
-                    PruneGone(e.stateLastPos, sn); PruneGone(e.stateMoving, sn); PruneGone(e.stateStoppedAt, sn); PruneGone(e.stateMoveStartedAt, sn);
+                    PruneGone(e.stateLastPos, sn); PruneGone(e.stateMoving, sn); PruneGone(e.stateStoppedAt, sn); PruneGone(e.stateMoveStartedAt, sn); PruneGone(e.stateLastDispAt, sn);
                     PruneGone(e.stateCombat, sn); PruneGone(e.stateCombatChangedAt, sn);
                 }
             }
