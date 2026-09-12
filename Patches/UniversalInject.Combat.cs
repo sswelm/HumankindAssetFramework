@@ -960,6 +960,10 @@ namespace HumankindAssetFramework
                     {
                         if (wasMoving && !moving) e.stateStoppedAt[guid] = now;        // the AFTER one-shot window starts here
                         if (!wasMoving && moving) e.stateMoveStartedAt[guid] = now;    // the PRE-MOVEMENT one-shot window starts here
+                        // DIAG (2026-09-12 "only folds when turning"): fold models' state edges are rare — log each
+                        // with the IsMoveHeld verdict, so a hold that fails to count as "moving" shows itself.
+                        if (e.preMoveAnimId >= 0)
+                            Plugin.Log.LogInfo($"[State] edge '{e.resourceName}' moving->{moving} (held={IsMoveHeld(unit)}, mapKey={keySalt == 0})");
                     }
                     e.stateMoving[guid] = moving;
                     // combat FLIP timestamp (2026-08-19, combatZ): the ease ramp for the combat height offset starts

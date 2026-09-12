@@ -14,6 +14,7 @@ namespace HumankindAssetFramework
     {
         static object animMgrRef;             // AnimationManager instance, captured at registration ([AnimDiag])
         [ProcessLived("diagnostic one-shot dump dedup (lazy)")] static HashSet<string> animDiagDone;  // entries already dumped by the one-shot [AnimDiag]
+        [SessionScoped] static readonly Dictionary<ModelEntry, float> preMoveDiagAt = new Dictionary<ModelEntry, float>();   // DIAG 2026-09-12 "only folds when turning": per-entry throttle for the pre-move trace
 
         // ONE-SHOT GPU-record diagnostic (2026-07-26, the T-62 renders-REST hunt): dump the engine's live
         // per-bone GPUAnimationEntry records (FrameCount/Format/StartPoseData/BBox) for an entry's primary and
@@ -1089,6 +1090,18 @@ namespace HumankindAssetFramework
             // PRE-MOVEMENT one-shot: just STARTED moving (e.g. a howitzer folding its legs) — plays once, then the Move loop
             if (moving && e.preMoveAnimId >= 0)
                 inPreMove = PoseMath.OneShot(moveStartedAt, UnityEngine.Time.time, e.preMoveDur, out preMoveT);
+            // DIAG (2026-09-12, "only folds when turning"): the no-turn hold ARMS ([Pivot] log) yet the unfold
+            // visibly skips — trace the chain once per second per entry while a window could be live, so the
+            // log shows whether the pose ever sees moving=true / inPreMove=true during a parked hold.
+            if (e.preMoveAnimId >= 0 && (moving || (moveStartedAt > 0f && UnityEngine.Time.time - moveStartedAt < 3f)))
+            {
+                float nowD = UnityEngine.Time.time;
+                if (!preMoveDiagAt.TryGetValue(e, out var tD) || nowD - tD > 1f)
+                {
+                    preMoveDiagAt[e] = nowD;
+                    Plugin.Log.LogInfo($"[State] '{e.resourceName}' moving={moving} inPreMove={inPreMove} preT={preMoveT:F2} startedAgo={(moveStartedAt > 0f ? (UnityEngine.Time.time - moveStartedAt).ToString("F2") : "-")} inAfter={inAfter}");
+                }
+            }
             bool combatIdle = inCombat && e.combatAnimId >= 0 && !moving && !inAfter && !inAttack;
             // IDLE-ALT (2026-07-23, the tiger's howl): an OCCASIONAL flavor one-shot while PLAIN idle — never during
             // move/attack/after/combat. One cadence per ENTRY (unit type): the pawn evaluated at due time becomes the
