@@ -1307,12 +1307,23 @@ public static class UniversalBaker
         // Instantiate produced a mesh with the deck markings mapped onto the superstructure. Combine manually
         // (concatenate verts/UVs/normals, remap triangles) so every vertex keeps its own UV.
         var rootInv = src.transform.worldToLocalMatrix;
+        // ONE FRAME FOR EVERY SOURCE (PR #35 review, own finding 2): glbconv-extracted geometry arrives in the
+        // baker's Z-up frame, but a DIRECT .obj/.fbx static source never passes through the converter — Unity
+        // imports it Y-up, and with the auto-align gone it would bake pitched 90°. Apply the identical +90°X
+        // (x,y,z)->(x,-z,y) here for those sources so the unified frame and the registry Rotation semantics hold
+        // regardless of format. The gate mirrors the EXTRACT routing exactly: glb/gltf/blend go through glbconv,
+        // and so does ANY source with strip/reduce prep (prep exports a GLB first) — only a plain, un-prepped
+        // .obj/.fbx is imported directly. (det +1: winding untouched; normals ride the same rotation via `local`.)
+        string srcExtFrame = Path.GetExtension(cfg.modelFile ?? "").ToLowerInvariant();
+        bool viaGlbconv = srcExtFrame == ".glb" || srcExtFrame == ".gltf" || srcExtFrame == ".blend"
+                       || !string.IsNullOrWhiteSpace(cfg.stripParts) || cfg.targetTris > 0;
+        Matrix4x4 srcToBaker = viaGlbconv ? Matrix4x4.identity : Matrix4x4.Rotate(Quaternion.AngleAxis(90f, new Vector3(1f, 0f, 0f)));
         var cVerts = new List<Vector3>(); var cUV = new List<Vector2>(); var cNorm = new List<Vector3>(); var cTris = new List<int>();
         bool haveUV = false, haveNorm = false;
         foreach (var mf in src.GetComponentsInChildren<MeshFilter>())
         {
             var m = mf.sharedMesh; if (m == null) continue;
-            var local = rootInv * mf.transform.localToWorldMatrix;
+            var local = srcToBaker * rootInv * mf.transform.localToWorldMatrix;
             var v = m.vertices; var uv = m.uv; var nr = m.normals;
             bool mUV = uv != null && uv.Length == v.Length, mNorm = nr != null && nr.Length == v.Length;
             if (!multiMat)

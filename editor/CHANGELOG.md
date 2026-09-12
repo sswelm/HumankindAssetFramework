@@ -19,10 +19,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   Z = roll, composed roll→pitch→yaw; review P1 — a plain Euler on the Z-up frame would have made Y a roll).
   The converter reads every JOINTS_n/WEIGHTS_n influence set and judges mirrored winding per vertex from the
   actual deforming transform (review P2/P3). Every cached extraction re-runs (cache stamp `v3`). **Breaking on
-  purpose:** pre-existing static GLB entries re-bake into the unified frame — re-dial their Rotation once
-  (typically back to 0,0,0). A static **.fbx/.obj** source never passes through the converter, so with the
-  auto-align gone it arrives Y-up in the Z-up combine: expect one Rotation dial of X≈±90 there (none of the
-  shipped entries are affected — all static entries are GLB).
+  purpose:** pre-existing static entries re-bake into the unified frame — re-dial their Rotation once
+  (typically back to 0,0,0). Direct **.fbx/.obj** static sources (which never pass through the converter) get
+  the identical Y-up→Z-up conversion applied in the combine instead, so the unified frame and the Rotation
+  semantics hold for every source format.
 
 - **Per-source Brightness dials — merged models read as one unit.** The TOW launcher arrived several stops
   lighter than its tripod ("acts more like a whole unit rather than a patched model"): two sliders in the
