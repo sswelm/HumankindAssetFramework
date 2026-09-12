@@ -216,21 +216,12 @@ def apply_brightness(scope, factor, tag):
                     _tin.default_value = _new
                     _job(_teximg.image, _teximg, _linked[0], _resid)
                     continue
-            # unrecognized chain (vertex colors, deep node math): fall back to the deep walk — every image
-            # feeding the chain gets the whole factor, with a WARN because a mid-chain tint would clip early
-            _stack = [_l.from_node for _l in _bc.links]
-            _seen = set()
-            while _stack:
-                _nd = _stack.pop()
-                if _nd in _seen:
-                    continue
-                _seen.add(_nd)
-                if _nd.type == 'TEX_IMAGE' and _nd.image is not None:
-                    _job(_nd.image, _nd, None, (factor, factor, factor)); _warn_chain += 1
-                else:
-                    for _in in _nd.inputs:
-                        for _l2 in _in.links:
-                            _stack.append(_l2.from_node)
+            # unsupported chain (add mixes, vertex colors, deep node math): REJECT rather than approximate
+            # (review round 4: the old deep-walk fallback scaled only the textures, so tex 0.2 ADD 0.2 at
+            # x0.5 produced 0.302 where 0.20 is right — a wrong result behind a warning is worse than no
+            # result). The material keeps its authored look and the log names it.
+            print("VEHICLE WARN: material '%s': Base Color comes from an unsupported node chain (%s) — brightness NOT applied to this material" % (_m.name, _src.type))
+            _warn_chain += 1
     import numpy as _np
     _edited = 0
     for (_img, _rkey), (_resid, _entries) in _img_jobs.items():
@@ -271,9 +262,8 @@ def apply_brightness(scope, factor, tag):
             else:
                 _nd.image = _copy
         _edited += 1
-    if _warn_chain:
-        print("VEHICLE WARN: %d base-color image(s) sit behind an unrecognized node chain — a mid-chain tint could clip a >1 factor early" % _warn_chain)
-    print("VEHICLE brightness x%.2f%s: %d base-color image(s) copied+adjusted, %d material(s) adjusted" % (factor, tag, _edited, len(_mats)))
+    print("VEHICLE brightness x%.2f%s: %d base-color image(s) copied+adjusted, %d material(s) adjusted%s"
+          % (factor, tag, _edited, len(_mats) - _warn_chain, ", %d SKIPPED (unsupported chains, see warnings)" % _warn_chain if _warn_chain else ""))
 
 # BRIGHTNESS (tagged like merge2 — probe and rig both need it so previews match the bake):
 #   bright=<first model factor>|<second model factor>
