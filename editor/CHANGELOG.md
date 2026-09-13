@@ -5,6 +5,16 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab Generate up to 6x faster on flat-panel-heavy models — chunked limited dissolve.** The
+  source-side reduction's limited dissolve joins coplanar faces region by region, and its cost is quadratic
+  in region size: game rips triangulate a big flat deck into ONE region, so the OceanLiner's 23k-vert
+  deckhouse alone took 39 seconds and the whole Generate 73s (71s of it in this single Blender op, measured
+  headless). Parts above 4,000 faces now dissolve in spatial chunks (BSP-split at the face-centroid median;
+  only cell-interior edges dissolve) — linear cost, same panels flattened; the thin lines of seam verts left
+  across flat regions are exactly what the collapse pass already trims when the dial asks for more. The
+  OceanLiner's reduce stage drops 66s → 13s; smaller parts keep the exact single-call behavior, and the
+  timing print now names the stage (`VEHICLE timing: reduce`) so a slow Generate is diagnosable from the log.
+
 - **ONE axis frame — the static bake now matches the animated one, no toggle, no legacy mode.** The static
   path used to ingest a GLB's Y-up vertices raw into the Z-up baker world and then auto-align the longest
   axis by guess — so the same file needed a different Rotation per path (the Lembos arrived upside-down on

@@ -1063,6 +1063,59 @@ def axle_axis(s):
 # thousands of tiny disconnected islands each keep minimum topology), then COLLAPSE toward the dial's target
 # measured against the ORIGINAL count, so the percentage means what it says or better. The print carries all
 # three numbers so a too-aggressive dial is loud, not silent.
+#
+# Limited dissolve's face-join is QUADRATIC in coplanar-region size: game rips triangulate big flat panels
+# into one huge region, and on the OceanLiner a 23k-vert deckhouse took 39 SECONDS to dissolve while a curvier
+# 65k-vert hull took 3s (the whole Generate ran 73s, 71s of it in this one op). Big parts therefore dissolve in
+# spatial chunks: BSP-split the faces at the centroid median until every cell holds <= _DISSOLVE_CHUNK_FACES,
+# then dissolve only cell-INTERIOR edges/verts, cell by cell — linear cost, same panels flattened. The cell
+# seams keep a thin line of extra verts across flat regions; the collapse pass right below eats them whenever
+# the dial asks for more. Parts at or under the cap skip the chunking and keep the exact single-call behavior.
+_DISSOLVE_CHUNK_FACES = 4000
+def _dissolve_limited(_rb, _angle_deg):
+    if len(_rb.faces) <= _DISSOLVE_CHUNK_FACES:
+        bmesh.ops.dissolve_limit(_rb, angle_limit=math.radians(_angle_deg), use_dissolve_boundaries=False,
+                                 verts=list(_rb.verts), edges=list(_rb.edges))
+        return
+    _cells = [[(_f, _f.calc_center_median()) for _f in _rb.faces]]
+    _leaves = []
+    while _cells:
+        _cell = _cells.pop()
+        if len(_cell) <= _DISSOLVE_CHUNK_FACES:
+            _leaves.append(_cell); continue
+        _spans = [max(_c[_i] for _, _c in _cell) - min(_c[_i] for _, _c in _cell) for _i in range(3)]
+        _ax = _spans.index(max(_spans))
+        _cell.sort(key=lambda _fc: _fc[1][_ax])
+        _mid = len(_cell) // 2
+        _cells.append(_cell[:_mid]); _cells.append(_cell[_mid:])
+    _fid = {}
+    for _li, _leaf in enumerate(_leaves):
+        for _f, _ in _leaf:
+            _fid[_f] = _li
+    # gather every cell's interior edges/verts BEFORE any dissolve runs: each cell's op deletes only elements
+    # interior to that cell, so the references collected here for later cells stay valid throughout.
+    _jobs = []
+    for _li, _leaf in enumerate(_leaves):
+        _es = set(); _vs = set()
+        for _f, _ in _leaf:
+            for _e in _f.edges:
+                _lf = _e.link_faces
+                if len(_lf) == 2 and _fid.get(_lf[0]) == _li and _fid.get(_lf[1]) == _li:
+                    _es.add(_e)
+            for _v in _f.verts:
+                if all(_fid.get(_vf) == _li for _vf in _v.link_faces):
+                    _vs.add(_v)
+        _jobs.append((list(_es), list(_vs)))
+    # run a cell even when it has NO interior edges: a disconnected single-face island (decal/panel shards)
+    # has no edge with two linked faces, but its collinear rim verts still dissolve in the VERT phase —
+    # skipping those cells left every such island at full density (review P2, reproduced: 4,100 lone
+    # rectangles kept all 24,600 verts where the global call cut to 16,400).
+    for _es, _vs in _jobs:
+        if _es or _vs:
+            bmesh.ops.dissolve_limit(_rb, angle_limit=math.radians(_angle_deg), use_dissolve_boundaries=False,
+                                     verts=_vs, edges=_es)
+
+_lap("prep")
 for _rlabel, _rnames, _rpct in (("RIGGING", rigging_names, rigging_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce), ("RUDDER", rudder_names, rudder_reduce), ("WHEEL", wheel_names, wheel_reduce), ("FLIP", flip_names, flip_reduce), ("PRESERVE", preserve_names, preserve_reduce), ("DETAIL", detail_names, detail_reduce)):
     if not _rnames or _rpct <= 0.5:
         continue
@@ -1077,8 +1130,7 @@ for _rlabel, _rnames, _rpct in (("RIGGING", rigging_names, rigging_reduce), ("ST
             print("VEHICLE WARN: %s part '%s' not found — skipped" % (_rlabel.lower(), _rn)); continue
         _v0 = len(_ro2.data.vertices)
         _rb = bmesh.new(); _rb.from_mesh(_ro2.data)
-        bmesh.ops.dissolve_limit(_rb, angle_limit=math.radians(5.0), use_dissolve_boundaries=False,
-                                 verts=list(_rb.verts), edges=list(_rb.edges))
+        _dissolve_limited(_rb, 5.0)
         # TRIANGULATE the dissolved result immediately: the dissolve leaves long, often non-planar/concave n-gons,
         # and Unity's FBX importer DISCARDS self-intersecting polygons on import (a wall of warnings + holes in the
         # preview). Blender's ear-clipping handles these fine; no n-gon ever reaches an exporter. Adds no vertices.
@@ -1099,6 +1151,7 @@ for _rlabel, _rnames, _rpct in (("RIGGING", rigging_names, rigging_reduce), ("ST
     if _rr_n:
         print("VEHICLE %s: %d part(s) reduced, %d -> %d verts total (%.0f%% cut)"
               % (_rlabel, _rr_n, _rr_v0, _rr_v1, 100.0 * (1.0 - float(_rr_v1) / max(1, _rr_v0))))
+_lap("reduce")
 
 # ---- wheel clustering ----
 # A wheel is usually MANY shards (tire, rim, spokes, bolts...). Bones must NOT be per-shard: a spoke spinning
