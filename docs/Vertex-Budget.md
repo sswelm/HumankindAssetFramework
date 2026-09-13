@@ -137,18 +137,25 @@ per the [Review-Backlog rules](Review-Backlog.md) (re-verify before acting), it 
 - **The number diagnoses itself**: 21,845 tiles × 3 parts = **65,535 — the 16-bit (ushort) ceiling**.
   That smells like an index/element count limit in the terrain pipeline, a *different species* from the
   units' 16,320-quad **per-fragment** clamp (255×64, pawn compute shader).
-- **Why the unit fix doesn't transplant directly**: the multi-fragment split worked because the whole
-  pawn fragment path runs through **managed code** a BepInEx plugin can patch (`PawnManager` /
-  `AnimationManager` — FragmentEntries, descriptor snapshots), and the cap is per-fragment, so more
-  fragments = more budget. A typeprobe sweep of `Amplitude.Mercury.Terrain` (2026-09-13) shows only
-  high-level managed types (territories, landmarks, labels, settings — no tile mesh builder), so the
-  tile geometry is likely built native/compute-side, where C# cannot reach a compiled `ushort`.
-- **Why it isn't a flat no**: the same divide-and-conquer shape (several tile batches, each under 65,535
-  elements) would work *if* batch construction has a managed seam — and precedent exists: HAF already
-  resizes a terrain-adjacent GPU buffer from C# (`DistrictBufferHeadroom` grows the `Visual` layer, the
-  table above). Some of that plumbing is managed.
+- **Round 2 (same day, deeper probe): the renderer is MANAGED after all.**
+  `Amplitude.Mercury.Terrain.ProceduralTerrainRenderer` is C# — GPU-indirect (visibility/repack/draw
+  compute kernels) but driven entirely from patchable code. Its `CreateOrResizeVisibleHexagonsBuffer` /
+  `CreateOrResizeDrawCommandsBuffer` size their buffers from **two plain ints on the loaded
+  `TerrainRendererTechnicalSettings` asset** (IL read, token-resolved; no clamp constant in the renderer).
+- **Measured live** (the `[Terrain]` probe line, 2026-09-13): `VisibleHexagonsBufferSize = 10,000`,
+  `DrawCommandBufferSize = 800,000`. **Not 65,536** — so the clean "ushort capacity" theory is dead in
+  its original form. Two live theories remain:
+  1. **The visible-hexagon budget**: 10,000 is the post-culling *on-screen* hex budget. A big world
+     zoomed far out can plausibly exceed it, and the repack would drop the rest — matching "tiles beyond
+     a certain amount will not render." Testable directly with the multiplier below.
+  2. **A ushort×3 edge/part index elsewhere**: 21,845 × 3 = 65,535 still fits a 16-bit index over
+     "3 parts per tile" (a hex owns 3 edges in standard storage). Candidates checked and CLEARED so far:
+     `WorldMapProviderHelper.ImportFrom`'s 65536s are capability FLAG BITS; `Matching.BakedElement`'s
+     65535 is the pattern-library sentinel (`NoMatchingEntryIndex`), not a tile count.
+- **The instrument exists**: `[Terrain] TerrainHexagonBufferMultiplier` (plugin config, default 1 =
+  vanilla) multiplies both settings ints before buffer creation, and the probe line logs the shipped
+  values every launch. **The decisive field test**: a >10k-visible-tile view (huge map, max zoom-out)
+  with the multiplier at 1 vs 4 — if missing far tiles appear, theory 1 is confirmed and the ceiling is
+  effectively broken; if nothing changes, hunt theory 2's ushort in the compute kernels' data layout.
 - **Scope caution**: a >21k-tile world stresses more than rendering (simulation, saves, pathing) —
   rendering may not even be the binding constraint.
-- **Next step, if ever picked up**: probe where tile visual buffers are allocated (start from the
-  terrain engine's managed entry points and `CameraGraphicService`), and look for a managed seam that
-  sizes or batches them. Fair odds the dig ends at "native code, can't reach."
