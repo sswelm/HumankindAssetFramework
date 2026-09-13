@@ -116,6 +116,50 @@ public class GlbPlaneCutTests
         Assert.Equal(0, twin.Value<int>("mesh"));   // still the original, uncut mesh
     }
 
+    // Facing-cut fixture: 7 disconnected triangles — 2 horizontal at y=0 (hull bottom), 2 horizontal at y=2
+    // (deck), 2 vertical at x=5 (bow plating), 1 tilted exactly 30 deg from level at y=5 (cambered deck edge).
+    static readonly float[] Facing = {
+        0f, 0f, 0f,  1f, 0f, 0f,  0f, 0f, 1f,
+        1f, 0f, 0f,  1f, 0f, 1f,  0f, 0f, 1f,
+        0f, 2f, 0f,  1f, 2f, 0f,  0f, 2f, 1f,
+        1f, 2f, 0f,  1f, 2f, 1f,  0f, 2f, 1f,
+        5f, 0f, 0f,  5f, 1f, 0f,  5f, 0f, 1f,
+        5f, 1f, 0f,  5f, 1f, 1f,  5f, 0f, 1f,
+        0f, 5f, 0f,  1f, 5f, 0f,  0f, 5.57735f, 1f
+    };
+
+    [Fact]
+    public void Facing_cut_partitions_by_surface_orientation()
+    {
+        byte[] source = BuildGlb(Facing);
+
+        // Tilt limit 45: both horizontal quads AND the 30-deg face are "level"; the vertical wall is not.
+        var result = GlbDisconnectedParts.CutNodeByFacing(source, 0, 1, 45.0, -10.0);
+        Assert.True(result.Changed);
+        JObject root = ReadJson(result.Bytes);
+        var nodes = (JArray)root["nodes"];
+        Assert.Equal(5, TriangleCount(root, (JObject)nodes[1]));   // _CutA: 2 bottom + 2 top + tilted
+        Assert.Equal(2, TriangleCount(root, (JObject)nodes[2]));   // _CutB: the vertical wall
+
+        // Tilt limit 20: the 30-deg face now counts as steep.
+        root = ReadJson(GlbDisconnectedParts.CutNodeByFacing(source, 0, 1, 20.0, -10.0).Bytes);
+        nodes = (JArray)root["nodes"];
+        Assert.Equal(4, TriangleCount(root, (JObject)nodes[1]));
+        Assert.Equal(3, TriangleCount(root, (JObject)nodes[2]));
+    }
+
+    [Fact]
+    public void Facing_floor_keeps_low_horizontal_surfaces_out_of_CutA()
+    {
+        // Floor at y=1: the equally-horizontal bottom (y=0) stays in _CutB — the hull-bottom case.
+        byte[] source = BuildGlb(Facing);
+        var result = GlbDisconnectedParts.CutNodeByFacing(source, 0, 1, 45.0, 1.0);
+        JObject root = ReadJson(result.Bytes);
+        var nodes = (JArray)root["nodes"];
+        Assert.Equal(3, TriangleCount(root, (JObject)nodes[1]));   // top quad + tilted face
+        Assert.Equal(4, TriangleCount(root, (JObject)nodes[2]));   // bottom quad + wall
+    }
+
     // ---- helpers (the GlbDisconnectedPartsTests builder, plus rotation / shared-node options) ----
 
     static byte[] BuildGlb(float[] positions, bool withWeightAnimation = false, bool rotationZ90 = false, bool secondNodeSharesMesh = false)

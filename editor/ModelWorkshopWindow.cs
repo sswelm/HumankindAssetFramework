@@ -69,6 +69,8 @@ public class ModelWorkshopWindow : EditorWindow
     // writes — no axis-convention mapping to get wrong. ----
     [SerializeField] int cutAxis = 1;      // source-file world axis: 0=X 1=Y (up in standard glTF) 2=Z
     [SerializeField] float cutPct = 50f;
+    [SerializeField] int cutRule = 0;      // 0 = flat plane; 1 = horizontal surfaces (facing) — deck vs bow plating
+    [SerializeField] float cutTiltDeg = 45f;   // facing rule: a face counts as horizontal when tilted less than this from level
     GlbDisconnectedParts.PartGeometry cutGeo;
     Mesh cutMesh; GameObject cutGO;
     Material cutMatA, cutMatB;
@@ -185,15 +187,29 @@ public class ModelWorkshopWindow : EditorWindow
                 }
                 else
                 {
-                    EditorGUILayout.LabelField($"Plane cut '{cutGeo.NodeName}' — yellow side becomes _CutA, grey side _CutB:", EditorStyles.miniBoldLabel);
-                    int newAxis = EditorGUILayout.Popup(new GUIContent("Cut axis",
-                        "World axis of the flat cut, in the SOURCE file's own frame. On a standard glTF ship: Y = horizontal cut " +
-                        "(deck off hull), X/Z = vertical cuts (bow section, side). Watch the preview — the colors are the actual partition."),
+                    EditorGUILayout.LabelField($"Cut '{cutGeo.NodeName}' — yellow side becomes _CutA, grey side _CutB:", EditorStyles.miniBoldLabel);
+                    int newRule = EditorGUILayout.Popup(new GUIContent("Cut rule",
+                        "Flat plane: everything at or above the plane goes to _CutA — a straight geometric slice. " +
+                        "Horizontal surfaces: a triangle goes to _CutA when its FACE lies flatter than the tilt limit — the deck " +
+                        "separates from the bow plating by orientation, where no flat plane can trace the boundary."),
+                        cutRule, new[] { "Flat plane", "Horizontal surfaces (deck vs sides)" });
+                    int newAxis = EditorGUILayout.Popup(new GUIContent(cutRule == 0 ? "Cut axis" : "Up axis",
+                        "World axis in the SOURCE file's own frame. On a standard glTF ship Y is up: for the plane rule that means a " +
+                        "horizontal cut (deck off hull), X/Z are vertical cuts (bow section, side); for the facing rule it defines " +
+                        "which way 'level' faces. Watch the preview — the colors are the actual partition."),
                         cutAxis, new[] { "X", "Y  (up, in most GLBs)", "Z" });
-                    float newPct = EditorGUILayout.Slider(new GUIContent("Position (%)",
-                        "Where the plane sits between the part's two ends on that axis. Live: what shows yellow is exactly what _CutA gets."),
+                    float newTilt = cutTiltDeg;
+                    if (cutRule == 1)
+                        newTilt = EditorGUILayout.Slider(new GUIContent("Max tilt (°)",
+                            "How far from level a face may lean and still count as horizontal (deck camber, sheer). Undersides count " +
+                            "too — a deck's ceiling is as horizontal as its planking. 45 is a good start; lower = stricter deck."),
+                            cutTiltDeg, 5f, 85f);
+                    float newPct = EditorGUILayout.Slider(new GUIContent(cutRule == 0 ? "Position (%)" : "Only above (%)",
+                        cutRule == 0 ? "Where the plane sits between the part's two ends on that axis. Live: what shows yellow is exactly what _CutA gets."
+                                     : "Height floor: horizontal faces BELOW this stay in _CutB — keeps the equally-horizontal hull BOTTOM out of the deck piece. 0 = judge the whole part by facing alone."),
                         cutPct, 0f, 100f);
-                    if (newAxis != cutAxis || !Mathf.Approximately(newPct, cutPct)) { cutAxis = newAxis; cutPct = newPct; UpdateCutPartition(); }
+                    if (newRule != cutRule || newAxis != cutAxis || !Mathf.Approximately(newPct, cutPct) || !Mathf.Approximately(newTilt, cutTiltDeg))
+                    { cutRule = newRule; cutAxis = newAxis; cutPct = newPct; cutTiltDeg = newTilt; UpdateCutPartition(); }
                     EditorGUILayout.LabelField($"   _CutA (yellow): {cutTrisA:N0} tris  ·  _CutB (grey): {cutTrisB:N0} tris — the boundary follows the existing triangulation", EditorStyles.miniLabel);
                     using (new EditorGUILayout.HorizontalScope())
                     {
@@ -366,13 +382,26 @@ public class ModelWorkshopWindow : EditorWindow
     {
         if (cutGeo == null || cutMesh == null) return;
         double v = CutPlaneValue();
+        double cosLimit = Math.Cos(Mathf.Clamp(cutTiltDeg, 0f, 90f) * Math.PI / 180.0);
         var a = new List<int>(); var b = new List<int>();
         int[] t = cutGeo.Triangles; float[] p = cutGeo.Positions;
         for (int i = 0; i < t.Length; i += 3)
         {
-            // same rule as GlbDisconnectedParts.CutNodeByPlane: world centroid at or above the plane = side A
-            double c = (p[t[i] * 3 + cutAxis] + p[t[i + 1] * 3 + cutAxis] + p[t[i + 2] * 3 + cutAxis]) / 3.0;
-            var side = c >= v ? a : b;
+            // the same rules as GlbDisconnectedParts.CutNodeByPlane/ByFacing, on the same world-space data
+            int i0 = t[i] * 3, i1 = t[i + 1] * 3, i2 = t[i + 2] * 3;
+            double c = (p[i0 + cutAxis] + p[i1 + cutAxis] + p[i2 + cutAxis]) / 3.0;
+            bool sideA;
+            if (cutRule == 0) sideA = c >= v;
+            else
+            {
+                double ux = p[i1] - p[i0], uy = p[i1 + 1] - p[i0 + 1], uz = p[i1 + 2] - p[i0 + 2];
+                double wx = p[i2] - p[i0], wy = p[i2 + 1] - p[i0 + 1], wz = p[i2 + 2] - p[i0 + 2];
+                double nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+                double len = Math.Sqrt(nx * nx + ny * ny + nz * nz);
+                double up = len < 1e-30 ? 0 : (cutAxis == 0 ? nx : cutAxis == 1 ? ny : nz) / len;
+                sideA = Math.Abs(up) >= cosLimit && c >= v;
+            }
+            var side = sideA ? a : b;
             side.Add(t[i]); side.Add(t[i + 1]); side.Add(t[i + 2]);
         }
         cutTrisA = a.Count / 3; cutTrisB = b.Count / 3;
@@ -387,9 +416,11 @@ public class ModelWorkshopWindow : EditorWindow
         if (File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?", outGlb, "Overwrite", "Cancel")) return;
         try
         {
-            EditorUtility.DisplayProgressBar("Model Workshop", "Cutting at the plane…", 0.4f);
-            var result = GlbDisconnectedParts.CutFileByPlane(srcFile, outGlb, cutGeo.NodeIndex, cutAxis, CutPlaneValue());
-            if (!result.Changed) { status = "Nothing changed — the plane leaves every triangle on one side."; return; }
+            EditorUtility.DisplayProgressBar("Model Workshop", "Cutting…", 0.4f);
+            var result = cutRule == 0
+                ? GlbDisconnectedParts.CutFileByPlane(srcFile, outGlb, cutGeo.NodeIndex, cutAxis, CutPlaneValue())
+                : GlbDisconnectedParts.CutFileByFacing(srcFile, outGlb, cutGeo.NodeIndex, cutAxis, cutTiltDeg, CutPlaneValue());
+            if (!result.Changed) { status = "Nothing changed — the cut leaves every triangle on one side."; return; }
             foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
             status = $"Plane cut done: {result.Details.FirstOrDefault()}\n{outGlb}\nNext: open it in the Vehicle Lab — or cut again by pointing Source GLB at this output and re-Probing.";
         }

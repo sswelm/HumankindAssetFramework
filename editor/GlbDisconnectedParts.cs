@@ -557,11 +557,12 @@ public static class GlbDisconnectedParts
             throw new InvalidOperationException("Choose a new output path; the source GLB is never overwritten.");
     }
 
-    // ---- PLANE CUT (2026-09-13, the Bremen deck): a CONNECTED part can never island-split — the OceanLiner's
-    // hull and deck are one welded mesh, one island, one Vehicle Lab row, one role. The plane cut is the same
-    // lossless mechanism with a different partition rule: WHOLE triangles are assigned by which side of an
-    // axis-aligned world-space plane their centroid falls on, and the two sides become _CutA/_CutB children
-    // (vertex data byte-identical, only filtered index accessors appended — exactly like the island split).
+    // ---- PLANE / FACING CUT (2026-09-13, the Bremen deck): a CONNECTED part can never island-split — the
+    // OceanLiner's hull and deck are one welded mesh, one island, one Vehicle Lab row, one role. Both cuts are
+    // the island splitter's lossless mechanism with a different partition rule: WHOLE triangles are judged in
+    // world space — plane cut by which side the centroid falls on, facing cut by whether the face lies flatter
+    // than a tilt limit (deck vs bow plating, where no flat plane can trace the boundary) — and the two sides
+    // become _CutA/_CutB children (vertex data byte-identical, only filtered index accessors appended).
     // No triangle is ever sliced: the boundary follows the existing triangulation, which is what role marking
     // and reduce dials need; visually nothing moves. Jagged-boundary honesty over interpolated new geometry.
     //
@@ -623,8 +624,42 @@ public static class GlbDisconnectedParts
 
     public static Result CutNodeByPlane(byte[] source, int nodeIndex, int axis, double planeValue)
     {
-        if (source == null) throw new ArgumentNullException(nameof(source));
         if (axis < 0 || axis > 2) throw new ArgumentOutOfRangeException(nameof(axis));
+        return CutNode(source, nodeIndex,
+            (pa, pb, pc) => (pa[axis] + pb[axis] + pc[axis]) / 3.0 >= planeValue,
+            "plane cut on axis " + "XYZ"[axis] + " at " + planeValue.ToString("0.###"));
+    }
+
+    // FACING CUT (the Bremen deck, round 2): the deck is HORIZONTAL and the bow plating is not — no flat plane
+    // can trace that boundary, the surface orientation can. A triangle goes to _CutA when its world-space face
+    // normal tilts less than maxTiltDeg away from the up axis (|n·up| >= cos, so a deck's underside counts as
+    // horizontal too) AND its centroid sits at or above floorValue — the floor keeps the equally-horizontal
+    // hull BOTTOM out of the deck piece. floorValue at or below the part's minimum = pure facing cut.
+    public static Result CutNodeByFacing(byte[] source, int nodeIndex, int upAxis, double maxTiltDeg, double floorValue)
+    {
+        if (upAxis < 0 || upAxis > 2) throw new ArgumentOutOfRangeException(nameof(upAxis));
+        double cosLimit = Math.Cos(Math.Max(0.0, Math.Min(90.0, maxTiltDeg)) * Math.PI / 180.0);
+        return CutNode(source, nodeIndex,
+            (pa, pb, pc) => Math.Abs(TriangleNormalComponent(pa, pb, pc, upAxis)) >= cosLimit
+                            && (pa[upAxis] + pb[upAxis] + pc[upAxis]) / 3.0 >= floorValue,
+            "facing cut, up axis " + "XYZ"[upAxis] + ", max tilt " + maxTiltDeg.ToString("0.#") +
+            " deg, floor " + floorValue.ToString("0.###"));
+    }
+
+    // The up-axis component of the triangle's unit normal; 0 for a degenerate triangle (lands in _CutB).
+    static double TriangleNormalComponent(Vec3 a, Vec3 b, Vec3 c, int axis)
+    {
+        double ux = b.X - a.X, uy = b.Y - a.Y, uz = b.Z - a.Z;
+        double vx = c.X - a.X, vy = c.Y - a.Y, vz = c.Z - a.Z;
+        double nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        double len = Math.Sqrt(nx * nx + ny * ny + nz * nz);
+        if (len < 1e-30) return 0;
+        return (axis == 0 ? nx : axis == 1 ? ny : nz) / len;
+    }
+
+    static Result CutNode(byte[] source, int nodeIndex, Func<Vec3, Vec3, Vec3, bool> sideA, string detail)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
         Document document = Parse(source);
         JObject root = document.Root;
         JArray nodes = root["nodes"] as JArray ?? new JArray();
@@ -640,7 +675,7 @@ public static class GlbDisconnectedParts
         var primitives = mesh["primitives"] as JArray ?? throw new InvalidDataException("Mesh has no primitives.");
         double[] world = NodeWorldMatrix(nodes, nodeIndex);
 
-        // Classify every triangle: side 0 (CutA) = world centroid at or above the plane, side 1 (CutB) below.
+        // Classify every triangle in world space: the sideA judge decides (plane side, or facing), side 1 = rest.
         var sides = new[] { new Dictionary<int, List<uint>>(), new Dictionary<int, List<uint>>() };
         int primitiveIndex = -1;
         foreach (JObject primitive in TrianglePrimitives(primitives))
@@ -657,8 +692,7 @@ public static class GlbDisconnectedParts
                 Vec3 pa = XForm(world, reader.Position(posAcc, a));
                 Vec3 pb = XForm(world, reader.Position(posAcc, b));
                 Vec3 pc = XForm(world, reader.Position(posAcc, c));
-                double centroid = (pa[axis] + pb[axis] + pc[axis]) / 3.0;
-                var bucket = sides[centroid >= planeValue ? 0 : 1];
+                var bucket = sides[sideA(pa, pb, pc) ? 0 : 1];
                 if (!bucket.TryGetValue(primitiveIndex, out List<uint> list)) bucket.Add(primitiveIndex, list = new List<uint>());
                 list.Add(a); list.Add(b); list.Add(c);
                 result.SourceTriangles++;
@@ -713,7 +747,7 @@ public static class GlbDisconnectedParts
         RetargetWeightAnimations(root, new Dictionary<int, List<int>> { { nodeIndex, newChildren } });
         result.MeshesSplit = 1;
         result.NodesSplit = 1;
-        result.Details.Add(nodeBase + ": plane cut on axis " + "XYZ"[axis] + " at " + planeValue.ToString("0.###") +
+        result.Details.Add(nodeBase + ": " + detail +
                            " -> " + nodeBase + "_CutA " + trisA + " tri(s) / " + nodeBase + "_CutB " + trisB + " tri(s)");
         foreach (int otherNode in Enumerable.Range(0, nodes.Count).Where(i => i != nodeIndex && (nodes[i] as JObject)?["mesh"]?.Value<int>() == meshIndex))
             result.Warnings.Add("Node " + otherNode + " shares the cut mesh and keeps the ORIGINAL (uncut) geometry.");
@@ -731,6 +765,14 @@ public static class GlbDisconnectedParts
     {
         GuardPaths(inputPath, outputPath);
         Result result = CutNodeByPlane(File.ReadAllBytes(inputPath), nodeIndex, axis, planeValue);
+        if (result.Changed) File.WriteAllBytes(outputPath, result.Bytes);
+        return result;
+    }
+
+    public static Result CutFileByFacing(string inputPath, string outputPath, int nodeIndex, int upAxis, double maxTiltDeg, double floorValue)
+    {
+        GuardPaths(inputPath, outputPath);
+        Result result = CutNodeByFacing(File.ReadAllBytes(inputPath), nodeIndex, upAxis, maxTiltDeg, floorValue);
         if (result.Changed) File.WriteAllBytes(outputPath, result.Bytes);
         return result;
     }
