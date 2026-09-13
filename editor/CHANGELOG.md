@@ -45,6 +45,23 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   any rig that has it: Auto-detect now recognizes a FLAG/SAIL rig and fills `Furl[0..0]` itself, and every Lab
   printout and HelpBox teaches the same. Wheel/rotor rigs (no Furl clip) keep `Spin[0..0]`, unchanged.
 
+- **A material literally named 'Material' no longer scrambles the animated atlas.** The animated path pairs
+  each submesh with its atlas cell by simplified material name — and simplifying strips the word "material",
+  so a bare 'Material' became an empty string, which the substring fallback matched to the FIRST cell (every
+  string contains ""). The SteamTransports' hull baked wearing the sails' canvas (white streaks) while its
+  static bake — which pairs by object identity, not names — was perfect. Empty simplified names now skip name
+  matching entirely and use the order-correct index fallback. Also from the same import: "Make static" no
+  longer writes `deploySpeed`/`recoilSpeed` = 0 (the schema default is 1; the zeros produced two harmless but
+  permanent per-bake validator warnings), and the registry floors both on every save, healing scarred entries.
+
+- **The preview dropdown can show the Idle stance override.** "Why doesn't it hide the sails at idle?" — it
+  did, in game; the Lab just couldn't show it: the stance override bakes to its own `anim_idle/` folder and
+  the dropdown had no entry for it, so the only idle-looking view was the reference (deliberately DEPLOYED on
+  a flag/sail rig). "Idle stance (override)" is now in the dropdown whenever that bake exists — the
+  furled-at-anchor look is verifiable without launching the game. Auto-detect also stopped wiping a
+  configured Furl idle stance: it can't guess one (a ship wants `Furl[N..N]`, a land flag wants it empty —
+  identical rigs), but it now KEEPS what you dialed and says so in the status line.
+
 - **Small fixes.** The Factory preview no longer shows a leftover animated rig after a static re-bake of a
   formerly animated entry (it fell through to the fresh static model only when the stale FBX was gone). The
   Animation section's probe re-runs when the model FILE changes in place, not only when its path changes (a

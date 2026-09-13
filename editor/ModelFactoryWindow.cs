@@ -219,6 +219,7 @@ public class ModelFactoryWindow : EditorWindow
     void DestroyPreview()
     {
         previewDraws = null;
+        DropPreviewSnapshots();
         if (previewGroundMat != null) { DestroyImmediate(previewGroundMat); previewGroundMat = null; }
         if (previewGroundMesh != null) { DestroyImmediate(previewGroundMesh); previewGroundMesh = null; }
         if (previewArrowMesh != null) { DestroyImmediate(previewArrowMesh); previewArrowMesh = null; }
@@ -233,6 +234,7 @@ public class ModelFactoryWindow : EditorWindow
     void LoadPreview(string name, bool forceReimport = false)
     {
         previewDraws = null;   // drop the old draw list; keep the PRU alive for reuse (it's cleaned on reload/close)
+        DropPreviewSnapshots();   // and the previous idle-pose snapshot meshes (runtime objects — they'd leak)
         previewFor = name ?? "";
         if (string.IsNullOrEmpty(name)) return;
         // ANIMATED entries preview the REST-POSE rig FBX — the same source the Animation Lab previews: upright,
@@ -280,7 +282,19 @@ public class ModelFactoryWindow : EditorWindow
         // MULTI-SMR SLICE (2026-08-19): the bake persists ONE remapped clone PER skinned renderer
         // (_PreviewMesh, _PreviewMesh1, …) — load them all and substitute per-renderer, not just the first hit.
         var uvSubs = path == animFbx ? UniversalBaker.LoadPreviewSubstitutes(name) : null;
-        if (go != null) BuildDrawList(go, over, uvSubs);
+        // POSE BY THE IDLE/MAIN CLIP (2026-09-13, user: "it should always play the Idle / main clip in the static
+        // view"): the raw draw list renders the FBX's serialized rest data unskinned, which is only trustworthy
+        // when bind data == composed rest. Sampling the baked reference clip's frame 0 through real skinning shows
+        // the pose the GAME composes at idle — the honest static view (and it stays honest about a damaged bake:
+        // a struck reference still shows struck). Falls back to the raw rest when the FBX carries no clip.
+        var idleClip = path == animFbx
+            ? AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>().FirstOrDefault(c => c != null && !c.name.StartsWith("__preview"))
+            : null;
+        if (go != null)
+        {
+            if (idleClip != null) BuildDrawListPosed(go, idleClip, over, uvSubs);
+            else BuildDrawList(go, over, uvSubs);
+        }
         // (A donor-clip "footprint centering" briefly lived here — REMOVED with the double-application discovery:
         // the placement quirks it approximated were largely the runtime ApplyPositionOffset adding the registry
         // position on top of a bake that ALSO carried it. With the bake-side copy gone, the FBX view + the LIVE
@@ -330,6 +344,77 @@ public class ModelFactoryWindow : EditorWindow
                       (subUsed == subTotal ? $"APPLIED {subUsed}/{subTotal} (texture-correct)"
                                            : $"APPLIED {subUsed}/{subTotal} — {subTotal - subUsed} clone(s) UNMATCHED ({string.Join(", ", pool.Select(s => s.vertexCount + " verts"))}) — FBX re-slimmed since the last bake? Re-bake to refresh the _PreviewMesh set"));
         if (previewDraws.Count == 0) previewDraws = null;
+    }
+
+    // POSED draw list (2026-09-13, user: "always play the Idle / main clip in the static view"): instantiate the
+    // rig FBX, swap in the atlas-UV substitute meshes (BEFORE sampling — the snapshot must carry atlas UVs), sample
+    // the baked reference clip at frame 0 through REAL skinning, and bake each skinned renderer's posed result into
+    // a snapshot mesh for the ordinary DrawMesh list. Shows the pose the game composes at idle instead of trusting
+    // the FBX's serialized rest data drawn unskinned. Snapshot meshes are runtime objects — tracked in
+    // previewSnapMeshes and destroyed on the next rebuild / window close (DropPreviewSnapshots).
+    List<Mesh> previewSnapMeshes;
+    void DropPreviewSnapshots()
+    {
+        if (previewSnapMeshes == null) return;
+        foreach (var m in previewSnapMeshes) if (m != null) DestroyImmediate(m);
+        previewSnapMeshes = null;
+    }
+    void BuildDrawListPosed(GameObject prefab, AnimationClip clip, Material overrideMat = null, List<Mesh> uvSubstitutes = null)
+    {
+        var inst = Instantiate(prefab);
+        inst.hideFlags = HideFlags.HideAndDontSave;
+        try
+        {
+            var pool = uvSubstitutes != null ? new List<Mesh>(uvSubstitutes.Where(s => s != null)) : null;
+            int subTotal = pool?.Count ?? 0, subUsed = 0;
+            foreach (var smr in inst.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+            {
+                if (pool == null || smr.sharedMesh == null) continue;
+                int hit = pool.FindIndex(s => s.vertexCount == smr.sharedMesh.vertexCount);
+                if (hit < 0) continue;
+                var sub = pool[hit]; pool.RemoveAt(hit);
+                // only accept a clone that carries the SAME skinning data — a UV clone without bind poses would
+                // bake as an unskinned heap (the same guard the Animation Lab's clip preview uses)
+                if (sub.bindposes.Length == smr.sharedMesh.bindposes.Length && sub.boneWeights.Length == sub.vertexCount)
+                { smr.sharedMesh = sub; subUsed++; }
+            }
+            clip.SampleAnimation(inst, 0f);
+            previewDraws = new List<(Mesh, Material[], Matrix4x4)>();
+            previewSnapMeshes = new List<Mesh>();
+            bool first = true;
+            foreach (var rr in inst.GetComponentsInChildren<Renderer>(true))
+            {
+                Mesh m; Matrix4x4 mtx;
+                if (rr is SkinnedMeshRenderer smr && smr.sharedMesh != null)
+                {
+                    var snap = new Mesh { name = smr.sharedMesh.name + "_idlePose", hideFlags = HideFlags.HideAndDontSave };
+                    smr.BakeMesh(snap, true);   // bakes the sampled pose + the renderer's scale into the vertices
+                    previewSnapMeshes.Add(snap);
+                    m = snap;
+                    mtx = Matrix4x4.TRS(rr.transform.position, rr.transform.rotation, Vector3.one);   // scale already baked
+                }
+                else
+                {
+                    m = rr.GetComponent<MeshFilter>()?.sharedMesh;
+                    mtx = rr.transform.localToWorldMatrix;
+                }
+                if (m == null) continue;
+                var mats = rr.sharedMaterials;
+                if (overrideMat != null)
+                {
+                    mats = new Material[Mathf.Max(1, m.subMeshCount)];
+                    for (int i = 0; i < mats.Length; i++) mats[i] = overrideMat;
+                }
+                previewDraws.Add((m, mats, mtx));
+                var wb = TransformBounds(mtx, m.bounds);
+                if (first) { previewBounds = wb; first = false; } else previewBounds.Encapsulate(wb);
+            }
+            if (subTotal > 0)
+                Debug.Log($"[Factory] preview UV substitution for '{previewFor}' (idle-posed): APPLIED {subUsed}/{subTotal}" +
+                          (subUsed == subTotal ? " (texture-correct)" : " — unmatched clone(s); re-bake to refresh the _PreviewMesh set"));
+            if (previewDraws.Count == 0) previewDraws = null;
+        }
+        finally { DestroyImmediate(inst); }
     }
 
     // THE TILE HEX — one in-game tile at TRUE size: center-to-center tile spacing is ~6.93 units (measured on the map,
@@ -740,7 +825,14 @@ public class ModelFactoryWindow : EditorWindow
             using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(cur.resourceName)))
                 if (GUILayout.Button(new GUIContent("Clone", "Copy the loaded entry into a NEW unsaved entry: same recipe, blank Pawn description, name + 'Clone', no baked assets, no bake lock. Nothing is written until you Bake or Save."), GUILayout.Width(60)))
                 {
-                    var clone = JsonUtility.FromJson<ModelDef>(JsonUtility.ToJson(cur));
+                    // STALE-FORM WARNING (2026-09-13, the LightCruisers clone): Clone copies THIS WINDOW'S FORM —
+                    // deliberately, so cloning work-in-progress is possible — but when another window (the
+                    // Animation Lab) has since saved different values for the same entry, the form is silently
+                    // outdated and the clone inherits stale settings (the swapped-reference steamer). Say so.
+                    string curJson = JsonUtility.ToJson(cur);
+                    var savedRow = !string.IsNullOrEmpty(loadedName) ? ModelRegistry.Load().FirstOrDefault(x => x.resourceName == loadedName) : null;
+                    bool formStale = savedRow != null && JsonUtility.ToJson(savedRow) != curJson;
+                    var clone = JsonUtility.FromJson<ModelDef>(curJson);
                     clone.resourceName = "";     // name the clone yourself — and an unnamed clone can't Bake/Save, so the source can never be overwritten by accident
                     clone.pawnDescription = "";
                     clone.skel = new int[4]; clone.atlas = new int[4]; clone.clip = new int[4];
@@ -755,7 +847,9 @@ public class ModelFactoryWindow : EditorWindow
                     cur = clone; selected = 0; sel = 0; GUI.FocusControl(null);   // sel too — else the popup-apply below reads the stale index as a "selection change" and reloads the source entry right over the clone
                     formDiffersFromRegistry = false;   // the banner is about a SAVED entry's form; a clone is unsaved by definition (and the banner's Reload would wipe it)
                     loadedName = "";                   // no registry identity until first Save/Bake
-                    status = "Cloned — set a Resource name and Pawn description, then Bake. Nothing saved yet.";
+                    status = formStale
+                        ? "Cloned — ⚠ this window's form DIFFERS from the saved entry (another window saved changes since it loaded): the clone copied the FORM as shown. If you wanted the saved recipe, discard this clone, reselect the source entry (reloads it), and Clone again."
+                        : "Cloned — set a Resource name and Pawn description, then Bake. Nothing saved yet.";
                 }
             // Remove the selected registry entry (disabled on <New>). Prompts, then drops it from haf_models.json.
             using (new EditorGUI.DisabledScope(selected <= 0))
@@ -2088,7 +2182,7 @@ public class ModelFactoryWindow : EditorWindow
         cur.gunElevMax = 0f; cur.gunElevAxis = 0; cur.gunElevRise = 1f; cur.gunElevHold = 1f; cur.gunElevFall = 1f; cur.animPhaseSpread = 0.5f;
         cur.handPropName = ""; cur.handPropGuid = ""; cur.handPropMat = ""; cur.handPropBone = ""; cur.handPropAngles = "";
         cur.fireOnAttack = false; cur.deployOnStop = false;
-        cur.deployPoseTime = 0f; cur.deploySpeed = 0f; cur.recoilSpeed = 0f;
+        cur.deployPoseTime = 0f; cur.deploySpeed = 1f; cur.recoilSpeed = 1f;   // 1 = the schema default and the validator's floor — clearing to 0 scarred every made-static entry with two per-bake warnings (same family as attackRepeats, 2026-09-13 SteamTransports report)
         bool saved = ModelRegistry.Upsert(cur);
         if (saved) { formDiffersFromRegistry = false; loadedName = cur.resourceName; browseUnitFixGuess = -1; }   // form is now the saved truth; a just-persisted Browse unit-fix guess DISARMS here — waiting for the next rebase to notice left a window where it could overwrite a newer Lab-saved value (external review of PR #22)
         RefreshList();

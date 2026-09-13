@@ -1878,6 +1878,15 @@ public static class UniversalBaker
     }
 
     static string SimplifyMat(string s) => (s ?? "").ToLowerInvariant().Replace("material", "").Replace("mat", "").Replace("_", "").Replace(" ", "").Replace(":", "");
+    // The RAW normalization: glbconv's Sanitize (every non-alphanumeric -> '_') plus lowercase, nothing dropped —
+    // 'Material.005' and the key fragment 'Material_005' both become 'material_005'. Digits survive, so names
+    // that SimplifyMat collapses ('Material' -> "") stay distinct and order-independent here.
+    static string SanitizeMatLower(string s)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var ch in (s ?? "").ToLowerInvariant()) sb.Append(char.IsLetterOrDigit(ch) ? ch : '_');
+        return sb.ToString().Trim('_');
+    }
 
     // Pack the per-material albedos into ONE atlas and remap the FBX's SKINNED mesh UVs per-submesh into their packed rect,
     // so each part samples its own texture. The mesh is CLONED (we never mutate the imported asset) and re-assigned to the
@@ -1930,6 +1939,14 @@ public static class UniversalBaker
         // '81tanktracks13') so the EXACT match below could never fire for ANY material — everything fell to
         // the Contains fallback, where prefix families collide ('tank_tracks' matched 'tank_tracks_13' first).
         var baseNames = orderedAlb.Select(kv => SimplifyMat(System.Text.RegularExpressions.Regex.Replace(kv.Key ?? "", @"^mat\d+_", ""))).ToArray();
+        // RAW names too (PR #36 review P1): the simplified names are LOSSY — a material literally named 'Material'
+        // simplifies to "" and can only ride the submesh-index fallback, whose "submesh order == MTL order"
+        // assumption Blender's join can break (the joined mesh's slot list starts from the ACTIVE object, not the
+        // glTF logical order). The raw name, normalized exactly the way glbconv sanitizes it into the key (every
+        // non-alphanumeric -> '_', lowercased, DIGITS KEPT), is a stable identifier: 'Material' stays distinct from
+        // 'Material_005' and matches its cell regardless of slot order. Ladder: raw-exact -> simplified-exact ->
+        // simplified-substring -> index.
+        var baseRaw = orderedAlb.Select(kv => SanitizeMatLower(System.Text.RegularExpressions.Regex.Replace(kv.Key ?? "", @"^mat\d+_", ""))).ToArray();
         foreach (var smr in fbxGo.GetComponentsInChildren<SkinnedMeshRenderer>())
         {
             var srcMesh = smr.sharedMesh;
@@ -1948,12 +1965,28 @@ public static class UniversalBaker
                     // Match by simplified material name, EXACT first: the loose Contains-both-ways match alone lets a
                     // material "Body" grab "Body_Trim"'s atlas rect (simplified "body" is a substring of "bodytrim"),
                     // mapping the wrong texture onto that submesh. Try exact, then substring, else the index below.
+                    // An EMPTY simplified name never name-matches (2026-09-13, the SteamTransports hull): a material
+                    // literally named 'Material' simplifies to "" (SimplifyMat strips the word), and while the exact
+                    // match correctly refuses empty names, the substring branch did not — every string
+                    // Contains("") — so the hull grabbed rect[0] (the sails' canvas: white streaked hull) instead of
+                    // falling through to the index fallback, which is order-correct for a glbconv/rig_anim pair.
+                    // 1) RAW exact (digits kept — order-independent and immune to the lossy simplification)
+                    string bnRaw = SanitizeMatLower(sm.name);
+                    if (bnRaw.Length > 0)
+                    {
+                        ri = System.Array.FindIndex(baseRaw, b => b.Length > 0 && b == bnRaw);
+                        if (ri >= 0 && s < baseRaw.Length && baseRaw[s] == bnRaw) ri = s;   // duplicate-name tie: prefer the submesh's own index
+                    }
+                    // 2) simplified exact, 3) simplified substring — for importer-mangled names the raw pass misses
                     string bn = SimplifyMat(sm.name);
-                    ri = System.Array.FindIndex(baseNames, b => b.Length > 0 && b == bn);
-                    // duplicate material NAMES exist in the wild (two 'german_gear_8' entries with different
-                    // textures) — among exact ties, prefer the rect at the submesh's own index (order-consistent)
-                    if (ri >= 0 && s < baseNames.Length && baseNames[s] == bn) ri = s;
-                    if (ri < 0) ri = System.Array.FindIndex(baseNames, b => b.Length > 0 && (bn.Contains(b) || b.Contains(bn)));
+                    if (ri < 0 && bn.Length > 0)
+                    {
+                        ri = System.Array.FindIndex(baseNames, b => b.Length > 0 && b == bn);
+                        // duplicate material NAMES exist in the wild (two 'german_gear_8' entries with different
+                        // textures) — among exact ties, prefer the rect at the submesh's own index (order-consistent)
+                        if (ri >= 0 && s < baseNames.Length && baseNames[s] == bn) ri = s;
+                        if (ri < 0) ri = System.Array.FindIndex(baseNames, b => b.Length > 0 && (bn.Contains(b) || b.Contains(bn)));
+                    }
                 }
                 if (ri < 0) ri = s;   // fall back to index (submesh order == MTL order)
                 if (ri < 0 || ri >= rects.Length) { Debug.LogWarning($"[Factory] {name} submesh {s} ('{(sm != null ? sm.name : "null")}') no atlas rect — left unmapped"); continue; }
