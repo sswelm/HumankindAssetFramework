@@ -891,7 +891,11 @@ namespace HumankindAssetFramework
                 {
                     int boost = EffectiveDensityBoost(ppc, fxGuid);
                     if (boost > 1) ppcF.SetValue(layerClone, ppc * boost);
+                    // Say it EVERY clone (2026-09-13, the Oracle verification: this site was silent, so proving
+                    // the boost ran meant counting trees in a screenshot instead of reading one line).
+                    Plugin.Diag($"[District] private layer '{layerClone.name}' PPC {ppc} -> {ppc * Math.Max(1, boost)} (boost x{boost}; ceiling ~{255L * ppc * Math.Max(1, boost):N0} primitives)");
                 }
+                else Plugin.Diag($"[District] private layer '{layerClone.name}': PPC field unreadable — ceiling NOT raised");
             }
             return layerClone;
         }
