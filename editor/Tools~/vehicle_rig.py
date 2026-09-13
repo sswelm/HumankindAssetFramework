@@ -533,6 +533,53 @@ if mode == "probe":
     _lap("visibility")
     # ---- dominant bone per shard (rigged sources) — so the Lab can highlight a BONE row's shards WITHOUT the
     # preview carrying skin weights (the skinned preview export was the 84 s hog; see below). ----
+    # ---- inside-out verdicts (2026-09-13 user request: "mark all objects the Fix inside-out would flip") ----
+    # The SAME island scoring the Generate-time fix uses (average face-normal dot against the radial from the
+    # hull's length axis; < -0.25 = provably interior-facing -> reversed), evaluated per part at probe time so
+    # the Lab can mark rows before anyone generates. Two approximations, both stated in the Lab tooltip: the
+    # judgement axis is the WHOLE model's (Generate re-judges each merged role mesh against its own axis —
+    # identical for the dominant Body pool), and the frame is the CURRENT orientation (re-Probe after
+    # straightening for exact verdicts). Role exclusions (Sail/Oar/Flag/Rudder/Preserve are skipped by the
+    # fix) are the Lab's to apply — marks don't exist at probe time.
+    _fa_pts = []
+    for _o in objs:
+        _mw0 = _o.matrix_world
+        _fstep0 = max(1, len(_o.data.vertices) // 2000)
+        for _i0, _v0 in enumerate(_o.data.vertices):
+            if _i0 % _fstep0 == 0:
+                _fa_pts.append(_mw0 @ _v0.co)
+    _flipn = {}
+    if _fa_pts:
+        _fcy_g = 0.5 * (min(_p.y for _p in _fa_pts) + max(_p.y for _p in _fa_pts))
+        _fzs_g = sorted(_p.z for _p in _fa_pts); _fcz_g = _fzs_g[len(_fzs_g) // 4]
+        for _o in objs:
+            _fb = bmesh.new(); _fb.from_mesh(_o.data); _fb.normal_update()
+            _fb.faces.ensure_lookup_table()
+            _mw0 = _o.matrix_world; _nm0 = _mw0.to_3x3()
+            _seenf = set(); _nrev = 0
+            for _f0 in _fb.faces:
+                if _f0.index in _seenf:
+                    continue
+                _stackf = [_f0]; _seenf.add(_f0.index)
+                _dsum = 0.0; _dn = 0
+                while _stackf:
+                    _fc = _stackf.pop()
+                    _ctr2 = _mw0 @ _fc.calc_center_median()
+                    _rad = Vector((0.0, _ctr2.y - _fcy_g, _ctr2.z - _fcz_g))
+                    _wn = _nm0 @ _fc.normal
+                    if _rad.length > 1e-6 and _wn.length > 1e-9:
+                        _dsum += _wn.normalized().dot(_rad.normalized()); _dn += 1
+                    for _e2 in _fc.edges:
+                        for _lf in _e2.link_faces:
+                            if _lf.index not in _seenf:
+                                _seenf.add(_lf.index); _stackf.append(_lf)
+                if _dn > 0 and (_dsum / _dn) < -0.25:
+                    _nrev += 1
+            _fb.free()
+            _flipn[_o.name] = _nrev
+        print("VEHICLE inside-out verdicts: %d part(s) hold interior-facing islands (the fix would reverse them)"
+              % sum(1 for _n in _flipn.values() if _n > 0))
+    _lap("flip-verdicts")
     _bone_names = set()
     for _a in [o for o in bpy.context.scene.objects if o.type == 'ARMATURE']:
         _bone_names.update(b.name for b in _a.data.bones)
@@ -550,7 +597,8 @@ if mode == "probe":
             _bone[_o.name] = max(_tally.items(), key=lambda kv: kv[1])[0]
     for o in objs:
         c, s = world_bbox(o)
-        print("PART|%s|%d|%.4f,%.4f,%.4f|%.4f,%.4f,%.4f|%d|%s" % (o.name, len(o.data.vertices), c.x, c.y, c.z, s.x, s.y, s.z, _vis.get(o.name, 1), _bone.get(o.name, "")))
+        # 8th field (2026-09-13): islands the inside-out fix would reverse in this part (0 = keeps as authored)
+        print("PART|%s|%d|%.4f,%.4f,%.4f|%.4f,%.4f,%.4f|%d|%s|%d" % (o.name, len(o.data.vertices), c.x, c.y, c.z, s.x, s.y, s.z, _vis.get(o.name, 1), _bone.get(o.name, ""), _flipn.get(o.name, 0)))
     print("VEHICLE parts listed"); sys.stdout.flush()   # sentinel + flush: Blender's C-level banner flushes AFTER Python's buffer and would otherwise glue onto the last PART line
     # optional argv[2]: export the SPLIT scene as a preview FBX so the Lab can show/zoom/highlight each part by name.
     # PERF (2026-08-20): exported UNSKINNED — plain meshes, world transforms baked, no armature. The FBX exporter
