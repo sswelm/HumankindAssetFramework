@@ -5,6 +5,16 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab Generate: batched decimate — a 1,435-shard liner's reduce stage drops 67s → ~3s.** The
+  morning's chunked dissolve fixed the flat-panel whale; the RMS Teutonic exposed the OTHER one: the reduce
+  loop called `bpy.ops.object.modifier_apply` per part, and every `bpy.ops` call is an operator round-trip
+  plus a whole-scene depsgraph sync — ~45 ms × 1,435 BODY shards. The loop now just attaches each part's
+  DECIMATE modifier (plain API, no sync) and ONE depsgraph evaluation applies them all in a single parallel
+  C pass, the evaluated meshes copied back with UVs and materials intact. Same modifier, same ratio —
+  drilled on the Teutonic itself: 319.9s → 1.7s for the decimate phase headless (the editor run showed 67s),
+  vertex totals identical to within collapse-ordering noise (±1 vert in 344k). Part lookup is a dict now too
+  (the 1,435-name linear scan was the second-order cost).
+
 - **District primitive ceiling auto-sizes.** A district mesh draws as at most 255 sub-particles × the layer's
   PrimitivePerParticleCount; `DistrictMeshDensityBoost` raised PPC on HAF's private layer clones, but as a
   static config int — a model needing ×40 with the config at 8 still clipped silently. The plugin now reads
