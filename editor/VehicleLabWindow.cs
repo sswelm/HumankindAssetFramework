@@ -234,7 +234,8 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] float minWidth = -999f;  // LEFT/RIGHT slice (user request 2026-08-01): hide parts whose center is LEFT of this on the WIDTH axis (center.y — the axis the two wheels mirror across); bracket with maxWidth to isolate ONE side's wheel. Default span = off.
     [SerializeField] float maxWidth = 999f;   // the reverse: hide parts whose center is RIGHT of this (center.y).
     [SerializeField] float minFlatPct = 0f;   // 0 = off — hide parts whose LEVEL-surface share (% of area within 30° of horizontal) is below this: the deck finder (2026-09-13, "which Object is the deck?")
-    Dictionary<string, float> flatShare; GameObject flatShareFor;   // per-part level-area share, cached for one preview instance
+    Dictionary<string, double> flatAreaByName, flatLevelByName;   // raw per-RENDERER sums, keyed by EXACT name (review P2: stripping suffixes in the cache while looking up unstripped part names sent every "Wall.001" through the fail-open door)
+    Dictionary<string, float> flatShare; GameObject flatShareFor; // resolved per-PART share memo (exact-first, digits-only ".NNN" alias merge)
     static float MaxDim(Part p) => Mathf.Max(p.size.x, Mathf.Max(p.size.y, p.size.z));
     bool VisiblePart(Part x) => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.center.z >= minHeight && x.center.z <= maxHeight && x.center.y >= minWidth && x.center.y <= maxWidth && FlatOk(x);
 
@@ -247,19 +248,36 @@ public class VehicleLabWindow : EditorWindow
     {
         if (minFlatPct <= 0f) return true;
         BuildFlatShareIFN();
-        return flatShare == null || !flatShare.TryGetValue(x.name, out float s) || s * 100f >= minFlatPct;
+        if (flatAreaByName == null) return true;
+        if (!flatShare.TryGetValue(x.name, out float s))
+        {
+            // EXACT probed name first (review P2: the old cache stripped ".001" while lookups used the full
+            // name, so every suffixed part missed and passed unconditionally — and the strip also ate ".abc").
+            // Only when the exact name is absent, merge confirmed preview aliases: "<name>.<digits>" precisely.
+            double a = 0, f = 0;
+            if (flatAreaByName.TryGetValue(x.name, out double ea)) { a = ea; f = flatLevelByName[x.name]; }
+            else
+                foreach (var kv in flatAreaByName)
+                {
+                    if (kv.Key.Length <= x.name.Length + 1 || kv.Key[x.name.Length] != '.' || !kv.Key.StartsWith(x.name, StringComparison.Ordinal)) continue;
+                    bool digits = true;
+                    for (int i = x.name.Length + 1; i < kv.Key.Length; i++) if (!char.IsDigit(kv.Key[i])) { digits = false; break; }
+                    if (digits) { a += kv.Value; f += flatLevelByName[kv.Key]; }
+                }
+            s = a > 0 ? (float)(f / a) : -1f;   // -1 = unmeasurable — passes (a filter must never hide what it cannot measure)
+            flatShare[x.name] = s;
+        }
+        return s < 0f || s * 100f >= minFlatPct;
     }
     void BuildFlatShareIFN()
     {
-        if (inst == null) { flatShare = null; flatShareFor = null; return; }
-        if (flatShare != null && flatShareFor == inst) return;
-        var area = new Dictionary<string, double>(); var flat = new Dictionary<string, double>();
+        if (inst == null) { flatAreaByName = null; flatLevelByName = null; flatShare = null; flatShareFor = null; return; }
+        if (flatAreaByName != null && flatShareFor == inst) return;
+        flatAreaByName = new Dictionary<string, double>(); flatLevelByName = new Dictionary<string, double>();
         foreach (var mf in inst.GetComponentsInChildren<MeshFilter>())
         {
             if (mf == null || mf.sharedMesh == null) continue;
-            string nm = mf.gameObject.name;
-            int dot = nm.LastIndexOf('.');
-            if (dot > 0 && dot == nm.Length - 4) nm = nm.Substring(0, dot);   // ".001" style suffix only — real dots in names survive
+            string nm = mf.gameObject.name;   // EXACT — alias merging is the lookup's job, with digits-only proof
             var m = mf.sharedMesh; var l2w = mf.transform.localToWorldMatrix;
             var v = m.vertices; var t = m.triangles;
             double a0 = 0, af = 0;
@@ -272,11 +290,10 @@ public class VehicleLabWindow : EditorWindow
                 a0 += a2;
                 if (Mathf.Abs(c.y) / a2 >= 0.866f) af += a2;   // cos 30° — matches the Workshop facing cut's default tilt
             }
-            area.TryGetValue(nm, out double ta); area[nm] = ta + a0;
-            flat.TryGetValue(nm, out double tf); flat[nm] = tf + af;
+            flatAreaByName.TryGetValue(nm, out double ta); flatAreaByName[nm] = ta + a0;
+            flatLevelByName.TryGetValue(nm, out double tf); flatLevelByName[nm] = tf + af;
         }
         flatShare = new Dictionary<string, float>();
-        foreach (var kv in area) flatShare[kv.Key] = kv.Value > 0 ? (float)(flat[kv.Key] / kv.Value) : 0f;
         flatShareFor = inst;
     }
     [SerializeField] int partFilter;      // list filter: 0 = all; see FilterOptions (Unreviewed = Default + Edgecase)
@@ -797,7 +814,7 @@ public class VehicleLabWindow : EditorWindow
                     fixInsideOut = EditorGUILayout.ToggleLeft(new GUIContent(
                         "  Fix inside-out faces" + (flipProbed ? $"   (⟲ would flip {flipAffected} part(s) — marked in the list)" : "   (re-Probe to see which parts it would flip)"),
                         "For a source whose winding ships partly INVERTED — you see through the near hull wall from outside while the far wall's interior renders. On: islands that provably face the hull's interior (inverted side planking) are REVERSED at export — no extra triangles; everything else keeps the artist's winding, as do marked Sail, Oar, Rudder and Preserve meshes. A Flip-marked part composes with this as an XOR (per island): where this fix flips, the Flip mark cancels it back. Sails are a ROLE (dropdown): mark the canvas instead of relying on any detection — marked sails are always double-sided and hide at idle. " +
-                        "The ⟲ row marks show each part the fix WOULD reverse, on or off — computed at Probe with the same island scoring, against the whole model's axis in the current orientation (Generate re-judges each merged role mesh against its own axis; re-Probe after straightening for exact verdicts)."), fixInsideOut);
+                        "The ⟲ row marks show each part the fix WOULD reverse, on or off — computed at Probe with the same island scoring, against the whole model's axis (Generate re-judges each merged role mesh against its own axis). The probe judges in the Orientation dialed AT PROBE TIME (it is passed along and applied to the classification math), so after changing Orientation, re-Probe and the verdicts follow."), fixInsideOut);
                     EditorGUILayout.LabelField("  Reduction cuts marked parts at Generate (dissolve + collapse) — the previews and the bake all see the slim mesh. The Generate log prints each part's real before/after.", EditorStyles.miniLabel);
                     using (new EditorGUI.DisabledScope(nRig == 0))
                         riggingReducePct = EditorGUILayout.Slider(new GUIContent("Rigging reduce (%)",
@@ -1342,7 +1359,7 @@ public class VehicleLabWindow : EditorWindow
         Directory.CreateDirectory(Path.Combine(projRoot, prevDir));
         string prevRel = prevDir + "/" + Path.GetFileNameWithoutExtension(srcFile) + "_probe.fbx";
         string prevFull = Path.Combine(projRoot, prevRel).Replace('\\', '/');
-        if (!RunBlender($"probe \"{srcFile}\" \"{prevFull}\"{Merge2Arg()}{BrightArg()}", out string stdout)) return;   // failed run: session intact, error already in status/Console
+        if (!RunBlender($"probe \"{srcFile}\" \"{prevFull}\"{Merge2Arg()}{BrightArg()}{ProbeRotArg()}", out string stdout)) return;   // failed run: session intact, error already in status/Console
         // Lenient float parse: degenerate shards can emit "nan" (python lowercase — .NET rejects it) — such a value
         // becomes 0 instead of killing the whole probe on one bad line out of thousands.
         float F(string s2) => float.TryParse(s2, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var f) ? f : 0f;
@@ -2115,6 +2132,17 @@ public class VehicleLabWindow : EditorWindow
     // The SECOND-MODEL merge argument — TAGGED (merge2=path|off|rot|scale), scanned by the rig script rather
     // than indexed, because probe and rig have different positional layouts and BOTH need the merged scene.
     // '|' is illegal in Windows paths, so the split is unambiguous. Empty when no second model is set.
+    // The probe's ORIENTATION argument (review P2, 2026-09-13): the inside-out flip verdicts must be judged in
+    // the same straightened frame Generate classifies in, or "re-Probe after straightening" promises a
+    // correction that never happens (a 90°-yawed fixture probed 2 flips where Generate reversed 0). Sent only
+    // when Orientation is dialed; applied script-side to the classification math alone, never the preview.
+    string ProbeRotArg()
+    {
+        if (modelRot == Vector3.zero) return "";
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        return $" \"proberot={modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\"";
+    }
+
     string Merge2Arg()
     {
         if (string.IsNullOrWhiteSpace(srcFile2)) return "";

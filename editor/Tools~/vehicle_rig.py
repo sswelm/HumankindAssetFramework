@@ -536,14 +536,28 @@ if mode == "probe":
     # ---- inside-out verdicts (2026-09-13 user request: "mark all objects the Fix inside-out would flip") ----
     # The SAME island scoring the Generate-time fix uses (average face-normal dot against the radial from the
     # hull's length axis; < -0.25 = provably interior-facing -> reversed), evaluated per part at probe time so
-    # the Lab can mark rows before anyone generates. Two approximations, both stated in the Lab tooltip: the
-    # judgement axis is the WHOLE model's (Generate re-judges each merged role mesh against its own axis —
-    # identical for the dominant Body pool), and the frame is the CURRENT orientation (re-Probe after
-    # straightening for exact verdicts). Role exclusions (Sail/Oar/Flag/Rudder/Preserve are skipped by the
-    # fix) are the Lab's to apply — marks don't exist at probe time.
+    # the Lab can mark rows before anyone generates. One stated approximation: the judgement axis is the WHOLE
+    # model's (Generate re-judges each merged role mesh against its own axis — identical for the dominant Body
+    # pool). Orientation is NOT an approximation any more (review P2: "re-Probe after straightening" promised a
+    # correction that could never happen — the probe never saw modelRot, while Generate applies it BEFORE
+    # classification; a 90-deg-yawed fixture probed 2 flips where Generate reversed 0): the Lab now passes its
+    # current Orientation as `proberot=x,y,z`, applied here to the classification MATH ONLY (the preview FBX
+    # stays in import orientation — every other filter and the turntable keep their frame). Role exclusions
+    # (Sail/Oar/Flag/Rudder/Preserve are skipped by the fix) are the Lab's to apply — marks don't exist yet.
+    _prarg = next((a for a in argv if a.startswith("proberot=")), None)
+    _probe_rot = [0.0, 0.0, 0.0]
+    if _prarg:
+        try:
+            _probe_rot = ([float(x) for x in _prarg[len("proberot="):].split(",")] + [0.0, 0.0, 0.0])[:3]
+        except Exception:
+            print("VEHICLE WARN: bad proberot argument '%s' — verdicts run in import orientation" % _prarg)
+    _porient = (Matrix.Rotation(math.radians(_probe_rot[0]), 4, 'X') @
+                Matrix.Rotation(math.radians(_probe_rot[1]), 4, 'Y') @
+                Matrix.Rotation(math.radians(_probe_rot[2]), 4, 'Z'))   # same composition Generate straightens with
+    _porient3 = _porient.to_3x3()
     _fa_pts = []
     for _o in objs:
-        _mw0 = _o.matrix_world
+        _mw0 = _porient @ _o.matrix_world
         _fstep0 = max(1, len(_o.data.vertices) // 2000)
         for _i0, _v0 in enumerate(_o.data.vertices):
             if _i0 % _fstep0 == 0:
@@ -555,7 +569,7 @@ if mode == "probe":
         for _o in objs:
             _fb = bmesh.new(); _fb.from_mesh(_o.data); _fb.normal_update()
             _fb.faces.ensure_lookup_table()
-            _mw0 = _o.matrix_world; _nm0 = _mw0.to_3x3()
+            _mw0 = _porient @ _o.matrix_world; _nm0 = _mw0.to_3x3()
             _seenf = set(); _nrev = 0
             for _f0 in _fb.faces:
                 if _f0.index in _seenf:
