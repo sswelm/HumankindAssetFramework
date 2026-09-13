@@ -387,7 +387,7 @@ public class ModelFactoryWindow : EditorWindow
                 Mesh m; Matrix4x4 mtx;
                 if (rr is SkinnedMeshRenderer smr && smr.sharedMesh != null)
                 {
-                    var snap = new Mesh { name = smr.sharedMesh.name + "_idlePose" };
+                    var snap = new Mesh { name = smr.sharedMesh.name + "_idlePose", hideFlags = HideFlags.HideAndDontSave };
                     smr.BakeMesh(snap, true);   // bakes the sampled pose + the renderer's scale into the vertices
                     previewSnapMeshes.Add(snap);
                     m = snap;
