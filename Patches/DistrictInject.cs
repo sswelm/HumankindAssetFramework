@@ -853,12 +853,18 @@ namespace HumankindAssetFramework
                     for (int s = 0; s < mesh.subMeshCount; s++) tris += (long)(mesh.GetIndexCount(s) / 3);
             }
             catch (Exception ex) { Plugin.Diag("[District] auto-boost mesh probe: " + ex.Message); }
-            fxMeshTris[key] = tris;
+            // Cache SUCCESSES only (review P2): a zero here usually means "asset not loadable YET" (bundle not
+            // mounted, mid-session-load) — caching it disabled auto-sizing for that guid for the whole process,
+            // session resets included. A failed probe re-tries on the next clone instead; clones are rare.
+            if (tris > 0) fxMeshTris[key] = tris;
             return tris;
         }
         static int EffectiveDensityBoost(int ppc, object fxGuid)
         {
             int boost = Plugin.DistrictMeshDensityBoost != null ? Plugin.DistrictMeshDensityBoost.Value : 8;
+            // 0/1 = vanilla is the DOCUMENTED opt-out (review P2: auto-sizing overrode it — a disable the user
+            // set by hand must win over any heuristic, the one-convention lesson in miniature).
+            if (boost <= 1) return boost;
             long tris = FxMeshTriangles(fxGuid);
             if (ppc > 0 && tris > 0)
             {
