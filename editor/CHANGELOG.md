@@ -5,6 +5,23 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Workshop: Plane cut — split a CONNECTED part in two.** Island splitting is helpless against the
+  ocean liner's Object_45: hull and deck are one welded mesh (1 island), one Vehicle Lab row, one role. Select
+  a part's row and press **Plane cut**: pick the axis (Y = horizontal deck-off-hull cut in a standard glTF,
+  X/Z = vertical) and slide the position — the preview swaps to that part alone, two-colored **from the source
+  file's own bytes**, so the yellow triangles ARE what becomes `_CutA` and grey `_CutB` (no Blender round-trip,
+  no axis-convention guesswork). The cut is the island splitter's lossless mechanism with a different partition
+  rule: WHOLE triangles assigned by centroid side, vertex data byte-identical, only filtered index accessors
+  appended, triangle totals verified — nothing is sliced, the boundary follows the existing triangulation
+  (invisible once each half takes its own role or reduce dial). Node transforms are honored (the plane lives in
+  world space), morph-weight animation retargets to both children, a second node sharing the cut mesh keeps the
+  original and is warned about. Chain cuts by pointing Source GLB at the output and re-Probing. A second **cut
+  rule — Horizontal surfaces** — partitions by FACE ORIENTATION instead of position: a triangle joins `_CutA`
+  when it lies flatter than the Max-tilt dial (undersides count — a ceiling is as level as its floor), with an
+  Only-above height floor so the equally-horizontal hull BOTTOM stays in `_CutB`. That's the deck-vs-bow-plating
+  split no flat plane can trace. Drilled on the Bremen: plane cut 61,232 triangles → `_CutA` 29,126 / `_CutB`
+  32,106 in 0.8s; facing cut caught exactly the 1,447 level faces above the floor — both verified in Blender.
+
 - **Vehicle Lab Generate up to 6x faster on flat-panel-heavy models — chunked limited dissolve.** The
   source-side reduction's limited dissolve joins coplanar faces region by region, and its cost is quadratic
   in region size: game rips triangulate a big flat deck into ONE region, so the OceanLiner's 23k-vert
