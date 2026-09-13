@@ -373,6 +373,14 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   near islands as one part (rotation-invariant since 0.5.6: diagonal dashed lines gate correctly too). The
   **Output GLB** auto-follows the source file until you edit it, and changing the source — typed or browsed —
   resets the probe so a stale part list can never split the wrong file.
+  **Plane cut** (0.5.7) handles the part island splitting *can't* touch: a CONNECTED mesh that needs two roles —
+  the ocean liner's hull welded to its deck. Select the part's row, press **Plane cut**, pick the axis (Y is "up"
+  in most GLBs, so Y = a horizontal deck-off-hull cut; X/Z are vertical cuts) and slide the position: the preview
+  swaps to just that part, two-colored **from the source file's own bytes** — the yellow triangles are exactly
+  what becomes `_CutA`, grey becomes `_CutB`. Whole triangles only, assigned by centroid side: nothing is sliced,
+  vertex data stays byte-identical, the boundary follows the existing triangulation (invisible once the two
+  halves get their own reduce dials or roles). **Cut** writes the output GLB; for a second cut (the bow off the
+  deck piece, say) point Source GLB at that output and re-Probe.
 - **Backup & Restore** — `Tools ▸ HAF ▸ Backup and Restore`. A safety net for everything git doesn't track (editor
   scripts, `FactorySource`, baked Resources, ENC databases, `Tools/`, live `BepInEx/config`). Timestamped, additive,
   guarded restore (auto-snapshots current state first). **Deep dive:** [Backup.md](Backup.md).

@@ -557,6 +557,305 @@ public static class GlbDisconnectedParts
             throw new InvalidOperationException("Choose a new output path; the source GLB is never overwritten.");
     }
 
+    // ---- PLANE CUT (2026-09-13, the Bremen deck): a CONNECTED part can never island-split — the OceanLiner's
+    // hull and deck are one welded mesh, one island, one Vehicle Lab row, one role. The plane cut is the same
+    // lossless mechanism with a different partition rule: WHOLE triangles are assigned by which side of an
+    // axis-aligned world-space plane their centroid falls on, and the two sides become _CutA/_CutB children
+    // (vertex data byte-identical, only filtered index accessors appended — exactly like the island split).
+    // No triangle is ever sliced: the boundary follows the existing triangulation, which is what role marking
+    // and reduce dials need; visually nothing moves. Jagged-boundary honesty over interpolated new geometry.
+    //
+    // Coordinates are the node's WORLD space (the node chain's composed glTF transforms), the same space
+    // ExtractPart reports — so a UI that previews ExtractPart geometry and cuts at a slider value taken from
+    // its bounds shows exactly the triangles the cut will move. CutA = centroid at or above planeValue.
+
+    /// <summary>One node's triangles in world space — the WYSIWYG data behind a plane-cut preview.</summary>
+    public sealed class PartGeometry
+    {
+        public int NodeIndex;
+        public string NodeName;
+        public float[] Positions;    // xyz triplets, world space, per-primitive concatenated
+        public int[] Triangles;      // vertex indices into Positions/3, every 3 = one triangle
+        public readonly double[] Min = { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity };
+        public readonly double[] Max = { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
+    }
+
+    public static PartGeometry ExtractPart(byte[] source, int nodeIndex)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        Document document = Parse(source);
+        JObject root = document.Root;
+        JArray nodes = root["nodes"] as JArray ?? new JArray();
+        JArray meshes = root["meshes"] as JArray ?? throw new InvalidDataException("GLB has no meshes array.");
+        Accessors reader = BinReader(document, root);
+        JObject node = NodeWithMesh(nodes, nodeIndex, out int meshIndex);
+        var primitives = (meshes[meshIndex] as JObject)?["primitives"] as JArray ?? throw new InvalidDataException("Mesh has no primitives.");
+        double[] world = NodeWorldMatrix(nodes, nodeIndex);
+
+        var positions = new List<float>();
+        var triangles = new List<int>();
+        var geo = new PartGeometry { NodeIndex = nodeIndex, NodeName = (string)node["name"] ?? ("node " + nodeIndex) };
+        foreach (JObject primitive in TrianglePrimitives(primitives))
+        {
+            int posAcc = primitive["attributes"].Value<int>("POSITION");
+            int baseVertex = positions.Count / 3;
+            int vertCount = reader.Count(posAcc);
+            for (uint v = 0; v < vertCount; v++)
+            {
+                Vec3 p = XForm(world, reader.Position(posAcc, v));
+                positions.Add((float)p.X); positions.Add((float)p.Y); positions.Add((float)p.Z);
+            }
+            int indexCount = primitive["indices"] == null ? vertCount : reader.Count(primitive.Value<int>("indices"));
+            if (indexCount % 3 != 0) throw new InvalidDataException("Triangle primitive index count is not divisible by three.");
+            for (uint i = 0; i < indexCount; i++)
+            {
+                uint idx = primitive["indices"] == null ? i : reader.Index(primitive.Value<int>("indices"), i);
+                if (idx >= vertCount) throw new InvalidDataException("Primitive index exceeds its POSITION accessor.");
+                triangles.Add(baseVertex + (int)idx);
+                int o = (baseVertex + (int)idx) * 3;
+                UpdateBounds(geo.Min, geo.Max, new Vec3 { X = positions[o], Y = positions[o + 1], Z = positions[o + 2] });
+            }
+        }
+        geo.Positions = positions.ToArray();
+        geo.Triangles = triangles.ToArray();
+        return geo;
+    }
+
+    public static Result CutNodeByPlane(byte[] source, int nodeIndex, int axis, double planeValue)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        if (axis < 0 || axis > 2) throw new ArgumentOutOfRangeException(nameof(axis));
+        Document document = Parse(source);
+        JObject root = document.Root;
+        JArray nodes = root["nodes"] as JArray ?? new JArray();
+        JArray meshes = root["meshes"] as JArray ?? throw new InvalidDataException("GLB has no meshes array.");
+        JArray buffers = root["buffers"] as JArray;
+        byte[] originalData;
+        Accessors reader = BinReader(document, root, out originalData);
+        var bin = new List<byte>(originalData);
+        var result = new Result();
+
+        JObject node = NodeWithMesh(nodes, nodeIndex, out int meshIndex);
+        var mesh = (JObject)meshes[meshIndex];
+        var primitives = mesh["primitives"] as JArray ?? throw new InvalidDataException("Mesh has no primitives.");
+        double[] world = NodeWorldMatrix(nodes, nodeIndex);
+
+        // Classify every triangle: side 0 (CutA) = world centroid at or above the plane, side 1 (CutB) below.
+        var sides = new[] { new Dictionary<int, List<uint>>(), new Dictionary<int, List<uint>>() };
+        int primitiveIndex = -1;
+        foreach (JObject primitive in TrianglePrimitives(primitives))
+        {
+            primitiveIndex++;
+            int posAcc = primitive["attributes"].Value<int>("POSITION");
+            int indexCount = primitive["indices"] == null ? reader.Count(posAcc) : reader.Count(primitive.Value<int>("indices"));
+            if (indexCount % 3 != 0) throw new InvalidDataException("Triangle primitive index count is not divisible by three.");
+            for (uint i = 0; i < indexCount; i += 3)
+            {
+                uint a = primitive["indices"] == null ? i : reader.Index(primitive.Value<int>("indices"), i);
+                uint b = primitive["indices"] == null ? i + 1 : reader.Index(primitive.Value<int>("indices"), i + 1);
+                uint c = primitive["indices"] == null ? i + 2 : reader.Index(primitive.Value<int>("indices"), i + 2);
+                Vec3 pa = XForm(world, reader.Position(posAcc, a));
+                Vec3 pb = XForm(world, reader.Position(posAcc, b));
+                Vec3 pc = XForm(world, reader.Position(posAcc, c));
+                double centroid = (pa[axis] + pb[axis] + pc[axis]) / 3.0;
+                var bucket = sides[centroid >= planeValue ? 0 : 1];
+                if (!bucket.TryGetValue(primitiveIndex, out List<uint> list)) bucket.Add(primitiveIndex, list = new List<uint>());
+                list.Add(a); list.Add(b); list.Add(c);
+                result.SourceTriangles++;
+            }
+        }
+        int trisA = sides[0].Values.Sum(l => l.Count) / 3, trisB = sides[1].Values.Sum(l => l.Count) / 3;
+        if (trisA == 0 || trisB == 0)
+        {
+            result.Warnings.Add("The plane leaves every triangle on one side — move it into the part before cutting.");
+            return result;   // Changed == false; source bytes untouched
+        }
+
+        string meshBase = (string)mesh["name"] ?? ("Mesh_" + meshIndex);
+        string nodeBase = (string)node["name"];
+        if (string.IsNullOrEmpty(nodeBase)) nodeBase = meshBase;
+        var nodeNames = new HashSet<string>(nodes.OfType<JObject>().Select(n => (string)n["name"]).Where(n => !string.IsNullOrEmpty(n)));
+        JToken skin = node["skin"]?.DeepClone();
+        JToken weights = node["weights"]?.DeepClone();
+        node.Remove("mesh"); node.Remove("skin"); node.Remove("weights");
+        JArray children = node["children"] as JArray;
+        if (children == null) { children = new JArray(); node["children"] = children; }
+        var newChildren = new List<int>();
+        var sideNames = new[] { "_CutA", "_CutB" };
+        for (int side = 0; side < 2; side++)
+        {
+            var partMesh = (JObject)mesh.DeepClone();
+            partMesh["name"] = UniqueName(meshBase + sideNames[side], meshes.OfType<JObject>().Select(m => (string)m["name"]));
+            var partPrimitives = new JArray();
+            for (int pi = 0; pi < primitives.Count; pi++)
+            {
+                if (!sides[side].TryGetValue(pi, out List<uint> partIndices) || partIndices.Count == 0) continue;
+                var sourcePrimitive = (JObject)primitives[pi];
+                var splitPrimitive = (JObject)sourcePrimitive.DeepClone();
+                int componentType = SourceIndexType(root, sourcePrimitive, reader.Count(sourcePrimitive["attributes"].Value<int>("POSITION")));
+                splitPrimitive["indices"] = AppendIndices(root, bin, partIndices, componentType);
+                partPrimitives.Add(splitPrimitive);
+                result.OutputTriangles += partIndices.Count / 3;
+            }
+            partMesh["primitives"] = partPrimitives;
+            string childName = UniqueName(nodeBase + sideNames[side], nodeNames);
+            nodeNames.Add(childName);
+            var child = new JObject { ["name"] = childName, ["mesh"] = meshes.Count };
+            if (skin != null) child["skin"] = skin.DeepClone();
+            if (weights != null) child["weights"] = weights.DeepClone();
+            meshes.Add(partMesh);
+            int childIndex = nodes.Count;
+            children.Add(childIndex);
+            nodes.Add(child);
+            newChildren.Add(childIndex);
+            result.ChildPartsCreated++;
+        }
+        RetargetWeightAnimations(root, new Dictionary<int, List<int>> { { nodeIndex, newChildren } });
+        result.MeshesSplit = 1;
+        result.NodesSplit = 1;
+        result.Details.Add(nodeBase + ": plane cut on axis " + "XYZ"[axis] + " at " + planeValue.ToString("0.###") +
+                           " -> " + nodeBase + "_CutA " + trisA + " tri(s) / " + nodeBase + "_CutB " + trisB + " tri(s)");
+        foreach (int otherNode in Enumerable.Range(0, nodes.Count).Where(i => i != nodeIndex && (nodes[i] as JObject)?["mesh"]?.Value<int>() == meshIndex))
+            result.Warnings.Add("Node " + otherNode + " shares the cut mesh and keeps the ORIGINAL (uncut) geometry.");
+
+        if (result.OutputTriangles != result.SourceTriangles)
+            throw new InvalidDataException("Triangle preservation check failed: source " + result.SourceTriangles + ", output " + result.OutputTriangles + ".");
+        buffers[0]["byteLength"] = bin.Count;
+        document.Chunks[document.BinIndex].Data = bin.ToArray();
+        result.Bytes = Write(document);
+        ValidateOutput(result.Bytes);
+        return result;
+    }
+
+    public static Result CutFileByPlane(string inputPath, string outputPath, int nodeIndex, int axis, double planeValue)
+    {
+        GuardPaths(inputPath, outputPath);
+        Result result = CutNodeByPlane(File.ReadAllBytes(inputPath), nodeIndex, axis, planeValue);
+        if (result.Changed) File.WriteAllBytes(outputPath, result.Bytes);
+        return result;
+    }
+
+    // ---- plane-cut internals ----
+
+    static Accessors BinReader(Document document, JObject root) => BinReader(document, root, out _);
+
+    static Accessors BinReader(Document document, JObject root, out byte[] originalData)
+    {
+        JArray buffers = root["buffers"] as JArray ?? throw new InvalidDataException("GLB has no buffers array.");
+        if (buffers.Count != 1 || buffers[0]?["uri"] != null)
+            throw new InvalidDataException("Lossless splitting requires one embedded GLB buffer.");
+        int declaredBinLength = buffers[0].Value<int>("byteLength");
+        byte[] sourceBin = document.Chunks[document.BinIndex].Data;
+        if (declaredBinLength < 0 || declaredBinLength > sourceBin.Length)
+            throw new InvalidDataException("buffers[0].byteLength exceeds the BIN chunk.");
+        originalData = sourceBin.Take(declaredBinLength).ToArray();
+        return new Accessors(root, originalData);
+    }
+
+    static JObject NodeWithMesh(JArray nodes, int nodeIndex, out int meshIndex)
+    {
+        if (nodeIndex < 0 || nodeIndex >= nodes.Count) throw new InvalidDataException("Node index is out of range.");
+        var node = nodes[nodeIndex] as JObject ?? throw new InvalidDataException("Node is not an object.");
+        if (node["mesh"] == null) throw new InvalidDataException("Node has no mesh.");
+        if (node["extensions"]?["EXT_mesh_gpu_instancing"] != null)
+            throw new InvalidDataException("GPU-instanced nodes cannot be cut.");
+        meshIndex = node.Value<int>("mesh");
+        return node;
+    }
+
+    // The primitive walk both plane-cut entry points share; also re-checks the splitter's safety gates.
+    static IEnumerable<JObject> TrianglePrimitives(JArray primitives)
+    {
+        foreach (JToken token in primitives)
+        {
+            var primitive = token as JObject ?? throw new InvalidDataException("Primitive is not an object.");
+            if ((primitive.Value<int?>("mode") ?? 4) != 4)
+                throw new InvalidDataException("Only TRIANGLES primitives can be split safely.");
+            if (primitive["extensions"]?["KHR_draco_mesh_compression"] != null)
+                throw new InvalidDataException("Draco-compressed primitives are not supported.");
+            var attributes = primitive["attributes"] as JObject ?? throw new InvalidDataException("Primitive has no attributes.");
+            if (attributes["POSITION"] == null) throw new InvalidDataException("Primitive has no POSITION attribute.");
+            yield return primitive;
+        }
+    }
+
+    // glTF node-to-world: compose matrix-or-TRS up the parent chain. Column-major double[16], glTF storage order.
+    static double[] NodeWorldMatrix(JArray nodes, int nodeIndex)
+    {
+        var parentOf = new Dictionary<int, int>();
+        for (int i = 0; i < nodes.Count; i++)
+            if ((nodes[i] as JObject)?["children"] is JArray kids)
+                foreach (JToken kid in kids)
+                {
+                    int ci = kid.Value<int>();
+                    if (!parentOf.ContainsKey(ci)) parentOf.Add(ci, i);
+                }
+        var chain = new List<int>();
+        int walk = nodeIndex;
+        var seen = new HashSet<int>();
+        while (true)
+        {
+            if (!seen.Add(walk)) throw new InvalidDataException("Node parent chain contains a cycle.");
+            chain.Add(walk);
+            if (!parentOf.TryGetValue(walk, out walk)) break;
+        }
+        double[] world = Identity();
+        for (int i = chain.Count - 1; i >= 0; i--)
+            world = Mul(world, LocalMatrix((JObject)nodes[chain[i]]));
+        return world;
+    }
+
+    static double[] Identity() => new double[] { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+
+    static double[] LocalMatrix(JObject node)
+    {
+        if (node?["matrix"] is JArray m16 && m16.Count == 16)
+        {
+            var m = new double[16];
+            for (int i = 0; i < 16; i++) m[i] = m16[i].Value<double>();
+            return m;
+        }
+        double[] t = ReadVec(node?["translation"] as JArray, 0, 0, 0);
+        double[] r = ReadVec(node?["rotation"] as JArray, 0, 0, 0, 1);
+        double[] s = ReadVec(node?["scale"] as JArray, 1, 1, 1);
+        double x = r[0], y = r[1], z = r[2], w = r[3];
+        var rot = new[,] {
+            { 1 - 2 * (y * y + z * z), 2 * (x * y - z * w),     2 * (x * z + y * w) },
+            { 2 * (x * y + z * w),     1 - 2 * (x * x + z * z), 2 * (y * z - x * w) },
+            { 2 * (x * z - y * w),     2 * (y * z + x * w),     1 - 2 * (x * x + y * y) }
+        };
+        var result = Identity();
+        for (int col = 0; col < 3; col++)
+            for (int row = 0; row < 3; row++)
+                result[col * 4 + row] = rot[row, col] * s[col];
+        result[12] = t[0]; result[13] = t[1]; result[14] = t[2];
+        return result;
+    }
+
+    static double[] ReadVec(JArray array, params double[] fallback)
+    {
+        if (array == null || array.Count != fallback.Length) return fallback;
+        var v = new double[fallback.Length];
+        for (int i = 0; i < v.Length; i++) v[i] = array[i].Value<double>();
+        return v;
+    }
+
+    static double[] Mul(double[] a, double[] b)
+    {
+        var m = new double[16];
+        for (int col = 0; col < 4; col++)
+            for (int row = 0; row < 4; row++)
+                for (int k = 0; k < 4; k++)
+                    m[col * 4 + row] += a[k * 4 + row] * b[col * 4 + k];
+        return m;
+    }
+
+    static Vec3 XForm(double[] m, Vec3 p) => new Vec3 {
+        X = m[0] * p.X + m[4] * p.Y + m[8] * p.Z + m[12],
+        Y = m[1] * p.X + m[5] * p.Y + m[9] * p.Z + m[13],
+        Z = m[2] * p.X + m[6] * p.Y + m[10] * p.Z + m[14]
+    };
+
     static MeshPlan AnalyzeMesh(int meshIndex, JObject mesh, Accessors reader, bool keepSingle = false, double mergeFraction = 0)
     {
         JArray primitives = mesh["primitives"] as JArray;

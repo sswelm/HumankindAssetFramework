@@ -281,7 +281,9 @@ reduction never has to choose what survives**:
    Probe lists every part's disconnected-island count; split the parts hiding floating junk (the merge-distance
    slider keeps segmented ropes and trim lines whole — only genuinely distant debris separates); then, in the
    Vehicle Lab, mark the junk **Ignore**. Deleting invisible geometry is free quality — on the galley this
-   removed three quarters of the raw source before any reduction ran.
+   removed three quarters of the raw source before any reduction ran. And when one CONNECTED part spans two
+   roles (a hull welded to its deck), select its row and **Plane cut** it in two — the yellow/grey preview shows
+   exactly which triangles land in `_CutA`/`_CutB`, and each half then takes its own role and reduce dial.
 2. **Cut where nobody looks, spare the silhouette.** In **Vertices control**, set the per-role reduce dials by
    visibility, not uniformly: Rigging 85–90 (ropes read as lines at game distance), Structure ~80, Body to
    taste — but keep **Oar around 40 and Sail at or below 50**: blades and canvas *are* the unit's identity, and
