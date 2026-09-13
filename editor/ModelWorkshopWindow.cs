@@ -63,12 +63,27 @@ public class ModelWorkshopWindow : EditorWindow
     Material highlightMat;
     List<Renderer> highlightedRenderers; List<Material[]> highlightedOriginals;
 
+    // ---- plane-cut state (2026-09-13, the Bremen deck: hull and deck are ONE welded island — nothing for the
+    // island splitter to do). The cut preview is built from the SOURCE GLB's own bytes (ExtractPart), not the
+    // Blender FBX round-trip, so the two-color partition on screen is exactly the triangle partition the cut
+    // writes — no axis-convention mapping to get wrong. ----
+    [SerializeField] int cutAxis = 1;      // source-file world axis: 0=X 1=Y (up in standard glTF) 2=Z
+    [SerializeField] float cutPct = 50f;
+    [SerializeField] int cutRule = 0;      // 0 = flat plane; 1 = horizontal surfaces (facing) — deck vs bow plating
+    [SerializeField] float cutTiltDeg = 45f;   // facing rule: a face counts as horizontal when tilted less than this from level
+    GlbDisconnectedParts.PartGeometry cutGeo;
+    Mesh cutMesh; GameObject cutGO;
+    Material cutMatA, cutMatB;
+    int cutTrisA, cutTrisB;
+    bool cutNormalsDone;
+    bool CutModeActive => cutGO != null;
+
     void OnDisable() => DestroyPreview();
 
     void OnGUI()
     {
-        EditorGUILayout.LabelField("Model Workshop — split chosen parts into their disconnected islands", EditorStyles.boldLabel);
-        EditorGUILayout.LabelField("For a part whose junk islands share a mesh with real geometry: split ONLY that part, then mark the junk Ignore in the Vehicle Lab. Lossless — vertex data, materials, skins and animations are preserved; only the checked parts gain _Part_NNN children.", EditorStyles.wordWrappedMiniLabel);
+        EditorGUILayout.LabelField("Model Workshop — split chosen parts into their disconnected islands, or plane-cut a connected one", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("For a part whose junk islands share a mesh with real geometry: split ONLY that part, then mark the junk Ignore in the Vehicle Lab. Lossless — vertex data, materials, skins and animations are preserved; only the checked parts gain _Part_NNN children. A CONNECTED part (1 island) can instead be plane-cut in two: select its row and press Plane cut.", EditorStyles.wordWrappedMiniLabel);
 
         using (new EditorGUILayout.HorizontalScope())
         {
@@ -153,13 +168,67 @@ public class ModelWorkshopWindow : EditorWindow
                                  : $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {(r.islands == 1 ? "1 island — already whole" : r.islands.ToString("N0") + " islands")})";
                     // the row label is a BUTTON, exactly like the Vehicle Lab: click = highlight + frame in the preview
                     if (GUILayout.Button(label, isSel ? EditorStyles.whiteLabel : (r.islands > 1 && r.blocked == null ? EditorStyles.label : EditorStyles.miniLabel)))
-                    { selectedIdx = isSel ? -1 : r.nodeIndex; SelectRow(isSel ? "" : r.node); }
+                    { ExitCutMode(); selectedIdx = isSel ? -1 : r.nodeIndex; SelectRow(isSel ? "" : r.node); }
                 }
             EditorGUILayout.EndScrollView();
 
-            if (inst != null)
+            // ---- plane cut: for the selected part, connected or not — the escape hatch when island
+            // splitting has nothing to grab (hull welded to deck). Whole triangles, nothing sliced. ----
+            var selRowObj = rows.FirstOrDefault(r => r.nodeIndex == selectedIdx);
+            if (selRowObj != null && selRowObj.blocked == null)
             {
-                EditorGUILayout.LabelField("Preview   (drag = orbit · middle/right-drag = pan · scroll = zoom · click a part row to highlight)", EditorStyles.miniBoldLabel);
+                if (!CutModeActive)
+                {
+                    if (GUILayout.Button(new GUIContent($"Plane cut '{selRowObj.node}'…  (split a connected part in two along a flat cut)",
+                            "For geometry the island split can't separate — a hull welded to its deck. Pick an axis and slide the plane; " +
+                            "whole triangles go to one side or the other by centroid (nothing is sliced, vertex data stays byte-identical), " +
+                            "and the two sides become _CutA/_CutB children in the output GLB."), GUILayout.Height(22)))
+                        EnterCutMode(selRowObj);
+                }
+                else
+                {
+                    EditorGUILayout.LabelField($"Cut '{cutGeo.NodeName}' — yellow side becomes _CutA, grey side _CutB:", EditorStyles.miniBoldLabel);
+                    int newRule = EditorGUILayout.Popup(new GUIContent("Cut rule",
+                        "Flat plane: everything at or above the plane goes to _CutA — a straight geometric slice. " +
+                        "Horizontal surfaces: a triangle goes to _CutA when its FACE lies flatter than the tilt limit — the deck " +
+                        "separates from the bow plating by orientation, where no flat plane can trace the boundary."),
+                        cutRule, new[] { "Flat plane", "Horizontal surfaces (deck vs sides)" });
+                    int newAxis = EditorGUILayout.Popup(new GUIContent(cutRule == 0 ? "Cut axis" : "Up axis",
+                        "World axis in the SOURCE file's own frame. On a standard glTF ship Y is up: for the plane rule that means a " +
+                        "horizontal cut (deck off hull), X/Z are vertical cuts (bow section, side); for the facing rule it defines " +
+                        "which way 'level' faces. Watch the preview — the colors are the actual partition."),
+                        cutAxis, new[] { "X", "Y  (up, in most GLBs)", "Z" });
+                    float newTilt = cutTiltDeg;
+                    if (cutRule == 1)
+                        newTilt = EditorGUILayout.Slider(new GUIContent("Max tilt (°)",
+                            "How far from level a face may lean and still count as horizontal (deck camber, sheer). Undersides count " +
+                            "too — a deck's ceiling is as horizontal as its planking. 45 is a good start; lower = stricter deck. " +
+                            "At 0 only mathematically perfect level faces pass — float noise can drop even those, so prefer 1-2 as the practical minimum."),
+                            cutTiltDeg, 0f, 85f);
+                    float newPct = EditorGUILayout.Slider(new GUIContent(cutRule == 0 ? "Position (%)" : "Only above (%)",
+                        cutRule == 0 ? "Where the plane sits between the part's two ends on that axis. Live: what shows yellow is exactly what _CutA gets."
+                                     : "Height floor: horizontal faces BELOW this stay in _CutB — keeps the equally-horizontal hull BOTTOM out of the deck piece. 0 = judge the whole part by facing alone."),
+                        cutPct, 0f, 100f);
+                    if (newRule != cutRule || newAxis != cutAxis || !Mathf.Approximately(newPct, cutPct) || !Mathf.Approximately(newTilt, cutTiltDeg))
+                    { cutRule = newRule; cutAxis = newAxis; cutPct = newPct; cutTiltDeg = newTilt; UpdateCutPartition(); }
+                    EditorGUILayout.LabelField($"   _CutA (yellow): {cutTrisA:N0} tris  ·  _CutB (grey): {cutTrisB:N0} tris — the boundary follows the existing triangulation", EditorStyles.miniLabel);
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        using (new EditorGUI.DisabledScope(cutTrisA == 0 || cutTrisB == 0 || string.IsNullOrEmpty(outGlb)))
+                            if (GUILayout.Button(new GUIContent($"Cut  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
+                                    "Writes the output GLB with this ONE part split into _CutA/_CutB children. The source file is never touched. " +
+                                    "To cut again (the bow off the deck piece, say), point Source GLB at the output and re-Probe."), GUILayout.Height(24)))
+                                DoPlaneCut();
+                        if (GUILayout.Button("Close", GUILayout.Width(60), GUILayout.Height(24))) ExitCutMode();
+                    }
+                }
+            }
+
+            if (inst != null || CutModeActive)
+            {
+                EditorGUILayout.LabelField(CutModeActive
+                    ? "Cut preview   (drag = orbit · middle/right-drag = pan · scroll = zoom — yellow = _CutA, grey = _CutB)"
+                    : "Preview   (drag = orbit · middle/right-drag = pan · scroll = zoom · click a part row to highlight)", EditorStyles.miniBoldLabel);
                 var rect = GUILayoutUtility.GetRect(200f, 4000f, 600f, 600f, GUILayout.ExpandWidth(true));
                 HandlePreviewInput(rect);
                 if (Event.current.type == EventType.Repaint) RenderPreview(rect);
@@ -252,11 +321,112 @@ public class ModelWorkshopWindow : EditorWindow
 
     void DestroyPreview()
     {
+        ExitCutMode();
         selectedIdx = -1;
         SelectRow("");
         if (inst != null) DestroyImmediate(inst);
         inst = null;
         if (pru != null) { pru.Cleanup(); pru = null; }
+    }
+
+    // ---- plane-cut mode: preview mesh built from the SOURCE bytes (ExtractPart), so what's yellow IS what
+    // the cut writes to _CutA. The Blender turntable model hides while the cut preview is up. ----
+    void EnterCutMode(Row row)
+    {
+        ExitCutMode();
+        try { cutGeo = GlbDisconnectedParts.ExtractPart(File.ReadAllBytes(srcFile), row.nodeIndex); }
+        catch (Exception e) { status = $"Plane cut unavailable for '{row.node}': {e.Message}"; cutGeo = null; return; }
+        cutMesh = new Mesh { hideFlags = HideFlags.HideAndDontSave, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+        var verts = new Vector3[cutGeo.Positions.Length / 3];
+        for (int i = 0; i < verts.Length; i++)
+            verts[i] = new Vector3(cutGeo.Positions[i * 3], cutGeo.Positions[i * 3 + 1], cutGeo.Positions[i * 3 + 2]);
+        cutMesh.vertices = verts;
+        cutMesh.subMeshCount = 2;
+        if (cutMatA == null)
+        {
+            var sh = Shader.Find("Standard") ?? Shader.Find("Unlit/Color");
+            cutMatA = new Material(sh) { color = new Color(1f, 0.85f, 0.1f), hideFlags = HideFlags.HideAndDontSave };
+            cutMatB = new Material(sh) { color = new Color(0.55f, 0.55f, 0.6f), hideFlags = HideFlags.HideAndDontSave };
+        }
+        cutGO = new GameObject("__cutPreview") { hideFlags = HideFlags.HideAndDontSave };
+        cutGO.AddComponent<MeshFilter>().sharedMesh = cutMesh;
+        cutGO.AddComponent<MeshRenderer>().sharedMaterials = new[] { cutMatA, cutMatB };
+        if (pru == null) pru = new PreviewRenderUtility();
+        pru.AddSingleGO(cutGO);
+        SetInstVisible(false);
+        cutNormalsDone = false;
+        UpdateCutPartition();
+        boundsValid = false; previewPan = Vector2.zero;
+        status = $"Plane cut mode on '{cutGeo.NodeName}': pick the axis, slide the plane, then Cut. Yellow → _CutA, grey → _CutB.";
+    }
+
+    void ExitCutMode()
+    {
+        if (cutGO != null) DestroyImmediate(cutGO);
+        cutGO = null;
+        if (cutMesh != null) DestroyImmediate(cutMesh);
+        cutMesh = null;
+        cutGeo = null; cutNormalsDone = false;
+        SetInstVisible(true);
+        boundsValid = false;
+    }
+
+    void SetInstVisible(bool on)
+    {
+        if (inst == null) return;
+        foreach (var r in inst.GetComponentsInChildren<Renderer>(true)) if (r != null) r.enabled = on;
+    }
+
+    double CutPlaneValue() => cutGeo.Min[cutAxis] + (cutGeo.Max[cutAxis] - cutGeo.Min[cutAxis]) * Mathf.Clamp(cutPct, 0f, 100f) / 100.0;
+
+    void UpdateCutPartition()
+    {
+        if (cutGeo == null || cutMesh == null) return;
+        double v = CutPlaneValue();
+        double cosLimit = Math.Cos(Mathf.Clamp(cutTiltDeg, 0f, 90f) * Math.PI / 180.0);
+        var a = new List<int>(); var b = new List<int>();
+        int[] t = cutGeo.Triangles; float[] p = cutGeo.Positions;
+        for (int i = 0; i < t.Length; i += 3)
+        {
+            // the same rules as GlbDisconnectedParts.CutNodeByPlane/ByFacing, on the same world-space data
+            int i0 = t[i] * 3, i1 = t[i + 1] * 3, i2 = t[i + 2] * 3;
+            double c = (p[i0 + cutAxis] + p[i1 + cutAxis] + p[i2 + cutAxis]) / 3.0;
+            bool sideA;
+            if (cutRule == 0) sideA = c >= v;
+            else
+            {
+                double ux = p[i1] - p[i0], uy = p[i1 + 1] - p[i0 + 1], uz = p[i1 + 2] - p[i0 + 2];
+                double wx = p[i2] - p[i0], wy = p[i2 + 1] - p[i0 + 1], wz = p[i2 + 2] - p[i0 + 2];
+                double nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+                double len = Math.Sqrt(nx * nx + ny * ny + nz * nz);
+                double up = len < 1e-30 ? 0 : (cutAxis == 0 ? nx : cutAxis == 1 ? ny : nz) / len;
+                sideA = Math.Abs(up) >= cosLimit && c >= v;
+            }
+            var side = sideA ? a : b;
+            side.Add(t[i]); side.Add(t[i + 1]); side.Add(t[i + 2]);
+        }
+        cutTrisA = a.Count / 3; cutTrisB = b.Count / 3;
+        cutMesh.SetTriangles(a, 0);
+        cutMesh.SetTriangles(b, 1);
+        if (!cutNormalsDone) { cutMesh.RecalculateNormals(); cutNormalsDone = true; }   // normals depend on the full set, not the partition — once is enough
+        Repaint();
+    }
+
+    void DoPlaneCut()
+    {
+        if (File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?", outGlb, "Overwrite", "Cancel")) return;
+        try
+        {
+            EditorUtility.DisplayProgressBar("Model Workshop", "Cutting…", 0.4f);
+            var result = cutRule == 0
+                ? GlbDisconnectedParts.CutFileByPlane(srcFile, outGlb, cutGeo.NodeIndex, cutAxis, CutPlaneValue())
+                : GlbDisconnectedParts.CutFileByFacing(srcFile, outGlb, cutGeo.NodeIndex, cutAxis, cutTiltDeg, CutPlaneValue());
+            if (!result.Changed) { status = "Nothing changed — the cut leaves every triangle on one side."; return; }
+            foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
+            status = $"Plane cut done: {result.Details.FirstOrDefault()}\n{outGlb}\nNext: open it in the Vehicle Lab — or cut again by pointing Source GLB at this output and re-Probing.";
+        }
+        catch (Exception e) { status = "Plane cut failed (source untouched): " + e.Message; Debug.LogException(e); }
+        finally { EditorUtility.ClearProgressBar(); }
     }
 
     // Click a row → tint that part's renderer(s) yellow and frame them with context (the Vehicle Lab mechanism,
@@ -311,14 +481,23 @@ public class ModelWorkshopWindow : EditorWindow
 
     void RenderPreview(Rect rect)
     {
-        if (inst == null || pru == null) return;
+        if (pru == null || (inst == null && !CutModeActive)) return;
         if (!boundsValid)
         {
-            bool first = true;
-            foreach (var r in inst.GetComponentsInChildren<Renderer>())
-            { if (r == null) continue; if (first) { bounds = r.bounds; first = false; } else bounds.Encapsulate(r.bounds); }
-            boundsValid = !first;
-            if (boundsValid) fullRadius = bounds.extents.magnitude;
+            if (CutModeActive)
+            {
+                bounds = cutMesh.bounds;   // cutGO sits at the identity, so mesh bounds ARE world bounds
+                boundsValid = true;
+                fullRadius = bounds.extents.magnitude;
+            }
+            else
+            {
+                bool first = true;
+                foreach (var r in inst.GetComponentsInChildren<Renderer>())
+                { if (r == null) continue; if (first) { bounds = r.bounds; first = false; } else bounds.Encapsulate(r.bounds); }
+                boundsValid = !first;
+                if (boundsValid) fullRadius = bounds.extents.magnitude;
+            }
         }
         if (!boundsValid) return;
         pru.BeginPreview(rect, GUIStyle.none);
