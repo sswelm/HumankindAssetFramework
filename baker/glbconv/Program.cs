@@ -49,7 +49,12 @@ class Program
         // (single-convention rework 2026-09-12; see the header note).
         Directory.CreateDirectory(outDir);
 
-        var model = ModelRoot.Load(glbPath);
+        // LENIENT load (2026-09-13, the Abominations/DroneSquadFPV bake-test failures): game-rip GLBs are
+        // routinely out of spec — these two declare byteStride on an animation-sampler bufferView, which the
+        // glTF spec forbids and SharpGLTF's STRICT default refuses at load ("AnimationSampler[0] _byteStride:
+        // must NOT be defined"), before any data is touched. TryFix repairs exactly this class of exporter
+        // sloppiness and still throws on genuinely unreadable files.
+        var model = ModelRoot.Load(glbPath, new SharpGLTF.Schema2.ReadSettings { Validation = SharpGLTF.Validation.ValidationMode.TryFix });
         Console.WriteLine($"loaded: meshes={model.LogicalMeshes.Count} materials={model.LogicalMaterials.Count} images={model.LogicalImages.Count}");
 
         // ---- 1) collect all geometry in world space (tracking each triangle's material index) ----
