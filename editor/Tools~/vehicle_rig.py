@@ -1106,8 +1106,12 @@ def _dissolve_limited(_rb, _angle_deg):
                 if all(_fid.get(_vf) == _li for _vf in _v.link_faces):
                     _vs.add(_v)
         _jobs.append((list(_es), list(_vs)))
+    # run a cell even when it has NO interior edges: a disconnected single-face island (decal/panel shards)
+    # has no edge with two linked faces, but its collinear rim verts still dissolve in the VERT phase —
+    # skipping those cells left every such island at full density (review P2, reproduced: 4,100 lone
+    # rectangles kept all 24,600 verts where the global call cut to 16,400).
     for _es, _vs in _jobs:
-        if _es:
+        if _es or _vs:
             bmesh.ops.dissolve_limit(_rb, angle_limit=math.radians(_angle_deg), use_dissolve_boundaries=False,
                                      verts=_vs, edges=_es)
 
