@@ -366,6 +366,57 @@ namespace HumankindAssetFramework
         }
     }
 
+    // EXPERIMENTAL (opt-in, [Terrain]) — the TILE render ceiling lead (2026-09-13, shakee's Discord report:
+    // tiles beyond ~21,000 stop rendering; 21,845 x 3 = 65,535 smells like a capacity). The terrain renderer
+    // is MANAGED (Amplitude.Mercury.Terrain.ProceduralTerrainRenderer) and its visible-hexagons / draw-command
+    // buffers size from two plain ints on the loaded TerrainRendererTechnicalSettings asset, read inside
+    // CreateOrResizeVisibleHexagonsBuffer / CreateOrResizeDrawCommandsBuffer — the DistrictBufferHeadroom
+    // pattern, one asset deeper. This hook does BOTH halves of the investigation:
+    //   PROBE (always, once per settings asset): log the shipped values — the next launch confirms or kills
+    //   the 65,536 theory without a big map.
+    //   OVERRIDE (opt-in): multiply both fields BEFORE the buffers are created. Idempotent per asset instance
+    //   (CreateOrResize re-runs on resolution/quality changes; multiplying again would compound).
+    // GPU cost is linear and small (a visible-hexagon entry is a few ints); the compute kernels read buffer
+    // sizes dynamically, but whether anything DOWNSTREAM (a shader-side ushort, the repack kernel) still
+    // clamps is exactly what the big-map field test must answer — this hook is the instrument for that test.
+    [HarmonyPatch]
+    internal static class Hk_TerrainHexagonHeadroom
+    {
+        static System.Collections.Generic.IEnumerable<MethodBase> TargetMethods()
+        {
+            var t = GameBinding.ProceduralTerrainRenderer;
+            foreach (var n in new[] { "CreateOrResizeVisibleHexagonsBuffer", "CreateOrResizeDrawCommandsBuffer" })
+            {
+                var m = t?.GetMethod(n, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                if (m != null) yield return m;
+            }
+        }
+        [ProcessLived("settings assets already probed/multiplied this session — instance IDs")]
+        static readonly System.Collections.Generic.HashSet<int> done = new System.Collections.Generic.HashSet<int>();
+        static void Prefix(object __instance)
+        {
+            try
+            {
+                var settings = __instance.GetType().GetField("loadedTechnicalSettings", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)?.GetValue(__instance) as UnityEngine.Object;
+                if (settings == null || !settings || !done.Add(settings.GetInstanceID())) return;
+                var st = settings.GetType();
+                var visF = st.GetField("VisibleHexagonsBufferSize", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                var drawF = st.GetField("DrawCommandBufferSize", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                int vis = visF != null ? (int)visF.GetValue(settings) : -1;
+                int draw = drawF != null ? (int)drawF.GetValue(settings) : -1;
+                Plugin.Log.LogInfo($"[Terrain] technical settings '{settings.name}': VisibleHexagonsBufferSize={vis:N0} DrawCommandBufferSize={draw:N0} (the ~21k-tile ceiling probe — 65,536 here confirms the capacity theory)");
+                int mult = Plugin.TerrainHexagonBufferMultiplier != null ? Plugin.TerrainHexagonBufferMultiplier.Value : 1;
+                if (mult > 1)
+                {
+                    if (visF != null && vis > 0) visF.SetValue(settings, vis * mult);
+                    if (drawF != null && draw > 0) drawF.SetValue(settings, draw * mult);
+                    Plugin.Log.LogInfo($"[Terrain] hexagon buffer headroom x{mult}: VisibleHexagonsBufferSize {vis:N0} -> {(long)vis * mult:N0}, DrawCommandBufferSize {draw:N0} -> {(long)draw * mult:N0}");
+                }
+            }
+            catch (System.Exception ex) { Plugin.Log.LogError("[Terrain] hexagon headroom: " + ex); }
+        }
+    }
+
     // EXPERIMENTAL (opt-in, [Props]) — pawn PROP/attachment axis. Postfix on AnimationManager.AnimationLoad: the exact
     // moment the game rebuilds its collection list and registers its OWN MeshCollections — we append ours right after,
     // BEFORE any pawn definition resolves its fragments. (An Update-tick registration loses that race: the pawn def then

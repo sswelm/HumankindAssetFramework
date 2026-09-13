@@ -116,6 +116,8 @@ namespace HumankindAssetFramework
         internal static Type PresentationPawnDefinitionAddOn => Cached("Amplitude.Mercury.Animation.PresentationPawnDefinitionAddOn");
         internal static Type ClipCollection      => Cached("Amplitude.Mercury.Animation.ClipCollection");
         internal static Type MeshCollection      => Cached("Amplitude.Mercury.Animation.MeshCollection");
+        // ---- terrain ----
+        internal static Type ProceduralTerrainRenderer => Cached("Amplitude.Mercury.Terrain.ProceduralTerrainRenderer");   // the MANAGED tile renderer — its visible-hexagon/draw-command buffers size from a settings asset (the ~21k-tile ceiling lead)
         // ---- UI / input ----
         internal static Type UIInteractivityManager => Cached("Amplitude.UI.Interactables.UIInteractivityManager");   // F8 click-through fix: its static IsMouseCovered is the game's own "pointer is over UI" flag
         // ---- data / assets / graphics ----
@@ -527,6 +529,11 @@ namespace HumankindAssetFramework
             new Dep(RenderFeatureSelector, nameof(RenderFeatureSelector), "SelectionFlags0", "FadingOptions"),
             new Dep(RenderFeatureProvider, nameof(RenderFeatureProvider), "ComputeRenderState"),
             new Dep(FxOutputLayer, nameof(FxOutputLayer), "primitivePerParticleCount", "RenderOutputs", "renderOutputs", "atlases", "Atlas", "atlas", "LayerIndex"),
+            // terrain — the tile-ceiling headroom (Hk_TerrainHexagonHeadroom): buffer sizes live as plain ints on
+            // the loaded technical-settings asset, read by the renderer's CreateOrResize* methods.
+            new Dep(ProceduralTerrainRenderer, nameof(ProceduralTerrainRenderer),
+                "CreateOrResizeVisibleHexagonsBuffer", "CreateOrResizeDrawCommandsBuffer", "loadedTechnicalSettings",
+                "VisibleHexagonsBufferSize", "DrawCommandBufferSize"),
             // formation (EntityFactoryControllerSettings / GameObjectPoolController resolve by SIMPLE name — see ResolveType)
             // ColumnsCountPerRow0/5 are the ENDPOINTS of the six per-row grids the builder writes (like Pose0/Pose8).
             new Dep(PresentationFormationDefinition, nameof(PresentationFormationDefinition), "Dummies", "ColumnsCountPerRow0", "ColumnsCountPerRow5", "Initialize", "LowSpecFormationDefinition"),
