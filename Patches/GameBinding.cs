@@ -118,6 +118,7 @@ namespace HumankindAssetFramework
         internal static Type MeshCollection      => Cached("Amplitude.Mercury.Animation.MeshCollection");
         // ---- terrain ----
         internal static Type ProceduralTerrainRenderer => Cached("Amplitude.Mercury.Terrain.ProceduralTerrainRenderer");   // the MANAGED tile renderer — its visible-hexagon/draw-command buffers size from a settings asset (the ~21k-tile ceiling lead)
+        internal static Type TerrainRendererTechnicalSettings => Cached("Amplitude.Mercury.Terrain.TerrainRendererTechnicalSettings");   // the settings ASSET carrying those two buffer-size ints
         // ---- UI / input ----
         internal static Type UIInteractivityManager => Cached("Amplitude.UI.Interactables.UIInteractivityManager");   // F8 click-through fix: its static IsMouseCovered is the game's own "pointer is over UI" flag
         // ---- data / assets / graphics ----
@@ -532,7 +533,10 @@ namespace HumankindAssetFramework
             // terrain — the tile-ceiling headroom (Hk_TerrainHexagonHeadroom): buffer sizes live as plain ints on
             // the loaded technical-settings asset, read by the renderer's CreateOrResize* methods.
             new Dep(ProceduralTerrainRenderer, nameof(ProceduralTerrainRenderer),
-                "CreateOrResizeVisibleHexagonsBuffer", "CreateOrResizeDrawCommandsBuffer", "loadedTechnicalSettings",
+                "CreateOrResizeVisibleHexagonsBuffer", "CreateOrResizeDrawCommandsBuffer", "loadedTechnicalSettings"),
+            // the two buffer-size ints live on the SETTINGS asset, not the renderer (the F8 self-check caught the
+            // mis-homed first version of this Dep as "2 members NOT FOUND" in red — the gate doing its job)
+            new Dep(TerrainRendererTechnicalSettings, nameof(TerrainRendererTechnicalSettings),
                 "VisibleHexagonsBufferSize", "DrawCommandBufferSize"),
             // formation (EntityFactoryControllerSettings / GameObjectPoolController resolve by SIMPLE name — see ResolveType)
             // ColumnsCountPerRow0/5 are the ENDPOINTS of the six per-row grids the builder writes (like Pose0/Pose8).
