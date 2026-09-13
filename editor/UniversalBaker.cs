@@ -1542,7 +1542,7 @@ public static class UniversalBaker
         var chunks = cfg.multiMesh ? SplitForQuadCeiling(mesh, name) : new List<Mesh> { mesh };
         if (chunks == null)
             return Fail($"{name}: {mesh.triangles.Length / 3:N0} tris need more than {MaxMeshChunks} draw fragments " +
-                        $"({MaxMeshChunks * EngineTriCeiling:N0}-tri hard cap) — lower 'Reduce to ~tris' or the Vehicle Lab dials first.");
+                        $"({MaxMeshChunks * QuadBudget:N0}-quad hard cap) — lower 'Reduce to ~tris' or the Vehicle Lab dials first.");
         // Re-bake = clean slate: delete prior outputs so nothing is overwritten IN PLACE. In-place overwrite leaves Unity
         // serving a stale cached mesh/prefab to the skeleton bake below -> the shipped skeleton lags a bake behind and the
         // ship renders 90 deg off in-game even though the (force-reimported) preview looks right. Fresh assets == first bake.
@@ -1607,7 +1607,15 @@ public static class UniversalBaker
         if (!InvokeReq(skelType, "Reimport", Type.EmptyTypes, skel, null, out err)) return Fail(err);
         EditorUtility.SetDirty(skel);
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
-        ReportBakedQuads(skelType, skel, name);
+        int chunksOverCeiling = ReportBakedQuads(skelType, skel, name);
+        // MULTI-MESH VERIFICATION (review P1): the split PROMISED every chunk fits; if the SDK paired fewer
+        // triangles than estimated and a chunk still measures over, shipping it would silently clip in-game —
+        // fail instead (E5 restores the previous bake) and say what to do. Single-mesh bakes keep the classic
+        // warn-only behavior: no promise was made there.
+        if (cfg.multiMesh && chunksOverCeiling > 0)
+            return Fail($"{name}: {chunksOverCeiling} baked chunk(s) still measure over the {EngineQuadCeiling:N0}-quad " +
+                        "ceiling — the SDK paired fewer triangles than the split estimated. The previous bake was restored; " +
+                        "lower the detail slightly (dials or 'Reduce to ~tris') and re-bake.");
 
         string skelGuid = AmplitudeGuid(skel), atlasGuid = AmplitudeGuid(atlas);
         // empty GUID = the SDK skeleton bake produced nothing -> fail loudly instead of writing a dead registry entry.
@@ -1622,13 +1630,43 @@ public static class UniversalBaker
     // masts and sails) simply never draws. Say the number right after the skeleton bake, where the dial that fixes it
     // (Reduce to ~tris) lives — so dialing to the limit needs no game launch, just this line after each Bake.
     const int EngineQuadCeiling = 255 * 64;   // 16,320 — per FRAGMENT; the multi-mesh split below gets this budget per chunk
-    const int EngineTriCeiling = EngineQuadCeiling * 2;   // the SDK pairs two triangles per drawn quad
-    const int MaxMeshChunks = 8;   // chunk letters A..H — 8 x 32,640 = 261k tris, far past any sane unit budget
+    const int MaxMeshChunks = 8;   // chunk letters A..H — far past any sane unit budget
+    // QUAD-AWARE BUDGET (review P1, 2026-09-13): the SDK does NOT turn every two triangles into one quad — it
+    // pairs only triangles SHARING AN EDGE, and every unpaired triangle costs a full quad. A Faceted bake
+    // (unwelded: no shared indices at all) encodes quads == tris, so the old tris/2 budget could ship chunks up
+    // to 2x over the ceiling; even the welded Bremen paired at 0.6 quads/tri, not 0.5. Chunks are budgeted on
+    // ESTIMATED quads (greedy pairing in triangle order — the common quad triangulation emits its pair
+    // adjacently) with headroom for estimator/SDK divergence, and the bake VERIFIES the SDK's real counts after
+    // the skeleton bake, failing (E5-restored) rather than shipping an over-ceiling chunk.
+    const int QuadBudget = 16000;   // 98% of the ceiling
+    static int EstimateQuads(int[] tris, IList<int> cell)
+    {
+        long Key(int x, int y) => x < y ? ((long)x << 32) | (uint)y : ((long)y << 32) | (uint)x;
+        var owner = new Dictionary<long, int>(cell.Count * 2);
+        var paired = new Dictionary<int, bool>(cell.Count);
+        int quads = 0;
+        foreach (int t in cell)
+        {
+            int a = tris[t * 3], b = tris[t * 3 + 1], c = tris[t * 3 + 2];
+            int mate = -1;
+            foreach (long e in new[] { Key(a, b), Key(b, c), Key(c, a) })
+                if (owner.TryGetValue(e, out int o) && !paired[o]) { mate = o; break; }
+            if (mate >= 0) { paired[mate] = true; paired[t] = true; quads++; }
+            else
+            {
+                paired[t] = false;
+                owner[Key(a, b)] = t; owner[Key(b, c)] = t; owner[Key(c, a)] = t;
+            }
+        }
+        foreach (var kv in paired) if (!kv.Value) quads++;
+        return quads;
+    }
 
     // MULTI-MESH SPLIT (2026-09-13, the Bremen — 51,072 quads on a 16,320 ceiling): partition an over-ceiling mesh
-    // into spatial chunks, each a standalone Mesh under the per-fragment budget. BSP at the triangle-centroid median
-    // on the longest axis (the Workshop plane cut's proven partition — whole triangles, deterministic order), every
-    // vertex attribute remapped per chunk. Chunk 0 keeps the plain _ModelMesh name (the body the donor fragment
+    // into spatial chunks, each a standalone Mesh under the per-fragment budget (measured in ESTIMATED QUADS —
+    // see EstimateQuads above; tris/2 was review P1's trap). BSP at the triangle-centroid median on the longest
+    // axis (the Workshop plane cut's proven partition — whole triangles, deterministic order), every vertex
+    // attribute remapped per chunk. Chunk 0 keeps the plain _ModelMesh name (the body the donor fragment
     // renames onto); overflow chunks get _ModelMesh_B.. and draw through plugin-appended fragments.
     // Returns the input mesh alone when it already fits; null when even 8 chunks can't hold it.
     static List<Mesh> SplitForQuadCeiling(Mesh mesh, string name)
@@ -1636,7 +1674,7 @@ public static class UniversalBaker
         int[] tris = mesh.triangles;
         int total = tris.Length / 3;
         var result = new List<Mesh>();
-        if (total <= EngineTriCeiling) { result.Add(mesh); return result; }
+        if (EstimateQuads(tris, Enumerable.Range(0, total).ToList()) <= EngineQuadCeiling) { result.Add(mesh); return result; }
         var v = mesh.vertices; var n = mesh.normals; var u = mesh.uv; var t4 = mesh.tangents;
         var bw = mesh.boneWeights; var bp = mesh.bindposes;
         bool hasN = n != null && n.Length == v.Length, hasU = u != null && u.Length == v.Length,
@@ -1648,7 +1686,7 @@ public static class UniversalBaker
         while (stack.Count > 0)
         {
             var cell = stack[stack.Count - 1]; stack.RemoveAt(stack.Count - 1);
-            if (cell.Count <= EngineTriCeiling) { cells.Add(cell); continue; }
+            if (EstimateQuads(tris, cell) <= QuadBudget) { cells.Add(cell); continue; }
             Vector3 mn = cent[cell[0]], mx = cent[cell[0]];
             foreach (int ti in cell) { mn = Vector3.Min(mn, cent[ti]); mx = Vector3.Max(mx, cent[ti]); }
             Vector3 span = mx - mn;
@@ -1701,7 +1739,7 @@ public static class UniversalBaker
             m2.SetTriangles(ct, 0);
             m2.RecalculateBounds();
             result.Add(m2);
-            sizes.Add($"{m2.name.Substring(name.Length)}: {cell.Count:N0} tris");
+            sizes.Add($"{m2.name.Substring(name.Length)}: {cell.Count:N0} tris (~{EstimateQuads(tris, cell):N0} quads)");
         }
         Debug.Log($"[Factory] {name}: {total:N0} tris exceed the {EngineQuadCeiling:N0}-quad per-fragment ceiling — split into " +
                   $"{result.Count} meshes ({string.Join(", ", sizes)}); the plugin draws each overflow chunk as its own fragment.");
@@ -1719,7 +1757,9 @@ public static class UniversalBaker
         }
         return null;
     }
-    static void ReportBakedQuads(Type skelType, UnityEngine.Object skel, string name)
+    // Returns how many meshes MEASURED over the ceiling (0 when all fit or when nothing could be verified —
+    // read failures stay warn-only, matching this report's original advisory role).
+    static int ReportBakedQuads(Type skelType, UnityEngine.Object skel, string name)
     {
         try
         {
@@ -1727,7 +1767,7 @@ public static class UniversalBaker
             if (!(smisF?.GetValue(skel) is System.Collections.IEnumerable smis))
             {
                 Debug.LogWarning($"[Factory] {name}: quad report could not read skinnedMeshInfos on {skelType.FullName} — the {EngineQuadCeiling:N0}-quad ceiling was NOT verified this bake.");
-                return;
+                return 0;
             }
             var over = new List<string>();
             int meshCount = 0; long totalQuads = 0;
@@ -1780,8 +1820,9 @@ public static class UniversalBaker
                     "\n\nThe overflow will SILENTLY not render in-game — the last-baked parts (masts, rigging…) vanish " +
                     "first, with no error anywhere. Lower 'Reduce to ~tris' and re-bake until the console line says 'fits'.",
                     "Understood");
+            return over.Count;
         }
-        catch (Exception qex) { Debug.LogWarning("[Factory] quad report: " + qex.Message); }
+        catch (Exception qex) { Debug.LogWarning("[Factory] quad report: " + qex.Message); return 0; }
     }
 
     // A readable albedo for one material, for multi-material atlas packing. Prefer the extracted png on disk whose name

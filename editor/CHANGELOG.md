@@ -24,7 +24,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   `BAKED MESH` line reports every chunk, and
   `[Uni][Multi]` log lines name each appended fragment at load. Headless bake test: a 70,844-tri grid must
   split into fitting chunks with the triangle sum preserved and one skeleton mesh entry per chunk. Animated
-  bakes do not split yet (their ceiling remains hard); up to 8 fragments = 261k triangles of static budget.
+  bakes do not split yet (their ceiling remains hard); up to 8 fragments of static budget. Review P1 hardened
+  the budget itself: the SDK pairs only triangles SHARING AN EDGE into quads (a Faceted bake pairs nothing —
+  quads == tris — and even a welded hull paired at ~0.6 quads/tri, not 0.5), so chunks are sized by an
+  SDK-style pairing ESTIMATE rather than tris/2, and after the skeleton bake the SDK's real per-chunk quad
+  counts are verified — a chunk still measuring over fails the bake (E5 restores the previous outputs) instead
+  of shipping geometry that would silently clip.
 
 - **Model Workshop: Plane cut — split a CONNECTED part in two.** Island splitting is helpless against the
   ocean liner's Object_45: hull and deck are one welded mesh (1 island), one Vehicle Lab row, one role. Select

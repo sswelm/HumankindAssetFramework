@@ -162,6 +162,28 @@ public static class BakeFeatureTest
                     smiCount == chunkList.Count && chunkList.Count > 1, $"skinnedMeshInfos={smiCount}, chunk assets={chunkList.Count}");
             }
 
+            // ---- FACETED + multi-mesh (review P1): unwelded triangles share NO edges, so the SDK pairs
+            //      nothing — quads == tris, and the old tris/2 budget shipped a 19,838-tri faceted mesh as one
+            //      19,838-quad "fitting" chunk (3,518 over the ceiling). The quad-aware budget must split it. ----
+            {
+                string grid2 = WriteDenseGrid(tmp, "grid2", 110, 92);   // (109*91)*2 = 19,838 tris — fits a tris/2 budget, OVER as faceted quads
+                var c = Cfg("splitfacet", grid2); c.multiMesh = true; c.normals = NormalsMode.Faceted;
+                var m = Bake(c, used, out var rf);
+                var fchunks = new List<Mesh>();
+                if (m != null) fchunks.Add(m);
+                for (char ch = 'B'; ch <= 'H'; ch++)
+                {
+                    var mc = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Resources/" + c.resourceName + "_ModelMesh_" + ch + ".asset");
+                    if (mc != null) fchunks.Add(mc);
+                }
+                int fsum = 0, fworst = -1;
+                foreach (var x in fchunks) { int t = x.triangles.Length / 3; fsum += t; fworst = Mathf.Max(fworst, t); }
+                // faceted quads == tris: every chunk must fit the QUAD ceiling measured in TRIANGLES
+                Check(res, ref pass, ref fail, "Faceted over-ceiling bake splits by real quad cost (quads == tris)",
+                    rf.ok && fchunks.Count >= 2 && fworst <= 255 * 64 && fsum == 19838,
+                    $"chunks={fchunks.Count}, worst={fworst:N0} tris (cap {255 * 64:N0} as quads), sum={fsum:N0}/19,838");
+            }
+
             // ---- materialMode Multi on a 2-material model: packs an atlas, bake succeeds (packing detail covered by real models) ----
             {
                 var c = Cfg("multi", cube2); c.materialMode = MaterialMode.Multi;
