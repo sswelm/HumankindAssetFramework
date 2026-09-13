@@ -229,8 +229,52 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] float maxHeight = 999f;  // the reverse: hide parts whose CENTER height is ABOVE this — slide down to strip the superstructure and isolate wheel/chassis level
     [SerializeField] float minWidth = -999f;  // LEFT/RIGHT slice (user request 2026-08-01): hide parts whose center is LEFT of this on the WIDTH axis (center.y — the axis the two wheels mirror across); bracket with maxWidth to isolate ONE side's wheel. Default span = off.
     [SerializeField] float maxWidth = 999f;   // the reverse: hide parts whose center is RIGHT of this (center.y).
+    [SerializeField] float minFlatPct = 0f;   // 0 = off — hide parts whose LEVEL-surface share (% of area within 30° of horizontal) is below this: the deck finder (2026-09-13, "which Object is the deck?")
+    Dictionary<string, float> flatShare; GameObject flatShareFor;   // per-part level-area share, cached for one preview instance
     static float MaxDim(Part p) => Mathf.Max(p.size.x, Mathf.Max(p.size.y, p.size.z));
-    bool VisiblePart(Part x) => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.center.z >= minHeight && x.center.z <= maxHeight && x.center.y >= minWidth && x.center.y <= maxWidth;
+    bool VisiblePart(Part x) => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.center.z >= minHeight && x.center.z <= maxHeight && x.center.y >= minWidth && x.center.y <= maxWidth && FlatOk(x);
+
+    // FLAT-SURFACE FILTER: the share of a part's surface area lying within 30° of level, measured on the
+    // PREVIEW meshes (the preview stands upright in Unity, so world +Y is 'level'; the geometric triangle
+    // normal is used — no reliance on authored normals). Cached once per preview instance; a part the preview
+    // doesn't carry (or any state before a probe) PASSES the filter — a filter must never hide what it cannot
+    // measure. Blender collision suffixes ("Object_2.001") count toward their base part, like SelectPart.
+    bool FlatOk(Part x)
+    {
+        if (minFlatPct <= 0f) return true;
+        BuildFlatShareIFN();
+        return flatShare == null || !flatShare.TryGetValue(x.name, out float s) || s * 100f >= minFlatPct;
+    }
+    void BuildFlatShareIFN()
+    {
+        if (inst == null) { flatShare = null; flatShareFor = null; return; }
+        if (flatShare != null && flatShareFor == inst) return;
+        var area = new Dictionary<string, double>(); var flat = new Dictionary<string, double>();
+        foreach (var mf in inst.GetComponentsInChildren<MeshFilter>())
+        {
+            if (mf == null || mf.sharedMesh == null) continue;
+            string nm = mf.gameObject.name;
+            int dot = nm.LastIndexOf('.');
+            if (dot > 0 && dot == nm.Length - 4) nm = nm.Substring(0, dot);   // ".001" style suffix only — real dots in names survive
+            var m = mf.sharedMesh; var l2w = mf.transform.localToWorldMatrix;
+            var v = m.vertices; var t = m.triangles;
+            double a0 = 0, af = 0;
+            for (int i = 0; i < t.Length; i += 3)
+            {
+                Vector3 p0 = l2w.MultiplyPoint3x4(v[t[i]]), p1 = l2w.MultiplyPoint3x4(v[t[i + 1]]), p2 = l2w.MultiplyPoint3x4(v[t[i + 2]]);
+                Vector3 c = Vector3.Cross(p1 - p0, p2 - p0);
+                float a2 = c.magnitude;
+                if (a2 <= 0f) continue;
+                a0 += a2;
+                if (Mathf.Abs(c.y) / a2 >= 0.866f) af += a2;   // cos 30° — matches the Workshop facing cut's default tilt
+            }
+            area.TryGetValue(nm, out double ta); area[nm] = ta + a0;
+            flat.TryGetValue(nm, out double tf); flat[nm] = tf + af;
+        }
+        flatShare = new Dictionary<string, float>();
+        foreach (var kv in area) flatShare[kv.Key] = kv.Value > 0 ? (float)(flat[kv.Key] / kv.Value) : 0f;
+        flatShareFor = inst;
+    }
     [SerializeField] int partFilter;      // list filter: 0 = all; see FilterOptions (Unreviewed = Default + Edgecase)
     static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase", "Caterpillar", "Gun", "Rotor", "Tail rotor", "Trail", "Muzzle", "Cradle", "Oar", "Sail", "Rigging", "Structure", "Flag", "Rudder", "Preserve", "Flip", "Detail" };
     bool MatchesFilter(Role r) => partFilter == 1 ? (r == Role.Default || r == Role.Edgecase)
@@ -566,6 +610,11 @@ public class VehicleLabWindow : EditorWindow
                     "Parts whose center is LEFT of this on the width axis are hidden — bracket with the next slider to keep just one side's wheel. (Straighten the model in Orientation first so the two wheels split along this axis.)"), Mathf.Clamp(minWidth, yLo - yPad, yHi + yPad), yLo - yPad, yHi + yPad);
                 maxWidth = EditorGUILayout.Slider(new GUIContent("Hide parts right of (side)",
                     "Parts whose center is RIGHT of this on the width axis are hidden. Slide the two together onto one wheel to isolate it, then mark it Wheel."), Mathf.Clamp(maxWidth, yLo - yPad, yHi + yPad), yLo - yPad, yHi + yPad);
+                minFlatPct = EditorGUILayout.Slider(new GUIContent("Only flat parts (≥ % level)",
+                    "The deck finder: hide parts whose surface area is less than this % LEVEL (within 30° of horizontal, " +
+                    "measured on the preview meshes). Slide up to ~60 and the walking decks, platforms and hatch tops " +
+                    "remain while masts, hull plating and rigging vanish; combine with the height sliders to pick one deck " +
+                    "level. 0 = off. Parts the preview can't measure stay visible."), minFlatPct, 0f, 100f);
                 partFilter = EditorGUILayout.Popup(new GUIContent("Show only",
                     "Filter the list to one classification. Marking a part out of the current filter removes it from the list and auto-advances to the next."), partFilter, FilterOptions);
                 int interiorN = list.Count(x => x.vis == 0);
@@ -1549,7 +1598,7 @@ public class VehicleLabWindow : EditorWindow
         // spread, gun trunnion, recoil or tail-rotor trim silently carried into the next model too.
         spinEnabled = true; trailSpreadDeg = 35f; trailFrames = 12; gunPivot = 0.5f; gunDeployElev = 0f;
         recoilDist = 0f; recoilFrames = 16; recoilLead = 0; tailAxisChoice = 0; tailYawAdj = 0f; tailPitchAdj = 0f;
-        minVerts = 50; minPartSize = 0f; minHeight = -999f; maxHeight = 999f; minWidth = -999f; maxWidth = 999f;
+        minVerts = 50; minPartSize = 0f; minHeight = -999f; maxHeight = 999f; minWidth = -999f; maxWidth = 999f; minFlatPct = 0f;
         partFilter = 0; selectedPart = ""; partsScroll = Vector2.zero; previewPan = Vector2.zero;
         DestroyPreview();
         status = "New model: pick a Raw model, then Probe parts. (Wheels optional — a floating unit just needs a Wave rock amplitude.)";

@@ -5,6 +5,14 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab: "Only flat parts" filter — the deck finder.** "Which Object is the deck?" on a 1,435-shard
+  liner used to be a headless-Blender analysis; now it's a slider next to the height/side filters. It hides
+  parts whose surface area is less than the dialed % LEVEL (within 30° of horizontal — the Workshop facing
+  cut's tilt), measured on the preview meshes with geometric triangle normals and cached per probe. Slide to
+  ~60: walking decks, platforms and hatch tops remain while masts, plating and rigging vanish; bracket with
+  the height sliders to isolate one deck level. Parts the preview can't measure always stay visible — a
+  filter must never hide what it cannot measure.
+
 - **District primitive ceiling auto-sizes.** A district mesh draws as at most 255 sub-particles × the layer's
   PrimitivePerParticleCount; `DistrictMeshDensityBoost` raised PPC on HAF's private layer clones, but as a
   static config int — a model needing ×40 with the config at 8 still clipped silently. The plugin now reads

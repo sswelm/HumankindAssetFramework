@@ -55,7 +55,10 @@ generated GLB, so the preview, the probe and the Factory atlas all show the same
 3. Press **Probe parts**.
 4. Open **Orientation — straighten the model** before tuning axes or tracks. Vehicle Lab expects the vehicle's length
    along X. Orientation is baked into the generated rig; Model Factory's Rotation is a later whole-model adjustment.
-5. Use the height/side filters and click a row to zoom and highlight the corresponding part.
+5. Use the height/side filters and click a row to zoom and highlight the corresponding part. The **Only flat
+   parts** slider (0.5.7) is the deck finder: at ~60% only parts whose surface lies mostly level remain —
+   decks, platforms, hatch tops — while masts, plating and rigging vanish; bracket with the height sliders to
+   isolate one deck level.
 
 If the source is already skinned and at least 90% of its vertices are weighted, Vehicle Lab offers **Use source
 skeleton (fast path)**. In that mode each row is a bone, not an individual mesh shard. Leave it enabled to preserve the
