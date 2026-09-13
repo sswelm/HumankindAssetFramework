@@ -116,3 +116,29 @@ Spawning 10 more of the same unit won't move the numbers (instancing — copies 
 2. **Per-era unload vs accumulate?** Moot — the pool is filled up-front and stays ~constant. The real
    ceiling is "the whole loaded roster," identical in every era, and it's ~700k/1M with vanilla + the
    current ENC set.
+
+## Other engine ceilings — the terrain tile limit (community lead, UNVERIFIED)
+
+Recorded 2026-09-13 after the multi-fragment unit split shipped (0.5.7): a community report (Discord)
+says map **tiles beyond roughly 21,000 stop rendering**, that each tile draws as **3 parts**, and asks
+whether the unit trick generalizes. Everything below is a **hypothesis on one probe session** — treat it
+per the [Review-Backlog rules](Review-Backlog.md) (re-verify before acting), it is not a finding.
+
+- **The number diagnoses itself**: 21,845 tiles × 3 parts = **65,535 — the 16-bit (ushort) ceiling**.
+  That smells like an index/element count limit in the terrain pipeline, a *different species* from the
+  units' 16,320-quad **per-fragment** clamp (255×64, pawn compute shader).
+- **Why the unit fix doesn't transplant directly**: the multi-fragment split worked because the whole
+  pawn fragment path runs through **managed code** a BepInEx plugin can patch (`PawnManager` /
+  `AnimationManager` — FragmentEntries, descriptor snapshots), and the cap is per-fragment, so more
+  fragments = more budget. A typeprobe sweep of `Amplitude.Mercury.Terrain` (2026-09-13) shows only
+  high-level managed types (territories, landmarks, labels, settings — no tile mesh builder), so the
+  tile geometry is likely built native/compute-side, where C# cannot reach a compiled `ushort`.
+- **Why it isn't a flat no**: the same divide-and-conquer shape (several tile batches, each under 65,535
+  elements) would work *if* batch construction has a managed seam — and precedent exists: HAF already
+  resizes a terrain-adjacent GPU buffer from C# (`DistrictBufferHeadroom` grows the `Visual` layer, the
+  table above). Some of that plumbing is managed.
+- **Scope caution**: a >21k-tile world stresses more than rendering (simulation, saves, pathing) —
+  rendering may not even be the binding constraint.
+- **Next step, if ever picked up**: probe where tile visual buffers are allocated (start from the
+  terrain engine's managed entry points and `CameraGraphicService`), and look for a managed seam that
+  sizes or batches them. Fair odds the dig ends at "native code, can't reach."
