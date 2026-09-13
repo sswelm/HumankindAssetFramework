@@ -202,8 +202,9 @@ public class ModelWorkshopWindow : EditorWindow
                     if (cutRule == 1)
                         newTilt = EditorGUILayout.Slider(new GUIContent("Max tilt (°)",
                             "How far from level a face may lean and still count as horizontal (deck camber, sheer). Undersides count " +
-                            "too — a deck's ceiling is as horizontal as its planking. 45 is a good start; lower = stricter deck."),
-                            cutTiltDeg, 5f, 85f);
+                            "too — a deck's ceiling is as horizontal as its planking. 45 is a good start; lower = stricter deck. " +
+                            "At 0 only mathematically perfect level faces pass — float noise can drop even those, so prefer 1-2 as the practical minimum."),
+                            cutTiltDeg, 0f, 85f);
                     float newPct = EditorGUILayout.Slider(new GUIContent(cutRule == 0 ? "Position (%)" : "Only above (%)",
                         cutRule == 0 ? "Where the plane sits between the part's two ends on that axis. Live: what shows yellow is exactly what _CutA gets."
                                      : "Height floor: horizontal faces BELOW this stay in _CutB — keeps the equally-horizontal hull BOTTOM out of the deck piece. 0 = judge the whole part by facing alone."),
