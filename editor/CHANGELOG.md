@@ -5,6 +5,14 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **District primitive ceiling auto-sizes.** A district mesh draws as at most 255 sub-particles × the layer's
+  PrimitivePerParticleCount; `DistrictMeshDensityBoost` raised PPC on HAF's private layer clones, but as a
+  static config int — a model needing ×40 with the config at 8 still clipped silently. The plugin now reads
+  the injected FxMesh's own triangle count and sizes the boost itself (`ceil(tris / (255 × PPC))`, config as
+  the floor; footprint decal layers keep the config-only behavior). Backed by the ceiling investigation that
+  read the encode's IL: 8-bit particle count over a 24-bit start index — see District-Visuals for the map of
+  all three engine ceilings (units / districts / terrain) and what remains hard in each.
+
 - **Past the 16,320-quad draw ceiling — an over-ceiling static bake can split into multiple draw fragments
   (opt-in per model).**
   The engine draws at most 16,320 quads per FRAGMENT (255 sub-particles × 64 primitives; the stride is compiled

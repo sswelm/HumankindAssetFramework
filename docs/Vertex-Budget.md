@@ -117,6 +117,16 @@ Spawning 10 more of the same unit won't move the numbers (instancing — copies 
    ceiling is "the whole loaded roster," identical in every era, and it's ~700k/1M with vanilla + the
    current ENC set.
 
+## Other engine ceilings — quick map
+
+Three sibling ceilings, three different verdicts (all share the "silently not drawn" failure mode):
+
+| Path | Ceiling | Status |
+|---|---|---|
+| **Units (pawns)** | 16,320 quads per fragment — PPC stride compiled into the pawn shader | beaten by **multi-fragment split** (0.5.7, opt-in Factory checkbox) |
+| **Districts** | 255 sub-particles × PPC — PPC read dynamically, on a private layer clone | beaten by **`DistrictMeshDensityBoost`**; IL-verified 24-bit start / 8-bit count encode — details in [District-Visuals](District-Visuals.md) |
+| **Terrain tiles** | ~21k tiles (likely 16-bit, native side) | unverified lead — section below |
+
 ## Other engine ceilings — the terrain tile limit (community lead, UNVERIFIED)
 
 Recorded 2026-09-13 after the multi-fragment unit split shipped (0.5.7): a community report (Discord)
