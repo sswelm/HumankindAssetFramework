@@ -1229,21 +1229,17 @@ public class ModelFactoryWindow : EditorWindow
                 "Rewind faces outward so single-sided / CAD 'sketch' meshes render single-sided instead of culling to invisible " +
                 "(e.g. a hovercraft skirt). Lighter than double-sided (no extra geometry). Assumes a roughly convex hull — " +
                 "true for vehicles/ships. Preferred for CAD hulls; use Double-sided for genuinely non-convex thin shells."), cur.windingFix, GUILayout.Width(190));
-            // Double-sided checkbox removed from the Factory (2026-09-03, user request): for ANIMATED models it's
-            // applied at the source in the Vehicle Lab ("Double-sided" when generating the rig), and the Factory had
-            // no runtime doubling left — so a Factory checkbox only did nothing and invited "why is it see-through".
-            // The static-path doubling code and the `doubleSided` field remain, so any existing entry still bakes as
-            // saved; there's just no UI to set it here. Winding fix (above) stays as the light single-sided repair.
-        }
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            GUILayout.FlexibleSpace();
             cur.multiMesh = EditorGUILayout.ToggleLeft(new GUIContent("Multi-fragment split (over-ceiling bake)",
                 "OPT-IN: a static bake over the engine's 16,320-quad per-fragment draw ceiling splits into spatial chunks " +
                 "(_ModelMesh_B..), each drawn as its own fragment on the unit — the whole model renders instead of the tail " +
                 "silently clipping (up to 8 fragments = 261k tris). Off = the classic behavior: one mesh, a warning dialog, " +
                 "and the overflow does not draw. More fragments cost more draw work — reduce first, split when reduction " +
-                "would visibly hurt. Static bakes only; the animated path's ceiling is unchanged."), cur.multiMesh, GUILayout.Width(260));
+                "would visibly hurt. Static bakes only; the animated path's ceiling is unchanged."), cur.multiMesh, GUILayout.Width(240));
+            // Double-sided checkbox removed from the Factory (2026-09-03, user request): for ANIMATED models it's
+            // applied at the source in the Vehicle Lab ("Double-sided" when generating the rig), and the Factory had
+            // no runtime doubling left — so a Factory checkbox only did nothing and invited "why is it see-through".
+            // The static-path doubling code and the `doubleSided` field remain, so any existing entry still bakes as
+            // saved; there's just no UI to set it here. Winding fix (above) stays as the light single-sided repair.
         }
         // Albedo tone (baked into the atlas). The injection path ships a FLAT albedo — the donor's PBR normal/metallic/
         // roughness maps are neutralized so its camo can't bleed onto our model — so a skin that relied on shiny metal,
