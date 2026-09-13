@@ -270,6 +270,10 @@ public class BakeTestRunnerWindow : EditorWindow
         bool cancelled = false;
         try
         {
+            // No modal per fixture, for EVERY row (2026-09-13 round 2: the first QuietDialogs pass covered only
+            // the feature-test sections — the smoke test's over-ceiling NuclearWarheads still raised the dialog).
+            // The runner owns the whole run, so the runner owns the flag; console warnings still log per bake.
+            UniversalBaker.QuietDialogs = true;
             for (int i = 0; i < queue.Count; i++)
             {
                 var r = queue[i];
@@ -288,7 +292,7 @@ public class BakeTestRunnerWindow : EditorWindow
                 lastReportPath = WriteReport(collected, InterimVerdict(collected, runWatch, finished: false));
             }
         }
-        finally { EditorUtility.ClearProgressBar(); Progress.EndRun(); }
+        finally { UniversalBaker.QuietDialogs = false; EditorUtility.ClearProgressBar(); Progress.EndRun(); }
         FinishRun(cancelled, queue.Count);
     }
 
