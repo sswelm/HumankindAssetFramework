@@ -1229,6 +1229,12 @@ public class ModelFactoryWindow : EditorWindow
                 "Rewind faces outward so single-sided / CAD 'sketch' meshes render single-sided instead of culling to invisible " +
                 "(e.g. a hovercraft skirt). Lighter than double-sided (no extra geometry). Assumes a roughly convex hull — " +
                 "true for vehicles/ships. Preferred for CAD hulls; use Double-sided for genuinely non-convex thin shells."), cur.windingFix, GUILayout.Width(190));
+            cur.multiMesh = EditorGUILayout.ToggleLeft(new GUIContent("Multi-fragment split (over-ceiling bake)",
+                "OPT-IN: a static bake over the engine's 16,320-quad per-fragment draw ceiling splits into spatial chunks " +
+                "(_ModelMesh_B..), each drawn as its own fragment on the unit — the whole model renders instead of the tail " +
+                "silently clipping (up to 8 fragments = 261k tris). Off = the classic behavior: one mesh, a warning dialog, " +
+                "and the overflow does not draw. More fragments cost more draw work — reduce first, split when reduction " +
+                "would visibly hurt. Static bakes only; the animated path's ceiling is unchanged."), cur.multiMesh, GUILayout.Width(240));
             // Double-sided checkbox removed from the Factory (2026-09-03, user request): for ANIMATED models it's
             // applied at the source in the Vehicle Lab ("Double-sided" when generating the rig), and the Factory had
             // no runtime doubling left — so a Factory checkbox only did nothing and invited "why is it see-through".
@@ -2021,7 +2027,7 @@ public class ModelFactoryWindow : EditorWindow
         resourceName = cur.resourceName, modelFile = cur.modelFile, pawnDescription = cur.pawnDescription,
         rotationEuler = cur.rotation, positionOffset = cur.position, size = cur.size,
         normals = (NormalsMode)cur.normalsMode, smoothingAngle = cur.smoothingAngle, convertGrid = cur.convertGrid,
-        reuseExtracted = cur.reuseExtracted, doubleSided = cur.doubleSided, windingFix = cur.windingFix, heightUV = cur.heightUV, targetTris = cur.targetTris,
+        reuseExtracted = cur.reuseExtracted, doubleSided = cur.doubleSided, windingFix = cur.windingFix, multiMesh = cur.multiMesh, heightUV = cur.heightUV, targetTris = cur.targetTris,
         albedoBrightness = cur.albedoBrightness, albedoSaturation = cur.albedoSaturation, keepBlack = cur.keepBlack, materialMode = cur.materialMode,
         atlasMaxDim = cur.atlasMaxDim <= 0 ? 512 : cur.atlasMaxDim,
         stripParts = cur.stripParts,
@@ -2107,7 +2113,7 @@ public class ModelFactoryWindow : EditorWindow
         cur.resourceName = form.resourceName; cur.pawnDescription = form.pawnDescription; cur.modelFile = form.modelFile;
         cur.rotation = form.rotation; cur.position = form.position; cur.size = form.size;
         cur.normalsMode = form.normalsMode; cur.smoothingAngle = form.smoothingAngle; cur.convertGrid = form.convertGrid;
-        cur.reuseExtracted = form.reuseExtracted; cur.doubleSided = form.doubleSided; cur.windingFix = form.windingFix; cur.heightUV = form.heightUV;
+        cur.reuseExtracted = form.reuseExtracted; cur.doubleSided = form.doubleSided; cur.windingFix = form.windingFix; cur.multiMesh = form.multiMesh; cur.heightUV = form.heightUV;
         cur.albedoBrightness = form.albedoBrightness; cur.albedoSaturation = form.albedoSaturation; cur.keepBlack = form.keepBlack;
         cur.materialMode = form.materialMode; cur.atlasMaxDim = form.atlasMaxDim; cur.targetTris = form.targetTris;
         cur.stripParts = form.stripParts; cur.hideMeshes = form.hideMeshes;

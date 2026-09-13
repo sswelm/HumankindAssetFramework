@@ -217,6 +217,13 @@ their settings and work together**:
   skirt low, grey hull high). For untextured CAD models that just need a simple gradient skin.
 - **Winding fix (CAD/convex)** — rewind faces outward so single-sided / CAD "sketch" meshes render instead of culling to
   invisible. Lightest fix; assumes a roughly convex hull (vehicles/ships).
+- **Multi-fragment split (over-ceiling bake)** — *opt-in, static bakes only.* A bake over the engine's 16,320-quad
+  per-fragment draw ceiling splits into spatial chunks (`…_ModelMesh_B`, …, up to 8), each drawn as its own fragment on
+  the unit, so the whole model renders instead of the tail silently clipping. Every split bake raises a **budget
+  warning** (console + dialog) with the total — "N quads across K fragments, K.K× the normal per-unit budget" — because
+  more fragments are more draw work: reduce first, split only when further reduction would visibly hurt. Unchecked
+  (default) keeps the classic behavior: one mesh, the over-ceiling dialog, overflow clipped. See the
+  [quickstart's draw-ceiling section](Vehicle-Lab-Quickstart.md#9-large-models--fitting-the-engines-draw-ceiling).
 - **Double-sided** — for **animated (rigged) vehicles** this moved to the **Vehicle Lab** in 0.5.4 (its
   *Double-sided (fix see-through parts)* checkbox, applied to the source Spin GLB when you generate the rig). The
   Factory no longer has the checkbox for animated models. For **static** single-sided/CAD shells, use **Winding

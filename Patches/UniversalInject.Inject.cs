@@ -255,6 +255,7 @@ namespace HumankindAssetFramework
                 SetMember(addon, "MeshCollection", e.skeleton);
                 ReloadFragments(addon, animMgr, e.skeleton, e);
                 InjectHandProp(addon, animMgr, e.skeleton, e);
+                InjectExtraMeshFragments(addon, animMgr, e.skeleton, e);
                 ApplyTexture(e, animMgr);
                 DumpFxIndices(donorSkel0, e, bodyName, animMgr);   // ghost hunt: donor vs our FxMeshIndex + StartIndex needle + descriptor scan
                 DumpLayerBudget(e, bodyName, animMgr);             // render-ceiling report: PPC + 255xPPC vs this mesh's PrimitiveCount
@@ -1441,9 +1442,20 @@ namespace HumankindAssetFramework
                 var arr = AccessTools.Field(skel.GetType(), "skinnedMeshInfos")?.GetValue(skel) as Array;
                 if (arr != null && arr.Length > 0)
                 {
-                    var item = arr.GetValue(0);
+                    // MULTI-MESH bakes (2026-09-13) carry overflow chunks (<name>_ModelMesh_B..) beside the body —
+                    // rename ONLY the body (the exact "_ModelMesh" tail), never blindly [0]: the SDK's Reimport order
+                    // is not a contract. A re-injection this session finds the body already carrying newName -> no-op.
+                    int idx = 0;
+                    for (int i = 0; i < arr.Length; i++)
+                    {
+                        var mi = arr.GetValue(i);
+                        var mn = AccessTools.Field(mi.GetType(), "MeshName")?.GetValue(mi) as string ?? "";
+                        if (mn == newName) return;
+                        if (mn.EndsWith("_ModelMesh", StringComparison.OrdinalIgnoreCase)) idx = i;
+                    }
+                    var item = arr.GetValue(idx);
                     AccessTools.Field(item.GetType(), "MeshName")?.SetValue(item, newName);
-                    arr.SetValue(item, 0);
+                    arr.SetValue(item, idx);
                 }
                 // There used to be a second half here that mirrored the new name into a parallel `allMeshNames` string[]
                 // on the skeleton. REMOVED 2026-08-23: `typeprobe --exact allMeshNames` says NO type in ANY game
@@ -1915,6 +1927,137 @@ namespace HumankindAssetFramework
                 Plugin.Diag($"[Props] '{e.resourceName}' hand prop '{meshName}' glued to bone '{boneName}' (boneIndex {bidx}, encoded {enc})");
             }
             catch (Exception ex) { Plugin.Log.LogError("[Props] InjectHandProp: " + ex); }
+        }
+
+        // MULTI-MESH SPLIT (2026-09-13, the Bremen — 51,072 quads on the 16,320 per-FRAGMENT ceiling): a bake over
+        // the ceiling ships overflow chunks (<name>_ModelMesh_B..) beside the body in OUR collection, and this
+        // appends one FragmentEntry per chunk so the whole ship draws — the sanctioned way past the ceiling (the
+        // pawn compute shader's 255x64 stride is compiled in; raising it shreds pawns). Everything is OURS: our
+        // collection, the body fragment's own output layer (same atlas — no new GPU layer slots), our root bone;
+        // the chunks skin by their own bone weights against our skeleton exactly like the body. Discovery is from
+        // the collection itself (no registry field): a fitting bake ships no chunks and this is a no-op. The
+        // descriptor repoint is the hand-prop pattern (append-only tail block, per-definition, alignment-safe);
+        // GPU SkinnedMeshIndex = the chunk's index within our collection, matching what the vanilla packer stamps.
+        // Runs AFTER InjectHandProp so each append repoints from the other's finished block. Re-entrant by meshName.
+        static void InjectExtraMeshFragments(object addon, object animMgr, object skel, ModelEntry e)
+        {
+            if (e == null || skel == null) return;
+            try
+            {
+                var smis = GetMember(skel, "skinnedMeshInfos") as Array;
+                if (smis == null || smis.Length < 2) return;
+                string prefix = e.resourceName + "_ModelMesh_";
+                var extraNames = new List<string>(); var extraSmi = new List<uint>();
+                for (int i = 0; i < smis.Length; i++)
+                {
+                    var mn = GetMember(smis.GetValue(i), "MeshName")?.ToString() ?? "";
+                    if (mn.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) { extraNames.Add(mn); extraSmi.Add((uint)i); }
+                }
+                if (extraNames.Count == 0) return;
+                var frags = GetMember(addon, "FragmentEntries") as Array;
+                if (frags == null || frags.Length == 0) return;
+                var fragType = frags.GetType().GetElementType();
+                var mnField = AccessTools.Field(fragType, "meshName");
+                var folField = AccessTools.Field(fragType, "fxOutputLayer");
+                for (int i = 0; i < frags.Length; i++)
+                    if (mnField?.GetValue(frags.GetValue(i)) is string s2)
+                        for (int x = extraNames.Count - 1; x >= 0; x--)
+                            if (string.Equals(extraNames[x], s2, StringComparison.OrdinalIgnoreCase))
+                            { extraNames.RemoveAt(x); extraSmi.RemoveAt(x); }   // already appended this session
+                if (extraNames.Count == 0) return;
+
+                // the BODY fragment's output layer: the isolated clone when one was made, else the first fragment
+                // that actually renders — SAME layer object, so the chunks share the body's atlas and GPU slot.
+                object fol = e.isolatedLayer;
+                for (int i = 0; i < frags.Length && fol == null; i++)
+                    if (frags.GetValue(i) != null && MemberUInt(frags.GetValue(i), "EncodedMeshAndVisualParticleCount", 0) != 0)
+                        fol = folField?.GetValue(frags.GetValue(i));
+                if (fol == null) { Plugin.Log.LogWarning($"[Uni][Multi] '{e.resourceName}': no rendering body fragment to borrow a layer from — overflow chunks stay invisible"); return; }
+
+                string boneName = null;
+                if (GetMember(skel, "BoneInfos") is Array bones && bones.Length > 0)
+                    boneName = GetMember(bones.GetValue(0), "Name")?.ToString();
+                if (string.IsNullOrEmpty(boneName)) { Plugin.Log.LogWarning($"[Uni][Multi] '{e.resourceName}': our skeleton reports no bones — overflow chunks stay invisible"); return; }
+
+                var ctor5 = fragType.GetConstructors(BF).FirstOrDefault(c => c.GetParameters().Length == 5);
+                if (ctor5 == null) { Plugin.Log.LogWarning("[Uni][Multi] FragmentEntry ctor not found (game update?)"); return; }
+                var renderer = GetMember(animMgr, "FxComponentRenderer");
+                var mcm = GetMember(animMgr, "FxComponentMeshContentManager");
+                var layerObj = GetMember(animMgr, "FXMeshLayerIndex");
+                int layer = layerObj is int li3 ? li3 : Convert.ToInt32(layerObj ?? 0);
+                var made = new List<object>(); var encs = new List<uint>(); var bidxs = new List<uint>(); var smiIdxs = new List<uint>();
+                for (int xi = 0; xi < extraNames.Count; xi++)
+                {
+                    string chunkName = extraNames[xi]; uint smiIndex = extraSmi[xi];
+                    var item = ctor5.Invoke(new object[] { 0, skel, chunkName, fol, boneName });
+                    try { AccessTools.Method(fragType, "Load")?.Invoke(item, new object[] { skel, renderer, mcm, layer }); }
+                    catch (Exception ex) { Plugin.Log.LogWarning($"[Uni][Multi] chunk '{chunkName}' Load: " + (ex.InnerException ?? ex).Message); continue; }
+                    uint enc = MemberUInt(item, "EncodedMeshAndVisualParticleCount", 0);
+                    if (enc == 0) { Plugin.Log.LogWarning($"[Uni][Multi] chunk '{chunkName}' encoded to 0 (name not in the collection?) — skipped"); continue; }
+                    made.Add(item); encs.Add(enc); bidxs.Add(MemberUInt(item, "BoneIndex", 0)); smiIdxs.Add(smiIndex);
+                    Plugin.Diag($"[Uni][Multi] '{e.resourceName}' chunk '{chunkName}' encoded 0x{enc:X8} (smi {smiIndex}, bone '{boneName}')");
+                }
+                if (made.Count == 0) return;
+                var narr = Array.CreateInstance(fragType, frags.Length + made.Count);
+                Array.Copy(frags, narr, frags.Length);
+                for (int i = 0; i < made.Count; i++) narr.SetValue(made[i], frags.Length + i);
+                SetMember(addon, "FragmentEntries", narr);
+                // descriptor repoint — hand-prop pattern, N entries at once (see InjectHandProp for why NOT
+                // UpdateDescriptorBufferContent: the full re-pack shifts unloaded definitions onto wrong fragments).
+                try
+                {
+                    var pmType = GameBinding.PawnManager;
+                    var pm = pmType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
+                             ?? AccessTools.Field(pmType, "Instance")?.GetValue(null);
+                    int defId = MemberInt(addon, "PawnDefinitionId", -1);
+                    if (pm == null || defId < 0)
+                    {
+                        Plugin.Diag($"[Uni][Multi] '{e.resourceName}' {made.Count} chunk fragment(s) appended pre-registration — the registration snapshot carries them");
+                        return;
+                    }
+                    var descF = AccessTools.Field(pmType, "gpuPawnDescriptorEntries");
+                    var fragF = AccessTools.Field(pmType, "gpuPawnDescriptorFragmentEntries");
+                    var cntF = AccessTools.Field(pmType, "persistentFragmentEntryCount");
+                    var dirtyF = AccessTools.Field(pmType, "descriptorBufferDirty");
+                    var descs = descF?.GetValue(pm) as Array;
+                    var gfrags = fragF?.GetValue(pm) as Array;
+                    if (descs == null || gfrags == null || cntF == null || defId >= descs.Length)
+                    { Plugin.Log.LogWarning($"[Uni][Multi] '{e.resourceName}': descriptor arrays unreadable (defId {defId}) — overflow chunks stay invisible"); return; }
+                    var dEntry = descs.GetValue(defId);
+                    var dT = dEntry.GetType();
+                    uint start = (uint)dT.GetField("StartFragment").GetValue(dEntry);
+                    uint count = (uint)dT.GetField("FragmentCount").GetValue(dEntry);
+                    int tail = Convert.ToInt32(cntF.GetValue(pm));
+                    int need = tail + (int)count + made.Count;
+                    if (gfrags.Length < need)
+                    {
+                        var grown = Array.CreateInstance(gfrags.GetType().GetElementType(), need + 100);
+                        Array.Copy(gfrags, grown, gfrags.Length);
+                        fragF.SetValue(pm, grown); gfrags = grown;
+                    }
+                    for (int k = 0; k < count; k++) gfrags.SetValue(gfrags.GetValue((int)start + k), tail + k);
+                    var feType = gfrags.GetType().GetElementType();
+                    uint folIdx = 0;
+                    try { folIdx = (uint)Convert.ToInt32(GetMember(fol, "LayerIndex")); } catch { }
+                    for (int i = 0; i < made.Count; i++)
+                    {
+                        var ge = Activator.CreateInstance(feType);
+                        feType.GetField("SkinnedMeshIndex").SetValue(ge, smiIdxs[i]);
+                        feType.GetField("EncodedMeshAndVisualParticleCountFxMeshIndex").SetValue(ge, encs[i]);
+                        feType.GetField("BoneIndex").SetValue(ge, bidxs[i]);
+                        feType.GetField("FxOutputLayerIndex").SetValue(ge, folIdx);
+                        gfrags.SetValue(ge, tail + (int)count + i);
+                    }
+                    dT.GetField("StartFragment").SetValue(dEntry, (uint)tail);
+                    dT.GetField("FragmentCount").SetValue(dEntry, count + (uint)made.Count);
+                    descs.SetValue(dEntry, defId);
+                    cntF.SetValue(pm, tail + (int)count + made.Count);
+                    dirtyF?.SetValue(pm, true);
+                    Plugin.Diag($"[Uni][Multi] descriptor[{defId}] repointed: fragments {start}+{count} -> {tail}+{count + (uint)made.Count} ({made.Count} overflow chunk(s), layer {folIdx})");
+                }
+                catch (Exception ex) { Plugin.Log.LogWarning("[Uni][Multi] descriptor patch: " + ex.Message); }
+            }
+            catch (Exception ex) { Plugin.Log.LogError("[Uni][Multi] InjectExtraMeshFragments: " + ex); }
         }
 
     }

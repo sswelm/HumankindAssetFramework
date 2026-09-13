@@ -265,13 +265,22 @@ by the game. Launch Humankind, enable the mod, load the target unit, and use F8 
 
 ## 9. Large models — fitting the engine's draw ceiling
 
-The engine draws **at most 16,320 quads per baked unit mesh** (255 sub-particles × 64 primitives, a hard 8-bit
+The engine draws **at most 16,320 quads per draw fragment** (255 sub-particles × 64 primitives, a hard 8-bit
 field) and the overrun is **silent**: the mesh stores fully, but whatever baked last — masts, rigging, sails —
 simply never renders in-game, with no error anywhere. Every preview shows the full model; only the game clips.
-The tooling now surfaces this at both ends: the Factory prints a per-mesh
-`BAKED MESH … fits (N to spare)` / `OVER by N` line after each bake (over-ceiling also raises a dialog), and the
-plugin logs a `[Uni][BUDGET]` audit line per injected unit at load, catching units baked before the check
-existed.
+Since 0.5.7 a static bake over the ceiling **can split itself — opt-in via the Factory entry's
+"Multi-fragment split (over-ceiling bake)" checkbox** (default off: extra fragments are extra draw work, so
+this is a conscious per-model choice; unchecked keeps the classic warn-and-clip). When enabled, the Factory
+partitions the mesh into spatial chunks (`…_ModelMesh`, `…_ModelMesh_B`, …), each under the budget, and the
+plugin draws every overflow chunk as its own fragment on the same unit — the engine-native way past the
+ceiling, the same mechanism vanilla's detailed multi-fragment units use. The `BAKED MESH` console line reports
+each chunk (`fits (N to spare)`), the split is logged as `split into K meshes`, and a **budget warning**
+(console + dialog) states the total — "N quads across K fragments, K.K× the normal per-unit budget" — so the
+cost stays visible even though every chunk fits. The plugin logs `[Uni][Multi] … chunk … encoded` per chunk at
+load. The dial guidance below still matters — fewer triangles are still cheaper. (Animated bakes don't split:
+their ceiling remains hard — keep them under 16,320 quads.)
+The plugin also logs a `[Uni][BUDGET]` audit line per injected unit at load, catching units baked before the
+check existed.
 
 A 395k-vertex source (a fully rigged galley: 64+ oars, sails, flags, rigging) fits under that ceiling at full
 visual quality with this workflow — **delete and cut per role at the source, so the Factory's blind global
@@ -305,8 +314,9 @@ reduction never has to choose what survives**:
    recipe, **Browse** to the new file (marked roles are kept), **Probe** (roles re-apply by part name — only the
    new `_Part_NNN` rows need marking), Save. Every Save keeps a `.bak~` of what it overwrites.
 
-Beyond the single-mesh ceiling, the engine-native path is multiple meshes per unit (each gets its own 16,320
-budget, as vanilla's detailed units do) — a planned framework feature, not yet available.
+Beyond the single-fragment ceiling, the engine-native path is multiple meshes per unit (each with its own
+16,320 budget, as vanilla's detailed units do) — since 0.5.7 the **static** bake path offers this via the
+opt-in Multi-fragment split checkbox (see the top of this section); the animated path does not.
 
 ## Fast symptom map
 

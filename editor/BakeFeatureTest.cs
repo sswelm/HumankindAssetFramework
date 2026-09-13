@@ -124,6 +124,66 @@ public static class BakeFeatureTest
                 Check(res, ref pass, ref fail, "windingFix completes and keeps geometry", m != null && r.ok && m.triangles.Length > 0, r.ok ? "ok" : r.error);
             }
 
+            // ---- MULTI-MESH SPLIT (2026-09-13, the Bremen): a bake over the 16,320-quad per-fragment ceiling
+            //      must ship overflow chunks (_ModelMesh_B..) instead of silently not drawing the tail in-game.
+            //      The 70,844-tri grid BSP-halves past the ceiling twice -> 4 chunks; assert every chunk fits,
+            //      nothing was lost (triangle sum), and the shipped Skeleton carries one skinnedMeshInfos entry
+            //      per chunk — the entries the plugin's fragment discovery appends draw calls for. ----
+            {
+                string grid = WriteDenseGrid(tmp, "grid", 200, 179);   // (199*178)*2 = 70,844 tris
+                // default (opt-in OFF): the classic behavior — ONE over-ceiling mesh, no chunk assets
+                var cOff = Cfg("splitoff", grid);
+                var mOff = Bake(cOff, used, out var rOff);
+                bool offClassic = rOff.ok && mOff != null && mOff.triangles.Length / 3 == 70844
+                    && AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Resources/" + cOff.resourceName + "_ModelMesh_B.asset") == null;
+                Check(res, ref pass, ref fail, "multi-mesh split is OPT-IN (default bakes one over-ceiling mesh)",
+                    offClassic, mOff != null ? $"tris={mOff.triangles.Length / 3:N0}, _B exists={!offClassic}" : "no mesh (" + rOff.error + ")");
+                var c = Cfg("split", grid); c.multiMesh = true;
+                var m = Bake(c, used, out var rs);
+                var chunkList = new List<Mesh>();
+                if (m != null) chunkList.Add(m);
+                for (char ch = 'B'; ch <= 'H'; ch++)
+                {
+                    var mc = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Resources/" + c.resourceName + "_ModelMesh_" + ch + ".asset");
+                    if (mc != null) chunkList.Add(mc);
+                }
+                int sum = 0, worst = -1;
+                foreach (var x in chunkList) { int t = x.triangles.Length / 3; sum += t; worst = Mathf.Max(worst, t); }
+                bool fits = chunkList.Count >= 3 && worst <= 255 * 64 * 2 && sum == 70844;
+                Check(res, ref pass, ref fail, "over-ceiling bake splits into fitting chunks",
+                    rs.ok && fits, $"chunks={chunkList.Count}, worst={worst:N0} tris (cap {255 * 64 * 2:N0}), sum={sum:N0}/70,844");
+                var skelObj = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>("Assets/Resources/" + c.resourceName + "_Skeleton.asset");
+                int smiCount = -1;
+                if (skelObj != null)
+                    for (var st = skelObj.GetType(); st != null && smiCount < 0; st = st.BaseType)
+                        if (st.GetField("skinnedMeshInfos", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.DeclaredOnly)?.GetValue(skelObj) is Array smiArr)
+                            smiCount = smiArr.Length;
+                Check(res, ref pass, ref fail, "split skeleton carries one mesh entry per chunk",
+                    smiCount == chunkList.Count && chunkList.Count > 1, $"skinnedMeshInfos={smiCount}, chunk assets={chunkList.Count}");
+            }
+
+            // ---- FACETED + multi-mesh (review P1): unwelded triangles share NO edges, so the SDK pairs
+            //      nothing — quads == tris, and the old tris/2 budget shipped a 19,838-tri faceted mesh as one
+            //      19,838-quad "fitting" chunk (3,518 over the ceiling). The quad-aware budget must split it. ----
+            {
+                string grid2 = WriteDenseGrid(tmp, "grid2", 110, 92);   // (109*91)*2 = 19,838 tris — fits a tris/2 budget, OVER as faceted quads
+                var c = Cfg("splitfacet", grid2); c.multiMesh = true; c.normals = NormalsMode.Faceted;
+                var m = Bake(c, used, out var rf);
+                var fchunks = new List<Mesh>();
+                if (m != null) fchunks.Add(m);
+                for (char ch = 'B'; ch <= 'H'; ch++)
+                {
+                    var mc = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Resources/" + c.resourceName + "_ModelMesh_" + ch + ".asset");
+                    if (mc != null) fchunks.Add(mc);
+                }
+                int fsum = 0, fworst = -1;
+                foreach (var x in fchunks) { int t = x.triangles.Length / 3; fsum += t; fworst = Mathf.Max(fworst, t); }
+                // faceted quads == tris: every chunk must fit the QUAD ceiling measured in TRIANGLES
+                Check(res, ref pass, ref fail, "Faceted over-ceiling bake splits by real quad cost (quads == tris)",
+                    rf.ok && fchunks.Count >= 2 && fworst <= 255 * 64 && fsum == 19838,
+                    $"chunks={fchunks.Count}, worst={fworst:N0} tris (cap {255 * 64:N0} as quads), sum={fsum:N0}/19,838");
+            }
+
             // ---- materialMode Multi on a 2-material model: packs an atlas, bake succeeds (packing detail covered by real models) ----
             {
                 var c = Cfg("multi", cube2); c.materialMode = MaterialMode.Multi;
@@ -421,6 +481,35 @@ public static class BakeFeatureTest
             mtl.AppendLine("newmtl mat"); mtl.AppendLine("map_Kd " + name + "_albedo.png");
             WriteAlbedo(Path.Combine(d, name + "_albedo.png"), new Color(1f, 0.55f, 0.2f));
         }
+        File.WriteAllText(Path.Combine(d, name + ".obj"), sb.ToString());
+        File.WriteAllText(Path.Combine(d, name + ".mtl"), mtl.ToString());
+        return Path.Combine(d, name + ".obj");
+    }
+
+    // Dense single-material grid — the multi-mesh-split fixture, sized to EXCEED the 32,640-tri fragment budget.
+    // A gentle sine ripple keeps the surface non-degenerate; one shared vt keeps the OBJ small.
+    static string WriteDenseGrid(string dir, string name, int nx, int ny)
+    {
+        var d = Path.Combine(dir, name);
+        Directory.CreateDirectory(d);
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var sb = new StringBuilder();
+        sb.AppendLine("mtllib " + name + ".mtl");
+        for (int y = 0; y < ny; y++)
+            for (int x = 0; x < nx; x++)
+                sb.AppendLine(string.Format(inv, "v {0} {1} {2}", x * 0.05f, y * 0.05f, Mathf.Sin(x * 0.7f) * 0.02f));
+        sb.AppendLine("vt 0 0");
+        sb.AppendLine("usemtl mat");
+        for (int y = 0; y < ny - 1; y++)
+            for (int x = 0; x < nx - 1; x++)
+            {
+                int a = y * nx + x + 1, b = a + 1, c = a + nx, d2 = a + nx + 1;
+                sb.AppendLine($"f {a}/1 {b}/1 {d2}/1");
+                sb.AppendLine($"f {a}/1 {d2}/1 {c}/1");
+            }
+        var mtl = new StringBuilder();
+        mtl.AppendLine("newmtl mat"); mtl.AppendLine("map_Kd " + name + "_albedo.png");
+        WriteAlbedo(Path.Combine(d, name + "_albedo.png"), new Color(0.6f, 0.6f, 0.3f));
         File.WriteAllText(Path.Combine(d, name + ".obj"), sb.ToString());
         File.WriteAllText(Path.Combine(d, name + ".mtl"), mtl.ToString());
         return Path.Combine(d, name + ".obj");

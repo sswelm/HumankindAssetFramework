@@ -28,6 +28,7 @@ public struct BakeConfig
     public bool    reuseExtracted;  // true = reuse the existing OBJ/albedo (skip re-import) — lets the modder hand-edit the extracted texture and keep it
     public bool    doubleSided;     // true = add a reversed back face to every triangle (single-sided/CAD repair) so backface-culled parts render in-game
     public bool    windingFix;      // true = rewind faces outward from the origin (documented CAD winding fix) so single-sided meshes render, no geometry doubling
+    public bool    multiMesh;       // true = a static bake over the per-fragment quad ceiling splits into _ModelMesh_B.. chunks (opt-in; off = classic warn-and-clip)
     public bool    heightUV;        // true = override UVs with U=length, V=height so a vertical-gradient albedo maps by height (black skirt low, grey hull high)
     public float   albedoBrightness; // multiply the baked atlas RGB (1 = unchanged). >1 lifts a dark skin — the injection path ships FLAT albedo (donor PBR neutralized), so shiny/dark models read muddy in-game; this compensates at bake time
     public float   albedoSaturation; // scale colour vividness around per-pixel luminance (1 = unchanged, 0 = greyscale, >1 = punchier). Fixes desaturated albedos (game lighting can't add colour back)
@@ -110,6 +111,10 @@ public static class UniversalBaker
     // "_ClipsPoseData.bytes" (the clip's baked pose stream, written by ClipCollection.Reimport next to _Clips) was
     // missing from this list, so a failed animated re-bake could restore an OLD _Clips next to NEW pose bytes.
     internal static readonly string[] OutputSuffixes = { "_ModelMesh.asset", "_Atlas.asset", "_Mat.mat", "_Model.prefab", "_Skeleton.asset", "_Clips.asset", "_ClipsPoseData.bytes",
+                                                // Multi-mesh split overflow chunks (2026-09-13, the Bremen): a bake over the 16,320-quad
+                                                // per-fragment ceiling ships extra _ModelMesh_B.. meshes in the same collection.
+                                                "_ModelMesh_B.asset", "_ModelMesh_C.asset", "_ModelMesh_D.asset", "_ModelMesh_E.asset",
+                                                "_ModelMesh_F.asset", "_ModelMesh_G.asset", "_ModelMesh_H.asset",
                                                 "_ClipsMove.asset", "_ClipsMovePoseData.bytes", "_ClipsAfter.asset", "_ClipsAfterPoseData.bytes",
                                                 "_ClipsAttack.asset", "_ClipsAttackPoseData.bytes",
                                                 "_ClipsCombat.asset", "_ClipsCombatPoseData.bytes",
@@ -1527,11 +1532,24 @@ public static class UniversalBaker
         mesh.RecalculateBounds();
         if (cfg.normals == NormalsMode.Faceted || mesh.normals == null || mesh.normals.Length != mesh.vertexCount) mesh.RecalculateNormals();
         mesh.RecalculateTangents();
+        // MULTI-MESH SPLIT (2026-09-13, the Bremen): the engine's 16,320-quad draw ceiling is per FRAGMENT
+        // (the pawn compute shader's 255x64 stride is compiled in — raising it shreds pawns; unit-mesh-render-clamp
+        // notes). With the entry's OPT-IN checkbox on, a mesh over the ceiling splits into spatial chunks, one
+        // SkinnedMeshRenderer each in the same prefab — the SDK's Skeleton.Reimport turns every SMR into its own
+        // skinnedMeshInfos entry, and the plugin appends a FragmentEntry per overflow chunk (<name>_ModelMesh_B..)
+        // so the whole ship draws. Off (the default) keeps the classic single mesh + warn-and-clip: extra fragments
+        // are extra draw work, so going multi-fragment stays a conscious per-model choice.
+        var chunks = cfg.multiMesh ? SplitForQuadCeiling(mesh, name) : new List<Mesh> { mesh };
+        if (chunks == null)
+            return Fail($"{name}: {mesh.triangles.Length / 3:N0} tris need more than {MaxMeshChunks} draw fragments " +
+                        $"({MaxMeshChunks * QuadBudget:N0}-quad hard cap) — lower 'Reduce to ~tris' or the Vehicle Lab dials first.");
         // Re-bake = clean slate: delete prior outputs so nothing is overwritten IN PLACE. In-place overwrite leaves Unity
         // serving a stale cached mesh/prefab to the skeleton bake below -> the shipped skeleton lags a bake behind and the
         // ship renders 90 deg off in-game even though the (force-reimported) preview looks right. Fresh assets == first bake.
         foreach (var old in new[] { "_ModelMesh.asset", "_Mat.mat", "_Model.prefab", "_Skeleton.asset" })
             AssetDatabase.DeleteAsset("Assets/Resources/" + name + old);
+        for (char c = 'B'; c <= 'H'; c++)   // stale overflow chunks from a previous (bigger) bake must not outlive it
+            AssetDatabase.DeleteAsset("Assets/Resources/" + name + "_ModelMesh_" + c + ".asset");
         // E7: a prior ANIMATED bake left <name>_Preview.prefab (+ _PreviewMesh/_PreviewMat) in FactorySource, and the
         // window's LoadPreview PREFERS that over the static _Model.prefab whenever it exists — so without this a static
         // re-bake would keep showing the OLD animated model in the preview. The static path has no _Preview of its own
@@ -1539,7 +1557,8 @@ public static class UniversalBaker
         for (int i = 1; i < 32; i++) AssetDatabase.DeleteAsset(PreviewMeshPath(resDir, name, i));   // numbered multi-SMR clones swept with the rest
         foreach (var pv in new[] { "_Preview.prefab", "_PreviewMesh.asset", "_PreviewMat.mat" })
             AssetDatabase.DeleteAsset(resDir + "/" + name + pv);
-        AssetDatabase.CreateAsset(mesh, "Assets/Resources/" + name + "_ModelMesh.asset");
+        foreach (var chunk in chunks)
+            AssetDatabase.CreateAsset(chunk, "Assets/Resources/" + chunk.name + ".asset");
 
         var mat = new Material(Shader.Find("Standard")) { name = name + "_Mat", mainTexture = atlas };
         mat.SetFloat("_Glossiness", 0f); mat.SetFloat("_Metallic", 0f);   // matte (Standard defaults to 0.5 smoothness -> glossy on dark textures, e.g. tyres)
@@ -1556,10 +1575,13 @@ public static class UniversalBaker
         }
         AssetDatabase.CreateAsset(mat, "Assets/Resources/" + name + "_Mat.mat");
 
-        var meshGO = new GameObject("Unit_" + name); meshGO.transform.SetParent(root.transform);
-        meshGO.transform.localRotation = Quaternion.Euler(270f, 0f, 0f);
-        var smr = meshGO.AddComponent<SkinnedMeshRenderer>();
-        smr.sharedMesh = mesh; smr.bones = new[] { bone.transform }; smr.rootBone = bone.transform; smr.sharedMaterial = mat; smr.updateWhenOffscreen = true;
+        for (int ci = 0; ci < chunks.Count; ci++)
+        {
+            var meshGO = new GameObject("Unit_" + name + (ci == 0 ? "" : "_" + (char)('A' + ci))); meshGO.transform.SetParent(root.transform);
+            meshGO.transform.localRotation = Quaternion.Euler(270f, 0f, 0f);
+            var smr = meshGO.AddComponent<SkinnedMeshRenderer>();
+            smr.sharedMesh = chunks[ci]; smr.bones = new[] { bone.transform }; smr.rootBone = bone.transform; smr.sharedMaterial = mat; smr.updateWhenOffscreen = true;
+        }
 
         var anim = root.AddComponent<Animator>();
         anim.avatar = AvatarBuilder.BuildGenericAvatar(root, "");
@@ -1570,7 +1592,8 @@ public static class UniversalBaker
         // A re-bake overwrites the mesh/prefab IN PLACE, so LoadAssetAtPath below can return Unity's STALE cached copy --
         // which makes the skeleton bake from last bake's geometry and ship a skeleton lagging a bake behind (wrong
         // orientation in-game while the preview looks right). Force a synchronous reimport so the skeleton reads fresh.
-        AssetDatabase.ImportAsset("Assets/Resources/" + name + "_ModelMesh.asset", ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+        foreach (var chunk in chunks)
+            AssetDatabase.ImportAsset("Assets/Resources/" + chunk.name + ".asset", ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
         AssetDatabase.ImportAsset(prefabPath, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
         var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
 
@@ -1584,7 +1607,15 @@ public static class UniversalBaker
         if (!InvokeReq(skelType, "Reimport", Type.EmptyTypes, skel, null, out err)) return Fail(err);
         EditorUtility.SetDirty(skel);
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
-        ReportBakedQuads(skelType, skel, name);
+        int chunksOverCeiling = ReportBakedQuads(skelType, skel, name);
+        // MULTI-MESH VERIFICATION (review P1): the split PROMISED every chunk fits; if the SDK paired fewer
+        // triangles than estimated and a chunk still measures over, shipping it would silently clip in-game —
+        // fail instead (E5 restores the previous bake) and say what to do. Single-mesh bakes keep the classic
+        // warn-only behavior: no promise was made there.
+        if (cfg.multiMesh && chunksOverCeiling > 0)
+            return Fail($"{name}: {chunksOverCeiling} baked chunk(s) still measure over the {EngineQuadCeiling:N0}-quad " +
+                        "ceiling — the SDK paired fewer triangles than the split estimated. The previous bake was restored; " +
+                        "lower the detail slightly (dials or 'Reduce to ~tris') and re-bake.");
 
         string skelGuid = AmplitudeGuid(skel), atlasGuid = AmplitudeGuid(atlas);
         // empty GUID = the SDK skeleton bake produced nothing -> fail loudly instead of writing a dead registry entry.
@@ -1598,7 +1629,122 @@ public static class UniversalBaker
     // shader — and the overrun is SILENT in-game: the mesh stores fully, the tail (whatever baked last: the galley's
     // masts and sails) simply never draws. Say the number right after the skeleton bake, where the dial that fixes it
     // (Reduce to ~tris) lives — so dialing to the limit needs no game launch, just this line after each Bake.
-    const int EngineQuadCeiling = 255 * 64;   // 16,320 — per MESH; a future multi-mesh split gets this budget per part
+    const int EngineQuadCeiling = 255 * 64;   // 16,320 — per FRAGMENT; the multi-mesh split below gets this budget per chunk
+    const int MaxMeshChunks = 8;   // chunk letters A..H — far past any sane unit budget
+    // QUAD-AWARE BUDGET (review P1, 2026-09-13): the SDK does NOT turn every two triangles into one quad — it
+    // pairs only triangles SHARING AN EDGE, and every unpaired triangle costs a full quad. A Faceted bake
+    // (unwelded: no shared indices at all) encodes quads == tris, so the old tris/2 budget could ship chunks up
+    // to 2x over the ceiling; even the welded Bremen paired at 0.6 quads/tri, not 0.5. Chunks are budgeted on
+    // ESTIMATED quads (greedy pairing in triangle order — the common quad triangulation emits its pair
+    // adjacently) with headroom for estimator/SDK divergence, and the bake VERIFIES the SDK's real counts after
+    // the skeleton bake, failing (E5-restored) rather than shipping an over-ceiling chunk.
+    const int QuadBudget = 16000;   // 98% of the ceiling
+    static int EstimateQuads(int[] tris, IList<int> cell)
+    {
+        long Key(int x, int y) => x < y ? ((long)x << 32) | (uint)y : ((long)y << 32) | (uint)x;
+        var owner = new Dictionary<long, int>(cell.Count * 2);
+        var paired = new Dictionary<int, bool>(cell.Count);
+        int quads = 0;
+        foreach (int t in cell)
+        {
+            int a = tris[t * 3], b = tris[t * 3 + 1], c = tris[t * 3 + 2];
+            int mate = -1;
+            foreach (long e in new[] { Key(a, b), Key(b, c), Key(c, a) })
+                if (owner.TryGetValue(e, out int o) && !paired[o]) { mate = o; break; }
+            if (mate >= 0) { paired[mate] = true; paired[t] = true; quads++; }
+            else
+            {
+                paired[t] = false;
+                owner[Key(a, b)] = t; owner[Key(b, c)] = t; owner[Key(c, a)] = t;
+            }
+        }
+        foreach (var kv in paired) if (!kv.Value) quads++;
+        return quads;
+    }
+
+    // MULTI-MESH SPLIT (2026-09-13, the Bremen — 51,072 quads on a 16,320 ceiling): partition an over-ceiling mesh
+    // into spatial chunks, each a standalone Mesh under the per-fragment budget (measured in ESTIMATED QUADS —
+    // see EstimateQuads above; tris/2 was review P1's trap). BSP at the triangle-centroid median on the longest
+    // axis (the Workshop plane cut's proven partition — whole triangles, deterministic order), every vertex
+    // attribute remapped per chunk. Chunk 0 keeps the plain _ModelMesh name (the body the donor fragment
+    // renames onto); overflow chunks get _ModelMesh_B.. and draw through plugin-appended fragments.
+    // Returns the input mesh alone when it already fits; null when even 8 chunks can't hold it.
+    static List<Mesh> SplitForQuadCeiling(Mesh mesh, string name)
+    {
+        int[] tris = mesh.triangles;
+        int total = tris.Length / 3;
+        var result = new List<Mesh>();
+        if (EstimateQuads(tris, Enumerable.Range(0, total).ToList()) <= EngineQuadCeiling) { result.Add(mesh); return result; }
+        var v = mesh.vertices; var n = mesh.normals; var u = mesh.uv; var t4 = mesh.tangents;
+        var bw = mesh.boneWeights; var bp = mesh.bindposes;
+        bool hasN = n != null && n.Length == v.Length, hasU = u != null && u.Length == v.Length,
+             hasT = t4 != null && t4.Length == v.Length, hasB = bw != null && bw.Length == v.Length;
+        var cent = new Vector3[total];
+        for (int i = 0; i < total; i++) cent[i] = (v[tris[i * 3]] + v[tris[i * 3 + 1]] + v[tris[i * 3 + 2]]) / 3f;
+        var stack = new List<List<int>> { Enumerable.Range(0, total).ToList() };
+        var cells = new List<List<int>>();
+        while (stack.Count > 0)
+        {
+            var cell = stack[stack.Count - 1]; stack.RemoveAt(stack.Count - 1);
+            if (EstimateQuads(tris, cell) <= QuadBudget) { cells.Add(cell); continue; }
+            Vector3 mn = cent[cell[0]], mx = cent[cell[0]];
+            foreach (int ti in cell) { mn = Vector3.Min(mn, cent[ti]); mx = Vector3.Max(mx, cent[ti]); }
+            Vector3 span = mx - mn;
+            int ax = span.x >= span.y && span.x >= span.z ? 0 : (span.y >= span.z ? 1 : 2);
+            cell.Sort((a, b) => cent[a][ax].CompareTo(cent[b][ax]));
+            int mid = cell.Count / 2;
+            stack.Add(cell.GetRange(0, mid)); stack.Add(cell.GetRange(mid, cell.Count - mid));
+        }
+        if (cells.Count > MaxMeshChunks) return null;
+        // stable chunk letters across re-bakes: order cells by their minimum centroid
+        cells.Sort((a, b) =>
+        {
+            Vector3 ma = cent[a[0]], mb = cent[b[0]];
+            foreach (int ti in a) ma = Vector3.Min(ma, cent[ti]);
+            foreach (int ti in b) mb = Vector3.Min(mb, cent[ti]);
+            int c = ma.x.CompareTo(mb.x); if (c != 0) return c;
+            c = ma.y.CompareTo(mb.y); if (c != 0) return c;
+            return ma.z.CompareTo(mb.z);
+        });
+        var sizes = new List<string>();
+        for (int ci = 0; ci < cells.Count; ci++)
+        {
+            var cell = cells[ci];
+            var map = new Dictionary<int, int>();
+            var cv = new List<Vector3>(); var cn = new List<Vector3>(); var cu = new List<Vector2>();
+            var ct4 = new List<Vector4>(); var cbw = new List<BoneWeight>();
+            var ct = new List<int>(cell.Count * 3);
+            foreach (int ti in cell)
+                for (int k = 0; k < 3; k++)
+                {
+                    int oldIdx = tris[ti * 3 + k];
+                    if (!map.TryGetValue(oldIdx, out int newIdx))
+                    {
+                        newIdx = cv.Count; map.Add(oldIdx, newIdx);
+                        cv.Add(v[oldIdx]);
+                        if (hasN) cn.Add(n[oldIdx]);
+                        if (hasU) cu.Add(u[oldIdx]);
+                        if (hasT) ct4.Add(t4[oldIdx]);
+                        if (hasB) cbw.Add(bw[oldIdx]);
+                    }
+                    ct.Add(newIdx);
+                }
+            var m2 = new Mesh { name = name + "_ModelMesh" + (ci == 0 ? "" : "_" + (char)('A' + ci)), indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+            m2.SetVertices(cv);
+            if (hasN) m2.SetNormals(cn);
+            if (hasU) m2.SetUVs(0, cu);
+            if (hasT) m2.SetTangents(ct4);
+            if (hasB) m2.boneWeights = cbw.ToArray();
+            if (bp != null && bp.Length > 0) m2.bindposes = bp;
+            m2.SetTriangles(ct, 0);
+            m2.RecalculateBounds();
+            result.Add(m2);
+            sizes.Add($"{m2.name.Substring(name.Length)}: {cell.Count:N0} tris (~{EstimateQuads(tris, cell):N0} quads)");
+        }
+        Debug.Log($"[Factory] {name}: {total:N0} tris exceed the {EngineQuadCeiling:N0}-quad per-fragment ceiling — split into " +
+                  $"{result.Count} meshes ({string.Join(", ", sizes)}); the plugin draws each overflow chunk as its own fragment.");
+        return result;
+    }
     // GetField does NOT see a base class's private fields — skinnedMeshInfos lives on Skeleton's BASE type
     // (MeshCollection), so the flat lookup returned null and the first version of this report silently did
     // nothing through an entire evening of over-ceiling bakes. Walk the hierarchy, and fail LOUDLY.
@@ -1611,7 +1757,9 @@ public static class UniversalBaker
         }
         return null;
     }
-    static void ReportBakedQuads(Type skelType, UnityEngine.Object skel, string name)
+    // Returns how many meshes MEASURED over the ceiling (0 when all fit or when nothing could be verified —
+    // read failures stay warn-only, matching this report's original advisory role).
+    static int ReportBakedQuads(Type skelType, UnityEngine.Object skel, string name)
     {
         try
         {
@@ -1619,9 +1767,10 @@ public static class UniversalBaker
             if (!(smisF?.GetValue(skel) is System.Collections.IEnumerable smis))
             {
                 Debug.LogWarning($"[Factory] {name}: quad report could not read skinnedMeshInfos on {skelType.FullName} — the {EngineQuadCeiling:N0}-quad ceiling was NOT verified this bake.");
-                return;
+                return 0;
             }
             var over = new List<string>();
+            int meshCount = 0; long totalQuads = 0;
             foreach (var smi in smis)
             {
                 var smiT = smi.GetType();
@@ -1632,6 +1781,7 @@ public static class UniversalBaker
                 int qc = (int)(FindFieldDeep(fmcT, "quadCount")?.GetValue(fmc) ?? 0);
                 int vc = (int)(FindFieldDeep(fmcT, "vertexCount")?.GetValue(fmc) ?? 0);
                 if (qc == 0) { Debug.LogWarning($"[Factory] {name}: quad report read 0 quads on '{mn}' (field missing or empty mesh) — NOT verified."); continue; }
+                meshCount++; totalQuads += qc;
                 if (qc > EngineQuadCeiling)
                 {
                     Debug.LogWarning($"[Factory] {name} BAKED MESH '{mn}': {qc:N0} quads / {vc:N0} verts — OVER the engine's {EngineQuadCeiling:N0}-quad draw ceiling by {qc - EngineQuadCeiling:N0}: that geometry will SILENTLY NOT RENDER in-game (the last-baked parts vanish first). Lower 'Reduce to ~tris' until this says 'fits'.");
@@ -1639,6 +1789,25 @@ public static class UniversalBaker
                 }
                 else
                     Debug.Log($"[Factory] {name} BAKED MESH '{mn}': {qc:N0} quads / {vc:N0} verts — fits the engine's {EngineQuadCeiling:N0}-quad draw ceiling ({EngineQuadCeiling - qc:N0} to spare).");
+            }
+            // MULTI-FRAGMENT BUDGET WARNING (2026-09-13, user request): the split makes every chunk say "fits",
+            // which silences the very signal that used to say "this unit is heavy". A unit past the normal
+            // one-fragment budget still costs that many times the draw work of a vanilla-sized unit — say so,
+            // loudly, every bake, so shipping a multi-fragment unit stays a conscious, informed choice.
+            if (meshCount > 1 && totalQuads > EngineQuadCeiling)
+            {
+                double factor = (double)totalQuads / EngineQuadCeiling;
+                Debug.LogWarning($"[Factory] {name} MULTI-FRAGMENT UNIT: {totalQuads:N0} quads across {meshCount} fragments — " +
+                                 $"{factor:0.0}x the engine's normal {EngineQuadCeiling:N0}-quad per-unit budget. It renders fully, " +
+                                 "but costs that many times the draw work of a vanilla-sized unit; reduce further if the frame rate matters.");
+                if (!Application.isBatchMode)
+                    EditorUtility.DisplayDialog("Multi-fragment unit — heavy draw budget",
+                        $"{name}: {totalQuads:N0} quads across {meshCount} draw fragments — {factor:0.0}× the engine's normal " +
+                        $"{EngineQuadCeiling:N0}-quad per-unit budget.\n\nThe whole model renders (that's what the Multi-fragment " +
+                        "split checkbox is for), but every fragment is a separate draw pass: this unit costs roughly " +
+                        $"{factor:0.0}× the render work of a vanilla-sized one. If the map will carry many of these, " +
+                        "reduce harder in the Vehicle Lab dials or 'Reduce to ~tris'.",
+                        "Understood");
             }
             // A DIALOG, not just a console line (user request 2026-09-06): the in-game failure is SILENT — a
             // console warning scrolled past is how the galley shipped without masts through five bakes. The bake
@@ -1651,8 +1820,9 @@ public static class UniversalBaker
                     "\n\nThe overflow will SILENTLY not render in-game — the last-baked parts (masts, rigging…) vanish " +
                     "first, with no error anywhere. Lower 'Reduce to ~tris' and re-bake until the console line says 'fits'.",
                     "Understood");
+            return over.Count;
         }
-        catch (Exception qex) { Debug.LogWarning("[Factory] quad report: " + qex.Message); }
+        catch (Exception qex) { Debug.LogWarning("[Factory] quad report: " + qex.Message); return 0; }
     }
 
     // A readable albedo for one material, for multi-material atlas packing. Prefer the extracted png on disk whose name
