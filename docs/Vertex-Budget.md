@@ -2,8 +2,12 @@
 
 The real limit on custom models is **not download size** (that compresses ~5:1 in the shipped
 bundle; a 190 MB bundle zips to ~69 MB, and mod.io's soft limit is 100 MB with generous headroom
-above). The real limit is a **GPU vertex buffer** the game packs every skinned mesh into. This page
-records what that buffer actually is, measured live, and how to budget against it.
+above). For **unit models** the real limit is a **GPU vertex buffer** the game packs every skinned
+mesh into — this page records what that buffer actually is, measured live, and how to budget against
+it. But it is only one of THREE separate draw-budget systems (units / districts / terrain), each
+limiting something different — terrain, notably, stores **no vertices at all**. The full map is in
+[Three pipelines, three different budgets](#three-pipelines-three-different-budgets--the-map-of-every-draw-limit)
+below; the sections in between are the unit pipeline's detail.
 
 ## The mechanism (decompiled: `Amplitude.Graphics.FxComponentMeshContentManager`)
 
@@ -117,15 +121,27 @@ Spawning 10 more of the same unit won't move the numbers (instancing — copies 
    ceiling is "the whole loaded roster," identical in every era, and it's ~700k/1M with vanilla + the
    current ENC set.
 
-## Other engine ceilings — quick map
+## Three pipelines, three different budgets — the map of every draw limit
 
-Three sibling ceilings, three different verdicts (all share the "silently not drawn" failure mode):
+**There is no single "vertex limit" in this game.** Three separate rendering systems each budget something
+different, and they fail the same way (silently not drawn) for different reasons. Everything below is
+measured, not assumed:
 
-| Path | Ceiling | Status |
-|---|---|---|
-| **Units (pawns)** | 16,320 quads per fragment — PPC stride compiled into the pawn shader | beaten by **multi-fragment split** (0.5.7, opt-in Factory checkbox) |
-| **Districts** | 255 sub-particles × PPC — PPC read dynamically, on a private layer clone | beaten by **`DistrictMeshDensityBoost`**; IL-verified 24-bit start / 8-bit count encode — details in [District-Visuals](District-Visuals.md) |
-| **Terrain tiles** | ~21k tiles (likely 16-bit, native side) | unverified lead — section below |
+| Pipeline | What is stored | Pool limit (shared) | Per-mesh limit | Raise it with |
+|---|---|---|---|---|
+| **Units (pawns)** | baked skinned meshes, one copy per TYPE (instances free) | **~1,000,000 verts** (pawn layer; ~700k used by the roster) | 16,320 quads per FRAGMENT (compiled shader stride) | `[Buffers] BufferOverrides` for the pool; the 0.5.7 **multi-fragment split** for the per-mesh cap |
+| **Districts / buildings** | baked static meshes in the shared `Visual` layer | **3,000,000 verts**, ~99% full late-game — the tightest real vertex wall | 255 sub-particles × PPC (PPC dynamic, auto-boosted since 0.5.7) | `DistrictBufferHeadroom` for the pool; `DistrictMeshDensityBoost` floor for the ceiling — [District-Visuals](District-Visuals.md) |
+| **Terrain tiles** | **NO stored vertices at all** — `ProceduralTerrainRenderer` GENERATES the hex geometry on the GPU every frame (visibility kernel → repack → draw-procedural + tessellation) and throws it away | n/a — vertices are manufactured per frame | **10,000 visible hexagons** per frame (post-culling) and 800,000 draw commands, both plain ints on the technical-settings asset | `[Terrain] TerrainHexagonBufferMultiplier` (0.5.7, experimental — section below) |
+
+The practical consequences:
+
+- A **unit or district** that is "too detailed" starves a shared *vertex pool* — the cost is per distinct
+  model type, paid at load, and VRAM buys it back.
+- **Terrain** can never run out of vertices — when tiles stop rendering on huge maps, the suspect is the
+  *visible-hexagon count* the visibility pass may emit, not geometry storage. Different disease, different
+  medicine.
+- Per-hex terrain DATA (altitude, biome, sculpt/river indices) is bit-packed in the const hex buffer — those
+  masks bound *value ranges* (how many distinct terrain types, etc.), never vertex counts.
 
 ## Other engine ceilings — the terrain tile limit (community lead, UNVERIFIED)
 
@@ -137,18 +153,25 @@ per the [Review-Backlog rules](Review-Backlog.md) (re-verify before acting), it 
 - **The number diagnoses itself**: 21,845 tiles × 3 parts = **65,535 — the 16-bit (ushort) ceiling**.
   That smells like an index/element count limit in the terrain pipeline, a *different species* from the
   units' 16,320-quad **per-fragment** clamp (255×64, pawn compute shader).
-- **Why the unit fix doesn't transplant directly**: the multi-fragment split worked because the whole
-  pawn fragment path runs through **managed code** a BepInEx plugin can patch (`PawnManager` /
-  `AnimationManager` — FragmentEntries, descriptor snapshots), and the cap is per-fragment, so more
-  fragments = more budget. A typeprobe sweep of `Amplitude.Mercury.Terrain` (2026-09-13) shows only
-  high-level managed types (territories, landmarks, labels, settings — no tile mesh builder), so the
-  tile geometry is likely built native/compute-side, where C# cannot reach a compiled `ushort`.
-- **Why it isn't a flat no**: the same divide-and-conquer shape (several tile batches, each under 65,535
-  elements) would work *if* batch construction has a managed seam — and precedent exists: HAF already
-  resizes a terrain-adjacent GPU buffer from C# (`DistrictBufferHeadroom` grows the `Visual` layer, the
-  table above). Some of that plumbing is managed.
+- **Round 2 (same day, deeper probe): the renderer is MANAGED after all.**
+  `Amplitude.Mercury.Terrain.ProceduralTerrainRenderer` is C# — GPU-indirect (visibility/repack/draw
+  compute kernels) but driven entirely from patchable code. Its `CreateOrResizeVisibleHexagonsBuffer` /
+  `CreateOrResizeDrawCommandsBuffer` size their buffers from **two plain ints on the loaded
+  `TerrainRendererTechnicalSettings` asset** (IL read, token-resolved; no clamp constant in the renderer).
+- **Measured live** (the `[Terrain]` probe line, 2026-09-13): `VisibleHexagonsBufferSize = 10,000`,
+  `DrawCommandBufferSize = 800,000`. **Not 65,536** — so the clean "ushort capacity" theory is dead in
+  its original form. Two live theories remain:
+  1. **The visible-hexagon budget**: 10,000 is the post-culling *on-screen* hex budget. A big world
+     zoomed far out can plausibly exceed it, and the repack would drop the rest — matching "tiles beyond
+     a certain amount will not render." Testable directly with the multiplier below.
+  2. **A ushort×3 edge/part index elsewhere**: 21,845 × 3 = 65,535 still fits a 16-bit index over
+     "3 parts per tile" (a hex owns 3 edges in standard storage). Candidates checked and CLEARED so far:
+     `WorldMapProviderHelper.ImportFrom`'s 65536s are capability FLAG BITS; `Matching.BakedElement`'s
+     65535 is the pattern-library sentinel (`NoMatchingEntryIndex`), not a tile count.
+- **The instrument exists**: `[Terrain] TerrainHexagonBufferMultiplier` (plugin config, default 1 =
+  vanilla) multiplies both settings ints before buffer creation, and the probe line logs the shipped
+  values every launch. **The decisive field test**: a >10k-visible-tile view (huge map, max zoom-out)
+  with the multiplier at 1 vs 4 — if missing far tiles appear, theory 1 is confirmed and the ceiling is
+  effectively broken; if nothing changes, hunt theory 2's ushort in the compute kernels' data layout.
 - **Scope caution**: a >21k-tile world stresses more than rendering (simulation, saves, pathing) —
   rendering may not even be the binding constraint.
-- **Next step, if ever picked up**: probe where tile visual buffers are allocated (start from the
-  terrain engine's managed entry points and `CameraGraphicService`), and look for a managed seam that
-  sizes or batches them. Fair odds the dig ends at "native code, can't reach."

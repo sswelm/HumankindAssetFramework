@@ -112,6 +112,7 @@ namespace HumankindAssetFramework
         internal static ConfigEntry<string> DistrictFxMeshGuid;  // MESH-SWAP: our baked FxMesh GUID; keep the district's own working material, swap only its mesh to ours (best render odds)
         internal static ConfigEntry<int>    DistrictBufferHeadroom; // extra vertices to add to the big (Visual) GPU mesh buffer at init, so custom district meshes fit even in a full late-game city. 0 = off (leave the buffer as the game sizes it).
         internal static ConfigEntry<int>    DistrictMeshDensityBoost; // multiplier on the private layer's PrimitivePerParticleCount — raises the per-mesh 255-sub-particle render ceiling so high-poly composed districts (grove pizzas) draw fully. 0/1 = vanilla.
+        internal static ConfigEntry<int>    TerrainHexagonBufferMultiplier; // [Terrain] EXPERIMENTAL: multiply the terrain renderer's VisibleHexagonsBufferSize/DrawCommandBufferSize (the suspected ~21k-tile render ceiling; 65,535 = 21,845 tiles x 3 parts). 0/1 = vanilla; the probe log line prints the shipped values either way.
         internal static ConfigEntry<string> DistrictGroundMaterial; // force a GroundMaterialDefinition (grass field) under custom districts — the terrain paint a wonder's affinity lacks. Blank = off. DistrictDebug logs the valid names.
         internal static ConfigEntry<string> DistrictHexSculpt; // force a HexagonSculptingDefinition (raised platform + strategic footprint) under custom wonders. Blank = off. Per-entry field overrides.
         internal static ConfigEntry<bool>   DistrictIsolate;         // scope the mesh-swap to only the target district's own tile (private per-instance leaf) instead of the shared-global swap
@@ -327,6 +328,12 @@ namespace HumankindAssetFramework
                                   "model (e.g. a temple + a grove of trees) exceeds it and the excess is silently not drawn. The mesh is fully stored; " +
                                   "only the render clamp bites, so multiplying PPC repacks it under the ceiling with the same GPU work. Default 8 (~8x " +
                                   "headroom). 0/1 = vanilla. Applied per district on our private layer clone only.");
+            TerrainHexagonBufferMultiplier = Config.Bind("Terrain", "TerrainHexagonBufferMultiplier", 1,
+                                  "EXPERIMENTAL — the map-tile render ceiling lead. The terrain renderer's visible-hexagon and draw-command " +
+                                  "buffers size from two ints on its technical-settings asset; community reports put the render limit at " +
+                                  "~21,000 tiles (21,845 x 3 parts = 65,535). This multiplies both sizes before the buffers are created. " +
+                                  "0/1 = vanilla (the [Terrain] probe line still logs the shipped values at load). Raise to 2+ only for " +
+                                  "oversized-map testing; whether a shader-side clamp remains downstream is exactly what the test answers.");
 
             SilenceAudioEvents  = Config.Bind("Audio", "SilenceAudioEvents", "",
                                   "Comma-separated Wwise event-name SUBSTRINGS to SILENCE — any sound whose event name contains one is dropped at the " +
@@ -420,6 +427,7 @@ namespace HumankindAssetFramework
                 typeof(Hk_SilenceEvents),     // silence-by-event-name: drop any Wwise post whose name matches Audio/SilenceAudioEvents (POC for era-audio; no-op when empty)
                 typeof(Hk_DistrictRepoint),   // EXPERIMENTAL: replace one district's on-map visual (docs/District-Visuals.md)
                 typeof(Hk_DistrictBufferHeadroom), // EXPERIMENTAL: enlarge the shared 'Visual' mesh buffer so custom district meshes fit (opt-in)
+                typeof(Hk_TerrainHexagonHeadroom), // EXPERIMENTAL: probe + multiply the terrain visible-hexagon/draw-command buffer sizes (the ~21k-tile ceiling lead)
                 typeof(Hk_DistrictGroundMaterial), // EXPERIMENTAL: force a ground material (grass field) under a custom district
                 typeof(Hk_GroundApplyProbe),       // DIAGNOSTIC: log the ground index each district resolves (find the Industry "deadzone")
                 typeof(Hk_DistrictHexSculpt),      // EXPERIMENTAL: force hexagon sculpting (raised platform + strategic footprint) under a custom wonder
