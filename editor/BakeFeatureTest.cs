@@ -32,6 +32,7 @@ public static class BakeFeatureTest
 
         try
         {
+            UniversalBaker.QuietDialogs = true;   // fixtures bake over-ceiling/multi-fragment ON PURPOSE — no modal per fixture
             if (Directory.Exists(tmp)) Directory.Delete(tmp, true);
             Directory.CreateDirectory(tmp);
             string cube1 = WriteCube(tmp, "cube1", false);            // single-material
@@ -272,6 +273,7 @@ public static class BakeFeatureTest
         catch (Exception e) { res.Add("FAIL: harness exception — " + e.Message); fail++; }
         finally
         {
+            UniversalBaker.QuietDialogs = false;
             Cleanup(used);
             try { if (Directory.Exists(tmp)) Directory.Delete(tmp, true); } catch { }
             AssetDatabase.Refresh();
@@ -299,6 +301,7 @@ public static class BakeFeatureTest
         }
         try
         {
+            UniversalBaker.QuietDialogs = true;   // same as Tier 1: fixture bakes must not raise modals
             if (Directory.Exists(tmp)) Directory.Delete(tmp, true);
             Directory.CreateDirectory(tmp);
 
@@ -348,6 +351,7 @@ public static class BakeFeatureTest
         catch (Exception e) { res.Add("FAIL: harness exception — " + e.Message); fail++; }
         finally
         {
+            UniversalBaker.QuietDialogs = false;
             Cleanup(used);
             try { if (Directory.Exists(tmp)) Directory.Delete(tmp, true); } catch { }
             AssetDatabase.Refresh();

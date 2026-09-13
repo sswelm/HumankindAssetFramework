@@ -1650,6 +1650,12 @@ public static class UniversalBaker
     // masts and sails) simply never draws. Say the number right after the skeleton bake, where the dial that fixes it
     // (Reduce to ~tris) lives — so dialing to the limit needs no game launch, just this line after each Bake.
     const int EngineQuadCeiling = 255 * 64;   // 16,320 — per FRAGMENT; the multi-mesh split below gets this budget per chunk
+    // QUIET flag for the in-editor test harness (2026-09-13, "the Budget tester is popping up for every
+    // validation"): the bake-test fixtures deliberately bake over-ceiling and multi-fragment models, so an
+    // interactive Tools ▸ HAF ▸ Bake Tests run raised a MODAL per fixture — the batch-mode guard only covers
+    // the headless lane. The harness sets this around its sections; console warnings still log either way,
+    // and a real user bake keeps its dialogs.
+    internal static bool QuietDialogs;
     const int MaxMeshChunks = 8;   // chunk letters A..H — far past any sane unit budget
     // QUAD-AWARE BUDGET (review P1, 2026-09-13): the SDK does NOT turn every two triangles into one quad — it
     // pairs only triangles SHARING AN EDGE, and every unpaired triangle costs a full quad. A Faceted bake
@@ -1835,7 +1841,7 @@ public static class UniversalBaker
                 Debug.LogWarning($"[Factory] {name} MULTI-FRAGMENT UNIT: {totalQuads:N0} quads across {meshCount} fragments — " +
                                  $"{factor:0.0}x the engine's normal {EngineQuadCeiling:N0}-quad per-unit budget. It renders fully, " +
                                  "but costs that many times the draw work of a vanilla-sized unit; reduce further if the frame rate matters.");
-                if (!Application.isBatchMode)
+                if (!Application.isBatchMode && !QuietDialogs)
                     EditorUtility.DisplayDialog("Multi-fragment unit — heavy draw budget",
                         $"{name}: {totalQuads:N0} quads across {meshCount} draw fragments — {factor:0.0}× the engine's normal " +
                         $"{EngineQuadCeiling:N0}-quad per-unit budget.\n\nThe whole model renders (that's what the Multi-fragment " +
@@ -1848,7 +1854,7 @@ public static class UniversalBaker
             // console warning scrolled past is how the galley shipped without masts through five bakes. The bake
             // still succeeds (the asset is valid; only the overflow won't draw), so this informs rather than
             // aborts. Skipped in batch mode so automated bake tests never block on a modal.
-            if (over.Count > 0 && !Application.isBatchMode)
+            if (over.Count > 0 && !Application.isBatchMode && !QuietDialogs)
                 EditorUtility.DisplayDialog("Mesh over the engine's draw ceiling",
                     $"{name}: the baked mesh exceeds the engine's per-mesh draw ceiling of {EngineQuadCeiling:N0} quads " +
                     "(255 sub-particles × 64 primitives).\n\n" + string.Join("\n", over) +
