@@ -689,9 +689,14 @@ public static class GlbDisconnectedParts
                 uint a = primitive["indices"] == null ? i : reader.Index(primitive.Value<int>("indices"), i);
                 uint b = primitive["indices"] == null ? i + 1 : reader.Index(primitive.Value<int>("indices"), i + 1);
                 uint c = primitive["indices"] == null ? i + 2 : reader.Index(primitive.Value<int>("indices"), i + 2);
-                Vec3 pa = XForm(world, reader.Position(posAcc, a));
-                Vec3 pb = XForm(world, reader.Position(posAcc, b));
-                Vec3 pc = XForm(world, reader.Position(posAcc, c));
+                // FLOAT-SNAP before judging (review P2, 2026-09-13): the preview classifies ExtractPart's FLOAT
+                // positions while this writer held doubles — at a boundary (a face exactly at the plane, or a
+                // 0.1 node translation whose float rounds above its double) the two disagreed: a grey face wrote
+                // to _CutA, and an "Only above: 0%" floor excluded the bottom face. Judging the same
+                // float-rounded coordinates the preview shows restores WYSIWYG exactly, boundaries included.
+                Vec3 pa = Snap(XForm(world, reader.Position(posAcc, a)));
+                Vec3 pb = Snap(XForm(world, reader.Position(posAcc, b)));
+                Vec3 pc = Snap(XForm(world, reader.Position(posAcc, c)));
                 var bucket = sides[sideA(pa, pb, pc) ? 0 : 1];
                 if (!bucket.TryGetValue(primitiveIndex, out List<uint> list)) bucket.Add(primitiveIndex, list = new List<uint>());
                 list.Add(a); list.Add(b); list.Add(c);
@@ -897,6 +902,11 @@ public static class GlbDisconnectedParts
         Y = m[1] * p.X + m[5] * p.Y + m[9] * p.Z + m[13],
         Z = m[2] * p.X + m[6] * p.Y + m[10] * p.Z + m[14]
     };
+
+    // The cut's shared coordinate precision: ExtractPart hands the preview FLOATS (a Unity Mesh holds nothing
+    // finer), so the writer's judge must see the identical rounding or boundary faces flip sides between the
+    // preview and the output GLB.
+    static Vec3 Snap(Vec3 p) => new Vec3 { X = (float)p.X, Y = (float)p.Y, Z = (float)p.Z };
 
     static MeshPlan AnalyzeMesh(int meshIndex, JObject mesh, Accessors reader, bool keepSingle = false, double mergeFraction = 0)
     {

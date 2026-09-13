@@ -160,9 +160,43 @@ public class GlbPlaneCutTests
         Assert.Equal(4, TriangleCount(root, (JObject)nodes[2]));   // bottom quad + wall
     }
 
+    // ---- boundary precision (review P2, 2026-09-13): the preview classifies ExtractPart's FLOAT positions;
+    // the writer must judge the SAME rounding, or boundary faces flip sides between screen and file. A node
+    // translation of double 0.1 is the trap: its float rounds ABOVE it (0.10000000149 > 0.1). ----
+
+    [Fact]
+    public void Writer_agrees_with_the_float_preview_at_an_exact_boundary_plane()
+    {
+        // Everything shows yellow in the preview (all float centroids >= the float minimum), so the cut must
+        // REFUSE as one-sided. The unsnapped writer put the bottom face's double centroid (0.1) below the
+        // float plane (0.10000000149) and split what the preview showed as uncuttable. The fixture must have
+        // a FLAT face at the exact minimum (Facing's bottom quad) — the Strip's sloped centroids never touch
+        // the boundary and would pass either way.
+        byte[] source = BuildGlb(Facing, translationY: 0.1);
+        var geo = GlbDisconnectedParts.ExtractPart(source, 0);
+        var result = GlbDisconnectedParts.CutNodeByPlane(source, 0, 1, geo.Min[1]);
+        Assert.False(result.Changed);
+        Assert.Contains(result.Warnings, w => w.Contains("every triangle on one side"));
+    }
+
+    [Fact]
+    public void Facing_floor_at_zero_percent_includes_the_bottom_face()
+    {
+        // "Only above: 0%" = floor at the part's float minimum — the WHOLE part must be judged by facing
+        // alone. The unsnapped writer excluded the lowest horizontal face (double 0.1 < float min).
+        byte[] source = BuildGlb(Facing, translationY: 0.1);
+        var geo = GlbDisconnectedParts.ExtractPart(source, 0);
+        var result = GlbDisconnectedParts.CutNodeByFacing(source, 0, 1, 45.0, geo.Min[1]);
+        Assert.True(result.Changed);
+        JObject root = ReadJson(result.Bytes);
+        var nodes = (JArray)root["nodes"];
+        Assert.Equal(5, TriangleCount(root, (JObject)nodes[1]));   // 2 bottom + 2 top + tilted — bottom INCLUDED
+        Assert.Equal(2, TriangleCount(root, (JObject)nodes[2]));   // the vertical wall only
+    }
+
     // ---- helpers (the GlbDisconnectedPartsTests builder, plus rotation / shared-node options) ----
 
-    static byte[] BuildGlb(float[] positions, bool withWeightAnimation = false, bool rotationZ90 = false, bool secondNodeSharesMesh = false)
+    static byte[] BuildGlb(float[] positions, bool withWeightAnimation = false, bool rotationZ90 = false, bool secondNodeSharesMesh = false, double translationY = 0)
     {
         var bin = new List<byte>();
         foreach (float f in positions) bin.AddRange(BitConverter.GetBytes(f));
@@ -180,6 +214,8 @@ public class GlbPlaneCutTests
         var hull = new JObject { ["name"] = "Hull", ["mesh"] = 0 };
         if (rotationZ90)   // +90 deg about Z: quaternion (0, 0, sin45, cos45)
             hull["rotation"] = new JArray(0.0, 0.0, Math.Sqrt(0.5), Math.Sqrt(0.5));
+        if (translationY != 0)
+            hull["translation"] = new JArray(0.0, translationY, 0.0);
         var nodes = new JArray { hull };
         var sceneNodes = new JArray(0);
         if (secondNodeSharesMesh)
