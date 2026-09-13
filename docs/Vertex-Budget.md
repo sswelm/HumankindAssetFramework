@@ -2,8 +2,12 @@
 
 The real limit on custom models is **not download size** (that compresses ~5:1 in the shipped
 bundle; a 190 MB bundle zips to ~69 MB, and mod.io's soft limit is 100 MB with generous headroom
-above). The real limit is a **GPU vertex buffer** the game packs every skinned mesh into. This page
-records what that buffer actually is, measured live, and how to budget against it.
+above). For **unit models** the real limit is a **GPU vertex buffer** the game packs every skinned
+mesh into — this page records what that buffer actually is, measured live, and how to budget against
+it. But it is only one of THREE separate draw-budget systems (units / districts / terrain), each
+limiting something different — terrain, notably, stores **no vertices at all**. The full map is in
+[Three pipelines, three different budgets](#three-pipelines-three-different-budgets--the-map-of-every-draw-limit)
+below; the sections in between are the unit pipeline's detail.
 
 ## The mechanism (decompiled: `Amplitude.Graphics.FxComponentMeshContentManager`)
 
@@ -117,15 +121,27 @@ Spawning 10 more of the same unit won't move the numbers (instancing — copies 
    ceiling is "the whole loaded roster," identical in every era, and it's ~700k/1M with vanilla + the
    current ENC set.
 
-## Other engine ceilings — quick map
+## Three pipelines, three different budgets — the map of every draw limit
 
-Three sibling ceilings, three different verdicts (all share the "silently not drawn" failure mode):
+**There is no single "vertex limit" in this game.** Three separate rendering systems each budget something
+different, and they fail the same way (silently not drawn) for different reasons. Everything below is
+measured, not assumed:
 
-| Path | Ceiling | Status |
-|---|---|---|
-| **Units (pawns)** | 16,320 quads per fragment — PPC stride compiled into the pawn shader | beaten by **multi-fragment split** (0.5.7, opt-in Factory checkbox) |
-| **Districts** | 255 sub-particles × PPC — PPC read dynamically, on a private layer clone | beaten by **`DistrictMeshDensityBoost`**; IL-verified 24-bit start / 8-bit count encode — details in [District-Visuals](District-Visuals.md) |
-| **Terrain tiles** | ~21k tiles (likely 16-bit, native side) | unverified lead — section below |
+| Pipeline | What is stored | Pool limit (shared) | Per-mesh limit | Raise it with |
+|---|---|---|---|---|
+| **Units (pawns)** | baked skinned meshes, one copy per TYPE (instances free) | **~1,000,000 verts** (pawn layer; ~700k used by the roster) | 16,320 quads per FRAGMENT (compiled shader stride) | `[Buffers] BufferOverrides` for the pool; the 0.5.7 **multi-fragment split** for the per-mesh cap |
+| **Districts / buildings** | baked static meshes in the shared `Visual` layer | **3,000,000 verts**, ~99% full late-game — the tightest real vertex wall | 255 sub-particles × PPC (PPC dynamic, auto-boosted since 0.5.7) | `DistrictBufferHeadroom` for the pool; `DistrictMeshDensityBoost` floor for the ceiling — [District-Visuals](District-Visuals.md) |
+| **Terrain tiles** | **NO stored vertices at all** — `ProceduralTerrainRenderer` GENERATES the hex geometry on the GPU every frame (visibility kernel → repack → draw-procedural + tessellation) and throws it away | n/a — vertices are manufactured per frame | **10,000 visible hexagons** per frame (post-culling) and 800,000 draw commands, both plain ints on the technical-settings asset | `[Terrain] TerrainHexagonBufferMultiplier` (0.5.7, experimental — section below) |
+
+The practical consequences:
+
+- A **unit or district** that is "too detailed" starves a shared *vertex pool* — the cost is per distinct
+  model type, paid at load, and VRAM buys it back.
+- **Terrain** can never run out of vertices — when tiles stop rendering on huge maps, the suspect is the
+  *visible-hexagon count* the visibility pass may emit, not geometry storage. Different disease, different
+  medicine.
+- Per-hex terrain DATA (altitude, biome, sculpt/river indices) is bit-packed in the const hex buffer — those
+  masks bound *value ranges* (how many distinct terrain types, etc.), never vertex counts.
 
 ## Other engine ceilings — the terrain tile limit (community lead, UNVERIFIED)
 
