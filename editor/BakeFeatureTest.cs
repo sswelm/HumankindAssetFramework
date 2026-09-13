@@ -131,7 +131,14 @@ public static class BakeFeatureTest
             //      per chunk — the entries the plugin's fragment discovery appends draw calls for. ----
             {
                 string grid = WriteDenseGrid(tmp, "grid", 200, 179);   // (199*178)*2 = 70,844 tris
-                var c = Cfg("split", grid);
+                // default (opt-in OFF): the classic behavior — ONE over-ceiling mesh, no chunk assets
+                var cOff = Cfg("splitoff", grid);
+                var mOff = Bake(cOff, used, out var rOff);
+                bool offClassic = rOff.ok && mOff != null && mOff.triangles.Length / 3 == 70844
+                    && AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Resources/" + cOff.resourceName + "_ModelMesh_B.asset") == null;
+                Check(res, ref pass, ref fail, "multi-mesh split is OPT-IN (default bakes one over-ceiling mesh)",
+                    offClassic, mOff != null ? $"tris={mOff.triangles.Length / 3:N0}, _B exists={!offClassic}" : "no mesh (" + rOff.error + ")");
+                var c = Cfg("split", grid); c.multiMesh = true;
                 var m = Bake(c, used, out var rs);
                 var chunkList = new List<Mesh>();
                 if (m != null) chunkList.Add(m);

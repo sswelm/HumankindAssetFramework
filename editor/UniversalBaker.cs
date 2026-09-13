@@ -28,6 +28,7 @@ public struct BakeConfig
     public bool    reuseExtracted;  // true = reuse the existing OBJ/albedo (skip re-import) — lets the modder hand-edit the extracted texture and keep it
     public bool    doubleSided;     // true = add a reversed back face to every triangle (single-sided/CAD repair) so backface-culled parts render in-game
     public bool    windingFix;      // true = rewind faces outward from the origin (documented CAD winding fix) so single-sided meshes render, no geometry doubling
+    public bool    multiMesh;       // true = a static bake over the per-fragment quad ceiling splits into _ModelMesh_B.. chunks (opt-in; off = classic warn-and-clip)
     public bool    heightUV;        // true = override UVs with U=length, V=height so a vertical-gradient albedo maps by height (black skirt low, grey hull high)
     public float   albedoBrightness; // multiply the baked atlas RGB (1 = unchanged). >1 lifts a dark skin — the injection path ships FLAT albedo (donor PBR neutralized), so shiny/dark models read muddy in-game; this compensates at bake time
     public float   albedoSaturation; // scale colour vividness around per-pixel luminance (1 = unchanged, 0 = greyscale, >1 = punchier). Fixes desaturated albedos (game lighting can't add colour back)
@@ -1533,10 +1534,12 @@ public static class UniversalBaker
         mesh.RecalculateTangents();
         // MULTI-MESH SPLIT (2026-09-13, the Bremen): the engine's 16,320-quad draw ceiling is per FRAGMENT
         // (the pawn compute shader's 255x64 stride is compiled in — raising it shreds pawns; unit-mesh-render-clamp
-        // notes). A mesh over the ceiling therefore splits into spatial chunks, one SkinnedMeshRenderer each in the
-        // same prefab — the SDK's Skeleton.Reimport turns every SMR into its own skinnedMeshInfos entry, and the
-        // plugin appends a FragmentEntry per overflow chunk (<name>_ModelMesh_B..) so the whole ship draws.
-        var chunks = SplitForQuadCeiling(mesh, name);
+        // notes). With the entry's OPT-IN checkbox on, a mesh over the ceiling splits into spatial chunks, one
+        // SkinnedMeshRenderer each in the same prefab — the SDK's Skeleton.Reimport turns every SMR into its own
+        // skinnedMeshInfos entry, and the plugin appends a FragmentEntry per overflow chunk (<name>_ModelMesh_B..)
+        // so the whole ship draws. Off (the default) keeps the classic single mesh + warn-and-clip: extra fragments
+        // are extra draw work, so going multi-fragment stays a conscious per-model choice.
+        var chunks = cfg.multiMesh ? SplitForQuadCeiling(mesh, name) : new List<Mesh> { mesh };
         if (chunks == null)
             return Fail($"{name}: {mesh.triangles.Length / 3:N0} tris need more than {MaxMeshChunks} draw fragments " +
                         $"({MaxMeshChunks * EngineTriCeiling:N0}-tri hard cap) — lower 'Reduce to ~tris' or the Vehicle Lab dials first.");
@@ -1727,6 +1730,7 @@ public static class UniversalBaker
                 return;
             }
             var over = new List<string>();
+            int meshCount = 0; long totalQuads = 0;
             foreach (var smi in smis)
             {
                 var smiT = smi.GetType();
@@ -1737,6 +1741,7 @@ public static class UniversalBaker
                 int qc = (int)(FindFieldDeep(fmcT, "quadCount")?.GetValue(fmc) ?? 0);
                 int vc = (int)(FindFieldDeep(fmcT, "vertexCount")?.GetValue(fmc) ?? 0);
                 if (qc == 0) { Debug.LogWarning($"[Factory] {name}: quad report read 0 quads on '{mn}' (field missing or empty mesh) — NOT verified."); continue; }
+                meshCount++; totalQuads += qc;
                 if (qc > EngineQuadCeiling)
                 {
                     Debug.LogWarning($"[Factory] {name} BAKED MESH '{mn}': {qc:N0} quads / {vc:N0} verts — OVER the engine's {EngineQuadCeiling:N0}-quad draw ceiling by {qc - EngineQuadCeiling:N0}: that geometry will SILENTLY NOT RENDER in-game (the last-baked parts vanish first). Lower 'Reduce to ~tris' until this says 'fits'.");
@@ -1744,6 +1749,25 @@ public static class UniversalBaker
                 }
                 else
                     Debug.Log($"[Factory] {name} BAKED MESH '{mn}': {qc:N0} quads / {vc:N0} verts — fits the engine's {EngineQuadCeiling:N0}-quad draw ceiling ({EngineQuadCeiling - qc:N0} to spare).");
+            }
+            // MULTI-FRAGMENT BUDGET WARNING (2026-09-13, user request): the split makes every chunk say "fits",
+            // which silences the very signal that used to say "this unit is heavy". A unit past the normal
+            // one-fragment budget still costs that many times the draw work of a vanilla-sized unit — say so,
+            // loudly, every bake, so shipping a multi-fragment unit stays a conscious, informed choice.
+            if (meshCount > 1 && totalQuads > EngineQuadCeiling)
+            {
+                double factor = (double)totalQuads / EngineQuadCeiling;
+                Debug.LogWarning($"[Factory] {name} MULTI-FRAGMENT UNIT: {totalQuads:N0} quads across {meshCount} fragments — " +
+                                 $"{factor:0.0}x the engine's normal {EngineQuadCeiling:N0}-quad per-unit budget. It renders fully, " +
+                                 "but costs that many times the draw work of a vanilla-sized unit; reduce further if the frame rate matters.");
+                if (!Application.isBatchMode)
+                    EditorUtility.DisplayDialog("Multi-fragment unit — heavy draw budget",
+                        $"{name}: {totalQuads:N0} quads across {meshCount} draw fragments — {factor:0.0}× the engine's normal " +
+                        $"{EngineQuadCeiling:N0}-quad per-unit budget.\n\nThe whole model renders (that's what the Multi-fragment " +
+                        "split checkbox is for), but every fragment is a separate draw pass: this unit costs roughly " +
+                        $"{factor:0.0}× the render work of a vanilla-sized one. If the map will carry many of these, " +
+                        "reduce harder in the Vehicle Lab dials or 'Reduce to ~tris'.",
+                        "Understood");
             }
             // A DIALOG, not just a console line (user request 2026-09-06): the in-game failure is SILENT — a
             // console warning scrolled past is how the galley shipped without masts through five bakes. The bake

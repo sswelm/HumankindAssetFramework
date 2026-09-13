@@ -5,17 +5,23 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
-- **Past the 16,320-quad draw ceiling — an over-ceiling static bake now splits into multiple draw fragments.**
+- **Past the 16,320-quad draw ceiling — an over-ceiling static bake can split into multiple draw fragments
+  (opt-in per model).**
   The engine draws at most 16,320 quads per FRAGMENT (255 sub-particles × 64 primitives; the stride is compiled
   into the pawn shader, so raising it shreds pawns — the density-boost post-mortem), and the overflow never
-  rendered: the Bremen baked 51,072 quads and the game silently clipped two thirds of the ship. A static bake
-  over the ceiling now BSP-splits the mesh into spatial chunks (`…_ModelMesh`, `…_ModelMesh_B`, …), each under
+  rendered: the Bremen baked 51,072 quads and the game silently clipped two thirds of the ship. With the new
+  **Multi-fragment split** checkbox on the Factory entry (default OFF — more fragments are more draw work, so
+  going multi-fragment is a conscious per-model choice; off keeps the classic warn-and-clip behavior), a static
+  bake over the ceiling BSP-splits the mesh into spatial chunks (`…_ModelMesh`, `…_ModelMesh_B`, …), each under
   the budget, one SkinnedMeshRenderer per chunk in the same prefab — the SDK's Skeleton bake turns each into
   its own mesh entry — and the plugin appends one FragmentEntry per overflow chunk at injection (our collection,
   the body fragment's own output layer and atlas, our root bone), patching the GPU pawn descriptor per
   definition exactly like the proven hand-prop append. Discovery is from the collection itself: a fitting bake
   ships no chunks and nothing changes; chunk letters are spatially stable across re-bakes; the E5 rollback,
-  Remove and re-bake sweeps all know the chunk assets. The console `BAKED MESH` line reports every chunk, and
+  Remove and re-bake sweeps all know the chunk assets. A split bake stays LOUD: because every chunk now says
+  "fits", the quad report adds a **multi-fragment budget warning** (console + dialog) naming the total — "N
+  quads across K fragments, K.Kx the normal per-unit budget" — so a heavy unit never ships quietly. The console
+  `BAKED MESH` line reports every chunk, and
   `[Uni][Multi]` log lines name each appended fragment at load. Headless bake test: a 70,844-tri grid must
   split into fitting chunks with the triangle sum preserved and one skeleton mesh entry per chunk. Animated
   bakes do not split yet (their ceiling remains hard); up to 8 fragments = 261k triangles of static budget.

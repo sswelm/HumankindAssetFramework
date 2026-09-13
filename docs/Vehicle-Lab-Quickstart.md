@@ -268,14 +268,17 @@ by the game. Launch Humankind, enable the mod, load the target unit, and use F8 
 The engine draws **at most 16,320 quads per draw fragment** (255 sub-particles × 64 primitives, a hard 8-bit
 field) and the overrun is **silent**: the mesh stores fully, but whatever baked last — masts, rigging, sails —
 simply never renders in-game, with no error anywhere. Every preview shows the full model; only the game clips.
-Since 0.5.7 a **static bake over the ceiling splits itself**: the Factory partitions the mesh into spatial
-chunks (`…_ModelMesh`, `…_ModelMesh_B`, …), each under the budget, and the plugin draws every overflow chunk
-as its own fragment on the same unit — the engine-native way past the ceiling, the same mechanism vanilla's
-detailed multi-fragment units use. The `BAKED MESH` console line then reports each chunk (`fits (N to spare)`)
-and the split is logged as `split into K meshes`; the plugin logs `[Uni][Multi] … chunk … encoded` per chunk at
-load. The dial guidance below still matters — fewer triangles are still cheaper — but an over-ceiling bake now
-degrades to more fragments instead of invisible geometry. (Animated bakes don't split yet: their ceiling
-remains hard — keep them under 16,320 quads.)
+Since 0.5.7 a static bake over the ceiling **can split itself — opt-in via the Factory entry's
+"Multi-fragment split (over-ceiling bake)" checkbox** (default off: extra fragments are extra draw work, so
+this is a conscious per-model choice; unchecked keeps the classic warn-and-clip). When enabled, the Factory
+partitions the mesh into spatial chunks (`…_ModelMesh`, `…_ModelMesh_B`, …), each under the budget, and the
+plugin draws every overflow chunk as its own fragment on the same unit — the engine-native way past the
+ceiling, the same mechanism vanilla's detailed multi-fragment units use. The `BAKED MESH` console line reports
+each chunk (`fits (N to spare)`), the split is logged as `split into K meshes`, and a **budget warning**
+(console + dialog) states the total — "N quads across K fragments, K.K× the normal per-unit budget" — so the
+cost stays visible even though every chunk fits. The plugin logs `[Uni][Multi] … chunk … encoded` per chunk at
+load. The dial guidance below still matters — fewer triangles are still cheaper. (Animated bakes don't split:
+their ceiling remains hard — keep them under 16,320 quads.)
 The plugin also logs a `[Uni][BUDGET]` audit line per injected unit at load, catching units baked before the
 check existed.
 
@@ -309,8 +312,8 @@ reduction never has to choose what survives**:
    new `_Part_NNN` rows need marking), Save. Every Save keeps a `.bak~` of what it overwrites.
 
 Beyond the single-fragment ceiling, the engine-native path is multiple meshes per unit (each with its own
-16,320 budget, as vanilla's detailed units do) — since 0.5.7 the **static** bake path does this automatically
-(see the top of this section); the animated path does not yet.
+16,320 budget, as vanilla's detailed units do) — since 0.5.7 the **static** bake path offers this via the
+opt-in Multi-fragment split checkbox (see the top of this section); the animated path does not.
 
 ## Fast symptom map
 

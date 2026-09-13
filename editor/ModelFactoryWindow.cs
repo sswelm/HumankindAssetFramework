@@ -1235,6 +1235,16 @@ public class ModelFactoryWindow : EditorWindow
             // The static-path doubling code and the `doubleSided` field remain, so any existing entry still bakes as
             // saved; there's just no UI to set it here. Winding fix (above) stays as the light single-sided repair.
         }
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            GUILayout.FlexibleSpace();
+            cur.multiMesh = EditorGUILayout.ToggleLeft(new GUIContent("Multi-fragment split (over-ceiling bake)",
+                "OPT-IN: a static bake over the engine's 16,320-quad per-fragment draw ceiling splits into spatial chunks " +
+                "(_ModelMesh_B..), each drawn as its own fragment on the unit — the whole model renders instead of the tail " +
+                "silently clipping (up to 8 fragments = 261k tris). Off = the classic behavior: one mesh, a warning dialog, " +
+                "and the overflow does not draw. More fragments cost more draw work — reduce first, split when reduction " +
+                "would visibly hurt. Static bakes only; the animated path's ceiling is unchanged."), cur.multiMesh, GUILayout.Width(260));
+        }
         // Albedo tone (baked into the atlas). The injection path ships a FLAT albedo — the donor's PBR normal/metallic/
         // roughness maps are neutralized so its camo can't bleed onto our model — so a skin that relied on shiny metal,
         // or a dark/washed-out texture, reads muddy in-game. These lift it at bake time (1.0 = unchanged). Slider ranges
@@ -2021,7 +2031,7 @@ public class ModelFactoryWindow : EditorWindow
         resourceName = cur.resourceName, modelFile = cur.modelFile, pawnDescription = cur.pawnDescription,
         rotationEuler = cur.rotation, positionOffset = cur.position, size = cur.size,
         normals = (NormalsMode)cur.normalsMode, smoothingAngle = cur.smoothingAngle, convertGrid = cur.convertGrid,
-        reuseExtracted = cur.reuseExtracted, doubleSided = cur.doubleSided, windingFix = cur.windingFix, heightUV = cur.heightUV, targetTris = cur.targetTris,
+        reuseExtracted = cur.reuseExtracted, doubleSided = cur.doubleSided, windingFix = cur.windingFix, multiMesh = cur.multiMesh, heightUV = cur.heightUV, targetTris = cur.targetTris,
         albedoBrightness = cur.albedoBrightness, albedoSaturation = cur.albedoSaturation, keepBlack = cur.keepBlack, materialMode = cur.materialMode,
         atlasMaxDim = cur.atlasMaxDim <= 0 ? 512 : cur.atlasMaxDim,
         stripParts = cur.stripParts,
@@ -2107,7 +2117,7 @@ public class ModelFactoryWindow : EditorWindow
         cur.resourceName = form.resourceName; cur.pawnDescription = form.pawnDescription; cur.modelFile = form.modelFile;
         cur.rotation = form.rotation; cur.position = form.position; cur.size = form.size;
         cur.normalsMode = form.normalsMode; cur.smoothingAngle = form.smoothingAngle; cur.convertGrid = form.convertGrid;
-        cur.reuseExtracted = form.reuseExtracted; cur.doubleSided = form.doubleSided; cur.windingFix = form.windingFix; cur.heightUV = form.heightUV;
+        cur.reuseExtracted = form.reuseExtracted; cur.doubleSided = form.doubleSided; cur.windingFix = form.windingFix; cur.multiMesh = form.multiMesh; cur.heightUV = form.heightUV;
         cur.albedoBrightness = form.albedoBrightness; cur.albedoSaturation = form.albedoSaturation; cur.keepBlack = form.keepBlack;
         cur.materialMode = form.materialMode; cur.atlasMaxDim = form.atlasMaxDim; cur.targetTris = form.targetTris;
         cur.stripParts = form.stripParts; cur.hideMeshes = form.hideMeshes;
