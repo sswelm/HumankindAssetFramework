@@ -654,15 +654,19 @@ namespace HumankindAssetFramework
                         // (FillMeshVertexAndBufferContent ignores PPC — encoding is complete); only the render clamp bites.
                         // PPC is a per-LAYER value and this is our private clone, so multiplying it lifts the ceiling
                         // (255 x PPC) with the SAME total GPU work — fewer particles, each covering more primitives. No
-                        // re-bake needed. Config DistrictMeshDensityBoost (default 8 -> ~8x headroom); 0/1 = vanilla.
-                        int boost = Plugin.DistrictMeshDensityBoost != null ? Plugin.DistrictMeshDensityBoost.Value : 8;
-                        if (boost > 1)
+                        // re-bake needed. Config DistrictMeshDensityBoost (default 8 -> ~8x headroom); 0/1 = vanilla —
+                        // and since 2026-09-13 the boost AUTO-SIZES from this leaf's own mesh (EffectiveDensityBoost:
+                        // config is the floor), so an over-sized model can no longer clip because nobody raised the int.
                         {
                             var ppcF = layerClone.GetType().GetField("primitivePerParticleCount", BF);
                             if (ppcF?.GetValue(layerClone) is int ppc && ppc > 0)
                             {
-                                ppcF.SetValue(layerClone, ppc * boost);
-                                Plugin.Diag($"[DistrictTex] private layer primitivePerParticleCount {ppc} -> {ppc * boost} (per-mesh ceiling now ~{255L * ppc * boost} primitives; the grove fix)");
+                                int boost = EffectiveDensityBoost(ppc, fxGuid);
+                                if (boost > 1)
+                                {
+                                    ppcF.SetValue(layerClone, ppc * boost);
+                                    Plugin.Diag($"[DistrictTex] private layer primitivePerParticleCount {ppc} -> {ppc * boost} (per-mesh ceiling now ~{255L * ppc * boost} primitives; the grove fix)");
+                                }
                             }
                         }
                         olF.SetValue(clone, layerClone);
@@ -822,10 +826,63 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogError("[District] preserve footprint: " + ex); }
         }
 
+        // AUTO-BOOST (2026-09-13, the ceiling investigation): DistrictMeshDensityBoost is a static config int, so
+        // a model needing x40 with the config at 8 still clipped silently — the exact silence the boost exists to
+        // prevent. The FxMesh asset carries its Unity Mesh, so the needed boost is computable at clone time:
+        // ceil(triangles / (255 x PPC)). Triangles OVERESTIMATE encoded quads (the encoder pairs edge-sharing
+        // tris), and overshooting PPC is free — fewer particles, each covering more primitives, same GPU work.
+        // The config value stays as the FLOOR; a caller without a mesh in hand (footprint decal layers) passes
+        // null and gets exactly the old behavior.
+        [ProcessLived("FxMesh triangle counts, keyed by guid string — assets are immutable within a session")]
+        static readonly System.Collections.Generic.Dictionary<string, long> fxMeshTris = new System.Collections.Generic.Dictionary<string, long>();
+        static long FxMeshTriangles(object fxGuid)
+        {
+            if (fxGuid == null) return 0;
+            string key = fxGuid.ToString();
+            if (fxMeshTris.TryGetValue(key, out long cached)) return cached;
+            long tris = 0;
+            try
+            {
+                var fxType = GameBinding.FxMesh;
+                var adb = GameBinding.AssetDatabase;
+                var load = fxType == null ? null : adb?.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                    .FirstOrDefault(m => (m.Name == "TryLoadAsset" || m.Name == "LoadAsset") && m.IsGenericMethodDefinition && m.GetParameters().Length == 1)?.MakeGenericMethod(fxType);
+                object fx = null;
+                try { fx = load?.Invoke(null, new[] { fxGuid }); } catch { }
+                if (fx is UnityEngine.Object ufx && ufx && GetMember(fx, "Mesh") is UnityEngine.Mesh mesh && mesh)
+                    for (int s = 0; s < mesh.subMeshCount; s++) tris += (long)(mesh.GetIndexCount(s) / 3);
+            }
+            catch (Exception ex) { Plugin.Diag("[District] auto-boost mesh probe: " + ex.Message); }
+            // Cache SUCCESSES only (review P2): a zero here usually means "asset not loadable YET" (bundle not
+            // mounted, mid-session-load) — caching it disabled auto-sizing for that guid for the whole process,
+            // session resets included. A failed probe re-tries on the next clone instead; clones are rare.
+            if (tris > 0) fxMeshTris[key] = tris;
+            return tris;
+        }
+        static int EffectiveDensityBoost(int ppc, object fxGuid)
+        {
+            int boost = Plugin.DistrictMeshDensityBoost != null ? Plugin.DistrictMeshDensityBoost.Value : 8;
+            // 0/1 = vanilla is the DOCUMENTED opt-out (review P2: auto-sizing overrode it — a disable the user
+            // set by hand must win over any heuristic, the one-convention lesson in miniature).
+            if (boost <= 1) return boost;
+            long tris = FxMeshTriangles(fxGuid);
+            if (ppc > 0 && tris > 0)
+            {
+                int needed = (int)((tris + 255L * ppc - 1) / (255L * ppc));
+                if (needed > boost)
+                {
+                    Plugin.Diag($"[District] auto-boost: mesh ~{tris:N0} tris needs x{needed} on PPC {ppc} (config x{boost}) — using x{needed}");
+                    boost = needed;
+                }
+            }
+            return boost;
+        }
+
         // Clone an FxOutputLayer private (the texture-injection layer): opt out of hi-res streaming (null the mid/high
         // material GUIDs so the game never stomps our binding) and raise the per-mesh primitive ceiling. Same recipe as
         // BuildPrivateLeaf's inline layer clone, factored out so the deep-clone reactor elements can share ONE such layer.
-        static UnityEngine.Object ClonePrivateOutputLayer(UnityEngine.Object srcLayer)
+        // fxGuid (optional): the mesh this layer will draw — enables the auto-boost above; null = config boost only.
+        static UnityEngine.Object ClonePrivateOutputLayer(UnityEngine.Object srcLayer, object fxGuid = null)
         {
             var layerClone = UnityEngine.Object.Instantiate(srcLayer);
             TrackDistrictClone(layerClone);   // deepLayer / scoped donorClone — OWN it (leak fix)
@@ -834,11 +891,17 @@ namespace HumankindAssetFramework
                 foreach (var ro in ros)
                     foreach (var gn in new[] { "midResMaterialGuid", "highResMaterialGuid" })
                     { var gf2 = ro?.GetType().GetField(gn, BF); if (gf2 != null) gf2.SetValue(ro, Activator.CreateInstance(gf2.FieldType)); }
-            int boost = Plugin.DistrictMeshDensityBoost != null ? Plugin.DistrictMeshDensityBoost.Value : 8;
-            if (boost > 1)
             {
                 var ppcF = layerClone.GetType().GetField("primitivePerParticleCount", BF);
-                if (ppcF?.GetValue(layerClone) is int ppc && ppc > 0) ppcF.SetValue(layerClone, ppc * boost);
+                if (ppcF?.GetValue(layerClone) is int ppc && ppc > 0)
+                {
+                    int boost = EffectiveDensityBoost(ppc, fxGuid);
+                    if (boost > 1) ppcF.SetValue(layerClone, ppc * boost);
+                    // Say it EVERY clone (2026-09-13, the Oracle verification: this site was silent, so proving
+                    // the boost ran meant counting trees in a screenshot instead of reading one line).
+                    Plugin.Diag($"[District] private layer '{layerClone.name}' PPC {ppc} -> {ppc * Math.Max(1, boost)} (boost x{boost}; ceiling ~{255L * ppc * Math.Max(1, boost):N0} primitives)");
+                }
+                else Plugin.Diag($"[District] private layer '{layerClone.name}': PPC field unreadable — ceiling NOT raised");
             }
             return layerClone;
         }
@@ -879,7 +942,7 @@ namespace HumankindAssetFramework
                     if (e.atlasGuid != null)
                     {
                         var olF = GF(t, "outputLayer");
-                        if (e.deepLayer == null && olF?.GetValue(clone) is UnityEngine.Object src && src != null) e.deepLayer = ClonePrivateOutputLayer(src);
+                        if (e.deepLayer == null && olF?.GetValue(clone) is UnityEngine.Object src && src != null) e.deepLayer = ClonePrivateOutputLayer(src, fxGuid);
                         if (e.deepLayer != null) olF?.SetValue(clone, e.deepLayer);
                         if (e.privateLeaf == null) e.privateLeaf = clone;   // representative leaf: DistrictApplyTexture/BindAlbedo bind our albedo on e.deepLayer
                     }
@@ -1143,7 +1206,8 @@ namespace HumankindAssetFramework
                 }
                 if (targets.Count == 0) { NoteBindStall(onlyName, "no element with a null outputLayer yet (its selector may still be loading)"); return false; }
                 if (donorLayer == null) { NoteBindStall(onlyName, "our element(s) are there, but no vanilla building output layer to borrow yet"); return false; }
-                var donorClone = ClonePrivateOutputLayer((UnityEngine.Object)donorLayer);
+                var donorClone = ClonePrivateOutputLayer((UnityEngine.Object)donorLayer,
+                    distModels.FirstOrDefault(x => x.district == onlyName)?.fxMeshGuid);   // auto-boost from OUR mesh; legacy all-districts path (onlyName null) keeps the config floor
                 int bound = 0;
                 foreach (var leaf in targets)
                 {

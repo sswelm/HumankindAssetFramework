@@ -294,6 +294,21 @@ UVs so it maps; so a terrain-paint choice reads as real grass/pavement/sand in t
   (255 × PPC) rises for the *same* GPU work — fewer particles, each covering more primitives — and no re-bake is
   needed. Verified: PPC 64 → 512, ceiling ~130k primitives, the full grove renders. (A first guess of a 16-bit
   vertex limit was decompiled and disproved — the index buffer is 32-bit.)
+  **How far the ceiling goes (2026-09-13 investigation, IL of `GetEncodedMeshAndVisualParticleCount` read from
+  `Amplitude.Graphics.dll`):** the encoded field is `meshStartIndex | (particleCount << 24)` — an 8-bit count
+  (clamped at 255, with the game's own console warning above it) over a **24-bit start index**. Unlike the pawn
+  path, the district shader reads PPC dynamically from `perLayerDataCB` and every HAF district route renders
+  through a **private layer clone**, so the boost has no compiled-in wall: the render ceiling is simply
+  `255 × PPC × boost` — and the boost now **auto-sizes** from the injected mesh's own triangle count
+  (`EffectiveDensityBoost`: the FxMesh asset carries its Unity Mesh, so the plugin computes
+  `ceil(tris / (255 × PPC))` at layer-clone time; triangles safely overestimate encoded quads, and overshooting
+  PPC is free). `DistrictMeshDensityBoost` remains as the FLOOR (default 8 ≈ 130k prims; the scoped path's
+  low-PPC donor once needed a hand-set 32 — no longer). The REAL remaining walls are: (1) the shared **Visual
+  layer's vertex buffer — 3M verts and ~99% full in a late-game save** before you add anything; give it room
+  with `DistrictBufferHeadroom` / `[Buffers] BufferOverrides` (see
+  [Vertex-Budget](Vertex-Budget.md)); and (2) the 24-bit start index (~16.7M primitives into the layer) — and
+  note it is **unmasked** in the encode, so overshooting it would corrupt the count byte rather than clamp;
+  unreachable with shipped buffer sizes, worth remembering if buffers are ever pushed toward 16M+.
 - **Grove copies** (a part placed multiple times, verified): one bake, one atlas slot, geometry appended per
   copy, each auto-rotated by the golden angle. A **per-part Target triangles** budget keeps grove trees lean
   independently of the detailed base. **Placement is literal and deterministic** — an offset places
