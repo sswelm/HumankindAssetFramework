@@ -1091,6 +1091,18 @@ public static class UniversalBaker
         float size = cfg.size > 0f ? cfg.size : 5f;
         float smoothing = cfg.smoothingAngle > 0f ? cfg.smoothingAngle : 20f;
 
+        // STAGE TIMING (2026-09-13, "the last bake took a real long time"): the bake's cost lives in stages the
+        // Editor.log never names (asset imports all read as milliseconds while the bake holds the editor for
+        // minutes). Same medicine as the Vehicle Lab's `VEHICLE timing:` lines, which unmasked a 71-second
+        // Blender op the same day: one console line per stage, every bake, so a slow bake names its whale.
+        var lapWatch = System.Diagnostics.Stopwatch.StartNew();
+        var lapTotal = System.Diagnostics.Stopwatch.StartNew();
+        void Lap(string stage)
+        {
+            Debug.Log($"[Factory] {name} timing: {stage,-36} {lapWatch.Elapsed.TotalSeconds,6:0.0}s   (total {lapTotal.Elapsed.TotalSeconds:0.0}s)");
+            lapWatch.Restart();
+        }
+
         if (!AssetDatabase.IsValidFolder("Assets/Resources")) AssetDatabase.CreateFolder("Assets", "Resources");
         SweepAllOutputs(name);   // cross-path sweep: a previous ANIMATED bake's _Clips/_ClipsPoseData must not ship alongside
         // Bake INPUTS (OBJ / albedos / preview prefab) go OUTSIDE Resources, into Assets/FactorySource. Unity force-
@@ -1266,6 +1278,7 @@ public static class UniversalBaker
             }
         }
         bool multiMat = matList.Count > 1;
+        Lap("extract + source import");
         Texture2D packedAtlas = null; Rect[] atlasRects = null;
         bool[] flatSwatch = null;   // per matList index: albedo is a <=8px solid swatch (flat-colour material) — see the animated path's note
         if (multiMat)
@@ -1390,6 +1403,7 @@ public static class UniversalBaker
         if (cVerts.Count == 0)
             return Fail($"{name}: the static combine found no mesh geometry (0 vertices) — the model likely imports as " +
                         "skinned meshes (a rigged FBX) the static path can't read. Use the Animated bake, or check the model imported correctly.");
+        Lap("albedo atlas pack");
         var mesh = new Mesh { name = name + "_ModelMesh", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
         mesh.SetVertices(cVerts);
         if (haveUV) mesh.SetUVs(0, cUV);
@@ -1506,6 +1520,7 @@ public static class UniversalBaker
         AssetDatabase.DeleteAsset("Assets/Resources/" + name + "_Atlas.asset");
         AssetDatabase.CreateAsset(atlas, "Assets/Resources/" + name + "_Atlas.asset");
         if (multiMat) BuildSurfaceAtlases(name, cfg, matList, atlasRects, atlas.width, atlas.height);   // normal/roughness packed with the SAME rects (docs/Wonder-Spike.md)
+        Lap("combine + transforms + atlas DXT/surface");
 
         // --- 5) Faceted shading: unweld so each triangle gets its own face normal ---
         if (cfg.normals == NormalsMode.Faceted)
@@ -1539,7 +1554,9 @@ public static class UniversalBaker
         // skinnedMeshInfos entry, and the plugin appends a FragmentEntry per overflow chunk (<name>_ModelMesh_B..)
         // so the whole ship draws. Off (the default) keeps the classic single mesh + warn-and-clip: extra fragments
         // are extra draw work, so going multi-fragment stays a conscious per-model choice.
+        Lap("rig + bind + tangents");
         var chunks = cfg.multiMesh ? SplitForQuadCeiling(mesh, name) : new List<Mesh> { mesh };
+        Lap("multi-mesh split");
         if (chunks == null)
             return Fail($"{name}: {mesh.triangles.Length / 3:N0} tris need more than {MaxMeshChunks} draw fragments " +
                         $"({MaxMeshChunks * QuadBudget:N0}-quad hard cap) — lower 'Reduce to ~tris' or the Vehicle Lab dials first.");
@@ -1596,6 +1613,7 @@ public static class UniversalBaker
             AssetDatabase.ImportAsset("Assets/Resources/" + chunk.name + ".asset", ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
         AssetDatabase.ImportAsset(prefabPath, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
         var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+        Lap("mesh assets + prefab (imports)");
 
         var skelType = AppDomain.CurrentDomain.GetAssemblies().SelectMany(SafeTypes)
             .FirstOrDefault(t => t.FullName == "Amplitude.Mercury.Animation.Skeleton");
@@ -1607,6 +1625,7 @@ public static class UniversalBaker
         if (!InvokeReq(skelType, "Reimport", Type.EmptyTypes, skel, null, out err)) return Fail(err);
         EditorUtility.SetDirty(skel);
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
+        Lap("skeleton (SDK SetPrefab/Reimport)");
         int chunksOverCeiling = ReportBakedQuads(skelType, skel, name);
         // MULTI-MESH VERIFICATION (review P1): the split PROMISED every chunk fits; if the SDK paired fewer
         // triangles than estimated and a chunk still measures over, shipping it would silently clip in-game —
@@ -1620,6 +1639,7 @@ public static class UniversalBaker
         string skelGuid = AmplitudeGuid(skel), atlasGuid = AmplitudeGuid(atlas);
         // empty GUID = the SDK skeleton bake produced nothing -> fail loudly instead of writing a dead registry entry.
         if (string.IsNullOrEmpty(skelGuid) || skelGuid == "0,0,0,0") return Fail($"{name}: skeleton bake produced an empty GUID (SetPrefab/Reimport did nothing).");
+        Lap("quad report + finish");
         Debug.Log($"[Factory] {name} DONE. skeleton={skelGuid} atlas={atlasGuid}");
         return new BakeResult { ok = true, skeletonGuid = skelGuid, atlasGuid = atlasGuid, bbox = dims };
     }
@@ -1639,23 +1659,38 @@ public static class UniversalBaker
     // adjacently) with headroom for estimator/SDK divergence, and the bake VERIFIES the SDK's real counts after
     // the skeleton bake, failing (E5-restored) rather than shipping an over-ceiling chunk.
     const int QuadBudget = 16000;   // 98% of the ceiling
+    // MEASURED, not assumed (2026-09-13, the 121-second bake): .NET's long hash is `low ^ high`, and a mesh
+    // edge key packing (v, v+1) XOR-collapses to tiny values — half a hull's edges landed in a handful of
+    // dictionary buckets, turning every lookup into a chain walk (11.2s vs 0.01s on a 179k-tri grid, same
+    // result). A murmur-style finalizer on the same keys restores O(1); the key values are untouched.
+    sealed class EdgeKeyComparer : IEqualityComparer<long>
+    {
+        public bool Equals(long x, long y) => x == y;
+        public int GetHashCode(long k)
+        {
+            unchecked { ulong z = (ulong)k; z ^= z >> 33; z *= 0xFF51AFD7ED558CCDUL; z ^= z >> 33; return (int)z ^ (int)(z >> 32); }
+        }
+    }
+    static readonly EdgeKeyComparer EdgeKeys = new EdgeKeyComparer();
     static int EstimateQuads(int[] tris, IList<int> cell)
     {
         long Key(int x, int y) => x < y ? ((long)x << 32) | (uint)y : ((long)y << 32) | (uint)x;
-        var owner = new Dictionary<long, int>(cell.Count * 2);
+        var owner = new Dictionary<long, int>(cell.Count * 2, EdgeKeys);
         var paired = new Dictionary<int, bool>(cell.Count);
         int quads = 0;
         foreach (int t in cell)
         {
             int a = tris[t * 3], b = tris[t * 3 + 1], c = tris[t * 3 + 2];
+            long e0 = Key(a, b), e1 = Key(b, c), e2 = Key(c, a);   // no per-triangle array — this runs at every BSP level
             int mate = -1;
-            foreach (long e in new[] { Key(a, b), Key(b, c), Key(c, a) })
-                if (owner.TryGetValue(e, out int o) && !paired[o]) { mate = o; break; }
+            if (owner.TryGetValue(e0, out int o0) && !paired[o0]) mate = o0;
+            else if (owner.TryGetValue(e1, out int o1) && !paired[o1]) mate = o1;
+            else if (owner.TryGetValue(e2, out int o2) && !paired[o2]) mate = o2;
             if (mate >= 0) { paired[mate] = true; paired[t] = true; quads++; }
             else
             {
                 paired[t] = false;
-                owner[Key(a, b)] = t; owner[Key(b, c)] = t; owner[Key(c, a)] = t;
+                owner[e0] = t; owner[e1] = t; owner[e2] = t;
             }
         }
         foreach (var kv in paired) if (!kv.Value) quads++;
