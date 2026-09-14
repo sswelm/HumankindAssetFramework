@@ -122,23 +122,29 @@ EOF
 # `ToInt32(`; the Harmony/BCL accessor shapes are appended verbatim.
 HELPERS="GetMember SetMember GetMemberOrNull CallMethod CachedField CachedProp GFA GF Mem Member Int
          MemberBool MemberFloat MemberInt MemberLong MemberUInt TryMemberFloat TryMemberLong TryMemberInt TryMemberUInt TryMemberULong
-         BumpIntField SetIntField ScaleTrsTranslation SetFreshElementReference DumpMatrices"
-# (object, string) helpers whose body reaches a reader but whose string is NOT a member name — each with the reason.
-NOT_MEMBER_READERS="DumpPlbcTree"   # DumpPlbcTree(plbc, label): the string is a log label; its own AccessTools.Field literals are extracted directly
+         BumpIntField SetIntField ScaleTrsTranslation SetFreshElementReference DumpMatrices InvokeNoArg"
+# (object, string …) helpers whose body reaches a reader but whose string is NOT a member name. Their own by-name
+# literals are inside the body and are extracted directly; only the STRING PARAMETER is exempt. One reason each:
+#   log label ............ DumpBoneRests DumpFields DumpNameTables DumpSkinned DumpSelectorElements DumpPlbcTree
+#                          RebaseRootIdentity WalkCollection OnPawnAttack (the "how" text of an attack)
+#   district name ........ CenterScopedBuilding DumpClipCollections DumpDecalBinding DumpSchematicAtlas GraftFootprint
+#                          InjectReactorFootprint KeepDistrictMeshAtStrategicZoom MaybeDumpPawnRig UnmaskPavingDecals
+#   substring filter ..... FillMatrixCells ("District/Main" against database names)
+#   bone / mesh / event .. SkelHasBone (bone name) RenameBodyMesh (mesh name) PostEventByName (audio event name)
+NOT_MEMBER_READERS="DumpBoneRests DumpFields DumpNameTables DumpSkinned DumpSelectorElements DumpPlbcTree RebaseRootIdentity
+                    WalkCollection OnPawnAttack CenterScopedBuilding DumpClipCollections DumpDecalBinding DumpSchematicAtlas
+                    GraftFootprint InjectReactorFootprint KeepDistrictMeshAtStrategicZoom MaybeDumpPawnRig UnmaskPavingDecals
+                    FillMatrixCells SkelHasBone RenameBodyMesh PostEventByName"
 HELPER_RE="\\b($(echo $HELPERS | tr ' ' '|'))"
 ACCESSORS="${HELPER_RE}|FastMember\.(Getter|Setter)<[^>]*>|AccessTools\.(Field|Property|Method|PropertyGetter|PropertySetter|DeclaredField|DeclaredProperty|DeclaredMethod)|\.Get(Field|Property|Method|Event|Member)|Traverse\.(Field|Property|Method)"
 
 # ---- SELF-CHECK: no by-name reader helper the extractor does not know (2026-09-14) ----
-# Discovers every `static <T> Name(object x, string name, …)` in the runtime sources whose definition line or the
-# three lines after it call a reader (GetMember/Mem/Member/TryConvert/CachedMember/CachedField/CachedProp/GF/GFA/
-# GetField/GetProperty/GetMethod/AccessTools.*). Each must be in HELPERS or NOT_MEMBER_READERS. Drilled: a copy of
-# `Mem(` under a new name in a runtime file FAILS here; the same helper added to HELPERS passes and its literals count.
-UNKNOWN=$(for f in $SRC; do
-  perl -0777 -ne 'while (/^[ \t]*(?:internal |public |private )?static\s+\S+\s+(\w+)\s*\(\s*(?:this\s+)?object\s+\w+\s*,\s*string\s+\w+[^\n]*\n(?=((?:[^\n]*\n){0,3}))/mg) {
-    my $n=$1; my $blk=$&.$2; my $ln = 1 + (substr($_,0,$-[0]) =~ tr/\n//);
-    print "$n\t$ARGV:$ln\n" if $blk =~ /\b(GetMember|GetMemberOrNull|Mem|Member|TryConvert|CachedMember|CachedField|CachedProp|GFA?|GetField|GetProperty|GetMethod|AccessTools\.\w+)\s*\(/;
-  }' "$f"
-done | awk -F'\t' -v known=" $HELPERS $NOT_MEMBER_READERS " 'BEGIN{gsub(/[ \t\n]+/," ",known)} index(known, " " $1 " ") == 0 {print}')
+# tools/find-reader-helpers.pl discovers every `static <T> Name(object x, string name, …)` in the runtime sources
+# whose WHOLE body calls a reader (GetMember/Mem/Member/TryConvert/CachedMember/CachedField/CachedProp/GF/GFA/
+# GetField/GetProperty/GetMethod/AccessTools.*). Each must be in HELPERS or NOT_MEMBER_READERS. Drilled by
+# tools/drill-reader-gates.sh (in the gate): a null-guarded multi-line copy of `Mem(` under a new name FAILS here.
+UNKNOWN=$(perl tools/find-reader-helpers.pl $SRC \
+  | awk -F'\t' -v known=" $HELPERS $NOT_MEMBER_READERS " 'BEGIN{gsub(/[ \t\n]+/," ",known)} index(known, " " $1 " ") == 0 {print}')
 if [ -n "$UNKNOWN" ]; then
   echo "[FAIL] by-name reader helper(s) the catalog gate does not know — literals passed through them are NOT being checked:"
   printf '%s\n' "$UNKNOWN" | sed 's/^/  /'

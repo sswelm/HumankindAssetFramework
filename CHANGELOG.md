@@ -29,7 +29,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   for the catalog, in `NOT_MEMBER_READERS` with a reason). Drilled: a planted `Peek(` wrapper fails both gates; a
   planted `Mem(…"Bogus")` fails the catalog; and adding `TryMemberULong` to the source tripped the self-check before
   it was added to the list — the exact event the check exists for. Five members catalogued (`SimulationArtilleryStrike`
-  is a new binding); bindcheck 135/135 against the live build; catalog surface 370 → 382.
+  is a new binding); bindcheck 135/135 against the live build; catalog surface 370 → 383.
+  **And the self-check was itself too narrow on arrival.** Review of the PR: it inspected the declaration plus three
+  lines, so a wrapper with a null guard above its read (`if (o == null) return null;` then `GetMember` on line 5)
+  passed both gates — the same silent gap, one level up. Now `tools/find-reader-helpers.pl` (shared by both gates, so
+  they cannot drift apart) walks to the matching brace and scans the WHOLE body; that surfaced 22 more
+  `(object, string …)` helpers, each classified with a reason (one real reader, `InvokeNoArg`; 21 whose string is a
+  district name, log label, bone, mesh or audio-event name). And the drill is no longer a thing done once by hand:
+  `tools/drill-reader-gates.sh` runs in the pre-push gate and CI, plants that exact guarded wrapper plus a
+  dead-sentinel and an uncatalogued literal through it, and FAILS if either gate passes — then re-plants under a
+  known name and demands the shapes are seen through it.
 - **THE SENTINEL THAT COULD NEVER BE REACHED (2026-08-23).** `bool loaded = true; try { loaded =
   Convert.ToBoolean(GetMember(unit, "IsLoaded")); } catch { }` reads as *"true unless the game says otherwise"*
   and means *"**false** whenever the member is missing"*. `GetMember` swallows its own exception and returns null

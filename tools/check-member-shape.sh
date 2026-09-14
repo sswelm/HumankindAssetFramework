@@ -45,7 +45,7 @@ cd "$(dirname "$0")/.." || exit 2
 
 # Object-returning member readers: the wrappers a Convert.To*() can sit on. Word-anchored, and followed by `(`, so
 # the typed MemberBool/MemberInt/… (which RETURN the fallback and are the fix) do not match.
-READERS="GetMember GetMemberOrNull Mem Member"
+READERS="GetMember GetMemberOrNull Mem Member ReflectMember"   # ReflectMember: the editor's (ModelFactoryWindow) field-then-property probe
 READER_RE="(?:\\w+\\.)?(?:$(echo $READERS | tr ' ' '|'))\\b\\s*\\("
 
 # Production C# only. Tests are excluded ON PURPOSE: MemberReadTests must be free to construct the bad shape in a
@@ -54,13 +54,11 @@ FILES=$(find . -name '*.cs' \
           -not -path './obj/*' -not -path './bin/*' -not -path './Temp/*' \
           -not -path './Tests/*' -not -path './baker/*' -not -path './tools/*' | sort)
 
-# ---- SELF-CHECK: every object-returning (object, string) helper that calls a reader must be in READERS ----
-UNKNOWN=$(for f in $FILES; do
-  perl -0777 -ne 'while (/^[ \t]*(?:internal |public |private )?static\s+object\s+(\w+)\s*\(\s*(?:this\s+)?object\s+\w+\s*,\s*string\s+\w+[^\n]*\n(?=((?:[^\n]*\n){0,3}))/mg) {
-    my $n=$1; my $blk=$&.$2; my $ln = 1 + (substr($_,0,$-[0]) =~ tr/\n//);
-    print "$n\t$ARGV:$ln\n" if $blk =~ /\b(GetMember|GetMemberOrNull|Mem|Member|CachedMember|AccessTools\.\w+|GetField|GetProperty)\s*\(/;
-  }' "$f"
-done | awk -F'\t' -v known=" $READERS " 'index(known, " " $1 " ") == 0 {print}')
+# ---- SELF-CHECK: every object-returning (object, string) helper whose body calls a reader must be in READERS ----
+# Whole-body scan via tools/find-reader-helpers.pl (a null guard above the read defeated the first, 3-line version);
+# drilled by tools/drill-reader-gates.sh in the gate.
+UNKNOWN=$(perl tools/find-reader-helpers.pl --object-only $FILES \
+  | awk -F'\t' -v known=" $READERS " 'index(known, " " $1 " ") == 0 {print}')
 if [ -n "$UNKNOWN" ]; then
   echo "[FAIL] object-returning member reader(s) this gate does not know — a Convert.To*() on them is invisible:"
   printf '%s\n' "$UNKNOWN" | sed 's/^/  /'
