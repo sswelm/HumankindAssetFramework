@@ -197,11 +197,23 @@ public static class BakeFeatureTest
 
             // ---- materialMode Multi on a 2-material model: packs an atlas, bake succeeds (packing detail covered by real models) ----
             {
-                var c = Cfg("multi", cube2); c.materialMode = MaterialMode.Multi;
+                // Both source materials must actually reach the packed atlas (review 2026-09-14: `atlas != null` alone
+                // passed a packer that dropped a material). Proven the way the .tga swatch row proves it — nearest-texel
+                // colour distance to each source's flat albedo — not by atlas size, which the cap decides: Cfg() pins
+                // atlasMaxDim = 512, under which a correct 2×512² bake is downscaled to 512² (second review of PR #50).
+                // The cap is raised for this fixture so downscaling cannot blur the two colours together.
+                var c = Cfg("multi", cube2); c.materialMode = MaterialMode.Multi; c.atlasMaxDim = 1024;
                 var t = BakeAtlas(c, used);
-                // Two 512² sources cannot share a 512² atlas: the packed result must carry at least both (review 2026-09-14 —
-                // `atlas != null` alone passed a packer that dropped a material).
-                Check(res, ref pass, ref fail, "materialMode=Multi packs BOTH materials into the atlas", t != null && (long)t.width * t.height >= 2L * 512 * 512, t != null ? $"atlas {t.width}x{t.height} (needs >= 2x512x512 texels)" : "no atlas");
+                // WriteAlbedo paints tint × (0.3..0.8) by row, so the target is each tint at the MID row (b = 0.55): a texel
+                // of exactly that colour exists in each source. The two are far apart on the channel each lacks (matA's
+                // blue ≤ 41, matB's red ≤ 62), so one material's gradient cannot satisfy the other's target within 40.
+                var matA = new Color32(140, 77, 28, 255);    // (1, 0.55, 0.2) × 0.55
+                var matB = new Color32(42, 70, 140, 255);    // (0.3, 0.5, 1) × 0.55
+                if (t == null) Check(res, ref pass, ref fail, "materialMode=Multi packs BOTH materials into the atlas", false, "no atlas");
+                else if (TryNearestColour(t, matA, out float dA) && TryNearestColour(t, matB, out float dB2))
+                    Check(res, ref pass, ref fail, "materialMode=Multi packs BOTH materials into the atlas",
+                        dA <= 40f && dB2 <= 40f, $"atlas {t.width}x{t.height}; nearest-texel Δ matA={dA:0}, matB={dB2:0} (tolerance 40)");
+                else { Skip(res, "materialMode=Multi packs BOTH materials", "baked atlas not CPU-readable"); skip++; }
             }
 
             // ---- flat-colour .tga swatches (0.5.2): glbconv writes untextured materials as 8x8 TGAs, which
