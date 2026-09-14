@@ -866,16 +866,9 @@ namespace HumankindAssetFramework
             // set by hand must win over any heuristic, the one-convention lesson in miniature).
             if (boost <= 1) return boost;
             long tris = FxMeshTriangles(fxGuid);
-            if (ppc > 0 && tris > 0)
-            {
-                int needed = (int)((tris + 255L * ppc - 1) / (255L * ppc));
-                if (needed > boost)
-                {
-                    Plugin.Diag($"[District] auto-boost: mesh ~{tris:N0} tris needs x{needed} on PPC {ppc} (config x{boost}) — using x{needed}");
-                    boost = needed;
-                }
-            }
-            return boost;
+            int eff = DistrictRules.NeededBoost(ppc, tris, boost);   // the decision is the pure kernel (DistrictRulesTests); this reads the facts
+            if (eff > boost) Plugin.Diag($"[District] auto-boost: mesh ~{tris:N0} tris needs x{eff} on PPC {ppc} (config x{boost}) — using x{eff}");
+            return eff;
         }
 
         // Clone an FxOutputLayer private (the texture-injection layer): opt out of hi-res streaming (null the mid/high

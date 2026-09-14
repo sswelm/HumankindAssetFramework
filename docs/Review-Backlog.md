@@ -77,36 +77,52 @@ skipped. Ranked by consequence within each group.
   the third widening of this alternation (08-21, 08-22 `CachedField`/`GF`, now). Fix: add the names, catalogue the
   four, and add a self-check that greps `static \w+ \w+\(object \w+, string \w+\) =>.*GetMember` wrappers and fails
   when one is not in the alternation — so the next consolidation of helpers trips the gate instead of blinding it.
-- **Descriptor repoint has no test at any tier.** `UniversalInject.Inject.cs:2026-2056` (`InjectExtraMeshFragments`)
+- ~~**Descriptor repoint has no test at any tier.**~~ — **FIXED 2026-09-14.** `Patches/DescriptorRepoint.cs` is the
+  shared pure kernel both sites call (6 tests incl. the chained hand-prop-then-chunks sequence, growth, refusal);
+  the smoke's full tier now reads each repointed descriptor back and FAILS if the block moved ("descriptor repoint(s)
+  undone"). Mutation-drilled: an append one slot too far and a non-advanced `FragmentCount` both go red. `UniversalInject.Inject.cs:2026-2056` (`InjectExtraMeshFragments`)
   and `:1884-1930` (`InjectHandProp`) do the tail-block copy / `StartFragment=tail` / `FragmentCount=count+N` /
   `persistentFragmentEntryCount` / grow-by-`need+100` arithmetic; an off-by-one is the "spike plague" family. Nothing
   in `Tests/` reaches it; the smoke has no fragment-count verdict; `BakeFeatureTest.cs:162` asserts the baker side
   only. It is pure `Array` + `FieldInfo` work — extract `RepointDescriptor(...)` and test with test-defined structs
   (3 existing + 2 chunks → `{tail, 5}`, tail advanced by 5, growth when the array is short). Smallest in-game guard: a
   smoke line `descriptor[defId].FragmentCount == bodyFrags + chunks` per multi-mesh entry.
-- **`SplitForQuadCeiling`/`EstimateQuads` covered only by the opt-in editor lane; `ReportBakedQuads` can verify
-  nothing and pass.** `editor/UniversalBaker.cs:1686-1793`; assertions live in `BakeFeatureTest.cs:128-186`, which run
+- ~~**`SplitForQuadCeiling`/`EstimateQuads` covered only by the opt-in editor lane; `ReportBakedQuads` can verify
+  nothing and pass.**~~ — **FIXED 2026-09-14** for the estimator and the BSP partition: both moved to the pure
+  `editor/QuadEstimate.cs`, compiled into the test project (8 tests: edge-sharing pair, disjoint, 3-fan, Faceted
+  quads == tris, welded grid, partition covers every triangle once under budget in a stable order, chunk cap). Drilled:
+  tris/2 and an unsorted partition both go red. `ReportBakedQuads`'s "verified nothing" warning is unchanged (game-type). `editor/UniversalBaker.cs:1686-1793`; assertions live in `BakeFeatureTest.cs:128-186`, which run
   via `tools/editor_tests.ps1` — not in `check.sh` nor `ci.yml`. `ReportBakedQuads` returning 0 ("NOT verified") is a
   warning; a game-type rename turns the ceiling check into silence. `EstimateQuads(int[] tris, IList<int> cell)` has
   no Unity dependency — move it to a pure file compiled into `Tests` (the `EditorRules.cs` pattern): 2 tris sharing an
   edge → 1; 2 disjoint → 2; 3-fan → 2; N faceted → N (the tris/2 trap of 09-12).
-- **`EffectiveDensityBoost` unreachable in xunit as written.** `DistrictInject.cs:862-879`; `FxMeshTriangles` returns 0
+- ~~**`EffectiveDensityBoost` unreachable in xunit as written.**~~ — **FIXED 2026-09-14** (`DistrictRules.NeededBoost`,
+  9 rows incl. the opt-out and the no-evidence cases). `DistrictInject.cs:862-879`; `FxMeshTriangles` returns 0
   without the game so the auto-size branch never executes in a test. Extract `NeededBoost(int ppc, long tris, int
   configBoost)`: `(3,10000,8)→14`, `(3,10000,1)→1` (the 09-12 opt-out), `(3,0,8)→8`, `(0,10000,8)→8`.
-- **`PART|` parser hard-caps at 8 tokens; a 9th field empties the Vehicle Lab silently.** `VehicleLabWindow.cs:1370`
+- ~~**`PART|` parser hard-caps at 8 tokens; a 9th field empties the Vehicle Lab silently.**~~ — **FIXED 2026-09-14**
+  (`VehicleLabRules.TryParsePartLine` + `FlatShare` in EditorRules.cs, 10 tests: a pipe in a name folds back into the
+  name, a genuine 9th column is rejected WITH a reason and the Lab logs the rejected rows, `nan` → 0, exact-name-first
+  alias merge). Drilled: no-fold and strip-instead-of-exact both go red. `VehicleLabWindow.cs:1370`
   `okLen = t.Length == 5 || (t.Length >= 6 && t.Length <= 8 …)`, `vehicle_rig.py:615` prints exactly 8; the 7th and 8th
   were each added within a month. A part name containing `|` shifts the count too (`:1368-1371`, dropped with no
   log). `vehicle_rig.py:6` still documents the 5-field shape. Fix: `TryParsePartLine(string, out Part)` with rows for
   5/6/7/8/9 tokens (9 → parse-with-extras or FAIL loudly), `nan` → 0; log every rejected line.
-- **Tier-1 bake rows that cannot fail for the feature they name.** `BakeFeatureTest.cs:121-126` "windingFix keeps
+- ~~**Tier-1 bake rows that cannot fail for the feature they name.**~~ — **FIXED 2026-09-14, NOT YET RUN** (Unity was
+  open, the headless lane needs it closed): windingFix now bakes a cube with one reversed face, asserts the premise
+  (2 inward triangles without the fix) and then 0 inward with it; atlas1024 asserts exactly 512×512; Multi asserts
+  ≥ 2×512² texels. Run `tools/editor_tests.ps1` before the next baker change — the 512×512 expectation is the one to watch. `BakeFeatureTest.cs:121-126` "windingFix keeps
   geometry" asserts `m != null && r.ok` on a consistently wound cube; `:100-102` "atlasMaxDim=1024 keeps the 512
   source" accepts `128 ≤ width ≤ 1024`; `:188-193` Multi asserts only `atlas != null`. Fix: one reversed face + every
   normal away from the centroid; `t2.width == 512`.
-- **No nested-parent fixture for the plane/facing cut.** `GlbDisconnectedParts.cs:830-852` composes the parent chain;
+- ~~**No nested-parent fixture for the plane/facing cut.**~~ — **FIXED 2026-09-14** (`BuildGlb(underParent: true)`:
+  root with translation (0,0,5) + rotation Z90, the Hull as its child; a world-Y cut splits 2/2 and `ExtractPart`
+  bounds carry the parent's rotation and Z offset). `GlbDisconnectedParts.cs:830-852` composes the parent chain;
   every fixture in `Tests/GlbPlaneCutTests.cs` is a root node, so reversing `Mul(world, local)` passes all 11 tests.
   One fixture: Strip under `{translation (0,0,5), rotation Z90}`, cut on world Y at 1 → 2/2, `ExtractPart` bounds shifted.
-- **`BakeSmokeTest` "one representative per bake path" can pick a texture-only override as the static/Auto
-  representative, skip it, and PASS.** `BakeSmokeTest.cs:39-41` groups by `(animated, materialMode, converted)` and
+- ~~**`BakeSmokeTest` "one representative per bake path" can pick a texture-only override as the static/Auto
+  representative, skip it, and PASS.**~~ — **FIXED 2026-09-14** (one `IsTextureOnly` predicate, applied before the
+  `GroupBy` and at the per-entry skip, so the two cannot disagree). `BakeSmokeTest.cs:39-41` groups by `(animated, materialMode, converted)` and
   takes `g.First()`; a Retexture entry lands in (static, Auto) and, with the registry sorted by name, wins whenever it
   sorts first; `Run()` then skips it at `:99-106`. PLAUSIBLE (not drilled). Fix: exclude texture-only entries before
   `GroupBy`.

@@ -36,13 +36,21 @@ public static class BakeSmokeTest
         // off is the byte-identical legacy pipeline — two genuinely different code paths that each need a
         // representative (before this, whichever sorted first shadowed the other). (The trigger used to be
         // 'rotation != 0'; the explicit convertRig flag replaced it on 2026-07-18.)
-        var reps = defs.Where(d => !d.resourceName.StartsWith(PREFIX))
+        // TEXTURE-ONLY entries are excluded BEFORE grouping (review 2026-09-14): a Retexture entry is (static, Auto)
+        // by default and, with the registry sorted by name, won that group's `First()` whenever it sorted before every
+        // static model — then Run() SKIPPED it, so no static/Auto bake happened and the section still said PASS.
+        var reps = defs.Where(d => !d.resourceName.StartsWith(PREFIX) && !IsTextureOnly(d))
                        .GroupBy(d => (d.animated, d.materialMode, converted: d.animated && d.convertRig))
                        .Select(g => g.First()).ToList();
         return Run(reps, "Smoke — one per bake path");
     }
 
     public static BakeTestSection RunAllSection() => RunAllSection(false);
+
+    // A Unit Retexture / Sound entry: no model file and no extracted source — nothing to bake, by design. ONE
+    // predicate for both the representative pick and the per-entry skip, so they cannot disagree again.
+    static bool IsTextureOnly(ModelDef d)
+        => string.IsNullOrWhiteSpace(d.modelFile) && !Directory.Exists(Path.Combine(Application.dataPath, "FactorySource", d.resourceName));
 
     // NO MODEL IS BAKED TWICE IN ONE RUN (2026-08-22). With everything selected, this row and the conversion row
     // both baked every animated+convertRig model — 12 of them on the current registry, and a conversion bake is the
@@ -96,9 +104,7 @@ public static class BakeSmokeTest
 
                 // TEXTURE-ONLY overrides (Unit Retexture entries, e.g. "Retex_<pawn>"): no model file and no extracted
                 // source — there is nothing to bake, by design. Skipping is correct, not a failure.
-                bool textureOnly = string.IsNullOrWhiteSpace(src.modelFile)
-                    && !Directory.Exists(Path.Combine(Application.dataPath, "FactorySource", src.resourceName));
-                if (textureOnly)
+                if (IsTextureOnly(src))
                 {
                     sb.AppendLine($"[{tag}] {src.resourceName}: SKIP (texture-only override — nothing to bake)");
                     skip++;   // counted honestly as a skip, not smuggled into the pass count

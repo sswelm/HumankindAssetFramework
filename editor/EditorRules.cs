@@ -9,6 +9,7 @@
 // doesn't. Keep these kernels free of UnityEngine/UnityEditor types and of file I/O: callers gather the
 // facts, the kernel decides.
 using System;
+using System.Collections.Generic;
 
 /// <summary>Bake-pipeline decisions (UniversalBaker calls these; BakerRulesTests locks them).</summary>
 public static class BakerRules
@@ -50,5 +51,86 @@ public static class NaturalOrder
     {
         int i = s.Length; while (i > 0 && char.IsDigit(s[i - 1])) i--;
         return i < s.Length && long.TryParse(s.Substring(i), out long n) ? n : -1;
+    }
+}
+
+/// <summary>Vehicle Lab decisions over the Blender probe's stdout contract (VehicleLabWindow calls these; VehicleLabRulesTests locks them).</summary>
+public static class VehicleLabRules
+{
+    public sealed class PartRow
+    {
+        public string Kind;                       // "PART" or "RIGBONE"
+        public string Name;
+        public int Verts;
+        public float[] Center = new float[3];     // probe frame (x, y, z as the script prints them)
+        public float[] Size = new float[3];
+        public int Vis = -1;                      // escape-ray visibility (1 external / 0 interior), -1 absent
+        public string Bone = "";                  // dominant bone (rigged sources), "" absent
+        public int Flip = -1;                     // inside-out flip verdict, -1 absent
+    }
+
+    // The probe prints POSITIONAL rows:  PART|name|verts|cx,cy,cz|sx,sy,sz|vis|bone|flip  (8 fields, the last three
+    // optional — 6th 2026-08-xx, 7th 2026-08-20, 8th 2026-09-13)  and  RIGBONE|name|verts|c|s  (5). Two things went
+    // wrong silently before 2026-09-14: a `|` inside a part name shifted every field and the row was dropped, and the
+    // parser hard-capped at 8 fields, so a 9th would have emptied the Lab with no log. Now: surplus tokens fold back
+    // into the NAME (the only field that can legitimately contain the separator), and a row whose numeric tail then
+    // fails to parse is rejected WITH a reason — a new field in the script trips the Lab loudly instead of quietly.
+    // Returns false with `reason == null` for lines that are not rows at all (timing lines, blanks): silent skip.
+    public static bool TryParsePartLine(string line, out PartRow row, out string reason)
+    {
+        row = null; reason = null;
+        if (string.IsNullOrEmpty(line)) return false;
+        var t = line.Trim().Split('|');
+        if (t.Length < 2 || (t[0] != "PART" && t[0] != "RIGBONE")) return false;
+        bool part = t[0] == "PART";
+        int tailMin = 3;                      // verts, centre, size
+        int tailMax = part ? 6 : 3;           // + vis, bone, flip
+        int given = t.Length - 2;             // tokens after the kind and the first name token
+        if (given < tailMin) { reason = $"{t.Length} field(s), expected {2 + tailMin}..{2 + tailMax}"; return false; }
+        int nameSpan = given <= tailMax ? 1 : given - tailMax + 1;   // surplus tokens belong to the name
+        string name = string.Join("|", t, 1, nameSpan);
+        int b = 1 + nameSpan;                 // index of `verts`
+        if (!int.TryParse(t[b], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int verts))
+        { reason = $"verts '{t[b]}' is not an integer" + (nameSpan > 1 ? " (surplus fields folded into the name — a new column in vehicle_rig.py?)" : ""); return false; }
+        var c = t[b + 1].Split(','); var s = t[b + 2].Split(',');
+        if (c.Length != 3) { reason = $"centre '{t[b + 1]}' is not x,y,z"; return false; }
+        if (s.Length != 3) { reason = $"size '{t[b + 2]}' is not x,y,z"; return false; }
+        var r = new PartRow { Kind = t[0], Name = name, Verts = verts };
+        for (int i = 0; i < 3; i++) { r.Center[i] = Lenient(c[i]); r.Size[i] = Lenient(s[i]); }
+        if (part)
+        {
+            if (t.Length > b + 3) r.Vis = int.TryParse(t[b + 3], out int vv) ? vv : -1;
+            if (t.Length > b + 4) r.Bone = t[b + 4].Trim();
+            if (t.Length > b + 5) r.Flip = int.TryParse(t[b + 5], out int fv) ? fv : -1;
+        }
+        row = r;
+        return true;
+    }
+
+    // Lenient float: degenerate shards can emit "nan" (python lowercase — .NET rejects it); such a value becomes 0
+    // instead of killing the whole probe on one bad line out of thousands.
+    public static float Lenient(string s)
+        => float.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var f) ? f : 0f;
+
+    // The flat-surface filter's share for one part from the per-renderer sums: the EXACT name first; only when it is
+    // absent, the digits-only aliases "<name>.<digits>" (Blender's collision suffixes) merged; -1 when nothing measured
+    // (a filter must never hide what it cannot measure). Review P2 (2026-09-13): the old cache stripped ".001" while
+    // lookups used the full name, so every suffixed part passed unconditionally — and the strip also ate ".abc".
+    public static float FlatShare(string name, IDictionary<string, double> areaByName, IDictionary<string, double> levelByName)
+    {
+        if (name == null || areaByName == null || levelByName == null) return -1f;
+        double a = 0, f = 0;
+        if (areaByName.TryGetValue(name, out double ea)) { a = ea; levelByName.TryGetValue(name, out f); }
+        else
+            foreach (var kv in areaByName)
+            {
+                if (kv.Key.Length <= name.Length + 1 || kv.Key[name.Length] != '.' || !kv.Key.StartsWith(name, StringComparison.Ordinal)) continue;
+                bool digits = true;
+                for (int i = name.Length + 1; i < kv.Key.Length; i++) if (!char.IsDigit(kv.Key[i])) { digits = false; break; }
+                if (!digits) continue;
+                a += kv.Value;
+                if (levelByName.TryGetValue(kv.Key, out double lv)) f += lv;
+            }
+        return a > 0 ? (float)(f / a) : -1f;
     }
 }

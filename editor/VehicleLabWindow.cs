@@ -251,20 +251,11 @@ public class VehicleLabWindow : EditorWindow
         if (flatAreaByName == null) return true;
         if (!flatShare.TryGetValue(x.name, out float s))
         {
-            // EXACT probed name first (review P2: the old cache stripped ".001" while lookups used the full
-            // name, so every suffixed part missed and passed unconditionally — and the strip also ate ".abc").
-            // Only when the exact name is absent, merge confirmed preview aliases: "<name>.<digits>" precisely.
-            double a = 0, f = 0;
-            if (flatAreaByName.TryGetValue(x.name, out double ea)) { a = ea; f = flatLevelByName[x.name]; }
-            else
-                foreach (var kv in flatAreaByName)
-                {
-                    if (kv.Key.Length <= x.name.Length + 1 || kv.Key[x.name.Length] != '.' || !kv.Key.StartsWith(x.name, StringComparison.Ordinal)) continue;
-                    bool digits = true;
-                    for (int i = x.name.Length + 1; i < kv.Key.Length; i++) if (!char.IsDigit(kv.Key[i])) { digits = false; break; }
-                    if (digits) { a += kv.Value; f += flatLevelByName[kv.Key]; }
-                }
-            s = a > 0 ? (float)(f / a) : -1f;   // -1 = unmeasurable — passes (a filter must never hide what it cannot measure)
+            // EXACT probed name first, else the digits-only ".NNN" aliases, else -1 = unmeasurable (passes — a filter
+            // must never hide what it cannot measure). The rule is the pure VehicleLabRules.FlatShare (EditorRules.cs),
+            // unit-tested since 2026-09-14: review P2 had found the old cache stripping ".001" while lookups used the
+            // full name, so every suffixed part passed unconditionally — the kind of bug only a test row catches.
+            s = VehicleLabRules.FlatShare(x.name, flatAreaByName, flatLevelByName);
             flatShare[x.name] = s;
         }
         return s < 0f || s * 100f >= minFlatPct;
@@ -1362,27 +1353,30 @@ public class VehicleLabWindow : EditorWindow
         if (!RunBlender($"probe \"{srcFile}\" \"{prevFull}\"{Merge2Arg()}{BrightArg()}{ProbeRotArg()}", out string stdout)) return;   // failed run: session intact, error already in status/Console
         // Lenient float parse: degenerate shards can emit "nan" (python lowercase — .NET rejects it) — such a value
         // becomes 0 instead of killing the whole probe on one bad line out of thousands.
-        float F(string s2) => float.TryParse(s2, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var f) ? f : 0f;
+        // The row contract is parsed by the pure kernel (EditorRules.cs: VehicleLabRules.TryParsePartLine, unit-tested):
+        // a '|' inside a part name folds back into the name; a row whose numeric tail does not parse is REJECTED
+        // LOUDLY (before 2026-09-14 a 9th field, or a pipe in a name, silently emptied the Lab).
+        var rejected = new List<string>();
         foreach (var line in stdout.Split('\n'))
         {
-            var t = line.Trim().Split('|');
-            // PART rows carry an optional 6th field: the escape-ray visibility verdict (1 external / 0 interior).
-            bool okLen = t.Length == 5 || (t.Length >= 6 && t.Length <= 8 && t[0] == "PART");   // 7th = dominant bone (2026-08-20); 8th = inside-out flip verdict (2026-09-13)
-            if (!okLen || (t[0] != "PART" && t[0] != "RIGBONE")) continue;
-            var c = t[3].Split(','); var s = t[4].Split(',');
-            if (c.Length != 3 || s.Length != 3) continue;
+            if (!VehicleLabRules.TryParsePartLine(line, out var row, out string why))
+            {
+                if (why != null) rejected.Add(line.Trim() + "  <- " + why);
+                continue;
+            }
             var p = new Part
             {
-                name = t[1],
-                verts = int.TryParse(t[2], out var v) ? v : 0,
-                center = new Vector3(F(c[0]), F(c[1]), F(c[2])),
-                size = new Vector3(F(s[0]), F(s[1]), F(s[2])),
-                vis = t.Length >= 6 && int.TryParse(t[5], out var vv) ? vv : -1,
-                bone = t.Length >= 7 ? t[6].Trim() : "",
-                flip = t.Length >= 8 && int.TryParse(t[7], out var fv) ? fv : -1,
+                name = row.Name,
+                verts = row.Verts,
+                center = new Vector3(row.Center[0], row.Center[1], row.Center[2]),
+                size = new Vector3(row.Size[0], row.Size[1], row.Size[2]),
+                vis = row.Vis,
+                bone = row.Bone,
+                flip = row.Flip,
             };
             var low = p.name.ToLowerInvariant();
-            var keptMap = t[0] == "RIGBONE" ? keptBones : kept;
+            bool rigBone = row.Kind == "RIGBONE";
+            var keptMap = rigBone ? keptBones : kept;
             p.role = keptMap.TryGetValue(p.name, out var kr) ? kr
                    : low.Contains("tail") && (low.Contains("rotor") || low.Contains("prop")) ? Role.TailRotor  // "tail rotor" before the generic rotor guess
                    : low.Contains("fantail") || low.Contains("fenestron") ? Role.TailRotor
@@ -1395,8 +1389,11 @@ public class VehicleLabWindow : EditorWindow
                    : low.Contains("rotor") || low.Contains("helix") || low.Contains("blade") || low.Contains("propeller") ? Role.Rotor
                    : low.Contains("wheel") || low.Contains("tyre") || low.Contains("tire") ? Role.Wheel
                    : low.Contains("turret") ? Role.Turret : Role.Default;
-            (t[0] == "RIGBONE" ? newBoneParts : newParts).Add(p);
+            (rigBone ? newBoneParts : newParts).Add(p);
         }
+        if (rejected.Count > 0)
+            Debug.LogWarning($"[VehicleLab] probe: {rejected.Count} PART/RIGBONE row(s) rejected (a row shape this Lab cannot parse — a new field in vehicle_rig.py needs a parser change):\n  " +
+                             string.Join("\n  ", rejected.Take(5)) + (rejected.Count > 5 ? $"\n  … {rejected.Count - 5} more" : ""));
         if (newParts.Count == 0 && newBoneParts.Count == 0)
         {   // Blender ran but listed nothing — keep the session (markings + preview) and say so
             status = "Probe found no mesh parts — is this a mesh model? Existing markings kept. (See the Console for Blender output.)";

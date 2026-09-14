@@ -37,6 +37,7 @@ public static class BakeFeatureTest
             Directory.CreateDirectory(tmp);
             string cube1 = WriteCube(tmp, "cube1", false);            // single-material
             string cube2 = WriteCube(tmp, "cube2", true);             // two-material
+            string cubeRev = WriteCube(tmp, "cuberev", false, reverseFace: 0);   // one face wound inward — the windingFix fixture
             string cube3 = WriteCube(tmp, "cube3", true, true);       // two flat-colour materials (8x8 .tga swatches)
 
             // ---- baseline (KeepModel, no features) — the reference for ratio/relative checks ----
@@ -99,7 +100,9 @@ public static class BakeFeatureTest
                 Check(res, ref pass, ref fail, "atlasMaxDim=256 caps the atlas", t != null && t.width <= 256 && t.height <= 256, t != null ? $"{t.width}x{t.height}" : "no atlas");
                 var c2 = Cfg("atlas1024", cube1); c2.atlasMaxDim = 1024;
                 var t2 = BakeAtlas(c2, used);
-                Check(res, ref pass, ref fail, "atlasMaxDim=1024 keeps the 512 source", t2 != null && t2.width <= 1024 && t2.width >= 128, t2 != null ? $"{t2.width}x{t2.height}" : "no atlas");
+                // EXACT, not a range (review 2026-09-14): `128 <= width <= 1024` let a regression capping everything at
+                // 256 pass both atlas rows. The single-material 512 source under a 1024 cap must come out as 512.
+                Check(res, ref pass, ref fail, "atlasMaxDim=1024 keeps the 512 source", t2 != null && t2.width == 512 && t2.height == 512, t2 != null ? $"{t2.width}x{t2.height} (expected 512x512)" : "no atlas");
             }
 
             // ---- size: scales the model's longest axis to `size` ----
@@ -118,11 +121,18 @@ public static class BakeFeatureTest
                 Check(res, ref pass, ref fail, "positionOffset.z raises the model", m != null && Mathf.Abs(minz - 5f) < 1.0f, $"min.z={minz:0.00} (expected ~5)");
             }
 
-            // ---- windingFix: rewinds faces outward -> must complete without error ----
+            // ---- windingFix: rewinds faces outward. The fixture has ONE face wound inward, so the row can FAIL
+            //      (review 2026-09-14: the consistently wound cube it used before passed a no-op fix) — and the
+            //      premise is asserted first, so a fixture that stops being inside-out is noticed too.
             {
-                var c = Cfg("winding", cube1); c.windingFix = true;
+                var c0 = Cfg("windingoff", cubeRev); c0.windingFix = false;
+                var m0 = Bake(c0, used, out var r0);
+                int inward0 = m0 != null ? InwardFaces(m0) : -1;
+                Check(res, ref pass, ref fail, "premise: the reversed-face fixture bakes inward without windingFix", m0 != null && r0.ok && inward0 == 2, m0 != null ? $"{inward0} inward triangle(s) (expected 2)" : r0.error);
+                var c = Cfg("winding", cubeRev); c.windingFix = true;
                 var m = Bake(c, used, out var r);
-                Check(res, ref pass, ref fail, "windingFix completes and keeps geometry", m != null && r.ok && m.triangles.Length > 0, r.ok ? "ok" : r.error);
+                int inward = m != null ? InwardFaces(m) : -1;
+                Check(res, ref pass, ref fail, "windingFix turns every face outward", m != null && r.ok && m.triangles.Length == 36 && inward == 0, m != null ? $"{inward} inward triangle(s) of {m.triangles.Length / 3}" : r.error);
             }
 
             // ---- MULTI-MESH SPLIT (2026-09-13, the Bremen): a bake over the 16,320-quad per-fragment ceiling
@@ -189,7 +199,9 @@ public static class BakeFeatureTest
             {
                 var c = Cfg("multi", cube2); c.materialMode = MaterialMode.Multi;
                 var t = BakeAtlas(c, used);
-                Check(res, ref pass, ref fail, "materialMode=Multi bakes a 2-material model", t != null, t != null ? $"atlas {t.width}x{t.height}" : "no atlas");
+                // Two 512² sources cannot share a 512² atlas: the packed result must carry at least both (review 2026-09-14 —
+                // `atlas != null` alone passed a packer that dropped a material).
+                Check(res, ref pass, ref fail, "materialMode=Multi packs BOTH materials into the atlas", t != null && (long)t.width * t.height >= 2L * 512 * 512, t != null ? $"atlas {t.width}x{t.height} (needs >= 2x512x512 texels)" : "no atlas");
             }
 
             // ---- flat-colour .tga swatches (0.5.2): glbconv writes untextured materials as 8x8 TGAs, which
@@ -433,7 +445,24 @@ public static class BakeFeatureTest
     //      flatTga swaps the two-material albedos for glbconv-style 8x8 flat-colour TGA swatches (type-2
     //      uncompressed 32-bit, top-left origin) — the exact bytes an untextured GLB material produces, which
     //      Texture2D.LoadImage cannot decode. ----
-    static string WriteCube(string dir, string name, bool twoMats, bool flatTga = false)
+    // Every triangle's geometric normal must point AWAY from the mesh centre — the property windingFix exists to
+    // restore. Returns how many face inward (0 = clean). A convex cube makes this exact; the bake's own transforms
+    // (rotation, size, keel offset) preserve it.
+    static int InwardFaces(Mesh m)
+    {
+        var v = m.vertices; var t = m.triangles; var c = m.bounds.center; int inward = 0;
+        for (int i = 0; i + 2 < t.Length; i += 3)
+        {
+            Vector3 a = v[t[i]], b = v[t[i + 1]], d = v[t[i + 2]];
+            Vector3 n = Vector3.Cross(b - a, d - a);
+            if (Vector3.Dot(n, (a + b + d) / 3f - c) < 0f) inward++;
+        }
+        return inward;
+    }
+
+    // `reverseFace` (2026-09-14): emit that quad's two triangles with their winding flipped, so the windingFix row
+    // has a fixture that can FAIL — the consistently wound cube it used before passed a no-op fix.
+    static string WriteCube(string dir, string name, bool twoMats, bool flatTga = false, int reverseFace = -1)
     {
         var d = Path.Combine(dir, name);
         Directory.CreateDirectory(d);
@@ -456,6 +485,12 @@ public static class BakeFeatureTest
             for (int f = from; f < to; f++)
             {
                 var q = faces[f];
+                if (f == reverseFace)
+                {
+                    sb.AppendLine($"f {q[2]}/3 {q[1]}/2 {q[0]}/1");
+                    sb.AppendLine($"f {q[3]}/4 {q[2]}/3 {q[0]}/1");
+                    continue;
+                }
                 sb.AppendLine($"f {q[0]}/1 {q[1]}/2 {q[2]}/3");
                 sb.AppendLine($"f {q[0]}/1 {q[2]}/3 {q[3]}/4");
             }

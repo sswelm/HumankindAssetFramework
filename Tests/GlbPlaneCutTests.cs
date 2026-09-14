@@ -194,9 +194,47 @@ public class GlbPlaneCutTests
         Assert.Equal(2, TriangleCount(root, (JObject)nodes[2]));   // the vertical wall only
     }
 
+    // ---- NESTED PARENT (2026-09-14): the transform lives on the PARENT, the cut node is its child ----
+
+    [Fact]
+    public void Cut_composes_the_parent_chain_not_just_the_node()
+    {
+        // Root: translation (0,0,5) + rotation Z90; Hull (node 1) untransformed. Local +X becomes world +Y through
+        // the PARENT, so a world-space Y plane at 1 splits the strip 2/2 — a cut that read only the node's own
+        // (identity) transform would put every triangle below y=1 and change nothing.
+        byte[] source = BuildGlb(Strip, underParent: true);
+
+        var result = GlbDisconnectedParts.CutNodeByPlane(source, 1, 1, 1.0);
+
+        Assert.True(result.Changed);
+        JObject root = ReadJson(result.Bytes);
+        var nodes = (JArray)root["nodes"];
+        Assert.Equal("Root", (string)nodes[0]["name"]);
+        Assert.Equal(2, TriangleCount(root, (JObject)nodes[2]));   // Hull_CutA
+        Assert.Equal(2, TriangleCount(root, (JObject)nodes[3]));   // Hull_CutB
+    }
+
+    [Fact]
+    public void ExtractPart_bounds_include_the_parent_translation_and_rotation()
+    {
+        var geo = GlbDisconnectedParts.ExtractPart(BuildGlb(Strip, underParent: true), 1);
+        Assert.Equal("Hull", geo.NodeName);
+        // rotated by the parent: local X [0,2] -> world Y [0,2], local Y [0,1] -> world X [-1,0]; translated: Z = 5
+        Assert.Equal(-1.0, geo.Min[0], 3);
+        Assert.Equal(0.0, geo.Max[0], 3);
+        Assert.Equal(0.0, geo.Min[1], 3);
+        Assert.Equal(2.0, geo.Max[1], 3);
+        Assert.Equal(5.0, geo.Min[2], 3);
+        Assert.Equal(5.0, geo.Max[2], 3);
+    }
+
     // ---- helpers (the GlbDisconnectedPartsTests builder, plus rotation / shared-node options) ----
 
-    static byte[] BuildGlb(float[] positions, bool withWeightAnimation = false, bool rotationZ90 = false, bool secondNodeSharesMesh = false, double translationY = 0)
+    // `underParent` (2026-09-14): the mesh node becomes the CHILD of a root carrying translation (0,0,5) + rotation
+    // Z90, so the cut/extract must compose the parent chain. Every earlier fixture was a root node — reversing
+    // `Mul(world, local)` or dropping the chain walk passed all of them (the project's own "drill hierarchy features
+    // with NESTED sources" lesson, Bare .parent= drops roots, 2026-09-03).
+    static byte[] BuildGlb(float[] positions, bool withWeightAnimation = false, bool rotationZ90 = false, bool secondNodeSharesMesh = false, double translationY = 0, bool underParent = false)
     {
         var bin = new List<byte>();
         foreach (float f in positions) bin.AddRange(BitConverter.GetBytes(f));
@@ -218,6 +256,13 @@ public class GlbPlaneCutTests
             hull["translation"] = new JArray(0.0, translationY, 0.0);
         var nodes = new JArray { hull };
         var sceneNodes = new JArray(0);
+        if (underParent)
+        {
+            // root at index 0, hull becomes index 1; the root carries the transform, the hull stays untransformed
+            var root0 = new JObject { ["name"] = "Root", ["translation"] = new JArray(0.0, 0.0, 5.0),
+                                      ["rotation"] = new JArray(0.0, 0.0, Math.Sqrt(0.5), Math.Sqrt(0.5)), ["children"] = new JArray(1) };
+            nodes = new JArray { root0, hull };
+        }
         if (secondNodeSharesMesh)
         {
             nodes.Add(new JObject { ["name"] = "Twin", ["mesh"] = 0, ["translation"] = new JArray(0.0, 0.0, 5.0) });

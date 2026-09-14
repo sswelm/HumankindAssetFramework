@@ -1897,19 +1897,6 @@ namespace HumankindAssetFramework
                         { Plugin.Log.LogWarning($"[Props] '{e.resourceName}' hand prop: descriptor arrays unreadable (defId {defId}) — prop stays invisible"); }
                         else
                         {
-                            var dEntry = descs.GetValue(defId);
-                            var dT = dEntry.GetType();
-                            uint start = (uint)dT.GetField("StartFragment").GetValue(dEntry);
-                            uint count = (uint)dT.GetField("FragmentCount").GetValue(dEntry);
-                            int tail = Convert.ToInt32(cntF.GetValue(pm));
-                            int need = tail + (int)count + 1;
-                            if (gfrags.Length < need)
-                            {
-                                var grown = Array.CreateInstance(gfrags.GetType().GetElementType(), need + 100);
-                                Array.Copy(gfrags, grown, gfrags.Length);
-                                fragF.SetValue(pm, grown); gfrags = grown;
-                            }
-                            for (int k = 0; k < count; k++) gfrags.SetValue(gfrags.GetValue((int)start + k), tail + k);
                             var feType = gfrags.GetType().GetElementType();
                             var ge = Activator.CreateInstance(feType);
                             feType.GetField("SkinnedMeshIndex").SetValue(ge, 0u);
@@ -1918,13 +1905,18 @@ namespace HumankindAssetFramework
                             uint folIdx = 0;
                             try { folIdx = (uint)Convert.ToInt32(GetMember(fol, "LayerIndex")); } catch { }
                             feType.GetField("FxOutputLayerIndex").SetValue(ge, folIdx);
-                            gfrags.SetValue(ge, tail + (int)count);
-                            dT.GetField("StartFragment").SetValue(dEntry, (uint)tail);
-                            dT.GetField("FragmentCount").SetValue(dEntry, count + 1);
-                            descs.SetValue(dEntry, defId);
-                            cntF.SetValue(pm, tail + (int)count + 1);
-                            dirtyF?.SetValue(pm, true);
-                            Plugin.Diag($"[Props] descriptor[{defId}] repointed: fragments {start}+{count} -> {tail}+{count + 1} (surgical, layer {folIdx})");
+                            // the arithmetic is the shared, unit-tested kernel (DescriptorRepoint.cs); this site keeps the game-side writes
+                            int tail = Convert.ToInt32(cntF.GetValue(pm));
+                            if (!DescriptorRepoint.Apply(ref gfrags, descs, defId, tail, new[] { ge }, out var rp, out string rpErr))
+                                Plugin.Log.LogWarning($"[Props] '{e.resourceName}' hand prop: descriptor repoint refused — {rpErr} — prop stays invisible");
+                            else
+                            {
+                                if (rp.Grown) fragF.SetValue(pm, gfrags);
+                                cntF.SetValue(pm, rp.NewTail);
+                                dirtyF?.SetValue(pm, true);
+                                e.gpuDefId = defId; e.gpuFragStart = rp.NewStart; e.gpuFragCount = rp.NewCount;   // what the smoke verifies the live descriptor still says
+                                Plugin.Diag($"[Props] descriptor[{defId}] repointed: fragments {rp.OldStart}+{rp.OldCount} -> {rp.NewStart}+{rp.NewCount} (surgical, layer {folIdx})");
+                            }
                         }
                     }
                 }
@@ -2028,22 +2020,10 @@ namespace HumankindAssetFramework
                     var gfrags = fragF?.GetValue(pm) as Array;
                     if (descs == null || gfrags == null || cntF == null || defId >= descs.Length)
                     { Plugin.Log.LogWarning($"[Uni][Multi] '{e.resourceName}': descriptor arrays unreadable (defId {defId}) — overflow chunks stay invisible"); return; }
-                    var dEntry = descs.GetValue(defId);
-                    var dT = dEntry.GetType();
-                    uint start = (uint)dT.GetField("StartFragment").GetValue(dEntry);
-                    uint count = (uint)dT.GetField("FragmentCount").GetValue(dEntry);
-                    int tail = Convert.ToInt32(cntF.GetValue(pm));
-                    int need = tail + (int)count + made.Count;
-                    if (gfrags.Length < need)
-                    {
-                        var grown = Array.CreateInstance(gfrags.GetType().GetElementType(), need + 100);
-                        Array.Copy(gfrags, grown, gfrags.Length);
-                        fragF.SetValue(pm, grown); gfrags = grown;
-                    }
-                    for (int k = 0; k < count; k++) gfrags.SetValue(gfrags.GetValue((int)start + k), tail + k);
                     var feType = gfrags.GetType().GetElementType();
                     uint folIdx = 0;
                     try { folIdx = (uint)Convert.ToInt32(GetMember(fol, "LayerIndex")); } catch { }
+                    var ges = new List<object>(made.Count);
                     for (int i = 0; i < made.Count; i++)
                     {
                         var ge = Activator.CreateInstance(feType);
@@ -2051,14 +2031,17 @@ namespace HumankindAssetFramework
                         feType.GetField("EncodedMeshAndVisualParticleCountFxMeshIndex").SetValue(ge, encs[i]);
                         feType.GetField("BoneIndex").SetValue(ge, bidxs[i]);
                         feType.GetField("FxOutputLayerIndex").SetValue(ge, folIdx);
-                        gfrags.SetValue(ge, tail + (int)count + i);
+                        ges.Add(ge);
                     }
-                    dT.GetField("StartFragment").SetValue(dEntry, (uint)tail);
-                    dT.GetField("FragmentCount").SetValue(dEntry, count + (uint)made.Count);
-                    descs.SetValue(dEntry, defId);
-                    cntF.SetValue(pm, tail + (int)count + made.Count);
+                    // the arithmetic is the shared, unit-tested kernel (DescriptorRepoint.cs); this site keeps the game-side writes
+                    int tail = Convert.ToInt32(cntF.GetValue(pm));
+                    if (!DescriptorRepoint.Apply(ref gfrags, descs, defId, tail, ges, out var rp, out string rpErr))
+                    { Plugin.Log.LogWarning($"[Uni][Multi] '{e.resourceName}': descriptor repoint refused — {rpErr} — overflow chunks stay invisible"); return; }
+                    if (rp.Grown) fragF.SetValue(pm, gfrags);
+                    cntF.SetValue(pm, rp.NewTail);
                     dirtyF?.SetValue(pm, true);
-                    Plugin.Diag($"[Uni][Multi] descriptor[{defId}] repointed: fragments {start}+{count} -> {tail}+{count + (uint)made.Count} ({made.Count} overflow chunk(s), layer {folIdx})");
+                    e.gpuDefId = defId; e.gpuFragStart = rp.NewStart; e.gpuFragCount = rp.NewCount;   // what the smoke verifies the live descriptor still says
+                    Plugin.Diag($"[Uni][Multi] descriptor[{defId}] repointed: fragments {rp.OldStart}+{rp.OldCount} -> {rp.NewStart}+{rp.NewCount} ({made.Count} overflow chunk(s), layer {folIdx})");
                 }
                 catch (Exception ex) { Plugin.Log.LogWarning("[Uni][Multi] descriptor patch: " + ex.Message); }
             }
