@@ -52,15 +52,24 @@ skipped. Ranked by consequence within each group.
 
 ### Verification machinery (fix first — a green gate that cannot see the shape is worse than no gate)
 
-- **`check-member-shape.sh` matches only `Convert.To*(GetMember(` — blind to the `Mem(` wrapper, and one live
-  dead-sentinel sits behind it.** `FormationOverridePatch.cs:358` defines `Mem(o,name) => GetMember(o,name)`; `:432`
+- ~~**`check-member-shape.sh` matches only `Convert.To*(GetMember(` — blind to the `Mem(` wrapper, and one live
+  dead-sentinel sits behind it.**~~ — **FIXED 2026-09-14, drilled.** Worse than reviewed: the regex was also blind to
+  the *qualified* `UniversalInject.GetMember(`, so the widened gate found **four more** live sites (FacingPersist
+  `IsLoaded` / `SimulationEntityGUID` / `FormationAngle`, FormationOverride `PawnDefinitionId`) — six rewritten as
+  typed reads (new `TryMemberULong` for the GUID). `READERS` list + self-check on object-returning `(object, string)`
+  helpers; a planted `Peek(` wrapper FAILS. See CHANGELOG *"The gates learn to see their own wrappers"*.
+  `FormationOverridePatch.cs:358` defines `Mem(o,name) => GetMember(o,name)`; `:432`
   `bool loaded = true; try { loaded = Convert.ToBoolean(Mem(unit, "IsLoaded")); } catch { }` then `if (!loaded)
   continue;` — a rename → null → `false` → every unit skipped by the formation re-form loop forever, no log. Same shape
   at `:443` (`IsNaval`). Drill: the shipped regex → 0 hits on that file; `(?:GetMember|Mem|Member)\b` fires on both.
   Fix: rewrite both sites as `MemberBool(unit, "IsLoaded", true)` (as `UniversalInject.Combat.cs:126` already does)
   and widen the reader alternation in patterns (a) and (b).
-- **`check-catalog.sh` "all 370 catalogued" excludes three accessor families; at least four members are
-  uncatalogued.** The alternation at `tools/check-catalog.sh:126,129` lacks `Mem(` (17 sites), `FireProbe.Member(`/
+- ~~**`check-catalog.sh` "all 370 catalogued" excludes three accessor families; at least four members are
+  uncatalogued.**~~ — **FIXED 2026-09-14, drilled.** Five catalogued (`striker` too; `SimulationArtilleryStrike` is a
+  new binding, bindcheck 135/135), surface 370 → 382. One `HELPERS` list drives the alternation; the self-check
+  discovers `(object, string)` helpers that reach a reader and FAILS on an unknown one — it tripped on `TryMemberULong`
+  the moment it was added to the source, before it was added to the list. `databaseMatrices0D` (RepoDump diagnostic)
+  site-allowlisted with the reason. The alternation at `tools/check-catalog.sh:126,129` lacked `Mem(` (17 sites), `FireProbe.Member(`/
   `FireProbe.Int(` (`CombatEventPatch.cs:31-32`, 6 sites) and the typed `MemberBool/Float/Int/Long/UInt` + `TryMember*`
   readers (38 sites). Behind them: `StrikerUnit` (`CombatEventPatch.cs:44`), `StrikerArmy` (`:54`),
   `AttackerEmpireIndex` (`:43`), `PrimitivePerParticleCount` (`UniversalInject.Inject.cs:1548`) — none in

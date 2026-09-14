@@ -10,6 +10,26 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE GATES LEARN TO SEE THEIR OWN WRAPPERS (2026-09-14).** The 09-14 critical review found both reflection-site
+  gates blind a fourth time, in the same way as the three times before: their reader alternation had been widened
+  one spelling at a time, and the 08-01 consolidation of local reader copies onto `GetMember` (`Mem(` in
+  FormationOverride, `FireProbe.Member/Int(` in CombatEventPatch) plus the 08-23 typed `MemberBool/…`/`TryMember*`
+  readers had never been added. `check-catalog.sh` reported *"all 370 catalogued"* while **61 sites** went through
+  names it could not see — behind them `StrikerUnit`, `StrikerArmy`, `AttackerEmpireIndex`, `striker` and
+  `PrimitivePerParticleCount` were uncatalogued, i.e. the fire-on-attack hook had no drift alarm. `check-member-shape.sh`
+  knew only the bare `GetMember(` — not `Mem(`, and not even the **qualified** `UniversalInject.GetMember(` — and so
+  printed OK over **six live dead-sentinel sites**: the formation re-form loop's `IsLoaded`/`IsNaval` (a rename would
+  have skipped every unit forever), FacingPersist's `IsLoaded`, its `SimulationEntityGUID` and `FormationAngle`
+  phantom-skips (an unreadable angle would have been snapshotted as **0**, a valid heading), and FormationOverride's
+  `PawnDefinitionId` (a missing member read as **0**, a valid id, instead of the −1 the branch below tests for).
+  All six rewritten as typed reads (`MemberBool`, `MemberInt`, `TryMemberInt`, new `TryMemberULong` — the GUID must not
+  round-trip through `ToInt64`; test pins a value above `long.MaxValue`). **Structurally:** each script now holds ONE
+  list of helper names and derives its alternation from it, and both carry a **self-check** that discovers every
+  `static … Name(object, string …)` helper whose body reaches a reader and FAILS if the name is not in the list (or,
+  for the catalog, in `NOT_MEMBER_READERS` with a reason). Drilled: a planted `Peek(` wrapper fails both gates; a
+  planted `Mem(…"Bogus")` fails the catalog; and adding `TryMemberULong` to the source tripped the self-check before
+  it was added to the list — the exact event the check exists for. Five members catalogued (`SimulationArtilleryStrike`
+  is a new binding); bindcheck 135/135 against the live build; catalog surface 370 → 382.
 - **THE SENTINEL THAT COULD NEVER BE REACHED (2026-08-23).** `bool loaded = true; try { loaded =
   Convert.ToBoolean(GetMember(unit, "IsLoaded")); } catch { }` reads as *"true unless the game says otherwise"*
   and means *"**false** whenever the member is missing"*. `GetMember` swallows its own exception and returns null

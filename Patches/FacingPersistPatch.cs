@@ -191,11 +191,9 @@ namespace HumankindAssetFramework
                 if (army == null) continue;
                 var unit = UniversalInject.GetMember(army, "PresentationUnit");
                 if (unit == null) continue;
-                bool loaded = true; try { loaded = Convert.ToBoolean(UniversalInject.GetMember(unit, "IsLoaded")); } catch { }
-                if (!loaded) continue;
-                ulong guid; try { guid = Convert.ToUInt64(UniversalInject.GetMember(UniversalInject.GetMember(army, "ArmyInfo"), "SimulationEntityGUID")); } catch { continue; }
-                if (guid == 0) continue;
-                int angle; try { angle = Convert.ToInt32(UniversalInject.GetMember(unit, "FormationAngle")); } catch { continue; }
+                if (!UniversalInject.MemberBool(unit, "IsLoaded", true)) continue;   // unreadable = assume loaded (the old dead-sentinel shape read it as FALSE)
+                if (!UniversalInject.TryMemberULong(UniversalInject.GetMember(army, "ArmyInfo"), "SimulationEntityGUID", out ulong guid) || guid == 0) continue;
+                if (!UniversalInject.TryMemberInt(unit, "FormationAngle", out int angle)) continue;   // unreadable = leave the snapshot alone (the old shape stored 0)
                 snap[guid] = angle;
 
                 // Restore? Apply the instant a pawn exists — no settle — and keep re-applying whenever the heading has

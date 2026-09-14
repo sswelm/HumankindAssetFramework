@@ -24,6 +24,7 @@ namespace HumankindAssetFramework.Tests
             public float Angle = 12.5f;
             public int Count = 7;
             public long Index = 9L;
+            public ulong Guid = 18446744073709551000UL;   // above long.MaxValue: the facing-persist GUID read must not go through ToInt64
             public string NotANumber = "abc";
         }
 
@@ -91,6 +92,14 @@ namespace HumankindAssetFramework.Tests
             Assert.False(UniversalInject.TryMemberFloat(h, "NoSuchMember", out float _));
             Assert.True(UniversalInject.TryMemberFloat(h, "Angle", out float ang));
             Assert.Equal(12.5f, ang);
+
+            // 2026-09-14: FacingPersist's `ulong guid; try { guid = Convert.ToUInt64(GetMember(…)); } catch { continue; }`
+            // was the phantom-skip shape through the QUALIFIED spelling the gate could not see. Its replacement must
+            // keep the full ulong range and report absence.
+            Assert.False(UniversalInject.TryMemberULong(h, "NoSuchMember", out ulong _));
+            Assert.True(UniversalInject.TryMemberULong(h, "Guid", out ulong g));
+            Assert.Equal(18446744073709551000UL, g);
+            Assert.False(UniversalInject.TryMemberULong(h, "NotANumber", out ulong _));   // present but unconvertible is also "no"
         }
 
         // THE COMPOSED CASE, and the two live bugs it carried. `CategoryFromProfile(Convert.ToInt32(GetMember(…)))`

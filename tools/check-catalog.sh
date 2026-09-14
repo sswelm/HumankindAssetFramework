@@ -55,10 +55,19 @@ guid@Patches/DistrictInject.cs	tolerant probe: same chain as Value above
 #      debug line and not a feature. Site-scoped, so the same names read anywhere else still have to be catalogued.
 ContentTypeName@Patches/DistrictInject.Scoped.cs	diagnostics only: DumpMatrices' repo dump, off a Definition whose type is not known statically
 OutputEntries@Patches/DistrictInject.Scoped.cs	diagnostics only: DumpGroundColors' atlas walk, read off atlas.GetType() at runtime
+databaseMatrices0D@Patches/DistrictInject.Scoped.cs	diagnostics only: DumpMatrices' repo dump (DistrictDebug-gated); surfaced 2026-09-14 when the gate learned to see DumpMatrices( — 1D/2D are catalogued because the district axis READS them
 # ---- the GF( family, made visible 2026-08-22 when this gate learned to see it (it had been blind to 16 sites) ----
 # GFA( joined it 2026-08-23 (the memoized AccessTools probe). It was added and the gate still said OK — because a
 # shape it cannot see is a shape it stops counting, not one it reports. Drilled both ways: a bogus name inside a
 # GFA( call passes the un-taught gate and fails the taught one. ANY new accessor helper must be added here.
+# ---- 2026-09-14: the FOURTH widening — and the last one done by hand. The 08-01 consolidation folded three local
+#      reader copies onto GetMember (`Mem(` in FormationOverride, `FireProbe.Member/Int(` in CombatEventPatch) and 08-23
+#      added the typed `MemberBool/…`/`TryMember*` readers; none of the names was ever added below, so 61 sites were
+#      invisible and "all 370 catalogued" was hiding StrikerUnit / StrikerArmy / AttackerEmpireIndex / striker /
+#      PrimitivePerParticleCount — the fire-on-attack hook had no drift alarm. The list is now HELPERS (one place),
+#      and the SELF-CHECK below discovers every `static … Name(object, string …)` helper whose body reaches a reader
+#      and FAILS if it is not in HELPERS or NOT_MEMBER_READERS. The next consolidation trips the gate instead of
+#      blinding it.
 
 # GF(type, "name") is the district axis's tolerant field probe over a type resolved AT RUNTIME (mat.GetType(),
 # voBox.GetType(), a clone's type). The catalog binds member-to-DECLARING-TYPE, and these sites genuinely do not
@@ -108,6 +117,38 @@ definition@Patches/DistrictInject.Scoped.cs	tolerant probe: tries Definition ?? 
 EOF
 )
 
+# ---- HELPERS: every HAF helper that takes a game MEMBER NAME as its string argument (2026-09-14, one place) ----
+# The alternation the extractor uses is built from this list. Bare names are word-anchored so `Int(` does not match
+# `ToInt32(`; the Harmony/BCL accessor shapes are appended verbatim.
+HELPERS="GetMember SetMember GetMemberOrNull CallMethod CachedField CachedProp GFA GF Mem Member Int
+         MemberBool MemberFloat MemberInt MemberLong MemberUInt TryMemberFloat TryMemberLong TryMemberInt TryMemberUInt TryMemberULong
+         BumpIntField SetIntField ScaleTrsTranslation SetFreshElementReference DumpMatrices"
+# (object, string) helpers whose body reaches a reader but whose string is NOT a member name — each with the reason.
+NOT_MEMBER_READERS="DumpPlbcTree"   # DumpPlbcTree(plbc, label): the string is a log label; its own AccessTools.Field literals are extracted directly
+HELPER_RE="\\b($(echo $HELPERS | tr ' ' '|'))"
+ACCESSORS="${HELPER_RE}|FastMember\.(Getter|Setter)<[^>]*>|AccessTools\.(Field|Property|Method|PropertyGetter|PropertySetter|DeclaredField|DeclaredProperty|DeclaredMethod)|\.Get(Field|Property|Method|Event|Member)|Traverse\.(Field|Property|Method)"
+
+# ---- SELF-CHECK: no by-name reader helper the extractor does not know (2026-09-14) ----
+# Discovers every `static <T> Name(object x, string name, …)` in the runtime sources whose definition line or the
+# three lines after it call a reader (GetMember/Mem/Member/TryConvert/CachedMember/CachedField/CachedProp/GF/GFA/
+# GetField/GetProperty/GetMethod/AccessTools.*). Each must be in HELPERS or NOT_MEMBER_READERS. Drilled: a copy of
+# `Mem(` under a new name in a runtime file FAILS here; the same helper added to HELPERS passes and its literals count.
+UNKNOWN=$(for f in $SRC; do
+  perl -0777 -ne 'while (/^[ \t]*(?:internal |public |private )?static\s+\S+\s+(\w+)\s*\(\s*(?:this\s+)?object\s+\w+\s*,\s*string\s+\w+[^\n]*\n(?=((?:[^\n]*\n){0,3}))/mg) {
+    my $n=$1; my $blk=$&.$2; my $ln = 1 + (substr($_,0,$-[0]) =~ tr/\n//);
+    print "$n\t$ARGV:$ln\n" if $blk =~ /\b(GetMember|GetMemberOrNull|Mem|Member|TryConvert|CachedMember|CachedField|CachedProp|GFA?|GetField|GetProperty|GetMethod|AccessTools\.\w+)\s*\(/;
+  }' "$f"
+done | awk -F'\t' -v known=" $HELPERS $NOT_MEMBER_READERS " 'BEGIN{gsub(/[ \t\n]+/," ",known)} index(known, " " $1 " ") == 0 {print}')
+if [ -n "$UNKNOWN" ]; then
+  echo "[FAIL] by-name reader helper(s) the catalog gate does not know — literals passed through them are NOT being checked:"
+  printf '%s\n' "$UNKNOWN" | sed 's/^/  /'
+  echo
+  echo "Add the name to HELPERS in tools/check-catalog.sh (its string argument is a game member name) or to"
+  echo "NOT_MEMBER_READERS with the reason (the string is a label, a bone name, …). A shape this gate cannot see is a"
+  echo "shape it silently stops counting — that is how 61 sites went unchecked between 2026-08-01 and 2026-09-14."
+  exit 1
+fi
+
 # ---- extract: string literals in a by-name reflection call, across the runtime sources ----
 # A literal immediately followed by `+` is a CONCATENATED family ("Pose" + i, "BoneRotation" + i): the real member is
 # <name>0, which is what the catalog holds, so check that instead of the bare prefix.
@@ -123,10 +164,10 @@ extract() {
   # the most common shapes in this codebase: 146 sites across 70 distinct names were never being checked, while this
   # script reported "all 331 catalogued". Found by a log line, not by the gate — `allMeshNames` missed 36 times in one
   # session, and typeprobe says no assembly in the game declares it at all.
-  grep -onE "(GetMember|SetMember|GetMemberOrNull|CallMethod|CachedField|CachedProp|GFA|GF|FastMember\.(Getter|Setter)<[^>]*>|AccessTools\.(Field|Property|Method|PropertyGetter|PropertySetter|DeclaredField|DeclaredProperty|DeclaredMethod)|\.Get(Field|Property|Method|Event|Member)|Traverse\.(Field|Property|Method))\([A-Za-z_][A-Za-z0-9_.]*\([^()]*\), *\"[A-Za-z_][A-Za-z0-9_.]*\"" $SRC 2>/dev/null \
+  grep -onE "(${ACCESSORS})\([A-Za-z_][A-Za-z0-9_.]*\([^()]*\), *\"[A-Za-z_][A-Za-z0-9_.]*\"" $SRC 2>/dev/null \
   | sed -E 's/^([^:]+):([0-9]+):.*"([A-Za-z_][A-Za-z0-9_.]*)"$/\3\t\1:\2/' \
   | awk -F'\t' '{n=split($1,p,"."); for(i=1;i<=n;i++) if (p[i] != "") print p[i] "\t" $2}'
-  grep -onE "(GetMember|SetMember|GetMemberOrNull|CallMethod|CachedField|CachedProp|GFA|GF|FastMember\.(Getter|Setter)<[^>]*>|AccessTools\.(Field|Property|Method|PropertyGetter|PropertySetter|DeclaredField|DeclaredProperty|DeclaredMethod)|\.Get(Field|Property|Method|Event|Member)|Traverse\.Field|Traverse\.Property|Traverse\.Method)\([^)]*?\"[A-Za-z_][A-Za-z0-9_.]*\" *\+?" $SRC 2>/dev/null \
+  grep -onE "(${ACCESSORS})\([^)]*?\"[A-Za-z_][A-Za-z0-9_.]*\" *\+?" $SRC 2>/dev/null \
   | sed -E 's/^([^:]+):([0-9]+):.*"([A-Za-z_][A-Za-z0-9_.]*)"( *\+)?$/\3\4\t\1:\2/' \
   | sed -E 's/^([A-Za-z_][A-Za-z0-9_.]*) *\+\t/\10\t/' \
   | awk -F'\t' '{n=split($1,p,"."); for(i=1;i<=n;i++) if (p[i] != "") print p[i] "\t" $2}'
