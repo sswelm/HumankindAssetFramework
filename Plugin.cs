@@ -494,8 +494,11 @@ namespace HumankindAssetFramework
             catch (System.Exception ex)
             {
                 UniversalInject.NoteInjectionError("update:" + name);
-                LogOnceWarning("poll:" + name + ":" + ex.GetType().Name + ":" + ex.Message,
-                               $"[HAF] per-frame poll '{name}' threw — it is skipped every frame it fails, but every OTHER poll still runs: " + ex);
+                // keyed on poll + exception TYPE only (2026-09-14): with the message in the key, a poll whose message
+                // varies (`KeyNotFoundException: 'X' was not present`, Unity's "'X' has been destroyed") logged the
+                // full stack EVERY frame and grew onceKeys by a string per frame — the spam this helper exists to stop
+                LogOnceWarning("poll:" + name + ":" + ex.GetType().Name,
+                               $"[HAF] per-frame poll '{name}' threw — it is skipped every frame it fails, but every OTHER poll still runs (first occurrence logged; later ones may differ in detail): " + ex);
             }
             finally { FrameCost.End(bucket, t); }
         }
@@ -560,7 +563,7 @@ namespace HumankindAssetFramework
                 Poll(FrameCost.DeployState,      "DeployState",      pDeployState);       // deploy-on-stop: record which of our pawns' units are currently moving
                 Poll(FrameCost.AnimStates,       "AnimStates",       pAnimStates);        // state-driven (Phase 2): publish per-unit moving/stopped for the idle/move/after clips
                 Poll(FrameCost.EngineAudio,      "EngineAudio",      pEngineAudio);       // engine sound: fire the per-ship Start/Stop move sound on our units
-                Poll(FrameCost.SubPawnVisuals,   "SubPawnVisuals",   pSubPawnVisuals);    // one-shot pawn-prefab hierarchy dump (the ghost-rotor hunt); no-op once dumped
+                Poll(FrameCost.SubPawnVisuals,   "SubPawnVisuals",   pSubPawnVisuals);    // hideSubPawns entries only: a 3 s poll re-applying the donor-struct source fix after respawns; hierarchy dump + renderer census once per entry. No-op without hideSubPawns entries
                 Poll(FrameCost.BattleCries,      "BattleCries",      pBattleCries);       // battle-start war cries queued by the sim-thread hook
                 Poll(FrameCost.Dials,            "Dials",            pDials);             // live dials: rotor trim, turn ease, terrain hug (haf_*.txt)
                 Poll(FrameCost.ClassScan,        "ClassScan",        pClassScan);         // category turn ease: sample live units for the Hover ability + azimuth turrets (~3s; only while category rates are active)

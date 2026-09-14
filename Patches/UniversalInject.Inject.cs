@@ -449,6 +449,7 @@ namespace HumankindAssetFramework
         // PresentationSubPawn's transform tree and log every child with its renderer/mesh/material names, so the next
         // step can disable the rotor children BY NAME instead of guessing. Poll-driven (~3s) from Plugin.Update.
         [ProcessLived("diagnostic once-per-name dump dedup")] static readonly HashSet<string> hierDumped = new HashSet<string>();
+        [ProcessLived("diagnostic once-per-name census dedup")] static readonly HashSet<string> rendererCensusDone = new HashSet<string>();
         static float hierNextAt;
         internal static void ProcessSubPawnVisuals()
         {
@@ -506,9 +507,13 @@ namespace HumankindAssetFramework
                     // caller — a RotationTransformInfo-driven attachment living OUTSIDE the SubPawn's own GameObject).
                     // Log every Renderer within 15 units (path, mesh, material, size); auto-disable those with
                     // donor-specific names (Gunship/Helix/Rotor/Blur — NOT "Helicopter", which matches our own assets).
-                    if (UnityEngine.Time.time >= e.rendererCensusNextAt)
+                    // ONCE per entry per process (2026-09-14): this was a 15 s timer, i.e. a full-scene
+                    // FindObjectsOfType<Renderer> on a timer — Performance.md rule 2, in the file that claims the
+                    // scan was removed. 82 runs in one session, every one "0 renderer(s)": the ghost it hunted is
+                    // killed at the source now (CrushGhostSlice / PruneCloneRenderOutputs). The census keeps its
+                    // diagnostic value as a one-shot; the auto-disable it carried never fired in that session.
+                    if (rendererCensusDone.Add(e.resourceName))
                     {
-                        e.rendererCensusNextAt = UnityEngine.Time.time + 15f;
                         var origin = c.transform.position;
                         int found = 0;
                         foreach (var r in UnityEngine.Object.FindObjectsOfType<UnityEngine.Renderer>())

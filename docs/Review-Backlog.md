@@ -163,7 +163,9 @@ skipped. Ranked by consequence within each group.
 
 ### Plugin — runtime core
 
-- **Vanilla-scaled pawns take the boxed-reflection path every frame while compiled accessors exist.**
+- ~~**Vanilla-scaled pawns take the boxed-reflection path every frame while compiled accessors exist.**~~ — **FIXED
+  2026-09-14** (`PawnFast.Scale/SetScale` with the reflection fallback; `MaybeSwapFormationBySize` short-circuits on
+  the last settled scale). Not yet re-measured in-game — Performance.md §8 names the line to read.
   `UniversalInject.ScaleEra.cs:343-347` — `GetMember(entry,"ObjectSpace")` / `GetMember(oss,"Scale")` / two
   `SetMember`s per scaled vanilla pawn per frame (≈3–5 µs each on a 0.94 µs baseline); `PawnFast.Scale/SetScale`
   (`PawnFast.cs:102`) are used only by the entry path (`Muzzle.cs:1155`). Ahead of it `MaybeSwapFormationBySize`
@@ -171,22 +173,24 @@ skipped. Ranked by consequence within each group.
   link (`FormationOverridePatch.cs:611-617`) — *before* the `sizeFormApplied` early-out at `:262`. Live today (Biremes
   ×2); a rules-only pack scaling every ship multiplies it by the fleet. Fix: `PawnFast` with the reflection fallback;
   move the early-out above the scan.
-- **`lastPawnMatched` is reset after the pose gate.** `UniversalInject.Pose.cs:205` returns before `:206
+- ~~**`lastPawnMatched` is reset after the pose gate.**~~ — **FIXED 2026-09-14** (reset moved above the gate). `UniversalInject.Pose.cs:205` returns before `:206
   lastPawnMatched = false`; `Hooks.cs:108` then bills every vanilla add to `PoseOurs` while the flag holds the last
   matched pawn's `true`. Reachable with a static-only pack after a session re-arm or `UniversalInject=false` — the
   vanilla/ours split in the perf docs inverts. Meter-only. Fix: move the reset above the gate.
-- **`Plugin.Poll`'s log-once key includes `ex.Message`.** `Plugin.cs:497` `"poll:"+name+":"+ex.GetType().Name+":"+
+- ~~**`Plugin.Poll`'s log-once key includes `ex.Message`.**~~ — **FIXED 2026-09-14** (key = poll + exception type). `Plugin.cs:497` `"poll:"+name+":"+ex.GetType().Name+":"+
   ex.Message` — a varying message (`KeyNotFoundException`, Unity's "has been destroyed") logs the full stack every
   frame and grows `onceKeys` (`:58`) by a string per frame — the spam the 08-19 hygiene note above it forbids. Latent
   (0 poll throws in the 09-13 log). Fix: key on `name + type`, message in the text.
-- **`ProcessSubPawnVisuals` is documented as a one-shot dump but is a permanent 3 s poll with a 15 s full-scene
-  `FindObjectsOfType<Renderer>` that mutates renderers.** `Plugin.cs:563` says "no-op once dumped"; `Inject.cs:461`
+- ~~**`ProcessSubPawnVisuals` is documented as a one-shot dump but is a permanent 3 s poll with a 15 s full-scene
+  `FindObjectsOfType<Renderer>` that mutates renderers.**~~ — **FIXED 2026-09-14** (census once per entry per process;
+  the 3 s poll stays for the donor-struct source fix and the comment now says so). `Plugin.cs:563` says "no-op once dumped"; `Inject.cs:461`
   "keep polling", `:509-527` scans the scene every 15 s per `hideSubPawns` entry and sets `r.enabled = false` on
   Gunship/Helix/Rotor/Blur within 15 u — Performance.md rule 2, in the file that says the scan was removed (`:52`).
   82 `[REND]` lines in ~22 min, all "0 renderer(s)". Fix: latch per sub-pawn instance id, or delete now that
   `CrushGhostSlice`/`PruneCloneRenderOutputs` kill the ghost; correct the comment either way.
-- **`SweepForStrays` is O(entries × managers × pawnCount) boxed reflection on a 2 s timer, bucketed inside
-  `PoseOurs`.** `Pose.cs:445-467` — `arr.GetValue(i)` + `TryMemberInt` ×2 per slot although `PawnFast.SkelId/DescId`
+- ~~**`SweepForStrays` is O(entries × managers × pawnCount) boxed reflection on a 2 s timer, bucketed inside
+  `PoseOurs`.**~~ — **FIXED 2026-09-14** (compiled manager + slot reads, managers pruned after five empty sweeps, the
+  sweep excluded from the "ours ns/add" mean and stated as its own segment). `Pose.cs:445-467` — `arr.GetValue(i)` + `TryMemberInt` ×2 per slot although `PawnFast.SkelId/DescId`
   are compiled; `knownManagers` (`:438`) retains every manager ever seen (battle managers included). Small today with
   one manager; the risk is late-game multi-manager. Keep the sweep (it rescues real strays); read through `PawnFast`,
   prune managers whose `pawnCount` reads 0 for N sweeps, give it its own bucket.
