@@ -1649,7 +1649,7 @@ public static class UniversalBaker
     // shader — and the overrun is SILENT in-game: the mesh stores fully, the tail (whatever baked last: the galley's
     // masts and sails) simply never draws. Say the number right after the skeleton bake, where the dial that fixes it
     // (Reduce to ~tris) lives — so dialing to the limit needs no game launch, just this line after each Bake.
-    const int EngineQuadCeiling = 255 * 64;   // 16,320 — per FRAGMENT; the multi-mesh split below gets this budget per chunk
+    const int EngineQuadCeiling = QuadEstimate.EngineQuadCeiling;   // 16,320 — per FRAGMENT; the multi-mesh split below gets this budget per chunk
     // QUIET flag for the in-editor test harness (2026-09-13, "the Budget tester is popping up for every
     // validation"): the bake-test fixtures deliberately bake over-ceiling and multi-fragment models, so an
     // interactive Tools ▸ HAF ▸ Bake Tests run raised a MODAL per fixture — the batch-mode guard only covers
@@ -1670,43 +1670,9 @@ public static class UniversalBaker
     // adjacently) with headroom for estimator/SDK divergence, and the bake VERIFIES the SDK's real counts after
     // the skeleton bake, failing (E5-restored) rather than shipping an over-ceiling chunk.
     const int QuadBudget = 16000;   // 98% of the ceiling
-    // MEASURED, not assumed (2026-09-13, the 121-second bake): .NET's long hash is `low ^ high`, and a mesh
-    // edge key packing (v, v+1) XOR-collapses to tiny values — half a hull's edges landed in a handful of
-    // dictionary buckets, turning every lookup into a chain walk (11.2s vs 0.01s on a 179k-tri grid, same
-    // result). A murmur-style finalizer on the same keys restores O(1); the key values are untouched.
-    sealed class EdgeKeyComparer : IEqualityComparer<long>
-    {
-        public bool Equals(long x, long y) => x == y;
-        public int GetHashCode(long k)
-        {
-            unchecked { ulong z = (ulong)k; z ^= z >> 33; z *= 0xFF51AFD7ED558CCDUL; z ^= z >> 33; return (int)z ^ (int)(z >> 32); }
-        }
-    }
-    static readonly EdgeKeyComparer EdgeKeys = new EdgeKeyComparer();
-    static int EstimateQuads(int[] tris, IList<int> cell)
-    {
-        long Key(int x, int y) => x < y ? ((long)x << 32) | (uint)y : ((long)y << 32) | (uint)x;
-        var owner = new Dictionary<long, int>(cell.Count * 2, EdgeKeys);
-        var paired = new Dictionary<int, bool>(cell.Count);
-        int quads = 0;
-        foreach (int t in cell)
-        {
-            int a = tris[t * 3], b = tris[t * 3 + 1], c = tris[t * 3 + 2];
-            long e0 = Key(a, b), e1 = Key(b, c), e2 = Key(c, a);   // no per-triangle array — this runs at every BSP level
-            int mate = -1;
-            if (owner.TryGetValue(e0, out int o0) && !paired[o0]) mate = o0;
-            else if (owner.TryGetValue(e1, out int o1) && !paired[o1]) mate = o1;
-            else if (owner.TryGetValue(e2, out int o2) && !paired[o2]) mate = o2;
-            if (mate >= 0) { paired[mate] = true; paired[t] = true; quads++; }
-            else
-            {
-                paired[t] = false;
-                owner[e0] = t; owner[e1] = t; owner[e2] = t;
-            }
-        }
-        foreach (var kv in paired) if (!kv.Value) quads++;
-        return quads;
-    }
+    // The estimator and the BSP partition live in editor/QuadEstimate.cs (pure, unit-tested since 2026-09-14 —
+    // the edge-hash story and the tris/2 trap are documented there). This forwarder keeps the baker's call sites.
+    static int EstimateQuads(int[] tris, IList<int> cell) => QuadEstimate.EstimateQuads(tris, cell);
 
     // MULTI-MESH SPLIT (2026-09-13, the Bremen — 51,072 quads on a 16,320 ceiling): partition an over-ceiling mesh
     // into spatial chunks, each a standalone Mesh under the per-fragment budget (measured in ESTIMATED QUADS —
@@ -1725,33 +1691,14 @@ public static class UniversalBaker
         var bw = mesh.boneWeights; var bp = mesh.bindposes;
         bool hasN = n != null && n.Length == v.Length, hasU = u != null && u.Length == v.Length,
              hasT = t4 != null && t4.Length == v.Length, hasB = bw != null && bw.Length == v.Length;
-        var cent = new Vector3[total];
-        for (int i = 0; i < total; i++) cent[i] = (v[tris[i * 3]] + v[tris[i * 3 + 1]] + v[tris[i * 3 + 2]]) / 3f;
-        var stack = new List<List<int>> { Enumerable.Range(0, total).ToList() };
-        var cells = new List<List<int>>();
-        while (stack.Count > 0)
+        var cent = new float[total * 3];   // flat xyz centroids for the pure partition (QuadEstimate.cs)
+        for (int i = 0; i < total; i++)
         {
-            var cell = stack[stack.Count - 1]; stack.RemoveAt(stack.Count - 1);
-            if (EstimateQuads(tris, cell) <= QuadBudget) { cells.Add(cell); continue; }
-            Vector3 mn = cent[cell[0]], mx = cent[cell[0]];
-            foreach (int ti in cell) { mn = Vector3.Min(mn, cent[ti]); mx = Vector3.Max(mx, cent[ti]); }
-            Vector3 span = mx - mn;
-            int ax = span.x >= span.y && span.x >= span.z ? 0 : (span.y >= span.z ? 1 : 2);
-            cell.Sort((a, b) => cent[a][ax].CompareTo(cent[b][ax]));
-            int mid = cell.Count / 2;
-            stack.Add(cell.GetRange(0, mid)); stack.Add(cell.GetRange(mid, cell.Count - mid));
+            var c = (v[tris[i * 3]] + v[tris[i * 3 + 1]] + v[tris[i * 3 + 2]]) / 3f;
+            cent[i * 3] = c.x; cent[i * 3 + 1] = c.y; cent[i * 3 + 2] = c.z;
         }
-        if (cells.Count > MaxMeshChunks) return null;
-        // stable chunk letters across re-bakes: order cells by their minimum centroid
-        cells.Sort((a, b) =>
-        {
-            Vector3 ma = cent[a[0]], mb = cent[b[0]];
-            foreach (int ti in a) ma = Vector3.Min(ma, cent[ti]);
-            foreach (int ti in b) mb = Vector3.Min(mb, cent[ti]);
-            int c = ma.x.CompareTo(mb.x); if (c != 0) return c;
-            c = ma.y.CompareTo(mb.y); if (c != 0) return c;
-            return ma.z.CompareTo(mb.z);
-        });
+        var cells = QuadEstimate.PartitionByQuadBudget(tris, cent, QuadBudget, MaxMeshChunks);   // null = more than MaxMeshChunks chunks
+        if (cells == null) return null;
         var sizes = new List<string>();
         for (int ci = 0; ci < cells.Count; ci++)
         {

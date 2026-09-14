@@ -4,7 +4,7 @@ HAF is verified in **three tiers**, each a machine, each at the level where its 
 
 | Tier | Runs | Guards |
 |---|---|---|
-| **Unit tests** — **715 as of 2026-09-02** | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers** |
+| **Unit tests** — **801 as of 2026-09-14** | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers**, and since 09-14 the kernels behind the game-touching code: the descriptor repoint, the multi-mesh quad estimator + partition, the district density boost, the Vehicle Lab's probe-row parser |
 | **Headless game checks** | `tools/check-catalog.sh` in the push gate; `tools/check-bindings.sh` on demand / after a game update | **two halves of one claim**: `check-catalog.sh` proves the catalog **covers the code** (every by-name literal at a reflection site is catalogued or allowlisted with a reason), `bindcheck` proves it **resolves** against the real DLLs; `typeprobe --find` / `--exact` locate a seam or a member's owner before a binding is written |
 | **In-game smoke test** — `[load]` automatic, `[full]` on the F8 button | every load (a few ms, once), and on request | the injecting half, read from the **engine**: bindings, registry, roles, assets, sounds, files, GPU budget, district tiles and textures, patched seams — and, on the button, every live pawn on *our* skeleton, pose-hook liveness, the sub-pawn walk vs a scene scan, the write-back self-test |
 
@@ -272,9 +272,14 @@ be referenced by the test project (they need `UnityEditor`), but a Unity-free so
 the test assembly directly** (`<Compile Include>` in the Tests csproj): `editor/GlbDisconnectedParts.cs` was the
 first, and **`editor/EditorRules.cs`** (2026-09-08) collects the extracted window/baker kernels — the
 extraction-freshness predicate whose wrongness was review finding 2 (it silently failed for a month; nothing
-crashed or logged), and the Workshop's natural name ordering. The bar for what moves there: logic whose wrongness
-is **invisible at use time**. Keep those files free of Unity types and file I/O — the caller gathers facts, the
-kernel decides.
+crashed or logged), the Workshop's natural name ordering, and (2026-09-14) the Vehicle Lab's probe-row parser and
+flat-share alias merge (`VehicleLabRules`); **`editor/QuadEstimate.cs`** (2026-09-14) holds the multi-mesh split's
+quad estimator and BSP partition. On the plugin side the same move produced `Patches/DescriptorRepoint.cs` (the
+hand-prop / multi-mesh descriptor repoint — the "spike plague" arithmetic, previously inline at two sites and
+reachable only with the game up) and `Patches/DistrictRules.cs` (the density auto-boost). The bar for what moves
+there: logic whose wrongness is **invisible at use time**. Keep those files free of Unity types and file I/O — the
+caller gathers facts, the kernel decides. And drill every kernel on arrival: each of the 09-14 ones was mutated
+(an append one slot too far, tris/2, no pipe folding, a suffix strip…) and its tests went red before the PR.
 
 The dials are the clearest case. Four `haf_*.txt` files each inlined their own `key=value` loop inside a `Poll*`
 method, wedged between `File.ReadAllText`, `UnityEngine.Time` and live-pawn reflection — untestable, and all four

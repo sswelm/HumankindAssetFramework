@@ -10,6 +10,26 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE COVERAGE TIER — everything the game touches gets a pure kernel and a test (2026-09-14).** The critical
+  review's biggest blind spot: the code that talks to the engine or to Unity had either no test at any tier or a
+  test only the opt-in editor lane runs. Now, all headless and in the per-push gate (suite 763 → 801):
+  **descriptor repoint** — the hand-prop and multi-mesh sites both call one pure `DescriptorRepoint.Apply`
+  (`Array` + the descriptor struct's two fields; the tail-block copy, the append, `StartFragment`/`FragmentCount`,
+  `persistentFragmentEntryCount`, grow-by-need+100), tested with test-defined structs including the shipped
+  hand-prop-then-chunks sequence, and the **smoke's full tier now reads every repointed descriptor back** and FAILS
+  when the block moved — the "spike plague" family finally has an in-game assertion;
+  **`QuadEstimate.cs`** — the edge-pairing estimator and the BSP partition behind the multi-mesh split, compiled
+  into the test project (Faceted quads == tris, the tris/2 trap; partition covers every triangle once, under budget,
+  in a stable order); **`DistrictRules.NeededBoost`** (the ≤1 opt-out, no-evidence cases); **`VehicleLabRules`** —
+  the `PART|` row parser (a `|` inside a part name folds back into the name; a genuine ninth column is rejected
+  WITH a reason and the Lab logs it, instead of silently emptying) and the flat-share alias merge (exact name
+  first, digits-only suffixes only); a **nested-parent fixture** for the plane/facing cut (root with translation +
+  rotation, the cut node as its child — every earlier fixture was a root, so reversing the matrix order passed all
+  of them); and the three Tier-1 bake rows that could not fail now can (a one-face-reversed cube for windingFix
+  with its premise asserted, atlas1024 exactly 512×512, Multi ≥ two textures' worth of texels), plus the bake
+  smoke no longer lets a texture-only entry stand in for the static/Auto path. Every kernel mutation-drilled
+  (an append one slot too far, a non-advanced count, tris/2, an unsorted partition, no pipe folding, a suffix strip
+  — all red). The Tier-1 rows are compiled but not yet executed: the headless lane needs Unity closed.
 - **THE VANILLA TIER GETS THE FAST PATH, AND THE METER STOPS HIDING THE SWEEP (2026-09-14).** The critical review's
   headline structural risk: per-pawn-per-frame work had two reflection tiers side by side — compiled `PawnFast` for
   *our* entries, boxed `GetMember`/`SetMember` for what the vanilla path touched — and the meter's nesting let the

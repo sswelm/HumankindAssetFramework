@@ -59,6 +59,12 @@ namespace HumankindAssetFramework
             public int TexturedChecked, TexturedApplied;             // textured districts with live tiles judged / of those, albedo actually applied (no give-up)
             public List<string> DistrictNotes = new List<string>();  // informational: texture still pending (asset not resolved yet) — never a FAIL
             public List<string> MatchIssues = new List<string>();    // FAIL: an entry whose pawnDescription can never match, although the game loaded its obvious target (the _DRILL class)
+            // DESCRIPTOR REPOINT HELD (2026-09-14): for every entry that appended fragments post-registration (hand prop,
+            // multi-mesh chunks), the live gpu descriptor must still point at the block we wrote. A re-pack or a second
+            // registration undoing it is the "spike plague" family, and until now nothing in-game asserted it.
+            public List<string> FragmentIssues = new List<string>(); // FAIL: live descriptor block != the block the repoint wrote
+            public List<string> FragmentNotes = new List<string>();  // informational: a repointed entry whose descriptor could not be read back (arrays unreadable)
+            public int FragmentsChecked;                             // repointed descriptors read back and found intact
             // 2026-08-19 five-point upgrade (user: "can't we apply all?"):
             public string SeamWriteBack = "";                        // "" = not run; "ok"; "skipped (…)"; "FAILED (…)" — the ObjectSpace round-trip (the combatZ died-in-the-box class), FAILED fails the smoke
             public List<string> Uninjected = new List<string>();     // "loaded but not injected" entries WITH the reason — the silent 19-of-22 delta, named (informational)
@@ -102,6 +108,7 @@ namespace HumankindAssetFramework
             // The seam self-test: a computed-but-never-written offset (the combatZ box bug) is a hard FAIL — it means
             // EVERY runtime offset feature is silently dead. "skipped" is not a failure (no pawns to probe).
             if (f.SeamWriteBack.StartsWith("FAILED")) fails.Add("ObjectSpace write-back self-test " + f.SeamWriteBack);
+            if (f.FragmentIssues.Count > 0) fails.Add($"{f.FragmentIssues.Count} descriptor repoint(s) undone: {string.Join("; ", f.FragmentIssues)}");
             if (f.PawnSkinIssues.Count > 0) fails.Add($"{f.PawnSkinIssues.Count} entry(ies) rendering the donor: {string.Join("; ", f.PawnSkinIssues)}");
             if (f.PoseIdle.Count > 0) fails.Add($"pose hook idle on {f.PoseIdle.Count} entry(ies): {string.Join("; ", f.PoseIdle)}");
             if (f.SubPawnMissed.Count > 0) fails.Add($"sub-pawn walk missed {f.SubPawnMissed.Count} of {f.SubPawnScene}: {string.Join(", ", f.SubPawnMissed)}");
@@ -130,6 +137,7 @@ namespace HumankindAssetFramework
                       "descriptor ids; the live-pawn checks are UNTESTED this session");
             notes.AddRange(f.SamplerNotes);
             notes.AddRange(f.DistrictNotes);
+            notes.AddRange(f.FragmentNotes);
             bool pass = fails.Count == 0;
             string head = (f.Tier.Length > 0 ? "[" + f.Tier + "] " : "") + (pass ? "PASS" : "FAIL (" + string.Join("; ", fails) + ")");
             return new SmokeResult
@@ -139,6 +147,7 @@ namespace HumankindAssetFramework
                           $"({f.Repointed} injected so far), {f.InjectionErrors} injection error(s)" +
                           (pass ? $"; deep checks clean on {f.Repointed} injected — verified {f.RolesChecked} clip role(s), " +
                                   $"{f.AssetsChecked} asset(s), {f.SoundsChecked} sound(s), {f.FilesChecked} file(s) on disk, {f.LayersChecked} GPU layer(s)" +
+                                  (f.FragmentsChecked > 0 ? $", {f.FragmentsChecked} descriptor repoint(s) held" : "") +
                                   // NEVER suppressed at zero: an omitted clause reads as "fine", a printed 0 reads as
                                   // "nothing was examined" — and the note above says why. (Review 2026-08-22.)
                                   (f.PawnManagers >= 0 && f.LivePawnsChecked == 0
@@ -413,6 +422,43 @@ namespace HumankindAssetFramework
         internal struct LiveSlot { public int Desc, Skel; public LiveSlot(int d, int s) { Desc = d; Skel = s; } }
         internal const float PoseIdleSeconds = 5f;
 
+        // PURE: judge one repointed descriptor against what the engine holds now. `live* < 0` = could not be read back
+        // (a note, not a failure — nothing to judge); a block that moved or shrank is a FAIL, named with both values.
+        internal static void GatherFragmentFact(string name, int expStart, int expCount, int liveStart, int liveCount, SmokeFacts f)
+        {
+            if (expStart < 0 || expCount < 0) return;   // never repointed post-registration — nothing to hold
+            if (liveStart < 0 || liveCount < 0) { f.FragmentNotes.Add($"'{name}' descriptor repoint not verifiable (descriptor table unreadable)"); return; }
+            if (liveStart != expStart || liveCount != expCount)
+                f.FragmentIssues.Add($"'{name}' descriptor now {liveStart}+{liveCount}, repointed to {expStart}+{expCount}");
+            else f.FragmentsChecked++;
+        }
+        static void GatherFragmentFacts(IList<ModelEntry> list, SmokeFacts f)
+        {
+            for (int i = 0; i < list.Count; i++)
+            {
+                var e = list[i];
+                if (!e.repointed || e.gpuDefId < 0) continue;   // only THIS session's repoints — the fields are cleared with `repointed` on re-arm
+                TryReadLiveDescriptor(e.gpuDefId, out int s, out int c);
+                GatherFragmentFact(e.resourceName, e.gpuFragStart, e.gpuFragCount, s, c, f);
+            }
+        }
+        static bool TryReadLiveDescriptor(int defId, out int start, out int count)
+        {
+            start = count = -1;
+            try
+            {
+                var pmType = GameBinding.PawnManager;
+                var pm = pmType?.GetProperty("Instance", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)?.GetValue(null)
+                         ?? HarmonyLib.AccessTools.Field(pmType, "Instance")?.GetValue(null);
+                var descs = pm == null ? null : HarmonyLib.AccessTools.Field(pmType, "gpuPawnDescriptorEntries")?.GetValue(pm) as Array;
+                if (descs == null || defId < 0 || defId >= descs.Length) return false;
+                var d = descs.GetValue(defId);
+                start = MemberInt(d, "StartFragment", -1); count = MemberInt(d, "FragmentCount", -1);
+                return start >= 0 && count >= 0;
+            }
+            catch { return false; }
+        }
+
         internal static void GatherLivePawnFacts(IEnumerable<LiveSlot> slots, IList<ModelEntry> list, float now, SmokeFacts f)
         {
             if (slots == null || list == null) return;
@@ -588,6 +634,7 @@ namespace HumankindAssetFramework
                     f.ArmiesLive = CountLiveArmies();
                     GatherLivePawnFacts(CollectLiveSlots(), snapshot, UnityEngine.Time.time, f);   // live-pawn truth: skeleton + pose-hook liveness
                     if (snapshot != null && f.Repointed > 0) { AuditSubPawnWalk(snapshot, out int w, out int sc, f.SubPawnMissed); f.SubPawnWalk = w; f.SubPawnScene = sc; }
+                    if (snapshot != null) GatherFragmentFacts(snapshot, f);   // every post-registration repoint: does the live descriptor still say what we wrote?
                 }
 
                 var res = SmokeVerdict(f);
