@@ -109,9 +109,11 @@ skipped. Ranked by consequence within each group.
   log). `vehicle_rig.py:6` still documents the 5-field shape. Fix: `TryParsePartLine(string, out Part)` with rows for
   5/6/7/8/9 tokens (9 → parse-with-extras or FAIL loudly), `nan` → 0; log every rejected line.
 - ~~**Tier-1 bake rows that cannot fail for the feature they name.**~~ — **FIXED 2026-09-14, NOT YET RUN** (Unity was
-  open, the headless lane needs it closed): windingFix now bakes a cube with one reversed face, asserts the premise
-  (2 inward triangles without the fix) and then 0 inward with it; atlas1024 asserts exactly 512×512; Multi asserts
-  ≥ 2×512² texels. Run `tools/editor_tests.ps1` before the next baker change — the 512×512 expectation is the one to watch. `BakeFeatureTest.cs:121-126` "windingFix keeps
+  open, the headless lane needs it closed): windingFix bakes an INSIDE-OUT cube, asserts the premise (inward without
+  the fix) and then outward with it, keel-plane faces excluded (undecidable from the origin by design); atlas1024
+  asserts exactly 512×512; Multi asserts both materials' colours reach the atlas. **Run by the user the same day:**
+  atlas rows PASS; the winding row's first version failed and exposed that `WriteCube`'s fixture had been wound
+  inside-out since it was written — corrected (outward by default, `insideOut: true` for the fixture). `BakeFeatureTest.cs:121-126` "windingFix keeps
   geometry" asserts `m != null && r.ok` on a consistently wound cube; `:100-102` "atlasMaxDim=1024 keeps the 512
   source" accepts `128 ≤ width ≤ 1024`; `:188-193` Multi asserts only `atlas != null`. Fix: one reversed face + every
   normal away from the centroid; `t2.width == 512`.

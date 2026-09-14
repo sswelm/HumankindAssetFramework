@@ -37,7 +37,7 @@ public static class BakeFeatureTest
             Directory.CreateDirectory(tmp);
             string cube1 = WriteCube(tmp, "cube1", false);            // single-material
             string cube2 = WriteCube(tmp, "cube2", true);             // two-material
-            string cubeRev = WriteCube(tmp, "cuberev", false, reverseFace: 0);   // one face wound inward — the windingFix fixture
+            string cubeIn = WriteCube(tmp, "cubein", false, insideOut: true);   // every face wound inward — the windingFix fixture
             string cube3 = WriteCube(tmp, "cube3", true, true);       // two flat-colour materials (8x8 .tga swatches)
 
             // ---- baseline (KeepModel, no features) — the reference for ratio/relative checks ----
@@ -121,18 +121,25 @@ public static class BakeFeatureTest
                 Check(res, ref pass, ref fail, "positionOffset.z raises the model", m != null && Mathf.Abs(minz - 5f) < 1.0f, $"min.z={minz:0.00} (expected ~5)");
             }
 
-            // ---- windingFix: rewinds faces outward. The fixture has ONE face wound inward, so the row can FAIL
-            //      (review 2026-09-14: the consistently wound cube it used before passed a no-op fix) — and the
-            //      premise is asserted first, so a fixture that stops being inside-out is noticed too.
+            // ---- windingFix: rewinds faces outward from the origin (the model raised to keel z=0). Three rows
+            //      (2026-09-14; the old single row asserted nothing and passed for months over an INSIDE-OUT cube):
+            //      the corrected cube bakes outward with no fix (metric + fixture sane), the inside-out cube bakes
+            //      inward with no fix (the premise — the fix row can fail), and the fix turns it outward. Faces ON
+            //      the keel plane are excluded and reported: an origin-based rule cannot decide them (documented).
             {
-                var c0 = Cfg("windingoff", cubeRev); c0.windingFix = false;
+                var cs = Cfg("windingsane", cube1); cs.windingFix = false;
+                var ms = Bake(cs, used, out var rs);
+                int inS = ms != null ? InwardFaces(ms, out int keelS) : -1;
+                Check(res, ref pass, ref fail, "the corrected cube fixture bakes outward without windingFix", ms != null && rs.ok && inS == 0, ms != null ? $"{inS} inward triangle(s) above the keel plane" : rs.error);
+                var c0 = Cfg("windingoff", cubeIn); c0.windingFix = false;
                 var m0 = Bake(c0, used, out var r0);
-                int inward0 = m0 != null ? InwardFaces(m0) : -1;
-                Check(res, ref pass, ref fail, "premise: the reversed-face fixture bakes inward without windingFix", m0 != null && r0.ok && inward0 == 2, m0 != null ? $"{inward0} inward triangle(s) (expected 2)" : r0.error);
-                var c = Cfg("winding", cubeRev); c.windingFix = true;
+                int in0 = m0 != null ? InwardFaces(m0, out int keel0) : -1;
+                Check(res, ref pass, ref fail, "premise: the inside-out fixture bakes inward without windingFix", m0 != null && r0.ok && in0 == 10, m0 != null ? $"{in0} inward triangle(s) above the keel plane (expected 10 = 12 minus the 2 on the keel)" : r0.error);
+                var c = Cfg("winding", cubeIn); c.windingFix = true;
                 var m = Bake(c, used, out var r);
-                int inward = m != null ? InwardFaces(m) : -1;
-                Check(res, ref pass, ref fail, "windingFix turns every face outward", m != null && r.ok && m.triangles.Length == 36 && inward == 0, m != null ? $"{inward} inward triangle(s) of {m.triangles.Length / 3}" : r.error);
+                int keel = -1; int inward = m != null ? InwardFaces(m, out keel) : -1;
+                Check(res, ref pass, ref fail, "windingFix turns every face above the keel plane outward", m != null && r.ok && m.triangles.Length == 36 && inward == 0,
+                    m != null ? $"{inward} inward triangle(s) of {m.triangles.Length / 3}; {keel} on the keel plane (undecidable from the origin by design, not judged)" : r.error);
             }
 
             // ---- MULTI-MESH SPLIT (2026-09-13, the Bremen): a bake over the 16,320-quad per-fragment ceiling
@@ -457,24 +464,32 @@ public static class BakeFeatureTest
     //      flatTga swaps the two-material albedos for glbconv-style 8x8 flat-colour TGA swatches (type-2
     //      uncompressed 32-bit, top-left origin) — the exact bytes an untextured GLB material produces, which
     //      Texture2D.LoadImage cannot decode. ----
-    // Every triangle's geometric normal must point AWAY from the mesh centre — the property windingFix exists to
-    // restore. Returns how many face inward (0 = clean). A convex cube makes this exact; the bake's own transforms
-    // (rotation, size, keel offset) preserve it.
-    static int InwardFaces(Mesh m)
+    // Every triangle's geometric normal (Unity's clockwise-front convention: Cross(b−a, c−a) points out of a front
+    // face) must point AWAY from the mesh centre — the property windingFix exists to restore. Returns how many face
+    // inward, EXCLUDING triangles lying on the keel plane: windingFix measures "outward" from the ORIGIN with the
+    // model raised so its keel sits at z=0 (by design — a hull's low side walls must point out, not down), and on
+    // that plane dot(normal, a+b+c) is ~0, so a face lying exactly on it is decided by rounding. `keelPlane` counts
+    // those separately so the row can say so instead of failing on a documented limitation.
+    static int InwardFaces(Mesh m, out int keelPlane)
     {
-        var v = m.vertices; var t = m.triangles; var c = m.bounds.center; int inward = 0;
+        var v = m.vertices; var t = m.triangles; var c = m.bounds.center; int inward = 0; keelPlane = 0;
+        float keelZ = m.bounds.min.z + 0.01f;
         for (int i = 0; i + 2 < t.Length; i += 3)
         {
             Vector3 a = v[t[i]], b = v[t[i + 1]], d = v[t[i + 2]];
+            Vector3 cen = (a + b + d) / 3f;
+            if (cen.z <= keelZ) { keelPlane++; continue; }
             Vector3 n = Vector3.Cross(b - a, d - a);
-            if (Vector3.Dot(n, (a + b + d) / 3f - c) < 0f) inward++;
+            if (Vector3.Dot(n, cen - c) < 0f) inward++;
         }
         return inward;
     }
 
-    // `reverseFace` (2026-09-14): emit that quad's two triangles with their winding flipped, so the windingFix row
-    // has a fixture that can FAIL — the consistently wound cube it used before passed a no-op fix.
-    static string WriteCube(string dir, string name, bool twoMats, bool flatTga = false, int reverseFace = -1)
+    // THE CUBE WAS INSIDE-OUT (found 2026-09-14 by the first winding row that asserted anything): every face of the
+    // fixture as first written was wound inward under Unity's clockwise-front convention, and no row had ever looked
+    // at facing, so it passed for months. Now the cube is wound OUTWARD by default; `insideOut` emits every face
+    // reversed — the CAD-mesh shape windingFix exists for, and the only fixture on which its row can fail.
+    static string WriteCube(string dir, string name, bool twoMats, bool flatTga = false, bool insideOut = false)
     {
         var d = Path.Combine(dir, name);
         Directory.CreateDirectory(d);
@@ -497,14 +512,14 @@ public static class BakeFeatureTest
             for (int f = from; f < to; f++)
             {
                 var q = faces[f];
-                if (f == reverseFace)
-                {
-                    sb.AppendLine($"f {q[2]}/3 {q[1]}/2 {q[0]}/1");
-                    sb.AppendLine($"f {q[3]}/4 {q[2]}/3 {q[0]}/1");
+                if (insideOut)
+                {   // the original emission order — inward under Unity's convention (see the note above WriteCube)
+                    sb.AppendLine($"f {q[0]}/1 {q[1]}/2 {q[2]}/3");
+                    sb.AppendLine($"f {q[0]}/1 {q[2]}/3 {q[3]}/4");
                     continue;
                 }
-                sb.AppendLine($"f {q[0]}/1 {q[1]}/2 {q[2]}/3");
-                sb.AppendLine($"f {q[0]}/1 {q[2]}/3 {q[3]}/4");
+                sb.AppendLine($"f {q[2]}/3 {q[1]}/2 {q[0]}/1");
+                sb.AppendLine($"f {q[3]}/4 {q[2]}/3 {q[0]}/1");
             }
         }
         var mtl = new StringBuilder();

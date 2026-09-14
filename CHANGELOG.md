@@ -25,11 +25,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   WITH a reason and the Lab logs it, instead of silently emptying) and the flat-share alias merge (exact name
   first, digits-only suffixes only); a **nested-parent fixture** for the plane/facing cut (root with translation +
   rotation, the cut node as its child — every earlier fixture was a root, so reversing the matrix order passed all
-  of them); and the three Tier-1 bake rows that could not fail now can (a one-face-reversed cube for windingFix
-  with its premise asserted, atlas1024 exactly 512×512, Multi ≥ two textures' worth of texels), plus the bake
+  of them); and the three Tier-1 bake rows that could not fail now can (an inside-out cube for windingFix with its
+  premise asserted, atlas1024 exactly 512×512, Multi proven by both materials' colours reaching the atlas), plus the bake
   smoke no longer lets a texture-only entry stand in for the static/Auto path. Every kernel mutation-drilled
   (an append one slot too far, a non-advanced count, tris/2, an unsorted partition, no pipe folding, a suffix strip
-  — all red). The Tier-1 rows are compiled but not yet executed: the headless lane needs Unity closed.
+  — all red). **The first run of the winding row found the fixture itself:** `WriteCube`'s cube had been wound
+  INSIDE-OUT since it was written (every face inward under Unity's clockwise-front convention) — no row had ever
+  looked at facing, so it passed for months and my "one reversed face" read as 10 inward + 2 outward. The cube is
+  now wound outward by default and `insideOut: true` is the winding fixture; the assertion excludes faces ON the
+  keel plane, where `windingFix`'s origin-based rule (the model raised to keel z=0, so "outward" points sideways for
+  low hull walls) is undecidable by design and rounding picks the side — the "2 inward" the first run left.
 - **THE VANILLA TIER GETS THE FAST PATH, AND THE METER STOPS HIDING THE SWEEP (2026-09-14).** The critical review's
   headline structural risk: per-pawn-per-frame work had two reflection tiers side by side — compiled `PawnFast` for
   *our* entries, boxed `GetMember`/`SetMember` for what the vanilla path touched — and the meter's nesting let the
