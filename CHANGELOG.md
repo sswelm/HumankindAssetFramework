@@ -25,7 +25,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   log-once key no longer carrying the exception message (a varying one logged every frame and grew `onceKeys` per
   frame), `lastPawnMatched` reset before the pose gate so an early return no longer files vanilla adds as ours, and
   the `FrameCost` line excludes the nested sweep from "ours ns/add" and states it on its own (`sweep N runs/frame`).
-  Test pins the new report shape. Not re-measured in-game yet — see [Performance](docs/Performance.md) §8 for the
+  Test pins the new report shape. *Review of the PR:* the sweep's `Begin/End` sat at the call site, so the new
+  segment counted every "ours" pawn add as a sweep — runs/frame ~50× too high, ns/run ~50× too low, the exact
+  distortion the segment was written to remove. Each of the two throttled routines now times itself past its own
+  throttle, and `DumpNearbyPawns` (10 s timer) gets its own bucket, `PoseNear`. Not re-measured in-game yet — see [Performance](docs/Performance.md) §8 for the
   numbers to read on the next launch.
 - **THE GATES LEARN TO SEE THEIR OWN WRAPPERS (2026-09-14).** The 09-14 critical review found both reflection-site
   gates blind a fourth time, in the same way as the three times before: their reader alternation had been widened

@@ -522,7 +522,7 @@ boxed costs hide inside a mean. Fixed in one pass, each item a rule above applie
 | `ProcessSubPawnVisuals` renderer census | `FindObjectsOfType<Renderer>()` **every 15 s per `hideSubPawns` entry**, in the file that said the scan was gone; 82 runs in one session, all "0 renderer(s)" | once per entry per process — a diagnostic, not a timer | 2 |
 | `Plugin.Poll` log-once key | included `ex.Message`, so a varying message logged the stack every frame and grew `onceKeys` per frame | keyed on poll + exception type | 7 |
 | `lastPawnMatched` | reset *after* the pose gate: an early return billed whole frames of vanilla adds to `PoseOurs` | reset before the gate | — |
-| `PoseSweep` in the report | nested inside `PoseOurs`, inflating "ours ns/add" whenever a sweep landed | excluded from the per-add mean; stated as its own segment (`sweep N runs/frame X µs`) when it ran | 1 |
+| `PoseSweep` in the report | nested inside `PoseOurs`, inflating "ours ns/add" whenever a sweep landed; timed at the **call site**, so its count was pawn adds, not sweeps | timed inside the throttle (a run is a run), excluded from the per-add mean, stated as its own segment (`sweep N runs/frame X µs`); `DumpNearbyPawns` has its own timer and now its own bucket (`PoseNear`) | 1 |
 
 **What was wrong with the picture, not just the numbers.** Scaled vanilla pawns have `hooked == null`, so the meter
 filed their boxed reflection under *PoseVanilla* — the tier the docs describe as "the early-out path, ~1 µs". The

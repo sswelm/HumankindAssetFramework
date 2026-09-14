@@ -60,7 +60,11 @@ namespace HumankindAssetFramework
                          // and this is that sentence happening. Its own bucket so the stall is attributed to the
                          // scan instead of to the helicopter whose frame happened to trigger it — the per-pawn
                          // donor cost is then readable as the ~4 µs it actually is.
-                         HugScan = 43;
+                         HugScan = 43,
+                         // DumpNearbyPawns — the hideSubPawns ghost census on its own 10 s timer. It shared PoseSweep's bucket
+                         // AND the sweep's Begin/End sat at the call site, so `cl[PoseSweep]` counted pawn adds, not sweeps
+                         // (review of PR #49, 2026-09-14). Each is now timed INSIDE its throttle, in its own bucket.
+                         PoseNear = 44;
         [ProcessLived("literal bucket label table")] static readonly string[] names =
         {
             "Update(total)", "PoseVanilla", "TickTexture", "RespawnPostLoad", "FireQueues", "DeployState", "AnimStates", "EngineAudio",
@@ -71,6 +75,7 @@ namespace HumankindAssetFramework
             "FormRetry", "FormScan", "FormScanSkip", "FormScanOurs",
             "DonorRig", "DonorWorld", "DonorMotion",
             "HugScan",
+            "PoseNear",
         };
         public static int Count => names.Length;
         public static string Name(int bucket) => names[bucket];

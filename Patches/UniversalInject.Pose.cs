@@ -336,10 +336,10 @@ namespace HumankindAssetFramework
                 }
 
                 ForceOurSkeleton(ctx, e);
-                long tS = FrameCost.Begin();
+                // Each times ITSELF, inside its own throttle (PoseSweep / PoseNear): a Begin/End here counted every
+                // "ours" add as a sweep, so the sweep's runs/frame read ~50× too high and its ns/run ~50× too low.
                 SweepForStrays(ctx, e);   // stale same-descriptor slots the game no longer rewrites (the ghost-donor fix)
                 DumpNearbyPawns(ctx, e);  // ghost census BY POSITION — catches a coincident pawn wearing a DIFFERENT descriptor
-                FrameCost.End(FrameCost.PoseSweep, tS);
 
                 // FREEZE (static): no clip of our own — pin the donor pose to frame 0 and stop. ANIMATED: play our clip on Pose0.
                 // NEITHER: a purely static repointed model. It reaches here only since the rescue was widened past
@@ -468,6 +468,9 @@ namespace HumankindAssetFramework
             float now = UnityEngine.Time.time;
             if (sweepLast.TryGetValue(e.resourceName, out var last) && now - last < 2f) return;
             sweepLast[e.resourceName] = now;
+            long tS = FrameCost.Begin();   // timed past the throttle: the bucket counts SWEEPS, not the pawn adds that asked
+            try
+            {
             for (int m = knownManagers.Count - 1; m >= 0; m--)
             {
                 var mgr = knownManagers[m];
@@ -511,6 +514,8 @@ namespace HumankindAssetFramework
                 else if (sweepScanLogged.Add(e.resourceName + "#" + m))
                     Plugin.Diag($"[Uni][SWEEP] '{e.resourceName}' manager#{m}: scan — {nSeen} slot(s) carry desc {e.descId}, all on our skeleton {e.skeletonId} ({knownManagers.Count} manager(s) known)");
             }
+            }
+            finally { FrameCost.End(FrameCost.PoseSweep, tS); }
         }
 
         // GHOST CENSUS BY POSITION (2026-08-03): every desc-filtered probe came back clean, yet the donor gunship still
@@ -527,6 +532,12 @@ namespace HumankindAssetFramework
             float now = UnityEngine.Time.time;
             if (now < nearNextAt) return;
             nearNextAt = now + 10f;
+            long tN = FrameCost.Begin();   // timed past the throttle: the bucket counts CENSUSES, not the pawn adds that asked
+            try { DumpNearbyPawnsCore(ctx, e); }
+            finally { FrameCost.End(FrameCost.PoseNear, tN); }
+        }
+        static void DumpNearbyPawnsCore(PawnCtx ctx, ModelEntry e)
+        {
             // LATE table dump: descriptors registered after our repoint (LODs, lazily-loaded defs) are invisible to the
             // repoint-time dump — re-dump the full table once while the unit is actually on screen (ghost included).
             if (!descTableDumpedLate) { descTableDumpedLate = true; ResetDescTableDump(); DumpDescriptorTable(); ResetFxMeshTableDump(); DumpFxMeshTable(ghostAnimMgr); }
