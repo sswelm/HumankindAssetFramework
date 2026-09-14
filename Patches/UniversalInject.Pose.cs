@@ -202,8 +202,11 @@ namespace HumankindAssetFramework
                 // two flags above are both false, yet they still need the wrong-skeleton rescue. Recomputed when an
                 // entry is repointed and on session reset — `repointed` flips at runtime, so it cannot be latched.
                 if (anyRescuable == null) anyRescuable = entries != null && entries.Any(Rescuable);
-                if ((anyAnimated != true && anyFreeze != true && anyRescuable != true && unitScaleByDesc.Count == 0 && vanillaTurnByDesc.Count == 0 && !AnyCatRate) || !Plugin.UniversalInjectOn.Value) return;
+                // The meter flag is reset BEFORE the gate (2026-09-14): the hook's postfix bills every add to PoseOurs
+                // while it holds the previous matched pawn's `true`, so an early return here used to file whole
+                // frames of vanilla adds as "ours" — the vanilla/ours split in the perf docs read inverted.
                 lastPawnMatched = false;
+                if ((anyAnimated != true && anyFreeze != true && anyRescuable != true && unitScaleByDesc.Count == 0 && vanillaTurnByDesc.Count == 0 && !AnyCatRate) || !Plugin.UniversalInjectOn.Value) return;
                 pawnMgrRef = pawnManager;   // cached for the live rotor-trim re-apply (PollRotorTrim walks live pawns)
                 if (!TryReadLastPawn(pawnManager, out var ctx)) return;
                 if (!knownManagers.Contains(pawnManager)) knownManagers.Add(pawnManager);   // every manager, incl. ones only adding vanilla pawns — the sweep needs them all
@@ -436,33 +439,69 @@ namespace HumankindAssetFramework
         // (a stale PresentationUnit from the load/respawn path) would never be swept via ctx alone — its stale slots
         // keep rendering donor visuals forever. Sweeping every known manager closes that hole. Cleared on session reset.
         [SessionScoped] internal static readonly List<object> knownManagers = new List<object>();
+        // Managers whose buffer has read EMPTY on consecutive sweeps (a finished battle's manager, a torn-down
+        // presentation). knownManagers only ever grew — every manager the session had seen was kept alive and swept
+        // every 2 s per entry forever (2026-09-14). After PruneAfterEmptySweeps in a row it is dropped; a manager that
+        // adds a pawn again is simply re-learned by the hook (the add path re-registers it).
+        [SessionScoped] static readonly Dictionary<object, int> mgrEmptySweeps = new Dictionary<object, int>();
+        const int PruneAfterEmptySweeps = 5;   // ≥ 10 s of nothing at the 2 s cadence
+        // The manager/slot reads through the compiled accessors when they are built (they are — PawnFast.EnsureMgrInit
+        // and EnsureInit run on every add) and the old boxed reflection otherwise. Per slot the sweep now pays one
+        // Array.GetValue box + two compiled reads instead of three boxed reflection reads (Performance.md rule 5).
+        static bool TryReadManager(object mgr, out Array arr, out int cnt)
+        {
+            arr = null; cnt = 0;
+            if (mgr == null) return false;
+            if (PawnFast.MgrReady) { arr = PawnFast.MgrEntries(mgr) as Array; cnt = arr == null ? 0 : PawnFast.MgrCount(mgr); return arr != null; }
+            arr = GetMember(mgr, "pawnEntries") as Array;
+            return arr != null && TryMemberInt(mgr, "pawnCount", out cnt);
+        }
+        static bool TryReadSlotIds(object slot, out int descId, out int skelId)
+        {
+            if (PawnFast.Ready) { descId = PawnFast.DescId(slot); skelId = PawnFast.SkelId(slot); return true; }
+            descId = skelId = -1;
+            return TryMemberInt(slot, "PawnDescriptorId", out descId) && TryMemberInt(slot, "SkeletonId", out skelId);
+        }
         static void SweepForStrays(PawnCtx ctx, ModelEntry e)
         {
             if (e.descId < 0) return;
             float now = UnityEngine.Time.time;
             if (sweepLast.TryGetValue(e.resourceName, out var last) && now - last < 2f) return;
             sweepLast[e.resourceName] = now;
-            for (int m = 0; m < knownManagers.Count; m++)
+            for (int m = knownManagers.Count - 1; m >= 0; m--)
             {
-                var arr = GetMember(knownManagers[m], "pawnEntries") as Array;
-                if (arr == null) continue;
-                if (!TryMemberInt(knownManagers[m], "pawnCount", out int cnt)) continue;
-                if (cnt <= 0 || cnt > arr.Length) continue;
+                var mgr = knownManagers[m];
+                if (!TryReadManager(mgr, out var arr, out int cnt) || cnt <= 0)
+                {
+                    // empty or unreadable: count it, and forget the manager once it has been that for a while
+                    mgrEmptySweeps.TryGetValue(mgr, out int empty);
+                    if (++empty >= PruneAfterEmptySweeps)
+                    {
+                        knownManagers.RemoveAt(m); mgrEmptySweeps.Remove(mgr);
+                        Plugin.Diag($"[Uni][SWEEP] manager#{m} dropped after {empty} empty sweep(s) ({knownManagers.Count} manager(s) still known)");
+                    }
+                    else mgrEmptySweeps[mgr] = empty;
+                    continue;
+                }
+                mgrEmptySweeps.Remove(mgr);
+                if (cnt > arr.Length) continue;
                 int nFixed = 0, nSeen = 0;
                 for (int i = 0; i < cnt; i++)
                 {
                     var slot = arr.GetValue(i);
-                    if (!TryMemberInt(slot, "PawnDescriptorId", out int d) || !TryMemberInt(slot, "SkeletonId", out int s)) continue;
+                    if (!TryReadSlotIds(slot, out int d, out int s)) continue;
                     if (d != e.descId) continue;
                     nSeen++;
                     if (s == e.skeletonId) continue;
-                    SetMember(slot, "SkeletonId", e.skeletonId);
-                    var p0 = GetMember(slot, "Pose0");
-                    if (p0 != null && e.animId >= 0)
-                    {
-                        SetMember(p0, "AnimationId", e.animId);
-                        SetMember(p0, "Weight", 1f);
-                        SetMember(slot, "Pose0", p0);
+                    WriteSkelId(slot, e.skeletonId);
+                    if (e.animId >= 0)
+                    {   // AnimationId + Weight only, as before — Time is left as the slot had it (no clip restart on a rescue)
+                        if (PawnFast.Ready) { PawnFast.PoseAnimId[0](slot, (uint)e.animId); PawnFast.PoseWeight[0](slot, 1f); }
+                        else
+                        {
+                            var p0 = GetMember(slot, "Pose0");
+                            if (p0 != null) { SetMember(p0, "AnimationId", e.animId); SetMember(p0, "Weight", 1f); SetMember(slot, "Pose0", p0); }
+                        }
                     }
                     arr.SetValue(slot, i);
                     nFixed++;
@@ -496,14 +535,11 @@ namespace HumankindAssetFramework
             PollGhostBisect();   // live operator-driven mesh bisect via haf_ghostbisect.txt (no relaunch needed)
             try
             {
-                var os0 = GetMember(ctx.entry, "ObjectSpace");
-                if (!(GetMember(os0, "Translation") is UnityEngine.Vector3 p0)) return;
+                if (!TryGetTranslation(ctx.entry, out var p0)) return;   // PawnFast or reflection (shares the sweep's 2 s cadence and bucket)
                 int shown = 0;
                 for (int m = 0; m < knownManagers.Count && shown < 24; m++)
                 {
-                    var arr = GetMember(knownManagers[m], "pawnEntries") as Array;
-                    if (arr == null) continue;
-                    if (!TryMemberInt(knownManagers[m], "pawnCount", out int cnt)) continue;
+                    if (!TryReadManager(knownManagers[m], out var arr, out int cnt)) continue;
                     if (cnt <= 0 || cnt > arr.Length) continue;
                     // THE STALE-BUFFER REGION (the ghost's hiding place, 2026-08-03): the GPU uploads the WHOLE
                     // pawnEntries array every frame — but the game (and every census we wrote) only touches

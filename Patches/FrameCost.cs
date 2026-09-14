@@ -118,8 +118,18 @@ namespace HumankindAssetFramework
             double totalUs = updateUs + poseVanUs + poseOurUs;
             double vanAdds = cl[PoseHook] / (double)frameCount, ourAdds = cl[PoseOurs] / (double)frameCount;
             double vanNs = cl[PoseHook] > 0 ? tk[PoseHook] * usPerTick * 1000.0 / cl[PoseHook] : 0;
-            double ourNs = cl[PoseOurs] > 0 ? tk[PoseOurs] * usPerTick * 1000.0 / cl[PoseOurs] : 0;
+            // The per-add mean for OUR pawns excludes the stray sweep (2026-09-14): PoseSweep is nested inside PoseOurs
+            // and runs on a 2 s timer, so a sweep landing on one add inflated that window's "ns/add" without ever
+            // showing as its own line. It is stated separately below when it ran, with its count.
+            double sweepTicks = Math.Min(tk[PoseSweep], tk[PoseOurs]);
+            double ourNs = cl[PoseOurs] > 0 ? (tk[PoseOurs] - sweepTicks) * usPerTick * 1000.0 / cl[PoseOurs] : 0;
             var summary = Inv($"HAF {totalUs:0} µs/frame ({100.0 * totalUs / frameUs:0.0}% @ {fps:0} fps) | Update {updateUs:0} µs | pose vanilla {poseVanUs:0} µs = {vanAdds:0} adds × {vanNs:0} ns | pose ours {poseOurUs:0} µs = {ourAdds:0} adds × {ourNs:0} ns");
+            if (cl[PoseSweep] > 0)
+            {
+                double swUs = tk[PoseSweep] * usPerTick / frameCount;
+                double swNs = tk[PoseSweep] * usPerTick * 1000.0 / cl[PoseSweep];
+                summary += Inv($" | sweep {cl[PoseSweep] / (double)frameCount:0.##} runs/frame {swUs:0.#} µs ({swNs:0} ns ea)");
+            }
             // DISTRICT SCAN, stated like the pose hook is (2026-08-23). SelectorTile is the biggest single bucket and
             // its cost divides two ways that need completely different fixes: too MANY districts walked per frame, or
             // too much work on the few that match. Printing both counts and the per-district cost makes that readable

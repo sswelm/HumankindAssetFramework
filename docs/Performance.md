@@ -506,5 +506,33 @@ reference converts into a `TypeLoadException` that takes the whole plugin down. 
   next session with one of those units on the map either prints it or proves the concern was never real.
   Pinned by two tests (the miss, and `DugoutCanoe` as the counter-case so the fallback isn't assumed universal).
 
+## 8. The 2026-09-14 pass — the vanilla tier, the sweep, and what the meter hid
+
+The 09-14 critical review read the shipped build at **473–580 µs/frame (1.4–1.7 %)** against the 0.4 % target and
+named the structural cause: per-pawn-per-frame work had **two reflection tiers living side by side** — compiled
+(`PawnFast`) for *our* entries, boxed for everything the vanilla path touched — and the meter's bucket nesting let the
+boxed costs hide inside a mean. Fixed in one pass, each item a rule above applied to a place it had not reached:
+
+| Site | Was | Now | Rule |
+|---|---|---|---|
+| `ApplyVanillaScale` (per scaled vanilla pawn, per frame) | `GetMember` → `GetMember` → `SetMember` → `SetMember` on the boxed `ObjectSpace` (~3–5 µs) | `PawnFast.Scale`/`SetScale` (~20 ns), reflection fallback kept | 5 |
+| `MaybeSwapFormationBySize` (ahead of it, per frame) | `SizeThresholdsFor`: a linear `OrdinalIgnoreCase` scan over every formation link, then the threshold walk, **before** the `sizeFormApplied` early-out | short-circuits on the scale it last confirmed settled (`sizeFormSettledScale`, session-scoped) — the walk runs only when the era anchor moves | 3 |
+| `SweepForStrays` (per entry, every 2 s) | `GetMember`/`TryMemberInt` ×2 per manager + ×2 per slot, over every manager the session had ever seen (`knownManagers` only grew) | compiled manager + slot reads; a manager empty for 5 consecutive sweeps is dropped and re-learned on its next add | 5 |
+| `DumpNearbyPawns` (same cadence, same bucket) | boxed manager reads + a boxed `ObjectSpace.Translation` | `TryReadManager` / `TryGetTranslation` | 5 |
+| `ProcessSubPawnVisuals` renderer census | `FindObjectsOfType<Renderer>()` **every 15 s per `hideSubPawns` entry**, in the file that said the scan was gone; 82 runs in one session, all "0 renderer(s)" | once per entry per process — a diagnostic, not a timer | 2 |
+| `Plugin.Poll` log-once key | included `ex.Message`, so a varying message logged the stack every frame and grew `onceKeys` per frame | keyed on poll + exception type | 7 |
+| `lastPawnMatched` | reset *after* the pose gate: an early return billed whole frames of vanilla adds to `PoseOurs` | reset before the gate | — |
+| `PoseSweep` in the report | nested inside `PoseOurs`, inflating "ours ns/add" whenever a sweep landed | excluded from the per-add mean; stated as its own segment (`sweep N runs/frame X µs`) when it ran | 1 |
+
+**What was wrong with the picture, not just the numbers.** Scaled vanilla pawns have `hooked == null`, so the meter
+filed their boxed reflection under *PoseVanilla* — the tier the docs describe as "the early-out path, ~1 µs". The
+0.94 µs figure in §2 was the gate; the scale rule sat on top of it, unnamed. Rule 5's corollary applies one step
+further out than 08-23 took it: the gate was compiled, the struct was compiled, and the *rule that ran between them*
+was not.
+
+The number to read after this pass is the `pose vanilla … ns` figure with a fleet-wide scale rule live (`Biremes`
+×2 in the reference pack is the smallest case), and the new `sweep` segment, which should stay in the low tens of
+µs at one manager. Not re-measured in-game at the time of writing — the line reports itself on the next launch.
+
 Related: [Architecture](Architecture.md) (§2 threads, §2b per-frame), [Testing](Testing.md) (the headless tools),
 [Vertex-Budget](Vertex-Budget.md) (the *GPU* budget — a different axis: mesh memory, not frame time).

@@ -130,7 +130,6 @@ namespace HumankindAssetFramework
         // captured Start/Stop AudioEventHandle onto that pawn's AudioEmitter, restoring the missing engine sound.
         public int lastPawnFrame = -1;   // duplicate-pawn hide (hideSubPawns): Time.frameCount of the last pawn add for this entry
         [MainThread("the pose hook, OnPawnAdded")] public readonly List<UnityEngine.Vector3> pawnKeptPos = new List<UnityEngine.Vector3>();   // hideSubPawns: positions of the pawns KEPT this frame — one per distinct UNIT (a unit's stacked squadron duplicates share a position; different units are tiles apart). Keeping per-position, not a per-type count, lets two units of the same model coexist.
-        public float rendererCensusNextAt;   // next Unity-renderer census time for this entry (the ghost-rotor hunt)
         public int profCat = -1;             // runtime: the unit's TYPE category (human/land/turret/air/ship) off its capability profile at addon load — drives the category default rates.
         public UnityEngine.Vector3 tiltLastPos; public float tiltCur; public float tiltLastTime;   // move-tilt runtime state
         public UnityEngine.AudioClip customClip, customStartClip, customStopClip, customIdleClip, customAttackClip, customDeathClip, customBattleClip;    // loaded once from the files

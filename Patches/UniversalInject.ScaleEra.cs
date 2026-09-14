@@ -230,8 +230,14 @@ namespace HumankindAssetFramework
         // Thresholds are PER UNIT (Formation Override window, `sizeFormations` on the unit's link — user ruling
         // 2026-07-30); the legacy GLOBAL table from the Era Lab remains a fallback for units without their own.
         [SessionScoped] static readonly Dictionary<int, string> sizeFormUnitName = new Dictionary<int, string>();   // descId -> unit def name
+        // STEADY-STATE SHORT-CIRCUIT (perf, 2026-09-14): this runs per scaled vanilla pawn per FRAME, and the walk
+        // below it — SizeThresholdsFor's linear OrdinalIgnoreCase scan over every formation link, then the threshold
+        // loop — was paid every time although its answer only changes when effScale does (the era anchor moved).
+        // The scale we last CONFIRMED applied for a descriptor: identical scale ⇒ identical desired ⇒ nothing to do.
+        [SessionScoped] static readonly Dictionary<int, float> sizeFormSettledScale = new Dictionary<int, float>();
         static void MaybeSwapFormationBySize(int descId, float effScale)
         {
+            if (sizeFormSettledScale.TryGetValue(descId, out var settled) && settled == effScale) return;
             // resolve (and cache) the unit definition name for this descriptor
             if (!sizeFormUnitName.TryGetValue(descId, out var unitName))
             {
@@ -259,7 +265,7 @@ namespace HumankindAssetFramework
             for (int i = 0; i < table.Count; i++)
                 if (effScale <= table[i].Key) { desired = table[i].Value; break; }
             var key = desired ?? "";
-            if (sizeFormApplied.TryGetValue(descId, out var cur) && cur == key) return;
+            if (sizeFormApplied.TryGetValue(descId, out var cur) && cur == key) { sizeFormSettledScale[descId] = effScale; return; }   // settled: skip the walk until the scale moves
 
             try
             {
@@ -340,10 +346,17 @@ namespace HumankindAssetFramework
                 float target = info.scale * EraAnchor(info);
                 MaybeSwapFormationBySize(ctx.descId, target);
 
-                // PLACEMENT half — every frame (the game rebuilds pawnEntries[] from scratch each frame)
-                var oss = GetMember(ctx.entry, "ObjectSpace");
-                SetMember(oss, "Scale", Convert.ToSingle(GetMember(oss, "Scale")) * target);
-                SetMember(ctx.entry, "ObjectSpace", oss);
+                // PLACEMENT half — every frame (the game rebuilds pawnEntries[] from scratch each frame). Through the
+                // compiled accessors (Performance.md rule 5): the boxed get/get/set/set here was ~3-5 µs per scaled
+                // vanilla pawn per frame, paid by every ship in a fleet-wide scale rule — and billed to PoseVanilla.
+                if (PawnFast.Scale != null && PawnFast.SetScale != null)
+                    PawnFast.SetScale(ctx.entry, PawnFast.Scale(ctx.entry) * target);
+                else
+                {
+                    var oss = GetMember(ctx.entry, "ObjectSpace");
+                    SetMember(oss, "Scale", Convert.ToSingle(GetMember(oss, "Scale")) * target);
+                    SetMember(ctx.entry, "ObjectSpace", oss);
+                }
                 ctx.pawnEntries.SetValue(ctx.entry, ctx.idx);
 
                 // GEOMETRY half — only when the target actually differs from what the buffer already carries

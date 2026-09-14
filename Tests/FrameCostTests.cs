@@ -33,6 +33,24 @@ namespace HumankindAssetFramework.Tests
             Assert.DoesNotContain("Update(total)", detail);
         }
 
+        // THE NESTED SWEEP (2026-09-14). PoseSweep runs inside PoseOurs on a 2 s timer, so one sweep landing on one add
+        // used to inflate that window's "ours ns/add" mean with no line of its own. The mean now excludes the sweep's
+        // ticks, and the sweep is stated separately with its count — silent when it never ran.
+        [Fact]
+        public void Format_SweepExcludedFromOursMean_AndStatedWithItsCount()
+        {
+            var tk = Ticks(); var cl = Calls();
+            int frames = 100;
+            tk[FrameCost.PoseOurs] = 500 * frames;  cl[FrameCost.PoseOurs] = 10L * frames;   // 50 µs/frame over 10 adds = 5000 ns … if nothing were nested
+            tk[FrameCost.PoseSweep] = 200 * frames; cl[FrameCost.PoseSweep] = 2L * frames;   // 20 µs/frame of that is the sweep: 2 runs/frame × 10 µs
+            var s = FrameCost.Format(tk, cl, frames, 1.0, Freq, out _);
+            Assert.Contains("pose ours 50 µs = 10 adds × 3000 ns", s);          // (500 − 200) ticks × 0.1 µs / 10 adds = 3000 ns, not 5000
+            Assert.Contains("sweep 2 runs/frame 20 µs (10000 ns ea)", s);
+
+            var quiet = FrameCost.Format(Ticks(), Calls(), frames, 1.0, Freq, out _);
+            Assert.DoesNotContain("sweep", quiet);
+        }
+
         [Fact]
         public void Format_OnlyBucketsThatRan_TopSix_InvariantCulture()
         {

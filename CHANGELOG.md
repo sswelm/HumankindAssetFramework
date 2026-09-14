@@ -10,6 +10,23 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE VANILLA TIER GETS THE FAST PATH, AND THE METER STOPS HIDING THE SWEEP (2026-09-14).** The critical review's
+  headline structural risk: per-pawn-per-frame work had two reflection tiers side by side — compiled `PawnFast` for
+  *our* entries, boxed `GetMember`/`SetMember` for what the vanilla path touched — and the meter's nesting let the
+  boxed costs hide inside a mean. `ApplyVanillaScale` did four boxed struct operations per scaled vanilla pawn per
+  frame (~3–5 µs on a 0.94 µs baseline) with `PawnFast.Scale/SetScale` compiled and unused beside it, and ahead of
+  it `MaybeSwapFormationBySize` paid `SizeThresholdsFor`'s linear scan over every formation link *before* its own
+  early-out; both were billed to `PoseVanilla` because the pawn matches no entry. `SweepForStrays` read every slot of
+  every manager the session had ever seen through boxed reflection, and `knownManagers` never shrank. The renderer
+  census in `ProcessSubPawnVisuals` was a full-scene `FindObjectsOfType<Renderer>` on a 15 s timer — Performance.md
+  rule 2, in the file that says the scan was removed — and had run 82 times in one session finding nothing. Now:
+  compiled accessors on the scale path and the sweep (reflection fallbacks kept), the formation walk short-circuited
+  on the last settled scale, managers pruned after five empty sweeps, the census once per entry, `Plugin.Poll`'s
+  log-once key no longer carrying the exception message (a varying one logged every frame and grew `onceKeys` per
+  frame), `lastPawnMatched` reset before the pose gate so an early return no longer files vanilla adds as ours, and
+  the `FrameCost` line excludes the nested sweep from "ours ns/add" and states it on its own (`sweep N runs/frame`).
+  Test pins the new report shape. Not re-measured in-game yet — see [Performance](docs/Performance.md) §8 for the
+  numbers to read on the next launch.
 - **THE GATES LEARN TO SEE THEIR OWN WRAPPERS (2026-09-14).** The 09-14 critical review found both reflection-site
   gates blind a fourth time, in the same way as the three times before: their reader alternation had been widened
   one spelling at a time, and the 08-01 consolidation of local reader copies onto `GetMember` (`Mem(` in
