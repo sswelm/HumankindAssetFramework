@@ -10,6 +10,43 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE GATES LEARN TO SEE THEIR OWN WRAPPERS (2026-09-14).** The 09-14 critical review found both reflection-site
+  gates blind a fourth time, in the same way as the three times before: their reader alternation had been widened
+  one spelling at a time, and the 08-01 consolidation of local reader copies onto `GetMember` (`Mem(` in
+  FormationOverride, `FireProbe.Member/Int(` in CombatEventPatch) plus the 08-23 typed `MemberBool/…`/`TryMember*`
+  readers had never been added. `check-catalog.sh` reported *"all 370 catalogued"* while **61 sites** went through
+  names it could not see — behind them `StrikerUnit`, `StrikerArmy`, `AttackerEmpireIndex`, `striker` and
+  `PrimitivePerParticleCount` were uncatalogued, i.e. the fire-on-attack hook had no drift alarm. `check-member-shape.sh`
+  knew only the bare `GetMember(` — not `Mem(`, and not even the **qualified** `UniversalInject.GetMember(` — and so
+  printed OK over **six live dead-sentinel sites**: the formation re-form loop's `IsLoaded`/`IsNaval` (a rename would
+  have skipped every unit forever), FacingPersist's `IsLoaded`, its `SimulationEntityGUID` and `FormationAngle`
+  phantom-skips (an unreadable angle would have been snapshotted as **0**, a valid heading), and FormationOverride's
+  `PawnDefinitionId` (a missing member read as **0**, a valid id, instead of the −1 the branch below tests for).
+  All six rewritten as typed reads (`MemberBool`, `MemberInt`, `TryMemberInt`, new `TryMemberULong` — the GUID must not
+  round-trip through `ToInt64`; test pins a value above `long.MaxValue`). **Structurally:** each script now holds ONE
+  list of helper names and derives its alternation from it, and both carry a **self-check** that discovers every
+  `static … Name(object, string …)` helper whose body reaches a reader and FAILS if the name is not in the list (or,
+  for the catalog, in `NOT_MEMBER_READERS` with a reason). Drilled: a planted `Peek(` wrapper fails both gates; a
+  planted `Mem(…"Bogus")` fails the catalog; and adding `TryMemberULong` to the source tripped the self-check before
+  it was added to the list — the exact event the check exists for. Five members catalogued (`SimulationArtilleryStrike`
+  is a new binding); bindcheck 135/135 against the live build; catalog surface 370 → 383.
+  **And the self-check was itself too narrow on arrival.** Review of the PR: it inspected the declaration plus three
+  lines, so a wrapper with a null guard above its read (`if (o == null) return null;` then `GetMember` on line 5)
+  passed both gates — the same silent gap, one level up. Now `tools/find-reader-helpers.pl` (shared by both gates, so
+  they cannot drift apart) walks to the matching brace and scans the WHOLE body; that surfaced 22 more
+  `(object, string …)` helpers, each classified with a reason (one real reader, `InvokeNoArg`; 21 whose string is a
+  district name, log label, bone, mesh or audio-event name). And the drill is no longer a thing done once by hand:
+  `tools/drill-reader-gates.sh` runs in the pre-push gate and CI, plants that exact guarded wrapper plus a
+  dead-sentinel and an uncatalogued literal through it, and FAILS if either gate passes — then re-plants under a
+  known name and demands the shapes are seen through it.
+  **Second review: the body walker took braces in comments and strings for code.** A `// }` or `"}"` above the read
+  closed the body early and the wrapper vanished again — and the header had claimed a brace in a literal could only
+  make a body *longer*. Comments and literals are now blanked before the walk by a small state machine, not a regex,
+  because interpolation holes are code: `$"… '{GetMember(mat, "name")}' …"` is a real reader call
+  (`DumpSelectorElements` has exactly that) and the first blanking attempt silently dropped it — the drill's clean-tree
+  discovery count is what caught that. Holes stay, their surrounding text and `{{`/`}}` escapes go, nested strings
+  inside holes are handled by the stack. The drill now plants all four shapes: null guard, comment brace, string
+  brace, and a read inside a hole after a `}}` in the text.
 - **THE SENTINEL THAT COULD NEVER BE REACHED (2026-08-23).** `bool loaded = true; try { loaded =
   Convert.ToBoolean(GetMember(unit, "IsLoaded")); } catch { }` reads as *"true unless the game says otherwise"*
   and means *"**false** whenever the member is missing"*. `GetMember` swallows its own exception and returns null

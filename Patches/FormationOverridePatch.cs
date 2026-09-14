@@ -429,8 +429,7 @@ namespace HumankindAssetFramework
                 matched = true;                                      // from here on this army is OURS — timed as FormScanOurs
                 reformPresent.Add(unit);
                 if (reformed.Contains(unit)) continue;               // already handled this session
-                bool loaded = true; try { loaded = Convert.ToBoolean(Mem(unit, "IsLoaded")); } catch { }
-                if (!loaded) continue;                                // nothing rendered yet — wait for the next scan
+                if (!UniversalInject.MemberBool(unit, "IsLoaded", true)) continue;   // nothing rendered yet — wait for the next scan; unreadable = assume loaded
                 // Per-matching-unit log (fires as each Warriors_Default appears, incl. manually-spawned ones after load):
                 // formation name + the two counts, so we see whether the repoint took and whether a re-form is needed.
                 var fo = Mem(unit, "Formation");
@@ -440,7 +439,7 @@ namespace HumankindAssetFramework
                 reformed.Add(unit); handledAny = true;               // handle/log each unit once; mark BEFORE any call so a throw isn't retried forever
                 if (e.targetCount <= 0 || pawns >= e.targetCount)     // no known target, or already full (spawned after the override won the race)
                 { Plugin.Diag($"[Formation] '{pdn}' already {pawns}/{e.targetCount} (formation='{fn}' dummyCount={dc}) — no re-form needed"); continue; }
-                bool naval = false; try { naval = Convert.ToBoolean(Mem(unit, "IsNaval")); } catch { }
+                bool naval = UniversalInject.MemberBool(unit, "IsNaval", false);
                 AccessTools.Method(unit.GetType(), "UpdatePawns", new[] { typeof(bool) })?.Invoke(unit, new object[] { naval });
                 int after = (Mem(unit, "Pawns") as ICollection)?.Count ?? -1;
                 object dc2 = Mem(Mem(unit, "Formation"), "DummyCount");
@@ -795,8 +794,7 @@ namespace HumankindAssetFramework
                 }
 
                 // 5) descriptor: pre-registration the snapshot picks the swapped assets up; post-registration patch surgically
-                int defId = -1;
-                try { defId = Convert.ToInt32(UniversalInject.GetMember(addon, "PawnDefinitionId")); } catch { }
+                int defId = UniversalInject.MemberInt(addon, "PawnDefinitionId", -1);   // -1 = "not registered yet"; the old dead-sentinel shape read a missing member as 0, a VALID id
                 if (defId < 0)
                 {
                     if (firstRun || replaced > 0)

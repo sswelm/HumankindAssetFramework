@@ -41,6 +41,11 @@ run "parse shape (no dead-default TryParse)" bash "$ROOT/tools/check-parse-shape
 #     never runs and the default is dead. Two live sites then did `if (!x) continue;` — work skipped forever.
 run "member shape (no dead-sentinel Convert(GetMember))" bash "$ROOT/tools/check-member-shape.sh"
 
+# 3f) the gate that tests 3b and 3e — plants a null-guarded reader wrapper under an unknown name plus the shapes
+#     those gates exist to catch, and FAILS if either gate passes. Their helper lists are hand-maintained; a review of
+#     PR #48 (2026-09-14) showed a 3-line body window let exactly this wrapper through. Seconds; source-only.
+run "reader-gate drill (the gates refuse an unknown wrapper)" bash "$ROOT/tools/drill-reader-gates.sh"
+
 # 4) registry schema parity — IN-REPO since 2026-08-24. The authoring tools moved from the ENCReload Unity project
 #    into editor/, so both halves of the contract now live here: the guard compares the plugin's Newtonsoft + regex
 #    parse against the baker's ModelDef with no sibling checkout, no best-effort [SKIP] branch, and no direction it

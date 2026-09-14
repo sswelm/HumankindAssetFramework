@@ -191,6 +191,7 @@ namespace HumankindAssetFramework
         internal static Type AnimationContent        => CachedDerived("AnimationContent",        () => FieldOrPropType(AnimationManager, "Content"));
         internal static Type ContentOutputLayerEntry => CachedDerived("ContentOutputLayerEntry", () => ElementType(FieldOrPropType(AnimationContent, "OutputLayerEntries")));
         internal static Type SimulationEventBattleStarted => Cached("Amplitude.Mercury.Simulation.SimulationEvent_BattleStarted", "SimulationEvent_BattleStarted");
+        internal static Type SimulationArtilleryStrike => Cached("Amplitude.Mercury.Simulation.ArtilleryStrike");   // Raise(sender, ArtilleryStrike) arg of the fire-on-attack hook
         internal static Type SimulationBattle        => CachedDerived("SimulationBattle",        () => MethodParamType(SimulationEventBattleStarted, "Raise", 1));
         internal static Type SimulationBattleGroup   => CachedDerived("SimulationBattleGroup",   () => FieldOrPropType(SimulationBattle, "AttackerGroup"));
 
@@ -473,7 +474,7 @@ namespace HumankindAssetFramework
             new Dep(UIInteractivityManager, nameof(UIInteractivityManager), "IsMouseCovered", "SpecificUpdate"),
             // combat / fight
             new Dep(PawnRangedFightSequence, nameof(PawnRangedFightSequence), "InitializeCommon", "Shooter", "Targets"),   // the state-driven attack hook's target
-            new Dep(PawnActionMeleeStartFight, nameof(PawnActionMeleeStartFight), "StartPairMeleeAttack"),   // the per-swing melee hook's target
+            new Dep(PawnActionMeleeStartFight, nameof(PawnActionMeleeStartFight), "StartPairMeleeAttack", "striker"),   // the per-swing melee hook's target + the swinging pawn it reads
             new Dep(RotationPawnStateMachine, nameof(RotationPawnStateMachine), "StartDirectionToLook", "StepTurning", "ownerPawn", "UseRotationAnimation", "rotationStart", "rotationEnd"),
             new Dep(PawnActionRangedStartAttack, nameof(PawnActionRangedStartAttack), "OnReadyToStart", "isReadyToStart", "pawn", "creationTime"),   // creationTime: base PresentationChoreographyAction (base-chain walk)
             new Dep(AttackAnimationStateMachine, nameof(AttackAnimationStateMachine), "TeleportToSimpleAttack"),
@@ -529,7 +530,7 @@ namespace HumankindAssetFramework
                 "pairs", "defaultMaterial", "invalidNameMaterial", "deferredName", "deferredTable"),
             new Dep(RenderFeatureSelector, nameof(RenderFeatureSelector), "SelectionFlags0", "FadingOptions"),
             new Dep(RenderFeatureProvider, nameof(RenderFeatureProvider), "ComputeRenderState"),
-            new Dep(FxOutputLayer, nameof(FxOutputLayer), "primitivePerParticleCount", "RenderOutputs", "renderOutputs", "atlases", "Atlas", "atlas", "LayerIndex"),
+            new Dep(FxOutputLayer, nameof(FxOutputLayer), "primitivePerParticleCount", "PrimitivePerParticleCount", "RenderOutputs", "renderOutputs", "atlases", "Atlas", "atlas", "LayerIndex"),
             // terrain — the tile-ceiling headroom (Hk_TerrainHexagonHeadroom): buffer sizes live as plain ints on
             // the loaded technical-settings asset, read by the renderer's CreateOrResize* methods.
             new Dep(ProceduralTerrainRenderer, nameof(ProceduralTerrainRenderer),
@@ -570,6 +571,7 @@ namespace HumankindAssetFramework
             // the launch-flagged members, re-homed on their TRUE receivers (both derived — see the accessors)
             new Dep(ContentOutputLayerEntry, nameof(ContentOutputLayerEntry), "OutputLayerInstance"),
             new Dep(SimulationEventBattleStarted, nameof(SimulationEventBattleStarted), "Raise"),
+            new Dep(SimulationArtilleryStrike, nameof(SimulationArtilleryStrike), "StrikerUnit", "StrikerArmy", "AttackerEmpireIndex", "TargetTileIndex"),   // fire-on-attack: read through FireProbe.Member/Int, invisible to the catalog gate until 2026-09-14
             new Dep(SimulationBattle, nameof(SimulationBattle), "AttackerGroup", "DefenderGroup"),
             new Dep(SimulationBattleGroup, nameof(SimulationBattleGroup), "Contenders", "Contenders"),
             // A6 — CLOSING THE CATALOG (2026-08-21): the by-name sites that were still outside the drift net. Each member

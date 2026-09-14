@@ -92,6 +92,8 @@ namespace HumankindAssetFramework
             => TryConvert(o, name, Convert.ToInt32, out value);
         internal static bool TryMemberUInt(object o, string name, out uint value)
             => TryConvert(o, name, Convert.ToUInt32, out value);
+        internal static bool TryMemberULong(object o, string name, out ulong value)
+            => TryConvert(o, name, Convert.ToUInt64, out value);
 
         internal static void SetMember(object o, string name, object val)
         {

@@ -31,17 +31,40 @@
 #     the fallback BEFORE the convert, so the sentinel is genuinely reachable there. One real site had this shape
 #     (ScaleEra), and a gate that cries wolf on correct code is a gate people start passing with --no-verify.
 #   - a Convert reached through a helper this script does not know by name;
-#   - the same shape around a reader other than GetMember.
+#   - the same shape around a reader other than the ones in READERS below.
 # It catches the compact idiom that actually occurred. Widen it when a new shape appears — and DRILL the new
 # shape, never assume the old regex reaches it.
+#
+# 2026-09-14: it HAD been too narrow again. The regex knew only `GetMember`, while FormationOverridePatch reads through
+# a local `Mem(o, name) => GetMember(o, name)` — and had the exact headline shape at two sites (`IsLoaded`, `IsNaval`),
+# the first of which is the formation re-form loop's "skip until rendered" test: a game rename would have skipped
+# every unit forever. The gate printed OK. Now READERS lists every object-returning wrapper, and the SELF-CHECK below
+# discovers `static object Name(object, string)` helpers that call a reader and FAILS if one is not in READERS.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
+
+# Object-returning member readers: the wrappers a Convert.To*() can sit on. Word-anchored, and followed by `(`, so
+# the typed MemberBool/MemberInt/… (which RETURN the fallback and are the fix) do not match.
+READERS="GetMember GetMemberOrNull Mem Member ReflectMember"   # ReflectMember: the editor's (ModelFactoryWindow) field-then-property probe
+READER_RE="(?:\\w+\\.)?(?:$(echo $READERS | tr ' ' '|'))\\b\\s*\\("
 
 # Production C# only. Tests are excluded ON PURPOSE: MemberReadTests must be free to construct the bad shape in a
 # mutation drill without the gate blocking the drill.
 FILES=$(find . -name '*.cs' \
           -not -path './obj/*' -not -path './bin/*' -not -path './Temp/*' \
           -not -path './Tests/*' -not -path './baker/*' -not -path './tools/*' | sort)
+
+# ---- SELF-CHECK: every object-returning (object, string) helper whose body calls a reader must be in READERS ----
+# Whole-body scan via tools/find-reader-helpers.pl (a null guard above the read defeated the first, 3-line version);
+# drilled by tools/drill-reader-gates.sh in the gate.
+UNKNOWN=$(perl tools/find-reader-helpers.pl --object-only $FILES \
+  | awk -F'\t' -v known=" $READERS " 'index(known, " " $1 " ") == 0 {print}')
+if [ -n "$UNKNOWN" ]; then
+  echo "[FAIL] object-returning member reader(s) this gate does not know — a Convert.To*() on them is invisible:"
+  printf '%s\n' "$UNKNOWN" | sed 's/^/  /'
+  echo "Add the name to READERS in tools/check-member-shape.sh." >&2
+  exit 1
+fi
 
 hits=0
 for f in $FILES; do
@@ -52,12 +75,12 @@ for f in $FILES; do
   # (a) DEAD INITIALIZER: <type> <var> = <init>; try { <var> = Convert.To*(GetMember(...
   # \1 back-reference is the whole test — it is only a bug when the try targets the SAME local just initialized.
   a=$(printf '%s' "$stripped" | grep -oP \
-    '\b(?:bool|float|double|int|long|uint|ulong|short|byte|decimal)\s+(\w+)\s*=\s*[^;{}]+;\s*try\s*\{\s*\1\s*=\s*(?:\w+\s*\(\s*)?Convert\.To\w+\s*\(\s*GetMember\b(?![^{}]*\?\?)[^{}]*?\}\s*catch' \
+    '\b(?:bool|float|double|int|long|uint|ulong|short|byte|decimal)\s+(\w+)\s*=\s*[^;{}]+;\s*try\s*\{\s*\1\s*=\s*(?:\w+\s*\(\s*)?Convert\.To\w+\s*\(\s*'"$READER_RE"'(?![^{}]*\?\?)[^{}]*?\}\s*catch' \
     || true)
 
   # (b) PHANTOM SKIP: try { ... Convert.To*(GetMember(...)) ... } catch { continue; }  — the continue never fires.
   b=$(printf '%s' "$stripped" | grep -oP \
-    'try\s*\{[^{}]*Convert\.To\w+\s*\(\s*GetMember\b[^{}]*\}\s*catch\s*(?:\([^)]*\))?\s*\{\s*continue\s*;\s*\}' \
+    'try\s*\{[^{}]*Convert\.To\w+\s*\(\s*'"$READER_RE"'[^{}]*\}\s*catch\s*(?:\([^)]*\))?\s*\{\s*continue\s*;\s*\}' \
     || true)
 
   for found in "$a" "$b"; do

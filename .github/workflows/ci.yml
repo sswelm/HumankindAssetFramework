@@ -64,6 +64,13 @@ jobs:
         shell: bash
         run: bash tools/check-member-shape.sh
 
+      # The gate that tests the two above: plants a null-guarded reader wrapper under an unknown name plus the shapes
+      # they exist to catch, and FAILS if either gate passes. Their helper lists are hand-maintained; a 3-line body
+      # window let exactly that wrapper through on 2026-09-14. Seconds, source-only.
+      - name: Reader-gate drill (the gates refuse an unknown wrapper)
+        shell: bash
+        run: bash tools/drill-reader-gates.sh
+
       # REGISTRY SCHEMA PARITY — IN-REPO since 2026-08-24. The editor WRITES pack.json from ModelDef; this plugin
       # READS it two ways, and a key the REGEX FALLBACK forgot is invisible at runtime by construction: a
       # malformed-JSON pack silently loses that field, no throw, no log.
