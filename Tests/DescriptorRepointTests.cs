@@ -111,6 +111,18 @@ namespace HumankindAssetFramework.Tests
         }
 
         [Fact]
+        public void TryReadBlock_reports_the_current_block_and_the_unpopulated_case()
+        {
+            var (_, d) = Fixture(64);
+            Assert.True(DescriptorRepoint.TryReadBlock(d, 2, out int s, out int c));
+            Assert.Equal(10, s); Assert.Equal(3, c);
+            Assert.True(DescriptorRepoint.TryReadBlock(d, 1, out int s1, out int c1));   // allocated, never registered: 0+0
+            Assert.Equal(0, s1); Assert.Equal(0, c1);                                    // callers skip the surgical repoint here
+            Assert.False(DescriptorRepoint.TryReadBlock(d, 9, out _, out _));
+            Assert.False(DescriptorRepoint.TryReadBlock(null, 0, out _, out _));
+        }
+
+        [Fact]
         public void Reports_a_descriptor_type_without_the_two_fields()
         {
             var g = (Array)new GFrag[8];

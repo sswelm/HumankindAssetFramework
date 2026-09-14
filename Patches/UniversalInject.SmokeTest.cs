@@ -422,14 +422,27 @@ namespace HumankindAssetFramework
         internal struct LiveSlot { public int Desc, Skel; public LiveSlot(int d, int s) { Desc = d; Skel = s; } }
         internal const float PoseIdleSeconds = 5f;
 
-        // PURE: judge one repointed descriptor against what the engine holds now. `live* < 0` = could not be read back
-        // (a note, not a failure — nothing to judge); a block that moved or shrank is a FAIL, named with both values.
-        internal static void GatherFragmentFact(string name, int expStart, int expCount, int liveStart, int liveCount, SmokeFacts f)
+        // PURE: judge one entry's appended fragments against what the engine draws NOW. Identity is the fragment's MESH
+        // NAME: each appended name must still have a live fragment entry on the addon (`addonEncs`: name -> current
+        // encoded mesh id, 0 = dead slot), and THAT id must appear in the descriptor's live block. Never by position —
+        // the game's registration legitimately moves the block (first in-game run, 2026-09-14: two healthy units
+        // flagged) — and never by a remembered encoding: FormationOverride.MaybeScaleFragments (`scaleMode="data"`)
+        // re-encodes every fragment onto scaled clones in the same Load hook, keeping the names (review of PR #53).
+        // Either source unreadable = a note, not a failure; a lost name is the spike-plague FAIL.
+        internal static void GatherFragmentFact(string name, IList<string> appendedNames, IDictionary<string, uint> addonEncs, IList<uint> liveBlock, SmokeFacts f)
         {
-            if (expStart < 0 || expCount < 0) return;   // never repointed post-registration — nothing to hold
-            if (liveStart < 0 || liveCount < 0) { f.FragmentNotes.Add($"'{name}' descriptor repoint not verifiable (descriptor table unreadable)"); return; }
-            if (liveStart != expStart || liveCount != expCount)
-                f.FragmentIssues.Add($"'{name}' descriptor now {liveStart}+{liveCount}, repointed to {expStart}+{expCount}");
+            if (appendedNames == null || appendedNames.Count == 0) return;   // nothing appended this session — nothing to hold
+            if (addonEncs == null) { f.FragmentNotes.Add($"'{name}' appended fragment(s) not verifiable (addon fragment entries unreadable)"); return; }
+            if (liveBlock == null) { f.FragmentNotes.Add($"'{name}' appended fragment(s) not verifiable (descriptor table unreadable)"); return; }
+            var missing = new List<string>();
+            for (int i = 0; i < appendedNames.Count; i++)
+            {
+                string nm = appendedNames[i];
+                if (!addonEncs.TryGetValue(nm, out uint enc) || enc == 0) missing.Add($"'{nm}' (no live fragment entry on the addon)");
+                else if (!liveBlock.Contains(enc)) missing.Add($"'{nm}' (0x{enc:X8} not in the descriptor block)");
+            }
+            if (missing.Count > 0)
+                f.FragmentIssues.Add($"'{name}' descriptor no longer draws {missing.Count} of {appendedNames.Count} appended fragment(s): {string.Join(", ", missing)} — block holds {liveBlock.Count} entry(ies)");
             else f.FragmentsChecked++;
         }
         static void GatherFragmentFacts(IList<ModelEntry> list, SmokeFacts f)
@@ -437,26 +450,50 @@ namespace HumankindAssetFramework
             for (int i = 0; i < list.Count; i++)
             {
                 var e = list[i];
-                if (!e.repointed || e.gpuDefId < 0) continue;   // only THIS session's repoints — the fields are cleared with `repointed` on re-arm
-                TryReadLiveDescriptor(e.gpuDefId, out int s, out int c);
-                GatherFragmentFact(e.resourceName, e.gpuFragStart, e.gpuFragCount, s, c, f);
+                if (!e.repointed || e.gpuDefId < 0 || e.gpuAppendedNames.Count == 0) continue;   // only THIS session's appends — cleared with `repointed` on re-arm
+                var addonEncs = ReadAddonEncsByName(e.gpuAddon?.Target);
+                TryReadLiveBlockEncs(e.gpuDefId, out var live);
+                GatherFragmentFact(e.resourceName, e.gpuAppendedNames, addonEncs, live, f);
             }
         }
-        static bool TryReadLiveDescriptor(int defId, out int start, out int count)
+        // meshName -> CURRENT encoded mesh id for every fragment entry on the addon (null = addon gone / unreadable).
+        static Dictionary<string, uint> ReadAddonEncsByName(object addon)
         {
-            start = count = -1;
+            if (addon == null) return null;
+            try
+            {
+                var frags = GetMember(addon, "FragmentEntries") as Array;
+                if (frags == null) return null;
+                var map = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < frags.Length; i++)
+                {
+                    var it = frags.GetValue(i); if (it == null) continue;
+                    var mn = GetMember(it, "meshName") as string; if (string.IsNullOrEmpty(mn)) continue;
+                    uint enc = MemberUInt(it, "EncodedMeshAndVisualParticleCount", 0);
+                    if (!map.TryGetValue(mn, out uint prev) || prev == 0) map[mn] = enc;   // a live entry beats a dead one of the same name
+                }
+                return map;
+            }
+            catch { return null; }
+        }
+        // The encoded mesh ids of every fragment the live descriptor `defId` draws right now (null = unreadable).
+        static bool TryReadLiveBlockEncs(int defId, out List<uint> encs)
+        {
+            encs = null;
             try
             {
                 var pmType = GameBinding.PawnManager;
                 var pm = pmType?.GetProperty("Instance", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)?.GetValue(null)
                          ?? HarmonyLib.AccessTools.Field(pmType, "Instance")?.GetValue(null);
                 var descs = pm == null ? null : HarmonyLib.AccessTools.Field(pmType, "gpuPawnDescriptorEntries")?.GetValue(pm) as Array;
-                if (descs == null || defId < 0 || defId >= descs.Length) return false;
-                var d = descs.GetValue(defId);
-                start = MemberInt(d, "StartFragment", -1); count = MemberInt(d, "FragmentCount", -1);
-                return start >= 0 && count >= 0;
+                var gfrags = pm == null ? null : HarmonyLib.AccessTools.Field(pmType, "gpuPawnDescriptorFragmentEntries")?.GetValue(pm) as Array;
+                if (descs == null || gfrags == null || !DescriptorRepoint.TryReadBlock(descs, defId, out int start, out int count)) return false;
+                if (start + count > gfrags.Length) return false;
+                encs = new List<uint>(count);
+                for (int i = 0; i < count; i++) encs.Add(MemberUInt(gfrags.GetValue(start + i), "EncodedMeshAndVisualParticleCountFxMeshIndex", 0));
+                return true;
             }
-            catch { return false; }
+            catch { encs = null; return false; }
         }
 
         internal static void GatherLivePawnFacts(IEnumerable<LiveSlot> slots, IList<ModelEntry> list, float now, SmokeFacts f)

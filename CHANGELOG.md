@@ -17,7 +17,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   (`Array` + the descriptor struct's two fields; the tail-block copy, the append, `StartFragment`/`FragmentCount`,
   `persistentFragmentEntryCount`, grow-by-need+100), tested with test-defined structs including the shipped
   hand-prop-then-chunks sequence, and the **smoke's full tier now reads every repointed descriptor back** and FAILS
-  when the block moved — the "spike plague" family finally has an in-game assertion;
+  when one of our appended fragments is no longer drawn — the "spike plague" family finally has an in-game
+  assertion. *Its first in-game run judged by POSITION and flagged two healthy units* (`DroneSquadFPV` 439+1 →
+  440+2, `TorpedoBoatDestroyers` 197+7 → 204+8): both appends had landed on a descriptor that read 0+0 — allocated,
+  not yet registered — and the game's registration then wrote the real block, body plus our entries, at its own
+  tail. The fact now judges by IDENTITY: each appended fragment is remembered by MESH NAME, resolved at smoke time to
+  its current entry on the addon, and that entry's encoded id must be in the live block. Not by a remembered
+  encoding either — the PR's second review found `FormationOverride.MaybeScaleFragments` (`scaleMode="data"`)
+  re-encoding every fragment onto scaled clones in the same Load hook, names intact. Both sites also skip the
+  surgical repoint on an unpopulated descriptor, since the registration snapshot carries the entries;
   **`QuadEstimate.cs`** — the edge-pairing estimator and the BSP partition behind the multi-mesh split, compiled
   into the test project (Faceted quads == tris, the tris/2 trap; partition covers every triangle once, under budget,
   in a stable order); **`DistrictRules.NeededBoost`** (the ≤1 opt-out, no-evidence cases); **`VehicleLabRules`** —

@@ -184,7 +184,9 @@ skipped. Ranked by consequence within each group.
 
 - ~~**Vanilla-scaled pawns take the boxed-reflection path every frame while compiled accessors exist.**~~ — **FIXED
   2026-09-14** (`PawnFast.Scale/SetScale` with the reflection fallback; `MaybeSwapFormationBySize` short-circuits on
-  the last settled scale). Not yet re-measured in-game — Performance.md §8 names the line to read.
+  the last settled scale). Measured the same evening (Performance.md §8): vanilla gate 1.0 µs/add as before, sweep
+  1.5 µs/frame, total unchanged at 1.6 % — the cost is `PoseOurs` (32 × 7 µs: `PoseAnim` + `DonorWorld`), the next
+  target. The scaled-vanilla path itself was not on screen (Biremes off-map) and is still unread.
   `UniversalInject.ScaleEra.cs:343-347` — `GetMember(entry,"ObjectSpace")` / `GetMember(oss,"Scale")` / two
   `SetMember`s per scaled vanilla pawn per frame (≈3–5 µs each on a 0.94 µs baseline); `PawnFast.Scale/SetScale`
   (`PawnFast.cs:102`) are used only by the entry path (`Muzzle.cs:1155`). Ahead of it `MaybeSwapFormationBySize`
