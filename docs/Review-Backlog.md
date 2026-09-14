@@ -44,6 +44,190 @@ stale** — struck through in place below, each with the evidence. The rest are 
   `animated-legacy` through the gated pipeline. **In-game verification DONE (2026-08-02)** — the howitzer checked out
   correctly after a real re-bake.
 
+## From the 2026-09-14 critical review (confirmed in source, unfixed)
+
+Six read-only passes over the 400 commits since 08-22; every item below was re-read in source on 09-14 (line numbers
+are of that day — re-check before touching, per the rules above). Items already tracked elsewhere in this file were
+skipped. Ranked by consequence within each group.
+
+### Verification machinery (fix first — a green gate that cannot see the shape is worse than no gate)
+
+- **`check-member-shape.sh` matches only `Convert.To*(GetMember(` — blind to the `Mem(` wrapper, and one live
+  dead-sentinel sits behind it.** `FormationOverridePatch.cs:358` defines `Mem(o,name) => GetMember(o,name)`; `:432`
+  `bool loaded = true; try { loaded = Convert.ToBoolean(Mem(unit, "IsLoaded")); } catch { }` then `if (!loaded)
+  continue;` — a rename → null → `false` → every unit skipped by the formation re-form loop forever, no log. Same shape
+  at `:443` (`IsNaval`). Drill: the shipped regex → 0 hits on that file; `(?:GetMember|Mem|Member)\b` fires on both.
+  Fix: rewrite both sites as `MemberBool(unit, "IsLoaded", true)` (as `UniversalInject.Combat.cs:126` already does)
+  and widen the reader alternation in patterns (a) and (b).
+- **`check-catalog.sh` "all 370 catalogued" excludes three accessor families; at least four members are
+  uncatalogued.** The alternation at `tools/check-catalog.sh:126,129` lacks `Mem(` (17 sites), `FireProbe.Member(`/
+  `FireProbe.Int(` (`CombatEventPatch.cs:31-32`, 6 sites) and the typed `MemberBool/Float/Int/Long/UInt` + `TryMember*`
+  readers (38 sites). Behind them: `StrikerUnit` (`CombatEventPatch.cs:44`), `StrikerArmy` (`:54`),
+  `AttackerEmpireIndex` (`:43`), `PrimitivePerParticleCount` (`UniversalInject.Inject.cs:1548`) — none in
+  `GameBinding.cs`. `CombatEventPatch` is the fire-on-attack hook: a rename silently disables `fireOnAttack`. This is
+  the third widening of this alternation (08-21, 08-22 `CachedField`/`GF`, now). Fix: add the names, catalogue the
+  four, and add a self-check that greps `static \w+ \w+\(object \w+, string \w+\) =>.*GetMember` wrappers and fails
+  when one is not in the alternation — so the next consolidation of helpers trips the gate instead of blinding it.
+- **Descriptor repoint has no test at any tier.** `UniversalInject.Inject.cs:2026-2056` (`InjectExtraMeshFragments`)
+  and `:1884-1930` (`InjectHandProp`) do the tail-block copy / `StartFragment=tail` / `FragmentCount=count+N` /
+  `persistentFragmentEntryCount` / grow-by-`need+100` arithmetic; an off-by-one is the "spike plague" family. Nothing
+  in `Tests/` reaches it; the smoke has no fragment-count verdict; `BakeFeatureTest.cs:162` asserts the baker side
+  only. It is pure `Array` + `FieldInfo` work — extract `RepointDescriptor(...)` and test with test-defined structs
+  (3 existing + 2 chunks → `{tail, 5}`, tail advanced by 5, growth when the array is short). Smallest in-game guard: a
+  smoke line `descriptor[defId].FragmentCount == bodyFrags + chunks` per multi-mesh entry.
+- **`SplitForQuadCeiling`/`EstimateQuads` covered only by the opt-in editor lane; `ReportBakedQuads` can verify
+  nothing and pass.** `editor/UniversalBaker.cs:1686-1793`; assertions live in `BakeFeatureTest.cs:128-186`, which run
+  via `tools/editor_tests.ps1` — not in `check.sh` nor `ci.yml`. `ReportBakedQuads` returning 0 ("NOT verified") is a
+  warning; a game-type rename turns the ceiling check into silence. `EstimateQuads(int[] tris, IList<int> cell)` has
+  no Unity dependency — move it to a pure file compiled into `Tests` (the `EditorRules.cs` pattern): 2 tris sharing an
+  edge → 1; 2 disjoint → 2; 3-fan → 2; N faceted → N (the tris/2 trap of 09-12).
+- **`EffectiveDensityBoost` unreachable in xunit as written.** `DistrictInject.cs:862-879`; `FxMeshTriangles` returns 0
+  without the game so the auto-size branch never executes in a test. Extract `NeededBoost(int ppc, long tris, int
+  configBoost)`: `(3,10000,8)→14`, `(3,10000,1)→1` (the 09-12 opt-out), `(3,0,8)→8`, `(0,10000,8)→8`.
+- **`PART|` parser hard-caps at 8 tokens; a 9th field empties the Vehicle Lab silently.** `VehicleLabWindow.cs:1370`
+  `okLen = t.Length == 5 || (t.Length >= 6 && t.Length <= 8 …)`, `vehicle_rig.py:615` prints exactly 8; the 7th and 8th
+  were each added within a month. A part name containing `|` shifts the count too (`:1368-1371`, dropped with no
+  log). `vehicle_rig.py:6` still documents the 5-field shape. Fix: `TryParsePartLine(string, out Part)` with rows for
+  5/6/7/8/9 tokens (9 → parse-with-extras or FAIL loudly), `nan` → 0; log every rejected line.
+- **Tier-1 bake rows that cannot fail for the feature they name.** `BakeFeatureTest.cs:121-126` "windingFix keeps
+  geometry" asserts `m != null && r.ok` on a consistently wound cube; `:100-102` "atlasMaxDim=1024 keeps the 512
+  source" accepts `128 ≤ width ≤ 1024`; `:188-193` Multi asserts only `atlas != null`. Fix: one reversed face + every
+  normal away from the centroid; `t2.width == 512`.
+- **No nested-parent fixture for the plane/facing cut.** `GlbDisconnectedParts.cs:830-852` composes the parent chain;
+  every fixture in `Tests/GlbPlaneCutTests.cs` is a root node, so reversing `Mul(world, local)` passes all 11 tests.
+  One fixture: Strip under `{translation (0,0,5), rotation Z90}`, cut on world Y at 1 → 2/2, `ExtractPart` bounds shifted.
+- **`BakeSmokeTest` "one representative per bake path" can pick a texture-only override as the static/Auto
+  representative, skip it, and PASS.** `BakeSmokeTest.cs:39-41` groups by `(animated, materialMode, converted)` and
+  takes `g.First()`; a Retexture entry lands in (static, Auto) and, with the registry sorted by name, wins whenever it
+  sorts first; `Run()` then skips it at `:99-106`. PLAUSIBLE (not drilled). Fix: exclude texture-only entries before
+  `GroupBy`.
+
+### Editor — bake pipeline
+
+- **P1 — a GLB re-export can bake a stale `.obj`.** `UniversalBaker` prefers the `.obj` beside the source
+  (`cachedFull`), `objPath` defaults to `.obj`, and `viaGlbconv` is read from the *current* config: a model whose GLB
+  changed but whose old `.obj` is still on disk bakes the old geometry, silently. Fix: key the cache on the GLB's
+  mtime/size (or always re-run glbconv when `viaGlbconv`), and log which file was actually loaded.
+- **`ModelRegistry.Load()` `Thread.Sleep(250)` per OnGUI event.** Reached through the Factory's name-collision block
+  at `ModelFactoryWindow.cs:994`; while the block is shown every repaint/layout event pays 250 ms.
+- **`BackupAuto` exclusion misses `_PreviewMesh1..31`.** Only the first preview mesh name is excluded; the chunked
+  previews are backed up on every bake.
+
+### Editor — Lab / Workshop windows
+
+- **Workshop cut preview sums three `float`s before widening; the writer sums doubles.** `ModelWorkshopWindow.cs:393`
+  `(p[i0+a] + p[i1+a] + p[i2+a]) / 3.0` on `float[]` — single-precision sum, then widened; `GlbDisconnectedParts.cs:629`
+  sums `Vec3` doubles. Same for the facing normal (`:398-402` vs `:652-654`). The 09-13 Snap fix made the *inputs*
+  identical, not the arithmetic: facing rule at 0 % ⇒ `v = Min`; a bottom face with all three verts at y = 0.7f sums
+  to fl(3·0.7f) which rounds DOWN, /3 ⇒ 0.69999997 < v ⇒ grey in the preview, yellow in the file. Roughly half of all
+  float heights round down this way. Fix: `((double)p[i0+a] + p[i1+a] + p[i2+a]) / 3.0` and `(double)p[i1] - p[i0]`;
+  better, expose the two `sideA` lambdas from `GlbDisconnectedParts` and have the preview call them; add a
+  `GlbPlaneCutTests` row on a flat face at exactly `Min` with a value that rounds down.
+- **Flat-surface filter judges "level" in import orientation; the inside-out verdicts honour the Orientation dial.**
+  `VehicleLabWindow.cs:242-246, 291` tests `|c.y|/a2 ≥ 0.866` on the preview instance, which never applies
+  `modelRot` (`vehicle_rig.py:544-546` "stays in import orientation"), while `ProbeRotArg` (`:2139-2144`) straightens
+  the flip verdicts. A hull imported on its side with Roll X = 90 dialed: every deck reads vertical ⇒ "Only flat parts"
+  hides all decks. Fix: rotate the triangle normal by the inverse of `modelRot` before the cos-30° test.
+- **Formation Override "Remove" re-selects the neighbouring entry and erases its own confirmation.**
+  `FormationOverrideWindow.cs:115` reads `sel = Popup(selected, …)` BEFORE the Remove button; Remove sets `selected =
+  0; status = "Removed …"`; `:132` `if (sel != selected) { selected = sel; OnSelect(); }` then loads the entry that
+  shifted into the old slot and blanks `status`. Remove the LAST entry ⇒ `selected` out of range. Fix: move the
+  select-check above the button (as `AnimationLabWindow.cs:734-744` already orders it) or set `sel = 0` on removal.
+- **A probe-mode Blender traceback is reported as "no mesh parts — is this a mesh model?".** `vehicle_rig.py:473-634`
+  (probe) runs outside `_guard` (defined at `:641`, rig-only); `VehicleLabWindow.cs:2189-2199` logs stderr only when
+  stdout contains `VEHICLE ERROR`, so a crash in the flip-verdict/visibility passes leaves 0 parts and `Probe()` blames
+  the model at `:1400-1403`. `ModelWorkshopWindow.cs:308` discards both streams. Fix: `partCount == 0 && done == null`
+  (or stderr contains `Traceback`) ⇒ `Debug.LogError` both streams; wrap probe mode in `_guard`.
+- **Preview helper objects leak per window close / domain reload.** `VehicleLabWindow.cs:431-436` destroys
+  `inst`/`pru` only — `waterMesh` (`:1666`), `levelMesh` (`:1710`) never; `ModelWorkshopWindow.cs:322-330` never destroys
+  `highlightMat`/`cutMatA`/`cutMatB`; `AnimationLabWindow.cs:209-217` misses `fitRefManMesh` (`:397`).
+- **Workshop pays the full probe (BVH visibility + island flood) just to obtain a preview FBX.** Unmeasured; worth a
+  `_lap` on a large ship before deciding whether a `--preview-only` flag is warranted.
+
+### Blender tools
+
+- **`RunBlender` discards stderr on the success path** (see the probe-traceback item above — same root).
+- **Probe writes its `VEHICLE` sentinel before the preview FBX export**, so a crash in the export leaves the Lab showing
+  the *previous* preview with a fresh part list.
+- **`_project` is O(V × 512)** (`vehicle_rig.py` ≈ `:2322`, the per-vertex loop over probe samples) — the leading
+  candidate for the post-reduce Teutonic whale once PR #46's laps name it; KDTree (`mathutils.kdtree`) is the fix.
+
+### Plugin — runtime core
+
+- **Vanilla-scaled pawns take the boxed-reflection path every frame while compiled accessors exist.**
+  `UniversalInject.ScaleEra.cs:343-347` — `GetMember(entry,"ObjectSpace")` / `GetMember(oss,"Scale")` / two
+  `SetMember`s per scaled vanilla pawn per frame (≈3–5 µs each on a 0.94 µs baseline); `PawnFast.Scale/SetScale`
+  (`PawnFast.cs:102`) are used only by the entry path (`Muzzle.cs:1155`). Ahead of it `MaybeSwapFormationBySize`
+  (`:233-262`) runs `FormationOverride.SizeThresholdsFor` — a linear `OrdinalIgnoreCase` scan over every formation
+  link (`FormationOverridePatch.cs:611-617`) — *before* the `sizeFormApplied` early-out at `:262`. Live today (Biremes
+  ×2); a rules-only pack scaling every ship multiplies it by the fleet. Fix: `PawnFast` with the reflection fallback;
+  move the early-out above the scan.
+- **`lastPawnMatched` is reset after the pose gate.** `UniversalInject.Pose.cs:205` returns before `:206
+  lastPawnMatched = false`; `Hooks.cs:108` then bills every vanilla add to `PoseOurs` while the flag holds the last
+  matched pawn's `true`. Reachable with a static-only pack after a session re-arm or `UniversalInject=false` — the
+  vanilla/ours split in the perf docs inverts. Meter-only. Fix: move the reset above the gate.
+- **`Plugin.Poll`'s log-once key includes `ex.Message`.** `Plugin.cs:497` `"poll:"+name+":"+ex.GetType().Name+":"+
+  ex.Message` — a varying message (`KeyNotFoundException`, Unity's "has been destroyed") logs the full stack every
+  frame and grows `onceKeys` (`:58`) by a string per frame — the spam the 08-19 hygiene note above it forbids. Latent
+  (0 poll throws in the 09-13 log). Fix: key on `name + type`, message in the text.
+- **`ProcessSubPawnVisuals` is documented as a one-shot dump but is a permanent 3 s poll with a 15 s full-scene
+  `FindObjectsOfType<Renderer>` that mutates renderers.** `Plugin.cs:563` says "no-op once dumped"; `Inject.cs:461`
+  "keep polling", `:509-527` scans the scene every 15 s per `hideSubPawns` entry and sets `r.enabled = false` on
+  Gunship/Helix/Rotor/Blur within 15 u — Performance.md rule 2, in the file that says the scan was removed (`:52`).
+  82 `[REND]` lines in ~22 min, all "0 renderer(s)". Fix: latch per sub-pawn instance id, or delete now that
+  `CrushGhostSlice`/`PruneCloneRenderOutputs` kill the ghost; correct the comment either way.
+- **`SweepForStrays` is O(entries × managers × pawnCount) boxed reflection on a 2 s timer, bucketed inside
+  `PoseOurs`.** `Pose.cs:445-467` — `arr.GetValue(i)` + `TryMemberInt` ×2 per slot although `PawnFast.SkelId/DescId`
+  are compiled; `knownManagers` (`:438`) retains every manager ever seen (battle managers included). Small today with
+  one manager; the risk is late-game multi-manager. Keep the sweep (it rescues real strays); read through `PawnFast`,
+  prune managers whose `pawnCount` reads 0 for N sweeps, give it its own bucket.
+- **Two hooks claim a per-session AnimationLoad re-arm that cannot happen.** `Hooks.cs:424-425, 446-447` vs
+  `UniversalInjectPatch.cs:1041-1043`, `FacingPersistPatch.cs:60-61`, Architecture.md:110, Animated-Runtime.md:36
+  (fires once per process, proven 08-16). `RearmPropRegistration` (`PropsBudget.cs:117`) and `RearmProjectileOverrides`
+  never run for a second session — props survive only via the `TickPropRegister` safety net, projectile overrides only
+  because they mutate process-lived assets. Both axes off by default. Fix: hang both on the `PawnManager.Load` seam
+  the model axis uses (`Hooks.cs:279`); fix the comments (`UniversalInjectPatch.cs:1036-1038` contradicts itself
+  three lines apart).
+- **The `[MainThread]` audit on `_typeCache` is incomplete.** `GameBinding.cs:66-69` names three sim-thread hooks;
+  `Hk_AnimatedBonePoolHeadroom.Prefix` (`Hooks.cs:284`) reads `GameBinding.AnimationManager` on `PawnManager.Load`,
+  documented "possibly off the main thread". Practical risk ≈ 0 (the only post-Awake writer is the late-loaded
+  `AudioEventHandle`); the written contract is wrong. Name the hook, or `ConcurrentDictionary`.
+- **`ScaleDescriptorMeshes` scales the descriptor bbox by the LAST fragment's ratio.** `ScaleEra.cs:399/423/445` —
+  `ratio` is overwritten per matched fragment; a descriptor whose body was rescaled but whose last fragment is shared
+  with an already-scaled descriptor gets `descRatio = 1` ⇒ vanilla-sized `BBoxMin/Max` ⇒ the enlarged unit culls at
+  the screen edge. PLAUSIBLE — not traced to a shipped mesh-sharing pair.
+
+### Plugin — district / combat
+
+- **District tracking is gated on the global config, not on the registry.** `DistrictInject.cs:1694-1700` `wantTrack =
+  DistrictMainRows set || DistrictSelectorTile set`; a district scoped only through `pack.json` is never added to
+  `trackedDistricts`, so `RearmDistrictScan()` never fires for it and the terrain-hug district map stays stale for
+  registry-only setups. Fix: `|| Registry has any scoped district`.
+- **`groundApplied` latches per entry NAME, not per district instance.** `DistrictInject.Scoped.cs:1318-1322` applies
+  once and sets `entry.groundApplied`; the prefix at `:1351-1357` then returns `false` (suppressing the game's own
+  `ApplyGroundMaterialDefinition`) for every district with that name. A second instance of the same district — a
+  second city building the same wonder-class district, or the same scoped district twice — never receives its ground
+  paint AND has the game's apply suppressed. Fix: key the latch on the district object (a `ConditionalWeakTable`), not
+  the entry.
+- **`meshPersistLogged` says "diagnostic log dedup" but gates the strategic-zoom mesh work once per process.**
+  `Scoped.cs:1128` `[ProcessLived("diagnostic once-per-name log dedup")]`; `:1133` `if (!meshPersistLogged.Add(name))
+  return;` sits *before* the work in `KeepDistrictMeshAtStrategicZoom`. A second session (new game, same process)
+  never re-applies the element visibility. Fix: `[SessionScoped(District)]` and a separate log-dedup set — the
+  annotation is currently lying to the fence audit.
+- **`refreshArgs` NRE in the documented scoped + isolate coexistence.** `DistrictInject.cs:702` scratch buffer is
+  allocated only at `:752` and `:821` (isolate resolvers), but `miRefreshChannel` is also resolved at `:1235`, `:1624`
+  and `Scoped.cs:420` without it; `:754`, `:823`, `:2073` index `refreshArgs[0]` guarded only by `miRefreshChannel !=
+  null`. A scoped district placing its selector first, then an isolate wonder ⇒ NRE; in `DistrictApplyTexture` it is
+  caught and counted toward the 3-strike `texErrors` latch, which then blames "apply failed 3x". Fix: allocate beside
+  every resolve (one `EnsureRefreshChannel(plbc)` helper).
+- **`matchedFromTracked/matchedFromGuids` sit outside the session fence.** `DistrictInject.cs:1084` plain `static int`
+  beside `[SessionScoped] matchedDistricts` (`:1083`); after a reset the early-out at `:1090` can fire when the new
+  session's counts coincide with the old, leaving the last district unmatched. Annotate, reset to −1.
+- **Live config runs the "experimental, untested" battle hold.** `BepInEx/config/haf_battleturn.txt:7` `hold=1`, while
+  `docs/Turn-Ease.md:113` calls that path experimental and untested, and `CombatEventPatch.cs:88` returns early on
+  `BattleTurn.holdFire` so the ranged-fire clip arms later. Either the doc is stale (it has been drilled) or the
+  operator is running an untested path — decide and make the two agree.
+
 ## From the 2026-08-23 critical review
 
 - ~~**Four `float x = D; TryParse(cfg, out x)` sites — the default is dead code.**~~ — **FIXED 2026-08-23,
