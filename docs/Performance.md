@@ -530,9 +530,20 @@ filed their boxed reflection under *PoseVanilla* — the tier the docs describe 
 further out than 08-23 took it: the gate was compiled, the struct was compiled, and the *rule that ran between them*
 was not.
 
-The number to read after this pass is the `pose vanilla … ns` figure with a fleet-wide scale rule live (`Biremes`
-×2 in the reference pack is the smallest case), and the new `sweep` segment, which should stay in the low tens of
-µs at one manager. Not re-measured in-game at the time of writing — the line reports itself on the next launch.
+**Measured the same evening** (build 2026-09-14 15:30, 32 live pawns of ours across 10 entries, no scaled vanilla
+unit drawn — the Biremes were off-map, so the scale path itself was not exercised):
+
+```
+HAF 522 µs/frame (1.6% @ 30 fps) | Update 231 µs | pose vanilla 64 µs = 63 adds × 1024 ns | pose ours 227 µs = 32 adds × 7053 ns
+| sweep 0.13 runs/frame 1.5 µs (11260 ns ea) | donor 6 poses 61.4 µs (10234 ns ea) = rig 0.5 + world 47.3 + motion 11.4 µs
+top: PoseOurs 227.2 µs, PoseAnim 65.4 µs, PoseVanilla 64.5 µs, PoseDonor 61.4 µs, AnimStates 52.7 µs, DonorWorld 47.3 µs
+```
+
+Read plainly: the vanilla gate is the 1.0 µs it was; the sweep is now counted as sweeps and costs 1.5 µs/frame; and
+the **total did not move** — because the cost was never in the vanilla tier. It is in `PoseOurs`: 32 adds × 7 µs,
+of which `PoseAnim` (65 µs) and the donor-clip world pose (`DonorWorld` 47 of `PoseDonor` 61 µs, six helicopters)
+are two thirds. That is the next target; the `pose vanilla … ns` figure with a scaled fleet on screen is still
+unread.
 
 Related: [Architecture](Architecture.md) (§2 threads, §2b per-frame), [Testing](Testing.md) (the headless tools),
 [Vertex-Budget](Vertex-Budget.md) (the *GPU* budget — a different axis: mesh memory, not frame time).
