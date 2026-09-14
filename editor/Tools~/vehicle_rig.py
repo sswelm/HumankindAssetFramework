@@ -1594,6 +1594,7 @@ for i, tn in enumerate(track_names):
         names.append(eb.name)
     track_infos.append((tn, names, front_cl, rear_cl, c.copy(), roadF_cl, roadR_cl))
 
+_lap("cluster + armature")
 # ---- SAIL bone: every marked sail part welds to ONE bone so the canvas lowers/raises as a unit ----
 sail_found = []
 sail_top_z = 0.0
@@ -2489,6 +2490,7 @@ for o in objs:
     md = o.modifiers.new("Armature", 'ARMATURE'); md.object = arm
     o.parent = arm
 
+_lap("role bones (edit mode)")
 # ---- path-instanced link bones (deferred: cells were only known after tread analysis) ----
 import bisect
 from mathutils import Matrix
@@ -2552,6 +2554,7 @@ if _link_jobs:
             _vg.add(_vis, 1.0, 'REPLACE')
     print("VEHICLE hybrid bones: %s" % ", ".join("%s links x%d + shuttles x%d" % (_j["prefix"], len(_j["cells"]), len(_j["runs"])) for _j in _link_jobs.values()))
 
+_lap("skinning")
 # ---- join shards per bone ----
 # 3,350 tiny objects make every downstream step crawl (the animated bake's Blender sub-process TIMED OUT on
 # the un-joined file). Rigid skinning is per-part anyway, so after weights are assigned the rig needs at most
@@ -3532,11 +3535,13 @@ for _xo in bpy.context.scene.objects:
     _xo.data.calc_loop_triangles()
     _xt_v += len(_xo.data.vertices); _xt_t += len(_xo.data.loop_triangles); _xt_m += 1
 print("VEHICLE export totals: %d verts, %d tris across %d mesh(es)" % (_xt_v, _xt_t, _xt_m))
+_lap("join + clips")
 bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
 if preview_fbx:
     bpy.ops.export_scene.fbx(filepath=preview_fbx, add_leaf_bones=False, bake_anim=True, **_embed_previews)
 # The export totals ride INSIDE the DONE line (user request 2026-09-05: the Lab's status box surfaces only this
 # one line, so a separate totals print never reached the eye that asked for it).
+_lap("export (glb + preview fbx)")
 print("VEHICLE RIG DONE: %d wheel part(s) clustered into %d wheel(s) %s, %d turret part(s) on one Turret bone, %d gun part(s) on one Gun bone%s, %d track loop(s) on own static bones, Spin 0..%d %.0f deg%s, exported %d verts / %d tris -> %s"
       % (len(wheel_names), len(clusters), {b: wheel_axes[b] for b in cluster_bones}, len(turret_names),
          len(gun_names), " (child of Turret)" if (gun_names and turret_names) else "", len(track_names), _clip_frames, degrees,
