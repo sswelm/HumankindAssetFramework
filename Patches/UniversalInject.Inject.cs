@@ -1906,8 +1906,9 @@ namespace HumankindAssetFramework
                             try { folIdx = (uint)Convert.ToInt32(GetMember(fol, "LayerIndex")); } catch { }
                             feType.GetField("FxOutputLayerIndex").SetValue(ge, folIdx);
                             // the arithmetic is the shared, unit-tested kernel (DescriptorRepoint.cs); this site keeps the game-side writes.
-                            // Either way the smoke verifies BY CONTENT that the live descriptor still draws this prop (gpuAppendedEncs).
-                            e.gpuDefId = defId; e.gpuAppendedEncs.Add(enc);
+                            // Either way the smoke verifies that the live descriptor still draws this prop — by NAME through the addon's
+                            // current entry (gpuAppendedNames), so a later re-encode (data-scale clones) does not read as a loss.
+                            e.gpuDefId = defId; e.gpuAddon = new WeakReference(addon); if (!e.gpuAppendedNames.Contains(meshName)) e.gpuAppendedNames.Add(meshName);
                             if (DescriptorRepoint.TryReadBlock(descs, defId, out _, out int curCount) && curCount == 0)
                                 Plugin.Diag($"[Props] descriptor[{defId}] not populated yet (0 fragments) — the registration snapshot carries the hand prop; no surgical repoint");
                             else
@@ -1988,7 +1989,7 @@ namespace HumankindAssetFramework
                 var mcm = GetMember(animMgr, "FxComponentMeshContentManager");
                 var layerObj = GetMember(animMgr, "FXMeshLayerIndex");
                 int layer = layerObj is int li3 ? li3 : Convert.ToInt32(layerObj ?? 0);
-                var made = new List<object>(); var encs = new List<uint>(); var bidxs = new List<uint>(); var smiIdxs = new List<uint>();
+                var made = new List<object>(); var encs = new List<uint>(); var bidxs = new List<uint>(); var smiIdxs = new List<uint>(); var madeNames = new List<string>();
                 for (int xi = 0; xi < extraNames.Count; xi++)
                 {
                     string chunkName = extraNames[xi]; uint smiIndex = extraSmi[xi];
@@ -1997,7 +1998,7 @@ namespace HumankindAssetFramework
                     catch (Exception ex) { Plugin.Log.LogWarning($"[Uni][Multi] chunk '{chunkName}' Load: " + (ex.InnerException ?? ex).Message); continue; }
                     uint enc = MemberUInt(item, "EncodedMeshAndVisualParticleCount", 0);
                     if (enc == 0) { Plugin.Log.LogWarning($"[Uni][Multi] chunk '{chunkName}' encoded to 0 (name not in the collection?) — skipped"); continue; }
-                    made.Add(item); encs.Add(enc); bidxs.Add(MemberUInt(item, "BoneIndex", 0)); smiIdxs.Add(smiIndex);
+                    made.Add(item); encs.Add(enc); bidxs.Add(MemberUInt(item, "BoneIndex", 0)); smiIdxs.Add(smiIndex); madeNames.Add(chunkName);
                     Plugin.Diag($"[Uni][Multi] '{e.resourceName}' chunk '{chunkName}' encoded 0x{enc:X8} (smi {smiIndex}, bone '{boneName}')");
                 }
                 if (made.Count == 0) return;
@@ -2040,8 +2041,10 @@ namespace HumankindAssetFramework
                         ges.Add(ge);
                     }
                     // the arithmetic is the shared, unit-tested kernel (DescriptorRepoint.cs); this site keeps the game-side writes.
-                    // Either way the smoke verifies BY CONTENT that the live descriptor still draws every chunk (gpuAppendedEncs).
-                    e.gpuDefId = defId; e.gpuAppendedEncs.AddRange(encs);
+                    // Either way the smoke verifies that the live descriptor still draws every chunk — by NAME through the addon's
+                    // current entries (gpuAppendedNames), so a later re-encode (data-scale clones) does not read as a loss.
+                    e.gpuDefId = defId; e.gpuAddon = new WeakReference(addon);
+                    foreach (var nm in madeNames) if (!e.gpuAppendedNames.Contains(nm)) e.gpuAppendedNames.Add(nm);
                     if (DescriptorRepoint.TryReadBlock(descs, defId, out _, out int curCount) && curCount == 0)
                     { Plugin.Diag($"[Uni][Multi] descriptor[{defId}] not populated yet (0 fragments) — the registration snapshot carries the {made.Count} chunk(s); no surgical repoint"); return; }
                     int tail = Convert.ToInt32(cntF.GetValue(pm));

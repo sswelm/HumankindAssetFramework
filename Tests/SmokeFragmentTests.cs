@@ -4,23 +4,30 @@ using Xunit;
 
 namespace HumankindAssetFramework.Tests
 {
-    // The smoke's "descriptor repoint held" fact (2026-09-14): every fragment we APPENDED to a unit's gpu descriptor
-    // (hand prop, multi-mesh chunks) must still be drawn by the descriptor's live block — judged by CONTENT (encoded
-    // mesh ids), never by position. The first in-game run judged by position and flagged two healthy units: their
-    // 0+0 descriptors had been registered by the game AFTER our append, block moved, our entries inside.
+    // The smoke's "descriptor repoint held" fact (2026-09-14): every fragment we APPENDED to a unit's addon (hand
+    // prop, multi-mesh chunks) must still be drawn by the descriptor's live block. Identity is the fragment's mesh
+    // NAME, resolved to its CURRENT encoded id on the addon — never position (the game's registration moves the
+    // block; the first in-game run flagged two healthy units) and never a remembered encoding (data-scale clones
+    // re-encode every fragment in the same Load hook; review of PR #53).
     public class SmokeFragmentTests
     {
-        static SmokeFactsWrapper Facts() => new SmokeFactsWrapper();
-        class SmokeFactsWrapper { public UniversalInject.SmokeFacts F = new UniversalInject.SmokeFacts { Models = 1, Repointed = 1 }; }
+        static UniversalInject.SmokeFacts Facts() => new UniversalInject.SmokeFacts { Models = 1, Repointed = 1 };
+        static Dictionary<string, uint> Addon(params (string name, uint enc)[] rows)
+        {
+            var d = new Dictionary<string, uint>(System.StringComparer.OrdinalIgnoreCase);
+            foreach (var r in rows) d[r.name] = r.enc;
+            return d;
+        }
 
         [Fact]
-        public void Appended_ids_present_in_the_live_block_count_as_held_wherever_the_block_moved()
+        public void Names_whose_current_ids_are_in_the_live_block_count_as_held_wherever_the_block_moved()
         {
-            var f = Facts().F;
-            // the log's own case: we appended 7 chunks at 197+7; the game then registered 204+8 = body + our 7
-            var appended = new List<uint> { 11, 12, 13, 14, 15, 16, 17 };
-            var live = new List<uint> { 1, 11, 12, 13, 14, 15, 16, 17 };
-            UniversalInject.GatherFragmentFact("TorpedoBoatDestroyers", appended, live, f);
+            var f = Facts();
+            // the log's own case: 7 chunks appended at 197+7; the game then registered 204+8 = body + our 7
+            var names = new List<string> { "Bremen_ModelMesh_B", "Bremen_ModelMesh_C", "Bremen_ModelMesh_D" };
+            var addon = Addon(("Bremen_ModelMesh", 1), ("Bremen_ModelMesh_B", 11), ("Bremen_ModelMesh_C", 12), ("Bremen_ModelMesh_D", 13));
+            var live = new List<uint> { 1, 11, 12, 13 };
+            UniversalInject.GatherFragmentFact("TorpedoBoatDestroyers", names, addon, live, f);
             Assert.Empty(f.FragmentIssues);
             Assert.Equal(1, f.FragmentsChecked);
             var v = UniversalInject.SmokeVerdict(f);
@@ -29,34 +36,51 @@ namespace HumankindAssetFramework.Tests
         }
 
         [Fact]
-        public void A_missing_appended_id_fails_the_smoke_and_names_it()
+        public void A_data_scale_re_encode_is_not_a_loss_when_the_new_ids_are_drawn()
         {
-            var f = Facts().F;
-            UniversalInject.GatherFragmentFact("Bremen", new List<uint> { 0x10, 0x20, 0x30 }, new List<uint> { 1, 0x10, 0x30 }, f);
-            Assert.Single(f.FragmentIssues);
-            Assert.Equal(0, f.FragmentsChecked);
-            var v = UniversalInject.SmokeVerdict(f);
-            Assert.False(v.Pass);
-            Assert.Contains("descriptor repoint(s) undone", v.Summary);
-            Assert.Contains("no longer draws 1 of 3 appended fragment(s) [0x00000020]", v.Summary);
+            // MaybeScaleFragments rebuilt every entry onto scaled clones: same names, NEW encodings, block re-registered
+            var f = Facts();
+            var names = new List<string> { "M60_DistrictMesh" };
+            var addon = Addon(("Body", 0x9001), ("M60_DistrictMesh", 0x9002));   // the prop's id used to be 489993472
+            var live = new List<uint> { 0x9001, 0x9002 };
+            UniversalInject.GatherFragmentFact("DroneSquadFPV", names, addon, live, f);
+            Assert.Empty(f.FragmentIssues);
+            Assert.Equal(1, f.FragmentsChecked);
         }
 
         [Fact]
-        public void A_block_reverted_to_the_original_body_only_fails()
+        public void A_name_whose_current_id_is_not_in_the_block_fails_and_names_it()
         {
-            var f = Facts().F;
-            UniversalInject.GatherFragmentFact("DroneSquadFPV", new List<uint> { 489993472u }, new List<uint> { 1 }, f);   // the M60 prop gone, body alone
+            var f = Facts();
+            var addon = Addon(("Body", 1), ("Bremen_ModelMesh_B", 0x10), ("Bremen_ModelMesh_C", 0x20));
+            UniversalInject.GatherFragmentFact("Bremen", new List<string> { "Bremen_ModelMesh_B", "Bremen_ModelMesh_C" }, addon, new List<uint> { 1, 0x10 }, f);
             Assert.Single(f.FragmentIssues);
+            var v = UniversalInject.SmokeVerdict(f);
+            Assert.False(v.Pass);
+            Assert.Contains("descriptor repoint(s) undone", v.Summary);
+            Assert.Contains("no longer draws 1 of 2 appended fragment(s): 'Bremen_ModelMesh_C' (0x00000020 not in the descriptor block)", v.Summary);
+        }
+
+        [Fact]
+        public void A_name_with_no_live_entry_on_the_addon_fails_as_lost()
+        {
+            // a vanilla ReloadFragments rebuilt FragmentEntries from the definition and our prop entry is gone (or dead)
+            var f = Facts();
+            var addon = Addon(("Body", 1), ("M60_DistrictMesh", 0));
+            UniversalInject.GatherFragmentFact("DroneSquadFPV", new List<string> { "M60_DistrictMesh" }, addon, new List<uint> { 1 }, f);
+            Assert.Single(f.FragmentIssues);
+            Assert.Contains("'M60_DistrictMesh' (no live fragment entry on the addon)", f.FragmentIssues[0]);
             Assert.Contains("block holds 1 entry(ies)", f.FragmentIssues[0]);
         }
 
         [Fact]
-        public void An_unreadable_descriptor_is_a_note_not_a_failure()
+        public void Unreadable_sources_are_notes_not_failures()
         {
-            var f = Facts().F;
-            UniversalInject.GatherFragmentFact("Bremen", new List<uint> { 5 }, null, f);
+            var f = Facts();
+            UniversalInject.GatherFragmentFact("Bremen", new List<string> { "X" }, null, new List<uint> { 1 }, f);
+            UniversalInject.GatherFragmentFact("Bremen", new List<string> { "X" }, Addon(("X", 5)), null, f);
             Assert.Empty(f.FragmentIssues);
-            Assert.Single(f.FragmentNotes);
+            Assert.Equal(2, f.FragmentNotes.Count);
             var v = UniversalInject.SmokeVerdict(f);
             Assert.True(v.Pass);
             Assert.Contains("not verifiable", v.Summary);
@@ -65,9 +89,9 @@ namespace HumankindAssetFramework.Tests
         [Fact]
         public void An_entry_that_appended_nothing_is_not_judged()
         {
-            var f = Facts().F;
-            UniversalInject.GatherFragmentFact("Bremen", new List<uint>(), new List<uint> { 1 }, f);
-            UniversalInject.GatherFragmentFact("Bremen", null, new List<uint> { 1 }, f);
+            var f = Facts();
+            UniversalInject.GatherFragmentFact("Bremen", new List<string>(), Addon(("Body", 1)), new List<uint> { 1 }, f);
+            UniversalInject.GatherFragmentFact("Bremen", null, null, null, f);
             Assert.Empty(f.FragmentIssues); Assert.Empty(f.FragmentNotes); Assert.Equal(0, f.FragmentsChecked);
         }
     }

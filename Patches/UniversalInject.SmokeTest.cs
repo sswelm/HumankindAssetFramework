@@ -422,19 +422,27 @@ namespace HumankindAssetFramework
         internal struct LiveSlot { public int Desc, Skel; public LiveSlot(int d, int s) { Desc = d; Skel = s; } }
         internal const float PoseIdleSeconds = 5f;
 
-        // PURE: judge one entry's appended fragments against the block the engine's descriptor draws NOW. By CONTENT —
-        // every encoded mesh id we appended must appear in the live block — never by position: the game's own
-        // registration legitimately moves the block (first in-game run, 2026-09-14: a position check flagged two
-        // healthy units whose 0+0 descriptors the game registered AFTER our append, with our entries inside).
-        // `liveBlock == null` = could not be read back (a note, not a failure); a missing id is the spike-plague FAIL.
-        internal static void GatherFragmentFact(string name, IList<uint> appended, IList<uint> liveBlock, SmokeFacts f)
+        // PURE: judge one entry's appended fragments against what the engine draws NOW. Identity is the fragment's MESH
+        // NAME: each appended name must still have a live fragment entry on the addon (`addonEncs`: name -> current
+        // encoded mesh id, 0 = dead slot), and THAT id must appear in the descriptor's live block. Never by position —
+        // the game's registration legitimately moves the block (first in-game run, 2026-09-14: two healthy units
+        // flagged) — and never by a remembered encoding: FormationOverride.MaybeScaleFragments (`scaleMode="data"`)
+        // re-encodes every fragment onto scaled clones in the same Load hook, keeping the names (review of PR #53).
+        // Either source unreadable = a note, not a failure; a lost name is the spike-plague FAIL.
+        internal static void GatherFragmentFact(string name, IList<string> appendedNames, IDictionary<string, uint> addonEncs, IList<uint> liveBlock, SmokeFacts f)
         {
-            if (appended == null || appended.Count == 0) return;   // nothing appended this session — nothing to hold
+            if (appendedNames == null || appendedNames.Count == 0) return;   // nothing appended this session — nothing to hold
+            if (addonEncs == null) { f.FragmentNotes.Add($"'{name}' appended fragment(s) not verifiable (addon fragment entries unreadable)"); return; }
             if (liveBlock == null) { f.FragmentNotes.Add($"'{name}' appended fragment(s) not verifiable (descriptor table unreadable)"); return; }
             var missing = new List<string>();
-            for (int i = 0; i < appended.Count; i++) if (!liveBlock.Contains(appended[i])) missing.Add("0x" + appended[i].ToString("X8"));
+            for (int i = 0; i < appendedNames.Count; i++)
+            {
+                string nm = appendedNames[i];
+                if (!addonEncs.TryGetValue(nm, out uint enc) || enc == 0) missing.Add($"'{nm}' (no live fragment entry on the addon)");
+                else if (!liveBlock.Contains(enc)) missing.Add($"'{nm}' (0x{enc:X8} not in the descriptor block)");
+            }
             if (missing.Count > 0)
-                f.FragmentIssues.Add($"'{name}' descriptor no longer draws {missing.Count} of {appended.Count} appended fragment(s) [{string.Join(", ", missing)}] — block holds {liveBlock.Count} entry(ies)");
+                f.FragmentIssues.Add($"'{name}' descriptor no longer draws {missing.Count} of {appendedNames.Count} appended fragment(s): {string.Join(", ", missing)} — block holds {liveBlock.Count} entry(ies)");
             else f.FragmentsChecked++;
         }
         static void GatherFragmentFacts(IList<ModelEntry> list, SmokeFacts f)
@@ -442,10 +450,31 @@ namespace HumankindAssetFramework
             for (int i = 0; i < list.Count; i++)
             {
                 var e = list[i];
-                if (!e.repointed || e.gpuDefId < 0 || e.gpuAppendedEncs.Count == 0) continue;   // only THIS session's appends — cleared with `repointed` on re-arm
+                if (!e.repointed || e.gpuDefId < 0 || e.gpuAppendedNames.Count == 0) continue;   // only THIS session's appends — cleared with `repointed` on re-arm
+                var addonEncs = ReadAddonEncsByName(e.gpuAddon?.Target);
                 TryReadLiveBlockEncs(e.gpuDefId, out var live);
-                GatherFragmentFact(e.resourceName, e.gpuAppendedEncs, live, f);
+                GatherFragmentFact(e.resourceName, e.gpuAppendedNames, addonEncs, live, f);
             }
+        }
+        // meshName -> CURRENT encoded mesh id for every fragment entry on the addon (null = addon gone / unreadable).
+        static Dictionary<string, uint> ReadAddonEncsByName(object addon)
+        {
+            if (addon == null) return null;
+            try
+            {
+                var frags = GetMember(addon, "FragmentEntries") as Array;
+                if (frags == null) return null;
+                var map = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < frags.Length; i++)
+                {
+                    var it = frags.GetValue(i); if (it == null) continue;
+                    var mn = GetMember(it, "meshName") as string; if (string.IsNullOrEmpty(mn)) continue;
+                    uint enc = MemberUInt(it, "EncodedMeshAndVisualParticleCount", 0);
+                    if (!map.TryGetValue(mn, out uint prev) || prev == 0) map[mn] = enc;   // a live entry beats a dead one of the same name
+                }
+                return map;
+            }
+            catch { return null; }
         }
         // The encoded mesh ids of every fragment the live descriptor `defId` draws right now (null = unreadable).
         static bool TryReadLiveBlockEncs(int defId, out List<uint> encs)
