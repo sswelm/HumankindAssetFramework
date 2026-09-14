@@ -29,6 +29,22 @@ namespace HumankindAssetFramework
             public bool Grown;                // `gfrags` was replaced — the caller must write it back
         }
 
+        // The descriptor's current block. `count == 0` means the definition is allocated but NOT YET REGISTERED (first
+        // in-game run of the smoke fact, 2026-09-14: both repoints it flagged had been made on a 0+0 descriptor, and
+        // the game's registration then wrote the real block — body plus our entries — at its own tail). A surgical
+        // repoint of an empty block is pointless: the registration snapshot of FragmentEntries carries the appended
+        // entries. Callers skip the repoint in that case and let the smoke verify the registration did its job.
+        internal static bool TryReadBlock(Array descs, int defId, out int start, out int count)
+        {
+            start = count = -1;
+            if (descs == null || defId < 0 || defId >= descs.Length) return false;
+            var d = descs.GetValue(defId);
+            var startF = d?.GetType().GetField("StartFragment"); var countF = d?.GetType().GetField("FragmentCount");
+            if (startF == null || countF == null) return false;
+            start = Convert.ToInt32(startF.GetValue(d)); count = Convert.ToInt32(countF.GetValue(d));
+            return start >= 0 && count >= 0;
+        }
+
         /// <param name="gfrags">the GPU fragment array; replaced when it must grow</param>
         /// <param name="descs">the descriptor array (boxed structs with StartFragment / FragmentCount)</param>
         /// <param name="defId">the descriptor to repoint</param>

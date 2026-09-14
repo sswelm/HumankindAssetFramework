@@ -1905,17 +1905,23 @@ namespace HumankindAssetFramework
                             uint folIdx = 0;
                             try { folIdx = (uint)Convert.ToInt32(GetMember(fol, "LayerIndex")); } catch { }
                             feType.GetField("FxOutputLayerIndex").SetValue(ge, folIdx);
-                            // the arithmetic is the shared, unit-tested kernel (DescriptorRepoint.cs); this site keeps the game-side writes
-                            int tail = Convert.ToInt32(cntF.GetValue(pm));
-                            if (!DescriptorRepoint.Apply(ref gfrags, descs, defId, tail, new[] { ge }, out var rp, out string rpErr))
-                                Plugin.Log.LogWarning($"[Props] '{e.resourceName}' hand prop: descriptor repoint refused — {rpErr} — prop stays invisible");
+                            // the arithmetic is the shared, unit-tested kernel (DescriptorRepoint.cs); this site keeps the game-side writes.
+                            // Either way the smoke verifies BY CONTENT that the live descriptor still draws this prop (gpuAppendedEncs).
+                            e.gpuDefId = defId; e.gpuAppendedEncs.Add(enc);
+                            if (DescriptorRepoint.TryReadBlock(descs, defId, out _, out int curCount) && curCount == 0)
+                                Plugin.Diag($"[Props] descriptor[{defId}] not populated yet (0 fragments) — the registration snapshot carries the hand prop; no surgical repoint");
                             else
                             {
-                                if (rp.Grown) fragF.SetValue(pm, gfrags);
-                                cntF.SetValue(pm, rp.NewTail);
-                                dirtyF?.SetValue(pm, true);
-                                e.gpuDefId = defId; e.gpuFragStart = rp.NewStart; e.gpuFragCount = rp.NewCount;   // what the smoke verifies the live descriptor still says
-                                Plugin.Diag($"[Props] descriptor[{defId}] repointed: fragments {rp.OldStart}+{rp.OldCount} -> {rp.NewStart}+{rp.NewCount} (surgical, layer {folIdx})");
+                                int tail = Convert.ToInt32(cntF.GetValue(pm));
+                                if (!DescriptorRepoint.Apply(ref gfrags, descs, defId, tail, new[] { ge }, out var rp, out string rpErr))
+                                    Plugin.Log.LogWarning($"[Props] '{e.resourceName}' hand prop: descriptor repoint refused — {rpErr} — prop stays invisible");
+                                else
+                                {
+                                    if (rp.Grown) fragF.SetValue(pm, gfrags);
+                                    cntF.SetValue(pm, rp.NewTail);
+                                    dirtyF?.SetValue(pm, true);
+                                    Plugin.Diag($"[Props] descriptor[{defId}] repointed: fragments {rp.OldStart}+{rp.OldCount} -> {rp.NewStart}+{rp.NewCount} (surgical, layer {folIdx})");
+                                }
                             }
                         }
                     }
@@ -2033,14 +2039,17 @@ namespace HumankindAssetFramework
                         feType.GetField("FxOutputLayerIndex").SetValue(ge, folIdx);
                         ges.Add(ge);
                     }
-                    // the arithmetic is the shared, unit-tested kernel (DescriptorRepoint.cs); this site keeps the game-side writes
+                    // the arithmetic is the shared, unit-tested kernel (DescriptorRepoint.cs); this site keeps the game-side writes.
+                    // Either way the smoke verifies BY CONTENT that the live descriptor still draws every chunk (gpuAppendedEncs).
+                    e.gpuDefId = defId; e.gpuAppendedEncs.AddRange(encs);
+                    if (DescriptorRepoint.TryReadBlock(descs, defId, out _, out int curCount) && curCount == 0)
+                    { Plugin.Diag($"[Uni][Multi] descriptor[{defId}] not populated yet (0 fragments) — the registration snapshot carries the {made.Count} chunk(s); no surgical repoint"); return; }
                     int tail = Convert.ToInt32(cntF.GetValue(pm));
                     if (!DescriptorRepoint.Apply(ref gfrags, descs, defId, tail, ges, out var rp, out string rpErr))
                     { Plugin.Log.LogWarning($"[Uni][Multi] '{e.resourceName}': descriptor repoint refused — {rpErr} — overflow chunks stay invisible"); return; }
                     if (rp.Grown) fragF.SetValue(pm, gfrags);
                     cntF.SetValue(pm, rp.NewTail);
                     dirtyF?.SetValue(pm, true);
-                    e.gpuDefId = defId; e.gpuFragStart = rp.NewStart; e.gpuFragCount = rp.NewCount;   // what the smoke verifies the live descriptor still says
                     Plugin.Diag($"[Uni][Multi] descriptor[{defId}] repointed: fragments {rp.OldStart}+{rp.OldCount} -> {rp.NewStart}+{rp.NewCount} ({made.Count} overflow chunk(s), layer {folIdx})");
                 }
                 catch (Exception ex) { Plugin.Log.LogWarning("[Uni][Multi] descriptor patch: " + ex.Message); }

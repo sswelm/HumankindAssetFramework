@@ -108,10 +108,13 @@ namespace HumankindAssetFramework
         [Locked("published by ProcessAnimStates, read by the pose hook — Architecture.md 2")] public readonly List<StateSample> stateSamples = new List<StateSample>();   // published for the pose hook (lock on it); pos = pawn render position
         public int skeletonId = -1;      // runtime AnimationManager skeleton index of our registered skeleton (to match PawnManager.PawnEntry.SkeletonId)
         public int descId = -1;          // runtime PawnDescriptorId of our unit (learned from the correctly-skinned pawn), to spot the wrong-skeleton twin the game spawns for the same unit
-        // The descriptor repoint we last WROTE post-registration (hand prop / multi-mesh chunks): gpu definition id and
-        // the fragment block it now points at. The smoke's full tier reads the live descriptor back and FAILS if it no
-        // longer says so (a re-pack or a second registration silently undoing the repoint = the spike plague). -1 = none.
-        public int gpuDefId = -1, gpuFragStart = -1, gpuFragCount = -1;
+        // The fragments we APPENDED to this unit's gpu descriptor (hand prop / multi-mesh chunks), by encoded mesh id, and
+        // the definition they belong to. The smoke's full tier reads the live descriptor's block back and FAILS if any of
+        // them is no longer drawn — by CONTENT, not position: the game's own registration legitimately moves the block
+        // (first in-game run, 2026-09-14: both "undone" repoints were a 0+0 descriptor the game then registered with our
+        // entries inside). -1 / empty = nothing appended this session.
+        public int gpuDefId = -1;
+        [MainThread("the injection sites (addon Load hook) write, the F8 smoke reads, RearmModelRegistration clears")] public readonly List<uint> gpuAppendedEncs = new List<uint>();
         public bool fragsLogged;         // one-shot: dump the donor's fragment mesh names once, so the modder can find hide targets
         public bool repointed;
         public float lastPoseHookAt = -1f;   // Time.time the pose hook last matched a live pawn to this entry (smoke: pose-hook liveness); -1 = never this session
@@ -1175,7 +1178,7 @@ namespace HumankindAssetFramework
                 try
                 {
                     e.skeletonId = -1; e.animId = -1; e.descId = -1; e.repointed = false; e.lastPoseHookAt = -1f;
-                    e.gpuDefId = -1; e.gpuFragStart = -1; e.gpuFragCount = -1;   // a repoint belongs to the session's descriptor table — cleared with `repointed`   // session-scoped ids re-learn
+                    e.gpuDefId = -1; e.gpuAppendedEncs.Clear();   // appended fragments belong to the session's descriptor table — cleared with `repointed`   // session-scoped ids re-learn
                     foreach (var b in e.Roles) b.animId = -1;                                   // every clip role's id re-resolves (the table, not a hand-list)
                     e.idleAltNextAt = 0f; e.idleAltStart = -1f; e.idleAltChosenId = -1;   // idle-alt cadence is session-scoped (Time.time resets)
                     e.stateLastPos.Clear(); e.stateMoving.Clear(); e.stateStoppedAt.Clear(); e.stateMoveStartedAt.Clear();
