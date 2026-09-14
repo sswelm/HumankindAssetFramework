@@ -113,7 +113,8 @@ skipped. Ranked by consequence within each group.
   the fix) and then outward with it, keel-plane faces excluded (undecidable from the origin by design); atlas1024
   asserts exactly 512×512; Multi asserts both materials' colours reach the atlas. **Run by the user the same day:**
   atlas rows PASS; the winding row's first version failed and exposed that `WriteCube`'s fixture had been wound
-  inside-out since it was written — corrected (outward by default, `insideOut: true` for the fixture). `BakeFeatureTest.cs:121-126` "windingFix keeps
+  inside-out since it was written — corrected (outward by default, `insideOut: true` for the fixture); the full
+  Bake Tests run after PR #51: **60 passed, 0 failed, 2 skipped** — the "NOT YET RUN" caveat is closed. `BakeFeatureTest.cs:121-126` "windingFix keeps
   geometry" asserts `m != null && r.ok` on a consistently wound cube; `:100-102` "atlasMaxDim=1024 keeps the 512
   source" accepts `128 ≤ width ≤ 1024`; `:188-193` Multi asserts only `atlas != null`. Fix: one reversed face + every
   normal away from the centroid; `t2.width == 512`.
