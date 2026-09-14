@@ -39,6 +39,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   `tools/drill-reader-gates.sh` runs in the pre-push gate and CI, plants that exact guarded wrapper plus a
   dead-sentinel and an uncatalogued literal through it, and FAILS if either gate passes — then re-plants under a
   known name and demands the shapes are seen through it.
+  **Second review: the body walker took braces in comments and strings for code.** A `// }` or `"}"` above the read
+  closed the body early and the wrapper vanished again — and the header had claimed a brace in a literal could only
+  make a body *longer*. Comments and literals are now blanked before the walk by a small state machine, not a regex,
+  because interpolation holes are code: `$"… '{GetMember(mat, "name")}' …"` is a real reader call
+  (`DumpSelectorElements` has exactly that) and the first blanking attempt silently dropped it — the drill's clean-tree
+  discovery count is what caught that. Holes stay, their surrounding text and `{{`/`}}` escapes go, nested strings
+  inside holes are handled by the stack. The drill now plants all four shapes: null guard, comment brace, string
+  brace, and a read inside a hole after a `}}` in the text.
 - **THE SENTINEL THAT COULD NEVER BE REACHED (2026-08-23).** `bool loaded = true; try { loaded =
   Convert.ToBoolean(GetMember(unit, "IsLoaded")); } catch { }` reads as *"true unless the game says otherwise"*
   and means *"**false** whenever the member is missing"*. `GetMember` swallows its own exception and returns null

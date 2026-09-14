@@ -5,6 +5,10 @@
 #   1. a NULL-GUARDED, MULTI-LINE reader wrapper under a name neither gate knows (`Peek`) — the review of PR #48
 #      (2026-09-14) showed the first self-check looked at three lines after the declaration, so this exact wrapper
 #      hid its GetMember on line 5 and both gates went quiet again;
+#   1b. the same wrapper with a `}` inside a COMMENT above the read (`PeekComment`) and inside a STRING
+#      (`PeekString`) — the second review: a brace the body walker took for code closed the body early — and one
+#      whose read sits INSIDE an interpolation hole after a `}}` in the string's text (`PeekInterp`): a blanking
+#      that treats the whole `$"…"` as text loses the read, one that treats it as code closes the body early;
 #   2. the headline dead-sentinel `bool x = true; try { x = Convert.ToBoolean(Peek(…)); } catch { }` through it;
 #   3. a by-name literal that is not in the catalog, read through the same wrapper.
 #
@@ -32,6 +36,23 @@ namespace HumankindAssetFramework
                 return null;
             return UniversalInject.GetMember(o, name);
         }
+        static object PeekComment(object o, string name)
+        {
+            // a stray brace in a comment: }
+            if (o == null) return null;   /* and one in a block comment } */
+            return UniversalInject.GetMember(o, name);
+        }
+        static object PeekString(object o, string name)
+        {
+            if (name == "}" || name == @"}" || name == $"{name}}}" || name == "\"}") return null;
+            return UniversalInject.GetMember(o, name);
+        }
+        static object PeekInterp(object o, string name)
+        {
+            // the read is INSIDE an interpolation hole — code, not text — after a brace in the hole's surrounding text
+            var s = $"[Drill] }} '{name}' -> '{UniversalInject.GetMember(o, name)}' {{ }}";
+            return s.Length > 0 ? null : o;
+        }
         static void Run(object unit)
         {
             bool loaded = true; try { loaded = Convert.ToBoolean(Peek(unit, "IsLoadedDrill")); } catch { }
@@ -43,19 +64,27 @@ namespace HumankindAssetFramework
 EOF
 
 fail=0
+# Every planted wrapper must be named by both self-checks — one missing means a body-boundary blind spot.
+expect_all() {   # $1 gate label, $2 output
+  local missing=""
+  for w in Peek PeekComment PeekString PeekInterp; do printf '%s' "$2" | grep -qE "^\s*$w\s" || missing="$missing $w"; done
+  if [ -n "$missing" ]; then echo "[FAIL] $1 failed, but did not name planted wrapper(s):$missing"; printf '%s\n' "$2" | head -8; return 1; fi
+  return 0
+}
 out=$(bash tools/check-catalog.sh 2>&1); rc=$?
-if [ $rc -eq 0 ]; then echo "[FAIL] check-catalog.sh PASSED with an unknown guarded wrapper and an uncatalogued literal planted"; fail=1
-elif ! printf '%s' "$out" | grep -q "Peek"; then echo "[FAIL] check-catalog.sh failed, but not on the planted wrapper 'Peek':"; printf '%s\n' "$out" | head -6; fail=1
-else echo "ok   — check-catalog.sh refuses the null-guarded wrapper 'Peek' (self-check)"; fi
+if [ $rc -eq 0 ]; then echo "[FAIL] check-catalog.sh PASSED with unknown guarded wrappers and an uncatalogued literal planted"; fail=1
+elif ! expect_all "check-catalog.sh" "$out"; then fail=1
+else echo "ok   — check-catalog.sh refuses the null-guarded / comment-brace / string-brace wrappers (self-check)"; fi
 
 out=$(bash tools/check-member-shape.sh 2>&1); rc=$?
-if [ $rc -eq 0 ]; then echo "[FAIL] check-member-shape.sh PASSED with an unknown guarded wrapper and a dead-sentinel through it planted"; fail=1
-elif ! printf '%s' "$out" | grep -q "Peek"; then echo "[FAIL] check-member-shape.sh failed, but not on the planted wrapper 'Peek':"; printf '%s\n' "$out" | head -6; fail=1
-else echo "ok   — check-member-shape.sh refuses the null-guarded wrapper 'Peek' (self-check)"; fi
+if [ $rc -eq 0 ]; then echo "[FAIL] check-member-shape.sh PASSED with unknown guarded wrappers and a dead-sentinel through one planted"; fail=1
+elif ! expect_all "check-member-shape.sh" "$out"; then fail=1
+else echo "ok   — check-member-shape.sh refuses the null-guarded / comment-brace / string-brace wrappers (self-check)"; fi
 
-# Second plant: the wrapper under a name the gates DO know (`Mem`) — now the self-checks are silent and the literal
+# Second plant: the wrappers under a name the gates DO know (`Mem`) — now the self-checks are silent and the literal
 # extraction and the dead-sentinel regex themselves must catch shapes 2 and 3.
-sed -i 's/\bPeek\b/Mem/g' "$PLANT"
+sed -i 's/\bPeekComment\b/MemC/g; s/\bPeekString\b/MemS/g; s/\bPeekInterp\b/MemI/g; s/\bPeek\b/Mem/g' "$PLANT"
+sed -i '/static object MemC(/,/^        }/d; /static object MemS(/,/^        }/d; /static object MemI(/,/^        }/d' "$PLANT"
 out=$(bash tools/check-catalog.sh 2>&1); rc=$?
 if [ $rc -eq 0 ] || ! printf '%s' "$out" | grep -q "BogusDrillMember"; then echo "[FAIL] check-catalog.sh did not report the uncatalogued literal read through a known wrapper:"; printf '%s\n' "$out" | head -6; fail=1
 else echo "ok   — check-catalog.sh sees the literal through the known wrapper 'Mem'"; fi
