@@ -5,6 +5,24 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab: the ⟲ inside-out marks — see the fix's reach before it runs.** Every probed part the
+  **Fix inside-out faces** pass would reverse now carries a ⟲ tag in the list (with its island count), and
+  the checkbox itself reports the total — whether the fix is on or off. The verdicts come from the SAME
+  island scoring Generate uses (average face normal against the radial from the hull's length axis, < −0.25
+  = interior-facing), computed at Probe in ~1s and shipped as a new `PART|` field; roles the fix skips
+  (Sail/Oar/Flag/Rudder/Preserve) show a struck-through tag instead. Two stated approximations: the probe
+  judges against the whole model's axis (Generate re-judges each merged role mesh against its own — identical
+  for the dominant Body pool) and in the current orientation — re-Probe after straightening for exact
+  verdicts. Old probes show "re-Probe to classify", like the visibility verdicts did.
+
+- **Vehicle Lab: "Only flat parts" filter — the deck finder.** "Which Object is the deck?" on a 1,435-shard
+  liner used to be a headless-Blender analysis; now it's a slider next to the height/side filters. It hides
+  parts whose surface area is less than the dialed % LEVEL (within 30° of horizontal — the Workshop facing
+  cut's tilt), measured on the preview meshes with geometric triangle normals and cached per probe. Slide to
+  ~60: walking decks, platforms and hatch tops remain while masts, plating and rigging vanish; bracket with
+  the height sliders to isolate one deck level. Parts the preview can't measure always stay visible — a
+  filter must never hide what it cannot measure.
+
 - **Vehicle Lab Generate: batched decimate — a 1,435-shard liner's reduce stage drops 67s → ~3s.** The
   morning's chunked dissolve fixed the flat-panel whale; the RMS Teutonic exposed the OTHER one: the reduce
   loop called `bpy.ops.object.modifier_apply` per part, and every `bpy.ops` call is an operator round-trip

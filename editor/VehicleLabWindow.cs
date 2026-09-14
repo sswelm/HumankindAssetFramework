@@ -70,7 +70,11 @@ public class VehicleLabWindow : EditorWindow
     enum Role { Body, Wheel, Turret, Ignore, Default, Edgecase, Caterpillar, Gun, Rotor, TailRotor, Trail, Muzzle, Cradle, Oar, Sail, Rigging, Structure, Flag, Rudder, Preserve, Flip, Detail }
     [Serializable] class Part { public string name; public int verts; public Vector3 center, size; public Role role;
         public int vis = -1;   // probe's escape-ray verdict: 1 = external (visible from outside), 0 = interior (never visible — strippable), -1 = unclassified (pre-visibility probe)
-        public string bone = ""; }   // rigged sources: the bone this shard is weighted to (probe 2026-08-20) — lets a BONE row highlight its shards
+        public string bone = "";   // rigged sources: the bone this shard is weighted to (probe 2026-08-20) — lets a BONE row highlight its shards
+        public int flip = -1; }    // islands the inside-out fix would REVERSE in this part (probe 2026-09-13): 0 = keeps authored winding, -1 = unclassified (re-Probe)
+
+    // The Generate-time fix skips these roles entirely (authored winding wins there) — the ⟲ row tag must agree.
+    static bool FixSkipsRole(Role r) => r == Role.Sail || r == Role.Oar || r == Role.Flag || r == Role.Rudder || r == Role.Preserve;
 
     // Everything an assignment session builds is [SerializeField]: a DOMAIN RELOAD (any recompile) must never eat
     // the marked roles again — the field incident that motivated recipes in the first place.
@@ -229,8 +233,69 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] float maxHeight = 999f;  // the reverse: hide parts whose CENTER height is ABOVE this — slide down to strip the superstructure and isolate wheel/chassis level
     [SerializeField] float minWidth = -999f;  // LEFT/RIGHT slice (user request 2026-08-01): hide parts whose center is LEFT of this on the WIDTH axis (center.y — the axis the two wheels mirror across); bracket with maxWidth to isolate ONE side's wheel. Default span = off.
     [SerializeField] float maxWidth = 999f;   // the reverse: hide parts whose center is RIGHT of this (center.y).
+    [SerializeField] float minFlatPct = 0f;   // 0 = off — hide parts whose LEVEL-surface share (% of area within 30° of horizontal) is below this: the deck finder (2026-09-13, "which Object is the deck?")
+    Dictionary<string, double> flatAreaByName, flatLevelByName;   // raw per-RENDERER sums, keyed by EXACT name (review P2: stripping suffixes in the cache while looking up unstripped part names sent every "Wall.001" through the fail-open door)
+    Dictionary<string, float> flatShare; GameObject flatShareFor; // resolved per-PART share memo (exact-first, digits-only ".NNN" alias merge)
     static float MaxDim(Part p) => Mathf.Max(p.size.x, Mathf.Max(p.size.y, p.size.z));
-    bool VisiblePart(Part x) => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.center.z >= minHeight && x.center.z <= maxHeight && x.center.y >= minWidth && x.center.y <= maxWidth;
+    bool VisiblePart(Part x) => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.center.z >= minHeight && x.center.z <= maxHeight && x.center.y >= minWidth && x.center.y <= maxWidth && FlatOk(x);
+
+    // FLAT-SURFACE FILTER: the share of a part's surface area lying within 30° of level, measured on the
+    // PREVIEW meshes (the preview stands upright in Unity, so world +Y is 'level'; the geometric triangle
+    // normal is used — no reliance on authored normals). Cached once per preview instance; a part the preview
+    // doesn't carry (or any state before a probe) PASSES the filter — a filter must never hide what it cannot
+    // measure. Blender collision suffixes ("Object_2.001") count toward their base part, like SelectPart.
+    bool FlatOk(Part x)
+    {
+        if (minFlatPct <= 0f) return true;
+        BuildFlatShareIFN();
+        if (flatAreaByName == null) return true;
+        if (!flatShare.TryGetValue(x.name, out float s))
+        {
+            // EXACT probed name first (review P2: the old cache stripped ".001" while lookups used the full
+            // name, so every suffixed part missed and passed unconditionally — and the strip also ate ".abc").
+            // Only when the exact name is absent, merge confirmed preview aliases: "<name>.<digits>" precisely.
+            double a = 0, f = 0;
+            if (flatAreaByName.TryGetValue(x.name, out double ea)) { a = ea; f = flatLevelByName[x.name]; }
+            else
+                foreach (var kv in flatAreaByName)
+                {
+                    if (kv.Key.Length <= x.name.Length + 1 || kv.Key[x.name.Length] != '.' || !kv.Key.StartsWith(x.name, StringComparison.Ordinal)) continue;
+                    bool digits = true;
+                    for (int i = x.name.Length + 1; i < kv.Key.Length; i++) if (!char.IsDigit(kv.Key[i])) { digits = false; break; }
+                    if (digits) { a += kv.Value; f += flatLevelByName[kv.Key]; }
+                }
+            s = a > 0 ? (float)(f / a) : -1f;   // -1 = unmeasurable — passes (a filter must never hide what it cannot measure)
+            flatShare[x.name] = s;
+        }
+        return s < 0f || s * 100f >= minFlatPct;
+    }
+    void BuildFlatShareIFN()
+    {
+        if (inst == null) { flatAreaByName = null; flatLevelByName = null; flatShare = null; flatShareFor = null; return; }
+        if (flatAreaByName != null && flatShareFor == inst) return;
+        flatAreaByName = new Dictionary<string, double>(); flatLevelByName = new Dictionary<string, double>();
+        foreach (var mf in inst.GetComponentsInChildren<MeshFilter>())
+        {
+            if (mf == null || mf.sharedMesh == null) continue;
+            string nm = mf.gameObject.name;   // EXACT — alias merging is the lookup's job, with digits-only proof
+            var m = mf.sharedMesh; var l2w = mf.transform.localToWorldMatrix;
+            var v = m.vertices; var t = m.triangles;
+            double a0 = 0, af = 0;
+            for (int i = 0; i < t.Length; i += 3)
+            {
+                Vector3 p0 = l2w.MultiplyPoint3x4(v[t[i]]), p1 = l2w.MultiplyPoint3x4(v[t[i + 1]]), p2 = l2w.MultiplyPoint3x4(v[t[i + 2]]);
+                Vector3 c = Vector3.Cross(p1 - p0, p2 - p0);
+                float a2 = c.magnitude;
+                if (a2 <= 0f) continue;
+                a0 += a2;
+                if (Mathf.Abs(c.y) / a2 >= 0.866f) af += a2;   // cos 30° — matches the Workshop facing cut's default tilt
+            }
+            flatAreaByName.TryGetValue(nm, out double ta); flatAreaByName[nm] = ta + a0;
+            flatLevelByName.TryGetValue(nm, out double tf); flatLevelByName[nm] = tf + af;
+        }
+        flatShare = new Dictionary<string, float>();
+        flatShareFor = inst;
+    }
     [SerializeField] int partFilter;      // list filter: 0 = all; see FilterOptions (Unreviewed = Default + Edgecase)
     static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase", "Caterpillar", "Gun", "Rotor", "Tail rotor", "Trail", "Muzzle", "Cradle", "Oar", "Sail", "Rigging", "Structure", "Flag", "Rudder", "Preserve", "Flip", "Detail" };
     bool MatchesFilter(Role r) => partFilter == 1 ? (r == Role.Default || r == Role.Edgecase)
@@ -566,6 +631,11 @@ public class VehicleLabWindow : EditorWindow
                     "Parts whose center is LEFT of this on the width axis are hidden — bracket with the next slider to keep just one side's wheel. (Straighten the model in Orientation first so the two wheels split along this axis.)"), Mathf.Clamp(minWidth, yLo - yPad, yHi + yPad), yLo - yPad, yHi + yPad);
                 maxWidth = EditorGUILayout.Slider(new GUIContent("Hide parts right of (side)",
                     "Parts whose center is RIGHT of this on the width axis are hidden. Slide the two together onto one wheel to isolate it, then mark it Wheel."), Mathf.Clamp(maxWidth, yLo - yPad, yHi + yPad), yLo - yPad, yHi + yPad);
+                minFlatPct = EditorGUILayout.Slider(new GUIContent("Only flat parts (≥ % level)",
+                    "The deck finder: hide parts whose surface area is less than this % LEVEL (within 30° of horizontal, " +
+                    "measured on the preview meshes). Slide up to ~60 and the walking decks, platforms and hatch tops " +
+                    "remain while masts, hull plating and rigging vanish; combine with the height sliders to pick one deck " +
+                    "level. 0 = off. Parts the preview can't measure stay visible."), minFlatPct, 0f, 100f);
                 partFilter = EditorGUILayout.Popup(new GUIContent("Show only",
                     "Filter the list to one classification. Marking a part out of the current filter removes it from the list and auto-advances to the next."), partFilter, FilterOptions);
                 int interiorN = list.Count(x => x.vis == 0);
@@ -581,7 +651,7 @@ public class VehicleLabWindow : EditorWindow
                 EditorGUILayout.LabelField($"{(useSourceRig && boneParts.Count > 0 ? "Source BONES" : "Parts")} ({shown.Count} shown{(hidden > 0 ? $", {hidden} hidden by the sliders" : "")}{(unreviewed > 0 ? $", {unreviewed} undecided" : ", all decided")}{(edgecases > 0 ? $", {edgecases} edge-case" : "")}) — mark {(useSourceRig && boneParts.Count > 0 ? "the bones that SPIN (Wheel)" : "the wheels & turret")}:", EditorStyles.boldLabel);
                 if (useSourceRig && boneParts.Count > 0)   // 2026-08-20: a user hunted for the turret's shards here — in this mode they are ONE row
                     EditorGUILayout.LabelField("Each row is one BONE of the shipped skeleton; all the shards skinned to it count as that row (the turret's parts = the Turret bone). Untick the fast path to list and mark individual parts.", EditorStyles.wordWrappedMiniLabel);
-                EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   W/T/B = Wheel/Turret/Body   ·   R = Rigging   ·   L = taiL rotor (spins about the lateral axis)   ·   G = Gun (rides the Turret; muzzle/socket anchor)   ·   C = Caterpillar (tread loop)   ·   O = Oar   ·   S = Structure   ·   F = Flip (reverse winding)   ·   I = Ignore (DELETED)   ·   D = Default   ·   E = Edgecase", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   W/T/B = Wheel/Turret/Body   ·   R = Rigging   ·   L = taiL rotor (spins about the lateral axis)   ·   G = Gun (rides the Turret; muzzle/socket anchor)   ·   C = Caterpillar (tread loop)   ·   O = Oar   ·   S = Structure   ·   F = Flip (reverse winding)   ·   P = Preserve (ship byte-identical)   ·   I = Ignore (DELETED)   ·   D = Default   ·   E = Edgecase", EditorStyles.miniLabel);
                 // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
                 // part's role — the whole list can be reviewed without mousing between rows and dropdowns.
                 var ev = Event.current;
@@ -596,7 +666,7 @@ public class VehicleLabWindow : EditorWindow
                         GUIUtility.keyboardControl = 0;                    // a focused slider/popup must not swallow the arrows
                         ev.Use(); Repaint();
                     }
-                    else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I || ev.keyCode == KeyCode.D || ev.keyCode == KeyCode.E || ev.keyCode == KeyCode.C || ev.keyCode == KeyCode.G || ev.keyCode == KeyCode.R || ev.keyCode == KeyCode.L || ev.keyCode == KeyCode.O || ev.keyCode == KeyCode.S || ev.keyCode == KeyCode.F))
+                    else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I || ev.keyCode == KeyCode.D || ev.keyCode == KeyCode.E || ev.keyCode == KeyCode.C || ev.keyCode == KeyCode.G || ev.keyCode == KeyCode.R || ev.keyCode == KeyCode.L || ev.keyCode == KeyCode.O || ev.keyCode == KeyCode.S || ev.keyCode == KeyCode.F || ev.keyCode == KeyCode.P))
                     {
                         shown[idx].role = ev.keyCode == KeyCode.W ? Role.Wheel
                                         : ev.keyCode == KeyCode.T ? Role.Turret
@@ -609,6 +679,7 @@ public class VehicleLabWindow : EditorWindow
                                         : ev.keyCode == KeyCode.O ? Role.Oar
                                         : ev.keyCode == KeyCode.S ? Role.Structure   // S = Structure (2026-09-06 user request; Sail is dropdown-only — a review pass marks far more railings than canvases)
                                         : ev.keyCode == KeyCode.F ? Role.Flip       // F = Flip (2026-09-08 user request; Flag is dropdown-only — winding surgery is marked far more often than a banner)
+                                        : ev.keyCode == KeyCode.P ? Role.Preserve   // P = Preserve (2026-09-13 user request; shipped byte-identical, spared every automatic pass)
                                         : ev.keyCode == KeyCode.L ? Role.TailRotor : Role.Body;
                         // If the new role falls outside the active filter, the part leaves the list — advance to the
                         // next one so the sweep continues instead of the selection dying with the removed row.
@@ -628,7 +699,10 @@ public class VehicleLabWindow : EditorWindow
                         // the row label is a BUTTON: click = zoom the preview onto this part and tint it yellow
                         bool isSel = selectedPart == p.name;
                         var st = isSel ? EditorStyles.whiteMiniLabel : EditorStyles.miniLabel;
-                        if (GUILayout.Button($"{(isSel ? "◉ " : "")}{p.name}   ({p.verts} verts, size {p.size.x:0.00}×{p.size.y:0.00}×{p.size.z:0.00})", st))
+                        // ⟲ = the inside-out fix would reverse island(s) of this part (probe verdict; struck through
+                        // by role when the fix skips it — the mark shows the fix's REACH whether the toggle is on or off)
+                        string flipTag = p.flip > 0 ? (FixSkipsRole(p.role) ? "   (⟲ fix would flip, but this role is skipped)" : $"   ⟲ fix flips {(p.flip == 1 ? "it" : p.flip + " islands")}") : "";
+                        if (GUILayout.Button($"{(isSel ? "◉ " : "")}{p.name}   ({p.verts} verts, size {p.size.x:0.00}×{p.size.y:0.00}×{p.size.z:0.00}){flipTag}", st))
                             SelectPart(isSel ? "" : p.name);   // click again = back to full view
                     }
                 EditorGUILayout.EndScrollView();
@@ -735,8 +809,12 @@ public class VehicleLabWindow : EditorWindow
                 {
                     doubleSided = EditorGUILayout.ToggleLeft(new GUIContent("  Double-sided (fix see-through parts)",
                         "The game culls backfaces, so single-sided / CAD parts (thin spokes, flat plates) render see-through from the wrong angle. On: the exported Spin GLB gets a reversed, slightly-inset copy of every face, making it genuinely two-sided at the source — the animated bake and both previews then just work. Doubles the triangle count; leave off for already-solid models. Marked Oar and Preserve meshes are never doubled — galley blades are authored as front/back pairs, and doubling them z-shimmers (Sail/Flag/Rudder are double-sided by their ROLE regardless of this switch)."), doubleSided);
-                    fixInsideOut = EditorGUILayout.ToggleLeft(new GUIContent("  Fix inside-out faces",
-                        "For a source whose winding ships partly INVERTED — you see through the near hull wall from outside while the far wall's interior renders. On: islands that provably face the hull's interior (inverted side planking) are REVERSED at export — no extra triangles; everything else keeps the artist's winding, as do marked Sail, Oar, Rudder and Preserve meshes. A Flip-marked part composes with this as an XOR (per island): where this fix flips, the Flip mark cancels it back. Sails are a ROLE (dropdown): mark the canvas instead of relying on any detection — marked sails are always double-sided and hide at idle."), fixInsideOut);
+                    int flipAffected = list.Count(x => x.flip > 0 && !FixSkipsRole(x.role));
+                    bool flipProbed = list.Any(x => x.flip >= 0);
+                    fixInsideOut = EditorGUILayout.ToggleLeft(new GUIContent(
+                        "  Fix inside-out faces" + (flipProbed ? $"   (⟲ would flip {flipAffected} part(s) — marked in the list)" : "   (re-Probe to see which parts it would flip)"),
+                        "For a source whose winding ships partly INVERTED — you see through the near hull wall from outside while the far wall's interior renders. On: islands that provably face the hull's interior (inverted side planking) are REVERSED at export — no extra triangles; everything else keeps the artist's winding, as do marked Sail, Oar, Rudder and Preserve meshes. A Flip-marked part composes with this as an XOR (per island): where this fix flips, the Flip mark cancels it back. Sails are a ROLE (dropdown): mark the canvas instead of relying on any detection — marked sails are always double-sided and hide at idle. " +
+                        "The ⟲ row marks show each part the fix WOULD reverse, on or off — computed at Probe with the same island scoring, against the whole model's axis (Generate re-judges each merged role mesh against its own axis). The probe judges in the Orientation dialed AT PROBE TIME (it is passed along and applied to the classification math), so after changing Orientation, re-Probe and the verdicts follow."), fixInsideOut);
                     EditorGUILayout.LabelField("  Reduction cuts marked parts at Generate (dissolve + collapse) — the previews and the bake all see the slim mesh. The Generate log prints each part's real before/after.", EditorStyles.miniLabel);
                     using (new EditorGUI.DisabledScope(nRig == 0))
                         riggingReducePct = EditorGUILayout.Slider(new GUIContent("Rigging reduce (%)",
@@ -1281,7 +1359,7 @@ public class VehicleLabWindow : EditorWindow
         Directory.CreateDirectory(Path.Combine(projRoot, prevDir));
         string prevRel = prevDir + "/" + Path.GetFileNameWithoutExtension(srcFile) + "_probe.fbx";
         string prevFull = Path.Combine(projRoot, prevRel).Replace('\\', '/');
-        if (!RunBlender($"probe \"{srcFile}\" \"{prevFull}\"{Merge2Arg()}{BrightArg()}", out string stdout)) return;   // failed run: session intact, error already in status/Console
+        if (!RunBlender($"probe \"{srcFile}\" \"{prevFull}\"{Merge2Arg()}{BrightArg()}{ProbeRotArg()}", out string stdout)) return;   // failed run: session intact, error already in status/Console
         // Lenient float parse: degenerate shards can emit "nan" (python lowercase — .NET rejects it) — such a value
         // becomes 0 instead of killing the whole probe on one bad line out of thousands.
         float F(string s2) => float.TryParse(s2, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var f) ? f : 0f;
@@ -1289,7 +1367,7 @@ public class VehicleLabWindow : EditorWindow
         {
             var t = line.Trim().Split('|');
             // PART rows carry an optional 6th field: the escape-ray visibility verdict (1 external / 0 interior).
-            bool okLen = t.Length == 5 || ((t.Length == 6 || t.Length == 7) && t[0] == "PART");   // 7th = dominant bone (2026-08-20)
+            bool okLen = t.Length == 5 || (t.Length >= 6 && t.Length <= 8 && t[0] == "PART");   // 7th = dominant bone (2026-08-20); 8th = inside-out flip verdict (2026-09-13)
             if (!okLen || (t[0] != "PART" && t[0] != "RIGBONE")) continue;
             var c = t[3].Split(','); var s = t[4].Split(',');
             if (c.Length != 3 || s.Length != 3) continue;
@@ -1300,7 +1378,8 @@ public class VehicleLabWindow : EditorWindow
                 center = new Vector3(F(c[0]), F(c[1]), F(c[2])),
                 size = new Vector3(F(s[0]), F(s[1]), F(s[2])),
                 vis = t.Length >= 6 && int.TryParse(t[5], out var vv) ? vv : -1,
-                bone = t.Length == 7 ? t[6].Trim() : "",
+                bone = t.Length >= 7 ? t[6].Trim() : "",
+                flip = t.Length >= 8 && int.TryParse(t[7], out var fv) ? fv : -1,
             };
             var low = p.name.ToLowerInvariant();
             var keptMap = t[0] == "RIGBONE" ? keptBones : kept;
@@ -1549,7 +1628,7 @@ public class VehicleLabWindow : EditorWindow
         // spread, gun trunnion, recoil or tail-rotor trim silently carried into the next model too.
         spinEnabled = true; trailSpreadDeg = 35f; trailFrames = 12; gunPivot = 0.5f; gunDeployElev = 0f;
         recoilDist = 0f; recoilFrames = 16; recoilLead = 0; tailAxisChoice = 0; tailYawAdj = 0f; tailPitchAdj = 0f;
-        minVerts = 50; minPartSize = 0f; minHeight = -999f; maxHeight = 999f; minWidth = -999f; maxWidth = 999f;
+        minVerts = 50; minPartSize = 0f; minHeight = -999f; maxHeight = 999f; minWidth = -999f; maxWidth = 999f; minFlatPct = 0f;
         partFilter = 0; selectedPart = ""; partsScroll = Vector2.zero; previewPan = Vector2.zero;
         DestroyPreview();
         status = "New model: pick a Raw model, then Probe parts. (Wheels optional — a floating unit just needs a Wave rock amplitude.)";
@@ -2053,6 +2132,17 @@ public class VehicleLabWindow : EditorWindow
     // The SECOND-MODEL merge argument — TAGGED (merge2=path|off|rot|scale), scanned by the rig script rather
     // than indexed, because probe and rig have different positional layouts and BOTH need the merged scene.
     // '|' is illegal in Windows paths, so the split is unambiguous. Empty when no second model is set.
+    // The probe's ORIENTATION argument (review P2, 2026-09-13): the inside-out flip verdicts must be judged in
+    // the same straightened frame Generate classifies in, or "re-Probe after straightening" promises a
+    // correction that never happens (a 90°-yawed fixture probed 2 flips where Generate reversed 0). Sent only
+    // when Orientation is dialed; applied script-side to the classification math alone, never the preview.
+    string ProbeRotArg()
+    {
+        if (modelRot == Vector3.zero) return "";
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        return $" \"proberot={modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\"";
+    }
+
     string Merge2Arg()
     {
         if (string.IsNullOrWhiteSpace(srcFile2)) return "";
