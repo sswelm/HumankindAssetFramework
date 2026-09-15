@@ -404,7 +404,11 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   winding it renders with. The console line lists the largest islands with what was measured and what decided.
   Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh;
   the fused part is a new root node named after the first checked row. The output can never be the source file.
-  Re-Probe the output to see it as one island, then rig it in the Vehicle Lab like any other part.
+  The ⊕ letters persist beside the source as `<source>.glb.fuse.txt` (one `letter|name|node index` line per marked
+  part; written by every Fuse and by **Save groups**, restored by Probe and **Load groups**) — a line applies to the
+  part at its node index, or by name where the name is unique; a name shared by several parts is refused and named
+  in the console rather than guessed. Re-Probe the output to see it as one island, then rig it in the Vehicle Lab
+  like any other part.
 - **Backup & Restore** — `Tools ▸ HAF ▸ Backup and Restore`. A safety net for everything git doesn't track (editor
   scripts, `FactorySource`, baked Resources, ENC databases, `Tools/`, live `BepInEx/config`). Timestamped, additive,
   guarded restore (auto-snapshots current state first). **Deep dive:** [Backup.md](Backup.md).

@@ -134,3 +134,52 @@ public static class VehicleLabRules
         return a > 0 ? (float)(f / a) : -1f;
     }
 }
+
+/// <summary>Model Workshop decisions (WorkshopRulesTests locks them).</summary>
+public static class WorkshopRules
+{
+    // The fuse-groupings sidecar (<source>.glb.fuse.txt): one part per line, "<letter>|<name>|<node index>"; files
+    // from before 2026-09-15 carry "<letter>|<name>" only. Restoring by NAME alone selected every namesake (review
+    // of 82088d4): two nodes called "Panel", one saved in A, both came back A; saved in A and B, both came back with
+    // the last letter. A line now applies to the row at its node index when that row still carries the name; with
+    // no index, or after a re-export moved it, by name only where the name is unique among the rows. Anything else
+    // is refused and named, never guessed.
+    public static string SidecarLine(string letter, string name, int nodeIndex) =>
+        letter + "|" + name + "|" + nodeIndex.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <param name="rows">(node index, node name) per Workshop row.</param>
+    /// <returns>letter by node index; lines that could not be placed are described in <paramref name="refused"/>.</returns>
+    public static Dictionary<int, string> ResolveFuseSidecar(IEnumerable<string> lines, IList<KeyValuePair<int, string>> rows, List<string> refused)
+    {
+        var result = new Dictionary<int, string>();
+        var nameAt = new Dictionary<int, string>();
+        var countByName = new Dictionary<string, int>(StringComparer.Ordinal);
+        var indexByName = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (KeyValuePair<int, string> r in rows)
+        {
+            nameAt[r.Key] = r.Value;
+            if (r.Value == null) continue;
+            countByName[r.Value] = countByName.TryGetValue(r.Value, out int c) ? c + 1 : 1;
+            indexByName[r.Value] = r.Key;
+        }
+        if (lines == null) return result;
+        foreach (string raw in lines)
+        {
+            string line = raw?.Trim();
+            if (string.IsNullOrEmpty(line)) continue;
+            string[] f = line.Split('|');
+            if (f.Length < 2) continue;
+            string letter = f[0].Trim(), name = f[1].Trim();
+            if (letter.Length != 1 || letter[0] < 'A' || letter[0] > 'H' || name.Length == 0) continue;
+            int index = -1;
+            if (f.Length >= 3 && int.TryParse(f[2].Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int parsed)) index = parsed;
+            if (index >= 0 && nameAt.TryGetValue(index, out string at) && at == name) { result[index] = letter; continue; }
+            int n = 0; countByName.TryGetValue(name, out n);
+            if (n == 1) { result[indexByName[name]] = letter; continue; }
+            refused?.Add(n > 1
+                ? "'" + name + "' names " + n + " parts and node " + (index < 0 ? "(none given)" : index.ToString(System.Globalization.CultureInfo.InvariantCulture)) + " is not one of them — mark them by hand"
+                : "'" + name + "' is not in this file");
+        }
+        return result;
+    }
+}

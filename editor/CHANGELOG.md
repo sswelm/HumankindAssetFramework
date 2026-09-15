@@ -56,6 +56,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   pass may change; the importer recomputes it). And **normals went through the plain world matrix** — under a
   non-uniform scale a normal needs the inverse transpose (a (2,1,1) scale put a sloped normal 35° off its
   surface); the Teutonic's nodes are uniform (0.0254) so nothing changed there, but a scaled part now lights right.
+  Third round, two more with tests: **one part without UVs stripped TEXCOORD_0 from every part of its material**
+  — an unmapped contributor is now padded (0,0) and only a primitive no vertex of which had UVs ships without;
+  and **the groupings sidecar restored by name alone**, so two parts called "Panel" with one saved in A both came
+  back A — lines now carry `letter|name|node index` (`WorkshopRules.ResolveFuseSidecar`, 5 tests): a line applies
+  at its node index, or by name where the name is unique, and a shared name is refused and named in the console.
+  Old name-only files keep working where names are unique (the Teutonic's 1,435 mesh nodes have no duplicate).
 
 - **Vehicle Lab: the ⟲ inside-out marks — see the fix's reach before it runs.** Every probed part the
   **Fix inside-out faces** pass would reverse now carries a ⟲ tag in the list (with its island count), and

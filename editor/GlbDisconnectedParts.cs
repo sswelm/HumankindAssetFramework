@@ -1225,7 +1225,9 @@ public static class GlbDisconnectedParts
             Vec3 p = pos[v], nn = finalNormal[v];
             prim.Positions.Add((float)p.X); prim.Positions.Add((float)p.Y); prim.Positions.Add((float)p.Z);
             prim.Normals.Add((float)nn.X); prim.Normals.Add((float)nn.Y); prim.Normals.Add((float)nn.Z);
-            if (uv[v] != null) { prim.Uvs.Add((float)uv[v][0]); prim.Uvs.Add((float)uv[v][1]); } else prim.UvMissing = true;
+            // a vertex from a part without UVs is padded (0,0) — the primitive used to drop TEXCOORD_0 for EVERY part of the
+            // material when one contributor lacked it (review of 82088d4); only a primitive no vertex of which had UVs ships without
+            if (uv[v] != null) { prim.Uvs.Add((float)uv[v][0]); prim.Uvs.Add((float)uv[v][1]); prim.UvSeen = true; } else { prim.Uvs.Add(0f); prim.Uvs.Add(0f); }
             for (int k = 0; k < extraNames.Count; k++)
             {
                 if (!prim.Extras.TryGetValue(extraNames[k], out List<float> list)) prim.Extras.Add(extraNames[k], list = new List<float>());
@@ -1258,7 +1260,7 @@ public static class GlbDisconnectedParts
                 ["POSITION"] = AppendFloats(root, bin, prim.Positions, 3, "VEC3", true),
                 ["NORMAL"] = AppendFloats(root, bin, prim.Normals, 3, "VEC3", false),
             };
-            if (!prim.UvMissing && prim.Uvs.Count > 0) attrs["TEXCOORD_0"] = AppendFloats(root, bin, prim.Uvs, 2, "VEC2", false);
+            if (prim.UvSeen) attrs["TEXCOORD_0"] = AppendFloats(root, bin, prim.Uvs, 2, "VEC2", false);
             for (int k = 0; k < extraNames.Count; k++)
                 if (prim.ExtrasSeen.Contains(extraNames[k]))
                     attrs[extraNames[k]] = AppendFloats(root, bin, prim.Extras[extraNames[k]], extraComps[k], extraComps[k] == 1 ? "SCALAR" : "VEC" + extraComps[k], false);
@@ -1313,7 +1315,7 @@ public static class GlbDisconnectedParts
         public readonly List<float> Normals = new List<float>();
         public readonly List<float> Uvs = new List<float>();
         public readonly List<uint> Indices = new List<uint>();
-        public bool UvMissing;   // some vertex of this material had no TEXCOORD_0: the primitive ships without UVs
+        public bool UvSeen;      // at least one vertex of this material carried TEXCOORD_0: the primitive ships with UVs (the rest padded 0,0)
         public readonly Dictionary<string, List<float>> Extras = new Dictionary<string, List<float>>();   // COLOR_n, TEXCOORD_1.., custom
         public readonly HashSet<string> ExtrasSeen = new HashSet<string>();                                // …that at least one vertex actually carried
     }

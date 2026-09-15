@@ -492,6 +492,26 @@ public class GlbFuseTests
     }
 
     [Fact]
+    public void A_part_without_UVs_does_not_strip_the_UVs_of_its_material_mates()
+    {
+        // review of 82088d4: one unmapped contributor made the whole material's primitive drop TEXCOORD_0
+        var a = Quad("A", 0, 1, 0, 1, 0); a.Uvs = new float[] { 0, 0, 0.5f, 0, 0.5f, 1, 0, 1 };
+        var b = Quad("B", 1, 2, 0, 1, 0);   // no UVs, same (absent) material
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(a, b), new[] { 0, 1 }, 0.0);
+        var g = Read(r.Bytes);
+        var prim = (JObject)g.Primitives(g.Node("A_Fused"))[0];
+        Assert.NotNull(((JObject)prim["attributes"])["TEXCOORD_0"]);
+        float[] uv = g.Floats(((JObject)prim["attributes"]).Value<int>("TEXCOORD_0"), 2);
+        Assert.Equal(r.VerticesAfter * 2, uv.Length);
+        Assert.Equal(8, r.VerticesAfter);            // A's seam (UV 0.5) and B's seam (no UV) stay separate vertices
+        Assert.Equal(2, uv.Count(x => x == 0.5f));   // A's coordinates intact…
+        Assert.Equal(4, Enumerable.Range(0, uv.Length / 2).Count(i => uv[i * 2] == 0f && uv[i * 2 + 1] == 0f) - 1);   // …B's four padded (0,0), plus A's own (0,0) corner
+
+        var none = GlbDisconnectedParts.FuseNodes(BuildGlb(Quad("A", 0, 1, 0, 1, 0), b), new[] { 0, 1 }, 0.0);   // nobody has UVs: none written
+        Assert.Null(((JObject)((JObject)Read(none.Bytes).Primitives(Read(none.Bytes).Node("A_Fused"))[0])["attributes"])["TEXCOORD_0"]);
+    }
+
+    [Fact]
     public void The_path_guard_refuses_output_equal_to_source()
     {
         Assert.Throws<InvalidOperationException>(() => GlbDisconnectedParts.GuardPaths(@"C:\models\ship.glb", @"C:/models/SHIP.GLB"));
