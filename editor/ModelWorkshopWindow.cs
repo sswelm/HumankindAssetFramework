@@ -303,6 +303,20 @@ public class ModelWorkshopWindow : EditorWindow
                 "that alone found and fixed its hole. Raise it only for sources whose plates leave gaps, knowing that every triangle smaller " +
                 "than the distance collapses (kept, zero-area, no longer connecting anything): at 0.5‰ the Teutonic lost 1,564 rivet-sized " +
                 "faces AND its hull island broke apart. The result line reports the collapsed count."), weldPermille, 0f, 5f);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                using (new EditorGUI.DisabledScope(fusedRows == 0))
+                    if (GUILayout.Button(new GUIContent("Save groups", $"Writes the ⊕ letters to {Path.GetFileName(srcFile)}.fuse.txt next to the source (a Fuse writes it too); Probe restores them from there."), GUILayout.Width(100)))
+                    { WriteFuseSidecar(srcFile); status = $"Groupings saved: {FuseSidecarPath(srcFile)}"; }
+                using (new EditorGUI.DisabledScope(!File.Exists(FuseSidecarPath(srcFile) ?? "")))
+                    if (GUILayout.Button(new GUIContent("Load groups", "Reads the ⊕ letters back from the sidecar next to the source, by part name."), GUILayout.Width(100)))
+                    {
+                        var map = ReadFuseSidecar(srcFile); int n = 0;
+                        if (map != null) foreach (var r in rows) if (r.node != null && map.TryGetValue(r.node, out string letter)) { r.fuse = letter; n++; }
+                        status = $"Groupings loaded: {n} part(s) marked from {FuseSidecarPath(srcFile)}";
+                    }
+                EditorGUILayout.LabelField(fusedRows == 0 ? " " : $"{fusedRows} marked in {fuseGroups.Count} group(s): {string.Join("  ", fuseGroups.Select(g => "⊕" + g + "×" + rows.Count(r => r.fuse == g)))}", EditorStyles.miniLabel);
+            }
             using (new EditorGUI.DisabledScope(fusedRows == 0 || string.IsNullOrEmpty(outGlb)))
                 if (GUILayout.Button(new GUIContent(fusedRows == 0
                             ? "Fuse — mark parts with a ⊕ letter first (popup per row, or keys A–H on the highlighted row)"
@@ -335,10 +349,16 @@ public class ModelWorkshopWindow : EditorWindow
     {
         // kept-state keyed by NODE INDEX (review round 2): keying by name re-checked every duplicate namesake.
         var kept = new HashSet<int>(rows.Where(r => r.split).Select(r => r.nodeIndex));
+        // FUSE LETTERS survive too (2026-09-15, user: "it doesn't seem to be able to save the groupings, only the
+        // checkboxes"): the merge slider re-analyzes and used to rebuild every row blank. Same key. And a re-Probe of a
+        // file with NO letters in memory restores them from the sidecar the last Fuse wrote (<source>.fuse.txt).
+        var keptFuse = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).ToDictionary(r => r.nodeIndex, r => r.fuse);
+        var sidecar = keptFuse.Count == 0 ? ReadFuseSidecar(srcFile) : null;
         try
         {
             rows = GlbDisconnectedParts.Analyze(File.ReadAllBytes(srcFile), mergePct / 100.0)
-                .Select(p => new Row { nodeIndex = p.NodeIndex, node = p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, split = kept.Contains(p.NodeIndex) })
+                .Select(p => new Row { nodeIndex = p.NodeIndex, node = p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, split = kept.Contains(p.NodeIndex),
+                                       fuse = keptFuse.TryGetValue(p.NodeIndex, out string kf) ? kf : sidecar != null && p.NodeName != null && sidecar.TryGetValue(p.NodeName, out string sf) ? sf : "" })
                 .OrderBy(r => NaturalPrefix(r.node), StringComparer.OrdinalIgnoreCase)
                 .ThenBy(r => NaturalNumber(r.node))
                 .ThenBy(r => r.node, StringComparer.OrdinalIgnoreCase).ToList();
@@ -590,6 +610,40 @@ public class ModelWorkshopWindow : EditorWindow
         GUI.DrawTexture(rect, pru.EndPreview(), ScaleMode.StretchToFill, false);
     }
 
+    // THE GROUPINGS PERSIST beside the source GLB as `<source>.fuse.txt` — `<letter>|<part name>` per line, in row order
+    // (the first name of a group names the fused part). Written by every successful Fuse, read by Probe when the window
+    // holds no letters for the file. Names, not indices: the file is human-editable and survives a re-export that
+    // keeps names. Also written on demand by "Save groups" so a marking session survives closing the window.
+    static string FuseSidecarPath(string glb) => string.IsNullOrEmpty(glb) ? null : glb + ".fuse.txt";
+    void WriteFuseSidecar(string glb)
+    {
+        try
+        {
+            string path = FuseSidecarPath(glb); if (path == null) return;
+            var lines = rows.Where(r => !string.IsNullOrEmpty(r.fuse) && !string.IsNullOrEmpty(r.node)).Select(r => r.fuse + "|" + r.node).ToArray();
+            if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }
+            File.WriteAllLines(path, lines);
+        }
+        catch (Exception e) { Debug.LogWarning("[Workshop] could not write the fuse groupings sidecar: " + e.Message); }
+    }
+    static Dictionary<string, string> ReadFuseSidecar(string glb)
+    {
+        try
+        {
+            string path = FuseSidecarPath(glb);
+            if (path == null || !File.Exists(path)) return null;
+            var map = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (string line in File.ReadAllLines(path))
+            {
+                int bar = line.IndexOf('|'); if (bar <= 0) continue;
+                string letter = line.Substring(0, bar).Trim(), name = line.Substring(bar + 1).Trim();
+                if (letter.Length == 1 && letter[0] >= 'A' && letter[0] <= 'H' && name.Length > 0) map[name] = letter;
+            }
+            return map.Count > 0 ? map : null;
+        }
+        catch (Exception e) { Debug.LogWarning("[Workshop] could not read the fuse groupings sidecar: " + e.Message); return null; }
+    }
+
     // Every ⊕ group becomes its own shell, chained through one in-memory GLB: FuseNodes never removes or reorders
     // nodes (fused sources only lose their mesh; the fused part is appended), so group B's node indices stay valid
     // in group A's output. One write at the end; the source file is never touched.
@@ -614,6 +668,7 @@ public class ModelWorkshopWindow : EditorWindow
             }
             if (done == 0) { status = "Nothing changed — no group produced a fused mesh (see warnings in the console)."; return; }
             File.WriteAllBytes(outGlb, bytes);
+            WriteFuseSidecar(srcFile);   // the groupings, next to the source: a later Probe of this file restores them
             status = $"Fuse done ({done} group(s)):\n{string.Join("\n", lines)}\n{outGlb}\nNext: point Source GLB at this output and re-Probe to see each fused shell as one part, or open it in the Vehicle Lab.";
         }
         catch (Exception e) { status = "Fuse failed (source untouched): " + e.Message; Debug.LogException(e); }
