@@ -138,14 +138,19 @@ public static class VehicleLabRules
 /// <summary>Model Workshop decisions (WorkshopRulesTests locks them).</summary>
 public static class WorkshopRules
 {
-    // The fuse-groupings sidecar (<source>.glb.fuse.txt): one part per line, "<letter>|<name>|<node index>"; files
-    // from before 2026-09-15 carry "<letter>|<name>" only. Restoring by NAME alone selected every namesake (review
-    // of 82088d4): two nodes called "Panel", one saved in A, both came back A; saved in A and B, both came back with
-    // the last letter. A line now applies to the row at its node index when that row still carries the name; with
-    // no index, or after a re-export moved it, by name only where the name is unique among the rows. Anything else
-    // is refused and named, never guessed.
+    // The fuse-groupings sidecar (<source>.glb.fuse.txt). Format v2 (2026-09-16): a header line, then one part per
+    // line as "<letter>|<node index>|<name>" — the name is LAST, so every '|' after the second belongs to it and
+    // nothing has to be guessed. Two earlier layouts still read: "<letter>|<name>|<node index>" (2026-09-15) and
+    // "<letter>|<name>" (before that); both put the name in the middle, and a name that itself ends in "|<number>"
+    // cannot be told from a name plus an index — the reader below tries both readings and refuses when both fit
+    // a part (review of 6db9a00: "A|Hull|3" after a re-export moved Hull to node 5 while another part was called
+    // "Hull|3" landed on the wrong one). Restoring by NAME alone selected every namesake (review of 82088d4), hence
+    // the index; a line applies to the row at its index when that row still carries the name, otherwise by name
+    // where the name is unique among the rows. Anything else is refused and named, never guessed.
+    public const string SidecarHeader = "#fuse-groups v2";
+
     public static string SidecarLine(string letter, string name, int nodeIndex) =>
-        letter + "|" + name + "|" + nodeIndex.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        letter + "|" + nodeIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + name;
 
     /// <param name="rows">(node index, node name) per Workshop row.</param>
     /// <returns>letter by node index; lines that could not be placed are described in <paramref name="refused"/>.</returns>
@@ -163,36 +168,52 @@ public static class WorkshopRules
             indexByName[r.Value] = r.Key;
         }
         if (lines == null) return result;
+        int UniqueRow(string name) => name != null && countByName.TryGetValue(name, out int n) && n == 1 ? indexByName[name] : -1;
+        int RowAt(int index, string name) => index >= 0 && name != null && nameAt.TryGetValue(index, out string at) && at == name ? index : -1;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        bool v2 = false;
         foreach (string raw in lines)
         {
             string line = raw?.Trim();
             if (string.IsNullOrEmpty(line)) continue;
-            // parsed from BOTH ends, never split: the letter is before the first '|', the index (if any) after the
-            // last, and the name is everything between — a part called "Hull|Port" must never land on "Hull"
-            // (review of 0a8b56e). A legacy line without an index reads the whole remainder as the name.
+            if (line.StartsWith("#", StringComparison.Ordinal)) { if (line == SidecarHeader) v2 = true; continue; }
             int firstBar = line.IndexOf('|');
             if (firstBar <= 0) continue;
             string letter = line.Substring(0, firstBar).Trim();
             if (letter.Length != 1 || letter[0] < 'A' || letter[0] > 'H') continue;
-            string remainder = line.Substring(firstBar + 1).Trim();
-            if (remainder.Length == 0) continue;
+            string remainder = line.Substring(firstBar + 1);
+            if (remainder.Trim().Length == 0) continue;
+            if (v2)
+            {
+                int secondBar = remainder.IndexOf('|');
+                if (secondBar <= 0 || !int.TryParse(remainder.Substring(0, secondBar).Trim(), System.Globalization.NumberStyles.Integer, inv, out int index)) continue;
+                string name = remainder.Substring(secondBar + 1).Trim();
+                if (name.Length == 0) continue;
+                int target = RowAt(index, name); if (target < 0) target = UniqueRow(name);
+                if (target >= 0) { result[target] = letter; continue; }
+                refused?.Add(countByName.TryGetValue(name, out int n) && n > 1
+                    ? "'" + name + "' names " + n + " parts and node " + index.ToString(inv) + " is not one of them — mark them by hand"
+                    : "'" + name + "' is not in this file");
+                continue;
+            }
+            // legacy layouts: the name in the middle. Reading 1: "<name>|<index>" split at the last bar; reading 2:
+            // the whole remainder is the name. The index settles it when the row there carries the name; otherwise
+            // each reading may find a unique part, and two different parts is an ambiguity, not a choice.
+            remainder = remainder.Trim();
             int lastBar = remainder.LastIndexOf('|');
-            int index = -1; string name = remainder;
-            if (lastBar > 0 && int.TryParse(remainder.Substring(lastBar + 1).Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int parsed))
-            { index = parsed; name = remainder.Substring(0, lastBar).Trim(); }
-            // the readings, strictest first: the row at the index carrying the name; a unique row named the whole
-            // remainder (a legacy line for a name that itself ends in "|<number>"); a unique row with the name
-            int byIndex = index >= 0 && nameAt.TryGetValue(index, out string at) && at == name ? index : -1;
-            int byWhole = name != remainder && countByName.TryGetValue(remainder, out int wn) && wn == 1 ? indexByName[remainder] : -1;
-            if (byIndex >= 0 && byWhole >= 0 && byIndex != byWhole)
-            { refused?.Add("'" + line + "' fits both node " + byIndex + " ('" + name + "') and '" + remainder + "' — mark them by hand"); continue; }
-            if (byIndex >= 0) { result[byIndex] = letter; continue; }
-            if (byWhole >= 0) { result[byWhole] = letter; continue; }
-            int n = 0; countByName.TryGetValue(name, out n);
-            if (n == 1) { result[indexByName[name]] = letter; continue; }
-            refused?.Add(n > 1
-                ? "'" + name + "' names " + n + " parts and node " + (index < 0 ? "(none given)" : index.ToString(System.Globalization.CultureInfo.InvariantCulture)) + " is not one of them — mark them by hand"
-                : "'" + name + "' is not in this file");
+            int legacyIndex = -1; string mid = null;
+            if (lastBar > 0 && int.TryParse(remainder.Substring(lastBar + 1).Trim(), System.Globalization.NumberStyles.Integer, inv, out int parsed))
+            { legacyIndex = parsed; mid = remainder.Substring(0, lastBar).Trim(); }
+            int byIndex = RowAt(legacyIndex, mid);
+            if (byIndex >= 0 && UniqueRow(remainder) < 0) { result[byIndex] = letter; continue; }
+            int byMid = mid != null ? UniqueRow(mid) : -1, byWhole = UniqueRow(remainder);
+            var fits = new List<int>(); foreach (int t in new[] { byIndex, byMid, byWhole }) if (t >= 0 && !fits.Contains(t)) fits.Add(t);
+            if (fits.Count == 1) { result[fits[0]] = letter; continue; }
+            if (fits.Count > 1) { refused?.Add("'" + line + "' fits " + fits.Count + " different parts (an old-format line whose name may end in '|<number>') — mark them by hand"); continue; }
+            string shown = mid ?? remainder; int cnt = 0; countByName.TryGetValue(shown, out cnt);
+            refused?.Add(cnt > 1
+                ? "'" + shown + "' names " + cnt + " parts and node " + (legacyIndex < 0 ? "(none given)" : legacyIndex.ToString(inv)) + " is not one of them — mark them by hand"
+                : "'" + shown + "' is not in this file");
         }
         return result;
     }

@@ -404,8 +404,9 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   winding it renders with. The console line lists the largest islands with what was measured and what decided.
   Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh;
   the fused part is a new root node named after the first checked row. The output can never be the source file.
-  The ⊕ letters persist beside the source as `<source>.glb.fuse.txt` (one `letter|name|node index` line per marked
-  part; written by every Fuse and by **Save groups**, read when a file is first probed into the window and by
+  The ⊕ letters persist beside the source as `<source>.glb.fuse.txt` (a `#fuse-groups v2` header, then one
+  `letter|node index|name` line per marked part — the name last, so it may contain anything; written by every Fuse
+  and by **Save groups**, read when a file is first probed into the window and by
   **Load groups**) — a line applies to the part at its node index, or by name where the name is unique; a name
   shared by several parts is refused and named in the console rather than guessed. **Save groups** with no letters
   marked removes the file, and a re-Probe never re-applies a sidecar over letters you cleared. Re-Probe the output to see it as one island, then rig it in the Vehicle Lab

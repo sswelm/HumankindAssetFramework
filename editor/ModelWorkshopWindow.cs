@@ -619,11 +619,12 @@ public class ModelWorkshopWindow : EditorWindow
         GUI.DrawTexture(rect, pru.EndPreview(), ScaleMode.StretchToFill, false);
     }
 
-    // THE GROUPINGS PERSIST beside the source GLB as `<source>.fuse.txt` — `<letter>|<part name>|<node index>` per line,
-    // in row order (the first name of a group names the fused part). Written by every successful Fuse, read by Probe
-    // when the window holds no letters for the file. Name AND index: the file stays human-editable and survives a
-    // re-export that keeps names, while two parts with one name are told apart (WorkshopRules.ResolveFuseSidecar —
-    // a name alone marked every namesake, review of 82088d4). Also written on demand by "Save groups".
+    // THE GROUPINGS PERSIST beside the source GLB as `<source>.fuse.txt` — a header line, then `<letter>|<node
+    // index>|<part name>` per line in row order (the first name of a group names the fused part). Written by every
+    // successful Fuse, read when a file is first loaded into the window. Name AND index: the file stays
+    // human-editable and survives a re-export that keeps names, while two parts with one name are told apart
+    // (WorkshopRules.ResolveFuseSidecar — a name alone marked every namesake, review of 82088d4; the name is LAST
+    // since 2026-09-16 so a '|' inside it is never mistaken for a field). Also written on demand by "Save groups".
     static string FuseSidecarPath(string glb) => string.IsNullOrEmpty(glb) ? null : glb + ".fuse.txt";
     void WriteFuseSidecar(string glb)
     {
@@ -632,7 +633,7 @@ public class ModelWorkshopWindow : EditorWindow
             string path = FuseSidecarPath(glb); if (path == null) return;
             var lines = rows.Where(r => !string.IsNullOrEmpty(r.fuse) && !string.IsNullOrEmpty(r.node)).Select(r => WorkshopRules.SidecarLine(r.fuse, r.node, r.nodeIndex)).ToArray();
             if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }
-            File.WriteAllLines(path, lines);
+            File.WriteAllLines(path, new[] { WorkshopRules.SidecarHeader }.Concat(lines));   // v2: header, then letter|index|name (the name last, so a '|' in it is nothing to guess)
         }
         catch (Exception e) { Debug.LogWarning("[Workshop] could not write the fuse groupings sidecar: " + e.Message); }
     }
