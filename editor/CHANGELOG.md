@@ -5,6 +5,71 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Workshop: FUSE — weld a plated hull into one shell, at the source.** The Teutonic shipped see-through
+  with a hole in its side: its hull plating is 861 disconnected islands over four parts, the per-island inside-out
+  fix flipped some plates and not others, and any reduction opened gaps because plates share no vertices. Each
+  Workshop row now carries a **⊕ fuse-group letter** (popup, or keys A–H on the highlighted row; ↑/↓ move it, 0
+  clears), and **Fuse … into one shell each** turns every group into ONE mesh in the output
+  GLB, seam vertices welded within a dial (‰ of the model's length; **default 0** = exactly coincident positions),
+  the winding made **consistent by majority** across each welded island, and direction judged once where it can
+  be — open sheets by the inside-out score, closed shells by their signed volume. Pure C# in
+  `GlbDisconnectedParts.FuseNodes`, 10 tests (the inverted plate, the inward deck, the inside-out box, the UV
+  seam, materials, the weld distance, parent transforms, collapsed faces, refusals, vertex normals). The rule came
+  out of a headless Blender drill on the real hull the same day, and the C# port was then run on the same hull:
+  the hole is a **1,613-face plate region glued on the wrong way round along a 26-edge seam** inside a 4,013-face
+  island — 99.6 % of edges read consistent, so no per-island or edge test could see it; parity propagation finds
+  it, and the two small shells authored inside-out (126 and 76 faces) are reversed whole by their signed volume.
+  Three rules were tried and rejected: a blind normal recalc (flipped 40 % of that consistent island — overlapping
+  plates are not the manifold solid it assumes), the radial score on closed shells (inner faces cancel outer; it
+  reads ~0), and a non-zero weld by default (0.5‰ collapsed 1,564 rivet-sized triangles and, stripped of their
+  adjacency, they broke the hull island apart — the plates already touch exactly; a distance is for gapped
+  sources only, and the result line reports what collapsed). Two more came from the first real use: **"0" means
+  coincident within float rounding, never bit-identical** — parts carry different node transforms, so one seam
+  point computed through two matrices differs at the 1e-6 level and the eight hull parts stayed eight islands
+  ("still separated"); and **a lap is not an inverted neighbour** — `Object_8` is 671 riveted strips lying ON the
+  plates, stitched to them, authored facing the same way, and in manifold terms a face folded back over its
+  neighbour must face the other way, so the plain rule turned every strip inward and they rendered as dark
+  lines along the strakes; same traversal AND agreeing authored normals now reads as "on the same side on
+  purpose" (532 of 656 strips with their plate after the fix). Fixing the source means the Lab, the Factory and the
+  static bake all see a whole hull; a Vehicle-Lab-side version was built first and dropped in favour of this one.
+  Review of the PR then found three more, all fixed and each with a test: **the signed volume was judged about
+  the origin** for any island under 30 % boundary edges — an open surface's signed volume is the cone from the
+  origin over it, so it reads where the sheet sits, not which way it faces (a correct 5×5 deck under y=0 came
+  back all 50 triangles reversed); it is now judged about the island's own centroid and trusted only where the
+  per-face cones agree (|Σv|/Σ|v| > 0.5) and there is real thickness (|volume|/area^1.5 > 0.01 — plating regions
+  read 0.04–0.22, a lap strip 0.001, a flat sheet 0), a flat sheet falling to the inside-out score; a "closed
+  = no boundary edge" rule was tried first and lost the Teutonic's 3,907-face plating island (21 % boundary,
+  a thin solid the radial score cannot see) — its side plating fell from 96 % outward to 78 %, the agreement
+  rule keeps it. **Welded vertices kept their own positions** where a UV seam or hard edge made them separate
+  output vertices, so two plates a gap apart inside the weld reported one island and still showed the gap;
+  every vertex of a welded class now sits at the class centroid. **The Workshop's Fuse button wrote the output
+  itself** and only asked the ordinary "overwrite?" — output == source now refuses like every file entry point.
+  And a fourth found by the drill on the port side: **a mirrored instance arrived inside-out** — glTF renders a
+  negative-determinant node's triangles with the front face reversed, and the Teutonic's port half is the
+  starboard meshes under a (0.0254, −0.0254, 0.0254) node; the winding is now swapped at gather, so the port
+  hull is judged as it renders (its 9,379-face island is kept at +0.93 agreement, 2 small islands reversed
+  instead of 36) and a port piece mixed into a starboard group no longer needs "correcting". Second review
+  round, two more with tests: **vertex colours and second UV sets were dropped** (only POSITION / NORMAL /
+  TEXCOORD_0 were written) — every other vertex attribute (COLOR_n, TEXCOORD_1.., custom) now rides along, takes
+  part in the merge decision (a colour seam keeps its vertices like a UV seam), and a part without the attribute
+  gets white / zero; TANGENT alone is dropped with a warning (it follows winding and UVs, both of which this
+  pass may change; the importer recomputes it). And **normals went through the plain world matrix** — under a
+  non-uniform scale a normal needs the inverse transpose (a (2,1,1) scale put a sloped normal 35° off its
+  surface); the Teutonic's nodes are uniform (0.0254) so nothing changed there, but a scaled part now lights right.
+  Third round, two more with tests: **one part without UVs stripped TEXCOORD_0 from every part of its material**
+  — an unmapped contributor is now padded (0,0) and only a primitive no vertex of which had UVs ships without;
+  and **the groupings sidecar restored by name alone**, so two parts called "Panel" with one saved in A both came
+  back A — lines now carry `letter|name|node index` (`WorkshopRules.ResolveFuseSidecar`, 5 tests): a line applies
+  at its node index, or by name where the name is unique, and a shared name is refused and named in the console.
+  Old name-only files keep working where names are unique (the Teutonic's 1,435 mesh nodes have no duplicate).
+  Fourth and fifth rounds: the sidecar is now **format v2** — a `#fuse-groups v2` header, then `letter|index|name`
+  with the name LAST, so a `|` inside a name is never mistaken for a field (the name-in-the-middle layout could not
+  tell `A|Hull|3` for a part `Hull` from one for a part `Hull|3` once a re-export moved `Hull`); the two older
+  layouts still read, and where both of their readings fit different parts the line is refused rather than
+  guessed; and a **cleared selection can be saved** — Save groups with no letters removes the sidecar,
+  and the sidecar is read only when a file is first loaded into the window (a re-Probe or slider move of a file
+  whose letters were cleared keeps them cleared; Load groups is the explicit way back).
+
 - **Vehicle Lab: the ⟲ inside-out marks — see the fix's reach before it runs.** Every probed part the
   **Fix inside-out faces** pass would reverse now carries a ⟲ tag in the list (with its island count), and
   the checkbox itself reports the total — whether the fix is on or off. The verdicts come from the SAME

@@ -134,3 +134,87 @@ public static class VehicleLabRules
         return a > 0 ? (float)(f / a) : -1f;
     }
 }
+
+/// <summary>Model Workshop decisions (WorkshopRulesTests locks them).</summary>
+public static class WorkshopRules
+{
+    // The fuse-groupings sidecar (<source>.glb.fuse.txt). Format v2 (2026-09-16): a header line, then one part per
+    // line as "<letter>|<node index>|<name>" — the name is LAST, so every '|' after the second belongs to it and
+    // nothing has to be guessed. Two earlier layouts still read: "<letter>|<name>|<node index>" (2026-09-15) and
+    // "<letter>|<name>" (before that); both put the name in the middle, and a name that itself ends in "|<number>"
+    // cannot be told from a name plus an index — the reader below tries both readings and refuses when both fit
+    // a part (review of 6db9a00: "A|Hull|3" after a re-export moved Hull to node 5 while another part was called
+    // "Hull|3" landed on the wrong one). Restoring by NAME alone selected every namesake (review of 82088d4), hence
+    // the index; a line applies to the row at its index when that row still carries the name, otherwise by name
+    // where the name is unique among the rows. Anything else is refused and named, never guessed.
+    public const string SidecarHeader = "#fuse-groups v2";
+
+    public static string SidecarLine(string letter, string name, int nodeIndex) =>
+        letter + "|" + nodeIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + name;
+
+    /// <param name="rows">(node index, node name) per Workshop row.</param>
+    /// <returns>letter by node index; lines that could not be placed are described in <paramref name="refused"/>.</returns>
+    public static Dictionary<int, string> ResolveFuseSidecar(IEnumerable<string> lines, IList<KeyValuePair<int, string>> rows, List<string> refused)
+    {
+        var result = new Dictionary<int, string>();
+        var nameAt = new Dictionary<int, string>();
+        var countByName = new Dictionary<string, int>(StringComparer.Ordinal);
+        var indexByName = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (KeyValuePair<int, string> r in rows)
+        {
+            nameAt[r.Key] = r.Value;
+            if (r.Value == null) continue;
+            countByName[r.Value] = countByName.TryGetValue(r.Value, out int c) ? c + 1 : 1;
+            indexByName[r.Value] = r.Key;
+        }
+        if (lines == null) return result;
+        int UniqueRow(string name) => name != null && countByName.TryGetValue(name, out int n) && n == 1 ? indexByName[name] : -1;
+        int RowAt(int index, string name) => index >= 0 && name != null && nameAt.TryGetValue(index, out string at) && at == name ? index : -1;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        bool v2 = false;
+        foreach (string raw in lines)
+        {
+            string line = raw?.Trim();
+            if (string.IsNullOrEmpty(line)) continue;
+            if (line.StartsWith("#", StringComparison.Ordinal)) { if (line == SidecarHeader) v2 = true; continue; }
+            int firstBar = line.IndexOf('|');
+            if (firstBar <= 0) continue;
+            string letter = line.Substring(0, firstBar).Trim();
+            if (letter.Length != 1 || letter[0] < 'A' || letter[0] > 'H') continue;
+            string remainder = line.Substring(firstBar + 1);
+            if (remainder.Trim().Length == 0) continue;
+            if (v2)
+            {
+                int secondBar = remainder.IndexOf('|');
+                if (secondBar <= 0 || !int.TryParse(remainder.Substring(0, secondBar).Trim(), System.Globalization.NumberStyles.Integer, inv, out int index)) continue;
+                string name = remainder.Substring(secondBar + 1).Trim();
+                if (name.Length == 0) continue;
+                int target = RowAt(index, name); if (target < 0) target = UniqueRow(name);
+                if (target >= 0) { result[target] = letter; continue; }
+                refused?.Add(countByName.TryGetValue(name, out int n) && n > 1
+                    ? "'" + name + "' names " + n + " parts and node " + index.ToString(inv) + " is not one of them — mark them by hand"
+                    : "'" + name + "' is not in this file");
+                continue;
+            }
+            // legacy layouts: the name in the middle. Reading 1: "<name>|<index>" split at the last bar; reading 2:
+            // the whole remainder is the name. The index settles it when the row there carries the name; otherwise
+            // each reading may find a unique part, and two different parts is an ambiguity, not a choice.
+            remainder = remainder.Trim();
+            int lastBar = remainder.LastIndexOf('|');
+            int legacyIndex = -1; string mid = null;
+            if (lastBar > 0 && int.TryParse(remainder.Substring(lastBar + 1).Trim(), System.Globalization.NumberStyles.Integer, inv, out int parsed))
+            { legacyIndex = parsed; mid = remainder.Substring(0, lastBar).Trim(); }
+            int byIndex = RowAt(legacyIndex, mid);
+            if (byIndex >= 0 && UniqueRow(remainder) < 0) { result[byIndex] = letter; continue; }
+            int byMid = mid != null ? UniqueRow(mid) : -1, byWhole = UniqueRow(remainder);
+            var fits = new List<int>(); foreach (int t in new[] { byIndex, byMid, byWhole }) if (t >= 0 && !fits.Contains(t)) fits.Add(t);
+            if (fits.Count == 1) { result[fits[0]] = letter; continue; }
+            if (fits.Count > 1) { refused?.Add("'" + line + "' fits " + fits.Count + " different parts (an old-format line whose name may end in '|<number>') — mark them by hand"); continue; }
+            string shown = mid ?? remainder; int cnt = 0; countByName.TryGetValue(shown, out cnt);
+            refused?.Add(cnt > 1
+                ? "'" + shown + "' names " + cnt + " parts and node " + (legacyIndex < 0 ? "(none given)" : legacyIndex.ToString(inv)) + " is not one of them — mark them by hand"
+                : "'" + shown + "' is not in this file");
+        }
+        return result;
+    }
+}

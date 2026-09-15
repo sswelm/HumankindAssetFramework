@@ -384,6 +384,33 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   sliced, vertex data stays byte-identical, the boundary follows the existing triangulation (invisible once the
   two halves get their own reduce dials or roles). **Cut** writes the output GLB; for a second cut (the bow off
   the deck piece, say) point Source GLB at that output and re-Probe.
+  **Fuse** (0.5.7) is the opposite of Split, for the opposite disease: a hull authored as dozens of separate
+  plates (the Teutonic — 861 islands over four parts) renders see-through with a hole in its side, because no
+  per-plate facing test can see that a 1,609-face region is glued on the wrong way round along a 26-edge seam,
+  and it cannot be reduced either: plates share no vertices, so any collapse opens gaps. Give the plates the same **⊕ letter** (the popup on each row, or keys **A–H** on the highlighted row;
+  ↑/↓ move the highlight, 0 clears; several letters = several shells), leave
+  **Fuse — weld seams closer than** at **0** (coincident positions, within float rounding — the Teutonic's plates already touch,
+  and that alone found its hole; raise it only for plates that leave gaps, knowing that every triangle smaller
+  than the distance collapses: at 0.5‰ the Teutonic lost 1,564 rivet-sized faces and its hull island broke apart),
+  press **Fuse … into one shell each**: every group becomes ONE mesh in the output GLB, their seam vertices
+  welded (a UV seam or a hard edge keeps its own vertex; connectivity is by position regardless), the winding
+  made **consistent by majority**
+  across each welded island, and direction judged once where it can be — a closed shell, a thin solid or a convex
+  plating region by its signed volume about its own centroid (wound inward = reversed whole; trusted only where the
+  per-face volumes agree and there is real thickness), a *flat* sheet (deck, bulwark) by the inside-out score against
+  the hull's belly axis. Welded vertices share one position even where a UV seam or hard edge keeps them separate;
+  vertex colours, further UV sets and custom attributes ride along and keep their own seams too (tangents are the
+  one thing dropped — the importer recomputes them from the new winding); and a mirrored instance (a node with negative scale, the usual "other half" of a symmetric hull) is read with the
+  winding it renders with. The console line lists the largest islands with what was measured and what decided.
+  Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh;
+  the fused part is a new root node named after the first checked row. The output can never be the source file.
+  The ⊕ letters persist beside the source as `<source>.glb.fuse.txt` (a `#fuse-groups v2` header, then one
+  `letter|node index|name` line per marked part — the name last, so it may contain anything; written by every Fuse
+  and by **Save groups**, read when a file is first probed into the window and by
+  **Load groups**) — a line applies to the part at its node index, or by name where the name is unique; a name
+  shared by several parts is refused and named in the console rather than guessed. **Save groups** with no letters
+  marked removes the file, and a re-Probe never re-applies a sidecar over letters you cleared. Re-Probe the output to see it as one island, then rig it in the Vehicle Lab
+  like any other part.
 - **Backup & Restore** — `Tools ▸ HAF ▸ Backup and Restore`. A safety net for everything git doesn't track (editor
   scripts, `FactorySource`, baked Resources, ENC databases, `Tools/`, live `BepInEx/config`). Timestamped, additive,
   guarded restore (auto-snapshots current state first). **Deep dive:** [Backup.md](Backup.md).
