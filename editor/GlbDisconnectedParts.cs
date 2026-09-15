@@ -842,6 +842,13 @@ public static class GlbDisconnectedParts
         // 1) gather every triangle of every chosen part in WORLD space, with normal / UV / material per vertex
         var pos = new List<Vec3>(); var nrm = new List<Vec3?>(); var uv = new List<double[]>(); var mat = new List<int>();
         var partOf = new List<int>();   // which chosen part each vertex came from (the lap-strip warning below)
+        // Every OTHER vertex attribute (COLOR_n, TEXCOORD_1.., custom _NAMEs) rides along untouched and takes part in
+        // the merge decision — the first fuse silently dropped vertex colours and second UV sets (review of 3052ed0).
+        // TANGENT is the one exception: it is derived from winding + UVs, both of which this pass may change, so it is
+        // dropped with a warning and left for the importer to recompute. JOINTS/WEIGHTS cannot occur (skins refused).
+        var extraNames = new List<string>(); var extraComps = new List<int>();
+        var extra = new List<double[][]>();   // per vertex, per extra attribute (null where the part lacked it)
+        bool tangentsDropped = false;
         var tris = new List<int>();
         var partNames = new List<string>();
         var picked = nodeIndices.Distinct().ToList();
@@ -871,15 +878,34 @@ public static class GlbDisconnectedParts
                 int vertCount = reader.Count(posAcc);
                 if (nAcc >= 0 && reader.Count(nAcc) != vertCount) nAcc = -1;
                 if (uvAcc >= 0 && reader.Count(uvAcc) != vertCount) uvAcc = -1;
+                var extraAcc = new int[extraNames.Count]; for (int k = 0; k < extraAcc.Length; k++) extraAcc[k] = -1;
+                foreach (JProperty attr in attrs.Properties())
+                {
+                    string name = attr.Name;
+                    if (name == "POSITION" || name == "NORMAL" || name == "TEXCOORD_0") continue;
+                    if (name == "TANGENT") { tangentsDropped = true; continue; }
+                    if (name.StartsWith("JOINTS_", StringComparison.Ordinal) || name.StartsWith("WEIGHTS_", StringComparison.Ordinal)) continue;
+                    int acc = attr.Value.Value<int>();
+                    if (vertCount == 0 || reader.Count(acc) != vertCount) continue;
+                    int comps = reader.Vector(acc, 0, 1).Length;
+                    int k = extraNames.IndexOf(name);
+                    if (k < 0) { extraNames.Add(name); extraComps.Add(comps); Array.Resize(ref extraAcc, extraNames.Count); k = extraNames.Count - 1; }
+                    else if (extraComps[k] != comps) throw new InvalidDataException("'" + nodeName + "' stores " + name + " with " + comps + " components where an earlier part had " + extraComps[k] + " — fuse parts that agree.");
+                    extraAcc[k] = acc;
+                }
+                double[] normalMatrix = NormalMatrix(world);   // inverse transpose: a (2,1,1) scale turned a sloped normal 35° off the surface through the plain matrix (review of 3052ed0)
                 int baseV = pos.Count;
                 for (uint v = 0; v < vertCount; v++)
                 {
                     pos.Add(XForm(world, reader.Position(posAcc, v)));
-                    if (nAcc >= 0) { double[] n = reader.Vector(nAcc, v, 3); nrm.Add(XFormDir(world, new Vec3 { X = n[0], Y = n[1], Z = n[2] })); }
+                    if (nAcc >= 0) { double[] n = reader.Vector(nAcc, v, 3); nrm.Add(XFormDir(normalMatrix, new Vec3 { X = n[0], Y = n[1], Z = n[2] })); }
                     else nrm.Add(null);
                     uv.Add(uvAcc >= 0 ? reader.Vector(uvAcc, v, 2) : null);
                     mat.Add(material);
                     partOf.Add(partNames.Count - 1);
+                    var ex = new double[extraNames.Count][];
+                    for (int k = 0; k < extraAcc.Length; k++) if (extraAcc[k] >= 0) ex[k] = reader.Vector(extraAcc[k], v, extraComps[k]);
+                    extra.Add(ex);
                 }
                 int indexCount = primitive["indices"] == null ? vertCount : reader.Count(primitive.Value<int>("indices"));
                 if (indexCount % 3 != 0) throw new InvalidDataException("Triangle primitive index count is not divisible by three.");
@@ -896,6 +922,8 @@ public static class GlbDisconnectedParts
         int faceCount = tris.Count / 3;
         result.SourceTriangles = faceCount;
         result.VerticesBefore = pos.Count;
+        if (tangentsDropped) result.Warnings.Add("TANGENT dropped from the fused mesh: tangents follow winding and UVs, which this pass may change — the importer recomputes them.");
+        for (int v = 0; v < pos.Count; v++) { double[][] ex = extra[v]; if (ex.Length < extraNames.Count) { Array.Resize(ref ex, extraNames.Count); extra[v] = ex; } }   // parts read before a later part introduced an attribute
         if (faceCount == 0) { result.Warnings.Add("Nothing to fuse: the chosen parts carry no triangles."); return result; }
 
         double[] mn = { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity };
@@ -1189,7 +1217,7 @@ public static class GlbDisconnectedParts
             foreach (int r in group)
             {
                 bool uvSame = (uv[v] == null && uv[r] == null) || (uv[v] != null && uv[r] != null && Math.Abs(uv[v][0] - uv[r][0]) < 1e-4 && Math.Abs(uv[v][1] - uv[r][1]) < 1e-4);
-                if (uvSame && FDot(finalNormal[v], finalNormal[r]) > 0.999) { found = r; break; }
+                if (uvSame && FDot(finalNormal[v], finalNormal[r]) > 0.999 && ExtrasSame(extra[v], extra[r])) { found = r; break; }
             }
             if (found >= 0) { vertexMap[v] = vertexMap[found]; continue; }
             group.Add(v);
@@ -1198,6 +1226,14 @@ public static class GlbDisconnectedParts
             prim.Positions.Add((float)p.X); prim.Positions.Add((float)p.Y); prim.Positions.Add((float)p.Z);
             prim.Normals.Add((float)nn.X); prim.Normals.Add((float)nn.Y); prim.Normals.Add((float)nn.Z);
             if (uv[v] != null) { prim.Uvs.Add((float)uv[v][0]); prim.Uvs.Add((float)uv[v][1]); } else prim.UvMissing = true;
+            for (int k = 0; k < extraNames.Count; k++)
+            {
+                if (!prim.Extras.TryGetValue(extraNames[k], out List<float> list)) prim.Extras.Add(extraNames[k], list = new List<float>());
+                double[] value = extra[v][k];
+                if (value != null) prim.ExtrasSeen.Add(extraNames[k]);
+                // a vertex from a part without the attribute: white for a colour, zero for anything else
+                for (int c = 0; c < extraComps[k]; c++) list.Add(value != null ? (float)value[c] : extraNames[k].StartsWith("COLOR_", StringComparison.Ordinal) ? 1f : 0f);
+            }
         }
         for (int f = 0; f < faceCount; f++)
         {
@@ -1223,6 +1259,9 @@ public static class GlbDisconnectedParts
                 ["NORMAL"] = AppendFloats(root, bin, prim.Normals, 3, "VEC3", false),
             };
             if (!prim.UvMissing && prim.Uvs.Count > 0) attrs["TEXCOORD_0"] = AppendFloats(root, bin, prim.Uvs, 2, "VEC2", false);
+            for (int k = 0; k < extraNames.Count; k++)
+                if (prim.ExtrasSeen.Contains(extraNames[k]))
+                    attrs[extraNames[k]] = AppendFloats(root, bin, prim.Extras[extraNames[k]], extraComps[k], extraComps[k] == 1 ? "SCALAR" : "VEC" + extraComps[k], false);
             var pj = new JObject { ["attributes"] = attrs, ["indices"] = AppendIndices(root, bin, prim.Indices, 5125), ["mode"] = 4 };
             if (prim.Material >= 0) pj["material"] = prim.Material;
             primitivesJson.Add(pj);
@@ -1275,6 +1314,19 @@ public static class GlbDisconnectedParts
         public readonly List<float> Uvs = new List<float>();
         public readonly List<uint> Indices = new List<uint>();
         public bool UvMissing;   // some vertex of this material had no TEXCOORD_0: the primitive ships without UVs
+        public readonly Dictionary<string, List<float>> Extras = new Dictionary<string, List<float>>();   // COLOR_n, TEXCOORD_1.., custom
+        public readonly HashSet<string> ExtrasSeen = new HashSet<string>();                                // …that at least one vertex actually carried
+    }
+
+    static bool ExtrasSame(double[][] a, double[][] b)
+    {
+        for (int k = 0; k < a.Length; k++)
+        {
+            if (a[k] == null && b[k] == null) continue;
+            if (a[k] == null || b[k] == null) return false;
+            for (int c = 0; c < a[k].Length; c++) if (Math.Abs(a[k][c] - b[k][c]) >= 1e-4) return false;
+        }
+        return true;
     }
 
     static PositionKey CellOf(Vec3 p, double cell) => new PositionKey { X = (long)Math.Floor(p.X / cell), Y = (long)Math.Floor(p.Y / cell), Z = (long)Math.Floor(p.Z / cell) };
@@ -1290,6 +1342,22 @@ public static class GlbDisconnectedParts
     // determinant of the upper-left 3x3 of a column-major glTF matrix: negative = a mirroring transform
     static double Det3(double[] m) =>
         m[0] * (m[5] * m[10] - m[9] * m[6]) - m[4] * (m[1] * m[10] - m[9] * m[2]) + m[8] * (m[1] * m[6] - m[5] * m[2]);
+    // The matrix that carries NORMALS: the inverse transpose of the upper-left 3x3, in the same column-major slots so
+    // XFormDir reads it like any other. Under a rotation it is the matrix itself; under a non-uniform scale it is not
+    // (a normal is a covector — scale the surface 2x along X and its normal shrinks along X). A mirror keeps its sign.
+    // Returns the plain matrix for a singular one (a flattened node): nothing better exists.
+    static double[] NormalMatrix(double[] m)
+    {
+        double det = Det3(m);
+        if (Math.Abs(det) < 1e-18) return m;
+        double a = m[0], b = m[4], c = m[8], d = m[1], e = m[5], f = m[9], g = m[2], h = m[6], i = m[10];   // row-major view: [a b c; d e f; g h i]
+        // inverse = adjugate / det; its transpose = cofactor matrix / det
+        double[] r = Identity();
+        r[0] = (e * i - f * h) / det; r[4] = (f * g - d * i) / det; r[8] = (d * h - e * g) / det;   // first ROW of the cofactor matrix -> slots of the first row
+        r[1] = (c * h - b * i) / det; r[5] = (a * i - c * g) / det; r[9] = (b * g - a * h) / det;
+        r[2] = (b * f - c * e) / det; r[6] = (c * d - a * f) / det; r[10] = (a * e - b * d) / det;
+        return r;
+    }
     static Vec3 XFormDir(double[] m, Vec3 v) => FUnit(new Vec3 {
         X = m[0] * v.X + m[4] * v.Y + m[8] * v.Z,
         Y = m[1] * v.X + m[5] * v.Y + m[9] * v.Z,

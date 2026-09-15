@@ -14,7 +14,7 @@ public class GlbFuseTests
 
     sealed class Part
     {
-        public string Name; public float[] Positions; public int[] Indices; public float[] Uvs; public float[] Normals;
+        public string Name; public float[] Positions; public int[] Indices; public float[] Uvs; public float[] Normals; public float[] Colors; public float[] Uvs1;
         public int Material = -1; public double[] Translation; public double[] Scale; public bool Skinned;
     }
 
@@ -67,6 +67,19 @@ public class GlbFuseTests
                 off = bin.Count; foreach (float f in part.Uvs) bin.AddRange(BitConverter.GetBytes(f));
                 accessors.Add(new JObject { ["bufferView"] = View(off, vcount * 8, 34962), ["componentType"] = 5126, ["count"] = vcount, ["type"] = "VEC2" });
                 attrs["TEXCOORD_0"] = accessors.Count - 1;
+            }
+            if (part.Uvs1 != null)
+            {
+                off = bin.Count; foreach (float f in part.Uvs1) bin.AddRange(BitConverter.GetBytes(f));
+                accessors.Add(new JObject { ["bufferView"] = View(off, vcount * 8, 34962), ["componentType"] = 5126, ["count"] = vcount, ["type"] = "VEC2" });
+                attrs["TEXCOORD_1"] = accessors.Count - 1;
+            }
+            if (part.Colors != null)
+            {   // stored the compact way real exporters use: normalized unsigned bytes, RGBA
+                off = bin.Count; foreach (float f in part.Colors) bin.Add((byte)Math.Round(f * 255));
+                while ((bin.Count & 3) != 0) bin.Add(0);
+                accessors.Add(new JObject { ["bufferView"] = View(off, vcount * 4, 34962), ["componentType"] = 5121, ["normalized"] = true, ["count"] = vcount, ["type"] = "VEC4" });
+                attrs["COLOR_0"] = accessors.Count - 1;
             }
             int[] indices = part.Indices ?? Enumerable.Range(0, vcount).ToArray();
             off = bin.Count; foreach (int i in indices) bin.AddRange(BitConverter.GetBytes((ushort)i));
@@ -426,6 +439,56 @@ public class GlbFuseTests
         Assert.Equal(4, normals.Count); Assert.All(normals, n => Assert.True(n[2] > 0, "faces +Z"));
         float[] p = g.Floats(((JObject)((JObject)g.Primitives(g.Node("A_Fused"))[0])["attributes"]).Value<int>("POSITION"), 3);
         Assert.Equal(-1f, Enumerable.Range(0, p.Length / 3).Min(i => p[i * 3]));
+    }
+
+    [Fact]
+    public void Vertex_colours_and_a_second_UV_set_survive_the_fuse_and_keep_their_own_vertices()
+    {
+        // review of 3052ed0: the fused mesh kept only POSITION / NORMAL / TEXCOORD_0 — a coloured mesh lost COLOR_0.
+        // A is red, B is blue, both carry a second UV set; the seam vertices differ in colour so they must NOT merge.
+        var a = Quad("A", 0, 1, 0, 1, 0); a.Colors = Enumerable.Repeat(new[] { 1f, 0f, 0f, 1f }, 4).SelectMany(c => c).ToArray(); a.Uvs1 = new float[] { 0, 0, 1, 0, 1, 1, 0, 1 };
+        var b = Quad("B", 1, 2, 0, 1, 0); b.Colors = Enumerable.Repeat(new[] { 0f, 0f, 1f, 1f }, 4).SelectMany(c => c).ToArray(); b.Uvs1 = new float[] { 0, 0, 1, 0, 1, 1, 0, 1 };
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(a, b), new[] { 0, 1 }, 0.0);
+        Assert.Equal(1, r.IslandsAfter);
+        Assert.Equal(8, r.VerticesAfter);   // the colour seam keeps its vertices
+        var g = Read(r.Bytes);
+        var attrs = (JObject)((JObject)g.Primitives(g.Node("A_Fused"))[0])["attributes"];
+        Assert.NotNull(attrs["COLOR_0"]); Assert.NotNull(attrs["TEXCOORD_1"]);
+        float[] col = g.Floats(attrs.Value<int>("COLOR_0"), 4);
+        Assert.Equal(4, Enumerable.Range(0, 8).Count(i => col[i * 4] > 0.99f && col[i * 4 + 2] < 0.01f));   // four red…
+        Assert.Equal(4, Enumerable.Range(0, 8).Count(i => col[i * 4 + 2] > 0.99f && col[i * 4] < 0.01f));   // …four blue, nothing blended
+        Assert.Equal(16, g.Floats(attrs.Value<int>("TEXCOORD_1"), 2).Length);
+
+        // the same colours (and matching second UVs) on both sides DO merge, as first UVs do
+        b.Colors = a.Colors; b.Uvs1 = new float[] { 1, 0, 2, 0, 2, 1, 1, 1 };
+        var same = GlbDisconnectedParts.FuseNodes(BuildGlb(a, b), new[] { 0, 1 }, 0.0);
+        Assert.Equal(6, same.VerticesAfter);
+
+        // a part without colours fused with one that has them: the attribute stays, the colourless part is white
+        var plain = Quad("C", 2, 3, 0, 1, 0);
+        var mixed = GlbDisconnectedParts.FuseNodes(BuildGlb(a, plain), new[] { 0, 1 }, 0.0);
+        var ga = (JObject)((JObject)Read(mixed.Bytes).Primitives(Read(mixed.Bytes).Node("A_Fused"))[0])["attributes"];
+        float[] mc = Read(mixed.Bytes).Floats(ga.Value<int>("COLOR_0"), 4);
+        Assert.Equal(4, Enumerable.Range(0, mc.Length / 4).Count(i => mc[i * 4] > 0.99f && mc[i * 4 + 1] > 0.99f && mc[i * 4 + 2] > 0.99f));
+    }
+
+    [Fact]
+    public void Non_uniform_scale_carries_normals_by_the_inverse_transpose()
+    {
+        // review of 3052ed0: normals went through the plain world matrix. A triangle with normal (1,1,1)/√3 under scale
+        // (2,1,1) has the surface normal (1,2,2)/3; the plain matrix gives (2,1,1)/√6 — 35° off.
+        float k = (float)(1 / Math.Sqrt(3));
+        var t = new Part { Name = "T", Positions = new float[] { 1, 0, 0, 0, 1, 0, 0, 0, 1 }, Indices = new[] { 0, 1, 2 }, Normals = new[] { k, k, k, k, k, k, k, k, k }, Scale = new double[] { 2, 1, 1 } };
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(t), new[] { 0 }, 0.0);
+        Assert.Equal(0, r.FacesRewound);
+        var g = Read(r.Bytes);
+        float[] n = g.Floats(((JObject)((JObject)g.Primitives(g.Node("T_Fused"))[0])["attributes"]).Value<int>("NORMAL"), 3);
+        for (int i = 0; i < n.Length / 3; i++)
+            Assert.True((n[i * 3] * 1 + n[i * 3 + 1] * 2 + n[i * 3 + 2] * 2) / 3 > 0.999, "vertex " + i + " normal must be (1,2,2)/3, got " + n[i * 3] + "," + n[i * 3 + 1] + "," + n[i * 3 + 2]);
+        // and the written normal agrees with the written geometry
+        var fn = FaceNormals(g, (JObject)g.Primitives(g.Node("T_Fused"))[0])[0];
+        double len = Math.Sqrt(fn[0] * fn[0] + fn[1] * fn[1] + fn[2] * fn[2]);
+        Assert.True((fn[0] * n[0] + fn[1] * n[1] + fn[2] * n[2]) / len > 0.999);
     }
 
     [Fact]

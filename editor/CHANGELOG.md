@@ -48,7 +48,14 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   negative-determinant node's triangles with the front face reversed, and the Teutonic's port half is the
   starboard meshes under a (0.0254, −0.0254, 0.0254) node; the winding is now swapped at gather, so the port
   hull is judged as it renders (its 9,379-face island is kept at +0.93 agreement, 2 small islands reversed
-  instead of 36) and a port piece mixed into a starboard group no longer needs "correcting".
+  instead of 36) and a port piece mixed into a starboard group no longer needs "correcting". Second review
+  round, two more with tests: **vertex colours and second UV sets were dropped** (only POSITION / NORMAL /
+  TEXCOORD_0 were written) — every other vertex attribute (COLOR_n, TEXCOORD_1.., custom) now rides along, takes
+  part in the merge decision (a colour seam keeps its vertices like a UV seam), and a part without the attribute
+  gets white / zero; TANGENT alone is dropped with a warning (it follows winding and UVs, both of which this
+  pass may change; the importer recomputes it). And **normals went through the plain world matrix** — under a
+  non-uniform scale a normal needs the inverse transpose (a (2,1,1) scale put a sloped normal 35° off its
+  surface); the Teutonic's nodes are uniform (0.0254) so nothing changed there, but a scaled part now lights right.
 
 - **Vehicle Lab: the ⟲ inside-out marks — see the fix's reach before it runs.** Every probed part the
   **Fix inside-out faces** pass would reverse now carries a ⟲ tag in the list (with its island count), and

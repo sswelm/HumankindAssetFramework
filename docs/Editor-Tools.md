@@ -398,8 +398,9 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   across each welded island, and direction judged once where it can be — a closed shell, a thin solid or a convex
   plating region by its signed volume about its own centroid (wound inward = reversed whole; trusted only where the
   per-face volumes agree and there is real thickness), a *flat* sheet (deck, bulwark) by the inside-out score against
-  the hull's belly axis. Welded vertices share one position even where a UV seam or hard edge keeps them separate,
-  and a mirrored instance (a node with negative scale, the usual "other half" of a symmetric hull) is read with the
+  the hull's belly axis. Welded vertices share one position even where a UV seam or hard edge keeps them separate;
+  vertex colours, further UV sets and custom attributes ride along and keep their own seams too (tangents are the
+  one thing dropped — the importer recomputes them from the new winding); and a mirrored instance (a node with negative scale, the usual "other half" of a symmetric hull) is read with the
   winding it renders with. The console line lists the largest islands with what was measured and what decided.
   Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh;
   the fused part is a new root node named after the first checked row. The output can never be the source file.
