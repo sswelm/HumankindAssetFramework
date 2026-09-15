@@ -563,7 +563,10 @@ public static class GlbDisconnectedParts
         return result;
     }
 
-    static void GuardPaths(string inputPath, string outputPath)
+    // Public so a caller that writes the bytes itself (the Workshop's chained Fuse) refuses the same thing the file
+    // entry points refuse: output == source. The Workshop's "Overwrite existing file?" dialog is an ordinary overwrite
+    // prompt, not this guard — it would have let the source go (review of 4e748c1).
+    public static void GuardPaths(string inputPath, string outputPath)
     {
         if (string.Equals(Path.GetFullPath(inputPath), Path.GetFullPath(outputPath), StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Choose a new output path; the source GLB is never overwritten.");
@@ -803,14 +806,22 @@ public static class GlbDisconnectedParts
     // `weldFraction` of the model's longest extent are one vertex (attributes permitting — a UV seam or a hard-edge
     // normal keeps its own vertex, while CONNECTIVITY is by position regardless); each welded island is made
     // consistent by MAJORITY (orientation parity propagated across every two-face edge, the minority reversed);
-    // and direction is judged where it can be: an OPEN sheet (more than 30 % boundary edges — a deck, a bulwark)
-    // by the inside-out score against an axis through the hull belly, a CLOSED shell by its signed volume
-    // (negative = wound inward, reversed whole). Two rules were measured and rejected on the Blender prototype
+    // and direction is judged where it can be: an OPEN sheet (any boundary edge — a deck, a bulwark, a plating
+    // region) by the inside-out score against an axis through the hull belly, a CLOSED shell (no boundary edge at
+    // all) by its signed volume (negative = wound inward, reversed whole). A "mostly closed" threshold was tried
+    // first (30 % boundary edges) and rejected in review: a densely triangulated deck is 23 % boundary, and the
+    // signed volume of an open surface depends on where the origin is — a correct deck below y=0 came back reversed
+    // whole. Two more rules were measured and rejected on the Blender prototype
     // the same day: a blind normal recalc flipped 40 % of a 99.6 %-edge-consistent island (overlapping plates are
     // not the manifold solid it assumes), and the radial score on a closed thin shell reads ~0 (inner faces cancel
     // outer). Vertex normals follow the final winding (negated where every incident face was reversed, recomputed
     // where mixed). Triangles are preserved exactly; the source nodes keep their transforms and children and lose
     // only their mesh; the fused mesh lands on a new root node in world space.
+    // An open island's signed volume counts as a judgement of facing only when |volume| / area^1.5 (~ thickness over
+    // sheet width for a thin solid) clears this. Measured on the Teutonic (2026-09-15): plating regions read 0.044,
+    // 0.047, 0.137, 0.158 and 0.222; an 18-face strip 0.004; the lap-over-plate fixture 0.001. A flat sheet reads 0.
+    const double VolumeThicknessGate = 0.01;
+
     public static Result FuseNodes(byte[] source, IList<int> nodeIndices, double weldFraction) => FuseNodes(source, nodeIndices, weldFraction, null);
 
     public static Result FuseNodes(byte[] source, IList<int> nodeIndices, double weldFraction, string fusedName)
@@ -843,6 +854,11 @@ public static class GlbDisconnectedParts
             var mesh = meshes[mi] as JObject ?? throw new InvalidDataException("Mesh is not an object.");
             var primitives = mesh["primitives"] as JArray ?? throw new InvalidDataException("Mesh has no primitives.");
             double[] world = NodeWorldMatrix(nodes, ni);
+            // glTF: a node whose transform has a negative determinant (a MIRRORED instance) renders its triangles
+            // with the front face reversed. Baked to world space on an identity root, that winding must be swapped
+            // or the part arrives inside-out — the Teutonic's port half is the starboard meshes under a
+            // (0.0254, -0.0254, 0.0254) node, and without this every port island came in inverted (2026-09-15).
+            bool mirrored = Det3(world) < 0;
             partNames.Add(nodeName); fusedMeshes.Add(mi);
             foreach (JObject primitive in TrianglePrimitives(primitives))
             {
@@ -867,12 +883,14 @@ public static class GlbDisconnectedParts
                 }
                 int indexCount = primitive["indices"] == null ? vertCount : reader.Count(primitive.Value<int>("indices"));
                 if (indexCount % 3 != 0) throw new InvalidDataException("Triangle primitive index count is not divisible by three.");
+                int triStart = tris.Count;
                 for (uint i = 0; i < indexCount; i++)
                 {
                     uint idx = primitive["indices"] == null ? i : reader.Index(primitive.Value<int>("indices"), i);
                     if (idx >= vertCount) throw new InvalidDataException("Primitive index exceeds its POSITION accessor.");
                     tris.Add(baseV + (int)idx);
                 }
+                if (mirrored) for (int t = triStart; t + 2 < tris.Count; t += 3) { int tmp = tris[t + 1]; tris[t + 1] = tris[t + 2]; tris[t + 2] = tmp; }
             }
         }
         int faceCount = tris.Count / 3;
@@ -971,6 +989,20 @@ public static class GlbDisconnectedParts
         }
         result.IslandsBefore = Islands(WeldClasses(rounding), out _, out _, out _, out _).Count;   // coincident positions only: what the source already connects
         int[] classes = WeldClasses(weld);
+        // ONE position per welded class. Connectivity is by class, but output vertices are emitted separately wherever
+        // UV, normal or material differ, and each kept its own authored position: two plates 0.01 apart across a UV
+        // seam reported one island and still rendered the 0.01 gap (review of 4e748c1). Every vertex of a class now
+        // sits at the class centroid — at weld 0 a move within float rounding, at 0.5‰ exactly what was asked for —
+        // and every judgement below (winding, direction, vertex normals) sees the geometry that will be written.
+        {
+            var sum = new Dictionary<int, Vec3>(); var count = new Dictionary<int, int>();
+            for (int v = 0; v < pos.Count; v++)
+            {
+                if (sum.TryGetValue(classes[v], out Vec3 s)) { sum[classes[v]] = FAdd(s, pos[v]); count[classes[v]]++; }
+                else { sum.Add(classes[v], pos[v]); count.Add(classes[v], 1); }
+            }
+            for (int v = 0; v < pos.Count; v++) if (count[classes[v]] > 1) pos[v] = FScale(sum[classes[v]], 1.0 / count[classes[v]]);
+        }
         List<List<int>> allIslands = Islands(classes, out long[] fEdgeKeys, out bool[] fEdgeDir, out Dictionary<long, List<int>> fEdgeFaces, out int collapsedFaces);
         result.IslandsAfter = allIslands.Count;
 
@@ -1044,43 +1076,67 @@ public static class GlbDisconnectedParts
             }
         }
 
-        // 5) direction — open sheets by the inside-out score, closed shells by their signed volume
+        // 5) direction. The signed volume about the ORIGIN was wrong for anything with a boundary: it is the volume of
+        // a cone from the origin over the surface, so it reads where the surface sits, not which way it faces (a
+        // correct deck under y=0 came back reversed whole — review of 4e748c1). Judged about the island's own
+        // centroid instead, and trusted only where the per-face cones AGREE (|sum| / sum|v| > 0.5): a closed shell,
+        // a thin slab with holes, a convex plating region all read ±1; a flat sheet reads 0/0 (the centroid lies in
+        // its plane) and falls to the inside-out score against the hull's belly axis. Measured on the Teutonic the
+        // same day: "closed = no boundary edge at all" was tried first and lost the 3,907-face plating island (21 %
+        // boundary, a thin solid the radial score cannot see, authored inward by a 51 % majority) — its side plating
+        // fell from 96 % outward to 78 %; the agreement rule keeps that call and still leaves the deck alone.
         int lengthAxis = (mx[0] - mn[0]) >= (mx[2] - mn[2]) ? 0 : 2, widthAxis = lengthAxis == 0 ? 2 : 0;   // glTF is Y-up; the hull's length is the longer horizontal extent
         double centreW = 0.5 * (mn[widthAxis] + mx[widthAxis]);
         var ys = new List<double>(); int step = Math.Max(1, pos.Count / 5000);
         for (int i = 0; i < pos.Count; i += step) ys.Add(pos[i].Y);
         ys.Sort(); double bellyY = ys.Count > 0 ? ys[ys.Count / 4] : 0.0;   // the 25th percentile of height: inside the hull mass, below the deck
         int openJudged = 0, openReversed = 0, closedReversed = 0;
-        foreach (List<int> isl in allIslands)
+        var islandRule = new string[allIslands.Count];   // per island, for the "largest islands" line: what was measured and what decided
+        for (int ii = 0; ii < allIslands.Count; ii++)
         {
+            List<int> isl = allIslands[ii];
             var keys = new HashSet<long>(); int boundary = 0;
             foreach (int f in isl) for (int e = 0; e < 3; e++) { long key = fEdgeKeys[f * 3 + e]; if (key >= 0 && keys.Add(key) && fEdgeFaces[key].Count == 1) boundary++; }
-            double boundaryFraction = keys.Count > 0 ? boundary / (double)keys.Count : 1.0;
-            if (boundaryFraction > 0.30)
+            bool closed = boundary == 0 && keys.Count > 0;
+            // signed volume about the island's own centroid, and how much the per-face cones agree on its sign
+            var centroid = new Vec3 { X = 0, Y = 0, Z = 0 };
+            foreach (int f in isl) centroid = FAdd(centroid, FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)));
+            centroid = FScale(centroid, 1.0 / (3.0 * isl.Count));
+            double volume = 0, absVolume = 0, area = 0;
+            foreach (int f in isl)
             {
-                openJudged++;
-                double sum = 0; int n = 0;
-                foreach (int f in isl)
-                {
-                    Vec3 c = FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0);
-                    var radial = new Vec3 { X = 0, Y = c.Y - bellyY, Z = 0 };
-                    if (widthAxis == 0) radial.X = c.X - centreW; else radial.Z = c.Z - centreW;
-                    double rl = FLen(radial), nl = FLen(FaceNormal(f));
-                    if (rl < 1e-9 || nl < 1e-12) continue;
-                    sum += FDot(FaceNormal(f), radial) / (rl * nl); n++;
-                }
-                if (n > 0 && sum / n < -0.25) { foreach (int f in isl) flip[f] = !flip[f]; openReversed++; }
+                double v = FDot(FSub(P(f, 0), centroid), FCross(FSub(P(f, 1), centroid), FSub(P(f, 2), centroid))) / 6.0;
+                if (flip[f]) v = -v;
+                volume += v; absVolume += Math.Abs(v); area += 0.5 * FLen(FaceNormal(f));
             }
+            double agreement = absVolume > 1e-12 * longest * longest * longest ? volume / absVolume : 0.0;
+            // how much volume for its surface: a thin solid of thickness t over area A holds ~tA, so this is ~t/sqrt(A) —
+            // a lap strip 0.01 over a 2x1 plate reads 0.001, a real plating region far more. Below the gate the
+            // "volume" is a sheet's tiny curl and no judgement of facing.
+            double thickness = area > 0 ? volume / Math.Pow(area, 1.5) : 0.0;
+            // the inside-out score against the belly axis (what a flat sheet is judged by)
+            double sum = 0; int n = 0;
+            foreach (int f in isl)
+            {
+                Vec3 c = FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0);
+                var radial = new Vec3 { X = 0, Y = c.Y - bellyY, Z = 0 };
+                if (widthAxis == 0) radial.X = c.X - centreW; else radial.Z = c.Z - centreW;
+                double rl = FLen(radial), nl = FLen(FaceNormal(f));
+                if (rl < 1e-9 || nl < 1e-12) continue;
+                sum += FDot(FaceNormal(f), radial) / (rl * nl); n++;
+            }
+            double score = n > 0 ? sum / n : 0.0;
+            bool reverse;
+            if (closed) { reverse = volume < 0; if (reverse) closedReversed++; }
             else
             {
-                double volume = 0;
-                foreach (int f in isl)
-                {
-                    double v = FDot(P(f, 0), FCross(P(f, 1), P(f, 2))) / 6.0;
-                    volume += flip[f] ? -v : v;
-                }
-                if (volume < -1e-9 * longest * longest * longest) { foreach (int f in isl) flip[f] = !flip[f]; closedReversed++; }
+                openJudged++;
+                reverse = Math.Abs(agreement) > 0.5 && Math.Abs(thickness) > VolumeThicknessGate ? volume < 0 : score < -0.25;
+                if (reverse) openReversed++;
             }
+            if (reverse) foreach (int f in isl) flip[f] = !flip[f];
+            islandRule[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}, volume agreement {1:+0.00;-0.00} thickness {2:+0.0000;-0.0000}, inside-out score {3:+0.00;-0.00}: {4}",
+                closed ? "closed" : "open", agreement, thickness, score, reverse ? "reversed whole" : "kept");
         }
         foreach (bool b in flip) if (b) result.FacesRewound++;
         // the largest islands, so a reader can see WHAT was judged (faces, boundary share, how many faces the majority
@@ -1089,11 +1145,12 @@ public static class GlbDisconnectedParts
         string largestIslands;
         {
             var rows = new List<string>();
-            foreach (List<int> isl in allIslands.OrderByDescending(i => i.Count).Take(6))
+            foreach (int ii in Enumerable.Range(0, allIslands.Count).OrderByDescending(i => allIslands[i].Count).Take(6))
             {
+                List<int> isl = allIslands[ii];
                 var keys = new HashSet<long>(); int boundary = 0, turned = 0;
                 foreach (int f in isl) { if (flip[f]) turned++; for (int e = 0; e < 3; e++) { long key = fEdgeKeys[f * 3 + e]; if (key >= 0 && keys.Add(key) && fEdgeFaces[key].Count == 1) boundary++; } }
-                rows.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} faces ({1:0}% boundary, {2} rewound)", isl.Count, keys.Count > 0 ? 100.0 * boundary / keys.Count : 100.0, turned));
+                rows.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} faces ({1:0}% boundary, {2}, {3} rewound)", isl.Count, keys.Count > 0 ? 100.0 * boundary / keys.Count : 100.0, islandRule[ii], turned));
             }
             largestIslands = "largest islands: " + string.Join("; ", rows);
         }
@@ -1230,6 +1287,9 @@ public static class GlbDisconnectedParts
     static double FLen(Vec3 a) => Math.Sqrt(FDot(a, a));
     static Vec3 FUnit(Vec3 a) { double l = FLen(a); return l > 1e-18 ? FScale(a, 1.0 / l) : a; }
     // a direction through the node's world matrix: the 3x3 part, re-normalized (rigid + uniform scale, which is what game rips carry)
+    // determinant of the upper-left 3x3 of a column-major glTF matrix: negative = a mirroring transform
+    static double Det3(double[] m) =>
+        m[0] * (m[5] * m[10] - m[9] * m[6]) - m[4] * (m[1] * m[10] - m[9] * m[2]) + m[8] * (m[1] * m[6] - m[5] * m[2]);
     static Vec3 XFormDir(double[] m, Vec3 v) => FUnit(new Vec3 {
         X = m[0] * v.X + m[4] * v.Y + m[8] * v.Z,
         Y = m[1] * v.X + m[5] * v.Y + m[9] * v.Z,

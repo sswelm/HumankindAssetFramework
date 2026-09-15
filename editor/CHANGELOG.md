@@ -32,6 +32,23 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   lines along the strakes; same traversal AND agreeing authored normals now reads as "on the same side on
   purpose" (532 of 656 strips with their plate after the fix). Fixing the source means the Lab, the Factory and the
   static bake all see a whole hull; a Vehicle-Lab-side version was built first and dropped in favour of this one.
+  Review of the PR then found three more, all fixed and each with a test: **the signed volume was judged about
+  the origin** for any island under 30 % boundary edges — an open surface's signed volume is the cone from the
+  origin over it, so it reads where the sheet sits, not which way it faces (a correct 5×5 deck under y=0 came
+  back all 50 triangles reversed); it is now judged about the island's own centroid and trusted only where the
+  per-face cones agree (|Σv|/Σ|v| > 0.5) and there is real thickness (|volume|/area^1.5 > 0.01 — plating regions
+  read 0.04–0.22, a lap strip 0.001, a flat sheet 0), a flat sheet falling to the inside-out score; a "closed
+  = no boundary edge" rule was tried first and lost the Teutonic's 3,907-face plating island (21 % boundary,
+  a thin solid the radial score cannot see) — its side plating fell from 96 % outward to 78 %, the agreement
+  rule keeps it. **Welded vertices kept their own positions** where a UV seam or hard edge made them separate
+  output vertices, so two plates a gap apart inside the weld reported one island and still showed the gap;
+  every vertex of a welded class now sits at the class centroid. **The Workshop's Fuse button wrote the output
+  itself** and only asked the ordinary "overwrite?" — output == source now refuses like every file entry point.
+  And a fourth found by the drill on the port side: **a mirrored instance arrived inside-out** — glTF renders a
+  negative-determinant node's triangles with the front face reversed, and the Teutonic's port half is the
+  starboard meshes under a (0.0254, −0.0254, 0.0254) node; the winding is now swapped at gather, so the port
+  hull is judged as it renders (its 9,379-face island is kept at +0.93 agreement, 2 small islands reversed
+  instead of 36) and a port piece mixed into a starboard group no longer needs "correcting".
 
 - **Vehicle Lab: the ⟲ inside-out marks — see the fix's reach before it runs.** Every probed part the
   **Fix inside-out faces** pass would reverse now carries a ⟲ tag in the list (with its island count), and

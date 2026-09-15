@@ -322,8 +322,9 @@ public class ModelWorkshopWindow : EditorWindow
                             ? "Fuse — mark parts with a ⊕ letter first (popup per row, or keys A–H on the highlighted row)"
                             : $"Fuse {fusedRows} marked part(s) in {fuseGroups.Count} group(s) ({string.Join(", ", fuseGroups.Select(g => "⊕" + g + "×" + rows.Count(r => r.fuse == g)))}) into one shell each  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
                         "Joins the parts of each ⊕ group into ONE mesh in the output GLB, welds their seams, makes the winding consistent by MAJORITY across each " +
-                        "welded island (the minority of faces reversed to agree with the rest), and judges direction once where it can be judged: an OPEN " +
-                        "sheet (a deck, a bulwark) by the inside-out score, a CLOSED shell by its signed volume (inside-out = reversed whole). The cure for " +
+                        "welded island (the minority of faces reversed to agree with the rest), and judges direction once where it can be judged: a shell, " +
+                        "a thin solid or a convex plating region by its signed volume about its own centroid (inside-out = reversed whole), a FLAT sheet " +
+                        "(a deck, a bulwark) by the inside-out score. Mirrored instances (negative node scale) are read with the winding they render with. The cure for " +
                         "a hull authored as dozens of separate plates — see-through, a hole in its side, gaps under any reduction. Triangles are preserved " +
                         "exactly; the source parts keep their transforms and children and lose only their mesh. The source file is never touched."), GUILayout.Height(28)))
                     FuseMarked();
@@ -649,6 +650,8 @@ public class ModelWorkshopWindow : EditorWindow
     // in group A's output. One write at the end; the source file is never touched.
     void FuseMarked()
     {
+        try { GlbDisconnectedParts.GuardPaths(srcFile, outGlb); }   // the file entry points refuse output == source; this path writes the bytes itself, so it asks the same guard
+        catch (Exception e) { status = "Fuse refused (source untouched): " + e.Message; return; }
         if (File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?", outGlb, "Overwrite", "Cancel")) return;
         try
         {

@@ -395,11 +395,15 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   press **Fuse … into one shell each**: every group becomes ONE mesh in the output GLB, their seam vertices
   welded (a UV seam or a hard edge keeps its own vertex; connectivity is by position regardless), the winding
   made **consistent by majority**
-  across each welded island, and direction judged once where it can be — an *open* sheet (deck, bulwark) by the
-  inside-out score, a *closed* shell by its signed volume (wound inward = reversed whole). Triangles are preserved
-  exactly; the source parts keep their transforms and children and lose only their mesh; the fused part is a new
-  root node named after the first checked row. Re-Probe the output to see it as one island, then rig it in the
-  Vehicle Lab like any other part.
+  across each welded island, and direction judged once where it can be — a closed shell, a thin solid or a convex
+  plating region by its signed volume about its own centroid (wound inward = reversed whole; trusted only where the
+  per-face volumes agree and there is real thickness), a *flat* sheet (deck, bulwark) by the inside-out score against
+  the hull's belly axis. Welded vertices share one position even where a UV seam or hard edge keeps them separate,
+  and a mirrored instance (a node with negative scale, the usual "other half" of a symmetric hull) is read with the
+  winding it renders with. The console line lists the largest islands with what was measured and what decided.
+  Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh;
+  the fused part is a new root node named after the first checked row. The output can never be the source file.
+  Re-Probe the output to see it as one island, then rig it in the Vehicle Lab like any other part.
 - **Backup & Restore** — `Tools ▸ HAF ▸ Backup and Restore`. A safety net for everything git doesn't track (editor
   scripts, `FactorySource`, baked Resources, ENC databases, `Tools/`, live `BepInEx/config`). Timestamped, additive,
   guarded restore (auto-snapshots current state first). **Deep dive:** [Backup.md](Backup.md).

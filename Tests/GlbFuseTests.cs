@@ -15,7 +15,7 @@ public class GlbFuseTests
     sealed class Part
     {
         public string Name; public float[] Positions; public int[] Indices; public float[] Uvs; public float[] Normals;
-        public int Material = -1; public double[] Translation; public bool Skinned;
+        public int Material = -1; public double[] Translation; public double[] Scale; public bool Skinned;
     }
 
     // a unit quad in the XY plane at z, spanning [x0,x1] x [y0,y1]; `inward` winds it so the geometric normal points -Z
@@ -77,6 +77,7 @@ public class GlbFuseTests
             meshes.Add(new JObject { ["name"] = part.Name + "Mesh", ["primitives"] = new JArray { prim } });
             var node = new JObject { ["name"] = part.Name, ["mesh"] = meshes.Count - 1 };
             if (part.Translation != null) node["translation"] = new JArray(part.Translation);
+            if (part.Scale != null) node["scale"] = new JArray(part.Scale);
             if (part.Skinned) node["skin"] = 0;
             nodes.Add(node); sceneNodes.Add(nodes.Count - 1);
         }
@@ -348,5 +349,89 @@ public class GlbFuseTests
         var prim = (JObject)g.Primitives(g.Node("A_Fused"))[0];
         float[] n = g.Floats(((JObject)prim["attributes"]).Value<int>("NORMAL"), 3);
         for (int i = 0; i < n.Length / 3; i++) Assert.True(n[i * 3 + 2] > 0.99f, "vertex " + i + " normal must point +Z after the flip");
+    }
+
+    // ---- review of 4e748c1 (2026-09-15) ----
+
+    // a flat n x n grid of quads in the XZ plane at height y, every triangle wound to face +Y
+    static Part Grid(string name, int n, float y)
+    {
+        var p = new List<float>(); var idx = new List<int>();
+        for (int r = 0; r <= n; r++) for (int c = 0; c <= n; c++) { p.Add(c); p.Add(y); p.Add(r); }
+        for (int r = 0; r < n; r++) for (int c = 0; c < n; c++)
+        {
+            int a = r * (n + 1) + c, b = a + 1, d = a + (n + 1), e = d + 1;   // (b-a)x(d-a) = (1,0,0)x(0,0,1) = (0,-1,0): so wind a,d,b for +Y
+            idx.AddRange(new[] { a, d, b, b, d, e });
+        }
+        return new Part { Name = name, Positions = p.ToArray(), Indices = idx.ToArray() };
+    }
+
+    [Fact]
+    public void A_densely_triangulated_open_deck_below_the_origin_is_not_a_closed_shell()
+    {
+        // 5x5 quads: 20 boundary edges of 85 (23 %) — under a "mostly closed" threshold this was judged by signed
+        // volume, and a correct upward deck at y=-1 came back with all 50 triangles reversed. Closed means no boundary edge.
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(Grid("Deck", 5, -1)), new[] { 0 }, 0.0);
+        Assert.Equal(50, r.SourceTriangles);
+        Assert.Equal(0, r.FacesRewound);
+        Assert.Contains("1 open sheet(s) judged, 0 reversed; 0 closed shell(s) reversed whole", r.Details[0]);
+        var g = Read(r.Bytes);
+        Assert.All(FaceNormals(g, (JObject)g.Primitives(g.Node("Deck_Fused"))[0]), n => Assert.True(n[1] > 0, "still faces up"));
+
+        // and a genuinely closed shell is still judged by volume wherever it sits: a box entirely below and behind the origin
+        var far = GlbDisconnectedParts.FuseNodes(BuildGlb(Box("Box", 2, -10, -10, -10, inward: true)), new[] { 0 }, 0.0);
+        Assert.Equal(12, far.FacesRewound);
+        Assert.Contains("1 closed shell(s) reversed whole", far.Details[0]);
+        var farOk = GlbDisconnectedParts.FuseNodes(BuildGlb(Box("Box", 2, -10, -10, -10, inward: false)), new[] { 0 }, 0.0);
+        Assert.Equal(0, farOk.FacesRewound);
+    }
+
+    [Fact]
+    public void A_gap_inside_the_weld_closes_even_where_a_UV_seam_keeps_separate_vertices()
+    {
+        // B starts 0.01 past A's edge with DIFFERENT UVs at the seam: connectivity welded them (one island) but the
+        // separately emitted seam vertices kept x=1.0 and x=1.01 — a visible crack. One position per welded class.
+        var a = Quad("A", 0, 1, 0, 1, 0); a.Uvs = new float[] { 0, 0, 0.5f, 0, 0.5f, 1, 0, 1 };
+        var b = Quad("B", 1.01f, 2.01f, 0, 1, 0); b.Uvs = new float[] { 0.7f, 0, 1, 0, 1, 1, 0.7f, 1 };
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(a, b), new[] { 0, 1 }, 0.05);   // 0.05 * 2.01 = 0.1 > 0.01
+        Assert.Equal(1, r.IslandsAfter);
+        Assert.Equal(8, r.VerticesAfter);            // the UV seam still keeps its own vertices…
+        var g = Read(r.Bytes);
+        var prim = (JObject)g.Primitives(g.Node("A_Fused"))[0];
+        float[] p = g.Floats(((JObject)prim["attributes"]).Value<int>("POSITION"), 3);
+        var xs = Enumerable.Range(0, p.Length / 3).Select(i => p[i * 3]).OrderBy(x => x).ToList();
+        Assert.Equal(4, xs.Count(x => Math.Abs(x - 1.005f) < 1e-5f));   // …but all four seam vertices sit on ONE line, the class centroid
+        Assert.DoesNotContain(xs, x => Math.Abs(x - 1.0f) < 1e-6f || Math.Abs(x - 1.01f) < 1e-6f);
+        Assert.Equal(2, xs.Count(x => x == 0f)); Assert.Equal(2, xs.Count(x => Math.Abs(x - 2.01f) < 1e-6f));   // the far edges untouched
+
+        // at weld 0 nothing inside rounding is touched: the exact-seam plates keep their authored coordinates bit for bit
+        var exact = GlbDisconnectedParts.FuseNodes(BuildGlb(Quad("A", 0, 1, 0, 1, 0), Quad("B", 1, 2, 0, 1, 0)), new[] { 0, 1 }, 0.0);
+        float[] pe = Read(exact.Bytes).Floats(((JObject)((JObject)Read(exact.Bytes).Primitives(Read(exact.Bytes).Node("A_Fused"))[0])["attributes"]).Value<int>("POSITION"), 3);
+        Assert.All(pe, v => Assert.True(v == 0f || v == 1f || v == 2f, "coordinate " + v));
+    }
+
+    [Fact]
+    public void A_mirrored_instance_keeps_the_facing_it_renders_with()
+    {
+        // glTF: a node with a negative-determinant transform renders its triangles with the front face reversed. The
+        // Teutonic's port half is the starboard meshes under a (0.0254, -0.0254, 0.0254) node; baked to world space with
+        // the raw winding it arrived inside-out and the fuse "corrected" it by reversing whole (by luck, per island).
+        var a = Quad("A", 0, 1, 0, 1, 0); a.Scale = new double[] { -1, 1, 1 };   // mirrored across X: world x -1..0, raw winding now reads -Z, rendered front is +Z
+        var b = Quad("B", 0, 1, 0, 1, 0);                                       // abuts it at x=0, +Z
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(a, b), new[] { 0, 1 }, 0.0);
+        Assert.Equal(1, r.IslandsAfter);
+        Assert.Equal(0, r.FacesRewound);   // nothing to correct: both render +Z, and the fused mesh is written that way
+        var g = Read(r.Bytes);
+        var normals = FaceNormals(g, (JObject)g.Primitives(g.Node("A_Fused"))[0]);
+        Assert.Equal(4, normals.Count); Assert.All(normals, n => Assert.True(n[2] > 0, "faces +Z"));
+        float[] p = g.Floats(((JObject)((JObject)g.Primitives(g.Node("A_Fused"))[0])["attributes"]).Value<int>("POSITION"), 3);
+        Assert.Equal(-1f, Enumerable.Range(0, p.Length / 3).Min(i => p[i * 3]));
+    }
+
+    [Fact]
+    public void The_path_guard_refuses_output_equal_to_source()
+    {
+        Assert.Throws<InvalidOperationException>(() => GlbDisconnectedParts.GuardPaths(@"C:\models\ship.glb", @"C:/models/SHIP.GLB"));
+        GlbDisconnectedParts.GuardPaths(@"C:\models\ship.glb", @"C:\models\ship_fused.glb");
     }
 }
