@@ -5,6 +5,26 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab: FUSE GROUPS — weld a plated hull into one shell before judging its facing.** The Teutonic
+  shipped see-through with a hole in its side: its hull plating is dozens of disconnected islands per object
+  (`Object_20` alone: 84), the per-island inside-out fix flipped some plates and not others, and any reduction
+  opened gaps because plates share no vertices. Each part row now carries a second, independent mark — a fuse
+  letter ⊕A–H (popup, or keys 1–8; 0 clears) — and parts sharing a letter are **joined into one mesh** at
+  Generate, their seam vertices **welded** within a dial (‰ of the model's length, default 0.5), and the winding
+  made **consistent by majority** across each welded island (the minority reversed to agree with the rest); open
+  sheets are then judged once with the fix's interior-facing score, closed shells keep the artist's direction unless
+  Blender's closed-shell solver reads the whole shell as inside-out, and a fused hull that still renders inverted
+  is reversed whole by marking the group's first member **Flip**. Drilled headless on the Teutonic's four hull
+  parts before shipping: 861 → 151 islands, 9,000 → 5,013 vertices, and the hole was a 1,609-face plate region glued
+  to the hull the wrong way round along a 26-edge seam — invisible to any per-island test, found and reversed by
+  the majority rule (Blender's own solver agreed on every island afterwards). Two rules were tried and rejected
+  on the way: trusting `recalc_face_normals` outright (it flipped 40% of a 99.6%-edge-consistent island —
+  overlapping plates are not the manifold solid it assumes) and the radial score on closed shells (a thin plate
+  solid's inner faces cancel its outer ones; it reads ~0). Runs after the reduce tiers, before the armature; the
+  fused mesh keeps its first-listed member's role; groups holding a moving part are refused with a log line. New
+  recipe field `fusePermille`; `fuse=<permille>|@<file>` to the script; the Generate log prints per group the
+  islands before/after, made consistent, reversed whole, and open sheets judged.
+
 - **Vehicle Lab: the ⟲ inside-out marks — see the fix's reach before it runs.** Every probed part the
   **Fix inside-out faces** pass would reverse now carries a ⟲ tag in the list (with its island count), and
   the checkbox itself reports the total — whether the fix is on or off. The verdicts come from the SAME

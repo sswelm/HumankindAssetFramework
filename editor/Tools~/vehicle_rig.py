@@ -786,6 +786,24 @@ preserve_reduce = min(95.0, max(0.0, float(argv[68]))) if len(argv) > 68 and arg
 # wants a dial between Structure and Body. Welds to the hull like Body; no exemptions, no special handling.
 detail_names = namelist(argv[69]) if len(argv) > 69 and argv[69].strip() else []
 detail_reduce = min(95.0, max(0.0, float(argv[70]))) if len(argv) > 70 and argv[70].strip() else 0.0
+# FUSE GROUPS (2026-09-15, tagged like merge2/bright): fuse=<permille>|@<file>, file lines `<letter>|<part name>`.
+# Parts sharing a letter are JOINED into one mesh right after the reduce tiers, their seam vertices welded within
+# permille/1000 of the model's length, and the winding made consistent across the fused shell and judged ONCE
+# (see _fuse_groups). The user's diagnosis of the Teutonic's see-through hull: the plating ships as dozens of
+# disconnected islands per object, and the per-island inside-out fix flips some plates and not others.
+_fuarg = next((a for a in argv if a.startswith("fuse=")), None)
+fuse_permille = 0.0
+fuse_groups = {}          # letter -> [part names, in marking order]; the FIRST name is the member whose role/bone the fused mesh keeps
+if _fuarg:
+    try:
+        _fp, _ff = _fuarg[len("fuse="):].split("|", 1)
+        fuse_permille = float(_fp) if _fp.strip() else 0.5
+        for _fl in namelist(_ff):
+            _fg, _fn = _fl.split("|", 1)
+            if _fg.strip() and _fn.strip():
+                fuse_groups.setdefault(_fg.strip(), []).append(_fn.strip())
+    except ValueError:
+        print("VEHICLE ERROR: malformed fuse argument: %s" % _fuarg); sys.exit(1)
 # SAIL IDLE FOLD (argv[71], 2026-09-09, vanilla-parity request): "1" = at idle the canvas FOLDS at the yard
 # (visible bundled sail, like the vanilla triaconter's brailed-up cloth) instead of the 180-degree strike below
 # the keel. ROTATION-ONLY by construction: the canvas is band-skinned to a Sail->SailF1->SailF2 chain and the
@@ -1018,6 +1036,8 @@ for _rl in (wheel_names, turret_names, track_names, gun_names, rotor_names, tail
             muzzle_names, cradle_names, oar_names, sail_names, rigging_names, structure_names, body_names,
             flag_names, rudder_names, preserve_names, flip_names, detail_names):
     _role_marked.update(_rl)
+for _fgl in fuse_groups.values():
+    _role_marked.update(_fgl)   # a fuse mark is a mark: never purge a part the user grouped
 for _fo in mesh_objects():
     # the import-time Icosphere purge is conservative (skips skinned ones); on THIS path all skinning is
     # about to be cleared anyway, so a bone-shape placeholder with vertex groups is equally garbage — the
@@ -1239,6 +1259,165 @@ for _rlabel, _rnames, _rpct in (("RIGGING", rigging_names, rigging_reduce), ("ST
         print("VEHICLE %s: %d part(s) reduced, %d -> %d verts total (%.0f%% cut)"
               % (_rlabel, _rr_n, _rr_v0, _rr_v1, 100.0 * (1.0 - float(_rr_v1) / max(1, _rr_v0))))
 _lap("reduce")
+
+# ---- FUSE GROUPS BEGIN (2026-09-15) ----
+# Parts sharing a fuse letter become ONE mesh with welded seams and consistent winding. Runs AFTER the reduce
+# tiers (each part still reduced by its own role dial) and BEFORE the armature (the fused mesh is skinned like
+# its first-listed member: bone_of / body_bone by that name - so a group of hull plates lands on the hull bone).
+# Per fused mesh: join -> bmesh.ops.remove_doubles(dist) -> per connected island: recalc_face_normals makes the
+# island internally consistent, then the SAME radial score the inside-out fix uses (mean face normal . radial from
+# an axis through the hull belly) decides once for the whole island: < -0.25 reversed, > 0.25 kept outward, and
+# an ambiguous island gets its authored winding back (the artist wins every call the score cannot make).
+# Why weld and not just decide together: plates that share no vertices also REDUCE apart - a collapse on either
+# side of a seam drifts the edges away from each other and the hull opens gaps (user report). Welded seams
+# collapse as one edge. Refuses a group that holds a MOVING part (wheel, turret, gun, rotor, oar, sail, flag,
+# track, rudder, preserve, flip): those roles find their parts by name after this point.
+def _fuse_groups():
+    global objs
+    if not fuse_groups:
+        return
+    _moving = (set(wheel_names) | set(turret_names) | set(track_names) | set(gun_names) | set(rotor_names) | set(tailrotor_names)
+               | set(trail_names) | set(muzzle_names) | set(cradle_names) | set(oar_names) | set(sail_names) | set(flag_names)
+               | set(rudder_names) | set(preserve_names) | set(flip_names))
+    _pts = [o.matrix_world @ Vector(c) for o in objs for c in o.bound_box]
+    _mlen = max((max(p[i] for p in _pts) - min(p[i] for p in _pts)) for i in range(3)) if _pts else 1.0
+    _wd = _mlen * fuse_permille / 1000.0
+    try:
+        bpy.ops.object.mode_set(mode='OBJECT')
+    except Exception:
+        pass
+    def _edge_dir(_face, _edge):   # True = the face walks the edge from verts[0] to verts[1]; None = not on this face
+        _vs = [_l.vert for _l in _face.loops]
+        for _i in range(len(_vs)):
+            if _vs[_i] is _edge.verts[0] and _vs[(_i + 1) % len(_vs)] is _edge.verts[1]:
+                return True
+            if _vs[_i] is _edge.verts[1] and _vs[(_i + 1) % len(_vs)] is _edge.verts[0]:
+                return False
+        return None
+    def _islands(_bm):
+        _seen = set(); _out = []
+        for _f0 in _bm.faces:
+            if _f0.index in _seen:
+                continue
+            _stack = [_f0]; _seen.add(_f0.index); _isl = []
+            while _stack:
+                _fc = _stack.pop(); _isl.append(_fc)
+                for _e in _fc.edges:
+                    for _lf in _e.link_faces:
+                        if _lf.index not in _seen:
+                            _seen.add(_lf.index); _stack.append(_lf)
+            _out.append(_isl)
+        return _out
+    for _g in sorted(fuse_groups):
+        _names = fuse_groups[_g]
+        _bad = [n for n in _names if n in _moving]
+        if _bad:
+            print("VEHICLE fuse %s: REFUSED - %d member(s) carry a moving role (%s); fuse groups are for static plating" % (_g, len(_bad), ", ".join(_bad[:5])))
+            continue
+        _have = {o.name: o for o in objs}
+        _members = [_have[n] for n in _names if n in _have]
+        _missing = [n for n in _names if n not in _have]
+        if _missing:
+            print("VEHICLE fuse %s: %d marked part(s) not found (renamed or purged?): %s" % (_g, len(_missing), ", ".join(_missing[:6])))
+        if len(_members) == 0:
+            continue
+        _first = _members[0]
+        _v0 = sum(len(o.data.vertices) for o in _members)
+        _pos = objs.index(_first)
+        bpy.ops.object.select_all(action='DESELECT')
+        for _o in _members:
+            _o.select_set(True)
+        bpy.context.view_layer.objects.active = _first
+        if len(_members) > 1:
+            bpy.ops.object.join()
+        _fo = bpy.context.view_layer.objects.active
+        objs = [o for o in objs if o not in _members]
+        objs.insert(min(_pos, len(objs)), _fo)
+        _fb = bmesh.new(); _fb.from_mesh(_fo.data)
+        _fb.verts.ensure_lookup_table(); _fb.faces.ensure_lookup_table(); _fb.faces.index_update()
+        _i0 = len(_islands(_fb))
+        if _wd > 0.0 and len(_fb.verts) > 1:
+            bmesh.ops.remove_doubles(_fb, verts=_fb.verts[:], dist=_wd)
+        _fb.verts.ensure_lookup_table(); _fb.faces.ensure_lookup_table(); _fb.faces.index_update(); _fb.normal_update()
+        # the judgement axis: bbox centre in Y, the 25th percentile of vertex height in Z - inside the hull belly (the fix's rule)
+        _fcy = 0.5 * (min(v.co.y for v in _fb.verts) + max(v.co.y for v in _fb.verts)) if len(_fb.verts) else 0.0
+        _step = max(1, len(_fb.verts) // 5000)
+        _zs = sorted(v.co.z for i, v in enumerate(_fb.verts) if i % _step == 0)
+        _fcz = _zs[len(_zs) // 4] if _zs else 0.0
+        _isls = _islands(_fb)
+        _uni = 0; _rev = 0; _open = 0; _changed = 0; _hint = []; _shell = 0
+        for _isl in _isls:
+            # 1) CONSISTENCY BY MAJORITY: propagate orientation parity across every 2-face edge from a root and reverse
+            #    the minority parity. NOT recalc_face_normals: measured on the Teutonic (2026-09-15), Blender's
+            #    closed-shell solver flipped 40% of an island whose authored winding was 99.6% edge-consistent -
+            #    overlapping thin plates are not the manifold solid it assumes. The artist's majority direction is kept.
+            _par = {}
+            for _f0 in _isl:
+                if _f0.index in _par:
+                    continue
+                _par[_f0.index] = 0; _q = [_f0]
+                while _q:
+                    _fa = _q.pop()
+                    for _e in _fa.edges:
+                        if len(_e.link_faces) != 2:
+                            continue
+                        _fb2 = _e.link_faces[0] if _e.link_faces[1] is _fa else _e.link_faces[1]
+                        if _fb2.index in _par:
+                            continue
+                        _da = _edge_dir(_fa, _e); _db = _edge_dir(_fb2, _e)
+                        _same = (_da is not None and _db is not None and _da == _db)   # same traversal = inconsistent neighbours
+                        _par[_fb2.index] = _par[_fa.index] ^ (1 if _same else 0)
+                        _q.append(_fb2)
+            _ones = sum(_par.values()); _n = len(_isl)
+            if 0 < _ones < _n:
+                _minor = 1 if _ones * 2 <= _n else 0
+                _flip = [_f for _f in _isl if _par[_f.index] == _minor]
+                bmesh.ops.reverse_faces(_fb, faces=_flip); _uni += 1; _changed += len(_flip)
+                _fb.normal_update()
+            # 2) DIRECTION: an OPEN sheet (many boundary edges - a deck, a bulwark) gets the inside-out fix's radial
+            #    verdict on the whole merged sheet; a CLOSED shell keeps the artist's direction, because a thin plate
+            #    solid has inner faces that legitimately face inward and the score reads ~0 on it. A closed shell that
+            #    still scores interior-facing is only REPORTED: mark the group's first member Flip to reverse it once.
+            _edges = set(_e for _f in _isl for _e in _f.edges)
+            _nb = sum(1 for _e in _edges if len(_e.link_faces) == 1)
+            _bfrac = _nb / max(1, len(_edges))
+            _dsum = 0.0; _dn = 0
+            for _f in _isl:
+                _c = _f.calc_center_median(); _rad = Vector((0.0, _c.y - _fcy, _c.z - _fcz))
+                if _rad.length > 1e-6:
+                    _dsum += _f.normal.dot(_rad.normalized()); _dn += 1
+            _score = (_dsum / _dn) if _dn else 0.0
+            if _bfrac > 0.30:
+                _open += 1
+                if _score < -0.25:
+                    bmesh.ops.reverse_faces(_fb, faces=_isl); _rev += 1; _changed += _n
+                    _fb.normal_update()
+            elif _n >= 24:   # anything down to a box (12 faces x 2 for a lid) - the solver needs a consistent closed shell, not a big one
+                # 3) a CLOSED shell that is now consistent: Blender's closed-shell solver is reliable on consistent input
+                #    (measured: on the Teutonic it flips exactly the region the majority rule flips). Let it reverse the
+                #    shell only when it says the WHOLE shell is inverted (>= 90% of faces) - the hull-authored-inside-out
+                #    case; anything in between is non-manifold noise: keep the artist's direction and just say so.
+                _pre = {_f.index: _f.normal.copy() for _f in _isl}
+                bmesh.ops.recalc_face_normals(_fb, faces=_isl); _fb.normal_update()
+                _nfl = sum(1 for _f in _isl if _f.normal.dot(_pre[_f.index]) < 0)
+                if _nfl >= 0.9 * _n:
+                    _shell += 1; _changed += _n
+                else:
+                    _undo = [_f for _f in _isl if _f.normal.dot(_pre[_f.index]) < 0]
+                    if _undo:
+                        bmesh.ops.reverse_faces(_fb, faces=_undo); _fb.normal_update()
+                    if _nfl > 0.1 * _n:
+                        _hint.append("%d faces (solver would reverse %d%%)" % (_n, int(100 * _nfl / _n)))
+        _v1 = len(_fb.verts)
+        _fb.to_mesh(_fo.data); _fb.free()
+        _fo.data.update()
+        print("VEHICLE fuse %s: %d part(s) -> '%s'; verts %d -> %d (seams welded within %.4f = %.2f permille of %.1f); islands %d -> %d; "
+              "%d island(s) made consistent, %d closed shell(s) reversed whole (authored inside-out), %d open sheet(s) judged with %d reversed as interior-facing; %d face(s) changed winding%s"
+              % (_g, len(_members), _fo.name, _v0, _v1, _wd, fuse_permille, _mlen, _i0, len(_isls), _uni, _shell, _open, _rev, _changed,
+                 ("; undecided closed shell(s) kept as authored - mark the group's first member Flip if the hull renders inside-out: " + ", ".join(_hint)) if _hint else ""))
+_guard(_fuse_groups)
+_lap("fuse groups")
+# ---- FUSE GROUPS END ----
 
 # ---- wheel clustering ----
 # A wheel is usually MANY shards (tire, rim, spokes, bolts...). Bones must NOT be per-shard: a spoke spinning

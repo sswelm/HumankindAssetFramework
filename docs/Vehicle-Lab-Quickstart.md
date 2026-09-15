@@ -125,6 +125,25 @@ in-game — no Model Factory option is involved (that checkbox was removed). It 
 Model Factory's **Reduce to ~tris** still caps the shipped mesh, so lower that if you are near the vertex budget.
 Leave it **off** for models that are already solid.
 
+**Fuse groups (⊕ per row, keys 1–8).** A hull authored as dozens of separate plates — the Teutonic's `Object_10`,
+`Object_20`, `Object_28`, `Object_30` were 23, 84, 7 and 7 islands each — defeats every per-island facing test: each
+plate is judged alone, some flip and some don't, and the ship renders with a hole in its side and the far wall's
+interior showing through. It also cannot be reduced: plates share no vertices, so a collapse on either side of a seam
+drifts the edges apart and gaps open. Give those parts the **same fuse letter** and at Generate they are **joined into
+one mesh**, their seam vertices **welded** when closer than the dial (in thousandths of the model's length, default
+0.5‰), and the winding is made **consistent by majority** across each welded island — the minority of faces is
+reversed to agree with the rest (on the Teutonic that was a 1,609-face plate region glued to the hull along a 26-edge
+seam the wrong way round: the hole). Direction is then judged where it can be: an **open** sheet (a deck, a bulwark)
+gets the fix's interior-facing score once for the whole merged sheet; a **closed** shell keeps the artist's direction,
+because a plate solid has inner faces that legitimately face inward — unless Blender's closed-shell solver says the
+*whole* shell is inside-out, in which case it is reversed whole. If a fused hull still renders inside-out, mark the
+group's first-listed member **Flip** and the whole fused mesh reverses once. Geometry, UVs and weights stay; only
+seams merge, and the vertex count usually drops (the Teutonic's four hull parts: 9,000 → 5,013 vertices, 861 → 151
+islands). The fused mesh keeps its first-listed member's role for bones and passes; a group holding a moving part
+(wheel, turret, oar, sail…) is refused with a log line. The mark is independent of the role: a Structure plate and a
+Body plate can share a letter. The Generate log prints per group the islands before/after the weld, how many were
+made consistent, reversed whole, or judged as open sheets.
+
 **Fix inside-out faces.** Some sources ship with part of their winding **inverted** — from outside you see through
 the near hull wall while the far wall's *interior* renders. Tick this and at export the islands that provably face
 the hull's interior (inverted side planking, judged against an axis through the hull belly) are **reversed** — the
