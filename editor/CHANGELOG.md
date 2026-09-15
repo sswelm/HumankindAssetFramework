@@ -5,6 +5,26 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Workshop: FUSE — weld a plated hull into one shell, at the source.** The Teutonic shipped see-through
+  with a hole in its side: its hull plating is 861 disconnected islands over four parts, the per-island inside-out
+  fix flipped some plates and not others, and any reduction opened gaps because plates share no vertices. The
+  Workshop's checkboxes now also drive **Fuse … into one shell**: the checked parts become ONE mesh in the output
+  GLB, seam vertices welded within a dial (‰ of the model's length; **default 0** = exactly coincident positions),
+  the winding made **consistent by majority** across each welded island, and direction judged once where it can
+  be — open sheets by the inside-out score, closed shells by their signed volume. Pure C# in
+  `GlbDisconnectedParts.FuseNodes`, 10 tests (the inverted plate, the inward deck, the inside-out box, the UV
+  seam, materials, the weld distance, parent transforms, collapsed faces, refusals, vertex normals). The rule came
+  out of a headless Blender drill on the real hull the same day, and the C# port was then run on the same hull:
+  the hole is a **1,613-face plate region glued on the wrong way round along a 26-edge seam** inside a 4,013-face
+  island — 99.6 % of edges read consistent, so no per-island or edge test could see it; parity propagation finds
+  it, and the two small shells authored inside-out (126 and 76 faces) are reversed whole by their signed volume.
+  Three rules were tried and rejected: a blind normal recalc (flipped 40 % of that consistent island — overlapping
+  plates are not the manifold solid it assumes), the radial score on closed shells (inner faces cancel outer; it
+  reads ~0), and a non-zero weld by default (0.5‰ collapsed 1,564 rivet-sized triangles and, stripped of their
+  adjacency, they broke the hull island apart — the plates already touch exactly; a distance is for gapped
+  sources only, and the result line reports what collapsed). Fixing the source means the Lab, the Factory and the
+  static bake all see a whole hull; a Vehicle-Lab-side version was built first and dropped in favour of this one.
+
 - **Vehicle Lab: the ⟲ inside-out marks — see the fix's reach before it runs.** Every probed part the
   **Fix inside-out faces** pass would reverse now carries a ⟲ tag in the list (with its island count), and
   the checkbox itself reports the total — whether the fix is on or off. The verdicts come from the SAME

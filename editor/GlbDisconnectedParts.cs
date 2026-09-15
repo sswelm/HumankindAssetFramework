@@ -30,6 +30,8 @@ public static class GlbDisconnectedParts
         public readonly List<string> Details = new List<string>();
         public readonly List<string> Warnings = new List<string>();
         public bool Changed => NodesSplit > 0;
+        // FUSE (2026-09-15) — what the weld and the winding pass did, so the Workshop can say it in one line
+        public int VerticesBefore, VerticesAfter, IslandsBefore, IslandsAfter, FacesRewound;
     }
 
     sealed class Chunk
@@ -240,6 +242,16 @@ public static class GlbDisconnectedParts
             if (componentType != 5121 && componentType != 5123 && componentType != 5125)
                 throw new InvalidDataException("Index accessor must use unsigned byte, ushort, or uint.");
             return checked((uint)ReadElement(a, index, 1)[0]);
+        }
+
+        // Any vector attribute (NORMAL, TEXCOORD_n …): the element's leading `components`, normalized ints decoded.
+        public double[] Vector(int accessorIndex, uint index, int components)
+        {
+            JObject a = Accessor(accessorIndex);
+            string type = (string)a["type"];
+            int have = type == "SCALAR" ? 1 : type == "VEC2" ? 2 : type == "VEC3" ? 3 : type == "VEC4" ? 4 : 0;
+            if (have < components) throw new InvalidDataException("Accessor " + type + " holds fewer than " + components + " components.");
+            return ReadElement(a, index, have);
         }
 
         JObject Accessor(int index)
@@ -780,6 +792,437 @@ public static class GlbDisconnectedParts
         Result result = CutNodeByFacing(File.ReadAllBytes(inputPath), nodeIndex, upAxis, maxTiltDeg, floorValue);
         if (result.Changed) File.WriteAllBytes(outputPath, result.Bytes);
         return result;
+    }
+
+    // ---- FUSE (2026-09-15): weld several parts into ONE shell with consistent winding ----
+    //
+    // The Teutonic's hull ships as dozens of separate plates per object (861 islands over four parts). No
+    // per-island facing test can see that a 1,609-face plate region is glued on the wrong way round along a
+    // 26-edge seam — the hole in the hull — and any reduction opens gaps because the plates share no vertices.
+    // Fusing at the SOURCE fixes every pipeline downstream: the chosen parts become one mesh; positions within
+    // `weldFraction` of the model's longest extent are one vertex (attributes permitting — a UV seam or a hard-edge
+    // normal keeps its own vertex, while CONNECTIVITY is by position regardless); each welded island is made
+    // consistent by MAJORITY (orientation parity propagated across every two-face edge, the minority reversed);
+    // and direction is judged where it can be: an OPEN sheet (more than 30 % boundary edges — a deck, a bulwark)
+    // by the inside-out score against an axis through the hull belly, a CLOSED shell by its signed volume
+    // (negative = wound inward, reversed whole). Two rules were measured and rejected on the Blender prototype
+    // the same day: a blind normal recalc flipped 40 % of a 99.6 %-edge-consistent island (overlapping plates are
+    // not the manifold solid it assumes), and the radial score on a closed thin shell reads ~0 (inner faces cancel
+    // outer). Vertex normals follow the final winding (negated where every incident face was reversed, recomputed
+    // where mixed). Triangles are preserved exactly; the source nodes keep their transforms and children and lose
+    // only their mesh; the fused mesh lands on a new root node in world space.
+    public static Result FuseNodes(byte[] source, IList<int> nodeIndices, double weldFraction) => FuseNodes(source, nodeIndices, weldFraction, null);
+
+    public static Result FuseNodes(byte[] source, IList<int> nodeIndices, double weldFraction, string fusedName)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        if (nodeIndices == null || nodeIndices.Count == 0) throw new ArgumentException("Nothing to fuse — no node indices.", nameof(nodeIndices));
+        if (double.IsNaN(weldFraction) || weldFraction < 0) throw new ArgumentOutOfRangeException(nameof(weldFraction));
+        Document document = Parse(source);
+        JObject root = document.Root;
+        JArray nodes = root["nodes"] as JArray ?? new JArray();
+        JArray meshes = root["meshes"] as JArray ?? throw new InvalidDataException("GLB has no meshes array.");
+        JArray buffers = root["buffers"] as JArray;
+        byte[] originalData;
+        Accessors reader = BinReader(document, root, out originalData);
+        var bin = new List<byte>(originalData);
+        var result = new Result();
+
+        // 1) gather every triangle of every chosen part in WORLD space, with normal / UV / material per vertex
+        var pos = new List<Vec3>(); var nrm = new List<Vec3?>(); var uv = new List<double[]>(); var mat = new List<int>();
+        var tris = new List<int>();
+        var partNames = new List<string>();
+        var picked = nodeIndices.Distinct().ToList();
+        var fusedMeshes = new HashSet<int>();
+        foreach (int ni in picked)
+        {
+            JObject node = NodeWithMesh(nodes, ni, out int mi);
+            string nodeName = (string)node["name"] ?? ("node " + ni);
+            if (node["skin"] != null) throw new InvalidDataException("'" + nodeName + "' is skinned — fuse static parts only.");
+            var mesh = meshes[mi] as JObject ?? throw new InvalidDataException("Mesh is not an object.");
+            var primitives = mesh["primitives"] as JArray ?? throw new InvalidDataException("Mesh has no primitives.");
+            double[] world = NodeWorldMatrix(nodes, ni);
+            partNames.Add(nodeName); fusedMeshes.Add(mi);
+            foreach (JObject primitive in TrianglePrimitives(primitives))
+            {
+                if (primitive["targets"] != null) throw new InvalidDataException("'" + nodeName + "' has morph targets — fuse static parts only.");
+                var attrs = primitive["attributes"] as JObject ?? throw new InvalidDataException("Primitive has no attributes.");
+                int posAcc = attrs.Value<int>("POSITION");
+                int nAcc = attrs["NORMAL"] == null ? -1 : attrs.Value<int>("NORMAL");
+                int uvAcc = attrs["TEXCOORD_0"] == null ? -1 : attrs.Value<int>("TEXCOORD_0");
+                int material = primitive["material"] == null ? -1 : primitive.Value<int>("material");
+                int vertCount = reader.Count(posAcc);
+                if (nAcc >= 0 && reader.Count(nAcc) != vertCount) nAcc = -1;
+                if (uvAcc >= 0 && reader.Count(uvAcc) != vertCount) uvAcc = -1;
+                int baseV = pos.Count;
+                for (uint v = 0; v < vertCount; v++)
+                {
+                    pos.Add(XForm(world, reader.Position(posAcc, v)));
+                    if (nAcc >= 0) { double[] n = reader.Vector(nAcc, v, 3); nrm.Add(XFormDir(world, new Vec3 { X = n[0], Y = n[1], Z = n[2] })); }
+                    else nrm.Add(null);
+                    uv.Add(uvAcc >= 0 ? reader.Vector(uvAcc, v, 2) : null);
+                    mat.Add(material);
+                }
+                int indexCount = primitive["indices"] == null ? vertCount : reader.Count(primitive.Value<int>("indices"));
+                if (indexCount % 3 != 0) throw new InvalidDataException("Triangle primitive index count is not divisible by three.");
+                for (uint i = 0; i < indexCount; i++)
+                {
+                    uint idx = primitive["indices"] == null ? i : reader.Index(primitive.Value<int>("indices"), i);
+                    if (idx >= vertCount) throw new InvalidDataException("Primitive index exceeds its POSITION accessor.");
+                    tris.Add(baseV + (int)idx);
+                }
+            }
+        }
+        int faceCount = tris.Count / 3;
+        result.SourceTriangles = faceCount;
+        result.VerticesBefore = pos.Count;
+        if (faceCount == 0) { result.Warnings.Add("Nothing to fuse: the chosen parts carry no triangles."); return result; }
+
+        double[] mn = { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity };
+        double[] mx = { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
+        foreach (Vec3 p in pos) UpdateBounds(mn, mx, p);
+        double longest = Math.Max(mx[0] - mn[0], Math.Max(mx[1] - mn[1], mx[2] - mn[2]));
+        if (longest <= 0) longest = 1e-9;
+        double weld = longest * weldFraction;
+
+        // 2) weld classes — union-find over vertices within `weld` (a hash grid, the 27 neighbouring cells)
+        int[] WeldClasses(double distance)
+        {
+            var parent = new int[pos.Count];
+            for (int i = 0; i < parent.Length; i++) parent[i] = i;
+            int Find(int i) { while (parent[i] != i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; }
+            double cellSize = distance > 0 ? distance : longest * 1e-7;
+            double thresh2 = distance > 0 ? distance * distance : 0.0;
+            var grid = new Dictionary<PositionKey, List<int>>();
+            for (int i = 0; i < pos.Count; i++)
+            {
+                PositionKey k = CellOf(pos[i], cellSize);
+                if (!grid.TryGetValue(k, out List<int> l)) grid.Add(k, l = new List<int>());
+                l.Add(i);
+            }
+            for (int i = 0; i < pos.Count; i++)
+            {
+                PositionKey k = CellOf(pos[i], cellSize);
+                for (long dx = -1; dx <= 1; dx++) for (long dy = -1; dy <= 1; dy++) for (long dz = -1; dz <= 1; dz++)
+                {
+                    if (!grid.TryGetValue(new PositionKey { X = k.X + dx, Y = k.Y + dy, Z = k.Z + dz }, out List<int> l)) continue;
+                    foreach (int j in l)
+                    {
+                        if (j <= i) continue;
+                        if (FDist2(pos[i], pos[j]) <= thresh2) { int a = Find(i), b = Find(j); if (a != b) parent[a] = b; }
+                    }
+                }
+            }
+            var cls = new int[pos.Count];
+            for (int i = 0; i < cls.Length; i++) cls[i] = Find(i);
+            return cls;
+        }
+        // 3) faces -> edges by welded class; islands by edge adjacency
+        // A face whose three corners weld to ONE class has collapsed (a rivet smaller than the weld distance). It is
+        // kept in the output — triangles are preserved exactly — but it has no edges, so it joins no island and is
+        // never judged: the first run on the Teutonic counted 1,570 of them as "open sheets" and the island count
+        // went UP after welding (151 -> 1,721), the opposite of the weld's purpose. Blender deletes them; we keep them.
+        List<List<int>> Islands(int[] cls, out long[] edgeKeys, out bool[] edgeDir, out Dictionary<long, List<int>> edgeFaces, out int collapsed)
+        {
+            edgeKeys = new long[faceCount * 3]; edgeDir = new bool[faceCount * 3];
+            edgeFaces = new Dictionary<long, List<int>>();
+            collapsed = 0;
+            var degenerate = new bool[faceCount];
+            for (int f = 0; f < faceCount; f++)
+            {
+                int ca = cls[tris[f * 3]], cb = cls[tris[f * 3 + 1]], cc = cls[tris[f * 3 + 2]];
+                if (ca == cb && cb == cc) { degenerate[f] = true; collapsed++; edgeKeys[f * 3] = edgeKeys[f * 3 + 1] = edgeKeys[f * 3 + 2] = -1; continue; }
+                for (int e = 0; e < 3; e++)
+                {
+                    int a = cls[tris[f * 3 + e]], b = cls[tris[f * 3 + (e + 1) % 3]];
+                    if (a == b) { edgeKeys[f * 3 + e] = -1; continue; }   // one collapsed edge (a needle): no adjacency through it
+                    long key = a < b ? ((long)a << 32) | (uint)b : ((long)b << 32) | (uint)a;
+                    edgeKeys[f * 3 + e] = key; edgeDir[f * 3 + e] = a < b;   // true = walked from the smaller class to the larger
+                    if (!edgeFaces.TryGetValue(key, out List<int> lf)) edgeFaces.Add(key, lf = new List<int>());
+                    lf.Add(f);
+                }
+            }
+            var island = new int[faceCount];
+            for (int f = 0; f < faceCount; f++) island[f] = -1;
+            var islands = new List<List<int>>();
+            for (int f0 = 0; f0 < faceCount; f0++)
+            {
+                if (island[f0] >= 0 || degenerate[f0]) continue;
+                var members = new List<int>(); var stack = new Stack<int>();
+                island[f0] = islands.Count; stack.Push(f0);
+                while (stack.Count > 0)
+                {
+                    int f = stack.Pop(); members.Add(f);
+                    for (int e = 0; e < 3; e++)
+                    {
+                        long key = edgeKeys[f * 3 + e]; if (key < 0) continue;
+                        foreach (int g in edgeFaces[key]) if (island[g] < 0) { island[g] = islands.Count; stack.Push(g); }
+                    }
+                }
+                islands.Add(members);
+            }
+            return islands;
+        }
+        result.IslandsBefore = Islands(WeldClasses(0.0), out _, out _, out _, out _).Count;   // exact positions only: what the source connects
+        int[] classes = WeldClasses(weld);
+        List<List<int>> allIslands = Islands(classes, out long[] fEdgeKeys, out bool[] fEdgeDir, out Dictionary<long, List<int>> fEdgeFaces, out int collapsedFaces);
+        result.IslandsAfter = allIslands.Count;
+
+        // 4) consistency by MAJORITY — parity propagation across two-face edges, the minority reversed
+        var flip = new bool[faceCount];
+        int islandsMadeConsistent = 0;
+        bool DirOf(int face, long key) { for (int e = 0; e < 3; e++) if (fEdgeKeys[face * 3 + e] == key) return fEdgeDir[face * 3 + e]; return false; }
+        foreach (List<int> isl in allIslands)
+        {
+            var parity = new Dictionary<int, int>();
+            foreach (int seed in isl)
+            {
+                if (parity.ContainsKey(seed)) continue;
+                parity[seed] = 0; var stack = new Stack<int>(); stack.Push(seed);
+                while (stack.Count > 0)
+                {
+                    int fa = stack.Pop();
+                    for (int e = 0; e < 3; e++)
+                    {
+                        long key = fEdgeKeys[fa * 3 + e]; if (key < 0) continue;
+                        List<int> lf = fEdgeFaces[key]; if (lf.Count != 2) continue;
+                        int fb = lf[0] == fa ? lf[1] : lf[0];
+                        if (fb == fa || parity.ContainsKey(fb)) continue;
+                        bool same = fEdgeDir[fa * 3 + e] == DirOf(fb, key);   // both walk the edge the same way = inconsistent neighbours
+                        parity[fb] = parity[fa] ^ (same ? 1 : 0);
+                        stack.Push(fb);
+                    }
+                }
+            }
+            int ones = 0; foreach (int f in isl) ones += parity[f];
+            if (ones > 0 && ones < isl.Count)
+            {
+                int minor = ones * 2 <= isl.Count ? 1 : 0;
+                foreach (int f in isl) if (parity[f] == minor) flip[f] = true;
+                islandsMadeConsistent++;
+            }
+        }
+
+        // 5) direction — open sheets by the inside-out score, closed shells by their signed volume
+        Vec3 P(int f, int corner) => pos[tris[f * 3 + corner]];
+        Vec3 FaceNormal(int f)   // area-weighted, with the CURRENT winding
+        {
+            Vec3 n = FCross(FSub(P(f, 1), P(f, 0)), FSub(P(f, 2), P(f, 0)));
+            return flip[f] ? FScale(n, -1.0) : n;
+        }
+        int lengthAxis = (mx[0] - mn[0]) >= (mx[2] - mn[2]) ? 0 : 2, widthAxis = lengthAxis == 0 ? 2 : 0;   // glTF is Y-up; the hull's length is the longer horizontal extent
+        double centreW = 0.5 * (mn[widthAxis] + mx[widthAxis]);
+        var ys = new List<double>(); int step = Math.Max(1, pos.Count / 5000);
+        for (int i = 0; i < pos.Count; i += step) ys.Add(pos[i].Y);
+        ys.Sort(); double bellyY = ys.Count > 0 ? ys[ys.Count / 4] : 0.0;   // the 25th percentile of height: inside the hull mass, below the deck
+        int openJudged = 0, openReversed = 0, closedReversed = 0;
+        foreach (List<int> isl in allIslands)
+        {
+            var keys = new HashSet<long>(); int boundary = 0;
+            foreach (int f in isl) for (int e = 0; e < 3; e++) { long key = fEdgeKeys[f * 3 + e]; if (key >= 0 && keys.Add(key) && fEdgeFaces[key].Count == 1) boundary++; }
+            double boundaryFraction = keys.Count > 0 ? boundary / (double)keys.Count : 1.0;
+            if (boundaryFraction > 0.30)
+            {
+                openJudged++;
+                double sum = 0; int n = 0;
+                foreach (int f in isl)
+                {
+                    Vec3 c = FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0);
+                    var radial = new Vec3 { X = 0, Y = c.Y - bellyY, Z = 0 };
+                    if (widthAxis == 0) radial.X = c.X - centreW; else radial.Z = c.Z - centreW;
+                    double rl = FLen(radial), nl = FLen(FaceNormal(f));
+                    if (rl < 1e-9 || nl < 1e-12) continue;
+                    sum += FDot(FaceNormal(f), radial) / (rl * nl); n++;
+                }
+                if (n > 0 && sum / n < -0.25) { foreach (int f in isl) flip[f] = !flip[f]; openReversed++; }
+            }
+            else
+            {
+                double volume = 0;
+                foreach (int f in isl)
+                {
+                    double v = FDot(P(f, 0), FCross(P(f, 1), P(f, 2))) / 6.0;
+                    volume += flip[f] ? -v : v;
+                }
+                if (volume < -1e-9 * longest * longest * longest) { foreach (int f in isl) flip[f] = !flip[f]; closedReversed++; }
+            }
+        }
+        foreach (bool b in flip) if (b) result.FacesRewound++;
+        // the largest islands, so a reader can see WHAT was judged (faces, boundary share, how many faces the majority
+        // rule turned) — the Teutonic's hole was a 1,613-face minority inside a 4,013-face island. Details[0] stays
+        // the one-line summary (the Workshop's status reads it); this is Details[1].
+        string largestIslands;
+        {
+            var rows = new List<string>();
+            foreach (List<int> isl in allIslands.OrderByDescending(i => i.Count).Take(6))
+            {
+                var keys = new HashSet<long>(); int boundary = 0, turned = 0;
+                foreach (int f in isl) { if (flip[f]) turned++; for (int e = 0; e < 3; e++) { long key = fEdgeKeys[f * 3 + e]; if (key >= 0 && keys.Add(key) && fEdgeFaces[key].Count == 1) boundary++; } }
+                rows.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} faces ({1:0}% boundary, {2} rewound)", isl.Count, keys.Count > 0 ? 100.0 * boundary / keys.Count : 100.0, turned));
+            }
+            largestIslands = "largest islands: " + string.Join("; ", rows);
+        }
+
+        // 6) vertex normals follow the final winding
+        var incident = new List<int>[pos.Count];
+        for (int f = 0; f < faceCount; f++) for (int c = 0; c < 3; c++) { int v = tris[f * 3 + c]; (incident[v] ?? (incident[v] = new List<int>())).Add(f); }
+        var finalNormal = new Vec3[pos.Count];
+        for (int v = 0; v < pos.Count; v++)
+        {
+            List<int> faces = incident[v];
+            int flipped = 0; if (faces != null) foreach (int f in faces) if (flip[f]) flipped++;
+            Vec3? authored = nrm[v];
+            if (authored.HasValue && faces != null && flipped == 0) finalNormal[v] = authored.Value;
+            else if (authored.HasValue && faces != null && flipped == faces.Count) finalNormal[v] = FScale(authored.Value, -1.0);
+            else
+            {
+                var acc = new Vec3 { X = 0, Y = 0, Z = 0 };
+                if (faces != null) foreach (int f in faces) acc = FAdd(acc, FaceNormal(f));
+                finalNormal[v] = FLen(acc) > 1e-18 ? FUnit(acc) : (authored ?? new Vec3 { X = 0, Y = 1, Z = 0 });
+            }
+        }
+
+        // 7) output vertices: one per welded class + material + matching UV + matching normal; one primitive per material
+        var primitiveOf = new Dictionary<int, FusePrimitive>();
+        var vertexMap = new int[pos.Count];
+        var reps = new Dictionary<long, List<int>>();   // (class, material) -> representative original vertices already emitted
+        for (int v = 0; v < pos.Count; v++)
+        {
+            if (incident[v] == null) { vertexMap[v] = -1; continue; }   // unreferenced source vertex: dropped
+            int material = mat[v];
+            if (!primitiveOf.TryGetValue(material, out FusePrimitive prim)) primitiveOf.Add(material, prim = new FusePrimitive { Material = material });
+            long groupKey = ((long)classes[v] << 32) | (uint)(material + 1);
+            if (!reps.TryGetValue(groupKey, out List<int> group)) reps.Add(groupKey, group = new List<int>());
+            int found = -1;
+            foreach (int r in group)
+            {
+                bool uvSame = (uv[v] == null && uv[r] == null) || (uv[v] != null && uv[r] != null && Math.Abs(uv[v][0] - uv[r][0]) < 1e-4 && Math.Abs(uv[v][1] - uv[r][1]) < 1e-4);
+                if (uvSame && FDot(finalNormal[v], finalNormal[r]) > 0.999) { found = r; break; }
+            }
+            if (found >= 0) { vertexMap[v] = vertexMap[found]; continue; }
+            group.Add(v);
+            vertexMap[v] = prim.Positions.Count / 3;
+            Vec3 p = pos[v], nn = finalNormal[v];
+            prim.Positions.Add((float)p.X); prim.Positions.Add((float)p.Y); prim.Positions.Add((float)p.Z);
+            prim.Normals.Add((float)nn.X); prim.Normals.Add((float)nn.Y); prim.Normals.Add((float)nn.Z);
+            if (uv[v] != null) { prim.Uvs.Add((float)uv[v][0]); prim.Uvs.Add((float)uv[v][1]); } else prim.UvMissing = true;
+        }
+        for (int f = 0; f < faceCount; f++)
+        {
+            FusePrimitive prim = primitiveOf[mat[tris[f * 3]]];
+            int i0 = vertexMap[tris[f * 3]], i1 = vertexMap[tris[f * 3 + 1]], i2 = vertexMap[tris[f * 3 + 2]];
+            if (flip[f]) { int t = i1; i1 = i2; i2 = t; }
+            prim.Indices.Add((uint)i0); prim.Indices.Add((uint)i1); prim.Indices.Add((uint)i2);
+            result.OutputTriangles++;
+        }
+        if (result.OutputTriangles != result.SourceTriangles)
+            throw new InvalidDataException("Triangle preservation check failed: source " + result.SourceTriangles + ", output " + result.OutputTriangles + ".");
+        foreach (FusePrimitive prim in primitiveOf.Values) result.VerticesAfter += prim.Positions.Count / 3;
+
+        // 8) the fused mesh on a new root node; the source nodes keep transforms and children, lose their mesh
+        string baseName = string.IsNullOrEmpty(fusedName) ? partNames[0] + "_Fused" : fusedName;
+        var meshJson = new JObject { ["name"] = UniqueName(baseName, meshes.OfType<JObject>().Select(m => (string)m["name"])) };
+        var primitivesJson = new JArray();
+        foreach (FusePrimitive prim in primitiveOf.Values.OrderBy(p => p.Material < 0 ? int.MaxValue : p.Material))
+        {
+            var attrs = new JObject
+            {
+                ["POSITION"] = AppendFloats(root, bin, prim.Positions, 3, "VEC3", true),
+                ["NORMAL"] = AppendFloats(root, bin, prim.Normals, 3, "VEC3", false),
+            };
+            if (!prim.UvMissing && prim.Uvs.Count > 0) attrs["TEXCOORD_0"] = AppendFloats(root, bin, prim.Uvs, 2, "VEC2", false);
+            var pj = new JObject { ["attributes"] = attrs, ["indices"] = AppendIndices(root, bin, prim.Indices, 5125), ["mode"] = 4 };
+            if (prim.Material >= 0) pj["material"] = prim.Material;
+            primitivesJson.Add(pj);
+        }
+        meshJson["primitives"] = primitivesJson;
+        int newMeshIndex = meshes.Count; meshes.Add(meshJson);
+        var nodeNames = new HashSet<string>(nodes.OfType<JObject>().Select(n => (string)n["name"]).Where(n => !string.IsNullOrEmpty(n)));
+        string newNodeName = UniqueName(baseName, nodeNames);
+        int newNodeIndex = nodes.Count;
+        nodes.Add(new JObject { ["name"] = newNodeName, ["mesh"] = newMeshIndex });
+        int sceneIndex = root["scene"] == null ? 0 : root.Value<int>("scene");
+        if (root["scenes"] is JArray scenes && sceneIndex >= 0 && sceneIndex < scenes.Count && scenes[sceneIndex] is JObject scene)
+        {
+            JArray sceneNodes = scene["nodes"] as JArray;
+            if (sceneNodes == null) scene["nodes"] = sceneNodes = new JArray();
+            sceneNodes.Add(newNodeIndex);
+        }
+        foreach (int ni in picked) { var n = (JObject)nodes[ni]; n.Remove("mesh"); }
+        foreach (int other in Enumerable.Range(0, nodes.Count))
+            if (!picked.Contains(other) && other != newNodeIndex && (nodes[other] as JObject)?["mesh"] != null && fusedMeshes.Contains(nodes[other].Value<int>("mesh")))
+                result.Warnings.Add("Node " + other + " shares a fused part's mesh and keeps the ORIGINAL geometry (instanced part).");
+        result.NodesSplit = picked.Count; result.MeshesSplit = fusedMeshes.Count; result.ChildPartsCreated = 1;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        result.Details.Add(string.Format(inv,
+            "Fused {0} part(s) -> '{1}': {2} -> {3} verts (seams welded within {4:0.####} = {5:0.##}‰ of {6:0.#}); islands {7} -> {8}; {9} made consistent; {10} open sheet(s) judged, {11} reversed; {12} closed shell(s) reversed whole; {13} of {14} face(s) rewound; {15} face(s) smaller than the weld kept collapsed",
+            picked.Count, newNodeName, result.VerticesBefore, result.VerticesAfter, weld, weldFraction * 1000.0, longest, result.IslandsBefore, result.IslandsAfter,
+            islandsMadeConsistent, openJudged, openReversed, closedReversed, result.FacesRewound, faceCount, collapsedFaces));
+        result.Details.Add(largestIslands);
+
+        buffers[0]["byteLength"] = bin.Count;
+        document.Chunks[document.BinIndex].Data = bin.ToArray();
+        result.Bytes = Write(document);
+        ValidateOutput(result.Bytes);
+        return result;
+    }
+
+    public static Result FuseFile(string inputPath, string outputPath, IList<int> nodeIndices, double weldFraction)
+    {
+        GuardPaths(inputPath, outputPath);
+        Result result = FuseNodes(File.ReadAllBytes(inputPath), nodeIndices, weldFraction);
+        if (result.Changed) File.WriteAllBytes(outputPath, result.Bytes);
+        return result;
+    }
+
+    sealed class FusePrimitive
+    {
+        public int Material;
+        public readonly List<float> Positions = new List<float>();
+        public readonly List<float> Normals = new List<float>();
+        public readonly List<float> Uvs = new List<float>();
+        public readonly List<uint> Indices = new List<uint>();
+        public bool UvMissing;   // some vertex of this material had no TEXCOORD_0: the primitive ships without UVs
+    }
+
+    static PositionKey CellOf(Vec3 p, double cell) => new PositionKey { X = (long)Math.Floor(p.X / cell), Y = (long)Math.Floor(p.Y / cell), Z = (long)Math.Floor(p.Z / cell) };
+    static double FDist2(Vec3 a, Vec3 b) { double dx = a.X - b.X, dy = a.Y - b.Y, dz = a.Z - b.Z; return dx * dx + dy * dy + dz * dz; }
+    static Vec3 FSub(Vec3 a, Vec3 b) => new Vec3 { X = a.X - b.X, Y = a.Y - b.Y, Z = a.Z - b.Z };
+    static Vec3 FAdd(Vec3 a, Vec3 b) => new Vec3 { X = a.X + b.X, Y = a.Y + b.Y, Z = a.Z + b.Z };
+    static Vec3 FScale(Vec3 a, double s) => new Vec3 { X = a.X * s, Y = a.Y * s, Z = a.Z * s };
+    static Vec3 FCross(Vec3 a, Vec3 b) => new Vec3 { X = a.Y * b.Z - a.Z * b.Y, Y = a.Z * b.X - a.X * b.Z, Z = a.X * b.Y - a.Y * b.X };
+    static double FDot(Vec3 a, Vec3 b) => a.X * b.X + a.Y * b.Y + a.Z * b.Z;
+    static double FLen(Vec3 a) => Math.Sqrt(FDot(a, a));
+    static Vec3 FUnit(Vec3 a) { double l = FLen(a); return l > 1e-18 ? FScale(a, 1.0 / l) : a; }
+    // a direction through the node's world matrix: the 3x3 part, re-normalized (rigid + uniform scale, which is what game rips carry)
+    static Vec3 XFormDir(double[] m, Vec3 v) => FUnit(new Vec3 {
+        X = m[0] * v.X + m[4] * v.Y + m[8] * v.Z,
+        Y = m[1] * v.X + m[5] * v.Y + m[9] * v.Z,
+        Z = m[2] * v.X + m[6] * v.Y + m[10] * v.Z
+    });
+
+    static int AppendFloats(JObject root, List<byte> bin, List<float> data, int components, string type, bool withMinMax)
+    {
+        while ((bin.Count & 3) != 0) bin.Add(0);
+        int byteOffset = bin.Count;
+        var min = new double[components]; var max = new double[components];
+        for (int c = 0; c < components; c++) { min[c] = double.PositiveInfinity; max[c] = double.NegativeInfinity; }
+        for (int i = 0; i < data.Count; i++)
+        {
+            AddUInt32(bin, BitConverter.ToUInt32(BitConverter.GetBytes(data[i]), 0));
+            int c = i % components;
+            if (data[i] < min[c]) min[c] = data[i];
+            if (data[i] > max[c]) max[c] = data[i];
+        }
+        var views = (JArray)root["bufferViews"];
+        int viewIndex = views.Count;
+        views.Add(new JObject { ["buffer"] = 0, ["byteOffset"] = byteOffset, ["byteLength"] = bin.Count - byteOffset, ["target"] = 34962 });
+        var accessors = (JArray)root["accessors"];
+        int accessorIndex = accessors.Count;
+        var accessor = new JObject { ["bufferView"] = viewIndex, ["componentType"] = 5126, ["count"] = data.Count / components, ["type"] = type };
+        if (withMinMax && data.Count > 0) { accessor["min"] = new JArray(min.Select(d => (float)d)); accessor["max"] = new JArray(max.Select(d => (float)d)); }
+        accessors.Add(accessor);
+        return accessorIndex;
     }
 
     // ---- plane-cut internals ----

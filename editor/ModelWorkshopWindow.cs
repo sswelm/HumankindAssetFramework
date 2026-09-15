@@ -48,6 +48,12 @@ public class ModelWorkshopWindow : EditorWindow
     // of 3-vert parts millimetres apart. Islands within this % of a part's own diagonal count as ONE part, so
     // only genuinely distant geometry — the floating junk — separates. 0 = pure topology.
     [SerializeField] float mergePct = 1f;
+    // FUSE (2026-09-15): the checked parts become ONE welded shell with consistent winding — the fix for a hull
+    // authored as separate plates (the Teutonic: see-through, a hole in its side, gaps under any reduction).
+    // Seam vertices closer than this (in thousandths of the model's length) become one vertex. DEFAULT 0 = exactly
+    // coincident positions only: measured on the Teutonic, its plates already touch exactly (the majority rule found
+    // the 1,613-face hole at 0), while 0.5‰ collapsed 1,564 rivet-sized triangles and broke the hull island apart.
+    [SerializeField] float weldPermille = 0f;
     bool analyzePending;   // slider moved: recount on the first Layout pass after the drag releases
     [SerializeField] Vector2 scroll;
     string status = "Pick a GLB and press Probe parts.";
@@ -161,7 +167,8 @@ public class ModelWorkshopWindow : EditorWindow
             foreach (var r in shown)
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    using (new EditorGUI.DisabledScope(r.islands <= 1 || r.blocked != null))
+                    // checkable whenever the part is readable: Split wants islands > 1, Fuse wants ANY plate (2026-09-15)
+                    using (new EditorGUI.DisabledScope(r.blocked != null))
                         r.split = EditorGUILayout.Toggle(r.split, GUILayout.Width(20));
                     bool isSel = selectedIdx == r.nodeIndex;
                     string label = r.blocked != null ? $"{(isSel ? "◉ " : "")}{r.node}   — skipped: {r.blocked}"
@@ -240,6 +247,25 @@ public class ModelWorkshopWindow : EditorWindow
                 if (GUILayout.Button(new GUIContent($"Split {chosen} checked part(s)  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
                         "Writes the output GLB with ONLY the checked parts exploded into _Part_NNN children. The source file is never touched."), GUILayout.Height(28)))
                     SplitChecked();
+
+            // ---- FUSE (2026-09-15): the opposite of Split — the checked parts become ONE welded shell with
+            // consistent winding, at the source, so the Lab, the Factory and the bake all see a whole hull. ----
+            EditorGUILayout.Space(4);
+            weldPermille = EditorGUILayout.Slider(new GUIContent("Fuse — weld seams closer than (‰ of length)",
+                "When fusing, vertices of the checked parts closer than this (in thousandths of the model's longest extent) become ONE vertex — " +
+                "so plates that merely touch turn into one connected surface (a UV seam or a hard edge keeps its own vertex; connectivity is by " +
+                "position regardless). START AT 0 = only exactly coincident positions merge — the Teutonic's plates already touch exactly, and " +
+                "that alone found and fixed its hole. Raise it only for sources whose plates leave gaps, knowing that every triangle smaller " +
+                "than the distance collapses (kept, zero-area, no longer connecting anything): at 0.5‰ the Teutonic lost 1,564 rivet-sized " +
+                "faces AND its hull island broke apart. The result line reports the collapsed count."), weldPermille, 0f, 5f);
+            using (new EditorGUI.DisabledScope(chosen == 0 || string.IsNullOrEmpty(outGlb)))
+                if (GUILayout.Button(new GUIContent($"Fuse {chosen} checked part(s) into one shell  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
+                        "Joins the checked parts into ONE mesh in the output GLB, welds their seams, makes the winding consistent by MAJORITY across each " +
+                        "welded island (the minority of faces reversed to agree with the rest), and judges direction once where it can be judged: an OPEN " +
+                        "sheet (a deck, a bulwark) by the inside-out score, a CLOSED shell by its signed volume (inside-out = reversed whole). The cure for " +
+                        "a hull authored as dozens of separate plates — see-through, a hole in its side, gaps under any reduction. Triangles are preserved " +
+                        "exactly; the source parts keep their transforms and children and lose only their mesh. The source file is never touched."), GUILayout.Height(28)))
+                    FuseChecked();
         }
 
         if (!string.IsNullOrEmpty(status)) EditorGUILayout.HelpBox(status, MessageType.None);
@@ -515,6 +541,23 @@ public class ModelWorkshopWindow : EditorWindow
         pru.ambientColor = new Color(0.3f, 0.3f, 0.3f);
         cam.Render();
         GUI.DrawTexture(rect, pru.EndPreview(), ScaleMode.StretchToFill, false);
+    }
+
+    void FuseChecked()
+    {
+        if (File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?", outGlb, "Overwrite", "Cancel")) return;
+        try
+        {
+            EditorUtility.DisplayProgressBar("Model Workshop", "Fusing checked parts…", 0.4f);
+            var picked = rows.Where(r => r.split).Select(r => r.nodeIndex).ToList();   // list order = the row order; the first becomes the fused part's name
+            var result = GlbDisconnectedParts.FuseFile(srcFile, outGlb, picked, weldPermille / 1000.0);
+            if (!result.Changed) { status = "Nothing changed — the checked parts produced no fused mesh (see warnings in the console)."; return; }
+            foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
+            status = $"Fuse done: {result.Details.FirstOrDefault()}\n{outGlb}\nNext: point Source GLB at this output and re-Probe to see the fused shell (one island = whole), or open it in the Vehicle Lab.";
+            Debug.Log($"[Workshop] {string.Join(" | ", result.Details)}");
+        }
+        catch (Exception e) { status = "Fuse failed (source untouched): " + e.Message; Debug.LogException(e); }
+        finally { EditorUtility.ClearProgressBar(); }
     }
 
     void SplitChecked()
