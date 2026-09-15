@@ -7,8 +7,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 - **Model Workshop: FUSE — weld a plated hull into one shell, at the source.** The Teutonic shipped see-through
   with a hole in its side: its hull plating is 861 disconnected islands over four parts, the per-island inside-out
-  fix flipped some plates and not others, and any reduction opened gaps because plates share no vertices. The
-  Workshop's checkboxes now also drive **Fuse … into one shell**: the checked parts become ONE mesh in the output
+  fix flipped some plates and not others, and any reduction opened gaps because plates share no vertices. Each
+  Workshop row now carries a **⊕ fuse-group letter** (popup, or keys A–H on the highlighted row; ↑/↓ move it, 0
+  clears), and **Fuse … into one shell each** turns every group into ONE mesh in the output
   GLB, seam vertices welded within a dial (‰ of the model's length; **default 0** = exactly coincident positions),
   the winding made **consistent by majority** across each welded island, and direction judged once where it can
   be — open sheets by the inside-out score, closed shells by their signed volume. Pure C# in

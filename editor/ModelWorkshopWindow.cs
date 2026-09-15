@@ -33,8 +33,10 @@ public class ModelWorkshopWindow : EditorWindow
         public int tris;
         public int islands;      // 1 = nothing to split (row disabled)
         public string blocked;   // non-null = the analyzer's reason this part cannot be split
-        public bool split;       // the checkbox
+        public bool split;       // the checkbox (Split)
+        public string fuse = ""; // FUSE GROUP letter A..H (2026-09-15): rows sharing a letter fuse into one shell each; "" = none
     }
+    static readonly string[] FuseLabels = { "–", "⊕A", "⊕B", "⊕C", "⊕D", "⊕E", "⊕F", "⊕G", "⊕H" };   // the per-row fuse popup; keys A–H set it, 0/Backspace clears
 
     const string PreviewDir = "Assets/FactorySource/ModelWorkshop";
 
@@ -163,9 +165,10 @@ public class ModelWorkshopWindow : EditorWindow
                 EditorGUILayout.LabelField(chosen > 0 ? $"{chosen} checked → +{rows.Where(r => r.split).Sum(r => r.islands) - chosen} new part(s) in the output" : " ", EditorStyles.miniLabel);
             }
             var shown = hideWhole ? rows.Where(r => r.islands > 1 || r.blocked != null).ToList() : rows;
-            // KEYBOARD MARKING (2026-09-15, the Vehicle Lab's idiom): ↑/↓ move the highlight, A or Space toggles the
-            // highlighted row's checkbox — checking dozens of hull plates for Fuse by mouse was the complaint.
-            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   A or Space = check/uncheck the highlighted part (for Split or Fuse)", EditorStyles.miniLabel);
+            // KEYBOARD MARKING (2026-09-15, the Vehicle Lab's idiom): ↑/↓ move the highlight, A–H put the highlighted row in
+            // a fuse group, 0/Backspace clear it, Space toggles its Split checkbox — marking dozens of hull plates by mouse
+            // was the complaint. The Workshop has no role hotkeys, so the letters are free here.
+            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   A–H = fuse group of the highlighted part (⊕ column)   ·   0 / Backspace = no group   ·   Space = Split checkbox", EditorStyles.miniLabel);
             var ev = Event.current;
             if (ev.type == EventType.KeyDown && shown.Count > 0 && !EditorGUIUtility.editingTextField)
             {
@@ -178,7 +181,19 @@ public class ModelWorkshopWindow : EditorWindow
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
-                else if (idx >= 0 && (ev.keyCode == KeyCode.A || ev.keyCode == KeyCode.Space) && shown[idx].blocked == null)
+                else if (idx >= 0 && shown[idx].blocked == null && ev.keyCode >= KeyCode.A && ev.keyCode <= KeyCode.H)
+                {
+                    shown[idx].fuse = ((char)('A' + (ev.keyCode - KeyCode.A))).ToString();
+                    GUIUtility.keyboardControl = 0;
+                    ev.Use(); Repaint();
+                }
+                else if (idx >= 0 && (ev.keyCode == KeyCode.Alpha0 || ev.keyCode == KeyCode.Keypad0 || ev.keyCode == KeyCode.Backspace || ev.keyCode == KeyCode.Delete))
+                {
+                    shown[idx].fuse = "";
+                    GUIUtility.keyboardControl = 0;
+                    ev.Use(); Repaint();
+                }
+                else if (idx >= 0 && ev.keyCode == KeyCode.Space && shown[idx].blocked == null && shown[idx].islands > 1)
                 {
                     shown[idx].split = !shown[idx].split;
                     GUIUtility.keyboardControl = 0;
@@ -189,9 +204,15 @@ public class ModelWorkshopWindow : EditorWindow
             foreach (var r in shown)
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    // checkable whenever the part is readable: Split wants islands > 1, Fuse wants ANY plate (2026-09-15)
-                    using (new EditorGUI.DisabledScope(r.blocked != null))
+                    using (new EditorGUI.DisabledScope(r.islands <= 1 || r.blocked != null))
                         r.split = EditorGUILayout.Toggle(r.split, GUILayout.Width(20));
+                    // FUSE GROUP (2026-09-15): an independent per-row mark — rows sharing a letter fuse into one welded shell each
+                    using (new EditorGUI.DisabledScope(r.blocked != null))
+                    {
+                        int fi = string.IsNullOrEmpty(r.fuse) ? 0 : Mathf.Clamp(r.fuse[0] - 'A' + 1, 0, FuseLabels.Length - 1);
+                        int fj = EditorGUILayout.Popup(fi, FuseLabels, GUILayout.Width(46));
+                        r.fuse = fj <= 0 ? "" : ((char)('A' + fj - 1)).ToString();
+                    }
                     bool isSel = selectedIdx == r.nodeIndex;
                     string label = r.blocked != null ? $"{(isSel ? "◉ " : "")}{r.node}   — skipped: {r.blocked}"
                                  : $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {(r.islands == 1 ? "1 island — already whole" : r.islands.ToString("N0") + " islands")})";
@@ -270,9 +291,11 @@ public class ModelWorkshopWindow : EditorWindow
                         "Writes the output GLB with ONLY the checked parts exploded into _Part_NNN children. The source file is never touched."), GUILayout.Height(28)))
                     SplitChecked();
 
-            // ---- FUSE (2026-09-15): the opposite of Split — the checked parts become ONE welded shell with
-            // consistent winding, at the source, so the Lab, the Factory and the bake all see a whole hull. ----
+            // ---- FUSE (2026-09-15): the opposite of Split — every fuse GROUP (rows sharing a ⊕ letter) becomes ONE welded
+            // shell with consistent winding, at the source, so the Lab, the Factory and the bake all see a whole hull. ----
             EditorGUILayout.Space(4);
+            int fusedRows = rows.Count(r => !string.IsNullOrEmpty(r.fuse));
+            var fuseGroups = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).Select(r => r.fuse).Distinct().OrderBy(g => g).ToList();
             weldPermille = EditorGUILayout.Slider(new GUIContent("Fuse — weld seams closer than (‰ of length)",
                 "When fusing, vertices of the checked parts closer than this (in thousandths of the model's longest extent) become ONE vertex — " +
                 "so plates that merely touch turn into one connected surface (a UV seam or a hard edge keeps its own vertex; connectivity is by " +
@@ -280,14 +303,16 @@ public class ModelWorkshopWindow : EditorWindow
                 "that alone found and fixed its hole. Raise it only for sources whose plates leave gaps, knowing that every triangle smaller " +
                 "than the distance collapses (kept, zero-area, no longer connecting anything): at 0.5‰ the Teutonic lost 1,564 rivet-sized " +
                 "faces AND its hull island broke apart. The result line reports the collapsed count."), weldPermille, 0f, 5f);
-            using (new EditorGUI.DisabledScope(chosen == 0 || string.IsNullOrEmpty(outGlb)))
-                if (GUILayout.Button(new GUIContent($"Fuse {chosen} checked part(s) into one shell  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
-                        "Joins the checked parts into ONE mesh in the output GLB, welds their seams, makes the winding consistent by MAJORITY across each " +
+            using (new EditorGUI.DisabledScope(fusedRows == 0 || string.IsNullOrEmpty(outGlb)))
+                if (GUILayout.Button(new GUIContent(fusedRows == 0
+                            ? "Fuse — mark parts with a ⊕ letter first (popup per row, or keys A–H on the highlighted row)"
+                            : $"Fuse {fusedRows} marked part(s) in {fuseGroups.Count} group(s) ({string.Join(", ", fuseGroups.Select(g => "⊕" + g + "×" + rows.Count(r => r.fuse == g)))}) into one shell each  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
+                        "Joins the parts of each ⊕ group into ONE mesh in the output GLB, welds their seams, makes the winding consistent by MAJORITY across each " +
                         "welded island (the minority of faces reversed to agree with the rest), and judges direction once where it can be judged: an OPEN " +
                         "sheet (a deck, a bulwark) by the inside-out score, a CLOSED shell by its signed volume (inside-out = reversed whole). The cure for " +
                         "a hull authored as dozens of separate plates — see-through, a hole in its side, gaps under any reduction. Triangles are preserved " +
                         "exactly; the source parts keep their transforms and children and lose only their mesh. The source file is never touched."), GUILayout.Height(28)))
-                    FuseChecked();
+                    FuseMarked();
         }
 
         if (!string.IsNullOrEmpty(status)) EditorGUILayout.HelpBox(status, MessageType.None);
@@ -565,18 +590,31 @@ public class ModelWorkshopWindow : EditorWindow
         GUI.DrawTexture(rect, pru.EndPreview(), ScaleMode.StretchToFill, false);
     }
 
-    void FuseChecked()
+    // Every ⊕ group becomes its own shell, chained through one in-memory GLB: FuseNodes never removes or reorders
+    // nodes (fused sources only lose their mesh; the fused part is appended), so group B's node indices stay valid
+    // in group A's output. One write at the end; the source file is never touched.
+    void FuseMarked()
     {
         if (File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?", outGlb, "Overwrite", "Cancel")) return;
         try
         {
-            EditorUtility.DisplayProgressBar("Model Workshop", "Fusing checked parts…", 0.4f);
-            var picked = rows.Where(r => r.split).Select(r => r.nodeIndex).ToList();   // list order = the row order; the first becomes the fused part's name
-            var result = GlbDisconnectedParts.FuseFile(srcFile, outGlb, picked, weldPermille / 1000.0);
-            if (!result.Changed) { status = "Nothing changed — the checked parts produced no fused mesh (see warnings in the console)."; return; }
-            foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
-            status = $"Fuse done: {result.Details.FirstOrDefault()}\n{outGlb}\nNext: point Source GLB at this output and re-Probe to see the fused shell (one island = whole), or open it in the Vehicle Lab.";
-            Debug.Log($"[Workshop] {string.Join(" | ", result.Details)}");
+            var groups = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).GroupBy(r => r.fuse).OrderBy(g => g.Key).ToList();
+            byte[] bytes = File.ReadAllBytes(srcFile);
+            var lines = new List<string>(); int done = 0;
+            foreach (var g in groups)
+            {
+                EditorUtility.DisplayProgressBar("Model Workshop", $"Fusing group ⊕{g.Key} ({g.Count()} part(s))…", 0.2f + 0.6f * done / Math.Max(1, groups.Count));
+                var picked = g.Select(r => r.nodeIndex).ToList();   // row order: the first becomes the fused part's name
+                var result = GlbDisconnectedParts.FuseNodes(bytes, picked, weldPermille / 1000.0);
+                foreach (var w in result.Warnings) Debug.LogWarning($"[Workshop] ⊕{g.Key}: " + w);
+                if (!result.Changed) { lines.Add($"⊕{g.Key}: nothing fused ({string.Join("; ", result.Warnings)})"); continue; }
+                bytes = result.Bytes; done++;
+                lines.Add($"⊕{g.Key}: {result.Details.FirstOrDefault()}");
+                Debug.Log($"[Workshop] ⊕{g.Key} {string.Join(" | ", result.Details)}");
+            }
+            if (done == 0) { status = "Nothing changed — no group produced a fused mesh (see warnings in the console)."; return; }
+            File.WriteAllBytes(outGlb, bytes);
+            status = $"Fuse done ({done} group(s)):\n{string.Join("\n", lines)}\n{outGlb}\nNext: point Source GLB at this output and re-Probe to see each fused shell as one part, or open it in the Vehicle Lab.";
         }
         catch (Exception e) { status = "Fuse failed (source untouched): " + e.Message; Debug.LogException(e); }
         finally { EditorUtility.ClearProgressBar(); }
