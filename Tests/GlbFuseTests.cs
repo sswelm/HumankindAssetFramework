@@ -269,6 +269,32 @@ public class GlbFuseTests
     }
 
     [Fact]
+    public void A_lap_strip_lying_on_its_plate_and_facing_with_it_is_not_treated_as_inverted()
+    {
+        // The Teutonic's Object_8: a riveted strip folded back OVER the plate along a shared edge, both authored +Z.
+        // In manifold terms a fold-back must face the other way, so the plain majority rule flipped every strip to
+        // face inward and they rendered as dark lines. Same traversal + agreeing normals = a lap: leave it alone.
+        var plate = new Part { Name = "Plate", Positions = new float[] { 0, 0, 0,  2, 0, 0,  2, 1, 0,  0, 1, 0 }, Indices = new[] { 0, 1, 2, 0, 2, 3 } };           // +Z
+        var strip = new Part { Name = "Strip", Positions = new float[] { 0, 1, 0,  0, 0.6f, 0.01f,  2, 0.6f, 0.01f,  2, 1, 0 }, Indices = new[] { 0, 1, 2, 0, 2, 3 } };   // +Z, shares the y=1 edge, lies over the plate
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(plate, strip), new[] { 0, 1 }, 0.0);
+        Assert.Equal(1, r.IslandsAfter);
+        Assert.Equal(0, r.FacesRewound);
+        var g = Read(r.Bytes);
+        var normals = FaceNormals(g, (JObject)g.Primitives(g.Node("Plate_Fused"))[0]);
+        Assert.Equal(4, normals.Count(n => n[2] > 0));   // plate AND strip still face +Z
+
+        // the control: the same strip folded over but authored facing DOWN is a thin solid's LIP — the manifold rule
+        // reads a fold-back facing the other way as consistent, and it is left exactly as authored (both cases: the
+        // artist's winding wins; only a fold-back that CONTRADICTS the manifold rule and yet agrees in direction is a lap)
+        var down = new Part { Name = "Strip", Positions = strip.Positions, Indices = new[] { 0, 2, 1, 0, 3, 2 } };   // -Z
+        var r2 = GlbDisconnectedParts.FuseNodes(BuildGlb(plate, down), new[] { 0, 1 }, 0.0);
+        Assert.Equal(0, r2.FacesRewound);
+        var normals2 = FaceNormals(Read(r2.Bytes), (JObject)Read(r2.Bytes).Primitives(Read(r2.Bytes).Node("Plate_Fused"))[0]);
+        Assert.Equal(2, normals2.Count(n => n[2] > 0));
+        Assert.Equal(2, normals2.Count(n => n[2] < 0));
+    }
+
+    [Fact]
     public void A_triangle_smaller_than_the_weld_is_kept_collapsed_and_joins_no_island()
     {
         // a plate plus a rivet-sized triangle far from it; the weld distance (0.2 of the 2-long model = 0.4) swallows the rivet

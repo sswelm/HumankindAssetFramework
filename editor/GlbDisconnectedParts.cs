@@ -830,6 +830,7 @@ public static class GlbDisconnectedParts
 
         // 1) gather every triangle of every chosen part in WORLD space, with normal / UV / material per vertex
         var pos = new List<Vec3>(); var nrm = new List<Vec3?>(); var uv = new List<double[]>(); var mat = new List<int>();
+        var partOf = new List<int>();   // which chosen part each vertex came from (the lap-strip warning below)
         var tris = new List<int>();
         var partNames = new List<string>();
         var picked = nodeIndices.Distinct().ToList();
@@ -862,6 +863,7 @@ public static class GlbDisconnectedParts
                     else nrm.Add(null);
                     uv.Add(uvAcc >= 0 ? reader.Vector(uvAcc, v, 2) : null);
                     mat.Add(material);
+                    partOf.Add(partNames.Count - 1);
                 }
                 int indexCount = primitive["indices"] == null ? vertCount : reader.Count(primitive.Value<int>("indices"));
                 if (indexCount % 3 != 0) throw new InvalidDataException("Triangle primitive index count is not divisible by three.");
@@ -883,7 +885,11 @@ public static class GlbDisconnectedParts
         foreach (Vec3 p in pos) UpdateBounds(mn, mx, p);
         double longest = Math.Max(mx[0] - mn[0], Math.Max(mx[1] - mn[1], mx[2] - mn[2]));
         if (longest <= 0) longest = 1e-9;
-        double weld = longest * weldFraction;
+        // "0" means coincident within float rounding, never bit-identical: parts carry different node transforms, so
+        // the same seam point computed through two matrices differs at the 1e-6 level — with exact equality the
+        // Teutonic's eight hull parts stayed eight islands ("islands 73 -> 73", user: "still separated").
+        double rounding = longest * 1e-6;
+        double weld = Math.Max(longest * weldFraction, rounding);
 
         // 2) weld classes — union-find over vertices within `weld` (a hash grid, the 27 neighbouring cells)
         int[] WeldClasses(double distance)
@@ -963,15 +969,38 @@ public static class GlbDisconnectedParts
             }
             return islands;
         }
-        result.IslandsBefore = Islands(WeldClasses(0.0), out _, out _, out _, out _).Count;   // exact positions only: what the source connects
+        result.IslandsBefore = Islands(WeldClasses(rounding), out _, out _, out _, out _).Count;   // coincident positions only: what the source already connects
         int[] classes = WeldClasses(weld);
         List<List<int>> allIslands = Islands(classes, out long[] fEdgeKeys, out bool[] fEdgeDir, out Dictionary<long, List<int>> fEdgeFaces, out int collapsedFaces);
         result.IslandsAfter = allIslands.Count;
+
+        // LAP / TRIM STRIPS (2026-09-15, the Teutonic's Object_8): a part most of whose vertices coincide with OTHER parts'
+        // vertices is stitched onto their surface — riveted strakes lying on the plates, trim on a wall. Welded in, it
+        // becomes a flap attached along the middle of the plate, and a later reduction creases the plate along every
+        // strip (the dark lines along the strakes). It is not wrong to fuse it; it is wrong to reduce the result. Say so.
+        if (picked.Count > 1)
+        {
+            var partsInClass = new Dictionary<int, HashSet<int>>();
+            for (int v = 0; v < pos.Count; v++) { if (!partsInClass.TryGetValue(classes[v], out HashSet<int> set)) partsInClass.Add(classes[v], set = new HashSet<int>()); set.Add(partOf[v]); }
+            var vertsOf = new int[picked.Count]; var sharedOf = new int[picked.Count];
+            for (int v = 0; v < pos.Count; v++) { vertsOf[partOf[v]]++; if (partsInClass[classes[v]].Count > 1) sharedOf[partOf[v]]++; }
+            for (int p = 0; p < picked.Count; p++)
+                if (vertsOf[p] > 0 && sharedOf[p] * 5 >= vertsOf[p] * 4 && vertsOf[p] * 4 < pos.Count)   // >= 80 %: abutting plates share 50-65 % along their seams and are NOT laps (measured on the Teutonic)
+                    result.Warnings.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                        "'{0}' is stitched onto the other parts along {1:0}% of its vertices — a lap/trim strip lying on their surface. Fused in, it becomes a flap along the middle of the plate and a later reduction creases the plate along it (dark lines). Leave it out of the group, or keep the fused part unreduced.",
+                        partNames[p], 100.0 * sharedOf[p] / vertsOf[p]));
+        }
 
         // 4) consistency by MAJORITY — parity propagation across two-face edges, the minority reversed
         var flip = new bool[faceCount];
         int islandsMadeConsistent = 0;
         bool DirOf(int face, long key) { for (int e = 0; e < 3; e++) if (fEdgeKeys[face * 3 + e] == key) return fEdgeDir[face * 3 + e]; return false; }
+        Vec3 P(int f, int corner) => pos[tris[f * 3 + corner]];
+        Vec3 FaceNormal(int f)   // area-weighted, with the CURRENT winding (authored while `flip` is still all false)
+        {
+            Vec3 n = FCross(FSub(P(f, 1), P(f, 0)), FSub(P(f, 2), P(f, 0)));
+            return flip[f] ? FScale(n, -1.0) : n;
+        }
         foreach (List<int> isl in allIslands)
         {
             var parity = new Dictionary<int, int>();
@@ -988,7 +1017,19 @@ public static class GlbDisconnectedParts
                         List<int> lf = fEdgeFaces[key]; if (lf.Count != 2) continue;
                         int fb = lf[0] == fa ? lf[1] : lf[0];
                         if (fb == fa || parity.ContainsKey(fb)) continue;
-                        bool same = fEdgeDir[fa * 3 + e] == DirOf(fb, key);   // both walk the edge the same way = inconsistent neighbours
+                        bool same = fEdgeDir[fa * 3 + e] == DirOf(fb, key);   // both walk the edge the same way = inconsistent neighbours…
+                        // …unless they are a LAP: the Teutonic's Object_8 is 671 riveted lap strips lying ON the plates,
+                        // stitched to them along one edge and authored facing the SAME way as the plate beneath. In
+                        // manifold terms a face folded back over its neighbour must face the opposite way (a thin solid's
+                        // lip), so the plain rule "corrected" every strip to face inward and they rendered as dark lines
+                        // (2026-09-15). Same traversal AND authored normals already agreeing = the two faces sit on the same
+                        // side of the edge on purpose: consistent as authored, parity equal, nothing to correct.
+                        if (same)
+                        {
+                            Vec3 na = FaceNormal(fa), nb = FaceNormal(fb);
+                            double la = FLen(na), lb = FLen(nb);
+                            if (la > 1e-12 && lb > 1e-12 && FDot(na, nb) / (la * lb) > 0.9) same = false;
+                        }
                         parity[fb] = parity[fa] ^ (same ? 1 : 0);
                         stack.Push(fb);
                     }
@@ -1004,12 +1045,6 @@ public static class GlbDisconnectedParts
         }
 
         // 5) direction — open sheets by the inside-out score, closed shells by their signed volume
-        Vec3 P(int f, int corner) => pos[tris[f * 3 + corner]];
-        Vec3 FaceNormal(int f)   // area-weighted, with the CURRENT winding
-        {
-            Vec3 n = FCross(FSub(P(f, 1), P(f, 0)), FSub(P(f, 2), P(f, 0)));
-            return flip[f] ? FScale(n, -1.0) : n;
-        }
         int lengthAxis = (mx[0] - mn[0]) >= (mx[2] - mn[2]) ? 0 : 2, widthAxis = lengthAxis == 0 ? 2 : 0;   // glTF is Y-up; the hull's length is the longer horizontal extent
         double centreW = 0.5 * (mn[widthAxis] + mx[widthAxis]);
         var ys = new List<double>(); int step = Math.Max(1, pos.Count / 5000);

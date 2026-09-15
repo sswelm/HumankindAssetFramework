@@ -389,7 +389,7 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   per-plate facing test can see that a 1,609-face region is glued on the wrong way round along a 26-edge seam,
   and it cannot be reduced either: plates share no vertices, so any collapse opens gaps. Give the plates the same **⊕ letter** (the popup on each row, or keys **A–H** on the highlighted row;
   ↑/↓ move the highlight, 0 clears; several letters = several shells), leave
-  **Fuse — weld seams closer than** at **0** (exactly coincident positions — the Teutonic's plates already touch,
+  **Fuse — weld seams closer than** at **0** (coincident positions, within float rounding — the Teutonic's plates already touch,
   and that alone found its hole; raise it only for plates that leave gaps, knowing that every triangle smaller
   than the distance collapses: at 0.5‰ the Teutonic lost 1,564 rivet-sized faces and its hull island broke apart),
   press **Fuse … into one shell each**: every group becomes ONE mesh in the output GLB, their seam vertices

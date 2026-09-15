@@ -23,7 +23,14 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   plates are not the manifold solid it assumes), the radial score on closed shells (inner faces cancel outer; it
   reads ~0), and a non-zero weld by default (0.5‰ collapsed 1,564 rivet-sized triangles and, stripped of their
   adjacency, they broke the hull island apart — the plates already touch exactly; a distance is for gapped
-  sources only, and the result line reports what collapsed). Fixing the source means the Lab, the Factory and the
+  sources only, and the result line reports what collapsed). Two more came from the first real use: **"0" means
+  coincident within float rounding, never bit-identical** — parts carry different node transforms, so one seam
+  point computed through two matrices differs at the 1e-6 level and the eight hull parts stayed eight islands
+  ("still separated"); and **a lap is not an inverted neighbour** — `Object_8` is 671 riveted strips lying ON the
+  plates, stitched to them, authored facing the same way, and in manifold terms a face folded back over its
+  neighbour must face the other way, so the plain rule turned every strip inward and they rendered as dark
+  lines along the strakes; same traversal AND agreeing authored normals now reads as "on the same side on
+  purpose" (532 of 656 strips with their plate after the fix). Fixing the source means the Lab, the Factory and the
   static bake all see a whole hull; a Vehicle-Lab-side version was built first and dropped in favour of this one.
 
 - **Vehicle Lab: the ⟲ inside-out marks — see the fix's reach before it runs.** Every probed part the
