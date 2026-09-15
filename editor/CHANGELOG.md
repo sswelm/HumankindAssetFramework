@@ -62,6 +62,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   back A — lines now carry `letter|name|node index` (`WorkshopRules.ResolveFuseSidecar`, 5 tests): a line applies
   at its node index, or by name where the name is unique, and a shared name is refused and named in the console.
   Old name-only files keep working where names are unique (the Teutonic's 1,435 mesh nodes have no duplicate).
+  Fourth round: the sidecar line is parsed from both ends (letter before the first `|`, index after the last, the
+  name is everything between), so a part called `Hull|Port` can never land on `Hull`, and a line that fits two
+  parts is refused; and a **cleared selection can be saved** — Save groups with no letters removes the sidecar,
+  and the sidecar is read only when a file is first loaded into the window (a re-Probe or slider move of a file
+  whose letters were cleared keeps them cleared; Load groups is the explicit way back).
 
 - **Vehicle Lab: the ⟲ inside-out marks — see the fix's reach before it runs.** Every probed part the
   **Fix inside-out faces** pass would reverse now carries a ⟲ tag in the list (with its island count), and

@@ -305,9 +305,13 @@ public class ModelWorkshopWindow : EditorWindow
                 "faces AND its hull island broke apart. The result line reports the collapsed count."), weldPermille, 0f, 5f);
             using (new EditorGUILayout.HorizontalScope())
             {
-                using (new EditorGUI.DisabledScope(fusedRows == 0))
-                    if (GUILayout.Button(new GUIContent("Save groups", $"Writes the ⊕ letters to {Path.GetFileName(srcFile)}.fuse.txt next to the source (a Fuse writes it too); Probe restores them from there."), GUILayout.Width(100)))
-                    { WriteFuseSidecar(srcFile); status = $"Groupings saved: {FuseSidecarPath(srcFile)}"; }
+                bool sidecarExists = File.Exists(FuseSidecarPath(srcFile) ?? "");
+                using (new EditorGUI.DisabledScope(fusedRows == 0 && !sidecarExists))   // with no letters AND a sidecar on disk, saving means "clear it" (review of 0a8b56e)
+                    if (GUILayout.Button(new GUIContent("Save groups", $"Writes the ⊕ letters to {Path.GetFileName(srcFile)}.fuse.txt next to the source (a Fuse writes it too); the first Probe of a file restores them from there. With no letters marked this removes the file."), GUILayout.Width(100)))
+                    {
+                        WriteFuseSidecar(srcFile);
+                        status = fusedRows == 0 ? $"Groupings cleared: {FuseSidecarPath(srcFile)} removed" : $"Groupings saved: {FuseSidecarPath(srcFile)}";
+                    }
                 using (new EditorGUI.DisabledScope(!File.Exists(FuseSidecarPath(srcFile) ?? "")))
                     if (GUILayout.Button(new GUIContent("Load groups", "Reads the ⊕ letters back from the sidecar next to the source, by part name and node index (a name shared by several parts is refused unless the index settles it)."), GUILayout.Width(100)))
                     {
@@ -353,6 +357,11 @@ public class ModelWorkshopWindow : EditorWindow
         // checkboxes"): the merge slider re-analyzes and used to rebuild every row blank. Same key. And a re-Probe of a
         // file with NO letters in memory restores them from the sidecar the last Fuse wrote (<source>.fuse.txt).
         var keptFuse = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).ToDictionary(r => r.nodeIndex, r => r.fuse);
+        // The sidecar is consulted only when this file is being loaded INTO the window (no rows yet, or rows of another
+        // file) — a re-Probe or a slider move of a file whose letters the user cleared keeps them cleared (review of
+        // 0a8b56e: the old rule "no letters in memory" reloaded the sidecar over a deliberate clear). "Load groups" is
+        // the explicit way back.
+        bool initialLoad = rows.Count == 0 || !SamePath(probedFile, srcFile);
         try
         {
             rows = GlbDisconnectedParts.Analyze(File.ReadAllBytes(srcFile), mergePct / 100.0)
@@ -361,7 +370,7 @@ public class ModelWorkshopWindow : EditorWindow
                 .OrderBy(r => NaturalPrefix(r.node), StringComparer.OrdinalIgnoreCase)
                 .ThenBy(r => NaturalNumber(r.node))
                 .ThenBy(r => r.node, StringComparer.OrdinalIgnoreCase).ToList();
-            if (keptFuse.Count == 0) ApplyFuseSidecar(rows, out _);
+            if (keptFuse.Count == 0 && initialLoad) ApplyFuseSidecar(rows, out _);
             foreach (var r in rows) if (r.islands <= 1 || r.blocked != null) r.split = false;   // no longer splittable at this distance
             int multi = rows.Count(r => r.islands > 1 && r.blocked == null);
             probedFile = srcFile;   // the rows now describe THIS file (the source-switch hygiene above keys on it)

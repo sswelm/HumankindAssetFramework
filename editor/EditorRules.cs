@@ -167,13 +167,27 @@ public static class WorkshopRules
         {
             string line = raw?.Trim();
             if (string.IsNullOrEmpty(line)) continue;
-            string[] f = line.Split('|');
-            if (f.Length < 2) continue;
-            string letter = f[0].Trim(), name = f[1].Trim();
-            if (letter.Length != 1 || letter[0] < 'A' || letter[0] > 'H' || name.Length == 0) continue;
-            int index = -1;
-            if (f.Length >= 3 && int.TryParse(f[2].Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int parsed)) index = parsed;
-            if (index >= 0 && nameAt.TryGetValue(index, out string at) && at == name) { result[index] = letter; continue; }
+            // parsed from BOTH ends, never split: the letter is before the first '|', the index (if any) after the
+            // last, and the name is everything between — a part called "Hull|Port" must never land on "Hull"
+            // (review of 0a8b56e). A legacy line without an index reads the whole remainder as the name.
+            int firstBar = line.IndexOf('|');
+            if (firstBar <= 0) continue;
+            string letter = line.Substring(0, firstBar).Trim();
+            if (letter.Length != 1 || letter[0] < 'A' || letter[0] > 'H') continue;
+            string remainder = line.Substring(firstBar + 1).Trim();
+            if (remainder.Length == 0) continue;
+            int lastBar = remainder.LastIndexOf('|');
+            int index = -1; string name = remainder;
+            if (lastBar > 0 && int.TryParse(remainder.Substring(lastBar + 1).Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int parsed))
+            { index = parsed; name = remainder.Substring(0, lastBar).Trim(); }
+            // the readings, strictest first: the row at the index carrying the name; a unique row named the whole
+            // remainder (a legacy line for a name that itself ends in "|<number>"); a unique row with the name
+            int byIndex = index >= 0 && nameAt.TryGetValue(index, out string at) && at == name ? index : -1;
+            int byWhole = name != remainder && countByName.TryGetValue(remainder, out int wn) && wn == 1 ? indexByName[remainder] : -1;
+            if (byIndex >= 0 && byWhole >= 0 && byIndex != byWhole)
+            { refused?.Add("'" + line + "' fits both node " + byIndex + " ('" + name + "') and '" + remainder + "' — mark them by hand"); continue; }
+            if (byIndex >= 0) { result[byIndex] = letter; continue; }
+            if (byWhole >= 0) { result[byWhole] = letter; continue; }
             int n = 0; countByName.TryGetValue(name, out n);
             if (n == 1) { result[indexByName[name]] = letter; continue; }
             refused?.Add(n > 1
