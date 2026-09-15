@@ -163,6 +163,28 @@ public class ModelWorkshopWindow : EditorWindow
                 EditorGUILayout.LabelField(chosen > 0 ? $"{chosen} checked → +{rows.Where(r => r.split).Sum(r => r.islands) - chosen} new part(s) in the output" : " ", EditorStyles.miniLabel);
             }
             var shown = hideWhole ? rows.Where(r => r.islands > 1 || r.blocked != null).ToList() : rows;
+            // KEYBOARD MARKING (2026-09-15, the Vehicle Lab's idiom): ↑/↓ move the highlight, A or Space toggles the
+            // highlighted row's checkbox — checking dozens of hull plates for Fuse by mouse was the complaint.
+            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   A or Space = check/uncheck the highlighted part (for Split or Fuse)", EditorStyles.miniLabel);
+            var ev = Event.current;
+            if (ev.type == EventType.KeyDown && shown.Count > 0 && !EditorGUIUtility.editingTextField)
+            {
+                int idx = shown.FindIndex(x => x.nodeIndex == selectedIdx);
+                if (ev.keyCode == KeyCode.UpArrow || ev.keyCode == KeyCode.DownArrow)
+                {
+                    idx = ev.keyCode == KeyCode.DownArrow ? Mathf.Min(idx + 1, shown.Count - 1) : Mathf.Max(idx - 1, 0);
+                    ExitCutMode(); selectedIdx = shown[idx].nodeIndex; SelectRow(shown[idx].node);
+                    scroll.y = Mathf.Max(0f, idx * 22f - 120f);
+                    GUIUtility.keyboardControl = 0;
+                    ev.Use(); Repaint();
+                }
+                else if (idx >= 0 && (ev.keyCode == KeyCode.A || ev.keyCode == KeyCode.Space) && shown[idx].blocked == null)
+                {
+                    shown[idx].split = !shown[idx].split;
+                    GUIUtility.keyboardControl = 0;
+                    ev.Use(); Repaint();
+                }
+            }
             scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(Mathf.Min(330, 22 * shown.Count + 8)));   // cap 220 -> 330 (2026-09-08 user request: +50% — a real ship's part list is dozens of rows)
             foreach (var r in shown)
                 using (new EditorGUILayout.HorizontalScope())
