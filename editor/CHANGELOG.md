@@ -16,6 +16,14 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   no copying by hand. The proposed output name follows the operation, `_cut` while the cut panel is open, `_split`
   otherwise, and counts up when the source already carries it: cutting `ship_cut.glb` proposes `ship_cut2.glb`.
 
+- **Fuse: an island whose winding cannot be made consistent is left as authored.** The Teutonic's propeller
+  blades render right, yet 32 of a blade's 1,287 edges are walked the same way by both faces, and after the parity
+  assignment 138 edges are still unsatisfied — the surface has odd cycles (fins, fillets, a twisted rim) and no
+  winding satisfies it; the majority rule turned 198 faces per blade and every tip showed jagged holes. Every real
+  hull, deck and boat island measured resolves to exactly 0 unsatisfied edges, so the rule is: 0 = fix, anything
+  else = keep and say so ("N not orientable by traversal (kept as authored)" in the summary, the edge counts on
+  each island's line). Test: a Möbius band of three quads.
+
 - **Model Workshop: a fused part is named `Fused_<letter>_<first part>`** (was `<first part>_Fused`), so the Lab's list
   shows which ⊕ group a shell came from and the fused parts sort together.
 

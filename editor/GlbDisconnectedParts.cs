@@ -1133,7 +1133,8 @@ public static class GlbDisconnectedParts
 
         // 4) consistency by MAJORITY — parity propagation across two-face edges, the minority reversed
         var flip = new bool[faceCount];
-        int islandsMadeConsistent = 0;
+        int islandsMadeConsistent = 0, islandsNotOrientable = 0;
+        var islandConflict = new string[allIslands.Count];   // per island: same-traversal edges before, still unsatisfied after the flip (the "largest islands" line)
         bool DirOf(int face, long key) { for (int e = 0; e < 3; e++) if (fEdgeKeys[face * 3 + e] == key) return fEdgeDir[face * 3 + e]; return false; }
         Vec3 P(int f, int corner) => pos[tris[f * 3 + corner]];
         Vec3 FaceNormal(int f)   // area-weighted, with the CURRENT winding (authored while `flip` is still all false)
@@ -1141,9 +1142,11 @@ public static class GlbDisconnectedParts
             Vec3 n = FCross(FSub(P(f, 1), P(f, 0)), FSub(P(f, 2), P(f, 0)));
             return flip[f] ? FScale(n, -1.0) : n;
         }
-        foreach (List<int> isl in allIslands)
+        for (int ii = 0; ii < allIslands.Count; ii++)
         {
+            List<int> isl = allIslands[ii];
             var parity = new Dictionary<int, int>();
+            var edgeSame = new Dictionary<long, bool>();   // every 2-face edge of the island: were its faces walking it the same way (after the lap rule)?
             foreach (int seed in isl)
             {
                 if (parity.ContainsKey(seed)) continue;
@@ -1170,13 +1173,37 @@ public static class GlbDisconnectedParts
                             double la = FLen(na), lb = FLen(nb);
                             if (la > 1e-12 && lb > 1e-12 && FDot(na, nb) / (la * lb) > 0.9) same = false;
                         }
+                        edgeSame[key] = same;
                         parity[fb] = parity[fa] ^ (same ? 1 : 0);
                         stack.Push(fb);
                     }
                 }
             }
             int ones = 0; foreach (int f in isl) ones += parity[f];
-            if (ones > 0 && ones < isl.Count)
+            // every 2-face edge (visited or not): same-traversal count before, and after the parity assignment how many
+            // edges are still unsatisfied — a 2-colourable island (the hull: one seam, one region) resolves to zero,
+            // a non-orientable construction (a propeller blade with fins) cannot
+            int sameBefore = 0, unsatisfied = 0, twoFaceEdges = 0;
+            {
+                var seenEdge = new HashSet<long>();
+                foreach (int f in isl) for (int e = 0; e < 3; e++)
+                {
+                    long key = fEdgeKeys[f * 3 + e]; if (key < 0 || !seenEdge.Add(key)) continue;
+                    List<int> lf = fEdgeFaces[key]; if (lf.Count != 2) continue;
+                    twoFaceEdges++;
+                    bool sm; if (!edgeSame.TryGetValue(key, out sm)) { sm = DirOf(lf[0], key) == DirOf(lf[1], key); }
+                    if (sm) sameBefore++;
+                    if ((parity[lf[0]] ^ parity[lf[1]]) != (sm ? 1 : 0)) unsatisfied++;
+                }
+            }
+            islandConflict[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} of {1} edges same-way, {2} unsatisfied after", sameBefore, twoFaceEdges, unsatisfied);
+            // NOT ORIENTABLE BY TRAVERSAL (2026-09-17, the Teutonic's propellers): a blade renders right yet 32 of its
+            // 1,287 edges are walked the same way by both faces, and after the parity assignment 138 edges are still
+            // unsatisfied — the surface has odd cycles (fins, fillets, a twisted rim) and no winding satisfies it. The
+            // majority rule then turned 198 faces per blade, jagged holes at every tip. Every real hull, deck and boat
+            // island measured reaches exactly 0 unsatisfied edges; anything above is a guess, and a guess is not made.
+            if (unsatisfied > 0 && ones > 0 && ones < isl.Count) { islandsNotOrientable++; islandConflict[ii] += " — not orientable, kept as authored"; }
+            else if (ones > 0 && ones < isl.Count)
             {
                 int minor = ones * 2 <= isl.Count ? 1 : 0;
                 foreach (int f in isl) if (parity[f] == minor) flip[f] = true;
@@ -1259,7 +1286,7 @@ public static class GlbDisconnectedParts
                 List<int> isl = allIslands[ii];
                 var keys = new HashSet<long>(); int boundary = 0, turned = 0;
                 foreach (int f in isl) { if (flip[f]) turned++; for (int e = 0; e < 3; e++) { long key = fEdgeKeys[f * 3 + e]; if (key >= 0 && keys.Add(key) && fEdgeFaces[key].Count == 1) boundary++; } }
-                rows.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} faces ({1:0}% boundary, {2}, {3} rewound)", isl.Count, keys.Count > 0 ? 100.0 * boundary / keys.Count : 100.0, islandRule[ii], turned));
+                rows.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} faces ({1:0}% boundary, {2}, {3} rewound; {4})", isl.Count, keys.Count > 0 ? 100.0 * boundary / keys.Count : 100.0, islandRule[ii], turned, islandConflict[ii]));
             }
             largestIslands = "largest islands: " + string.Join("; ", rows);
         }
@@ -1369,9 +1396,10 @@ public static class GlbDisconnectedParts
         result.NodesSplit = picked.Count; result.MeshesSplit = fusedMeshes.Count; result.ChildPartsCreated = 1;
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         result.Details.Add(string.Format(inv,
-            "Fused {0} part(s) -> '{1}': {2} -> {3} verts (seams welded within {4:0.####} = {5:0.##}‰ of {6:0.#}); islands {7} -> {8}; {9} made consistent; {10} open sheet(s) judged, {11} reversed; {12} closed shell(s) reversed whole; {13} of {14} face(s) rewound; {15} face(s) smaller than the weld kept collapsed",
+            "Fused {0} part(s) -> '{1}': {2} -> {3} verts (seams welded within {4:0.####} = {5:0.##}‰ of {6:0.#}); islands {7} -> {8}; {9} made consistent{16}; {10} open sheet(s) judged, {11} reversed; {12} closed shell(s) reversed whole; {13} of {14} face(s) rewound; {15} face(s) smaller than the weld kept collapsed",
             picked.Count, newNodeName, result.VerticesBefore, result.VerticesAfter, weld, weldFraction * 1000.0, longest, result.IslandsBefore, result.IslandsAfter,
-            islandsMadeConsistent, openJudged, openReversed, closedReversed, result.FacesRewound, faceCount, collapsedFaces));
+            islandsMadeConsistent, openJudged, openReversed, closedReversed, result.FacesRewound, faceCount, collapsedFaces,
+            islandsNotOrientable > 0 ? string.Format(inv, ", {0} not orientable by traversal (kept as authored)", islandsNotOrientable) : ""));
         result.Details.Add(largestIslands);
         if (stitchedLine != null) result.Details.Add(stitchedLine);
         result.Details.Add(string.Format(inv, "frame: length along {0}, side centre {1:0.##}, belly height {2:0.##} (the model's, fused or not)", lengthAxis == 0 ? "X" : "Z", centreW, bellyY));

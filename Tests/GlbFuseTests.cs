@@ -576,6 +576,35 @@ public class GlbFuseTests
     }
 
     [Fact]
+    public void An_island_whose_parity_cannot_be_satisfied_is_left_as_authored()
+    {
+        // 2026-09-17, the Teutonic's propeller blades: a surface with an odd cycle — here a Möbius band of three quads,
+        // the third joining back to the first edge with a half twist — has no consistent winding. The old rule flipped
+        // the "minority" of a parity assignment that could never be satisfied (198 faces per blade, holes at every tip).
+        float r = 3f, w = 1f; var pos = new List<float>(); var idx = new List<int>();
+        for (int k = 0; k < 3; k++)
+        {
+            double a = k * 2 * Math.PI / 3, half = a / 2;   // the half twist
+            float cx = (float)(r * Math.Cos(a)), cz = (float)(r * Math.Sin(a));
+            float ux = (float)(Math.Cos(half) * Math.Cos(a) * w), uy = (float)(Math.Sin(half) * w), uz = (float)(Math.Cos(half) * Math.Sin(a) * w);
+            pos.AddRange(new[] { cx - ux, 5 - uy, cz - uz,  cx + ux, 5 + uy, cz + uz });   // A_k, B_k
+        }
+        for (int k = 0; k < 3; k++)
+        {
+            int a0 = 2 * k, b0 = 2 * k + 1, a1, b1;
+            if (k < 2) { a1 = 2 * (k + 1); b1 = 2 * (k + 1) + 1; } else { a1 = 1; b1 = 0; }   // the twist: A2->B0, B2->A0
+            idx.AddRange(new[] { a0, b0, b1, a0, b1, a1 });
+        }
+        var band = new Part { Name = "Band", Positions = pos.ToArray(), Indices = idx.ToArray() };
+        var hull = Box("Hull", 6, -3, -3, -3, inward: false);   // the model's belly, outside the group
+        var res = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, band), new[] { 1 }, 0.0);
+        Assert.Equal(1, res.IslandsAfter);
+        Assert.Contains("0 made consistent, 1 not orientable by traversal (kept as authored)", res.Details[0]);
+        Assert.Contains("not orientable, kept as authored", res.Details[1]);
+        // and a plain inverted-plate seam (2-colourable) is still fixed: the existing first test covers it
+    }
+
+    [Fact]
     public void The_path_guard_refuses_output_equal_to_source()
     {
         Assert.Throws<InvalidOperationException>(() => GlbDisconnectedParts.GuardPaths(@"C:\models\ship.glb", @"C:/models/SHIP.GLB"));

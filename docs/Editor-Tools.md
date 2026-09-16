@@ -395,7 +395,8 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   press **Fuse … into one shell each**: every group becomes ONE mesh in the output GLB, their seam vertices
   welded (a UV seam or a hard edge keeps its own vertex; connectivity is by position regardless), the winding
   made **consistent by majority**
-  across each welded island, and direction judged once where it can be — a closed shell, a thin solid or a convex
+  across each welded island (an island whose winding cannot be made consistent at all — a propeller blade with
+  fins, a twisted rim — is left as authored and named in the report), and direction judged once where it can be — a closed shell, a thin solid or a convex
   plating region by its signed volume about its own centroid (wound inward = reversed whole; trusted only where the
   per-face volumes agree and there is real thickness), a *flat* sheet (deck, bulwark) by the inside-out score against
   the hull's belly axis. Welded vertices share one position even where a UV seam or hard edge keeps them separate;
