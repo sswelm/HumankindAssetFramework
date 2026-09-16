@@ -34,9 +34,9 @@ public class ModelWorkshopWindow : EditorWindow
         public int islands;      // 1 = nothing to split (row disabled)
         public string blocked;   // non-null = the analyzer's reason this part cannot be split
         public bool split;       // the checkbox (Split)
-        public string fuse = ""; // FUSE GROUP letter A..H (2026-09-15): rows sharing a letter fuse into one shell each; "" = none
+        public string fuse = ""; // FUSE GROUP letter A..Z (2026-09-15; A..H until 09-16): rows sharing a letter fuse into one shell each; "" = none
     }
-    static readonly string[] FuseLabels = { "–", "⊕A", "⊕B", "⊕C", "⊕D", "⊕E", "⊕F", "⊕G", "⊕H" };   // the per-row fuse popup; keys A–H set it, 0/Backspace clears
+    static readonly string[] FuseLabels = new[] { "–" }.Concat(Enumerable.Range(0, 26).Select(i => "⊕" + (char)('A' + i))).ToArray();   // the per-row fuse popup, A–Z (was A–H; user 2026-09-16: a ship has more than eight boats); keys A–Z set it, 0/Backspace clears
 
     const string PreviewDir = "Assets/FactorySource/ModelWorkshop";
 
@@ -58,6 +58,9 @@ public class ModelWorkshopWindow : EditorWindow
     [SerializeField] float weldPermille = 0f;
     bool analyzePending;   // slider moved: recount on the first Layout pass after the drag releases
     [SerializeField] Vector2 scroll;
+    readonly List<Rect> rowRects = new List<Rect>();   // per shown row, measured at Repaint: the ↑/↓ keys keep the highlight in view by these, not by an assumed row height
+    float listViewHeight = 330f;
+    [SerializeField] Vector2 windowScroll;   // the WHOLE window: header + list (≤330) + preview (600) + Split/Fuse controls overflow a short window, and the Fuse row was cut off with no way to reach it (user 2026-09-16)
     string status = "Pick a GLB and press Probe parts.";
 
     // ---- turntable preview state (the Vehicle Lab's proven camera, minus clips/waterline) ----
@@ -90,6 +93,7 @@ public class ModelWorkshopWindow : EditorWindow
 
     void OnGUI()
     {
+        windowScroll = EditorGUILayout.BeginScrollView(windowScroll);   // a vertical bar appears when the window is shorter than its content; the preview keeps its scroll-wheel zoom (it Use()s the event first)
         EditorGUILayout.LabelField("Model Workshop — split chosen parts into their disconnected islands, or plane-cut a connected one", EditorStyles.boldLabel);
         EditorGUILayout.LabelField("For a part whose junk islands share a mesh with real geometry: split ONLY that part, then mark the junk Ignore in the Vehicle Lab. Lossless — vertex data, materials, skins and animations are preserved; only the checked parts gain _Part_NNN children. A CONNECTED part (1 island) can instead be plane-cut in two: select its row and press Plane cut.", EditorStyles.wordWrappedMiniLabel);
 
@@ -165,10 +169,10 @@ public class ModelWorkshopWindow : EditorWindow
                 EditorGUILayout.LabelField(chosen > 0 ? $"{chosen} checked → +{rows.Where(r => r.split).Sum(r => r.islands) - chosen} new part(s) in the output" : " ", EditorStyles.miniLabel);
             }
             var shown = hideWhole ? rows.Where(r => r.islands > 1 || r.blocked != null).ToList() : rows;
-            // KEYBOARD MARKING (2026-09-15, the Vehicle Lab's idiom): ↑/↓ move the highlight, A–H put the highlighted row in
+            // KEYBOARD MARKING (2026-09-15, the Vehicle Lab's idiom): ↑/↓ move the highlight, A–Z put the highlighted row in
             // a fuse group, 0/Backspace clear it, Space toggles its Split checkbox — marking dozens of hull plates by mouse
             // was the complaint. The Workshop has no role hotkeys, so the letters are free here.
-            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   A–H = fuse group of the highlighted part (⊕ column)   ·   0 / Backspace = no group   ·   Space = Split checkbox", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   A–Z = fuse group of the highlighted part (⊕ column)   ·   – / 0 / Backspace = no group   ·   Space = Split checkbox", EditorStyles.miniLabel);
             var ev = Event.current;
             if (ev.type == EventType.KeyDown && shown.Count > 0 && !EditorGUIUtility.editingTextField)
             {
@@ -177,17 +181,25 @@ public class ModelWorkshopWindow : EditorWindow
                 {
                     idx = ev.keyCode == KeyCode.DownArrow ? Mathf.Min(idx + 1, shown.Count - 1) : Mathf.Max(idx - 1, 0);
                     ExitCutMode(); selectedIdx = shown[idx].nodeIndex; SelectRow(shown[idx].node);
-                    scroll.y = Mathf.Max(0f, idx * 22f - 120f);
+                    // keep the row in view by its MEASURED rect (rows are not one height: "already whole" rows draw in the mini
+                    // font and are shorter, and an assumed 22 px per row drifted the highlight out of view past ~100 rows — user 2026-09-16)
+                    if (idx < rowRects.Count)
+                    {
+                        Rect rr = rowRects[idx];
+                        if (rr.yMin < scroll.y + 8f) scroll.y = Mathf.Max(0f, rr.yMin - 8f);
+                        else if (rr.yMax > scroll.y + listViewHeight - 8f) scroll.y = rr.yMax - listViewHeight + 8f;
+                    }
+                    else scroll.y = Mathf.Max(0f, idx * 22f - 120f);   // no rects measured yet (first frame): the old estimate
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
-                else if (idx >= 0 && shown[idx].blocked == null && ev.keyCode >= KeyCode.A && ev.keyCode <= KeyCode.H)
+                else if (idx >= 0 && shown[idx].blocked == null && ev.keyCode >= KeyCode.A && ev.keyCode <= KeyCode.Z)
                 {
                     shown[idx].fuse = ((char)('A' + (ev.keyCode - KeyCode.A))).ToString();
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
-                else if (idx >= 0 && (ev.keyCode == KeyCode.Alpha0 || ev.keyCode == KeyCode.Keypad0 || ev.keyCode == KeyCode.Backspace || ev.keyCode == KeyCode.Delete))
+                else if (idx >= 0 && (ev.keyCode == KeyCode.Alpha0 || ev.keyCode == KeyCode.Keypad0 || ev.keyCode == KeyCode.Minus || ev.keyCode == KeyCode.KeypadMinus || ev.keyCode == KeyCode.Backspace || ev.keyCode == KeyCode.Delete))   // '-' too: it is what the popup shows for "no group" (user 2026-09-16)
                 {
                     shown[idx].fuse = "";
                     GUIUtility.keyboardControl = 0;
@@ -200,7 +212,9 @@ public class ModelWorkshopWindow : EditorWindow
                     ev.Use(); Repaint();
                 }
             }
-            scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(Mathf.Min(330, 22 * shown.Count + 8)));   // cap 220 -> 330 (2026-09-08 user request: +50% — a real ship's part list is dozens of rows)
+            listViewHeight = Mathf.Min(330, 22 * shown.Count + 8);
+            if (Event.current.type == EventType.Repaint) rowRects.Clear();
+            scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(listViewHeight));   // cap 220 -> 330 (2026-09-08 user request: +50% — a real ship's part list is dozens of rows)
             foreach (var r in shown)
                 using (new EditorGUILayout.HorizontalScope())
                 {
@@ -219,6 +233,7 @@ public class ModelWorkshopWindow : EditorWindow
                     // the row label is a BUTTON, exactly like the Vehicle Lab: click = highlight + frame in the preview
                     if (GUILayout.Button(label, isSel ? EditorStyles.whiteLabel : (r.islands > 1 && r.blocked == null ? EditorStyles.label : EditorStyles.miniLabel)))
                     { ExitCutMode(); selectedIdx = isSel ? -1 : r.nodeIndex; SelectRow(isSel ? "" : r.node); }
+                    if (Event.current.type == EventType.Repaint) rowRects.Add(GUILayoutUtility.GetLastRect());   // the row's real rect in scroll-content space (see the ↑/↓ handler)
                 }
             EditorGUILayout.EndScrollView();
 
@@ -322,7 +337,7 @@ public class ModelWorkshopWindow : EditorWindow
             }
             using (new EditorGUI.DisabledScope(fusedRows == 0 || string.IsNullOrEmpty(outGlb)))
                 if (GUILayout.Button(new GUIContent(fusedRows == 0
-                            ? "Fuse — mark parts with a ⊕ letter first (popup per row, or keys A–H on the highlighted row)"
+                            ? "Fuse — mark parts with a ⊕ letter first (popup per row, or keys A–Z on the highlighted row)"
                             : $"Fuse {fusedRows} marked part(s) in {fuseGroups.Count} group(s) ({string.Join(", ", fuseGroups.Select(g => "⊕" + g + "×" + rows.Count(r => r.fuse == g)))}) into one shell each  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
                         "Joins the parts of each ⊕ group into ONE mesh in the output GLB, welds their seams, makes the winding consistent by MAJORITY across each " +
                         "welded island (the minority of faces reversed to agree with the rest), and judges direction once where it can be judged: a shell, " +
@@ -334,6 +349,7 @@ public class ModelWorkshopWindow : EditorWindow
         }
 
         if (!string.IsNullOrEmpty(status)) EditorGUILayout.HelpBox(status, MessageType.None);
+        EditorGUILayout.EndScrollView();
     }
 
     void Probe()
@@ -576,7 +592,7 @@ public class ModelWorkshopWindow : EditorWindow
     {
         var e = Event.current;
         if (!rect.Contains(e.mousePosition)) return;
-        if (e.type == EventType.ScrollWheel) { zoom = Mathf.Clamp(zoom * Mathf.Pow(1.12f, e.delta.y > 0 ? 1f : -1f), 0.2f, 50f); e.Use(); Repaint(); }
+        if (e.type == EventType.ScrollWheel) { zoom = Mathf.Clamp(zoom * Mathf.Pow(1.12f, e.delta.y > 0 ? 1f : -1f), 0.1f, 50f); e.Use(); Repaint(); }   // 0.1 = camera at a fifth of the radius (was 0.2; user 2026-09-16: "double the maximum zoom-in" to judge plating up close)
         else if (e.type == EventType.MouseDrag && e.button == 0) { orbit += new Vector2(e.delta.x, -e.delta.y) * 0.7f; orbit.y = Mathf.Clamp(orbit.y, -89f, 89f); e.Use(); Repaint(); }
         else if (e.type == EventType.MouseDrag && (e.button == 1 || e.button == 2)) { previewPan += new Vector2(-e.delta.x, e.delta.y) * 0.0035f; e.Use(); Repaint(); }
     }

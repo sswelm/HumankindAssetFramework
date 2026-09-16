@@ -97,8 +97,10 @@ public class WorkshopRulesTests
     public void Malformed_lines_and_bad_letters_are_ignored()
     {
         var rows = Rows((1, "Hull"));
-        var got = WorkshopRules.ResolveFuseSidecar(new[] { "", "no bar", "Z|Hull|1", "AB|Hull|1", "A||1", " a|Hull|1 " }, rows, null);
+        var got = WorkshopRules.ResolveFuseSidecar(new[] { "", "no bar", "[|Hull|1", "AB|Hull|1", "A||1", " a|Hull|1 " }, rows, null);
         Assert.Empty(got);
+        got = WorkshopRules.ResolveFuseSidecar(new[] { WorkshopRules.SidecarHeader, "Z|1|Hull" }, rows, null);   // A–Z since 2026-09-16
+        Assert.Equal(new Dictionary<int, string> { [1] = "Z" }, got);
         Assert.Equal("A|1|Hull", WorkshopRules.SidecarLine("A", "Hull", 1));
     }
 }

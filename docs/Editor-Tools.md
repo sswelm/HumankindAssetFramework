@@ -387,7 +387,7 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   **Fuse** (0.5.7) is the opposite of Split, for the opposite disease: a hull authored as dozens of separate
   plates (the Teutonic — 861 islands over four parts) renders see-through with a hole in its side, because no
   per-plate facing test can see that a 1,609-face region is glued on the wrong way round along a 26-edge seam,
-  and it cannot be reduced either: plates share no vertices, so any collapse opens gaps. Give the plates the same **⊕ letter** (the popup on each row, or keys **A–H** on the highlighted row;
+  and it cannot be reduced either: plates share no vertices, so any collapse opens gaps. Give the plates the same **⊕ letter** (the popup on each row, or keys **A–Z** on the highlighted row;
   ↑/↓ move the highlight, 0 clears; several letters = several shells), leave
   **Fuse — weld seams closer than** at **0** (coincident positions, within float rounding — the Teutonic's plates already touch,
   and that alone found its hole; raise it only for plates that leave gaps, knowing that every triangle smaller
