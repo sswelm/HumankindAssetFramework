@@ -5,6 +5,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Workshop: the preview zooms in twice as close** (the scroll-wheel floor went from 0.2 to 0.1 of the
+  framing distance — the camera can now sit a fifth of the model's radius from it), so plating, laps and seams
+  can be judged up close before choosing what to fuse or cut.
+
 - **Model Workshop: FUSE — weld a plated hull into one shell, at the source.** The Teutonic shipped see-through
   with a hole in its side: its hull plating is 861 disconnected islands over four parts, the per-island inside-out
   fix flipped some plates and not others, and any reduction opened gaps because plates share no vertices. Each
