@@ -77,4 +77,17 @@ public class NaturalOrderTests
         Assert.Equal(-1, NaturalOrder.Number(big));
         Assert.Equal("Part_", NaturalOrder.Prefix(big));   // the digit run still strips; only the NUMBER falls back
     }
+
+    [Fact]
+    public void Tiled_materials_repeat_as_authored_capped_by_the_texture_s_pixels()
+    {
+        Assert.Equal(1, BakerRules.TileRepeats(0.8, 769, 48));      // one tile: not tiled, the fold stays
+        Assert.Equal(1, BakerRules.TileRepeats(1.5, 769, 48));      // the threshold is exclusive
+        Assert.Equal(2, BakerRules.TileRepeats(1.6, 769, 48));
+        Assert.Equal(13, BakerRules.TileRepeats(13.2, 769, 48));    // the Teutonic's hull skin: 13 repeats fit (769/48 = 16)
+        Assert.Equal(16, BakerRules.TileRepeats(104.7, 769, 48));   // 105 authored, capped at 16 (48 px each)
+        Assert.Equal(5, BakerRules.TileRepeats(29.0, 256, 48));     // a short axis caps sooner
+        Assert.Equal(1, BakerRules.TileRepeats(1036.0, 8, 48));     // a swatch never repeats
+        Assert.Equal(1, BakerRules.TileRepeats(double.NaN, 769, 48));
+    }
 }

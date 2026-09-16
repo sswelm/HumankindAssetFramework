@@ -1281,10 +1281,26 @@ public static class UniversalBaker
         Lap("extract + source import");
         Texture2D packedAtlas = null; Rect[] atlasRects = null;
         bool[] flatSwatch = null;   // per matList index: albedo is a <=8px solid swatch (flat-colour material) — see the animated path's note
+        TileSpan[] tileSpans = null;   // per matList index: the material's UV span and the repeats baked into its cell (tiled materials)
         if (multiMat)
         {
             var albs = matList.Select(mm => LoadReadableAlbedo(fsResDir, mm)).ToArray();
             flatSwatch = albs.Select(a => a != null && a.width <= 8 && a.height <= 8).ToArray();
+            // TILED MATERIALS: the UV span of every material over the source meshes, measured before packing
+            tileSpans = matList.Select(_ => new TileSpan()).ToArray();
+            foreach (var mf0 in src.GetComponentsInChildren<MeshFilter>())
+            {
+                var mm0 = mf0.sharedMesh; if (mm0 == null) continue;
+                var uv0 = mm0.uv; if (uv0 == null || uv0.Length != mm0.vertexCount) continue;
+                var mr1 = mf0.GetComponent<MeshRenderer>(); var mats1 = mr1 != null ? mr1.sharedMaterials : null;
+                for (int s0 = 0; s0 < Mathf.Max(1, mm0.subMeshCount); s0++)
+                {
+                    var smat0 = (mats1 != null && mats1.Length > 0) ? mats1[Mathf.Min(s0, mats1.Length - 1)] : null;
+                    int mi0 = smat0 != null ? matList.IndexOf(smat0) : -1; if (mi0 < 0) continue;
+                    foreach (int vi0 in mm0.GetTriangles(s0)) tileSpans[mi0].Add(uv0[vi0]);
+                }
+            }
+            foreach (string line in PreTileAlbedos(albs, tileSpans, flatSwatch, matList.Select(mm => mm != null ? mm.name : "?").ToArray())) Debug.Log($"[Factory] {name} tiled material {line}");
             // Does any source albedo carry REAL transparency (alpha-MASK foliage cards etc.)? Checked BEFORE packing:
             // the old unconditional a=255 below silently flattened cutout foliage into solid triangles (the beech-tree
             // hunt). Opaque-source models keep the exact old behavior, so their re-bakes stay byte-identical.
@@ -1386,9 +1402,11 @@ public static class UniversalBaker
                             // gaps between islands. An island that sits wholly within one tile has all its verts
                             // subtract the same integer -> no distortion; only a triangle straddling a tile edge
                             // smears slightly, which is unavoidable when emulating wrap on a packed atlas.
-                            u.x -= Mathf.Floor(u.x); u.y -= Mathf.Floor(u.y);
+                            // (a TILED axis maps the material's whole span across the cell instead — TileSpan.Cell)
+                            var ts0 = (tileSpans != null && mi >= 0 && mi < tileSpans.Length) ? tileSpans[mi] : null;
+                            if (ts0 == null) { u.x -= Mathf.Floor(u.x); u.y -= Mathf.Floor(u.y); }
                             cUV.Add(flat ? new Vector2(r.x + r.width * 0.5f, r.y + r.height * 0.5f)
-                                         : new Vector2(r.x + u.x * r.width, r.y + u.y * r.height));
+                                         : ts0 != null ? ts0.Cell(u, r) : new Vector2(r.x + u.x * r.width, r.y + u.y * r.height));
                             cNorm.Add(mNorm ? local.MultiplyVector(nr[oldI]).normalized : Vector3.up);
                         }
                         cTris.Add(ni);
@@ -1852,6 +1870,82 @@ public static class UniversalBaker
         return g;
     }
 
+    // ---- TILED MATERIALS (2026-09-17): see BakerRules.TileRepeats. Per atlas cell: the material's UV span, whether each
+    // axis is tiled, and the repeats baked into the cell image. Both atlas paths (static below, animated in
+    // BuildMultiAtlasAndRemap) measure BEFORE packing, pre-tile the cell image, and remap linearly on tiled axes. ----
+    sealed class TileSpan
+    {
+        public float U0 = float.PositiveInfinity, U1 = float.NegativeInfinity, V0 = float.PositiveInfinity, V1 = float.NegativeInfinity;
+        public int RU = 1, RV = 1;
+        public bool Any => !float.IsInfinity(U0);
+        public float SpanU => U1 - U0; public float SpanV => V1 - V0;
+        public bool TiledU => Any && SpanU > (float)BakerRules.TiledSpan;
+        public bool TiledV => Any && SpanV > (float)BakerRules.TiledSpan;
+        public void Add(Vector2 uv) { if (uv.x < U0) U0 = uv.x; if (uv.x > U1) U1 = uv.x; if (uv.y < V0) V0 = uv.y; if (uv.y > V1) V1 = uv.y; }
+        // the UV inside its cell: a tiled axis maps the whole span across the cell once, an untiled axis folds as before
+        public Vector2 Cell(Vector2 uv, Rect r)
+        {
+            float fu = TiledU ? (uv.x - U0) / SpanU : uv.x - Mathf.Floor(uv.x);
+            float fv = TiledV ? (uv.y - V0) / SpanV : uv.y - Mathf.Floor(uv.y);
+            return new Vector2(r.x + fu * r.width, r.y + fv * r.height);
+        }
+    }
+    const int TileMinRepeatPx = 48;
+
+    // Decide the repeats for every cell and replace the tiled ones' albedo with the pre-tiled image (same pixel size:
+    // the repeats share the texture's own resolution). Swatches and untiled cells are untouched. Returns the log lines.
+    static List<string> PreTileAlbedos(Texture2D[] albs, TileSpan[] spans, bool[] flatSwatch, string[] labels)
+    {
+        var log = new List<string>();
+        for (int i = 0; i < albs.Length; i++)
+        {
+            var a = albs[i]; var ts = spans[i];
+            if (a == null || ts == null || !ts.Any || (flatSwatch != null && i < flatSwatch.Length && flatSwatch[i])) continue;
+            if (!ts.TiledU && !ts.TiledV) continue;
+            ts.RU = BakerRules.TileRepeats(ts.SpanU, a.width, TileMinRepeatPx);
+            ts.RV = BakerRules.TileRepeats(ts.SpanV, a.height, TileMinRepeatPx);
+            if (ts.RU == 1 && ts.RV == 1) continue;   // tiled but the texture is too small to hold a repeat
+            var src = a.GetPixels32(); int w = a.width, h = a.height;
+            var dst = new Color32[src.Length];
+            for (int y = 0; y < h; y++)
+            {
+                int sy = (int)((long)y * ts.RV % h);
+                for (int x = 0; x < w; x++) dst[y * w + x] = src[sy * w + (int)((long)x * ts.RU % w)];
+            }
+            var t = new Texture2D(w, h, TextureFormat.RGBA32, false) { name = a.name + "_tiled" };
+            t.SetPixels32(dst); t.Apply();
+            UnityEngine.Object.DestroyImmediate(a); albs[i] = t;
+            log.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "'{0}': UVs span {1:0.#} x {2:0.#} tiles -> {3} x {4} repeat(s) baked into its cell (grain continuous, {5:0.#}x coarser along the length)",
+                labels != null && i < labels.Length ? labels[i] : "material " + i, ts.SpanU, ts.SpanV, ts.RU, ts.RV, Mathf.Max(ts.SpanU / ts.RU, ts.SpanV / ts.RV)));
+        }
+        return log;
+    }
+
+    // The submesh -> atlas-cell match by material name (raw exact, simplified exact, simplified substring, index):
+    // one ladder for the measuring pass and the remap pass of the animated path.
+    static int RectIndexFor(Material sm, int s, string[] baseNames, string[] baseRaw)
+    {
+        int ri = -1;
+        if (sm != null)
+        {
+            string bnRaw = SanitizeMatLower(sm.name);
+            if (bnRaw.Length > 0)
+            {
+                ri = System.Array.FindIndex(baseRaw, b => b.Length > 0 && b == bnRaw);
+                if (ri >= 0 && s < baseRaw.Length && baseRaw[s] == bnRaw) ri = s;   // duplicate-name tie: prefer the submesh's own index
+            }
+            string bn = SimplifyMat(sm.name);
+            if (ri < 0 && bn.Length > 0)
+            {
+                ri = System.Array.FindIndex(baseNames, b => b.Length > 0 && b == bn);
+                if (ri >= 0 && s < baseNames.Length && baseNames[s] == bn) ri = s;
+                if (ri < 0) ri = System.Array.FindIndex(baseNames, b => b.Length > 0 && (bn.Contains(b) || b.Contains(bn)));
+            }
+        }
+        if (ri < 0) ri = s;   // fall back to index (submesh order == MTL order)
+        return ri;
+    }
+
     // Imported textures are usually not CPU-readable (needed by PackTextures); blit through a RenderTexture to copy.
     static Texture2D ReadableCopy(Texture2D srcTex)
     {
@@ -2083,6 +2177,24 @@ public static class UniversalBaker
             if (tr > seen / 100) srcHasAlpha = true;   // >1% transparent samples = intentional alpha, not noise
         }
         var atlas = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = name + "_Atlas" };
+        // the submesh -> cell names (see the ladder note below) are needed BEFORE packing now: tiled materials are
+        // measured over the skinned meshes and their cell image pre-tiled, then packed
+        var baseNames = orderedAlb.Select(kv => SimplifyMat(System.Text.RegularExpressions.Regex.Replace(kv.Key ?? "", @"^mat\d+_", ""))).ToArray();
+        var baseRaw = orderedAlb.Select(kv => SanitizeMatLower(System.Text.RegularExpressions.Regex.Replace(kv.Key ?? "", @"^mat\d+_", ""))).ToArray();
+        var tileSpans = albs.Select(_ => new TileSpan()).ToArray();
+        foreach (var smr0 in fbxGo.GetComponentsInChildren<SkinnedMeshRenderer>())
+        {
+            var m0 = smr0.sharedMesh; if (m0 == null) continue;
+            var uv0 = m0.uv; if (uv0 == null || uv0.Length != m0.vertexCount) continue;
+            var mats0 = smr0.sharedMaterials;
+            for (int s0 = 0; s0 < m0.subMeshCount; s0++)
+            {
+                int ri0 = RectIndexFor((mats0 != null && s0 < mats0.Length) ? mats0[s0] : null, s0, baseNames, baseRaw);
+                if (ri0 < 0 || ri0 >= tileSpans.Length) continue;
+                foreach (int vi0 in m0.GetTriangles(s0)) tileSpans[ri0].Add(uv0[vi0]);
+            }
+        }
+        foreach (string line in PreTileAlbedos(albs, tileSpans, flatSwatch, orderedAlb.Select(kv => kv.Key).ToArray())) Debug.Log($"[Factory] {name} tiled material {line}");
         var rects = atlas.PackTextures(albs, 2, cfg.atlasMaxDim > 0 ? cfg.atlasMaxDim : AtlasMaxDimDefault);
         var apx = atlas.GetPixels32();
         AdjustAlbedo(apx, cfg.albedoBrightness, cfg.albedoSaturation);
@@ -2101,7 +2213,7 @@ public static class UniversalBaker
         // wheels): with the prefix, SimplifyMat left a leading index digit ('mat81_tank_tracks_13' ->
         // '81tanktracks13') so the EXACT match below could never fire for ANY material — everything fell to
         // the Contains fallback, where prefix families collide ('tank_tracks' matched 'tank_tracks_13' first).
-        var baseNames = orderedAlb.Select(kv => SimplifyMat(System.Text.RegularExpressions.Regex.Replace(kv.Key ?? "", @"^mat\d+_", ""))).ToArray();
+        // (baseNames / baseRaw are computed above, before packing — the tiled-material measuring pass needs them)
         // RAW names too (PR #36 review P1): the simplified names are LOSSY — a material literally named 'Material'
         // simplifies to "" and can only ride the submesh-index fallback, whose "submesh order == MTL order"
         // assumption Blender's join can break (the joined mesh's slot list starts from the ACTIVE object, not the
@@ -2109,7 +2221,6 @@ public static class UniversalBaker
         // non-alphanumeric -> '_', lowercased, DIGITS KEPT), is a stable identifier: 'Material' stays distinct from
         // 'Material_005' and matches its cell regardless of slot order. Ladder: raw-exact -> simplified-exact ->
         // simplified-substring -> index.
-        var baseRaw = orderedAlb.Select(kv => SanitizeMatLower(System.Text.RegularExpressions.Regex.Replace(kv.Key ?? "", @"^mat\d+_", ""))).ToArray();
         foreach (var smr in fbxGo.GetComponentsInChildren<SkinnedMeshRenderer>())
         {
             var srcMesh = smr.sharedMesh;
@@ -2121,37 +2232,8 @@ public static class UniversalBaker
             var doneVert = new bool[uv.Length];   // remap each vertex once (parts don't share verts across submeshes after a join)
             for (int s = 0; s < mesh.subMeshCount; s++)
             {
-                int ri = -1;
                 var sm = (mats != null && s < mats.Length) ? mats[s] : null;
-                if (sm != null)
-                {
-                    // Match by simplified material name, EXACT first: the loose Contains-both-ways match alone lets a
-                    // material "Body" grab "Body_Trim"'s atlas rect (simplified "body" is a substring of "bodytrim"),
-                    // mapping the wrong texture onto that submesh. Try exact, then substring, else the index below.
-                    // An EMPTY simplified name never name-matches (2026-09-13, the SteamTransports hull): a material
-                    // literally named 'Material' simplifies to "" (SimplifyMat strips the word), and while the exact
-                    // match correctly refuses empty names, the substring branch did not — every string
-                    // Contains("") — so the hull grabbed rect[0] (the sails' canvas: white streaked hull) instead of
-                    // falling through to the index fallback, which is order-correct for a glbconv/rig_anim pair.
-                    // 1) RAW exact (digits kept — order-independent and immune to the lossy simplification)
-                    string bnRaw = SanitizeMatLower(sm.name);
-                    if (bnRaw.Length > 0)
-                    {
-                        ri = System.Array.FindIndex(baseRaw, b => b.Length > 0 && b == bnRaw);
-                        if (ri >= 0 && s < baseRaw.Length && baseRaw[s] == bnRaw) ri = s;   // duplicate-name tie: prefer the submesh's own index
-                    }
-                    // 2) simplified exact, 3) simplified substring — for importer-mangled names the raw pass misses
-                    string bn = SimplifyMat(sm.name);
-                    if (ri < 0 && bn.Length > 0)
-                    {
-                        ri = System.Array.FindIndex(baseNames, b => b.Length > 0 && b == bn);
-                        // duplicate material NAMES exist in the wild (two 'german_gear_8' entries with different
-                        // textures) — among exact ties, prefer the rect at the submesh's own index (order-consistent)
-                        if (ri >= 0 && s < baseNames.Length && baseNames[s] == bn) ri = s;
-                        if (ri < 0) ri = System.Array.FindIndex(baseNames, b => b.Length > 0 && (bn.Contains(b) || b.Contains(bn)));
-                    }
-                }
-                if (ri < 0) ri = s;   // fall back to index (submesh order == MTL order)
+                int ri = RectIndexFor(sm, s, baseNames, baseRaw);   // raw exact -> simplified exact -> substring -> index (the ladder's history is on RectIndexFor)
                 if (ri < 0 || ri >= rects.Length) { Debug.LogWarning($"[Factory] {name} submesh {s} ('{(sm != null ? sm.name : "null")}') no atlas rect — left unmapped"); continue; }
                 var r = rects[ri];
                 if (ri < flatSwatch.Length && flatSwatch[ri])
@@ -2165,7 +2247,9 @@ public static class UniversalBaker
                 // Fold each UV into [0,1) first: atlas cells have no wrap, but source models often park a material's
                 // island in a distant integer tile relying on texture wrap — unfolded it flies outside its rect into
                 // the black gaps. Whole-in-one-tile islands subtract a uniform integer (no distortion); see the static path.
-                foreach (int vi in mesh.GetTriangles(s)) if (!doneVert[vi]) { float fu = uv[vi].x - Mathf.Floor(uv[vi].x), fv = uv[vi].y - Mathf.Floor(uv[vi].y); uv[vi] = new Vector2(r.x + fu * r.width, r.y + fv * r.height); doneVert[vi] = true; }
+                // (a TILED axis maps the material's whole span across the cell instead — TileSpan.Cell)
+                var ts = ri < tileSpans.Length ? tileSpans[ri] : null;
+                foreach (int vi in mesh.GetTriangles(s)) if (!doneVert[vi]) { uv[vi] = ts != null ? ts.Cell(uv[vi], r) : new Vector2(r.x + (uv[vi].x - Mathf.Floor(uv[vi].x)) * r.width, r.y + (uv[vi].y - Mathf.Floor(uv[vi].y)) * r.height); doneVert[vi] = true; }
                 Debug.Log($"[Factory]   submesh {s} '{(sm != null ? sm.name : "null")}' -> rect[{ri}] '{orderedAlb[ri].Key}'");
             }
             mesh.uv = uv;

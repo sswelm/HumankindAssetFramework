@@ -32,6 +32,23 @@ public static class BakerRules
         if (keepTexture && extractedExists) return ExtractionAction.KeepProtected;
         return ExtractionAction.ReExtract;   // keepTexture cannot protect files that do not exist
     }
+
+    // TILED MATERIALS (2026-09-17, the Teutonic's decks, hull skin, funnels and masts): a SketchUp-style material
+    // repeats a small texture 13 to 1,000 times across a part, relying on texture wrap. An atlas cell cannot wrap,
+    // and the fold-into-[0,1) that serves islands parked in one tile smears every triangle that spans several — the
+    // deck grain read as a dense hatch. An axis counts as TILED when the material's UV span on it exceeds
+    // `TiledSpan` tiles; the cell image is then the texture repeated `repeats` times along that axis (as many as
+    // the authored span asks for, capped so each repeat keeps `minRepeatPx` of the texture's own pixels), and the
+    // UVs map the part's whole span linearly across the cell — continuous, correctly oriented grain at a coarser
+    // repeat ("believable from a distance"). An axis that is not tiled keeps the fold exactly as before.
+    public const double TiledSpan = 1.5;
+
+    public static int TileRepeats(double span, int texPixels, int minRepeatPx)
+    {
+        if (!(span > TiledSpan)) return 1;
+        int cap = Math.Max(1, texPixels / Math.Max(1, minRepeatPx));
+        return Math.Max(1, Math.Min((int)Math.Round(span), cap));
+    }
 }
 
 /// <summary>Natural name ordering — "Object_2" before "Object_10" (Model Workshop part list; NaturalOrderTests).</summary>

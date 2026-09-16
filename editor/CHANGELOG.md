@@ -16,6 +16,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   no copying by hand. The proposed output name follows the operation, `_cut` while the cut panel is open, `_split`
   otherwise, and counts up when the source already carries it: cutting `ship_cut.glb` proposes `ship_cut2.glb`.
 
+- **Bake: tiled materials keep their grain.** A SketchUp-style material repeats a small texture 13 to 1,000 times
+  across a part (the Teutonic's decks, hull skin, funnels, masts); an atlas cell cannot wrap, and the fold-into-one-
+  tile that serves islands parked in a single tile smeared every triangle spanning several — the deck grain read as
+  a dense hatch. A material whose UV span exceeds 1.5 tiles on an axis now gets its cell image pre-tiled along that
+  axis (as many repeats as authored, capped so each keeps 48 px of the texture's own resolution) and its UVs mapped
+  linearly across the cell: continuous, correctly oriented grain at a coarser repeat. Untiled axes and flat swatches
+  are untouched; both the static and the animated atlas paths do it, and the console names each tiled material with
+  its spans and repeats. Kernel `BakerRules.TileRepeats`, tested.
+
 - **Fuse: an island whose winding cannot be made consistent is left as authored.** The Teutonic's propeller
   blades render right, yet 32 of a blade's 1,287 edges are walked the same way by both faces, and after the parity
   assignment 138 edges are still unsatisfied — the surface has odd cycles (fins, fillets, a twisted rim) and no
