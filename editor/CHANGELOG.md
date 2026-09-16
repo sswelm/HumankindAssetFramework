@@ -5,6 +5,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Fuse: the inside-out score measures against the MODEL's belly, not the group's.** A group made only of deck
+  strips had its own bounding box as its world, its belly line ran through the strips themselves, and a deck facing
+  down scored ~0 — undecidable, kept as authored (the Teutonic's starboard deck strips, transparent from above).
+  The belly (25th percentile of height) and the side centre now come from sampled vertices of every mesh node in the
+  file, fused or not; a deck-only group above the hull is reversed to face up. Test with a hull outside the group.
+
 - **Model Workshop: one Generate button for Fuse AND Split** — every ⊕ group is fused into one shell, then every
   checked part is exploded into its islands, in one output GLB (chained in memory; a row that is both lettered and
   checked is fused, not split, and the report says so). The fuse report gains a `Split` section.

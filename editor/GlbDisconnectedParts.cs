@@ -1193,11 +1193,12 @@ public static class GlbDisconnectedParts
         // same day: "closed = no boundary edge at all" was tried first and lost the 3,907-face plating island (21 %
         // boundary, a thin solid the radial score cannot see, authored inward by a 51 % majority) — its side plating
         // fell from 96 % outward to 78 %; the agreement rule keeps that call and still leaves the deck alone.
-        int lengthAxis = (mx[0] - mn[0]) >= (mx[2] - mn[2]) ? 0 : 2, widthAxis = lengthAxis == 0 ? 2 : 0;   // glTF is Y-up; the hull's length is the longer horizontal extent
-        double centreW = 0.5 * (mn[widthAxis] + mx[widthAxis]);
-        var ys = new List<double>(); int step = Math.Max(1, pos.Count / 5000);
-        for (int i = 0; i < pos.Count; i += step) ys.Add(pos[i].Y);
-        ys.Sort(); double bellyY = ys.Count > 0 ? ys[ys.Count / 4] : 0.0;   // the 25th percentile of height: inside the hull mass, below the deck
+        // The belly axis is the MODEL's, never the group's (2026-09-16, the Teutonic's deck strips): a group made only
+        // of deck strips has its own bounding box as its world, its belly line runs through the strips themselves,
+        // and a deck facing down scores ~0 — undecidable, kept as authored. Sampled over every mesh node in the file
+        // through its world matrix (masts and funnels do not move a percentile the way they move a bounding box);
+        // the group's own vertices are the fallback for a file with nothing else in it.
+        ModelBelly(nodes, meshes, reader, pos, out int lengthAxis, out int widthAxis, out double centreW, out double bellyY);
         int openJudged = 0, openReversed = 0, closedReversed = 0;
         var islandRule = new string[allIslands.Count];   // per island, for the "largest islands" line: what was measured and what decided
         for (int ii = 0; ii < allIslands.Count; ii++)
@@ -1373,6 +1374,7 @@ public static class GlbDisconnectedParts
             islandsMadeConsistent, openJudged, openReversed, closedReversed, result.FacesRewound, faceCount, collapsedFaces));
         result.Details.Add(largestIslands);
         if (stitchedLine != null) result.Details.Add(stitchedLine);
+        result.Details.Add(string.Format(inv, "frame: length along {0}, side centre {1:0.##}, belly height {2:0.##} (the model's, fused or not)", lengthAxis == 0 ? "X" : "Z", centreW, bellyY));
 
         buffers[0]["byteLength"] = bin.Count;
         document.Chunks[document.BinIndex].Data = bin.ToArray();
@@ -1443,6 +1445,50 @@ public static class GlbDisconnectedParts
         double denom = 1.0 / (va + vb + vc); double vv = vb * denom, ww = vc * denom;
         return FLen(FSub(p, FAdd(a, FAdd(FScale(ab, vv), FScale(ac, ww)))));
     }
+    // The hull's frame for the inside-out score: length = the longer horizontal extent (glTF is Y-up), the side centre
+    // = the middle of the width extent, the belly = the 25th percentile of height over sampled vertices of EVERY mesh
+    // node (≤ ~50k samples), i.e. inside the hull mass, below the decks. Falls back to the given vertices.
+    static void ModelBelly(JArray nodes, JArray meshes, Accessors reader, List<Vec3> fallback, out int lengthAxis, out int widthAxis, out double centreW, out double bellyY)
+    {
+        var samples = new List<Vec3>();
+        try
+        {
+            long total = 0; var accessorsOfNode = new List<KeyValuePair<int, int>>();   // (node, POSITION accessor)
+            for (int ni = 0; ni < nodes.Count; ni++)
+            {
+                var node = nodes[ni] as JObject; if (node?["mesh"] == null) continue;
+                int mi = node.Value<int>("mesh"); if (mi < 0 || mi >= meshes.Count) continue;
+                var prims = (meshes[mi] as JObject)?["primitives"] as JArray; if (prims == null) continue;
+                foreach (JObject prim in prims.OfType<JObject>())
+                {
+                    var attrs = prim["attributes"] as JObject; if (attrs?["POSITION"] == null) continue;
+                    int acc = attrs.Value<int>("POSITION"); accessorsOfNode.Add(new KeyValuePair<int, int>(ni, acc)); total += reader.Count(acc);
+                }
+            }
+            int stride = (int)Math.Max(1, total / 50000);
+            foreach (KeyValuePair<int, int> na in accessorsOfNode)
+            {
+                double[] world = NodeWorldMatrix(nodes, na.Key); int count = reader.Count(na.Value);
+                for (uint v = 0; v < count; v += (uint)stride) samples.Add(XForm(world, reader.Position(na.Value, v)));
+            }
+        }
+        catch (Exception) { samples.Clear(); }
+        if (samples.Count == 0) samples = fallback;
+        double[] lo = { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity }, hi = { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
+        foreach (Vec3 p in samples) UpdateBounds(lo, hi, p);
+        lengthAxis = (hi[0] - lo[0]) >= (hi[2] - lo[2]) ? 0 : 2; widthAxis = lengthAxis == 0 ? 2 : 0;
+        centreW = 0.5 * (lo[widthAxis] + hi[widthAxis]);
+        // a quarter of the way up the model's HEIGHT RANGE, the range taken between the 1st and 99th height percentiles
+        // (mast tops are few vertices and must not stretch it) — not the 25th percentile of the vertices themselves:
+        // a liner spends most of its vertices in rigging and deckhouses, which put that percentile at deck level and
+        // read the lower decks as "below the belly", i.e. facing down was right (the Teutonic's lower strips, 2026-09-16)
+        var ys = new List<double>(samples.Count); foreach (Vec3 p in samples) ys.Add(p.Y);
+        ys.Sort();
+        if (ys.Count == 0) { bellyY = 0.0; return; }
+        double yLo = ys[(int)(ys.Count * 0.01)], yHi = ys[Math.Min(ys.Count - 1, (int)(ys.Count * 0.99))];
+        bellyY = yLo + 0.25 * (yHi - yLo);
+    }
+
     // determinant of the upper-left 3x3 of a column-major glTF matrix: negative = a mirroring transform
     static double Det3(double[] m) =>
         m[0] * (m[5] * m[10] - m[9] * m[6]) - m[4] * (m[1] * m[10] - m[9] * m[2]) + m[8] * (m[1] * m[6] - m[5] * m[2]);

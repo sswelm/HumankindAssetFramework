@@ -199,10 +199,10 @@ public class GlbFuseTests
     public void An_open_sheet_facing_the_hull_interior_is_reversed_a_correct_one_is_kept()
     {
         // Three separate open sheets (nothing touches): a side wall (normal +X, away from the hull centre — kept),
-        // a bottom plate at y=0 (pulls the belly percentile down; scores ~0 — kept), and a deck at y=5 whose
-        // normal points DOWN toward the axis — the one that must be reversed. Y is up.
+        // a bottom plate at y=0 facing DOWN (a hull bottom: away from the belly a quarter up the model — kept), and a
+        // deck at y=5 whose normal points DOWN toward the belly — the one that must be reversed. Y is up.
         var wall = new Part { Name = "Wall", Positions = new float[] { 5, 0, -4,  5, 0, 4,  5, 6, 4,  5, 6, -4 }, Indices = new[] { 0, 3, 2, 0, 2, 1 } };   // (b-a)x(c-a): (0,6,0)x(0,6,8) = (48,0,0): +X, away from the centre
-        var floor = new Part { Name = "Floor", Positions = new float[] { -4, 0, -3,  -4, 0, 3,  3, 0, 3,  3, 0, -3 }, Indices = new[] { 0, 1, 2, 0, 2, 3 } };
+        var floor = new Part { Name = "Floor", Positions = new float[] { -4, 0, -3,  -4, 0, 3,  3, 0, 3,  3, 0, -3 }, Indices = new[] { 0, 2, 1, 0, 3, 2 } };   // wound to face DOWN
         var deck = new Part { Name = "Deck", Positions = new float[] { -4, 5, -3,  3, 5, -3,  3, 5, 3,  -4, 5, 3 }, Indices = new[] { 0, 1, 2, 0, 2, 3 } };   // (b-a)x(c-a): (7,0,0)x(7,0,6) = (0,-42,0): DOWN
         byte[] src = BuildGlb(wall, floor, deck);
         var r = GlbDisconnectedParts.FuseNodes(src, new[] { 0, 1, 2 }, 0.0);   // no welding: three open islands
@@ -212,7 +212,8 @@ public class GlbFuseTests
         var g = Read(r.Bytes);
         var normals = FaceNormals(g, (JObject)g.Primitives(g.Node("Wall_Fused"))[0]);
         Assert.Equal(2, normals.Count(n => n[0] > 0 && Math.Abs(n[1]) < 1e-6));   // wall still +X
-        Assert.Equal(4, normals.Count(n => n[1] > 0));                            // deck now UP (plus the floor, authored up)
+        Assert.Equal(2, normals.Count(n => n[1] > 0));                            // deck now UP
+        Assert.Equal(2, normals.Count(n => n[1] < 0));                            // the hull bottom still DOWN
         Assert.Contains("3 open sheet(s) judged, 1 reversed", r.Details[0]);
     }
 
@@ -480,11 +481,12 @@ public class GlbFuseTests
         float k = (float)(1 / Math.Sqrt(3));
         var t = new Part { Name = "T", Positions = new float[] { 1, 0, 0, 0, 1, 0, 0, 0, 1 }, Indices = new[] { 0, 1, 2 }, Normals = new[] { k, k, k, k, k, k, k, k, k }, Scale = new double[] { 2, 1, 1 } };
         var r = GlbDisconnectedParts.FuseNodes(BuildGlb(t), new[] { 0 }, 0.0);
-        Assert.Equal(0, r.FacesRewound);
+        // a lone sloped triangle has no meaningful facing, so the direction rule may or may not rewind it; the claim
+        // under test is the DIRECTION of the carried normal up to that sign, and its agreement with the written geometry
         var g = Read(r.Bytes);
         float[] n = g.Floats(((JObject)((JObject)g.Primitives(g.Node("T_Fused"))[0])["attributes"]).Value<int>("NORMAL"), 3);
         for (int i = 0; i < n.Length / 3; i++)
-            Assert.True((n[i * 3] * 1 + n[i * 3 + 1] * 2 + n[i * 3 + 2] * 2) / 3 > 0.999, "vertex " + i + " normal must be (1,2,2)/3, got " + n[i * 3] + "," + n[i * 3 + 1] + "," + n[i * 3 + 2]);
+            Assert.True(Math.Abs((n[i * 3] * 1 + n[i * 3 + 1] * 2 + n[i * 3 + 2] * 2) / 3) > 0.999, "vertex " + i + " normal must be ±(1,2,2)/3, got " + n[i * 3] + "," + n[i * 3 + 1] + "," + n[i * 3 + 2]);
         // and the written normal agrees with the written geometry
         var fn = FaceNormals(g, (JObject)g.Primitives(g.Node("T_Fused"))[0])[0];
         double len = Math.Sqrt(fn[0] * fn[0] + fn[1] * fn[1] + fn[2] * fn[2]);
@@ -553,6 +555,24 @@ public class GlbFuseTests
         Assert.Equal(4, parts[0].Vertices);
         Assert.Equal(new double[] { 10, 0, 0 }, parts[0].Min); Assert.Equal(new double[] { 11, 1, 0 }, parts[0].Max);   // through the node transform: world space
         Assert.Equal(new double[] { 0, 0, 0 }, parts[1].Min); Assert.Equal(new double[] { 2, 3, 0 }, parts[1].Max);
+    }
+
+    [Fact]
+    public void A_deck_group_is_judged_against_the_whole_model_s_belly_not_its_own()
+    {
+        // 2026-09-16, the Teutonic's deck strips: a group made only of two deck strips (y = 8) has its own belly line
+        // at y = 8, so a strip facing DOWN scored ~0 and stayed down. The hull (node 0, NOT in the group) puts the
+        // model's belly at its bottom, and the strips must then be reversed to face up.
+        var hull = Box("Hull", 6, 0, 0, 0, inward: false);                                                   // y 0..6
+        var deck = new Part { Name = "Deck", Positions = new float[] { 1, 8, 1,  5, 8, 1,  5, 8, 5,  1, 8, 5 }, Indices = new[] { 0, 1, 2, 0, 2, 3 } };       // (b-a)x(c-a) = (4,0,0)x(4,0,4) = (0,-16,0): DOWN
+        var deck2 = new Part { Name = "Deck2", Positions = new float[] { 1, 8, 6,  5, 8, 6,  5, 8, 9,  1, 8, 9 }, Indices = new[] { 0, 1, 2, 0, 2, 3 } };   // DOWN too, separate island
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, deck, deck2), new[] { 1, 2 }, 0.0);   // the hull is not fused, only measured
+        Assert.Equal(2, r.IslandsAfter);
+        Assert.Equal(4, r.FacesRewound);
+        Assert.Contains("2 open sheet(s) judged, 2 reversed", r.Details[0]);
+        var g = Read(r.Bytes);
+        Assert.All(FaceNormals(g, (JObject)g.Primitives(g.Node("Deck_Fused"))[0]), n => Assert.True(n[1] > 0, "faces up"));
+        Assert.NotNull(g.Node("Hull")["mesh"]);   // untouched
     }
 
     [Fact]
