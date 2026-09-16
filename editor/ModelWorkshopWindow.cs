@@ -685,21 +685,26 @@ public class ModelWorkshopWindow : EditorWindow
             var groups = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).GroupBy(r => r.fuse).OrderBy(g => g.Key).ToList();
             byte[] bytes = File.ReadAllBytes(srcFile);
             var lines = new List<string>(); int done = 0;
+            var report = new List<WorkshopRules.FuseGroupReport>();   // the evidence goes to a file, not the status box (711 parts in six groups made the status unreadable — user 2026-09-16)
             foreach (var g in groups)
             {
                 EditorUtility.DisplayProgressBar("Model Workshop", $"Fusing group ⊕{g.Key} ({g.Count()} part(s))…", 0.2f + 0.6f * done / Math.Max(1, groups.Count));
                 var picked = g.Select(r => r.nodeIndex).ToList();   // row order: the first becomes the fused part's name
                 var result = GlbDisconnectedParts.FuseNodes(bytes, picked, weldPermille / 1000.0);
-                foreach (var w in result.Warnings) Debug.LogWarning($"[Workshop] ⊕{g.Key}: " + w);
+                report.Add(new WorkshopRules.FuseGroupReport { Letter = g.Key, PartNames = g.Select(r => r.node).ToList(), Details = result.Details, Warnings = result.Warnings, Changed = result.Changed });
                 if (!result.Changed) { lines.Add($"⊕{g.Key}: nothing fused ({string.Join("; ", result.Warnings)})"); continue; }
                 bytes = result.Bytes; done++;
-                lines.Add($"⊕{g.Key}: {result.Details.FirstOrDefault()}");
-                Debug.Log($"[Workshop] ⊕{g.Key} {string.Join(" | ", result.Details)}");
+                lines.Add($"⊕{g.Key}: {result.Details.FirstOrDefault()}" + (result.Warnings.Count > 0 ? $"   ⚠ {result.Warnings.Count} warning(s)" : ""));
             }
             if (done == 0) { status = "Nothing changed — no group produced a fused mesh (see warnings in the console)."; return; }
             File.WriteAllBytes(outGlb, bytes);
             WriteFuseSidecar(srcFile);   // the groupings, next to the source: a later Probe of this file restores them
-            status = $"Fuse done ({done} group(s)):\n{string.Join("\n", lines)}\n{outGlb}\nNext: point Source GLB at this output and re-Probe to see each fused shell as one part, or open it in the Vehicle Lab.";
+            string reportPath = outGlb + ".fuse-report.txt";
+            try { File.WriteAllText(reportPath, WorkshopRules.FuseReport(srcFile, outGlb, weldPermille, report)); }
+            catch (Exception e) { Debug.LogWarning("[Workshop] could not write the fuse report: " + e.Message); reportPath = "(not written: " + e.Message + ")"; }
+            foreach (var g in report) foreach (var w in g.Warnings) Debug.LogWarning($"[Workshop] ⊕{g.Letter}: " + w);
+            Debug.Log($"[Workshop] fuse report: {reportPath}");
+            status = $"Fuse done ({done} group(s)):\n{string.Join("\n", lines)}\n{outGlb}\nReport (every group's islands, warnings and stitched-part numbers): {reportPath}\nNext: point Source GLB at this output and re-Probe to see each fused shell as one part, or open it in the Vehicle Lab.";
         }
         catch (Exception e) { status = "Fuse failed (source untouched): " + e.Message; Debug.LogException(e); }
         finally { EditorUtility.ClearProgressBar(); }

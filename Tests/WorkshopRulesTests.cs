@@ -103,4 +103,31 @@ public class WorkshopRulesTests
         Assert.Equal(new Dictionary<int, string> { [1] = "Z" }, got);
         Assert.Equal("A|1|Hull", WorkshopRules.SidecarLine("A", "Hull", 1));
     }
+
+    [Fact]
+    public void The_fuse_report_puts_every_island_and_stitched_part_on_its_own_line()
+    {
+        var groups = new List<WorkshopRules.FuseGroupReport>
+        {
+            new WorkshopRules.FuseGroupReport { Letter = "A", Changed = true, PartNames = new[] { "Object_6", "Object_8" },
+                Details = new[] { "Fused 2 part(s) -> 'Object_6_Fused': 10 -> 8 verts", "largest islands: 40 faces (6% boundary, kept, 3 rewound); 12 faces (50% boundary, kept, 0 rewound)", "stitched parts: Object_8 90% verts shared, 94% of its touching faces lying on them" },
+                Warnings = new[] { "1 lap/trim strip(s) lying on the other parts' surface: 'Object_8'." } },
+            new WorkshopRules.FuseGroupReport { Letter = "B", Changed = false, PartNames = new[] { "Object_54" }, Details = new string[0], Warnings = new[] { "Nothing to fuse: the chosen parts carry no triangles." } },
+        };
+        string text = WorkshopRules.FuseReport(@"D:\m\ship.glb", @"D:\m\ship_split.glb", 0.5, groups);
+        var lines = text.Split('\n');
+        Assert.Contains(@"source: D:\m\ship.glb", lines);
+        Assert.Contains("weld: 0.5 permille of the model's length", lines);
+        Assert.Contains("== group A — 2 part(s)", lines);
+        Assert.Contains("parts: Object_6, Object_8", lines);
+        Assert.Contains("WARNING: 1 lap/trim strip(s) lying on the other parts' surface: 'Object_8'.", lines);
+        Assert.Contains("Fused 2 part(s) -> 'Object_6_Fused': 10 -> 8 verts", lines);
+        Assert.Contains("largest islands:", lines);
+        Assert.Contains("  40 faces (6% boundary, kept, 3 rewound)", lines);
+        Assert.Contains("  12 faces (50% boundary, kept, 0 rewound)", lines);
+        Assert.Contains("stitched parts:", lines);
+        Assert.Contains("  Object_8 90% verts shared, 94% of its touching faces lying on them", lines);
+        Assert.Contains("== group B — 1 part(s) — NOTHING FUSED", lines);
+        Assert.Contains("WARNING: Nothing to fuse: the chosen parts carry no triangles.", lines);
+    }
 }

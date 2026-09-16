@@ -401,7 +401,9 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   the hull's belly axis. Welded vertices share one position even where a UV seam or hard edge keeps them separate;
   vertex colours, further UV sets and custom attributes ride along and keep their own seams too (tangents are the
   one thing dropped — the importer recomputes them from the new winding); and a mirrored instance (a node with negative scale, the usual "other half" of a symmetric hull) is read with the
-  winding it renders with. The console line lists the largest islands with what was measured and what decided.
+  winding it renders with. A report beside the output (`<output>.glb.fuse-report.txt`) lists, per group, every
+  island's verdict, every warning and every stitched candidate's numbers, one item per line; the status box keeps
+  one line per group.
   Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh;
   the fused part is a new root node named after the first checked row. The output can never be the source file.
   The ⊕ letters persist beside the source as `<source>.glb.fuse.txt` (a `#fuse-groups v2` header, then one

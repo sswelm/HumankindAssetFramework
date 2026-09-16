@@ -217,4 +217,41 @@ public static class WorkshopRules
         }
         return result;
     }
+
+    // The FUSE REPORT (2026-09-16): the per-group evidence (summary, largest islands, warnings, every stitched
+    // candidate's numbers) went into the Workshop's status box as one wall of text — 711 parts in six groups made it
+    // unreadable ("some report export would be more useful"). The status keeps one line per group; this file, written
+    // beside the output GLB as <output>.fuse-report.txt, holds everything, one item per line, greppable.
+    public sealed class FuseGroupReport
+    {
+        public string Letter; public IList<string> PartNames; public IList<string> Details; public IList<string> Warnings; public bool Changed;
+    }
+
+    public static string FuseReport(string sourcePath, string outputPath, double weldPermille, IList<FuseGroupReport> groups)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append("Model Workshop fuse report\n");
+        sb.Append("source: ").Append(sourcePath).Append('\n');
+        sb.Append("output: ").Append(outputPath).Append('\n');
+        sb.Append("weld: ").Append(weldPermille.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)).Append(" permille of the model's length\n");
+        sb.Append("groups: ").Append(groups.Count).Append('\n');
+        foreach (FuseGroupReport g in groups)
+        {
+            sb.Append('\n').Append("== group ").Append(g.Letter).Append(" — ").Append(g.PartNames.Count).Append(" part(s)").Append(g.Changed ? "" : " — NOTHING FUSED").Append('\n');
+            sb.Append("parts: ").Append(string.Join(", ", g.PartNames)).Append('\n');
+            foreach (string w in g.Warnings) sb.Append("WARNING: ").Append(w).Append('\n');
+            foreach (string d in g.Details)
+            {
+                // the "largest islands: a; b; c" and "stitched parts: a; b; c" lines become one item per line
+                int colon = d.IndexOf(": ", StringComparison.Ordinal);
+                if (colon > 0 && (d.StartsWith("largest islands", StringComparison.Ordinal) || d.StartsWith("stitched parts", StringComparison.Ordinal)))
+                {
+                    sb.Append(d.Substring(0, colon)).Append(":\n");
+                    foreach (string item in d.Substring(colon + 2).Split(new[] { "; " }, StringSplitOptions.RemoveEmptyEntries)) sb.Append("  ").Append(item).Append('\n');
+                }
+                else sb.Append(d).Append('\n');
+            }
+        }
+        return sb.ToString();
+    }
 }

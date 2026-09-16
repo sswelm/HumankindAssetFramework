@@ -5,6 +5,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Workshop: Fuse writes a report file** beside the output GLB (`<output>.glb.fuse-report.txt`): per group the
+  parts, the summary, every island's verdict and every stitched candidate's numbers, one item per line. The status
+  box keeps one summary line per group and the report path — 711 parts in six groups had made it a wall of text.
+
 - **Model Workshop: the preview zooms in twice as close** (the scroll-wheel floor went from 0.2 to 0.1 of the
   framing distance — the camera can now sit a fifth of the model's radius from it), so plating, laps and seams
   can be judged up close before choosing what to fuse or cut. And **the window scrolls**: header, part list,
