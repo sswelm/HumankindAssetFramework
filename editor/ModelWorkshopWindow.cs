@@ -35,6 +35,8 @@ public class ModelWorkshopWindow : EditorWindow
         public string blocked;   // non-null = the analyzer's reason this part cannot be split
         public bool split;       // the checkbox (Split)
         public string fuse = ""; // FUSE GROUP letter A..Z (2026-09-15; A..H until 09-16): rows sharing a letter fuse into one shell each; "" = none
+        public int verts;        // for the list filters (2026-09-16): vertex count and the world bbox (min/max null = unmeasured, never hidden)
+        public float[] min, max;
     }
     static readonly string[] FuseLabels = new[] { "–" }.Concat(Enumerable.Range(0, 26).Select(i => "⊕" + (char)('A' + i))).ToArray();   // the per-row fuse popup, A–Z (was A–H; user 2026-09-16: a ship has more than eight boats); keys A–Z set it, 0/Backspace clears
 
@@ -46,6 +48,15 @@ public class ModelWorkshopWindow : EditorWindow
     [SerializeField] string probedFile = "";   // the file `rows` (and the checks/preview/output path) were built from — serialized so a domain reload doesn't read surviving rows as stale (review finding 8)
     [SerializeField] List<Row> rows = new List<Row>();
     [SerializeField] bool hideWhole = false;   // filter: hide "1 island — already whole" rows (nothing to split there)
+    // LIST FILTERS (2026-09-16, the Vehicle Lab's sliders brought over — user: "make these selection tools also available in
+    // the Model Workshop"): the same bands, over the node bbox the analyzer reads from the accessors. Height is glTF +Y, the
+    // side axis is the model's shorter horizontal extent (as the fuse's belly axis). The flat-surface and visibility filters
+    // stay Lab-only: they need the Blender probe's measurements, which the Workshop does not run.
+    [SerializeField] int minVerts = 1;
+    [SerializeField] float minPartSize = 0f;
+    [SerializeField] float minHeight = -1e9f, maxHeight = 1e9f, minWidth = -1e9f, maxWidth = 1e9f;   // clamped into the model's span each frame: a fresh model hides nothing
+    [SerializeField] int showOnly = 0;
+    static readonly string[] ShowOnlyOptions = { "None (all parts)", "Checked for Split", "In a fuse group", "Not in a fuse group", "More than one island", "Already whole", "Skipped by the analyzer" };
     // DISTANCE MERGE (2026-09-06, the 602-island rope): topology alone shreds segmented geometry into hundreds
     // of 3-vert parts millimetres apart. Islands within this % of a part's own diagonal count as ONE part, so
     // only genuinely distant geometry — the floating junk — separates. 0 = pure topology.
@@ -168,7 +179,49 @@ public class ModelWorkshopWindow : EditorWindow
                 // A 300-island rope part is a legitimate but LOUD choice — say what a check costs before Split.
                 EditorGUILayout.LabelField(chosen > 0 ? $"{chosen} checked → +{rows.Where(r => r.split).Sum(r => r.islands) - chosen} new part(s) in the output" : " ", EditorStyles.miniLabel);
             }
-            var shown = hideWhole ? rows.Where(r => r.islands > 1 || r.blocked != null).ToList() : rows;
+            // the sliders auto-fit the model's span, padded a hair past the outermost part (the Lab's finding 2026-08-01: an exact
+            // clamp rounds slightly inside and hides the edge part at rest)
+            var boxed = rows.Where(r => r.min != null).ToList();
+            int sideAxis = 2;
+            if (boxed.Count > 0)
+            {
+                float ex = boxed.Max(r => r.max[0]) - boxed.Min(r => r.min[0]), ez = boxed.Max(r => r.max[2]) - boxed.Min(r => r.min[2]);
+                sideAxis = ex >= ez ? 2 : 0;   // the LONGER horizontal extent is the length; the side axis is the other one
+            }
+            float Centre(Row r, int axis) => 0.5f * (r.min[axis] + r.max[axis]);
+            minVerts = EditorGUILayout.IntSlider(new GUIContent("Hide parts under (verts)", "Rows with fewer vertices than this are hidden from the list (they are still in the file and still fuse/split if marked)."), minVerts, 1, 2000);
+            minPartSize = EditorGUILayout.Slider(new GUIContent("Hide parts under (size)", "Rows whose largest bbox dimension is below this are hidden. Drop the verts slider and raise this to find LARGE parts with few vertices."), minPartSize, 0f, boxed.Count > 0 ? boxed.Max(r => Mathf.Max(r.max[0] - r.min[0], r.max[1] - r.min[1], r.max[2] - r.min[2])) : 1f);
+            if (boxed.Count > 0)
+            {
+                float yLo = boxed.Min(r => Centre(r, 1)), yHi = boxed.Max(r => Centre(r, 1)), yPad = Mathf.Max(0.02f, (yHi - yLo) * 0.02f);
+                minHeight = EditorGUILayout.Slider(new GUIContent("Hide parts below (height)", "Parts whose bbox centre is below this height are hidden. Slide up past the hull to isolate deck-level parts."), Mathf.Clamp(minHeight, yLo - yPad, yHi + yPad), yLo - yPad, yHi + yPad);
+                maxHeight = EditorGUILayout.Slider(new GUIContent("Hide parts above (height)", "Parts whose bbox centre is above this height are hidden. Slide down to strip the superstructure."), Mathf.Clamp(maxHeight, yLo - yPad, yHi + yPad), yLo - yPad, yHi + yPad);
+                float wLo = boxed.Min(r => Centre(r, sideAxis)), wHi = boxed.Max(r => Centre(r, sideAxis)), wPad = Mathf.Max(0.02f, (wHi - wLo) * 0.02f);
+                minWidth = EditorGUILayout.Slider(new GUIContent("Hide parts left of (side)", "Parts whose bbox centre is on the far side of this across the beam are hidden — bracket with the next slider to keep one side (the starboard hull plates, say)."), Mathf.Clamp(minWidth, wLo - wPad, wHi + wPad), wLo - wPad, wHi + wPad);
+                maxWidth = EditorGUILayout.Slider(new GUIContent("Hide parts right of (side)", "Parts whose bbox centre is beyond this across the beam are hidden."), Mathf.Clamp(maxWidth, wLo - wPad, wHi + wPad), wLo - wPad, wHi + wPad);
+            }
+            showOnly = EditorGUILayout.Popup(new GUIContent("Show only", "Filter the list to one kind of row. Marks on hidden rows are kept."), showOnly, ShowOnlyOptions);
+            bool Passes(Row r)
+            {
+                if (hideWhole && r.islands <= 1 && r.blocked == null) return false;
+                switch (showOnly)
+                {
+                    case 1: if (!r.split) return false; break;
+                    case 2: if (string.IsNullOrEmpty(r.fuse)) return false; break;
+                    case 3: if (!string.IsNullOrEmpty(r.fuse)) return false; break;
+                    case 4: if (r.islands <= 1 || r.blocked != null) return false; break;
+                    case 5: if (r.islands != 1 || r.blocked != null) return false; break;
+                    case 6: if (r.blocked == null) return false; break;
+                }
+                if (r.verts > 0 && r.verts < minVerts) return false;
+                if (r.min == null) return true;   // unmeasured: a filter never hides what it cannot measure
+                if (Mathf.Max(r.max[0] - r.min[0], r.max[1] - r.min[1], r.max[2] - r.min[2]) < minPartSize) return false;
+                float h = Centre(r, 1), w = Centre(r, sideAxis);
+                return h >= minHeight && h <= maxHeight && w >= minWidth && w <= maxWidth;
+            }
+            var shown = rows.Where(Passes).ToList();
+            int hiddenRows = rows.Count - shown.Count;
+            if (hiddenRows > 0) EditorGUILayout.LabelField($"  {shown.Count} shown, {hiddenRows} hidden by the filters (marks on hidden rows are kept; Fuse and Split act on ALL marked rows)", EditorStyles.miniLabel);
             // KEYBOARD MARKING (2026-09-15, the Vehicle Lab's idiom): ↑/↓ move the highlight, A–Z put the highlighted row in
             // a fuse group, 0/Backspace clear it, Space toggles its Split checkbox — marking dozens of hull plates by mouse
             // was the complaint. The Workshop has no role hotkeys, so the letters are free here.
@@ -382,7 +435,8 @@ public class ModelWorkshopWindow : EditorWindow
         {
             rows = GlbDisconnectedParts.Analyze(File.ReadAllBytes(srcFile), mergePct / 100.0)
                 .Select(p => new Row { nodeIndex = p.NodeIndex, node = p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, split = kept.Contains(p.NodeIndex),
-                                       fuse = keptFuse.TryGetValue(p.NodeIndex, out string kf) ? kf : "" })
+                                       fuse = keptFuse.TryGetValue(p.NodeIndex, out string kf) ? kf : "",
+                                       verts = p.Vertices, min = p.Min?.Select(d => (float)d).ToArray(), max = p.Max?.Select(d => (float)d).ToArray() })
                 .OrderBy(r => NaturalPrefix(r.node), StringComparer.OrdinalIgnoreCase)
                 .ThenBy(r => NaturalNumber(r.node))
                 .ThenBy(r => r.node, StringComparer.OrdinalIgnoreCase).ToList();

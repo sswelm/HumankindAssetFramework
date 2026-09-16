@@ -544,6 +544,18 @@ public class GlbFuseTests
     }
 
     [Fact]
+    public void Analyze_reports_each_part_s_world_bbox_and_vertex_count_for_the_list_filters()
+    {
+        var a = Quad("A", 0, 1, 0, 1, 0); a.Translation = new double[] { 10, 0, 0 };
+        var b = Quad("B", 0, 2, 0, 1, 0); b.Scale = new double[] { 1, 3, 1 };
+        var parts = GlbDisconnectedParts.Analyze(BuildGlb(a, b));
+        Assert.Equal(2, parts.Count);
+        Assert.Equal(4, parts[0].Vertices);
+        Assert.Equal(new double[] { 10, 0, 0 }, parts[0].Min); Assert.Equal(new double[] { 11, 1, 0 }, parts[0].Max);   // through the node transform: world space
+        Assert.Equal(new double[] { 0, 0, 0 }, parts[1].Min); Assert.Equal(new double[] { 2, 3, 0 }, parts[1].Max);
+    }
+
+    [Fact]
     public void The_path_guard_refuses_output_equal_to_source()
     {
         Assert.Throws<InvalidOperationException>(() => GlbDisconnectedParts.GuardPaths(@"C:\models\ship.glb", @"C:/models/SHIP.GLB"));

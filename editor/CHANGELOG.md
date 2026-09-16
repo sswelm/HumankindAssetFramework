@@ -5,6 +5,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Workshop: the Vehicle Lab's list filters** — hide parts under a vertex count or a size, a height band, a
+  side band across the beam, and a **Show only** popup (checked for Split, in a fuse group, not in one, more than
+  one island, already whole, skipped). The bands come from each node's world bounding box, read from the file's
+  accessor min/max, so nothing slows the Probe. Marks on hidden rows are kept and Fuse/Split act on every marked
+  row. The flat-surface and visibility filters stay in the Lab: they need the Blender probe.
+
 - **Model Workshop: Fuse writes a report file** beside the output GLB (`<output>.glb.fuse-report.txt`): per group the
   parts, the summary, every island's verdict and every stitched candidate's numbers, one item per line. The status
   box keeps one summary line per group and the report path — 711 parts in six groups had made it a wall of text.

@@ -321,6 +321,11 @@ public static class GlbDisconnectedParts
         public int Triangles;
         public int Islands;
         public string Blocked;   // non-null = unsupported for splitting (compressed, instanced, non-triangle…)
+        // For the Workshop's list filters (2026-09-16, the Vehicle Lab's sliders brought over): the node's WORLD-space
+        // bounding box from the POSITION accessors' min/max (required by glTF, so no vertex is read) through the node's
+        // world matrix, and its vertex count. Min/Max stay null where an accessor has no min/max — such a part is never hidden.
+        public int Vertices;
+        public double[] Min, Max;
     }
 
     public static List<PartInfo> Analyze(byte[] source) => Analyze(source, 0);
@@ -347,6 +352,7 @@ public static class GlbDisconnectedParts
             if (node?["mesh"] == null) continue;
             int meshIndex = node.Value<int>("mesh");
             var info = new PartInfo { NodeIndex = nodeIndex, NodeName = (string)node["name"] ?? ("node " + nodeIndex), MeshName = (string)meshes[meshIndex]?["name"] ?? ("mesh " + meshIndex) };
+            MeasureNode(root, nodes, nodeIndex, meshes[meshIndex] as JObject, info);
             if (node["extensions"]?["EXT_mesh_gpu_instancing"] != null)
                 info.Blocked = "GPU-instanced node";
             else if (blockedByMesh.TryGetValue(meshIndex, out string why))
@@ -363,6 +369,36 @@ public static class GlbDisconnectedParts
             infos.Add(info);
         }
         return infos;
+    }
+
+    // world bbox + vertex count of a node's mesh from accessor min/max (see PartInfo); never throws — a part the
+    // file does not describe simply carries no box
+    static void MeasureNode(JObject root, JArray nodes, int nodeIndex, JObject mesh, PartInfo info)
+    {
+        try
+        {
+            var accessors = root["accessors"] as JArray; var primitives = mesh?["primitives"] as JArray;
+            if (accessors == null || primitives == null) return;
+            double[] world = NodeWorldMatrix(nodes, nodeIndex);
+            double[] mn = { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity };
+            double[] mx = { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
+            bool any = false;
+            foreach (JObject primitive in primitives.OfType<JObject>())
+            {
+                var attrs = primitive["attributes"] as JObject; if (attrs?["POSITION"] == null) continue;
+                var acc = accessors[attrs.Value<int>("POSITION")] as JObject; if (acc == null) continue;
+                info.Vertices += acc.Value<int?>("count") ?? 0;
+                var amin = acc["min"] as JArray; var amax = acc["max"] as JArray;
+                if (amin == null || amax == null || amin.Count < 3 || amax.Count < 3) continue;
+                for (int corner = 0; corner < 8; corner++)
+                {
+                    var c = new Vec3 { X = ((corner & 1) == 0 ? amin[0] : amax[0]).Value<double>(), Y = ((corner & 2) == 0 ? amin[1] : amax[1]).Value<double>(), Z = ((corner & 4) == 0 ? amin[2] : amax[2]).Value<double>() };
+                    UpdateBounds(mn, mx, XForm(world, c)); any = true;
+                }
+            }
+            if (any) { info.Min = mn; info.Max = mx; }
+        }
+        catch (Exception) { info.Min = info.Max = null; }
     }
 
     public static Result Split(byte[] source) => SplitCore(source, null, null, 0);
