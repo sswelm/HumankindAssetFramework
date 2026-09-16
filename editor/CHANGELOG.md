@@ -11,7 +11,7 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 - **Model Workshop: the Vehicle Lab's list filters** — hide parts under a vertex count or a size, a height band, a
   side band across the beam, and a **Show only** popup (checked for Split, in a fuse group, not in one, more than
-  one island, already whole, skipped). The bands come from each node's world bounding box, read from the file's
+  one island, already whole, skipped — or any ONE fuse group, every letter in use is listed). The bands come from each node's world bounding box, read from the file's
   accessor min/max, so nothing slows the Probe. Marks on hidden rows are kept and Fuse/Split act on every marked
   row. The flat-surface and visibility filters stay in the Lab: they need the Blender probe.
 

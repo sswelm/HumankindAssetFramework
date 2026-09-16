@@ -56,6 +56,7 @@ public class ModelWorkshopWindow : EditorWindow
     [SerializeField] float minPartSize = 0f;
     [SerializeField] float minHeight = -1e9f, maxHeight = 1e9f, minWidth = -1e9f, maxWidth = 1e9f;   // clamped into the model's span each frame: a fresh model hides nothing
     [SerializeField] int showOnly = 0;
+    [SerializeField] string showOnlyLetter = "";   // "Show only" can also be ONE fuse group (user 2026-09-16): the popup lists every letter in use after the fixed kinds
     static readonly string[] ShowOnlyOptions = { "None (all parts)", "Checked for Split", "In a fuse group", "Not in a fuse group", "More than one island", "Already whole", "Skipped by the analyzer" };
     // DISTANCE MERGE (2026-09-06, the 602-island rope): topology alone shreds segmented geometry into hundreds
     // of 3-vert parts millimetres apart. Islands within this % of a part's own diagonal count as ONE part, so
@@ -200,10 +201,16 @@ public class ModelWorkshopWindow : EditorWindow
                 minWidth = EditorGUILayout.Slider(new GUIContent("Hide parts left of (side)", "Parts whose bbox centre is on the far side of this across the beam are hidden — bracket with the next slider to keep one side (the starboard hull plates, say)."), Mathf.Clamp(minWidth, wLo - wPad, wHi + wPad), wLo - wPad, wHi + wPad);
                 maxWidth = EditorGUILayout.Slider(new GUIContent("Hide parts right of (side)", "Parts whose bbox centre is beyond this across the beam are hidden."), Mathf.Clamp(maxWidth, wLo - wPad, wHi + wPad), wLo - wPad, wHi + wPad);
             }
-            showOnly = EditorGUILayout.Popup(new GUIContent("Show only", "Filter the list to one kind of row. Marks on hidden rows are kept."), showOnly, ShowOnlyOptions);
+            var lettersInUse = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).Select(r => r.fuse).Distinct().OrderBy(l => l).ToList();
+            var showOptions = ShowOnlyOptions.Concat(lettersInUse.Select(l => $"Group ⊕{l}  ({rows.Count(r => r.fuse == l)} part(s))")).ToArray();
+            int showIdx = !string.IsNullOrEmpty(showOnlyLetter) && lettersInUse.Contains(showOnlyLetter) ? ShowOnlyOptions.Length + lettersInUse.IndexOf(showOnlyLetter) : showOnly;
+            int picked = EditorGUILayout.Popup(new GUIContent("Show only", "Filter the list to one kind of row, or to ONE fuse group (every letter in use is listed). Marks on hidden rows are kept."), showIdx, showOptions);
+            if (picked >= ShowOnlyOptions.Length) { showOnly = 0; showOnlyLetter = lettersInUse[picked - ShowOnlyOptions.Length]; }
+            else { showOnly = picked; showOnlyLetter = ""; }
             bool Passes(Row r)
             {
                 if (hideWhole && r.islands <= 1 && r.blocked == null) return false;
+                if (!string.IsNullOrEmpty(showOnlyLetter) && r.fuse != showOnlyLetter) return false;
                 switch (showOnly)
                 {
                     case 1: if (!r.split) return false; break;
