@@ -11,6 +11,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   The belly (25th percentile of height) and the side centre now come from sampled vertices of every mesh node in the
   file, fused or not; a deck-only group above the hull is reversed to face up. Test with a hull outside the group.
 
+- **Model Workshop: the ⊕ letters travel with a cut or split output**, and output names chain. A cut and a split keep
+  every node, so their output now gets the groupings sidecar too — point Source GLB at it and the letters are back,
+  no copying by hand. The proposed output name follows the operation, `_cut` while the cut panel is open, `_split`
+  otherwise, and counts up when the source already carries it: cutting `ship_cut.glb` proposes `ship_cut2.glb`.
+
 - **Model Workshop: one Generate button for Fuse AND Split** — every ⊕ group is fused into one shell, then every
   checked part is exploded into its islands, in one output GLB (chained in memory; a row that is both lettered and
   checked is fused, not split, and the report says so). The fuse report gains a `Split` section.

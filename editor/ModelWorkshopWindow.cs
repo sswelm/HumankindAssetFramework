@@ -123,8 +123,10 @@ public class ModelWorkshopWindow : EditorWindow
         // fragment and then stuck (the reset below fires only while rows exist), so Split could write the
         // completed source's output to a "sh_split.glb" stub, over whatever lived there. While the user
         // hasn't overridden the field it now re-derives every pass; an edit that differs takes ownership.
+        // the suffix follows the operation — _split, or _cut while the cut panel is open — and chains: cutting ship_cut.glb
+        // proposes ship_cut2.glb (user 2026-09-16: two cuts in a row needed two names typed by hand)
         string autoOut = string.IsNullOrEmpty(srcFile) ? ""
-            : Path.Combine(Path.GetDirectoryName(srcFile), Path.GetFileNameWithoutExtension(srcFile) + "_split.glb").Replace('\\', '/');
+            : Path.Combine(Path.GetDirectoryName(srcFile), WorkshopRules.NextOutputName(Path.GetFileNameWithoutExtension(srcFile), CutModeActive ? "_cut" : "_split") + ".glb").Replace('\\', '/');
         if (outGlbAuto && !string.IsNullOrEmpty(autoOut)) outGlb = autoOut;
         using (new EditorGUILayout.HorizontalScope())
         {
@@ -610,7 +612,8 @@ public class ModelWorkshopWindow : EditorWindow
                 : GlbDisconnectedParts.CutFileByFacing(srcFile, outGlb, cutGeo.NodeIndex, cutAxis, cutTiltDeg, CutPlaneValue());
             if (!result.Changed) { status = "Nothing changed — the cut leaves every triangle on one side."; return; }
             foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
-            status = $"Plane cut done: {result.Details.FirstOrDefault()}\n{outGlb}\nNext: open it in the Vehicle Lab — or cut again by pointing Source GLB at this output and re-Probing.";
+            WriteFuseSidecar(outGlb);   // a cut keeps every node, so the ⊕ letters travel with the output: point Source at it and they are back (user 2026-09-16)
+            status = $"Plane cut done: {result.Details.FirstOrDefault()}\n{outGlb}\nNext: open it in the Vehicle Lab — or cut again by pointing Source GLB at this output and re-Probing (your ⊕ letters travel with it).";
         }
         catch (Exception e) { status = "Plane cut failed (source untouched): " + e.Message; Debug.LogException(e); }
         finally { EditorUtility.ClearProgressBar(); }
@@ -812,6 +815,7 @@ public class ModelWorkshopWindow : EditorWindow
             var result = GlbDisconnectedParts.SplitFile(srcFile, outGlb, picked, mergePct / 100.0);
             if (!result.Changed) { status = "Nothing changed — the checked parts produced no split (see warnings in the console)."; return; }
             foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
+            WriteFuseSidecar(outGlb);   // a split keeps every node too: the ⊕ letters travel with the output
             status = $"Split done: {result.NodesSplit} part(s) → {result.ChildPartsCreated} sub-parts, {result.SourceTriangles:N0} triangles preserved.\n{outGlb}\nNext: open it in the Vehicle Lab, Probe parts, and mark the junk islands Ignore.";
             Debug.Log($"[Workshop] {string.Join(" | ", result.Details)}");
         }

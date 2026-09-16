@@ -254,4 +254,21 @@ public static class WorkshopRules
         }
         return sb.ToString();
     }
+
+    // OUTPUT NAMES THAT CHAIN (2026-09-16, user: "should a cut automatically create a cut postfix?"): a cut's output
+    // defaults to <source>_cut.glb, and cutting THAT output again goes to _cut2, _cut3 … instead of refusing (output ==
+    // source) or overwriting. Same for _split. Any other name just gets the suffix appended.
+    public static string NextOutputName(string baseName, string suffix)
+    {
+        if (string.IsNullOrEmpty(baseName)) return baseName;
+        int at = baseName.LastIndexOf(suffix, StringComparison.OrdinalIgnoreCase);
+        if (at >= 0)
+        {
+            string tail = baseName.Substring(at + suffix.Length);
+            if (tail.Length == 0) return baseName + "2";
+            if (int.TryParse(tail, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int n))
+                return baseName.Substring(0, at) + suffix + (n + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        return baseName + suffix;
+    }
 }

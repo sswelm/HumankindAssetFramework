@@ -130,4 +130,18 @@ public class WorkshopRulesTests
         Assert.Contains("== group B — 1 part(s) — NOTHING FUSED", lines);
         Assert.Contains("WARNING: Nothing to fuse: the chosen parts carry no triangles.", lines);
     }
+
+    [Fact]
+    public void Output_names_chain_by_suffix()
+    {
+        Assert.Equal("ship_cut", WorkshopRules.NextOutputName("ship", "_cut"));
+        Assert.Equal("ship_cut2", WorkshopRules.NextOutputName("ship_cut", "_cut"));
+        Assert.Equal("ship_cut3", WorkshopRules.NextOutputName("ship_cut2", "_cut"));
+        Assert.Equal("ship_cut10", WorkshopRules.NextOutputName("ship_cut9", "_cut"));
+        Assert.Equal("ship_split", WorkshopRules.NextOutputName("ship", "_split"));
+        Assert.Equal("ship_split2", WorkshopRules.NextOutputName("ship_split", "_split"));
+        Assert.Equal("ship_split_cut", WorkshopRules.NextOutputName("ship_split", "_cut"));   // a different operation: appended, not counted
+        Assert.Equal("ship_cut_split_cut", WorkshopRules.NextOutputName("ship_cut_split", "_cut"));
+        Assert.Equal("ship_CUT2", WorkshopRules.NextOutputName("ship_CUT", "_cut"));   // case-insensitive match keeps the source spelling
+    }
 }
