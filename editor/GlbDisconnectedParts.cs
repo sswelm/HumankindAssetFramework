@@ -1042,6 +1042,7 @@ public static class GlbDisconnectedParts
         // the first test and it was over-eager (2026-09-16, the lifeboats): a gunwale rail or keel band attached along
         // its whole length shares 100 % of its vertices by construction and is not a lap — its faces stand off the hull.
         // A lap's faces are PARALLEL to the plate's faces at the shared vertices (measured: 533 of 656 Object_8 strips).
+        string stitchedLine = null;
         if (picked.Count > 1)
         {
             var partsInClass = new Dictionary<int, HashSet<int>>();
@@ -1074,7 +1075,7 @@ public static class GlbDisconnectedParts
                 {
                     if (!facesAtClass.TryGetValue(classes[tris[f * 3 + c]], out List<int> others)) continue;
                     foreach (int g in others)
-                        if (partOf[tris[g * 3]] != p && FDot(unit[f].Value, unit[g].Value) > 0.9
+                        if (partOf[tris[g * 3]] != p && Math.Abs(FDot(unit[f].Value, unit[g].Value)) > 0.9   // parallel either way: a lap wound the other way is still a lap (review of ce91915)
                             && PointTriangleDistance(centre, pos[tris[g * 3]], pos[tris[g * 3 + 1]], pos[tris[g * 3 + 2]]) < longest * 1e-3) { onSurface = true; break; }
                 }
                 if (onSurface) lying[p]++;
@@ -1087,7 +1088,7 @@ public static class GlbDisconnectedParts
                 stitching.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} {1:0}% verts shared, {2:0}% of its touching faces lying on them", partNames[p], 100.0 * sharedOf[p] / vertsOf[p], lie));
                 if (lying[p] * 5 >= touching[p] * 4 && touching[p] > 0) laps.Add(partNames[p]);   // >= 80 % of its faces at the seam are parallel to the other part's: it lies ON the surface
             }
-            if (stitching.Count > 0) result.Details.Add("stitched parts: " + string.Join("; ", stitching));
+            if (stitching.Count > 0) stitchedLine = "stitched parts: " + string.Join("; ", stitching);   // added AFTER the summary and the islands line: Details[0] is what the Workshop status shows (review of ce91915)
             if (laps.Count > 0)
                 result.Warnings.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture,
                     "{0} lap/trim strip(s) lying on the other parts' surface: {1}. Fused in, each becomes a flap along the middle of the plate and a later reduction creases the plate along it (dark lines). Leave them out of the group, or keep the fused part unreduced.",
@@ -1335,6 +1336,7 @@ public static class GlbDisconnectedParts
             picked.Count, newNodeName, result.VerticesBefore, result.VerticesAfter, weld, weldFraction * 1000.0, longest, result.IslandsBefore, result.IslandsAfter,
             islandsMadeConsistent, openJudged, openReversed, closedReversed, result.FacesRewound, faceCount, collapsedFaces));
         result.Details.Add(largestIslands);
+        if (stitchedLine != null) result.Details.Add(stitchedLine);
 
         buffers[0]["byteLength"] = bin.Count;
         document.Chunks[document.BinIndex].Data = bin.ToArray();

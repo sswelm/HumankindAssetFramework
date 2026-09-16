@@ -533,6 +533,14 @@ public class GlbFuseTests
         string stitched = r.Details.FirstOrDefault(d => d.StartsWith("stitched parts: "));
         Assert.NotNull(stitched); Assert.Contains("Cover", stitched); Assert.Contains("Lap", stitched);   // both share 100 % of their vertices…
         Assert.Contains("Cover 100% verts shared, 0% of its touching faces lying on them", stitched);       // …only the lap lies on the plate
+        Assert.StartsWith("Fused ", r.Details[0]);                   // the summary stays first: it is what the Workshop status shows (review of ce91915)
+        Assert.StartsWith("largest islands: ", r.Details[1]);
+        Assert.Same(stitched, r.Details[2]);
+
+        // a lap wound the OTHER way is still a lap: same overlap, same crease under reduction (review of ce91915)
+        var lapReversed = new Part { Name = "Lap", Positions = lap.Positions, Indices = new[] { 0, 2, 1, 0, 3, 2 } };
+        var r2 = GlbDisconnectedParts.FuseNodes(BuildGlb(plate, lapReversed, wallL, wallR, cover), new[] { 0, 1, 2, 3, 4 }, 0.0);   // same fixture: a lap must also be a SMALL part (under a quarter of the vertices)
+        Assert.Contains(r2.Warnings, w => w.Contains("lap/trim strip") && w.Contains("'Lap'"));
     }
 
     [Fact]
