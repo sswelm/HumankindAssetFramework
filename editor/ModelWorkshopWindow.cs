@@ -771,7 +771,9 @@ public class ModelWorkshopWindow : EditorWindow
             {
                 EditorUtility.DisplayProgressBar("Model Workshop", $"Fusing group ⊕{g.Key} ({g.Count()} part(s))…", 0.2f + 0.6f * done / Math.Max(1, groups.Count));
                 var picked = g.Select(r => r.nodeIndex).ToList();   // row order: the first becomes the fused part's name
-                var result = GlbDisconnectedParts.FuseNodes(bytes, picked, weldPermille / 1000.0);
+                // the group letter leads the fused part's name — "Fused_B_Object_54" — so the Lab's list shows at a glance which
+                // group a shell came from and the fused parts sort together (user 2026-09-17)
+                var result = GlbDisconnectedParts.FuseNodes(bytes, picked, weldPermille / 1000.0, "Fused_" + g.Key + "_" + g.First().node);
                 report.Add(new WorkshopRules.FuseGroupReport { Letter = g.Key, PartNames = g.Select(r => r.node).ToList(), Details = result.Details, Warnings = result.Warnings, Changed = result.Changed });
                 if (!result.Changed) { lines.Add($"⊕{g.Key}: nothing fused ({string.Join("; ", result.Warnings)})"); continue; }
                 bytes = result.Bytes; done++;

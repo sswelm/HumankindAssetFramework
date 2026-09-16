@@ -16,6 +16,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   no copying by hand. The proposed output name follows the operation, `_cut` while the cut panel is open, `_split`
   otherwise, and counts up when the source already carries it: cutting `ship_cut.glb` proposes `ship_cut2.glb`.
 
+- **Model Workshop: a fused part is named `Fused_<letter>_<first part>`** (was `<first part>_Fused`), so the Lab's list
+  shows which ⊕ group a shell came from and the fused parts sort together.
+
 - **Model Workshop: one Generate button for Fuse AND Split** — every ⊕ group is fused into one shell, then every
   checked part is exploded into its islands, in one output GLB (chained in memory; a row that is both lettered and
   checked is fused, not split, and the report says so). The fuse report gains a `Split` section.
