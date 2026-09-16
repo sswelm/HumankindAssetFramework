@@ -10,6 +10,7 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   can be judged up close before choosing what to fuse or cut. And **the window scrolls**: header, part list,
   the 600-px preview and the Split/Fuse controls overflow a short window, and the Fuse row was simply cut off —
   a vertical bar now appears when the content is taller than the window (the preview keeps its wheel zoom).
+  And **fuse groups run A–Z** (were A–H): one letter per lifeboat is more than eight on a liner.
 
 - **Model Workshop: FUSE — weld a plated hull into one shell, at the source.** The Teutonic shipped see-through
   with a hole in its side: its hull plating is 861 disconnected islands over four parts, the per-island inside-out

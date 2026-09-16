@@ -180,7 +180,7 @@ public static class WorkshopRules
             int firstBar = line.IndexOf('|');
             if (firstBar <= 0) continue;
             string letter = line.Substring(0, firstBar).Trim();
-            if (letter.Length != 1 || letter[0] < 'A' || letter[0] > 'H') continue;
+            if (letter.Length != 1 || letter[0] < 'A' || letter[0] > 'Z') continue;   // A–Z since 2026-09-16 (was A–H)
             string remainder = line.Substring(firstBar + 1);
             if (remainder.Trim().Length == 0) continue;
             if (v2)

@@ -34,9 +34,9 @@ public class ModelWorkshopWindow : EditorWindow
         public int islands;      // 1 = nothing to split (row disabled)
         public string blocked;   // non-null = the analyzer's reason this part cannot be split
         public bool split;       // the checkbox (Split)
-        public string fuse = ""; // FUSE GROUP letter A..H (2026-09-15): rows sharing a letter fuse into one shell each; "" = none
+        public string fuse = ""; // FUSE GROUP letter A..Z (2026-09-15; A..H until 09-16): rows sharing a letter fuse into one shell each; "" = none
     }
-    static readonly string[] FuseLabels = { "–", "⊕A", "⊕B", "⊕C", "⊕D", "⊕E", "⊕F", "⊕G", "⊕H" };   // the per-row fuse popup; keys A–H set it, 0/Backspace clears
+    static readonly string[] FuseLabels = new[] { "–" }.Concat(Enumerable.Range(0, 26).Select(i => "⊕" + (char)('A' + i))).ToArray();   // the per-row fuse popup, A–Z (was A–H; user 2026-09-16: a ship has more than eight boats); keys A–Z set it, 0/Backspace clears
 
     const string PreviewDir = "Assets/FactorySource/ModelWorkshop";
 
@@ -167,10 +167,10 @@ public class ModelWorkshopWindow : EditorWindow
                 EditorGUILayout.LabelField(chosen > 0 ? $"{chosen} checked → +{rows.Where(r => r.split).Sum(r => r.islands) - chosen} new part(s) in the output" : " ", EditorStyles.miniLabel);
             }
             var shown = hideWhole ? rows.Where(r => r.islands > 1 || r.blocked != null).ToList() : rows;
-            // KEYBOARD MARKING (2026-09-15, the Vehicle Lab's idiom): ↑/↓ move the highlight, A–H put the highlighted row in
+            // KEYBOARD MARKING (2026-09-15, the Vehicle Lab's idiom): ↑/↓ move the highlight, A–Z put the highlighted row in
             // a fuse group, 0/Backspace clear it, Space toggles its Split checkbox — marking dozens of hull plates by mouse
             // was the complaint. The Workshop has no role hotkeys, so the letters are free here.
-            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   A–H = fuse group of the highlighted part (⊕ column)   ·   0 / Backspace = no group   ·   Space = Split checkbox", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   A–Z = fuse group of the highlighted part (⊕ column)   ·   0 / Backspace = no group   ·   Space = Split checkbox", EditorStyles.miniLabel);
             var ev = Event.current;
             if (ev.type == EventType.KeyDown && shown.Count > 0 && !EditorGUIUtility.editingTextField)
             {
@@ -183,7 +183,7 @@ public class ModelWorkshopWindow : EditorWindow
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
-                else if (idx >= 0 && shown[idx].blocked == null && ev.keyCode >= KeyCode.A && ev.keyCode <= KeyCode.H)
+                else if (idx >= 0 && shown[idx].blocked == null && ev.keyCode >= KeyCode.A && ev.keyCode <= KeyCode.Z)
                 {
                     shown[idx].fuse = ((char)('A' + (ev.keyCode - KeyCode.A))).ToString();
                     GUIUtility.keyboardControl = 0;
@@ -324,7 +324,7 @@ public class ModelWorkshopWindow : EditorWindow
             }
             using (new EditorGUI.DisabledScope(fusedRows == 0 || string.IsNullOrEmpty(outGlb)))
                 if (GUILayout.Button(new GUIContent(fusedRows == 0
-                            ? "Fuse — mark parts with a ⊕ letter first (popup per row, or keys A–H on the highlighted row)"
+                            ? "Fuse — mark parts with a ⊕ letter first (popup per row, or keys A–Z on the highlighted row)"
                             : $"Fuse {fusedRows} marked part(s) in {fuseGroups.Count} group(s) ({string.Join(", ", fuseGroups.Select(g => "⊕" + g + "×" + rows.Count(r => r.fuse == g)))}) into one shell each  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
                         "Joins the parts of each ⊕ group into ONE mesh in the output GLB, welds their seams, makes the winding consistent by MAJORITY across each " +
                         "welded island (the minority of faces reversed to agree with the rest), and judges direction once where it can be judged: a shell, " +
