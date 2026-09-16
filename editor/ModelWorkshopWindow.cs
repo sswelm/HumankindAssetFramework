@@ -172,7 +172,7 @@ public class ModelWorkshopWindow : EditorWindow
             // KEYBOARD MARKING (2026-09-15, the Vehicle Lab's idiom): ↑/↓ move the highlight, A–Z put the highlighted row in
             // a fuse group, 0/Backspace clear it, Space toggles its Split checkbox — marking dozens of hull plates by mouse
             // was the complaint. The Workshop has no role hotkeys, so the letters are free here.
-            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   A–Z = fuse group of the highlighted part (⊕ column)   ·   0 / Backspace = no group   ·   Space = Split checkbox", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   A–Z = fuse group of the highlighted part (⊕ column)   ·   – / 0 / Backspace = no group   ·   Space = Split checkbox", EditorStyles.miniLabel);
             var ev = Event.current;
             if (ev.type == EventType.KeyDown && shown.Count > 0 && !EditorGUIUtility.editingTextField)
             {
@@ -199,7 +199,7 @@ public class ModelWorkshopWindow : EditorWindow
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
-                else if (idx >= 0 && (ev.keyCode == KeyCode.Alpha0 || ev.keyCode == KeyCode.Keypad0 || ev.keyCode == KeyCode.Backspace || ev.keyCode == KeyCode.Delete))
+                else if (idx >= 0 && (ev.keyCode == KeyCode.Alpha0 || ev.keyCode == KeyCode.Keypad0 || ev.keyCode == KeyCode.Minus || ev.keyCode == KeyCode.KeypadMinus || ev.keyCode == KeyCode.Backspace || ev.keyCode == KeyCode.Delete))   // '-' too: it is what the popup shows for "no group" (user 2026-09-16)
                 {
                     shown[idx].fuse = "";
                     GUIUtility.keyboardControl = 0;

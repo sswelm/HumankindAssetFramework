@@ -19,6 +19,7 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   And **↑/↓ keep the highlighted row in view** past a hundred rows: the list scrolled by an assumed 22 px per
   row, but "already whole" rows draw in the mini font and are shorter, so the estimate drifted and the highlight
   walked out of the visible list; rows are now placed by their measured rectangles.
+  And **the `–` key clears the group** like 0 and Backspace — it is what the popup shows for "no group".
 
 - **Model Workshop: FUSE — weld a plated hull into one shell, at the source.** The Teutonic shipped see-through
   with a hole in its side: its hull plating is 861 disconnected islands over four parts, the per-island inside-out
