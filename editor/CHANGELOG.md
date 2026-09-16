@@ -5,6 +5,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Workshop: one Generate button for Fuse AND Split** — every ⊕ group is fused into one shell, then every
+  checked part is exploded into its islands, in one output GLB (chained in memory; a row that is both lettered and
+  checked is fused, not split, and the report says so). The fuse report gains a `Split` section.
+
 - **Model Workshop: the Vehicle Lab's list filters** — hide parts under a vertex count or a size, a height band, a
   side band across the beam, and a **Show only** popup (checked for Split, in a fuse group, not in one, more than
   one island, already whole, skipped). The bands come from each node's world bounding box, read from the file's

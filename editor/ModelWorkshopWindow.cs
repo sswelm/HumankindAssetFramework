@@ -399,6 +399,14 @@ public class ModelWorkshopWindow : EditorWindow
                         "a hull authored as dozens of separate plates — see-through, a hole in its side, gaps under any reduction. Triangles are preserved " +
                         "exactly; the source parts keep their transforms and children and lose only their mesh. The source file is never touched."), GUILayout.Height(28)))
                     FuseMarked();
+            int checkedRows = rows.Count(r => r.split);
+            using (new EditorGUI.DisabledScope((fusedRows == 0 && checkedRows == 0) || string.IsNullOrEmpty(outGlb)))
+                if (GUILayout.Button(new GUIContent(
+                            $"Generate — fuse {fusedRows} marked part(s) in {fuseGroups.Count} group(s) AND split {checkedRows} checked part(s)  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
+                            "ONE output GLB with both operations: every ⊕ group is fused into one shell first, then every checked part is exploded into its " +
+                            "_Part_NNN islands (Merge closer than applies). A row that is both lettered and checked is fused, not split — it is named in the report. " +
+                            "The source file is never touched."), GUILayout.Height(28)))
+                    Generate(true);
         }
 
         if (!string.IsNullOrEmpty(status)) EditorGUILayout.HelpBox(status, MessageType.None);
@@ -729,10 +737,17 @@ public class ModelWorkshopWindow : EditorWindow
     // Every ⊕ group becomes its own shell, chained through one in-memory GLB: FuseNodes never removes or reorders
     // nodes (fused sources only lose their mesh; the fused part is appended), so group B's node indices stay valid
     // in group A's output. One write at the end; the source file is never touched.
-    void FuseMarked()
+    void FuseMarked() => Generate(false);
+
+    // GENERATE (2026-09-16, user: "a button that will generate a model which will both Fuse or Split objects"): the same
+    // in-memory chain, with the Split of every checked row appended after the fuse groups — Split never removes or
+    // reorders nodes either, so the checked rows' node indices survive the fuses. A row that is both lettered and
+    // checked is fused, not split (its mesh is gone after the fuse); it is reported.
+    void Generate(bool alsoSplit)
     {
+        string verb = alsoSplit ? "Generate" : "Fuse";
         try { GlbDisconnectedParts.GuardPaths(srcFile, outGlb); }   // the file entry points refuse output == source; this path writes the bytes itself, so it asks the same guard
-        catch (Exception e) { status = "Fuse refused (source untouched): " + e.Message; return; }
+        catch (Exception e) { status = verb + " refused (source untouched): " + e.Message; return; }
         if (File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?", outGlb, "Overwrite", "Cancel")) return;
         try
         {
@@ -750,7 +765,23 @@ public class ModelWorkshopWindow : EditorWindow
                 bytes = result.Bytes; done++;
                 lines.Add($"⊕{g.Key}: {result.Details.FirstOrDefault()}" + (result.Warnings.Count > 0 ? $"   ⚠ {result.Warnings.Count} warning(s)" : ""));
             }
-            if (done == 0) { status = "Nothing changed — no group produced a fused mesh (see warnings in the console)."; return; }
+            if (alsoSplit)
+            {
+                var both = rows.Where(r => r.split && !string.IsNullOrEmpty(r.fuse)).Select(r => r.node).ToList();
+                var toSplit = rows.Where(r => r.split && string.IsNullOrEmpty(r.fuse)).ToList();
+                if (toSplit.Count > 0)
+                {
+                    EditorUtility.DisplayProgressBar("Model Workshop", $"Splitting {toSplit.Count} checked part(s)…", 0.85f);
+                    var sr = GlbDisconnectedParts.Split(bytes, new HashSet<int>(toSplit.Select(r => r.nodeIndex)), mergePct / 100.0);
+                    var warnings = new List<string>(sr.Warnings);
+                    if (both.Count > 0) warnings.Insert(0, "checked AND in a fuse group — fused, not split: " + string.Join(", ", both));
+                    report.Add(new WorkshopRules.FuseGroupReport { Letter = "Split", PartNames = toSplit.Select(r => r.node).ToList(), Details = sr.Details, Warnings = warnings, Changed = sr.Changed });
+                    if (sr.Changed) { bytes = sr.Bytes; done++; lines.Add($"Split: {sr.NodesSplit} part(s) → {sr.ChildPartsCreated} sub-parts, {sr.SourceTriangles:N0} triangles preserved" + (warnings.Count > 0 ? $"   ⚠ {warnings.Count} warning(s)" : "")); }
+                    else lines.Add($"Split: nothing split ({string.Join("; ", sr.Warnings)})");
+                }
+                else if (both.Count > 0) lines.Add("Split: every checked row is also in a fuse group — fused, not split: " + string.Join(", ", both));
+            }
+            if (done == 0) { status = "Nothing changed — no group produced a fused mesh" + (alsoSplit ? " and nothing split" : "") + " (see warnings in the console)."; return; }
             File.WriteAllBytes(outGlb, bytes);
             WriteFuseSidecar(srcFile);   // the groupings, next to the source: a later Probe of this file restores them
             string reportPath = outGlb + ".fuse-report.txt";
@@ -758,9 +789,9 @@ public class ModelWorkshopWindow : EditorWindow
             catch (Exception e) { Debug.LogWarning("[Workshop] could not write the fuse report: " + e.Message); reportPath = "(not written: " + e.Message + ")"; }
             foreach (var g in report) foreach (var w in g.Warnings) Debug.LogWarning($"[Workshop] ⊕{g.Letter}: " + w);
             Debug.Log($"[Workshop] fuse report: {reportPath}");
-            status = $"Fuse done ({done} group(s)):\n{string.Join("\n", lines)}\n{outGlb}\nReport (every group's islands, warnings and stitched-part numbers): {reportPath}\nNext: point Source GLB at this output and re-Probe to see each fused shell as one part, or open it in the Vehicle Lab.";
+            status = $"{verb} done ({done} step(s)):\n{string.Join("\n", lines)}\n{outGlb}\nReport (every group's islands, warnings and stitched-part numbers): {reportPath}\nNext: point Source GLB at this output and re-Probe to see each fused shell as one part, or open it in the Vehicle Lab.";
         }
-        catch (Exception e) { status = "Fuse failed (source untouched): " + e.Message; Debug.LogException(e); }
+        catch (Exception e) { status = verb + " failed (source untouched): " + e.Message; Debug.LogException(e); }
         finally { EditorUtility.ClearProgressBar(); }
     }
 
