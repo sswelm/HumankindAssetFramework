@@ -1035,20 +1035,63 @@ public static class GlbDisconnectedParts
         result.IslandsAfter = allIslands.Count;
 
         // LAP / TRIM STRIPS (2026-09-15, the Teutonic's Object_8): a part most of whose vertices coincide with OTHER parts'
-        // vertices is stitched onto their surface — riveted strakes lying on the plates, trim on a wall. Welded in, it
-        // becomes a flap attached along the middle of the plate, and a later reduction creases the plate along every
-        // strip (the dark lines along the strakes). It is not wrong to fuse it; it is wrong to reduce the result. Say so.
+        // vertices AND whose faces lie flat on those parts' faces is stitched onto their surface — riveted strakes lying
+        // on the plates, trim on a wall. Welded in, it becomes a flap attached along the middle of the plate, and a
+        // later reduction creases the plate along every strip (the dark lines along the strakes). It is not wrong to
+        // fuse it; it is wrong to reduce the result. Say so — ONCE per fuse, naming the parts. Vertex sharing alone was
+        // the first test and it was over-eager (2026-09-16, the lifeboats): a gunwale rail or keel band attached along
+        // its whole length shares 100 % of its vertices by construction and is not a lap — its faces stand off the hull.
+        // A lap's faces are PARALLEL to the plate's faces at the shared vertices (measured: 533 of 656 Object_8 strips).
         if (picked.Count > 1)
         {
             var partsInClass = new Dictionary<int, HashSet<int>>();
             for (int v = 0; v < pos.Count; v++) { if (!partsInClass.TryGetValue(classes[v], out HashSet<int> set)) partsInClass.Add(classes[v], set = new HashSet<int>()); set.Add(partOf[v]); }
             var vertsOf = new int[picked.Count]; var sharedOf = new int[picked.Count];
             for (int v = 0; v < pos.Count; v++) { vertsOf[partOf[v]]++; if (partsInClass[classes[v]].Count > 1) sharedOf[partOf[v]]++; }
+            // faces with a corner in a shared class, grouped by that class, with unit normals (authored winding is fine: parallel is parallel)
+            var facesAtClass = new Dictionary<int, List<int>>();
+            var unit = new Vec3?[faceCount];
+            for (int f = 0; f < faceCount; f++)
+                for (int c = 0; c < 3; c++)
+                {
+                    int cls = classes[tris[f * 3 + c]];
+                    if (partsInClass[cls].Count < 2) continue;
+                    if (!facesAtClass.TryGetValue(cls, out List<int> lf)) facesAtClass.Add(cls, lf = new List<int>());
+                    if (!lf.Contains(f)) lf.Add(f);
+                    if (unit[f] == null) { Vec3 n = FCross(FSub(pos[tris[f * 3 + 1]], pos[tris[f * 3]]), FSub(pos[tris[f * 3 + 2]], pos[tris[f * 3]])); unit[f] = FLen(n) > 1e-18 ? FUnit(n) : new Vec3 { X = 0, Y = 0, Z = 0 }; }
+                }
+            var touching = new int[picked.Count]; var lying = new int[picked.Count];
+            for (int f = 0; f < faceCount; f++)
+            {
+                if (unit[f] == null) continue;   // no shared corner
+                int p = partOf[tris[f * 3]]; touching[p]++;
+                // lying = parallel to a face of another part at a shared corner AND its centre sits on that face (within
+                // 1e-3 of the model's length: Object_8's strips sit 1e-4 off their plates; a lifeboat's cover shares the
+                // gunwale's vertices and is parallel to the rim faces there, but its centres are 0.5 m off them — measured 2026-09-16)
+                Vec3 centre = FScale(FAdd(FAdd(pos[tris[f * 3]], pos[tris[f * 3 + 1]]), pos[tris[f * 3 + 2]]), 1.0 / 3.0);
+                bool onSurface = false;
+                for (int c = 0; c < 3 && !onSurface; c++)
+                {
+                    if (!facesAtClass.TryGetValue(classes[tris[f * 3 + c]], out List<int> others)) continue;
+                    foreach (int g in others)
+                        if (partOf[tris[g * 3]] != p && FDot(unit[f].Value, unit[g].Value) > 0.9
+                            && PointTriangleDistance(centre, pos[tris[g * 3]], pos[tris[g * 3 + 1]], pos[tris[g * 3 + 2]]) < longest * 1e-3) { onSurface = true; break; }
+                }
+                if (onSurface) lying[p]++;
+            }
+            var laps = new List<string>(); var stitching = new List<string>();
             for (int p = 0; p < picked.Count; p++)
-                if (vertsOf[p] > 0 && sharedOf[p] * 5 >= vertsOf[p] * 4 && vertsOf[p] * 4 < pos.Count)   // >= 80 %: abutting plates share 50-65 % along their seams and are NOT laps (measured on the Teutonic)
-                    result.Warnings.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                        "'{0}' is stitched onto the other parts along {1:0}% of its vertices — a lap/trim strip lying on their surface. Fused in, it becomes a flap along the middle of the plate and a later reduction creases the plate along it (dark lines). Leave it out of the group, or keep the fused part unreduced.",
-                        partNames[p], 100.0 * sharedOf[p] / vertsOf[p]));
+            {
+                if (vertsOf[p] == 0 || sharedOf[p] * 5 < vertsOf[p] * 4 || vertsOf[p] * 4 >= pos.Count) continue;   // >= 80 % of its vertices shared: abutting plates share 50-65 % along their seams and are NOT laps (measured on the Teutonic)
+                double lie = touching[p] > 0 ? 100.0 * lying[p] / touching[p] : 0.0;
+                stitching.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} {1:0}% verts shared, {2:0}% of its touching faces lying on them", partNames[p], 100.0 * sharedOf[p] / vertsOf[p], lie));
+                if (lying[p] * 5 >= touching[p] * 4 && touching[p] > 0) laps.Add(partNames[p]);   // >= 80 % of its faces at the seam are parallel to the other part's: it lies ON the surface
+            }
+            if (stitching.Count > 0) result.Details.Add("stitched parts: " + string.Join("; ", stitching));
+            if (laps.Count > 0)
+                result.Warnings.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "{0} lap/trim strip(s) lying on the other parts' surface: {1}. Fused in, each becomes a flap along the middle of the plate and a later reduction creases the plate along it (dark lines). Leave them out of the group, or keep the fused part unreduced.",
+                    laps.Count, string.Join(", ", laps.Select(n => "'" + n + "'"))));
         }
 
         // 4) consistency by MAJORITY — parity propagation across two-face edges, the minority reversed
@@ -1341,6 +1384,27 @@ public static class GlbDisconnectedParts
     static double FLen(Vec3 a) => Math.Sqrt(FDot(a, a));
     static Vec3 FUnit(Vec3 a) { double l = FLen(a); return l > 1e-18 ? FScale(a, 1.0 / l) : a; }
     // a direction through the node's world matrix: the 3x3 part, re-normalized (rigid + uniform scale, which is what game rips carry)
+    // distance from a point to a triangle (Ericson, Real-Time Collision Detection 5.1.5): the closest point on the
+    // triangle by Voronoi region, then the plain distance — used to tell a lap strip (its face centres ON the plate)
+    // from a cover or rail that merely shares the plate's edge vertices.
+    static double PointTriangleDistance(Vec3 p, Vec3 a, Vec3 b, Vec3 c)
+    {
+        Vec3 ab = FSub(b, a), ac = FSub(c, a), ap = FSub(p, a);
+        double d1 = FDot(ab, ap), d2 = FDot(ac, ap);
+        if (d1 <= 0 && d2 <= 0) return FLen(ap);
+        Vec3 bp = FSub(p, b); double d3 = FDot(ab, bp), d4 = FDot(ac, bp);
+        if (d3 >= 0 && d4 <= d3) return FLen(bp);
+        double vc = d1 * d4 - d3 * d2;
+        if (vc <= 0 && d1 >= 0 && d3 <= 0) { double v = d1 / (d1 - d3); return FLen(FSub(p, FAdd(a, FScale(ab, v)))); }
+        Vec3 cp = FSub(p, c); double d5 = FDot(ab, cp), d6 = FDot(ac, cp);
+        if (d6 >= 0 && d5 <= d6) return FLen(cp);
+        double vb = d5 * d2 - d1 * d6;
+        if (vb <= 0 && d2 >= 0 && d6 <= 0) { double w = d2 / (d2 - d6); return FLen(FSub(p, FAdd(a, FScale(ac, w)))); }
+        double va = d3 * d6 - d5 * d4;
+        if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) { double w = (d4 - d3) / ((d4 - d3) + (d5 - d6)); return FLen(FSub(p, FAdd(b, FScale(FSub(c, b), w)))); }
+        double denom = 1.0 / (va + vb + vc); double vv = vb * denom, ww = vc * denom;
+        return FLen(FSub(p, FAdd(a, FAdd(FScale(ab, vv), FScale(ac, ww)))));
+    }
     // determinant of the upper-left 3x3 of a column-major glTF matrix: negative = a mirroring transform
     static double Det3(double[] m) =>
         m[0] * (m[5] * m[10] - m[9] * m[6]) - m[4] * (m[1] * m[10] - m[9] * m[2]) + m[8] * (m[1] * m[6] - m[5] * m[2]);

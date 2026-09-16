@@ -512,6 +512,30 @@ public class GlbFuseTests
     }
 
     [Fact]
+    public void The_lap_warning_names_strips_lying_on_a_plate_and_not_covers_or_rails_that_share_its_edge()
+    {
+        // 2026-09-16, the lifeboats: vertex sharing alone flagged every gunwale rail and cover (100 % shared by
+        // construction). A lap is parallel to the plate AND its face centres sit on it.
+        // the plate has a vertex row at y=0.6 so the lap — a riveted strake — coincides with plate vertices along BOTH its
+        // long edges, as Object_8's strips do (86 % of their vertices exactly on plate vertices), and lies flat on it
+        var plate = new Part { Name = "Plate", Positions = new float[] { 0, 0, 0,  2, 0, 0,  2, 0.6f, 0,  0, 0.6f, 0,  2, 1, 0,  0, 1, 0 }, Indices = new[] { 0, 1, 2, 0, 2, 3, 3, 2, 4, 3, 4, 5 } };   // +Z, 2 x 1
+        var lap = new Part { Name = "Lap", Positions = new float[] { 0, 1, 0,  0, 0.6f, 0,  2, 0.6f, 0,  2, 1, 0 }, Indices = new[] { 0, 1, 2, 0, 2, 3 } };                        // over the plate's top strip, +Z
+        // a boat-like case: two walls and a cover spanning their top edges — every cover vertex is a wall vertex (100 %
+        // shared, like a lifeboat cover on the gunwale) but the cover's faces stand off the walls
+        var wallL = new Part { Name = "WallL", Positions = new float[] { 5, 0, 0,  5, 1, 0,  5, 1, 0.5f,  5, 0, 0.5f }, Indices = new[] { 0, 1, 2, 0, 2, 3 } };
+        var wallR = new Part { Name = "WallR", Positions = new float[] { 7, 0, 0,  7, 1, 0,  7, 1, 0.5f,  7, 0, 0.5f }, Indices = new[] { 0, 2, 1, 0, 3, 2 } };
+        var cover = new Part { Name = "Cover", Positions = new float[] { 5, 0, 0.5f,  7, 0, 0.5f,  7, 1, 0.5f,  5, 1, 0.5f }, Indices = new[] { 0, 1, 2, 0, 2, 3 } };
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(plate, lap, wallL, wallR, cover), new[] { 0, 1, 2, 3, 4 }, 0.0);
+        string warning = r.Warnings.FirstOrDefault(w => w.Contains("lap/trim strip"));
+        Assert.NotNull(warning);
+        Assert.Contains("'Lap'", warning); Assert.DoesNotContain("'Cover'", warning);
+        Assert.Contains("1 lap/trim strip(s)", warning);   // one line for the whole fuse, the parts named in it
+        string stitched = r.Details.FirstOrDefault(d => d.StartsWith("stitched parts: "));
+        Assert.NotNull(stitched); Assert.Contains("Cover", stitched); Assert.Contains("Lap", stitched);   // both share 100 % of their vertices…
+        Assert.Contains("Cover 100% verts shared, 0% of its touching faces lying on them", stitched);       // …only the lap lies on the plate
+    }
+
+    [Fact]
     public void The_path_guard_refuses_output_equal_to_source()
     {
         Assert.Throws<InvalidOperationException>(() => GlbDisconnectedParts.GuardPaths(@"C:\models\ship.glb", @"C:/models/SHIP.GLB"));
