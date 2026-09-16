@@ -105,9 +105,11 @@ public class ModelWorkshopWindow : EditorWindow
 
     void OnGUI()
     {
-        windowScroll = EditorGUILayout.BeginScrollView(windowScroll);   // a vertical bar appears when the window is shorter than its content; the preview keeps its scroll-wheel zoom (it Use()s the event first)
+        windowScroll = EditorGUILayout.BeginScrollView(windowScroll, GUIStyle.none, GUI.skin.verticalScrollbar);   // vertical only: a bar appears when the window is shorter than its content, and no long line can push the window wide; the preview keeps its scroll-wheel zoom (it Use()s the event first)
         EditorGUILayout.LabelField("Model Workshop — split chosen parts into their disconnected islands, or plane-cut a connected one", EditorStyles.boldLabel);
-        EditorGUILayout.LabelField("For a part whose junk islands share a mesh with real geometry: split ONLY that part, then mark the junk Ignore in the Vehicle Lab. Lossless — vertex data, materials, skins and animations are preserved; only the checked parts gain _Part_NNN children. A CONNECTED part (1 island) can instead be plane-cut in two: select its row and press Plane cut.", EditorStyles.wordWrappedMiniLabel);
+        // two short lines, not one long one: a single long label sets the window's minimum width (user 2026-09-16)
+        EditorGUILayout.LabelField("For a part whose junk islands share a mesh with real geometry: split ONLY that part, then mark the junk Ignore in the Vehicle Lab.", EditorStyles.wordWrappedMiniLabel);
+        EditorGUILayout.LabelField("Lossless — vertex data, materials, skins and animations are preserved; only the checked parts gain _Part_NNN children. A CONNECTED part (1 island) can instead be plane-cut in two: select its row and press Plane cut.", EditorStyles.wordWrappedMiniLabel);
 
         using (new EditorGUILayout.HorizontalScope())
         {
@@ -234,7 +236,7 @@ public class ModelWorkshopWindow : EditorWindow
             // KEYBOARD MARKING (2026-09-15, the Vehicle Lab's idiom): ↑/↓ move the highlight, A–Z put the highlighted row in
             // a fuse group, 0/Backspace clear it, Space toggles its Split checkbox — marking dozens of hull plates by mouse
             // was the complaint. The Workshop has no role hotkeys, so the letters are free here.
-            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   A–Z = fuse group of the highlighted part (⊕ column)   ·   – / 0 / Backspace = no group   ·   Space = Split checkbox", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   A–Z = fuse group of the highlighted part (⊕ column)   ·   – / 0 / Backspace = no group   ·   Space = Split checkbox", EditorStyles.wordWrappedMiniLabel);
             var ev = Event.current;
             if (ev.type == EventType.KeyDown && shown.Count > 0 && !EditorGUIUtility.editingTextField)
             {
