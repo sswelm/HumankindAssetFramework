@@ -10,7 +10,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   can be judged up close before choosing what to fuse or cut. And **the window scrolls**: header, part list,
   the 600-px preview and the Split/Fuse controls overflow a short window, and the Fuse row was simply cut off —
   a vertical bar now appears when the content is taller than the window (the preview keeps its wheel zoom).
-  And **fuse groups run A–Z** (were A–H): one letter per lifeboat is more than eight on a liner.
+  And **fuse groups run A–Z** (were A–H): one letter per lifeboat is more than eight on a liner. And **the
+  lap-strip warning fires only for laps**: it used to count vertex sharing alone, so a gunwale rail or a boat cover
+  attached along its whole edge (100 % shared by construction) was flagged on every boat, nine warnings for three
+  boats; a part is a lap only when its faces are parallel to the other part's faces AND their centres sit on them
+  (within 1e-3 of the model's length — Object_8's strips sit at 1e-4, the boat covers half a metre off), and one
+  warning per fuse names the parts. The console line "stitched parts: …" lists the numbers behind the verdict.
+  And **↑/↓ keep the highlighted row in view** past a hundred rows: the list scrolled by an assumed 22 px per
+  row, but "already whole" rows draw in the mini font and are shorter, so the estimate drifted and the highlight
+  walked out of the visible list; rows are now placed by their measured rectangles.
 
 - **Model Workshop: FUSE — weld a plated hull into one shell, at the source.** The Teutonic shipped see-through
   with a hole in its side: its hull plating is 861 disconnected islands over four parts, the per-island inside-out

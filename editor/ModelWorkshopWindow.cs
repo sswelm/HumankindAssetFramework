@@ -58,6 +58,8 @@ public class ModelWorkshopWindow : EditorWindow
     [SerializeField] float weldPermille = 0f;
     bool analyzePending;   // slider moved: recount on the first Layout pass after the drag releases
     [SerializeField] Vector2 scroll;
+    readonly List<Rect> rowRects = new List<Rect>();   // per shown row, measured at Repaint: the ↑/↓ keys keep the highlight in view by these, not by an assumed row height
+    float listViewHeight = 330f;
     [SerializeField] Vector2 windowScroll;   // the WHOLE window: header + list (≤330) + preview (600) + Split/Fuse controls overflow a short window, and the Fuse row was cut off with no way to reach it (user 2026-09-16)
     string status = "Pick a GLB and press Probe parts.";
 
@@ -179,7 +181,15 @@ public class ModelWorkshopWindow : EditorWindow
                 {
                     idx = ev.keyCode == KeyCode.DownArrow ? Mathf.Min(idx + 1, shown.Count - 1) : Mathf.Max(idx - 1, 0);
                     ExitCutMode(); selectedIdx = shown[idx].nodeIndex; SelectRow(shown[idx].node);
-                    scroll.y = Mathf.Max(0f, idx * 22f - 120f);
+                    // keep the row in view by its MEASURED rect (rows are not one height: "already whole" rows draw in the mini
+                    // font and are shorter, and an assumed 22 px per row drifted the highlight out of view past ~100 rows — user 2026-09-16)
+                    if (idx < rowRects.Count)
+                    {
+                        Rect rr = rowRects[idx];
+                        if (rr.yMin < scroll.y + 8f) scroll.y = Mathf.Max(0f, rr.yMin - 8f);
+                        else if (rr.yMax > scroll.y + listViewHeight - 8f) scroll.y = rr.yMax - listViewHeight + 8f;
+                    }
+                    else scroll.y = Mathf.Max(0f, idx * 22f - 120f);   // no rects measured yet (first frame): the old estimate
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
@@ -202,7 +212,9 @@ public class ModelWorkshopWindow : EditorWindow
                     ev.Use(); Repaint();
                 }
             }
-            scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(Mathf.Min(330, 22 * shown.Count + 8)));   // cap 220 -> 330 (2026-09-08 user request: +50% — a real ship's part list is dozens of rows)
+            listViewHeight = Mathf.Min(330, 22 * shown.Count + 8);
+            if (Event.current.type == EventType.Repaint) rowRects.Clear();
+            scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(listViewHeight));   // cap 220 -> 330 (2026-09-08 user request: +50% — a real ship's part list is dozens of rows)
             foreach (var r in shown)
                 using (new EditorGUILayout.HorizontalScope())
                 {
@@ -221,6 +233,7 @@ public class ModelWorkshopWindow : EditorWindow
                     // the row label is a BUTTON, exactly like the Vehicle Lab: click = highlight + frame in the preview
                     if (GUILayout.Button(label, isSel ? EditorStyles.whiteLabel : (r.islands > 1 && r.blocked == null ? EditorStyles.label : EditorStyles.miniLabel)))
                     { ExitCutMode(); selectedIdx = isSel ? -1 : r.nodeIndex; SelectRow(isSel ? "" : r.node); }
+                    if (Event.current.type == EventType.Repaint) rowRects.Add(GUILayoutUtility.GetLastRect());   // the row's real rect in scroll-content space (see the ↑/↓ handler)
                 }
             EditorGUILayout.EndScrollView();
 
