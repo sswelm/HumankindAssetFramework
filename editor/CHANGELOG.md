@@ -13,7 +13,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   Unity's own "Hold on… Importing assets" modal still covers every bar during a synchronous import and eats the
   clicks — nothing draws over it — so the runner's bar is drawn from the first second of a row and comes back at
   every phase boundary inside the bake (after each import, each save, each Blender step), and a click there stops
-  the bake at that boundary rather than at the next model.
+  the bake at that boundary rather than at the next model. And a **STOP button in the window itself**: the blocked
+  main thread cannot deliver a click to it, so at every poll the runner asks the OS whether the mouse is held down
+  over that button (or Esc is held) — hold it a moment and the button reads "Stopping after the current step…".
+  Windows editor only; elsewhere the modal bar's Cancel remains.
 
 - **Fuse: the inside-out score measures against the MODEL's belly, not the group's.** A group made only of deck
   strips had its own bounding box as its world, its belly line ran through the strips themselves, and a deck facing

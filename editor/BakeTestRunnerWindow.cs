@@ -161,6 +161,14 @@ public class BakeTestRunnerWindow : EditorWindow
             EditorGUI.ProgressBar(r1, Progress.OverallFrac, "Run:  " + Progress.RowLabel);
             var r2 = EditorGUILayout.GetControlRect(false, 18);
             EditorGUI.ProgressBar(r2, Progress.InnerFrac, Progress.InnerLabel);
+            // STOP, IN THE WINDOW (2026-09-17, user: "why not put the cancel button here instead" — the modal bar's
+            // Cancel kept vanishing under Unity's Importing dialog). The run blocks the main thread, so this button
+            // never receives a click the IMGUI way; instead its screen rectangle is recorded here and the runner asks
+            // the OS at every poll whether the mouse button is down over it (or Esc is held) — NativeCancel below.
+            // Hold it for a moment: the poll runs at every phase boundary and every 250 ms during a Blender step.
+            var r3 = EditorGUILayout.GetControlRect(false, 26);
+            GUI.Button(r3, Progress.CancelRequested ? "Stopping after the current step…" : "STOP the run  —  hold the button (or hold Esc) until it says 'Stopping'");
+            if (Event.current.type == EventType.Repaint) Progress.StopRect = GUIUtility.GUIToScreenRect(r3);
             EditorGUILayout.Space(2);
         }
         if (!blender)
@@ -327,7 +335,11 @@ public class BakeTestRunnerWindow : EditorWindow
         // a running Blender within its next 250 ms slice. Nothing already baked is lost: the report is rewritten
         // after every row, and a section reports what it finished plus a CANCELLED line.
         internal static bool CancelRequested { get; private set; }
-        internal static void Attach(BakeTestRunnerWindow w) { window = w; CancelRequested = false; }
+        internal static Rect StopRect;   // the in-window STOP button, in screen points (recorded at each repaint)
+        internal static void Attach(BakeTestRunnerWindow w) { window = w; CancelRequested = false; StopRect = default; NativeCancel.Reset(); }
+        // the OS-level check: the mouse held down over the STOP button, or Esc held — works while the main thread is blocked
+        // and while Unity's own Importing modal covers every bar (the bars only need to be drawn for the RECT to be current)
+        static void PollNative() { if (!CancelRequested && NativeCancel.Pressed(StopRect)) CancelRequested = true; }
         internal static void BeginRow(string name, int index, int count, System.Diagnostics.Stopwatch w)
         { rowName = name; rowIndex = index; rowCount = count; watch = w; Step("starting…", 0f); }   // the bar is up from the first second (2026-09-17: "it takes a long time for something to appear")
         // Polled from the BAKER at its phase boundaries (UniversalBaker.TestPoll): Unity's own Importing modal covers
@@ -346,6 +358,7 @@ public class BakeTestRunnerWindow : EditorWindow
             if (EditorUtility.DisplayCancelableProgressBar(Title("HAF Bake Tests"),
                     FormattableString.Invariant($"{InnerText}   ({watch.Elapsed.TotalMinutes:0.0} min elapsed)"),
                     OverallFrac)) CancelRequested = true;
+            PollNative();
             RepaintNow();
         }
 
@@ -356,6 +369,7 @@ public class BakeTestRunnerWindow : EditorWindow
             if (EditorUtility.DisplayCancelableProgressBar(Title("HAF Bake Tests"),
                     FormattableString.Invariant($"{inner}   ({watch.Elapsed.TotalMinutes:0.0} min elapsed)"),
                     OverallFrac)) CancelRequested = true;
+            PollNative();
             RepaintNow();
         }
 
@@ -377,6 +391,40 @@ public class BakeTestRunnerWindow : EditorWindow
                 if (repaintNow != null) repaintNow.Invoke(window, null); else window.Repaint();
             }
             catch { try { window.Repaint(); } catch { } }
+        }
+    }
+
+    // OS-LEVEL CANCEL (Windows editor only; a no-op elsewhere). GetAsyncKeyState reports a key's state without any
+    // message pump: bit 15 = down right now, bit 0 = pressed since the last call (sticky, so a short click between two
+    // polls is still seen — unless something else queried the key first, which is why the advice says HOLD).
+    // The mouse counts only over the STOP button's screen rect; Esc counts anywhere. Screen points vs physical pixels:
+    // GetCursorPos is physical, GUIToScreenRect is points — divided by the editor's pixelsPerPoint.
+    static class NativeCancel
+    {
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool GetCursorPos(out Point p);
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] struct Point { public int X, Y; }
+        const int VK_LBUTTON = 0x01, VK_ESCAPE = 0x1B;
+        static bool unavailable;
+
+        internal static void Reset()
+        {   // drain the "pressed since last call" bits so a click from before the run cannot cancel it
+            if (unavailable || Application.platform != RuntimePlatform.WindowsEditor) return;
+            try { GetAsyncKeyState(VK_LBUTTON); GetAsyncKeyState(VK_ESCAPE); } catch { unavailable = true; }
+        }
+
+        internal static bool Pressed(Rect stopScreenRect)
+        {
+            if (unavailable || Application.platform != RuntimePlatform.WindowsEditor) return false;
+            try
+            {
+                if ((GetAsyncKeyState(VK_ESCAPE) & 0x8001) != 0) return true;
+                bool mouse = (GetAsyncKeyState(VK_LBUTTON) & 0x8001) != 0;
+                if (!mouse || stopScreenRect.width <= 0 || !GetCursorPos(out Point p)) return false;
+                float scale = Mathf.Max(0.5f, EditorGUIUtility.pixelsPerPoint);
+                return stopScreenRect.Contains(new Vector2(p.X / scale, p.Y / scale));
+            }
+            catch { unavailable = true; return false; }
         }
     }
 
