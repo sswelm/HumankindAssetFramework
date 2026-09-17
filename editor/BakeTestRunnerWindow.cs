@@ -350,7 +350,10 @@ public class BakeTestRunnerWindow : EditorWindow
         internal static void EndRun() { rowName = null; watch = null; window = null; CancelRequested = false; }
         // the modal's width is Unity's and fixed: the title carries only the run position and the row name (the cancel
         // hint lives in the window, which is as wide as the user makes it — 2026-09-17: the long title was clipped)
-        static string Title(string plain) => rowName == null ? plain : FormattableString.Invariant($"Bake Tests {rowIndex + 1}/{rowCount} · {rowName}");
+        // …and Unity appends its own " (busy for 34s)…" once a step runs long, so the row's parenthetical detail is
+        // dropped from the title too ("Does every model still bake?" — the window shows the full name)
+        static string ShortRow => rowName == null ? "" : (rowName.IndexOf(" (", StringComparison.Ordinal) > 0 ? rowName.Substring(0, rowName.IndexOf(" (", StringComparison.Ordinal)) : rowName);
+        static string Title(string plain) => rowName == null ? plain : FormattableString.Invariant($"Bake Tests {rowIndex + 1}/{rowCount} · {ShortRow}");
         /// Re-render the bars with live elapsed time while a SUBPROCESS runs (RunBounded's sliced wait calls this
         /// every 250 ms). Text and fraction stay put — only the elapsed figure and the modal repaint move, which
         /// is exactly the "still alive" signal a minutes-long Blender step was missing. No-op outside a run.
