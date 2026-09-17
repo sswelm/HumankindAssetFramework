@@ -663,6 +663,11 @@ public class GlbFuseTests
         var bottomOk = new Part { Name = "Bottom", Positions = bottom.Positions, Indices = top.Indices };
         var ok = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, topOk, bottomOk), new[] { 1, 2 }, 0.0);
         Assert.Equal(0, ok.FacesRewound);
+        // A NESTED CAVITY SHELL (review of e595844): an outward outer box and an inward inner box 2 cm inside it — a
+        // hollow solid, correct as authored. The inner shell's volume is negative, but every twin lies BEHIND it: that
+        // vetoes the reversal (it already faces away from the material), while it could never cause one
+        var hollow = GlbDisconnectedParts.FuseNodes(BuildGlb(Box("Outer", 10, 0, 0, 0, inward: false), Box("Inner", 9.96f, 0.02f, 0.02f, 0.02f, inward: true)), new[] { 0, 1 }, 0.0);
+        Assert.Equal(0, hollow.FacesRewound);
         // NEARBY SEPARATE SOLIDS (review of 9cacd9f): four outward cubes 5 mm apart — from inside a gap, air looks like
         // a skin of material; each cube is closed with a confident volume, and that verdict wins over the twin evidence
         var cubes = new[] { Box("C0", 1, 0, 0, 0, inward: false), Box("C1", 1, 1.005f, 0, 0, inward: false), Box("C2", 1, 0, 0, 1.005f, inward: false), Box("C3", 1, -1.005f, 0, 0, inward: false) };
@@ -701,6 +706,22 @@ public class GlbFuseTests
         var m = System.Text.RegularExpressions.Regex.Match(frame, @"belly height (-?[\d.]+)");
         double belly = double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
         Assert.True(belly > 1 && belly < 5, "belly must sit in the hull, not above the deck at 10 — " + frame);   // ~3: a quarter up 0..12
+    }
+
+    [Fact]
+    public void A_coarse_tall_box_s_belly_sits_a_quarter_up_its_height_not_at_its_faces_centres()
+    {
+        // review of e595844: a 100 x 100 x 1 box is six pairs of huge triangles; sampled at their CENTRES the height
+        // percentiles ran 33..67 and the belly landed at 42 — an upward platform at 35 then flipped. Corners now.
+        var slab = Box("Slab", 1, 0, 0, 0, inward: false);
+        slab.Positions = new float[] { 0, 0, 0,  100, 0, 0,  100, 100, 0,  0, 100, 0,  0, 0, 1,  100, 0, 1,  100, 100, 1,  0, 100, 1 };   // 100 x 100 x 1 (y up to 100)
+        var platform = new Part { Name = "Platform", Positions = new float[] { 10, 35, 0.5f,  20, 35, 0.5f,  20, 35, 0.6f,  10, 35, 0.6f }, Indices = new[] { 0, 2, 1, 0, 3, 2 } };   // UP: (b-a)x(c-a) with the swapped order = +Y
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(slab, platform), new[] { 1 }, 0.0);
+        Assert.Equal(0, r.FacesRewound);
+        string frame = r.Details.First(d => d.StartsWith("frame: "));
+        var m = System.Text.RegularExpressions.Regex.Match(frame, @"belly height (-?[\d.]+)");
+        double belly = double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.True(belly > 20 && belly < 30, "a quarter up 0..100 — " + frame);
     }
 
     [Fact]

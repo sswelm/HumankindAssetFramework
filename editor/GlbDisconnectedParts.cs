@@ -1357,12 +1357,15 @@ public static class GlbDisconnectedParts
             // like a skin of material, so four cubes 5 mm apart read "twin in front" on every facing side. A closed
             // island's volume and an open island's confident volume decide first; only where both are inconclusive
             // does the twin evidence speak, and after it the inside-out score.
-            else if (closed) { reverse = volume < 0; if (reverse) closedReversed++; }
+            // …and the one thing twin evidence MAY do against a confident volume is VETO a reversal: a closed cavity
+            // shell (the inner skin of a hollow solid) has a negative volume yet every twin BEHIND it — it already faces
+            // away from the material, and turning it would point it into the wall (review of e595844).
+            else if (closed) { reverse = volume < 0 && !(doubleSkin && twinBehind > twinInFront); if (reverse) closedReversed++; }
             else
             {
                 openJudged++;
                 bool volumeConfident = Math.Abs(agreement) > 0.5 && Math.Abs(thickness) > VolumeThicknessGate;
-                reverse = volumeConfident ? volume < 0 : doubleSkin ? twinInFront > twinBehind : score < -0.25;
+                reverse = volumeConfident ? (volume < 0 && !(doubleSkin && twinBehind > twinInFront)) : doubleSkin ? twinInFront > twinBehind : score < -0.25;
                 if (reverse) openReversed++;
             }
             if (reverse) foreach (int f in isl) flip[f] = !flip[f];
@@ -1611,7 +1614,9 @@ public static class GlbDisconnectedParts
                     Vec3 a = XForm(world, reader.Position(posAcc, i0)), b = XForm(world, reader.Position(posAcc, i1)), c = XForm(world, reader.Position(posAcc, i2));
                     double area = 0.5 * FLen(FCross(FSub(b, a), FSub(c, a))) * stride;   // the stride stands in for the faces skipped
                     if (area <= 0) continue;
-                    pts.Add(FScale(FAdd(FAdd(a, b), c), 1.0 / 3.0)); wts.Add(area);
+                    // the three corners, a third of the area each: a triangle's area lies across its whole extent, and one
+                    // sample at its centre put a coarse 100-tall box's belly at 42 instead of 25 (review of e595844)
+                    pts.Add(a); wts.Add(area / 3); pts.Add(b); wts.Add(area / 3); pts.Add(c); wts.Add(area / 3);
                 }
             }
         }

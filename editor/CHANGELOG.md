@@ -17,7 +17,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   only: from inside a gap, air between two solids looks exactly like a skin, so a confident volume verdict (a closed
   island, or an open one past the agreement and thickness gates) always wins. The frame is area-weighted: face
   samples weighted by their area, so a coarse hull outweighs a dense cabin and a chain of tiny links weighs nothing
-  however many vertices it carries. Six tests.
+  however many vertices it carries — sampled at each triangle's three corners, a third of its area each, so a big
+  triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
+  behind it: it already faces away from the material) but never cause one against a confident volume. Eight tests.
 - **Vehicle Lab: "Mark all shown as …"** — one role for every part the filters currently show. The SS Romanic
   carries 144 stray copies of one fitting 3 km down the length axis and 190 m up (an authoring leftover that
   makes the preview frame a speck of a ship); "Hide parts below (height)" isolates them in seconds and one Apply
