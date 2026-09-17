@@ -1353,12 +1353,16 @@ public static class GlbDisconnectedParts
             bool doubleSkin = partnered * 2 >= isl.Count && partnered > 0 && Math.Abs(twinInFront - twinBehind) * 10 > partnered * 4;   // decided when 70/30 or clearer
             bool reverse = false;
             if (notOrientable[ii]) { }   // kept as authored means KEPT: no whole-island reversal either — a volume or score read off a surface with no consistent winding is noise (review of 0097bd5: the reversed Möbius band came back "6 of 6 rewound")
-            else if (doubleSkin) { reverse = twinInFront > twinBehind; if (closed) { if (reverse) closedReversed++; } else { openJudged++; if (reverse) openReversed++; } }
+            // the twin rule is a TIE-BREAKER (review of 9cacd9f): from inside a gap, air between two solids looks exactly
+            // like a skin of material, so four cubes 5 mm apart read "twin in front" on every facing side. A closed
+            // island's volume and an open island's confident volume decide first; only where both are inconclusive
+            // does the twin evidence speak, and after it the inside-out score.
             else if (closed) { reverse = volume < 0; if (reverse) closedReversed++; }
             else
             {
                 openJudged++;
-                reverse = Math.Abs(agreement) > 0.5 && Math.Abs(thickness) > VolumeThicknessGate ? volume < 0 : score < -0.25;
+                bool volumeConfident = Math.Abs(agreement) > 0.5 && Math.Abs(thickness) > VolumeThicknessGate;
+                reverse = volumeConfident ? volume < 0 : doubleSkin ? twinInFront > twinBehind : score < -0.25;
                 if (reverse) openReversed++;
             }
             if (reverse) foreach (int f in isl) flip[f] = !flip[f];
@@ -1573,61 +1577,86 @@ public static class GlbDisconnectedParts
     // node (≤ ~50k samples), i.e. inside the hull mass, below the decks. Falls back to the given vertices.
     static void ModelBelly(JArray nodes, JArray meshes, Accessors reader, List<Vec3> fallback, out int lengthAxis, out int widthAxis, out double centreW, out double bellyY)
     {
-        var samples = new List<Vec3>();
+        // AREA-WEIGHTED (review of 9cacd9f): the frame is measured on FACE samples weighted by their area, not on
+        // vertices — a coarse hull of a few hundred triangles outweighs a dense cabin of thousands, and a chain of 144
+        // tiny links weighs almost nothing however many vertices it carries. Vertex-density filtering had discarded a
+        // coarse hull under a dense superstructure (belly 10.6 on a deck at 10).
+        var pts = new List<Vec3>(); var wts = new List<double>();
         try
         {
-            long total = 0; var accessorsOfNode = new List<KeyValuePair<int, int>>();   // (node, POSITION accessor)
+            long total = 0; var prims = new List<KeyValuePair<int, JObject>>();   // (node, primitive)
             for (int ni = 0; ni < nodes.Count; ni++)
             {
                 var node = nodes[ni] as JObject; if (node?["mesh"] == null) continue;
                 int mi = node.Value<int>("mesh"); if (mi < 0 || mi >= meshes.Count) continue;
-                var prims = (meshes[mi] as JObject)?["primitives"] as JArray; if (prims == null) continue;
-                foreach (JObject prim in prims.OfType<JObject>())
+                var pl = (meshes[mi] as JObject)?["primitives"] as JArray; if (pl == null) continue;
+                foreach (JObject prim in TrianglePrimitives(pl))
                 {
                     var attrs = prim["attributes"] as JObject; if (attrs?["POSITION"] == null) continue;
-                    int acc = attrs.Value<int>("POSITION"); accessorsOfNode.Add(new KeyValuePair<int, int>(ni, acc)); total += reader.Count(acc);
+                    prims.Add(new KeyValuePair<int, JObject>(ni, prim));
+                    total += (prim["indices"] == null ? reader.Count(attrs.Value<int>("POSITION")) : reader.Count(prim.Value<int>("indices"))) / 3;
                 }
             }
             int stride = (int)Math.Max(1, total / 50000);
-            foreach (KeyValuePair<int, int> na in accessorsOfNode)
+            foreach (KeyValuePair<int, JObject> np in prims)
             {
-                double[] world = NodeWorldMatrix(nodes, na.Key); int count = reader.Count(na.Value);
-                for (uint v = 0; v < count; v += (uint)stride) samples.Add(XForm(world, reader.Position(na.Value, v)));
+                double[] world = NodeWorldMatrix(nodes, np.Key); JObject prim = np.Value;
+                int posAcc = ((JObject)prim["attributes"]).Value<int>("POSITION"); int vertCount = reader.Count(posAcc);
+                int idxAcc = prim["indices"] == null ? -1 : prim.Value<int>("indices");
+                int faceN = (idxAcc < 0 ? vertCount : reader.Count(idxAcc)) / 3;
+                for (int f = 0; f < faceN; f += stride)
+                {
+                    uint i0 = idxAcc < 0 ? (uint)(f * 3) : reader.Index(idxAcc, (uint)(f * 3)), i1 = idxAcc < 0 ? (uint)(f * 3 + 1) : reader.Index(idxAcc, (uint)(f * 3 + 1)), i2 = idxAcc < 0 ? (uint)(f * 3 + 2) : reader.Index(idxAcc, (uint)(f * 3 + 2));
+                    if (i0 >= vertCount || i1 >= vertCount || i2 >= vertCount) continue;
+                    Vec3 a = XForm(world, reader.Position(posAcc, i0)), b = XForm(world, reader.Position(posAcc, i1)), c = XForm(world, reader.Position(posAcc, i2));
+                    double area = 0.5 * FLen(FCross(FSub(b, a), FSub(c, a))) * stride;   // the stride stands in for the faces skipped
+                    if (area <= 0) continue;
+                    pts.Add(FScale(FAdd(FAdd(a, b), c), 1.0 / 3.0)); wts.Add(area);
+                }
             }
         }
-        catch (Exception) { samples.Clear(); }
-        if (samples.Count == 0) samples = fallback;
-        // STRAY GEOMETRY (2026-09-17, the SS Romanic): 144 anchor-chain links parked 3 km down the length axis and
-        // 190 m up put the belly at 46 m on a ship whose deck is at 11, and every deck read "below the belly". A sample
-        // farther from the model's median centre than 4x the median distance is not the model; it is dropped here.
-        if (samples.Count > 8)
+        catch (Exception) { pts.Clear(); wts.Clear(); }
+        if (pts.Count == 0) { pts = fallback; wts = new List<double>(fallback.Count); foreach (Vec3 _ in fallback) wts.Add(1.0); }
+        // STRAY GEOMETRY (2026-09-17, the SS Romanic's anchor chain 3 km off): a sample farther from the area-weighted
+        // median centre than 4x the area-weighted median distance is not the model, and is dropped
+        if (pts.Count > 8)
         {
-            var sx = new List<double>(samples.Count); var sy = new List<double>(samples.Count); var sz = new List<double>(samples.Count);
-            foreach (Vec3 q in samples) { sx.Add(q.X); sy.Add(q.Y); sz.Add(q.Z); }
-            sx.Sort(); sy.Sort(); sz.Sort();
-            var mid = new Vec3 { X = sx[sx.Count / 2], Y = sy[sy.Count / 2], Z = sz[sz.Count / 2] };
-            var dist = new List<double>(samples.Count); foreach (Vec3 q in samples) dist.Add(FLen(FSub(q, mid)));
-            var sorted = new List<double>(dist); sorted.Sort(); double cut = 4.0 * sorted[sorted.Count / 2];
+            var mid = new Vec3 { X = WeightedPercentile(pts, wts, 0, 0.5), Y = WeightedPercentile(pts, wts, 1, 0.5), Z = WeightedPercentile(pts, wts, 2, 0.5) };
+            var dist = new List<double>(pts.Count); foreach (Vec3 q in pts) dist.Add(FLen(FSub(q, mid)));
+            double cut = 4.0 * WeightedPercentileOf(dist, wts, 0.5);
             if (cut > 0)
             {
-                var kept = new List<Vec3>(samples.Count);
-                for (int i = 0; i < samples.Count; i++) if (dist[i] <= cut) kept.Add(samples[i]);
-                if (kept.Count >= 8) samples = kept;
+                var kp = new List<Vec3>(pts.Count); var kw = new List<double>(pts.Count);
+                for (int i = 0; i < pts.Count; i++) if (dist[i] <= cut) { kp.Add(pts[i]); kw.Add(wts[i]); }
+                if (kp.Count >= 8) { pts = kp; wts = kw; }
             }
         }
-        double[] lo = { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity }, hi = { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
-        foreach (Vec3 p in samples) UpdateBounds(lo, hi, p);
-        lengthAxis = (hi[0] - lo[0]) >= (hi[2] - lo[2]) ? 0 : 2; widthAxis = lengthAxis == 0 ? 2 : 0;
-        centreW = 0.5 * (lo[widthAxis] + hi[widthAxis]);
-        // a quarter of the way up the model's HEIGHT RANGE, the range taken between the 1st and 99th height percentiles
-        // (mast tops are few vertices and must not stretch it) — not the 25th percentile of the vertices themselves:
-        // a liner spends most of its vertices in rigging and deckhouses, which put that percentile at deck level and
-        // read the lower decks as "below the belly", i.e. facing down was right (the Teutonic's lower strips, 2026-09-16)
-        var ys = new List<double>(samples.Count); foreach (Vec3 p in samples) ys.Add(p.Y);
-        ys.Sort();
-        if (ys.Count == 0) { bellyY = 0.0; return; }
-        double yLo = ys[(int)(ys.Count * 0.01)], yHi = ys[Math.Min(ys.Count - 1, (int)(ys.Count * 0.99))];
-        bellyY = yLo + 0.25 * (yHi - yLo);
+        if (pts.Count == 0) { lengthAxis = 0; widthAxis = 2; centreW = 0; bellyY = 0; return; }
+        // robust extents: the 1st..99th area-weighted percentiles per axis (a mast top is little area)
+        double x1 = WeightedPercentile(pts, wts, 0, 0.01), x99 = WeightedPercentile(pts, wts, 0, 0.99);
+        double z1 = WeightedPercentile(pts, wts, 2, 0.01), z99 = WeightedPercentile(pts, wts, 2, 0.99);
+        double y1 = WeightedPercentile(pts, wts, 1, 0.01), y99 = WeightedPercentile(pts, wts, 1, 0.99);
+        lengthAxis = (x99 - x1) >= (z99 - z1) ? 0 : 2; widthAxis = lengthAxis == 0 ? 2 : 0;
+        centreW = widthAxis == 0 ? 0.5 * (x1 + x99) : 0.5 * (z1 + z99);
+        // a quarter of the way up the model's HEIGHT RANGE (not a vertex percentile: a liner spends its vertices in rigging
+        // and deckhouses, which put that percentile at deck level — the Teutonic's lower strips, 2026-09-16)
+        bellyY = y1 + 0.25 * (y99 - y1);
+    }
+
+    static double WeightedPercentile(List<Vec3> pts, List<double> wts, int axis, double q)
+    {
+        var vals = new List<double>(pts.Count); foreach (Vec3 p in pts) vals.Add(axis == 0 ? p.X : axis == 1 ? p.Y : p.Z);
+        return WeightedPercentileOf(vals, wts, q);
+    }
+    static double WeightedPercentileOf(List<double> vals, List<double> wts, double q)
+    {
+        int n = vals.Count; if (n == 0) return 0.0;
+        var order = new int[n]; for (int i = 0; i < n; i++) order[i] = i;
+        Array.Sort(order, (a, b) => vals[a].CompareTo(vals[b]));
+        double total = 0; foreach (double w in wts) total += w;
+        double acc = 0, target = q * total;
+        foreach (int i in order) { acc += wts[i]; if (acc >= target) return vals[i]; }
+        return vals[order[n - 1]];
     }
 
     // determinant of the upper-left 3x3 of a column-major glTF matrix: negative = a mirroring transform

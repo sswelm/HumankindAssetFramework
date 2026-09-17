@@ -13,7 +13,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   ship whose deck is at 11: the frame drops samples farther than 4x the median distance from the model's median
   centre. And a third direction rule for thin solids built as two skins with opposite normals, where the volume and
   score rules cancel: material lies BEHIND an outward face — an island with a twin on at least half its faces is
-  decided by the majority of twin-in-front vs behind, measured for every island before any flip. Four tests.
+  decided by the majority of twin-in-front vs behind, measured for every island before any flip — as a TIE-BREAKER
+  only: from inside a gap, air between two solids looks exactly like a skin, so a confident volume verdict (a closed
+  island, or an open one past the agreement and thickness gates) always wins. The frame is area-weighted: face
+  samples weighted by their area, so a coarse hull outweighs a dense cabin and a chain of tiny links weighs nothing
+  however many vertices it carries. Six tests.
 - **Vehicle Lab: "Mark all shown as …"** — one role for every part the filters currently show. The SS Romanic
   carries 144 stray copies of one fitting 3 km down the length axis and 190 m up (an authoring leftover that
   makes the preview frame a speck of a ship); "Hide parts below (height)" isolates them in seconds and one Apply
