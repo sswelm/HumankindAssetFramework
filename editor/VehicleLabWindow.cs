@@ -192,6 +192,7 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] bool tracksStatic = false; // isolation switch: rig tread loops rigid to the hull (no link bones, no conveyor)
     [SerializeField] bool spinEnabled = true;   // MASTER spin switch (2026-08-19, user request: disabling spin on a wheeled vehicle meant unmarking every wheel — the wave-checkbox lesson again). Off = generate with 0 spin degrees + static tracks; bones/markings all kept.
     [SerializeField] bool doubleSided = false;  // DOUBLE-SIDED at the source (2026-09-03): the game culls backfaces, so single-sided / CAD parts (thin spokes, plates) render see-through. On = vehicle_rig.py appends reversed, slightly-inset faces so the exported Spin GLB is genuinely two-sided — no runtime doubling, no preview mismatch.
+    [SerializeField] Role bulkRole = Role.Ignore;   // "Mark all shown as" — the role applied to every filtered-in part at once
     [SerializeField] bool fixInsideOut = false; // FIX INSIDE-OUT FACES (2026-09-04): a source whose winding ships consistently inverted (the Khalandion hull) reads see-through from outside while showing the far wall's interior. On = vehicle_rig.py recalculates face normals outward (Shift+N) — the cheap single-sided fix; no extra triangles.
     // WAVE ROCK (2026-07-31): slow idle sway for FLOATING units, authored on a Hull bone under Root. 0 = off.
     [SerializeField] float rockDegrees = 0f;
@@ -640,6 +641,20 @@ public class VehicleLabWindow : EditorWindow
                 int unreviewed = list.Count(x => VisiblePart(x) && x.role == Role.Default);
                 int edgecases = list.Count(x => VisiblePart(x) && x.role == Role.Edgecase);
                 EditorGUILayout.LabelField($"{(useSourceRig && boneParts.Count > 0 ? "Source BONES" : "Parts")} ({shown.Count} shown{(hidden > 0 ? $", {hidden} hidden by the sliders" : "")}{(unreviewed > 0 ? $", {unreviewed} undecided" : ", all decided")}{(edgecases > 0 ? $", {edgecases} edge-case" : "")}) — mark {(useSourceRig && boneParts.Count > 0 ? "the bones that SPIN (Wheel)" : "the wheels & turret")}:", EditorStyles.boldLabel);
+                // MARK ALL SHOWN (2026-09-17, the SS Romanic: 144 stray copies of one fitting 3 km down the length axis and
+                // 190 m up, an authoring leftover). The filters isolate such a cluster in seconds; marking it row by row
+                // does not scale. One role for every part the filters currently show — the same parts the list draws.
+                if (!(useSourceRig && boneParts.Count > 0) && shown.Count > 0)
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        GUILayout.Label("Mark all shown as:", GUILayout.Width(120));
+                        bulkRole = (Role)EditorGUILayout.EnumPopup(bulkRole, GUILayout.Width(90));
+                        if (GUILayout.Button(new GUIContent($"Apply to {shown.Count} shown part(s)",
+                                "Sets this role on EVERY part the filters currently show (sliders, Show only, Visibility) — filter first, then apply. " +
+                                "Undo: filter the same way and apply Default."), GUILayout.Width(200)))
+                        { foreach (var x in shown) x.role = bulkRole; Repaint(); }
+                        EditorGUILayout.LabelField($"({shown.Count} of {list.Count} parts pass the filters)", EditorStyles.miniLabel);
+                    }
                 if (useSourceRig && boneParts.Count > 0)   // 2026-08-20: a user hunted for the turret's shards here — in this mode they are ONE row
                     EditorGUILayout.LabelField("Each row is one BONE of the shipped skeleton; all the shards skinned to it count as that row (the turret's parts = the Turret bone). Untick the fast path to list and mark individual parts.", EditorStyles.wordWrappedMiniLabel);
                 EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   W/T/B = Wheel/Turret/Body   ·   R = Rigging   ·   L = taiL rotor (spins about the lateral axis)   ·   G = Gun (rides the Turret; muzzle/socket anchor)   ·   C = Caterpillar (tread loop)   ·   O = Oar   ·   S = Structure   ·   F = Flip (reverse winding)   ·   P = Preserve (ship byte-identical)   ·   I = Ignore (DELETED)   ·   D = Default   ·   E = Edgecase", EditorStyles.miniLabel);
