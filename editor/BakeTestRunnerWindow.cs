@@ -329,7 +329,12 @@ public class BakeTestRunnerWindow : EditorWindow
         internal static bool CancelRequested { get; private set; }
         internal static void Attach(BakeTestRunnerWindow w) { window = w; CancelRequested = false; }
         internal static void BeginRow(string name, int index, int count, System.Diagnostics.Stopwatch w)
-        { rowName = name; rowIndex = index; rowCount = count; watch = w; InnerText = "starting…"; InnerFrac = 0f; RepaintNow(); }
+        { rowName = name; rowIndex = index; rowCount = count; watch = w; Step("starting…", 0f); }   // the bar is up from the first second (2026-09-17: "it takes a long time for something to appear")
+        // Polled from the BAKER at its phase boundaries (UniversalBaker.TestPoll): Unity's own Importing modal covers
+        // every bar during a synchronous import and eats the clicks; the runner's bar returns the moment the import
+        // ends, and a click then is honoured at the next boundary instead of the next model. Throws out of the bake.
+        internal static void Poll() { Heartbeat(); }
+        internal static void ThrowIfCancelled() { if (CancelRequested) throw new OperationCanceledException("Bake Tests: cancelled by the user"); }
         internal static void EndRun() { rowName = null; watch = null; window = null; CancelRequested = false; }
         static string Title(string plain) => rowName == null ? plain : FormattableString.Invariant($"HAF Bake Tests — {rowIndex + 1}/{rowCount} · {rowName}   (Cancel stops within seconds; what finished is kept)");
         /// Re-render the bars with live elapsed time while a SUBPROCESS runs (RunBounded's sliced wait calls this
@@ -385,6 +390,8 @@ public class BakeTestRunnerWindow : EditorWindow
         // closed. Now every row carries its own, in the window and in the durable report.
         var w = System.Diagnostics.Stopwatch.StartNew();
         try { r.last = r.run(); r.last.title = r.name; }
+        catch (OperationCanceledException)
+        { r.last = new BakeTestSection { title = r.name, skip = 1, body = "CANCELLED by the user before this row finished — nothing counted; the rows above are complete." }; }
         catch (Exception ex)
         { r.last = new BakeTestSection { title = r.name, fail = 1, body = "harness exception: " + ex.GetType().Name + ": " + ex.Message }; }
         w.Stop();

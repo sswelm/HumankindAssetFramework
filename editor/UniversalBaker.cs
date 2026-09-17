@@ -460,6 +460,7 @@ public static class UniversalBaker
         }
         if (!File.Exists(fbxFull)) return Fail("no slim FBX at " + fbxRel + " — bake with a Model file first (Reuse extracted needs an existing one).");
         AssetDatabase.ImportAsset(fbxRel, ImportAssetOptions.ForceUpdate);
+        TestPoll();
         if (cfg.animStateDriven)
         {
             if (!File.Exists(Path.Combine(projRoot, moveFbxRel))) return Fail("state-driven: the Blender step produced no Movement FBX (" + moveFbxRel + ") — check the Movement clip name.");
@@ -678,6 +679,7 @@ public static class UniversalBaker
         if (!InvokeReq(skelType, "Reimport", Type.EmptyTypes, skel, null, out err)) return Fail(err);
         EditorUtility.SetDirty(skel);
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
+        TestPoll();
 
         ReportBakedQuads(skelType, skel, name);
 
@@ -750,6 +752,7 @@ public static class UniversalBaker
             }
         }
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
+        TestPoll();
 
         // --- 6) preview aid: a STATIC textured prefab (the baked mesh + the atlas skin) you can select to inspect in
         //        Unity's preview window and to judge the (decimated) vertex count. NOT written to the registry, so the
@@ -1101,6 +1104,7 @@ public static class UniversalBaker
         {
             Debug.Log($"[Factory] {name} timing: {stage,-36} {lapWatch.Elapsed.TotalSeconds,6:0.0}s   (total {lapTotal.Elapsed.TotalSeconds:0.0}s)");
             lapWatch.Restart();
+            TestPoll();   // a bake-test cancel point at every phase boundary
         }
 
         if (!AssetDatabase.IsValidFolder("Assets/Resources")) AssetDatabase.CreateFolder("Assets", "Resources");
@@ -1231,6 +1235,7 @@ public static class UniversalBaker
         // failure seen on FBX. ForceSynchronousImport guarantees the imported GameObject exists right now.
         if (File.Exists(Path.Combine(projRoot, objPath)))
             AssetDatabase.ImportAsset(objPath, ImportAssetOptions.ForceSynchronousImport);
+            TestPoll();
         if (AssetDatabase.LoadAssetAtPath<GameObject>(objPath) == null)
         {
             // Fallback: objPath guessed .obj but the extracted source may be the other supported extension (e.g. a
@@ -1624,6 +1629,7 @@ public static class UniversalBaker
         PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
         UnityEngine.Object.DestroyImmediate(root);
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
+        TestPoll();
         // A re-bake overwrites the mesh/prefab IN PLACE, so LoadAssetAtPath below can return Unity's STALE cached copy --
         // which makes the skeleton bake from last bake's geometry and ship a skeleton lagging a bake behind (wrong
         // orientation in-game while the preview looks right). Force a synchronous reimport so the skeleton reads fresh.
@@ -1643,6 +1649,7 @@ public static class UniversalBaker
         if (!InvokeReq(skelType, "Reimport", Type.EmptyTypes, skel, null, out err)) return Fail(err);
         EditorUtility.SetDirty(skel);
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
+        TestPoll();
         Lap("skeleton (SDK SetPrefab/Reimport)");
         int chunksOverCeiling = ReportBakedQuads(skelType, skel, name);
         // MULTI-MESH VERIFICATION (review P1): the split PROMISED every chunk fits; if the SDK paired fewer
@@ -1944,6 +1951,16 @@ public static class UniversalBaker
         }
         if (ri < 0) ri = s;   // fall back to index (submesh order == MTL order)
         return ri;
+    }
+
+    // BAKE-TEST CANCEL POINTS (2026-09-17): during a test run, redraw the runner's cancelable bar and honour a pressed
+    // Cancel by throwing out of the bake (the runner turns that into a CANCELLED row, the section cleans its throwaway
+    // assets in its finally). Called at phase boundaries — after every synchronous import, where Unity's own modal
+    // has just given the screen back. A no-op outside a bake-test run: the bar is not drawn and the flag is never set.
+    static void TestPoll()
+    {
+        try { BakeTestRunnerWindow.Progress.Poll(); } catch { }
+        BakeTestRunnerWindow.Progress.ThrowIfCancelled();
     }
 
     // Imported textures are usually not CPU-readable (needed by PackTextures); blit through a RenderTexture to copy.

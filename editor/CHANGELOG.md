@@ -10,6 +10,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   cancelable now: a click stops the section between models, the runner between rows, and kills a running Blender
   step within a quarter second. What finished is kept — the report is rewritten after every row and the section's
   body ends with a CANCELLED line naming where it stopped; a killed bake is not counted as a failure of the baker.
+  Unity's own "Hold on… Importing assets" modal still covers every bar during a synchronous import and eats the
+  clicks — nothing draws over it — so the runner's bar is drawn from the first second of a row and comes back at
+  every phase boundary inside the bake (after each import, each save, each Blender step), and a click there stops
+  the bake at that boundary rather than at the next model.
 
 - **Fuse: the inside-out score measures against the MODEL's belly, not the group's.** A group made only of deck
   strips had its own bounding box as its world, its belly line ran through the strips themselves, and a deck facing
