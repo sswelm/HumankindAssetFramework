@@ -1351,6 +1351,11 @@ public static class GlbDisconnectedParts
             // double-skinned when at least half its faces have a twin; the majority of front-vs-behind decides.
             int partnered = twinStats[ii][0], twinInFront = twinStats[ii][1], twinBehind = twinStats[ii][2];
             bool doubleSkin = partnered * 2 >= isl.Count && partnered > 0 && Math.Abs(twinInFront - twinBehind) * 10 > partnered * 4;   // decided when 70/30 or clearer
+            // ENCLOSED: a twin BEHIND at least 90 % of the faces — the containment a cavity shell has (the outer skin
+            // surrounds it on every side) and a neighbouring solid never has (twins only on the sides that touch: four
+            // inward cubes 5 mm apart gave the central one twins behind 6 of 12 faces, and the veto kept it inside out —
+            // review of a043f8e). Only an enclosed island may veto a volume reversal.
+            bool enclosed = twinBehind * 10 >= isl.Count * 9;
             bool reverse = false;
             if (notOrientable[ii]) { }   // kept as authored means KEPT: no whole-island reversal either — a volume or score read off a surface with no consistent winding is noise (review of 0097bd5: the reversed Möbius band came back "6 of 6 rewound")
             // the twin rule is a TIE-BREAKER (review of 9cacd9f): from inside a gap, air between two solids looks exactly
@@ -1360,12 +1365,12 @@ public static class GlbDisconnectedParts
             // …and the one thing twin evidence MAY do against a confident volume is VETO a reversal: a closed cavity
             // shell (the inner skin of a hollow solid) has a negative volume yet every twin BEHIND it — it already faces
             // away from the material, and turning it would point it into the wall (review of e595844).
-            else if (closed) { reverse = volume < 0 && !(doubleSkin && twinBehind > twinInFront); if (reverse) closedReversed++; }
+            else if (closed) { reverse = volume < 0 && !enclosed; if (reverse) closedReversed++; }
             else
             {
                 openJudged++;
                 bool volumeConfident = Math.Abs(agreement) > 0.5 && Math.Abs(thickness) > VolumeThicknessGate;
-                reverse = volumeConfident ? (volume < 0 && !(doubleSkin && twinBehind > twinInFront)) : doubleSkin ? twinInFront > twinBehind : score < -0.25;
+                reverse = volumeConfident ? (volume < 0 && !enclosed) : doubleSkin ? twinInFront > twinBehind : score < -0.25;
                 if (reverse) openReversed++;
             }
             if (reverse) foreach (int f in isl) flip[f] = !flip[f];

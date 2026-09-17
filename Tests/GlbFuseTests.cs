@@ -673,6 +673,11 @@ public class GlbFuseTests
         var cubes = new[] { Box("C0", 1, 0, 0, 0, inward: false), Box("C1", 1, 1.005f, 0, 0, inward: false), Box("C2", 1, 0, 0, 1.005f, inward: false), Box("C3", 1, -1.005f, 0, 0, inward: false) };
         var gaps = GlbDisconnectedParts.FuseNodes(BuildGlb(cubes), new[] { 0, 1, 2, 3 }, 0.0);
         Assert.Equal(0, gaps.FacesRewound);
+        // …and the same four cubes wound INWARD are all corrected (review of a043f8e): the central one has twins behind
+        // 6 of its 12 faces only — not enclosed, so no veto — and its negative volume turns it like the other three
+        var cubesIn = new[] { Box("C0", 1, 0, 0, 0, inward: true), Box("C1", 1, 1.005f, 0, 0, inward: true), Box("C2", 1, 0, 0, 1.005f, inward: true), Box("C3", 1, -1.005f, 0, 0, inward: true) };
+        var gapsIn = GlbDisconnectedParts.FuseNodes(BuildGlb(cubesIn), new[] { 0, 1, 2, 3 }, 0.0);
+        Assert.Equal(48, gapsIn.FacesRewound);
     }
 
     [Fact]
