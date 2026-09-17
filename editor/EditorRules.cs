@@ -301,10 +301,17 @@ public static class WorkshopRules
                 if (letters.TryGetValue(kv.Key, out string own) && !string.IsNullOrEmpty(own)) result[kv.Key] = own;
                 continue;
             }
+            // created by the operation: walk up through the nodes it created to the FIRST ORIGINAL node — the part that
+            // was split or cut — and take its letter or its lack of one. Never further: an unmarked prop split under a
+            // marked hull must not hand the hull's letter to its pieces (review of 4caf027).
             int node = kv.Key; var seen = new HashSet<int>();
             while (node >= 0 && seen.Add(node))
             {
-                if (letters.TryGetValue(node, out string letter) && !string.IsNullOrEmpty(letter)) { result[kv.Key] = letter; break; }
+                if (node < firstNewNode)
+                {
+                    if (letters.TryGetValue(node, out string letter) && !string.IsNullOrEmpty(letter)) result[kv.Key] = letter;
+                    break;
+                }
                 node = parentOf.TryGetValue(node, out int up) ? up : -1;
             }
         }

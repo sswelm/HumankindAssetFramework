@@ -164,6 +164,15 @@ public class WorkshopRulesTests
         var lettersProp = new Dictionary<int, string> { [3] = "A", [6] = "C" };
         var got2 = WorkshopRules.TransferLetters(lettersProp, withProp, new HashSet<int> { 4, 6, 10, 11 }, 8);
         Assert.Equal(new Dictionary<int, string> { [6] = "C", [10] = "A", [11] = "A" }, got2);
+        // splitting the UNMARKED prop (node 4, child of the marked hull) gives its pieces nothing: inheritance stops at the
+        // first original node, the prop, and takes its lack of a letter — never the grandparent's (review of 4caf027)
+        var propSplit = new List<KeyValuePair<int, int>>(withProp) { new KeyValuePair<int, int>(30, 4), new KeyValuePair<int, int>(31, 4) };
+        var got3 = WorkshopRules.TransferLetters(lettersProp, propSplit, new HashSet<int> { 6, 10, 11, 30, 31 }, 8);
+        Assert.Equal(new Dictionary<int, string> { [6] = "C", [10] = "A", [11] = "A" }, got3);
+        // while a cut of a split piece (new under new under the marked hull) still reaches the hull
+        var cutOfSplit = new List<KeyValuePair<int, int>>(propSplit) { new KeyValuePair<int, int>(40, 10) };
+        var got4 = WorkshopRules.TransferLetters(lettersProp, cutOfSplit, new HashSet<int> { 40 }, 8);
+        Assert.Equal(new Dictionary<int, string> { [40] = "A" }, got4);
     }
 
     [Fact]
