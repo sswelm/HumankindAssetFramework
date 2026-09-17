@@ -288,7 +288,7 @@ public class BakeTestRunnerWindow : EditorWindow
                 var r = queue[i];
                 current = r;
                 if (EditorUtility.DisplayCancelableProgressBar(
-                        "HAF Bake Tests — safe to leave running (Cancel stops within seconds; what finished is kept)",
+                        "Bake Tests — safe to leave running",
                         FormattableString.Invariant($"{r.name}  ({i + 1} of {queue.Count}, {runWatch.Elapsed.TotalMinutes:0.0} min elapsed)"),
                         (float)i / Math.Max(1, queue.Count)))
                 { cancelled = true; break; }
@@ -348,7 +348,9 @@ public class BakeTestRunnerWindow : EditorWindow
         internal static void Poll() { Heartbeat(); }
         internal static void ThrowIfCancelled() { if (CancelRequested) throw new OperationCanceledException("Bake Tests: cancelled by the user"); }
         internal static void EndRun() { rowName = null; watch = null; window = null; CancelRequested = false; }
-        static string Title(string plain) => rowName == null ? plain : FormattableString.Invariant($"HAF Bake Tests — {rowIndex + 1}/{rowCount} · {rowName}   (Cancel stops within seconds; what finished is kept)");
+        // the modal's width is Unity's and fixed: the title carries only the run position and the row name (the cancel
+        // hint lives in the window, which is as wide as the user makes it — 2026-09-17: the long title was clipped)
+        static string Title(string plain) => rowName == null ? plain : FormattableString.Invariant($"Bake Tests {rowIndex + 1}/{rowCount} · {rowName}");
         /// Re-render the bars with live elapsed time while a SUBPROCESS runs (RunBounded's sliced wait calls this
         /// every 250 ms). Text and fraction stay put — only the elapsed figure and the modal repaint move, which
         /// is exactly the "still alive" signal a minutes-long Blender step was missing. No-op outside a run.
