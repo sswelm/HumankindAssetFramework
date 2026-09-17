@@ -148,7 +148,8 @@ public class BakeTestRunnerWindow : EditorWindow
             "names — your models, assets and registry are never touched. Results appear on each row (expand for " +
             "detail), in the Console, and in Logs/haf_bake_tests_report.txt.\n" +
             "Fire and forget: a run finishes on its own — you can alt-tab away or minimise Unity, and the report is " +
-            "rewritten after every test, so even a cancelled run leaves what finished.", MessageType.Info);
+            "rewritten after every test, so even a cancelled run leaves what finished. To stop a run, press Cancel on " +
+            "the progress bar: it takes effect within seconds (between models; a running Blender step is killed).", MessageType.Info);
 
         // THE TWO IN-WINDOW BARS — run level and step level — live during a run via Progress.RepaintNow().
         // They freeze only while Unity's own native dialogs (Importing…, Hold on…) hold the screen; the run
@@ -160,6 +161,14 @@ public class BakeTestRunnerWindow : EditorWindow
             EditorGUI.ProgressBar(r1, Progress.OverallFrac, "Run:  " + Progress.RowLabel);
             var r2 = EditorGUILayout.GetControlRect(false, 18);
             EditorGUI.ProgressBar(r2, Progress.InnerFrac, Progress.InnerLabel);
+            // STOP, IN THE WINDOW (2026-09-17, user: "why not put the cancel button here instead" — the modal bar's
+            // Cancel kept vanishing under Unity's Importing dialog). The run blocks the main thread, so this button
+            // never receives a click the IMGUI way; instead its screen rectangle is recorded here and the runner asks
+            // the OS at every poll whether the mouse button is down over it (or Esc is held) — NativeCancel below.
+            // Hold it for a moment: the poll runs at every phase boundary and every 250 ms during a Blender step.
+            var r3 = EditorGUILayout.GetControlRect(false, 26);
+            GUI.Button(r3, Progress.CancelRequested ? "Stopping after the current step…" : "STOP the run  —  hold the button (or hold Esc) until it says 'Stopping'");
+            if (Event.current.type == EventType.Repaint) Progress.StopRect = GUIUtility.GUIToScreenRect(r3);
             EditorGUILayout.Space(2);
         }
         if (!blender)
@@ -279,7 +288,7 @@ public class BakeTestRunnerWindow : EditorWindow
                 var r = queue[i];
                 current = r;
                 if (EditorUtility.DisplayCancelableProgressBar(
-                        "HAF Bake Tests — safe to leave running",
+                        "Bake Tests — safe to leave running",
                         FormattableString.Invariant($"{r.name}  ({i + 1} of {queue.Count}, {runWatch.Elapsed.TotalMinutes:0.0} min elapsed)"),
                         (float)i / Math.Max(1, queue.Count)))
                 { cancelled = true; break; }
@@ -290,6 +299,7 @@ public class BakeTestRunnerWindow : EditorWindow
                 pending.Dequeue();
                 // durable after EVERY test: an interrupted run still leaves a report of what did finish
                 lastReportPath = WriteReport(collected, InterimVerdict(collected, runWatch, finished: false));
+                if (Progress.CancelRequested) { cancelled = true; r.open = true; break; }   // Cancel pressed inside the row: the section stopped early and says so in its body
             }
         }
         finally { UniversalBaker.QuietDialogs = false; EditorUtility.ClearProgressBar(); Progress.EndRun(); }
@@ -318,31 +328,53 @@ public class BakeTestRunnerWindow : EditorWindow
         internal static string InnerLabel => watch == null || InnerText == null ? (InnerText ?? "")
             : FormattableString.Invariant($"{InnerText}   ({watch.Elapsed.TotalMinutes:0.0} min)");
 
-        internal static void Attach(BakeTestRunnerWindow w) { window = w; }
+        // CANCEL ANYWHERE (2026-09-17, user: "I have no way to stop it"): the run blocks the main thread, so the modal
+        // bar's Cancel button is the only input there is — and it existed only on the between-rows bar, while a row is
+        // a whole section of bakes lasting many minutes. Every bar this class draws is cancelable now; a click sets
+        // CancelRequested, and the sections stop between models, the runner stops between rows, and RunBounded kills
+        // a running Blender within its next 250 ms slice. Nothing already baked is lost: the report is rewritten
+        // after every row, and a section reports what it finished plus a CANCELLED line.
+        internal static bool CancelRequested { get; private set; }
+        internal static Rect StopRect;   // the in-window STOP button, in screen points (recorded at each repaint)
+        internal static void Attach(BakeTestRunnerWindow w) { window = w; CancelRequested = false; StopRect = default; NativeCancel.Reset(); }
+        // the OS-level check: the mouse held down over the STOP button, or Esc held — works while the main thread is blocked
+        // and while Unity's own Importing modal covers every bar (the bars only need to be drawn for the RECT to be current)
+        static void PollNative() { if (!CancelRequested && NativeCancel.Pressed(StopRect)) CancelRequested = true; }
         internal static void BeginRow(string name, int index, int count, System.Diagnostics.Stopwatch w)
-        { rowName = name; rowIndex = index; rowCount = count; watch = w; InnerText = "starting…"; InnerFrac = 0f; RepaintNow(); }
-        internal static void EndRun() { rowName = null; watch = null; window = null; }
+        { rowName = name; rowIndex = index; rowCount = count; watch = w; Step("starting…", 0f); }   // the bar is up from the first second (2026-09-17: "it takes a long time for something to appear")
+        // Polled from the BAKER at its phase boundaries (UniversalBaker.TestPoll): Unity's own Importing modal covers
+        // every bar during a synchronous import and eats the clicks; the runner's bar returns the moment the import
+        // ends, and a click then is honoured at the next boundary instead of the next model. Throws out of the bake.
+        internal static void Poll() { Heartbeat(); }
+        internal static void ThrowIfCancelled() { if (CancelRequested) throw new OperationCanceledException("Bake Tests: cancelled by the user"); }
+        internal static void EndRun() { rowName = null; watch = null; window = null; CancelRequested = false; }
+        // the modal's width is Unity's and fixed: the title carries only the run position and the row name (the cancel
+        // hint lives in the window, which is as wide as the user makes it — 2026-09-17: the long title was clipped)
+        // …and Unity appends its own " (busy for 34s)…" once a step runs long, so the row's parenthetical detail is
+        // dropped from the title too ("Does every model still bake?" — the window shows the full name)
+        static string ShortRow => rowName == null ? "" : (rowName.IndexOf(" (", StringComparison.Ordinal) > 0 ? rowName.Substring(0, rowName.IndexOf(" (", StringComparison.Ordinal)) : rowName);
+        static string Title(string plain) => rowName == null ? plain : FormattableString.Invariant($"Bake Tests {rowIndex + 1}/{rowCount} · {ShortRow}");
         /// Re-render the bars with live elapsed time while a SUBPROCESS runs (RunBounded's sliced wait calls this
         /// every 250 ms). Text and fraction stay put — only the elapsed figure and the modal repaint move, which
         /// is exactly the "still alive" signal a minutes-long Blender step was missing. No-op outside a run.
         internal static void Heartbeat()
         {
             if (rowName == null || InnerText == null) return;
-            EditorUtility.DisplayProgressBar(
-                FormattableString.Invariant($"HAF Bake Tests — {rowIndex + 1}/{rowCount} · {rowName}"),
-                FormattableString.Invariant($"{InnerText}   ({watch.Elapsed.TotalMinutes:0.0} min elapsed)"),
-                OverallFrac);
+            if (EditorUtility.DisplayCancelableProgressBar(Title("HAF Bake Tests"),
+                    FormattableString.Invariant($"{InnerText}   ({watch.Elapsed.TotalMinutes:0.0} min elapsed)"),
+                    OverallFrac)) CancelRequested = true;
+            PollNative();
             RepaintNow();
         }
 
         internal static void Step(string inner, float innerFrac)
         {
             InnerText = inner; InnerFrac = Mathf.Clamp01(innerFrac);
-            if (rowName == null) { EditorUtility.DisplayProgressBar("HAF Bake Tests", inner, innerFrac); return; }
-            EditorUtility.DisplayProgressBar(
-                FormattableString.Invariant($"HAF Bake Tests — {rowIndex + 1}/{rowCount} · {rowName}"),
-                FormattableString.Invariant($"{inner}   ({watch.Elapsed.TotalMinutes:0.0} min elapsed)"),
-                OverallFrac);
+            if (rowName == null) { if (EditorUtility.DisplayCancelableProgressBar("HAF Bake Tests", inner, innerFrac)) CancelRequested = true; return; }
+            if (EditorUtility.DisplayCancelableProgressBar(Title("HAF Bake Tests"),
+                    FormattableString.Invariant($"{inner}   ({watch.Elapsed.TotalMinutes:0.0} min elapsed)"),
+                    OverallFrac)) CancelRequested = true;
+            PollNative();
             RepaintNow();
         }
 
@@ -367,6 +399,47 @@ public class BakeTestRunnerWindow : EditorWindow
         }
     }
 
+    // OS-LEVEL CANCEL (Windows editor only; a no-op elsewhere). GetAsyncKeyState reports a key's state without any
+    // message pump: bit 15 = down right now, bit 0 = pressed since the last call (sticky, so a short click between two
+    // polls is still seen — unless something else queried the key first, which is why the advice says HOLD).
+    // The mouse counts only over the STOP button's screen rect; Esc counts anywhere. Screen points vs physical pixels:
+    // GetCursorPos is physical, GUIToScreenRect is points — divided by the editor's pixelsPerPoint.
+    static class NativeCancel
+    {
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool GetCursorPos(out Point p);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+        static readonly int ownPid = System.Diagnostics.Process.GetCurrentProcess().Id;
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] struct Point { public int X, Y; }
+        const int VK_LBUTTON = 0x01, VK_ESCAPE = 0x1B;
+        static bool unavailable;
+
+        internal static void Reset()
+        {   // drain the "pressed since last call" bits so a click from before the run cannot cancel it
+            if (unavailable || Application.platform != RuntimePlatform.WindowsEditor) return;
+            try { GetAsyncKeyState(VK_LBUTTON); GetAsyncKeyState(VK_ESCAPE); } catch { unavailable = true; }
+        }
+
+        internal static bool Pressed(Rect stopScreenRect)
+        {
+            if (unavailable || Application.platform != RuntimePlatform.WindowsEditor) return false;
+            try
+            {
+                // only while UNITY owns the foreground window: the key state is global, and Esc or a click in another
+                // application over the button's stored coordinates must not stop a background run (review of 8cff051)
+                GetWindowThreadProcessId(GetForegroundWindow(), out uint fgPid);
+                if (fgPid != (uint)ownPid) { GetAsyncKeyState(VK_ESCAPE); GetAsyncKeyState(VK_LBUTTON); return false; }   // drain the sticky bits too
+                if ((GetAsyncKeyState(VK_ESCAPE) & 0x8001) != 0) return true;
+                bool mouse = (GetAsyncKeyState(VK_LBUTTON) & 0x8001) != 0;
+                if (!mouse || stopScreenRect.width <= 0 || !GetCursorPos(out Point p)) return false;
+                float scale = Mathf.Max(0.5f, EditorGUIUtility.pixelsPerPoint);
+                return stopScreenRect.Contains(new Vector2(p.X / scale, p.Y / scale));
+            }
+            catch { unavailable = true; return false; }
+        }
+    }
+
     void RunOne(TestRow r)
     {
         if (r.needsBlender && !blenderAtRunStart)
@@ -377,6 +450,8 @@ public class BakeTestRunnerWindow : EditorWindow
         // closed. Now every row carries its own, in the window and in the durable report.
         var w = System.Diagnostics.Stopwatch.StartNew();
         try { r.last = r.run(); r.last.title = r.name; }
+        catch (OperationCanceledException)
+        { r.last = new BakeTestSection { title = r.name, skip = 1, body = "CANCELLED by the user before this row finished — nothing counted; the rows above are complete." }; }
         catch (Exception ex)
         { r.last = new BakeTestSection { title = r.name, fail = 1, body = "harness exception: " + ex.GetType().Name + ": " + ex.Message }; }
         w.Stop();

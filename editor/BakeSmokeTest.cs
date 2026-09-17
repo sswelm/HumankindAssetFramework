@@ -142,10 +142,16 @@ public static class BakeSmokeTest
                             result = missing.Count == 0 ? "PASS (fresh bake)" : "FAIL — missing/empty: " + string.Join(", ", missing);
                         }
                     }
+                    catch (OperationCanceledException) { result = "CANCELLED"; }   // the flag check below writes the line and stops; never counted as a failure
                     catch (Exception ex) { result = "FAIL — exception: " + ex.GetType().Name + ": " + ex.Message; }
                     finally { CleanupTestAssets(testName); }   // ALWAYS remove throwaway output, even on throw
                 }
 
+                if (BakeTestRunnerWindow.Progress.CancelRequested)
+                {   // the bar's Cancel button: a bake killed mid-way is not a failure of the baker — say what happened and stop
+                    sb.AppendLine($"[{tag}] {src.resourceName}: CANCELLED by the user (bake stopped; {pass} passed, {fail} failed before it)");
+                    break;
+                }
                 if (result.StartsWith("PASS")) pass++; else fail++;
                 sb.AppendLine($"[{tag}] {src.resourceName}: {result}");
             }

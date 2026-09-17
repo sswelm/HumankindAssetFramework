@@ -80,6 +80,7 @@ public static class UniversalBaker
         var backup = BackupOutputs(cfg.resourceName);
         BakeResult r;
         try { r = BuildInner(cfg); }
+        catch (OperationCanceledException) { RestoreOutputs(backup); throw; }   // a bake-test cancel: roll back exactly like a failure, but the RUNNER must see the cancel, not a failed bake (review of 8cff051)
         catch (Exception e) { Debug.LogError("[Factory] " + e); r = new BakeResult { ok = false, error = e.Message }; }
         if (r.ok) DiscardBackup(backup); else RestoreOutputs(backup);
         return r;
@@ -95,6 +96,7 @@ public static class UniversalBaker
         var backup = BackupOutputs(cfg.resourceName);   // E5: same rollback protection on the animated path
         BakeResult r;
         try { r = BuildAnimatedInner(cfg); }
+        catch (OperationCanceledException) { RestoreOutputs(backup); throw; }   // as in Build: a cancel rolls back and propagates
         catch (Exception e) { Debug.LogError("[Factory] " + e); r = new BakeResult { ok = false, error = e.Message }; }
         if (r.ok) DiscardBackup(backup); else RestoreOutputs(backup);
         return r;
@@ -146,6 +148,7 @@ public static class UniversalBaker
             if (DistrictRegistry.Load().Any(d => string.Equals(d.resourceName, name, StringComparison.OrdinalIgnoreCase)))
                 Debug.LogWarning($"[Factory] {name}: a DISTRICT entry layers on this model's baked outputs (shared _Atlas / _NormalAtlas / _RoughAtlas) — re-bake the district after this, or it keeps pointing at raw or missing atlases.");
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception e) { Debug.LogWarning($"[Factory] {name}: district-layering check skipped ({e.Message})."); }
         foreach (var s in OutputSuffixes)
             AssetDatabase.DeleteAsset("Assets/Resources/" + name + s);
@@ -199,6 +202,7 @@ public static class UniversalBaker
                     b.files.Add(name + s + ext);
                 }
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception e) { Debug.LogWarning("[Factory] re-bake backup failed (proceeding WITHOUT rollback protection): " + e.Message); b.files.Clear(); }
         return b;
     }
@@ -226,6 +230,7 @@ public static class UniversalBaker
             int n = b.files.Count(f => !f.EndsWith(".meta"));
             Debug.LogWarning($"[Factory] {b.name}: re-bake FAILED — restored the previous {n} baked asset(s) from backup. Your working model is intact (the registry was not changed).");
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception e)
         {
             Debug.LogError($"[Factory] re-bake RESTORE failed mid-copy — the backup is KEPT at '{b.dir}'. Close whatever locks the files, then copy its contents into 'Assets/Resources' (assets + .meta, overwriting) and let Unity refresh; or recover from git: " + e);
@@ -314,6 +319,7 @@ public static class UniversalBaker
             File.WriteAllText(sidecar, key);
             return outFull;
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel is not a conversion failure
         catch (Exception e) { error = "deploy conversion: " + e.Message; return null; }
         finally { EditorUtility.ClearProgressBar(); }
     }
@@ -460,6 +466,7 @@ public static class UniversalBaker
         }
         if (!File.Exists(fbxFull)) return Fail("no slim FBX at " + fbxRel + " — bake with a Model file first (Reuse extracted needs an existing one).");
         AssetDatabase.ImportAsset(fbxRel, ImportAssetOptions.ForceUpdate);
+        TestPoll();
         if (cfg.animStateDriven)
         {
             if (!File.Exists(Path.Combine(projRoot, moveFbxRel))) return Fail("state-driven: the Blender step produced no Movement FBX (" + moveFbxRel + ") — check the Movement clip name.");
@@ -678,6 +685,7 @@ public static class UniversalBaker
         if (!InvokeReq(skelType, "Reimport", Type.EmptyTypes, skel, null, out err)) return Fail(err);
         EditorUtility.SetDirty(skel);
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
+        TestPoll();
 
         ReportBakedQuads(skelType, skel, name);
 
@@ -750,6 +758,7 @@ public static class UniversalBaker
             }
         }
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
+        TestPoll();
 
         // --- 6) preview aid: a STATIC textured prefab (the baked mesh + the atlas skin) you can select to inspect in
         //        Unity's preview window and to judge the (decimated) vertex count. NOT written to the registry, so the
@@ -901,6 +910,7 @@ public static class UniversalBaker
                 $"Mesh = {mesh.vertexCount} verts / {mesh.triangles.Length / 3} tris — select it to inspect; " +
                 "lower 'Reduce to ~tris' + re-bake to cut further.");
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception e) { Debug.LogWarning("[Factory] preview prefab: " + e.Message); }
     }
 
@@ -983,6 +993,7 @@ public static class UniversalBaker
             }
             Debug.Log($"[Factory] {name}: surface atlases packed ({found}/{matList.Count} materials had maps) -> _NormalAtlas / _RoughAtlas (+ preview swizzle)");
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception e) { Debug.LogWarning("[Factory] surface atlases: " + e.Message); }
     }
 
@@ -1073,6 +1084,7 @@ public static class UniversalBaker
                 return true;
             }
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception ex) { Debug.LogError("[Factory] could not run Blender rig_anim ('" + blender + "'): " + ex.Message); return false; }
     }
 
@@ -1101,6 +1113,7 @@ public static class UniversalBaker
         {
             Debug.Log($"[Factory] {name} timing: {stage,-36} {lapWatch.Elapsed.TotalSeconds,6:0.0}s   (total {lapTotal.Elapsed.TotalSeconds:0.0}s)");
             lapWatch.Restart();
+            TestPoll();   // a bake-test cancel point at every phase boundary
         }
 
         if (!AssetDatabase.IsValidFolder("Assets/Resources")) AssetDatabase.CreateFolder("Assets", "Resources");
@@ -1231,6 +1244,7 @@ public static class UniversalBaker
         // failure seen on FBX. ForceSynchronousImport guarantees the imported GameObject exists right now.
         if (File.Exists(Path.Combine(projRoot, objPath)))
             AssetDatabase.ImportAsset(objPath, ImportAssetOptions.ForceSynchronousImport);
+            TestPoll();
         if (AssetDatabase.LoadAssetAtPath<GameObject>(objPath) == null)
         {
             // Fallback: objPath guessed .obj but the extracted source may be the other supported extension (e.g. a
@@ -1624,6 +1638,7 @@ public static class UniversalBaker
         PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
         UnityEngine.Object.DestroyImmediate(root);
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
+        TestPoll();
         // A re-bake overwrites the mesh/prefab IN PLACE, so LoadAssetAtPath below can return Unity's STALE cached copy --
         // which makes the skeleton bake from last bake's geometry and ship a skeleton lagging a bake behind (wrong
         // orientation in-game while the preview looks right). Force a synchronous reimport so the skeleton reads fresh.
@@ -1643,6 +1658,7 @@ public static class UniversalBaker
         if (!InvokeReq(skelType, "Reimport", Type.EmptyTypes, skel, null, out err)) return Fail(err);
         EditorUtility.SetDirty(skel);
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
+        TestPoll();
         Lap("skeleton (SDK SetPrefab/Reimport)");
         int chunksOverCeiling = ReportBakedQuads(skelType, skel, name);
         // MULTI-MESH VERIFICATION (review P1): the split PROMISED every chunk fits; if the SDK paired fewer
@@ -1944,6 +1960,16 @@ public static class UniversalBaker
         }
         if (ri < 0) ri = s;   // fall back to index (submesh order == MTL order)
         return ri;
+    }
+
+    // BAKE-TEST CANCEL POINTS (2026-09-17): during a test run, redraw the runner's cancelable bar and honour a pressed
+    // Cancel by throwing out of the bake (the runner turns that into a CANCELLED row, the section cleans its throwaway
+    // assets in its finally). Called at phase boundaries — after every synchronous import, where Unity's own modal
+    // has just given the screen back. A no-op outside a bake-test run: the bar is not drawn and the flag is never set.
+    static void TestPoll()
+    {
+        try { BakeTestRunnerWindow.Progress.Poll(); } catch { }
+        BakeTestRunnerWindow.Progress.ThrowIfCancelled();
     }
 
     // Imported textures are usually not CPU-readable (needed by PackTextures); blit through a RenderTexture to copy.
@@ -2309,6 +2335,7 @@ public static class UniversalBaker
                 return p.ExitCode == 0;
             }
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception ex) { Debug.LogError("[Factory] could not run converter ('" + psi.FileName + "'): " + ex.Message + "\n(GLB path uses Tools/glbconv/glbconv.exe; the dev fallback needs a dotnet on PATH or EditorPrefs 'ENC.dotnetPath'.)"); return false; }
     }
 
@@ -2337,6 +2364,9 @@ public static class UniversalBaker
         {
             if (p.WaitForExit(250)) { exited = true; break; }
             try { BakeTestRunnerWindow.Progress.Heartbeat(); } catch { }   // cosmetic — must never kill a bake
+            // a bake-test run the user cancelled (the bar's Cancel button, read by Heartbeat): kill the step now rather
+            // than let a minutes-long Blender finish first. Outside a run CancelRequested is never set (2026-09-17).
+            if (BakeTestRunnerWindow.Progress.CancelRequested) { try { p.Kill(); } catch { } BakeTestRunnerWindow.Progress.ThrowIfCancelled(); }   // killed by the user: a CANCEL, never a "timed out" failure (review of 8cff051)
         }
         if (!exited && !p.WaitForExit(0)) { try { p.Kill(); } catch { } return false; }   // the process itself hung -> killed
         // E4: WaitForExit(timeout) returns as soon as the PROCESS exits, but stdout/stderr stay open until EVERY handle to
@@ -2418,6 +2448,7 @@ public static class UniversalBaker
                 return true;
             }
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception ex) { Debug.LogError("[Factory] could not run Blender prep ('" + blender + "'): " + ex.Message); return false; }
     }
 
@@ -2443,6 +2474,7 @@ public static class UniversalBaker
                 return true;
             }
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception ex) { Debug.LogError("[Factory] could not run Blender ('" + blender + "'): " + ex.Message + "\nInstall Blender, or set EditorPrefs 'HAF.BlenderPath' to blender.exe."); return false; }
     }
 
@@ -2500,6 +2532,7 @@ public static class UniversalBaker
                                         && !n.name.StartsWith("Object_", StringComparison.OrdinalIgnoreCase))
                             .Select(n => n.name).Distinct().OrderBy(s => s).ToArray();
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception e) { Debug.LogWarning("[Factory] list object names: " + e.Message); return new string[0]; }
     }
 }
