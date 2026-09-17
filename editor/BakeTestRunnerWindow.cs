@@ -148,7 +148,8 @@ public class BakeTestRunnerWindow : EditorWindow
             "names — your models, assets and registry are never touched. Results appear on each row (expand for " +
             "detail), in the Console, and in Logs/haf_bake_tests_report.txt.\n" +
             "Fire and forget: a run finishes on its own — you can alt-tab away or minimise Unity, and the report is " +
-            "rewritten after every test, so even a cancelled run leaves what finished.", MessageType.Info);
+            "rewritten after every test, so even a cancelled run leaves what finished. To stop a run, press Cancel on " +
+            "the progress bar: it takes effect within seconds (between models; a running Blender step is killed).", MessageType.Info);
 
         // THE TWO IN-WINDOW BARS — run level and step level — live during a run via Progress.RepaintNow().
         // They freeze only while Unity's own native dialogs (Importing…, Hold on…) hold the screen; the run
@@ -279,7 +280,7 @@ public class BakeTestRunnerWindow : EditorWindow
                 var r = queue[i];
                 current = r;
                 if (EditorUtility.DisplayCancelableProgressBar(
-                        "HAF Bake Tests — safe to leave running",
+                        "HAF Bake Tests — safe to leave running (Cancel stops within seconds; what finished is kept)",
                         FormattableString.Invariant($"{r.name}  ({i + 1} of {queue.Count}, {runWatch.Elapsed.TotalMinutes:0.0} min elapsed)"),
                         (float)i / Math.Max(1, queue.Count)))
                 { cancelled = true; break; }
@@ -290,6 +291,7 @@ public class BakeTestRunnerWindow : EditorWindow
                 pending.Dequeue();
                 // durable after EVERY test: an interrupted run still leaves a report of what did finish
                 lastReportPath = WriteReport(collected, InterimVerdict(collected, runWatch, finished: false));
+                if (Progress.CancelRequested) { cancelled = true; r.open = true; break; }   // Cancel pressed inside the row: the section stopped early and says so in its body
             }
         }
         finally { UniversalBaker.QuietDialogs = false; EditorUtility.ClearProgressBar(); Progress.EndRun(); }
@@ -318,31 +320,37 @@ public class BakeTestRunnerWindow : EditorWindow
         internal static string InnerLabel => watch == null || InnerText == null ? (InnerText ?? "")
             : FormattableString.Invariant($"{InnerText}   ({watch.Elapsed.TotalMinutes:0.0} min)");
 
-        internal static void Attach(BakeTestRunnerWindow w) { window = w; }
+        // CANCEL ANYWHERE (2026-09-17, user: "I have no way to stop it"): the run blocks the main thread, so the modal
+        // bar's Cancel button is the only input there is — and it existed only on the between-rows bar, while a row is
+        // a whole section of bakes lasting many minutes. Every bar this class draws is cancelable now; a click sets
+        // CancelRequested, and the sections stop between models, the runner stops between rows, and RunBounded kills
+        // a running Blender within its next 250 ms slice. Nothing already baked is lost: the report is rewritten
+        // after every row, and a section reports what it finished plus a CANCELLED line.
+        internal static bool CancelRequested { get; private set; }
+        internal static void Attach(BakeTestRunnerWindow w) { window = w; CancelRequested = false; }
         internal static void BeginRow(string name, int index, int count, System.Diagnostics.Stopwatch w)
         { rowName = name; rowIndex = index; rowCount = count; watch = w; InnerText = "starting…"; InnerFrac = 0f; RepaintNow(); }
-        internal static void EndRun() { rowName = null; watch = null; window = null; }
+        internal static void EndRun() { rowName = null; watch = null; window = null; CancelRequested = false; }
+        static string Title(string plain) => rowName == null ? plain : FormattableString.Invariant($"HAF Bake Tests — {rowIndex + 1}/{rowCount} · {rowName}   (Cancel stops within seconds; what finished is kept)");
         /// Re-render the bars with live elapsed time while a SUBPROCESS runs (RunBounded's sliced wait calls this
         /// every 250 ms). Text and fraction stay put — only the elapsed figure and the modal repaint move, which
         /// is exactly the "still alive" signal a minutes-long Blender step was missing. No-op outside a run.
         internal static void Heartbeat()
         {
             if (rowName == null || InnerText == null) return;
-            EditorUtility.DisplayProgressBar(
-                FormattableString.Invariant($"HAF Bake Tests — {rowIndex + 1}/{rowCount} · {rowName}"),
-                FormattableString.Invariant($"{InnerText}   ({watch.Elapsed.TotalMinutes:0.0} min elapsed)"),
-                OverallFrac);
+            if (EditorUtility.DisplayCancelableProgressBar(Title("HAF Bake Tests"),
+                    FormattableString.Invariant($"{InnerText}   ({watch.Elapsed.TotalMinutes:0.0} min elapsed)"),
+                    OverallFrac)) CancelRequested = true;
             RepaintNow();
         }
 
         internal static void Step(string inner, float innerFrac)
         {
             InnerText = inner; InnerFrac = Mathf.Clamp01(innerFrac);
-            if (rowName == null) { EditorUtility.DisplayProgressBar("HAF Bake Tests", inner, innerFrac); return; }
-            EditorUtility.DisplayProgressBar(
-                FormattableString.Invariant($"HAF Bake Tests — {rowIndex + 1}/{rowCount} · {rowName}"),
-                FormattableString.Invariant($"{inner}   ({watch.Elapsed.TotalMinutes:0.0} min elapsed)"),
-                OverallFrac);
+            if (rowName == null) { if (EditorUtility.DisplayCancelableProgressBar("HAF Bake Tests", inner, innerFrac)) CancelRequested = true; return; }
+            if (EditorUtility.DisplayCancelableProgressBar(Title("HAF Bake Tests"),
+                    FormattableString.Invariant($"{inner}   ({watch.Elapsed.TotalMinutes:0.0} min elapsed)"),
+                    OverallFrac)) CancelRequested = true;
             RepaintNow();
         }
 

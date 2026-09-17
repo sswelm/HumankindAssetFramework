@@ -108,6 +108,7 @@ public static class ConversionGateTest
             var clone = JsonUtility.FromJson<ModelDef>(JsonUtility.ToJson(src));   // never mutate the real entry
             BakeTestRunnerWindow.Progress.Step($"{src.resourceName} ({total + 1}/{defs.Count}) — full conversion bake…", (float)total / defs.Count);
             int fails = BakeAndAssert(clone, $"{total + 1:00}of{defs.Count:00}_");
+            if (BakeTestRunnerWindow.Progress.CancelRequested) { lines.Add($"CANCELLED by the user at {src.resourceName} ({tested} tested before it)"); break; }
             lines.Add(fails == 0
                 ? $"PASS {src.resourceName} (full conversion on the real rig)"
                 : $"FAIL {src.resourceName} — {fails} invariant failure(s), see the Console");

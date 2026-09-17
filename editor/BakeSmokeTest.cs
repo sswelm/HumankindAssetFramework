@@ -146,6 +146,11 @@ public static class BakeSmokeTest
                     finally { CleanupTestAssets(testName); }   // ALWAYS remove throwaway output, even on throw
                 }
 
+                if (BakeTestRunnerWindow.Progress.CancelRequested)
+                {   // the bar's Cancel button: a bake killed mid-way is not a failure of the baker — say what happened and stop
+                    sb.AppendLine($"[{tag}] {src.resourceName}: CANCELLED by the user (bake stopped; {pass} passed, {fail} failed before it)");
+                    break;
+                }
                 if (result.StartsWith("PASS")) pass++; else fail++;
                 sb.AppendLine($"[{tag}] {src.resourceName}: {result}");
             }

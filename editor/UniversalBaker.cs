@@ -2337,6 +2337,9 @@ public static class UniversalBaker
         {
             if (p.WaitForExit(250)) { exited = true; break; }
             try { BakeTestRunnerWindow.Progress.Heartbeat(); } catch { }   // cosmetic — must never kill a bake
+            // a bake-test run the user cancelled (the bar's Cancel button, read by Heartbeat): kill the step now rather
+            // than let a minutes-long Blender finish first. Outside a run CancelRequested is never set (2026-09-17).
+            if (BakeTestRunnerWindow.Progress.CancelRequested) { try { p.Kill(); } catch { } return false; }
         }
         if (!exited && !p.WaitForExit(0)) { try { p.Kill(); } catch { } return false; }   // the process itself hung -> killed
         // E4: WaitForExit(timeout) returns as soon as the PROCESS exits, but stdout/stderr stay open until EVERY handle to
