@@ -144,4 +144,30 @@ public class WorkshopRulesTests
         Assert.Equal("ship_cut_split_cut", WorkshopRules.NextOutputName("ship_cut_split", "_cut"));
         Assert.Equal("ship_CUT2", WorkshopRules.NextOutputName("ship_CUT", "_cut"));   // case-insensitive match keeps the source spelling
     }
+
+    [Fact]
+    public void Letters_pass_down_to_the_children_a_split_or_cut_created()
+    {
+        // source: node 3 "Hull" marked A, node 5 "Deck" marked B. Output: 3 lost its mesh to children 10 and 11 (_Part_001/_002),
+        // 5 was cut into 12 and 13; node 7 is an unmarked part; node 20 is a grandchild of 3 (a cut of a split)
+        var letters = new Dictionary<int, string> { [3] = "A", [5] = "B" };
+        var table = new List<KeyValuePair<int, int>> { new KeyValuePair<int, int>(3, -1), new KeyValuePair<int, int>(5, -1), new KeyValuePair<int, int>(7, -1),
+            new KeyValuePair<int, int>(10, 3), new KeyValuePair<int, int>(11, 3), new KeyValuePair<int, int>(12, 5), new KeyValuePair<int, int>(13, 5), new KeyValuePair<int, int>(20, 10) };
+        var got = WorkshopRules.TransferLetters(letters, table, new HashSet<int> { 7, 10, 11, 12, 13, 20 });   // mesh nodes only (3 and 5 are meshless now)
+        Assert.Equal(new Dictionary<int, string> { [10] = "A", [11] = "A", [20] = "A", [12] = "B", [13] = "B" }, got);
+        // a marked node that still carries its mesh keeps its own letter
+        var kept = WorkshopRules.TransferLetters(letters, table, new HashSet<int> { 3, 7 });
+        Assert.Equal(new Dictionary<int, string> { [3] = "A" }, kept);
+    }
+
+    [Fact]
+    public void The_fuse_report_lists_every_island_when_given_them()
+    {
+        var g = new WorkshopRules.FuseGroupReport { Letter = "A", Changed = true, PartNames = new[] { "P" }, Warnings = new string[0],
+            Details = new[] { "Fused 1 part(s)", "largest islands: a; b; c; d; e; f" }, Islands = new[] { "a", "b", "c", "d", "e", "f", "g" } };
+        var lines = WorkshopRules.FuseReport("s.glb", "o.glb", 0, new[] { g }).Split('\n');
+        Assert.Contains("islands (7, largest first):", lines);
+        Assert.Contains("  g", lines);
+        Assert.DoesNotContain("largest islands:", lines);   // the abbreviated line is replaced by the complete list
+    }
 }

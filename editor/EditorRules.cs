@@ -242,6 +242,7 @@ public static class WorkshopRules
     public sealed class FuseGroupReport
     {
         public string Letter; public IList<string> PartNames; public IList<string> Details; public IList<string> Warnings; public bool Changed;
+        public IList<string> Islands;   // EVERY island's verdict (Details carries the largest six for the status) — review of 0097bd5
     }
 
     public static string FuseReport(string sourcePath, string outputPath, double weldPermille, IList<FuseGroupReport> groups)
@@ -259,6 +260,8 @@ public static class WorkshopRules
             foreach (string w in g.Warnings) sb.Append("WARNING: ").Append(w).Append('\n');
             foreach (string d in g.Details)
             {
+                if (g.Islands != null && d.StartsWith("largest islands", StringComparison.Ordinal)) continue;   // the complete list follows instead
+
                 // the "largest islands: a; b; c" and "stitched parts: a; b; c" lines become one item per line
                 int colon = d.IndexOf(": ", StringComparison.Ordinal);
                 if (colon > 0 && (d.StartsWith("largest islands", StringComparison.Ordinal) || d.StartsWith("stitched parts", StringComparison.Ordinal)))
@@ -268,8 +271,38 @@ public static class WorkshopRules
                 }
                 else sb.Append(d).Append('\n');
             }
+            if (g.Islands != null)
+            {
+                sb.Append("islands (").Append(g.Islands.Count).Append(", largest first):\n");
+                foreach (string line in g.Islands) sb.Append("  ").Append(line).Append('\n');
+            }
         }
         return sb.ToString();
+    }
+
+    // A SPLIT or CUT output keeps every node but the split part's mesh moves into new child nodes (_Part_NNN, _CutA/_CutB),
+    // and the parent, meshless, is no longer a row — so its letter resolved to nothing (review of 0097bd5). The letter
+    // passes to every mesh-carrying descendant of a marked node; a marked node that still has a mesh keeps its own.
+    // `parts`: (node index, parent index or -1) of every mesh-carrying node in the OUTPUT; `letters`: by node index in
+    // the source (indices survive a split/cut: nodes are only appended). Returns letters by output node index.
+    public static Dictionary<int, string> TransferLetters(IDictionary<int, string> letters, IEnumerable<KeyValuePair<int, int>> parts) => TransferLetters(letters, parts, null);
+
+    /// <param name="meshNodes">the nodes to report (mesh-carrying); null = every node in <paramref name="parts"/>. The parent walk uses every entry of <paramref name="parts"/>, meshless ancestors included.</param>
+    public static Dictionary<int, string> TransferLetters(IDictionary<int, string> letters, IEnumerable<KeyValuePair<int, int>> parts, ICollection<int> meshNodes)
+    {
+        var parentOf = new Dictionary<int, int>(); foreach (KeyValuePair<int, int> kv in parts) parentOf[kv.Key] = kv.Value;
+        var result = new Dictionary<int, string>();
+        foreach (KeyValuePair<int, int> kv in parts)
+        {
+            if (meshNodes != null && !meshNodes.Contains(kv.Key)) continue;
+            int node = kv.Key; var seen = new HashSet<int>();
+            while (node >= 0 && seen.Add(node))
+            {
+                if (letters.TryGetValue(node, out string letter) && !string.IsNullOrEmpty(letter)) { result[kv.Key] = letter; break; }
+                node = parentOf.TryGetValue(node, out int up) ? up : -1;
+            }
+        }
+        return result;
     }
 
     // OUTPUT NAMES THAT CHAIN (2026-09-16, user: "should a cut automatically create a cut postfix?"): a cut's output

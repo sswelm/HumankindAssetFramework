@@ -614,7 +614,7 @@ public class ModelWorkshopWindow : EditorWindow
                 : GlbDisconnectedParts.CutFileByFacing(srcFile, outGlb, cutGeo.NodeIndex, cutAxis, cutTiltDeg, CutPlaneValue());
             if (!result.Changed) { status = "Nothing changed — the cut leaves every triangle on one side."; return; }
             foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
-            WriteFuseSidecar(outGlb);   // a cut keeps every node, so the ⊕ letters travel with the output: point Source at it and they are back (user 2026-09-16)
+            WriteFuseSidecarForOutput(outGlb);   // the ⊕ letters travel with the output, passed down to the _CutA/_CutB children (user 2026-09-16; review of 0097bd5)
             status = $"Plane cut done: {result.Details.FirstOrDefault()}\n{outGlb}\nNext: open it in the Vehicle Lab — or cut again by pointing Source GLB at this output and re-Probing (your ⊕ letters travel with it).";
         }
         catch (Exception e) { status = "Plane cut failed (source untouched): " + e.Message; Debug.LogException(e); }
@@ -727,6 +727,26 @@ public class ModelWorkshopWindow : EditorWindow
         }
         catch (Exception e) { Debug.LogWarning("[Workshop] could not write the fuse groupings sidecar: " + e.Message); }
     }
+    // The sidecar for a SPLIT or CUT output: the letters of the rows in memory, passed down to the new _Part_NNN / _CutA
+    // children in the output (the split parent is meshless there and would resolve to nothing — review of 0097bd5).
+    void WriteFuseSidecarForOutput(string outputGlb)
+    {
+        try
+        {
+            string path = FuseSidecarPath(outputGlb); if (path == null) return;
+            var letters = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).ToDictionary(r => r.nodeIndex, r => r.fuse);
+            if (letters.Count == 0) { if (File.Exists(path)) File.Delete(path); return; }
+            var parts = GlbDisconnectedParts.Analyze(File.ReadAllBytes(outputGlb));
+            // every node's parent (the split parent is meshless, so the analyzer does not list it — read the hierarchy directly)
+            var table = GlbDisconnectedParts.NodeParents(File.ReadAllBytes(outputGlb));
+            var transferred = WorkshopRules.TransferLetters(letters, table, new HashSet<int>(parts.Select(q => q.NodeIndex)));
+            var nameOf = parts.ToDictionary(q => q.NodeIndex, q => q.NodeName);
+            var lines = transferred.OrderBy(kv => kv.Key).Where(kv => nameOf.ContainsKey(kv.Key)).Select(kv => WorkshopRules.SidecarLine(kv.Value, nameOf[kv.Key], kv.Key)).ToArray();
+            if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }
+            File.WriteAllLines(path, new[] { WorkshopRules.SidecarHeader }.Concat(lines));
+        }
+        catch (Exception e) { Debug.LogWarning("[Workshop] could not write the output's fuse groupings sidecar: " + e.Message); }
+    }
     // Marks `target` from the sidecar; returns how many rows got a letter, `refused` = lines that fit no single row
     // (each already logged as a warning). Rows the file does not mention are left as they are.
     int ApplyFuseSidecar(List<Row> target, out int refused)
@@ -774,7 +794,7 @@ public class ModelWorkshopWindow : EditorWindow
                 // the group letter leads the fused part's name — "Fused_B_Object_54" — so the Lab's list shows at a glance which
                 // group a shell came from and the fused parts sort together (user 2026-09-17)
                 var result = GlbDisconnectedParts.FuseNodes(bytes, picked, weldPermille / 1000.0, "Fused_" + g.Key + "_" + g.First().node);
-                report.Add(new WorkshopRules.FuseGroupReport { Letter = g.Key, PartNames = g.Select(r => r.node).ToList(), Details = result.Details, Warnings = result.Warnings, Changed = result.Changed });
+                report.Add(new WorkshopRules.FuseGroupReport { Letter = g.Key, PartNames = g.Select(r => r.node).ToList(), Details = result.Details, Warnings = result.Warnings, Changed = result.Changed, Islands = result.IslandLines });
                 if (!result.Changed) { lines.Add($"⊕{g.Key}: nothing fused ({string.Join("; ", result.Warnings)})"); continue; }
                 bytes = result.Bytes; done++;
                 lines.Add($"⊕{g.Key}: {result.Details.FirstOrDefault()}" + (result.Warnings.Count > 0 ? $"   ⚠ {result.Warnings.Count} warning(s)" : ""));
@@ -819,7 +839,7 @@ public class ModelWorkshopWindow : EditorWindow
             var result = GlbDisconnectedParts.SplitFile(srcFile, outGlb, picked, mergePct / 100.0);
             if (!result.Changed) { status = "Nothing changed — the checked parts produced no split (see warnings in the console)."; return; }
             foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
-            WriteFuseSidecar(outGlb);   // a split keeps every node too: the ⊕ letters travel with the output
+            WriteFuseSidecarForOutput(outGlb);   // the ⊕ letters travel with the output, passed down to the _Part_NNN children
             status = $"Split done: {result.NodesSplit} part(s) → {result.ChildPartsCreated} sub-parts, {result.SourceTriangles:N0} triangles preserved.\n{outGlb}\nNext: open it in the Vehicle Lab, Probe parts, and mark the junk islands Ignore.";
             Debug.Log($"[Workshop] {string.Join(" | ", result.Details)}");
         }

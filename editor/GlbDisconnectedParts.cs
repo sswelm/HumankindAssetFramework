@@ -32,6 +32,7 @@ public static class GlbDisconnectedParts
         public bool Changed => NodesSplit > 0;
         // FUSE (2026-09-15) — what the weld and the winding pass did, so the Workshop can say it in one line
         public int VerticesBefore, VerticesAfter, IslandsBefore, IslandsAfter, FacesRewound;
+        public readonly List<string> IslandLines = new List<string>();   // EVERY island's verdict, largest first (the report; Details keeps the largest six for the status)
     }
 
     sealed class Chunk
@@ -326,6 +327,7 @@ public static class GlbDisconnectedParts
         // world matrix, and its vertex count. Min/Max stay null where an accessor has no min/max — such a part is never hidden.
         public int Vertices;
         public double[] Min, Max;
+        public int ParentIndex = -1;   // the node's parent (-1 at the root): a _Part_NNN / _CutA child inherits its parent's ⊕ letter (WorkshopRules.TransferLetters)
     }
 
     public static List<PartInfo> Analyze(byte[] source) => Analyze(source, 0);
@@ -346,6 +348,10 @@ public static class GlbDisconnectedParts
         var byMesh = new Dictionary<int, MeshPlan>();
         var blockedByMesh = new Dictionary<int, string>();
         var infos = new List<PartInfo>();
+        var parentOf = new Dictionary<int, int>();
+        for (int i = 0; i < nodes.Count; i++)
+            if ((nodes[i] as JObject)?["children"] is JArray kids)
+                foreach (JToken kid in kids) { int ci = kid.Value<int>(); if (!parentOf.ContainsKey(ci)) parentOf.Add(ci, i); }
         for (int nodeIndex = 0; nodeIndex < nodes.Count; nodeIndex++)
         {
             var node = nodes[nodeIndex] as JObject;
@@ -353,6 +359,7 @@ public static class GlbDisconnectedParts
             int meshIndex = node.Value<int>("mesh");
             var info = new PartInfo { NodeIndex = nodeIndex, NodeName = (string)node["name"] ?? ("node " + nodeIndex), MeshName = (string)meshes[meshIndex]?["name"] ?? ("mesh " + meshIndex) };
             MeasureNode(root, nodes, nodeIndex, meshes[meshIndex] as JObject, info);
+            info.ParentIndex = parentOf.TryGetValue(nodeIndex, out int pi) ? pi : -1;
             if (node["extensions"]?["EXT_mesh_gpu_instancing"] != null)
                 info.Blocked = "GPU-instanced node";
             else if (blockedByMesh.TryGetValue(meshIndex, out string why))
@@ -399,6 +406,21 @@ public static class GlbDisconnectedParts
             if (any) { info.Min = mn; info.Max = mx; }
         }
         catch (Exception) { info.Min = info.Max = null; }
+    }
+
+    // Every node's parent index (-1 at a root), meshless nodes included — a split parent has no mesh and is not a
+    // PartInfo, yet its _Part_NNN children must find it to inherit its ⊕ letter (WorkshopRules.TransferLetters).
+    public static List<KeyValuePair<int, int>> NodeParents(byte[] source)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        JArray nodes = Parse(source).Root["nodes"] as JArray ?? new JArray();
+        var parentOf = new Dictionary<int, int>();
+        for (int i = 0; i < nodes.Count; i++)
+            if ((nodes[i] as JObject)?["children"] is JArray kids)
+                foreach (JToken kid in kids) { int ci = kid.Value<int>(); if (!parentOf.ContainsKey(ci)) parentOf.Add(ci, i); }
+        var table = new List<KeyValuePair<int, int>>(nodes.Count);
+        for (int i = 0; i < nodes.Count; i++) table.Add(new KeyValuePair<int, int>(i, parentOf.TryGetValue(i, out int pi) ? pi : -1));
+        return table;
     }
 
     public static Result Split(byte[] source) => SplitCore(source, null, null, 0);
@@ -1134,7 +1156,8 @@ public static class GlbDisconnectedParts
         // 4) consistency by MAJORITY — parity propagation across two-face edges, the minority reversed
         var flip = new bool[faceCount];
         int islandsMadeConsistent = 0, islandsNotOrientable = 0;
-        var islandConflict = new string[allIslands.Count];   // per island: same-traversal edges before, still unsatisfied after the flip (the "largest islands" line)
+        var islandConflict = new string[allIslands.Count];
+        var notOrientable = new bool[allIslands.Count];   // an island the parity pass refused is left alone by the direction pass too (review of 0097bd5)   // per island: same-traversal edges before, still unsatisfied after the flip (the "largest islands" line)
         bool DirOf(int face, long key) { for (int e = 0; e < 3; e++) if (fEdgeKeys[face * 3 + e] == key) return fEdgeDir[face * 3 + e]; return false; }
         Vec3 P(int f, int corner) => pos[tris[f * 3 + corner]];
         Vec3 FaceNormal(int f)   // area-weighted, with the CURRENT winding (authored while `flip` is still all false)
@@ -1202,7 +1225,7 @@ public static class GlbDisconnectedParts
             // unsatisfied — the surface has odd cycles (fins, fillets, a twisted rim) and no winding satisfies it. The
             // majority rule then turned 198 faces per blade, jagged holes at every tip. Every real hull, deck and boat
             // island measured reaches exactly 0 unsatisfied edges; anything above is a guess, and a guess is not made.
-            if (unsatisfied > 0 && ones > 0 && ones < isl.Count) { islandsNotOrientable++; islandConflict[ii] += " — not orientable, kept as authored"; }
+            if (unsatisfied > 0 && ones > 0 && ones < isl.Count) { islandsNotOrientable++; notOrientable[ii] = true; islandConflict[ii] += " — not orientable, kept as authored"; }
             else if (ones > 0 && ones < isl.Count)
             {
                 int minor = ones * 2 <= isl.Count ? 1 : 0;
@@ -1262,8 +1285,9 @@ public static class GlbDisconnectedParts
                 sum += FDot(FaceNormal(f), radial) / (rl * nl); n++;
             }
             double score = n > 0 ? sum / n : 0.0;
-            bool reverse;
-            if (closed) { reverse = volume < 0; if (reverse) closedReversed++; }
+            bool reverse = false;
+            if (notOrientable[ii]) { }   // kept as authored means KEPT: no whole-island reversal either — a volume or score read off a surface with no consistent winding is noise (review of 0097bd5: the reversed Möbius band came back "6 of 6 rewound")
+            else if (closed) { reverse = volume < 0; if (reverse) closedReversed++; }
             else
             {
                 openJudged++;
@@ -1272,7 +1296,7 @@ public static class GlbDisconnectedParts
             }
             if (reverse) foreach (int f in isl) flip[f] = !flip[f];
             islandRule[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}, volume agreement {1:+0.00;-0.00} thickness {2:+0.0000;-0.0000}, inside-out score {3:+0.00;-0.00}: {4}",
-                closed ? "closed" : "open", agreement, thickness, score, reverse ? "reversed whole" : "kept");
+                closed ? "closed" : "open", agreement, thickness, score, notOrientable[ii] ? "not judged" : reverse ? "reversed whole" : "kept");
         }
         foreach (bool b in flip) if (b) result.FacesRewound++;
         // the largest islands, so a reader can see WHAT was judged (faces, boundary share, how many faces the majority
@@ -1281,12 +1305,14 @@ public static class GlbDisconnectedParts
         string largestIslands;
         {
             var rows = new List<string>();
-            foreach (int ii in Enumerable.Range(0, allIslands.Count).OrderByDescending(i => allIslands[i].Count).Take(6))
+            foreach (int ii in Enumerable.Range(0, allIslands.Count).OrderByDescending(i => allIslands[i].Count))
             {
                 List<int> isl = allIslands[ii];
                 var keys = new HashSet<long>(); int boundary = 0, turned = 0;
                 foreach (int f in isl) { if (flip[f]) turned++; for (int e = 0; e < 3; e++) { long key = fEdgeKeys[f * 3 + e]; if (key >= 0 && keys.Add(key) && fEdgeFaces[key].Count == 1) boundary++; } }
-                rows.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} faces ({1:0}% boundary, {2}, {3} rewound; {4})", isl.Count, keys.Count > 0 ? 100.0 * boundary / keys.Count : 100.0, islandRule[ii], turned, islandConflict[ii]));
+                string line = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} faces ({1:0}% boundary, {2}, {3} rewound; {4})", isl.Count, keys.Count > 0 ? 100.0 * boundary / keys.Count : 100.0, islandRule[ii], turned, islandConflict[ii]);
+                result.IslandLines.Add(line);   // all of them, for the report (review of 0097bd5: the report promised every island and carried six)
+                if (rows.Count < 6) rows.Add(line);
             }
             largestIslands = "largest islands: " + string.Join("; ", rows);
         }

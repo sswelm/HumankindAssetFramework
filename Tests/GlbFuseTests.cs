@@ -601,7 +601,36 @@ public class GlbFuseTests
         Assert.Equal(1, res.IslandsAfter);
         Assert.Contains("0 made consistent, 1 not orientable by traversal (kept as authored)", res.Details[0]);
         Assert.Contains("not orientable, kept as authored", res.Details[1]);
+        Assert.Contains("not judged", res.Details[1]);
+        Assert.Equal(0, res.FacesRewound);
+        // KEPT means kept: the same band wound the other way is not reversed whole by the direction pass either (review of 0097bd5)
+        var bandReversed = new Part { Name = "Band", Positions = pos.ToArray(), Indices = idx.Select((v, i) => i % 3 == 1 ? idx[i + 1] : i % 3 == 2 ? idx[i - 1] : v).ToArray() };
+        var res2 = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, bandReversed), new[] { 1 }, 0.0);
+        Assert.Equal(0, res2.FacesRewound);
+        Assert.Contains("1 not orientable by traversal (kept as authored)", res2.Details[0]);
         // and a plain inverted-plate seam (2-colourable) is still fixed: the existing first test covers it
+    }
+
+    [Fact]
+    public void Every_island_is_listed_for_the_report_while_the_status_keeps_six()
+    {
+        var parts = Enumerable.Range(0, 7).Select(i => Quad("Q" + i, i * 3, i * 3 + 1, 0, 1, 0)).ToArray();   // seven separate plates
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(parts), Enumerable.Range(0, 7).ToArray(), 0.0);
+        Assert.Equal(7, r.IslandsAfter);
+        Assert.Equal(7, r.IslandLines.Count);
+        Assert.Equal(6, System.Text.RegularExpressions.Regex.Matches(r.Details[1], @"\d+ faces \(").Count);   // the status line: the largest six
+        Assert.All(r.IslandLines, l => Assert.StartsWith("2 faces (", l));
+    }
+
+    [Fact]
+    public void Analyze_reports_each_part_s_parent_node()
+    {
+        var a = Quad("A", 0, 1, 0, 1, 0);
+        var src = GlbDisconnectedParts.Split(BuildGlb(a, Quad("B", 5, 6, 0, 1, 0)), new HashSet<int> { 1 }, 0.0);   // B has one island: nothing to split, stays as is
+        var parts = GlbDisconnectedParts.Analyze(BuildGlb(a));
+        Assert.Equal(-1, parts[0].ParentIndex);   // a root node
+        var table = GlbDisconnectedParts.NodeParents(BuildGlb(a));
+        Assert.Equal(new KeyValuePair<int, int>(0, -1), table[0]);
     }
 
     [Fact]

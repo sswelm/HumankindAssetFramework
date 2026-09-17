@@ -16,6 +16,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   no copying by hand. The proposed output name follows the operation, `_cut` while the cut panel is open, `_split`
   otherwise, and counts up when the source already carries it: cutting `ship_cut.glb` proposes `ship_cut2.glb`.
 
+- Review of the branch: a non-orientable island is now left alone by the direction pass too (it read "6 of 6
+  rewound" while saying "kept as authored"); a split or cut output passes each ⊕ letter down to the `_Part_NNN` /
+  `_CutA` children it created (the meshless parent resolved to nothing); the fuse report lists EVERY island (the
+  status keeps the largest six). Tests for all three.
+
 - **Bake: tiled materials keep their grain.** A SketchUp-style material repeats a small texture 13 to 1,000 times
   across a part (the Teutonic's decks, hull skin, funnels, masts); an atlas cell cannot wrap, and the fold-into-one-
   tile that serves islands parked in a single tile smeared every triangle spanning several — the deck grain read as
