@@ -1283,13 +1283,25 @@ public static class GlbDisconnectedParts
         // the twin statistics of every island, measured BEFORE any direction flip (an island turned earlier in the loop
         // would present same-way normals to its twin island — the inner skin saw an already-turned outer skin)
         var twinStats = new int[allIslands.Count][];
+        // ENCLOSURE evidence (review of 7307fe2: six inward cubes around a seventh across air gaps gave the centre a twin
+        // behind every face): the twins behind a cavity shell all belong to ONE other island whose bounding box contains
+        // the shell — six neighbours are six twin islands, none containing the centre. Recorded here per island.
+        var islandOf = new int[faceCount]; for (int ii = 0; ii < allIslands.Count; ii++) foreach (int f in allIslands[ii]) islandOf[f] = ii;
+        var islandLo = new double[allIslands.Count][]; var islandHi = new double[allIslands.Count][];
+        for (int ii = 0; ii < allIslands.Count; ii++)
+        {
+            islandLo[ii] = new[] { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity }; islandHi[ii] = new[] { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
+            foreach (int f in allIslands[ii]) for (int c = 0; c < 3; c++) UpdateBounds(islandLo[ii], islandHi[ii], P(f, c));
+        }
+        var enclosingIsland = new int[allIslands.Count];   // the island holding the twins behind, when one island holds ≥ 90 % of them and its box contains this one; else -1
         for (int ii = 0; ii < allIslands.Count; ii++)
         {
             int partnered = 0, twinInFront = 0, twinBehind = 0;
+            var behindBy = new Dictionary<int, int>();   // twin island -> twins-behind count
             foreach (int f in allIslands[ii])
             {
                 Vec3 nf = FaceNormal(f); double lf = FLen(nf); if (lf < 1e-12) continue; nf = FScale(nf, 1.0 / lf);
-                Vec3 c = twinCentres[f]; PositionKey k = CellOf(c, twinCell); double best = double.PositiveInfinity; double proj = 0;
+                Vec3 c = twinCentres[f]; PositionKey k = CellOf(c, twinCell); double best = double.PositiveInfinity; double proj = 0; int bestG = -1;
                 var seenG = new HashSet<int>();
                 for (long dx = -1; dx <= 1; dx++) for (long dy = -1; dy <= 1; dy++) for (long dz = -1; dz <= 1; dz++)
                 {
@@ -1302,12 +1314,29 @@ public static class GlbDisconnectedParts
                         if (dist < 1e-9 || dist > twinReach) continue;
                         double along = FDot(d, nf);
                         if (Math.Abs(along) < 0.5 * dist) continue;   // the twin must lie along the normal, not beside the face
-                        if (dist < best) { best = dist; proj = along; }
+                        if (dist < best) { best = dist; proj = along; bestG = g; }
                     }
                 }
-                if (!double.IsPositiveInfinity(best)) { partnered++; if (proj > 0) twinInFront++; else twinBehind++; }
+                if (!double.IsPositiveInfinity(best))
+                {
+                    partnered++;
+                    if (proj > 0) twinInFront++;
+                    else { twinBehind++; int ti = islandOf[bestG]; behindBy[ti] = behindBy.TryGetValue(ti, out int bc) ? bc + 1 : 1; }
+                }
             }
             twinStats[ii] = new[] { partnered, twinInFront, twinBehind };
+            enclosingIsland[ii] = -1;
+            if (twinBehind > 0)
+            {
+                int dom = -1, domCount = 0; foreach (KeyValuePair<int, int> kv in behindBy) if (kv.Value > domCount) { dom = kv.Key; domCount = kv.Value; }
+                if (dom >= 0 && dom != ii && domCount * 10 >= twinBehind * 9)
+                {
+                    double pad = twinReach;   // the box of the enclosing island must contain this island's box (a skin's thickness of slack)
+                    bool contains = true;
+                    for (int c = 0; c < 3; c++) if (islandLo[dom][c] > islandLo[ii][c] + pad || islandHi[dom][c] < islandHi[ii][c] - pad) contains = false;
+                    if (contains) enclosingIsland[ii] = dom;
+                }
+            }
         }
         for (int ii = 0; ii < allIslands.Count; ii++)
         {
@@ -1355,7 +1384,7 @@ public static class GlbDisconnectedParts
             // surrounds it on every side) and a neighbouring solid never has (twins only on the sides that touch: four
             // inward cubes 5 mm apart gave the central one twins behind 6 of 12 faces, and the veto kept it inside out —
             // review of a043f8e). Only an enclosed island may veto a volume reversal.
-            bool enclosed = twinBehind * 10 >= isl.Count * 9;
+            bool enclosed = twinBehind * 10 >= isl.Count * 9 && enclosingIsland[ii] >= 0;   // …AND one enclosing island holds those twins and boxes this one in
             bool reverse = false;
             if (notOrientable[ii]) { }   // kept as authored means KEPT: no whole-island reversal either — a volume or score read off a surface with no consistent winding is noise (review of 0097bd5: the reversed Möbius band came back "6 of 6 rewound")
             // the twin rule is a TIE-BREAKER (review of 9cacd9f): from inside a gap, air between two solids looks exactly

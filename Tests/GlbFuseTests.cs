@@ -678,6 +678,13 @@ public class GlbFuseTests
         var cubesIn = new[] { Box("C0", 1, 0, 0, 0, inward: true), Box("C1", 1, 1.005f, 0, 0, inward: true), Box("C2", 1, 0, 0, 1.005f, inward: true), Box("C3", 1, -1.005f, 0, 0, inward: true) };
         var gapsIn = GlbDisconnectedParts.FuseNodes(BuildGlb(cubesIn), new[] { 0, 1, 2, 3 }, 0.0);
         Assert.Equal(48, gapsIn.FacesRewound);
+        // …and SIX inward cubes around a seventh (review of 7307fe2): the centre has a twin behind every face, but they
+        // belong to six islands and none contains it — no enclosure, no veto, all 84 corrected
+        var ring = new[] { Box("C", 1, 0, 0, 0, inward: true),
+            Box("X+", 1, 1.005f, 0, 0, inward: true), Box("X-", 1, -1.005f, 0, 0, inward: true), Box("Y+", 1, 0, 1.005f, 0, inward: true),
+            Box("Y-", 1, 0, -1.005f, 0, inward: true), Box("Z+", 1, 0, 0, 1.005f, inward: true), Box("Z-", 1, 0, 0, -1.005f, inward: true) };
+        var ringIn = GlbDisconnectedParts.FuseNodes(BuildGlb(ring), Enumerable.Range(0, 7).ToArray(), 0.0);
+        Assert.Equal(84, ringIn.FacesRewound);
     }
 
     [Fact]

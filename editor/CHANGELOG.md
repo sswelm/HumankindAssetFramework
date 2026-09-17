@@ -19,8 +19,8 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   samples weighted by their area, so a coarse hull outweighs a dense cabin and a chain of tiny links weighs nothing
   however many vertices it carries — sampled at each triangle's three corners, a third of its area each, so a big
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
-  behind it on at least 90 % of its faces — enclosed, as a neighbouring solid never is) but never cause one against a
-  confident volume. Nine tests.
+  behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
+  solids never are) but never cause one against a confident volume. Ten tests.
 - **Vehicle Lab: "Mark all shown as …"** — one role for every part the filters currently show. The SS Romanic
   carries 144 stray copies of one fitting 3 km down the length axis and 190 m up (an authoring leftover that
   makes the preview frame a speck of a ship); "Hide parts below (height)" isolates them in seconds and one Apply
