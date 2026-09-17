@@ -739,7 +739,8 @@ public class ModelWorkshopWindow : EditorWindow
             var parts = GlbDisconnectedParts.Analyze(File.ReadAllBytes(outputGlb));
             // every node's parent (the split parent is meshless, so the analyzer does not list it — read the hierarchy directly)
             var table = GlbDisconnectedParts.NodeParents(File.ReadAllBytes(outputGlb));
-            var transferred = WorkshopRules.TransferLetters(letters, table, new HashSet<int>(parts.Select(q => q.NodeIndex)));
+            int firstNewNode = GlbDisconnectedParts.NodeParents(File.ReadAllBytes(srcFile)).Count;   // the operation only appends: nodes past the source's count are the ones it created
+            var transferred = WorkshopRules.TransferLetters(letters, table, new HashSet<int>(parts.Select(q => q.NodeIndex)), firstNewNode);
             var nameOf = parts.ToDictionary(q => q.NodeIndex, q => q.NodeName);
             var lines = transferred.OrderBy(kv => kv.Key).Where(kv => nameOf.ContainsKey(kv.Key)).Select(kv => WorkshopRules.SidecarLine(kv.Value, nameOf[kv.Key], kv.Key)).ToArray();
             if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }

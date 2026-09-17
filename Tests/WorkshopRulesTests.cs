@@ -153,11 +153,17 @@ public class WorkshopRulesTests
         var letters = new Dictionary<int, string> { [3] = "A", [5] = "B" };
         var table = new List<KeyValuePair<int, int>> { new KeyValuePair<int, int>(3, -1), new KeyValuePair<int, int>(5, -1), new KeyValuePair<int, int>(7, -1),
             new KeyValuePair<int, int>(10, 3), new KeyValuePair<int, int>(11, 3), new KeyValuePair<int, int>(12, 5), new KeyValuePair<int, int>(13, 5), new KeyValuePair<int, int>(20, 10) };
-        var got = WorkshopRules.TransferLetters(letters, table, new HashSet<int> { 7, 10, 11, 12, 13, 20 });   // mesh nodes only (3 and 5 are meshless now)
+        var got = WorkshopRules.TransferLetters(letters, table, new HashSet<int> { 7, 10, 11, 12, 13, 20 }, 8);   // mesh nodes only (3 and 5 are meshless now); the source had 8 nodes
         Assert.Equal(new Dictionary<int, string> { [10] = "A", [11] = "A", [20] = "A", [12] = "B", [13] = "B" }, got);
         // a marked node that still carries its mesh keeps its own letter
-        var kept = WorkshopRules.TransferLetters(letters, table, new HashSet<int> { 3, 7 });
+        var kept = WorkshopRules.TransferLetters(letters, table, new HashSet<int> { 3, 7 }, 8);
         Assert.Equal(new Dictionary<int, string> { [3] = "A" }, kept);
+        // a child that EXISTED before the split (index below the source's node count) never inherits: the hull's unmarked
+        // prop stays unmarked, and a marked pre-existing child keeps its own letter (review of 26b4571)
+        var withProp = new List<KeyValuePair<int, int>>(table) { new KeyValuePair<int, int>(4, 3), new KeyValuePair<int, int>(6, 3) };
+        var lettersProp = new Dictionary<int, string> { [3] = "A", [6] = "C" };
+        var got2 = WorkshopRules.TransferLetters(lettersProp, withProp, new HashSet<int> { 4, 6, 10, 11 }, 8);
+        Assert.Equal(new Dictionary<int, string> { [6] = "C", [10] = "A", [11] = "A" }, got2);
     }
 
     [Fact]

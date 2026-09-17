@@ -285,16 +285,22 @@ public static class WorkshopRules
     // passes to every mesh-carrying descendant of a marked node; a marked node that still has a mesh keeps its own.
     // `parts`: (node index, parent index or -1) of every mesh-carrying node in the OUTPUT; `letters`: by node index in
     // the source (indices survive a split/cut: nodes are only appended). Returns letters by output node index.
-    public static Dictionary<int, string> TransferLetters(IDictionary<int, string> letters, IEnumerable<KeyValuePair<int, int>> parts) => TransferLetters(letters, parts, null);
-
     /// <param name="meshNodes">the nodes to report (mesh-carrying); null = every node in <paramref name="parts"/>. The parent walk uses every entry of <paramref name="parts"/>, meshless ancestors included.</param>
-    public static Dictionary<int, string> TransferLetters(IDictionary<int, string> letters, IEnumerable<KeyValuePair<int, int>> parts, ICollection<int> meshNodes)
+    /// <param name="firstNewNode">the source's node count: a split/cut only APPENDS nodes, so every index at or past it was created by the
+    /// operation and inherits the nearest marked ancestor's letter; a node that existed before keeps exactly its own letter, marked or not
+    /// (review of 26b4571: a marked hull's unmarked child prop must not join the hull's group because the hull was split).</param>
+    public static Dictionary<int, string> TransferLetters(IDictionary<int, string> letters, IEnumerable<KeyValuePair<int, int>> parts, ICollection<int> meshNodes, int firstNewNode)
     {
         var parentOf = new Dictionary<int, int>(); foreach (KeyValuePair<int, int> kv in parts) parentOf[kv.Key] = kv.Value;
         var result = new Dictionary<int, string>();
         foreach (KeyValuePair<int, int> kv in parts)
         {
             if (meshNodes != null && !meshNodes.Contains(kv.Key)) continue;
+            if (kv.Key < firstNewNode)
+            {   // existed before: its own letter or nothing
+                if (letters.TryGetValue(kv.Key, out string own) && !string.IsNullOrEmpty(own)) result[kv.Key] = own;
+                continue;
+            }
             int node = kv.Key; var seen = new HashSet<int>();
             while (node >= 0 && seen.Add(node))
             {

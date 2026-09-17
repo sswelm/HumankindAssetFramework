@@ -18,7 +18,7 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 - Review of the branch: a non-orientable island is now left alone by the direction pass too (it read "6 of 6
   rewound" while saying "kept as authored"); a split or cut output passes each ⊕ letter down to the `_Part_NNN` /
-  `_CutA` children it created (the meshless parent resolved to nothing); the fuse report lists EVERY island (the
+  `_CutA` children it created — and only to those: a child that existed before keeps its own letter or none (the meshless parent resolved to nothing); the fuse report lists EVERY island (the
   status keeps the largest six). Tests for all three.
 
 - **Bake: tiled materials keep their grain.** A SketchUp-style material repeats a small texture 13 to 1,000 times
