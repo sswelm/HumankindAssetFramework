@@ -32,6 +32,23 @@ public static class BakerRules
         if (keepTexture && extractedExists) return ExtractionAction.KeepProtected;
         return ExtractionAction.ReExtract;   // keepTexture cannot protect files that do not exist
     }
+
+    // TILED MATERIALS (2026-09-17, the Teutonic's decks, hull skin, funnels and masts): a SketchUp-style material
+    // repeats a small texture 13 to 1,000 times across a part, relying on texture wrap. An atlas cell cannot wrap,
+    // and the fold-into-[0,1) that serves islands parked in one tile smears every triangle that spans several — the
+    // deck grain read as a dense hatch. An axis counts as TILED when the material's UV span on it exceeds
+    // `TiledSpan` tiles; the cell image is then the texture repeated `repeats` times along that axis (as many as
+    // the authored span asks for, capped so each repeat keeps `minRepeatPx` of the texture's own pixels), and the
+    // UVs map the part's whole span linearly across the cell — continuous, correctly oriented grain at a coarser
+    // repeat ("believable from a distance"). An axis that is not tiled keeps the fold exactly as before.
+    public const double TiledSpan = 1.5;
+
+    public static int TileRepeats(double span, int texPixels, int minRepeatPx)
+    {
+        if (!(span > TiledSpan)) return 1;
+        int cap = Math.Max(1, texPixels / Math.Max(1, minRepeatPx));
+        return Math.Max(1, Math.Min((int)Math.Round(span), cap));
+    }
 }
 
 /// <summary>Natural name ordering — "Object_2" before "Object_10" (Model Workshop part list; NaturalOrderTests).</summary>
@@ -216,5 +233,105 @@ public static class WorkshopRules
                 : "'" + shown + "' is not in this file");
         }
         return result;
+    }
+
+    // The FUSE REPORT (2026-09-16): the per-group evidence (summary, largest islands, warnings, every stitched
+    // candidate's numbers) went into the Workshop's status box as one wall of text — 711 parts in six groups made it
+    // unreadable ("some report export would be more useful"). The status keeps one line per group; this file, written
+    // beside the output GLB as <output>.fuse-report.txt, holds everything, one item per line, greppable.
+    public sealed class FuseGroupReport
+    {
+        public string Letter; public IList<string> PartNames; public IList<string> Details; public IList<string> Warnings; public bool Changed;
+        public IList<string> Islands;   // EVERY island's verdict (Details carries the largest six for the status) — review of 0097bd5
+    }
+
+    public static string FuseReport(string sourcePath, string outputPath, double weldPermille, IList<FuseGroupReport> groups)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append("Model Workshop fuse report\n");
+        sb.Append("source: ").Append(sourcePath).Append('\n');
+        sb.Append("output: ").Append(outputPath).Append('\n');
+        sb.Append("weld: ").Append(weldPermille.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)).Append(" permille of the model's length\n");
+        sb.Append("groups: ").Append(groups.Count).Append('\n');
+        foreach (FuseGroupReport g in groups)
+        {
+            sb.Append('\n').Append("== group ").Append(g.Letter).Append(" — ").Append(g.PartNames.Count).Append(" part(s)").Append(g.Changed ? "" : " — NOTHING FUSED").Append('\n');
+            sb.Append("parts: ").Append(string.Join(", ", g.PartNames)).Append('\n');
+            foreach (string w in g.Warnings) sb.Append("WARNING: ").Append(w).Append('\n');
+            foreach (string d in g.Details)
+            {
+                if (g.Islands != null && d.StartsWith("largest islands", StringComparison.Ordinal)) continue;   // the complete list follows instead
+
+                // the "largest islands: a; b; c" and "stitched parts: a; b; c" lines become one item per line
+                int colon = d.IndexOf(": ", StringComparison.Ordinal);
+                if (colon > 0 && (d.StartsWith("largest islands", StringComparison.Ordinal) || d.StartsWith("stitched parts", StringComparison.Ordinal)))
+                {
+                    sb.Append(d.Substring(0, colon)).Append(":\n");
+                    foreach (string item in d.Substring(colon + 2).Split(new[] { "; " }, StringSplitOptions.RemoveEmptyEntries)) sb.Append("  ").Append(item).Append('\n');
+                }
+                else sb.Append(d).Append('\n');
+            }
+            if (g.Islands != null)
+            {
+                sb.Append("islands (").Append(g.Islands.Count).Append(", largest first):\n");
+                foreach (string line in g.Islands) sb.Append("  ").Append(line).Append('\n');
+            }
+        }
+        return sb.ToString();
+    }
+
+    // A SPLIT or CUT output keeps every node but the split part's mesh moves into new child nodes (_Part_NNN, _CutA/_CutB),
+    // and the parent, meshless, is no longer a row — so its letter resolved to nothing (review of 0097bd5). The letter
+    // passes to every mesh-carrying descendant of a marked node; a marked node that still has a mesh keeps its own.
+    // `parts`: (node index, parent index or -1) of every mesh-carrying node in the OUTPUT; `letters`: by node index in
+    // the source (indices survive a split/cut: nodes are only appended). Returns letters by output node index.
+    /// <param name="meshNodes">the nodes to report (mesh-carrying); null = every node in <paramref name="parts"/>. The parent walk uses every entry of <paramref name="parts"/>, meshless ancestors included.</param>
+    /// <param name="firstNewNode">the source's node count: a split/cut only APPENDS nodes, so every index at or past it was created by the
+    /// operation and inherits the nearest marked ancestor's letter; a node that existed before keeps exactly its own letter, marked or not
+    /// (review of 26b4571: a marked hull's unmarked child prop must not join the hull's group because the hull was split).</param>
+    public static Dictionary<int, string> TransferLetters(IDictionary<int, string> letters, IEnumerable<KeyValuePair<int, int>> parts, ICollection<int> meshNodes, int firstNewNode)
+    {
+        var parentOf = new Dictionary<int, int>(); foreach (KeyValuePair<int, int> kv in parts) parentOf[kv.Key] = kv.Value;
+        var result = new Dictionary<int, string>();
+        foreach (KeyValuePair<int, int> kv in parts)
+        {
+            if (meshNodes != null && !meshNodes.Contains(kv.Key)) continue;
+            if (kv.Key < firstNewNode)
+            {   // existed before: its own letter or nothing
+                if (letters.TryGetValue(kv.Key, out string own) && !string.IsNullOrEmpty(own)) result[kv.Key] = own;
+                continue;
+            }
+            // created by the operation: walk up through the nodes it created to the FIRST ORIGINAL node — the part that
+            // was split or cut — and take its letter or its lack of one. Never further: an unmarked prop split under a
+            // marked hull must not hand the hull's letter to its pieces (review of 4caf027).
+            int node = kv.Key; var seen = new HashSet<int>();
+            while (node >= 0 && seen.Add(node))
+            {
+                if (node < firstNewNode)
+                {
+                    if (letters.TryGetValue(node, out string letter) && !string.IsNullOrEmpty(letter)) result[kv.Key] = letter;
+                    break;
+                }
+                node = parentOf.TryGetValue(node, out int up) ? up : -1;
+            }
+        }
+        return result;
+    }
+
+    // OUTPUT NAMES THAT CHAIN (2026-09-16, user: "should a cut automatically create a cut postfix?"): a cut's output
+    // defaults to <source>_cut.glb, and cutting THAT output again goes to _cut2, _cut3 … instead of refusing (output ==
+    // source) or overwriting. Same for _split. Any other name just gets the suffix appended.
+    public static string NextOutputName(string baseName, string suffix)
+    {
+        if (string.IsNullOrEmpty(baseName)) return baseName;
+        int at = baseName.LastIndexOf(suffix, StringComparison.OrdinalIgnoreCase);
+        if (at >= 0)
+        {
+            string tail = baseName.Substring(at + suffix.Length);
+            if (tail.Length == 0) return baseName + "2";
+            if (int.TryParse(tail, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int n))
+                return baseName.Substring(0, at) + suffix + (n + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        return baseName + suffix;
     }
 }

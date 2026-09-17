@@ -32,6 +32,7 @@ public static class GlbDisconnectedParts
         public bool Changed => NodesSplit > 0;
         // FUSE (2026-09-15) — what the weld and the winding pass did, so the Workshop can say it in one line
         public int VerticesBefore, VerticesAfter, IslandsBefore, IslandsAfter, FacesRewound;
+        public readonly List<string> IslandLines = new List<string>();   // EVERY island's verdict, largest first (the report; Details keeps the largest six for the status)
     }
 
     sealed class Chunk
@@ -321,6 +322,12 @@ public static class GlbDisconnectedParts
         public int Triangles;
         public int Islands;
         public string Blocked;   // non-null = unsupported for splitting (compressed, instanced, non-triangle…)
+        // For the Workshop's list filters (2026-09-16, the Vehicle Lab's sliders brought over): the node's WORLD-space
+        // bounding box from the POSITION accessors' min/max (required by glTF, so no vertex is read) through the node's
+        // world matrix, and its vertex count. Min/Max stay null where an accessor has no min/max — such a part is never hidden.
+        public int Vertices;
+        public double[] Min, Max;
+        public int ParentIndex = -1;   // the node's parent (-1 at the root): a _Part_NNN / _CutA child inherits its parent's ⊕ letter (WorkshopRules.TransferLetters)
     }
 
     public static List<PartInfo> Analyze(byte[] source) => Analyze(source, 0);
@@ -341,12 +348,18 @@ public static class GlbDisconnectedParts
         var byMesh = new Dictionary<int, MeshPlan>();
         var blockedByMesh = new Dictionary<int, string>();
         var infos = new List<PartInfo>();
+        var parentOf = new Dictionary<int, int>();
+        for (int i = 0; i < nodes.Count; i++)
+            if ((nodes[i] as JObject)?["children"] is JArray kids)
+                foreach (JToken kid in kids) { int ci = kid.Value<int>(); if (!parentOf.ContainsKey(ci)) parentOf.Add(ci, i); }
         for (int nodeIndex = 0; nodeIndex < nodes.Count; nodeIndex++)
         {
             var node = nodes[nodeIndex] as JObject;
             if (node?["mesh"] == null) continue;
             int meshIndex = node.Value<int>("mesh");
             var info = new PartInfo { NodeIndex = nodeIndex, NodeName = (string)node["name"] ?? ("node " + nodeIndex), MeshName = (string)meshes[meshIndex]?["name"] ?? ("mesh " + meshIndex) };
+            MeasureNode(root, nodes, nodeIndex, meshes[meshIndex] as JObject, info);
+            info.ParentIndex = parentOf.TryGetValue(nodeIndex, out int pi) ? pi : -1;
             if (node["extensions"]?["EXT_mesh_gpu_instancing"] != null)
                 info.Blocked = "GPU-instanced node";
             else if (blockedByMesh.TryGetValue(meshIndex, out string why))
@@ -363,6 +376,51 @@ public static class GlbDisconnectedParts
             infos.Add(info);
         }
         return infos;
+    }
+
+    // world bbox + vertex count of a node's mesh from accessor min/max (see PartInfo); never throws — a part the
+    // file does not describe simply carries no box
+    static void MeasureNode(JObject root, JArray nodes, int nodeIndex, JObject mesh, PartInfo info)
+    {
+        try
+        {
+            var accessors = root["accessors"] as JArray; var primitives = mesh?["primitives"] as JArray;
+            if (accessors == null || primitives == null) return;
+            double[] world = NodeWorldMatrix(nodes, nodeIndex);
+            double[] mn = { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity };
+            double[] mx = { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
+            bool any = false;
+            foreach (JObject primitive in primitives.OfType<JObject>())
+            {
+                var attrs = primitive["attributes"] as JObject; if (attrs?["POSITION"] == null) continue;
+                var acc = accessors[attrs.Value<int>("POSITION")] as JObject; if (acc == null) continue;
+                info.Vertices += acc.Value<int?>("count") ?? 0;
+                var amin = acc["min"] as JArray; var amax = acc["max"] as JArray;
+                if (amin == null || amax == null || amin.Count < 3 || amax.Count < 3) continue;
+                for (int corner = 0; corner < 8; corner++)
+                {
+                    var c = new Vec3 { X = ((corner & 1) == 0 ? amin[0] : amax[0]).Value<double>(), Y = ((corner & 2) == 0 ? amin[1] : amax[1]).Value<double>(), Z = ((corner & 4) == 0 ? amin[2] : amax[2]).Value<double>() };
+                    UpdateBounds(mn, mx, XForm(world, c)); any = true;
+                }
+            }
+            if (any) { info.Min = mn; info.Max = mx; }
+        }
+        catch (Exception) { info.Min = info.Max = null; }
+    }
+
+    // Every node's parent index (-1 at a root), meshless nodes included — a split parent has no mesh and is not a
+    // PartInfo, yet its _Part_NNN children must find it to inherit its ⊕ letter (WorkshopRules.TransferLetters).
+    public static List<KeyValuePair<int, int>> NodeParents(byte[] source)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        JArray nodes = Parse(source).Root["nodes"] as JArray ?? new JArray();
+        var parentOf = new Dictionary<int, int>();
+        for (int i = 0; i < nodes.Count; i++)
+            if ((nodes[i] as JObject)?["children"] is JArray kids)
+                foreach (JToken kid in kids) { int ci = kid.Value<int>(); if (!parentOf.ContainsKey(ci)) parentOf.Add(ci, i); }
+        var table = new List<KeyValuePair<int, int>>(nodes.Count);
+        for (int i = 0; i < nodes.Count; i++) table.Add(new KeyValuePair<int, int>(i, parentOf.TryGetValue(i, out int pi) ? pi : -1));
+        return table;
     }
 
     public static Result Split(byte[] source) => SplitCore(source, null, null, 0);
@@ -1097,7 +1155,9 @@ public static class GlbDisconnectedParts
 
         // 4) consistency by MAJORITY — parity propagation across two-face edges, the minority reversed
         var flip = new bool[faceCount];
-        int islandsMadeConsistent = 0;
+        int islandsMadeConsistent = 0, islandsNotOrientable = 0;
+        var islandConflict = new string[allIslands.Count];
+        var notOrientable = new bool[allIslands.Count];   // an island the parity pass refused is left alone by the direction pass too (review of 0097bd5)   // per island: same-traversal edges before, still unsatisfied after the flip (the "largest islands" line)
         bool DirOf(int face, long key) { for (int e = 0; e < 3; e++) if (fEdgeKeys[face * 3 + e] == key) return fEdgeDir[face * 3 + e]; return false; }
         Vec3 P(int f, int corner) => pos[tris[f * 3 + corner]];
         Vec3 FaceNormal(int f)   // area-weighted, with the CURRENT winding (authored while `flip` is still all false)
@@ -1105,9 +1165,11 @@ public static class GlbDisconnectedParts
             Vec3 n = FCross(FSub(P(f, 1), P(f, 0)), FSub(P(f, 2), P(f, 0)));
             return flip[f] ? FScale(n, -1.0) : n;
         }
-        foreach (List<int> isl in allIslands)
+        for (int ii = 0; ii < allIslands.Count; ii++)
         {
+            List<int> isl = allIslands[ii];
             var parity = new Dictionary<int, int>();
+            var edgeSame = new Dictionary<long, bool>();   // every 2-face edge of the island: were its faces walking it the same way (after the lap rule)?
             foreach (int seed in isl)
             {
                 if (parity.ContainsKey(seed)) continue;
@@ -1134,13 +1196,37 @@ public static class GlbDisconnectedParts
                             double la = FLen(na), lb = FLen(nb);
                             if (la > 1e-12 && lb > 1e-12 && FDot(na, nb) / (la * lb) > 0.9) same = false;
                         }
+                        edgeSame[key] = same;
                         parity[fb] = parity[fa] ^ (same ? 1 : 0);
                         stack.Push(fb);
                     }
                 }
             }
             int ones = 0; foreach (int f in isl) ones += parity[f];
-            if (ones > 0 && ones < isl.Count)
+            // every 2-face edge (visited or not): same-traversal count before, and after the parity assignment how many
+            // edges are still unsatisfied — a 2-colourable island (the hull: one seam, one region) resolves to zero,
+            // a non-orientable construction (a propeller blade with fins) cannot
+            int sameBefore = 0, unsatisfied = 0, twoFaceEdges = 0;
+            {
+                var seenEdge = new HashSet<long>();
+                foreach (int f in isl) for (int e = 0; e < 3; e++)
+                {
+                    long key = fEdgeKeys[f * 3 + e]; if (key < 0 || !seenEdge.Add(key)) continue;
+                    List<int> lf = fEdgeFaces[key]; if (lf.Count != 2) continue;
+                    twoFaceEdges++;
+                    bool sm; if (!edgeSame.TryGetValue(key, out sm)) { sm = DirOf(lf[0], key) == DirOf(lf[1], key); }
+                    if (sm) sameBefore++;
+                    if ((parity[lf[0]] ^ parity[lf[1]]) != (sm ? 1 : 0)) unsatisfied++;
+                }
+            }
+            islandConflict[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} of {1} edges same-way, {2} unsatisfied after", sameBefore, twoFaceEdges, unsatisfied);
+            // NOT ORIENTABLE BY TRAVERSAL (2026-09-17, the Teutonic's propellers): a blade renders right yet 32 of its
+            // 1,287 edges are walked the same way by both faces, and after the parity assignment 138 edges are still
+            // unsatisfied — the surface has odd cycles (fins, fillets, a twisted rim) and no winding satisfies it. The
+            // majority rule then turned 198 faces per blade, jagged holes at every tip. Every real hull, deck and boat
+            // island measured reaches exactly 0 unsatisfied edges; anything above is a guess, and a guess is not made.
+            if (unsatisfied > 0 && ones > 0 && ones < isl.Count) { islandsNotOrientable++; notOrientable[ii] = true; islandConflict[ii] += " — not orientable, kept as authored"; }
+            else if (ones > 0 && ones < isl.Count)
             {
                 int minor = ones * 2 <= isl.Count ? 1 : 0;
                 foreach (int f in isl) if (parity[f] == minor) flip[f] = true;
@@ -1157,11 +1243,12 @@ public static class GlbDisconnectedParts
         // same day: "closed = no boundary edge at all" was tried first and lost the 3,907-face plating island (21 %
         // boundary, a thin solid the radial score cannot see, authored inward by a 51 % majority) — its side plating
         // fell from 96 % outward to 78 %; the agreement rule keeps that call and still leaves the deck alone.
-        int lengthAxis = (mx[0] - mn[0]) >= (mx[2] - mn[2]) ? 0 : 2, widthAxis = lengthAxis == 0 ? 2 : 0;   // glTF is Y-up; the hull's length is the longer horizontal extent
-        double centreW = 0.5 * (mn[widthAxis] + mx[widthAxis]);
-        var ys = new List<double>(); int step = Math.Max(1, pos.Count / 5000);
-        for (int i = 0; i < pos.Count; i += step) ys.Add(pos[i].Y);
-        ys.Sort(); double bellyY = ys.Count > 0 ? ys[ys.Count / 4] : 0.0;   // the 25th percentile of height: inside the hull mass, below the deck
+        // The belly axis is the MODEL's, never the group's (2026-09-16, the Teutonic's deck strips): a group made only
+        // of deck strips has its own bounding box as its world, its belly line runs through the strips themselves,
+        // and a deck facing down scores ~0 — undecidable, kept as authored. Sampled over every mesh node in the file
+        // through its world matrix (masts and funnels do not move a percentile the way they move a bounding box);
+        // the group's own vertices are the fallback for a file with nothing else in it.
+        ModelBelly(nodes, meshes, reader, pos, out int lengthAxis, out int widthAxis, out double centreW, out double bellyY);
         int openJudged = 0, openReversed = 0, closedReversed = 0;
         var islandRule = new string[allIslands.Count];   // per island, for the "largest islands" line: what was measured and what decided
         for (int ii = 0; ii < allIslands.Count; ii++)
@@ -1198,8 +1285,9 @@ public static class GlbDisconnectedParts
                 sum += FDot(FaceNormal(f), radial) / (rl * nl); n++;
             }
             double score = n > 0 ? sum / n : 0.0;
-            bool reverse;
-            if (closed) { reverse = volume < 0; if (reverse) closedReversed++; }
+            bool reverse = false;
+            if (notOrientable[ii]) { }   // kept as authored means KEPT: no whole-island reversal either — a volume or score read off a surface with no consistent winding is noise (review of 0097bd5: the reversed Möbius band came back "6 of 6 rewound")
+            else if (closed) { reverse = volume < 0; if (reverse) closedReversed++; }
             else
             {
                 openJudged++;
@@ -1208,7 +1296,7 @@ public static class GlbDisconnectedParts
             }
             if (reverse) foreach (int f in isl) flip[f] = !flip[f];
             islandRule[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}, volume agreement {1:+0.00;-0.00} thickness {2:+0.0000;-0.0000}, inside-out score {3:+0.00;-0.00}: {4}",
-                closed ? "closed" : "open", agreement, thickness, score, reverse ? "reversed whole" : "kept");
+                closed ? "closed" : "open", agreement, thickness, score, notOrientable[ii] ? "not judged" : reverse ? "reversed whole" : "kept");
         }
         foreach (bool b in flip) if (b) result.FacesRewound++;
         // the largest islands, so a reader can see WHAT was judged (faces, boundary share, how many faces the majority
@@ -1217,12 +1305,14 @@ public static class GlbDisconnectedParts
         string largestIslands;
         {
             var rows = new List<string>();
-            foreach (int ii in Enumerable.Range(0, allIslands.Count).OrderByDescending(i => allIslands[i].Count).Take(6))
+            foreach (int ii in Enumerable.Range(0, allIslands.Count).OrderByDescending(i => allIslands[i].Count))
             {
                 List<int> isl = allIslands[ii];
                 var keys = new HashSet<long>(); int boundary = 0, turned = 0;
                 foreach (int f in isl) { if (flip[f]) turned++; for (int e = 0; e < 3; e++) { long key = fEdgeKeys[f * 3 + e]; if (key >= 0 && keys.Add(key) && fEdgeFaces[key].Count == 1) boundary++; } }
-                rows.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} faces ({1:0}% boundary, {2}, {3} rewound)", isl.Count, keys.Count > 0 ? 100.0 * boundary / keys.Count : 100.0, islandRule[ii], turned));
+                string line = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} faces ({1:0}% boundary, {2}, {3} rewound; {4})", isl.Count, keys.Count > 0 ? 100.0 * boundary / keys.Count : 100.0, islandRule[ii], turned, islandConflict[ii]);
+                result.IslandLines.Add(line);   // all of them, for the report (review of 0097bd5: the report promised every island and carried six)
+                if (rows.Count < 6) rows.Add(line);
             }
             largestIslands = "largest islands: " + string.Join("; ", rows);
         }
@@ -1332,11 +1422,13 @@ public static class GlbDisconnectedParts
         result.NodesSplit = picked.Count; result.MeshesSplit = fusedMeshes.Count; result.ChildPartsCreated = 1;
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         result.Details.Add(string.Format(inv,
-            "Fused {0} part(s) -> '{1}': {2} -> {3} verts (seams welded within {4:0.####} = {5:0.##}‰ of {6:0.#}); islands {7} -> {8}; {9} made consistent; {10} open sheet(s) judged, {11} reversed; {12} closed shell(s) reversed whole; {13} of {14} face(s) rewound; {15} face(s) smaller than the weld kept collapsed",
+            "Fused {0} part(s) -> '{1}': {2} -> {3} verts (seams welded within {4:0.####} = {5:0.##}‰ of {6:0.#}); islands {7} -> {8}; {9} made consistent{16}; {10} open sheet(s) judged, {11} reversed; {12} closed shell(s) reversed whole; {13} of {14} face(s) rewound; {15} face(s) smaller than the weld kept collapsed",
             picked.Count, newNodeName, result.VerticesBefore, result.VerticesAfter, weld, weldFraction * 1000.0, longest, result.IslandsBefore, result.IslandsAfter,
-            islandsMadeConsistent, openJudged, openReversed, closedReversed, result.FacesRewound, faceCount, collapsedFaces));
+            islandsMadeConsistent, openJudged, openReversed, closedReversed, result.FacesRewound, faceCount, collapsedFaces,
+            islandsNotOrientable > 0 ? string.Format(inv, ", {0} not orientable by traversal (kept as authored)", islandsNotOrientable) : ""));
         result.Details.Add(largestIslands);
         if (stitchedLine != null) result.Details.Add(stitchedLine);
+        result.Details.Add(string.Format(inv, "frame: length along {0}, side centre {1:0.##}, belly height {2:0.##} (the model's, fused or not)", lengthAxis == 0 ? "X" : "Z", centreW, bellyY));
 
         buffers[0]["byteLength"] = bin.Count;
         document.Chunks[document.BinIndex].Data = bin.ToArray();
@@ -1407,6 +1499,50 @@ public static class GlbDisconnectedParts
         double denom = 1.0 / (va + vb + vc); double vv = vb * denom, ww = vc * denom;
         return FLen(FSub(p, FAdd(a, FAdd(FScale(ab, vv), FScale(ac, ww)))));
     }
+    // The hull's frame for the inside-out score: length = the longer horizontal extent (glTF is Y-up), the side centre
+    // = the middle of the width extent, the belly = the 25th percentile of height over sampled vertices of EVERY mesh
+    // node (≤ ~50k samples), i.e. inside the hull mass, below the decks. Falls back to the given vertices.
+    static void ModelBelly(JArray nodes, JArray meshes, Accessors reader, List<Vec3> fallback, out int lengthAxis, out int widthAxis, out double centreW, out double bellyY)
+    {
+        var samples = new List<Vec3>();
+        try
+        {
+            long total = 0; var accessorsOfNode = new List<KeyValuePair<int, int>>();   // (node, POSITION accessor)
+            for (int ni = 0; ni < nodes.Count; ni++)
+            {
+                var node = nodes[ni] as JObject; if (node?["mesh"] == null) continue;
+                int mi = node.Value<int>("mesh"); if (mi < 0 || mi >= meshes.Count) continue;
+                var prims = (meshes[mi] as JObject)?["primitives"] as JArray; if (prims == null) continue;
+                foreach (JObject prim in prims.OfType<JObject>())
+                {
+                    var attrs = prim["attributes"] as JObject; if (attrs?["POSITION"] == null) continue;
+                    int acc = attrs.Value<int>("POSITION"); accessorsOfNode.Add(new KeyValuePair<int, int>(ni, acc)); total += reader.Count(acc);
+                }
+            }
+            int stride = (int)Math.Max(1, total / 50000);
+            foreach (KeyValuePair<int, int> na in accessorsOfNode)
+            {
+                double[] world = NodeWorldMatrix(nodes, na.Key); int count = reader.Count(na.Value);
+                for (uint v = 0; v < count; v += (uint)stride) samples.Add(XForm(world, reader.Position(na.Value, v)));
+            }
+        }
+        catch (Exception) { samples.Clear(); }
+        if (samples.Count == 0) samples = fallback;
+        double[] lo = { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity }, hi = { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
+        foreach (Vec3 p in samples) UpdateBounds(lo, hi, p);
+        lengthAxis = (hi[0] - lo[0]) >= (hi[2] - lo[2]) ? 0 : 2; widthAxis = lengthAxis == 0 ? 2 : 0;
+        centreW = 0.5 * (lo[widthAxis] + hi[widthAxis]);
+        // a quarter of the way up the model's HEIGHT RANGE, the range taken between the 1st and 99th height percentiles
+        // (mast tops are few vertices and must not stretch it) — not the 25th percentile of the vertices themselves:
+        // a liner spends most of its vertices in rigging and deckhouses, which put that percentile at deck level and
+        // read the lower decks as "below the belly", i.e. facing down was right (the Teutonic's lower strips, 2026-09-16)
+        var ys = new List<double>(samples.Count); foreach (Vec3 p in samples) ys.Add(p.Y);
+        ys.Sort();
+        if (ys.Count == 0) { bellyY = 0.0; return; }
+        double yLo = ys[(int)(ys.Count * 0.01)], yHi = ys[Math.Min(ys.Count - 1, (int)(ys.Count * 0.99))];
+        bellyY = yLo + 0.25 * (yHi - yLo);
+    }
+
     // determinant of the upper-left 3x3 of a column-major glTF matrix: negative = a mirroring transform
     static double Det3(double[] m) =>
         m[0] * (m[5] * m[10] - m[9] * m[6]) - m[4] * (m[1] * m[10] - m[9] * m[2]) + m[8] * (m[1] * m[6] - m[5] * m[2]);

@@ -199,10 +199,10 @@ public class GlbFuseTests
     public void An_open_sheet_facing_the_hull_interior_is_reversed_a_correct_one_is_kept()
     {
         // Three separate open sheets (nothing touches): a side wall (normal +X, away from the hull centre — kept),
-        // a bottom plate at y=0 (pulls the belly percentile down; scores ~0 — kept), and a deck at y=5 whose
-        // normal points DOWN toward the axis — the one that must be reversed. Y is up.
+        // a bottom plate at y=0 facing DOWN (a hull bottom: away from the belly a quarter up the model — kept), and a
+        // deck at y=5 whose normal points DOWN toward the belly — the one that must be reversed. Y is up.
         var wall = new Part { Name = "Wall", Positions = new float[] { 5, 0, -4,  5, 0, 4,  5, 6, 4,  5, 6, -4 }, Indices = new[] { 0, 3, 2, 0, 2, 1 } };   // (b-a)x(c-a): (0,6,0)x(0,6,8) = (48,0,0): +X, away from the centre
-        var floor = new Part { Name = "Floor", Positions = new float[] { -4, 0, -3,  -4, 0, 3,  3, 0, 3,  3, 0, -3 }, Indices = new[] { 0, 1, 2, 0, 2, 3 } };
+        var floor = new Part { Name = "Floor", Positions = new float[] { -4, 0, -3,  -4, 0, 3,  3, 0, 3,  3, 0, -3 }, Indices = new[] { 0, 2, 1, 0, 3, 2 } };   // wound to face DOWN
         var deck = new Part { Name = "Deck", Positions = new float[] { -4, 5, -3,  3, 5, -3,  3, 5, 3,  -4, 5, 3 }, Indices = new[] { 0, 1, 2, 0, 2, 3 } };   // (b-a)x(c-a): (7,0,0)x(7,0,6) = (0,-42,0): DOWN
         byte[] src = BuildGlb(wall, floor, deck);
         var r = GlbDisconnectedParts.FuseNodes(src, new[] { 0, 1, 2 }, 0.0);   // no welding: three open islands
@@ -212,7 +212,8 @@ public class GlbFuseTests
         var g = Read(r.Bytes);
         var normals = FaceNormals(g, (JObject)g.Primitives(g.Node("Wall_Fused"))[0]);
         Assert.Equal(2, normals.Count(n => n[0] > 0 && Math.Abs(n[1]) < 1e-6));   // wall still +X
-        Assert.Equal(4, normals.Count(n => n[1] > 0));                            // deck now UP (plus the floor, authored up)
+        Assert.Equal(2, normals.Count(n => n[1] > 0));                            // deck now UP
+        Assert.Equal(2, normals.Count(n => n[1] < 0));                            // the hull bottom still DOWN
         Assert.Contains("3 open sheet(s) judged, 1 reversed", r.Details[0]);
     }
 
@@ -480,11 +481,12 @@ public class GlbFuseTests
         float k = (float)(1 / Math.Sqrt(3));
         var t = new Part { Name = "T", Positions = new float[] { 1, 0, 0, 0, 1, 0, 0, 0, 1 }, Indices = new[] { 0, 1, 2 }, Normals = new[] { k, k, k, k, k, k, k, k, k }, Scale = new double[] { 2, 1, 1 } };
         var r = GlbDisconnectedParts.FuseNodes(BuildGlb(t), new[] { 0 }, 0.0);
-        Assert.Equal(0, r.FacesRewound);
+        // a lone sloped triangle has no meaningful facing, so the direction rule may or may not rewind it; the claim
+        // under test is the DIRECTION of the carried normal up to that sign, and its agreement with the written geometry
         var g = Read(r.Bytes);
         float[] n = g.Floats(((JObject)((JObject)g.Primitives(g.Node("T_Fused"))[0])["attributes"]).Value<int>("NORMAL"), 3);
         for (int i = 0; i < n.Length / 3; i++)
-            Assert.True((n[i * 3] * 1 + n[i * 3 + 1] * 2 + n[i * 3 + 2] * 2) / 3 > 0.999, "vertex " + i + " normal must be (1,2,2)/3, got " + n[i * 3] + "," + n[i * 3 + 1] + "," + n[i * 3 + 2]);
+            Assert.True(Math.Abs((n[i * 3] * 1 + n[i * 3 + 1] * 2 + n[i * 3 + 2] * 2) / 3) > 0.999, "vertex " + i + " normal must be ±(1,2,2)/3, got " + n[i * 3] + "," + n[i * 3 + 1] + "," + n[i * 3 + 2]);
         // and the written normal agrees with the written geometry
         var fn = FaceNormals(g, (JObject)g.Primitives(g.Node("T_Fused"))[0])[0];
         double len = Math.Sqrt(fn[0] * fn[0] + fn[1] * fn[1] + fn[2] * fn[2]);
@@ -541,6 +543,94 @@ public class GlbFuseTests
         var lapReversed = new Part { Name = "Lap", Positions = lap.Positions, Indices = new[] { 0, 2, 1, 0, 3, 2 } };
         var r2 = GlbDisconnectedParts.FuseNodes(BuildGlb(plate, lapReversed, wallL, wallR, cover), new[] { 0, 1, 2, 3, 4 }, 0.0);   // same fixture: a lap must also be a SMALL part (under a quarter of the vertices)
         Assert.Contains(r2.Warnings, w => w.Contains("lap/trim strip") && w.Contains("'Lap'"));
+    }
+
+    [Fact]
+    public void Analyze_reports_each_part_s_world_bbox_and_vertex_count_for_the_list_filters()
+    {
+        var a = Quad("A", 0, 1, 0, 1, 0); a.Translation = new double[] { 10, 0, 0 };
+        var b = Quad("B", 0, 2, 0, 1, 0); b.Scale = new double[] { 1, 3, 1 };
+        var parts = GlbDisconnectedParts.Analyze(BuildGlb(a, b));
+        Assert.Equal(2, parts.Count);
+        Assert.Equal(4, parts[0].Vertices);
+        Assert.Equal(new double[] { 10, 0, 0 }, parts[0].Min); Assert.Equal(new double[] { 11, 1, 0 }, parts[0].Max);   // through the node transform: world space
+        Assert.Equal(new double[] { 0, 0, 0 }, parts[1].Min); Assert.Equal(new double[] { 2, 3, 0 }, parts[1].Max);
+    }
+
+    [Fact]
+    public void A_deck_group_is_judged_against_the_whole_model_s_belly_not_its_own()
+    {
+        // 2026-09-16, the Teutonic's deck strips: a group made only of two deck strips (y = 8) has its own belly line
+        // at y = 8, so a strip facing DOWN scored ~0 and stayed down. The hull (node 0, NOT in the group) puts the
+        // model's belly at its bottom, and the strips must then be reversed to face up.
+        var hull = Box("Hull", 6, 0, 0, 0, inward: false);                                                   // y 0..6
+        var deck = new Part { Name = "Deck", Positions = new float[] { 1, 8, 1,  5, 8, 1,  5, 8, 5,  1, 8, 5 }, Indices = new[] { 0, 1, 2, 0, 2, 3 } };       // (b-a)x(c-a) = (4,0,0)x(4,0,4) = (0,-16,0): DOWN
+        var deck2 = new Part { Name = "Deck2", Positions = new float[] { 1, 8, 6,  5, 8, 6,  5, 8, 9,  1, 8, 9 }, Indices = new[] { 0, 1, 2, 0, 2, 3 } };   // DOWN too, separate island
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, deck, deck2), new[] { 1, 2 }, 0.0);   // the hull is not fused, only measured
+        Assert.Equal(2, r.IslandsAfter);
+        Assert.Equal(4, r.FacesRewound);
+        Assert.Contains("2 open sheet(s) judged, 2 reversed", r.Details[0]);
+        var g = Read(r.Bytes);
+        Assert.All(FaceNormals(g, (JObject)g.Primitives(g.Node("Deck_Fused"))[0]), n => Assert.True(n[1] > 0, "faces up"));
+        Assert.NotNull(g.Node("Hull")["mesh"]);   // untouched
+    }
+
+    [Fact]
+    public void An_island_whose_parity_cannot_be_satisfied_is_left_as_authored()
+    {
+        // 2026-09-17, the Teutonic's propeller blades: a surface with an odd cycle — here a Möbius band of three quads,
+        // the third joining back to the first edge with a half twist — has no consistent winding. The old rule flipped
+        // the "minority" of a parity assignment that could never be satisfied (198 faces per blade, holes at every tip).
+        float r = 3f, w = 1f; var pos = new List<float>(); var idx = new List<int>();
+        for (int k = 0; k < 3; k++)
+        {
+            double a = k * 2 * Math.PI / 3, half = a / 2;   // the half twist
+            float cx = (float)(r * Math.Cos(a)), cz = (float)(r * Math.Sin(a));
+            float ux = (float)(Math.Cos(half) * Math.Cos(a) * w), uy = (float)(Math.Sin(half) * w), uz = (float)(Math.Cos(half) * Math.Sin(a) * w);
+            pos.AddRange(new[] { cx - ux, 5 - uy, cz - uz,  cx + ux, 5 + uy, cz + uz });   // A_k, B_k
+        }
+        for (int k = 0; k < 3; k++)
+        {
+            int a0 = 2 * k, b0 = 2 * k + 1, a1, b1;
+            if (k < 2) { a1 = 2 * (k + 1); b1 = 2 * (k + 1) + 1; } else { a1 = 1; b1 = 0; }   // the twist: A2->B0, B2->A0
+            idx.AddRange(new[] { a0, b0, b1, a0, b1, a1 });
+        }
+        var band = new Part { Name = "Band", Positions = pos.ToArray(), Indices = idx.ToArray() };
+        var hull = Box("Hull", 6, -3, -3, -3, inward: false);   // the model's belly, outside the group
+        var res = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, band), new[] { 1 }, 0.0);
+        Assert.Equal(1, res.IslandsAfter);
+        Assert.Contains("0 made consistent, 1 not orientable by traversal (kept as authored)", res.Details[0]);
+        Assert.Contains("not orientable, kept as authored", res.Details[1]);
+        Assert.Contains("not judged", res.Details[1]);
+        Assert.Equal(0, res.FacesRewound);
+        // KEPT means kept: the same band wound the other way is not reversed whole by the direction pass either (review of 0097bd5)
+        var bandReversed = new Part { Name = "Band", Positions = pos.ToArray(), Indices = idx.Select((v, i) => i % 3 == 1 ? idx[i + 1] : i % 3 == 2 ? idx[i - 1] : v).ToArray() };
+        var res2 = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, bandReversed), new[] { 1 }, 0.0);
+        Assert.Equal(0, res2.FacesRewound);
+        Assert.Contains("1 not orientable by traversal (kept as authored)", res2.Details[0]);
+        // and a plain inverted-plate seam (2-colourable) is still fixed: the existing first test covers it
+    }
+
+    [Fact]
+    public void Every_island_is_listed_for_the_report_while_the_status_keeps_six()
+    {
+        var parts = Enumerable.Range(0, 7).Select(i => Quad("Q" + i, i * 3, i * 3 + 1, 0, 1, 0)).ToArray();   // seven separate plates
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(parts), Enumerable.Range(0, 7).ToArray(), 0.0);
+        Assert.Equal(7, r.IslandsAfter);
+        Assert.Equal(7, r.IslandLines.Count);
+        Assert.Equal(6, System.Text.RegularExpressions.Regex.Matches(r.Details[1], @"\d+ faces \(").Count);   // the status line: the largest six
+        Assert.All(r.IslandLines, l => Assert.StartsWith("2 faces (", l));
+    }
+
+    [Fact]
+    public void Analyze_reports_each_part_s_parent_node()
+    {
+        var a = Quad("A", 0, 1, 0, 1, 0);
+        var src = GlbDisconnectedParts.Split(BuildGlb(a, Quad("B", 5, 6, 0, 1, 0)), new HashSet<int> { 1 }, 0.0);   // B has one island: nothing to split, stays as is
+        var parts = GlbDisconnectedParts.Analyze(BuildGlb(a));
+        Assert.Equal(-1, parts[0].ParentIndex);   // a root node
+        var table = GlbDisconnectedParts.NodeParents(BuildGlb(a));
+        Assert.Equal(new KeyValuePair<int, int>(0, -1), table[0]);
     }
 
     [Fact]

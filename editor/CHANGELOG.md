@@ -5,6 +5,56 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Fuse: the inside-out score measures against the MODEL's belly, not the group's.** A group made only of deck
+  strips had its own bounding box as its world, its belly line ran through the strips themselves, and a deck facing
+  down scored ~0 — undecidable, kept as authored (the Teutonic's starboard deck strips, transparent from above).
+  The belly (25th percentile of height) and the side centre now come from sampled vertices of every mesh node in the
+  file, fused or not; a deck-only group above the hull is reversed to face up. Test with a hull outside the group.
+
+- **Model Workshop: the ⊕ letters travel with a cut or split output**, and output names chain. A cut and a split keep
+  every node, so their output now gets the groupings sidecar too — point Source GLB at it and the letters are back,
+  no copying by hand. The proposed output name follows the operation, `_cut` while the cut panel is open, `_split`
+  otherwise, and counts up when the source already carries it: cutting `ship_cut.glb` proposes `ship_cut2.glb`.
+
+- Review of the branch: a non-orientable island is now left alone by the direction pass too (it read "6 of 6
+  rewound" while saying "kept as authored"); a split or cut output passes each ⊕ letter down to the `_Part_NNN` /
+  `_CutA` children it created — and only to those: a child that existed before keeps its own letter or none (the meshless parent resolved to nothing); the fuse report lists EVERY island (the
+  status keeps the largest six). Tests for all three.
+
+- **Bake: tiled materials keep their grain.** A SketchUp-style material repeats a small texture 13 to 1,000 times
+  across a part (the Teutonic's decks, hull skin, funnels, masts); an atlas cell cannot wrap, and the fold-into-one-
+  tile that serves islands parked in a single tile smeared every triangle spanning several — the deck grain read as
+  a dense hatch. A material whose UV span exceeds 1.5 tiles on an axis now gets its cell image pre-tiled along that
+  axis (as many repeats as authored, capped so each keeps 48 px of the texture's own resolution) and its UVs mapped
+  linearly across the cell: continuous, correctly oriented grain at a coarser repeat. Untiled axes and flat swatches
+  are untouched; both the static and the animated atlas paths do it, and the console names each tiled material with
+  its spans and repeats. Kernel `BakerRules.TileRepeats`, tested.
+
+- **Fuse: an island whose winding cannot be made consistent is left as authored.** The Teutonic's propeller
+  blades render right, yet 32 of a blade's 1,287 edges are walked the same way by both faces, and after the parity
+  assignment 138 edges are still unsatisfied — the surface has odd cycles (fins, fillets, a twisted rim) and no
+  winding satisfies it; the majority rule turned 198 faces per blade and every tip showed jagged holes. Every real
+  hull, deck and boat island measured resolves to exactly 0 unsatisfied edges, so the rule is: 0 = fix, anything
+  else = keep and say so ("N not orientable by traversal (kept as authored)" in the summary, the edge counts on
+  each island's line). Test: a Möbius band of three quads.
+
+- **Model Workshop: a fused part is named `Fused_<letter>_<first part>`** (was `<first part>_Fused`), so the Lab's list
+  shows which ⊕ group a shell came from and the fused parts sort together.
+
+- **Model Workshop: one Generate button for Fuse AND Split** — every ⊕ group is fused into one shell, then every
+  checked part is exploded into its islands, in one output GLB (chained in memory; a row that is both lettered and
+  checked is fused, not split, and the report says so). The fuse report gains a `Split` section.
+
+- **Model Workshop: the Vehicle Lab's list filters** — hide parts under a vertex count or a size, a height band, a
+  side band across the beam, and a **Show only** popup (checked for Split, in a fuse group, not in one, more than
+  one island, already whole, skipped — or any ONE fuse group, every letter in use is listed). The bands come from each node's world bounding box, read from the file's
+  accessor min/max, so nothing slows the Probe. Marks on hidden rows are kept and Fuse/Split act on every marked
+  row. The flat-surface and visibility filters stay in the Lab: they need the Blender probe.
+
+- **Model Workshop: Fuse writes a report file** beside the output GLB (`<output>.glb.fuse-report.txt`): per group the
+  parts, the summary, every island's verdict and every stitched candidate's numbers, one item per line. The status
+  box keeps one summary line per group and the report path — 711 parts in six groups had made it a wall of text.
+
 - **Model Workshop: the preview zooms in twice as close** (the scroll-wheel floor went from 0.2 to 0.1 of the
   framing distance — the camera can now sit a fifth of the model's radius from it), so plating, laps and seams
   can be judged up close before choosing what to fuse or cut. And **the window scrolls**: header, part list,

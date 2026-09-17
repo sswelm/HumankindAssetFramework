@@ -103,4 +103,86 @@ public class WorkshopRulesTests
         Assert.Equal(new Dictionary<int, string> { [1] = "Z" }, got);
         Assert.Equal("A|1|Hull", WorkshopRules.SidecarLine("A", "Hull", 1));
     }
+
+    [Fact]
+    public void The_fuse_report_puts_every_island_and_stitched_part_on_its_own_line()
+    {
+        var groups = new List<WorkshopRules.FuseGroupReport>
+        {
+            new WorkshopRules.FuseGroupReport { Letter = "A", Changed = true, PartNames = new[] { "Object_6", "Object_8" },
+                Details = new[] { "Fused 2 part(s) -> 'Object_6_Fused': 10 -> 8 verts", "largest islands: 40 faces (6% boundary, kept, 3 rewound); 12 faces (50% boundary, kept, 0 rewound)", "stitched parts: Object_8 90% verts shared, 94% of its touching faces lying on them" },
+                Warnings = new[] { "1 lap/trim strip(s) lying on the other parts' surface: 'Object_8'." } },
+            new WorkshopRules.FuseGroupReport { Letter = "B", Changed = false, PartNames = new[] { "Object_54" }, Details = new string[0], Warnings = new[] { "Nothing to fuse: the chosen parts carry no triangles." } },
+        };
+        string text = WorkshopRules.FuseReport(@"D:\m\ship.glb", @"D:\m\ship_split.glb", 0.5, groups);
+        var lines = text.Split('\n');
+        Assert.Contains(@"source: D:\m\ship.glb", lines);
+        Assert.Contains("weld: 0.5 permille of the model's length", lines);
+        Assert.Contains("== group A — 2 part(s)", lines);
+        Assert.Contains("parts: Object_6, Object_8", lines);
+        Assert.Contains("WARNING: 1 lap/trim strip(s) lying on the other parts' surface: 'Object_8'.", lines);
+        Assert.Contains("Fused 2 part(s) -> 'Object_6_Fused': 10 -> 8 verts", lines);
+        Assert.Contains("largest islands:", lines);
+        Assert.Contains("  40 faces (6% boundary, kept, 3 rewound)", lines);
+        Assert.Contains("  12 faces (50% boundary, kept, 0 rewound)", lines);
+        Assert.Contains("stitched parts:", lines);
+        Assert.Contains("  Object_8 90% verts shared, 94% of its touching faces lying on them", lines);
+        Assert.Contains("== group B — 1 part(s) — NOTHING FUSED", lines);
+        Assert.Contains("WARNING: Nothing to fuse: the chosen parts carry no triangles.", lines);
+    }
+
+    [Fact]
+    public void Output_names_chain_by_suffix()
+    {
+        Assert.Equal("ship_cut", WorkshopRules.NextOutputName("ship", "_cut"));
+        Assert.Equal("ship_cut2", WorkshopRules.NextOutputName("ship_cut", "_cut"));
+        Assert.Equal("ship_cut3", WorkshopRules.NextOutputName("ship_cut2", "_cut"));
+        Assert.Equal("ship_cut10", WorkshopRules.NextOutputName("ship_cut9", "_cut"));
+        Assert.Equal("ship_split", WorkshopRules.NextOutputName("ship", "_split"));
+        Assert.Equal("ship_split2", WorkshopRules.NextOutputName("ship_split", "_split"));
+        Assert.Equal("ship_split_cut", WorkshopRules.NextOutputName("ship_split", "_cut"));   // a different operation: appended, not counted
+        Assert.Equal("ship_cut_split_cut", WorkshopRules.NextOutputName("ship_cut_split", "_cut"));
+        Assert.Equal("ship_CUT2", WorkshopRules.NextOutputName("ship_CUT", "_cut"));   // case-insensitive match keeps the source spelling
+    }
+
+    [Fact]
+    public void Letters_pass_down_to_the_children_a_split_or_cut_created()
+    {
+        // source: node 3 "Hull" marked A, node 5 "Deck" marked B. Output: 3 lost its mesh to children 10 and 11 (_Part_001/_002),
+        // 5 was cut into 12 and 13; node 7 is an unmarked part; node 20 is a grandchild of 3 (a cut of a split)
+        var letters = new Dictionary<int, string> { [3] = "A", [5] = "B" };
+        var table = new List<KeyValuePair<int, int>> { new KeyValuePair<int, int>(3, -1), new KeyValuePair<int, int>(5, -1), new KeyValuePair<int, int>(7, -1),
+            new KeyValuePair<int, int>(10, 3), new KeyValuePair<int, int>(11, 3), new KeyValuePair<int, int>(12, 5), new KeyValuePair<int, int>(13, 5), new KeyValuePair<int, int>(20, 10) };
+        var got = WorkshopRules.TransferLetters(letters, table, new HashSet<int> { 7, 10, 11, 12, 13, 20 }, 8);   // mesh nodes only (3 and 5 are meshless now); the source had 8 nodes
+        Assert.Equal(new Dictionary<int, string> { [10] = "A", [11] = "A", [20] = "A", [12] = "B", [13] = "B" }, got);
+        // a marked node that still carries its mesh keeps its own letter
+        var kept = WorkshopRules.TransferLetters(letters, table, new HashSet<int> { 3, 7 }, 8);
+        Assert.Equal(new Dictionary<int, string> { [3] = "A" }, kept);
+        // a child that EXISTED before the split (index below the source's node count) never inherits: the hull's unmarked
+        // prop stays unmarked, and a marked pre-existing child keeps its own letter (review of 26b4571)
+        var withProp = new List<KeyValuePair<int, int>>(table) { new KeyValuePair<int, int>(4, 3), new KeyValuePair<int, int>(6, 3) };
+        var lettersProp = new Dictionary<int, string> { [3] = "A", [6] = "C" };
+        var got2 = WorkshopRules.TransferLetters(lettersProp, withProp, new HashSet<int> { 4, 6, 10, 11 }, 8);
+        Assert.Equal(new Dictionary<int, string> { [6] = "C", [10] = "A", [11] = "A" }, got2);
+        // splitting the UNMARKED prop (node 4, child of the marked hull) gives its pieces nothing: inheritance stops at the
+        // first original node, the prop, and takes its lack of a letter — never the grandparent's (review of 4caf027)
+        var propSplit = new List<KeyValuePair<int, int>>(withProp) { new KeyValuePair<int, int>(30, 4), new KeyValuePair<int, int>(31, 4) };
+        var got3 = WorkshopRules.TransferLetters(lettersProp, propSplit, new HashSet<int> { 6, 10, 11, 30, 31 }, 8);
+        Assert.Equal(new Dictionary<int, string> { [6] = "C", [10] = "A", [11] = "A" }, got3);
+        // while a cut of a split piece (new under new under the marked hull) still reaches the hull
+        var cutOfSplit = new List<KeyValuePair<int, int>>(propSplit) { new KeyValuePair<int, int>(40, 10) };
+        var got4 = WorkshopRules.TransferLetters(lettersProp, cutOfSplit, new HashSet<int> { 40 }, 8);
+        Assert.Equal(new Dictionary<int, string> { [40] = "A" }, got4);
+    }
+
+    [Fact]
+    public void The_fuse_report_lists_every_island_when_given_them()
+    {
+        var g = new WorkshopRules.FuseGroupReport { Letter = "A", Changed = true, PartNames = new[] { "P" }, Warnings = new string[0],
+            Details = new[] { "Fused 1 part(s)", "largest islands: a; b; c; d; e; f" }, Islands = new[] { "a", "b", "c", "d", "e", "f", "g" } };
+        var lines = WorkshopRules.FuseReport("s.glb", "o.glb", 0, new[] { g }).Split('\n');
+        Assert.Contains("islands (7, largest first):", lines);
+        Assert.Contains("  g", lines);
+        Assert.DoesNotContain("largest islands:", lines);   // the abbreviated line is replaced by the complete list
+    }
 }
