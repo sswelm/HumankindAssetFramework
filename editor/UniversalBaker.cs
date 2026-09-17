@@ -148,6 +148,7 @@ public static class UniversalBaker
             if (DistrictRegistry.Load().Any(d => string.Equals(d.resourceName, name, StringComparison.OrdinalIgnoreCase)))
                 Debug.LogWarning($"[Factory] {name}: a DISTRICT entry layers on this model's baked outputs (shared _Atlas / _NormalAtlas / _RoughAtlas) — re-bake the district after this, or it keeps pointing at raw or missing atlases.");
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception e) { Debug.LogWarning($"[Factory] {name}: district-layering check skipped ({e.Message})."); }
         foreach (var s in OutputSuffixes)
             AssetDatabase.DeleteAsset("Assets/Resources/" + name + s);
@@ -201,6 +202,7 @@ public static class UniversalBaker
                     b.files.Add(name + s + ext);
                 }
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception e) { Debug.LogWarning("[Factory] re-bake backup failed (proceeding WITHOUT rollback protection): " + e.Message); b.files.Clear(); }
         return b;
     }
@@ -228,6 +230,7 @@ public static class UniversalBaker
             int n = b.files.Count(f => !f.EndsWith(".meta"));
             Debug.LogWarning($"[Factory] {b.name}: re-bake FAILED — restored the previous {n} baked asset(s) from backup. Your working model is intact (the registry was not changed).");
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception e)
         {
             Debug.LogError($"[Factory] re-bake RESTORE failed mid-copy — the backup is KEPT at '{b.dir}'. Close whatever locks the files, then copy its contents into 'Assets/Resources' (assets + .meta, overwriting) and let Unity refresh; or recover from git: " + e);
@@ -907,6 +910,7 @@ public static class UniversalBaker
                 $"Mesh = {mesh.vertexCount} verts / {mesh.triangles.Length / 3} tris — select it to inspect; " +
                 "lower 'Reduce to ~tris' + re-bake to cut further.");
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception e) { Debug.LogWarning("[Factory] preview prefab: " + e.Message); }
     }
 
@@ -989,6 +993,7 @@ public static class UniversalBaker
             }
             Debug.Log($"[Factory] {name}: surface atlases packed ({found}/{matList.Count} materials had maps) -> _NormalAtlas / _RoughAtlas (+ preview swizzle)");
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception e) { Debug.LogWarning("[Factory] surface atlases: " + e.Message); }
     }
 
@@ -1079,6 +1084,7 @@ public static class UniversalBaker
                 return true;
             }
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception ex) { Debug.LogError("[Factory] could not run Blender rig_anim ('" + blender + "'): " + ex.Message); return false; }
     }
 
@@ -2329,6 +2335,7 @@ public static class UniversalBaker
                 return p.ExitCode == 0;
             }
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception ex) { Debug.LogError("[Factory] could not run converter ('" + psi.FileName + "'): " + ex.Message + "\n(GLB path uses Tools/glbconv/glbconv.exe; the dev fallback needs a dotnet on PATH or EditorPrefs 'ENC.dotnetPath'.)"); return false; }
     }
 
@@ -2441,6 +2448,7 @@ public static class UniversalBaker
                 return true;
             }
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception ex) { Debug.LogError("[Factory] could not run Blender prep ('" + blender + "'): " + ex.Message); return false; }
     }
 
@@ -2466,6 +2474,7 @@ public static class UniversalBaker
                 return true;
             }
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception ex) { Debug.LogError("[Factory] could not run Blender ('" + blender + "'): " + ex.Message + "\nInstall Blender, or set EditorPrefs 'HAF.BlenderPath' to blender.exe."); return false; }
     }
 
@@ -2523,6 +2532,7 @@ public static class UniversalBaker
                                         && !n.name.StartsWith("Object_", StringComparison.OrdinalIgnoreCase))
                             .Select(n => n.name).Distinct().OrderBy(s => s).ToArray();
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
         catch (Exception e) { Debug.LogWarning("[Factory] list object names: " + e.Message); return new string[0]; }
     }
 }

@@ -19,7 +19,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   Windows editor only; elsewhere the modal bar's Cancel remains. It counts only while Unity owns the foreground
   window, so Esc or a click in another application cannot stop a background run; and a cancel is a distinct
   outcome everywhere — the bake rolls back its outputs like a failure but the runner sees CANCELLED, never a
-  failed bake, in every section (smoke, options, control rig, deploy golden, registry conversion).
+  failed bake, in every section (smoke, options, control rig, deploy golden, registry conversion) and through every
+  subprocess wrapper; the control-rig litmus never reads an unfinished bake as a pass, and the deploy-golden loop keeps
+  the results above the cancelled model.
 
 - **Fuse: the inside-out score measures against the MODEL's belly, not the group's.** A group made only of deck
   strips had its own bounding box as its world, its belly line ran through the strips themselves, and a deck facing

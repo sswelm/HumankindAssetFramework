@@ -76,6 +76,8 @@ public static class ConversionGateTest
         };
         BakeTestRunnerWindow.Progress.Step("litmus — full conversion bake through Blender…", 0.4f);
         int fails = BakeAndAssert(def);
+        if (BakeTestRunnerWindow.Progress.CancelRequested)   // zero failures because the bake never finished is not a pass (review of 610711c)
+            return new BakeTestSection { title = title, skip = 1, body = "CANCELLED by the user — the litmus bake did not finish; nothing counted." };
         Debug.Log(fails == 0
             ? "[ConvGate] LITMUS PASS — conversion invariants hold (all scales 1, parents before children, rotation-only clip)."
             : $"[ConvGate] LITMUS: {fails} FAILURE(S) — the conversion pipeline regressed; see errors above.");
@@ -157,9 +159,12 @@ public static class ConversionGateTest
 
         int pass = 0, fail = 0, miss = 0;
         var lines = new System.Collections.Generic.List<string>();
+        string current = null;
+        try
+        {
         foreach (var af in argFiles)
         {
-            string res = new DirectoryInfo(Path.GetDirectoryName(af)).Name;
+            string res = new DirectoryInfo(Path.GetDirectoryName(af)).Name; current = res;
             var fields = File.ReadAllText(af).Trim().Split('|');   // source | srcMtime | toolMtime | 14 args
             if (fields.Length < 4) { lines.Add($"SKIP {res} — malformed args.txt"); miss++; continue; }
             string src = fields[0];
@@ -177,6 +182,9 @@ public static class ConversionGateTest
             if (Norm(got) == Norm(File.ReadAllText(goldFile))) { lines.Add($"PASS {res} (deploy golden match)"); pass++; }
             else { lines.Add($"FAIL {res} — converted rig CHANGED vs golden. Run `bash Tools/deploy_regression.sh` for the line diff."); fail++; }
         }
+        }
+        catch (OperationCanceledException)   // a Blender step killed by the user: keep every result above it (review of 610711c)
+        { lines.Add($"CANCELLED by the user at {current ?? "start"} — the models above are complete, the rest did not run"); }
         Debug.Log($"[ConvGate] deploy golden diff: {pass} pass, {fail} fail, {miss} missing golden (of {argFiles.Length} models).");
         return new BakeTestSection { title = title, pass = pass, fail = fail, skip = miss, body = string.Join("\n", lines) };
     }
