@@ -301,6 +301,7 @@ public static class BakeFeatureTest
                 }
             }
         }
+        catch (OperationCanceledException) { res.Add("CANCELLED by the user — the fixtures above are complete, the rest did not run (not a failure)"); }
         catch (Exception e) { res.Add("FAIL: harness exception — " + e.Message); fail++; }
         finally
         {
@@ -379,6 +380,7 @@ public static class BakeFeatureTest
                     ok ? $"skel {r.skeletonGuid}, clip {r.clipGuid}" : (r.ok ? "guids/clip asset missing" : r.error));
             }
         }
+        catch (OperationCanceledException) { res.Add("CANCELLED by the user — the fixtures above are complete, the rest did not run (not a failure)"); }
         catch (Exception e) { res.Add("FAIL: harness exception — " + e.Message); fail++; }
         finally
         {

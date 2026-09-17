@@ -408,6 +408,9 @@ public class BakeTestRunnerWindow : EditorWindow
     {
         [System.Runtime.InteropServices.DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
         [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool GetCursorPos(out Point p);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+        static readonly int ownPid = System.Diagnostics.Process.GetCurrentProcess().Id;
         [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] struct Point { public int X, Y; }
         const int VK_LBUTTON = 0x01, VK_ESCAPE = 0x1B;
         static bool unavailable;
@@ -423,6 +426,10 @@ public class BakeTestRunnerWindow : EditorWindow
             if (unavailable || Application.platform != RuntimePlatform.WindowsEditor) return false;
             try
             {
+                // only while UNITY owns the foreground window: the key state is global, and Esc or a click in another
+                // application over the button's stored coordinates must not stop a background run (review of 8cff051)
+                GetWindowThreadProcessId(GetForegroundWindow(), out uint fgPid);
+                if (fgPid != (uint)ownPid) { GetAsyncKeyState(VK_ESCAPE); GetAsyncKeyState(VK_LBUTTON); return false; }   // drain the sticky bits too
                 if ((GetAsyncKeyState(VK_ESCAPE) & 0x8001) != 0) return true;
                 bool mouse = (GetAsyncKeyState(VK_LBUTTON) & 0x8001) != 0;
                 if (!mouse || stopScreenRect.width <= 0 || !GetCursorPos(out Point p)) return false;

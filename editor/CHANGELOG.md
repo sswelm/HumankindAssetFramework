@@ -16,7 +16,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   the bake at that boundary rather than at the next model. And a **STOP button in the window itself**: the blocked
   main thread cannot deliver a click to it, so at every poll the runner asks the OS whether the mouse is held down
   over that button (or Esc is held) — hold it a moment and the button reads "Stopping after the current step…".
-  Windows editor only; elsewhere the modal bar's Cancel remains.
+  Windows editor only; elsewhere the modal bar's Cancel remains. It counts only while Unity owns the foreground
+  window, so Esc or a click in another application cannot stop a background run; and a cancel is a distinct
+  outcome everywhere — the bake rolls back its outputs like a failure but the runner sees CANCELLED, never a
+  failed bake, in every section (smoke, options, control rig, deploy golden, registry conversion).
 
 - **Fuse: the inside-out score measures against the MODEL's belly, not the group's.** A group made only of deck
   strips had its own bounding box as its world, its belly line ran through the strips themselves, and a deck facing

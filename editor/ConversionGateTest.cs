@@ -297,6 +297,7 @@ public static class ConversionGateTest
 
             return fails;
         }
+        catch (OperationCanceledException) { return fails; }   // the caller checks Progress.CancelRequested and writes the CANCELLED line; not a failure
         catch (Exception ex) { Debug.LogError($"[ConvGate] {testName}: exception {ex.GetType().Name}: {ex.Message}"); return fails + 1; }
         finally
         {

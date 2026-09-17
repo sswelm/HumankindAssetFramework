@@ -80,6 +80,7 @@ public static class UniversalBaker
         var backup = BackupOutputs(cfg.resourceName);
         BakeResult r;
         try { r = BuildInner(cfg); }
+        catch (OperationCanceledException) { RestoreOutputs(backup); throw; }   // a bake-test cancel: roll back exactly like a failure, but the RUNNER must see the cancel, not a failed bake (review of 8cff051)
         catch (Exception e) { Debug.LogError("[Factory] " + e); r = new BakeResult { ok = false, error = e.Message }; }
         if (r.ok) DiscardBackup(backup); else RestoreOutputs(backup);
         return r;
@@ -95,6 +96,7 @@ public static class UniversalBaker
         var backup = BackupOutputs(cfg.resourceName);   // E5: same rollback protection on the animated path
         BakeResult r;
         try { r = BuildAnimatedInner(cfg); }
+        catch (OperationCanceledException) { RestoreOutputs(backup); throw; }   // as in Build: a cancel rolls back and propagates
         catch (Exception e) { Debug.LogError("[Factory] " + e); r = new BakeResult { ok = false, error = e.Message }; }
         if (r.ok) DiscardBackup(backup); else RestoreOutputs(backup);
         return r;
@@ -314,6 +316,7 @@ public static class UniversalBaker
             File.WriteAllText(sidecar, key);
             return outFull;
         }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel is not a conversion failure
         catch (Exception e) { error = "deploy conversion: " + e.Message; return null; }
         finally { EditorUtility.ClearProgressBar(); }
     }
@@ -2356,7 +2359,7 @@ public static class UniversalBaker
             try { BakeTestRunnerWindow.Progress.Heartbeat(); } catch { }   // cosmetic — must never kill a bake
             // a bake-test run the user cancelled (the bar's Cancel button, read by Heartbeat): kill the step now rather
             // than let a minutes-long Blender finish first. Outside a run CancelRequested is never set (2026-09-17).
-            if (BakeTestRunnerWindow.Progress.CancelRequested) { try { p.Kill(); } catch { } return false; }
+            if (BakeTestRunnerWindow.Progress.CancelRequested) { try { p.Kill(); } catch { } BakeTestRunnerWindow.Progress.ThrowIfCancelled(); }   // killed by the user: a CANCEL, never a "timed out" failure (review of 8cff051)
         }
         if (!exited && !p.WaitForExit(0)) { try { p.Kill(); } catch { } return false; }   // the process itself hung -> killed
         // E4: WaitForExit(timeout) returns as soon as the PROCESS exits, but stdout/stderr stay open until EVERY handle to
