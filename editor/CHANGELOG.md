@@ -14,6 +14,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   centre. And a third direction rule for thin solids built as two skins with opposite normals, where the volume and
   score rules cancel: material lies BEHIND an outward face — an island with a twin on at least half its faces is
   decided by the majority of twin-in-front vs behind, measured for every island before any flip. Four tests.
+- **Vehicle Lab: "Mark all shown as …"** — one role for every part the filters currently show. The SS Romanic
+  carries 144 stray copies of one fitting 3 km down the length axis and 190 m up (an authoring leftover that
+  makes the preview frame a speck of a ship); "Hide parts below (height)" isolates them in seconds and one Apply
+  marks them Ignore. Undo by filtering the same way and applying Default.
 
 - **Bake Tests: Cancel works anywhere.** The Cancel button existed only on the between-rows bar, and a row is a
   whole section of bakes lasting many minutes ("I have no way to stop it"). Every bar the runner draws is
