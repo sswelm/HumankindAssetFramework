@@ -1225,7 +1225,10 @@ public static class GlbDisconnectedParts
             // unsatisfied — the surface has odd cycles (fins, fillets, a twisted rim) and no winding satisfies it. The
             // majority rule then turned 198 faces per blade, jagged holes at every tip. Every real hull, deck and boat
             // island measured reaches exactly 0 unsatisfied edges; anything above is a guess, and a guess is not made.
-            if (unsatisfied > 0 && ones > 0 && ones < isl.Count) { islandsNotOrientable++; notOrientable[ii] = true; islandConflict[ii] += " — not orientable, kept as authored"; }
+            // "0 unsatisfied" was the first rule; the SS Romanic's 41,799-face hull reached 1 unsatisfied of 92 same-way
+            // edges (one stray edge in 59,000) and the whole hull was refused. Tolerance: the pass must resolve at least
+            // 95 % of the same-way edges — a blade (138 left of 32) is still refused, one stray edge is not.
+            if (unsatisfied > 0 && unsatisfied * 20 > sameBefore && ones > 0 && ones < isl.Count) { islandsNotOrientable++; notOrientable[ii] = true; islandConflict[ii] += " — not orientable, kept as authored"; }
             else if (ones > 0 && ones < isl.Count)
             {
                 int minor = ones * 2 <= isl.Count ? 1 : 0;
@@ -1251,6 +1254,61 @@ public static class GlbDisconnectedParts
         ModelBelly(nodes, meshes, reader, pos, out int lengthAxis, out int widthAxis, out double centreW, out double bellyY);
         int openJudged = 0, openReversed = 0, closedReversed = 0;
         var islandRule = new string[allIslands.Count];   // per island, for the "largest islands" line: what was measured and what decided
+        // DOUBLE-SKIN twin grid, built ONCE over every face of the group (the two skins of a thin solid are usually separate
+        // islands, so a twin must be searched across islands): each face registered in every cell its bounding box
+        // touches, the cell the larger of the reach and the median triangle size (a coarse mesh registers in a handful of
+        // cells, a fine one in one), the 27-cell search around a face's centroid still covering the reach.
+        double twinReach = longest * 0.01, twinCell;   // 1 % of the length: hull skins are 0.05-0.3 % apart, a deck and the ceiling below it 1.4 %+
+        var twinCells = new Dictionary<PositionKey, List<int>>();
+        var twinCentres = new Vec3[faceCount];
+        {
+            var sizes = new List<double>(faceCount);
+            for (int f = 0; f < faceCount; f++)
+            {
+                Vec3 a = P(f, 0), b = P(f, 1), cc = P(f, 2);
+                twinCentres[f] = FScale(FAdd(FAdd(a, b), cc), 1.0 / 3.0);
+                sizes.Add(Math.Max(Math.Max(a.X, Math.Max(b.X, cc.X)) - Math.Min(a.X, Math.Min(b.X, cc.X)), Math.Max(Math.Max(a.Y, Math.Max(b.Y, cc.Y)) - Math.Min(a.Y, Math.Min(b.Y, cc.Y)), Math.Max(a.Z, Math.Max(b.Z, cc.Z)) - Math.Min(a.Z, Math.Min(b.Z, cc.Z)))));
+            }
+            sizes.Sort(); twinCell = Math.Max(twinReach, sizes.Count > 0 ? sizes[sizes.Count / 2] : twinReach);
+            for (int f = 0; f < faceCount; f++)
+            {
+                Vec3 a = P(f, 0), b = P(f, 1), cc = P(f, 2);
+                PositionKey lo = CellOf(new Vec3 { X = Math.Min(a.X, Math.Min(b.X, cc.X)), Y = Math.Min(a.Y, Math.Min(b.Y, cc.Y)), Z = Math.Min(a.Z, Math.Min(b.Z, cc.Z)) }, twinCell);
+                PositionKey hi = CellOf(new Vec3 { X = Math.Max(a.X, Math.Max(b.X, cc.X)), Y = Math.Max(a.Y, Math.Max(b.Y, cc.Y)), Z = Math.Max(a.Z, Math.Max(b.Z, cc.Z)) }, twinCell);
+                long x1 = Math.Min(hi.X, lo.X + 40), y1 = Math.Min(hi.Y, lo.Y + 40), z1 = Math.Min(hi.Z, lo.Z + 40);   // a triangle 40x the median size is capped (a stray sliver)
+                for (long x = lo.X; x <= x1; x++) for (long y = lo.Y; y <= y1; y++) for (long z = lo.Z; z <= z1; z++)
+                { var k = new PositionKey { X = x, Y = y, Z = z }; if (!twinCells.TryGetValue(k, out List<int> l)) twinCells.Add(k, l = new List<int>()); l.Add(f); }
+            }
+        }
+        // the twin statistics of every island, measured BEFORE any direction flip (an island turned earlier in the loop
+        // would present same-way normals to its twin island — the inner skin saw an already-turned outer skin)
+        var twinStats = new int[allIslands.Count][];
+        for (int ii = 0; ii < allIslands.Count; ii++)
+        {
+            int partnered = 0, twinInFront = 0, twinBehind = 0;
+            foreach (int f in allIslands[ii])
+            {
+                Vec3 nf = FaceNormal(f); double lf = FLen(nf); if (lf < 1e-12) continue; nf = FScale(nf, 1.0 / lf);
+                Vec3 c = twinCentres[f]; PositionKey k = CellOf(c, twinCell); double best = double.PositiveInfinity; double proj = 0;
+                var seenG = new HashSet<int>();
+                for (long dx = -1; dx <= 1; dx++) for (long dy = -1; dy <= 1; dy++) for (long dz = -1; dz <= 1; dz++)
+                {
+                    if (!twinCells.TryGetValue(new PositionKey { X = k.X + dx, Y = k.Y + dy, Z = k.Z + dz }, out List<int> l)) continue;
+                    foreach (int g in l)
+                    {
+                        if (g == f || !seenG.Add(g)) continue;
+                        Vec3 ng = FaceNormal(g); double lg = FLen(ng); if (lg < 1e-12 || FDot(nf, ng) / lg > -0.95) continue;
+                        Vec3 q = ClosestPointOnTriangle(c, P(g, 0), P(g, 1), P(g, 2)); Vec3 d = FSub(q, c); double dist = FLen(d);
+                        if (dist < 1e-9 || dist > twinReach) continue;
+                        double along = FDot(d, nf);
+                        if (Math.Abs(along) < 0.5 * dist) continue;   // the twin must lie along the normal, not beside the face
+                        if (dist < best) { best = dist; proj = along; }
+                    }
+                }
+                if (!double.IsPositiveInfinity(best)) { partnered++; if (proj > 0) twinInFront++; else twinBehind++; }
+            }
+            twinStats[ii] = new[] { partnered, twinInFront, twinBehind };
+        }
         for (int ii = 0; ii < allIslands.Count; ii++)
         {
             List<int> isl = allIslands[ii];
@@ -1285,8 +1343,17 @@ public static class GlbDisconnectedParts
                 sum += FDot(FaceNormal(f), radial) / (rl * nl); n++;
             }
             double score = n > 0 ? sum / n : 0.0;
+            // DOUBLE-SKINNED SOLIDS (2026-09-17, the SS Romanic): the hull is two skins a few centimetres apart with
+            // opposite normals, wound inside-out as a whole. Both rules above read ~0 on it (the cones of the two skins
+            // cancel: agreement -0.01, thickness -0.0005; the radial score cancels the same way). What does not cancel:
+            // for every face, on which side its twin lies. Material lies BEHIND an outward face, so a partnered face
+            // whose twin sits in FRONT of it (along +normal, within `skinReach`) faces into the solid. The island is
+            // double-skinned when at least half its faces have a twin; the majority of front-vs-behind decides.
+            int partnered = twinStats[ii][0], twinInFront = twinStats[ii][1], twinBehind = twinStats[ii][2];
+            bool doubleSkin = partnered * 2 >= isl.Count && partnered > 0 && Math.Abs(twinInFront - twinBehind) * 10 > partnered * 4;   // decided when 70/30 or clearer
             bool reverse = false;
             if (notOrientable[ii]) { }   // kept as authored means KEPT: no whole-island reversal either — a volume or score read off a surface with no consistent winding is noise (review of 0097bd5: the reversed Möbius band came back "6 of 6 rewound")
+            else if (doubleSkin) { reverse = twinInFront > twinBehind; if (closed) { if (reverse) closedReversed++; } else { openJudged++; if (reverse) openReversed++; } }
             else if (closed) { reverse = volume < 0; if (reverse) closedReversed++; }
             else
             {
@@ -1295,8 +1362,9 @@ public static class GlbDisconnectedParts
                 if (reverse) openReversed++;
             }
             if (reverse) foreach (int f in isl) flip[f] = !flip[f];
-            islandRule[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}, volume agreement {1:+0.00;-0.00} thickness {2:+0.0000;-0.0000}, inside-out score {3:+0.00;-0.00}: {4}",
-                closed ? "closed" : "open", agreement, thickness, score, notOrientable[ii] ? "not judged" : reverse ? "reversed whole" : "kept");
+            islandRule[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}, volume agreement {1:+0.00;-0.00} thickness {2:+0.0000;-0.0000}, inside-out score {3:+0.00;-0.00}{5}: {4}",
+                closed ? "closed" : "open", agreement, thickness, score, notOrientable[ii] ? "not judged" : reverse ? "reversed whole" : "kept",
+                partnered > 0 ? string.Format(System.Globalization.CultureInfo.InvariantCulture, ", double skin {0:0}% twinned ({1} twin in front / {2} behind)", 100.0 * partnered / isl.Count, twinInFront, twinBehind) : "");
         }
         foreach (bool b in flip) if (b) result.FacesRewound++;
         // the largest islands, so a reader can see WHAT was judged (faces, boundary share, how many faces the majority
@@ -1481,23 +1549,24 @@ public static class GlbDisconnectedParts
     // distance from a point to a triangle (Ericson, Real-Time Collision Detection 5.1.5): the closest point on the
     // triangle by Voronoi region, then the plain distance — used to tell a lap strip (its face centres ON the plate)
     // from a cover or rail that merely shares the plate's edge vertices.
-    static double PointTriangleDistance(Vec3 p, Vec3 a, Vec3 b, Vec3 c)
+    static double PointTriangleDistance(Vec3 p, Vec3 a, Vec3 b, Vec3 c) => FLen(FSub(p, ClosestPointOnTriangle(p, a, b, c)));
+    static Vec3 ClosestPointOnTriangle(Vec3 p, Vec3 a, Vec3 b, Vec3 c)
     {
         Vec3 ab = FSub(b, a), ac = FSub(c, a), ap = FSub(p, a);
         double d1 = FDot(ab, ap), d2 = FDot(ac, ap);
-        if (d1 <= 0 && d2 <= 0) return FLen(ap);
+        if (d1 <= 0 && d2 <= 0) return a;
         Vec3 bp = FSub(p, b); double d3 = FDot(ab, bp), d4 = FDot(ac, bp);
-        if (d3 >= 0 && d4 <= d3) return FLen(bp);
+        if (d3 >= 0 && d4 <= d3) return b;
         double vc = d1 * d4 - d3 * d2;
-        if (vc <= 0 && d1 >= 0 && d3 <= 0) { double v = d1 / (d1 - d3); return FLen(FSub(p, FAdd(a, FScale(ab, v)))); }
+        if (vc <= 0 && d1 >= 0 && d3 <= 0) { double v = d1 / (d1 - d3); return FAdd(a, FScale(ab, v)); }
         Vec3 cp = FSub(p, c); double d5 = FDot(ab, cp), d6 = FDot(ac, cp);
-        if (d6 >= 0 && d5 <= d6) return FLen(cp);
+        if (d6 >= 0 && d5 <= d6) return c;
         double vb = d5 * d2 - d1 * d6;
-        if (vb <= 0 && d2 >= 0 && d6 <= 0) { double w = d2 / (d2 - d6); return FLen(FSub(p, FAdd(a, FScale(ac, w)))); }
+        if (vb <= 0 && d2 >= 0 && d6 <= 0) { double w = d2 / (d2 - d6); return FAdd(a, FScale(ac, w)); }
         double va = d3 * d6 - d5 * d4;
-        if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) { double w = (d4 - d3) / ((d4 - d3) + (d5 - d6)); return FLen(FSub(p, FAdd(b, FScale(FSub(c, b), w)))); }
+        if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) { double w = (d4 - d3) / ((d4 - d3) + (d5 - d6)); return FAdd(b, FScale(FSub(c, b), w)); }
         double denom = 1.0 / (va + vb + vc); double vv = vb * denom, ww = vc * denom;
-        return FLen(FSub(p, FAdd(a, FAdd(FScale(ab, vv), FScale(ac, ww)))));
+        return FAdd(a, FAdd(FScale(ab, vv), FScale(ac, ww)));
     }
     // The hull's frame for the inside-out score: length = the longer horizontal extent (glTF is Y-up), the side centre
     // = the middle of the width extent, the belly = the 25th percentile of height over sampled vertices of EVERY mesh
@@ -1528,6 +1597,24 @@ public static class GlbDisconnectedParts
         }
         catch (Exception) { samples.Clear(); }
         if (samples.Count == 0) samples = fallback;
+        // STRAY GEOMETRY (2026-09-17, the SS Romanic): 144 anchor-chain links parked 3 km down the length axis and
+        // 190 m up put the belly at 46 m on a ship whose deck is at 11, and every deck read "below the belly". A sample
+        // farther from the model's median centre than 4x the median distance is not the model; it is dropped here.
+        if (samples.Count > 8)
+        {
+            var sx = new List<double>(samples.Count); var sy = new List<double>(samples.Count); var sz = new List<double>(samples.Count);
+            foreach (Vec3 q in samples) { sx.Add(q.X); sy.Add(q.Y); sz.Add(q.Z); }
+            sx.Sort(); sy.Sort(); sz.Sort();
+            var mid = new Vec3 { X = sx[sx.Count / 2], Y = sy[sy.Count / 2], Z = sz[sz.Count / 2] };
+            var dist = new List<double>(samples.Count); foreach (Vec3 q in samples) dist.Add(FLen(FSub(q, mid)));
+            var sorted = new List<double>(dist); sorted.Sort(); double cut = 4.0 * sorted[sorted.Count / 2];
+            if (cut > 0)
+            {
+                var kept = new List<Vec3>(samples.Count);
+                for (int i = 0; i < samples.Count; i++) if (dist[i] <= cut) kept.Add(samples[i]);
+                if (kept.Count >= 8) samples = kept;
+            }
+        }
         double[] lo = { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity }, hi = { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
         foreach (Vec3 p in samples) UpdateBounds(lo, hi, p);
         lengthAxis = (hi[0] - lo[0]) >= (hi[2] - lo[2]) ? 0 : 2; widthAxis = lengthAxis == 0 ? 2 : 0;

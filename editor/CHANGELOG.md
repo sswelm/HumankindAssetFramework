@@ -5,6 +5,16 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Fuse: one stray edge, stray geometry, and double-skinned solids** (the SS Romanic). Its 41,799-face hull reached
+  1 unsatisfied edge of 92 same-way in 59,000 and the "0 or nothing" orientability rule refused it: the parity pass
+  must now resolve 95 % of the same-way edges (a propeller blade at 138 left of 32 is still refused) — with that the
+  majority rule turned 19,923 faces (a single skin with half its regions wound the other way) and the hull renders
+  complete. Its 144 anchor-chain links parked 3 km down the length axis and 190 m up had put the belly at 46 m on a
+  ship whose deck is at 11: the frame drops samples farther than 4x the median distance from the model's median
+  centre. And a third direction rule for thin solids built as two skins with opposite normals, where the volume and
+  score rules cancel: material lies BEHIND an outward face — an island with a twin on at least half its faces is
+  decided by the majority of twin-in-front vs behind, measured for every island before any flip. Four tests.
+
 - **Bake Tests: Cancel works anywhere.** The Cancel button existed only on the between-rows bar, and a row is a
   whole section of bakes lasting many minutes ("I have no way to stop it"). Every bar the runner draws is
   cancelable now: a click stops the section between models, the runner between rows, and kills a running Blender

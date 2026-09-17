@@ -303,7 +303,10 @@ public class GlbFuseTests
         // artist's winding wins; only a fold-back that CONTRADICTS the manifold rule and yet agrees in direction is a lap)
         var down = new Part { Name = "Strip", Positions = strip.Positions, Indices = new[] { 0, 2, 1, 0, 3, 2 } };   // -Z
         var r2 = GlbDisconnectedParts.FuseNodes(BuildGlb(plate, down), new[] { 0, 1 }, 0.0);
-        Assert.Equal(0, r2.FacesRewound);
+        // (2026-09-17) that control is a thin solid whose two skins face INTO their own gap — the double-skin rule now reads
+        // it as inside-out and turns it whole (plate down, strip up: material behind both), which is the right reading
+        Assert.Equal(4, r2.FacesRewound);
+        Assert.Contains("double skin", r2.Details[1]);
         var normals2 = FaceNormals(Read(r2.Bytes), (JObject)Read(r2.Bytes).Primitives(Read(r2.Bytes).Node("Plate_Fused"))[0]);
         Assert.Equal(2, normals2.Count(n => n[2] > 0));
         Assert.Equal(2, normals2.Count(n => n[2] < 0));
@@ -631,6 +634,50 @@ public class GlbFuseTests
         Assert.Equal(-1, parts[0].ParentIndex);   // a root node
         var table = GlbDisconnectedParts.NodeParents(BuildGlb(a));
         Assert.Equal(new KeyValuePair<int, int>(0, -1), table[0]);
+    }
+
+    [Fact]
+    public void A_double_skinned_solid_is_judged_by_which_side_its_other_skin_lies_on()
+    {
+        // 2026-09-17, the SS Romanic: a hull built as two skins 2 cm apart with opposite normals, wound inside-out as a
+        // whole — the volume of the two skins cancels (agreement ~0, thickness ~0) and so does the radial score. The
+        // rule that does not cancel: material lies BEHIND an outward face. Outer box 10 m, inner box 2 cm inside it.
+        var outerWrong = Box("Outer", 10, 0, 0, 0, inward: true);       // faces into the material: wrong
+        var innerWrong = Box("Inner", 9.96f, 0.02f, 0.02f, 0.02f, inward: false);   // an inner skin must face the cavity: wrong
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(outerWrong, innerWrong), new[] { 0, 1 }, 0.0);
+        Assert.Equal(2, r.IslandsAfter);
+        Assert.True(r.FacesRewound == 24, "both skins must turn — " + r.Details[1]);   // both skins turned
+        Assert.Contains("double skin 100% twinned", r.Details[1]);
+        var outerRight = Box("Outer", 10, 0, 0, 0, inward: false);
+        var innerRight = Box("Inner", 9.96f, 0.02f, 0.02f, 0.02f, inward: true);
+        var ok = GlbDisconnectedParts.FuseNodes(BuildGlb(outerRight, innerRight), new[] { 0, 1 }, 0.0);
+        Assert.Equal(0, ok.FacesRewound);   // the inner skin faces the cavity, and the closed-volume rule alone would have called it inside-out
+    }
+
+    [Fact]
+    public void Stray_geometry_far_from_the_model_does_not_move_the_belly()
+    {
+        // the Romanic's anchor chain: 144 links 3 km away and 190 m up put the belly above the deck. Hull box y 0..6,
+        // a deck at y 8 facing DOWN (must be reversed), and a stray part 3 km away and 190 m up that is NOT fused.
+        var hull = Box("Hull", 6, 0, 0, 0, inward: false);
+        var deck = new Part { Name = "Deck", Positions = new float[] { 1, 8, 1,  5, 8, 1,  5, 8, 5,  1, 8, 5 }, Indices = new[] { 0, 1, 2, 0, 2, 3 } };   // DOWN
+        var stray = Box("Stray", 3, 0, 190, 3000, inward: false);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, deck, stray), new[] { 1 }, 0.0);
+        Assert.Equal(2, r.FacesRewound);
+        Assert.Contains("1 open sheet(s) judged, 1 reversed", r.Details[0]);
+        string frame = r.Details.First(d => d.StartsWith("frame: "));
+        Assert.DoesNotContain("belly height 4", frame);   // ~1.5 (a quarter up 0..6), not ~46
+    }
+
+    [Fact]
+    public void One_stray_unsatisfied_edge_does_not_refuse_a_whole_hull()
+    {
+        // 95 % of the same-way edges resolved is orientable enough: a plate seam (2-colourable) plus one T-fin that
+        // leaves a single contradiction. The Romanic hull: 1 unsatisfied of 92 same-way in 59,000 edges.
+        byte[] src = BuildGlb(Quad("A", 0, 1, 0, 1, 0), Quad("B", 1, 2, 0, 1, 0, inward: true));   // the plain seam: B inverted
+        var r = GlbDisconnectedParts.FuseNodes(src, new[] { 0, 1 }, 0.001);
+        Assert.Equal(2, r.FacesRewound);
+        Assert.DoesNotContain("not orientable", r.Details[0]);
     }
 
     [Fact]
