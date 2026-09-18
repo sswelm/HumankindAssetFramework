@@ -26,7 +26,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   by Split, Plane cut and Fuse alike after their own work. The Splitter's row popup is "–  / Split / Delete" (a whole part
   offers no Split), the Fuser's letter popup ends with "✕ Delete"; Insert marks the highlighted row for split, Delete
   toggles deletion, – / 0 / Backspace clear every mark. A deleted part is neither split nor fused. "Show only" lists
-  "Marked for deletion". The mark lives in the window, like a Split check — not in the sidecar.
+    "Marked for deletion". The checks and the deletion marks persist in `<source>.marks.txt` beside the fuse sidecar
+  (S = split, X = delete): written by **Save marks** in the Splitter, by Save groups in the Fuser, and by every Split,
+  Plane cut and Fuse; read at the first Probe of a file, and by Load marks / Load groups. Both windows share it.
 - **The Model Workshop is two windows: Model Splitter and Model Fuser** (user: "too many responsibilities, which makes
   it cluttered — one screen for cutting and one for merging"). One implementation; both share the file pickers, the
   probe, the filtered part list, the preview, the mirror finder and the keyboard sweep. The Splitter shows the Split

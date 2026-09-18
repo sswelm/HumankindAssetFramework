@@ -246,6 +246,17 @@ public class WorkshopRulesTests
     }
 
     [Fact]
+    public void The_marks_sidecar_rides_the_fuse_sidecar_s_format_with_S_and_X()
+    {
+        // the Splitter's checks and both windows' deletion marks: S = split, X = delete, resolved by node index and name
+        var lines = new[] { WorkshopRules.SidecarHeader, WorkshopRules.SidecarLine("S", "Hull", 3), WorkshopRules.SidecarLine("X", "Chain", 921) };
+        var problems = new List<string>();
+        var marks = WorkshopRules.ResolveFuseSidecar(lines, Rows((3, "Hull"), (921, "Chain"), (922, "Chain2")), problems);
+        Assert.Empty(problems);
+        Assert.Equal("S", marks[3]); Assert.Equal("X", marks[921]); Assert.False(marks.ContainsKey(922));
+    }
+
+    [Fact]
     public void The_fuse_report_lists_every_island_when_given_them()
     {
         var g = new WorkshopRules.FuseGroupReport { Letter = "A", Changed = true, PartNames = new[] { "P" }, Warnings = new string[0],

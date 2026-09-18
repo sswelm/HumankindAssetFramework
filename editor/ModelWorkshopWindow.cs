@@ -207,6 +207,19 @@ public abstract class ModelWorkshopWindow : EditorWindow
                     if (GUILayout.Button("Uncheck all", GUILayout.Width(100))) foreach (var r in rows) r.split = false;
                     hideWhole = EditorGUILayout.ToggleLeft(new GUIContent("Hide already-whole parts",
                         "Hide the rows with a single island — there is nothing to split in them, they only pad the list."), hideWhole, GUILayout.Width(180));
+                    bool marksOnDisk = File.Exists(MarksSidecarPath(srcFile) ?? "");
+                    using (new EditorGUI.DisabledScope(chosen == 0 && deleted == 0 && !marksOnDisk))   // with no marks AND a file on disk, saving means "clear it"
+                        if (GUILayout.Button(new GUIContent("Save marks", $"Writes the Split checks and deletion marks to {Path.GetFileName(srcFile)}.marks.txt next to the source (a Split writes it too); the first Probe of the file reads it back."), GUILayout.Width(90)))
+                        {
+                            WriteMarksSidecar(srcFile);
+                            status = chosen == 0 && deleted == 0 ? $"Marks cleared: {MarksSidecarPath(srcFile)} removed" : $"Marks saved: {MarksSidecarPath(srcFile)}";
+                        }
+                    using (new EditorGUI.DisabledScope(!marksOnDisk))
+                        if (GUILayout.Button(new GUIContent("Load marks", "Reads the Split checks and deletion marks back from the sidecar next to the source, by part name and node index."), GUILayout.Width(90)))
+                        {
+                            int n = ApplyMarksSidecar(rows, out int refused);
+                            status = $"Marks loaded: {n} part(s) marked from {MarksSidecarPath(srcFile)}" + (refused > 0 ? $" — {refused} line(s) fit no single part (see the console)" : "");
+                        }
                     // A 300-island rope part is a legitimate but LOUD choice — say what a check costs before Split.
                     EditorGUILayout.LabelField(chosen > 0 ? $"{chosen} checked → +{rows.Where(r => r.split).Sum(r => r.islands) - chosen} new part(s) in the output" : " ", EditorStyles.miniLabel);
                 }
@@ -495,14 +508,16 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 using (new EditorGUI.DisabledScope(fusedRows == 0 && !sidecarExists))   // with no letters AND a sidecar on disk, saving means "clear it" (review of 0a8b56e)
                     if (GUILayout.Button(new GUIContent("Save groups", $"Writes the ⊕ letters to {Path.GetFileName(srcFile)}.fuse.txt next to the source (a Fuse writes it too); the first Probe of a file restores them from there. With no letters marked this removes the file."), GUILayout.Width(100)))
                     {
-                        WriteFuseSidecar(srcFile);
-                        status = fusedRows == 0 ? $"Groupings cleared: {FuseSidecarPath(srcFile)} removed" : $"Groupings saved: {FuseSidecarPath(srcFile)}";
+                        WriteFuseSidecar(srcFile); WriteMarksSidecar(srcFile);   // the deletion marks ride along in their own sidecar
+                        status = (fusedRows == 0 ? $"Groupings cleared: {FuseSidecarPath(srcFile)} removed" : $"Groupings saved: {FuseSidecarPath(srcFile)}") + (deleted > 0 ? $"; {deleted} deletion mark(s) saved: {MarksSidecarPath(srcFile)}" : "");
                     }
                 using (new EditorGUI.DisabledScope(!File.Exists(FuseSidecarPath(srcFile) ?? "")))
                     if (GUILayout.Button(new GUIContent("Load groups", "Reads the ⊕ letters back from the sidecar next to the source, by part name and node index (a name shared by several parts is refused unless the index settles it)."), GUILayout.Width(100)))
                     {
                         int n = ApplyFuseSidecar(rows, out int refused);
-                        status = $"Groupings loaded: {n} part(s) marked from {FuseSidecarPath(srcFile)}" + (refused > 0 ? $" — {refused} line(s) fit no single part (see the console)" : "");
+                        int m = ApplyMarksSidecar(rows, out int refusedMarks);
+                        status = $"Groupings loaded: {n} part(s) marked from {FuseSidecarPath(srcFile)}" + (refused > 0 ? $" — {refused} line(s) fit no single part (see the console)" : "")
+                               + (m > 0 ? $"; {m} mark(s) from {MarksSidecarPath(srcFile)}" : "") + (refusedMarks > 0 ? $" — {refusedMarks} mark line(s) fit no single part" : "");
                     }
                 EditorGUILayout.LabelField(fusedRows == 0 ? " " : $"{fusedRows} marked in {fuseGroups.Count} group(s): {string.Join("  ", fuseGroups.Select(g => "⊕" + g + "×" + rows.Count(r => r.fuse == g)))}", EditorStyles.miniLabel);
             }
@@ -543,6 +558,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
     {
         // kept-state keyed by NODE INDEX (review round 2): keying by name re-checked every duplicate namesake.
         var kept = new HashSet<int>(rows.Where(r => r.split).Select(r => r.nodeIndex));
+        var keptDelete = new HashSet<int>(rows.Where(r => r.delete).Select(r => r.nodeIndex));   // the deletion marks survive a re-Probe as the checks do
+        bool firstLoad = rows.Count == 0 || !SamePath(probedFile, srcFile);   // the marks sidecar is read once, when a file comes into the window
         // FUSE LETTERS survive too (2026-09-15, user: "it doesn't seem to be able to save the groupings, only the
         // checkboxes"): the merge slider re-analyzes and used to rebuild every row blank. Same key. And a re-Probe of a
         // file with NO letters in memory restores them from the sidecar the last Fuse wrote (<source>.fuse.txt).
@@ -558,13 +575,14 @@ public abstract class ModelWorkshopWindow : EditorWindow
         try
         {
             rows = GlbDisconnectedParts.Analyze(File.ReadAllBytes(srcFile), mergePct / 100.0)
-                .Select(p => new Row { nodeIndex = p.NodeIndex, node = p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, split = kept.Contains(p.NodeIndex),
+                .Select(p => new Row { nodeIndex = p.NodeIndex, node = p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, split = kept.Contains(p.NodeIndex), delete = keptDelete.Contains(p.NodeIndex),
                                        fuse = keptFuse.TryGetValue(p.NodeIndex, out string kf) ? kf : "",
                                        verts = p.Vertices, min = p.Min?.Select(d => (float)d).ToArray(), max = p.Max?.Select(d => (float)d).ToArray() })
                 .OrderBy(r => NaturalPrefix(r.node), StringComparer.OrdinalIgnoreCase)
                 .ThenBy(r => NaturalNumber(r.node))
                 .ThenBy(r => r.node, StringComparer.OrdinalIgnoreCase).ToList();
             if (keptFuse.Count == 0 && initialLoad) ApplyFuseSidecar(rows, out _);
+            if (firstLoad && kept.Count == 0 && keptDelete.Count == 0) ApplyMarksSidecar(rows, out _);
             foreach (var r in rows) if (r.islands <= 1 || r.blocked != null) r.split = false;   // no longer splittable at this distance
             int multi = rows.Count(r => r.islands > 1 && r.blocked == null);
             probedFile = srcFile;   // the rows now describe THIS file (the source-switch hygiene above keys on it)
@@ -733,6 +751,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             if (!result.Changed) { status = "Nothing changed — the cut leaves every triangle on one side."; return; }
             foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
             string deletedLine = ApplyDeletionsTo(outGlb);   // the marks for deletion, on the written output (the cut only appends)
+            WriteMarksSidecar(srcFile);
             WriteFuseSidecarForOutput(outGlb);   // the ⊕ letters travel with the output, passed down to the _CutA/_CutB children (user 2026-09-16; review of 0097bd5)
             status = $"Plane cut done: {result.Details.FirstOrDefault()}{(deletedLine != null ? " " + deletedLine + "." : "")}\n{outGlb}\nNext: open it in the Vehicle Lab — or cut again by pointing Source GLB at this output and re-Probing (your ⊕ letters travel with it).";
         }
@@ -880,6 +899,45 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // (WorkshopRules.ResolveFuseSidecar — a name alone marked every namesake, review of 82088d4; the name is LAST
     // since 2026-09-16 so a '|' inside it is never mistaken for a field). Also written on demand by "Save groups".
     static string FuseSidecarPath(string glb) => string.IsNullOrEmpty(glb) ? null : glb + ".fuse.txt";
+    // THE MARKS SIDECAR (2026-09-18, user: "how is the delete state persisted?" after marking 144 chain links): the Split
+    // checks and the deletion marks, next to the source as <glb>.marks.txt — the fuse sidecar's format with S (split) and
+    // X (delete) for letters, so the same resolver reads it by node index and name. Written by Save marks and by every
+    // Split, Plane cut and Fuse; read at the first Probe of a file (a re-Probe keeps the marks in memory, as the Fuser
+    // keeps its letters). Both windows read and write it: a deletion marked in the Fuser reaches the Splitter.
+    static string MarksSidecarPath(string glb) => string.IsNullOrEmpty(glb) ? null : glb + ".marks.txt";
+    void WriteMarksSidecar(string glb)
+    {
+        try
+        {
+            string path = MarksSidecarPath(glb); if (path == null) return;
+            var lines = rows.Where(r => (r.split || r.delete) && !string.IsNullOrEmpty(r.node)).Select(r => WorkshopRules.SidecarLine(r.delete ? "X" : "S", r.node, r.nodeIndex)).ToArray();
+            if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }
+            File.WriteAllLines(path, new[] { WorkshopRules.SidecarHeader }.Concat(lines));
+        }
+        catch (Exception e) { Debug.LogWarning("[Workshop] could not write the marks sidecar: " + e.Message); }
+    }
+    int ApplyMarksSidecar(List<Row> target, out int refused)
+    {
+        refused = 0;
+        try
+        {
+            string path = MarksSidecarPath(srcFile);
+            if (path == null || !File.Exists(path)) return 0;
+            var problems = new List<string>();
+            var marks = WorkshopRules.ResolveFuseSidecar(File.ReadAllLines(path), target.Select(r => new KeyValuePair<int, string>(r.nodeIndex, r.node)).ToList(), problems);
+            int applied = 0;
+            foreach (var r in target)
+            {
+                if (!marks.TryGetValue(r.nodeIndex, out string mark)) continue;
+                if (mark == "X") { r.delete = true; r.split = false; r.fuse = ""; applied++; }
+                else if (mark == "S" && r.islands > 1 && r.blocked == null) { r.split = true; r.delete = false; applied++; }
+            }
+            foreach (string q in problems) Debug.LogWarning("[Workshop] marks sidecar: " + q);
+            refused = problems.Count;
+            return applied;
+        }
+        catch (Exception e) { Debug.LogWarning("[Workshop] could not read the marks sidecar: " + e.Message); return 0; }
+    }
     void WriteFuseSidecar(string glb)
     {
         try
@@ -981,7 +1039,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             }
             if (done == 0) { status = "Nothing changed — no group produced a fused mesh and nothing was deleted (see warnings in the console)."; return; }
             File.WriteAllBytes(outGlb, bytes);
-            WriteFuseSidecar(srcFile);   // the groupings, next to the source: a later Probe of this file restores them
+            WriteFuseSidecar(srcFile); WriteMarksSidecar(srcFile);   // the groupings and the marks, next to the source: a later Probe of this file restores them
             // ...and next to the OUTPUT: each shell under its group's letter, so the Splitter (or the Fuser again) opens it knowing its groups
             if (results != null) try
             {
@@ -1036,6 +1094,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             }
             if ((result == null || !result.Changed) && deletedLine == null) { status = "Nothing changed — the checked parts produced no split and nothing was deleted (see warnings in the console)."; return; }
             File.WriteAllBytes(outGlb, bytes);
+            WriteMarksSidecar(srcFile);   // the checks and deletion marks, next to the source: the first Probe of it restores them
             if (result != null) foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
             WriteFuseSidecarForOutput(outGlb);   // the ⊕ letters travel with the output, passed down to the _Part_NNN children
             status = (result != null && result.Changed ? $"Split done: {result.NodesSplit} part(s) → {result.ChildPartsCreated} sub-parts, {result.SourceTriangles:N0} triangles preserved." : "Split: nothing checked.")
