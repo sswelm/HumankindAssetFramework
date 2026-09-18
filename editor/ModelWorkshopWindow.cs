@@ -232,6 +232,17 @@ public class ModelWorkshopWindow : EditorWindow
             }
             var shown = rows.Where(Passes).ToList();
             int hiddenRows = rows.Count - shown.Count;
+            // AUTO-ADVANCE (user 2026-09-18): a mark that takes the highlighted row OUT of the filtered list ("Show only:
+            // Group Z", then the letter changes) left the highlight on a row no longer drawn, and the next ↓ started over at
+            // the FIRST row. The Lab's sweep idiom instead: the highlight moves to the row after it (before it at the end).
+            // The list keeps its place — the next row slides up into the vacated slot, so no scroll is needed.
+            void AdvanceIfHidden(int at)
+            {
+                if (at < 0 || at >= shown.Count || Passes(shown[at])) return;
+                int next = WorkshopRules.NextHighlight(at, shown.Count);
+                ExitCutMode(); selectedIdx = next >= 0 ? shown[next].nodeIndex : -1; SelectRow(next >= 0 ? shown[next].node : "");
+            }
+            int advanceFrom = -1;   // a popup/checkbox change on the highlighted row inside the list loop: advanced after the loop
             if (hiddenRows > 0) EditorGUILayout.LabelField($"  {shown.Count} shown, {hiddenRows} hidden by the filters (marks on hidden rows are kept; Fuse and Split act on ALL marked rows)", EditorStyles.miniLabel);
             // KEYBOARD MARKING (2026-09-15, the Vehicle Lab's idiom): ↑/↓ move the highlight, A–Z put the highlighted row in
             // a fuse group, 0/Backspace clear it, Space toggles its Split checkbox — marking dozens of hull plates by mouse
@@ -260,18 +271,21 @@ public class ModelWorkshopWindow : EditorWindow
                 else if (idx >= 0 && shown[idx].blocked == null && ev.keyCode >= KeyCode.A && ev.keyCode <= KeyCode.Z)
                 {
                     shown[idx].fuse = ((char)('A' + (ev.keyCode - KeyCode.A))).ToString();
+                    AdvanceIfHidden(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
                 else if (idx >= 0 && (ev.keyCode == KeyCode.Alpha0 || ev.keyCode == KeyCode.Keypad0 || ev.keyCode == KeyCode.Minus || ev.keyCode == KeyCode.KeypadMinus || ev.keyCode == KeyCode.Backspace || ev.keyCode == KeyCode.Delete))   // '-' too: it is what the popup shows for "no group" (user 2026-09-16)
                 {
                     shown[idx].fuse = "";
+                    AdvanceIfHidden(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
                 else if (idx >= 0 && ev.keyCode == KeyCode.Space && shown[idx].blocked == null && shown[idx].islands > 1)
                 {
                     shown[idx].split = !shown[idx].split;
+                    AdvanceIfHidden(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
@@ -279,9 +293,10 @@ public class ModelWorkshopWindow : EditorWindow
             listViewHeight = Mathf.Min(330, 22 * shown.Count + 8);
             if (Event.current.type == EventType.Repaint) rowRects.Clear();
             scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(listViewHeight));   // cap 220 -> 330 (2026-09-08 user request: +50% — a real ship's part list is dozens of rows)
-            foreach (var r in shown)
+            for (int ri = 0; ri < shown.Count; ri++)
                 using (new EditorGUILayout.HorizontalScope())
                 {
+                    Row r = shown[ri]; bool splitBefore = r.split; string fuseBefore = r.fuse;
                     using (new EditorGUI.DisabledScope(r.islands <= 1 || r.blocked != null))
                         r.split = EditorGUILayout.Toggle(r.split, GUILayout.Width(20));
                     // FUSE GROUP (2026-09-15): an independent per-row mark — rows sharing a letter fuse into one welded shell each
@@ -291,6 +306,7 @@ public class ModelWorkshopWindow : EditorWindow
                         int fj = EditorGUILayout.Popup(fi, FuseLabels, GUILayout.Width(46));
                         r.fuse = fj <= 0 ? "" : ((char)('A' + fj - 1)).ToString();
                     }
+                    if (r.nodeIndex == selectedIdx && (r.split != splitBefore || r.fuse != fuseBefore)) advanceFrom = ri;   // the mouse path of the A–Z / Space keys
                     bool isSel = selectedIdx == r.nodeIndex;
                     string label = r.blocked != null ? $"{(isSel ? "◉ " : "")}{r.node}   — skipped: {r.blocked}"
                                  : $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {(r.islands == 1 ? "1 island — already whole" : r.islands.ToString("N0") + " islands")})";
@@ -300,6 +316,7 @@ public class ModelWorkshopWindow : EditorWindow
                     if (Event.current.type == EventType.Repaint) rowRects.Add(GUILayoutUtility.GetLastRect());   // the row's real rect in scroll-content space (see the ↑/↓ handler)
                 }
             EditorGUILayout.EndScrollView();
+            if (advanceFrom >= 0) AdvanceIfHidden(advanceFrom);
 
             // ---- plane cut: for the selected part, connected or not — the escape hatch when island
             // splitting has nothing to grab (hull welded to deck). Whole triangles, nothing sliced. ----

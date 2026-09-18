@@ -21,6 +21,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
+- **Model Workshop: the highlight follows the sweep.** With "Show only" set to one fuse group, changing the highlighted
+  row's letter (key or dropdown) took it out of the list and the next ↓ started over at the first row. The highlight
+  now moves to the row after it (before it at the end of the list), as the Vehicle Lab's marking sweep does — the same
+  for the Split checkbox under "Checked for Split" and for the group filters.
 - **Vehicle Lab: "Mark all shown as …"** — one role for every part the filters currently show. The SS Romanic
   carries 144 stray copies of one fitting 3 km down the length axis and 190 m up (an authoring leftover that
   makes the preview frame a speck of a ship); "Hide parts below (height)" isolates them in seconds and one Apply

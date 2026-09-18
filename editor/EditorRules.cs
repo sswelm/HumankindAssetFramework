@@ -321,6 +321,16 @@ public static class WorkshopRules
     // OUTPUT NAMES THAT CHAIN (2026-09-16, user: "should a cut automatically create a cut postfix?"): a cut's output
     // defaults to <source>_cut.glb, and cutting THAT output again goes to _cut2, _cut3 … instead of refusing (output ==
     // source) or overwriting. Same for _split. Any other name just gets the suffix appended.
+    // THE HIGHLIGHT AFTER A ROW LEAVES A FILTERED LIST (2026-09-18, user: "when I change the group so that it disappears
+    // from the list, it should select the next item rather than the first"): the row after it, the row before it at the
+    // end of the list, nothing when it was alone. The Vehicle Lab's sweep idiom, shared with the Workshop.
+    public static int NextHighlight(int idx, int count)
+    {
+        if (idx < 0 || idx >= count) return -1;
+        if (idx + 1 < count) return idx + 1;
+        return idx - 1;   // -1 when the list held only this row
+    }
+
     public static string NextOutputName(string baseName, string suffix)
     {
         if (string.IsNullOrEmpty(baseName)) return baseName;

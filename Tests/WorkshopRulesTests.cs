@@ -176,6 +176,17 @@ public class WorkshopRulesTests
     }
 
     [Fact]
+    public void The_highlight_moves_to_the_next_row_when_a_mark_hides_the_current_one()
+    {
+        Assert.Equal(3, WorkshopRules.NextHighlight(2, 5));    // the row after it
+        Assert.Equal(3, WorkshopRules.NextHighlight(4, 5));    // at the end of the list: the row before it
+        Assert.Equal(1, WorkshopRules.NextHighlight(0, 5));
+        Assert.Equal(-1, WorkshopRules.NextHighlight(0, 1));   // it was the only row: nothing left to highlight
+        Assert.Equal(-1, WorkshopRules.NextHighlight(-1, 5));  // nothing was highlighted
+        Assert.Equal(-1, WorkshopRules.NextHighlight(5, 5));   // out of range
+    }
+
+    [Fact]
     public void The_fuse_report_lists_every_island_when_given_them()
     {
         var g = new WorkshopRules.FuseGroupReport { Letter = "A", Changed = true, PartNames = new[] { "P" }, Warnings = new string[0],
