@@ -27,7 +27,8 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   checkboxes, "Check all splittable", the plane cut and Split (output `_split` / `_cut`); the Fuser the ⊕ letters,
   the A–Z keys, the weld slider, Save/Load groups and Fuse (output `_fused`). "Show only" lists each window's own
   kinds. The one-step Generate (fuse AND split) went with the split: chain the outputs — the ⊕ letters travel with a
-  cut or split output, so either order works.
+  cut or split output, so either order works (each window reads the sidecar at Probe). A saved editor layout that held
+  the old Model Workshop drops that window once — the class is abstract now.
 - **Generate: every group fused in parallel, and the big ones 5x faster.** Nineteen groups took 3½ minutes chained.
   Planning a group (gather, weld, islands, sheets, direction) reads only the source, so every group now plans at once
   on the thread pool and the meshes are appended in letter order into one output — the same bytes chaining gave,

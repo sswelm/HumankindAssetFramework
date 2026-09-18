@@ -118,7 +118,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             EditorGUILayout.LabelField("Model Fuser — weld the parts of each ⊕ group into ONE shell with consistent winding", EditorStyles.boldLabel);
             // two short lines, not one long one: a single long label sets the window's minimum width (user 2026-09-16)
             EditorGUILayout.LabelField("For a hull authored as separate plates (see-through, holes, gaps under reduction): mark the plates with one letter, Fuse, then feed the output to the Vehicle Lab.", EditorStyles.wordWrappedMiniLabel);
-            EditorGUILayout.LabelField("Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh. To cut as well, open the output in the Model Cutter — the ⊕ letters travel with it.", EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.LabelField("Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh. To cut as well, open the output in the Model Cutter.", EditorStyles.wordWrappedMiniLabel);
         }
         else
         {
@@ -149,7 +149,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         if (outGlbAuto && !string.IsNullOrEmpty(autoOut)) outGlb = autoOut;
         using (new EditorGUILayout.HorizontalScope())
         {
-            string typedOut = EditorGUILayout.TextField(new GUIContent("Output GLB", "Where the split copy is written — feed THIS file to the Vehicle Lab afterwards. Auto-follows the source file until you edit it."), outGlb);
+            string typedOut = EditorGUILayout.TextField(new GUIContent("Output GLB", (Fusing ? "Where the fused copy is written" : "Where the split copy is written") + " — feed THIS file to the Vehicle Lab afterwards. Auto-follows the source file until you edit it."), outGlb);
             if (typedOut != outGlb) { outGlb = typedOut; outGlbAuto = SamePath(typedOut, autoOut); }
             using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(srcFile)))
                 if (GUILayout.Button("…", GUILayout.Width(28)))
@@ -338,9 +338,10 @@ public abstract class ModelWorkshopWindow : EditorWindow
                     if (r.nodeIndex == selectedIdx && (r.split != splitBefore || r.fuse != fuseBefore)) advanceFrom = ri;   // the mouse path of the A–Z / Space keys
                     bool isSel = selectedIdx == r.nodeIndex;
                     string label = r.blocked != null ? $"{(isSel ? "◉ " : "")}{r.node}   — skipped: {r.blocked}"
+                                 : Fusing ? $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {r.islands:N0} island{(r.islands == 1 ? "" : "s")})"
                                  : $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {(r.islands == 1 ? "1 island — already whole" : r.islands.ToString("N0") + " islands")})";
                     // the row label is a BUTTON, exactly like the Vehicle Lab: click = highlight + frame in the preview
-                    if (GUILayout.Button(label, isSel ? EditorStyles.whiteLabel : (r.islands > 1 && r.blocked == null ? EditorStyles.label : EditorStyles.miniLabel)))
+                    if (GUILayout.Button(label, isSel ? EditorStyles.whiteLabel : (r.blocked == null && (Fusing || r.islands > 1) ? EditorStyles.label : EditorStyles.miniLabel)))   // the Cutter dims what it cannot split
                     { ExitCutMode(); selectedIdx = isSel ? -1 : r.nodeIndex; SelectRow(isSel ? "" : r.node); }
                     if (Event.current.type == EventType.Repaint) rowRects.Add(GUILayoutUtility.GetLastRect());   // the row's real rect in scroll-content space (see the ↑/↓ handler)
                 }
@@ -371,7 +372,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                         int si = shown.FindIndex(x => x.nodeIndex == mr.nodeIndex);
                         if (si >= 0) RevealRow(si);
                         status = $"Mirror of '{from}': '{mr.node}' ({mr.tris:N0} tris{(string.IsNullOrEmpty(mr.fuse) ? "" : $", group {mr.fuse}")}) — highlighted" +
-                                 (si >= 0 ? "; press a letter to mark it." : "; its row is hidden by the filters (widen them to see it).");
+                                 (si < 0 ? "; its row is hidden by the filters (widen them to see it)." : Fusing ? "; press a letter to mark it." : mr.islands > 1 && mr.blocked == null ? "; press Space to check it." : ".");
                         GUIUtility.keyboardControl = 0; Repaint();
                     }
                 }
@@ -434,7 +435,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 if (Event.current.type == EventType.Repaint) RenderPreview(rect);
             }
             else if (rows.Count > 0)
-                EditorGUILayout.LabelField("  (no preview — the Blender probe export failed or is still pending; the list and Split still work)", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField($"  (no preview — the Blender probe export failed or is still pending; the list and {(Fusing ? "Fuse" : "Split")} still work)", EditorStyles.miniLabel);
 
             if (!Fusing)
             using (new EditorGUI.DisabledScope(chosen == 0 || string.IsNullOrEmpty(outGlb)))
@@ -764,7 +765,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         // (the splitter uniquifies its output names); when it happens, say so instead of pretending precision.
         int namesakes = rows.Count(r => r.node == name);
         if (namesakes > 1)
-            status = $"⚠ {namesakes} parts share the name '{name}' — the preview highlight shows all of them; checkbox and Split still target exactly the row you clicked (by node index).";
+            status = $"⚠ {namesakes} parts share the name '{name}' — the preview highlight shows all of them; {(Fusing ? "the ⊕ letter and Fuse" : "the checkbox and Split")} still target exactly the row you clicked (by node index).";
         // EXACT name PLUS Blender's collision-suffix form ("Object_2.001") — combined, not fallback (review
         // round 4: exact-only found the first namesake and starved the suffix branch, so duplicate rows lit the
         // same renderer). Never a mere prefix — a bare StartsWith made "Object_2" light up Object_20..Object_29.
@@ -895,15 +896,11 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // Every ⊕ group becomes its own shell, chained through one in-memory GLB: FuseNodes never removes or reorders
     // nodes (fused sources only lose their mesh; the fused part is appended), so group B's node indices stay valid
     // in group A's output. One write at the end; the source file is never touched.
-    void FuseMarked() => Generate(false);
-
-    // GENERATE (2026-09-16, user: "a button that will generate a model which will both Fuse or Split objects"): the same
-    // in-memory chain, with the Split of every checked row appended after the fuse groups — Split never removes or
-    // reorders nodes either, so the checked rows' node indices survive the fuses. A row that is both lettered and
-    // checked is fused, not split (its mesh is gone after the fuse); it is reported.
-    void Generate(bool alsoSplit)
+    // (The 2026-09-16 Generate — fuse AND split in one output — went with the two-window split of 2026-09-18: the
+    // Cutter's checks and the Fuser's letters no longer live in one window. Chain the outputs; the letters travel.)
+    void FuseMarked()
     {
-        string verb = alsoSplit ? "Generate" : "Fuse";
+        const string verb = "Fuse";
         try { GlbDisconnectedParts.GuardPaths(srcFile, outGlb); }   // the file entry points refuse output == source; this path writes the bytes itself, so it asks the same guard
         catch (Exception e) { status = verb + " refused (source untouched): " + e.Message; return; }
         if (File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?", outGlb, "Overwrite", "Cancel")) return;
@@ -935,23 +932,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 }
                 if (done > 0) bytes = fused;
             }
-            if (alsoSplit)
-            {
-                var both = rows.Where(r => r.split && !string.IsNullOrEmpty(r.fuse)).Select(r => r.node).ToList();
-                var toSplit = rows.Where(r => r.split && string.IsNullOrEmpty(r.fuse)).ToList();
-                if (toSplit.Count > 0)
-                {
-                    EditorUtility.DisplayProgressBar("Model Workshop", $"Splitting {toSplit.Count} checked part(s)…", 0.85f);
-                    var sr = GlbDisconnectedParts.Split(bytes, new HashSet<int>(toSplit.Select(r => r.nodeIndex)), mergePct / 100.0);
-                    var warnings = new List<string>(sr.Warnings);
-                    if (both.Count > 0) warnings.Insert(0, "checked AND in a fuse group — fused, not split: " + string.Join(", ", both));
-                    report.Add(new WorkshopRules.FuseGroupReport { Letter = "Split", PartNames = toSplit.Select(r => r.node).ToList(), Details = sr.Details, Warnings = warnings, Changed = sr.Changed });
-                    if (sr.Changed) { bytes = sr.Bytes; done++; lines.Add($"Split: {sr.NodesSplit} part(s) → {sr.ChildPartsCreated} sub-parts, {sr.SourceTriangles:N0} triangles preserved" + (warnings.Count > 0 ? $"   ⚠ {warnings.Count} warning(s)" : "")); }
-                    else lines.Add($"Split: nothing split ({string.Join("; ", sr.Warnings)})");
-                }
-                else if (both.Count > 0) lines.Add("Split: every checked row is also in a fuse group — fused, not split: " + string.Join(", ", both));
-            }
-            if (done == 0) { status = "Nothing changed — no group produced a fused mesh" + (alsoSplit ? " and nothing split" : "") + " (see warnings in the console)."; return; }
+            if (done == 0) { status = "Nothing changed — no group produced a fused mesh (see warnings in the console)."; return; }
             File.WriteAllBytes(outGlb, bytes);
             WriteFuseSidecar(srcFile);   // the groupings, next to the source: a later Probe of this file restores them
             string reportPath = outGlb + ".fuse-report.txt";
