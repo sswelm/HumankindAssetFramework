@@ -19,10 +19,14 @@ using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
-public class ModelWorkshopWindow : EditorWindow
+// TWO WINDOWS, ONE IMPLEMENTATION (2026-09-18, user: "the Model Workshop has too many responsibilities, which makes it
+// cluttered — split it up into two screens, one for cutting and one for merging"): the CUTTER (island split + plane cut)
+// and the FUSER (⊕ groups → welded shells) share the file pickers, the probe, the filtered part list, the preview, the
+// mirror finder and the keyboard sweep; each shows only its own column, keys and buttons. The one-step Generate (fuse
+// AND split) went with the split — chain the outputs instead: the ⊕ letters travel through a cut, so either order works.
+public abstract class ModelWorkshopWindow : EditorWindow
 {
-    [MenuItem("Tools/HAF/Model Workshop")]
-    static void Open() => GetWindow<ModelWorkshopWindow>("Model Workshop");
+    protected abstract bool Fusing { get; }   // the Fuser: ⊕ letters, weld, Fuse — else the Cutter: Split checkboxes, plane cut, Split
 
     [Serializable]
     class Row
@@ -109,10 +113,20 @@ public class ModelWorkshopWindow : EditorWindow
     void OnGUI()
     {
         windowScroll = EditorGUILayout.BeginScrollView(windowScroll, GUIStyle.none, GUI.skin.verticalScrollbar);   // vertical only: a bar appears when the window is shorter than its content, and no long line can push the window wide; the preview keeps its scroll-wheel zoom (it Use()s the event first)
-        EditorGUILayout.LabelField("Model Workshop — split chosen parts into their disconnected islands, or plane-cut a connected one", EditorStyles.boldLabel);
-        // two short lines, not one long one: a single long label sets the window's minimum width (user 2026-09-16)
-        EditorGUILayout.LabelField("For a part whose junk islands share a mesh with real geometry: split ONLY that part, then mark the junk Ignore in the Vehicle Lab.", EditorStyles.wordWrappedMiniLabel);
-        EditorGUILayout.LabelField("Lossless — vertex data, materials, skins and animations are preserved; only the checked parts gain _Part_NNN children. A CONNECTED part (1 island) can instead be plane-cut in two: select its row and press Plane cut.", EditorStyles.wordWrappedMiniLabel);
+        if (Fusing)
+        {
+            EditorGUILayout.LabelField("Model Fuser — weld the parts of each ⊕ group into ONE shell with consistent winding", EditorStyles.boldLabel);
+            // two short lines, not one long one: a single long label sets the window's minimum width (user 2026-09-16)
+            EditorGUILayout.LabelField("For a hull authored as separate plates (see-through, holes, gaps under reduction): mark the plates with one letter, Fuse, then feed the output to the Vehicle Lab.", EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.LabelField("Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh. To cut as well, open the output in the Model Cutter — the ⊕ letters travel with it.", EditorStyles.wordWrappedMiniLabel);
+        }
+        else
+        {
+            EditorGUILayout.LabelField("Model Cutter — split chosen parts into their disconnected islands, or plane-cut a connected one", EditorStyles.boldLabel);
+            // two short lines, not one long one: a single long label sets the window's minimum width (user 2026-09-16)
+            EditorGUILayout.LabelField("For a part whose junk islands share a mesh with real geometry: split ONLY that part, then mark the junk Ignore in the Vehicle Lab.", EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.LabelField("Lossless — vertex data, materials, skins and animations are preserved; only the checked parts gain _Part_NNN children. A CONNECTED part (1 island) can instead be plane-cut in two. To fuse as well, open the output in the Model Fuser.", EditorStyles.wordWrappedMiniLabel);
+        }
 
         using (new EditorGUILayout.HorizontalScope())
         {
@@ -131,7 +145,7 @@ public class ModelWorkshopWindow : EditorWindow
         // the suffix follows the operation — _split, or _cut while the cut panel is open — and chains: cutting ship_cut.glb
         // proposes ship_cut2.glb (user 2026-09-16: two cuts in a row needed two names typed by hand)
         string autoOut = string.IsNullOrEmpty(srcFile) ? ""
-            : Path.Combine(Path.GetDirectoryName(srcFile), WorkshopRules.NextOutputName(Path.GetFileNameWithoutExtension(srcFile), CutModeActive ? "_cut" : "_split") + ".glb").Replace('\\', '/');
+            : Path.Combine(Path.GetDirectoryName(srcFile), WorkshopRules.NextOutputName(Path.GetFileNameWithoutExtension(srcFile), Fusing ? "_fused" : CutModeActive ? "_cut" : "_split") + ".glb").Replace('\\', '/');
         if (outGlbAuto && !string.IsNullOrEmpty(autoOut)) outGlb = autoOut;
         using (new EditorGUILayout.HorizontalScope())
         {
@@ -140,7 +154,7 @@ public class ModelWorkshopWindow : EditorWindow
             using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(srcFile)))
                 if (GUILayout.Button("…", GUILayout.Width(28)))
                 {
-                    string p = EditorUtility.SaveFilePanel("Write split GLB", Path.GetDirectoryName(srcFile), Path.GetFileNameWithoutExtension(srcFile) + "_split", "glb");
+                    string p = EditorUtility.SaveFilePanel("Write split GLB", Path.GetDirectoryName(srcFile), Path.GetFileNameWithoutExtension(srcFile) + (Fusing ? "_fused" : "_split"), "glb");
                     if (!string.IsNullOrEmpty(p)) { outGlb = p.Replace('\\', '/'); outGlbAuto = SamePath(outGlb, autoOut); }
                 }
         }
@@ -177,16 +191,19 @@ public class ModelWorkshopWindow : EditorWindow
         {
             int splittable = rows.Count(r => r.islands > 1 && r.blocked == null);
             int chosen = rows.Count(r => r.split);
-            EditorGUILayout.LabelField($"Parts ({rows.Count} node(s), {splittable} with more than one island) — click a row to highlight it below; check the parts to split:", EditorStyles.boldLabel);
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                if (GUILayout.Button("Check all splittable", GUILayout.Width(140))) foreach (var r in rows) r.split = r.islands > 1 && r.blocked == null;
-                if (GUILayout.Button("Uncheck all", GUILayout.Width(100))) foreach (var r in rows) r.split = false;
-                hideWhole = EditorGUILayout.ToggleLeft(new GUIContent("Hide already-whole parts",
-                    "Hide the rows with a single island — there is nothing to split in them, they only pad the list."), hideWhole, GUILayout.Width(180));
-                // A 300-island rope part is a legitimate but LOUD choice — say what a check costs before Split.
-                EditorGUILayout.LabelField(chosen > 0 ? $"{chosen} checked → +{rows.Where(r => r.split).Sum(r => r.islands) - chosen} new part(s) in the output" : " ", EditorStyles.miniLabel);
-            }
+            EditorGUILayout.LabelField(Fusing
+                ? $"Parts ({rows.Count} node(s)) — click a row to highlight it below; give the parts of one shell the same ⊕ letter:"
+                : $"Parts ({rows.Count} node(s), {splittable} with more than one island) — click a row to highlight it below; check the parts to split:", EditorStyles.boldLabel);
+            if (!Fusing)
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    if (GUILayout.Button("Check all splittable", GUILayout.Width(140))) foreach (var r in rows) r.split = r.islands > 1 && r.blocked == null;
+                    if (GUILayout.Button("Uncheck all", GUILayout.Width(100))) foreach (var r in rows) r.split = false;
+                    hideWhole = EditorGUILayout.ToggleLeft(new GUIContent("Hide already-whole parts",
+                        "Hide the rows with a single island — there is nothing to split in them, they only pad the list."), hideWhole, GUILayout.Width(180));
+                    // A 300-island rope part is a legitimate but LOUD choice — say what a check costs before Split.
+                    EditorGUILayout.LabelField(chosen > 0 ? $"{chosen} checked → +{rows.Where(r => r.split).Sum(r => r.islands) - chosen} new part(s) in the output" : " ", EditorStyles.miniLabel);
+                }
             // the sliders auto-fit the model's span, padded a hair past the outermost part (the Lab's finding 2026-08-01: an exact
             // clamp rounds slightly inside and hides the edge part at rest)
             var boxed = rows.Where(r => r.min != null).ToList();
@@ -217,15 +234,19 @@ public class ModelWorkshopWindow : EditorWindow
                 "and rigging vanish; combine with the height sliders to pick one deck level. 0 = off. Needs the preview (Probe parts " +
                 "builds it); parts the preview can't measure stay visible."), minFlatPct, 0f, 100f);
             var lettersInUse = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).Select(r => r.fuse).Distinct().OrderBy(l => l).ToList();
-            var showOptions = ShowOnlyOptions.Concat(lettersInUse.Select(l => $"Group ⊕{l}  ({rows.Count(r => r.fuse == l)} part(s))")).ToArray();
-            int showIdx = !string.IsNullOrEmpty(showOnlyLetter) && lettersInUse.Contains(showOnlyLetter) ? ShowOnlyOptions.Length + lettersInUse.IndexOf(showOnlyLetter) : showOnly;
-            int picked = EditorGUILayout.Popup(new GUIContent("Show only", "Filter the list to one kind of row, or to ONE fuse group (every letter in use is listed). Marks on hidden rows are kept."), showIdx, showOptions);
-            if (picked >= ShowOnlyOptions.Length) { showOnly = 0; showOnlyLetter = lettersInUse[picked - ShowOnlyOptions.Length]; }
-            else { showOnly = picked; showOnlyLetter = ""; }
+            // each window lists its own kinds (the Cutter: checked / islands; the Fuser: groups / islands, then every letter in use)
+            int[] kinds = Fusing ? new[] { 0, 2, 3, 4, 5, 6 } : new[] { 0, 1, 4, 5, 6 };
+            if (Array.IndexOf(kinds, showOnly) < 0) showOnly = 0;
+            var showOptions = kinds.Select(k => ShowOnlyOptions[k]).Concat(Fusing ? lettersInUse.Select(l => $"Group ⊕{l}  ({rows.Count(r => r.fuse == l)} part(s))") : Enumerable.Empty<string>()).ToArray();
+            int showIdx = Fusing && !string.IsNullOrEmpty(showOnlyLetter) && lettersInUse.Contains(showOnlyLetter) ? kinds.Length + lettersInUse.IndexOf(showOnlyLetter) : Array.IndexOf(kinds, showOnly);
+            int picked = EditorGUILayout.Popup(new GUIContent("Show only", Fusing ? "Filter the list to one kind of row, or to ONE fuse group (every letter in use is listed). Marks on hidden rows are kept."
+                                                                                  : "Filter the list to one kind of row. Checks on hidden rows are kept."), showIdx, showOptions);
+            if (picked >= kinds.Length) { showOnly = 0; showOnlyLetter = lettersInUse[picked - kinds.Length]; }
+            else { showOnly = kinds[picked]; showOnlyLetter = ""; }
             bool Passes(Row r)
             {
-                if (hideWhole && r.islands <= 1 && r.blocked == null) return false;
-                if (!string.IsNullOrEmpty(showOnlyLetter) && r.fuse != showOnlyLetter) return false;
+                if (!Fusing && hideWhole && r.islands <= 1 && r.blocked == null) return false;   // the Cutter's toggle; the Fuser has no use for island counts
+                if (Fusing && !string.IsNullOrEmpty(showOnlyLetter) && r.fuse != showOnlyLetter) return false;
                 switch (showOnly)
                 {
                     case 1: if (!r.split) return false; break;
@@ -255,11 +276,13 @@ public class ModelWorkshopWindow : EditorWindow
                 ExitCutMode(); selectedIdx = next >= 0 ? shown[next].nodeIndex : -1; SelectRow(next >= 0 ? shown[next].node : "");
             }
             int advanceFrom = -1;   // a popup/checkbox change on the highlighted row inside the list loop: advanced after the loop
-            if (hiddenRows > 0) EditorGUILayout.LabelField($"  {shown.Count} shown, {hiddenRows} hidden by the filters (marks on hidden rows are kept; Fuse and Split act on ALL marked rows)", EditorStyles.miniLabel);
+            if (hiddenRows > 0) EditorGUILayout.LabelField($"  {shown.Count} shown, {hiddenRows} hidden by the filters (marks on hidden rows are kept; {(Fusing ? "Fuse" : "Split")} acts on ALL marked rows)", EditorStyles.miniLabel);
             // KEYBOARD MARKING (2026-09-15, the Vehicle Lab's idiom): ↑/↓ move the highlight, A–Z put the highlighted row in
             // a fuse group, 0/Backspace clear it, Space toggles its Split checkbox — marking dozens of hull plates by mouse
             // was the complaint. The Workshop has no role hotkeys, so the letters are free here.
-            EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   A–Z = fuse group of the highlighted part (⊕ column)   ·   – / 0 / Backspace = no group   ·   Space = Split checkbox", EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.LabelField(Fusing
+                ? "  Keys:  ↑/↓ = previous/next part   ·   A–Z = fuse group of the highlighted part (⊕ column)   ·   – / 0 / Backspace = no group"
+                : "  Keys:  ↑/↓ = previous/next part   ·   Space = Split checkbox", EditorStyles.wordWrappedMiniLabel);
             var ev = Event.current;
             if (ev.type == EventType.KeyDown && shown.Count > 0 && !EditorGUIUtility.editingTextField)
             {
@@ -272,21 +295,21 @@ public class ModelWorkshopWindow : EditorWindow
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
-                else if (idx >= 0 && shown[idx].blocked == null && ev.keyCode >= KeyCode.A && ev.keyCode <= KeyCode.Z)
+                else if (Fusing && idx >= 0 && shown[idx].blocked == null && ev.keyCode >= KeyCode.A && ev.keyCode <= KeyCode.Z)
                 {
                     shown[idx].fuse = ((char)('A' + (ev.keyCode - KeyCode.A))).ToString();
                     AdvanceIfHidden(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
-                else if (idx >= 0 && (ev.keyCode == KeyCode.Alpha0 || ev.keyCode == KeyCode.Keypad0 || ev.keyCode == KeyCode.Minus || ev.keyCode == KeyCode.KeypadMinus || ev.keyCode == KeyCode.Backspace || ev.keyCode == KeyCode.Delete))   // '-' too: it is what the popup shows for "no group" (user 2026-09-16)
+                else if (Fusing && idx >= 0 && (ev.keyCode == KeyCode.Alpha0 || ev.keyCode == KeyCode.Keypad0 || ev.keyCode == KeyCode.Minus || ev.keyCode == KeyCode.KeypadMinus || ev.keyCode == KeyCode.Backspace || ev.keyCode == KeyCode.Delete))   // '-' too: it is what the popup shows for "no group" (user 2026-09-16)
                 {
                     shown[idx].fuse = "";
                     AdvanceIfHidden(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
-                else if (idx >= 0 && ev.keyCode == KeyCode.Space && shown[idx].blocked == null && shown[idx].islands > 1)
+                else if (!Fusing && idx >= 0 && ev.keyCode == KeyCode.Space && shown[idx].blocked == null && shown[idx].islands > 1)
                 {
                     shown[idx].split = !shown[idx].split;
                     AdvanceIfHidden(idx);
@@ -301,15 +324,17 @@ public class ModelWorkshopWindow : EditorWindow
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     Row r = shown[ri]; bool splitBefore = r.split; string fuseBefore = r.fuse;
-                    using (new EditorGUI.DisabledScope(r.islands <= 1 || r.blocked != null))
-                        r.split = EditorGUILayout.Toggle(r.split, GUILayout.Width(20));
+                    if (!Fusing)
+                        using (new EditorGUI.DisabledScope(r.islands <= 1 || r.blocked != null))
+                            r.split = EditorGUILayout.Toggle(r.split, GUILayout.Width(20));
                     // FUSE GROUP (2026-09-15): an independent per-row mark — rows sharing a letter fuse into one welded shell each
-                    using (new EditorGUI.DisabledScope(r.blocked != null))
-                    {
-                        int fi = string.IsNullOrEmpty(r.fuse) ? 0 : Mathf.Clamp(r.fuse[0] - 'A' + 1, 0, FuseLabels.Length - 1);
-                        int fj = EditorGUILayout.Popup(fi, FuseLabels, GUILayout.Width(46));
-                        r.fuse = fj <= 0 ? "" : ((char)('A' + fj - 1)).ToString();
-                    }
+                    else
+                        using (new EditorGUI.DisabledScope(r.blocked != null))
+                        {
+                            int fi = string.IsNullOrEmpty(r.fuse) ? 0 : Mathf.Clamp(r.fuse[0] - 'A' + 1, 0, FuseLabels.Length - 1);
+                            int fj = EditorGUILayout.Popup(fi, FuseLabels, GUILayout.Width(46));
+                            r.fuse = fj <= 0 ? "" : ((char)('A' + fj - 1)).ToString();
+                        }
                     if (r.nodeIndex == selectedIdx && (r.split != splitBefore || r.fuse != fuseBefore)) advanceFrom = ri;   // the mouse path of the A–Z / Space keys
                     bool isSel = selectedIdx == r.nodeIndex;
                     string label = r.blocked != null ? $"{(isSel ? "◉ " : "")}{r.node}   — skipped: {r.blocked}"
@@ -350,7 +375,7 @@ public class ModelWorkshopWindow : EditorWindow
                         GUIUtility.keyboardControl = 0; Repaint();
                     }
                 }
-            if (selRowObj != null && selRowObj.blocked == null)
+            if (!Fusing && selRowObj != null && selRowObj.blocked == null)
             {
                 if (!CutModeActive)
                 {
@@ -411,11 +436,14 @@ public class ModelWorkshopWindow : EditorWindow
             else if (rows.Count > 0)
                 EditorGUILayout.LabelField("  (no preview — the Blender probe export failed or is still pending; the list and Split still work)", EditorStyles.miniLabel);
 
+            if (!Fusing)
             using (new EditorGUI.DisabledScope(chosen == 0 || string.IsNullOrEmpty(outGlb)))
                 if (GUILayout.Button(new GUIContent($"Split {chosen} checked part(s)  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
                         "Writes the output GLB with ONLY the checked parts exploded into _Part_NNN children. The source file is never touched."), GUILayout.Height(28)))
                     SplitChecked();
 
+            if (Fusing)
+            {
             // ---- FUSE (2026-09-15): the opposite of Split — every fuse GROUP (rows sharing a ⊕ letter) becomes ONE welded
             // shell with consistent winding, at the source, so the Lab, the Factory and the bake all see a whole hull. ----
             EditorGUILayout.Space(4);
@@ -456,14 +484,7 @@ public class ModelWorkshopWindow : EditorWindow
                         "a hull authored as dozens of separate plates — see-through, a hole in its side, gaps under any reduction. Triangles are preserved " +
                         "exactly; the source parts keep their transforms and children and lose only their mesh. The source file is never touched."), GUILayout.Height(28)))
                     FuseMarked();
-            int checkedRows = rows.Count(r => r.split);
-            using (new EditorGUI.DisabledScope((fusedRows == 0 && checkedRows == 0) || string.IsNullOrEmpty(outGlb)))
-                if (GUILayout.Button(new GUIContent(
-                            $"Generate — fuse {fusedRows} marked part(s) in {fuseGroups.Count} group(s) AND split {checkedRows} checked part(s)  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
-                            "ONE output GLB with both operations: every ⊕ group is fused into one shell first, then every checked part is exploded into its " +
-                            "_Part_NNN islands (Merge closer than applies). A row that is both lettered and checked is fused, not split — it is named in the report. " +
-                            "The source file is never touched."), GUILayout.Height(28)))
-                    Generate(true);
+            }
         }
 
         if (!string.IsNullOrEmpty(status)) EditorGUILayout.HelpBox(status, MessageType.None);
@@ -961,4 +982,18 @@ public class ModelWorkshopWindow : EditorWindow
         catch (Exception e) { status = "Split failed (source untouched): " + e.Message; Debug.LogException(e); }
         finally { EditorUtility.ClearProgressBar(); }
     }
+}
+
+public class ModelCutterWindow : ModelWorkshopWindow
+{
+    [MenuItem("Tools/HAF/Model Cutter")]
+    static void Open() => GetWindow<ModelCutterWindow>("Model Cutter");
+    protected override bool Fusing => false;
+}
+
+public class ModelFuserWindow : ModelWorkshopWindow
+{
+    [MenuItem("Tools/HAF/Model Fuser")]
+    static void Open() => GetWindow<ModelFuserWindow>("Model Fuser");
+    protected override bool Fusing => true;
 }
