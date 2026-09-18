@@ -42,6 +42,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
         public int verts;        // for the list filters (2026-09-16): vertex count and the world bbox (min/max null = unmeasured, never hidden)
         public float[] min, max;
     }
+    static GUIStyle wrappedButton;
+    static GUIStyle WrappedButton => wrappedButton ?? (wrappedButton = new GUIStyle(GUI.skin.button) { wordWrap = true });   // built lazily: GUI.skin exists only inside OnGUI
     static readonly string[] FuseLabels = new[] { "–" }.Concat(Enumerable.Range(0, 26).Select(i => "⊕" + (char)('A' + i))).ToArray();   // the per-row fuse popup, A–Z (was A–H; user 2026-09-16: a ship has more than eight boats); keys A–Z set it, 0/Backspace clears
 
     const string PreviewDir = "Assets/FactorySource/ModelWorkshop";
@@ -483,7 +485,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                         "a thin solid or a convex plating region by its signed volume about its own centroid (inside-out = reversed whole), a FLAT sheet " +
                         "(a deck, a bulwark) by the inside-out score. Mirrored instances (negative node scale) are read with the winding they render with. The cure for " +
                         "a hull authored as dozens of separate plates — see-through, a hole in its side, gaps under any reduction. Triangles are preserved " +
-                        "exactly; the source parts keep their transforms and children and lose only their mesh. The source file is never touched."), GUILayout.Height(28)))
+                        "exactly; the source parts keep their transforms and children and lose only their mesh. The source file is never touched."), WrappedButton, GUILayout.Height(56)))   // twice the height, wrapped: 19 groups' letters and counts fit (user 2026-09-18)
                     FuseMarked();
             }
         }
