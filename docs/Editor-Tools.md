@@ -421,6 +421,9 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   letters travel with a cut or split output, and a fused output's sidecar names each shell under its group's letter, so
   either order works (the Splitter re-reads the sidecar on every Probe, so after changing groups in the Fuser,
   re-Probe in the Splitter before cutting; the Fuser keeps your edits across a re-Probe and reloads through Load groups).
+  **Delete** (0.5.7): the Delete key, or the row popup, marks a part for deletion in either window — it loses its mesh
+  in the output, whatever writes it (Split, Plane cut or Fuse); Insert marks the highlighted row for split, – / 0 /
+  Backspace clear every mark. The mark is the window's, like a Split check, not the sidecar's.
   Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh;
   the fused part is a new root node named `Fused_<letter>_<first row of the group>`. The output can never be the source file.
   The ⊕ letters persist beside the source as `<source>.glb.fuse.txt` (a `#fuse-groups v2` header, then one

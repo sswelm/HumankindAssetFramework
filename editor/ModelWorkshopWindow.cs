@@ -38,13 +38,16 @@ public abstract class ModelWorkshopWindow : EditorWindow
         public int islands;      // 1 = nothing to split (row disabled)
         public string blocked;   // non-null = the analyzer's reason this part cannot be split
         public bool split;       // the checkbox (Split)
+        public bool delete;      // MARKED FOR DELETION (2026-09-18): the part loses its mesh in the output — Delete key or the row popup, in both windows; exclusive with split and fuse
         public string fuse = ""; // FUSE GROUP letter A..Z (2026-09-15; A..H until 09-16): rows sharing a letter fuse into one shell each; "" = none
         public int verts;        // for the list filters (2026-09-16): vertex count and the world bbox (min/max null = unmeasured, never hidden)
         public float[] min, max;
     }
     static GUIStyle wrappedButton;
     static GUIStyle WrappedButton => wrappedButton ?? (wrappedButton = new GUIStyle(GUI.skin.button) { wordWrap = true });   // built lazily: GUI.skin exists only inside OnGUI
-    static readonly string[] FuseLabels = new[] { "–" }.Concat(Enumerable.Range(0, 26).Select(i => "⊕" + (char)('A' + i))).ToArray();   // the per-row fuse popup, A–Z (was A–H; user 2026-09-16: a ship has more than eight boats); keys A–Z set it, 0/Backspace clears
+    static readonly string[] FuseLabels = new[] { "–" }.Concat(Enumerable.Range(0, 26).Select(i => "⊕" + (char)('A' + i))).Concat(new[] { "✕ Delete" }).ToArray();   // the Fuser's row popup: no group, A–Z, or marked for deletion
+    const int DeleteEntry = 27;   // FuseLabels index of "✕ Delete"
+    static readonly string[] SplitLabels = { "–", "Split", "Delete" }, WholeLabels = { "–", "Delete" };   // the Splitter's row popup (a whole part cannot be split)   // the per-row fuse popup, A–Z (was A–H; user 2026-09-16: a ship has more than eight boats); keys A–Z set it, 0/Backspace clears
 
     const string PreviewDir = "Assets/FactorySource/ModelWorkshop";
 
@@ -66,7 +69,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     Dictionary<string, double> flatAreaByName, flatLevelByName;   // raw per-RENDERER sums over the preview, keyed by EXACT name (the Lab's review P2 lesson: strip nothing here)
     Dictionary<string, float> flatShare; GameObject flatShareFor; // resolved per-part share memo (exact-first, digits-only ".NNN" alias merge — VehicleLabRules.FlatShare)
     [SerializeField] string showOnlyLetter = "";   // "Show only" can also be ONE fuse group (user 2026-09-16): the popup lists every letter in use after the fixed kinds
-    static readonly string[] ShowOnlyOptions = { "None (all parts)", "Checked for Split", "In a fuse group", "Not in a fuse group", "More than one island", "Already whole", "Skipped by the analyzer" };
+    static readonly string[] ShowOnlyOptions = { "None (all parts)", "Checked for Split", "In a fuse group", "Not in a fuse group", "More than one island", "Already whole", "Skipped by the analyzer", "Marked for deletion" };
     // DISTANCE MERGE (2026-09-06, the 602-island rope): topology alone shreds segmented geometry into hundreds
     // of 3-vert parts millimetres apart. Islands within this % of a part's own diagonal count as ONE part, so
     // only genuinely distant geometry — the floating junk — separates. 0 = pure topology.
@@ -193,6 +196,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         {
             int splittable = rows.Count(r => r.islands > 1 && r.blocked == null);
             int chosen = rows.Count(r => r.split);
+            int deleted = rows.Count(r => r.delete);
             EditorGUILayout.LabelField(Fusing
                 ? $"Parts ({rows.Count} node(s)) — click a row to highlight it below; give the parts of one shell the same ⊕ letter:"
                 : $"Parts ({rows.Count} node(s), {splittable} with more than one island) — click a row to highlight it below; check the parts to split:", EditorStyles.boldLabel);
@@ -237,7 +241,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 "builds it); parts the preview can't measure stay visible."), minFlatPct, 0f, 100f);
             var lettersInUse = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).Select(r => r.fuse).Distinct().OrderBy(l => l).ToList();
             // each window lists its own kinds (the Splitter: checked / islands; the Fuser: groups / islands, then every letter in use)
-            int[] kinds = Fusing ? new[] { 0, 2, 3, 4, 5, 6 } : new[] { 0, 1, 4, 5, 6 };
+            int[] kinds = Fusing ? new[] { 0, 2, 3, 7, 4, 5, 6 } : new[] { 0, 1, 7, 4, 5, 6 };
             if (Array.IndexOf(kinds, showOnly) < 0) showOnly = 0;
             var showOptions = kinds.Select(k => ShowOnlyOptions[k]).Concat(Fusing ? lettersInUse.Select(l => $"Group ⊕{l}  ({rows.Count(r => r.fuse == l)} part(s))") : Enumerable.Empty<string>()).ToArray();
             int showIdx = Fusing && !string.IsNullOrEmpty(showOnlyLetter) && lettersInUse.Contains(showOnlyLetter) ? kinds.Length + lettersInUse.IndexOf(showOnlyLetter) : Array.IndexOf(kinds, showOnly);
@@ -257,6 +261,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                     case 4: if (r.islands <= 1 || r.blocked != null) return false; break;
                     case 5: if (r.islands != 1 || r.blocked != null) return false; break;
                     case 6: if (r.blocked == null) return false; break;
+                    case 7: if (!r.delete) return false; break;
                 }
                 if (r.verts > 0 && r.verts < minVerts) return false;
                 if (!FlatOk(r)) return false;
@@ -283,8 +288,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
             // a fuse group, 0/Backspace clear it, Space toggles its Split checkbox — marking dozens of hull plates by mouse
             // was the complaint. The Workshop has no role hotkeys, so the letters are free here.
             EditorGUILayout.LabelField(Fusing
-                ? "  Keys:  ↑/↓ = previous/next part   ·   A–Z = fuse group of the highlighted part (⊕ column)   ·   – / 0 / Backspace = no group"
-                : "  Keys:  ↑/↓ = previous/next part   ·   Space = Split checkbox", EditorStyles.wordWrappedMiniLabel);
+                ? "  Keys:  ↑/↓ = previous/next part   ·   A–Z = fuse group of the highlighted part (⊕ column)   ·   Delete = mark for deletion   ·   – / 0 / Backspace = no mark"
+                : "  Keys:  ↑/↓ = previous/next part   ·   Insert = mark for split   ·   Delete = mark for deletion   ·   Space = toggle split   ·   – / 0 / Backspace = no mark", EditorStyles.wordWrappedMiniLabel);
             var ev = Event.current;
             if (ev.type == EventType.KeyDown && shown.Count > 0 && !EditorGUIUtility.editingTextField)
             {
@@ -299,21 +304,39 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 }
                 else if (Fusing && idx >= 0 && shown[idx].blocked == null && ev.keyCode >= KeyCode.A && ev.keyCode <= KeyCode.Z)
                 {
-                    shown[idx].fuse = ((char)('A' + (ev.keyCode - KeyCode.A))).ToString();
+                    shown[idx].fuse = ((char)('A' + (ev.keyCode - KeyCode.A))).ToString(); shown[idx].delete = false;
                     AdvanceIfHidden(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
-                else if (Fusing && idx >= 0 && (ev.keyCode == KeyCode.Alpha0 || ev.keyCode == KeyCode.Keypad0 || ev.keyCode == KeyCode.Minus || ev.keyCode == KeyCode.KeypadMinus || ev.keyCode == KeyCode.Backspace || ev.keyCode == KeyCode.Delete))   // '-' too: it is what the popup shows for "no group" (user 2026-09-16)
+                // MARKS BY KEY (2026-09-18, user: "an easy way to mark a unit for removal with the Del key … Insert should mark it for
+                // split-up … Delete should also be active in the Fuser"): Delete toggles the deletion mark in both windows and
+                // clears the other marks (a deleted part is neither split nor fused); Insert marks for split in the Splitter
+                else if (idx >= 0 && ev.keyCode == KeyCode.Delete)
                 {
-                    shown[idx].fuse = "";
+                    Row d = shown[idx]; d.delete = !d.delete; if (d.delete) { d.split = false; d.fuse = ""; }
+                    AdvanceIfHidden(idx);
+                    GUIUtility.keyboardControl = 0;
+                    ev.Use(); Repaint();
+                }
+                else if (!Fusing && idx >= 0 && ev.keyCode == KeyCode.Insert && shown[idx].blocked == null && shown[idx].islands > 1)
+                {
+                    shown[idx].split = true; shown[idx].delete = false;
+                    AdvanceIfHidden(idx);
+                    GUIUtility.keyboardControl = 0;
+                    ev.Use(); Repaint();
+                }
+                else if (idx >= 0 && (ev.keyCode == KeyCode.Alpha0 || ev.keyCode == KeyCode.Keypad0 || ev.keyCode == KeyCode.Minus || ev.keyCode == KeyCode.KeypadMinus || ev.keyCode == KeyCode.Backspace))   // '-' too: it is what the popup shows for "no mark" (user 2026-09-16)
+                {
+                    if (Fusing) shown[idx].fuse = ""; else shown[idx].split = false;
+                    shown[idx].delete = false;
                     AdvanceIfHidden(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
                 else if (!Fusing && idx >= 0 && ev.keyCode == KeyCode.Space && shown[idx].blocked == null && shown[idx].islands > 1)
                 {
-                    shown[idx].split = !shown[idx].split;
+                    shown[idx].split = !shown[idx].split; if (shown[idx].split) shown[idx].delete = false;
                     AdvanceIfHidden(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
@@ -325,23 +348,30 @@ public abstract class ModelWorkshopWindow : EditorWindow
             for (int ri = 0; ri < shown.Count; ri++)
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    Row r = shown[ri]; bool splitBefore = r.split; string fuseBefore = r.fuse;
+                    Row r = shown[ri]; bool splitBefore = r.split, deleteBefore = r.delete; string fuseBefore = r.fuse;
                     if (!Fusing)
-                        using (new EditorGUI.DisabledScope(r.islands <= 1 || r.blocked != null))
-                            r.split = EditorGUILayout.Toggle(r.split, GUILayout.Width(20));
-                    // FUSE GROUP (2026-09-15): an independent per-row mark — rows sharing a letter fuse into one welded shell each
+                    {
+                        // the Splitter's mark: nothing, Split (a part with more than one island), or Delete — a popup, as the user asked
+                        // for the same reach by mouse as by key (2026-09-18); the analyzer's skipped parts can still be deleted
+                        bool canSplit = r.islands > 1 && r.blocked == null;
+                        string[] labels = canSplit ? SplitLabels : WholeLabels;
+                        int si = r.delete ? labels.Length - 1 : r.split && canSplit ? 1 : 0;
+                        int sj = EditorGUILayout.Popup(si, labels, GUILayout.Width(64));
+                        if (sj != si) { r.delete = sj == labels.Length - 1; r.split = canSplit && sj == 1; }
+                    }
+                    // FUSE GROUP (2026-09-15): an independent per-row mark — rows sharing a letter fuse into one welded shell each; or Delete
                     else
                         using (new EditorGUI.DisabledScope(r.blocked != null))
                         {
-                            int fi = string.IsNullOrEmpty(r.fuse) ? 0 : Mathf.Clamp(r.fuse[0] - 'A' + 1, 0, FuseLabels.Length - 1);
-                            int fj = EditorGUILayout.Popup(fi, FuseLabels, GUILayout.Width(46));
-                            r.fuse = fj <= 0 ? "" : ((char)('A' + fj - 1)).ToString();
+                            int fi = r.delete ? DeleteEntry : string.IsNullOrEmpty(r.fuse) ? 0 : Mathf.Clamp(r.fuse[0] - 'A' + 1, 0, DeleteEntry - 1);
+                            int fj = EditorGUILayout.Popup(fi, FuseLabels, GUILayout.Width(62));
+                            if (fj != fi) { r.delete = fj == DeleteEntry; r.fuse = fj <= 0 || fj == DeleteEntry ? "" : ((char)('A' + fj - 1)).ToString(); }
                         }
-                    if (r.nodeIndex == selectedIdx && (r.split != splitBefore || r.fuse != fuseBefore)) advanceFrom = ri;   // the mouse path of the A–Z / Space keys
+                    if (r.nodeIndex == selectedIdx && (r.split != splitBefore || r.fuse != fuseBefore || r.delete != deleteBefore)) advanceFrom = ri;   // the mouse path of the A–Z / Space keys
                     bool isSel = selectedIdx == r.nodeIndex;
-                    string label = r.blocked != null ? $"{(isSel ? "◉ " : "")}{r.node}   — skipped: {r.blocked}"
-                                 : Fusing ? $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {r.islands:N0} island{(r.islands == 1 ? "" : "s")})"
-                                 : $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {(r.islands == 1 ? "1 island — already whole" : r.islands.ToString("N0") + " islands")})";
+                    string label = r.blocked != null ? $"{(isSel ? "◉ " : "")}{r.node}   — skipped: {r.blocked}{(r.delete ? "   ✕ deleted in the output" : "")}"
+                                 : Fusing ? $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {r.islands:N0} island{(r.islands == 1 ? "" : "s")}){(r.delete ? "   ✕ deleted in the output" : "")}"
+                                 : $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {(r.islands == 1 ? "1 island — already whole" : r.islands.ToString("N0") + " islands")}){(r.delete ? "   ✕ deleted in the output" : "")}";
                     // the row label is a BUTTON, exactly like the Vehicle Lab: click = highlight + frame in the preview
                     if (GUILayout.Button(label, isSel ? EditorStyles.whiteLabel : (r.blocked == null && (Fusing || r.islands > 1) ? EditorStyles.label : EditorStyles.miniLabel)))   // the Splitter dims what it cannot split
                     { ExitCutMode(); selectedIdx = isSel ? -1 : r.nodeIndex; SelectRow(isSel ? "" : r.node); }
@@ -440,9 +470,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 EditorGUILayout.LabelField($"  (no preview — the Blender probe export failed or is still pending; the list and {(Fusing ? "Fuse" : "Split")} still work)", EditorStyles.miniLabel);
 
             if (!Fusing)
-            using (new EditorGUI.DisabledScope(chosen == 0 || string.IsNullOrEmpty(outGlb)))
-                if (GUILayout.Button(new GUIContent($"Split {chosen} checked part(s)  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
-                        "Writes the output GLB with ONLY the checked parts exploded into _Part_NNN children. The source file is never touched."), GUILayout.Height(28)))
+            using (new EditorGUI.DisabledScope((chosen == 0 && deleted == 0) || string.IsNullOrEmpty(outGlb)))
+                if (GUILayout.Button(new GUIContent($"Split {chosen} checked part(s){(deleted > 0 ? $" and delete {deleted} marked" : "")}  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
+                        "Writes the output GLB with ONLY the checked parts exploded into _Part_NNN children, and every part marked for deletion stripped of its mesh (its transform and children stay). The source file is never touched."), GUILayout.Height(28)))
                     SplitChecked();
 
             if (Fusing)
@@ -476,10 +506,12 @@ public abstract class ModelWorkshopWindow : EditorWindow
                     }
                 EditorGUILayout.LabelField(fusedRows == 0 ? " " : $"{fusedRows} marked in {fuseGroups.Count} group(s): {string.Join("  ", fuseGroups.Select(g => "⊕" + g + "×" + rows.Count(r => r.fuse == g)))}", EditorStyles.miniLabel);
             }
-            using (new EditorGUI.DisabledScope(fusedRows == 0 || string.IsNullOrEmpty(outGlb)))
-                if (GUILayout.Button(new GUIContent(fusedRows == 0
+            using (new EditorGUI.DisabledScope((fusedRows == 0 && deleted == 0) || string.IsNullOrEmpty(outGlb)))
+                if (GUILayout.Button(new GUIContent(fusedRows == 0 && deleted == 0
                             ? "Fuse — mark parts with a ⊕ letter first (popup per row, or keys A–Z on the highlighted row)"
-                            : $"Fuse {fusedRows} marked part(s) in {fuseGroups.Count} group(s) ({string.Join(", ", fuseGroups.Select(g => "⊕" + g + "×" + rows.Count(r => r.fuse == g)))}) into one shell each  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
+                            : fusedRows == 0
+                            ? $"Delete {deleted} marked part(s)  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}"
+                            : $"Fuse {fusedRows} marked part(s) in {fuseGroups.Count} group(s) ({string.Join(", ", fuseGroups.Select(g => "⊕" + g + "×" + rows.Count(r => r.fuse == g)))}) into one shell each{(deleted > 0 ? $" and delete {deleted} marked" : "")}  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
                         "Joins the parts of each ⊕ group into ONE mesh in the output GLB, welds their seams, makes the winding consistent by MAJORITY across each " +
                         "welded island (the minority of faces reversed to agree with the rest), and judges direction once where it can be judged: a shell, " +
                         "a thin solid or a convex plating region by its signed volume about its own centroid (inside-out = reversed whole), a FLAT sheet " +
@@ -700,8 +732,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 : GlbDisconnectedParts.CutFileByFacing(srcFile, outGlb, cutGeo.NodeIndex, cutAxis, cutTiltDeg, CutPlaneValue());
             if (!result.Changed) { status = "Nothing changed — the cut leaves every triangle on one side."; return; }
             foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
+            string deletedLine = ApplyDeletionsTo(outGlb);   // the marks for deletion, on the written output (the cut only appends)
             WriteFuseSidecarForOutput(outGlb);   // the ⊕ letters travel with the output, passed down to the _CutA/_CutB children (user 2026-09-16; review of 0097bd5)
-            status = $"Plane cut done: {result.Details.FirstOrDefault()}\n{outGlb}\nNext: open it in the Vehicle Lab — or cut again by pointing Source GLB at this output and re-Probing (your ⊕ letters travel with it).";
+            status = $"Plane cut done: {result.Details.FirstOrDefault()}{(deletedLine != null ? " " + deletedLine + "." : "")}\n{outGlb}\nNext: open it in the Vehicle Lab — or cut again by pointing Source GLB at this output and re-Probing (your ⊕ letters travel with it).";
         }
         catch (Exception e) { status = "Plane cut failed (source untouched): " + e.Message; Debug.LogException(e); }
         finally { EditorUtility.ClearProgressBar(); }
@@ -938,7 +971,15 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 }
                 if (done > 0) bytes = fused;
             }
-            if (done == 0) { status = "Nothing changed — no group produced a fused mesh (see warnings in the console)."; return; }
+            // …then every part marked for deletion loses its mesh (the fuse never renumbers nodes, so the marks' indices hold)
+            var toDelete = new HashSet<int>(rows.Where(r => r.delete).Select(r => r.nodeIndex));
+            if (toDelete.Count > 0)
+            {
+                var rr = GlbDisconnectedParts.RemoveMeshes(bytes, toDelete);
+                foreach (var w in rr.Warnings) Debug.LogWarning("[Workshop] delete: " + w);
+                if (rr.Changed) { bytes = rr.Bytes; done++; lines.Add(rr.Details[0]); }
+            }
+            if (done == 0) { status = "Nothing changed — no group produced a fused mesh and nothing was deleted (see warnings in the console)."; return; }
             File.WriteAllBytes(outGlb, bytes);
             WriteFuseSidecar(srcFile);   // the groupings, next to the source: a later Probe of this file restores them
             // ...and next to the OUTPUT: each shell under its group's letter, so the Splitter (or the Fuser again) opens it knowing its groups
@@ -962,19 +1003,44 @@ public abstract class ModelWorkshopWindow : EditorWindow
         finally { EditorUtility.ClearProgressBar(); }
     }
 
+    // the parts marked for deletion, stripped from a file already written (the plane cut writes its own output)
+    string ApplyDeletionsTo(string glb)
+    {
+        var toDelete = new HashSet<int>(rows.Where(r => r.delete).Select(r => r.nodeIndex));
+        if (toDelete.Count == 0) return null;
+        var rr = GlbDisconnectedParts.RemoveMeshes(File.ReadAllBytes(glb), toDelete);
+        foreach (var w in rr.Warnings) Debug.LogWarning("[Workshop] delete: " + w);
+        if (!rr.Changed) return null;
+        File.WriteAllBytes(glb, rr.Bytes);
+        return rr.Details[0];
+    }
+
     void SplitChecked()
     {
         if (File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?", outGlb, "Overwrite", "Cancel")) return;
         try
         {
             EditorUtility.DisplayProgressBar("Model Workshop", "Splitting checked parts…", 0.4f);
+            GlbDisconnectedParts.GuardPaths(srcFile, outGlb);   // SplitFile used to guard; this path writes the bytes itself
             var picked = new HashSet<int>(rows.Where(r => r.split).Select(r => r.nodeIndex));
-            var result = GlbDisconnectedParts.SplitFile(srcFile, outGlb, picked, mergePct / 100.0);
-            if (!result.Changed) { status = "Nothing changed — the checked parts produced no split (see warnings in the console)."; return; }
-            foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
+            var toDelete = new HashSet<int>(rows.Where(r => r.delete).Select(r => r.nodeIndex));
+            byte[] bytes = File.ReadAllBytes(srcFile);
+            GlbDisconnectedParts.Result result = picked.Count > 0 ? GlbDisconnectedParts.Split(bytes, picked, mergePct / 100.0) : null;
+            if (result != null && result.Changed) bytes = result.Bytes;
+            string deletedLine = null;
+            if (toDelete.Count > 0)   // after the split: the split only appends, so the marked indices still name their nodes
+            {
+                var rr = GlbDisconnectedParts.RemoveMeshes(bytes, toDelete);
+                foreach (var w in rr.Warnings) Debug.LogWarning("[Workshop] delete: " + w);
+                if (rr.Changed) { bytes = rr.Bytes; deletedLine = rr.Details[0]; }
+            }
+            if ((result == null || !result.Changed) && deletedLine == null) { status = "Nothing changed — the checked parts produced no split and nothing was deleted (see warnings in the console)."; return; }
+            File.WriteAllBytes(outGlb, bytes);
+            if (result != null) foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
             WriteFuseSidecarForOutput(outGlb);   // the ⊕ letters travel with the output, passed down to the _Part_NNN children
-            status = $"Split done: {result.NodesSplit} part(s) → {result.ChildPartsCreated} sub-parts, {result.SourceTriangles:N0} triangles preserved.\n{outGlb}\nNext: open it in the Vehicle Lab, Probe parts, and mark the junk islands Ignore.";
-            Debug.Log($"[Workshop] {string.Join(" | ", result.Details)}");
+            status = (result != null && result.Changed ? $"Split done: {result.NodesSplit} part(s) → {result.ChildPartsCreated} sub-parts, {result.SourceTriangles:N0} triangles preserved." : "Split: nothing checked.")
+                   + (deletedLine != null ? " " + deletedLine + "." : "") + $"\n{outGlb}\nNext: open it in the Vehicle Lab, Probe parts, and mark the junk islands Ignore.";
+            if (result != null) Debug.Log($"[Workshop] {string.Join(" | ", result.Details)}");
         }
         catch (Exception e) { status = "Split failed (source untouched): " + e.Message; Debug.LogException(e); }
         finally { EditorUtility.ClearProgressBar(); }

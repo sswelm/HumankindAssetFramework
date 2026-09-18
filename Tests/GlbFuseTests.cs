@@ -845,4 +845,21 @@ public class GlbFuseTests
         GlbDisconnectedParts.FuseGroups(src, new List<GlbDisconnectedParts.FuseJob> { new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 0, 1 } } }, 0.001, out _, n => { last = n; ticks++; });
         Assert.Equal(1, last); Assert.True(ticks >= 1);
     }
+
+    [Fact]
+    public void RemoveMeshes_strips_the_marked_nodes_meshes_and_nothing_else()
+    {
+        var a = Quad("A", 0, 1, 0, 1, 0); var b = Quad("B", 2, 3, 0, 1, 0); b.Translation = new double[] { 5, 0, 0 };
+        var r = GlbDisconnectedParts.RemoveMeshes(BuildGlb(a, b), new HashSet<int> { 1 });
+        Assert.True(r.Changed); Assert.Equal(1, r.NodesSplit);
+        Assert.Equal("Removed 1 part(s): B", r.Details[0]);
+        var g = Read(r.Bytes);
+        Assert.NotNull(g.Node("A")["mesh"]);
+        Assert.Null(g.Node("B")["mesh"]); Assert.Equal(5.0, (double)g.Node("B")["translation"][0]);   // the node stays, with its transform
+        Assert.Equal(2, ((JArray)g.Root["meshes"]).Count);   // the mesh data is left in the file (an orphan), not compacted
+        // a node without a mesh, or out of range: reported, nothing written
+        var none = GlbDisconnectedParts.RemoveMeshes(r.Bytes, new HashSet<int> { 1, 7 });
+        Assert.False(none.Changed); Assert.Null(none.Bytes); Assert.Equal(2, none.Warnings.Count);
+        Assert.Throws<ArgumentException>(() => GlbDisconnectedParts.RemoveMeshes(r.Bytes, new HashSet<int>()));
+    }
 }

@@ -1735,6 +1735,33 @@ public static class GlbDisconnectedParts
         result.Details.Add(plan.FrameLine);
     }
 
+    // REMOVE (2026-09-18, user: "an easy way to mark a unit for removal with the Del key"): the marked nodes lose their
+    // mesh — exactly what a fused source loses — and keep their transforms and children; nothing is renumbered, so every
+    // other mark (a ⊕ letter, a Split check) still finds its node in the output. The mesh data itself stays in the file
+    // as an orphan the bake never reads; no compaction is attempted. A node without a mesh is reported, not an error.
+    public static Result RemoveMeshes(byte[] source, ISet<int> nodeIndices)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        if (nodeIndices == null || nodeIndices.Count == 0) throw new ArgumentException("Nothing to remove — no node indices.", nameof(nodeIndices));
+        Document document = Parse(source);
+        JObject root = document.Root;
+        JArray nodes = root["nodes"] as JArray ?? new JArray();
+        var result = new Result(); var names = new List<string>();
+        foreach (int ni in nodeIndices.OrderBy(i => i))
+        {
+            if (ni < 0 || ni >= nodes.Count) { result.Warnings.Add("Node " + ni + " does not exist — nothing removed there."); continue; }
+            var n = nodes[ni] as JObject;
+            if (n == null || n["mesh"] == null) { result.Warnings.Add("Node " + ni + " carries no mesh — nothing to remove."); continue; }
+            n.Remove("mesh"); n.Remove("skin");   // a skin without a mesh is invalid glTF: it goes with the mesh
+            names.Add((string)n["name"] ?? ("node " + ni)); result.NodesSplit++;
+        }
+        if (result.NodesSplit == 0) return result;   // Changed == false, Bytes null: the caller keeps what it had
+        result.Details.Add("Removed " + result.NodesSplit + " part(s): " + string.Join(", ", names));
+        result.Bytes = Write(document);
+        ValidateOutput(result.Bytes);
+        return result;
+    }
+
     public static Result FuseFile(string inputPath, string outputPath, IList<int> nodeIndices, double weldFraction)
     {
         GuardPaths(inputPath, outputPath);

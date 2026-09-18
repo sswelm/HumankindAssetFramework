@@ -21,6 +21,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
+- **Mark a part for deletion — Delete key or the row popup, in both windows.** The part loses its mesh in the
+  output (its transform and children stay; the mesh data is left in the file as an orphan the bake never reads), applied
+  by Split, Plane cut and Fuse alike after their own work. The Splitter's row popup is "–  / Split / Delete" (a whole part
+  offers no Split), the Fuser's letter popup ends with "✕ Delete"; Insert marks the highlighted row for split, Delete
+  toggles deletion, – / 0 / Backspace clear every mark. A deleted part is neither split nor fused. "Show only" lists
+  "Marked for deletion". The mark lives in the window, like a Split check — not in the sidecar.
 - **The Model Workshop is two windows: Model Splitter and Model Fuser** (user: "too many responsibilities, which makes
   it cluttered — one screen for cutting and one for merging"). One implementation; both share the file pickers, the
   probe, the filtered part list, the preview, the mirror finder and the keyboard sweep. The Splitter shows the Split
