@@ -214,6 +214,11 @@ public class WorkshopRulesTests
         Assert.Equal(0f, rc, 3);
         Assert.Equal(1, WorkshopRules.FindMirror(rmins, rmaxs, new List<int> { 10, 10, 5, 3 }, 0, 0, rc, out self));
         Assert.Equal(-1, WorkshopRules.FindMirror(rmins, rmaxs, new List<int> { 10, 10, 5, 3 }, 2, 0, rc, out self)); Assert.True(self);
+        // review of 3148c73: four identical fittings clustered on one side vote six pairs among themselves — three genuine
+        // pairs vote three; a part counts once per cluster, so the six genuine parts beat the four strays
+        var cmins = new List<float[]> { V(-5, 0, 0), V(4, 0, 0), V(-3, 2, 0), V(2, 2, 0), V(-8, 4, 0), V(7, 4, 0), V(29.9f, 9, 0), V(30, 9, 0), V(30.1f, 9, 0), V(30.2f, 9, 0) };
+        var cmaxs = new List<float[]> { V(-4, 1, 3), V(5, 1, 3), V(-2, 3, 3), V(3, 3, 3), V(-7, 5, 3), V(8, 5, 3), V(30.4f, 9.5f, 0.5f), V(30.5f, 9.5f, 0.5f), V(30.6f, 9.5f, 0.5f), V(30.7f, 9.5f, 0.5f) };
+        Assert.Equal(0f, WorkshopRules.MirrorCentre(cmins, cmaxs, 0), 3);
         // no two parts alike: the median still serves (a lone hull half beside its keel)
         Assert.Equal(1.5f, WorkshopRules.MirrorCentre(new List<float[]> { V(0, 0, 0), V(1, 0, 0) }, new List<float[]> { V(1, 1, 1), V(4, 2, 2) }, 0), 3);
         // an off-centre model along the other side axis

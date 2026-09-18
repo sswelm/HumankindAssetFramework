@@ -370,10 +370,12 @@ public static class WorkshopRules
 
     // The centreline to mirror across, VOTED by the pairs themselves: every two parts with the same box extents and the
     // same position on the other two axes are a candidate mirrored pair, and the midpoint of their side centres is where
-    // the centreline would have to be; the densest cluster of midpoints wins (within 1 % of the model's side extent).
-    // The median of all part centres was the first rule and a review broke it with four parts: a pair at -5/+5, a keel
-    // at 0 and one stray fitting at 30.5 gave a median of 2.5 and the exact pair was missed. Nothing to vote (no two
-    // parts alike): the median, which a lone keel or a symmetric hull still puts on the centreline.
+    // the centreline would have to be; the cluster of midpoints (within 1 % of the model's side extent) that mirrors the
+    // most DISTINCT parts wins. The median of all part centres was the first rule and a review broke it with four parts:
+    // a pair at -5/+5, a keel at 0 and one stray fitting at 30.5 gave a median of 2.5 and the exact pair was missed.
+    // Counting pairs was the second, and four identical fittings clustered on one side (six pairs among them) outvoted
+    // three genuine pairs (three); a part now counts once per cluster however many partners it has there. Nothing to
+    // vote (no two parts alike): the median, which a lone keel or a symmetric hull still puts on the centreline.
     public static float MirrorCentre(IList<float[]> mins, IList<float[]> maxs, int sideAxis)
     {
         var idx = new List<int>();
@@ -382,7 +384,7 @@ public static class WorkshopRules
         float lo = float.PositiveInfinity, hi = float.NegativeInfinity;
         foreach (int i in idx) { lo = Math.Min(lo, mins[i][sideAxis]); hi = Math.Max(hi, maxs[i][sideAxis]); }
         float window = Math.Max(0.01f * (hi - lo), 1e-4f);
-        var mids = new List<float>();
+        var mids = new List<KeyValuePair<float, long>>();   // midpoint, and the pair (i << 32 | j) that voted it
         for (int a = 0; a < idx.Count; a++)
         {
             int i = idx[a]; float[] li = mins[i], hi_ = maxs[i];
@@ -397,7 +399,7 @@ public static class WorkshopRules
                     if (Math.Abs((hj[c] - lj[c]) - (hi_[c] - li[c])) > tol) alike = false;                 // same extents
                     else if (c != sideAxis && (Math.Abs(lj[c] - li[c]) > tol || Math.Abs(hj[c] - hi_[c]) > tol)) alike = false;   // same place across the other axes
                 }
-                if (alike) mids.Add(0.25f * (li[sideAxis] + hi_[sideAxis] + lj[sideAxis] + hj[sideAxis]));
+                if (alike) mids.Add(new KeyValuePair<float, long>(0.25f * (li[sideAxis] + hi_[sideAxis] + lj[sideAxis] + hj[sideAxis]), ((long)i << 32) | (uint)j));
             }
         }
         if (mids.Count == 0)
@@ -406,14 +408,25 @@ public static class WorkshopRules
             cs.Sort();
             return cs.Count % 2 == 1 ? cs[cs.Count / 2] : 0.5f * (cs[cs.Count / 2 - 1] + cs[cs.Count / 2]);
         }
-        mids.Sort();
-        int bestStart = 0, bestCount = 0;
-        for (int s0 = 0, e = 0; s0 < mids.Count; s0++)
+        mids.Sort((x, y) => x.Key.CompareTo(y.Key));
+        // slide a window over the sorted midpoints, counting the DISTINCT parts in it (a part enters when its first pair
+        // enters and leaves when its last pair leaves); the window mirroring the most parts wins
+        var inWindow = new Dictionary<int, int>();
+        int bestStart = 0, bestEnd = 0, bestParts = 0, e2 = 0;
+        for (int s0 = 0; s0 < mids.Count; s0++)
         {
-            while (e < mids.Count && mids[e] - mids[s0] <= window) e++;
-            if (e - s0 > bestCount) { bestCount = e - s0; bestStart = s0; }
+            while (e2 < mids.Count && mids[e2].Key - mids[s0].Key <= window)
+            {
+                long pk = mids[e2].Value; int pi = (int)(pk >> 32), pj = (int)(pk & 0xffffffffL);
+                inWindow[pi] = inWindow.TryGetValue(pi, out int ci) ? ci + 1 : 1; inWindow[pj] = inWindow.TryGetValue(pj, out int cj) ? cj + 1 : 1;
+                e2++;
+            }
+            if (inWindow.Count > bestParts) { bestParts = inWindow.Count; bestStart = s0; bestEnd = e2; }
+            long qk = mids[s0].Value; int qi = (int)(qk >> 32), qj = (int)(qk & 0xffffffffL);
+            if (--inWindow[qi] == 0) inWindow.Remove(qi);
+            if (--inWindow[qj] == 0) inWindow.Remove(qj);
         }
-        return mids[bestStart + bestCount / 2];   // the window's MEDIAN: exact mirrors vote exactly, a near-copy on the same side only nudges a mean
+        return mids[(bestStart + bestEnd) / 2].Key;   // the window's MEDIAN: exact mirrors vote exactly, a near-copy on the same side only nudges a mean
     }
 
     public static string NextOutputName(string baseName, string suffix)
