@@ -21,6 +21,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
+- **Vehicle Lab: "Default reduce (%)", and Detail now reads before Preserve.** The catch-all tier — every part still
+  marked Default, nothing chosen for it — cut by one dial at Generate exactly as Body parts are, so a model whose
+  thousand small fittings are all undecided slims without marking each one. It joins the tier summary, the Verify
+  projection and the recipe; the rig script takes it as a tagged argument (`defaultreduce=@<file>|<pct>`), so an
+  older script and a newer Lab still run together. Preserve's dial moved below Detail's: the exception reads last.
 - **Mark a part for deletion — Delete key or the row popup, in both windows.** The part loses its mesh in the
   output (its transform and children stay; the mesh data is left in the file as an orphan the bake never reads), applied
   by Split, Plane cut and Fuse alike after their own work. The Splitter's row popup is "–  / Split / Delete" (a whole part
