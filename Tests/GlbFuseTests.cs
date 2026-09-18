@@ -827,6 +827,9 @@ public class GlbFuseTests
         Assert.StartsWith("Fused 2 part(s) -> 'Fused_B_B1'", results[1].Details[0]);
         Assert.True(results[0].Changed && results[1].Changed);
         Assert.Null(results[0].Bytes);   // one output for all: the caller gets the bytes, not each result
+        var gb = Read(both);   // each result names its shell by node index and name: the fused output's sidecar is written from these
+        Assert.Equal("Fused_A_A1", results[0].FusedNodeName); Assert.Equal("Fused_A_A1", (string)gb.Root["nodes"][results[0].FusedNodeIndex]["name"]);
+        Assert.Equal("Fused_B_B1", results[1].FusedNodeName); Assert.Equal("Fused_B_B1", (string)gb.Root["nodes"][results[1].FusedNodeIndex]["name"]);
         // a failing group surfaces its own exception, not an AggregateException
         var skinned = Quad("S", 0, 1, 0, 1, 0); skinned.Skinned = true;
         Assert.Throws<System.IO.InvalidDataException>(() => GlbDisconnectedParts.FuseGroups(BuildGlb(a1, skinned), new List<GlbDisconnectedParts.FuseJob> { new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 1 } } }, 0.001, out _, null));

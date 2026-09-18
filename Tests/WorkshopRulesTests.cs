@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Xunit;
 
 // The fuse-groupings sidecar must never mark a part the user did not mark (review of 82088d4: name-only restore
@@ -226,6 +227,22 @@ public class WorkshopRulesTests
         float oc = WorkshopRules.MirrorCentre(omins, omaxs, 2);
         Assert.Equal(10f, oc, 3);
         Assert.Equal(1, WorkshopRules.FindMirror(omins, omaxs, new List<int> { 1, 1 }, 0, 2, oc, out self));
+    }
+
+    [Fact]
+    public void A_fused_output_s_sidecar_names_each_shell_under_its_letter_and_keeps_an_unfused_group_s_parts()
+    {
+        var groups = new List<KeyValuePair<string, IList<KeyValuePair<int, string>>>> {
+            new KeyValuePair<string, IList<KeyValuePair<int, string>>>("A", Rows((5, "Object_5"), (7, "Object_7"))),
+            new KeyValuePair<string, IList<KeyValuePair<int, string>>>("B", Rows((9, "Object_9"))) };
+        var shells = new Dictionary<string, KeyValuePair<int, string>> { ["A"] = new KeyValuePair<int, string>(1940, "Fused_A_Object_5"), ["B"] = new KeyValuePair<int, string>(-1, null) };   // B produced nothing
+        var lines = WorkshopRules.FusedOutputSidecarLines(groups, shells);
+        Assert.Equal(new[] { "A|1940|Fused_A_Object_5", "B|9|Object_9" }, lines);
+        // ...and the lines read back as the letters they carry
+        var refusedLines = new List<string>();
+        var restored = WorkshopRules.ResolveFuseSidecar(new[] { WorkshopRules.SidecarHeader }.Concat(lines).ToArray(), Rows((9, "Object_9"), (1940, "Fused_A_Object_5")), refusedLines);
+        Assert.Empty(refusedLines);
+        Assert.Equal("A", restored[1940]); Assert.Equal("B", restored[9]);
     }
 
     [Fact]

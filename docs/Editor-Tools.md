@@ -418,7 +418,8 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   band, a side band, **Only flat parts (≥ % level)** — the Lab's deck finder, measured on the preview meshes, so
   the deck plate a fuse group is still missing shows up among a dozen rows — and a **Show only** popup by mark or
   island count — so a 1,400-row liner can be worked one deck or one side at a time; marks on hidden rows are kept. To cut AND fuse, chain the two windows: the ⊕
-  letters travel with a cut or split output, so either order works (each window reads the sidecar at Probe — after
+  letters travel with a cut or split output, and a fused output's sidecar names each shell under its group's letter, so
+  either order works (each window reads the sidecar at Probe — after
   changing groups in the Fuser, re-Probe in the Cutter before cutting, or its output carries the old letters).
   Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh;
   the fused part is a new root node named `Fused_<letter>_<first row of the group>`. The output can never be the source file.

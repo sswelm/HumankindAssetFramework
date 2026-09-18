@@ -118,7 +118,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             EditorGUILayout.LabelField("Model Fuser — weld the parts of each ⊕ group into ONE shell with consistent winding", EditorStyles.boldLabel);
             // two short lines, not one long one: a single long label sets the window's minimum width (user 2026-09-16)
             EditorGUILayout.LabelField("For a hull authored as separate plates (see-through, holes, gaps under reduction): mark the plates with one letter, Fuse, then feed the output to the Vehicle Lab.", EditorStyles.wordWrappedMiniLabel);
-            EditorGUILayout.LabelField("Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh. To cut as well, open the output in the Model Cutter.", EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.LabelField("Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh. To cut as well, open the output in the Model Cutter: each shell keeps its ⊕ letter there.", EditorStyles.wordWrappedMiniLabel);
         }
         else
         {
@@ -910,6 +910,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             byte[] bytes = File.ReadAllBytes(srcFile);
             var lines = new List<string>(); int done = 0;
             var report = new List<WorkshopRules.FuseGroupReport>();   // the evidence goes to a file, not the status box (711 parts in six groups made the status unreadable — user 2026-09-16)
+            List<GlbDisconnectedParts.Result> results = null;   // one per group, in letter order; the output sidecar below names each shell from them
             if (groups.Count > 0)
             {
                 // every group planned AT ONCE on the thread pool against the same source, applied in letter order into one
@@ -920,7 +921,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 var jobs = groups.Select(g => new GlbDisconnectedParts.FuseJob { NodeIndices = g.Select(r => r.nodeIndex).ToList(), Name = "Fused_" + g.Key + "_" + g.First().node }).ToList();   // row order: the first becomes the fused part's name
                 int total = jobs.Count; string letters = string.Join(" ", groups.Select(g => "⊕" + g.Key));
                 EditorUtility.DisplayProgressBar("Model Workshop", $"Fusing {total} group(s) in parallel: {letters}…", 0.2f);
-                byte[] fused = GlbDisconnectedParts.FuseGroups(bytes, jobs, weldPermille / 1000.0, out List<GlbDisconnectedParts.Result> results,
+                byte[] fused = GlbDisconnectedParts.FuseGroups(bytes, jobs, weldPermille / 1000.0, out results,
                     planned => EditorUtility.DisplayProgressBar("Model Workshop", $"Fusing {total} group(s) in parallel — {planned} of {total} planned…", 0.2f + 0.6f * planned / Math.Max(1, total)));
                 for (int gi = 0; gi < groups.Count; gi++)
                 {
@@ -935,6 +936,16 @@ public abstract class ModelWorkshopWindow : EditorWindow
             if (done == 0) { status = "Nothing changed — no group produced a fused mesh (see warnings in the console)."; return; }
             File.WriteAllBytes(outGlb, bytes);
             WriteFuseSidecar(srcFile);   // the groupings, next to the source: a later Probe of this file restores them
+            // ...and next to the OUTPUT: each shell under its group's letter, so the Cutter (or the Fuser again) opens it knowing its groups
+            if (results != null) try
+            {
+                string outSidecar = FuseSidecarPath(outGlb);
+                var byLetter = new Dictionary<string, KeyValuePair<int, string>>();
+                for (int gi = 0; gi < groups.Count; gi++) byLetter[groups[gi].Key] = new KeyValuePair<int, string>(results[gi].FusedNodeIndex, results[gi].FusedNodeName);
+                var outLines = WorkshopRules.FusedOutputSidecarLines(groups.Select(g => new KeyValuePair<string, IList<KeyValuePair<int, string>>>(g.Key, g.Select(r => new KeyValuePair<int, string>(r.nodeIndex, r.node)).ToList())), byLetter);
+                if (outSidecar != null) { if (outLines.Count > 0) File.WriteAllLines(outSidecar, new[] { WorkshopRules.SidecarHeader }.Concat(outLines)); else if (File.Exists(outSidecar)) File.Delete(outSidecar); }
+            }
+            catch (Exception e) { Debug.LogWarning("[Workshop] could not write the output's fuse groupings sidecar: " + e.Message); }
             string reportPath = outGlb + ".fuse-report.txt";
             try { File.WriteAllText(reportPath, WorkshopRules.FuseReport(srcFile, outGlb, weldPermille, report)); }
             catch (Exception e) { Debug.LogWarning("[Workshop] could not write the fuse report: " + e.Message); reportPath = "(not written: " + e.Message + ")"; }

@@ -32,7 +32,8 @@ public static class GlbDisconnectedParts
         public bool Changed => NodesSplit > 0;
         // FUSE (2026-09-15) — what the weld and the winding pass did, so the Workshop can say it in one line
         public int VerticesBefore, VerticesAfter, IslandsBefore, IslandsAfter, FacesRewound;
-        public readonly List<string> IslandLines = new List<string>();   // EVERY island's verdict, largest first (the report; Details keeps the largest six for the status)
+        public readonly List<string> IslandLines = new List<string>();
+        public int FusedNodeIndex = -1; public string FusedNodeName;   // the appended shell (a fuse only): the output sidecar names it with its group's letter   // EVERY island's verdict, largest first (the report; Details keeps the largest six for the status)
     }
 
     sealed class Chunk
@@ -1720,6 +1721,7 @@ public static class GlbDisconnectedParts
             if (!picked.Contains(other) && other != newNodeIndex && (nodes[other] as JObject)?["mesh"] != null && plan.FusedMeshes.Contains(nodes[other].Value<int>("mesh")))
                 result.Warnings.Add("Node " + other + " shares a fused part's mesh and keeps the ORIGINAL geometry (instanced part).");
         result.NodesSplit = picked.Count; result.MeshesSplit = plan.FusedMeshes.Count; result.ChildPartsCreated = 1;
+        result.FusedNodeIndex = newNodeIndex; result.FusedNodeName = newNodeName;
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         result.Details.Add(string.Format(inv,
             "Fused {0} part(s) -> '{1}': {2} -> {3} verts (seams welded within {4:0.####} = {5:0.##}‰ of {6:0.#}); islands {7} -> {8}; {9} made consistent{16}; {10} open sheet(s) judged, {11} reversed; {12} closed shell(s) reversed whole; {13} of {14} face(s) rewound; {15} face(s) smaller than the weld kept collapsed",
