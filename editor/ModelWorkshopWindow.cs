@@ -1039,7 +1039,11 @@ public abstract class ModelWorkshopWindow : EditorWindow
             }
             if (done == 0) { status = "Nothing changed — no group produced a fused mesh and nothing was deleted (see warnings in the console)."; return; }
             File.WriteAllBytes(outGlb, bytes);
-            WriteFuseSidecar(srcFile); WriteMarksSidecar(srcFile);   // the groupings and the marks, next to the source: a later Probe of this file restores them
+            // the groupings and the marks, next to the source: a later Probe of this file restores them. An empty write
+            // CLEARS the file (Save groups' documented "clear"), so a delete-only run — no letters at all — must not
+            // touch it: it would silently drop the groups saved earlier (self-review of PR #63).
+            if (groups.Count > 0) WriteFuseSidecar(srcFile);
+            WriteMarksSidecar(srcFile);
             // ...and next to the OUTPUT: each shell under its group's letter, so the Splitter (or the Fuser again) opens it knowing its groups
             if (results != null) try
             {

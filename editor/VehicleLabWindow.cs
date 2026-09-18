@@ -830,7 +830,9 @@ public class VehicleLabWindow : EditorWindow
                             "The CATCH-ALL tier (2026-09-19): every part still marked Default — nothing chosen for it — " +
                             "cut by this one dial at Generate, exactly as Body parts are (same dissolve + collapse, no " +
                             "exemptions). A model whose thousand small fittings are all undecided slims in one move, " +
-                            "without marking each one. Marking a part anything else takes it out of this tier. 0 = untouched."),
+                            "without marking each one. Marking a part anything else takes it out of this tier. Every part is " +
+                            "cut on its own, so a model with thousands of undecided shards spends real time in Blender here — " +
+                            "watch the Generate log. 0 = untouched."),
                             defaultReducePct, 0f, 95f);
                     using (new EditorGUI.DisabledScope(nRig == 0))
                         riggingReducePct = EditorGUILayout.Slider(new GUIContent("Rigging reduce (%)",
@@ -2112,8 +2114,8 @@ public class VehicleLabWindow : EditorWindow
         File.WriteAllLines(flipFile, src.Where(p => p.role == Role.Flip).Select(p => p.name).ToArray());
         // DEFAULT reduce (2026-09-19): the catch-all tier — every part still unmarked, cut like Body. Passed as a TAGGED
         // argument (the positional block is full at argv[75]), so an older script and a newer Lab still run together.
-        string defaultFile = Path.Combine(projRoot, prevDir, baseName + "_default.txt").Replace(BackSlash, '/');
-        File.WriteAllLines(defaultFile, src.Where(p => p.role == Role.Default).Select(p => p.name).ToArray());
+        string defaultFile = Path.Combine(projRoot, prevDir, baseName + "_default.txt").Replace('\\', '/');
+        if (defaultReducePct > 0f) File.WriteAllLines(defaultFile, src.Where(p => p.role == Role.Default).Select(p => p.name).ToArray());   // only when the dial asks: an undecided model lists thousands of names
         // DETAIL (2026-09-08): a plain reduction tier of its own — welds to the hull like Body.
         string detailFile = Path.Combine(projRoot, prevDir, baseName + "_detail.txt").Replace('\\', '/');
         File.WriteAllLines(detailFile, src.Where(p => p.role == Role.Detail).Select(p => p.name).ToArray());
@@ -2191,7 +2193,6 @@ public class VehicleLabWindow : EditorWindow
     }
 
     // The FLAG FOLD argument — tagged like merge2/bright; empty at the legacy 0 so ships send nothing.
-    const char BackSlash = '\\';   // the path separator, named so a patch script never has to escape it
     // the catch-all reduce tier, tagged: defaultreduce=@<names file>|<percent>. Absent while the dial is 0, so a
     // recipe that never touched it produces a byte-identical command line (and an older rig script ignores the tag).
     string DefaultReduceArg(string namesFile)
