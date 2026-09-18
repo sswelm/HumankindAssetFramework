@@ -56,6 +56,9 @@ public class ModelWorkshopWindow : EditorWindow
     [SerializeField] float minPartSize = 0f;
     [SerializeField] float minHeight = -1e9f, maxHeight = 1e9f, minWidth = -1e9f, maxWidth = 1e9f;   // clamped into the model's span each frame: a fresh model hides nothing
     [SerializeField] int showOnly = 0;
+    [SerializeField] float minFlatPct = 0f;   // 0 = off — hide parts whose LEVEL-surface share (% of area within 30° of horizontal) is below this: the Lab's deck finder, brought over 2026-09-18 ("group D is still missing part of the deck")
+    Dictionary<string, double> flatAreaByName, flatLevelByName;   // raw per-RENDERER sums over the preview, keyed by EXACT name (the Lab's review P2 lesson: strip nothing here)
+    Dictionary<string, float> flatShare; GameObject flatShareFor; // resolved per-part share memo (exact-first, digits-only ".NNN" alias merge — VehicleLabRules.FlatShare)
     [SerializeField] string showOnlyLetter = "";   // "Show only" can also be ONE fuse group (user 2026-09-16): the popup lists every letter in use after the fixed kinds
     static readonly string[] ShowOnlyOptions = { "None (all parts)", "Checked for Split", "In a fuse group", "Not in a fuse group", "More than one island", "Already whole", "Skipped by the analyzer" };
     // DISTANCE MERGE (2026-09-06, the 602-island rope): topology alone shreds segmented geometry into hundreds
@@ -205,6 +208,14 @@ public class ModelWorkshopWindow : EditorWindow
                 minWidth = EditorGUILayout.Slider(new GUIContent("Hide parts left of (side)", "Parts whose bbox centre is on the far side of this across the beam are hidden — bracket with the next slider to keep one side (the starboard hull plates, say)."), Mathf.Clamp(minWidth, wLo - wPad, wHi + wPad), wLo - wPad, wHi + wPad);
                 maxWidth = EditorGUILayout.Slider(new GUIContent("Hide parts right of (side)", "Parts whose bbox centre is beyond this across the beam are hidden."), Mathf.Clamp(maxWidth, wLo - wPad, wHi + wPad), wLo - wPad, wHi + wPad);
             }
+            // THE DECK FINDER (2026-09-18, user: "group D in the Vehicle Lab still seems to be missing part of the deck"): the
+            // Lab's flat-surface filter, measured on the same Blender preview the Workshop builds. Without a preview every
+            // part passes — a filter never hides what it cannot measure.
+            minFlatPct = EditorGUILayout.Slider(new GUIContent("Only flat parts (≥ % level)",
+                "The deck finder: hide parts whose surface area is less than this % LEVEL (within 30° of horizontal, measured on the " +
+                "preview meshes). Slide up to ~60 and the walking decks, platforms and hatch tops remain while masts, hull plating " +
+                "and rigging vanish; combine with the height sliders to pick one deck level. 0 = off. Needs the preview (Probe parts " +
+                "builds it); parts the preview can't measure stay visible."), minFlatPct, 0f, 100f);
             var lettersInUse = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).Select(r => r.fuse).Distinct().OrderBy(l => l).ToList();
             var showOptions = ShowOnlyOptions.Concat(lettersInUse.Select(l => $"Group ⊕{l}  ({rows.Count(r => r.fuse == l)} part(s))")).ToArray();
             int showIdx = !string.IsNullOrEmpty(showOnlyLetter) && lettersInUse.Contains(showOnlyLetter) ? ShowOnlyOptions.Length + lettersInUse.IndexOf(showOnlyLetter) : showOnly;
@@ -225,6 +236,7 @@ public class ModelWorkshopWindow : EditorWindow
                     case 6: if (r.blocked == null) return false; break;
                 }
                 if (r.verts > 0 && r.verts < minVerts) return false;
+                if (!FlatOk(r)) return false;
                 if (r.min == null) return true;   // unmeasured: a filter never hides what it cannot measure
                 if (Mathf.Max(r.max[0] - r.min[0], r.max[1] - r.min[1], r.max[2] - r.min[2]) < minPartSize) return false;
                 float h = Centre(r, 1), w = Centre(r, sideAxis);
@@ -670,6 +682,51 @@ public class ModelWorkshopWindow : EditorWindow
 
     // Click a row → tint that part's renderer(s) yellow and frame them with context (the Vehicle Lab mechanism,
     // name-matched: probe part names ARE the glTF node names, with StartsWith for Blender's collision suffixes).
+    // FLAT-SURFACE FILTER (the Vehicle Lab's, verbatim in spirit): the share of a part's surface area lying within 30° of
+    // level, measured on the PREVIEW meshes (the preview stands upright in Unity, so world +Y is 'level'; the geometric
+    // triangle normal is used — no reliance on authored normals). Cached once per preview instance; a part the preview
+    // doesn't carry (or any state before a probe) PASSES the filter. Blender collision suffixes ("Object_2.001") count
+    // toward their base part through VehicleLabRules.FlatShare, the unit-tested lookup.
+    bool FlatOk(Row x)
+    {
+        if (minFlatPct <= 0f) return true;
+        BuildFlatShareIFN();
+        if (flatAreaByName == null || string.IsNullOrEmpty(x.node)) return true;
+        if (!flatShare.TryGetValue(x.node, out float s))
+        {
+            s = VehicleLabRules.FlatShare(x.node, flatAreaByName, flatLevelByName);
+            flatShare[x.node] = s;
+        }
+        return s < 0f || s * 100f >= minFlatPct;
+    }
+    void BuildFlatShareIFN()
+    {
+        if (inst == null) { flatAreaByName = null; flatLevelByName = null; flatShare = null; flatShareFor = null; return; }
+        if (flatAreaByName != null && flatShareFor == inst) return;
+        flatAreaByName = new Dictionary<string, double>(); flatLevelByName = new Dictionary<string, double>();
+        foreach (var mf in inst.GetComponentsInChildren<MeshFilter>(true))
+        {
+            if (mf == null || mf.sharedMesh == null) continue;
+            string nm = mf.gameObject.name;   // EXACT — alias merging is the lookup's job, with digits-only proof
+            var m = mf.sharedMesh; var l2w = mf.transform.localToWorldMatrix;
+            var v = m.vertices; var t = m.triangles;
+            double a0 = 0, af = 0;
+            for (int i = 0; i < t.Length; i += 3)
+            {
+                Vector3 p0 = l2w.MultiplyPoint3x4(v[t[i]]), p1 = l2w.MultiplyPoint3x4(v[t[i + 1]]), p2 = l2w.MultiplyPoint3x4(v[t[i + 2]]);
+                Vector3 c = Vector3.Cross(p1 - p0, p2 - p0);
+                float a2 = c.magnitude;
+                if (a2 <= 0f) continue;
+                a0 += a2;
+                if (Mathf.Abs(c.y) / a2 >= 0.866f) af += a2;   // cos 30° — the facing cut's default tilt
+            }
+            flatAreaByName.TryGetValue(nm, out double ta); flatAreaByName[nm] = ta + a0;
+            flatLevelByName.TryGetValue(nm, out double tf); flatLevelByName[nm] = tf + af;
+        }
+        flatShare = new Dictionary<string, float>();
+        flatShareFor = inst;
+    }
+
     void SelectRow(string name)
     {
         if (highlightedRenderers != null)

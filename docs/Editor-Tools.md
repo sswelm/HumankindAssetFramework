@@ -409,8 +409,9 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   winding it renders with. A report beside the output (`<output>.glb.fuse-report.txt`) lists, per group, every
   island's verdict, every warning and every stitched candidate's numbers, one item per line; the status box keeps
   one line per group. The part list carries the Lab's filters — hide under a vertex count or a size, a height
-  band, a side band, and a **Show only** popup by mark or island count — so a 1,400-row liner can be worked one
-  deck or one side at a time; marks on hidden rows are kept. **Generate** does both operations into one output:
+  band, a side band, **Only flat parts (≥ % level)** — the Lab's deck finder, measured on the preview meshes, so
+  the deck plate a fuse group is still missing shows up among a dozen rows — and a **Show only** popup by mark or
+  island count — so a 1,400-row liner can be worked one deck or one side at a time; marks on hidden rows are kept. **Generate** does both operations into one output:
   the ⊕ groups fused first, then the checked parts split (a row that is both is fused).
   Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh;
   the fused part is a new root node named `Fused_<letter>_<first row of the group>`. The output can never be the source file.

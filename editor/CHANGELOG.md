@@ -21,6 +21,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
+- **Model Workshop: "Only flat parts (≥ % level)"** — the Vehicle Lab's deck finder, measured on the Blender preview
+  the Workshop already builds: slide it up to ~60 and only the walking decks, platforms and hatch tops remain, so the
+  deck plate a fuse group is still missing shows up in a list of a dozen rows instead of 1,900. Parts the preview
+  cannot measure stay visible; the visibility filter stays in the Lab (it needs the Lab's escape-ray probe).
 - **Model Workshop: "Find the mirror of …"** — one button under the part list finds the highlighted part's twin on
   the other side of the centreline: the part whose world box is this one's reflected (every bound within 3 % of the
   part's size), triangle counts ignored because the two sides are often remodelled rather than instanced (the SS
@@ -98,7 +102,7 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   side band across the beam, and a **Show only** popup (checked for Split, in a fuse group, not in one, more than
   one island, already whole, skipped — or any ONE fuse group, every letter in use is listed). The bands come from each node's world bounding box, read from the file's
   accessor min/max, so nothing slows the Probe. Marks on hidden rows are kept and Fuse/Split act on every marked
-  row. The flat-surface and visibility filters stay in the Lab: they need the Blender probe.
+  row. The visibility filter stays in the Lab: it needs the Lab's escape-ray probe (the flat filter followed on 2026-09-18).
 
 - **Model Workshop: Fuse writes a report file** beside the output GLB (`<output>.glb.fuse-report.txt`): per group the
   parts, the summary, every island's verdict and every stitched candidate's numbers, one item per line. The status
