@@ -1153,36 +1153,56 @@ public static class GlbDisconnectedParts
                     laps.Count, string.Join(", ", laps.Select(n => "'" + n + "'"))));
         }
 
-        // 4) consistency by MAJORITY — parity propagation across two-face edges, the minority reversed
+        // 4) ORIENTATION SHEETS, and consistency by MAJORITY within each. Parity (which way a face is wound relative to
+        // its neighbour) propagates across TWO-face edges only. An edge shared by three or more faces — a deck meeting
+        // a hull side in the middle of the plate, a lap strip stitched onto plating — is a junction no two faces own, so
+        // an island (stage 3, connectivity through ANY shared edge) can hold several parity-connected SHEETS joined only
+        // at such junctions, each sheet's winding relative to the others being whatever the seeds assigned. Until
+        // 2026-09-18 ONE majority flip and ONE direction verdict covered the whole island, and for the SS Romanic's
+        // group D (hull shell + decks + bulwarks, one 25,000-face island of 19 % boundary) they fell on either side of a
+        // coin: the starboard deck rendered transparent with 12 parts in the group and solid with 14. Sheets are the
+        // units now: the majority is taken within a sheet (the minimal correction that makes it consistent), the
+        // orientability test is the sheet's own, and stage 5 judges each sheet's direction by its own volume, twins
+        // and score. A manifold island is one sheet, so hulls, boats and decks read exactly as before. Partnering the
+        // two faces that geometrically CONTINUE each other at a junction was tried and rejected the same day: the
+        // Romanic's Object_4 alone went from 0 to 3 non-orientable sheets (its inner and outer skins meet its decks at
+        // three-face rims, and a continuation pair there closes odd cycles); a branch at a junction starts its own sheet.
         var flip = new bool[faceCount];
         int islandsMadeConsistent = 0, islandsNotOrientable = 0;
-        var islandConflict = new string[allIslands.Count];
-        var notOrientable = new bool[allIslands.Count];   // an island the parity pass refused is left alone by the direction pass too (review of 0097bd5)   // per island: same-traversal edges before, still unsatisfied after the flip (the "largest islands" line)
         bool DirOf(int face, long key) { for (int e = 0; e < 3; e++) if (fEdgeKeys[face * 3 + e] == key) return fEdgeDir[face * 3 + e]; return false; }
+        long PairKey(int f, int g) => f < g ? ((long)f << 32) | (uint)g : ((long)g << 32) | (uint)f;
         Vec3 P(int f, int corner) => pos[tris[f * 3 + corner]];
         Vec3 FaceNormal(int f)   // area-weighted, with the CURRENT winding (authored while `flip` is still all false)
         {
             Vec3 n = FCross(FSub(P(f, 1), P(f, 0)), FSub(P(f, 2), P(f, 0)));
             return flip[f] ? FScale(n, -1.0) : n;
         }
-        for (int ii = 0; ii < allIslands.Count; ii++)
+        // the partner of every face-edge: the face across a two-face edge, -1 at a rim or a junction
+        var partner = new int[faceCount * 3]; for (int k = 0; k < partner.Length; k++) partner[k] = -1;
+        for (int f = 0; f < faceCount; f++) for (int e = 0; e < 3; e++)
         {
-            List<int> isl = allIslands[ii];
-            var parity = new Dictionary<int, int>();
-            var edgeSame = new Dictionary<long, bool>();   // every 2-face edge of the island: were its faces walking it the same way (after the lap rule)?
-            foreach (int seed in isl)
+            long key = fEdgeKeys[f * 3 + e]; if (key < 0) continue;
+            List<int> lf = fEdgeFaces[key]; if (lf.Count != 2) continue;
+            partner[f * 3 + e] = lf[0] == f ? lf[1] : lf[0];
+        }
+        var sheets = new List<List<int>>();
+        var sheetOf = new int[faceCount]; for (int f = 0; f < faceCount; f++) sheetOf[f] = -1;
+        var parityOf = new int[faceCount];
+        var edgeSame = new Dictionary<long, bool>();   // every partnered pair walked (keyed by the pair): were its faces walking the edge the same way (after the lap rule)?
+        foreach (List<int> islandFaces in allIslands)
+            foreach (int seed in islandFaces)
             {
-                if (parity.ContainsKey(seed)) continue;
-                parity[seed] = 0; var stack = new Stack<int>(); stack.Push(seed);
+                if (sheetOf[seed] >= 0) continue;
+                int sid = sheets.Count; var members = new List<int>();
+                sheetOf[seed] = sid; parityOf[seed] = 0; var stack = new Stack<int>(); stack.Push(seed);
                 while (stack.Count > 0)
                 {
-                    int fa = stack.Pop();
+                    int fa = stack.Pop(); members.Add(fa);
                     for (int e = 0; e < 3; e++)
                     {
                         long key = fEdgeKeys[fa * 3 + e]; if (key < 0) continue;
-                        List<int> lf = fEdgeFaces[key]; if (lf.Count != 2) continue;
-                        int fb = lf[0] == fa ? lf[1] : lf[0];
-                        if (fb == fa || parity.ContainsKey(fb)) continue;
+                        int fb = partner[fa * 3 + e];
+                        if (fb < 0 || fb == fa || sheetOf[fb] >= 0) continue;
                         bool same = fEdgeDir[fa * 3 + e] == DirOf(fb, key);   // both walk the edge the same way = inconsistent neighbours…
                         // …unless they are a LAP: the Teutonic's Object_8 is 671 riveted lap strips lying ON the plates,
                         // stitched to them along one edge and authored facing the SAME way as the plate beneath. In
@@ -1196,35 +1216,49 @@ public static class GlbDisconnectedParts
                             double la = FLen(na), lb = FLen(nb);
                             if (la > 1e-12 && lb > 1e-12 && FDot(na, nb) / (la * lb) > 0.9) same = false;
                         }
-                        edgeSame[key] = same;
-                        parity[fb] = parity[fa] ^ (same ? 1 : 0);
-                        stack.Push(fb);
+                        edgeSame[PairKey(fa, fb)] = same;
+                        parityOf[fb] = parityOf[fa] ^ (same ? 1 : 0);
+                        sheetOf[fb] = sid; stack.Push(fb);
+                    }
+                }
+                sheets.Add(members);
+            }
+        var islandConflict = new string[sheets.Count];   // per sheet: same-traversal edges before, still unsatisfied after the flip (the "largest islands" line)
+        var notOrientable = new bool[sheets.Count];      // a sheet the parity pass refused is left alone by the direction pass too (review of 0097bd5)
+        for (int ii = 0; ii < sheets.Count; ii++)
+        {
+            List<int> isl = sheets[ii];
+            int ones = 0; foreach (int f in isl) ones += parityOf[f];
+            // every 2-face edge (tree or not): same-traversal count before, and after the parity assignment how many
+            // edges are still unsatisfied — a 2-colourable sheet (the hull: one seam, one region) resolves to zero,
+            // a non-orientable construction (a propeller blade with fins) cannot
+            int sameBefore = 0, unsatisfied = 0, twoFaceEdges = 0;
+            var conflicts = new Dictionary<string, int>();   // "partA~partB (n-face edge)" -> unsatisfied pairs there: WHERE a sheet fails to orient
+            {
+                foreach (int f in isl) for (int e = 0; e < 3; e++)
+                {
+                    long key = fEdgeKeys[f * 3 + e]; int g = partner[f * 3 + e];
+                    if (key < 0 || g < 0 || g < f) continue;   // each partnered pair once
+                    twoFaceEdges++;
+                    bool sm; if (!edgeSame.TryGetValue(PairKey(f, g), out sm)) { sm = fEdgeDir[f * 3 + e] == DirOf(g, key); }
+                    if (sm) sameBefore++;
+                    if ((parityOf[f] ^ parityOf[g]) != (sm ? 1 : 0))
+                    {
+                        unsatisfied++;
+                        int pa = partOf[tris[f * 3]], pb = partOf[tris[g * 3]];
+                        string ck = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}~{1} ({2}-face edge)", partNames[Math.Min(pa, pb)], partNames[Math.Max(pa, pb)], fEdgeFaces[key].Count);
+                        conflicts[ck] = conflicts.TryGetValue(ck, out int cc) ? cc + 1 : 1;
                     }
                 }
             }
-            int ones = 0; foreach (int f in isl) ones += parity[f];
-            // every 2-face edge (visited or not): same-traversal count before, and after the parity assignment how many
-            // edges are still unsatisfied — a 2-colourable island (the hull: one seam, one region) resolves to zero,
-            // a non-orientable construction (a propeller blade with fins) cannot
-            int sameBefore = 0, unsatisfied = 0, twoFaceEdges = 0;
-            {
-                var seenEdge = new HashSet<long>();
-                foreach (int f in isl) for (int e = 0; e < 3; e++)
-                {
-                    long key = fEdgeKeys[f * 3 + e]; if (key < 0 || !seenEdge.Add(key)) continue;
-                    List<int> lf = fEdgeFaces[key]; if (lf.Count != 2) continue;
-                    twoFaceEdges++;
-                    bool sm; if (!edgeSame.TryGetValue(key, out sm)) { sm = DirOf(lf[0], key) == DirOf(lf[1], key); }
-                    if (sm) sameBefore++;
-                    if ((parity[lf[0]] ^ parity[lf[1]]) != (sm ? 1 : 0)) unsatisfied++;
-                }
-            }
             islandConflict[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} of {1} edges same-way, {2} unsatisfied after", sameBefore, twoFaceEdges, unsatisfied);
+            if (conflicts.Count > 0)   // the reader's next question is WHERE: the four heaviest part pairs
+                islandConflict[ii] += " at " + string.Join(", ", conflicts.OrderByDescending(kv => kv.Value).Take(4).Select(kv => kv.Key + " ×" + kv.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)));
             // NOT ORIENTABLE BY TRAVERSAL (2026-09-17, the Teutonic's propellers): a blade renders right yet 32 of its
             // 1,287 edges are walked the same way by both faces, and after the parity assignment 138 edges are still
             // unsatisfied — the surface has odd cycles (fins, fillets, a twisted rim) and no winding satisfies it. The
             // majority rule then turned 198 faces per blade, jagged holes at every tip. Every real hull, deck and boat
-            // island measured reaches exactly 0 unsatisfied edges; anything above is a guess, and a guess is not made.
+            // sheet measured reaches exactly 0 unsatisfied edges; anything above is a guess, and a guess is not made.
             // "0 unsatisfied" was the first rule; the SS Romanic's 41,799-face hull reached 1 unsatisfied of 92 same-way
             // edges (one stray edge in 59,000) and the whole hull was refused. Tolerance: the pass must resolve at least
             // 95 % of the same-way edges — a blade (138 left of 32) is still refused, one stray edge is not.
@@ -1232,7 +1266,7 @@ public static class GlbDisconnectedParts
             else if (ones > 0 && ones < isl.Count)
             {
                 int minor = ones * 2 <= isl.Count ? 1 : 0;
-                foreach (int f in isl) if (parity[f] == minor) flip[f] = true;
+                foreach (int f in isl) if (parityOf[f] == minor) flip[f] = true;
                 islandsMadeConsistent++;
             }
         }
@@ -1253,7 +1287,7 @@ public static class GlbDisconnectedParts
         // the group's own vertices are the fallback for a file with nothing else in it.
         ModelBelly(nodes, meshes, reader, pos, out int lengthAxis, out int widthAxis, out double centreW, out double bellyY);
         int openJudged = 0, openReversed = 0, closedReversed = 0;
-        var islandRule = new string[allIslands.Count];   // per island, for the "largest islands" line: what was measured and what decided
+        var islandRule = new string[sheets.Count];   // per island, for the "largest islands" line: what was measured and what decided
         // DOUBLE-SKIN twin grid, built ONCE over every face of the group (the two skins of a thin solid are usually separate
         // islands, so a twin must be searched across islands): each face registered in every cell its bounding box
         // touches, the cell the larger of the reach and the median triangle size (a coarse mesh registers in a handful of
@@ -1282,23 +1316,23 @@ public static class GlbDisconnectedParts
         }
         // the twin statistics of every island, measured BEFORE any direction flip (an island turned earlier in the loop
         // would present same-way normals to its twin island — the inner skin saw an already-turned outer skin)
-        var twinStats = new int[allIslands.Count][];
+        var twinStats = new int[sheets.Count][];
         // ENCLOSURE evidence (review of 7307fe2: six inward cubes around a seventh across air gaps gave the centre a twin
         // behind every face): the twins behind a cavity shell all belong to ONE other island whose bounding box contains
         // the shell — six neighbours are six twin islands, none containing the centre. Recorded here per island.
-        var islandOf = new int[faceCount]; for (int ii = 0; ii < allIslands.Count; ii++) foreach (int f in allIslands[ii]) islandOf[f] = ii;
-        var islandLo = new double[allIslands.Count][]; var islandHi = new double[allIslands.Count][];
-        for (int ii = 0; ii < allIslands.Count; ii++)
+        var islandOf = sheetOf;   // the twins' owner is a SHEET (the enclosing skin is one sheet even where it meets its decks)
+        var islandLo = new double[sheets.Count][]; var islandHi = new double[sheets.Count][];
+        for (int ii = 0; ii < sheets.Count; ii++)
         {
             islandLo[ii] = new[] { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity }; islandHi[ii] = new[] { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
-            foreach (int f in allIslands[ii]) for (int c = 0; c < 3; c++) UpdateBounds(islandLo[ii], islandHi[ii], P(f, c));
+            foreach (int f in sheets[ii]) for (int c = 0; c < 3; c++) UpdateBounds(islandLo[ii], islandHi[ii], P(f, c));
         }
-        var enclosingIsland = new int[allIslands.Count];   // the island holding the twins behind, when one island holds ≥ 90 % of them and its box contains this one; else -1
-        for (int ii = 0; ii < allIslands.Count; ii++)
+        var enclosingIsland = new int[sheets.Count];   // the island holding the twins behind, when one island holds ≥ 90 % of them and its box contains this one; else -1
+        for (int ii = 0; ii < sheets.Count; ii++)
         {
             int partnered = 0, twinInFront = 0, twinBehind = 0;
             var behindBy = new Dictionary<int, int>();   // twin island -> twins-behind count
-            foreach (int f in allIslands[ii])
+            foreach (int f in sheets[ii])
             {
                 Vec3 nf = FaceNormal(f); double lf = FLen(nf); if (lf < 1e-12) continue; nf = FScale(nf, 1.0 / lf);
                 Vec3 c = twinCentres[f]; PositionKey k = CellOf(c, twinCell); double best = double.PositiveInfinity; double proj = 0; int bestG = -1;
@@ -1338,11 +1372,13 @@ public static class GlbDisconnectedParts
                 }
             }
         }
-        for (int ii = 0; ii < allIslands.Count; ii++)
+        for (int ii = 0; ii < sheets.Count; ii++)
         {
-            List<int> isl = allIslands[ii];
+            List<int> isl = sheets[ii];
+            // a sheet's boundary is every face-edge without a partner: the rim, and the junctions where this sheet is the
+            // branching face (a deck ends at the hull side; a hull side continues through it) — such a sheet is open
             var keys = new HashSet<long>(); int boundary = 0;
-            foreach (int f in isl) for (int e = 0; e < 3; e++) { long key = fEdgeKeys[f * 3 + e]; if (key >= 0 && keys.Add(key) && fEdgeFaces[key].Count == 1) boundary++; }
+            foreach (int f in isl) for (int e = 0; e < 3; e++) { long key = fEdgeKeys[f * 3 + e]; if (key < 0) continue; keys.Add(key); if (partner[f * 3 + e] < 0) boundary++; }
             bool closed = boundary == 0 && keys.Count > 0;
             // signed volume about the island's own centroid, and how much the per-face cones agree on its sign
             var centroid = new Vec3 { X = 0, Y = 0, Z = 0 };
@@ -1408,17 +1444,25 @@ public static class GlbDisconnectedParts
                 partnered > 0 ? string.Format(System.Globalization.CultureInfo.InvariantCulture, ", double skin {0:0}% twinned ({1} twin in front / {2} behind)", 100.0 * partnered / isl.Count, twinInFront, twinBehind) : "");
         }
         foreach (bool b in flip) if (b) result.FacesRewound++;
+        // per PART: how many of its faces were turned — the reader's question after "why does my port side still render
+        // inside out" is which part the pass left alone (2026-09-18, the Romanic's group D)
+        string rewoundByPart;
+        {
+            var facesOf = new int[picked.Count]; var turnedOf = new int[picked.Count];
+            for (int f = 0; f < faceCount; f++) { int pp = partOf[tris[f * 3]]; facesOf[pp]++; if (flip[f]) turnedOf[pp]++; }
+            rewoundByPart = "rewound by part: " + string.Join("; ", Enumerable.Range(0, picked.Count).Select(pp => string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} {1}/{2}", partNames[pp], turnedOf[pp], facesOf[pp])));
+        }
         // the largest islands, so a reader can see WHAT was judged (faces, boundary share, how many faces the majority
         // rule turned) — the Teutonic's hole was a 1,613-face minority inside a 4,013-face island. Details[0] stays
         // the one-line summary (the Workshop's status reads it); this is Details[1].
         string largestIslands;
         {
             var rows = new List<string>();
-            foreach (int ii in Enumerable.Range(0, allIslands.Count).OrderByDescending(i => allIslands[i].Count))
+            foreach (int ii in Enumerable.Range(0, sheets.Count).OrderByDescending(i => sheets[i].Count))
             {
-                List<int> isl = allIslands[ii];
+                List<int> isl = sheets[ii];
                 var keys = new HashSet<long>(); int boundary = 0, turned = 0;
-                foreach (int f in isl) { if (flip[f]) turned++; for (int e = 0; e < 3; e++) { long key = fEdgeKeys[f * 3 + e]; if (key >= 0 && keys.Add(key) && fEdgeFaces[key].Count == 1) boundary++; } }
+                foreach (int f in isl) { if (flip[f]) turned++; for (int e = 0; e < 3; e++) { long key = fEdgeKeys[f * 3 + e]; if (key < 0) continue; keys.Add(key); if (partner[f * 3 + e] < 0) boundary++; } }
                 string line = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} faces ({1:0}% boundary, {2}, {3} rewound; {4})", isl.Count, keys.Count > 0 ? 100.0 * boundary / keys.Count : 100.0, islandRule[ii], turned, islandConflict[ii]);
                 result.IslandLines.Add(line);   // all of them, for the report (review of 0097bd5: the report promised every island and carried six)
                 if (rows.Count < 6) rows.Add(line);
@@ -1429,20 +1473,21 @@ public static class GlbDisconnectedParts
         // 6) vertex normals follow the final winding
         var incident = new List<int>[pos.Count];
         for (int f = 0; f < faceCount; f++) for (int c = 0; c < 3; c++) { int v = tris[f * 3 + c]; (incident[v] ?? (incident[v] = new List<int>())).Add(f); }
+        // The authored normal is kept (its smoothing is the artist's) with its SIGN chosen to agree with the final winding:
+        // the sum of the incident faces' geometric normals. "Negate it when every incident face was flipped" was the
+        // first rule, and it assumed the authored normal agreed with the authored winding — a mirrored instance (the
+        // Romanic's whole port side) ships normals pointing UP over a winding that renders DOWN, so turning the winding
+        // right and negating the normal left the deck lit from below (2026-09-18: visible from above at last, and dark).
         var finalNormal = new Vec3[pos.Count];
         for (int v = 0; v < pos.Count; v++)
         {
             List<int> faces = incident[v];
-            int flipped = 0; if (faces != null) foreach (int f in faces) if (flip[f]) flipped++;
+            var acc = new Vec3 { X = 0, Y = 0, Z = 0 };
+            if (faces != null) foreach (int f in faces) acc = FAdd(acc, FaceNormal(f));
             Vec3? authored = nrm[v];
-            if (authored.HasValue && faces != null && flipped == 0) finalNormal[v] = authored.Value;
-            else if (authored.HasValue && faces != null && flipped == faces.Count) finalNormal[v] = FScale(authored.Value, -1.0);
-            else
-            {
-                var acc = new Vec3 { X = 0, Y = 0, Z = 0 };
-                if (faces != null) foreach (int f in faces) acc = FAdd(acc, FaceNormal(f));
-                finalNormal[v] = FLen(acc) > 1e-18 ? FUnit(acc) : (authored ?? new Vec3 { X = 0, Y = 1, Z = 0 });
-            }
+            if (authored.HasValue && FLen(acc) > 1e-18) finalNormal[v] = FDot(authored.Value, acc) < 0 ? FScale(authored.Value, -1.0) : authored.Value;
+            else if (authored.HasValue) { int flipped = 0; if (faces != null) foreach (int f in faces) if (flip[f]) flipped++; finalNormal[v] = faces != null && flipped == faces.Count ? FScale(authored.Value, -1.0) : authored.Value; }   // degenerate fan: the old rule
+            else finalNormal[v] = FLen(acc) > 1e-18 ? FUnit(acc) : new Vec3 { X = 0, Y = 1, Z = 0 };
         }
 
         // 7) output vertices: one per welded class + material + matching UV + matching normal; one primitive per material
@@ -1536,7 +1581,8 @@ public static class GlbDisconnectedParts
             islandsMadeConsistent, openJudged, openReversed, closedReversed, result.FacesRewound, faceCount, collapsedFaces,
             islandsNotOrientable > 0 ? string.Format(inv, ", {0} not orientable by traversal (kept as authored)", islandsNotOrientable) : ""));
         result.Details.Add(largestIslands);
-        if (stitchedLine != null) result.Details.Add(stitchedLine);
+        if (stitchedLine != null) result.Details.Add(stitchedLine);   // Details[2] when present: the lap test pins it there
+        result.Details.Add(rewoundByPart);
         result.Details.Add(string.Format(inv, "frame: length along {0}, side centre {1:0.##}, belly height {2:0.##} (the model's, fused or not)", lengthAxis == 0 ? "X" : "Z", centreW, bellyY));
 
         buffers[0]["byteLength"] = bin.Count;

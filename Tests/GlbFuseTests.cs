@@ -612,6 +612,7 @@ public class GlbFuseTests
         Assert.Contains("0 made consistent, 1 not orientable by traversal (kept as authored)", res.Details[0]);
         Assert.Contains("not orientable, kept as authored", res.Details[1]);
         Assert.Contains("not judged", res.Details[1]);
+        Assert.Contains("unsatisfied after at Band~Band (2-face edge)", res.Details[1]);   // …and WHERE it fails, by part pair (2026-09-18)
         Assert.Equal(0, res.FacesRewound);
         // KEPT means kept: the same band wound the other way is not reversed whole by the direction pass either (review of 0097bd5)
         var bandReversed = new Part { Name = "Band", Positions = pos.ToArray(), Indices = idx.Select((v, i) => i % 3 == 1 ? idx[i + 1] : i % 3 == 2 ? idx[i - 1] : v).ToArray() };
@@ -752,5 +753,59 @@ public class GlbFuseTests
     {
         Assert.Throws<InvalidOperationException>(() => GlbDisconnectedParts.GuardPaths(@"C:\models\ship.glb", @"C:/models/SHIP.GLB"));
         GlbDisconnectedParts.GuardPaths(@"C:\models\ship.glb", @"C:\models\ship_fused.glb");
+    }
+
+    // ---- orientation SHEETS (2026-09-18, the SS Romanic's group D) ----
+
+    // a plate hinged on the cube's top-front edge (a three-face junction) and extending forward at the cube's top height,
+    // wound to face DOWN; its 4 corners are the cube's v6/v7 and two new ones
+    static Part HingedPlate(string name, bool down)
+    {
+        var p = new Part { Name = name, Positions = new float[] { 0, 1, 1,  1, 1, 1,  1, 1, 2,  0, 1, 2 } };
+        p.Indices = down ? new[] { 0, 1, 3,  1, 2, 3 } : new[] { 0, 3, 1,  1, 3, 2 };
+        return p;
+    }
+
+    [Fact]
+    public void A_branch_at_a_three_face_junction_is_judged_as_its_own_sheet()
+    {
+        // an outward cube with a downward plate hinged on one of its edges: cube + plate are ONE island (they share the
+        // edge) but two sheets (the edge has three faces, so parity crosses it nowhere). Judged as one island the cube's
+        // confident volume kept everything and the plate stayed inside out; per sheet the plate (open, no volume) goes to
+        // the inside-out score against the belly and is reversed, the cube (open at that edge, confident volume) is kept
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(Box("Cube", 1, 0, 0, 0, inward: false), HingedPlate("Plate", down: true)), new[] { 0, 1 }, 0.0);
+        Assert.Equal(1, r.IslandsAfter);
+        Assert.Equal(2, r.FacesRewound);
+        Assert.Contains("2 open sheet(s) judged, 1 reversed", r.Details[0]);
+        Assert.Contains("rewound by part: Cube 0/12; Plate 2/2", r.Details.First(d => d.StartsWith("rewound by part")));
+        // …and the same plate wound UP is left alone, the cube too
+        var ok = GlbDisconnectedParts.FuseNodes(BuildGlb(Box("Cube", 1, 0, 0, 0, inward: false), HingedPlate("Plate", down: false)), new[] { 0, 1 }, 0.0);
+        Assert.Equal(0, ok.FacesRewound);
+        // the island line names the sheets, largest first, and each sheet's line carries its own verdict
+        Assert.Equal(2, r.IslandLines.Count);
+        Assert.StartsWith("12 faces (", r.IslandLines[0]);
+        Assert.Contains("kept", r.IslandLines[0]);
+        Assert.StartsWith("2 faces (", r.IslandLines[1]);
+        Assert.Contains("reversed whole", r.IslandLines[1]);
+    }
+
+    [Fact]
+    public void Authored_normals_take_the_sign_of_the_final_winding_not_the_flip_count()
+    {
+        // The Romanic's port side: a mirrored node whose spec front face points DOWN while its authored normals point UP.
+        // The direction pass turns the deck up; "negate the normal when every face flipped" then pointed the normals DOWN
+        // — the deck rendered lit from below. The normal keeps the artist's smoothing and takes the sign of the winding.
+        // The frame needs a belly below the deck: a tall box elsewhere in the file (not in the group) supplies it.
+        var deck = new Part { Name = "Deck", Positions = new float[] { 0, 0.9f, 0,  1, 0.9f, 0,  0, 0.9f, 1,  1, 0.9f, 1 },
+            Indices = new[] { 0, 1, 2,  1, 3, 2 },   // local winding faces -Y; under the mirror the spec front face is -Y too (det < 0 flips it back)
+            Normals = new float[] { 0, 1, 0,  0, 1, 0,  0, 1, 0,  0, 1, 0 }, Scale = new double[] { -1, 1, 1 } };
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(deck, Box("Hull", 1, 2, 0, 0, inward: false)), new[] { 0 }, 0.0);
+        Assert.Equal(2, r.FacesRewound);   // the deck faced down above the belly: reversed
+        var g = Read(r.Bytes);
+        var prim = (JObject)g.Primitives(g.Node("Deck_Fused"))[0];
+        float[] n = g.Floats(((JObject)prim["attributes"]).Value<int>("NORMAL"), 3);
+        for (int i = 0; i < n.Length / 3; i++) Assert.True(n[i * 3 + 1] > 0.99f, "vertex " + i + " normal must point +Y with the final winding, got " + n[i * 3 + 1]);
+        var fn = FaceNormals(g, prim);
+        foreach (double[] f in fn) Assert.True(f[1] > 0, "the written winding faces +Y");
     }
 }

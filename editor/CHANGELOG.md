@@ -21,6 +21,25 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
+- **Fuse: orientation by SHEET, not by island** (the SS Romanic's group D: hull shell + decks + bulwarks). Winding
+  parity propagates across two-face edges only; an edge shared by three faces (a deck meeting the hull side mid-plate,
+  a lap strip on plating) is a junction no two faces own. An island joined through such junctions holds several
+  parity-connected sheets whose winding relative to each other was whatever the seeds assigned — then ONE majority flip
+  and ONE direction verdict for the whole island fell on either side of a coin: the starboard deck rendered
+  transparent with 12 parts in the group and solid with 14. Each sheet is now made consistent by its own majority,
+  tested for orientability on its own edges, and judged for direction on its own volume, twins and score; a sheet's
+  edges at a junction are boundary, so a deck cut off at the hull side is open, never a "closed shell". A manifold
+  island is one sheet — the Romanic's hull group and the Teutonic's hull, boats and decks read the same as before.
+  Pairing the two faces that continue each other at a junction was tried and rejected: it closed odd cycles inside
+  the Romanic's hull shell (0 → 3 non-orientable sheets).
+- **Fuse: authored normals take the sign of the final winding.** The Romanic's whole port side ships normals pointing
+  UP over a winding that renders DOWN (a mirrored instance). The direction pass turned the deck up, and the old rule
+  — negate the normal when every face flipped — then pointed the normals down: the deck was visible from above at
+  last, and lit from below. The artist's smoothing is kept; its sign follows the sum of the incident faces' geometric
+  normals. The Teutonic's masts (group G) had rendered dark for the same reason.
+- **Fuse report: where and what.** A sheet the parity pass refuses now says where it fails ("… unsatisfied after at
+  Object_4~Object_4 (2-face edge) ×52"), and every fuse lists "rewound by part: Object_4 1,566/11,955; …" — the first
+  question after "why does my port side still render inside out" is which part the pass left alone.
 - **Model Workshop: "Only flat parts (≥ % level)"** — the Vehicle Lab's deck finder, measured on the Blender preview
   the Workshop already builds: slide it up to ~60 and only the walking decks, platforms and hatch tops remain, so the
   deck plate a fuse group is still missing shows up in a list of a dozen rows instead of 1,900. Parts the preview
