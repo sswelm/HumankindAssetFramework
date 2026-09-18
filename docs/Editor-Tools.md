@@ -373,6 +373,10 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   near islands as one part (rotation-invariant since 0.5.6: diagonal dashed lines gate correctly too). The
   **Output GLB** auto-follows the source file until you edit it, and changing the source — typed or browsed —
   resets the probe so a stale part list can never split the wrong file.
+  **Find the mirror of …** (0.5.7): with a row highlighted, the button finds the part on the other side of the
+  centreline whose bounding box is this one's reflected (within 3 % of the part's size — triangle counts may differ,
+  the two sides of a ship are often remodelled rather than instanced), highlights it and scrolls to it; press a letter
+  to put it in the same fuse group. A part sitting on the centreline reports itself as its own mirror.
   **Plane cut** (0.5.7) handles the part island splitting *can't* touch: a CONNECTED mesh that needs two roles —
   the ocean liner's hull welded to its deck. Select the part's row, press **Plane cut**: the preview swaps to
   just that part, two-colored **from the source file's own bytes** — the yellow triangles are exactly what
@@ -395,18 +399,22 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   press **Fuse … into one shell each**: every group becomes ONE mesh in the output GLB, their seam vertices
   welded (a UV seam or a hard edge keeps its own vertex; connectivity is by position regardless), the winding
   made **consistent by majority**
-  across each welded island (an island whose winding cannot be made consistent at all — a propeller blade with
-  fins, a twisted rim — is left as authored and named in the report), and direction judged once where it can be — a closed shell, a thin solid or a convex
+  across each welded *sheet* — the faces reachable through two-face edges; an edge shared by three faces, a deck
+  meeting the hull side mid-plate, is a junction no two faces own, so a hull-and-decks island holds several sheets
+  and each is judged on its own (a sheet whose winding cannot be made consistent at all — a propeller blade with
+  fins, a twisted rim — is left as authored and named in the report, with the part pair it fails at), and direction judged once per sheet where it can be — a closed shell, a thin solid or a convex
   plating region by its signed volume about its own centroid (wound inward = reversed whole; trusted only where the
   per-face volumes agree and there is real thickness), a *flat* sheet (deck, bulwark) by the inside-out score against
   the hull's belly axis. Welded vertices share one position even where a UV seam or hard edge keeps them separate;
   vertex colours, further UV sets and custom attributes ride along and keep their own seams too (tangents are the
   one thing dropped — the importer recomputes them from the new winding); and a mirrored instance (a node with negative scale, the usual "other half" of a symmetric hull) is read with the
-  winding it renders with. A report beside the output (`<output>.glb.fuse-report.txt`) lists, per group, every
-  island's verdict, every warning and every stitched candidate's numbers, one item per line; the status box keeps
+  winding it renders with, its authored normals taking the sign of the final winding (a mirrored port side ships
+  normals pointing up over a winding that renders down). A report beside the output (`<output>.glb.fuse-report.txt`) lists, per group, every
+  sheet's verdict, every warning, every stitched candidate's numbers and the faces rewound per part, one item per line; the status box keeps
   one line per group. The part list carries the Lab's filters — hide under a vertex count or a size, a height
-  band, a side band, and a **Show only** popup by mark or island count — so a 1,400-row liner can be worked one
-  deck or one side at a time; marks on hidden rows are kept. **Generate** does both operations into one output:
+  band, a side band, **Only flat parts (≥ % level)** — the Lab's deck finder, measured on the preview meshes, so
+  the deck plate a fuse group is still missing shows up among a dozen rows — and a **Show only** popup by mark or
+  island count — so a 1,400-row liner can be worked one deck or one side at a time; marks on hidden rows are kept. **Generate** does both operations into one output:
   the ⊕ groups fused first, then the checked parts split (a row that is both is fused).
   Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh;
   the fused part is a new root node named `Fused_<letter>_<first row of the group>`. The output can never be the source file.

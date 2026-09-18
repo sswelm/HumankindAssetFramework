@@ -321,6 +321,114 @@ public static class WorkshopRules
     // OUTPUT NAMES THAT CHAIN (2026-09-16, user: "should a cut automatically create a cut postfix?"): a cut's output
     // defaults to <source>_cut.glb, and cutting THAT output again goes to _cut2, _cut3 … instead of refusing (output ==
     // source) or overwriting. Same for _split. Any other name just gets the suffix appended.
+    // THE HIGHLIGHT AFTER A ROW LEAVES A FILTERED LIST (2026-09-18, user: "when I change the group so that it disappears
+    // from the list, it should select the next item rather than the first"): the row after it, the row before it at the
+    // end of the list, nothing when it was alone. The Vehicle Lab's sweep idiom, shared with the Workshop.
+    public static int NextHighlight(int idx, int count)
+    {
+        if (idx < 0 || idx >= count) return -1;
+        if (idx + 1 < count) return idx + 1;
+        return idx - 1;   // -1 when the list held only this row
+    }
+
+    // THE MIRROR OF A PART (2026-09-18, user: "a button to find the mirror item"): the SS Romanic's port fittings are
+    // separate nodes under a mirrored chain, and marking one letter per side meant hunting every twin by eye. A twin is
+    // the part whose world box is this part's box reflected across the model's centreline: every bound within 3 % of
+    // the part's largest dimension. The two sides are often remodelled rather than instanced (Object_6 has 1,262
+    // triangles, its twin 1,274), so geometry never enters — only the box. Among several matches (stacked copies of one
+    // fitting) the closest box wins, then the closest triangle count. A part that is its own reflection (a keel on the
+    // centreline) has no twin: -1 with selfSymmetric set. Unmeasured parts (null boxes) are skipped.
+    public static int FindMirror(IList<float[]> mins, IList<float[]> maxs, IList<int> tris, int index, int sideAxis, float centre, out bool selfSymmetric)
+    {
+        selfSymmetric = false;
+        if (index < 0 || index >= mins.Count || mins[index] == null || maxs[index] == null) return -1;
+        float[] lo = mins[index], hi = maxs[index];
+        float dim = Math.Max(hi[0] - lo[0], Math.Max(hi[1] - lo[1], hi[2] - lo[2]));
+        float tol = Math.Max(0.03f * dim, 1e-4f);
+        var rlo = (float[])lo.Clone(); var rhi = (float[])hi.Clone();
+        rlo[sideAxis] = 2f * centre - hi[sideAxis]; rhi[sideAxis] = 2f * centre - lo[sideAxis];   // the reflected box
+        float Score(float[] a, float[] b)
+        {
+            float worst = 0f;
+            for (int c = 0; c < 3; c++) { worst = Math.Max(worst, Math.Abs(a[c] - rlo[c])); worst = Math.Max(worst, Math.Abs(b[c] - rhi[c])); }
+            return worst;
+        }
+        selfSymmetric = Score(lo, hi) <= tol;
+        int best = -1; float bestScore = float.PositiveInfinity; int bestTriGap = int.MaxValue;
+        for (int i = 0; i < mins.Count; i++)
+        {
+            if (i == index || mins[i] == null || maxs[i] == null) continue;
+            float sc = Score(mins[i], maxs[i]);
+            if (sc > tol) continue;
+            int gap = Math.Abs(tris[i] - tris[index]);
+            bool closer = sc < bestScore - 1e-6f || (Math.Abs(sc - bestScore) <= 1e-6f && gap < bestTriGap);
+            if (closer) { best = i; bestScore = sc; bestTriGap = gap; }
+        }
+        if (best >= 0) selfSymmetric = false;
+        return best;
+    }
+
+    // The centreline to mirror across, VOTED by the pairs themselves: every two parts with the same box extents and the
+    // same position on the other two axes are a candidate mirrored pair, and the midpoint of their side centres is where
+    // the centreline would have to be; the cluster of midpoints (within 1 % of the model's side extent) that mirrors the
+    // most DISTINCT parts wins. The median of all part centres was the first rule and a review broke it with four parts:
+    // a pair at -5/+5, a keel at 0 and one stray fitting at 30.5 gave a median of 2.5 and the exact pair was missed.
+    // Counting pairs was the second, and four identical fittings clustered on one side (six pairs among them) outvoted
+    // three genuine pairs (three); a part now counts once per cluster however many partners it has there. Nothing to
+    // vote (no two parts alike): the median, which a lone keel or a symmetric hull still puts on the centreline.
+    public static float MirrorCentre(IList<float[]> mins, IList<float[]> maxs, int sideAxis)
+    {
+        var idx = new List<int>();
+        for (int i = 0; i < mins.Count; i++) if (mins[i] != null && maxs[i] != null) idx.Add(i);
+        if (idx.Count == 0) return 0f;
+        float lo = float.PositiveInfinity, hi = float.NegativeInfinity;
+        foreach (int i in idx) { lo = Math.Min(lo, mins[i][sideAxis]); hi = Math.Max(hi, maxs[i][sideAxis]); }
+        float window = Math.Max(0.01f * (hi - lo), 1e-4f);
+        var mids = new List<KeyValuePair<float, long>>();   // midpoint, and the pair (i << 32 | j) that voted it
+        for (int a = 0; a < idx.Count; a++)
+        {
+            int i = idx[a]; float[] li = mins[i], hi_ = maxs[i];
+            float dim = Math.Max(hi_[0] - li[0], Math.Max(hi_[1] - li[1], hi_[2] - li[2]));
+            float tol = Math.Max(0.03f * dim, 1e-4f);
+            for (int b = a + 1; b < idx.Count; b++)
+            {
+                int j = idx[b]; float[] lj = mins[j], hj = maxs[j];
+                bool alike = true;
+                for (int c = 0; c < 3 && alike; c++)
+                {
+                    if (Math.Abs((hj[c] - lj[c]) - (hi_[c] - li[c])) > tol) alike = false;                 // same extents
+                    else if (c != sideAxis && (Math.Abs(lj[c] - li[c]) > tol || Math.Abs(hj[c] - hi_[c]) > tol)) alike = false;   // same place across the other axes
+                }
+                if (alike) mids.Add(new KeyValuePair<float, long>(0.25f * (li[sideAxis] + hi_[sideAxis] + lj[sideAxis] + hj[sideAxis]), ((long)i << 32) | (uint)j));
+            }
+        }
+        if (mids.Count == 0)
+        {
+            var cs = new List<float>(); foreach (int i in idx) cs.Add(0.5f * (mins[i][sideAxis] + maxs[i][sideAxis]));
+            cs.Sort();
+            return cs.Count % 2 == 1 ? cs[cs.Count / 2] : 0.5f * (cs[cs.Count / 2 - 1] + cs[cs.Count / 2]);
+        }
+        mids.Sort((x, y) => x.Key.CompareTo(y.Key));
+        // slide a window over the sorted midpoints, counting the DISTINCT parts in it (a part enters when its first pair
+        // enters and leaves when its last pair leaves); the window mirroring the most parts wins
+        var inWindow = new Dictionary<int, int>();
+        int bestStart = 0, bestEnd = 0, bestParts = 0, e2 = 0;
+        for (int s0 = 0; s0 < mids.Count; s0++)
+        {
+            while (e2 < mids.Count && mids[e2].Key - mids[s0].Key <= window)
+            {
+                long pk = mids[e2].Value; int pi = (int)(pk >> 32), pj = (int)(pk & 0xffffffffL);
+                inWindow[pi] = inWindow.TryGetValue(pi, out int ci) ? ci + 1 : 1; inWindow[pj] = inWindow.TryGetValue(pj, out int cj) ? cj + 1 : 1;
+                e2++;
+            }
+            if (inWindow.Count > bestParts) { bestParts = inWindow.Count; bestStart = s0; bestEnd = e2; }
+            long qk = mids[s0].Value; int qi = (int)(qk >> 32), qj = (int)(qk & 0xffffffffL);
+            if (--inWindow[qi] == 0) inWindow.Remove(qi);
+            if (--inWindow[qj] == 0) inWindow.Remove(qj);
+        }
+        return mids[(bestStart + bestEnd) / 2].Key;   // the window's MEDIAN: exact mirrors vote exactly, a near-copy on the same side only nudges a mean
+    }
+
     public static string NextOutputName(string baseName, string suffix)
     {
         if (string.IsNullOrEmpty(baseName)) return baseName;

@@ -21,6 +21,41 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
+- **Fuse: orientation by SHEET, not by island** (the SS Romanic's group D: hull shell + decks + bulwarks). Winding
+  parity propagates across two-face edges only; an edge shared by three faces (a deck meeting the hull side mid-plate,
+  a lap strip on plating) is a junction no two faces own. An island joined through such junctions holds several
+  parity-connected sheets whose winding relative to each other was whatever the seeds assigned — then ONE majority flip
+  and ONE direction verdict for the whole island fell on either side of a coin: the starboard deck rendered
+  transparent with 12 parts in the group and solid with 14. Each sheet is now made consistent by its own majority,
+  tested for orientability on its own edges, and judged for direction on its own volume, twins and score; a sheet's
+  edges at a junction are boundary, so a deck cut off at the hull side is open, never a "closed shell". A manifold
+  island is one sheet — the Romanic's hull group and the Teutonic's hull, boats and decks read the same as before.
+  Pairing the two faces that continue each other at a junction was tried and rejected: it closed odd cycles inside
+  the Romanic's hull shell (0 → 3 non-orientable sheets).
+- **Fuse: authored normals take the sign of the final winding.** The Romanic's whole port side ships normals pointing
+  UP over a winding that renders DOWN (a mirrored instance). The direction pass turned the deck up, and the old rule
+  — negate the normal when every face flipped — then pointed the normals down: the deck was visible from above at
+  last, and lit from below. The artist's smoothing is kept; its sign follows the sum of the incident faces' geometric
+  normals. The Teutonic's masts (group G) had rendered dark for the same reason.
+- **Fuse report: where and what.** A sheet the parity pass refuses now says where it fails ("… unsatisfied after at
+  Object_4~Object_4 (2-face edge) ×52"), and every fuse lists "rewound by part: Object_4 1,566/11,955; …" — the first
+  question after "why does my port side still render inside out" is which part the pass left alone.
+- **Model Workshop: "Only flat parts (≥ % level)"** — the Vehicle Lab's deck finder, measured on the Blender preview
+  the Workshop already builds: slide it up to ~60 and only the walking decks, platforms and hatch tops remain, so the
+  deck plate a fuse group is still missing shows up in a list of a dozen rows instead of 1,900. Parts the preview
+  cannot measure stay visible; the visibility filter stays in the Lab (it needs the Lab's escape-ray probe).
+- **Model Workshop: "Find the mirror of …"** — one button under the part list finds the highlighted part's twin on
+  the other side of the centreline: the part whose world box is this one's reflected (every bound within 3 % of the
+  part's size), triangle counts ignored because the two sides are often remodelled rather than instanced (the SS
+  Romanic's Object_6 has 1,262 triangles, its port twin Object_1774 1,274). The twin is highlighted and scrolled into
+  view, so a letter key marks it next; a part on the centreline reports itself as its own mirror. The centreline is
+  voted by the pairs themselves — the cluster of midpoints between parts of the same box that mirrors the most distinct
+  parts — so a stray has no vote and a cluster of identical strays counts each of them once (the median was the first
+  rule; a pair at ±5 with a keel and one stray fitting put it at 2.5).
+- **Model Workshop: the highlight follows the sweep.** With "Show only" set to one fuse group, changing the highlighted
+  row's letter (key or dropdown) took it out of the list and the next ↓ started over at the first row. The highlight
+  now moves to the row after it (before it at the end of the list), as the Vehicle Lab's marking sweep does — the same
+  for the Split checkbox under "Checked for Split" and for the group filters.
 - **Vehicle Lab: "Mark all shown as …"** — one role for every part the filters currently show. The SS Romanic
   carries 144 stray copies of one fitting 3 km down the length axis and 190 m up (an authoring leftover that
   makes the preview frame a speck of a ship); "Hide parts below (height)" isolates them in seconds and one Apply
@@ -88,7 +123,7 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   side band across the beam, and a **Show only** popup (checked for Split, in a fuse group, not in one, more than
   one island, already whole, skipped — or any ONE fuse group, every letter in use is listed). The bands come from each node's world bounding box, read from the file's
   accessor min/max, so nothing slows the Probe. Marks on hidden rows are kept and Fuse/Split act on every marked
-  row. The flat-surface and visibility filters stay in the Lab: they need the Blender probe.
+  row. The visibility filter stays in the Lab: it needs the Lab's escape-ray probe (the flat filter followed on 2026-09-18).
 
 - **Model Workshop: Fuse writes a report file** beside the output GLB (`<output>.glb.fuse-report.txt`): per group the
   parts, the summary, every island's verdict and every stitched candidate's numbers, one item per line. The status

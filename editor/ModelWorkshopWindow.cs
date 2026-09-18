@@ -56,6 +56,9 @@ public class ModelWorkshopWindow : EditorWindow
     [SerializeField] float minPartSize = 0f;
     [SerializeField] float minHeight = -1e9f, maxHeight = 1e9f, minWidth = -1e9f, maxWidth = 1e9f;   // clamped into the model's span each frame: a fresh model hides nothing
     [SerializeField] int showOnly = 0;
+    [SerializeField] float minFlatPct = 0f;   // 0 = off — hide parts whose LEVEL-surface share (% of area within 30° of horizontal) is below this: the Lab's deck finder, brought over 2026-09-18 ("group D is still missing part of the deck")
+    Dictionary<string, double> flatAreaByName, flatLevelByName;   // raw per-RENDERER sums over the preview, keyed by EXACT name (the Lab's review P2 lesson: strip nothing here)
+    Dictionary<string, float> flatShare; GameObject flatShareFor; // resolved per-part share memo (exact-first, digits-only ".NNN" alias merge — VehicleLabRules.FlatShare)
     [SerializeField] string showOnlyLetter = "";   // "Show only" can also be ONE fuse group (user 2026-09-16): the popup lists every letter in use after the fixed kinds
     static readonly string[] ShowOnlyOptions = { "None (all parts)", "Checked for Split", "In a fuse group", "Not in a fuse group", "More than one island", "Already whole", "Skipped by the analyzer" };
     // DISTANCE MERGE (2026-09-06, the 602-island rope): topology alone shreds segmented geometry into hundreds
@@ -205,6 +208,14 @@ public class ModelWorkshopWindow : EditorWindow
                 minWidth = EditorGUILayout.Slider(new GUIContent("Hide parts left of (side)", "Parts whose bbox centre is on the far side of this across the beam are hidden — bracket with the next slider to keep one side (the starboard hull plates, say)."), Mathf.Clamp(minWidth, wLo - wPad, wHi + wPad), wLo - wPad, wHi + wPad);
                 maxWidth = EditorGUILayout.Slider(new GUIContent("Hide parts right of (side)", "Parts whose bbox centre is beyond this across the beam are hidden."), Mathf.Clamp(maxWidth, wLo - wPad, wHi + wPad), wLo - wPad, wHi + wPad);
             }
+            // THE DECK FINDER (2026-09-18, user: "group D in the Vehicle Lab still seems to be missing part of the deck"): the
+            // Lab's flat-surface filter, measured on the same Blender preview the Workshop builds. Without a preview every
+            // part passes — a filter never hides what it cannot measure.
+            minFlatPct = EditorGUILayout.Slider(new GUIContent("Only flat parts (≥ % level)",
+                "The deck finder: hide parts whose surface area is less than this % LEVEL (within 30° of horizontal, measured on the " +
+                "preview meshes). Slide up to ~60 and the walking decks, platforms and hatch tops remain while masts, hull plating " +
+                "and rigging vanish; combine with the height sliders to pick one deck level. 0 = off. Needs the preview (Probe parts " +
+                "builds it); parts the preview can't measure stay visible."), minFlatPct, 0f, 100f);
             var lettersInUse = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).Select(r => r.fuse).Distinct().OrderBy(l => l).ToList();
             var showOptions = ShowOnlyOptions.Concat(lettersInUse.Select(l => $"Group ⊕{l}  ({rows.Count(r => r.fuse == l)} part(s))")).ToArray();
             int showIdx = !string.IsNullOrEmpty(showOnlyLetter) && lettersInUse.Contains(showOnlyLetter) ? ShowOnlyOptions.Length + lettersInUse.IndexOf(showOnlyLetter) : showOnly;
@@ -225,6 +236,7 @@ public class ModelWorkshopWindow : EditorWindow
                     case 6: if (r.blocked == null) return false; break;
                 }
                 if (r.verts > 0 && r.verts < minVerts) return false;
+                if (!FlatOk(r)) return false;
                 if (r.min == null) return true;   // unmeasured: a filter never hides what it cannot measure
                 if (Mathf.Max(r.max[0] - r.min[0], r.max[1] - r.min[1], r.max[2] - r.min[2]) < minPartSize) return false;
                 float h = Centre(r, 1), w = Centre(r, sideAxis);
@@ -232,6 +244,17 @@ public class ModelWorkshopWindow : EditorWindow
             }
             var shown = rows.Where(Passes).ToList();
             int hiddenRows = rows.Count - shown.Count;
+            // AUTO-ADVANCE (user 2026-09-18): a mark that takes the highlighted row OUT of the filtered list ("Show only:
+            // Group Z", then the letter changes) left the highlight on a row no longer drawn, and the next ↓ started over at
+            // the FIRST row. The Lab's sweep idiom instead: the highlight moves to the row after it (before it at the end).
+            // The list keeps its place — the next row slides up into the vacated slot, so no scroll is needed.
+            void AdvanceIfHidden(int at)
+            {
+                if (at < 0 || at >= shown.Count || Passes(shown[at])) return;
+                int next = WorkshopRules.NextHighlight(at, shown.Count);
+                ExitCutMode(); selectedIdx = next >= 0 ? shown[next].nodeIndex : -1; SelectRow(next >= 0 ? shown[next].node : "");
+            }
+            int advanceFrom = -1;   // a popup/checkbox change on the highlighted row inside the list loop: advanced after the loop
             if (hiddenRows > 0) EditorGUILayout.LabelField($"  {shown.Count} shown, {hiddenRows} hidden by the filters (marks on hidden rows are kept; Fuse and Split act on ALL marked rows)", EditorStyles.miniLabel);
             // KEYBOARD MARKING (2026-09-15, the Vehicle Lab's idiom): ↑/↓ move the highlight, A–Z put the highlighted row in
             // a fuse group, 0/Backspace clear it, Space toggles its Split checkbox — marking dozens of hull plates by mouse
@@ -245,33 +268,28 @@ public class ModelWorkshopWindow : EditorWindow
                 {
                     idx = ev.keyCode == KeyCode.DownArrow ? Mathf.Min(idx + 1, shown.Count - 1) : Mathf.Max(idx - 1, 0);
                     ExitCutMode(); selectedIdx = shown[idx].nodeIndex; SelectRow(shown[idx].node);
-                    // keep the row in view by its MEASURED rect (rows are not one height: "already whole" rows draw in the mini
-                    // font and are shorter, and an assumed 22 px per row drifted the highlight out of view past ~100 rows — user 2026-09-16)
-                    if (idx < rowRects.Count)
-                    {
-                        Rect rr = rowRects[idx];
-                        if (rr.yMin < scroll.y + 8f) scroll.y = Mathf.Max(0f, rr.yMin - 8f);
-                        else if (rr.yMax > scroll.y + listViewHeight - 8f) scroll.y = rr.yMax - listViewHeight + 8f;
-                    }
-                    else scroll.y = Mathf.Max(0f, idx * 22f - 120f);   // no rects measured yet (first frame): the old estimate
+                    RevealRow(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
                 else if (idx >= 0 && shown[idx].blocked == null && ev.keyCode >= KeyCode.A && ev.keyCode <= KeyCode.Z)
                 {
                     shown[idx].fuse = ((char)('A' + (ev.keyCode - KeyCode.A))).ToString();
+                    AdvanceIfHidden(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
                 else if (idx >= 0 && (ev.keyCode == KeyCode.Alpha0 || ev.keyCode == KeyCode.Keypad0 || ev.keyCode == KeyCode.Minus || ev.keyCode == KeyCode.KeypadMinus || ev.keyCode == KeyCode.Backspace || ev.keyCode == KeyCode.Delete))   // '-' too: it is what the popup shows for "no group" (user 2026-09-16)
                 {
                     shown[idx].fuse = "";
+                    AdvanceIfHidden(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
                 else if (idx >= 0 && ev.keyCode == KeyCode.Space && shown[idx].blocked == null && shown[idx].islands > 1)
                 {
                     shown[idx].split = !shown[idx].split;
+                    AdvanceIfHidden(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
@@ -279,9 +297,10 @@ public class ModelWorkshopWindow : EditorWindow
             listViewHeight = Mathf.Min(330, 22 * shown.Count + 8);
             if (Event.current.type == EventType.Repaint) rowRects.Clear();
             scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(listViewHeight));   // cap 220 -> 330 (2026-09-08 user request: +50% — a real ship's part list is dozens of rows)
-            foreach (var r in shown)
+            for (int ri = 0; ri < shown.Count; ri++)
                 using (new EditorGUILayout.HorizontalScope())
                 {
+                    Row r = shown[ri]; bool splitBefore = r.split; string fuseBefore = r.fuse;
                     using (new EditorGUI.DisabledScope(r.islands <= 1 || r.blocked != null))
                         r.split = EditorGUILayout.Toggle(r.split, GUILayout.Width(20));
                     // FUSE GROUP (2026-09-15): an independent per-row mark — rows sharing a letter fuse into one welded shell each
@@ -291,6 +310,7 @@ public class ModelWorkshopWindow : EditorWindow
                         int fj = EditorGUILayout.Popup(fi, FuseLabels, GUILayout.Width(46));
                         r.fuse = fj <= 0 ? "" : ((char)('A' + fj - 1)).ToString();
                     }
+                    if (r.nodeIndex == selectedIdx && (r.split != splitBefore || r.fuse != fuseBefore)) advanceFrom = ri;   // the mouse path of the A–Z / Space keys
                     bool isSel = selectedIdx == r.nodeIndex;
                     string label = r.blocked != null ? $"{(isSel ? "◉ " : "")}{r.node}   — skipped: {r.blocked}"
                                  : $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {(r.islands == 1 ? "1 island — already whole" : r.islands.ToString("N0") + " islands")})";
@@ -300,10 +320,36 @@ public class ModelWorkshopWindow : EditorWindow
                     if (Event.current.type == EventType.Repaint) rowRects.Add(GUILayoutUtility.GetLastRect());   // the row's real rect in scroll-content space (see the ↑/↓ handler)
                 }
             EditorGUILayout.EndScrollView();
+            if (advanceFrom >= 0) AdvanceIfHidden(advanceFrom);
 
             // ---- plane cut: for the selected part, connected or not — the escape hatch when island
             // splitting has nothing to grab (hull welded to deck). Whole triangles, nothing sliced. ----
             var selRowObj = rows.FirstOrDefault(r => r.nodeIndex == selectedIdx);
+            // FIND THE MIRROR (2026-09-18, user: "I want to find the mirror item of Object_6"): the part whose box is the
+            // highlighted part's box reflected across the centreline (WorkshopRules.FindMirror) — highlighted and scrolled
+            // into view; a letter key then marks it. Hidden by the filters? It is still highlighted in the preview.
+            if (selRowObj != null && selRowObj.min != null && !CutModeActive)
+                if (GUILayout.Button(new GUIContent($"Find the mirror of '{selRowObj.node}'  (the part on the other side of the centreline with the same box)",
+                        "Looks for the part whose world bounding box is this part's box reflected across the model's centreline (every bound within 3 % of the part's size; " +
+                        "triangle counts may differ — the two sides are often remodelled). The twin is highlighted and scrolled into view: press its letter to mark it."), GUILayout.Height(22)))
+                {
+                    var mins = rows.Select(r => r.min).ToList(); var maxs = rows.Select(r => r.max).ToList(); var tri = rows.Select(r => r.tris).ToList();
+                    float centre = WorkshopRules.MirrorCentre(mins, maxs, sideAxis);
+                    int m = WorkshopRules.FindMirror(mins, maxs, tri, rows.IndexOf(selRowObj), sideAxis, centre, out bool selfSym);
+                    if (m < 0)
+                        status = selfSym ? $"'{selRowObj.node}' is symmetric about the centreline (side {centre:0.00}) — it is its own mirror."
+                                         : $"No mirror of '{selRowObj.node}' found: no part's box is its reflection across the centreline (side {centre:0.00}).";
+                    else
+                    {
+                        Row mr = rows[m]; string from = selRowObj.node;
+                        ExitCutMode(); selectedIdx = mr.nodeIndex; SelectRow(mr.node);
+                        int si = shown.FindIndex(x => x.nodeIndex == mr.nodeIndex);
+                        if (si >= 0) RevealRow(si);
+                        status = $"Mirror of '{from}': '{mr.node}' ({mr.tris:N0} tris{(string.IsNullOrEmpty(mr.fuse) ? "" : $", group {mr.fuse}")}) — highlighted" +
+                                 (si >= 0 ? "; press a letter to mark it." : "; its row is hidden by the filters (widen them to see it).");
+                        GUIUtility.keyboardControl = 0; Repaint();
+                    }
+                }
             if (selRowObj != null && selRowObj.blocked == null)
             {
                 if (!CutModeActive)
@@ -551,6 +597,19 @@ public class ModelWorkshopWindow : EditorWindow
         status = $"Plane cut mode on '{cutGeo.NodeName}': pick the axis, slide the plane, then Cut. Yellow → _CutA, grey → _CutB.";
     }
 
+    // keep a shown row in view by its MEASURED rect (rows are not one height: "already whole" rows draw in the mini font and
+    // are shorter, and an assumed 22 px per row drifted the highlight out of view past ~100 rows — user 2026-09-16)
+    void RevealRow(int idx)
+    {
+        if (idx < rowRects.Count)
+        {
+            Rect rr = rowRects[idx];
+            if (rr.yMin < scroll.y + 8f) scroll.y = Mathf.Max(0f, rr.yMin - 8f);
+            else if (rr.yMax > scroll.y + listViewHeight - 8f) scroll.y = rr.yMax - listViewHeight + 8f;
+        }
+        else scroll.y = Mathf.Max(0f, idx * 22f - 120f);   // no rects measured yet (first frame): the old estimate
+    }
+
     void ExitCutMode()
     {
         if (cutGO != null) DestroyImmediate(cutGO);
@@ -623,6 +682,51 @@ public class ModelWorkshopWindow : EditorWindow
 
     // Click a row → tint that part's renderer(s) yellow and frame them with context (the Vehicle Lab mechanism,
     // name-matched: probe part names ARE the glTF node names, with StartsWith for Blender's collision suffixes).
+    // FLAT-SURFACE FILTER (the Vehicle Lab's, verbatim in spirit): the share of a part's surface area lying within 30° of
+    // level, measured on the PREVIEW meshes (the preview stands upright in Unity, so world +Y is 'level'; the geometric
+    // triangle normal is used — no reliance on authored normals). Cached once per preview instance; a part the preview
+    // doesn't carry (or any state before a probe) PASSES the filter. Blender collision suffixes ("Object_2.001") count
+    // toward their base part through VehicleLabRules.FlatShare, the unit-tested lookup.
+    bool FlatOk(Row x)
+    {
+        if (minFlatPct <= 0f) return true;
+        BuildFlatShareIFN();
+        if (flatAreaByName == null || string.IsNullOrEmpty(x.node)) return true;
+        if (!flatShare.TryGetValue(x.node, out float s))
+        {
+            s = VehicleLabRules.FlatShare(x.node, flatAreaByName, flatLevelByName);
+            flatShare[x.node] = s;
+        }
+        return s < 0f || s * 100f >= minFlatPct;
+    }
+    void BuildFlatShareIFN()
+    {
+        if (inst == null) { flatAreaByName = null; flatLevelByName = null; flatShare = null; flatShareFor = null; return; }
+        if (flatAreaByName != null && flatShareFor == inst) return;
+        flatAreaByName = new Dictionary<string, double>(); flatLevelByName = new Dictionary<string, double>();
+        foreach (var mf in inst.GetComponentsInChildren<MeshFilter>(true))
+        {
+            if (mf == null || mf.sharedMesh == null) continue;
+            string nm = mf.gameObject.name;   // EXACT — alias merging is the lookup's job, with digits-only proof
+            var m = mf.sharedMesh; var l2w = mf.transform.localToWorldMatrix;
+            var v = m.vertices; var t = m.triangles;
+            double a0 = 0, af = 0;
+            for (int i = 0; i < t.Length; i += 3)
+            {
+                Vector3 p0 = l2w.MultiplyPoint3x4(v[t[i]]), p1 = l2w.MultiplyPoint3x4(v[t[i + 1]]), p2 = l2w.MultiplyPoint3x4(v[t[i + 2]]);
+                Vector3 c = Vector3.Cross(p1 - p0, p2 - p0);
+                float a2 = c.magnitude;
+                if (a2 <= 0f) continue;
+                a0 += a2;
+                if (Mathf.Abs(c.y) / a2 >= 0.866f) af += a2;   // cos 30° — the facing cut's default tilt
+            }
+            flatAreaByName.TryGetValue(nm, out double ta); flatAreaByName[nm] = ta + a0;
+            flatLevelByName.TryGetValue(nm, out double tf); flatLevelByName[nm] = tf + af;
+        }
+        flatShare = new Dictionary<string, float>();
+        flatShareFor = inst;
+    }
+
     void SelectRow(string name)
     {
         if (highlightedRenderers != null)
