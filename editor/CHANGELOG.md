@@ -43,7 +43,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   cut or split output, and a fused output's sidecar names each shell under its group's letter (an unfused group keeps
   its parts' lines), so either order works (the Splitter re-reads the sidecar on every Probe; the Fuser keeps its
   edits and reloads through Load groups). A saved editor layout that held
-  the old Model Workshop drops that window once — the class is abstract now.
+  the old Model Workshop drops that window once — the class is abstract now. Each window is its own file
+  (`ModelSplitterWindow.cs`, `ModelFuserWindow.cs`): Unity binds a docked window's saved layout entry to the script
+  whose FILE NAME matches the class, so a window class nested in another file vanishes on the next restart.
 - **Generate: every group fused in parallel, and the big ones 5x faster.** Nineteen groups took 3½ minutes chained.
   Planning a group (gather, weld, islands, sheets, direction) reads only the source, so every group now plans at once
   on the thread pool and the meshes are appended in letter order into one output — the same bytes chaining gave,

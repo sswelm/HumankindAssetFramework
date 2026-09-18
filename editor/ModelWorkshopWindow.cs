@@ -1109,17 +1109,3 @@ public abstract class ModelWorkshopWindow : EditorWindow
         finally { EditorUtility.ClearProgressBar(); }
     }
 }
-
-public class ModelSplitterWindow : ModelWorkshopWindow
-{
-    [MenuItem("Tools/HAF/Model Splitter")]
-    static void Open() => GetWindow<ModelSplitterWindow>("Model Splitter");
-    protected override bool Fusing => false;
-}
-
-public class ModelFuserWindow : ModelWorkshopWindow
-{
-    [MenuItem("Tools/HAF/Model Fuser")]
-    static void Open() => GetWindow<ModelFuserWindow>("Model Fuser");
-    protected override bool Fusing => true;
-}
