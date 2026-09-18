@@ -331,6 +331,55 @@ public static class WorkshopRules
         return idx - 1;   // -1 when the list held only this row
     }
 
+    // THE MIRROR OF A PART (2026-09-18, user: "a button to find the mirror item"): the SS Romanic's port fittings are
+    // separate nodes under a mirrored chain, and marking one letter per side meant hunting every twin by eye. A twin is
+    // the part whose world box is this part's box reflected across the model's centreline: every bound within 3 % of
+    // the part's largest dimension. The two sides are often remodelled rather than instanced (Object_6 has 1,262
+    // triangles, its twin 1,274), so geometry never enters — only the box. Among several matches (stacked copies of one
+    // fitting) the closest box wins, then the closest triangle count. A part that is its own reflection (a keel on the
+    // centreline) has no twin: -1 with selfSymmetric set. Unmeasured parts (null boxes) are skipped.
+    public static int FindMirror(IList<float[]> mins, IList<float[]> maxs, IList<int> tris, int index, int sideAxis, float centre, out bool selfSymmetric)
+    {
+        selfSymmetric = false;
+        if (index < 0 || index >= mins.Count || mins[index] == null || maxs[index] == null) return -1;
+        float[] lo = mins[index], hi = maxs[index];
+        float dim = Math.Max(hi[0] - lo[0], Math.Max(hi[1] - lo[1], hi[2] - lo[2]));
+        float tol = Math.Max(0.03f * dim, 1e-4f);
+        var rlo = (float[])lo.Clone(); var rhi = (float[])hi.Clone();
+        rlo[sideAxis] = 2f * centre - hi[sideAxis]; rhi[sideAxis] = 2f * centre - lo[sideAxis];   // the reflected box
+        float Score(float[] a, float[] b)
+        {
+            float worst = 0f;
+            for (int c = 0; c < 3; c++) { worst = Math.Max(worst, Math.Abs(a[c] - rlo[c])); worst = Math.Max(worst, Math.Abs(b[c] - rhi[c])); }
+            return worst;
+        }
+        selfSymmetric = Score(lo, hi) <= tol;
+        int best = -1; float bestScore = float.PositiveInfinity; int bestTriGap = int.MaxValue;
+        for (int i = 0; i < mins.Count; i++)
+        {
+            if (i == index || mins[i] == null || maxs[i] == null) continue;
+            float sc = Score(mins[i], maxs[i]);
+            if (sc > tol) continue;
+            int gap = Math.Abs(tris[i] - tris[index]);
+            bool closer = sc < bestScore - 1e-6f || (Math.Abs(sc - bestScore) <= 1e-6f && gap < bestTriGap);
+            if (closer) { best = i; bestScore = sc; bestTriGap = gap; }
+        }
+        if (best >= 0) selfSymmetric = false;
+        return best;
+    }
+
+    // The centreline to mirror across: the MEDIAN of the part centres along the side axis. Paired parts straddle it
+    // symmetrically and unpaired ones (keel, funnels, masts) lie on it, so the median lands on it even when a stray
+    // cluster sits far to one side (the Romanic's anchor chain, 30-47 m off to port and starboard both).
+    public static float MirrorCentre(IList<float[]> mins, IList<float[]> maxs, int sideAxis)
+    {
+        var cs = new List<float>();
+        for (int i = 0; i < mins.Count; i++) if (mins[i] != null && maxs[i] != null) cs.Add(0.5f * (mins[i][sideAxis] + maxs[i][sideAxis]));
+        if (cs.Count == 0) return 0f;
+        cs.Sort();
+        return cs.Count % 2 == 1 ? cs[cs.Count / 2] : 0.5f * (cs[cs.Count / 2 - 1] + cs[cs.Count / 2]);
+    }
+
     public static string NextOutputName(string baseName, string suffix)
     {
         if (string.IsNullOrEmpty(baseName)) return baseName;

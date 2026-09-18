@@ -256,15 +256,7 @@ public class ModelWorkshopWindow : EditorWindow
                 {
                     idx = ev.keyCode == KeyCode.DownArrow ? Mathf.Min(idx + 1, shown.Count - 1) : Mathf.Max(idx - 1, 0);
                     ExitCutMode(); selectedIdx = shown[idx].nodeIndex; SelectRow(shown[idx].node);
-                    // keep the row in view by its MEASURED rect (rows are not one height: "already whole" rows draw in the mini
-                    // font and are shorter, and an assumed 22 px per row drifted the highlight out of view past ~100 rows — user 2026-09-16)
-                    if (idx < rowRects.Count)
-                    {
-                        Rect rr = rowRects[idx];
-                        if (rr.yMin < scroll.y + 8f) scroll.y = Mathf.Max(0f, rr.yMin - 8f);
-                        else if (rr.yMax > scroll.y + listViewHeight - 8f) scroll.y = rr.yMax - listViewHeight + 8f;
-                    }
-                    else scroll.y = Mathf.Max(0f, idx * 22f - 120f);   // no rects measured yet (first frame): the old estimate
+                    RevealRow(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
@@ -321,6 +313,31 @@ public class ModelWorkshopWindow : EditorWindow
             // ---- plane cut: for the selected part, connected or not — the escape hatch when island
             // splitting has nothing to grab (hull welded to deck). Whole triangles, nothing sliced. ----
             var selRowObj = rows.FirstOrDefault(r => r.nodeIndex == selectedIdx);
+            // FIND THE MIRROR (2026-09-18, user: "I want to find the mirror item of Object_6"): the part whose box is the
+            // highlighted part's box reflected across the centreline (WorkshopRules.FindMirror) — highlighted and scrolled
+            // into view; a letter key then marks it. Hidden by the filters? It is still highlighted in the preview.
+            if (selRowObj != null && selRowObj.min != null && !CutModeActive)
+                if (GUILayout.Button(new GUIContent($"Find the mirror of '{selRowObj.node}'  (the part on the other side of the centreline with the same box)",
+                        "Looks for the part whose world bounding box is this part's box reflected across the model's centreline (every bound within 3 % of the part's size; " +
+                        "triangle counts may differ — the two sides are often remodelled). The twin is highlighted and scrolled into view: press its letter to mark it."), GUILayout.Height(22)))
+                {
+                    var mins = rows.Select(r => r.min).ToList(); var maxs = rows.Select(r => r.max).ToList(); var tri = rows.Select(r => r.tris).ToList();
+                    float centre = WorkshopRules.MirrorCentre(mins, maxs, sideAxis);
+                    int m = WorkshopRules.FindMirror(mins, maxs, tri, rows.IndexOf(selRowObj), sideAxis, centre, out bool selfSym);
+                    if (m < 0)
+                        status = selfSym ? $"'{selRowObj.node}' is symmetric about the centreline (side {centre:0.00}) — it is its own mirror."
+                                         : $"No mirror of '{selRowObj.node}' found: no part's box is its reflection across the centreline (side {centre:0.00}).";
+                    else
+                    {
+                        Row mr = rows[m]; string from = selRowObj.node;
+                        ExitCutMode(); selectedIdx = mr.nodeIndex; SelectRow(mr.node);
+                        int si = shown.FindIndex(x => x.nodeIndex == mr.nodeIndex);
+                        if (si >= 0) RevealRow(si);
+                        status = $"Mirror of '{from}': '{mr.node}' ({mr.tris:N0} tris{(string.IsNullOrEmpty(mr.fuse) ? "" : $", group {mr.fuse}")}) — highlighted" +
+                                 (si >= 0 ? "; press a letter to mark it." : "; its row is hidden by the filters (widen them to see it).");
+                        GUIUtility.keyboardControl = 0; Repaint();
+                    }
+                }
             if (selRowObj != null && selRowObj.blocked == null)
             {
                 if (!CutModeActive)
@@ -566,6 +583,19 @@ public class ModelWorkshopWindow : EditorWindow
         UpdateCutPartition();
         boundsValid = false; previewPan = Vector2.zero;
         status = $"Plane cut mode on '{cutGeo.NodeName}': pick the axis, slide the plane, then Cut. Yellow → _CutA, grey → _CutB.";
+    }
+
+    // keep a shown row in view by its MEASURED rect (rows are not one height: "already whole" rows draw in the mini font and
+    // are shorter, and an assumed 22 px per row drifted the highlight out of view past ~100 rows — user 2026-09-16)
+    void RevealRow(int idx)
+    {
+        if (idx < rowRects.Count)
+        {
+            Rect rr = rowRects[idx];
+            if (rr.yMin < scroll.y + 8f) scroll.y = Mathf.Max(0f, rr.yMin - 8f);
+            else if (rr.yMax > scroll.y + listViewHeight - 8f) scroll.y = rr.yMax - listViewHeight + 8f;
+        }
+        else scroll.y = Mathf.Max(0f, idx * 22f - 120f);   // no rects measured yet (first frame): the old estimate
     }
 
     void ExitCutMode()

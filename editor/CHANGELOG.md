@@ -21,6 +21,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
+- **Model Workshop: "Find the mirror of …"** — one button under the part list finds the highlighted part's twin on
+  the other side of the centreline: the part whose world box is this one's reflected (every bound within 3 % of the
+  part's size), triangle counts ignored because the two sides are often remodelled rather than instanced (the SS
+  Romanic's Object_6 has 1,262 triangles, its port twin Object_1774 1,274). The twin is highlighted and scrolled into
+  view, so a letter key marks it next; a part on the centreline reports itself as its own mirror. The centreline is
+  the median of the part centres across the beam, so a stray cluster off to one side does not move it.
 - **Model Workshop: the highlight follows the sweep.** With "Show only" set to one fuse group, changing the highlighted
   row's letter (key or dropdown) took it out of the list and the next ↓ started over at the first row. The highlight
   now moves to the row after it (before it at the end of the list), as the Vehicle Lab's marking sweep does — the same

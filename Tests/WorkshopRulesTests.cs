@@ -186,6 +186,35 @@ public class WorkshopRulesTests
         Assert.Equal(-1, WorkshopRules.NextHighlight(5, 5));   // out of range
     }
 
+    static float[] V(float x, float y, float z) => new[] { x, y, z };
+
+    [Fact]
+    public void The_mirror_is_the_part_whose_box_is_the_reflection_across_the_centreline()
+    {
+        // side axis 0; a hull half each side, a keel on the centreline, a stray chain link far to one side
+        var mins = new List<float[]> { V(-9, 5.8f, 7), V(0, 5.8f, 7), V(-0.5f, -10, 14), V(30, 190, 3300), V(-1, 8, 100), V(0.6f, 8, 100), V(-1.2f, 8, 100), null };
+        var maxs = new List<float[]> { V(0, 8.9f, 180), V(9.1f, 8.91f, 180), V(0.5f, -9, 180), V(31, 191, 3301), V(-0.6f, 9, 101), V(1, 9, 101), V(-0.8f, 9, 101), null };
+        var tris = new List<int> { 1475, 1348, 300, 120, 50, 52, 50, 0 };
+        float centre = WorkshopRules.MirrorCentre(mins, maxs, 0);
+        Assert.InRange(centre, -0.2f, 0.2f);   // the median lands on the centreline despite the stray link at 30
+        Assert.Equal(1, WorkshopRules.FindMirror(mins, maxs, tris, 0, 0, centre, out bool self)); Assert.False(self);   // Object_14 -> Object_1782: different triangle counts, same box
+        Assert.Equal(0, WorkshopRules.FindMirror(mins, maxs, tris, 1, 0, centre, out self));
+        Assert.Equal(-1, WorkshopRules.FindMirror(mins, maxs, tris, 2, 0, centre, out self)); Assert.True(self);   // the keel is its own mirror
+        Assert.Equal(-1, WorkshopRules.FindMirror(mins, maxs, tris, 3, 0, centre, out self)); Assert.False(self);   // the stray link has none
+        Assert.Equal(5, WorkshopRules.FindMirror(mins, maxs, tris, 4, 0, centre, out self));   // a small fitting and its twin
+        Assert.Equal(4, WorkshopRules.FindMirror(mins, maxs, tris, 5, 0, centre, out self));   // the near copy at index 6 sits 0.2 off — outside 3 % of a 1 m part
+        Assert.Equal(-1, WorkshopRules.FindMirror(mins, maxs, tris, 6, 0, centre, out self));
+        Assert.Equal(-1, WorkshopRules.FindMirror(mins, maxs, tris, 7, 0, centre, out self));  // unmeasured
+        // exact duplicates: the closer triangle count breaks the tie
+        var dmins = new List<float[]> { V(-2, 0, 0), V(1, 0, 0), V(1, 0, 0) }; var dmaxs = new List<float[]> { V(-1, 1, 1), V(2, 1, 1), V(2, 1, 1) };
+        Assert.Equal(2, WorkshopRules.FindMirror(dmins, dmaxs, new List<int> { 100, 80, 99 }, 0, 0, 0f, out self));
+        // an off-centre model along the other side axis
+        var omins = new List<float[]> { V(0, 0, 4), V(0, 0, 12) }; var omaxs = new List<float[]> { V(1, 1, 8), V(1, 1, 16) };
+        float oc = WorkshopRules.MirrorCentre(omins, omaxs, 2);
+        Assert.Equal(10f, oc, 3);
+        Assert.Equal(1, WorkshopRules.FindMirror(omins, omaxs, new List<int> { 1, 1 }, 0, 2, oc, out self));
+    }
+
     [Fact]
     public void The_fuse_report_lists_every_island_when_given_them()
     {
