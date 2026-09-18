@@ -21,6 +21,13 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
+- **Generate: every group fused in parallel, and the big ones 5x faster.** Nineteen groups took 3½ minutes chained.
+  Planning a group (gather, weld, islands, sheets, direction) reads only the source, so every group now plans at once
+  on the thread pool and the meshes are appended in letter order into one output — the same bytes chaining gave,
+  in the time of the longest group. Two hot spots went with it: the edge tables hashed packed pair keys by
+  `a ^ b` (adjacent vertex classes collide, a chain walk per lookup — 11 s on a 99,000-face group), and the twin
+  search tested thousands of candidates per face where a centroid-distance reject skips nearly all of them (44 s → 9 s).
+  The report carries a `timing:` line per group.
 - **Fuse: orientation by SHEET, not by island** (the SS Romanic's group D: hull shell + decks + bulwarks). Winding
   parity propagates across two-face edges only; an edge shared by three faces (a deck meeting the hull side mid-plate,
   a lap strip on plating) is a junction no two faces own. An island joined through such junctions holds several

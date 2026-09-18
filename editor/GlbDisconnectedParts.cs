@@ -58,6 +58,16 @@ public static class GlbDisconnectedParts
         public override int GetHashCode() => unchecked(Accessor * 397 ^ (int)Index);
     }
 
+    // PACKED PAIR KEYS ((a << 32) | b: an edge by its two vertex classes, a face pair, a class+material) hash to a ^ b under
+    // long.GetHashCode — adjacent classes give tiny, colliding hashes and every dictionary of edges degenerated to a chain
+    // walk (2026-09-18: the Romanic's 99,000-face group Q spent 11 s building and reading its edge tables). Mixed here.
+    sealed class PairKeyComparer : IEqualityComparer<long>
+    {
+        public static readonly PairKeyComparer Instance = new PairKeyComparer();
+        public bool Equals(long x, long y) => x == y;
+        public int GetHashCode(long x) { unchecked { ulong z = (ulong)x * 0x9E3779B97F4A7C15UL; z ^= z >> 29; return (int)(z >> 32) ^ (int)z; } }
+    }
+
     struct PositionKey : IEquatable<PositionKey>
     {
         public long X, Y, Z;
@@ -882,20 +892,112 @@ public static class GlbDisconnectedParts
 
     public static Result FuseNodes(byte[] source, IList<int> nodeIndices, double weldFraction) => FuseNodes(source, nodeIndices, weldFraction, null);
 
+    // FUSE = PLAN + APPLY (2026-09-18, user: "generating takes quite a substantial time, can't we process it in parallel?"):
+    // planning a group (stages 1-7: gather, weld, islands, sheets, direction, normals, vertices) reads only the source
+    // bytes and its own state, so every group of a Generate plans at once on the thread pool; applying (stage 8: the
+    // mesh, the node, the stripped sources) appends to ONE document in letter order and writes once. The Romanic's 19
+    // groups: 130 s chained → the longest group's 12 s plus the writes. FuseNodes keeps the one-group API.
     public static Result FuseNodes(byte[] source, IList<int> nodeIndices, double weldFraction, string fusedName)
+    {
+        FusePlan plan = PlanFuse(source, nodeIndices, weldFraction, fusedName);
+        if (plan.Empty) return plan.Result;
+        Document document = Parse(source);
+        JObject root = document.Root;
+        JArray nodes = root["nodes"] as JArray ?? new JArray();
+        JArray meshes = (JArray)root["meshes"];
+        JArray buffers = root["buffers"] as JArray;
+        Accessors reader = BinReader(document, root, out byte[] originalData);
+        var bin = new List<byte>(originalData);
+        ApplyPlan(root, nodes, meshes, bin, plan);
+        buffers[0]["byteLength"] = bin.Count;
+        document.Chunks[document.BinIndex].Data = bin.ToArray();
+        plan.Result.Bytes = Write(document);
+        ValidateOutput(plan.Result.Bytes);
+        return plan.Result;
+    }
+
+    /// <summary>One group of a multi-group fuse: the node indices and the fused part's name (null = "&lt;first part&gt;_Fused").</summary>
+    public sealed class FuseJob { public IList<int> NodeIndices; public string Name; }
+
+    /// <summary>
+    /// Fuse several groups from ONE source in one output: every group is planned in parallel against the same source
+    /// bytes, then applied in the given order (so the fused parts are appended in that order, exactly as chaining
+    /// FuseNodes group by group would). <paramref name="onTick"/> is called on the CALLING thread every ~100 ms while
+    /// the plans run, with the number of groups planned so far — a progress bar's hook. One Result per job, in order;
+    /// the bytes of the combined output are returned (each Result's Bytes is null).
+    /// </summary>
+    public static byte[] FuseGroups(byte[] source, IList<FuseJob> jobs, double weldFraction, out List<Result> results, Action<int> onTick = null)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        if (jobs == null || jobs.Count == 0) throw new ArgumentException("Nothing to fuse — no groups.", nameof(jobs));
+        // a node in two jobs would be fused twice (the chain refused the second: its mesh was already gone) — refused up front
+        var owner = new Dictionary<int, int>();
+        for (int i = 0; i < jobs.Count; i++)
+        {
+            if (jobs[i] == null || jobs[i].NodeIndices == null || jobs[i].NodeIndices.Count == 0) throw new ArgumentException("Group " + i + " has no node indices.", nameof(jobs));
+            foreach (int ni in jobs[i].NodeIndices)
+                if (owner.TryGetValue(ni, out int first) && first != i) throw new ArgumentException("Node " + ni + " is in group " + first + " and group " + i + " — a part fuses once.", nameof(jobs));
+                else owner[ni] = i;
+        }
+        var plans = new FusePlan[jobs.Count]; int done = 0;
+        var tasks = new System.Threading.Tasks.Task[jobs.Count];
+        for (int i = 0; i < jobs.Count; i++)
+        {
+            int at = i; FuseJob job = jobs[i];
+            tasks[i] = System.Threading.Tasks.Task.Run(() => { plans[at] = PlanFuse(source, job.NodeIndices, weldFraction, job.Name); System.Threading.Interlocked.Increment(ref done); });
+        }
+        while (true)
+        {
+            bool all;
+            try { all = System.Threading.Tasks.Task.WaitAll(tasks, 100); }
+            catch (AggregateException) { all = true; }   // a faulted plan: surfaced below as its own exception, not wrapped
+            onTick?.Invoke(done);
+            if (all) break;
+        }
+        foreach (var t in tasks) if (t.Exception != null) throw t.Exception.InnerExceptions.Count == 1 ? t.Exception.InnerExceptions[0] : t.Exception;
+        Document document = Parse(source);
+        JObject root = document.Root;
+        JArray nodes = root["nodes"] as JArray ?? new JArray();
+        JArray meshes = (JArray)root["meshes"];
+        JArray buffers = root["buffers"] as JArray;
+        Accessors reader = BinReader(document, root, out byte[] originalData);
+        var bin = new List<byte>(originalData);
+        results = new List<Result>();
+        foreach (FusePlan plan in plans) { ApplyPlan(root, nodes, meshes, bin, plan); results.Add(plan.Result); }
+        buffers[0]["byteLength"] = bin.Count;
+        document.Chunks[document.BinIndex].Data = bin.ToArray();
+        byte[] bytes = Write(document);
+        ValidateOutput(bytes);
+        return bytes;
+    }
+
+    sealed class FusePlan
+    {
+        public readonly Result Result = new Result();
+        public Dictionary<int, FusePrimitive> Primitives; public List<string> ExtraNames; public List<int> ExtraComps;
+        public List<int> Picked; public HashSet<int> FusedMeshes; public string BaseName;
+        public double Weld, WeldFraction, Longest; public int MadeConsistent, OpenJudged, OpenReversed, ClosedReversed, FaceCount, CollapsedFaces, NotOrientable;
+        public string LargestIslands, StitchedLine, RewoundByPart, Timing, FrameLine;
+        public bool Empty;   // no triangles: nothing to append, the sources keep their meshes, Result.Changed stays false
+    }
+
+    static FusePlan PlanFuse(byte[] source, IList<int> nodeIndices, double weldFraction, string fusedName)
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
         if (nodeIndices == null || nodeIndices.Count == 0) throw new ArgumentException("Nothing to fuse — no node indices.", nameof(nodeIndices));
         if (double.IsNaN(weldFraction) || weldFraction < 0) throw new ArgumentOutOfRangeException(nameof(weldFraction));
+        // stage timing for the report ("timing: parse 300 ms; gather 120 ms; weld 300 ms; …"): a 99,000-face group took 55 s on
+        // 2026-09-18. Each mark is charged to the work since the previous one, the clock running from before the parse.
+        var stageClock = System.Diagnostics.Stopwatch.StartNew(); var timing = new List<string>();
+        void Mark(string what) { timing.Add(what + " " + stageClock.ElapsedMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " ms"); stageClock.Restart(); }
         Document document = Parse(source);
         JObject root = document.Root;
         JArray nodes = root["nodes"] as JArray ?? new JArray();
         JArray meshes = root["meshes"] as JArray ?? throw new InvalidDataException("GLB has no meshes array.");
-        JArray buffers = root["buffers"] as JArray;
         byte[] originalData;
         Accessors reader = BinReader(document, root, out originalData);
-        var bin = new List<byte>(originalData);
-        var result = new Result();
+        var plan = new FusePlan(); Result result = plan.Result;
+        Mark("parse");
 
         // 1) gather every triangle of every chosen part in WORLD space, with normal / UV / material per vertex
         var pos = new List<Vec3>(); var nrm = new List<Vec3?>(); var uv = new List<double[]>(); var mat = new List<int>();
@@ -982,7 +1084,7 @@ public static class GlbDisconnectedParts
         result.VerticesBefore = pos.Count;
         if (tangentsDropped) result.Warnings.Add("TANGENT dropped from the fused mesh: tangents follow winding and UVs, which this pass may change — the importer recomputes them.");
         for (int v = 0; v < pos.Count; v++) { double[][] ex = extra[v]; if (ex.Length < extraNames.Count) { Array.Resize(ref ex, extraNames.Count); extra[v] = ex; } }   // parts read before a later part introduced an attribute
-        if (faceCount == 0) { result.Warnings.Add("Nothing to fuse: the chosen parts carry no triangles."); return result; }
+        if (faceCount == 0) { result.Warnings.Add("Nothing to fuse: the chosen parts carry no triangles."); plan.Empty = true; return plan; }   // nothing to apply: Changed stays false
 
         double[] mn = { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity };
         double[] mx = { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
@@ -995,6 +1097,7 @@ public static class GlbDisconnectedParts
         double rounding = longest * 1e-6;
         double weld = Math.Max(longest * weldFraction, rounding);
 
+        Mark("gather");
         // 2) weld classes — union-find over vertices within `weld` (a hash grid, the 27 neighbouring cells)
         int[] WeldClasses(double distance)
         {
@@ -1035,7 +1138,7 @@ public static class GlbDisconnectedParts
         List<List<int>> Islands(int[] cls, out long[] edgeKeys, out bool[] edgeDir, out Dictionary<long, List<int>> edgeFaces, out int collapsed)
         {
             edgeKeys = new long[faceCount * 3]; edgeDir = new bool[faceCount * 3];
-            edgeFaces = new Dictionary<long, List<int>>();
+            edgeFaces = new Dictionary<long, List<int>>(PairKeyComparer.Instance);
             collapsed = 0;
             var degenerate = new bool[faceCount];
             for (int f = 0; f < faceCount; f++)
@@ -1075,6 +1178,7 @@ public static class GlbDisconnectedParts
         }
         result.IslandsBefore = Islands(WeldClasses(rounding), out _, out _, out _, out _).Count;   // coincident positions only: what the source already connects
         int[] classes = WeldClasses(weld);
+        Mark("weld");   // both weld passes (the coincident-only count above and the real one) are charged here, where they run
         // ONE position per welded class. Connectivity is by class, but output vertices are emitted separately wherever
         // UV, normal or material differ, and each kept its own authored position: two plates 0.01 apart across a UV
         // seam reported one island and still rendered the 0.01 gap (review of 4e748c1). Every vertex of a class now
@@ -1100,6 +1204,7 @@ public static class GlbDisconnectedParts
         // the first test and it was over-eager (2026-09-16, the lifeboats): a gunwale rail or keel band attached along
         // its whole length shares 100 % of its vertices by construction and is not a lap — its faces stand off the hull.
         // A lap's faces are PARALLEL to the plate's faces at the shared vertices (measured: 533 of 656 Object_8 strips).
+        Mark("islands");
         string stitchedLine = null;
         if (picked.Count > 1)
         {
@@ -1153,6 +1258,7 @@ public static class GlbDisconnectedParts
                     laps.Count, string.Join(", ", laps.Select(n => "'" + n + "'"))));
         }
 
+        Mark("stitched");
         // 4) ORIENTATION SHEETS, and consistency by MAJORITY within each. Parity (which way a face is wound relative to
         // its neighbour) propagates across TWO-face edges only. An edge shared by three or more faces — a deck meeting
         // a hull side in the middle of the plate, a lap strip stitched onto plating — is a junction no two faces own, so
@@ -1188,7 +1294,7 @@ public static class GlbDisconnectedParts
         var sheets = new List<List<int>>();
         var sheetOf = new int[faceCount]; for (int f = 0; f < faceCount; f++) sheetOf[f] = -1;
         var parityOf = new int[faceCount];
-        var edgeSame = new Dictionary<long, bool>();   // every partnered pair walked (keyed by the pair): were its faces walking the edge the same way (after the lap rule)?
+        var edgeSame = new Dictionary<long, bool>(PairKeyComparer.Instance);   // every partnered pair walked (keyed by the pair): were its faces walking the edge the same way (after the lap rule)?
         foreach (List<int> islandFaces in allIslands)
             foreach (int seed in islandFaces)
             {
@@ -1271,6 +1377,7 @@ public static class GlbDisconnectedParts
             }
         }
 
+        Mark("sheets");
         // 5) direction. The signed volume about the ORIGIN was wrong for anything with a boundary: it is the volume of
         // a cone from the origin over the surface, so it reads where the surface sits, not which way it faces (a
         // correct deck under y=0 came back reversed whole — review of 4e748c1). Judged about the island's own
@@ -1295,6 +1402,18 @@ public static class GlbDisconnectedParts
         double twinReach = longest * 0.01, twinCell;   // 1 % of the length: hull skins are 0.05-0.3 % apart, a deck and the ceiling below it 1.4 %+
         var twinCells = new Dictionary<PositionKey, List<int>>();
         var twinCentres = new Vec3[faceCount];
+        // per face, once: its unit normal (null when degenerate) and the radius of its corners about the centroid — a
+        // candidate whose centroid lies farther than reach + its radius cannot hold a point within reach, and is skipped
+        // before any cross product or closest-point test (the 27-cell search around a dense superstructure returned
+        // thousands of candidates per face; group Q's direction pass took 44 s)
+        var twinUnit = new Vec3?[faceCount]; var twinRadius = new double[faceCount];
+        for (int f = 0; f < faceCount; f++)
+        {
+            Vec3 n = FaceNormal(f); double l = FLen(n); if (l >= 1e-12) twinUnit[f] = FScale(n, 1.0 / l);
+            Vec3 a = P(f, 0), b = P(f, 1), cc = P(f, 2), cen = FScale(FAdd(FAdd(a, b), cc), 1.0 / 3.0);
+            twinRadius[f] = Math.Max(FLen(FSub(a, cen)), Math.Max(FLen(FSub(b, cen)), FLen(FSub(cc, cen))));
+        }
+        var twinSeen = new int[faceCount];   // stamp: twinSeen[g] == f + 1 when g was already tested for face f
         {
             var sizes = new List<double>(faceCount);
             for (int f = 0; f < faceCount; f++)
@@ -1314,6 +1433,7 @@ public static class GlbDisconnectedParts
                 { var k = new PositionKey { X = x, Y = y, Z = z }; if (!twinCells.TryGetValue(k, out List<int> l)) twinCells.Add(k, l = new List<int>()); l.Add(f); }
             }
         }
+        Mark("belly+twin grid");
         // the twin statistics of every island, measured BEFORE any direction flip (an island turned earlier in the loop
         // would present same-way normals to its twin island — the inner skin saw an already-turned outer skin)
         var twinStats = new int[sheets.Count][];
@@ -1334,16 +1454,21 @@ public static class GlbDisconnectedParts
             var behindBy = new Dictionary<int, int>();   // twin island -> twins-behind count
             foreach (int f in sheets[ii])
             {
-                Vec3 nf = FaceNormal(f); double lf = FLen(nf); if (lf < 1e-12) continue; nf = FScale(nf, 1.0 / lf);
+                if (twinUnit[f] == null) continue; Vec3 nf = twinUnit[f].Value;
                 Vec3 c = twinCentres[f]; PositionKey k = CellOf(c, twinCell); double best = double.PositiveInfinity; double proj = 0; int bestG = -1;
-                var seenG = new HashSet<int>();
+                int stamp = f + 1;
                 for (long dx = -1; dx <= 1; dx++) for (long dy = -1; dy <= 1; dy++) for (long dz = -1; dz <= 1; dz++)
                 {
                     if (!twinCells.TryGetValue(new PositionKey { X = k.X + dx, Y = k.Y + dy, Z = k.Z + dz }, out List<int> l)) continue;
                     foreach (int g in l)
                     {
-                        if (g == f || !seenG.Add(g)) continue;
-                        Vec3 ng = FaceNormal(g); double lg = FLen(ng); if (lg < 1e-12 || FDot(nf, ng) / lg > -0.95) continue;
+                        if (g == f || twinSeen[g] == stamp) continue;
+                        twinSeen[g] = stamp;
+                        if (twinUnit[g] == null) continue;
+                        Vec3 gc = twinCentres[g]; double reachG = twinReach + twinRadius[g];
+                        double ddx = gc.X - c.X, ddy = gc.Y - c.Y, ddz = gc.Z - c.Z;
+                        if (ddx * ddx + ddy * ddy + ddz * ddz > reachG * reachG) continue;   // too far for any point of g to lie within reach
+                        if (FDot(nf, twinUnit[g].Value) > -0.95) continue;
                         Vec3 q = ClosestPointOnTriangle(c, P(g, 0), P(g, 1), P(g, 2)); Vec3 d = FSub(q, c); double dist = FLen(d);
                         if (dist < 1e-9 || dist > twinReach) continue;
                         double along = FDot(d, nf);
@@ -1377,7 +1502,7 @@ public static class GlbDisconnectedParts
             List<int> isl = sheets[ii];
             // a sheet's boundary is every face-edge without a partner: the rim, and the junctions where this sheet is the
             // branching face (a deck ends at the hull side; a hull side continues through it) — such a sheet is open
-            var keys = new HashSet<long>(); int boundary = 0;
+            var keys = new HashSet<long>(PairKeyComparer.Instance); int boundary = 0;
             foreach (int f in isl) for (int e = 0; e < 3; e++) { long key = fEdgeKeys[f * 3 + e]; if (key < 0) continue; keys.Add(key); if (partner[f * 3 + e] < 0) boundary++; }
             bool closed = boundary == 0 && keys.Count > 0;
             // signed volume about the island's own centroid, and how much the per-face cones agree on its sign
@@ -1443,6 +1568,7 @@ public static class GlbDisconnectedParts
                 closed ? "closed" : "open", agreement, thickness, score, notOrientable[ii] ? "not judged" : reverse ? "reversed whole" : "kept",
                 partnered > 0 ? string.Format(System.Globalization.CultureInfo.InvariantCulture, ", double skin {0:0}% twinned ({1} twin in front / {2} behind)", 100.0 * partnered / isl.Count, twinInFront, twinBehind) : "");
         }
+        Mark("direction");
         foreach (bool b in flip) if (b) result.FacesRewound++;
         // per PART: how many of its faces were turned — the reader's question after "why does my port side still render
         // inside out" is which part the pass left alone (2026-09-18, the Romanic's group D)
@@ -1461,7 +1587,7 @@ public static class GlbDisconnectedParts
             foreach (int ii in Enumerable.Range(0, sheets.Count).OrderByDescending(i => sheets[i].Count))
             {
                 List<int> isl = sheets[ii];
-                var keys = new HashSet<long>(); int boundary = 0, turned = 0;
+                var keys = new HashSet<long>(PairKeyComparer.Instance); int boundary = 0, turned = 0;
                 foreach (int f in isl) { if (flip[f]) turned++; for (int e = 0; e < 3; e++) { long key = fEdgeKeys[f * 3 + e]; if (key < 0) continue; keys.Add(key); if (partner[f * 3 + e] < 0) boundary++; } }
                 string line = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} faces ({1:0}% boundary, {2}, {3} rewound; {4})", isl.Count, keys.Count > 0 ? 100.0 * boundary / keys.Count : 100.0, islandRule[ii], turned, islandConflict[ii]);
                 result.IslandLines.Add(line);   // all of them, for the report (review of 0097bd5: the report promised every island and carried six)
@@ -1470,6 +1596,7 @@ public static class GlbDisconnectedParts
             largestIslands = "largest islands: " + string.Join("; ", rows);
         }
 
+        Mark("report");
         // 6) vertex normals follow the final winding
         var incident = new List<int>[pos.Count];
         for (int f = 0; f < faceCount; f++) for (int c = 0; c < 3; c++) { int v = tris[f * 3 + c]; (incident[v] ?? (incident[v] = new List<int>())).Add(f); }
@@ -1490,10 +1617,11 @@ public static class GlbDisconnectedParts
             else finalNormal[v] = FLen(acc) > 1e-18 ? FUnit(acc) : new Vec3 { X = 0, Y = 1, Z = 0 };
         }
 
+        Mark("normals");
         // 7) output vertices: one per welded class + material + matching UV + matching normal; one primitive per material
         var primitiveOf = new Dictionary<int, FusePrimitive>();
         var vertexMap = new int[pos.Count];
-        var reps = new Dictionary<long, List<int>>();   // (class, material) -> representative original vertices already emitted
+        var reps = new Dictionary<long, List<int>>(PairKeyComparer.Instance);   // (class, material) -> representative original vertices already emitted
         for (int v = 0; v < pos.Count; v++)
         {
             if (incident[v] == null) { vertexMap[v] = -1; continue; }   // unreferenced source vertex: dropped
@@ -1537,11 +1665,29 @@ public static class GlbDisconnectedParts
             throw new InvalidDataException("Triangle preservation check failed: source " + result.SourceTriangles + ", output " + result.OutputTriangles + ".");
         foreach (FusePrimitive prim in primitiveOf.Values) result.VerticesAfter += prim.Positions.Count / 3;
 
-        // 8) the fused mesh on a new root node; the source nodes keep transforms and children, lose their mesh
-        string baseName = string.IsNullOrEmpty(fusedName) ? partNames[0] + "_Fused" : fusedName;
+        Mark("vertices");
+        plan.Primitives = primitiveOf; plan.ExtraNames = extraNames; plan.ExtraComps = extraComps; plan.Picked = picked; plan.FusedMeshes = fusedMeshes;
+        plan.BaseName = string.IsNullOrEmpty(fusedName) ? partNames[0] + "_Fused" : fusedName;
+        plan.Weld = weld; plan.WeldFraction = weldFraction; plan.Longest = longest;
+        plan.MadeConsistent = islandsMadeConsistent; plan.OpenJudged = openJudged; plan.OpenReversed = openReversed; plan.ClosedReversed = closedReversed;
+        plan.FaceCount = faceCount; plan.CollapsedFaces = collapsedFaces; plan.NotOrientable = islandsNotOrientable;
+        plan.LargestIslands = largestIslands; plan.StitchedLine = stitchedLine; plan.RewoundByPart = rewoundByPart;
+        plan.Timing = string.Join("; ", timing);
+        plan.FrameLine = string.Format(System.Globalization.CultureInfo.InvariantCulture, "frame: length along {0}, side centre {1:0.##}, belly height {2:0.##} (the model's, fused or not)", lengthAxis == 0 ? "X" : "Z", centreW, bellyY);
+        return plan;
+    }
+
+    // 8) the fused mesh on a new root node; the source nodes keep transforms and children, lose their mesh — appended to
+    // the document the caller holds (one group, or every group of a Generate in turn), the BIN growing in `bin`
+    static void ApplyPlan(JObject root, JArray nodes, JArray meshes, List<byte> bin, FusePlan plan)
+    {
+        if (plan.Empty) return;
+        var writeClock = System.Diagnostics.Stopwatch.StartNew();
+        Result result = plan.Result; List<int> picked = plan.Picked; List<string> extraNames = plan.ExtraNames; List<int> extraComps = plan.ExtraComps;
+        string baseName = plan.BaseName;
         var meshJson = new JObject { ["name"] = UniqueName(baseName, meshes.OfType<JObject>().Select(m => (string)m["name"])) };
         var primitivesJson = new JArray();
-        foreach (FusePrimitive prim in primitiveOf.Values.OrderBy(p => p.Material < 0 ? int.MaxValue : p.Material))
+        foreach (FusePrimitive prim in plan.Primitives.Values.OrderBy(p => p.Material < 0 ? int.MaxValue : p.Material))
         {
             var attrs = new JObject
             {
@@ -1571,25 +1717,20 @@ public static class GlbDisconnectedParts
         }
         foreach (int ni in picked) { var n = (JObject)nodes[ni]; n.Remove("mesh"); }
         foreach (int other in Enumerable.Range(0, nodes.Count))
-            if (!picked.Contains(other) && other != newNodeIndex && (nodes[other] as JObject)?["mesh"] != null && fusedMeshes.Contains(nodes[other].Value<int>("mesh")))
+            if (!picked.Contains(other) && other != newNodeIndex && (nodes[other] as JObject)?["mesh"] != null && plan.FusedMeshes.Contains(nodes[other].Value<int>("mesh")))
                 result.Warnings.Add("Node " + other + " shares a fused part's mesh and keeps the ORIGINAL geometry (instanced part).");
-        result.NodesSplit = picked.Count; result.MeshesSplit = fusedMeshes.Count; result.ChildPartsCreated = 1;
+        result.NodesSplit = picked.Count; result.MeshesSplit = plan.FusedMeshes.Count; result.ChildPartsCreated = 1;
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         result.Details.Add(string.Format(inv,
             "Fused {0} part(s) -> '{1}': {2} -> {3} verts (seams welded within {4:0.####} = {5:0.##}‰ of {6:0.#}); islands {7} -> {8}; {9} made consistent{16}; {10} open sheet(s) judged, {11} reversed; {12} closed shell(s) reversed whole; {13} of {14} face(s) rewound; {15} face(s) smaller than the weld kept collapsed",
-            picked.Count, newNodeName, result.VerticesBefore, result.VerticesAfter, weld, weldFraction * 1000.0, longest, result.IslandsBefore, result.IslandsAfter,
-            islandsMadeConsistent, openJudged, openReversed, closedReversed, result.FacesRewound, faceCount, collapsedFaces,
-            islandsNotOrientable > 0 ? string.Format(inv, ", {0} not orientable by traversal (kept as authored)", islandsNotOrientable) : ""));
-        result.Details.Add(largestIslands);
-        if (stitchedLine != null) result.Details.Add(stitchedLine);   // Details[2] when present: the lap test pins it there
-        result.Details.Add(rewoundByPart);
-        result.Details.Add(string.Format(inv, "frame: length along {0}, side centre {1:0.##}, belly height {2:0.##} (the model's, fused or not)", lengthAxis == 0 ? "X" : "Z", centreW, bellyY));
-
-        buffers[0]["byteLength"] = bin.Count;
-        document.Chunks[document.BinIndex].Data = bin.ToArray();
-        result.Bytes = Write(document);
-        ValidateOutput(result.Bytes);
-        return result;
+            picked.Count, newNodeName, result.VerticesBefore, result.VerticesAfter, plan.Weld, plan.WeldFraction * 1000.0, plan.Longest, result.IslandsBefore, result.IslandsAfter,
+            plan.MadeConsistent, plan.OpenJudged, plan.OpenReversed, plan.ClosedReversed, result.FacesRewound, plan.FaceCount, plan.CollapsedFaces,
+            plan.NotOrientable > 0 ? string.Format(inv, ", {0} not orientable by traversal (kept as authored)", plan.NotOrientable) : ""));
+        result.Details.Add(plan.LargestIslands);
+        if (plan.StitchedLine != null) result.Details.Add(plan.StitchedLine);   // Details[2] when present: the lap test pins it there
+        result.Details.Add(plan.RewoundByPart);
+        result.Details.Add("timing: " + plan.Timing + "; write " + writeClock.ElapsedMilliseconds.ToString(inv) + " ms");
+        result.Details.Add(plan.FrameLine);
     }
 
     public static Result FuseFile(string inputPath, string outputPath, IList<int> nodeIndices, double weldFraction)
