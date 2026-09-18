@@ -20,13 +20,13 @@ using UnityEditor;
 using UnityEngine;
 
 // TWO WINDOWS, ONE IMPLEMENTATION (2026-09-18, user: "the Model Workshop has too many responsibilities, which makes it
-// cluttered — split it up into two screens, one for cutting and one for merging"): the CUTTER (island split + plane cut)
+// cluttered — split it up into two screens, one for cutting and one for merging"): the SPLITTER (island split + plane cut)
 // and the FUSER (⊕ groups → welded shells) share the file pickers, the probe, the filtered part list, the preview, the
 // mirror finder and the keyboard sweep; each shows only its own column, keys and buttons. The one-step Generate (fuse
 // AND split) went with the split — chain the outputs instead: the ⊕ letters travel through a cut, so either order works.
 public abstract class ModelWorkshopWindow : EditorWindow
 {
-    protected abstract bool Fusing { get; }   // the Fuser: ⊕ letters, weld, Fuse — else the Cutter: Split checkboxes, plane cut, Split
+    protected abstract bool Fusing { get; }   // the Fuser: ⊕ letters, weld, Fuse — else the Splitter: Split checkboxes, plane cut, Split
 
     [Serializable]
     class Row
@@ -120,11 +120,11 @@ public abstract class ModelWorkshopWindow : EditorWindow
             EditorGUILayout.LabelField("Model Fuser — weld the parts of each ⊕ group into ONE shell with consistent winding", EditorStyles.boldLabel);
             // two short lines, not one long one: a single long label sets the window's minimum width (user 2026-09-16)
             EditorGUILayout.LabelField("For a hull authored as separate plates (see-through, holes, gaps under reduction): mark the plates with one letter, Fuse, then feed the output to the Vehicle Lab.", EditorStyles.wordWrappedMiniLabel);
-            EditorGUILayout.LabelField("Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh. To cut as well, open the output in the Model Cutter: each shell keeps its ⊕ letter there.", EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.LabelField("Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh. To cut as well, open the output in the Model Splitter: each shell keeps its ⊕ letter there.", EditorStyles.wordWrappedMiniLabel);
         }
         else
         {
-            EditorGUILayout.LabelField("Model Cutter — split chosen parts into their disconnected islands, or plane-cut a connected one", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Model Splitter — split chosen parts into their disconnected islands, or plane-cut a connected one", EditorStyles.boldLabel);
             // two short lines, not one long one: a single long label sets the window's minimum width (user 2026-09-16)
             EditorGUILayout.LabelField("For a part whose junk islands share a mesh with real geometry: split ONLY that part, then mark the junk Ignore in the Vehicle Lab.", EditorStyles.wordWrappedMiniLabel);
             EditorGUILayout.LabelField("Lossless — vertex data, materials, skins and animations are preserved; only the checked parts gain _Part_NNN children. A CONNECTED part (1 island) can instead be plane-cut in two. To fuse as well, open the output in the Model Fuser.", EditorStyles.wordWrappedMiniLabel);
@@ -236,7 +236,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 "and rigging vanish; combine with the height sliders to pick one deck level. 0 = off. Needs the preview (Probe parts " +
                 "builds it); parts the preview can't measure stay visible."), minFlatPct, 0f, 100f);
             var lettersInUse = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).Select(r => r.fuse).Distinct().OrderBy(l => l).ToList();
-            // each window lists its own kinds (the Cutter: checked / islands; the Fuser: groups / islands, then every letter in use)
+            // each window lists its own kinds (the Splitter: checked / islands; the Fuser: groups / islands, then every letter in use)
             int[] kinds = Fusing ? new[] { 0, 2, 3, 4, 5, 6 } : new[] { 0, 1, 4, 5, 6 };
             if (Array.IndexOf(kinds, showOnly) < 0) showOnly = 0;
             var showOptions = kinds.Select(k => ShowOnlyOptions[k]).Concat(Fusing ? lettersInUse.Select(l => $"Group ⊕{l}  ({rows.Count(r => r.fuse == l)} part(s))") : Enumerable.Empty<string>()).ToArray();
@@ -247,7 +247,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             else { showOnly = kinds[picked]; showOnlyLetter = ""; }
             bool Passes(Row r)
             {
-                if (!Fusing && hideWhole && r.islands <= 1 && r.blocked == null) return false;   // the Cutter's toggle; the Fuser has no use for island counts
+                if (!Fusing && hideWhole && r.islands <= 1 && r.blocked == null) return false;   // the Splitter's toggle; the Fuser has no use for island counts
                 if (Fusing && !string.IsNullOrEmpty(showOnlyLetter) && r.fuse != showOnlyLetter) return false;
                 switch (showOnly)
                 {
@@ -343,7 +343,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                                  : Fusing ? $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {r.islands:N0} island{(r.islands == 1 ? "" : "s")})"
                                  : $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {(r.islands == 1 ? "1 island — already whole" : r.islands.ToString("N0") + " islands")})";
                     // the row label is a BUTTON, exactly like the Vehicle Lab: click = highlight + frame in the preview
-                    if (GUILayout.Button(label, isSel ? EditorStyles.whiteLabel : (r.blocked == null && (Fusing || r.islands > 1) ? EditorStyles.label : EditorStyles.miniLabel)))   // the Cutter dims what it cannot split
+                    if (GUILayout.Button(label, isSel ? EditorStyles.whiteLabel : (r.blocked == null && (Fusing || r.islands > 1) ? EditorStyles.label : EditorStyles.miniLabel)))   // the Splitter dims what it cannot split
                     { ExitCutMode(); selectedIdx = isSel ? -1 : r.nodeIndex; SelectRow(isSel ? "" : r.node); }
                     if (Event.current.type == EventType.Repaint) rowRects.Add(GUILayoutUtility.GetLastRect());   // the row's real rect in scroll-content space (see the ↑/↓ handler)
                 }
@@ -899,7 +899,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // nodes (fused sources only lose their mesh; the fused part is appended), so group B's node indices stay valid
     // in group A's output. One write at the end; the source file is never touched.
     // (The 2026-09-16 Generate — fuse AND split in one output — went with the two-window split of 2026-09-18: the
-    // Cutter's checks and the Fuser's letters no longer live in one window. Chain the outputs; the letters travel.)
+    // Splitter's checks and the Fuser's letters no longer live in one window. Chain the outputs; the letters travel.)
     void FuseMarked()
     {
         const string verb = "Fuse";
@@ -938,7 +938,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             if (done == 0) { status = "Nothing changed — no group produced a fused mesh (see warnings in the console)."; return; }
             File.WriteAllBytes(outGlb, bytes);
             WriteFuseSidecar(srcFile);   // the groupings, next to the source: a later Probe of this file restores them
-            // ...and next to the OUTPUT: each shell under its group's letter, so the Cutter (or the Fuser again) opens it knowing its groups
+            // ...and next to the OUTPUT: each shell under its group's letter, so the Splitter (or the Fuser again) opens it knowing its groups
             if (results != null) try
             {
                 string outSidecar = FuseSidecarPath(outGlb);
@@ -978,10 +978,10 @@ public abstract class ModelWorkshopWindow : EditorWindow
     }
 }
 
-public class ModelCutterWindow : ModelWorkshopWindow
+public class ModelSplitterWindow : ModelWorkshopWindow
 {
-    [MenuItem("Tools/HAF/Model Cutter")]
-    static void Open() => GetWindow<ModelCutterWindow>("Model Cutter");
+    [MenuItem("Tools/HAF/Model Splitter")]
+    static void Open() => GetWindow<ModelSplitterWindow>("Model Splitter");
     protected override bool Fusing => false;
 }
 

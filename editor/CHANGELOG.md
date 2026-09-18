@@ -21,9 +21,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
-- **The Model Workshop is two windows: Model Cutter and Model Fuser** (user: "too many responsibilities, which makes
+- **The Model Workshop is two windows: Model Splitter and Model Fuser** (user: "too many responsibilities, which makes
   it cluttered — one screen for cutting and one for merging"). One implementation; both share the file pickers, the
-  probe, the filtered part list, the preview, the mirror finder and the keyboard sweep. The Cutter shows the Split
+  probe, the filtered part list, the preview, the mirror finder and the keyboard sweep. The Splitter shows the Split
   checkboxes, "Check all splittable", the plane cut and Split (output `_split` / `_cut`); the Fuser the ⊕ letters,
   the A–Z keys, the weld slider, Save/Load groups and Fuse (output `_fused`). "Show only" lists each window's own
   kinds. The one-step Generate (fuse AND split) went with the split: chain the outputs — the ⊕ letters travel with a

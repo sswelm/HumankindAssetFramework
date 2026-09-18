@@ -291,7 +291,7 @@ A 395k-vertex source (a fully rigged galley: 64+ oars, sails, flags, rigging) fi
 visual quality with this workflow — **delete and cut per role at the source, so the Factory's blind global
 reduction never has to choose what survives**:
 
-1. **Amputate before you diet.** Open the source in the **Model Cutter** (`Tools ▸ HAF ▸ Model Cutter`):
+1. **Amputate before you diet.** Open the source in the **Model Splitter** (`Tools ▸ HAF ▸ Model Splitter`):
    Probe lists every part's disconnected-island count; split the parts hiding floating junk (the merge-distance
    slider keeps segmented ropes and trim lines whole — only genuinely distant debris separates); then, in the
    Vehicle Lab, mark the junk **Ignore**. Deleting invisible geometry is free quality — on the galley this
