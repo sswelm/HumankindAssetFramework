@@ -808,4 +808,31 @@ public class GlbFuseTests
         var fn = FaceNormals(g, prim);
         foreach (double[] f in fn) Assert.True(f[1] > 0, "the written winding faces +Y");
     }
+
+    [Fact]
+    public void Fusing_groups_in_parallel_writes_exactly_what_chaining_them_writes()
+    {
+        // two groups planned at once and applied in order must give the bytes that FuseNodes(FuseNodes(A)) gives
+        var a1 = Quad("A1", 0, 1, 0, 1, 0); var a2 = Quad("A2", 1, 2, 0, 1, 0, inward: true);
+        var b1 = Box("B1", 1, 5, 0, 0, inward: true); var b2 = Box("B2", 1, 5, 0, 1.5f, inward: false);
+        byte[] src = BuildGlb(a1, a2, b1, b2);
+        var chainA = GlbDisconnectedParts.FuseNodes(src, new[] { 0, 1 }, 0.001, "Fused_A_A1");
+        var chainB = GlbDisconnectedParts.FuseNodes(chainA.Bytes, new[] { 2, 3 }, 0.001, "Fused_B_B1");
+        byte[] both = GlbDisconnectedParts.FuseGroups(src, new List<GlbDisconnectedParts.FuseJob> {
+            new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 0, 1 }, Name = "Fused_A_A1" }, new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 2, 3 }, Name = "Fused_B_B1" } }, 0.001, out var results, null);
+        Assert.Equal(chainB.Bytes, both);
+        Assert.Equal(2, results.Count);
+        Assert.Equal(chainA.FacesRewound, results[0].FacesRewound); Assert.Equal(chainB.FacesRewound, results[1].FacesRewound);
+        Assert.StartsWith("Fused 2 part(s) -> 'Fused_A_A1'", results[0].Details[0]);
+        Assert.StartsWith("Fused 2 part(s) -> 'Fused_B_B1'", results[1].Details[0]);
+        Assert.True(results[0].Changed && results[1].Changed);
+        Assert.Null(results[0].Bytes);   // one output for all: the caller gets the bytes, not each result
+        // a failing group surfaces its own exception, not an AggregateException
+        var skinned = Quad("S", 0, 1, 0, 1, 0); skinned.Skinned = true;
+        Assert.Throws<System.IO.InvalidDataException>(() => GlbDisconnectedParts.FuseGroups(BuildGlb(a1, skinned), new List<GlbDisconnectedParts.FuseJob> { new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 1 } } }, 0.001, out _, null));
+        // the tick reports the planned count on the calling thread and ends at the total
+        int last = -1; int ticks = 0;
+        GlbDisconnectedParts.FuseGroups(src, new List<GlbDisconnectedParts.FuseJob> { new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 0, 1 } } }, 0.001, out _, n => { last = n; ticks++; });
+        Assert.Equal(1, last); Assert.True(ticks >= 1);
+    }
 }

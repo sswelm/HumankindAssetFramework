@@ -892,17 +892,27 @@ public class ModelWorkshopWindow : EditorWindow
             byte[] bytes = File.ReadAllBytes(srcFile);
             var lines = new List<string>(); int done = 0;
             var report = new List<WorkshopRules.FuseGroupReport>();   // the evidence goes to a file, not the status box (711 parts in six groups made the status unreadable — user 2026-09-16)
-            foreach (var g in groups)
+            if (groups.Count > 0)
             {
-                EditorUtility.DisplayProgressBar("Model Workshop", $"Fusing group ⊕{g.Key} ({g.Count()} part(s))…", 0.2f + 0.6f * done / Math.Max(1, groups.Count));
-                var picked = g.Select(r => r.nodeIndex).ToList();   // row order: the first becomes the fused part's name
+                // every group planned AT ONCE on the thread pool against the same source, applied in letter order into one
+                // output (2026-09-18, user: "can't we process it in parallel?" — 19 groups took 3½ minutes chained); the
+                // fused parts are appended in the same order chaining would, so node indices and names come out the same
                 // the group letter leads the fused part's name — "Fused_B_Object_54" — so the Lab's list shows at a glance which
                 // group a shell came from and the fused parts sort together (user 2026-09-17)
-                var result = GlbDisconnectedParts.FuseNodes(bytes, picked, weldPermille / 1000.0, "Fused_" + g.Key + "_" + g.First().node);
-                report.Add(new WorkshopRules.FuseGroupReport { Letter = g.Key, PartNames = g.Select(r => r.node).ToList(), Details = result.Details, Warnings = result.Warnings, Changed = result.Changed, Islands = result.IslandLines });
-                if (!result.Changed) { lines.Add($"⊕{g.Key}: nothing fused ({string.Join("; ", result.Warnings)})"); continue; }
-                bytes = result.Bytes; done++;
-                lines.Add($"⊕{g.Key}: {result.Details.FirstOrDefault()}" + (result.Warnings.Count > 0 ? $"   ⚠ {result.Warnings.Count} warning(s)" : ""));
+                var jobs = groups.Select(g => new GlbDisconnectedParts.FuseJob { NodeIndices = g.Select(r => r.nodeIndex).ToList(), Name = "Fused_" + g.Key + "_" + g.First().node }).ToList();   // row order: the first becomes the fused part's name
+                int total = jobs.Count; string letters = string.Join(" ", groups.Select(g => "⊕" + g.Key));
+                EditorUtility.DisplayProgressBar("Model Workshop", $"Fusing {total} group(s) in parallel: {letters}…", 0.2f);
+                byte[] fused = GlbDisconnectedParts.FuseGroups(bytes, jobs, weldPermille / 1000.0, out List<GlbDisconnectedParts.Result> results,
+                    planned => EditorUtility.DisplayProgressBar("Model Workshop", $"Fusing {total} group(s) in parallel — {planned} of {total} planned…", 0.2f + 0.6f * planned / Math.Max(1, total)));
+                for (int gi = 0; gi < groups.Count; gi++)
+                {
+                    var g = groups[gi]; var result = results[gi];
+                    report.Add(new WorkshopRules.FuseGroupReport { Letter = g.Key, PartNames = g.Select(r => r.node).ToList(), Details = result.Details, Warnings = result.Warnings, Changed = result.Changed, Islands = result.IslandLines });
+                    if (!result.Changed) { lines.Add($"⊕{g.Key}: nothing fused ({string.Join("; ", result.Warnings)})"); continue; }
+                    done++;
+                    lines.Add($"⊕{g.Key}: {result.Details.FirstOrDefault()}" + (result.Warnings.Count > 0 ? $"   ⚠ {result.Warnings.Count} warning(s)" : ""));
+                }
+                if (done > 0) bytes = fused;
             }
             if (alsoSplit)
             {
