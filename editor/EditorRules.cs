@@ -368,16 +368,52 @@ public static class WorkshopRules
         return best;
     }
 
-    // The centreline to mirror across: the MEDIAN of the part centres along the side axis. Paired parts straddle it
-    // symmetrically and unpaired ones (keel, funnels, masts) lie on it, so the median lands on it even when a stray
-    // cluster sits far to one side (the Romanic's anchor chain, 30-47 m off to port and starboard both).
+    // The centreline to mirror across, VOTED by the pairs themselves: every two parts with the same box extents and the
+    // same position on the other two axes are a candidate mirrored pair, and the midpoint of their side centres is where
+    // the centreline would have to be; the densest cluster of midpoints wins (within 1 % of the model's side extent).
+    // The median of all part centres was the first rule and a review broke it with four parts: a pair at -5/+5, a keel
+    // at 0 and one stray fitting at 30.5 gave a median of 2.5 and the exact pair was missed. Nothing to vote (no two
+    // parts alike): the median, which a lone keel or a symmetric hull still puts on the centreline.
     public static float MirrorCentre(IList<float[]> mins, IList<float[]> maxs, int sideAxis)
     {
-        var cs = new List<float>();
-        for (int i = 0; i < mins.Count; i++) if (mins[i] != null && maxs[i] != null) cs.Add(0.5f * (mins[i][sideAxis] + maxs[i][sideAxis]));
-        if (cs.Count == 0) return 0f;
-        cs.Sort();
-        return cs.Count % 2 == 1 ? cs[cs.Count / 2] : 0.5f * (cs[cs.Count / 2 - 1] + cs[cs.Count / 2]);
+        var idx = new List<int>();
+        for (int i = 0; i < mins.Count; i++) if (mins[i] != null && maxs[i] != null) idx.Add(i);
+        if (idx.Count == 0) return 0f;
+        float lo = float.PositiveInfinity, hi = float.NegativeInfinity;
+        foreach (int i in idx) { lo = Math.Min(lo, mins[i][sideAxis]); hi = Math.Max(hi, maxs[i][sideAxis]); }
+        float window = Math.Max(0.01f * (hi - lo), 1e-4f);
+        var mids = new List<float>();
+        for (int a = 0; a < idx.Count; a++)
+        {
+            int i = idx[a]; float[] li = mins[i], hi_ = maxs[i];
+            float dim = Math.Max(hi_[0] - li[0], Math.Max(hi_[1] - li[1], hi_[2] - li[2]));
+            float tol = Math.Max(0.03f * dim, 1e-4f);
+            for (int b = a + 1; b < idx.Count; b++)
+            {
+                int j = idx[b]; float[] lj = mins[j], hj = maxs[j];
+                bool alike = true;
+                for (int c = 0; c < 3 && alike; c++)
+                {
+                    if (Math.Abs((hj[c] - lj[c]) - (hi_[c] - li[c])) > tol) alike = false;                 // same extents
+                    else if (c != sideAxis && (Math.Abs(lj[c] - li[c]) > tol || Math.Abs(hj[c] - hi_[c]) > tol)) alike = false;   // same place across the other axes
+                }
+                if (alike) mids.Add(0.25f * (li[sideAxis] + hi_[sideAxis] + lj[sideAxis] + hj[sideAxis]));
+            }
+        }
+        if (mids.Count == 0)
+        {
+            var cs = new List<float>(); foreach (int i in idx) cs.Add(0.5f * (mins[i][sideAxis] + maxs[i][sideAxis]));
+            cs.Sort();
+            return cs.Count % 2 == 1 ? cs[cs.Count / 2] : 0.5f * (cs[cs.Count / 2 - 1] + cs[cs.Count / 2]);
+        }
+        mids.Sort();
+        int bestStart = 0, bestCount = 0;
+        for (int s0 = 0, e = 0; s0 < mids.Count; s0++)
+        {
+            while (e < mids.Count && mids[e] - mids[s0] <= window) e++;
+            if (e - s0 > bestCount) { bestCount = e - s0; bestStart = s0; }
+        }
+        return mids[bestStart + bestCount / 2];   // the window's MEDIAN: exact mirrors vote exactly, a near-copy on the same side only nudges a mean
     }
 
     public static string NextOutputName(string baseName, string suffix)

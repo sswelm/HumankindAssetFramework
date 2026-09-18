@@ -196,7 +196,7 @@ public class WorkshopRulesTests
         var maxs = new List<float[]> { V(0, 8.9f, 180), V(9.1f, 8.91f, 180), V(0.5f, -9, 180), V(31, 191, 3301), V(-0.6f, 9, 101), V(1, 9, 101), V(-0.8f, 9, 101), null };
         var tris = new List<int> { 1475, 1348, 300, 120, 50, 52, 50, 0 };
         float centre = WorkshopRules.MirrorCentre(mins, maxs, 0);
-        Assert.InRange(centre, -0.2f, 0.2f);   // the median lands on the centreline despite the stray link at 30
+        Assert.InRange(centre, -0.05f, 0.05f);   // voted by the pairs: the stray link at 30 has no partner and no vote
         Assert.Equal(1, WorkshopRules.FindMirror(mins, maxs, tris, 0, 0, centre, out bool self)); Assert.False(self);   // Object_14 -> Object_1782: different triangle counts, same box
         Assert.Equal(0, WorkshopRules.FindMirror(mins, maxs, tris, 1, 0, centre, out self));
         Assert.Equal(-1, WorkshopRules.FindMirror(mins, maxs, tris, 2, 0, centre, out self)); Assert.True(self);   // the keel is its own mirror
@@ -208,6 +208,14 @@ public class WorkshopRulesTests
         // exact duplicates: the closer triangle count breaks the tie
         var dmins = new List<float[]> { V(-2, 0, 0), V(1, 0, 0), V(1, 0, 0) }; var dmaxs = new List<float[]> { V(-1, 1, 1), V(2, 1, 1), V(2, 1, 1) };
         Assert.Equal(2, WorkshopRules.FindMirror(dmins, dmaxs, new List<int> { 100, 80, 99 }, 0, 0, 0f, out self));
+        // a review's four parts: an exact pair at -5/+5, a keel at 0, one unmatched fitting at 30.5 — the median said 2.5
+        var rmins = new List<float[]> { V(-6, 0, 0), V(4, 0, 0), V(-0.5f, -1, 0), V(30, 5, 0) }; var rmaxs = new List<float[]> { V(-4, 1, 3), V(6, 1, 3), V(0.5f, 0, 3), V(31, 6, 1) };
+        float rc = WorkshopRules.MirrorCentre(rmins, rmaxs, 0);
+        Assert.Equal(0f, rc, 3);
+        Assert.Equal(1, WorkshopRules.FindMirror(rmins, rmaxs, new List<int> { 10, 10, 5, 3 }, 0, 0, rc, out self));
+        Assert.Equal(-1, WorkshopRules.FindMirror(rmins, rmaxs, new List<int> { 10, 10, 5, 3 }, 2, 0, rc, out self)); Assert.True(self);
+        // no two parts alike: the median still serves (a lone hull half beside its keel)
+        Assert.Equal(1.5f, WorkshopRules.MirrorCentre(new List<float[]> { V(0, 0, 0), V(1, 0, 0) }, new List<float[]> { V(1, 1, 1), V(4, 2, 2) }, 0), 3);
         // an off-centre model along the other side axis
         var omins = new List<float[]> { V(0, 0, 4), V(0, 0, 12) }; var omaxs = new List<float[]> { V(1, 1, 8), V(1, 1, 16) };
         float oc = WorkshopRules.MirrorCentre(omins, omaxs, 2);

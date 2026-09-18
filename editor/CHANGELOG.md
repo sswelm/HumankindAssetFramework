@@ -49,7 +49,8 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   part's size), triangle counts ignored because the two sides are often remodelled rather than instanced (the SS
   Romanic's Object_6 has 1,262 triangles, its port twin Object_1774 1,274). The twin is highlighted and scrolled into
   view, so a letter key marks it next; a part on the centreline reports itself as its own mirror. The centreline is
-  the median of the part centres across the beam, so a stray cluster off to one side does not move it.
+  voted by the pairs themselves — the densest cluster of midpoints between parts of the same box — so a stray cluster
+  off to one side has no vote (the median was the first rule; a pair at ±5 with a keel and one stray fitting put it at 2.5).
 - **Model Workshop: the highlight follows the sweep.** With "Show only" set to one fuse group, changing the highlighted
   row's letter (key or dropdown) took it out of the list and the next ↓ started over at the first row. The highlight
   now moves to the row after it (before it at the end of the list), as the Vehicle Lab's marking sweep does — the same
