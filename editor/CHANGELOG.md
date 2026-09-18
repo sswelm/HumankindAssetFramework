@@ -5,6 +5,27 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Fuse: one stray edge, stray geometry, and double-skinned solids** (the SS Romanic). Its 41,799-face hull reached
+  1 unsatisfied edge of 92 same-way in 59,000 and the "0 or nothing" orientability rule refused it: the parity pass
+  must now resolve 95 % of the same-way edges (a propeller blade at 138 left of 32 is still refused) — with that the
+  majority rule turned 19,923 faces (a single skin with half its regions wound the other way) and the hull renders
+  complete. Its 144 anchor-chain links parked 3 km down the length axis and 190 m up had put the belly at 46 m on a
+  ship whose deck is at 11: the frame drops samples farther than 4x the median distance from the model's median
+  centre. And a third direction rule for thin solids built as two skins with opposite normals, where the volume and
+  score rules cancel: material lies BEHIND an outward face — an island with a twin on at least half its faces is
+  decided by the majority of twin-in-front vs behind, measured for every island before any flip — as a TIE-BREAKER
+  only: from inside a gap, air between two solids looks exactly like a skin, so a confident volume verdict (a closed
+  island, or an open one past the agreement and thickness gates) always wins. The frame is area-weighted: face
+  samples weighted by their area, so a coarse hull outweighs a dense cabin and a chain of tiny links weighs nothing
+  however many vertices it carries — sampled at each triangle's three corners, a third of its area each, so a big
+  triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
+  behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
+  solids never are) but never cause one against a confident volume. Ten tests.
+- **Vehicle Lab: "Mark all shown as …"** — one role for every part the filters currently show. The SS Romanic
+  carries 144 stray copies of one fitting 3 km down the length axis and 190 m up (an authoring leftover that
+  makes the preview frame a speck of a ship); "Hide parts below (height)" isolates them in seconds and one Apply
+  marks them Ignore. Undo by filtering the same way and applying Default.
+
 - **Bake Tests: Cancel works anywhere.** The Cancel button existed only on the between-rows bar, and a row is a
   whole section of bakes lasting many minutes ("I have no way to stop it"). Every bar the runner draws is
   cancelable now: a click stops the section between models, the runner between rows, and kills a running Blender

@@ -43,6 +43,13 @@ public class GlbFuseTests
         return new Part { Name = name, Positions = v, Indices = idx.ToArray() };
     }
 
+    // a box without its top face (5 faces): an OPEN thin solid's two skins cancel in volume, so the twin rule decides
+    static Part OpenBox(string name, float s, float ox, float oy, float oz, bool inward)
+    {
+        var full = Box(name, s, ox, oy, oz, inward);
+        return new Part { Name = name, Positions = full.Positions, Indices = full.Indices.Take(6).Concat(full.Indices.Skip(12)).ToArray() };   // face 1 (top, +Y) dropped
+    }
+
     static byte[] BuildGlb(params Part[] parts)
     {
         var bin = new List<byte>();
@@ -303,7 +310,10 @@ public class GlbFuseTests
         // artist's winding wins; only a fold-back that CONTRADICTS the manifold rule and yet agrees in direction is a lap)
         var down = new Part { Name = "Strip", Positions = strip.Positions, Indices = new[] { 0, 2, 1, 0, 3, 2 } };   // -Z
         var r2 = GlbDisconnectedParts.FuseNodes(BuildGlb(plate, down), new[] { 0, 1 }, 0.0);
-        Assert.Equal(0, r2.FacesRewound);
+        // (2026-09-17) that control is a thin solid whose two skins face INTO their own gap — the double-skin rule now reads
+        // it as inside-out and turns it whole (plate down, strip up: material behind both), which is the right reading
+        Assert.Equal(4, r2.FacesRewound);
+        Assert.Contains("double skin", r2.Details[1]);
         var normals2 = FaceNormals(Read(r2.Bytes), (JObject)Read(r2.Bytes).Primitives(Read(r2.Bytes).Node("Plate_Fused"))[0]);
         Assert.Equal(2, normals2.Count(n => n[2] > 0));
         Assert.Equal(2, normals2.Count(n => n[2] < 0));
@@ -631,6 +641,110 @@ public class GlbFuseTests
         Assert.Equal(-1, parts[0].ParentIndex);   // a root node
         var table = GlbDisconnectedParts.NodeParents(BuildGlb(a));
         Assert.Equal(new KeyValuePair<int, int>(0, -1), table[0]);
+    }
+
+    [Fact]
+    public void A_double_skinned_solid_is_judged_by_which_side_its_other_skin_lies_on()
+    {
+        // 2026-09-17, the SS Romanic: a hull built as two skins 2 cm apart with opposite normals, wound inside-out as a
+        // whole — the volume of the two skins cancels (agreement ~0, thickness ~0) and so does the radial score. The
+        // rule that does not cancel: material lies BEHIND an outward face. Outer box 10 m, inner box 2 cm inside it.
+        // the rule's domain: THIN sheets, where the volume is inconclusive. Two 10 x 10 skins 2 cm apart above a hull
+        // box (the frame), each a flat sheet (volume 0) — wound to face EACH OTHER (into the material): both must turn
+        var hull = Box("Hull", 6, 0, 0, 0, inward: false);
+        var top = new Part { Name = "Top", Positions = new float[] { 0, 8.02f, 0,  10, 8.02f, 0,  10, 8.02f, 10,  0, 8.02f, 10 }, Indices = new[] { 0, 1, 2, 0, 2, 3 } };   // (b-a)x(c-a) = (10,0,0)x(10,0,10) = (0,-100,0): DOWN, toward the bottom skin
+        var bottom = new Part { Name = "Bottom", Positions = new float[] { 0, 8, 0,  10, 8, 0,  10, 8, 10,  0, 8, 10 }, Indices = new[] { 0, 2, 1, 0, 3, 2 } };            // UP, toward the top skin
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, top, bottom), new[] { 1, 2 }, 0.0);
+        Assert.Equal(2, r.IslandsAfter);
+        Assert.True(r.FacesRewound == 4, "both skins must turn — " + r.Details[1]);
+        Assert.Contains("double skin 100% twinned", r.Details[1]);
+        // the same pair wound AWAY from each other (material between them, behind each face) is kept
+        var topOk = new Part { Name = "Top", Positions = top.Positions, Indices = bottom.Indices };
+        var bottomOk = new Part { Name = "Bottom", Positions = bottom.Positions, Indices = top.Indices };
+        var ok = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, topOk, bottomOk), new[] { 1, 2 }, 0.0);
+        Assert.Equal(0, ok.FacesRewound);
+        // A NESTED CAVITY SHELL (review of e595844): an outward outer box and an inward inner box 2 cm inside it — a
+        // hollow solid, correct as authored. The inner shell's volume is negative, but every twin lies BEHIND it: that
+        // vetoes the reversal (it already faces away from the material), while it could never cause one
+        var hollow = GlbDisconnectedParts.FuseNodes(BuildGlb(Box("Outer", 10, 0, 0, 0, inward: false), Box("Inner", 9.96f, 0.02f, 0.02f, 0.02f, inward: true)), new[] { 0, 1 }, 0.0);
+        Assert.Equal(0, hollow.FacesRewound);
+        // NEARBY SEPARATE SOLIDS (review of 9cacd9f): four outward cubes 5 mm apart — from inside a gap, air looks like
+        // a skin of material; each cube is closed with a confident volume, and that verdict wins over the twin evidence
+        var cubes = new[] { Box("C0", 1, 0, 0, 0, inward: false), Box("C1", 1, 1.005f, 0, 0, inward: false), Box("C2", 1, 0, 0, 1.005f, inward: false), Box("C3", 1, -1.005f, 0, 0, inward: false) };
+        var gaps = GlbDisconnectedParts.FuseNodes(BuildGlb(cubes), new[] { 0, 1, 2, 3 }, 0.0);
+        Assert.Equal(0, gaps.FacesRewound);
+        // …and the same four cubes wound INWARD are all corrected (review of a043f8e): the central one has twins behind
+        // 6 of its 12 faces only — not enclosed, so no veto — and its negative volume turns it like the other three
+        var cubesIn = new[] { Box("C0", 1, 0, 0, 0, inward: true), Box("C1", 1, 1.005f, 0, 0, inward: true), Box("C2", 1, 0, 0, 1.005f, inward: true), Box("C3", 1, -1.005f, 0, 0, inward: true) };
+        var gapsIn = GlbDisconnectedParts.FuseNodes(BuildGlb(cubesIn), new[] { 0, 1, 2, 3 }, 0.0);
+        Assert.Equal(48, gapsIn.FacesRewound);
+        // …and SIX inward cubes around a seventh (review of 7307fe2): the centre has a twin behind every face, but they
+        // belong to six islands and none contains it — no enclosure, no veto, all 84 corrected
+        var ring = new[] { Box("C", 1, 0, 0, 0, inward: true),
+            Box("X+", 1, 1.005f, 0, 0, inward: true), Box("X-", 1, -1.005f, 0, 0, inward: true), Box("Y+", 1, 0, 1.005f, 0, inward: true),
+            Box("Y-", 1, 0, -1.005f, 0, inward: true), Box("Z+", 1, 0, 0, 1.005f, inward: true), Box("Z-", 1, 0, 0, -1.005f, inward: true) };
+        var ringIn = GlbDisconnectedParts.FuseNodes(BuildGlb(ring), Enumerable.Range(0, 7).ToArray(), 0.0);
+        Assert.Equal(84, ringIn.FacesRewound);
+    }
+
+    [Fact]
+    public void Stray_geometry_far_from_the_model_does_not_move_the_belly()
+    {
+        // the Romanic's anchor chain: 144 links 3 km away and 190 m up put the belly above the deck. Hull box y 0..6,
+        // a deck at y 8 facing DOWN (must be reversed), and a stray part 3 km away and 190 m up that is NOT fused.
+        var hull = Box("Hull", 6, 0, 0, 0, inward: false);
+        var deck = new Part { Name = "Deck", Positions = new float[] { 1, 8, 1,  5, 8, 1,  5, 8, 5,  1, 8, 5 }, Indices = new[] { 0, 1, 2, 0, 2, 3 } };   // DOWN
+        var stray = Box("Stray", 3, 0, 190, 3000, inward: false);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, deck, stray), new[] { 1 }, 0.0);
+        Assert.Equal(2, r.FacesRewound);
+        Assert.Contains("1 open sheet(s) judged, 1 reversed", r.Details[0]);
+        string frame = r.Details.First(d => d.StartsWith("frame: "));
+        Assert.DoesNotContain("belly height 4", frame);   // ~1.5 (a quarter up 0..6), not ~46
+    }
+
+    [Fact]
+    public void A_dense_cabin_does_not_outweigh_a_coarse_hull_in_the_belly()
+    {
+        // review of 9cacd9f: a coarse 10-unit hull (12 triangles) under a cabin and thirty small roof fittings carried enough
+        // VERTICES upstairs that vertex-density filtering discarded the hull; the frame is area-weighted now
+        var parts = new List<Part> { Box("Hull", 10, 0, 0, 0, inward: false) };                        // y 0..10, area 600
+        parts.Add(Box("Cabin", 2, 4, 10, 4, inward: false));                                                  // on the deck
+        for (int i = 0; i < 30; i++) parts.Add(Box("Fit" + i, 0.3f, 4.1f + (i % 6) * 0.3f, 12, 4.1f + (i / 6) * 0.3f, inward: false));   // 30 tiny boxes on the cabin roof: 360 tris, little area
+        var deck = new Part { Name = "Deck", Positions = new float[] { 1, 10.01f, 1,  9, 10.01f, 1,  9, 10.01f, 9,  1, 10.01f, 9 }, Indices = new[] { 0, 2, 1, 0, 3, 2 } };   // a deck plate facing UP (wound so): must be KEPT
+        parts.Add(deck);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(parts.ToArray()), new[] { parts.Count - 1 }, 0.0);
+        Assert.Equal(0, r.FacesRewound);
+        string frame = r.Details.First(d => d.StartsWith("frame: "));
+        var m = System.Text.RegularExpressions.Regex.Match(frame, @"belly height (-?[\d.]+)");
+        double belly = double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.True(belly > 1 && belly < 5, "belly must sit in the hull, not above the deck at 10 — " + frame);   // ~3: a quarter up 0..12
+    }
+
+    [Fact]
+    public void A_coarse_tall_box_s_belly_sits_a_quarter_up_its_height_not_at_its_faces_centres()
+    {
+        // review of e595844: a 100 x 100 x 1 box is six pairs of huge triangles; sampled at their CENTRES the height
+        // percentiles ran 33..67 and the belly landed at 42 — an upward platform at 35 then flipped. Corners now.
+        var slab = Box("Slab", 1, 0, 0, 0, inward: false);
+        slab.Positions = new float[] { 0, 0, 0,  100, 0, 0,  100, 100, 0,  0, 100, 0,  0, 0, 1,  100, 0, 1,  100, 100, 1,  0, 100, 1 };   // 100 x 100 x 1 (y up to 100)
+        var platform = new Part { Name = "Platform", Positions = new float[] { 10, 35, 0.5f,  20, 35, 0.5f,  20, 35, 0.6f,  10, 35, 0.6f }, Indices = new[] { 0, 2, 1, 0, 3, 2 } };   // UP: (b-a)x(c-a) with the swapped order = +Y
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(slab, platform), new[] { 1 }, 0.0);
+        Assert.Equal(0, r.FacesRewound);
+        string frame = r.Details.First(d => d.StartsWith("frame: "));
+        var m = System.Text.RegularExpressions.Regex.Match(frame, @"belly height (-?[\d.]+)");
+        double belly = double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.True(belly > 20 && belly < 30, "a quarter up 0..100 — " + frame);
+    }
+
+    [Fact]
+    public void One_stray_unsatisfied_edge_does_not_refuse_a_whole_hull()
+    {
+        // 95 % of the same-way edges resolved is orientable enough: a plate seam (2-colourable) plus one T-fin that
+        // leaves a single contradiction. The Romanic hull: 1 unsatisfied of 92 same-way in 59,000 edges.
+        byte[] src = BuildGlb(Quad("A", 0, 1, 0, 1, 0), Quad("B", 1, 2, 0, 1, 0, inward: true));   // the plain seam: B inverted
+        var r = GlbDisconnectedParts.FuseNodes(src, new[] { 0, 1 }, 0.001);
+        Assert.Equal(2, r.FacesRewound);
+        Assert.DoesNotContain("not orientable", r.Details[0]);
     }
 
     [Fact]
