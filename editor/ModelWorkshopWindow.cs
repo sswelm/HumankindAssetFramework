@@ -514,12 +514,15 @@ public abstract class ModelWorkshopWindow : EditorWindow
         // FUSE LETTERS survive too (2026-09-15, user: "it doesn't seem to be able to save the groupings, only the
         // checkboxes"): the merge slider re-analyzes and used to rebuild every row blank. Same key. And a re-Probe of a
         // file with NO letters in memory restores them from the sidecar the last Fuse wrote (<source>.fuse.txt).
-        var keptFuse = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).ToDictionary(r => r.nodeIndex, r => r.fuse);
+        // …in the FUSER, where the letters are the user's edits. The SPLITTER never edits a letter: its letters are the
+        // sidecar's, and a re-Probe there re-reads the sidecar so groups saved in the Fuser meanwhile reach the next cut
+        // (review of PR #63: a re-Probe kept the Splitter's stale letters while the docs told the user to re-Probe)
+        var keptFuse = Fusing ? rows.Where(r => !string.IsNullOrEmpty(r.fuse)).ToDictionary(r => r.nodeIndex, r => r.fuse) : new Dictionary<int, string>();
         // The sidecar is consulted only when this file is being loaded INTO the window (no rows yet, or rows of another
         // file) — a re-Probe or a slider move of a file whose letters the user cleared keeps them cleared (review of
         // 0a8b56e: the old rule "no letters in memory" reloaded the sidecar over a deliberate clear). "Load groups" is
         // the explicit way back.
-        bool initialLoad = rows.Count == 0 || !SamePath(probedFile, srcFile);
+        bool initialLoad = rows.Count == 0 || !SamePath(probedFile, srcFile) || !Fusing;
         try
         {
             rows = GlbDisconnectedParts.Analyze(File.ReadAllBytes(srcFile), mergePct / 100.0)
