@@ -930,6 +930,15 @@ public static class GlbDisconnectedParts
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
         if (jobs == null || jobs.Count == 0) throw new ArgumentException("Nothing to fuse — no groups.", nameof(jobs));
+        // a node in two jobs would be fused twice (the chain refused the second: its mesh was already gone) — refused up front
+        var owner = new Dictionary<int, int>();
+        for (int i = 0; i < jobs.Count; i++)
+        {
+            if (jobs[i] == null || jobs[i].NodeIndices == null || jobs[i].NodeIndices.Count == 0) throw new ArgumentException("Group " + i + " has no node indices.", nameof(jobs));
+            foreach (int ni in jobs[i].NodeIndices)
+                if (owner.TryGetValue(ni, out int first) && first != i) throw new ArgumentException("Node " + ni + " is in group " + first + " and group " + i + " — a part fuses once.", nameof(jobs));
+                else owner[ni] = i;
+        }
         var plans = new FusePlan[jobs.Count]; int done = 0;
         var tasks = new System.Threading.Tasks.Task[jobs.Count];
         for (int i = 0; i < jobs.Count; i++)
@@ -977,6 +986,10 @@ public static class GlbDisconnectedParts
         if (source == null) throw new ArgumentNullException(nameof(source));
         if (nodeIndices == null || nodeIndices.Count == 0) throw new ArgumentException("Nothing to fuse — no node indices.", nameof(nodeIndices));
         if (double.IsNaN(weldFraction) || weldFraction < 0) throw new ArgumentOutOfRangeException(nameof(weldFraction));
+        // stage timing for the report ("timing: parse 300 ms; gather 120 ms; weld 300 ms; …"): a 99,000-face group took 55 s on
+        // 2026-09-18. Each mark is charged to the work since the previous one, the clock running from before the parse.
+        var stageClock = System.Diagnostics.Stopwatch.StartNew(); var timing = new List<string>();
+        void Mark(string what) { timing.Add(what + " " + stageClock.ElapsedMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " ms"); stageClock.Restart(); }
         Document document = Parse(source);
         JObject root = document.Root;
         JArray nodes = root["nodes"] as JArray ?? new JArray();
@@ -984,9 +997,6 @@ public static class GlbDisconnectedParts
         byte[] originalData;
         Accessors reader = BinReader(document, root, out originalData);
         var plan = new FusePlan(); Result result = plan.Result;
-        // stage timing for the report ("timing: gather 120 ms; weld 300 ms; …"): a 99,000-face group took 55 s on 2026-09-18
-        var stageClock = System.Diagnostics.Stopwatch.StartNew(); var timing = new List<string>();
-        void Mark(string what) { timing.Add(what + " " + stageClock.ElapsedMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " ms"); stageClock.Restart(); }
         Mark("parse");
 
         // 1) gather every triangle of every chosen part in WORLD space, with normal / UV / material per vertex
@@ -1120,7 +1130,6 @@ public static class GlbDisconnectedParts
             for (int i = 0; i < cls.Length; i++) cls[i] = Find(i);
             return cls;
         }
-        Mark("weld");
         // 3) faces -> edges by welded class; islands by edge adjacency
         // A face whose three corners weld to ONE class has collapsed (a rivet smaller than the weld distance). It is
         // kept in the output — triangles are preserved exactly — but it has no edges, so it joins no island and is
@@ -1169,6 +1178,7 @@ public static class GlbDisconnectedParts
         }
         result.IslandsBefore = Islands(WeldClasses(rounding), out _, out _, out _, out _).Count;   // coincident positions only: what the source already connects
         int[] classes = WeldClasses(weld);
+        Mark("weld");   // both weld passes (the coincident-only count above and the real one) are charged here, where they run
         // ONE position per welded class. Connectivity is by class, but output vertices are emitted separately wherever
         // UV, normal or material differ, and each kept its own authored position: two plates 0.01 apart across a UV
         // seam reported one island and still rendered the 0.01 gap (review of 4e748c1). Every vertex of a class now

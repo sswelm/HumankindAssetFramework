@@ -830,6 +830,13 @@ public class GlbFuseTests
         // a failing group surfaces its own exception, not an AggregateException
         var skinned = Quad("S", 0, 1, 0, 1, 0); skinned.Skinned = true;
         Assert.Throws<System.IO.InvalidDataException>(() => GlbDisconnectedParts.FuseGroups(BuildGlb(a1, skinned), new List<GlbDisconnectedParts.FuseJob> { new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 1 } } }, 0.001, out _, null));
+        // a node in two groups is refused before anything runs (review of 6d8bb08: it fused twice, four triangles from two)
+        var overlap = Assert.Throws<ArgumentException>(() => GlbDisconnectedParts.FuseGroups(src, new List<GlbDisconnectedParts.FuseJob> {
+            new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 0, 1 } }, new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 1, 2 } } }, 0.001, out _, null));
+        Assert.Contains("Node 1 is in group 0 and group 1", overlap.Message);
+        // the timing line charges the parse and the weld where they run
+        string timingLine = results[0].Details.First(d => d.StartsWith("timing: "));
+        Assert.StartsWith("timing: parse ", timingLine); Assert.Contains("; weld ", timingLine);
         // the tick reports the planned count on the calling thread and ends at the total
         int last = -1; int ticks = 0;
         GlbDisconnectedParts.FuseGroups(src, new List<GlbDisconnectedParts.FuseJob> { new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 0, 1 } } }, 0.001, out _, n => { last = n; ticks++; });
