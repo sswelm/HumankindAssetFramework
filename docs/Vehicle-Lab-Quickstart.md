@@ -306,6 +306,8 @@ reduction never has to choose what survives**:
    Cutting a rope past ~90 leaves floating dash fragments — lower the dial or Ignore the part outright.
    Every tier but Rigging welds the model's seams before it collapses (0.5.7), so a hull reduces as one surface
    instead of cracking along every plate; the dial counts the welded vertices, which the log reports per part.
+   The weld stays within each material, so painted borders (a boot-topping stripe, plating rows, portholes) keep
+   their lines instead of smearing into the neighbouring plate.
 3. **Read the projection before generating.** **Verify** now ends with per-role vertex statistics and the
    post-dial projection. Aim the generated GLB below roughly **30k triangles**: then the Factory bakes with
    **Reduce to ~tris = 0** — no global decimation at all — and still fits the ceiling.

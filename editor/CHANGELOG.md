@@ -31,7 +31,13 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle soup: 68,000 of its 73,000 vertices on a "boundary", every seam's two sides moved on their own, and the
   hull came out cracked along every plate (small fittings, each triangle collapsing alone, were ground to slivers).
   Every tier but Rigging now welds coincident vertices (1e-5 of the part's size; double skins stay apart), marks
-  edges over 40° sharp so hard edges survive, and collapses to a dial that counts welded vertices. Measured on
+  edges over 40° sharp so hard edges survive, and collapses to a dial that counts welded vertices. **The weld stays
+  within a material:** a ripped hull paints its plating, stripe and portholes as per-face materials, and the first
+  cut of this welded across them — the collapse then slid vertices from a black plate into the gold stripe for
+  free (a flat surface, no quadric error) and the user's hull came out smeared ("the hull texture is wrong"). A
+  material border left as a mesh boundary keeps the decimate's boundary quadric and stays on its line: the Romanic
+  hull at 65 % renders identical to the source (portholes, stripe, plating), 25,300 triangles either way, beam
+  holes 109 vs 108 unreduced. Measured on
   the Romanic's hull at 50 %: the old pass added holes (from the beam, 0.3 m cells: 9 → 50 starboard, 108 → 99
   port, and visible cracks); the welded pass adds none and reads smooth; the Teutonic's hull the same (255 → 305
   became 255 → 255). Ventilator cowls that reduced to dust keep their shape at the same triangle count. Rigging

@@ -1237,7 +1237,23 @@ for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RI
         _weld = _rlabel != "RIGGING"
         if _weld:
             _dim = max(_ro2.dimensions) or 1.0
-            bmesh.ops.remove_doubles(_rb, verts=list(_rb.verts), dist=_dim * 1e-5)
+            # Weld WITHIN each material only. A ripped hull paints its plating, boot-topping stripe and portholes as
+            # per-face materials with point UVs; a weld across a material border lets the collapse slide a vertex
+            # from a black plate into the gold stripe for free (the surface is flat there, the quadric sees no
+            # error) and the stripe smeared over the whole side. A border left as a mesh boundary gets the
+            # decimate's boundary quadric instead and stays on its line. A vertex the source already shares
+            # across materials is left as it is. Measured on the Romanic hull at 65 %: texture identical to the
+            # source, beam holes 109 vs 108 unreduced; the all-position weld gave the smear (PR #64 follow-up).
+            _bym = {}
+            for _v in _rb.verts:
+                _ls = _v.link_loops
+                if not _ls:
+                    continue
+                _m0 = _ls[0].face.material_index
+                if all(_l.face.material_index == _m0 for _l in _ls[1:]):
+                    _bym.setdefault(_m0, []).append(_v)
+            for _vs in _bym.values():
+                bmesh.ops.remove_doubles(_rb, verts=_vs, dist=_dim * 1e-5)
             for _e in _rb.edges:   # hard edges survive the weld as sharp edges: the export splits normals there again
                 if len(_e.link_faces) == 2:
                     _fa = _e.calc_face_angle(None)
