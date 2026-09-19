@@ -101,6 +101,13 @@ public abstract class ModelWorkshopWindow : EditorWindow
     readonly Dictionary<int, Renderer> previewByNode = new Dictionary<int, Renderer>();   // node index -> its preview renderer (the identity rows and preview share)
     readonly List<Mesh> previewAssets = new List<Mesh>();                                  // built meshes, destroyed with the preview (runtime Unity objects never GC)
     readonly Dictionary<Color, Material> previewMats = new Dictionary<Color, Material>();
+    // UN-MIRROR (2026-09-19, user: "could you make it a checkbox allowing me to unmirror it?"): glTF is right-handed
+    // and Unity left-handed, so handing the file's coordinates over unchanged shows the model as a MIRROR — screen-left
+    // is the file's starboard. Ticking this negates X and flips every triangle to compensate, which is measured to keep
+    // the surface solid (drill_unity_facing.py on the Romanic split: 1.0 % of struck cells render back-facing either
+    // way; negating WITHOUT the flip would invert the whole ship). Off by default so the view does not move under
+    // anyone mid-session. Nothing else changes: the sliders, the mirror finder and every output read file coordinates.
+    [SerializeField] bool unmirror = false;
     [SerializeField] Vector2 orbit = new Vector2(30f, -20f);
     [SerializeField] float zoom = 1.5f;
     Vector2 previewPan;
@@ -486,9 +493,18 @@ public abstract class ModelWorkshopWindow : EditorWindow
 
             if (inst != null || CutModeActive)
             {
-                EditorGUILayout.LabelField(CutModeActive
-                    ? "Cut preview   (drag = orbit · middle/right-drag = pan · scroll = zoom — yellow = _CutA, grey = _CutB)"
-                    : "Preview   (drag = orbit · middle/right-drag = pan · scroll = zoom · click a part row to highlight)", EditorStyles.miniBoldLabel);
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(CutModeActive
+                        ? "Cut preview   (drag = orbit · middle/right-drag = pan · scroll = zoom — yellow = _CutA, grey = _CutB)"
+                        : "Preview   (drag = orbit · middle/right-drag = pan · scroll = zoom · click a part row to highlight)", EditorStyles.miniBoldLabel);
+                    bool wantUnmirror = EditorGUILayout.ToggleLeft(new GUIContent("Un-mirror",
+                        "glTF and Unity disagree on handedness, so the preview shows the model MIRRORED — screen-left is the file's starboard. " +
+                        "Tick this to see it the right way round (the geometry is flipped back so nothing turns see-through). The part list, the " +
+                        "sliders, Find the mirror and every output always work in the file's own coordinates and are unaffected either way."),
+                        unmirror, GUILayout.Width(90));
+                    if (wantUnmirror != unmirror) { unmirror = wantUnmirror; FlipPreviewX(); }
+                }
                 var rect = GUILayoutUtility.GetRect(200f, 4000f, 600f, 600f, GUILayout.ExpandWidth(true));
                 HandlePreviewInput(rect);
                 if (Event.current.type == EventType.Repaint) RenderPreview(rect);
@@ -651,7 +667,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
             {
                 var mesh = new Mesh { name = g.NodeName, hideFlags = HideFlags.HideAndDontSave, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
                 var verts = new Vector3[g.Positions.Length / 3];
-                for (int i = 0; i < verts.Length; i++) verts[i] = new Vector3(g.Positions[i * 3], g.Positions[i * 3 + 1], g.Positions[i * 3 + 2]);
+                float sx = unmirror ? -1f : 1f;
+                for (int i = 0; i < verts.Length; i++) verts[i] = new Vector3(sx * g.Positions[i * 3], g.Positions[i * 3 + 1], g.Positions[i * 3 + 2]);
                 mesh.vertices = verts;
                 int subs = Math.Max(1, g.PrimitiveStart.Length);
                 mesh.subMeshCount = subs;
@@ -660,6 +677,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 {
                     int start = s < g.PrimitiveStart.Length ? g.PrimitiveStart[s] : 0, end = s + 1 < g.PrimitiveStart.Length ? g.PrimitiveStart[s + 1] : g.Triangles.Length;
                     var tri = new int[Math.Max(0, end - start)]; Array.Copy(g.Triangles, start, tri, 0, tri.Length);
+                    if (unmirror) for (int t = 0; t + 2 < tri.Length; t += 3) { int tmp = tri[t + 1]; tri[t + 1] = tri[t + 2]; tri[t + 2] = tmp; }
                     mesh.SetTriangles(tri, s, false);
                     mats[s] = PreviewMaterial(sh, s < g.PrimitiveColour.Length ? g.PrimitiveColour[s] : null);
                 }
@@ -691,6 +709,38 @@ public abstract class ModelWorkshopWindow : EditorWindow
         long verts = 0, idx = 0;
         foreach (var r in rows) { verts += r.verts; idx += 3L * r.tris; }
         return verts * 72L + idx * 8L;
+    }
+
+    // Flip every built mesh in place when the checkbox moves: negate X and reverse each submesh's winding (the two
+    // together are what the drill measured as solid). Cheaper and steadier than re-reading a 214 MB file, and the cut
+    // preview follows through UpdateCutPartition, which re-emits its triangles anyway.
+    void FlipPreviewX()
+    {
+        foreach (var m in previewAssets)
+        {
+            if (m == null) continue;
+            var v = m.vertices;
+            for (int i = 0; i < v.Length; i++) v[i].x = -v[i].x;
+            m.vertices = v;
+            for (int s = 0; s < m.subMeshCount; s++)
+            {
+                var tri = m.GetTriangles(s);
+                for (int t = 0; t + 2 < tri.Length; t += 3) { int tmp = tri[t + 1]; tri[t + 1] = tri[t + 2]; tri[t + 2] = tmp; }
+                m.SetTriangles(tri, s, false);
+            }
+            m.RecalculateNormals(); m.RecalculateBounds();
+        }
+        if (cutMesh != null)
+        {
+            var v = cutMesh.vertices;
+            for (int i = 0; i < v.Length; i++) v[i].x = -v[i].x;
+            cutMesh.vertices = v;
+            UpdateCutPartition();   // re-emits both sides, winding included
+            cutMesh.RecalculateNormals();
+        }
+        flatShare = null; flatShareFor = null;   // measured on the preview meshes, which just moved
+        boundsValid = false;
+        Repaint();
     }
 
     // One material per distinct base colour, shared across the preview (a 1,400-part liner has a dozen colours).
@@ -736,8 +786,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
         catch (Exception e) { status = $"Plane cut unavailable for '{row.node}': {e.Message}"; cutGeo = null; return; }
         cutMesh = new Mesh { hideFlags = HideFlags.HideAndDontSave, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
         var verts = new Vector3[cutGeo.Positions.Length / 3];
+        float csx = unmirror ? -1f : 1f;
         for (int i = 0; i < verts.Length; i++)
-            verts[i] = new Vector3(cutGeo.Positions[i * 3], cutGeo.Positions[i * 3 + 1], cutGeo.Positions[i * 3 + 2]);
+            verts[i] = new Vector3(csx * cutGeo.Positions[i * 3], cutGeo.Positions[i * 3 + 1], cutGeo.Positions[i * 3 + 2]);
         cutMesh.vertices = verts;
         cutMesh.subMeshCount = 2;
         if (cutMatA == null)
@@ -814,7 +865,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 sideA = Math.Abs(up) >= cosLimit && c >= v;
             }
             var side = sideA ? a : b;
-            side.Add(t[i]); side.Add(t[i + 1]); side.Add(t[i + 2]);
+            if (unmirror) { side.Add(t[i]); side.Add(t[i + 2]); side.Add(t[i + 1]); }   // the mirrored mesh needs the reversed winding
+            else { side.Add(t[i]); side.Add(t[i + 1]); side.Add(t[i + 2]); }
         }
         cutTrisA = a.Count / 3; cutTrisB = b.Count / 3;
         cutMesh.SetTriangles(a, 0);

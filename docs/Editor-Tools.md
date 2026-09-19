@@ -379,7 +379,9 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   (0.5.7: no Blender export, no FBX import — a 214 MB ship probes in about ten seconds), one object per node, so a
   row lights exactly its own part even in a file whose nodes all share one name. The preview is a MIRROR image of the
   model (glTF and Unity disagree on handedness, and correcting it would invert every face), so screen-left is the
-  file's starboard; the side sliders and the mirror finder work in file coordinates and are unaffected. A model whose
+  file's starboard — tick **Un-mirror** above the preview to see it the right way round (the geometry is flipped back,
+  so nothing turns see-through); the side sliders and the mirror finder work in file coordinates and are unaffected
+  either way. A model whose
   meshes would need more than 1 GB is listed and filtered as usual but not drawn.
   **Find the mirror of …** (0.5.7): with a row highlighted, the button finds the part on the other side of the
   centreline whose bounding box is this one's reflected (within 3 % of the part's size — triangle counts may differ,

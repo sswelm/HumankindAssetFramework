@@ -21,6 +21,13 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
+- **Model Splitter / Fuser: an "Un-mirror" checkbox above the preview.** glTF is right-handed and Unity left-handed, so
+  the preview showed the model mirrored — screen-left was the file's starboard, a trap in a window where picking a side
+  is half the work. The box negates X and flips every triangle to compensate, measured to leave the surface exactly as
+  solid (the Romanic split: 1.0 % of struck cells render back-facing either way; negating without the flip inverts the
+  whole ship). Off by default, remembered per window, and it flips the built meshes in place rather than re-reading the
+  file. The part list, the sliders, Find the mirror and every output always worked in file coordinates and are
+  unaffected either way.
 - **Model Splitter / Fuser: a file probed into the window starts fully visible.** The list filters kept their values
   across files and were only clamped into the new model's span, so four sliders left at the ends on a metre-scale ship
   arrived at the ends of a centimetre-scale one and hid all 113 parts ("why don't I see any parts?"). The first Probe of a
