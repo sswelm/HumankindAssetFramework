@@ -93,6 +93,11 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // coincident positions only: measured on the Teutonic, its plates already touch exactly (the majority rule found
     // the 1,613-face hole at 0), while 0.5‰ collapsed 1,564 rivet-sized triangles and broke the hull island apart.
     [SerializeField] float weldPermille = 0f;
+    // CHECK MIRRORED PARTS (2026-09-19, the Confederate frigate; user: "make it an option"). Off by default: every file
+    // fuses exactly as before. On, the fuse compares each mirrored part with the plain parts it is welded to and, when
+    // they clearly agree the file stores mirrored parts already facing outward, undoes the glTF reversal that would turn
+    // them inward (see GlbDisconnectedParts, step 3b). The fuse report and a warning say when it would help.
+    [SerializeField] bool checkMirrored = false;
     bool analyzePending;   // slider moved: recount on the first Layout pass after the drag releases
     [SerializeField] Vector2 scroll;
     readonly List<Rect> rowRects = new List<Rect>();   // per shown row, measured at Repaint: the ↑/↓ keys keep the highlight in view by these, not by an assumed row height
@@ -558,6 +563,13 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 "that alone found and fixed its hole. Raise it only for sources whose plates leave gaps, knowing that every triangle smaller " +
                 "than the distance collapses (kept, zero-area, no longer connecting anything): at 0.5‰ the Teutonic lost 1,564 rivet-sized " +
                 "faces AND its hull island broke apart. The result line reports the collapsed count."), weldPermille, 0f, 5f);
+            checkMirrored = EditorGUILayout.ToggleLeft(new GUIContent("Check mirrored parts",
+                "glTF says a mirrored part (a negative-scale node, typically one side of a symmetric hull) must have its winding reversed, and the " +
+                "fuse does that. Some files store their mirrored parts ALREADY facing outward, and the reversal then turns that whole side " +
+                "inward: see-through (the Confederate frigate's hull, 94.8 % back-facing from one side). Ticked, the fuse compares every mirrored " +
+                "part with the plain parts it is welded to and undoes the reversal only when they clearly agree the file is stored that way; " +
+                "mixed evidence changes nothing, and a file stored the standard way (the Teutonic) comes out byte-identical. Off by default. " +
+                "The fuse warns you when a group would need it."), checkMirrored);
             using (new EditorGUILayout.HorizontalScope())
             {
                 bool sidecarExists = File.Exists(FuseSidecarPath(srcFile) ?? "");
@@ -1163,7 +1175,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 // fused parts are appended in the same order chaining would, so node indices and names come out the same
                 // the group letter leads the fused part's name — "Fused_B_Object_54" — so the Lab's list shows at a glance which
                 // group a shell came from and the fused parts sort together (user 2026-09-17)
-                var jobs = groups.Select(g => new GlbDisconnectedParts.FuseJob { NodeIndices = g.Select(r => r.nodeIndex).ToList(), Name = "Fused_" + g.Key + "_" + g.First().node }).ToList();   // row order: the first becomes the fused part's name
+                var jobs = groups.Select(g => new GlbDisconnectedParts.FuseJob { NodeIndices = g.Select(r => r.nodeIndex).ToList(), Name = "Fused_" + g.Key + "_" + g.First().node, CheckMirrored = checkMirrored }).ToList();   // row order: the first becomes the fused part's name
                 int total = jobs.Count; string letters = string.Join(" ", groups.Select(g => "⊕" + g.Key));
                 EditorUtility.DisplayProgressBar("Model Workshop", $"Fusing {total} group(s) in parallel: {letters}…", 0.2f);
                 byte[] fused = GlbDisconnectedParts.FuseGroups(bytes, jobs, weldPermille / 1000.0, out results,

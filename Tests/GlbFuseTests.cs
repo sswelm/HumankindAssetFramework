@@ -452,6 +452,118 @@ public class GlbFuseTests
         Assert.Equal(-1f, Enumerable.Range(0, p.Length / 3).Min(i => p[i * 3]));
     }
 
+    // ---- the mirrored-part check (2026-09-19, the Confederate frigate; option "Check mirrored parts") ----
+    // A 1 x 3 strip of quads in the XY plane at z, spanning x0..x1 and y 0..3: its x = x0 column is three edges long, so
+    // a strip abutting it shares three seam edges (the check wants at least three before it judges a part). `inward`
+    // winds it so the geometric normal points -Z.
+    static Part Strip(string name, float x0, float x1, float z, bool inward)
+    {
+        var pos = new List<float>(); var idx = new List<int>();
+        for (int j = 0; j <= 3; j++) { pos.AddRange(new[] { x0, (float)j, z }); pos.AddRange(new[] { x1, (float)j, z }); }
+        for (int k = 0; k < 3; k++)
+        {
+            int v00 = 2 * k, v10 = 2 * k + 1, v11 = 2 * k + 3, v01 = 2 * k + 2;
+            idx.AddRange(inward ? new[] { v00, v11, v10, v00, v01, v11 } : new[] { v00, v10, v11, v00, v11, v01 });
+        }
+        return new Part { Name = name, Positions = pos.ToArray(), Indices = idx.ToArray() };
+    }
+
+    // `pairs` plain strips (x 0..1, facing +Z) each abutted at x = 0 by a mirrored strip (scale -1 on X, so world x -1..0).
+    // preFlipped[i] true = the file stores that mirrored strip ALREADY facing +Z after the mirror (the frigate's case: the
+    // glTF reversal then turns it to -Z); false = stored the standard way (the reversal is what brings it to +Z).
+    static Part[] MirrorPairs(params bool[] preFlipped)
+    {
+        var parts = new List<Part>();
+        for (int i = 0; i < preFlipped.Length; i++)
+        {
+            parts.Add(Strip("P" + i, 0, 1, 10 * i, inward: false));
+            var m = Strip("M" + i, 0, 1, 10 * i, inward: preFlipped[i]); m.Scale = new double[] { -1, 1, 1 };
+            parts.Add(m);
+        }
+        return parts.ToArray();
+    }
+
+    static int[] AllNodes(int n) => Enumerable.Range(0, n).ToArray();
+
+    static List<double[]> LoneFaces(byte[] fused)
+    {
+        var g = Read(fused); var prim = (JObject)g.Primitives(g.Node("P0_Fused"))[0];
+        float[] p = g.Floats(((JObject)prim["attributes"]).Value<int>("POSITION"), 3);
+        uint[] ix = g.Indices(prim.Value<int>("indices"));
+        var all = FaceNormals(g, prim); var r = new List<double[]>();
+        for (int t = 0; t < ix.Length; t += 3) if (p[ix[t] * 3 + 2] > 39f) r.Add(all[t / 3]);
+        Assert.Equal(6, r.Count);   // the lone strip's six triangles
+        return r;
+    }
+
+    [Fact]
+    public void A_file_that_stores_mirrored_parts_pre_flipped_is_fixed_only_with_the_option()
+    {
+        var parts = MirrorPairs(true, true, true);
+        byte[] glb = BuildGlb(parts);
+        var off = GlbDisconnectedParts.FuseNodes(glb, AllNodes(parts.Length), 0.0, null, false);
+        Assert.Contains(off.Warnings, w => w.Contains("Check mirrored parts") && w.Contains("3 of 3"));   // off: it says so, changes nothing
+        Assert.DoesNotContain(off.Details, d => d.StartsWith("mirrored parts", StringComparison.Ordinal));
+        // (These simple pairs are cleanly orientable, so the consistency stage repairs them even with the option off.
+        // The frigate broke because its hull island also held a structure that cannot be oriented, and the fuse then
+        // keeps the whole island as it stands. The case the fuse cannot repair alone is reproduced in the lone-strip
+        // test below; the real hull is covered by the drill: 94.8 % back-facing off, 0.0 % on.)
+
+        var on = GlbDisconnectedParts.FuseNodes(glb, AllNodes(parts.Length), 0.0, null, true);
+        Assert.Contains(on.Details, d => d.StartsWith("mirrored parts", StringComparison.Ordinal) && d.Contains("3 of 3 judged") && d.Contains("undone for 3"));
+        var g = Read(on.Bytes);
+        var normals = FaceNormals(g, (JObject)g.Primitives(g.Node("P0_Fused"))[0]);
+        Assert.Equal(36, normals.Count);                                 // 6 strips x 6 triangles
+        Assert.All(normals, n => Assert.True(n[2] > 0, "every face +Z, the mirrored halves included"));
+    }
+
+    [Fact]
+    public void A_file_stored_the_standard_way_is_left_exactly_as_before()
+    {
+        // The Teutonic's case: the glTF reversal is RIGHT. The check must confirm it and change nothing, byte for byte.
+        var parts = MirrorPairs(false, false, false);
+        byte[] glb = BuildGlb(parts);
+        var off = GlbDisconnectedParts.FuseNodes(glb, AllNodes(parts.Length), 0.0, null, false);
+        var on = GlbDisconnectedParts.FuseNodes(glb, AllNodes(parts.Length), 0.0, null, true);
+        Assert.Equal(off.Bytes, on.Bytes);
+        Assert.Contains(on.Details, d => d.StartsWith("mirrored parts", StringComparison.Ordinal) && d.Contains("confirm the glTF reversal"));
+        Assert.DoesNotContain(off.Warnings, w => w.Contains("Check mirrored parts"));
+    }
+
+    [Fact]
+    public void Mixed_evidence_changes_nothing()
+    {
+        // The Romanic's group H judged 1 pre-flipped against 2 standard, and acting on the one made the group worse
+        // (2,667 -> 2,955 back-facing cells). One pre-flipped of three is no convention: output identical, no warning.
+        var parts = MirrorPairs(true, false, false);
+        byte[] glb = BuildGlb(parts);
+        var off = GlbDisconnectedParts.FuseNodes(glb, AllNodes(parts.Length), 0.0, null, false);
+        var on = GlbDisconnectedParts.FuseNodes(glb, AllNodes(parts.Length), 0.0, null, true);
+        Assert.Equal(off.Bytes, on.Bytes);
+        Assert.Contains(on.Details, d => d.Contains("not enough agreement to act on"));
+        Assert.DoesNotContain(off.Warnings, w => w.Contains("Check mirrored parts"));
+    }
+
+    [Fact]
+    public void A_mirrored_part_with_no_plain_neighbour_follows_the_files_convention()
+    {
+        // The frigate's Object_961: no plain neighbour to judge it by, and it kept the reversal, carrying 2,443 of the
+        // 2,462 back-facing cells left on the hull. Three judged parts agreeing make the convention; it follows.
+        var parts = MirrorPairs(true, true, true).ToList();
+        var lone = Strip("Lone", 0, 1, 40, inward: true); lone.Scale = new double[] { -1, 1, 1 };   // pre-flipped, touches nothing
+        parts.Add(lone);
+        byte[] glb = BuildGlb(parts.ToArray());
+        // off: a flat strip on its own gives the direction stage nothing to judge, so it keeps the glTF reversal: -Z,
+        // see-through from above. This is the bug, reproduced where the fuse cannot repair it by itself.
+        var off = GlbDisconnectedParts.FuseNodes(glb, AllNodes(parts.Count), 0.0, null, false);
+        Assert.All(LoneFaces(off.Bytes), n => Assert.True(n[2] < 0, "off: the lone strip is inside-out"));
+        var on = GlbDisconnectedParts.FuseNodes(glb, AllNodes(parts.Count), 0.0, null, true);
+        Assert.Contains(on.Details, d => d.Contains("undone for 4") && d.Contains("1 of them had no plain neighbour"));
+        Assert.All(LoneFaces(on.Bytes), n => Assert.True(n[2] > 0, "on: the lone strip faces +Z"));
+        var g = Read(on.Bytes);
+        Assert.All(FaceNormals(g, (JObject)g.Primitives(g.Node("P0_Fused"))[0]), n => Assert.True(n[2] > 0, "and every other face too"));
+    }
+
     [Fact]
     public void Vertex_colours_and_a_second_UV_set_survive_the_fuse_and_keep_their_own_vertices()
     {
