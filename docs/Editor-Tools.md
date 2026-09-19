@@ -419,7 +419,9 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   one line per group. The part list carries the Lab's filters — hide under a vertex count or a size, a height
   band, a side band, **Only flat parts (≥ % level)** — the Lab's deck finder, measured on the preview meshes, so
   the deck plate a fuse group is still missing shows up among a dozen rows — and a **Show only** popup by mark or
-  island count — so a 1,400-row liner can be worked one deck or one side at a time; marks on hidden rows are kept. To cut AND fuse, chain the two windows: the ⊕
+  island count — so a 1,400-row liner can be worked one deck or one side at a time; marks on hidden rows are kept. A file's
+  first Probe starts with every filter off (the sliders are in model units, so a previous model's settings would hide
+  everything on one at another scale), and **Show all** resets them by hand. To cut AND fuse, chain the two windows: the ⊕
   letters travel with a cut or split output, and a fused output's sidecar names each shell under its group's letter, so
   either order works (the Splitter re-reads the sidecar on every Probe, so after changing groups in the Fuser,
   re-Probe in the Splitter before cutting; the Fuser keeps your edits across a re-Probe and reloads through Load groups).

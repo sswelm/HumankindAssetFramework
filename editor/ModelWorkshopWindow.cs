@@ -74,6 +74,17 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // of 3-vert parts millimetres apart. Islands within this % of a part's own diagonal count as ONE part, so
     // only genuinely distant geometry — the floating junk — separates. 0 = pure topology.
     [SerializeField] float mergePct = 1f;
+    // Every list filter back to "hide nothing". Called when a file is probed INTO the window (2026-09-19, user: "ensure
+    // that the first time a model is probed it minimizes the filter allowing you to see all parts") — the sliders keep
+    // their values across files and are only clamped into the new model's span, so four sliders left at the ends of a
+    // metre-scale ship arrived at the ends of a centimetre-scale one and hid all 113 parts ("why don't I see any
+    // parts?"). A re-Probe or a slider move on the SAME file keeps the settings; the "Show all" button is the manual way.
+    void ResetFilters()
+    {
+        minVerts = 1; minPartSize = 0f; minFlatPct = 0f;
+        minHeight = -1e9f; maxHeight = 1e9f; minWidth = -1e9f; maxWidth = 1e9f;
+        showOnly = 0; showOnlyLetter = ""; hideWhole = false;
+    }
     // FUSE (2026-09-15): the checked parts become ONE welded shell with consistent winding — the fix for a hull
     // authored as separate plates (the Teutonic: see-through, a hole in its side, gaps under any reduction).
     // Seam vertices closer than this (in thousandths of the model's length) become one vertex. DEFAULT 0 = exactly
@@ -207,6 +218,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
                     if (GUILayout.Button("Uncheck all", GUILayout.Width(100))) foreach (var r in rows) r.split = false;
                     hideWhole = EditorGUILayout.ToggleLeft(new GUIContent("Hide already-whole parts",
                         "Hide the rows with a single island — there is nothing to split in them, they only pad the list."), hideWhole, GUILayout.Width(180));
+                    if (GUILayout.Button(new GUIContent("Show all", "Every list filter back to 'hide nothing' — the sliders, 'Show only' and this toggle. Marks are kept. (A file probed into the window for the first time starts this way.)"), GUILayout.Width(70)))
+                        ResetFilters();
                     bool marksOnDisk = File.Exists(MarksSidecarPath(srcFile) ?? "");
                     using (new EditorGUI.DisabledScope(chosen == 0 && deleted == 0 && !marksOnDisk))   // with no marks AND a file on disk, saving means "clear it"
                         if (GUILayout.Button(new GUIContent("Save marks", $"Writes the Split checks and deletion marks to {Path.GetFileName(srcFile)}.marks.txt next to the source (a Split writes it too); the first Probe of the file reads it back."), GUILayout.Width(90)))
@@ -572,6 +585,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         // 0a8b56e: the old rule "no letters in memory" reloaded the sidecar over a deliberate clear). "Load groups" is
         // the explicit way back.
         bool initialLoad = rows.Count == 0 || !SamePath(probedFile, srcFile) || !Fusing;
+        if (firstLoad) ResetFilters();   // a model probed into the window starts fully visible (see ResetFilters)
         try
         {
             rows = GlbDisconnectedParts.Analyze(File.ReadAllBytes(srcFile), mergePct / 100.0)

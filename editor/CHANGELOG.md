@@ -21,6 +21,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
+- **Model Splitter / Fuser: a file probed into the window starts fully visible.** The list filters kept their values
+  across files and were only clamped into the new model's span, so four sliders left at the ends on a metre-scale ship
+  arrived at the ends of a centimetre-scale one and hid all 113 parts ("why don't I see any parts?"). The first Probe of a
+  file now resets every filter (sliders, Show only, the whole-parts toggle); a re-Probe or a slider move on the same file
+  keeps them. A **Show all** button next to the toggle does the same by hand.
 - **Model Splitter / Fuser: Probe is three times faster on a big file.** A 214 MB ship (113 parts, 2.6 M triangles)
   took 86 s to probe. Two causes, both fixed. The island analysis read every index and every position through the
   accessor's JSON again — string-keyed lookups, a boxed int and a fresh array per element — 30 s; the reader now
