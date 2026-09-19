@@ -291,21 +291,6 @@ _embed_previews = {"path_mode": 'COPY', "embed_textures": True} if (abs(_bright1
 # (Idle stance Furl[0..0] · Pre-move Furl[0..N] · After-move Furl[N..0] · Movement Spin) makes the unit
 # fold before moving and redeploy on arrival — the pivot-hold waits for a pre-move clip automatically.
 # Negative degrees fold the other way (the hinge axis is the flag's larger horizontal extent).
-# DEFAULT REDUCE (tagged arg, 2026-09-19, user: "add Default reduce"): the catch-all tier — every part still
-# marked Default (nothing chosen for it) cut by one dial, like Body. Tagged, not positional: the positional block
-# ends at argv[75] and a tag keeps an older Lab and a newer script (and the reverse) working unchanged.
-#   defaultreduce=@<names file>|<percent>
-default_names = []
-default_reduce = 0.0
-_dfarg = next((a for a in argv if a.startswith("defaultreduce=")), None)
-if _dfarg:
-    try:
-        _dfnames, _dfpct = _dfarg[len("defaultreduce="):].rsplit("|", 1)
-        default_names = namelist(_dfnames) if _dfnames.strip() else []
-        default_reduce = min(95.0, max(0.0, float(_dfpct)))
-    except Exception as _e:
-        print("VEHICLE WARN: bad defaultreduce arg '%s' (%s) — ignored" % (_dfarg, _e))
-
 _ffarg = next((a for a in argv if a.startswith("flagfold=")), None)
 # FOLD MODE is the TAG'S PRESENCE, not the angle (field follow-up: "can you please also make it work at 0"):
 # in fold mode, angle 0 means "no fold — the flag part simply STAYS DEPLOYED while moving", which is the
@@ -801,6 +786,24 @@ preserve_reduce = min(95.0, max(0.0, float(argv[68]))) if len(argv) > 68 and arg
 # wants a dial between Structure and Body. Welds to the hull like Body; no exemptions, no special handling.
 detail_names = namelist(argv[69]) if len(argv) > 69 and argv[69].strip() else []
 detail_reduce = min(95.0, max(0.0, float(argv[70]))) if len(argv) > 70 and argv[70].strip() else 0.0
+# DEFAULT REDUCE (tagged arg, 2026-09-19, user: "add Default reduce"): the catch-all tier — every part still
+# marked Default (nothing chosen for it) cut by one dial, like Body. Tagged, not positional: the positional block
+# ends at argv[75] and a tag keeps an older Lab and a newer script (and the reverse) working unchanged. Parsed
+# HERE, after namelist() exists: the first version sat with the other tags above and called namelist before its
+# definition — a NameError the except swallowed, so the dial never ran and a 208,000-triangle rig failed the bake
+# while Verify had projected 156,000 (user 2026-09-19: "I clearly have a model with less vertices yet the same
+# error"). A malformed tag is a hard error now, like the other tags: never a silent skip of a reduce dial.
+#   defaultreduce=@<names file>|<percent>
+default_names = []
+default_reduce = 0.0
+_dfarg = next((a for a in argv if a.startswith("defaultreduce=")), None)
+if _dfarg:
+    try:
+        _dfnames, _dfpct = _dfarg[len("defaultreduce="):].rsplit("|", 1)
+        default_names = namelist(_dfnames) if _dfnames.strip() else []
+        default_reduce = min(95.0, max(0.0, float(_dfpct)))
+    except Exception as _e:
+        print("VEHICLE ERROR: malformed defaultreduce argument: %s (%s)" % (_dfarg, _e)); sys.exit(1)
 # SAIL IDLE FOLD (argv[71], 2026-09-09, vanilla-parity request): "1" = at idle the canvas FOLDS at the yard
 # (visible bundled sail, like the vanilla triaconter's brailed-up cloth) instead of the 180-degree strike below
 # the keel. ROTATION-ONLY by construction: the canvas is band-skinned to a Sail->SailF1->SailF2 chain and the
@@ -1141,6 +1144,19 @@ def axle_axis(s):
 # measured against the ORIGINAL count, so the percentage means what it says or better. The print carries all
 # three numbers so a too-aggressive dial is loud, not silent.
 #
+# WELD FIRST (2026-09-19, the SS Romanic's hull: "it keeps getting large gaps in the hull — can't you improve the
+# reduction to prevent holes?"). A GLB carries a vertex per UV seam and per hard edge, and the importer keeps them
+# apart, so a fused hull arrives as a triangle soup: 68,000 of its 73,000 vertices sat on a "boundary". The
+# collapse then moved each side of every seam on its own and the seams opened into cracks (and small fittings —
+# ventilator cowls — were ground to slivers, each triangle collapsing alone). Every tier but RIGGING now welds
+# coincident vertices (1e-5 of the part's size: skins 2 cm apart stay apart) and marks edges over 40° sharp
+# before the collapse, and the dial's percentage is of the WELDED count. Measured (holes from the beam, 0.3 m
+# cells, hull at 50 %): unreduced 9/108, the old pass 50/99, welded 9/108 — none added; the Teutonic's hull the
+# same. RIGGING keeps the soup pass below: welded rope segments bottom out at each island's minimum topology
+# (58,000 triangles where the dial asked for 6,000) while the soup collapse thins them to the dial — the "lines
+# at game distance" the tier is for. The dissolve is not run on a welded surface: at 5° it joins a hull's
+# curvature into long slivers and tore the bow and stern (holes 44/329 at the same dial).
+#
 # Limited dissolve's face-join is QUADRATIC in coplanar-region size: game rips triangulate big flat panels
 # into one huge region, and on the OceanLiner a 23k-vert deckhouse took 39 SECONDS to dissolve while a curvier
 # 65k-vert hull took 3s (the whole Generate ran 73s, 71s of it in this one op). Big parts therefore dissolve in
@@ -1216,26 +1232,56 @@ for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RI
         _ro2 = _by_name.get(_rn)
         if _ro2 is None:
             print("VEHICLE WARN: %s part '%s' not found — skipped" % (_rlabel.lower(), _rn)); continue
-        _v0 = len(_ro2.data.vertices)
+        _vraw = len(_ro2.data.vertices)
         _rb = bmesh.new(); _rb.from_mesh(_ro2.data)
-        _dissolve_limited(_rb, 5.0)
-        # TRIANGULATE the dissolved result immediately: the dissolve leaves long, often non-planar/concave n-gons,
-        # and Unity's FBX importer DISCARDS self-intersecting polygons on import (a wall of warnings + holes in the
-        # preview). Blender's ear-clipping handles these fine; no n-gon ever reaches an exporter. Adds no vertices.
+        _weld = _rlabel != "RIGGING"
+        if _weld:
+            _dim = max(_ro2.dimensions) or 1.0
+            # Weld WITHIN each material only. A ripped hull paints its plating, boot-topping stripe and portholes as
+            # per-face materials with point UVs; a weld across a material border lets the collapse slide a vertex
+            # from a black plate into the gold stripe for free (the surface is flat there, the quadric sees no
+            # error) and the stripe smeared over the whole side. A border left as a mesh boundary gets the
+            # decimate's boundary quadric instead and stays on its line. A vertex the source already shares
+            # across materials is left as it is. Measured on the Romanic hull at 65 %: texture identical to the
+            # source, beam holes 109 vs 108 unreduced; the all-position weld gave the smear (PR #64 follow-up).
+            _bym = {}
+            for _v in _rb.verts:
+                _ls = _v.link_loops
+                if not _ls:
+                    continue
+                _m0 = _ls[0].face.material_index
+                if all(_l.face.material_index == _m0 for _l in _ls[1:]):
+                    _bym.setdefault(_m0, []).append(_v)
+            for _vs in _bym.values():
+                bmesh.ops.remove_doubles(_rb, verts=_vs, dist=_dim * 1e-5)
+            for _e in _rb.edges:   # hard edges survive the weld as sharp edges: the export splits normals there again
+                if len(_e.link_faces) == 2:
+                    _fa = _e.calc_face_angle(None)
+                    if _fa is not None and _fa > math.radians(40.0):
+                        _e.smooth = False
+        else:
+            _dissolve_limited(_rb, 5.0)
+        # TRIANGULATE immediately: the dissolve leaves long, often non-planar/concave n-gons, and Unity's FBX
+        # importer DISCARDS self-intersecting polygons on import (a wall of warnings + holes in the preview).
+        # Blender's ear-clipping handles these fine; no n-gon ever reaches an exporter. Adds no vertices.
         bmesh.ops.triangulate(_rb, faces=list(_rb.faces))
         _rb.to_mesh(_ro2.data); _rb.free()
+        if _weld:
+            for _p in _ro2.data.polygons:
+                _p.use_smooth = True   # smooth across the welded seams, hard at the sharp edges marked above
         _vmid = len(_ro2.data.vertices)
+        _v0 = _vmid if _weld else _vraw   # the dial's base: real vertices once welded, the raw count on the soup pass
         _target = max(8, int(_v0 * (1.0 - _rpct / 100.0)))
         if _vmid > _target:
             _dm2 = _ro2.modifiers.new("HAFReduce", 'DECIMATE')
             _dm2.ratio = max(0.02, float(_target) / float(_vmid))
-            _rows.append((_ro2, _v0, _vmid, _target, None))
+            _rows.append((_ro2, _v0, _vmid, _target, None, _vraw, _weld))
         else:
-            _rows.append((None, _v0, _vmid, _target, _vmid))
+            _rows.append((None, _v0, _vmid, _target, _vmid, _vraw, _weld))
     if any(_r[0] is not None for _r in _rows):
         _deps = bpy.context.evaluated_depsgraph_get()   # the ONE evaluation — every pending decimate at once
         for _ri in range(len(_rows)):
-            _ro2, _v0, _vmid, _target, _v1 = _rows[_ri]
+            _ro2, _v0, _vmid, _target, _v1, _vraw, _weld = _rows[_ri]
             if _ro2 is None:
                 continue
             _ev = _ro2.evaluated_get(_deps)
@@ -1244,12 +1290,16 @@ for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RI
             _ro2.data = _me2
             _ro2.modifiers.clear()
             bpy.data.meshes.remove(_old)
-            _rows[_ri] = (_ro2, _v0, _vmid, _target, len(_me2.vertices))
+            _rows[_ri] = (_ro2, _v0, _vmid, _target, len(_me2.vertices), _vraw, _weld)
     _rnames_ok = [n for n in _rnames if _by_name.get(n) is not None]
-    for (_ro2, _v0, _vmid, _target, _v1), _rn in zip(_rows, _rnames_ok):
+    for (_ro2, _v0, _vmid, _target, _v1, _vraw, _weld), _rn in zip(_rows, _rnames_ok):
         _rr_v0 += _v0; _rr_v1 += _v1; _rr_n += 1
-        print("VEHICLE %s '%s': %d -> %d verts (dissolve pass: %d; dial %.0f%% = target %d)"
-              % (_rlabel, _rn, _v0, _v1, _vmid, _rpct, _target))
+        if _weld:
+            print("VEHICLE %s '%s': %d -> %d verts (welded from %d raw; dial %.0f%% = target %d)"
+                  % (_rlabel, _rn, _v0, _v1, _vraw, _rpct, _target))
+        else:
+            print("VEHICLE %s '%s': %d -> %d verts (dissolve pass: %d; dial %.0f%% = target %d)"
+                  % (_rlabel, _rn, _v0, _v1, _vmid, _rpct, _target))
     if _rr_n:
         print("VEHICLE %s: %d part(s) reduced, %d -> %d verts total (%.0f%% cut)"
               % (_rlabel, _rr_n, _rr_v0, _rr_v1, 100.0 * (1.0 - float(_rr_v1) / max(1, _rr_v0))))

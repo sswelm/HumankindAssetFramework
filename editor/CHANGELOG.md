@@ -21,6 +21,28 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
+- **Vehicle Lab: Default reduce actually runs.** Its tagged argument was parsed before the script defined its
+  name-list reader, so the rig logged a warning and silently skipped the tier: a 208,000-triangle rig failed the
+  bake while Verify had projected 156,000 (user: "I clearly have a model with less vertices yet the same error").
+  Parsed after the reader now, and a malformed tag is a hard error like the other tags — never a silent skip of a
+  reduce dial.
+- **Vehicle Lab reduction welds the seams first — no more cracks in a reduced hull.** A GLB carries a vertex per
+  UV seam and per hard edge, and the rig's importer keeps them apart, so a fused hull reached the collapse as a
+  triangle soup: 68,000 of its 73,000 vertices on a "boundary", every seam's two sides moved on their own, and the
+  hull came out cracked along every plate (small fittings, each triangle collapsing alone, were ground to slivers).
+  Every tier but Rigging now welds coincident vertices (1e-5 of the part's size; double skins stay apart), marks
+  edges over 40° sharp so hard edges survive, and collapses to a dial that counts welded vertices. **The weld stays
+  within a material:** a ripped hull paints its plating, stripe and portholes as per-face materials, and the first
+  cut of this welded across them — the collapse then slid vertices from a black plate into the gold stripe for
+  free (a flat surface, no quadric error) and the user's hull came out smeared ("the hull texture is wrong"). A
+  material border left as a mesh boundary keeps the decimate's boundary quadric and stays on its line: the Romanic
+  hull at 65 % renders identical to the source (portholes, stripe, plating), 25,300 triangles either way, beam
+  holes 109 vs 108 unreduced. Measured on
+  the Romanic's hull at 50 %: the old pass added holes (from the beam, 0.3 m cells: 9 → 50 starboard, 108 → 99
+  port, and visible cracks); the welded pass adds none and reads smooth; the Teutonic's hull the same (255 → 305
+  became 255 → 255). Ventilator cowls that reduced to dust keep their shape at the same triangle count. Rigging
+  keeps the raw-mesh dissolve + collapse: welded rope segments bottom out at each island's minimum topology,
+  where the soup collapse thins ropes to the lines the tier is for. The log line reads "welded from N raw".
 - **Fuse: the twin reach is 0.5 % of the length (was 1 %) — the Romanic's bridge deck.** A 39-face roof region on
   each side, facing up and correct as authored, welded into a deckhouse sheet and found 74 "twins in front": the
   deckhouse's undersides a metre and more above — neighbours, not a skin — and the twin rule turned the roof over

@@ -55,7 +55,7 @@ public class VehicleLabWindow : EditorWindow
     // so every downstream stage sees the slim mesh. Body-like otherwise (welds to Root). Dropdown-only, no hotkey.
     // Structure (2026-09-05): the second reduction tier — small-but-dense DETAIL geometry (railings, a carved bow
     // figure) that is more visible than rigging, so it gets its own, usually gentler, percentage dial. Same
-    // dissolve+collapse treatment at Generate; Body-like otherwise. Dropdown-only, no hotkey.
+    // weld+collapse treatment at Generate; Body-like otherwise. Dropdown-only, no hotkey.
     // Preserve (2026-09-06): geometry shipped EXACTLY as authored — never winding-flipped, never doubled (not
     // even under the global Double-sided switch); welds to the hull like Body but stays its own mesh so no
     // export pass can touch it. For parts every automatic pass keeps getting wrong. Appended LAST.
@@ -824,11 +824,11 @@ public class VehicleLabWindow : EditorWindow
                         "  Fix inside-out faces" + (flipProbed ? $"   (⟲ would flip {flipAffected} part(s) — marked in the list)" : "   (re-Probe to see which parts it would flip)"),
                         "For a source whose winding ships partly INVERTED — you see through the near hull wall from outside while the far wall's interior renders. On: islands that provably face the hull's interior (inverted side planking) are REVERSED at export — no extra triangles; everything else keeps the artist's winding, as do marked Sail, Oar, Rudder and Preserve meshes. A Flip-marked part composes with this as an XOR (per island): where this fix flips, the Flip mark cancels it back. Sails are a ROLE (dropdown): mark the canvas instead of relying on any detection — marked sails are always double-sided and hide at idle. " +
                         "The ⟲ row marks show each part the fix WOULD reverse, on or off — computed at Probe with the same island scoring, against the whole model's axis (Generate re-judges each merged role mesh against its own axis). The probe judges in the Orientation dialed AT PROBE TIME (it is passed along and applied to the classification math), so after changing Orientation, re-Probe and the verdicts follow."), fixInsideOut);
-                    EditorGUILayout.LabelField("  Reduction cuts marked parts at Generate (dissolve + collapse) — the previews and the bake all see the slim mesh. The Generate log prints each part's real before/after.", EditorStyles.miniLabel);
+                    EditorGUILayout.LabelField("  Reduction cuts marked parts at Generate (seams welded, then collapse; Rigging: dissolve + collapse) — the previews and the bake all see the slim mesh. The Generate log prints each part's real before/after.", EditorStyles.miniLabel);
                     using (new EditorGUI.DisabledScope(nDef == 0))
                         defaultReducePct = EditorGUILayout.Slider(new GUIContent("Default reduce (%)",
                             "The CATCH-ALL tier (2026-09-19): every part still marked Default — nothing chosen for it — " +
-                            "cut by this one dial at Generate, exactly as Body parts are (same dissolve + collapse, no " +
+                            "cut by this one dial at Generate, exactly as Body parts are (seams welded, then collapse; no " +
                             "exemptions). A model whose thousand small fittings are all undecided slims in one move, " +
                             "without marking each one. Marking a part anything else takes it out of this tier. Every part is " +
                             "cut on its own, so a model with thousands of undecided shards spends real time in Blender here — " +
@@ -836,7 +836,7 @@ public class VehicleLabWindow : EditorWindow
                             defaultReducePct, 0f, 95f);
                     using (new EditorGUI.DisabledScope(nRig == 0))
                         riggingReducePct = EditorGUILayout.Slider(new GUIContent("Rigging reduce (%)",
-                            "Percentage of vertices REMOVED from Rigging-marked parts at Generate (dissolve + collapse, at the " +
+                            "Percentage of vertices REMOVED from Rigging-marked parts at Generate (dissolve + collapse on the raw mesh — ropes thin to lines, at the " +
                             "source — every preview and the bake see the slim mesh). Rope/line geometry is dense but barely " +
                             "visible at game distance; mark it Rigging in the dropdown and dial how hard to cut. 0 = untouched."),
                             riggingReducePct, 0f, 95f);
@@ -844,7 +844,7 @@ public class VehicleLabWindow : EditorWindow
                         structureReducePct = EditorGUILayout.Slider(new GUIContent("Structure reduce (%)",
                             "The SECOND reduction tier: small-but-dense DETAIL geometry (railings, a carved bow figure) that " +
                             "is more visible than rigging, so it usually takes a gentler cut. Mark parts Structure in the " +
-                            "dropdown; same dissolve + collapse treatment at Generate, separate dial. 0 = untouched."),
+                            "dropdown; seams welded, then collapse, at Generate (the dial counts welded vertices), separate dial. 0 = untouched."),
                             structureReducePct, 0f, 95f);
                     using (new EditorGUI.DisabledScope(nBod == 0))
                         bodyReducePct = EditorGUILayout.Slider(new GUIContent("Body reduce (%)",
