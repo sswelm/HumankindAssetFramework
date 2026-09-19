@@ -21,6 +21,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
+- **Model Splitter / Fuser: "Hide parts over (size)"** — the mirror of the existing lower bound, so the two bracket a
+  size band, and alone it leaves nothing but the small clutter in the list, ready for the Delete key. Its travel is
+  **logarithmic**: part sizes span four decades on a split model (the Romanic's 1,796 parts run 0.017 to 173), where a
+  linear slider spends 99 % of its length doing nothing and crosses "219 parts shown" to "1,361 shown" inside one
+  pixel. The number box beside it takes an exact threshold. At rest it sits a hair above the largest part, so the
+  biggest row can never round its way into hiding.
 - **Model Splitter / Fuser: an "Un-mirror" checkbox above the preview.** glTF is right-handed and Unity left-handed, so
   the preview showed the model mirrored — screen-left was the file's starboard, a trap in a window where picking a side
   is half the work. The box negates X and flips every triangle to compensate, measured to leave the surface exactly as

@@ -62,6 +62,10 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // escape rays, which the Workshop does not run.
     [SerializeField] int minVerts = 1;
     [SerializeField] float minPartSize = 0f;
+    // The UPPER size bound (2026-09-19, user: "a hide parts over size filter so I can find all the small items, so I
+    // can delete them"): the mirror of the slider above, so the two bracket a size band. Its natural use is alone —
+    // drag it down and only the clutter is left in the list, ready for the Delete key or the row popup.
+    [SerializeField] float maxPartSize = 1e9f;
     [SerializeField] float minHeight = -1e9f, maxHeight = 1e9f, minWidth = -1e9f, maxWidth = 1e9f;   // clamped into the model's span each frame: a fresh model hides nothing
     [SerializeField] int showOnly = 0;
     [SerializeField] float minFlatPct = 0f;   // 0 = off — hide parts whose LEVEL-surface share (% of area within 30° of horizontal) is below this: the Lab's deck finder, brought over 2026-09-18 ("group D is still missing part of the deck")
@@ -79,7 +83,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // parts?"). A re-Probe or a slider move on the SAME file keeps the settings; the "Show all" button is the manual way.
     void ResetFilters()
     {
-        minVerts = 1; minPartSize = 0f; minFlatPct = 0f;
+        minVerts = 1; minPartSize = 0f; maxPartSize = 1e9f; minFlatPct = 0f;
         minHeight = -1e9f; maxHeight = 1e9f; minWidth = -1e9f; maxWidth = 1e9f;
         showOnly = 0; showOnlyLetter = ""; hideWhole = false;
     }
@@ -255,7 +259,28 @@ public abstract class ModelWorkshopWindow : EditorWindow
             }
             float Centre(Row r, int axis) => 0.5f * (r.min[axis] + r.max[axis]);
             minVerts = EditorGUILayout.IntSlider(new GUIContent("Hide parts under (verts)", "Rows with fewer vertices than this are hidden from the list (they are still in the file and still fuse/split if marked)."), minVerts, 1, 2000);
-            minPartSize = EditorGUILayout.Slider(new GUIContent("Hide parts under (size)", "Rows whose largest bbox dimension is below this are hidden. Drop the verts slider and raise this to find LARGE parts with few vertices."), minPartSize, 0f, boxed.Count > 0 ? boxed.Max(r => Mathf.Max(r.max[0] - r.min[0], r.max[1] - r.min[1], r.max[2] - r.min[2])) : 1f);
+            float biggestPart = boxed.Count > 0 ? boxed.Max(r => Mathf.Max(r.max[0] - r.min[0], r.max[1] - r.min[1], r.max[2] - r.min[2])) : 1f;
+            minPartSize = EditorGUILayout.Slider(new GUIContent("Hide parts under (size)", "Rows whose largest bbox dimension is below this are hidden. Drop the verts slider and raise this to find LARGE parts with few vertices."), minPartSize, 0f, biggestPart);
+            // LOGARITHMIC, unlike its neighbour (measured 2026-09-19): part sizes span four decades on a split model
+            // (the Romanic's 1,796 parts run 0.017 to 173), so a linear slider spends 99 % of its travel doing nothing
+            // and crosses "keeps 219 parts" to "keeps 1,361" inside one pixel. Even travel per decade instead, with the
+            // number box for an exact threshold. The lower slider is left linear: it is dragged UP to find big parts,
+            // where the range is not compressed.
+            float smallestPart = boxed.Count > 0 ? boxed.Min(r => Mathf.Max(r.max[0] - r.min[0], r.max[1] - r.min[1], r.max[2] - r.min[2])) : 0f;
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.PrefixLabel(new GUIContent("Hide parts over (size)",
+                    "Rows whose largest bbox dimension is above this are hidden — drag it down and only the small clutter is left, ready for the Delete key. " +
+                    "The travel is logarithmic because part sizes span decades; the box takes an exact figure. Pair it with the slider above to keep one size band."));
+                // a hair ABOVE the biggest part, so at rest the threshold cannot round just inside it and hide the
+                // largest row (the Lab's 2026-08-01 finding, which is why the height sliders carry a pad too)
+                float lo = Mathf.Max(1e-4f, smallestPart), hi = Mathf.Max(lo * 1.0001f, biggestPart * 1.001f);
+                float cur = Mathf.Clamp(maxPartSize, lo, hi);
+                float t = (Mathf.Log(cur) - Mathf.Log(lo)) / (Mathf.Log(hi) - Mathf.Log(lo));
+                t = GUILayout.HorizontalSlider(t, 0f, 1f);
+                maxPartSize = Mathf.Exp(Mathf.Lerp(Mathf.Log(lo), Mathf.Log(hi), t));
+                maxPartSize = Mathf.Clamp(EditorGUILayout.FloatField(maxPartSize, GUILayout.Width(64)), 0f, hi);
+            }
             if (boxed.Count > 0)
             {
                 float yLo = boxed.Min(r => Centre(r, 1)), yHi = boxed.Max(r => Centre(r, 1)), yPad = Mathf.Max(0.02f, (yHi - yLo) * 0.02f);
@@ -300,7 +325,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 if (r.verts > 0 && r.verts < minVerts) return false;
                 if (!FlatOk(r)) return false;
                 if (r.min == null) return true;   // unmeasured: a filter never hides what it cannot measure
-                if (Mathf.Max(r.max[0] - r.min[0], r.max[1] - r.min[1], r.max[2] - r.min[2]) < minPartSize) return false;
+                float span = Mathf.Max(r.max[0] - r.min[0], r.max[1] - r.min[1], r.max[2] - r.min[2]);
+                if (span < minPartSize || span > maxPartSize) return false;
                 float h = Centre(r, 1), w = Centre(r, sideAxis);
                 return h >= minHeight && h <= maxHeight && w >= minWidth && w <= maxWidth;
             }
