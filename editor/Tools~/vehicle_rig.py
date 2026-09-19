@@ -500,25 +500,21 @@ if mode == "probe":
     # scene.ray_cast per ray walked all 3,350 objects each time — 31 s on the Ehrhardt; the BVH does it in 0.2 s
     # with the same verdicts (±3 parts of 3,350 at the eps boundary).
     from mathutils.bvhtree import BVHTree
-    # PREVIEW ONLY (2026-09-19, the Model Splitter's 86 s Probe): the Workshop windows read nothing but the FBX —
-    # no PART lines, no verdicts — yet paid for the visibility rays (8 s) and the inside-out verdicts (16 s) on a
-    # 214 MB ship. With `previewonly` in the arguments both passes are skipped; the Vehicle Lab never passes it.
-    _preview_only = "previewonly" in argv
     _dirs = [Vector(_v).normalized() for _v in ((1,0,0),(-1,0,0),(0,1,0),(0,-1,0),(0,0,1),(0,0,-1),
              (1,1,1),(1,1,-1),(1,-1,1),(1,-1,-1),(-1,1,1),(-1,1,-1),(-1,-1,1),(-1,-1,-1))]
     _bv = []; _bp = []; _base = 0
     _mx_ext = 0.0
-    for _o in ([] if _preview_only else objs):
+    for _o in objs:
         _mw = _o.matrix_world
         _bv.extend([_mw @ _v.co for _v in _o.data.vertices])
         _bp.extend([tuple(_base + _i for _i in _p.vertices) for _p in _o.data.polygons])
         _base += len(_o.data.vertices)
         _c2, _s2 = world_bbox(_o)
         _mx_ext = max(_mx_ext, _s2.x, _s2.y, _s2.z)
-    _bvh = None if _preview_only else BVHTree.FromPolygons(_bv, _bp)
+    _bvh = BVHTree.FromPolygons(_bv, _bp)
     _eps = max(1e-4, _mx_ext * 1e-3)   # ray start offset so a point clears its own surface
     _vis = {}
-    for _o in ([] if _preview_only else objs):
+    for _o in objs:
         _vs = _o.data.vertices
         _stp = max(1, len(_vs) // 30)
         _nm = _o.matrix_world.to_3x3()
@@ -533,10 +529,7 @@ if mode == "probe":
             if _seen:
                 break
         _vis[_o.name] = 1 if _seen else 0
-    if _preview_only:
-        print("VEHICLE probe: preview only — visibility and inside-out verdicts skipped")
-    else:
-        print("VEHICLE visibility: %d external / %d interior part(s)" % (sum(_vis.values()), len(objs) - sum(_vis.values())))
+    print("VEHICLE visibility: %d external / %d interior part(s)" % (sum(_vis.values()), len(objs) - sum(_vis.values())))
     _lap("visibility")
     # ---- dominant bone per shard (rigged sources) — so the Lab can highlight a BONE row's shards WITHOUT the
     # preview carrying skin weights (the skinned preview export was the 84 s hog; see below). ----
@@ -563,7 +556,7 @@ if mode == "probe":
                 Matrix.Rotation(math.radians(_probe_rot[2]), 4, 'Z'))   # same composition Generate straightens with
     _porient3 = _porient.to_3x3()
     _fa_pts = []
-    for _o in ([] if _preview_only else objs):   # no sample points -> the verdict pass below does not run
+    for _o in objs:
         _mw0 = _porient @ _o.matrix_world
         _fstep0 = max(1, len(_o.data.vertices) // 2000)
         for _i0, _v0 in enumerate(_o.data.vertices):

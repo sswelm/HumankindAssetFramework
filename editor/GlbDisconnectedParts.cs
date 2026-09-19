@@ -680,13 +680,15 @@ public static class GlbDisconnectedParts
     // ExtractPart reports — so a UI that previews ExtractPart geometry and cuts at a slider value taken from
     // its bounds shows exactly the triangles the cut will move. CutA = centroid at or above planeValue.
 
-    /// <summary>One node's triangles in world space — the WYSIWYG data behind a plane-cut preview.</summary>
+    /// <summary>One node's triangles in world space — the WYSIWYG data behind a plane-cut preview and the Workshop's turntable.</summary>
     public sealed class PartGeometry
     {
         public int NodeIndex;
         public string NodeName;
         public float[] Positions;    // xyz triplets, world space, per-primitive concatenated
         public int[] Triangles;      // vertex indices into Positions/3, every 3 = one triangle
+        public int[] PrimitiveStart;       // where each primitive's run begins in Triangles (a preview submesh per primitive)
+        public float[][] PrimitiveColour;  // each primitive's material base colour factor, RGB (1,1,1 when the material has none)
         public readonly double[] Min = { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity };
         public readonly double[] Max = { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
     }
@@ -699,37 +701,95 @@ public static class GlbDisconnectedParts
         JArray nodes = root["nodes"] as JArray ?? new JArray();
         JArray meshes = root["meshes"] as JArray ?? throw new InvalidDataException("GLB has no meshes array.");
         Accessors reader = BinReader(document, root);
+        return ExtractNode(root, nodes, meshes, reader, nodeIndex);
+    }
+
+    // EVERY mesh-carrying node in one pass (2026-09-19, the Workshop's preview): the file is parsed once and each node's
+    // geometry read through the cached accessors, one PartGeometry per node in node order — the preview objects then
+    // meet the part rows on the NODE INDEX, which a file that names all 113 nodes "Material2" cannot do by name. A node
+    // the extractor refuses (draco, GPU instancing, a primitive that is not triangles) is left out; Analyze lists it
+    // blocked, and the preview simply lacks it.
+    public static List<PartGeometry> ExtractAll(byte[] source)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        Document document = Parse(source);
+        JObject root = document.Root;
+        JArray nodes = root["nodes"] as JArray ?? new JArray();
+        JArray meshes = root["meshes"] as JArray ?? throw new InvalidDataException("GLB has no meshes array.");
+        Accessors reader = BinReader(document, root);
+        var parts = new List<PartGeometry>();
+        for (int nodeIndex = 0; nodeIndex < nodes.Count; nodeIndex++)
+        {
+            if ((nodes[nodeIndex] as JObject)?["mesh"] == null) continue;
+            try { parts.Add(ExtractNode(root, nodes, meshes, reader, nodeIndex)); }
+            catch (Exception ex) when (ex is InvalidDataException || ex is OverflowException) { }
+        }
+        return parts;
+    }
+
+    static PartGeometry ExtractNode(JObject root, JArray nodes, JArray meshes, Accessors reader, int nodeIndex)
+    {
         JObject node = NodeWithMesh(nodes, nodeIndex, out int meshIndex);
         var primitives = (meshes[meshIndex] as JObject)?["primitives"] as JArray ?? throw new InvalidDataException("Mesh has no primitives.");
         double[] world = NodeWorldMatrix(nodes, nodeIndex);
-
-        var positions = new List<float>();
-        var triangles = new List<int>();
-        var geo = new PartGeometry { NodeIndex = nodeIndex, NodeName = (string)node["name"] ?? ("node " + nodeIndex) };
-        foreach (JObject primitive in TrianglePrimitives(primitives))
+        var prims = TrianglePrimitives(primitives).ToList();
+        // sizes first, arrays second: a 2.6 M-triangle ship is read in one pass without list growth
+        int totalVerts = 0, totalIndices = 0;
+        foreach (JObject primitive in prims)
         {
+            int vertCount = reader.Count(primitive["attributes"].Value<int>("POSITION"));
+            int indexCount = primitive["indices"] == null ? vertCount : reader.Count(primitive.Value<int>("indices"));
+            if (indexCount % 3 != 0) throw new InvalidDataException("Triangle primitive index count is not divisible by three.");
+            totalVerts = checked(totalVerts + vertCount); totalIndices = checked(totalIndices + indexCount);
+        }
+        var positions = new float[checked(totalVerts * 3)];
+        var triangles = new int[totalIndices];
+        var geo = new PartGeometry { NodeIndex = nodeIndex, NodeName = (string)node["name"] ?? ("node " + nodeIndex), PrimitiveStart = new int[prims.Count], PrimitiveColour = new float[prims.Count][] };
+        JArray materials = root["materials"] as JArray;
+        int baseVertex = 0, at = 0;
+        for (int pi = 0; pi < prims.Count; pi++)
+        {
+            JObject primitive = prims[pi];
             int posAcc = primitive["attributes"].Value<int>("POSITION");
-            int baseVertex = positions.Count / 3;
             int vertCount = reader.Count(posAcc);
             for (uint v = 0; v < vertCount; v++)
             {
                 Vec3 p = XForm(world, reader.Position(posAcc, v));
-                positions.Add((float)p.X); positions.Add((float)p.Y); positions.Add((float)p.Z);
+                int o = (baseVertex + (int)v) * 3;
+                positions[o] = (float)p.X; positions[o + 1] = (float)p.Y; positions[o + 2] = (float)p.Z;
             }
+            geo.PrimitiveStart[pi] = at;
+            geo.PrimitiveColour[pi] = BaseColour(materials, primitive);
             int indexCount = primitive["indices"] == null ? vertCount : reader.Count(primitive.Value<int>("indices"));
-            if (indexCount % 3 != 0) throw new InvalidDataException("Triangle primitive index count is not divisible by three.");
             for (uint i = 0; i < indexCount; i++)
             {
                 uint idx = primitive["indices"] == null ? i : reader.Index(primitive.Value<int>("indices"), i);
                 if (idx >= vertCount) throw new InvalidDataException("Primitive index exceeds its POSITION accessor.");
-                triangles.Add(baseVertex + (int)idx);
-                int o = (baseVertex + (int)idx) * 3;
+                int vi = baseVertex + (int)idx;
+                triangles[at++] = vi;
+                int o = vi * 3;
                 UpdateBounds(geo.Min, geo.Max, new Vec3 { X = positions[o], Y = positions[o + 1], Z = positions[o + 2] });
             }
+            baseVertex += vertCount;
         }
-        geo.Positions = positions.ToArray();
-        geo.Triangles = triangles.ToArray();
+        geo.Positions = positions;
+        geo.Triangles = triangles;
         return geo;
+    }
+
+    // The primitive's material base colour factor as RGB; white for a material without one. Never throws: the colour
+    // is cosmetic (the preview's tint), the geometry is what the caller came for.
+    static float[] BaseColour(JArray materials, JObject primitive)
+    {
+        var rgb = new[] { 1f, 1f, 1f };
+        try
+        {
+            int mi = primitive.Value<int?>("material") ?? -1;
+            var factor = (materials != null && mi >= 0 && mi < materials.Count ? materials[mi]?["pbrMetallicRoughness"]?["baseColorFactor"] : null) as JArray;
+            if (factor != null && factor.Count >= 3) for (int k = 0; k < 3; k++) rgb[k] = (float)factor[k].Value<double>();
+        }
+        catch (Exception) { }
+        return rgb;
     }
 
     public static Result CutNodeByPlane(byte[] source, int nodeIndex, int axis, double planeValue)

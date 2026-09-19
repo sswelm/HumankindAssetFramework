@@ -49,7 +49,6 @@ public abstract class ModelWorkshopWindow : EditorWindow
     const int DeleteEntry = 27;   // FuseLabels index of "✕ Delete"
     static readonly string[] SplitLabels = { "–", "Split", "Delete" }, WholeLabels = { "–", "Delete" };   // the Splitter's row popup (a whole part cannot be split)
 
-    const string PreviewDir = "Assets/FactorySource/ModelWorkshop";
 
     [SerializeField] string srcFile = "";
     [SerializeField] string outGlb = "";
@@ -60,14 +59,14 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // LIST FILTERS (2026-09-16, the Vehicle Lab's sliders brought over — user: "make these selection tools also available in
     // the Model Workshop"): the same bands, over the node bbox the analyzer reads from the accessors. Height is glTF +Y, the
     // side axis is the model's shorter horizontal extent (as the fuse's belly axis). The flat-surface and visibility filters
-    // stay Lab-only: they need the Blender probe's measurements, which the Workshop does not run.
+    // the flat filter came over on 2026-09-18, measured on the preview meshes; the visibility filter stays Lab-only (it needs the
+    // Blender probe's escape rays, which the Workshop does not run).
     [SerializeField] int minVerts = 1;
     [SerializeField] float minPartSize = 0f;
     [SerializeField] float minHeight = -1e9f, maxHeight = 1e9f, minWidth = -1e9f, maxWidth = 1e9f;   // clamped into the model's span each frame: a fresh model hides nothing
     [SerializeField] int showOnly = 0;
     [SerializeField] float minFlatPct = 0f;   // 0 = off — hide parts whose LEVEL-surface share (% of area within 30° of horizontal) is below this: the Lab's deck finder, brought over 2026-09-18 ("group D is still missing part of the deck")
-    Dictionary<string, double> flatAreaByName, flatLevelByName;   // raw per-RENDERER sums over the preview, keyed by EXACT name (the Lab's review P2 lesson: strip nothing here)
-    Dictionary<string, float> flatShare; GameObject flatShareFor; // resolved per-part share memo (exact-first, digits-only ".NNN" alias merge — VehicleLabRules.FlatShare)
+    Dictionary<int, float> flatShare; GameObject flatShareFor;   // per-NODE level-surface share over the preview meshes (the preview is one object per node since 2026-09-19 — no name aliasing needed)
     [SerializeField] string showOnlyLetter = "";   // "Show only" can also be ONE fuse group (user 2026-09-16): the popup lists every letter in use after the fixed kinds
     static readonly string[] ShowOnlyOptions = { "None (all parts)", "Checked for Split", "In a fuse group", "Not in a fuse group", "More than one island", "Already whole", "Skipped by the analyzer", "Marked for deletion" };
     // DISTANCE MERGE (2026-09-06, the 602-island rope): topology alone shreds segmented geometry into hundreds
@@ -100,19 +99,22 @@ public abstract class ModelWorkshopWindow : EditorWindow
 
     // ---- turntable preview state (the Vehicle Lab's proven camera, minus clips/waterline) ----
     GameObject inst; PreviewRenderUtility pru;
+    readonly Dictionary<int, Renderer> previewByNode = new Dictionary<int, Renderer>();   // node index -> its preview renderer (the identity rows and preview share)
+    readonly List<Mesh> previewAssets = new List<Mesh>();                                  // built meshes, destroyed with the preview (runtime Unity objects never GC)
+    readonly Dictionary<Color, Material> previewMats = new Dictionary<Color, Material>();
     [SerializeField] Vector2 orbit = new Vector2(30f, -20f);
     [SerializeField] float zoom = 1.5f;
     Vector2 previewPan;
     Bounds bounds; bool boundsValid; float fullRadius;
-    string selectedRow = "";   // the highlighted part's NAME (renderer matching in the Blender preview is name-based)
+    string selectedRow = "";   // the highlighted part's NAME (labels only — the preview is matched by node index)
     int selectedIdx = -1;      // the selected ROW's identity (node index — names can be duplicated)
     Material highlightMat;
     List<Renderer> highlightedRenderers; List<Material[]> highlightedOriginals;
 
     // ---- plane-cut state (2026-09-13, the Bremen deck: hull and deck are ONE welded island — nothing for the
-    // island splitter to do). The cut preview is built from the SOURCE GLB's own bytes (ExtractPart), not the
-    // Blender FBX round-trip, so the two-color partition on screen is exactly the triangle partition the cut
-    // writes — no axis-convention mapping to get wrong. ----
+    // island splitter to do). The cut preview is built from the SOURCE GLB's own bytes (ExtractPart — the same
+    // world-space data the turntable is built from since 2026-09-19), so the two-color partition on screen is
+    // exactly the triangle partition the cut writes — no axis-convention mapping to get wrong. ----
     [SerializeField] int cutAxis = 1;      // source-file world axis: 0=X 1=Y (up in standard glTF) 2=Z
     [SerializeField] float cutPct = 50f;
     [SerializeField] int cutRule = 0;      // 0 = flat plane; 1 = horizontal surfaces (facing) — deck vs bow plating
@@ -258,7 +260,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 maxWidth = EditorGUILayout.Slider(new GUIContent("Hide parts right of (side)", "Parts whose bbox centre is beyond this across the beam are hidden."), Mathf.Clamp(maxWidth, wLo - wPad, wHi + wPad), wLo - wPad, wHi + wPad);
             }
             // THE DECK FINDER (2026-09-18, user: "group D in the Vehicle Lab still seems to be missing part of the deck"): the
-            // Lab's flat-surface filter, measured on the same Blender preview the Workshop builds. Without a preview every
+            // Lab's flat-surface filter, measured on the preview meshes the Workshop builds from the GLB. Without a preview every
             // part passes — a filter never hides what it cannot measure.
             minFlatPct = EditorGUILayout.Slider(new GUIContent("Only flat parts (≥ % level)",
                 "The deck finder: hide parts whose surface area is less than this % LEVEL (within 30° of horizontal, measured on the " +
@@ -306,7 +308,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             {
                 if (at < 0 || at >= shown.Count || Passes(shown[at])) return;
                 int next = WorkshopRules.NextHighlight(at, shown.Count);
-                ExitCutMode(); selectedIdx = next >= 0 ? shown[next].nodeIndex : -1; SelectRow(next >= 0 ? shown[next].node : "");
+                ExitCutMode(); selectedIdx = next >= 0 ? shown[next].nodeIndex : -1; SelectRow(next >= 0 ? shown[next] : null);
             }
             int advanceFrom = -1;   // a popup/checkbox change on the highlighted row inside the list loop: advanced after the loop
             if (hiddenRows > 0) EditorGUILayout.LabelField($"  {shown.Count} shown, {hiddenRows} hidden by the filters (marks on hidden rows are kept; {(Fusing ? "Fuse" : "Split")} acts on ALL marked rows)", EditorStyles.miniLabel);
@@ -323,7 +325,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 if (ev.keyCode == KeyCode.UpArrow || ev.keyCode == KeyCode.DownArrow)
                 {
                     idx = ev.keyCode == KeyCode.DownArrow ? Mathf.Min(idx + 1, shown.Count - 1) : Mathf.Max(idx - 1, 0);
-                    ExitCutMode(); selectedIdx = shown[idx].nodeIndex; SelectRow(shown[idx].node);
+                    ExitCutMode(); selectedIdx = shown[idx].nodeIndex; SelectRow(shown[idx]);
                     RevealRow(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
@@ -400,7 +402,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                                  : $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {(r.islands == 1 ? "1 island — already whole" : r.islands.ToString("N0") + " islands")}){(r.delete ? "   ✕ deleted in the output" : "")}";
                     // the row label is a BUTTON, exactly like the Vehicle Lab: click = highlight + frame in the preview
                     if (GUILayout.Button(label, isSel ? EditorStyles.whiteLabel : (r.blocked == null && (Fusing || r.islands > 1) ? EditorStyles.label : EditorStyles.miniLabel)))   // the Splitter dims what it cannot split
-                    { ExitCutMode(); selectedIdx = isSel ? -1 : r.nodeIndex; SelectRow(isSel ? "" : r.node); }
+                    { ExitCutMode(); selectedIdx = isSel ? -1 : r.nodeIndex; SelectRow(isSel ? null : r); }
                     if (Event.current.type == EventType.Repaint) rowRects.Add(GUILayoutUtility.GetLastRect());   // the row's real rect in scroll-content space (see the ↑/↓ handler)
                 }
             EditorGUILayout.EndScrollView();
@@ -426,7 +428,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                     else
                     {
                         Row mr = rows[m]; string from = selRowObj.node;
-                        ExitCutMode(); selectedIdx = mr.nodeIndex; SelectRow(mr.node);
+                        ExitCutMode(); selectedIdx = mr.nodeIndex; SelectRow(mr);
                         int si = shown.FindIndex(x => x.nodeIndex == mr.nodeIndex);
                         if (si >= 0) RevealRow(si);
                         status = $"Mirror of '{from}': '{mr.node}' ({mr.tris:N0} tris{(string.IsNullOrEmpty(mr.fuse) ? "" : $", group {mr.fuse}")}) — highlighted" +
@@ -493,7 +495,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 if (Event.current.type == EventType.Repaint) RenderPreview(rect);
             }
             else if (rows.Count > 0)
-                EditorGUILayout.LabelField($"  (no preview — the Blender probe export failed or is still pending; the list and {(Fusing ? "Fuse" : "Split")} still work)", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField($"  (no preview — the preview could not be built from the file; the list and {(Fusing ? "Fuse" : "Split")} still work)", EditorStyles.miniLabel);
 
             if (!Fusing)
             using (new EditorGUI.DisabledScope((chosen == 0 && deleted == 0) || string.IsNullOrEmpty(outGlb)))
@@ -556,7 +558,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
 
     void Probe()
     {
-        if (Analyze()) BuildPreviewViaBlender();
+        if (Analyze()) BuildPreviewFromGlb();
     }
 
     // Path identity for the source-switch hygiene: separator- and case-insensitive (Windows paths), so retyping
@@ -613,54 +615,85 @@ public abstract class ModelWorkshopWindow : EditorWindow
     static string NaturalPrefix(string s) => NaturalOrder.Prefix(s);
     static long NaturalNumber(string s) => NaturalOrder.Number(s);
 
-    // ---- preview build: the Vehicle Lab's probe export (headless Blender writes an FBX of the model), imported
-    // and instanced with AddSingleGO. Node names survive the trip, so rows highlight renderers by name. ----
-    void BuildPreviewViaBlender()
+    // ---- preview build (2026-09-19): straight from the GLB, one object per mesh-carrying NODE. Until now the Vehicle
+    // Lab's Blender probe exported an FBX that Unity imported (24 s of a 214 MB ship's probe) and the rows found their
+    // renderers by NAME — a file that names all 113 of its nodes "Material2" (the Salegs Revenge) lit the whole ship for
+    // any row. Rows and preview objects now meet on the node index. Same coordinates and winding as the cut preview
+    // (world-space glTF, as ExtractPart reports them), so the turntable and the cut mode agree; a submesh per primitive
+    // carries its material's base colour, which is what the FBX trip showed too. ----
+    void BuildPreviewFromGlb()
     {
         DestroyPreview();
         try
         {
-            string projRoot = Directory.GetParent(Application.dataPath).FullName;
-            Directory.CreateDirectory(Path.Combine(projRoot, PreviewDir));
-            string prevRel = PreviewDir + "/" + Path.GetFileNameWithoutExtension(srcFile) + "_wprobe.fbx";
-            string prevFull = Path.Combine(projRoot, prevRel).Replace('\\', '/');
-            string script = HafPackageContext.ToolPath("vehicle_rig.py");
-            if (!File.Exists(script)) { status += "\n(no preview: Tools/vehicle_rig.py missing)"; return; }
-            EditorUtility.DisplayProgressBar("Model Workshop", "Exporting preview via Blender…", 0.4f);
-            var p = new System.Diagnostics.Process();
-            p.StartInfo.FileName = UniversalBaker.FindBlender();
-            // `previewonly`: this window reads nothing but the FBX, so the probe skips the Lab's visibility rays and
-            // inside-out verdicts (24 s of a 214 MB ship's 86 s Probe); the Lab's own probe runs them as before.
-            p.StartInfo.Arguments = $"--background --python \"{script}\" -- probe \"{srcFile}\" \"{prevFull}\" previewonly";
-            p.StartInfo.UseShellExecute = false; p.StartInfo.CreateNoWindow = true;
-            p.StartInfo.RedirectStandardOutput = true; p.StartInfo.RedirectStandardError = true;
-            p.Start();
-            if (!UniversalBaker.RunBounded(p, 300000, out _, out _)) { status += "\n(no preview: Blender timed out)"; return; }
-            if (!File.Exists(prevFull)) { status += "\n(no preview: Blender wrote no FBX)"; return; }
-            AssetDatabase.ImportAsset(prevRel, ImportAssetOptions.ForceUpdate);
-            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prevRel);
-            if (prefab == null) { status += "\n(no preview: FBX import failed)"; return; }
+            EditorUtility.DisplayProgressBar("Model Workshop", "Building the preview…", 0.4f);
+            var parts = GlbDisconnectedParts.ExtractAll(File.ReadAllBytes(srcFile));
+            inst = new GameObject("__workshopPreview") { hideFlags = HideFlags.HideAndDontSave };
+            var sh = Shader.Find("Standard") ?? Shader.Find("Unlit/Color");
+            foreach (var g in parts)
+            {
+                var mesh = new Mesh { name = g.NodeName, hideFlags = HideFlags.HideAndDontSave, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+                var verts = new Vector3[g.Positions.Length / 3];
+                for (int i = 0; i < verts.Length; i++) verts[i] = new Vector3(g.Positions[i * 3], g.Positions[i * 3 + 1], g.Positions[i * 3 + 2]);
+                mesh.vertices = verts;
+                int subs = Math.Max(1, g.PrimitiveStart.Length);
+                mesh.subMeshCount = subs;
+                var mats = new Material[subs];
+                for (int s = 0; s < subs; s++)
+                {
+                    int start = s < g.PrimitiveStart.Length ? g.PrimitiveStart[s] : 0, end = s + 1 < g.PrimitiveStart.Length ? g.PrimitiveStart[s + 1] : g.Triangles.Length;
+                    var tri = new int[Math.Max(0, end - start)]; Array.Copy(g.Triangles, start, tri, 0, tri.Length);
+                    mesh.SetTriangles(tri, s, false);
+                    mats[s] = PreviewMaterial(sh, s < g.PrimitiveColour.Length ? g.PrimitiveColour[s] : null);
+                }
+                mesh.RecalculateNormals(); mesh.RecalculateBounds();
+                previewAssets.Add(mesh);
+                var go = new GameObject(g.NodeName) { hideFlags = HideFlags.HideAndDontSave };
+                go.transform.SetParent(inst.transform, false);
+                go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                var mr = go.AddComponent<MeshRenderer>(); mr.sharedMaterials = mats;
+                previewByNode[g.NodeIndex] = mr;
+            }
             if (pru == null) pru = new PreviewRenderUtility();
-            inst = Instantiate(prefab);
             pru.AddSingleGO(inst);
             boundsValid = false; previewPan = Vector2.zero; zoom = 1.5f;
+            int missing = rows.Count(r => !previewByNode.ContainsKey(r.nodeIndex));
+            if (missing > 0) status += $"\n(preview: {missing} part(s) the extractor refused are not drawn — their rows say why)";
         }
         catch (Exception e) { status += "\n(no preview: " + e.Message + ")"; }
         finally { EditorUtility.ClearProgressBar(); }
+    }
+
+    // One material per distinct base colour, shared across the preview (a 1,400-part liner has a dozen colours).
+    Material PreviewMaterial(Shader sh, float[] rgb)
+    {
+        var c = rgb != null && rgb.Length >= 3 ? new Color(rgb[0], rgb[1], rgb[2]) : Color.white;
+        if (!previewMats.TryGetValue(c, out Material m) || m == null)
+        {
+            m = new Material(sh) { color = c, hideFlags = HideFlags.HideAndDontSave };
+            previewMats[c] = m;
+        }
+        return m;
     }
 
     void DestroyPreview()
     {
         ExitCutMode();
         selectedIdx = -1;
-        SelectRow("");
+        SelectRow(null);
         if (inst != null) DestroyImmediate(inst);
         inst = null;
+        previewByNode.Clear();
+        foreach (var a in previewAssets) if (a != null) DestroyImmediate(a);
+        previewAssets.Clear();
+        foreach (var m in previewMats.Values) if (m != null) DestroyImmediate(m);
+        previewMats.Clear();
+        flatShare = null; flatShareFor = null;
         if (pru != null) { pru.Cleanup(); pru = null; }
     }
 
     // ---- plane-cut mode: preview mesh built from the SOURCE bytes (ExtractPart), so what's yellow IS what
-    // the cut writes to _CutA. The Blender turntable model hides while the cut preview is up. ----
+    // the cut writes to _CutA. The turntable model hides while the cut preview is up. ----
     void EnterCutMode(Row row)
     {
         ExitCutMode();
@@ -775,34 +808,28 @@ public abstract class ModelWorkshopWindow : EditorWindow
         finally { EditorUtility.ClearProgressBar(); }
     }
 
-    // Click a row → tint that part's renderer(s) yellow and frame them with context (the Vehicle Lab mechanism,
-    // name-matched: probe part names ARE the glTF node names, with StartsWith for Blender's collision suffixes).
+    // Click a row → tint that part's renderer yellow and frame it with context (the Vehicle Lab mechanism, matched by
+    // node index since the preview is built per node).
     // FLAT-SURFACE FILTER (the Vehicle Lab's, verbatim in spirit): the share of a part's surface area lying within 30° of
-    // level, measured on the PREVIEW meshes (the preview stands upright in Unity, so world +Y is 'level'; the geometric
-    // triangle normal is used — no reliance on authored normals). Cached once per preview instance; a part the preview
-    // doesn't carry (or any state before a probe) PASSES the filter. Blender collision suffixes ("Object_2.001") count
-    // toward their base part through VehicleLabRules.FlatShare, the unit-tested lookup.
+    // level, measured on the PREVIEW meshes (glTF +Y is up, so world +Y is 'level'; the geometric triangle normal is
+    // used — no reliance on authored normals). Cached once per preview instance; a part the preview doesn't carry (or
+    // any state before a probe) PASSES the filter — a filter never hides what it cannot measure.
     bool FlatOk(Row x)
     {
         if (minFlatPct <= 0f) return true;
         BuildFlatShareIFN();
-        if (flatAreaByName == null || string.IsNullOrEmpty(x.node)) return true;
-        if (!flatShare.TryGetValue(x.node, out float s))
-        {
-            s = VehicleLabRules.FlatShare(x.node, flatAreaByName, flatLevelByName);
-            flatShare[x.node] = s;
-        }
-        return s < 0f || s * 100f >= minFlatPct;
+        if (flatShare == null || !flatShare.TryGetValue(x.nodeIndex, out float s)) return true;
+        return s * 100f >= minFlatPct;
     }
     void BuildFlatShareIFN()
     {
-        if (inst == null) { flatAreaByName = null; flatLevelByName = null; flatShare = null; flatShareFor = null; return; }
-        if (flatAreaByName != null && flatShareFor == inst) return;
-        flatAreaByName = new Dictionary<string, double>(); flatLevelByName = new Dictionary<string, double>();
-        foreach (var mf in inst.GetComponentsInChildren<MeshFilter>(true))
+        if (inst == null) { flatShare = null; flatShareFor = null; return; }
+        if (flatShare != null && flatShareFor == inst) return;
+        flatShare = new Dictionary<int, float>();
+        foreach (var kv in previewByNode)
         {
+            var mf = kv.Value != null ? kv.Value.GetComponent<MeshFilter>() : null;
             if (mf == null || mf.sharedMesh == null) continue;
-            string nm = mf.gameObject.name;   // EXACT — alias merging is the lookup's job, with digits-only proof
             var m = mf.sharedMesh; var l2w = mf.transform.localToWorldMatrix;
             var v = m.vertices; var t = m.triangles;
             double a0 = 0, af = 0;
@@ -815,35 +842,25 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 a0 += a2;
                 if (Mathf.Abs(c.y) / a2 >= 0.866f) af += a2;   // cos 30° — the facing cut's default tilt
             }
-            flatAreaByName.TryGetValue(nm, out double ta); flatAreaByName[nm] = ta + a0;
-            flatLevelByName.TryGetValue(nm, out double tf); flatLevelByName[nm] = tf + af;
+            if (a0 > 0) flatShare[kv.Key] = (float)(af / a0);
         }
-        flatShare = new Dictionary<string, float>();
         flatShareFor = inst;
     }
 
-    void SelectRow(string name)
+    void SelectRow(Row row)
     {
         if (highlightedRenderers != null)
             for (int i = 0; i < highlightedRenderers.Count; i++)
                 try { if (highlightedRenderers[i] != null) highlightedRenderers[i].sharedMaterials = highlightedOriginals[i]; } catch { }
         highlightedRenderers = null; highlightedOriginals = null;
-        selectedRow = name;
+        selectedRow = row?.node ?? "";
         boundsValid = false;
         previewPan = Vector2.zero;
-        if (inst == null || string.IsNullOrEmpty(name)) return;
-        var all = inst.GetComponentsInChildren<Renderer>();
-        // DUPLICATE NAMES (review round 3): split/check identity is the node INDEX, but the Blender preview
-        // round-trip carries only names — namesake rows all light the same renderers. Rare in this pipeline
-        // (the splitter uniquifies its output names); when it happens, say so instead of pretending precision.
-        int namesakes = rows.Count(r => r.node == name);
-        if (namesakes > 1)
-            status = $"⚠ {namesakes} parts share the name '{name}' — the preview highlight shows all of them; {(Fusing ? "the ⊕ letter and Fuse" : "the checkbox and Split")} still target exactly the row you clicked (by node index).";
-        // EXACT name PLUS Blender's collision-suffix form ("Object_2.001") — combined, not fallback (review
-        // round 4: exact-only found the first namesake and starved the suffix branch, so duplicate rows lit the
-        // same renderer). Never a mere prefix — a bare StartsWith made "Object_2" light up Object_20..Object_29.
-        var hits = all.Where(x => x != null && (x.gameObject.name == name || x.gameObject.name.StartsWith(name + "."))).ToList();
-        if (hits.Count == 0) return;
+        if (inst == null || row == null) return;
+        // by NODE INDEX (2026-09-19): the preview is built from the GLB one object per node, so a row lights exactly its
+        // own part — the old name match lit every namesake, all 113 of them on a file that names every node "Material2"
+        if (!previewByNode.TryGetValue(row.nodeIndex, out Renderer hit) || hit == null) return;   // a part the extractor refused: nothing to light
+        var hits = new List<Renderer> { hit };
         if (highlightMat == null)
         {
             var sh = Shader.Find("Unlit/Color") ?? Shader.Find("Standard");

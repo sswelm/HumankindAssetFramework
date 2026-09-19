@@ -30,11 +30,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   took 86 s to probe. Two causes, both fixed. The island analysis read every index and every position through the
   accessor's JSON again — string-keyed lookups, a boxed int and a fresh array per element — 30 s; the reader now
   resolves each accessor's layout once (same checks, same messages, same bytes: the rows of the real file are
-  identical to master's) and reads elements straight from the buffer: 6 s. The preview export ran the Vehicle
-  Lab's visibility rays and inside-out verdicts (24 s) that these windows never read; the Workshop passes
-  `previewonly` and the probe skips them: 40 s → 16 s, the FBX unchanged beyond the exporter's own run-to-run
-  stamps. Every GLB reader in the toolkit (split, cut, fuse, extract) shares the faster accessor. The BIN prefix
-  copy also stopped enumerating 200 MB byte by byte through LINQ.
+  identical to master's) and reads elements straight from the buffer: 6 s. The preview went through Blender (an FBX
+  export with the Vehicle Lab's visibility rays and inside-out verdicts these windows never read, 40 s) and a Unity
+  FBX import (8 s); **the preview is now built straight from the GLB in C#, one object per node** — no Blender, no
+  FBX, a few seconds — and that also fixes a real bug: the preview matched rows to renderers by NAME, so a file that
+  names all 113 of its nodes "Material2" (the Salegs Revenge) lit the whole ship for any row. Rows and preview objects
+  now meet on the node index; the flat-parts filter measures per node too. Same coordinates and winding as the cut
+  preview, a submesh per primitive tinted with its material's base colour. Every GLB reader in the toolkit (split,
+  cut, fuse, extract) shares the faster accessor; the BIN prefix copy also stopped enumerating 200 MB byte by byte
+  through LINQ.
 - **Bake: a point-UV material packs as the colour it samples.** The Romanic's deck is painted with a 512×1024
   plank texture whose every face carries the same single UV — the texture used as a colour picker, one tan
   texel. Packed as a texture, that point folded onto the bottom-left edge of its atlas cell, where the bilinear
