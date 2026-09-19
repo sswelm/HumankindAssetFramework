@@ -375,7 +375,14 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   explodes the part list; usually leave those whole — or raise the **Merge closer than (%)** slider, which counts
   near islands as one part (rotation-invariant since 0.5.6: diagonal dashed lines gate correctly too). The
   **Output GLB** auto-follows the source file until you edit it, and changing the source — typed or browsed —
-  resets the probe so a stale part list can never split the wrong file.
+  resets the probe so a stale part list can never split the wrong file. The preview is built straight from the GLB
+  (0.5.7: no Blender export, no FBX import — a 214 MB ship probes in about ten seconds), one object per node, so a
+  row lights exactly its own part even in a file whose nodes all share one name. The preview is a MIRROR image of the
+  model (glTF and Unity disagree on handedness, and correcting it would invert every face), so screen-left is the
+  file's starboard — tick **Un-mirror** above the preview to see it the right way round (the geometry is flipped back,
+  so nothing turns see-through); the side sliders and the mirror finder work in file coordinates and are unaffected
+  either way. A model whose
+  meshes would need more than 1 GB is listed and filtered as usual but not drawn.
   **Find the mirror of …** (0.5.7): with a row highlighted, the button finds the part on the other side of the
   centreline whose bounding box is this one's reflected (within 3 % of the part's size — triangle counts may differ,
   the two sides of a ship are often remodelled rather than instanced), highlights it and scrolls to it; press a letter
@@ -414,10 +421,13 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   winding it renders with, its authored normals taking the sign of the final winding (a mirrored port side ships
   normals pointing up over a winding that renders down). A report beside the output (`<output>.glb.fuse-report.txt`) lists, per group, every
   sheet's verdict, every warning, every stitched candidate's numbers and the faces rewound per part, one item per line; the status box keeps
-  one line per group. The part list carries the Lab's filters — hide under a vertex count or a size, a height
+  one line per group. The part list carries the Lab's filters — hide under a vertex count or a size, hide OVER a size (logarithmic, with an
+  exact entry box: drag it down and only the small clutter remains, ready to mark for deletion), a height
   band, a side band, **Only flat parts (≥ % level)** — the Lab's deck finder, measured on the preview meshes, so
   the deck plate a fuse group is still missing shows up among a dozen rows — and a **Show only** popup by mark or
-  island count — so a 1,400-row liner can be worked one deck or one side at a time; marks on hidden rows are kept. To cut AND fuse, chain the two windows: the ⊕
+  island count — so a 1,400-row liner can be worked one deck or one side at a time; marks on hidden rows are kept. A file's
+  first Probe starts with every filter off (the sliders are in model units, so a previous model's settings would hide
+  everything on one at another scale), and **Show all** resets them by hand. To cut AND fuse, chain the two windows: the ⊕
   letters travel with a cut or split output, and a fused output's sidecar names each shell under its group's letter, so
   either order works (the Splitter re-reads the sidecar on every Probe, so after changing groups in the Fuser,
   re-Probe in the Splitter before cutting; the Fuser keeps your edits across a re-Probe and reloads through Load groups).

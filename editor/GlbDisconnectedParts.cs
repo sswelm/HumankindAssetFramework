@@ -223,81 +223,107 @@ public static class GlbDisconnectedParts
 
     sealed class Accessors
     {
-        readonly JObject root;
         readonly byte[] bin;
         readonly JArray accessors;
         readonly JArray views;
 
+        // PER-ACCESSOR LAYOUT CACHE (2026-09-19, the Model Splitter's 86 s Probe on a 214 MB GLB): every element read
+        // used to walk the accessor and its bufferView through the JSON again — string-keyed JObject lookups, boxed
+        // ints and a fresh double[] per index and per position — 28 s of a 30 s Analyze. The layout is resolved ONCE
+        // per accessor, with the same checks in the same order (the messages are the contract the tests lock; a
+        // view problem is remembered and thrown on the first read, as before), and an element read is an offset
+        // multiply and a BitConverter call. Results are byte-identical: nothing about the decode changed.
+        sealed class Layout
+        {
+            public int Count, ComponentType, Bytes, Have, Stride; public long Start; public bool Normalized; public string Type;
+            public string ViewError;   // the ReadElement exception this accessor's view would raise, thrown when a read is attempted
+        }
+        readonly Dictionary<int, Layout> layouts = new Dictionary<int, Layout>();
+
         public Accessors(JObject root, byte[] bin)
         {
-            this.root = root;
             this.bin = bin;
             accessors = root["accessors"] as JArray ?? throw new InvalidDataException("GLB has no accessors array.");
             views = root["bufferViews"] as JArray ?? throw new InvalidDataException("GLB has no bufferViews array.");
         }
 
-        public int Count(int accessorIndex) => Accessor(accessorIndex).Value<int>("count");
+        public int Count(int accessorIndex) => Resolve(accessorIndex).Count;
 
         public Vec3 Position(int accessorIndex, uint index)
         {
-            JObject a = Accessor(accessorIndex);
-            if ((string)a["type"] != "VEC3") throw new InvalidDataException("POSITION accessor is not VEC3.");
-            var values = ReadElement(a, index, 3);
-            return new Vec3 { X = values[0], Y = values[1], Z = values[2] };
+            Layout a = Resolve(accessorIndex);
+            if (a.Type != "VEC3") throw new InvalidDataException("POSITION accessor is not VEC3.");
+            int at = ElementOffset(a, index, 3);
+            return new Vec3 { X = ReadComponent(bin, at, a.ComponentType, a.Normalized), Y = ReadComponent(bin, at + a.Bytes, a.ComponentType, a.Normalized), Z = ReadComponent(bin, at + 2 * a.Bytes, a.ComponentType, a.Normalized) };
         }
 
         public uint Index(int accessorIndex, uint index)
         {
-            JObject a = Accessor(accessorIndex);
-            if ((string)a["type"] != "SCALAR") throw new InvalidDataException("Index accessor is not SCALAR.");
-            int componentType = a.Value<int>("componentType");
-            if (componentType != 5121 && componentType != 5123 && componentType != 5125)
+            Layout a = Resolve(accessorIndex);
+            if (a.Type != "SCALAR") throw new InvalidDataException("Index accessor is not SCALAR.");
+            if (a.ComponentType != 5121 && a.ComponentType != 5123 && a.ComponentType != 5125)
                 throw new InvalidDataException("Index accessor must use unsigned byte, ushort, or uint.");
-            return checked((uint)ReadElement(a, index, 1)[0]);
+            return checked((uint)ReadComponent(bin, ElementOffset(a, index, 1), a.ComponentType, a.Normalized));
         }
 
         // Any vector attribute (NORMAL, TEXCOORD_n …): the element's leading `components`, normalized ints decoded.
         public double[] Vector(int accessorIndex, uint index, int components)
         {
-            JObject a = Accessor(accessorIndex);
-            string type = (string)a["type"];
-            int have = type == "SCALAR" ? 1 : type == "VEC2" ? 2 : type == "VEC3" ? 3 : type == "VEC4" ? 4 : 0;
-            if (have < components) throw new InvalidDataException("Accessor " + type + " holds fewer than " + components + " components.");
-            return ReadElement(a, index, have);
+            Layout a = Resolve(accessorIndex);
+            if (a.Have < components) throw new InvalidDataException("Accessor " + a.Type + " holds fewer than " + components + " components.");
+            int at = ElementOffset(a, index, a.Have);
+            var result = new double[a.Have];
+            for (int i = 0; i < a.Have; i++) result[i] = ReadComponent(bin, at + i * a.Bytes, a.ComponentType, a.Normalized);
+            return result;
         }
 
-        JObject Accessor(int index)
+        Layout Resolve(int index)
         {
+            if (layouts.TryGetValue(index, out Layout cached)) return cached;
             if (index < 0 || index >= accessors.Count) throw new InvalidDataException("Accessor index is out of range.");
             var a = accessors[index] as JObject ?? throw new InvalidDataException("Accessor is not an object.");
             if (a["sparse"] != null) throw new InvalidDataException("Sparse accessors are not supported by this splitter.");
-            return a;
+            var l = new Layout { Count = a.Value<int>("count"), Type = (string)a["type"], ComponentType = a.Value<int>("componentType"), Normalized = a.Value<bool?>("normalized") ?? false };
+            l.Have = l.Type == "SCALAR" ? 1 : l.Type == "VEC2" ? 2 : l.Type == "VEC3" ? 3 : l.Type == "VEC4" ? 4 : 0;
+            JObject view = null;
+            if (a["bufferView"] == null) l.ViewError = "Accessor has no bufferView (compressed/implicit data is unsupported).";
+            else
+            {
+                int viewIndex = a.Value<int>("bufferView");
+                if (viewIndex < 0 || viewIndex >= views.Count) l.ViewError = "bufferView index is out of range.";
+                else if ((view = views[viewIndex] as JObject) == null) l.ViewError = "bufferView is not an object.";
+                else if (view.Value<int?>("buffer").GetValueOrDefault() != 0) l.ViewError = "Only GLB buffer 0 can be edited losslessly.";
+                else if (view["extensions"]?["EXT_meshopt_compression"] != null) l.ViewError = "Meshopt-compressed bufferViews are not supported.";
+            }
+            if (l.ViewError == null)
+            {
+                l.Bytes = ComponentBytes(l.ComponentType);   // throws "Unsupported GLB component type" here, as the old read did after the view checks
+                l.Stride = view.Value<int?>("byteStride") ?? -1;   // -1 = ABSENT (tightly packed, sized per read); a declared 0 stays 0 and is rejected below, as it was before the cache
+                l.Start = (long)(view.Value<int?>("byteOffset") ?? 0) + (a.Value<int?>("byteOffset") ?? 0);
+            }
+            layouts[index] = l;
+            return l;
         }
 
-        double[] ReadElement(JObject accessor, uint index, int components)
+        // The BIN offset of element `index`, with the old per-read checks in the old order.
+        int ElementOffset(Layout a, uint index, int components)
         {
-            int count = accessor.Value<int>("count");
-            if (index >= count) throw new InvalidDataException("Accessor element is out of range.");
-            if (accessor["bufferView"] == null) throw new InvalidDataException("Accessor has no bufferView (compressed/implicit data is unsupported).");
-            int viewIndex = accessor.Value<int>("bufferView");
-            if (viewIndex < 0 || viewIndex >= views.Count) throw new InvalidDataException("bufferView index is out of range.");
-            var view = views[viewIndex] as JObject ?? throw new InvalidDataException("bufferView is not an object.");
-            if (view.Value<int?>("buffer").GetValueOrDefault() != 0)
-                throw new InvalidDataException("Only GLB buffer 0 can be edited losslessly.");
-            if (view["extensions"]?["EXT_meshopt_compression"] != null)
-                throw new InvalidDataException("Meshopt-compressed bufferViews are not supported.");
-
-            int componentType = accessor.Value<int>("componentType");
-            int bytes = ComponentBytes(componentType);
-            int stride = view.Value<int?>("byteStride") ?? bytes * components;
-            if (stride < bytes * components) throw new InvalidDataException("bufferView byteStride is smaller than its element.");
-            long start = (long)(view.Value<int?>("byteOffset") ?? 0) + (accessor.Value<int?>("byteOffset") ?? 0) + (long)index * stride;
-            if (start < 0 || start + bytes * components > bin.Length) throw new InvalidDataException("Accessor reads beyond the BIN chunk.");
-            bool normalized = accessor.Value<bool?>("normalized") ?? false;
-            var result = new double[components];
-            for (int i = 0; i < components; i++) result[i] = ReadComponent(bin, checked((int)start + i * bytes), componentType, normalized);
-            return result;
+            if (index >= a.Count) throw new InvalidDataException("Accessor element is out of range.");
+            if (a.ViewError != null) throw new InvalidDataException(a.ViewError);
+            int stride = a.Stride >= 0 ? a.Stride : a.Bytes * components;
+            if (stride < a.Bytes * components) throw new InvalidDataException("bufferView byteStride is smaller than its element.");
+            long start = a.Start + (long)index * stride;
+            if (start < 0 || start + a.Bytes * components > bin.Length) throw new InvalidDataException("Accessor reads beyond the BIN chunk.");
+            return checked((int)start);
         }
+    }
+
+    // The declared prefix of the BIN chunk as its own array (a copy, as the old LINQ Take().ToArray() was — the
+    // callers append to it), without enumerating 200 MB byte by byte.
+    static byte[] Prefix(byte[] source, int length)
+    {
+        int n = Math.Max(0, Math.Min(length, source.Length));
+        var copy = new byte[n]; Buffer.BlockCopy(source, 0, copy, 0, n); return copy;
     }
 
     static int ComponentBytes(int type)
@@ -354,7 +380,7 @@ public static class GlbDisconnectedParts
         if (buffers.Count != 1 || buffers[0]?["uri"] != null)
             throw new InvalidDataException("Lossless splitting requires one embedded GLB buffer.");
         byte[] sourceBin = document.Chunks[document.BinIndex].Data;
-        var reader = new Accessors(root, sourceBin.Take(buffers[0].Value<int>("byteLength")).ToArray());
+        var reader = new Accessors(root, Prefix(sourceBin, buffers[0].Value<int>("byteLength")));
 
         var byMesh = new Dictionary<int, MeshPlan>();
         var blockedByMesh = new Dictionary<int, string>();
@@ -464,7 +490,7 @@ public static class GlbDisconnectedParts
         byte[] sourceBin = document.Chunks[document.BinIndex].Data;
         if (declaredBinLength < 0 || declaredBinLength > sourceBin.Length)
             throw new InvalidDataException("buffers[0].byteLength exceeds the BIN chunk.");
-        byte[] originalData = sourceBin.Take(declaredBinLength).ToArray();
+        byte[] originalData = Prefix(sourceBin, declaredBinLength);
         var bin = new List<byte>(originalData);
         var result = new Result();
         var reader = new Accessors(root, originalData);
@@ -654,13 +680,15 @@ public static class GlbDisconnectedParts
     // ExtractPart reports — so a UI that previews ExtractPart geometry and cuts at a slider value taken from
     // its bounds shows exactly the triangles the cut will move. CutA = centroid at or above planeValue.
 
-    /// <summary>One node's triangles in world space — the WYSIWYG data behind a plane-cut preview.</summary>
+    /// <summary>One node's triangles in world space — the WYSIWYG data behind a plane-cut preview and the Workshop's turntable.</summary>
     public sealed class PartGeometry
     {
         public int NodeIndex;
         public string NodeName;
         public float[] Positions;    // xyz triplets, world space, per-primitive concatenated
         public int[] Triangles;      // vertex indices into Positions/3, every 3 = one triangle
+        public int[] PrimitiveStart;       // where each primitive's run begins in Triangles (a preview submesh per primitive)
+        public float[][] PrimitiveColour;  // each primitive's material base colour factor, RGB (1,1,1 when the material has none)
         public readonly double[] Min = { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity };
         public readonly double[] Max = { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
     }
@@ -673,37 +701,111 @@ public static class GlbDisconnectedParts
         JArray nodes = root["nodes"] as JArray ?? new JArray();
         JArray meshes = root["meshes"] as JArray ?? throw new InvalidDataException("GLB has no meshes array.");
         Accessors reader = BinReader(document, root);
+        return ExtractNode(root, nodes, meshes, reader, nodeIndex);
+    }
+
+    // EVERY mesh-carrying node in one pass (2026-09-19, the Workshop's preview): the file is parsed once and each node's
+    // geometry read through the cached accessors, one PartGeometry per node in node order — the preview objects then
+    // meet the part rows on the NODE INDEX, which a file that names all 113 nodes "Material2" cannot do by name. A node
+    // the extractor refuses (draco, GPU instancing, a primitive that is not triangles) is left out; Analyze lists it
+    // blocked, and the preview simply lacks it.
+    public static List<PartGeometry> ExtractAll(byte[] source)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        Document document = Parse(source);
+        JObject root = document.Root;
+        JArray nodes = root["nodes"] as JArray ?? new JArray();
+        JArray meshes = root["meshes"] as JArray ?? throw new InvalidDataException("GLB has no meshes array.");
+        Accessors reader = BinReader(document, root);
+        var parts = new List<PartGeometry>();
+        for (int nodeIndex = 0; nodeIndex < nodes.Count; nodeIndex++)
+        {
+            if ((nodes[nodeIndex] as JObject)?["mesh"] == null) continue;
+            try { parts.Add(ExtractNode(root, nodes, meshes, reader, nodeIndex)); }
+            catch (Exception ex) when (ex is InvalidDataException || ex is OverflowException) { }
+        }
+        return parts;
+    }
+
+    static PartGeometry ExtractNode(JObject root, JArray nodes, JArray meshes, Accessors reader, int nodeIndex)
+    {
         JObject node = NodeWithMesh(nodes, nodeIndex, out int meshIndex);
         var primitives = (meshes[meshIndex] as JObject)?["primitives"] as JArray ?? throw new InvalidDataException("Mesh has no primitives.");
         double[] world = NodeWorldMatrix(nodes, nodeIndex);
-
-        var positions = new List<float>();
-        var triangles = new List<int>();
-        var geo = new PartGeometry { NodeIndex = nodeIndex, NodeName = (string)node["name"] ?? ("node " + nodeIndex) };
-        foreach (JObject primitive in TrianglePrimitives(primitives))
+        var prims = TrianglePrimitives(primitives).ToList();
+        // ONLY THE VERTICES THIS PART REFERENCES (2026-09-19, review of PR 66). A split writes its fragments as new
+        // INDEX accessors over the parent's untouched POSITION accessor, so a fragment's primitive addresses a handful
+        // of vertices inside a buffer holding the whole original part. Copying the buffer wholesale gave every fragment
+        // the parent's vertices: measured on khelandion_2_split.glb, 5,202,111 vertices held to draw 393,646 (13.2x),
+        // one 8-vertex fragment carrying 65,532. Two consequences, both real — the memory, and Unity's
+        // RecalculateBounds over the unused vertices, which framed the whole parent when a fragment's row was clicked.
+        // Each primitive is compacted to its referenced vertices with the indices remapped; the bounds were always
+        // taken over referenced vertices only, so Min/Max are unchanged.
+        int totalIndices = 0;
+        var primIndices = new uint[prims.Count][];
+        var primVertCount = new int[prims.Count];
+        for (int pi = 0; pi < prims.Count; pi++)
         {
+            JObject primitive = prims[pi];
             int posAcc = primitive["attributes"].Value<int>("POSITION");
-            int baseVertex = positions.Count / 3;
             int vertCount = reader.Count(posAcc);
-            for (uint v = 0; v < vertCount; v++)
-            {
-                Vec3 p = XForm(world, reader.Position(posAcc, v));
-                positions.Add((float)p.X); positions.Add((float)p.Y); positions.Add((float)p.Z);
-            }
             int indexCount = primitive["indices"] == null ? vertCount : reader.Count(primitive.Value<int>("indices"));
             if (indexCount % 3 != 0) throw new InvalidDataException("Triangle primitive index count is not divisible by three.");
+            var idx = new uint[indexCount];
             for (uint i = 0; i < indexCount; i++)
             {
-                uint idx = primitive["indices"] == null ? i : reader.Index(primitive.Value<int>("indices"), i);
-                if (idx >= vertCount) throw new InvalidDataException("Primitive index exceeds its POSITION accessor.");
-                triangles.Add(baseVertex + (int)idx);
-                int o = (baseVertex + (int)idx) * 3;
-                UpdateBounds(geo.Min, geo.Max, new Vec3 { X = positions[o], Y = positions[o + 1], Z = positions[o + 2] });
+                uint v = primitive["indices"] == null ? i : reader.Index(primitive.Value<int>("indices"), i);
+                if (v >= vertCount) throw new InvalidDataException("Primitive index exceeds its POSITION accessor.");
+                idx[i] = v;
+            }
+            primIndices[pi] = idx; primVertCount[pi] = vertCount;
+            totalIndices = checked(totalIndices + indexCount);
+        }
+        var triangles = new int[totalIndices];
+        var positions = new List<float>(Math.Min(totalIndices, 1 << 20) * 3);
+        var geo = new PartGeometry { NodeIndex = nodeIndex, NodeName = (string)node["name"] ?? ("node " + nodeIndex), PrimitiveStart = new int[prims.Count], PrimitiveColour = new float[prims.Count][] };
+        JArray materials = root["materials"] as JArray;
+        int at = 0;
+        for (int pi = 0; pi < prims.Count; pi++)
+        {
+            JObject primitive = prims[pi];
+            int posAcc = primitive["attributes"].Value<int>("POSITION");
+            geo.PrimitiveStart[pi] = at;
+            geo.PrimitiveColour[pi] = BaseColour(materials, primitive);
+            var remap = new int[primVertCount[pi]];        // source vertex -> compacted vertex, -1 until first use
+            for (int k = 0; k < remap.Length; k++) remap[k] = -1;
+            foreach (uint v in primIndices[pi])
+            {
+                int vi = remap[(int)v];
+                if (vi < 0)
+                {
+                    Vec3 p = XForm(world, reader.Position(posAcc, v));
+                    vi = positions.Count / 3;
+                    positions.Add((float)p.X); positions.Add((float)p.Y); positions.Add((float)p.Z);
+                    remap[(int)v] = vi;
+                    UpdateBounds(geo.Min, geo.Max, new Vec3 { X = positions[vi * 3], Y = positions[vi * 3 + 1], Z = positions[vi * 3 + 2] });
+                }
+                triangles[at++] = vi;
             }
         }
         geo.Positions = positions.ToArray();
-        geo.Triangles = triangles.ToArray();
+        geo.Triangles = triangles;
         return geo;
+    }
+
+    // The primitive's material base colour factor as RGB; white for a material without one. Never throws: the colour
+    // is cosmetic (the preview's tint), the geometry is what the caller came for.
+    static float[] BaseColour(JArray materials, JObject primitive)
+    {
+        var rgb = new[] { 1f, 1f, 1f };
+        try
+        {
+            int mi = primitive.Value<int?>("material") ?? -1;
+            var factor = (materials != null && mi >= 0 && mi < materials.Count ? materials[mi]?["pbrMetallicRoughness"]?["baseColorFactor"] : null) as JArray;
+            if (factor != null && factor.Count >= 3) for (int k = 0; k < 3; k++) rgb[k] = (float)factor[k].Value<double>();
+        }
+        catch (Exception) { }
+        return rgb;
     }
 
     public static Result CutNodeByPlane(byte[] source, int nodeIndex, int axis, double planeValue)
@@ -1991,7 +2093,7 @@ public static class GlbDisconnectedParts
         byte[] sourceBin = document.Chunks[document.BinIndex].Data;
         if (declaredBinLength < 0 || declaredBinLength > sourceBin.Length)
             throw new InvalidDataException("buffers[0].byteLength exceeds the BIN chunk.");
-        originalData = sourceBin.Take(declaredBinLength).ToArray();
+        originalData = Prefix(sourceBin, declaredBinLength);
         return new Accessors(root, originalData);
     }
 

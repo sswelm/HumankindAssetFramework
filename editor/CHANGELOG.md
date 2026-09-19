@@ -21,6 +21,45 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
+- **Model Splitter / Fuser: a split fragment's preview carries only its own vertices.** A split writes its fragments as
+  new *index* accessors over the parent's untouched position buffer, so a fragment addresses a handful of vertices
+  inside a buffer holding the whole original part. The preview copied the buffer wholesale: on a real Khalandion split
+  it held 5,202,111 vertices to draw 393,646 (13x), one 8-vertex fragment carrying 65,532 — and because Unity sizes a
+  mesh with `RecalculateBounds` over every vertex it holds, clicking a fragment's row framed the whole parent instead
+  of zooming to the part. Each primitive is now compacted to the vertices it references, indices remapped; the same
+  file now holds exactly the 393,646 it draws. The 1 GB estimate counted the shared buffers too and is corrected the
+  same way. Found in review of PR 66.
+- **Model Splitter / Fuser: "Hide parts over (size)"** — the mirror of the existing lower bound, so the two bracket a
+  size band, and alone it leaves nothing but the small clutter in the list, ready for the Delete key. Its travel is
+  **logarithmic**: part sizes span four decades on a split model (the Romanic's 1,796 parts run 0.017 to 173), where a
+  linear slider spends 99 % of its length doing nothing and crosses "219 parts shown" to "1,361 shown" inside one
+  pixel. The number box beside it takes an exact threshold. At rest it sits a hair above the largest part, so the
+  biggest row can never round its way into hiding.
+- **Model Splitter / Fuser: an "Un-mirror" checkbox above the preview.** glTF is right-handed and Unity left-handed, so
+  the preview showed the model mirrored — screen-left was the file's starboard, a trap in a window where picking a side
+  is half the work. The box negates X and flips every triangle to compensate, measured to leave the surface exactly as
+  solid (the Romanic split: 1.0 % of struck cells render back-facing either way; negating without the flip inverts the
+  whole ship). Off by default, remembered per window, and it flips the built meshes in place rather than re-reading the
+  file. The part list, the sliders, Find the mirror and every output always worked in file coordinates and are
+  unaffected either way.
+- **Model Splitter / Fuser: a file probed into the window starts fully visible.** The list filters kept their values
+  across files and were only clamped into the new model's span, so four sliders left at the ends on a metre-scale ship
+  arrived at the ends of a centimetre-scale one and hid all 113 parts ("why don't I see any parts?"). The first Probe of a
+  file now resets every filter (sliders, Show only, the whole-parts toggle); a re-Probe or a slider move on the same file
+  keeps them. A **Show all** button next to the toggle does the same by hand.
+- **Model Splitter / Fuser: Probe is three times faster on a big file.** A 214 MB ship (113 parts, 2.6 M triangles)
+  took 86 s to probe. Two causes, both fixed. The island analysis read every index and every position through the
+  accessor's JSON again — string-keyed lookups, a boxed int and a fresh array per element — 30 s; the reader now
+  resolves each accessor's layout once (same checks, same messages, same bytes: the rows of the real file are
+  identical to master's) and reads elements straight from the buffer: 6 s. The preview went through Blender (an FBX
+  export with the Vehicle Lab's visibility rays and inside-out verdicts these windows never read, 40 s) and a Unity
+  FBX import (8 s); **the preview is now built straight from the GLB in C#, one object per node** — no Blender, no
+  FBX, a few seconds — and that also fixes a real bug: the preview matched rows to renderers by NAME, so a file that
+  names all 113 of its nodes "Material2" (the Salegs Revenge) lit the whole ship for any row. Rows and preview objects
+  now meet on the node index; the flat-parts filter measures per node too. Same coordinates and winding as the cut
+  preview, a submesh per primitive tinted with its material's base colour. Every GLB reader in the toolkit (split,
+  cut, fuse, extract) shares the faster accessor; the BIN prefix copy also stopped enumerating 200 MB byte by byte
+  through LINQ.
 - **Bake: a point-UV material packs as the colour it samples.** The Romanic's deck is painted with a 512×1024
   plank texture whose every face carries the same single UV — the texture used as a colour picker, one tan
   texel. Packed as a texture, that point folded onto the bottom-left edge of its atlas cell, where the bilinear

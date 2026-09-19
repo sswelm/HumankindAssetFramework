@@ -49,8 +49,6 @@ public abstract class ModelWorkshopWindow : EditorWindow
     const int DeleteEntry = 27;   // FuseLabels index of "✕ Delete"
     static readonly string[] SplitLabels = { "–", "Split", "Delete" }, WholeLabels = { "–", "Delete" };   // the Splitter's row popup (a whole part cannot be split)
 
-    const string PreviewDir = "Assets/FactorySource/ModelWorkshop";
-
     [SerializeField] string srcFile = "";
     [SerializeField] string outGlb = "";
     [SerializeField] bool outGlbAuto = true;   // output path is auto-derived from srcFile and TRACKS it until the user edits the field to something else (external review of PR #22)
@@ -59,21 +57,36 @@ public abstract class ModelWorkshopWindow : EditorWindow
     [SerializeField] bool hideWhole = false;   // filter: hide "1 island — already whole" rows (nothing to split there)
     // LIST FILTERS (2026-09-16, the Vehicle Lab's sliders brought over — user: "make these selection tools also available in
     // the Model Workshop"): the same bands, over the node bbox the analyzer reads from the accessors. Height is glTF +Y, the
-    // side axis is the model's shorter horizontal extent (as the fuse's belly axis). The flat-surface and visibility filters
-    // stay Lab-only: they need the Blender probe's measurements, which the Workshop does not run.
+    // side axis is the model's shorter horizontal extent (as the fuse's belly axis). The flat-surface filter came over on
+    // 2026-09-18 and is measured on the preview meshes; the visibility filter stays Lab-only, needing the Blender probe's
+    // escape rays, which the Workshop does not run.
     [SerializeField] int minVerts = 1;
     [SerializeField] float minPartSize = 0f;
+    // The UPPER size bound (2026-09-19, user: "a hide parts over size filter so I can find all the small items, so I
+    // can delete them"): the mirror of the slider above, so the two bracket a size band. Its natural use is alone —
+    // drag it down and only the clutter is left in the list, ready for the Delete key or the row popup.
+    [SerializeField] float maxPartSize = 1e9f;
     [SerializeField] float minHeight = -1e9f, maxHeight = 1e9f, minWidth = -1e9f, maxWidth = 1e9f;   // clamped into the model's span each frame: a fresh model hides nothing
     [SerializeField] int showOnly = 0;
     [SerializeField] float minFlatPct = 0f;   // 0 = off — hide parts whose LEVEL-surface share (% of area within 30° of horizontal) is below this: the Lab's deck finder, brought over 2026-09-18 ("group D is still missing part of the deck")
-    Dictionary<string, double> flatAreaByName, flatLevelByName;   // raw per-RENDERER sums over the preview, keyed by EXACT name (the Lab's review P2 lesson: strip nothing here)
-    Dictionary<string, float> flatShare; GameObject flatShareFor; // resolved per-part share memo (exact-first, digits-only ".NNN" alias merge — VehicleLabRules.FlatShare)
+    Dictionary<int, float> flatShare; GameObject flatShareFor;   // per-NODE level-surface share over the preview meshes (the preview is one object per node since 2026-09-19 — no name aliasing needed)
     [SerializeField] string showOnlyLetter = "";   // "Show only" can also be ONE fuse group (user 2026-09-16): the popup lists every letter in use after the fixed kinds
     static readonly string[] ShowOnlyOptions = { "None (all parts)", "Checked for Split", "In a fuse group", "Not in a fuse group", "More than one island", "Already whole", "Skipped by the analyzer", "Marked for deletion" };
     // DISTANCE MERGE (2026-09-06, the 602-island rope): topology alone shreds segmented geometry into hundreds
     // of 3-vert parts millimetres apart. Islands within this % of a part's own diagonal count as ONE part, so
     // only genuinely distant geometry — the floating junk — separates. 0 = pure topology.
     [SerializeField] float mergePct = 1f;
+    // Every list filter back to "hide nothing". Called when a file is probed INTO the window (2026-09-19, user: "ensure
+    // that the first time a model is probed it minimizes the filter allowing you to see all parts") — the sliders keep
+    // their values across files and are only clamped into the new model's span, so four sliders left at the ends of a
+    // metre-scale ship arrived at the ends of a centimetre-scale one and hid all 113 parts ("why don't I see any
+    // parts?"). A re-Probe or a slider move on the SAME file keeps the settings; the "Show all" button is the manual way.
+    void ResetFilters()
+    {
+        minVerts = 1; minPartSize = 0f; maxPartSize = 1e9f; minFlatPct = 0f;
+        minHeight = -1e9f; maxHeight = 1e9f; minWidth = -1e9f; maxWidth = 1e9f;
+        showOnly = 0; showOnlyLetter = ""; hideWhole = false;
+    }
     // FUSE (2026-09-15): the checked parts become ONE welded shell with consistent winding — the fix for a hull
     // authored as separate plates (the Teutonic: see-through, a hole in its side, gaps under any reduction).
     // Seam vertices closer than this (in thousandths of the model's length) become one vertex. DEFAULT 0 = exactly
@@ -89,19 +102,29 @@ public abstract class ModelWorkshopWindow : EditorWindow
 
     // ---- turntable preview state (the Vehicle Lab's proven camera, minus clips/waterline) ----
     GameObject inst; PreviewRenderUtility pru;
+    readonly Dictionary<int, Renderer> previewByNode = new Dictionary<int, Renderer>();   // node index -> its preview renderer (the identity rows and preview share)
+    readonly List<Mesh> previewAssets = new List<Mesh>();                                  // built meshes, destroyed with the preview (runtime Unity objects never GC)
+    readonly Dictionary<Color, Material> previewMats = new Dictionary<Color, Material>();
+    // UN-MIRROR (2026-09-19, user: "could you make it a checkbox allowing me to unmirror it?"): glTF is right-handed
+    // and Unity left-handed, so handing the file's coordinates over unchanged shows the model as a MIRROR — screen-left
+    // is the file's starboard. Ticking this negates X and flips every triangle to compensate, which is measured to keep
+    // the surface solid (drill_unity_facing.py on the Romanic split: 1.0 % of struck cells render back-facing either
+    // way; negating WITHOUT the flip would invert the whole ship). Off by default so the view does not move under
+    // anyone mid-session. Nothing else changes: the sliders, the mirror finder and every output read file coordinates.
+    [SerializeField] bool unmirror = false;
     [SerializeField] Vector2 orbit = new Vector2(30f, -20f);
     [SerializeField] float zoom = 1.5f;
     Vector2 previewPan;
     Bounds bounds; bool boundsValid; float fullRadius;
-    string selectedRow = "";   // the highlighted part's NAME (renderer matching in the Blender preview is name-based)
+    string selectedRow = "";   // the highlighted part's NAME (labels only — the preview is matched by node index)
     int selectedIdx = -1;      // the selected ROW's identity (node index — names can be duplicated)
     Material highlightMat;
     List<Renderer> highlightedRenderers; List<Material[]> highlightedOriginals;
 
     // ---- plane-cut state (2026-09-13, the Bremen deck: hull and deck are ONE welded island — nothing for the
-    // island splitter to do). The cut preview is built from the SOURCE GLB's own bytes (ExtractPart), not the
-    // Blender FBX round-trip, so the two-color partition on screen is exactly the triangle partition the cut
-    // writes — no axis-convention mapping to get wrong. ----
+    // island splitter to do). The cut preview is built from the SOURCE GLB's own bytes (ExtractPart — the same
+    // world-space data the turntable is built from since 2026-09-19), so the two-color partition on screen is
+    // exactly the triangle partition the cut writes — no axis-convention mapping to get wrong. ----
     [SerializeField] int cutAxis = 1;      // source-file world axis: 0=X 1=Y (up in standard glTF) 2=Z
     [SerializeField] float cutPct = 50f;
     [SerializeField] int cutRule = 0;      // 0 = flat plane; 1 = horizontal surfaces (facing) — deck vs bow plating
@@ -207,6 +230,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
                     if (GUILayout.Button("Uncheck all", GUILayout.Width(100))) foreach (var r in rows) r.split = false;
                     hideWhole = EditorGUILayout.ToggleLeft(new GUIContent("Hide already-whole parts",
                         "Hide the rows with a single island — there is nothing to split in them, they only pad the list."), hideWhole, GUILayout.Width(180));
+                    if (GUILayout.Button(new GUIContent("Show all", "Every list filter back to 'hide nothing' — the sliders, 'Show only' and this toggle. Marks are kept. (A file probed into the window for the first time starts this way.)"), GUILayout.Width(70)))
+                        ResetFilters();
                     bool marksOnDisk = File.Exists(MarksSidecarPath(srcFile) ?? "");
                     using (new EditorGUI.DisabledScope(chosen == 0 && deleted == 0 && !marksOnDisk))   // with no marks AND a file on disk, saving means "clear it"
                         if (GUILayout.Button(new GUIContent("Save marks", $"Writes the Split checks and deletion marks to {Path.GetFileName(srcFile)}.marks.txt next to the source (a Split writes it too); the first Probe of the file reads it back."), GUILayout.Width(90)))
@@ -234,7 +259,28 @@ public abstract class ModelWorkshopWindow : EditorWindow
             }
             float Centre(Row r, int axis) => 0.5f * (r.min[axis] + r.max[axis]);
             minVerts = EditorGUILayout.IntSlider(new GUIContent("Hide parts under (verts)", "Rows with fewer vertices than this are hidden from the list (they are still in the file and still fuse/split if marked)."), minVerts, 1, 2000);
-            minPartSize = EditorGUILayout.Slider(new GUIContent("Hide parts under (size)", "Rows whose largest bbox dimension is below this are hidden. Drop the verts slider and raise this to find LARGE parts with few vertices."), minPartSize, 0f, boxed.Count > 0 ? boxed.Max(r => Mathf.Max(r.max[0] - r.min[0], r.max[1] - r.min[1], r.max[2] - r.min[2])) : 1f);
+            float biggestPart = boxed.Count > 0 ? boxed.Max(r => Mathf.Max(r.max[0] - r.min[0], r.max[1] - r.min[1], r.max[2] - r.min[2])) : 1f;
+            minPartSize = EditorGUILayout.Slider(new GUIContent("Hide parts under (size)", "Rows whose largest bbox dimension is below this are hidden. Drop the verts slider and raise this to find LARGE parts with few vertices."), minPartSize, 0f, biggestPart);
+            // LOGARITHMIC, unlike its neighbour (measured 2026-09-19): part sizes span four decades on a split model
+            // (the Romanic's 1,796 parts run 0.017 to 173), so a linear slider spends 99 % of its travel doing nothing
+            // and crosses "keeps 219 parts" to "keeps 1,361" inside one pixel. Even travel per decade instead, with the
+            // number box for an exact threshold. The lower slider is left linear: it is dragged UP to find big parts,
+            // where the range is not compressed.
+            float smallestPart = boxed.Count > 0 ? boxed.Min(r => Mathf.Max(r.max[0] - r.min[0], r.max[1] - r.min[1], r.max[2] - r.min[2])) : 0f;
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.PrefixLabel(new GUIContent("Hide parts over (size)",
+                    "Rows whose largest bbox dimension is above this are hidden — drag it down and only the small clutter is left, ready for the Delete key. " +
+                    "The travel is logarithmic because part sizes span decades; the box takes an exact figure. Pair it with the slider above to keep one size band."));
+                // a hair ABOVE the biggest part, so at rest the threshold cannot round just inside it and hide the
+                // largest row (the Lab's 2026-08-01 finding, which is why the height sliders carry a pad too)
+                float lo = Mathf.Max(1e-4f, smallestPart), hi = Mathf.Max(lo * 1.0001f, biggestPart * 1.001f);
+                float cur = Mathf.Clamp(maxPartSize, lo, hi);
+                float t = (Mathf.Log(cur) - Mathf.Log(lo)) / (Mathf.Log(hi) - Mathf.Log(lo));
+                t = GUILayout.HorizontalSlider(t, 0f, 1f);
+                maxPartSize = Mathf.Exp(Mathf.Lerp(Mathf.Log(lo), Mathf.Log(hi), t));
+                maxPartSize = Mathf.Clamp(EditorGUILayout.FloatField(maxPartSize, GUILayout.Width(64)), 0f, hi);
+            }
             if (boxed.Count > 0)
             {
                 float yLo = boxed.Min(r => Centre(r, 1)), yHi = boxed.Max(r => Centre(r, 1)), yPad = Mathf.Max(0.02f, (yHi - yLo) * 0.02f);
@@ -245,7 +291,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 maxWidth = EditorGUILayout.Slider(new GUIContent("Hide parts right of (side)", "Parts whose bbox centre is beyond this across the beam are hidden."), Mathf.Clamp(maxWidth, wLo - wPad, wHi + wPad), wLo - wPad, wHi + wPad);
             }
             // THE DECK FINDER (2026-09-18, user: "group D in the Vehicle Lab still seems to be missing part of the deck"): the
-            // Lab's flat-surface filter, measured on the same Blender preview the Workshop builds. Without a preview every
+            // Lab's flat-surface filter, measured on the preview meshes the Workshop builds from the GLB. Without a preview every
             // part passes — a filter never hides what it cannot measure.
             minFlatPct = EditorGUILayout.Slider(new GUIContent("Only flat parts (≥ % level)",
                 "The deck finder: hide parts whose surface area is less than this % LEVEL (within 30° of horizontal, measured on the " +
@@ -279,7 +325,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 if (r.verts > 0 && r.verts < minVerts) return false;
                 if (!FlatOk(r)) return false;
                 if (r.min == null) return true;   // unmeasured: a filter never hides what it cannot measure
-                if (Mathf.Max(r.max[0] - r.min[0], r.max[1] - r.min[1], r.max[2] - r.min[2]) < minPartSize) return false;
+                float span = Mathf.Max(r.max[0] - r.min[0], r.max[1] - r.min[1], r.max[2] - r.min[2]);
+                if (span < minPartSize || span > maxPartSize) return false;
                 float h = Centre(r, 1), w = Centre(r, sideAxis);
                 return h >= minHeight && h <= maxHeight && w >= minWidth && w <= maxWidth;
             }
@@ -293,7 +340,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             {
                 if (at < 0 || at >= shown.Count || Passes(shown[at])) return;
                 int next = WorkshopRules.NextHighlight(at, shown.Count);
-                ExitCutMode(); selectedIdx = next >= 0 ? shown[next].nodeIndex : -1; SelectRow(next >= 0 ? shown[next].node : "");
+                ExitCutMode(); selectedIdx = next >= 0 ? shown[next].nodeIndex : -1; SelectRow(next >= 0 ? shown[next] : null);
             }
             int advanceFrom = -1;   // a popup/checkbox change on the highlighted row inside the list loop: advanced after the loop
             if (hiddenRows > 0) EditorGUILayout.LabelField($"  {shown.Count} shown, {hiddenRows} hidden by the filters (marks on hidden rows are kept; {(Fusing ? "Fuse" : "Split")} acts on ALL marked rows)", EditorStyles.miniLabel);
@@ -310,7 +357,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 if (ev.keyCode == KeyCode.UpArrow || ev.keyCode == KeyCode.DownArrow)
                 {
                     idx = ev.keyCode == KeyCode.DownArrow ? Mathf.Min(idx + 1, shown.Count - 1) : Mathf.Max(idx - 1, 0);
-                    ExitCutMode(); selectedIdx = shown[idx].nodeIndex; SelectRow(shown[idx].node);
+                    ExitCutMode(); selectedIdx = shown[idx].nodeIndex; SelectRow(shown[idx]);
                     RevealRow(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
@@ -387,7 +434,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                                  : $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {(r.islands == 1 ? "1 island — already whole" : r.islands.ToString("N0") + " islands")}){(r.delete ? "   ✕ deleted in the output" : "")}";
                     // the row label is a BUTTON, exactly like the Vehicle Lab: click = highlight + frame in the preview
                     if (GUILayout.Button(label, isSel ? EditorStyles.whiteLabel : (r.blocked == null && (Fusing || r.islands > 1) ? EditorStyles.label : EditorStyles.miniLabel)))   // the Splitter dims what it cannot split
-                    { ExitCutMode(); selectedIdx = isSel ? -1 : r.nodeIndex; SelectRow(isSel ? "" : r.node); }
+                    { ExitCutMode(); selectedIdx = isSel ? -1 : r.nodeIndex; SelectRow(isSel ? null : r); }
                     if (Event.current.type == EventType.Repaint) rowRects.Add(GUILayoutUtility.GetLastRect());   // the row's real rect in scroll-content space (see the ↑/↓ handler)
                 }
             EditorGUILayout.EndScrollView();
@@ -413,7 +460,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                     else
                     {
                         Row mr = rows[m]; string from = selRowObj.node;
-                        ExitCutMode(); selectedIdx = mr.nodeIndex; SelectRow(mr.node);
+                        ExitCutMode(); selectedIdx = mr.nodeIndex; SelectRow(mr);
                         int si = shown.FindIndex(x => x.nodeIndex == mr.nodeIndex);
                         if (si >= 0) RevealRow(si);
                         status = $"Mirror of '{from}': '{mr.node}' ({mr.tris:N0} tris{(string.IsNullOrEmpty(mr.fuse) ? "" : $", group {mr.fuse}")}) — highlighted" +
@@ -472,15 +519,24 @@ public abstract class ModelWorkshopWindow : EditorWindow
 
             if (inst != null || CutModeActive)
             {
-                EditorGUILayout.LabelField(CutModeActive
-                    ? "Cut preview   (drag = orbit · middle/right-drag = pan · scroll = zoom — yellow = _CutA, grey = _CutB)"
-                    : "Preview   (drag = orbit · middle/right-drag = pan · scroll = zoom · click a part row to highlight)", EditorStyles.miniBoldLabel);
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(CutModeActive
+                        ? "Cut preview   (drag = orbit · middle/right-drag = pan · scroll = zoom — yellow = _CutA, grey = _CutB)"
+                        : "Preview   (drag = orbit · middle/right-drag = pan · scroll = zoom · click a part row to highlight)", EditorStyles.miniBoldLabel);
+                    bool wantUnmirror = EditorGUILayout.ToggleLeft(new GUIContent("Un-mirror",
+                        "glTF and Unity disagree on handedness, so the preview shows the model MIRRORED — screen-left is the file's starboard. " +
+                        "Tick this to see it the right way round (the geometry is flipped back so nothing turns see-through). The part list, the " +
+                        "sliders, Find the mirror and every output always work in the file's own coordinates and are unaffected either way."),
+                        unmirror, GUILayout.Width(90));
+                    if (wantUnmirror != unmirror) { unmirror = wantUnmirror; FlipPreviewX(); }
+                }
                 var rect = GUILayoutUtility.GetRect(200f, 4000f, 600f, 600f, GUILayout.ExpandWidth(true));
                 HandlePreviewInput(rect);
                 if (Event.current.type == EventType.Repaint) RenderPreview(rect);
             }
             else if (rows.Count > 0)
-                EditorGUILayout.LabelField($"  (no preview — the Blender probe export failed or is still pending; the list and {(Fusing ? "Fuse" : "Split")} still work)", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField($"  (no preview — the preview could not be built from the file; the list and {(Fusing ? "Fuse" : "Split")} still work)", EditorStyles.miniLabel);
 
             if (!Fusing)
             using (new EditorGUI.DisabledScope((chosen == 0 && deleted == 0) || string.IsNullOrEmpty(outGlb)))
@@ -543,7 +599,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
 
     void Probe()
     {
-        if (Analyze()) BuildPreviewViaBlender();
+        if (Analyze()) BuildPreviewFromGlb();
     }
 
     // Path identity for the source-switch hygiene: separator- and case-insensitive (Windows paths), so retyping
@@ -572,6 +628,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         // 0a8b56e: the old rule "no letters in memory" reloaded the sidecar over a deliberate clear). "Load groups" is
         // the explicit way back.
         bool initialLoad = rows.Count == 0 || !SamePath(probedFile, srcFile) || !Fusing;
+        if (firstLoad) ResetFilters();   // a model probed into the window starts fully visible (see ResetFilters)
         try
         {
             rows = GlbDisconnectedParts.Analyze(File.ReadAllBytes(srcFile), mergePct / 100.0)
@@ -599,52 +656,158 @@ public abstract class ModelWorkshopWindow : EditorWindow
     static string NaturalPrefix(string s) => NaturalOrder.Prefix(s);
     static long NaturalNumber(string s) => NaturalOrder.Number(s);
 
-    // ---- preview build: the Vehicle Lab's probe export (headless Blender writes an FBX of the model), imported
-    // and instanced with AddSingleGO. Node names survive the trip, so rows highlight renderers by name. ----
-    void BuildPreviewViaBlender()
+    // MIRRORED IMAGE, NOT MIRRORED FACING (measured 2026-09-19, drill_unity_facing.py on the Romanic split: 856
+    // mirrored nodes, 425,632 triangles, rays from the beam): the winding below is handed to Unity UNCHANGED and
+    // 1.0 % of the struck surface renders back-facing; adding the swap glTF's negative-determinant rule seems to ask
+    // for takes that to 97.6 % — the whole port side inside-out, which is what a user reported. Unity reads these
+    // numbers in a left-handed frame AND calls a clockwise triangle front-facing, and the two conventions cancel, so
+    // facing survives the copy. The IMAGE does not: the preview is a mirror of the model, so screen-left is the
+    // file's starboard. The sliders and the mirror finder work in FILE coordinates and stay correct.
+    // ---- preview build (2026-09-19): straight from the GLB, one object per mesh-carrying NODE. Until now the Vehicle
+    // Lab's Blender probe exported an FBX that Unity imported (24 s of a 214 MB ship's probe) and the rows found their
+    // renderers by NAME — a file that names all 113 of its nodes "Material2" (the Salegs Revenge) lit the whole ship for
+    // any row. Rows and preview objects now meet on the node index. Same coordinates and winding as the cut preview
+    // (world-space glTF, as ExtractPart reports them), so the turntable and the cut mode agree; a submesh per primitive
+    // carries its material's base colour, which is what the FBX trip showed too. ----
+    void BuildPreviewFromGlb()
     {
         DestroyPreview();
         try
         {
-            string projRoot = Directory.GetParent(Application.dataPath).FullName;
-            Directory.CreateDirectory(Path.Combine(projRoot, PreviewDir));
-            string prevRel = PreviewDir + "/" + Path.GetFileNameWithoutExtension(srcFile) + "_wprobe.fbx";
-            string prevFull = Path.Combine(projRoot, prevRel).Replace('\\', '/');
-            string script = HafPackageContext.ToolPath("vehicle_rig.py");
-            if (!File.Exists(script)) { status += "\n(no preview: Tools/vehicle_rig.py missing)"; return; }
-            EditorUtility.DisplayProgressBar("Model Workshop", "Exporting preview via Blender…", 0.4f);
-            var p = new System.Diagnostics.Process();
-            p.StartInfo.FileName = UniversalBaker.FindBlender();
-            p.StartInfo.Arguments = $"--background --python \"{script}\" -- probe \"{srcFile}\" \"{prevFull}\"";
-            p.StartInfo.UseShellExecute = false; p.StartInfo.CreateNoWindow = true;
-            p.StartInfo.RedirectStandardOutput = true; p.StartInfo.RedirectStandardError = true;
-            p.Start();
-            if (!UniversalBaker.RunBounded(p, 300000, out _, out _)) { status += "\n(no preview: Blender timed out)"; return; }
-            if (!File.Exists(prevFull)) { status += "\n(no preview: Blender wrote no FBX)"; return; }
-            AssetDatabase.ImportAsset(prevRel, ImportAssetOptions.ForceUpdate);
-            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prevRel);
-            if (prefab == null) { status += "\n(no preview: FBX import failed)"; return; }
+            // MEMORY CEILING (2026-09-19, user: "1GB should be a good limit"): the preview holds the whole model as
+            // managed arrays AND as Unity meshes — positions, the Vector3 copy, recalculated normals and the index
+            // arrays. Analyze has already counted this file's vertices and triangles, so the cost is known BEFORE a
+            // byte is read; past the ceiling the window says so and keeps the list, which is what the Splitter and
+            // Fuser actually act on. (Your 214 MB ship: 5.2 M vertices, 6.2 M triangles, about 0.4 GB — it still builds.)
+            long need = PreviewBytes();
+            if (need > PreviewByteCeiling)
+            {
+                status += $"\n(no preview: this model would need about {need / (1024f * 1024f * 1024f):0.0} GB of mesh memory, over the {PreviewByteCeiling / (1024 * 1024 * 1024)} GB ceiling — the list, the filters and {(Fusing ? "Fuse" : "Split")} work as usual)";
+                return;
+            }
+            EditorUtility.DisplayProgressBar("Model Workshop", "Building the preview…", 0.4f);
+            var parts = GlbDisconnectedParts.ExtractAll(File.ReadAllBytes(srcFile));
+            inst = new GameObject("__workshopPreview") { hideFlags = HideFlags.HideAndDontSave };
+            var sh = Shader.Find("Standard") ?? Shader.Find("Unlit/Color");
+            foreach (var g in parts)
+            {
+                var mesh = new Mesh { name = g.NodeName, hideFlags = HideFlags.HideAndDontSave, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+                var verts = new Vector3[g.Positions.Length / 3];
+                float sx = unmirror ? -1f : 1f;
+                for (int i = 0; i < verts.Length; i++) verts[i] = new Vector3(sx * g.Positions[i * 3], g.Positions[i * 3 + 1], g.Positions[i * 3 + 2]);
+                mesh.vertices = verts;
+                int subs = Math.Max(1, g.PrimitiveStart.Length);
+                mesh.subMeshCount = subs;
+                var mats = new Material[subs];
+                for (int s = 0; s < subs; s++)
+                {
+                    int start = s < g.PrimitiveStart.Length ? g.PrimitiveStart[s] : 0, end = s + 1 < g.PrimitiveStart.Length ? g.PrimitiveStart[s + 1] : g.Triangles.Length;
+                    var tri = new int[Math.Max(0, end - start)]; Array.Copy(g.Triangles, start, tri, 0, tri.Length);
+                    if (unmirror) for (int t = 0; t + 2 < tri.Length; t += 3) { int tmp = tri[t + 1]; tri[t + 1] = tri[t + 2]; tri[t + 2] = tmp; }
+                    mesh.SetTriangles(tri, s, false);
+                    mats[s] = PreviewMaterial(sh, s < g.PrimitiveColour.Length ? g.PrimitiveColour[s] : null);
+                }
+                mesh.RecalculateNormals(); mesh.RecalculateBounds();
+                previewAssets.Add(mesh);
+                var go = new GameObject(g.NodeName) { hideFlags = HideFlags.HideAndDontSave };
+                go.transform.SetParent(inst.transform, false);
+                go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                var mr = go.AddComponent<MeshRenderer>(); mr.sharedMaterials = mats;
+                previewByNode[g.NodeIndex] = mr;
+            }
             if (pru == null) pru = new PreviewRenderUtility();
-            inst = Instantiate(prefab);
             pru.AddSingleGO(inst);
             boundsValid = false; previewPan = Vector2.zero; zoom = 1.5f;
+            int missing = rows.Count(r => !previewByNode.ContainsKey(r.nodeIndex));
+            if (missing > 0) status += $"\n(preview: {missing} part(s) the extractor refused are not drawn — their rows say why)";
         }
         catch (Exception e) { status += "\n(no preview: " + e.Message + ")"; }
         finally { EditorUtility.ClearProgressBar(); }
+    }
+
+    // What the preview will cost, from the counts Analyze already has: per vertex the float positions, the Vector3
+    // copy and the recalculated normals (3 x 12 bytes) with the same again for Unity's own copy of the mesh, and per
+    // index the managed array plus Unity's (2 x 4 bytes). Deliberately an over-estimate — the ceiling is a guard, and
+    // refusing a preview costs the user a picture, while running out of memory costs the editor.
+    const long PreviewByteCeiling = 1L << 30;   // 1 GB
+    long PreviewBytes()
+    {
+        long verts = 0, idx = 0;
+        // r.verts counts the whole POSITION accessor, which a split fragment SHARES with its parent — 13x too high on
+        // a real Khalandion split (PR 66 review). The extractor compacts to referenced vertices, and a part can never
+        // reference more than three per triangle, so the smaller of the two is the honest figure.
+        foreach (var r in rows) { verts += Math.Min(r.verts, 3L * r.tris); idx += 3L * r.tris; }
+        return verts * 72L + idx * 8L;
+    }
+
+    // Flip every built mesh in place when the checkbox moves: negate X and reverse each submesh's winding (the two
+    // together are what the drill measured as solid). Cheaper and steadier than re-reading a 214 MB file, and the cut
+    // preview follows through UpdateCutPartition, which re-emits its triangles anyway.
+    void FlipPreviewX()
+    {
+        foreach (var m in previewAssets)
+        {
+            if (m == null) continue;
+            var v = m.vertices;
+            for (int i = 0; i < v.Length; i++) v[i].x = -v[i].x;
+            m.vertices = v;
+            for (int s = 0; s < m.subMeshCount; s++)
+            {
+                var tri = m.GetTriangles(s);
+                for (int t = 0; t + 2 < tri.Length; t += 3) { int tmp = tri[t + 1]; tri[t + 1] = tri[t + 2]; tri[t + 2] = tmp; }
+                m.SetTriangles(tri, s, false);
+            }
+            m.RecalculateNormals(); m.RecalculateBounds();
+        }
+        if (cutMesh != null)
+        {
+            var v = cutMesh.vertices;
+            for (int i = 0; i < v.Length; i++) v[i].x = -v[i].x;
+            cutMesh.vertices = v;
+            UpdateCutPartition();   // re-emits both sides, winding included
+            cutMesh.RecalculateNormals();
+        }
+        flatShare = null; flatShareFor = null;   // measured on the preview meshes, which just moved
+        boundsValid = false;
+        Repaint();
+    }
+
+    // One material per distinct base colour, shared across the preview (a 1,400-part liner has a dozen colours).
+    // COLOUR SPACE, measured 2026-09-19 (drill_colour_space.py) and deliberately NOT changed: glTF stores
+    // baseColorFactor in LINEAR space and this project renders in Gamma, so the honest conversion would brighten every
+    // flat colour (a charcoal of 0.137 would display at 0.406). The OLD Blender/FBX preview handed Unity the linear
+    // number unconverted — checked material by material on the Salegs Revenge, all twelve identical — so converting
+    // here would not restore anything, it would make the Workshop disagree with every other preview in the toolkit.
+    // Bake-time tone is the albedoBrightness / albedoSaturation dials' job, not this window's.
+    Material PreviewMaterial(Shader sh, float[] rgb)
+    {
+        var c = rgb != null && rgb.Length >= 3 ? new Color(rgb[0], rgb[1], rgb[2]) : Color.white;
+        if (!previewMats.TryGetValue(c, out Material m) || m == null)
+        {
+            m = new Material(sh) { color = c, hideFlags = HideFlags.HideAndDontSave };
+            previewMats[c] = m;
+        }
+        return m;
     }
 
     void DestroyPreview()
     {
         ExitCutMode();
         selectedIdx = -1;
-        SelectRow("");
+        SelectRow(null);
         if (inst != null) DestroyImmediate(inst);
         inst = null;
+        previewByNode.Clear();
+        foreach (var a in previewAssets) if (a != null) DestroyImmediate(a);
+        previewAssets.Clear();
+        foreach (var m in previewMats.Values) if (m != null) DestroyImmediate(m);
+        previewMats.Clear();
+        flatShare = null; flatShareFor = null;
         if (pru != null) { pru.Cleanup(); pru = null; }
     }
 
     // ---- plane-cut mode: preview mesh built from the SOURCE bytes (ExtractPart), so what's yellow IS what
-    // the cut writes to _CutA. The Blender turntable model hides while the cut preview is up. ----
+    // the cut writes to _CutA. The turntable model hides while the cut preview is up. ----
     void EnterCutMode(Row row)
     {
         ExitCutMode();
@@ -652,8 +815,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
         catch (Exception e) { status = $"Plane cut unavailable for '{row.node}': {e.Message}"; cutGeo = null; return; }
         cutMesh = new Mesh { hideFlags = HideFlags.HideAndDontSave, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
         var verts = new Vector3[cutGeo.Positions.Length / 3];
+        float csx = unmirror ? -1f : 1f;
         for (int i = 0; i < verts.Length; i++)
-            verts[i] = new Vector3(cutGeo.Positions[i * 3], cutGeo.Positions[i * 3 + 1], cutGeo.Positions[i * 3 + 2]);
+            verts[i] = new Vector3(csx * cutGeo.Positions[i * 3], cutGeo.Positions[i * 3 + 1], cutGeo.Positions[i * 3 + 2]);
         cutMesh.vertices = verts;
         cutMesh.subMeshCount = 2;
         if (cutMatA == null)
@@ -730,7 +894,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 sideA = Math.Abs(up) >= cosLimit && c >= v;
             }
             var side = sideA ? a : b;
-            side.Add(t[i]); side.Add(t[i + 1]); side.Add(t[i + 2]);
+            if (unmirror) { side.Add(t[i]); side.Add(t[i + 2]); side.Add(t[i + 1]); }   // the mirrored mesh needs the reversed winding
+            else { side.Add(t[i]); side.Add(t[i + 1]); side.Add(t[i + 2]); }
         }
         cutTrisA = a.Count / 3; cutTrisB = b.Count / 3;
         cutMesh.SetTriangles(a, 0);
@@ -759,34 +924,28 @@ public abstract class ModelWorkshopWindow : EditorWindow
         finally { EditorUtility.ClearProgressBar(); }
     }
 
-    // Click a row → tint that part's renderer(s) yellow and frame them with context (the Vehicle Lab mechanism,
-    // name-matched: probe part names ARE the glTF node names, with StartsWith for Blender's collision suffixes).
+    // Click a row → tint that part's renderer yellow and frame it with context (the Vehicle Lab mechanism, matched by
+    // node index since the preview is built per node).
     // FLAT-SURFACE FILTER (the Vehicle Lab's, verbatim in spirit): the share of a part's surface area lying within 30° of
-    // level, measured on the PREVIEW meshes (the preview stands upright in Unity, so world +Y is 'level'; the geometric
-    // triangle normal is used — no reliance on authored normals). Cached once per preview instance; a part the preview
-    // doesn't carry (or any state before a probe) PASSES the filter. Blender collision suffixes ("Object_2.001") count
-    // toward their base part through VehicleLabRules.FlatShare, the unit-tested lookup.
+    // level, measured on the PREVIEW meshes (glTF +Y is up, so world +Y is 'level'; the geometric triangle normal is
+    // used — no reliance on authored normals). Cached once per preview instance; a part the preview doesn't carry (or
+    // any state before a probe) PASSES the filter — a filter never hides what it cannot measure.
     bool FlatOk(Row x)
     {
         if (minFlatPct <= 0f) return true;
         BuildFlatShareIFN();
-        if (flatAreaByName == null || string.IsNullOrEmpty(x.node)) return true;
-        if (!flatShare.TryGetValue(x.node, out float s))
-        {
-            s = VehicleLabRules.FlatShare(x.node, flatAreaByName, flatLevelByName);
-            flatShare[x.node] = s;
-        }
-        return s < 0f || s * 100f >= minFlatPct;
+        if (flatShare == null || !flatShare.TryGetValue(x.nodeIndex, out float s)) return true;
+        return s * 100f >= minFlatPct;
     }
     void BuildFlatShareIFN()
     {
-        if (inst == null) { flatAreaByName = null; flatLevelByName = null; flatShare = null; flatShareFor = null; return; }
-        if (flatAreaByName != null && flatShareFor == inst) return;
-        flatAreaByName = new Dictionary<string, double>(); flatLevelByName = new Dictionary<string, double>();
-        foreach (var mf in inst.GetComponentsInChildren<MeshFilter>(true))
+        if (inst == null) { flatShare = null; flatShareFor = null; return; }
+        if (flatShare != null && flatShareFor == inst) return;
+        flatShare = new Dictionary<int, float>();
+        foreach (var kv in previewByNode)
         {
+            var mf = kv.Value != null ? kv.Value.GetComponent<MeshFilter>() : null;
             if (mf == null || mf.sharedMesh == null) continue;
-            string nm = mf.gameObject.name;   // EXACT — alias merging is the lookup's job, with digits-only proof
             var m = mf.sharedMesh; var l2w = mf.transform.localToWorldMatrix;
             var v = m.vertices; var t = m.triangles;
             double a0 = 0, af = 0;
@@ -799,35 +958,25 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 a0 += a2;
                 if (Mathf.Abs(c.y) / a2 >= 0.866f) af += a2;   // cos 30° — the facing cut's default tilt
             }
-            flatAreaByName.TryGetValue(nm, out double ta); flatAreaByName[nm] = ta + a0;
-            flatLevelByName.TryGetValue(nm, out double tf); flatLevelByName[nm] = tf + af;
+            if (a0 > 0) flatShare[kv.Key] = (float)(af / a0);
         }
-        flatShare = new Dictionary<string, float>();
         flatShareFor = inst;
     }
 
-    void SelectRow(string name)
+    void SelectRow(Row row)
     {
         if (highlightedRenderers != null)
             for (int i = 0; i < highlightedRenderers.Count; i++)
                 try { if (highlightedRenderers[i] != null) highlightedRenderers[i].sharedMaterials = highlightedOriginals[i]; } catch { }
         highlightedRenderers = null; highlightedOriginals = null;
-        selectedRow = name;
+        selectedRow = row?.node ?? "";
         boundsValid = false;
         previewPan = Vector2.zero;
-        if (inst == null || string.IsNullOrEmpty(name)) return;
-        var all = inst.GetComponentsInChildren<Renderer>();
-        // DUPLICATE NAMES (review round 3): split/check identity is the node INDEX, but the Blender preview
-        // round-trip carries only names — namesake rows all light the same renderers. Rare in this pipeline
-        // (the splitter uniquifies its output names); when it happens, say so instead of pretending precision.
-        int namesakes = rows.Count(r => r.node == name);
-        if (namesakes > 1)
-            status = $"⚠ {namesakes} parts share the name '{name}' — the preview highlight shows all of them; {(Fusing ? "the ⊕ letter and Fuse" : "the checkbox and Split")} still target exactly the row you clicked (by node index).";
-        // EXACT name PLUS Blender's collision-suffix form ("Object_2.001") — combined, not fallback (review
-        // round 4: exact-only found the first namesake and starved the suffix branch, so duplicate rows lit the
-        // same renderer). Never a mere prefix — a bare StartsWith made "Object_2" light up Object_20..Object_29.
-        var hits = all.Where(x => x != null && (x.gameObject.name == name || x.gameObject.name.StartsWith(name + "."))).ToList();
-        if (hits.Count == 0) return;
+        if (inst == null || row == null) return;
+        // by NODE INDEX (2026-09-19): the preview is built from the GLB one object per node, so a row lights exactly its
+        // own part — the old name match lit every namesake, all 113 of them on a file that names every node "Material2"
+        if (!previewByNode.TryGetValue(row.nodeIndex, out Renderer hit) || hit == null) return;   // a part the extractor refused: nothing to light
+        var hits = new List<Renderer> { hit };
         if (highlightMat == null)
         {
             var sh = Shader.Find("Unlit/Color") ?? Shader.Find("Standard");
