@@ -694,6 +694,12 @@ public abstract class ModelWorkshopWindow : EditorWindow
     }
 
     // One material per distinct base colour, shared across the preview (a 1,400-part liner has a dozen colours).
+    // COLOUR SPACE, measured 2026-09-19 (drill_colour_space.py) and deliberately NOT changed: glTF stores
+    // baseColorFactor in LINEAR space and this project renders in Gamma, so the honest conversion would brighten every
+    // flat colour (a charcoal of 0.137 would display at 0.406). The OLD Blender/FBX preview handed Unity the linear
+    // number unconverted — checked material by material on the Salegs Revenge, all twelve identical — so converting
+    // here would not restore anything, it would make the Workshop disagree with every other preview in the toolkit.
+    // Bake-time tone is the albedoBrightness / albedoSaturation dials' job, not this window's.
     Material PreviewMaterial(Shader sh, float[] rgb)
     {
         var c = rgb != null && rgb.Length >= 3 ? new Color(rgb[0], rgb[1], rgb[2]) : Color.white;
