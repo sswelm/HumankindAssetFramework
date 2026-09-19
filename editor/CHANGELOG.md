@@ -20,7 +20,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   Romanic groups byte-identical; the Romanic's group H, whose judged parts disagreed 1 to 2 and got worse when the
   one was acted on, now left untouched. Four tests: a pre-flipped file fixed only with the option, a standard file
   byte-identical, mixed evidence unchanged, and a lone mirrored part following the file's convention (the failure
-  reproduced with the option off).
+  reproduced with the option off). A lap strip lying on its plate walks their shared edge the same way on purpose; the
+  check applies the consistency pass's own lap rule, so mirrored lap strips are never mistaken for inside-out (review
+  of PR #67: three of them had drawn a unanimous verdict and 18 correct faces were turned inward).
 
 - **Fuse: one stray edge, stray geometry, and double-skinned solids** (the SS Romanic). Its 41,799-face hull reached
   1 unsatisfied edge of 92 same-way in 59,000 and the "0 or nothing" orientability rule refused it: the parity pass

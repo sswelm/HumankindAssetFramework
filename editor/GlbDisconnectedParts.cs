@@ -1332,7 +1332,21 @@ public static class GlbDisconnectedParts
                     int f = lf[0], g = lf[1]; int pf = Part(f), pg = Part(g);
                     if (pf == pg) continue;
                     bool df = Walk(f, kv.Key) ^ (decided[pf] && undo[pf]), dg = Walk(g, kv.Key) ^ (decided[pg] && undo[pg]);
-                    bool same = df == dg;   // both faces walk the shared edge the same way: one of them is inside-out
+                    bool same = df == dg;   // both faces walk the shared edge the same way: one of them is inside-out…
+                    // …unless they are a LAP, the consistency pass's own rule below (the Teutonic's Object_8, 671 strips): a strip
+                    // lying ON its plate, stitched along one edge and facing the same way, walks that edge the same way as the
+                    // plate on purpose. Same traversal AND surfaces already facing the same way = consistent as authored. Without
+                    // it, three mirrored lap strips gave a unanimous "already facing outward" verdict and 18 correct faces were
+                    // turned inward (review of PR #67). A decided part about to be undone is judged as it will be written.
+                    if (same)
+                    {
+                        Vec3 na = FCross(FSub(pos[tris[f * 3 + 1]], pos[tris[f * 3]]), FSub(pos[tris[f * 3 + 2]], pos[tris[f * 3]]));
+                        Vec3 nb = FCross(FSub(pos[tris[g * 3 + 1]], pos[tris[g * 3]]), FSub(pos[tris[g * 3 + 2]], pos[tris[g * 3]]));
+                        if (decided[pf] && undo[pf]) na = FScale(na, -1.0);
+                        if (decided[pg] && undo[pg]) nb = FScale(nb, -1.0);
+                        double la = FLen(na), lb = FLen(nb);
+                        if (la > 1e-12 && lb > 1e-12 && FDot(na, nb) / (la * lb) > 0.9) same = false;
+                    }
                     bool refF = !partMirrored[pf] || decided[pf], refG = !partMirrored[pg] || decided[pg];
                     if (partMirrored[pf] && !decided[pf] && refG) { if (same) conflict[pf]++; else agree[pf]++; }
                     if (partMirrored[pg] && !decided[pg] && refF) { if (same) conflict[pg]++; else agree[pg]++; }

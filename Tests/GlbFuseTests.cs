@@ -545,6 +545,31 @@ public class GlbFuseTests
     }
 
     [Fact]
+    public void Mirrored_lap_strips_lying_on_their_plates_are_not_mistaken_for_inside_out()
+    {
+        // Review of PR #67 (76de8e3): a lap strip lies ON its plate, stitched along one edge and facing the same way. Both
+        // faces then walk the shared edge the SAME way, legitimately — the consistency pass's lap rule knows this (the
+        // Teutonic's Object_8, 671 strips). The first mirrored-part check counted it as a conflict, gave the group a
+        // unanimous "already facing outward" verdict, and flipped all 18 lap faces inward.
+        var parts = new List<Part>();
+        for (int i = 0; i < 3; i++)
+        {
+            parts.Add(Strip("P" + i, 0, 1, 10 * i, inward: false));                      // the plate, x 0..1, +Z
+            var lap = Strip("L" + i, -0.5f, 0, 10 * i, inward: false);                   // local x -0.5..0 -> world 0..0.5: ON the plate
+            lap.Scale = new double[] { -1, 1, 1 };                                        // mirrored, stored the standard way: +Z after the glTF reversal
+            parts.Add(lap);
+        }
+        byte[] glb = BuildGlb(parts.ToArray());
+        var off = GlbDisconnectedParts.FuseNodes(glb, AllNodes(parts.Count), 0.0, null, false);
+        var goff = Read(off.Bytes);
+        Assert.All(FaceNormals(goff, (JObject)goff.Primitives(goff.Node("P0_Fused"))[0]), n => Assert.True(n[2] > 0, "off: every face +Z (premise)"));
+        var on = GlbDisconnectedParts.FuseNodes(glb, AllNodes(parts.Count), 0.0, null, true);
+        Assert.Equal(off.Bytes, on.Bytes);                                               // nothing to change, nothing changed
+        Assert.DoesNotContain(on.Details, d => d.Contains("already stores them facing outward"));
+        Assert.DoesNotContain(off.Warnings, w => w.Contains("Check mirrored parts"));
+    }
+
+    [Fact]
     public void A_mirrored_part_with_no_plain_neighbour_follows_the_files_convention()
     {
         // The frigate's Object_961: no plain neighbour to judge it by, and it kept the reversal, carrying 2,443 of the
