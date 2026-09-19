@@ -298,7 +298,7 @@ public static class GlbDisconnectedParts
             if (l.ViewError == null)
             {
                 l.Bytes = ComponentBytes(l.ComponentType);   // throws "Unsupported GLB component type" here, as the old read did after the view checks
-                l.Stride = view.Value<int?>("byteStride") ?? 0;   // 0 = tightly packed: the element size is applied per read (it depends on the components asked for)
+                l.Stride = view.Value<int?>("byteStride") ?? -1;   // -1 = ABSENT (tightly packed, sized per read); a declared 0 stays 0 and is rejected below, as it was before the cache
                 l.Start = (long)(view.Value<int?>("byteOffset") ?? 0) + (a.Value<int?>("byteOffset") ?? 0);
             }
             layouts[index] = l;
@@ -310,7 +310,7 @@ public static class GlbDisconnectedParts
         {
             if (index >= a.Count) throw new InvalidDataException("Accessor element is out of range.");
             if (a.ViewError != null) throw new InvalidDataException(a.ViewError);
-            int stride = a.Stride != 0 ? a.Stride : a.Bytes * components;
+            int stride = a.Stride >= 0 ? a.Stride : a.Bytes * components;
             if (stride < a.Bytes * components) throw new InvalidDataException("bufferView byteStride is smaller than its element.");
             long start = a.Start + (long)index * stride;
             if (start < 0 || start + a.Bytes * components > bin.Length) throw new InvalidDataException("Accessor reads beyond the BIN chunk.");

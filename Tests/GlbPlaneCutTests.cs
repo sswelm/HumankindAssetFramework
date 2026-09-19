@@ -94,6 +94,26 @@ public class GlbPlaneCutTests
     }
 
     [Fact]
+    public void ExtractAll_returns_one_entry_per_mesh_node_matching_ExtractPart()
+    {
+        // The Workshop preview builds ONE object per mesh-carrying node and keys the row highlight on the node index:
+        // the file that started this names all 113 of its nodes the same, so a name-keyed preview lit every part at once.
+        byte[] source = BuildGlb(Strip, secondNodeSharesMesh: true);
+        var all = GlbDisconnectedParts.ExtractAll(source);
+        Assert.Equal(2, all.Count);
+        Assert.Equal(new[] { 0, 1 }, all.Select(g => g.NodeIndex).ToArray());
+        foreach (var g in all)
+        {
+            var one = GlbDisconnectedParts.ExtractPart(source, g.NodeIndex);
+            Assert.Equal(one.Positions, g.Positions);
+            Assert.Equal(one.Triangles, g.Triangles);
+            Assert.Equal(one.NodeName, g.NodeName);
+        }
+        Assert.All(all, g => Assert.Single(g.PrimitiveStart));       // one primitive -> one preview submesh
+        Assert.All(all, g => Assert.Equal(3, g.PrimitiveColour[0].Length));
+    }
+
+    [Fact]
     public void Morph_weight_animation_retargets_to_both_cut_children()
     {
         byte[] source = BuildGlb(Strip, withWeightAnimation: true);

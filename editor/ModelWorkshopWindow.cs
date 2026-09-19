@@ -49,7 +49,6 @@ public abstract class ModelWorkshopWindow : EditorWindow
     const int DeleteEntry = 27;   // FuseLabels index of "✕ Delete"
     static readonly string[] SplitLabels = { "–", "Split", "Delete" }, WholeLabels = { "–", "Delete" };   // the Splitter's row popup (a whole part cannot be split)
 
-
     [SerializeField] string srcFile = "";
     [SerializeField] string outGlb = "";
     [SerializeField] bool outGlbAuto = true;   // output path is auto-derived from srcFile and TRACKS it until the user edits the field to something else (external review of PR #22)
@@ -58,9 +57,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
     [SerializeField] bool hideWhole = false;   // filter: hide "1 island — already whole" rows (nothing to split there)
     // LIST FILTERS (2026-09-16, the Vehicle Lab's sliders brought over — user: "make these selection tools also available in
     // the Model Workshop"): the same bands, over the node bbox the analyzer reads from the accessors. Height is glTF +Y, the
-    // side axis is the model's shorter horizontal extent (as the fuse's belly axis). The flat-surface and visibility filters
-    // the flat filter came over on 2026-09-18, measured on the preview meshes; the visibility filter stays Lab-only (it needs the
-    // Blender probe's escape rays, which the Workshop does not run).
+    // side axis is the model's shorter horizontal extent (as the fuse's belly axis). The flat-surface filter came over on
+    // 2026-09-18 and is measured on the preview meshes; the visibility filter stays Lab-only, needing the Blender probe's
+    // escape rays, which the Workshop does not run.
     [SerializeField] int minVerts = 1;
     [SerializeField] float minPartSize = 0f;
     [SerializeField] float minHeight = -1e9f, maxHeight = 1e9f, minWidth = -1e9f, maxWidth = 1e9f;   // clamped into the model's span each frame: a fresh model hides nothing
