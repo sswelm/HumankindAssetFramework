@@ -32,8 +32,8 @@ public static class GlbDisconnectedParts
         public bool Changed => NodesSplit > 0;
         // FUSE (2026-09-15) — what the weld and the winding pass did, so the Workshop can say it in one line
         public int VerticesBefore, VerticesAfter, IslandsBefore, IslandsAfter, FacesRewound;
-        public readonly List<string> IslandLines = new List<string>();
-        public int FusedNodeIndex = -1; public string FusedNodeName;   // the appended shell (a fuse only): the output sidecar names it with its group's letter   // EVERY island's verdict, largest first (the report; Details keeps the largest six for the status)
+        public readonly List<string> IslandLines = new List<string>();   // EVERY sheet's verdict, largest first (the report; Details keeps the largest six for the status)
+        public int FusedNodeIndex = -1; public string FusedNodeName;   // the appended shell (a fuse only): the output sidecar names it with its group's letter
     }
 
     sealed class Chunk
@@ -1444,7 +1444,7 @@ public static class GlbDisconnectedParts
         // the twin statistics of every island, measured BEFORE any direction flip (an island turned earlier in the loop
         // would present same-way normals to its twin island — the inner skin saw an already-turned outer skin)
         var twinStats = new int[sheets.Count][];
-        var twinDist = new double[sheets.Count]; var twinStraight = new double[sheets.Count];   // DIAGNOSTIC: mean twin distance / reach, mean |along| / dist over the partnered faces
+        var twinDist = new double[sheets.Count]; var twinStraight = new double[sheets.Count];   // for the sheet's report line: mean twin distance as a fraction of the reach, mean |along| / distance (1 = straight in front or behind) — a skin reads ≤ 0.35 and ~0.9, a neighbour 0.7+
         // ENCLOSURE evidence (review of 7307fe2: six inward cubes around a seventh across air gaps gave the centre a twin
         // behind every face): the twins behind a cavity shell all belong to ONE other island whose bounding box contains
         // the shell — six neighbours are six twin islands, none containing the centre. Recorded here per island.
@@ -1547,7 +1547,7 @@ public static class GlbDisconnectedParts
             // opposite normals, wound inside-out as a whole. Both rules above read ~0 on it (the cones of the two skins
             // cancel: agreement -0.01, thickness -0.0005; the radial score cancels the same way). What does not cancel:
             // for every face, on which side its twin lies. Material lies BEHIND an outward face, so a partnered face
-            // whose twin sits in FRONT of it (along +normal, within `skinReach`) faces into the solid. The island is
+            // whose twin sits in FRONT of it (along +normal, within `twinReach`) faces into the solid. The island is
             // double-skinned when at least half its faces have a twin; the majority of front-vs-behind decides.
             int partnered = twinStats[ii][0], twinInFront = twinStats[ii][1], twinBehind = twinStats[ii][2];
             bool doubleSkin = partnered * 2 >= isl.Count && partnered > 0 && Math.Abs(twinInFront - twinBehind) * 10 > partnered * 4;   // decided when 70/30 or clearer
@@ -1767,7 +1767,7 @@ public static class GlbDisconnectedParts
             if (ni < 0 || ni >= nodes.Count) { result.Warnings.Add("Node " + ni + " does not exist — nothing removed there."); continue; }
             var n = nodes[ni] as JObject;
             if (n == null || n["mesh"] == null) { result.Warnings.Add("Node " + ni + " carries no mesh — nothing to remove."); continue; }
-            n.Remove("mesh"); n.Remove("skin");   // a skin without a mesh is invalid glTF: it goes with the mesh
+            n.Remove("mesh"); n.Remove("skin"); n.Remove("weights");   // a skin or morph weights without a mesh are invalid glTF: they go with it
             names.Add((string)n["name"] ?? ("node " + ni)); result.NodesSplit++;
         }
         if (result.NodesSplit == 0) return result;   // Changed == false, Bytes null: the caller keeps what it had

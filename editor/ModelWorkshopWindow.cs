@@ -45,9 +45,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
     }
     static GUIStyle wrappedButton;
     static GUIStyle WrappedButton => wrappedButton ?? (wrappedButton = new GUIStyle(GUI.skin.button) { wordWrap = true });   // built lazily: GUI.skin exists only inside OnGUI
-    static readonly string[] FuseLabels = new[] { "–" }.Concat(Enumerable.Range(0, 26).Select(i => "⊕" + (char)('A' + i))).Concat(new[] { "✕ Delete" }).ToArray();   // the Fuser's row popup: no group, A–Z, or marked for deletion
+    static readonly string[] FuseLabels = new[] { "–" }.Concat(Enumerable.Range(0, 26).Select(i => "⊕" + (char)('A' + i))).Concat(new[] { "✕ Delete" }).ToArray();   // the Fuser's row popup: no group, A–Z (was A–H; user 2026-09-16: a ship has more than eight boats), or marked for deletion; keys A–Z set it, – / 0 / Backspace clear
     const int DeleteEntry = 27;   // FuseLabels index of "✕ Delete"
-    static readonly string[] SplitLabels = { "–", "Split", "Delete" }, WholeLabels = { "–", "Delete" };   // the Splitter's row popup (a whole part cannot be split)   // the per-row fuse popup, A–Z (was A–H; user 2026-09-16: a ship has more than eight boats); keys A–Z set it, 0/Backspace clears
+    static readonly string[] SplitLabels = { "–", "Split", "Delete" }, WholeLabels = { "–", "Delete" };   // the Splitter's row popup (a whole part cannot be split)
 
     const string PreviewDir = "Assets/FactorySource/ModelWorkshop";
 
