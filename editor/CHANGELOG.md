@@ -21,6 +21,16 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
+- **Bake: a point-UV material packs as the colour it samples.** The Romanic's deck is painted with a 512×1024
+  plank texture whose every face carries the same single UV — the texture used as a colour picker, one tan
+  texel. Packed as a texture, that point folded onto the bottom-left edge of its atlas cell, where the bilinear
+  tap blends the neighbouring cell in and every coarser mip averages the whole plank image: the deck read as the
+  image's dark-brown mean (0.61, 0.52, 0.36) instead of the tan texel (0.77, 0.68, 0.52) the web preview shows,
+  and the brightness/saturation dials could not bring it back. Both atlas paths now detect a material whose whole
+  UV span fits inside one texel of its own texture (`BakerRules.PointUv`), replace its albedo with an 8 px swatch
+  of that texel (wrapped, as the source viewer sampled it) and pin its vertices to the cell centre like any
+  flat-colour material. Tiled materials and real textures are untouched; the Generate log names each one as
+  "point-UV material '…': every UV at (u, v) — one texel of a W×H texture, packed as the flat colour (r, g, b)".
 - **Vehicle Lab: Default reduce actually runs.** Its tagged argument was parsed before the script defined its
   name-list reader, so the rig logged a warning and silently skipped the tier: a 208,000-triangle rig failed the
   bake while Verify had projected 156,000 (user: "I clearly have a model with less vertices yet the same error").

@@ -1314,6 +1314,7 @@ public static class UniversalBaker
                     foreach (int vi0 in mm0.GetTriangles(s0)) tileSpans[mi0].Add(uv0[vi0]);
                 }
             }
+            foreach (string line in PointSwatches(albs, tileSpans, flatSwatch, matList.Select(mm => mm != null ? mm.name : "?").ToArray())) Debug.Log($"[Factory] {name} point-UV material {line}");
             foreach (string line in PreTileAlbedos(albs, tileSpans, flatSwatch, matList.Select(mm => mm != null ? mm.name : "?").ToArray())) Debug.Log($"[Factory] {name} tiled material {line}");
             // Does any source albedo carry REAL transparency (alpha-MASK foliage cards etc.)? Checked BEFORE packing:
             // the old unconditional a=255 below silently flattened cutout foliage into solid triangles (the beech-tree
@@ -1908,6 +1909,30 @@ public static class UniversalBaker
     }
     const int TileMinRepeatPx = 48;
 
+    // POINT-UV MATERIALS (see BakerRules.PointUv): a textured material whose whole UV span fits inside one texel is a
+    // solid colour — that texel. Replace its albedo with an 8 px swatch of it and mark it flat, so the remap pins its
+    // vertices to the cell centre instead of an edge the bilinear tap and every mip would blend with the neighbours.
+    // Runs after the spans are measured and before PreTileAlbedos (a point is never tiled). Returns the log lines.
+    static List<string> PointSwatches(Texture2D[] albs, TileSpan[] spans, bool[] flatSwatch, string[] labels)
+    {
+        var log = new List<string>();
+        for (int i = 0; i < albs.Length; i++)
+        {
+            var a = albs[i]; var ts = spans[i];
+            if (a == null || ts == null || !ts.Any || (flatSwatch != null && i < flatSwatch.Length && flatSwatch[i])) continue;
+            if (!BakerRules.PointUv(ts.SpanU, ts.SpanV, a.width, a.height)) continue;
+            float fu = ts.U0 - Mathf.Floor(ts.U0), fv = ts.V0 - Mathf.Floor(ts.V0);   // the texture wraps, as the source viewer wrapped it
+            int px = Mathf.Clamp((int)(fu * a.width), 0, a.width - 1), py = Mathf.Clamp((int)(fv * a.height), 0, a.height - 1);
+            Color32 c = a.GetPixel(px, py);
+            var t = FilledTex(8, 8, c); t.name = a.name + "_point";
+            UnityEngine.Object.DestroyImmediate(a); albs[i] = t;
+            if (flatSwatch != null && i < flatSwatch.Length) flatSwatch[i] = true;
+            log.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "'{0}': every UV at ({1:0.###}, {2:0.###}) — one texel of a {3}x{4} texture, packed as the flat colour ({5}, {6}, {7})",
+                labels != null && i < labels.Length ? labels[i] : "material " + i, ts.U0, ts.V0, a.width, a.height, c.r, c.g, c.b));
+        }
+        return log;
+    }
+
     // Decide the repeats for every cell and replace the tiled ones' albedo with the pre-tiled image (same pixel size:
     // the repeats share the texture's own resolution). Swatches and untiled cells are untouched. Returns the log lines.
     static List<string> PreTileAlbedos(Texture2D[] albs, TileSpan[] spans, bool[] flatSwatch, string[] labels)
@@ -2220,6 +2245,7 @@ public static class UniversalBaker
                 foreach (int vi0 in m0.GetTriangles(s0)) tileSpans[ri0].Add(uv0[vi0]);
             }
         }
+        foreach (string line in PointSwatches(albs, tileSpans, flatSwatch, orderedAlb.Select(kv => kv.Key).ToArray())) Debug.Log($"[Factory] {name} point-UV material {line}");
         foreach (string line in PreTileAlbedos(albs, tileSpans, flatSwatch, orderedAlb.Select(kv => kv.Key).ToArray())) Debug.Log($"[Factory] {name} tiled material {line}");
         var rects = atlas.PackTextures(albs, 2, cfg.atlasMaxDim > 0 ? cfg.atlasMaxDim : AtlasMaxDimDefault);
         var apx = atlas.GetPixels32();
