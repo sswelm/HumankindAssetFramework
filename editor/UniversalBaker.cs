@@ -1924,11 +1924,12 @@ public static class UniversalBaker
             float fu = ts.U0 - Mathf.Floor(ts.U0), fv = ts.V0 - Mathf.Floor(ts.V0);   // the texture wraps, as the source viewer wrapped it
             int px = Mathf.Clamp((int)(fu * a.width), 0, a.width - 1), py = Mathf.Clamp((int)(fv * a.height), 0, a.height - 1);
             Color32 c = a.GetPixel(px, py);
-            var t = FilledTex(8, 8, c); t.name = a.name + "_point";
+            int aw = a.width, ah = a.height; string an = a.name;   // read BEFORE the destroy below: a destroyed Texture2D throws on every access
+            var t = FilledTex(8, 8, c); t.name = an + "_point";
             UnityEngine.Object.DestroyImmediate(a); albs[i] = t;
             if (flatSwatch != null && i < flatSwatch.Length) flatSwatch[i] = true;
             log.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "'{0}': every UV at ({1:0.###}, {2:0.###}) — one texel of a {3}x{4} texture, packed as the flat colour ({5}, {6}, {7})",
-                labels != null && i < labels.Length ? labels[i] : "material " + i, ts.U0, ts.V0, a.width, a.height, c.r, c.g, c.b));
+                labels != null && i < labels.Length ? labels[i] : "material " + i, ts.U0, ts.V0, aw, ah, c.r, c.g, c.b));
         }
         return log;
     }
