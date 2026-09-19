@@ -90,4 +90,17 @@ public class NaturalOrderTests
         Assert.Equal(1, BakerRules.TileRepeats(1036.0, 8, 48));     // a swatch never repeats
         Assert.Equal(1, BakerRules.TileRepeats(double.NaN, 769, 48));
     }
+
+    [Fact]
+    public void Point_uv_material_is_the_one_texel_its_whole_span_fits_in()
+    {
+        Assert.True(BakerRules.PointUv(0.0, 0.0, 512, 1024));            // the Romanic's deck: every face at (0, 1)
+        Assert.True(BakerRules.PointUv(1.0 / 512, 1.0 / 1024, 512, 1024)); // exactly one texel still counts
+        Assert.False(BakerRules.PointUv(2.0 / 512, 0.0, 512, 1024));      // two texels across: a texture, keep the fold
+        Assert.False(BakerRules.PointUv(0.0, 0.5, 512, 1024));            // a line of texels on one axis
+        Assert.False(BakerRules.PointUv(53.4, 108.7, 256, 256));          // the hull plating: tiled, never a point
+        Assert.False(BakerRules.PointUv(double.NaN, 0.0, 512, 1024));
+        Assert.False(BakerRules.PointUv(double.PositiveInfinity, 0.0, 512, 1024));   // an unmeasured span (no UVs)
+        Assert.False(BakerRules.PointUv(0.0, 0.0, 0, 1024));              // a texture with no pixels is not sampled
+    }
 }

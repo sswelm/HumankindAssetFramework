@@ -49,6 +49,21 @@ public static class BakerRules
         int cap = Math.Max(1, texPixels / Math.Max(1, minRepeatPx));
         return Math.Max(1, Math.Min((int)Math.Round(span), cap));
     }
+
+    // POINT-UV MATERIALS (2026-09-19, the Romanic's deck): a ripped model often paints a part with a textured
+    // material whose every face carries the SAME single UV — the texture is used as a colour picker, one texel.
+    // Packed as a texture, that point lands on one edge of its atlas cell (the fold maps v = 1 to 0), where the
+    // bilinear tap blends the neighbouring cell in and every coarser mip averages the whole image: a tan plank
+    // texel read as the image's dark-brown mean (0.61, 0.52, 0.36 for a 0.77, 0.68, 0.52 texel) while the web
+    // preview, sampling the wrapped texture at the point, showed the tan. Such a material IS a flat colour — the
+    // texel at its point — and packs as an 8 px swatch pinned to its cell centre like any factor-only material.
+    // The test is the material's whole UV span fitting inside ONE texel of its own texture on both axes.
+    public static bool PointUv(double spanU, double spanV, int texW, int texH)
+    {
+        if (double.IsNaN(spanU) || double.IsNaN(spanV) || double.IsInfinity(spanU) || double.IsInfinity(spanV)) return false;
+        if (spanU < 0 || spanV < 0 || texW < 1 || texH < 1) return false;
+        return spanU * texW <= 1.0 && spanV * texH <= 1.0;
+    }
 }
 
 /// <summary>Natural name ordering — "Object_2" before "Object_10" (Model Workshop part list; NaturalOrderTests).</summary>
