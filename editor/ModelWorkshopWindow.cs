@@ -733,7 +733,10 @@ public abstract class ModelWorkshopWindow : EditorWindow
     long PreviewBytes()
     {
         long verts = 0, idx = 0;
-        foreach (var r in rows) { verts += r.verts; idx += 3L * r.tris; }
+        // r.verts counts the whole POSITION accessor, which a split fragment SHARES with its parent — 13x too high on
+        // a real Khalandion split (PR 66 review). The extractor compacts to referenced vertices, and a part can never
+        // reference more than three per triangle, so the smaller of the two is the honest figure.
+        foreach (var r in rows) { verts += Math.Min(r.verts, 3L * r.tris); idx += 3L * r.tris; }
         return verts * 72L + idx * 8L;
     }
 

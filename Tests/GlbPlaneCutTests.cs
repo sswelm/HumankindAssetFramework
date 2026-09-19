@@ -114,6 +114,33 @@ public class GlbPlaneCutTests
     }
 
     [Fact]
+    public void A_split_fragment_carries_only_its_own_vertices()
+    {
+        // A split writes its fragments as new INDEX accessors over the parent's untouched POSITION accessor, so a
+        // fragment addresses a few vertices inside a buffer holding the whole part. The preview builds one Unity mesh
+        // per part and lets RecalculateBounds size it, so uncompacted vertices both waste memory (measured 13x on a
+        // real Khalandion split, one 8-vertex fragment holding 65,532) and frame the WHOLE parent when a fragment's
+        // row is clicked. (PR 66 review.) The Facing fixture's 7 triangles form 4 disconnected islands.
+        byte[] split = GlbDisconnectedParts.Split(BuildGlb(Facing)).Bytes;
+        var frags = GlbDisconnectedParts.ExtractAll(split).Where(g => g.NodeName.Contains("_Part_")).ToList();
+        Assert.Equal(4, frags.Count);
+        Assert.Equal(21, frags.Sum(g => g.Triangles.Length / 3) * 3);   // every triangle of the parent, once
+        foreach (var f in frags)
+        {
+            // the fixture shares no vertex between its triangles, so a compact fragment holds exactly its own corners
+            Assert.Equal(f.Triangles.Length, f.Positions.Length / 3);
+            Assert.All(f.Triangles, i => Assert.InRange(i, 0, f.Positions.Length / 3 - 1));
+            for (int a = 0; a < 3; a++)
+            {
+                double lo = double.PositiveInfinity, hi = double.NegativeInfinity;
+                for (int v = 0; v < f.Positions.Length / 3; v++) { lo = Math.Min(lo, f.Positions[v * 3 + a]); hi = Math.Max(hi, f.Positions[v * 3 + a]); }
+                Assert.Equal(lo, f.Min[a], 4);   // the vertex buffer's own extent IS the fragment's extent, so what
+                Assert.Equal(hi, f.Max[a], 4);   // Unity measures with RecalculateBounds agrees with PartGeometry
+            }
+        }
+    }
+
+    [Fact]
     public void Morph_weight_animation_retargets_to_both_cut_children()
     {
         byte[] source = BuildGlb(Strip, withWeightAnimation: true);

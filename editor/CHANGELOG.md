@@ -21,6 +21,14 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
+- **Model Splitter / Fuser: a split fragment's preview carries only its own vertices.** A split writes its fragments as
+  new *index* accessors over the parent's untouched position buffer, so a fragment addresses a handful of vertices
+  inside a buffer holding the whole original part. The preview copied the buffer wholesale: on a real Khalandion split
+  it held 5,202,111 vertices to draw 393,646 (13x), one 8-vertex fragment carrying 65,532 — and because Unity sizes a
+  mesh with `RecalculateBounds` over every vertex it holds, clicking a fragment's row framed the whole parent instead
+  of zooming to the part. Each primitive is now compacted to the vertices it references, indices remapped; the same
+  file now holds exactly the 393,646 it draws. The 1 GB estimate counted the shared buffers too and is corrected the
+  same way. Found in review of PR 66.
 - **Model Splitter / Fuser: "Hide parts over (size)"** — the mirror of the existing lower bound, so the two bracket a
   size band, and alone it leaves nothing but the small clutter in the list, ready for the Delete key. Its travel is
   **logarithmic**: part sizes span four decades on a split model (the Romanic's 1,796 parts run 0.017 to 173), where a

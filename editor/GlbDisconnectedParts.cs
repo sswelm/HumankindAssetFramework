@@ -733,46 +733,62 @@ public static class GlbDisconnectedParts
         var primitives = (meshes[meshIndex] as JObject)?["primitives"] as JArray ?? throw new InvalidDataException("Mesh has no primitives.");
         double[] world = NodeWorldMatrix(nodes, nodeIndex);
         var prims = TrianglePrimitives(primitives).ToList();
-        // sizes first, arrays second: a 2.6 M-triangle ship is read in one pass without list growth
-        int totalVerts = 0, totalIndices = 0;
-        foreach (JObject primitive in prims)
-        {
-            int vertCount = reader.Count(primitive["attributes"].Value<int>("POSITION"));
-            int indexCount = primitive["indices"] == null ? vertCount : reader.Count(primitive.Value<int>("indices"));
-            if (indexCount % 3 != 0) throw new InvalidDataException("Triangle primitive index count is not divisible by three.");
-            totalVerts = checked(totalVerts + vertCount); totalIndices = checked(totalIndices + indexCount);
-        }
-        var positions = new float[checked(totalVerts * 3)];
-        var triangles = new int[totalIndices];
-        var geo = new PartGeometry { NodeIndex = nodeIndex, NodeName = (string)node["name"] ?? ("node " + nodeIndex), PrimitiveStart = new int[prims.Count], PrimitiveColour = new float[prims.Count][] };
-        JArray materials = root["materials"] as JArray;
-        int baseVertex = 0, at = 0;
+        // ONLY THE VERTICES THIS PART REFERENCES (2026-09-19, review of PR 66). A split writes its fragments as new
+        // INDEX accessors over the parent's untouched POSITION accessor, so a fragment's primitive addresses a handful
+        // of vertices inside a buffer holding the whole original part. Copying the buffer wholesale gave every fragment
+        // the parent's vertices: measured on khelandion_2_split.glb, 5,202,111 vertices held to draw 393,646 (13.2x),
+        // one 8-vertex fragment carrying 65,532. Two consequences, both real — the memory, and Unity's
+        // RecalculateBounds over the unused vertices, which framed the whole parent when a fragment's row was clicked.
+        // Each primitive is compacted to its referenced vertices with the indices remapped; the bounds were always
+        // taken over referenced vertices only, so Min/Max are unchanged.
+        int totalIndices = 0;
+        var primIndices = new uint[prims.Count][];
+        var primVertCount = new int[prims.Count];
         for (int pi = 0; pi < prims.Count; pi++)
         {
             JObject primitive = prims[pi];
             int posAcc = primitive["attributes"].Value<int>("POSITION");
             int vertCount = reader.Count(posAcc);
-            for (uint v = 0; v < vertCount; v++)
-            {
-                Vec3 p = XForm(world, reader.Position(posAcc, v));
-                int o = (baseVertex + (int)v) * 3;
-                positions[o] = (float)p.X; positions[o + 1] = (float)p.Y; positions[o + 2] = (float)p.Z;
-            }
-            geo.PrimitiveStart[pi] = at;
-            geo.PrimitiveColour[pi] = BaseColour(materials, primitive);
             int indexCount = primitive["indices"] == null ? vertCount : reader.Count(primitive.Value<int>("indices"));
+            if (indexCount % 3 != 0) throw new InvalidDataException("Triangle primitive index count is not divisible by three.");
+            var idx = new uint[indexCount];
             for (uint i = 0; i < indexCount; i++)
             {
-                uint idx = primitive["indices"] == null ? i : reader.Index(primitive.Value<int>("indices"), i);
-                if (idx >= vertCount) throw new InvalidDataException("Primitive index exceeds its POSITION accessor.");
-                int vi = baseVertex + (int)idx;
-                triangles[at++] = vi;
-                int o = vi * 3;
-                UpdateBounds(geo.Min, geo.Max, new Vec3 { X = positions[o], Y = positions[o + 1], Z = positions[o + 2] });
+                uint v = primitive["indices"] == null ? i : reader.Index(primitive.Value<int>("indices"), i);
+                if (v >= vertCount) throw new InvalidDataException("Primitive index exceeds its POSITION accessor.");
+                idx[i] = v;
             }
-            baseVertex += vertCount;
+            primIndices[pi] = idx; primVertCount[pi] = vertCount;
+            totalIndices = checked(totalIndices + indexCount);
         }
-        geo.Positions = positions;
+        var triangles = new int[totalIndices];
+        var positions = new List<float>(Math.Min(totalIndices, 1 << 20) * 3);
+        var geo = new PartGeometry { NodeIndex = nodeIndex, NodeName = (string)node["name"] ?? ("node " + nodeIndex), PrimitiveStart = new int[prims.Count], PrimitiveColour = new float[prims.Count][] };
+        JArray materials = root["materials"] as JArray;
+        int at = 0;
+        for (int pi = 0; pi < prims.Count; pi++)
+        {
+            JObject primitive = prims[pi];
+            int posAcc = primitive["attributes"].Value<int>("POSITION");
+            geo.PrimitiveStart[pi] = at;
+            geo.PrimitiveColour[pi] = BaseColour(materials, primitive);
+            var remap = new int[primVertCount[pi]];        // source vertex -> compacted vertex, -1 until first use
+            for (int k = 0; k < remap.Length; k++) remap[k] = -1;
+            foreach (uint v in primIndices[pi])
+            {
+                int vi = remap[(int)v];
+                if (vi < 0)
+                {
+                    Vec3 p = XForm(world, reader.Position(posAcc, v));
+                    vi = positions.Count / 3;
+                    positions.Add((float)p.X); positions.Add((float)p.Y); positions.Add((float)p.Z);
+                    remap[(int)v] = vi;
+                    UpdateBounds(geo.Min, geo.Max, new Vec3 { X = positions[vi * 3], Y = positions[vi * 3 + 1], Z = positions[vi * 3 + 2] });
+                }
+                triangles[at++] = vi;
+            }
+        }
+        geo.Positions = positions.ToArray();
         geo.Triangles = triangles;
         return geo;
     }
