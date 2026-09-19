@@ -615,7 +615,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
             EditorUtility.DisplayProgressBar("Model Workshop", "Exporting preview via Blender…", 0.4f);
             var p = new System.Diagnostics.Process();
             p.StartInfo.FileName = UniversalBaker.FindBlender();
-            p.StartInfo.Arguments = $"--background --python \"{script}\" -- probe \"{srcFile}\" \"{prevFull}\"";
+            // `previewonly`: this window reads nothing but the FBX, so the probe skips the Lab's visibility rays and
+            // inside-out verdicts (24 s of a 214 MB ship's 86 s Probe); the Lab's own probe runs them as before.
+            p.StartInfo.Arguments = $"--background --python \"{script}\" -- probe \"{srcFile}\" \"{prevFull}\" previewonly";
             p.StartInfo.UseShellExecute = false; p.StartInfo.CreateNoWindow = true;
             p.StartInfo.RedirectStandardOutput = true; p.StartInfo.RedirectStandardError = true;
             p.Start();

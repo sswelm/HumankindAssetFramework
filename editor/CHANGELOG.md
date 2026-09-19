@@ -21,6 +21,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
+- **Model Splitter / Fuser: Probe is three times faster on a big file.** A 214 MB ship (113 parts, 2.6 M triangles)
+  took 86 s to probe. Two causes, both fixed. The island analysis read every index and every position through the
+  accessor's JSON again — string-keyed lookups, a boxed int and a fresh array per element — 30 s; the reader now
+  resolves each accessor's layout once (same checks, same messages, same bytes: the rows of the real file are
+  identical to master's) and reads elements straight from the buffer: 6 s. The preview export ran the Vehicle
+  Lab's visibility rays and inside-out verdicts (24 s) that these windows never read; the Workshop passes
+  `previewonly` and the probe skips them: 40 s → 16 s, the FBX unchanged beyond the exporter's own run-to-run
+  stamps. Every GLB reader in the toolkit (split, cut, fuse, extract) shares the faster accessor. The BIN prefix
+  copy also stopped enumerating 200 MB byte by byte through LINQ.
 - **Bake: a point-UV material packs as the colour it samples.** The Romanic's deck is painted with a 512×1024
   plank texture whose every face carries the same single UV — the texture used as a colour picker, one tan
   texel. Packed as a texture, that point folded onto the bottom-left edge of its atlas cell, where the bilinear

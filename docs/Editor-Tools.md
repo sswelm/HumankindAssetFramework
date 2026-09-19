@@ -375,7 +375,9 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   explodes the part list; usually leave those whole — or raise the **Merge closer than (%)** slider, which counts
   near islands as one part (rotation-invariant since 0.5.6: diagonal dashed lines gate correctly too). The
   **Output GLB** auto-follows the source file until you edit it, and changing the source — typed or browsed —
-  resets the probe so a stale part list can never split the wrong file.
+  resets the probe so a stale part list can never split the wrong file. Probe time is dominated by Blender's
+  import and export of the preview (a 214 MB ship probes in about 30 s; the island analysis itself takes a few
+  seconds) — the Workshop's probe skips the Vehicle Lab's visibility and inside-out passes, which it never shows.
   **Find the mirror of …** (0.5.7): with a row highlighted, the button finds the part on the other side of the
   centreline whose bounding box is this one's reflected (within 3 % of the part's size — triangle counts may differ,
   the two sides of a ship are often remodelled rather than instanced), highlights it and scrolls to it; press a letter

@@ -223,81 +223,107 @@ public static class GlbDisconnectedParts
 
     sealed class Accessors
     {
-        readonly JObject root;
         readonly byte[] bin;
         readonly JArray accessors;
         readonly JArray views;
 
+        // PER-ACCESSOR LAYOUT CACHE (2026-09-19, the Model Splitter's 86 s Probe on a 214 MB GLB): every element read
+        // used to walk the accessor and its bufferView through the JSON again — string-keyed JObject lookups, boxed
+        // ints and a fresh double[] per index and per position — 28 s of a 30 s Analyze. The layout is resolved ONCE
+        // per accessor, with the same checks in the same order (the messages are the contract the tests lock; a
+        // view problem is remembered and thrown on the first read, as before), and an element read is an offset
+        // multiply and a BitConverter call. Results are byte-identical: nothing about the decode changed.
+        sealed class Layout
+        {
+            public int Count, ComponentType, Bytes, Have, Stride; public long Start; public bool Normalized; public string Type;
+            public string ViewError;   // the ReadElement exception this accessor's view would raise, thrown when a read is attempted
+        }
+        readonly Dictionary<int, Layout> layouts = new Dictionary<int, Layout>();
+
         public Accessors(JObject root, byte[] bin)
         {
-            this.root = root;
             this.bin = bin;
             accessors = root["accessors"] as JArray ?? throw new InvalidDataException("GLB has no accessors array.");
             views = root["bufferViews"] as JArray ?? throw new InvalidDataException("GLB has no bufferViews array.");
         }
 
-        public int Count(int accessorIndex) => Accessor(accessorIndex).Value<int>("count");
+        public int Count(int accessorIndex) => Resolve(accessorIndex).Count;
 
         public Vec3 Position(int accessorIndex, uint index)
         {
-            JObject a = Accessor(accessorIndex);
-            if ((string)a["type"] != "VEC3") throw new InvalidDataException("POSITION accessor is not VEC3.");
-            var values = ReadElement(a, index, 3);
-            return new Vec3 { X = values[0], Y = values[1], Z = values[2] };
+            Layout a = Resolve(accessorIndex);
+            if (a.Type != "VEC3") throw new InvalidDataException("POSITION accessor is not VEC3.");
+            int at = ElementOffset(a, index, 3);
+            return new Vec3 { X = ReadComponent(bin, at, a.ComponentType, a.Normalized), Y = ReadComponent(bin, at + a.Bytes, a.ComponentType, a.Normalized), Z = ReadComponent(bin, at + 2 * a.Bytes, a.ComponentType, a.Normalized) };
         }
 
         public uint Index(int accessorIndex, uint index)
         {
-            JObject a = Accessor(accessorIndex);
-            if ((string)a["type"] != "SCALAR") throw new InvalidDataException("Index accessor is not SCALAR.");
-            int componentType = a.Value<int>("componentType");
-            if (componentType != 5121 && componentType != 5123 && componentType != 5125)
+            Layout a = Resolve(accessorIndex);
+            if (a.Type != "SCALAR") throw new InvalidDataException("Index accessor is not SCALAR.");
+            if (a.ComponentType != 5121 && a.ComponentType != 5123 && a.ComponentType != 5125)
                 throw new InvalidDataException("Index accessor must use unsigned byte, ushort, or uint.");
-            return checked((uint)ReadElement(a, index, 1)[0]);
+            return checked((uint)ReadComponent(bin, ElementOffset(a, index, 1), a.ComponentType, a.Normalized));
         }
 
         // Any vector attribute (NORMAL, TEXCOORD_n …): the element's leading `components`, normalized ints decoded.
         public double[] Vector(int accessorIndex, uint index, int components)
         {
-            JObject a = Accessor(accessorIndex);
-            string type = (string)a["type"];
-            int have = type == "SCALAR" ? 1 : type == "VEC2" ? 2 : type == "VEC3" ? 3 : type == "VEC4" ? 4 : 0;
-            if (have < components) throw new InvalidDataException("Accessor " + type + " holds fewer than " + components + " components.");
-            return ReadElement(a, index, have);
+            Layout a = Resolve(accessorIndex);
+            if (a.Have < components) throw new InvalidDataException("Accessor " + a.Type + " holds fewer than " + components + " components.");
+            int at = ElementOffset(a, index, a.Have);
+            var result = new double[a.Have];
+            for (int i = 0; i < a.Have; i++) result[i] = ReadComponent(bin, at + i * a.Bytes, a.ComponentType, a.Normalized);
+            return result;
         }
 
-        JObject Accessor(int index)
+        Layout Resolve(int index)
         {
+            if (layouts.TryGetValue(index, out Layout cached)) return cached;
             if (index < 0 || index >= accessors.Count) throw new InvalidDataException("Accessor index is out of range.");
             var a = accessors[index] as JObject ?? throw new InvalidDataException("Accessor is not an object.");
             if (a["sparse"] != null) throw new InvalidDataException("Sparse accessors are not supported by this splitter.");
-            return a;
+            var l = new Layout { Count = a.Value<int>("count"), Type = (string)a["type"], ComponentType = a.Value<int>("componentType"), Normalized = a.Value<bool?>("normalized") ?? false };
+            l.Have = l.Type == "SCALAR" ? 1 : l.Type == "VEC2" ? 2 : l.Type == "VEC3" ? 3 : l.Type == "VEC4" ? 4 : 0;
+            JObject view = null;
+            if (a["bufferView"] == null) l.ViewError = "Accessor has no bufferView (compressed/implicit data is unsupported).";
+            else
+            {
+                int viewIndex = a.Value<int>("bufferView");
+                if (viewIndex < 0 || viewIndex >= views.Count) l.ViewError = "bufferView index is out of range.";
+                else if ((view = views[viewIndex] as JObject) == null) l.ViewError = "bufferView is not an object.";
+                else if (view.Value<int?>("buffer").GetValueOrDefault() != 0) l.ViewError = "Only GLB buffer 0 can be edited losslessly.";
+                else if (view["extensions"]?["EXT_meshopt_compression"] != null) l.ViewError = "Meshopt-compressed bufferViews are not supported.";
+            }
+            if (l.ViewError == null)
+            {
+                l.Bytes = ComponentBytes(l.ComponentType);   // throws "Unsupported GLB component type" here, as the old read did after the view checks
+                l.Stride = view.Value<int?>("byteStride") ?? 0;   // 0 = tightly packed: the element size is applied per read (it depends on the components asked for)
+                l.Start = (long)(view.Value<int?>("byteOffset") ?? 0) + (a.Value<int?>("byteOffset") ?? 0);
+            }
+            layouts[index] = l;
+            return l;
         }
 
-        double[] ReadElement(JObject accessor, uint index, int components)
+        // The BIN offset of element `index`, with the old per-read checks in the old order.
+        int ElementOffset(Layout a, uint index, int components)
         {
-            int count = accessor.Value<int>("count");
-            if (index >= count) throw new InvalidDataException("Accessor element is out of range.");
-            if (accessor["bufferView"] == null) throw new InvalidDataException("Accessor has no bufferView (compressed/implicit data is unsupported).");
-            int viewIndex = accessor.Value<int>("bufferView");
-            if (viewIndex < 0 || viewIndex >= views.Count) throw new InvalidDataException("bufferView index is out of range.");
-            var view = views[viewIndex] as JObject ?? throw new InvalidDataException("bufferView is not an object.");
-            if (view.Value<int?>("buffer").GetValueOrDefault() != 0)
-                throw new InvalidDataException("Only GLB buffer 0 can be edited losslessly.");
-            if (view["extensions"]?["EXT_meshopt_compression"] != null)
-                throw new InvalidDataException("Meshopt-compressed bufferViews are not supported.");
-
-            int componentType = accessor.Value<int>("componentType");
-            int bytes = ComponentBytes(componentType);
-            int stride = view.Value<int?>("byteStride") ?? bytes * components;
-            if (stride < bytes * components) throw new InvalidDataException("bufferView byteStride is smaller than its element.");
-            long start = (long)(view.Value<int?>("byteOffset") ?? 0) + (accessor.Value<int?>("byteOffset") ?? 0) + (long)index * stride;
-            if (start < 0 || start + bytes * components > bin.Length) throw new InvalidDataException("Accessor reads beyond the BIN chunk.");
-            bool normalized = accessor.Value<bool?>("normalized") ?? false;
-            var result = new double[components];
-            for (int i = 0; i < components; i++) result[i] = ReadComponent(bin, checked((int)start + i * bytes), componentType, normalized);
-            return result;
+            if (index >= a.Count) throw new InvalidDataException("Accessor element is out of range.");
+            if (a.ViewError != null) throw new InvalidDataException(a.ViewError);
+            int stride = a.Stride != 0 ? a.Stride : a.Bytes * components;
+            if (stride < a.Bytes * components) throw new InvalidDataException("bufferView byteStride is smaller than its element.");
+            long start = a.Start + (long)index * stride;
+            if (start < 0 || start + a.Bytes * components > bin.Length) throw new InvalidDataException("Accessor reads beyond the BIN chunk.");
+            return checked((int)start);
         }
+    }
+
+    // The declared prefix of the BIN chunk as its own array (a copy, as the old LINQ Take().ToArray() was — the
+    // callers append to it), without enumerating 200 MB byte by byte.
+    static byte[] Prefix(byte[] source, int length)
+    {
+        int n = Math.Max(0, Math.Min(length, source.Length));
+        var copy = new byte[n]; Buffer.BlockCopy(source, 0, copy, 0, n); return copy;
     }
 
     static int ComponentBytes(int type)
@@ -354,7 +380,7 @@ public static class GlbDisconnectedParts
         if (buffers.Count != 1 || buffers[0]?["uri"] != null)
             throw new InvalidDataException("Lossless splitting requires one embedded GLB buffer.");
         byte[] sourceBin = document.Chunks[document.BinIndex].Data;
-        var reader = new Accessors(root, sourceBin.Take(buffers[0].Value<int>("byteLength")).ToArray());
+        var reader = new Accessors(root, Prefix(sourceBin, buffers[0].Value<int>("byteLength")));
 
         var byMesh = new Dictionary<int, MeshPlan>();
         var blockedByMesh = new Dictionary<int, string>();
@@ -464,7 +490,7 @@ public static class GlbDisconnectedParts
         byte[] sourceBin = document.Chunks[document.BinIndex].Data;
         if (declaredBinLength < 0 || declaredBinLength > sourceBin.Length)
             throw new InvalidDataException("buffers[0].byteLength exceeds the BIN chunk.");
-        byte[] originalData = sourceBin.Take(declaredBinLength).ToArray();
+        byte[] originalData = Prefix(sourceBin, declaredBinLength);
         var bin = new List<byte>(originalData);
         var result = new Result();
         var reader = new Accessors(root, originalData);
@@ -1991,7 +2017,7 @@ public static class GlbDisconnectedParts
         byte[] sourceBin = document.Chunks[document.BinIndex].Data;
         if (declaredBinLength < 0 || declaredBinLength > sourceBin.Length)
             throw new InvalidDataException("buffers[0].byteLength exceeds the BIN chunk.");
-        originalData = sourceBin.Take(declaredBinLength).ToArray();
+        originalData = Prefix(sourceBin, declaredBinLength);
         return new Accessors(root, originalData);
     }
 
