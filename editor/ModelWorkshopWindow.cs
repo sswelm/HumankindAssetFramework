@@ -614,6 +614,13 @@ public abstract class ModelWorkshopWindow : EditorWindow
     static string NaturalPrefix(string s) => NaturalOrder.Prefix(s);
     static long NaturalNumber(string s) => NaturalOrder.Number(s);
 
+    // MIRRORED IMAGE, NOT MIRRORED FACING (measured 2026-09-19, drill_unity_facing.py on the Romanic split: 856
+    // mirrored nodes, 425,632 triangles, rays from the beam): the winding below is handed to Unity UNCHANGED and
+    // 1.0 % of the struck surface renders back-facing; adding the swap glTF's negative-determinant rule seems to ask
+    // for takes that to 97.6 % — the whole port side inside-out, which is what a user reported. Unity reads these
+    // numbers in a left-handed frame AND calls a clockwise triangle front-facing, and the two conventions cancel, so
+    // facing survives the copy. The IMAGE does not: the preview is a mirror of the model, so screen-left is the
+    // file's starboard. The sliders and the mirror finder work in FILE coordinates and stay correct.
     // ---- preview build (2026-09-19): straight from the GLB, one object per mesh-carrying NODE. Until now the Vehicle
     // Lab's Blender probe exported an FBX that Unity imported (24 s of a 214 MB ship's probe) and the rows found their
     // renderers by NAME — a file that names all 113 of its nodes "Material2" (the Salegs Revenge) lit the whole ship for
@@ -625,6 +632,17 @@ public abstract class ModelWorkshopWindow : EditorWindow
         DestroyPreview();
         try
         {
+            // MEMORY CEILING (2026-09-19, user: "1GB should be a good limit"): the preview holds the whole model as
+            // managed arrays AND as Unity meshes — positions, the Vector3 copy, recalculated normals and the index
+            // arrays. Analyze has already counted this file's vertices and triangles, so the cost is known BEFORE a
+            // byte is read; past the ceiling the window says so and keeps the list, which is what the Splitter and
+            // Fuser actually act on. (Your 214 MB ship: 5.2 M vertices, 6.2 M triangles, about 0.4 GB — it still builds.)
+            long need = PreviewBytes();
+            if (need > PreviewByteCeiling)
+            {
+                status += $"\n(no preview: this model would need about {need / (1024f * 1024f * 1024f):0.0} GB of mesh memory, over the {PreviewByteCeiling / (1024 * 1024 * 1024)} GB ceiling — the list, the filters and {(Fusing ? "Fuse" : "Split")} work as usual)";
+                return;
+            }
             EditorUtility.DisplayProgressBar("Model Workshop", "Building the preview…", 0.4f);
             var parts = GlbDisconnectedParts.ExtractAll(File.ReadAllBytes(srcFile));
             inst = new GameObject("__workshopPreview") { hideFlags = HideFlags.HideAndDontSave };
@@ -661,6 +679,18 @@ public abstract class ModelWorkshopWindow : EditorWindow
         }
         catch (Exception e) { status += "\n(no preview: " + e.Message + ")"; }
         finally { EditorUtility.ClearProgressBar(); }
+    }
+
+    // What the preview will cost, from the counts Analyze already has: per vertex the float positions, the Vector3
+    // copy and the recalculated normals (3 x 12 bytes) with the same again for Unity's own copy of the mesh, and per
+    // index the managed array plus Unity's (2 x 4 bytes). Deliberately an over-estimate — the ceiling is a guard, and
+    // refusing a preview costs the user a picture, while running out of memory costs the editor.
+    const long PreviewByteCeiling = 1L << 30;   // 1 GB
+    long PreviewBytes()
+    {
+        long verts = 0, idx = 0;
+        foreach (var r in rows) { verts += r.verts; idx += 3L * r.tris; }
+        return verts * 72L + idx * 8L;
     }
 
     // One material per distinct base colour, shared across the preview (a 1,400-part liner has a dozen colours).

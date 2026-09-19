@@ -377,7 +377,10 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   **Output GLB** auto-follows the source file until you edit it, and changing the source — typed or browsed —
   resets the probe so a stale part list can never split the wrong file. The preview is built straight from the GLB
   (0.5.7: no Blender export, no FBX import — a 214 MB ship probes in about ten seconds), one object per node, so a
-  row lights exactly its own part even in a file whose nodes all share one name.
+  row lights exactly its own part even in a file whose nodes all share one name. The preview is a MIRROR image of the
+  model (glTF and Unity disagree on handedness, and correcting it would invert every face), so screen-left is the
+  file's starboard; the side sliders and the mirror finder work in file coordinates and are unaffected. A model whose
+  meshes would need more than 1 GB is listed and filtered as usual but not drawn.
   **Find the mirror of …** (0.5.7): with a row highlighted, the button finds the part on the other side of the
   centreline whose bounding box is this one's reflected (within 3 % of the part's size — triangle counts may differ,
   the two sides of a ship are often remodelled rather than instanced), highlights it and scrolls to it; press a letter
