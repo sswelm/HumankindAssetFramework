@@ -406,6 +406,9 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   **Fuse — weld seams closer than** at **0** (coincident positions, within float rounding — the Teutonic's plates already touch,
   and that alone found its hole; raise it only for plates that leave gaps, knowing that every triangle smaller
   than the distance collapses: at 0.5‰ the Teutonic lost 1,564 rivet-sized faces and its hull island broke apart),
+  tick **Check mirrored parts** if one side of a symmetric hull comes out see-through (0.5.7: some files store their
+  mirrored parts already facing outward, and the glTF reversal then turns them inward; the fuse checks them against
+  the plain parts they touch and acts only on a clear verdict, and warns you when a group would need it),
   press **Fuse … into one shell each**: every group becomes ONE mesh in the output GLB, their seam vertices
   welded (a UV seam or a hard edge keeps its own vertex; connectivity is by position regardless), the winding
   made **consistent by majority**

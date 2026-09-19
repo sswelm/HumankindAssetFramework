@@ -1000,9 +1000,11 @@ public static class GlbDisconnectedParts
     // bytes and its own state, so every group of a Generate plans at once on the thread pool; applying (stage 8: the
     // mesh, the node, the stripped sources) appends to ONE document in letter order and writes once. The Romanic's 19
     // groups: 130 s chained → the longest group's 12 s plus the writes. FuseNodes keeps the one-group API.
-    public static Result FuseNodes(byte[] source, IList<int> nodeIndices, double weldFraction, string fusedName)
+    public static Result FuseNodes(byte[] source, IList<int> nodeIndices, double weldFraction, string fusedName) => FuseNodes(source, nodeIndices, weldFraction, fusedName, false);
+
+    public static Result FuseNodes(byte[] source, IList<int> nodeIndices, double weldFraction, string fusedName, bool checkMirrored)
     {
-        FusePlan plan = PlanFuse(source, nodeIndices, weldFraction, fusedName);
+        FusePlan plan = PlanFuse(source, nodeIndices, weldFraction, fusedName, checkMirrored);
         if (plan.Empty) return plan.Result;
         Document document = Parse(source);
         JObject root = document.Root;
@@ -1020,7 +1022,7 @@ public static class GlbDisconnectedParts
     }
 
     /// <summary>One group of a multi-group fuse: the node indices and the fused part's name (null = "&lt;first part&gt;_Fused").</summary>
-    public sealed class FuseJob { public IList<int> NodeIndices; public string Name; }
+    public sealed class FuseJob { public IList<int> NodeIndices; public string Name; public bool CheckMirrored; }
 
     /// <summary>
     /// Fuse several groups from ONE source in one output: every group is planned in parallel against the same source
@@ -1047,7 +1049,7 @@ public static class GlbDisconnectedParts
         for (int i = 0; i < jobs.Count; i++)
         {
             int at = i; FuseJob job = jobs[i];
-            tasks[i] = System.Threading.Tasks.Task.Run(() => { plans[at] = PlanFuse(source, job.NodeIndices, weldFraction, job.Name); System.Threading.Interlocked.Increment(ref done); });
+            tasks[i] = System.Threading.Tasks.Task.Run(() => { plans[at] = PlanFuse(source, job.NodeIndices, weldFraction, job.Name, job.CheckMirrored); System.Threading.Interlocked.Increment(ref done); });
         }
         while (true)
         {
@@ -1081,10 +1083,11 @@ public static class GlbDisconnectedParts
         public List<int> Picked; public HashSet<int> FusedMeshes; public string BaseName;
         public double Weld, WeldFraction, Longest; public int MadeConsistent, OpenJudged, OpenReversed, ClosedReversed, FaceCount, CollapsedFaces, NotOrientable;
         public string LargestIslands, StitchedLine, RewoundByPart, Timing, FrameLine;
+        public string MirroredLine;   // the mirrored-part check's verdicts (null unless the check ran with the option on)
         public bool Empty;   // no triangles: nothing to append, the sources keep their meshes, Result.Changed stays false
     }
 
-    static FusePlan PlanFuse(byte[] source, IList<int> nodeIndices, double weldFraction, string fusedName)
+    static FusePlan PlanFuse(byte[] source, IList<int> nodeIndices, double weldFraction, string fusedName, bool checkMirrored)
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
         if (nodeIndices == null || nodeIndices.Count == 0) throw new ArgumentException("Nothing to fuse — no node indices.", nameof(nodeIndices));
@@ -1114,6 +1117,7 @@ public static class GlbDisconnectedParts
         bool tangentsDropped = false;
         var tris = new List<int>();
         var partNames = new List<string>();
+        var partMirrored = new List<bool>();   // per part: its world transform mirrors (the gather reversed its winding)
         var picked = nodeIndices.Distinct().ToList();
         var fusedMeshes = new HashSet<int>();
         foreach (int ni in picked)
@@ -1129,7 +1133,7 @@ public static class GlbDisconnectedParts
             // or the part arrives inside-out — the Teutonic's port half is the starboard meshes under a
             // (0.0254, -0.0254, 0.0254) node, and without this every port island came in inverted (2026-09-15).
             bool mirrored = Det3(world) < 0;
-            partNames.Add(nodeName); fusedMeshes.Add(mi);
+            partNames.Add(nodeName); partMirrored.Add(mirrored); fusedMeshes.Add(mi);
             foreach (JObject primitive in TrianglePrimitives(primitives))
             {
                 if (primitive["targets"] != null) throw new InvalidDataException("'" + nodeName + "' has morph targets — fuse static parts only.");
@@ -1298,6 +1302,108 @@ public static class GlbDisconnectedParts
         }
         List<List<int>> allIslands = Islands(classes, out long[] fEdgeKeys, out bool[] fEdgeDir, out Dictionary<long, List<int>> fEdgeFaces, out int collapsedFaces);
         result.IslandsAfter = allIslands.Count;
+
+        // 3b) MIRRORED PARTS JUDGED BY THEIR PLAIN NEIGHBOURS (2026-09-19, the Confederate frigate; an OPTION, off by
+        // default, user: "make it an option"). The gather reverses every mirrored part, as glTF requires of a
+        // negative-determinant node, and that is what the Teutonic needed. The frigate's file stores its mirrored hull
+        // half ALREADY facing outward, so the same reversal turned that whole side inward: 94.8 % of the fused hull
+        // rendered back-facing from that side, 0.1 % for the same 60 parts unfused. Welded to the correct half in one
+        // island, the two halves cancelled every direction signal (volume +0.00, inside-out +0.00, twins 3605 / 3514)
+        // and the island was left as it stood. A PLAIN part's winding is never in doubt (no rule touched it), so it
+        // is the reference: a mirrored part whose shared two-face edges run the SAME way as its plain neighbours' is
+        // inside-out relative to them, and its reversal is undone. Parts that touch only other mirrored parts inherit
+        // the verdict ring by ring; a part with too little evidence keeps the glTF rule. Evaluated always, so the
+        // report can say when it would matter; applied only when asked.
+        if (partMirrored.Contains(true))
+        {
+            int nParts = partNames.Count;
+            var decided = new bool[nParts]; var undo = new bool[nParts];
+            var conflictAll = new long[nParts];
+            int Part(int face) => partOf[tris[face * 3]];
+            bool Walk(int face, long key) { for (int e = 0; e < 3; e++) if (fEdgeKeys[face * 3 + e] == key) return fEdgeDir[face * 3 + e]; return false; }
+            bool progress = true;
+            while (progress)
+            {
+                progress = false;
+                var agree = new long[nParts]; var conflict = new long[nParts];
+                foreach (KeyValuePair<long, List<int>> kv in fEdgeFaces)
+                {
+                    List<int> lf = kv.Value; if (lf.Count != 2) continue;   // only a clean two-face seam is evidence
+                    int f = lf[0], g = lf[1]; int pf = Part(f), pg = Part(g);
+                    if (pf == pg) continue;
+                    bool df = Walk(f, kv.Key) ^ (decided[pf] && undo[pf]), dg = Walk(g, kv.Key) ^ (decided[pg] && undo[pg]);
+                    bool same = df == dg;   // both faces walk the shared edge the same way: one of them is inside-out…
+                    // …unless they are a LAP, the consistency pass's own rule below (the Teutonic's Object_8, 671 strips): a strip
+                    // lying ON its plate, stitched along one edge and facing the same way, walks that edge the same way as the
+                    // plate on purpose. Same traversal AND surfaces already facing the same way = consistent as authored. Without
+                    // it, three mirrored lap strips gave a unanimous "already facing outward" verdict and 18 correct faces were
+                    // turned inward (review of PR #67). A decided part about to be undone is judged as it will be written.
+                    if (same)
+                    {
+                        Vec3 na = FCross(FSub(pos[tris[f * 3 + 1]], pos[tris[f * 3]]), FSub(pos[tris[f * 3 + 2]], pos[tris[f * 3]]));
+                        Vec3 nb = FCross(FSub(pos[tris[g * 3 + 1]], pos[tris[g * 3]]), FSub(pos[tris[g * 3 + 2]], pos[tris[g * 3]]));
+                        if (decided[pf] && undo[pf]) na = FScale(na, -1.0);
+                        if (decided[pg] && undo[pg]) nb = FScale(nb, -1.0);
+                        double la = FLen(na), lb = FLen(nb);
+                        if (la > 1e-12 && lb > 1e-12 && FDot(na, nb) / (la * lb) > 0.9) same = false;
+                    }
+                    bool refF = !partMirrored[pf] || decided[pf], refG = !partMirrored[pg] || decided[pg];
+                    if (partMirrored[pf] && !decided[pf] && refG) { if (same) conflict[pf]++; else agree[pf]++; }
+                    if (partMirrored[pg] && !decided[pg] && refF) { if (same) conflict[pg]++; else agree[pg]++; }
+                }
+                for (int p = 0; p < nParts; p++)
+                    if (partMirrored[p] && !decided[p] && agree[p] + conflict[p] >= 3)
+                    { decided[p] = true; undo[p] = conflict[p] > agree[p]; conflictAll[p] = conflict[p]; progress = true; }
+            }
+            // A VERDICT ONLY WHEN THE GROUP GIVES A CLEAR ONE. How mirrored parts are stored is a property of the program
+            // that exported the file, not of each part: on the frigate all 5 mirrored parts with plain neighbours already
+            // faced outward, and one of the 14 without neighbours (Object_961) then carried 2,443 of the 2,462 back-facing
+            // cells left on the fused hull. But a single part's seam evidence is not enough on its own: the Romanic's
+            // group H judged 1 pre-flipped against 2 not, and undoing that one part made the group WORSE (2,667 -> 2,955
+            // back-facing cells from the beam). So nothing is undone unless at least three parts were judged and nine in
+            // ten of them agree the file is pre-flipped. Then every mirrored part is undone, those without evidence
+            // following the convention, except a part whose own evidence says it needs the glTF reversal. Mixed or thin
+            // evidence changes nothing at all.
+            int judgedUndo = 0, judgedKeep = 0;
+            for (int p = 0; p < nParts; p++) if (decided[p]) { if (undo[p]) judgedUndo++; else judgedKeep++; }
+            int judgedAll = judgedUndo + judgedKeep;
+            bool clear = judgedAll >= 3 && judgedUndo * 10 >= judgedAll * 9;
+            var undoSet = new HashSet<int>(); var undoNames = new List<string>(); int byConvention = 0; long undoConflicts = 0;
+            if (clear)
+                for (int p = 0; p < nParts; p++)
+                {
+                    if (!partMirrored[p] || (decided[p] && !undo[p])) continue;   // a judged dissenter keeps the glTF rule
+                    undoSet.Add(p); undoNames.Add(partNames[p]);
+                    if (decided[p]) undoConflicts += conflictAll[p]; else byConvention++;
+                }
+            int mirroredCount = partMirrored.Count(m => m);
+            if (undoSet.Count > 0 && checkMirrored)
+            {
+                for (int f = 0; f < faceCount; f++)
+                    if (undoSet.Contains(Part(f))) { int t = tris[f * 3 + 1]; tris[f * 3 + 1] = tris[f * 3 + 2]; tris[f * 3 + 2] = t; }
+                allIslands = Islands(classes, out fEdgeKeys, out fEdgeDir, out fEdgeFaces, out collapsedFaces);   // winding changed: re-read edge directions
+            }
+            var inv3 = System.Globalization.CultureInfo.InvariantCulture;
+            string names = string.Join(", ", undoNames.Take(8)) + (undoNames.Count > 8 ? ", ..." : "");
+            if (checkMirrored)
+                plan.MirroredLine = clear
+                    ? string.Format(inv3,
+                        "mirrored parts checked against their plain neighbours: {0} of {1} judged say this file already stores them facing outward, so the glTF reversal is undone for {2} part(s) ({3}){4}{5}",
+                        judgedUndo, judgedAll, undoSet.Count, names,
+                        byConvention > 0 ? string.Format(inv3, "; {0} of them had no plain neighbour and follow that convention", byConvention) : "",
+                        judgedKeep > 0 ? string.Format(inv3, "; {0} whose own seams disagree keep the reversal", judgedKeep) : "")
+                    : judgedAll >= 3 && judgedKeep * 10 >= judgedAll * 9
+                    ? string.Format(inv3,
+                        "mirrored parts checked against their plain neighbours: {0} of {1} judged confirm the glTF reversal is right (a file stored the standard way), nothing changed",
+                        judgedKeep, judgedAll)
+                    : string.Format(inv3,
+                        "mirrored parts checked against their plain neighbours: {0} of {1} mirrored part(s) judged ({2} say already facing outward, {3} say the glTF reversal is right), not enough agreement to act on, nothing changed",
+                        judgedAll, mirroredCount, judgedUndo, judgedKeep);
+            else if (clear)
+                result.Warnings.Add(string.Format(inv3,
+                    "{0} of {1} mirrored part(s) that touch plain parts disagree with them ({2} seam edges run the same way): this file stores its mirrored parts already facing outward, so the glTF reversal turns {3} part(s) inward (see-through). Tick 'Check mirrored parts' and fuse again.",
+                    judgedUndo, judgedAll, undoConflicts, undoSet.Count));
+        }
 
         // LAP / TRIM STRIPS (2026-09-15, the Teutonic's Object_8): a part most of whose vertices coincide with OTHER parts'
         // vertices AND whose faces lie flat on those parts' faces is stitched onto their surface — riveted strakes lying
@@ -1850,6 +1956,7 @@ public static class GlbDisconnectedParts
         result.Details.Add(plan.RewoundByPart);
         result.Details.Add("timing: " + plan.Timing + "; write " + writeClock.ElapsedMilliseconds.ToString(inv) + " ms");
         result.Details.Add(plan.FrameLine);
+        if (plan.MirroredLine != null) result.Details.Add(plan.MirroredLine);   // last: tests pin the earlier lines by index
     }
 
     // REMOVE (2026-09-18, user: "an easy way to mark a unit for removal with the Del key"): the marked nodes lose their

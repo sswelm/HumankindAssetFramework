@@ -5,6 +5,25 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Fuser: "Check mirrored parts", for files that store their mirrored parts already facing outward.** glTF
+  says a mirrored part (a negative-scale node, one side of a symmetric hull) renders with its winding reversed, and
+  the fuse applies that, which is what the Teutonic needed. The Confederate frigate's file stores its mirrored hull
+  half already facing outward, so the reversal turned that whole side inward: 94.8 % of the fused hull rendered
+  back-facing from that side, 0.1 % for the same parts unfused. Welded to the correct half, the two cancelled every
+  direction signal and the fuse left the island as it stood. Ticked, the fuse compares each mirrored part with the
+  plain parts it is welded to (a plain part's winding is never in doubt) and undoes the reversal only when the group
+  gives a clear verdict: at least three mirrored parts judged and nine in ten agreeing. Parts with no plain neighbour
+  follow that verdict; a part whose own seams disagree keeps the reversal; mixed evidence changes nothing. **Off by
+  default** (user: "make it an option"), and the fuse warns when a group would need it. Measured with the real fuse
+  on the real files: the frigate's hull 94.8 % -> 0.0 %; the Romanic's hull 108 -> 8 back-facing cells from the
+  beam and its deck 161 -> 29 from above, which turn out to be the same bug; the Teutonic hull and eight other
+  Romanic groups byte-identical; the Romanic's group H, whose judged parts disagreed 1 to 2 and got worse when the
+  one was acted on, now left untouched. Four tests: a pre-flipped file fixed only with the option, a standard file
+  byte-identical, mixed evidence unchanged, and a lone mirrored part following the file's convention (the failure
+  reproduced with the option off). A lap strip lying on its plate walks their shared edge the same way on purpose; the
+  check applies the consistency pass's own lap rule, so mirrored lap strips are never mistaken for inside-out (review
+  of PR #67: three of them had drawn a unanimous verdict and 18 correct faces were turned inward).
+
 - **Fuse: one stray edge, stray geometry, and double-skinned solids** (the SS Romanic). Its 41,799-face hull reached
   1 unsatisfied edge of 92 same-way in 59,000 and the "0 or nothing" orientability rule refused it: the parity pass
   must now resolve 95 % of the same-way edges (a propeller blade at 138 left of 32 is still refused) — with that the
