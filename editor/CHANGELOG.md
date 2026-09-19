@@ -21,6 +21,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
+- **Vehicle Lab: Default reduce actually runs.** Its tagged argument was parsed before the script defined its
+  name-list reader, so the rig logged a warning and silently skipped the tier: a 208,000-triangle rig failed the
+  bake while Verify had projected 156,000 (user: "I clearly have a model with less vertices yet the same error").
+  Parsed after the reader now, and a malformed tag is a hard error like the other tags — never a silent skip of a
+  reduce dial.
 - **Vehicle Lab reduction welds the seams first — no more cracks in a reduced hull.** A GLB carries a vertex per
   UV seam and per hard edge, and the rig's importer keeps them apart, so a fused hull reached the collapse as a
   triangle soup: 68,000 of its 73,000 vertices on a "boundary", every seam's two sides moved on their own, and the

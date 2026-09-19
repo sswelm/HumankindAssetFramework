@@ -291,21 +291,6 @@ _embed_previews = {"path_mode": 'COPY', "embed_textures": True} if (abs(_bright1
 # (Idle stance Furl[0..0] · Pre-move Furl[0..N] · After-move Furl[N..0] · Movement Spin) makes the unit
 # fold before moving and redeploy on arrival — the pivot-hold waits for a pre-move clip automatically.
 # Negative degrees fold the other way (the hinge axis is the flag's larger horizontal extent).
-# DEFAULT REDUCE (tagged arg, 2026-09-19, user: "add Default reduce"): the catch-all tier — every part still
-# marked Default (nothing chosen for it) cut by one dial, like Body. Tagged, not positional: the positional block
-# ends at argv[75] and a tag keeps an older Lab and a newer script (and the reverse) working unchanged.
-#   defaultreduce=@<names file>|<percent>
-default_names = []
-default_reduce = 0.0
-_dfarg = next((a for a in argv if a.startswith("defaultreduce=")), None)
-if _dfarg:
-    try:
-        _dfnames, _dfpct = _dfarg[len("defaultreduce="):].rsplit("|", 1)
-        default_names = namelist(_dfnames) if _dfnames.strip() else []
-        default_reduce = min(95.0, max(0.0, float(_dfpct)))
-    except Exception as _e:
-        print("VEHICLE WARN: bad defaultreduce arg '%s' (%s) — ignored" % (_dfarg, _e))
-
 _ffarg = next((a for a in argv if a.startswith("flagfold=")), None)
 # FOLD MODE is the TAG'S PRESENCE, not the angle (field follow-up: "can you please also make it work at 0"):
 # in fold mode, angle 0 means "no fold — the flag part simply STAYS DEPLOYED while moving", which is the
@@ -801,6 +786,24 @@ preserve_reduce = min(95.0, max(0.0, float(argv[68]))) if len(argv) > 68 and arg
 # wants a dial between Structure and Body. Welds to the hull like Body; no exemptions, no special handling.
 detail_names = namelist(argv[69]) if len(argv) > 69 and argv[69].strip() else []
 detail_reduce = min(95.0, max(0.0, float(argv[70]))) if len(argv) > 70 and argv[70].strip() else 0.0
+# DEFAULT REDUCE (tagged arg, 2026-09-19, user: "add Default reduce"): the catch-all tier — every part still
+# marked Default (nothing chosen for it) cut by one dial, like Body. Tagged, not positional: the positional block
+# ends at argv[75] and a tag keeps an older Lab and a newer script (and the reverse) working unchanged. Parsed
+# HERE, after namelist() exists: the first version sat with the other tags above and called namelist before its
+# definition — a NameError the except swallowed, so the dial never ran and a 208,000-triangle rig failed the bake
+# while Verify had projected 156,000 (user 2026-09-19: "I clearly have a model with less vertices yet the same
+# error"). A malformed tag is a hard error now, like the other tags: never a silent skip of a reduce dial.
+#   defaultreduce=@<names file>|<percent>
+default_names = []
+default_reduce = 0.0
+_dfarg = next((a for a in argv if a.startswith("defaultreduce=")), None)
+if _dfarg:
+    try:
+        _dfnames, _dfpct = _dfarg[len("defaultreduce="):].rsplit("|", 1)
+        default_names = namelist(_dfnames) if _dfnames.strip() else []
+        default_reduce = min(95.0, max(0.0, float(_dfpct)))
+    except Exception as _e:
+        print("VEHICLE ERROR: malformed defaultreduce argument: %s (%s)" % (_dfarg, _e)); sys.exit(1)
 # SAIL IDLE FOLD (argv[71], 2026-09-09, vanilla-parity request): "1" = at idle the canvas FOLDS at the yard
 # (visible bundled sail, like the vanilla triaconter's brailed-up cloth) instead of the 180-degree strike below
 # the keel. ROTATION-ONLY by construction: the canvas is band-skinned to a Sail->SailF1->SailF2 chain and the
