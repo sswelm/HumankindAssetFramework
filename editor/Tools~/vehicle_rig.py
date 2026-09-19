@@ -1141,6 +1141,19 @@ def axle_axis(s):
 # measured against the ORIGINAL count, so the percentage means what it says or better. The print carries all
 # three numbers so a too-aggressive dial is loud, not silent.
 #
+# WELD FIRST (2026-09-19, the SS Romanic's hull: "it keeps getting large gaps in the hull — can't you improve the
+# reduction to prevent holes?"). A GLB carries a vertex per UV seam and per hard edge, and the importer keeps them
+# apart, so a fused hull arrives as a triangle soup: 68,000 of its 73,000 vertices sat on a "boundary". The
+# collapse then moved each side of every seam on its own and the seams opened into cracks (and small fittings —
+# ventilator cowls — were ground to slivers, each triangle collapsing alone). Every tier but RIGGING now welds
+# coincident vertices (1e-5 of the part's size: skins 2 cm apart stay apart) and marks edges over 40° sharp
+# before the collapse, and the dial's percentage is of the WELDED count. Measured (holes from the beam, 0.3 m
+# cells, hull at 50 %): unreduced 9/108, the old pass 50/99, welded 9/108 — none added; the Teutonic's hull the
+# same. RIGGING keeps the soup pass below: welded rope segments bottom out at each island's minimum topology
+# (58,000 triangles where the dial asked for 6,000) while the soup collapse thins them to the dial — the "lines
+# at game distance" the tier is for. The dissolve is not run on a welded surface: at 5° it joins a hull's
+# curvature into long slivers and tore the bow and stern (holes 44/329 at the same dial).
+#
 # Limited dissolve's face-join is QUADRATIC in coplanar-region size: game rips triangulate big flat panels
 # into one huge region, and on the OceanLiner a 23k-vert deckhouse took 39 SECONDS to dissolve while a curvier
 # 65k-vert hull took 3s (the whole Generate ran 73s, 71s of it in this one op). Big parts therefore dissolve in
@@ -1216,26 +1229,40 @@ for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RI
         _ro2 = _by_name.get(_rn)
         if _ro2 is None:
             print("VEHICLE WARN: %s part '%s' not found — skipped" % (_rlabel.lower(), _rn)); continue
-        _v0 = len(_ro2.data.vertices)
+        _vraw = len(_ro2.data.vertices)
         _rb = bmesh.new(); _rb.from_mesh(_ro2.data)
-        _dissolve_limited(_rb, 5.0)
-        # TRIANGULATE the dissolved result immediately: the dissolve leaves long, often non-planar/concave n-gons,
-        # and Unity's FBX importer DISCARDS self-intersecting polygons on import (a wall of warnings + holes in the
-        # preview). Blender's ear-clipping handles these fine; no n-gon ever reaches an exporter. Adds no vertices.
+        _weld = _rlabel != "RIGGING"
+        if _weld:
+            _dim = max(_ro2.dimensions) or 1.0
+            bmesh.ops.remove_doubles(_rb, verts=list(_rb.verts), dist=_dim * 1e-5)
+            for _e in _rb.edges:   # hard edges survive the weld as sharp edges: the export splits normals there again
+                if len(_e.link_faces) == 2:
+                    _fa = _e.calc_face_angle(None)
+                    if _fa is not None and _fa > math.radians(40.0):
+                        _e.smooth = False
+        else:
+            _dissolve_limited(_rb, 5.0)
+        # TRIANGULATE immediately: the dissolve leaves long, often non-planar/concave n-gons, and Unity's FBX
+        # importer DISCARDS self-intersecting polygons on import (a wall of warnings + holes in the preview).
+        # Blender's ear-clipping handles these fine; no n-gon ever reaches an exporter. Adds no vertices.
         bmesh.ops.triangulate(_rb, faces=list(_rb.faces))
         _rb.to_mesh(_ro2.data); _rb.free()
+        if _weld:
+            for _p in _ro2.data.polygons:
+                _p.use_smooth = True   # smooth across the welded seams, hard at the sharp edges marked above
         _vmid = len(_ro2.data.vertices)
+        _v0 = _vmid if _weld else _vraw   # the dial's base: real vertices once welded, the raw count on the soup pass
         _target = max(8, int(_v0 * (1.0 - _rpct / 100.0)))
         if _vmid > _target:
             _dm2 = _ro2.modifiers.new("HAFReduce", 'DECIMATE')
             _dm2.ratio = max(0.02, float(_target) / float(_vmid))
-            _rows.append((_ro2, _v0, _vmid, _target, None))
+            _rows.append((_ro2, _v0, _vmid, _target, None, _vraw, _weld))
         else:
-            _rows.append((None, _v0, _vmid, _target, _vmid))
+            _rows.append((None, _v0, _vmid, _target, _vmid, _vraw, _weld))
     if any(_r[0] is not None for _r in _rows):
         _deps = bpy.context.evaluated_depsgraph_get()   # the ONE evaluation — every pending decimate at once
         for _ri in range(len(_rows)):
-            _ro2, _v0, _vmid, _target, _v1 = _rows[_ri]
+            _ro2, _v0, _vmid, _target, _v1, _vraw, _weld = _rows[_ri]
             if _ro2 is None:
                 continue
             _ev = _ro2.evaluated_get(_deps)
@@ -1244,12 +1271,16 @@ for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RI
             _ro2.data = _me2
             _ro2.modifiers.clear()
             bpy.data.meshes.remove(_old)
-            _rows[_ri] = (_ro2, _v0, _vmid, _target, len(_me2.vertices))
+            _rows[_ri] = (_ro2, _v0, _vmid, _target, len(_me2.vertices), _vraw, _weld)
     _rnames_ok = [n for n in _rnames if _by_name.get(n) is not None]
-    for (_ro2, _v0, _vmid, _target, _v1), _rn in zip(_rows, _rnames_ok):
+    for (_ro2, _v0, _vmid, _target, _v1, _vraw, _weld), _rn in zip(_rows, _rnames_ok):
         _rr_v0 += _v0; _rr_v1 += _v1; _rr_n += 1
-        print("VEHICLE %s '%s': %d -> %d verts (dissolve pass: %d; dial %.0f%% = target %d)"
-              % (_rlabel, _rn, _v0, _v1, _vmid, _rpct, _target))
+        if _weld:
+            print("VEHICLE %s '%s': %d -> %d verts (welded from %d raw; dial %.0f%% = target %d)"
+                  % (_rlabel, _rn, _v0, _v1, _vraw, _rpct, _target))
+        else:
+            print("VEHICLE %s '%s': %d -> %d verts (dissolve pass: %d; dial %.0f%% = target %d)"
+                  % (_rlabel, _rn, _v0, _v1, _vmid, _rpct, _target))
     if _rr_n:
         print("VEHICLE %s: %d part(s) reduced, %d -> %d verts total (%.0f%% cut)"
               % (_rlabel, _rr_n, _rr_v0, _rr_v1, 100.0 * (1.0 - float(_rr_v1) / max(1, _rr_v0))))
