@@ -98,7 +98,7 @@ axle disagreement, unpaired wheels, turret outliers, and visible interior geomet
 | **Flip** (`F`) | Winding reversed **once** at export, applied on top of the inside-out fix — an XOR **per island**: islands the fix flipped land back on their authored winding, and with the fix off (or on islands the fix left alone) the mark alone reverses them. A part whose islands got *mixed* fix verdicts can't be fully repaired by Flip — split it in the Workshop, or use Rudder (double-sided) there. Own **Flip reduce (%)** dial. Mesh rig only (the fast path refuses it loudly). |
 | **Detail** | A plain reduction tier of its own (**Detail reduce (%)**) for ornament/trim geometry that wants a dial between Structure and Body. No exemptions — the winding fix and doubling treat it like Body. |
 | **Ignore** (`I`) | Deleted from the generated GLB. Use for genuinely invisible internals or unwanted variants. |
-| **Default / Edgecase** (`D` / `E`) | Root-weighted review markers: undecided, or deliberately parked for another pass. |
+| **Default / Edgecase** (`D` / `E`) | Root-weighted review markers: undecided, or deliberately parked for another pass. Default has its own catch-all dial, **Default reduce (%)** — everything you never marked, cut in one move like Body. |
 
 The **Visibility** filter can isolate parts that escape-ray probing found fully enclosed. It is conservative: anything
 visible through an opening counts as external. Review interior parts before marking them Ignore.
@@ -291,7 +291,7 @@ A 395k-vertex source (a fully rigged galley: 64+ oars, sails, flags, rigging) fi
 visual quality with this workflow — **delete and cut per role at the source, so the Factory's blind global
 reduction never has to choose what survives**:
 
-1. **Amputate before you diet.** Open the source in the **Model Workshop** (`Tools ▸ HAF ▸ Model Workshop`):
+1. **Amputate before you diet.** Open the source in the **Model Splitter** (`Tools ▸ HAF ▸ Model Splitter`):
    Probe lists every part's disconnected-island count; split the parts hiding floating junk (the merge-distance
    slider keeps segmented ropes and trim lines whole — only genuinely distant debris separates); then, in the
    Vehicle Lab, mark the junk **Ignore**. Deleting invisible geometry is free quality — on the galley this
@@ -300,8 +300,8 @@ reduction never has to choose what survives**:
    orientation (*Horizontal surfaces*: deck vs bow plating) — the yellow/grey preview shows exactly which
    triangles land in `_CutA`/`_CutB`, and each half then takes its own role and reduce dial.
 2. **Cut where nobody looks, spare the silhouette.** In **Vertices control**, set the per-role reduce dials by
-   visibility, not uniformly: Rigging 85–90 (ropes read as lines at game distance), Structure ~80, Body to
-   taste — but keep **Oar around 40 and Sail at or below 50**: blades and canvas *are* the unit's identity, and
+   visibility, not uniformly: Rigging 85–90 (ropes read as lines at game distance), Structure ~80, Body and
+   **Default** (the catch-all for everything still unmarked) to taste — but keep **Oar around 40 and Sail at or below 50**: blades and canvas *are* the unit's identity, and
    thin sheets are what decimation destroys first (half-blades and tattered sails read worse than fewer ropes).
    Cutting a rope past ~90 leaves floating dash fragments — lower the dial or Ignore the part outright.
 3. **Read the projection before generating.** **Verify** now ends with per-role vertex statistics and the

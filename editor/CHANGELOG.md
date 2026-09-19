@@ -21,6 +21,40 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
+- **Fuse: the twin reach is 0.5 % of the length (was 1 %) — the Romanic's bridge deck.** A 39-face roof region on
+  each side, facing up and correct as authored, welded into a deckhouse sheet and found 74 "twins in front": the
+  deckhouse's undersides a metre and more above — neighbours, not a skin — and the twin rule turned the roof over
+  (34 m² transparent from above) while its own inside-out score read +0.55. Measured on the ship, every genuine double
+  skin has its twin within a third of the old reach (hull skins 0.03–0.34, deckhouse skins 0.05–0.13, the fixture
+  0.20); the roof's neighbours sat at 0.72. Half the reach keeps every skin and loses every neighbour. Holes from
+  above, ray-cast over the whole ship: 339 cells → 126, group D 230 → 17; the Teutonic's fused hull 70 → 49, its
+  per-group numbers unchanged. Each sheet's report line now names its parts ("— parts: Object_6 ×37, …") and how far
+  and how straight its twins lie ("at 0.72 of reach, 0.95 straight"), the two numbers that found this.
+- **Vehicle Lab: "Default reduce (%)", and Detail now reads before Preserve.** The catch-all tier — every part still
+  marked Default, nothing chosen for it — cut by one dial at Generate exactly as Body parts are, so a model whose
+  thousand small fittings are all undecided slims without marking each one. It joins the tier summary, the Verify
+  projection and the recipe; the rig script takes it as a tagged argument (`defaultreduce=@<file>|<pct>`), so an
+  older script and a newer Lab still run together. Preserve's dial moved below Detail's: the exception reads last.
+- **Mark a part for deletion — Delete key or the row popup, in both windows.** The part loses its mesh in the
+  output (its transform and children stay; the mesh data is left in the file as an orphan the bake never reads), applied
+  by Split, Plane cut and Fuse alike after their own work. The Splitter's row popup is "–  / Split / Delete" (a whole part
+  offers no Split), the Fuser's letter popup ends with "✕ Delete"; Insert marks the highlighted row for split, Delete
+  toggles deletion, – / 0 / Backspace clear every mark. A deleted part is neither split nor fused. "Show only" lists
+    "Marked for deletion". The checks and the deletion marks persist in `<source>.marks.txt` beside the fuse sidecar
+  (S = split, X = delete): written by **Save marks** in the Splitter, by Save groups in the Fuser, and by every Split,
+  Plane cut and Fuse; read at the first Probe of a file, and by Load marks / Load groups. Both windows share it.
+- **The Model Workshop is two windows: Model Splitter and Model Fuser** (user: "too many responsibilities, which makes
+  it cluttered — one screen for cutting and one for merging"). One implementation; both share the file pickers, the
+  probe, the filtered part list, the preview, the mirror finder and the keyboard sweep. The Splitter shows the Split
+  checkboxes, "Check all splittable", the plane cut and Split (output `_split` / `_cut`); the Fuser the ⊕ letters,
+  the A–Z keys, the weld slider, Save/Load groups and Fuse (output `_fused`). "Show only" lists each window's own
+  kinds. The one-step Generate (fuse AND split) went with the split: chain the outputs — the ⊕ letters travel with a
+  cut or split output, and a fused output's sidecar names each shell under its group's letter (an unfused group keeps
+  its parts' lines), so either order works (the Splitter re-reads the sidecar on every Probe; the Fuser keeps its
+  edits and reloads through Load groups). A saved editor layout that held
+  the old Model Workshop drops that window once — the class is abstract now. Each window is its own file
+  (`ModelSplitterWindow.cs`, `ModelFuserWindow.cs`): Unity binds a docked window's saved layout entry to the script
+  whose FILE NAME matches the class, so a window class nested in another file vanishes on the next restart.
 - **Generate: every group fused in parallel, and the big ones 5x faster.** Nineteen groups took 3½ minutes chained.
   Planning a group (gather, weld, islands, sheets, direction) reads only the source, so every group now plans at once
   on the thread pool and the meshes are appended in letter order into one output — the same bytes chaining gave,

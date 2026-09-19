@@ -32,7 +32,8 @@ public static class GlbDisconnectedParts
         public bool Changed => NodesSplit > 0;
         // FUSE (2026-09-15) — what the weld and the winding pass did, so the Workshop can say it in one line
         public int VerticesBefore, VerticesAfter, IslandsBefore, IslandsAfter, FacesRewound;
-        public readonly List<string> IslandLines = new List<string>();   // EVERY island's verdict, largest first (the report; Details keeps the largest six for the status)
+        public readonly List<string> IslandLines = new List<string>();   // EVERY sheet's verdict, largest first (the report; Details keeps the largest six for the status)
+        public int FusedNodeIndex = -1; public string FusedNodeName;   // the appended shell (a fuse only): the output sidecar names it with its group's letter
     }
 
     sealed class Chunk
@@ -1399,7 +1400,13 @@ public static class GlbDisconnectedParts
         // islands, so a twin must be searched across islands): each face registered in every cell its bounding box
         // touches, the cell the larger of the reach and the median triangle size (a coarse mesh registers in a handful of
         // cells, a fine one in one), the 27-cell search around a face's centroid still covering the reach.
-        double twinReach = longest * 0.01, twinCell;   // 1 % of the length: hull skins are 0.05-0.3 % apart, a deck and the ceiling below it 1.4 %+
+        // THE REACH IS 0.5 % OF THE LENGTH (was 1 %; 2026-09-19, the Romanic's bridge deck). Measured on the ship, every
+        // genuine double skin has its twin within a third of the old reach — the hull skins at 0.03-0.34 of it, the
+        // deckhouse skins at 0.05-0.13, the test fixture at 0.20 — while a 39-face roof region that is correct as
+        // authored found 74 "twins in front" at 0.72 of it: the deckhouse's undersides a metre and more above, neighbours,
+        // not a skin. The twin rule then turned the roof over (its own inside-out score read +0.55, plainly outward).
+        // Half the reach keeps every skin and loses every neighbour; a deck and the ceiling below it sit at 1.4 %+.
+        double twinReach = longest * 0.005, twinCell;
         var twinCells = new Dictionary<PositionKey, List<int>>();
         var twinCentres = new Vec3[faceCount];
         // per face, once: its unit normal (null when degenerate) and the radius of its corners about the centroid — a
@@ -1437,6 +1444,7 @@ public static class GlbDisconnectedParts
         // the twin statistics of every island, measured BEFORE any direction flip (an island turned earlier in the loop
         // would present same-way normals to its twin island — the inner skin saw an already-turned outer skin)
         var twinStats = new int[sheets.Count][];
+        var twinDist = new double[sheets.Count]; var twinStraight = new double[sheets.Count];   // for the sheet's report line: mean twin distance as a fraction of the reach, mean |along| / distance (1 = straight in front or behind) — a skin reads ≤ 0.35 and ~0.9, a neighbour 0.7+
         // ENCLOSURE evidence (review of 7307fe2: six inward cubes around a seventh across air gaps gave the centre a twin
         // behind every face): the twins behind a cavity shell all belong to ONE other island whose bounding box contains
         // the shell — six neighbours are six twin islands, none containing the centre. Recorded here per island.
@@ -1451,6 +1459,7 @@ public static class GlbDisconnectedParts
         for (int ii = 0; ii < sheets.Count; ii++)
         {
             int partnered = 0, twinInFront = 0, twinBehind = 0;
+            double distSum = 0, straightSum = 0;
             var behindBy = new Dictionary<int, int>();   // twin island -> twins-behind count
             foreach (int f in sheets[ii])
             {
@@ -1478,12 +1487,13 @@ public static class GlbDisconnectedParts
                 }
                 if (!double.IsPositiveInfinity(best))
                 {
-                    partnered++;
+                    partnered++; distSum += best / twinReach; straightSum += Math.Abs(proj) / best;
                     if (proj > 0) twinInFront++;
                     else { twinBehind++; int ti = islandOf[bestG]; behindBy[ti] = behindBy.TryGetValue(ti, out int bc) ? bc + 1 : 1; }
                 }
             }
             twinStats[ii] = new[] { partnered, twinInFront, twinBehind };
+            twinDist[ii] = partnered > 0 ? distSum / partnered : 0; twinStraight[ii] = partnered > 0 ? straightSum / partnered : 0;
             enclosingIsland[ii] = -1;
             if (twinBehind > 0)
             {
@@ -1537,7 +1547,7 @@ public static class GlbDisconnectedParts
             // opposite normals, wound inside-out as a whole. Both rules above read ~0 on it (the cones of the two skins
             // cancel: agreement -0.01, thickness -0.0005; the radial score cancels the same way). What does not cancel:
             // for every face, on which side its twin lies. Material lies BEHIND an outward face, so a partnered face
-            // whose twin sits in FRONT of it (along +normal, within `skinReach`) faces into the solid. The island is
+            // whose twin sits in FRONT of it (along +normal, within `twinReach`) faces into the solid. The island is
             // double-skinned when at least half its faces have a twin; the majority of front-vs-behind decides.
             int partnered = twinStats[ii][0], twinInFront = twinStats[ii][1], twinBehind = twinStats[ii][2];
             bool doubleSkin = partnered * 2 >= isl.Count && partnered > 0 && Math.Abs(twinInFront - twinBehind) * 10 > partnered * 4;   // decided when 70/30 or clearer
@@ -1566,7 +1576,7 @@ public static class GlbDisconnectedParts
             if (reverse) foreach (int f in isl) flip[f] = !flip[f];
             islandRule[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}, volume agreement {1:+0.00;-0.00} thickness {2:+0.0000;-0.0000}, inside-out score {3:+0.00;-0.00}{5}: {4}",
                 closed ? "closed" : "open", agreement, thickness, score, notOrientable[ii] ? "not judged" : reverse ? "reversed whole" : "kept",
-                partnered > 0 ? string.Format(System.Globalization.CultureInfo.InvariantCulture, ", double skin {0:0}% twinned ({1} twin in front / {2} behind)", 100.0 * partnered / isl.Count, twinInFront, twinBehind) : "");
+                partnered > 0 ? string.Format(System.Globalization.CultureInfo.InvariantCulture, ", double skin {0:0}% twinned ({1} twin in front / {2} behind, at {3:0.00} of reach, {4:0.00} straight)", 100.0 * partnered / isl.Count, twinInFront, twinBehind, twinDist[ii], twinStraight[ii]) : "");
         }
         Mark("direction");
         foreach (bool b in flip) if (b) result.FacesRewound++;
@@ -1589,7 +1599,13 @@ public static class GlbDisconnectedParts
                 List<int> isl = sheets[ii];
                 var keys = new HashSet<long>(PairKeyComparer.Instance); int boundary = 0, turned = 0;
                 foreach (int f in isl) { if (flip[f]) turned++; for (int e = 0; e < 3; e++) { long key = fEdgeKeys[f * 3 + e]; if (key < 0) continue; keys.Add(key); if (partner[f * 3 + e] < 0) boundary++; } }
-                string line = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} faces ({1:0}% boundary, {2}, {3} rewound; {4})", isl.Count, keys.Count > 0 ? 100.0 * boundary / keys.Count : 100.0, islandRule[ii], turned, islandConflict[ii]);
+                // WHICH PARTS make up the sheet (2026-09-19, the Romanic's bridge deck: a 39-face roof region welded into a
+                // deckhouse sheet took the deckhouse's verdict — the reader needs to see the mixture): the heaviest four
+                var byPart = new Dictionary<int, int>();
+                foreach (int f in isl) { int pp = partOf[tris[f * 3]]; byPart[pp] = byPart.TryGetValue(pp, out int pc) ? pc + 1 : 1; }
+                string parts = string.Join(", ", byPart.OrderByDescending(kv => kv.Value).Take(4).Select(kv => partNames[kv.Key] + " ×" + kv.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)))
+                             + (byPart.Count > 4 ? ", +" + (byPart.Count - 4).ToString(System.Globalization.CultureInfo.InvariantCulture) + " more" : "");
+                string line = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} faces ({1:0}% boundary, {2}, {3} rewound; {4}) — parts: {5}", isl.Count, keys.Count > 0 ? 100.0 * boundary / keys.Count : 100.0, islandRule[ii], turned, islandConflict[ii], parts);
                 result.IslandLines.Add(line);   // all of them, for the report (review of 0097bd5: the report promised every island and carried six)
                 if (rows.Count < 6) rows.Add(line);
             }
@@ -1720,6 +1736,7 @@ public static class GlbDisconnectedParts
             if (!picked.Contains(other) && other != newNodeIndex && (nodes[other] as JObject)?["mesh"] != null && plan.FusedMeshes.Contains(nodes[other].Value<int>("mesh")))
                 result.Warnings.Add("Node " + other + " shares a fused part's mesh and keeps the ORIGINAL geometry (instanced part).");
         result.NodesSplit = picked.Count; result.MeshesSplit = plan.FusedMeshes.Count; result.ChildPartsCreated = 1;
+        result.FusedNodeIndex = newNodeIndex; result.FusedNodeName = newNodeName;
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         result.Details.Add(string.Format(inv,
             "Fused {0} part(s) -> '{1}': {2} -> {3} verts (seams welded within {4:0.####} = {5:0.##}‰ of {6:0.#}); islands {7} -> {8}; {9} made consistent{16}; {10} open sheet(s) judged, {11} reversed; {12} closed shell(s) reversed whole; {13} of {14} face(s) rewound; {15} face(s) smaller than the weld kept collapsed",
@@ -1731,6 +1748,33 @@ public static class GlbDisconnectedParts
         result.Details.Add(plan.RewoundByPart);
         result.Details.Add("timing: " + plan.Timing + "; write " + writeClock.ElapsedMilliseconds.ToString(inv) + " ms");
         result.Details.Add(plan.FrameLine);
+    }
+
+    // REMOVE (2026-09-18, user: "an easy way to mark a unit for removal with the Del key"): the marked nodes lose their
+    // mesh — exactly what a fused source loses — and keep their transforms and children; nothing is renumbered, so every
+    // other mark (a ⊕ letter, a Split check) still finds its node in the output. The mesh data itself stays in the file
+    // as an orphan the bake never reads; no compaction is attempted. A node without a mesh is reported, not an error.
+    public static Result RemoveMeshes(byte[] source, ISet<int> nodeIndices)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        if (nodeIndices == null || nodeIndices.Count == 0) throw new ArgumentException("Nothing to remove — no node indices.", nameof(nodeIndices));
+        Document document = Parse(source);
+        JObject root = document.Root;
+        JArray nodes = root["nodes"] as JArray ?? new JArray();
+        var result = new Result(); var names = new List<string>();
+        foreach (int ni in nodeIndices.OrderBy(i => i))
+        {
+            if (ni < 0 || ni >= nodes.Count) { result.Warnings.Add("Node " + ni + " does not exist — nothing removed there."); continue; }
+            var n = nodes[ni] as JObject;
+            if (n == null || n["mesh"] == null) { result.Warnings.Add("Node " + ni + " carries no mesh — nothing to remove."); continue; }
+            n.Remove("mesh"); n.Remove("skin"); n.Remove("weights");   // a skin or morph weights without a mesh are invalid glTF: they go with it
+            names.Add((string)n["name"] ?? ("node " + ni)); result.NodesSplit++;
+        }
+        if (result.NodesSplit == 0) return result;   // Changed == false, Bytes null: the caller keeps what it had
+        result.Details.Add("Removed " + result.NodesSplit + " part(s): " + string.Join(", ", names));
+        result.Bytes = Write(document);
+        ValidateOutput(result.Bytes);
+        return result;
     }
 
     public static Result FuseFile(string inputPath, string outputPath, IList<int> nodeIndices, double weldFraction)

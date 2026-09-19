@@ -429,6 +429,21 @@ public static class WorkshopRules
         return mids[(bestStart + bestEnd) / 2].Key;   // the window's MEDIAN: exact mirrors vote exactly, a near-copy on the same side only nudges a mean
     }
 
+    // THE SIDECAR OF A FUSED OUTPUT (review of PR #63: "the Fuser -> Splitter handoff loses group letters"): every group that
+    // fused is now ONE shell, and the shell carries the group's letter under its own node index; a group that produced
+    // nothing keeps its parts' lines unchanged (the fuse never renumbers nodes). So a fused output opened in the Splitter
+    // still knows its groups: a cut shell's pieces inherit the letter, and the Fuser welds them back if asked.
+    public static List<string> FusedOutputSidecarLines(IEnumerable<KeyValuePair<string, IList<KeyValuePair<int, string>>>> groups, IDictionary<string, KeyValuePair<int, string>> fusedNodeByLetter)
+    {
+        var lines = new List<string>();
+        foreach (KeyValuePair<string, IList<KeyValuePair<int, string>>> g in groups)
+        {
+            if (fusedNodeByLetter.TryGetValue(g.Key, out KeyValuePair<int, string> shell) && shell.Key >= 0) lines.Add(SidecarLine(g.Key, shell.Value, shell.Key));
+            else foreach (KeyValuePair<int, string> part in g.Value) if (!string.IsNullOrEmpty(part.Value)) lines.Add(SidecarLine(g.Key, part.Value, part.Key));
+        }
+        return lines;
+    }
+
     public static string NextOutputName(string baseName, string suffix)
     {
         if (string.IsNullOrEmpty(baseName)) return baseName;

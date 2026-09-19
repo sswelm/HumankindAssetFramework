@@ -364,7 +364,10 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   and write a new `_split_parts.glb` in which every unattached geometry island is a separately selectable child
   node. The source is protected from overwrite, triangle totals are verified, and existing materials, transforms,
   skins, animations, textures and vertex data are retained. Duplicate UV/normal seam vertices remain attached.
-- **Model Workshop** — `Tools ▸ HAF ▸ Model Workshop`. The *selective* version of the splitter: **Probe parts**
+- **Model Splitter and Model Fuser** — `Tools ▸ HAF ▸ Model Splitter` and `Tools ▸ HAF ▸ Model Fuser`, two windows on one
+  implementation (0.5.7: the one Model Workshop had grown cluttered). Both share the file pickers, the probe, the filtered
+  part list, the preview, the mirror finder and the keyboard sweep; the Splitter shows the Split checkboxes and the plane cut,
+  the Fuser the ⊕ letters, the weld and Fuse. The Splitter is the *selective* version of the batch splitter above: **Probe parts**
   lists every mesh-carrying node with its triangle and disconnected-island counts; check just the parts whose
   islands you need to separate (floating junk welded into a hull part, say) and **Split** writes a new GLB where
   only those gain `_Part_NNN` children — same lossless method, so the rest of the model is byte-identical. Feed
@@ -414,8 +417,15 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   one line per group. The part list carries the Lab's filters — hide under a vertex count or a size, a height
   band, a side band, **Only flat parts (≥ % level)** — the Lab's deck finder, measured on the preview meshes, so
   the deck plate a fuse group is still missing shows up among a dozen rows — and a **Show only** popup by mark or
-  island count — so a 1,400-row liner can be worked one deck or one side at a time; marks on hidden rows are kept. **Generate** does both operations into one output:
-  the ⊕ groups fused first, then the checked parts split (a row that is both is fused).
+  island count — so a 1,400-row liner can be worked one deck or one side at a time; marks on hidden rows are kept. To cut AND fuse, chain the two windows: the ⊕
+  letters travel with a cut or split output, and a fused output's sidecar names each shell under its group's letter, so
+  either order works (the Splitter re-reads the sidecar on every Probe, so after changing groups in the Fuser,
+  re-Probe in the Splitter before cutting; the Fuser keeps your edits across a re-Probe and reloads through Load groups).
+  **Delete** (0.5.7): the Delete key, or the row popup, marks a part for deletion in either window — it loses its mesh
+  in the output, whatever writes it (Split, Plane cut or Fuse); Insert marks the highlighted row for split, – / 0 /
+  Backspace clear every mark. The Split checks and the deletion marks persist in `<source>.marks.txt` (S = split,
+  X = delete, the fuse sidecar's format): **Save marks** / **Load marks** in the Splitter, Save/Load groups in the Fuser,
+  and every Split, Plane cut and Fuse writes it; the first Probe of a file reads it. Both windows share it.
   Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh;
   the fused part is a new root node named `Fused_<letter>_<first row of the group>`. The output can never be the source file.
   The ⊕ letters persist beside the source as `<source>.glb.fuse.txt` (a `#fuse-groups v2` header, then one

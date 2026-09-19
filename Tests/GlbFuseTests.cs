@@ -827,6 +827,9 @@ public class GlbFuseTests
         Assert.StartsWith("Fused 2 part(s) -> 'Fused_B_B1'", results[1].Details[0]);
         Assert.True(results[0].Changed && results[1].Changed);
         Assert.Null(results[0].Bytes);   // one output for all: the caller gets the bytes, not each result
+        var gb = Read(both);   // each result names its shell by node index and name: the fused output's sidecar is written from these
+        Assert.Equal("Fused_A_A1", results[0].FusedNodeName); Assert.Equal("Fused_A_A1", (string)gb.Root["nodes"][results[0].FusedNodeIndex]["name"]);
+        Assert.Equal("Fused_B_B1", results[1].FusedNodeName); Assert.Equal("Fused_B_B1", (string)gb.Root["nodes"][results[1].FusedNodeIndex]["name"]);
         // a failing group surfaces its own exception, not an AggregateException
         var skinned = Quad("S", 0, 1, 0, 1, 0); skinned.Skinned = true;
         Assert.Throws<System.IO.InvalidDataException>(() => GlbDisconnectedParts.FuseGroups(BuildGlb(a1, skinned), new List<GlbDisconnectedParts.FuseJob> { new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 1 } } }, 0.001, out _, null));
@@ -841,5 +844,50 @@ public class GlbFuseTests
         int last = -1; int ticks = 0;
         GlbDisconnectedParts.FuseGroups(src, new List<GlbDisconnectedParts.FuseJob> { new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 0, 1 } } }, 0.001, out _, n => { last = n; ticks++; });
         Assert.Equal(1, last); Assert.True(ticks >= 1);
+    }
+
+    [Fact]
+    public void RemoveMeshes_strips_the_marked_nodes_meshes_and_nothing_else()
+    {
+        var a = Quad("A", 0, 1, 0, 1, 0); var b = Quad("B", 2, 3, 0, 1, 0); b.Translation = new double[] { 5, 0, 0 };
+        var r = GlbDisconnectedParts.RemoveMeshes(BuildGlb(a, b), new HashSet<int> { 1 });
+        Assert.True(r.Changed); Assert.Equal(1, r.NodesSplit);
+        Assert.Equal("Removed 1 part(s): B", r.Details[0]);
+        var g = Read(r.Bytes);
+        Assert.NotNull(g.Node("A")["mesh"]);
+        Assert.Null(g.Node("B")["mesh"]); Assert.Equal(5.0, (double)g.Node("B")["translation"][0]);   // the node stays, with its transform
+        Assert.Equal(2, ((JArray)g.Root["meshes"]).Count);   // the mesh data is left in the file (an orphan), not compacted
+        // a node without a mesh, or out of range: reported, nothing written
+        var none = GlbDisconnectedParts.RemoveMeshes(r.Bytes, new HashSet<int> { 1, 7 });
+        Assert.False(none.Changed); Assert.Null(none.Bytes); Assert.Equal(2, none.Warnings.Count);
+        Assert.Throws<ArgumentException>(() => GlbDisconnectedParts.RemoveMeshes(r.Bytes, new HashSet<int>()));
+    }
+
+    [Fact]
+    public void A_neighbour_a_metre_above_a_roof_is_not_its_twin()
+    {
+        // 2026-09-19, the Romanic's bridge deck: a roof region facing UP and correct as authored found the deckhouse's
+        // undersides 0.7 % of the length above it and the twin rule turned it over ("twin in front") while its own
+        // inside-out score read +0.55. Every genuine double skin measured on the ship has its twin within a third of the
+        // old 1 % reach; the reach is 0.5 % now. Roof 10 x 10 at y = 8 above a hull box (the frame); a downward
+        // "ceiling" 0.07 above it — 0.7 % of the 10 m length — is a neighbour: the roof keeps its winding.
+        var hull = Box("Hull", 6, 0, 0, 0, inward: false);
+        var roof = new Part { Name = "Roof", Positions = new float[] { 0, 8, 0,  10, 8, 0,  10, 8, 10,  0, 8, 10 }, Indices = new[] { 0, 2, 1, 0, 3, 2 } };            // faces UP
+        var ceiling = new Part { Name = "Ceiling", Positions = new float[] { 0, 8.07f, 0,  10, 8.07f, 0,  10, 8.07f, 10,  0, 8.07f, 10 }, Indices = new[] { 0, 1, 2, 0, 2, 3 } };   // faces DOWN, 0.07 above
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, roof, ceiling), new[] { 1, 2 }, 0.0);
+        var g = Read(r.Bytes);
+        var prim = (JObject)g.Primitives(g.Node("Roof_Fused"))[0];
+        // the fused mesh carries both parts; the roof's two triangles are the ones at y = 8 — every one must still face UP
+        var fn = FaceNormals(g, prim);
+        float[] pos = g.Floats(((JObject)prim["attributes"]).Value<int>("POSITION"), 3);
+        var idx = g.Indices(prim.Value<int>("indices"));
+        int roofUp = 0, roofDown = 0;
+        for (int t = 0; t < fn.Count; t++)
+        {
+            float y = pos[(int)idx[t * 3] * 3 + 1];
+            if (Math.Abs(y - 8f) > 1e-4f) continue;
+            if (fn[t][1] > 0) roofUp++; else roofDown++;
+        }
+        Assert.Equal(2, roofUp); Assert.Equal(0, roofDown);
     }
 }
