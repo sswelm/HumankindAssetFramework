@@ -28,7 +28,7 @@ public struct BakeConfig
     public bool    reuseExtracted;  // true = reuse the existing OBJ/albedo (skip re-import) — lets the modder hand-edit the extracted texture and keep it
     public bool    doubleSided;     // true = add a reversed back face to every triangle (single-sided/CAD repair) so backface-culled parts render in-game
     public bool    windingFix;      // true = rewind faces outward from the origin (documented CAD winding fix) so single-sided meshes render, no geometry doubling
-    public bool    multiMesh;       // true = a static bake over the per-fragment quad ceiling splits into _ModelMesh_B.. chunks (opt-in; off = classic warn-and-clip)
+    public bool    multiMesh;       // true = a bake over the per-fragment quad ceiling splits into _ModelMesh_B.. chunks, on EITHER path (static since 2026-09-13, animated since 2026-09-20; opt-in, off = classic warn-and-clip). Costs vertices: each chunk duplicates its seam (~+26% on the frigate) in the shared pawn vertex buffer.
     public bool    heightUV;        // true = override UVs with U=length, V=height so a vertical-gradient albedo maps by height (black skirt low, grey hull high)
     public float   albedoBrightness; // multiply the baked atlas RGB (1 = unchanged). >1 lifts a dark skin — the injection path ships FLAT albedo (donor PBR neutralized), so shiny/dark models read muddy in-game; this compensates at bake time
     public float   albedoSaturation; // scale colour vividness around per-pixel luminance (1 = unchanged, 0 = greyscale, >1 = punchier). Fixes desaturated albedos (game lighting can't add colour back)
@@ -655,6 +655,89 @@ public static class UniversalBaker
         AssetDatabase.CreateAsset(atlas, atlasPath);
         AssetDatabase.SaveAssets();
 
+        // --- 3b) MULTI-FRAGMENT SPLIT, ANIMATED (2026-09-20) — the same ceiling and the same cure as the static path.
+        // The engine draws at most 16,320 quads per FRAGMENT and the steam frigate bakes 40,891: the overflow
+        // SILENTLY does not render (the last-baked parts — masts, rigging — vanish first, with no error anywhere).
+        // The static path has split since 2026-09-13; the checkbox did NOTHING on an animated bake, because
+        // SplitForQuadCeiling had exactly one call site, in the static builder (user, 2026-09-20: "for unknown
+        // reason the Multi-fragment split option no longer works" — on this path it never worked).
+        //
+        // Almost everything needed already existed. The splitter is general: it carries boneWeights and bindposes,
+        // so a skinned chunk skins against our skeleton exactly like the body. The runtime's
+        // InjectExtraMeshFragments discovers chunks from the collection BY NAME, with no registry field and no
+        // path of its own — it has never cared whether the entry is animated.
+        //
+        // What this path does need is a PREFAB OF ITS OWN. The imported FBX is an asset, so the extra renderers go
+        // on an instantiated copy (the atlas remap above already mutated the shared meshes, so the copy carries the
+        // remapped UVs), and the body mesh is renamed <name>_ModelMesh: that exact tail is what RenameBodyMesh
+        // looks for when it retargets our body onto the donor's mesh name. Without the rename, with chunks in the
+        // collection, that search falls through to index 0 — which may be a CHUNK, retargeting the wrong renderer.
+        //
+        // IT COSTS VERTICES. Every chunk duplicates the vertices along its seam — the frigate goes 99,676 ->
+        // 125,369 (+26%) — and all of them share the pawn vertex buffer, which is 1,000,000 vanilla. Splitting a
+        // big model can fill it, and a full buffer stops the game uploading ANY further mesh: units and districts
+        // both stop drawing (user, 2026-09-20). Raise it with BufferOverrides if you split more than one ship.
+        GameObject skelSource = fbxGo;
+        for (char c = 'B'; c <= 'H'; c++)   // stale chunks from a previous, bigger bake must not outlive it
+            AssetDatabase.DeleteAsset("Assets/Resources/" + name + "_ModelMesh_" + c + ".asset");
+        AssetDatabase.DeleteAsset("Assets/Resources/" + name + "_ModelMesh.asset");
+        string splitPrefabPath = resDir + "/" + name + "_Split.prefab";
+        AssetDatabase.DeleteAsset(splitPrefabPath);
+        if (cfg.multiMesh)
+        {
+            var smrs = fbxGo.GetComponentsInChildren<SkinnedMeshRenderer>();
+            if (smrs.Length != 1 || smrs[0].sharedMesh == null)
+                Debug.LogWarning($"[Factory] {name}: Multi-fragment split SKIPPED — the rig carries {smrs.Length} skinned mesh(es) and the split expects the single merged mesh rig_anim bakes. The bake continues unsplit; if it is over the ceiling, lower 'Reduce to ~tris'.");
+            else
+            {
+                var chunks = SplitForQuadCeiling(smrs[0].sharedMesh, name);
+                if (chunks == null)
+                    return Fail($"{name}: {smrs[0].sharedMesh.triangles.Length / 3:N0} tris need more than {MaxMeshChunks} draw fragments " +
+                                $"({MaxMeshChunks * QuadBudget:N0}-quad hard cap) — lower 'Reduce to ~tris' or the Vehicle Lab dials first.");
+                if (chunks.Count > 1)
+                {
+                    // The chunks must be ASSETS: the prefab below references them, and a mesh that lives only in
+                    // memory is gone by the time the skeleton bake reads the prefab back.
+                    foreach (var ch in chunks) AssetDatabase.CreateAsset(ch, "Assets/Resources/" + ch.name + ".asset");
+                    AssetDatabase.SaveAssets();
+                    // A PLAIN clone, not PrefabUtility.InstantiatePrefab: we want an independent hierarchy to save,
+                    // not an instance linked to the FBX (which would save as a variant and keep the FBX's meshes).
+                    var inst = UnityEngine.Object.Instantiate(fbxGo);
+                    var body = inst.GetComponentsInChildren<SkinnedMeshRenderer>()[0];
+                    body.sharedMesh = chunks[0];
+                    // A chunk must sit in the BODY'S space. Normally the skinned mesh is a child of the FBX root,
+                    // so the chunk becomes its sibling and copies its local transform. If the mesh IS the root
+                    // (parent null), a sibling would be a second ROOT object and would not be saved into the prefab
+                    // at all — the chunk then goes under the root with an identity transform, which is the same space.
+                    Transform bodyParent = body.transform.parent;
+                    for (int ci = 1; ci < chunks.Count; ci++)
+                    {
+                        var go = new GameObject(body.gameObject.name + "_" + (char)('A' + ci));
+                        go.transform.SetParent(bodyParent != null ? bodyParent : inst.transform, false);
+                        if (bodyParent != null)
+                        {
+                            go.transform.localPosition = body.transform.localPosition;
+                            go.transform.localRotation = body.transform.localRotation;
+                            go.transform.localScale = body.transform.localScale;
+                        }
+                        var extra = go.AddComponent<SkinnedMeshRenderer>();
+                        // Same bones, same root, same material: a chunk is the body's geometry, not a second model.
+                        extra.sharedMesh = chunks[ci];
+                        extra.bones = body.bones; extra.rootBone = body.rootBone;
+                        extra.sharedMaterials = body.sharedMaterials;
+                        extra.updateWhenOffscreen = true;
+                    }
+                    PrefabUtility.SaveAsPrefabAsset(inst, splitPrefabPath);
+                    UnityEngine.Object.DestroyImmediate(inst);
+                    AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
+                    AssetDatabase.ImportAsset(splitPrefabPath, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+                    skelSource = AssetDatabase.LoadAssetAtPath<GameObject>(splitPrefabPath);
+                    if (skelSource == null) return Fail($"{name}: the split prefab did not import ({splitPrefabPath}) — the skeleton would bake from the unsplit rig and the overflow would silently not render.");
+                    Debug.Log($"[Factory] {name}: ANIMATED multi-fragment split — {chunks.Count} skinned fragment(s) on one skeleton, baked from {System.IO.Path.GetFileName(splitPrefabPath)}; the plugin appends a FragmentEntry per overflow chunk.");
+                }
+            }
+        }
+
         // Double-sided for ANIMATED models is applied AT THE SOURCE — the Vehicle Lab's "Double-sided" option makes
         // vehicle_rig.py export a genuinely two-sided Spin GLB (reversed, inset faces). So there is NO runtime mesh
         // doubling here: the rigged FBX arrives already double-sided, and the rig, the atlas-remapped _PreviewMesh
@@ -671,7 +754,7 @@ public static class UniversalBaker
         // Pre-check the skinned mesh's bone data: a vertex weighted to a bone index the mesh's bone list doesn't have
         // makes Amplitude's SetPrefab/Reimport (MeshCollection.ImportMeshes) throw an opaque IndexOutOfRange. Dump the
         // state and flag any mismatch clearly (this is what breaks the ReconDrone's FRESH bake).
-        foreach (var smr in fbxGo.GetComponentsInChildren<SkinnedMeshRenderer>())
+        foreach (var smr in skelSource.GetComponentsInChildren<SkinnedMeshRenderer>())
         {
             var m = smr.sharedMesh; if (m == null) continue;
             int nBones = smr.bones != null ? smr.bones.Length : 0;
@@ -681,13 +764,20 @@ public static class UniversalBaker
             if (maxIdx >= nBones)
                 Debug.LogError($"[Factory] {name}: BONE MISMATCH — a vertex is weighted to bone index {maxIdx} but the mesh lists only {nBones} bones. THIS is the IndexOutOfRange in Amplitude's ImportMeshes (a fresh-extraction rig/decimation issue).");
         }
-        if (!InvokeReq(skelType, "SetPrefab", new[] { typeof(GameObject) }, skel, new object[] { fbxGo }, out var err)) return Fail(err);
+        if (!InvokeReq(skelType, "SetPrefab", new[] { typeof(GameObject) }, skel, new object[] { skelSource }, out var err)) return Fail(err);
         if (!InvokeReq(skelType, "Reimport", Type.EmptyTypes, skel, null, out err)) return Fail(err);
         EditorUtility.SetDirty(skel);
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
         TestPoll();
 
-        ReportBakedQuads(skelType, skel, name);
+        int animChunksOver = ReportBakedQuads(skelType, skel, name);
+        // THE SPLIT MADE A PROMISE (the static path's review-P1 rule, now here too): every chunk was measured to
+        // fit. If the SDK paired fewer triangles than the estimate and one still measures over, shipping it would
+        // silently clip in-game — fail instead and say what to do. An unsplit bake keeps the classic warn-only
+        // behaviour, because it promised nothing.
+        if (cfg.multiMesh && animChunksOver > 0)
+            return Fail($"{name}: {animChunksOver} baked chunk(s) still measure over the {EngineQuadCeiling:N0}-quad " +
+                        "per-fragment ceiling after the split — lower 'Reduce to ~tris' and re-bake.");
 
         // --- 5) bake ClipCollection: set its skeleton guid, SetFromDirectory (populate clips), Reimport (bake poseData) ---
         var clipType = FindAmpType("Amplitude.Mercury.Animation.ClipCollection");

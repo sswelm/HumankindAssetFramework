@@ -273,7 +273,7 @@ by the game. Launch Humankind, enable the mod, load the target unit, and use F8 
 The engine draws **at most 16,320 quads per draw fragment** (255 sub-particles × 64 primitives, a hard 8-bit
 field) and the overrun is **silent**: the mesh stores fully, but whatever baked last — masts, rigging, sails —
 simply never renders in-game, with no error anywhere. Every preview shows the full model; only the game clips.
-Since 0.5.7 a static bake over the ceiling **can split itself — opt-in via the Factory entry's
+Since 0.5.7 a bake over the ceiling **can split itself — opt-in via the Factory entry's
 "Multi-fragment split (over-ceiling bake)" checkbox** (default off: extra fragments are extra draw work, so
 this is a conscious per-model choice; unchecked keeps the classic warn-and-clip). When enabled, the Factory
 partitions the mesh into spatial chunks (`…_ModelMesh`, `…_ModelMesh_B`, …), each under the budget, and the
@@ -282,8 +282,18 @@ ceiling, the same mechanism vanilla's detailed multi-fragment units use. The `BA
 each chunk (`fits (N to spare)`), the split is logged as `split into K meshes`, and a **budget warning**
 (console + dialog) states the total — "N quads across K fragments, K.K× the normal per-unit budget" — so the
 cost stays visible even though every chunk fits. The plugin logs `[Uni][Multi] … chunk … encoded` per chunk at
-load. The dial guidance below still matters — fewer triangles are still cheaper. (Animated bakes don't split:
-their ceiling remains hard — keep them under 16,320 quads.)
+load. The dial guidance below still matters — fewer triangles are still cheaper.
+
+**Animated bakes split too, since 2026-09-20** (before that the checkbox was there but did nothing on the animated
+path, and an over-ceiling rig simply lost its masts in-game). The rigged mesh is partitioned by the same splitter —
+it carries bone weights and bindposes, so every chunk skins against the same skeleton and plays the same clips — and
+the bake writes a `…_Split.prefab` holding one `SkinnedMeshRenderer` per chunk, which is what the skeleton is baked
+from. The body is renamed `<name>_ModelMesh` so the plugin retargets the right renderer onto the donor's mesh name.
+
+**Mind the vertex cost.** Splitting duplicates every seam vertex — the steam frigate went 99,676 → 125,369 (**+26%**)
+— and chunks share the pawn vertex buffer (1,000,000 vanilla). A full buffer stops the game drawing units *and*
+districts, silently. Check F8 after a split bake; raise the pool with `BufferOverrides` if you split more than one
+big model. See [Vertex-Budget](Vertex-Budget.md).
 The plugin also logs a `[Uni][BUDGET]` audit line per injected unit at load, catching units baked before the
 check existed.
 
@@ -324,8 +334,9 @@ reduction never has to choose what survives**:
    new `_Part_NNN` rows need marking), Save. Every Save keeps a `.bak~` of what it overwrites.
 
 Beyond the single-fragment ceiling, the engine-native path is multiple meshes per unit (each with its own
-16,320 budget, as vanilla's detailed units do) — since 0.5.7 the **static** bake path offers this via the
-opt-in Multi-fragment split checkbox (see the top of this section); the animated path does not.
+16,320 budget, as vanilla's detailed units do) — the opt-in Multi-fragment split checkbox does this on **both**
+bake paths (static since 0.5.7, animated since 2026-09-20; see the top of this section), at the cost of the
+duplicated seam vertices it adds to the shared pawn buffer.
 
 ## Fast symptom map
 

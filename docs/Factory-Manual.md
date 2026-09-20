@@ -217,13 +217,20 @@ their settings and work together**:
   skirt low, grey hull high). For untextured CAD models that just need a simple gradient skin.
 - **Winding fix (CAD/convex)** — rewind faces outward so single-sided / CAD "sketch" meshes render instead of culling to
   invisible. Lightest fix; assumes a roughly convex hull (vehicles/ships).
-- **Multi-fragment split (over-ceiling bake)** — *opt-in, static bakes only.* A bake over the engine's 16,320-quad
+- **Multi-fragment split (over-ceiling bake)** — *opt-in; **both** bake paths (static since 0.5.7, **animated since
+  2026-09-20**).* A bake over the engine's 16,320-quad
   per-fragment draw ceiling splits into spatial chunks (`…_ModelMesh_B`, …, up to 8), each drawn as its own fragment on
   the unit, so the whole model renders instead of the tail silently clipping. Every split bake raises a **budget
   warning** (console + dialog) with the total — "N quads across K fragments, K.K× the normal per-unit budget" — because
   more fragments are more draw work: reduce first, split only when further reduction would visibly hurt. Unchecked
   (default) keeps the classic behavior: one mesh, the over-ceiling dialog, overflow clipped. See the
   [quickstart's draw-ceiling section](Vehicle-Lab-Quickstart.md#9-large-models--fitting-the-engines-draw-ceiling).
+  **The second cost is vertices**, and it is the one that bites: every chunk duplicates the vertices along its seam —
+  the steam frigate went 99,676 → 125,369 (**+26%**) — and all of them live in the shared pawn vertex buffer, which is
+  1,000,000 vanilla. Fill that buffer and the game stops uploading *any* further mesh: units **and** districts stop
+  drawing at once, with no error (2026-09-20 — a single static re-bake of that frigate was the straw, on a buffer
+  already doubled to 2,000,000 by `BufferOverrides`). F8 shows the fill; raise it with
+  `BufferOverrides = MeshWithSkeleton:verts=+N`. See [Vertex-Budget](Vertex-Budget.md).
 - **Double-sided** — for **animated (rigged) vehicles** this moved to the **Vehicle Lab** in 0.5.4 (its
   *Double-sided (fix see-through parts)* checkbox, applied to the source Spin GLB when you generate the rig). The
   Factory no longer has the checkbox for animated models. For **static** single-sided/CAD shells, use **Winding

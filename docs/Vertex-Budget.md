@@ -129,7 +129,16 @@ measured, not assumed:
 
 | Pipeline | What is stored | Pool limit (shared) | Per-mesh limit | Raise it with |
 |---|---|---|---|---|
-| **Units (pawns)** | baked skinned meshes, one copy per TYPE (instances free) | **~1,000,000 verts** (pawn layer; ~700k used by the roster) | 16,320 quads per FRAGMENT (compiled shader stride) | `[Buffers] BufferOverrides` for the pool; the 0.5.7 **multi-fragment split** for the per-mesh cap |
+| **Units (pawns)** | baked skinned meshes, one copy per TYPE (instances free) | **~1,000,000 verts** (pawn layer; ~700k used by the roster) | 16,320 quads per FRAGMENT (compiled shader stride) | `[Buffers] BufferOverrides` for the pool; the 0.5.7 **multi-fragment split** (both bake paths since 2026-09-20) for the per-mesh cap |
+
+> **THE TWO CEILINGS PULL AGAINST EACH OTHER** (2026-09-20, the steam frigate). The split is the cure for the
+> per-fragment quad ceiling, and it is paid for out of the pool: each chunk duplicates the vertices on its seam, so
+> that ship went 99,676 → **125,369 verts (+26%)** as four fragments. The pool is shared by every unit type, and when
+> it fills the game stops uploading meshes entirely — **units and districts both stop drawing, with no error**. That
+> day's buffer was already doubled to 2,000,000 by `BufferOverrides` and sat at 1,999,968; one static re-bake of one
+> ship was the straw. Read the fill with **F8** (`L2 … verts %`), and raise the pool with
+> `BufferOverrides = MeshWithSkeleton:verts=+2000000` (roughly +48 MB VRAM per million) before splitting a second
+> large model. Reducing triangles pays both ceilings at once; splitting pays one by spending the other.
 | **Districts / buildings** | baked static meshes in the shared `Visual` layer | **3,000,000 verts**, ~99% full late-game — the tightest real vertex wall | 255 sub-particles × PPC (PPC dynamic, auto-boosted since 0.5.7) | `DistrictBufferHeadroom` for the pool; `DistrictMeshDensityBoost` floor for the ceiling — [District-Visuals](District-Visuals.md) |
 | **Terrain tiles** | **NO stored vertices at all** — `ProceduralTerrainRenderer` GENERATES the hex geometry on the GPU every frame (visibility kernel → repack → draw-procedural + tessellation) and throws it away | n/a — vertices are manufactured per frame | **10,000 visible hexagons** per frame (post-culling) and 800,000 draw commands, both plain ints on the technical-settings asset | `[Terrain] TerrainHexagonBufferMultiplier` (0.5.7, experimental — section below) |
 

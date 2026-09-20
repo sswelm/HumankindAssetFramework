@@ -9,6 +9,28 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   on occasion split an object apart"). Menu, title and text follow the name; the window's own class keeps its old name
   so a saved Unity layout still finds it and nobody has to reopen the window.
 
+- **The Multi-fragment split now works on ANIMATED bakes** (user: "for unknown reason the Multi-fragment split option
+  no longer works" — on the animated path it never did). The engine draws at most 16,320 quads per fragment and the
+  overflow silently does not render; the split has cured that for static bakes since 0.5.7, but `SplitForQuadCeiling`
+  had exactly one call site, in the static builder, so on a rigged model the checkbox did nothing and the steam
+  frigate's 40,891 quads lost their masts in-game. Most of the machinery was already general: the splitter carries
+  bone weights and bindposes, so a chunk skins against the same skeleton and plays the same clips, and the plugin's
+  chunk injection discovers chunks from the collection by name and has never cared which path baked them. What the
+  animated path needed was a prefab of its own — the imported FBX is an asset, so the extra renderers go on a copy,
+  saved as `<name>_Split.prefab`, which the skeleton is then baked from. The body mesh is renamed `<name>_ModelMesh`
+  because that exact tail is what the runtime looks for when it retargets the body onto the donor's mesh name;
+  without it, with chunks present, that search falls through to index 0 and can land on a chunk. As on the static
+  path, the split makes a promise and the bake now verifies it: a chunk that still measures over the ceiling fails
+  the bake instead of shipping geometry that will not draw.
+
+- **Splitting costs vertices, and the pool it spends is shared** (documented after it bit: units and districts all
+  stopped drawing). Every chunk duplicates the vertices along its seam — the steam frigate went 99,676 to 125,369,
+  **+26 %** — and they live in the pawn vertex buffer, 1,000,000 vanilla. When that buffer fills the game stops
+  uploading meshes entirely, so units **and** districts vanish at once with no error anywhere. The two ceilings pull
+  against each other: reducing triangles pays both, splitting pays one by spending the other. F8 reports the fill and
+  `BufferOverrides = MeshWithSkeleton:verts=+N` raises the pool (~48 MB VRAM per million). Now stated in the
+  checkbox's own tooltip, the Factory manual, the quickstart and Vertex-Budget.
+
 - **Model Cutter / Fuser: every row shows the part's size**, the same figure the Vehicle Lab prints, from the box the
   analyzer already reads (user: "it would really help if this list also included the dimensions" — while hunting a flat
   panel by eye through 900 rows).
