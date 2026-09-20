@@ -1973,6 +1973,12 @@ public class VehicleLabWindow : EditorWindow
                 try { if (highlightedRenderers[i] != null) highlightedRenderers[i].sharedMaterials = highlightedOriginals[i]; } catch { }
         highlightedRenderers = null; highlightedOriginals = null;
         selectedPart = name;
+        // DROP KEYBOARD FOCUS on every selection change (2026-09-21, user: the Placement values "do not consistently
+        // get updated when switching between objects"). IMGUI text fields are identified by POSITION, so the Offset
+        // and Scale fields keep their control ids from one selected part to the next — and a field that still has
+        // focus shows its own edit buffer, not the new part's value, until focus leaves. Same cure this window
+        // already applies after a recipe load (the Edit-existing dropdown above).
+        GUI.FocusControl(null); EditorGUIUtility.editingTextField = false;
         boundsValid = false;   // re-derive (full model or the part) on next render
         previewPan = Vector2.zero;   // a part focus should CENTER the part — a leftover pan would frame empty space
         if (inst == null || string.IsNullOrEmpty(name)) return;
