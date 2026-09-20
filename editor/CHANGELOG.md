@@ -5,7 +5,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
-- **Model Splitter / Fuser: every row shows the part's size**, the same figure the Vehicle Lab prints, from the box the
+- **The Model Splitter is now the Model Cutter** (user: "we are mainly cutting away bad or insignificant parts and only
+  on occasion split an object apart"). Menu, title and text follow the name; the window's own class keeps its old name
+  so a saved Unity layout still finds it and nobody has to reopen the window.
+
+- **Model Cutter / Fuser: every row shows the part's size**, the same figure the Vehicle Lab prints, from the box the
   analyzer already reads (user: "it would really help if this list also included the dimensions" — while hunting a flat
   panel by eye through 900 rows).
 - **Fuse: the run's mirrored verdict reaches the groups that cannot see it.** How a file stores its mirrored parts is a
@@ -65,7 +69,7 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangle's area lies across its whole extent. Twin evidence may veto a volume reversal (a cavity shell's twins lie
   behind it on at least 90 % of its faces, all from ONE other island whose box contains it — enclosed, as neighbouring
   solids never are) but never cause one against a confident volume. Ten tests.
-- **Model Splitter / Fuser: a split fragment's preview carries only its own vertices.** A split writes its fragments as
+- **Model Cutter / Fuser: a split fragment's preview carries only its own vertices.** A split writes its fragments as
   new *index* accessors over the parent's untouched position buffer, so a fragment addresses a handful of vertices
   inside a buffer holding the whole original part. The preview copied the buffer wholesale: on a real Khalandion split
   it held 5,202,111 vertices to draw 393,646 (13x), one 8-vertex fragment carrying 65,532 — and because Unity sizes a
@@ -73,25 +77,25 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   of zooming to the part. Each primitive is now compacted to the vertices it references, indices remapped; the same
   file now holds exactly the 393,646 it draws. The 1 GB estimate counted the shared buffers too and is corrected the
   same way. Found in review of PR 66.
-- **Model Splitter / Fuser: "Hide parts over (size)"** — the mirror of the existing lower bound, so the two bracket a
+- **Model Cutter / Fuser: "Hide parts over (size)"** — the mirror of the existing lower bound, so the two bracket a
   size band, and alone it leaves nothing but the small clutter in the list, ready for the Delete key. Its travel is
   **logarithmic**: part sizes span four decades on a split model (the Romanic's 1,796 parts run 0.017 to 173), where a
   linear slider spends 99 % of its length doing nothing and crosses "219 parts shown" to "1,361 shown" inside one
   pixel. The number box beside it takes an exact threshold. At rest it sits a hair above the largest part, so the
   biggest row can never round its way into hiding.
-- **Model Splitter / Fuser: an "Un-mirror" checkbox above the preview.** glTF is right-handed and Unity left-handed, so
+- **Model Cutter / Fuser: an "Un-mirror" checkbox above the preview.** glTF is right-handed and Unity left-handed, so
   the preview showed the model mirrored — screen-left was the file's starboard, a trap in a window where picking a side
   is half the work. The box negates X and flips every triangle to compensate, measured to leave the surface exactly as
   solid (the Romanic split: 1.0 % of struck cells render back-facing either way; negating without the flip inverts the
   whole ship). Off by default, remembered per window, and it flips the built meshes in place rather than re-reading the
   file. The part list, the sliders, Find the mirror and every output always worked in file coordinates and are
   unaffected either way.
-- **Model Splitter / Fuser: a file probed into the window starts fully visible.** The list filters kept their values
+- **Model Cutter / Fuser: a file probed into the window starts fully visible.** The list filters kept their values
   across files and were only clamped into the new model's span, so four sliders left at the ends on a metre-scale ship
   arrived at the ends of a centimetre-scale one and hid all 113 parts ("why don't I see any parts?"). The first Probe of a
   file now resets every filter (sliders, Show only, the whole-parts toggle); a re-Probe or a slider move on the same file
   keeps them. A **Show all** button next to the toggle does the same by hand.
-- **Model Splitter / Fuser: Probe is three times faster on a big file.** A 214 MB ship (113 parts, 2.6 M triangles)
+- **Model Cutter / Fuser: Probe is three times faster on a big file.** A 214 MB ship (113 parts, 2.6 M triangles)
   took 86 s to probe. Two causes, both fixed. The island analysis read every index and every position through the
   accessor's JSON again — string-keyed lookups, a boxed int and a fresh array per element — 30 s; the reader now
   resolves each accessor's layout once (same checks, same messages, same bytes: the rows of the real file are
@@ -158,7 +162,7 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
     "Marked for deletion". The checks and the deletion marks persist in `<source>.marks.txt` beside the fuse sidecar
   (S = split, X = delete): written by **Save marks** in the Splitter, by Save groups in the Fuser, and by every Split,
   Plane cut and Fuse; read at the first Probe of a file, and by Load marks / Load groups. Both windows share it.
-- **The Model Workshop is two windows: Model Splitter and Model Fuser** (user: "too many responsibilities, which makes
+- **The Model Workshop is two windows: Model Cutter and Model Fuser** (user: "too many responsibilities, which makes
   it cluttered — one screen for cutting and one for merging"). One implementation; both share the file pickers, the
   probe, the filtered part list, the preview, the mirror finder and the keyboard sweep. The Splitter shows the Split
   checkboxes, "Check all splittable", the plane cut and Split (output `_split` / `_cut`); the Fuser the ⊕ letters,
