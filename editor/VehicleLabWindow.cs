@@ -1471,6 +1471,30 @@ public class VehicleLabWindow : EditorWindow
             status = "Probe found no mesh parts — is this a mesh model? Existing markings kept. (See the Console for Blender output.)";
             return;
         }
+        // RENAMED FUSED GROUPS (2026-09-21, user: "I had given Fused_Y_Object_1740 a Z offset of -0.5 … this seems to
+        // have gotten wiped after I made some changes to the group in the Model Fuser"). The Fuser names a fused node
+        // after the group's FIRST member, so changing a group's membership renames the node — the recipe held the
+        // placement under Fused_Y_Object_1722, the re-fused file called the node Fused_Y_Object_1740 — and a role or
+        // placement kept by exact name had nothing to land on. The GROUP is the stable identity: when a kept fused
+        // name is gone and exactly ONE fresh row carries the same Fused_<group>_ prefix, the role and the placement
+        // move to it, and the status says so. Anything less certain than "exactly one" stays a manual re-mark.
+        var migrated = new List<string>();
+        {
+            var newNames = new HashSet<string>(newParts.Select(x => x.name));
+            string GroupOf(string n) { var m = System.Text.RegularExpressions.Regex.Match(n ?? "", @"^Fused_([^_]+)_"); return m.Success ? m.Groups[1].Value : null; }
+            foreach (string old in kept.Keys.Concat(keptPlace.Keys).Distinct().ToList())
+            {
+                if (newNames.Contains(old)) continue;
+                string g = GroupOf(old); if (g == null) continue;
+                var cands = newParts.Where(x => GroupOf(x.name) == g && !kept.ContainsKey(x.name) && !keptPlace.ContainsKey(x.name)).ToList();
+                if (cands.Count != 1) continue;
+                var t = cands[0]; var what = new List<string>();
+                if (kept.TryGetValue(old, out var r0)) { t.role = r0; what.Add("role " + r0); }
+                if (keptPlace.TryGetValue(old, out var pl)) { t.offset = pl.off; t.scale = pl.scl; what.Add("placement"); }
+                migrated.Add($"{old} → {t.name} ({string.Join(" + ", what)})");
+            }
+            if (migrated.Count > 0) Debug.Log("[VehicleLab] fused group(s) renamed by the Fuser — markings carried over by group: " + string.Join("; ", migrated));
+        }
         parts.Clear(); parts.AddRange(newParts);
         boneParts.Clear(); boneParts.AddRange(newBoneParts);
         DestroyPreview();
@@ -1488,6 +1512,7 @@ public class VehicleLabWindow : EditorWindow
                 : "") +
               $"Probed {parts.Count} part(s); {parts.Count(x => x.role == Role.Wheel)} wheel(s), {parts.Count(x => x.role == Role.Turret)} turret(s)" +
               (kept.Count > 0 ? $" ({parts.Count(x => kept.ContainsKey(x.name) && x.role == kept[x.name])} of {kept.Count} earlier markings kept)" : " (auto-guessed)") +
+              (migrated.Count > 0 ? $" · {migrated.Count} renamed fused group(s) carried over: {string.Join("; ", migrated)}" : "") +
               ". Click a row to see WHICH part it is (zoom + yellow highlight), assign roles, then Generate rig.";
     }
 

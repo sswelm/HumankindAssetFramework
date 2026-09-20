@@ -114,7 +114,9 @@ placed rows carry a ⇄ tag. The numbers are in the model file's own axes and un
 centre/size and the second model's Offset — and they apply *before* the Orientation straightening, so Probe and
 Generate agree. **Re-Probe** to see a placement in the preview, **Generate** to bake it; the Generate log prints each
 placed part's centre and size before and after (`VEHICLE PLACED`). Placements are saved in the recipe and survive a
-re-Probe by part name, like roles. The source-skeleton fast path leaves meshes as authored, so it ignores placement
+re-Probe by part name, like roles. If the Model Fuser renames a group's node — it is named after the group's
+first member, so changing the membership renames it — a re-Probe carries the role and the placement over to the one
+fresh row with the same `Fused_<group>_` prefix and says so in the status. The source-skeleton fast path leaves meshes as authored, so it ignores placement
 and says so in the log.
 
 ## 4. Tune and generate
