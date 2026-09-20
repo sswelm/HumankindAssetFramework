@@ -1140,22 +1140,36 @@ if convert_rig or clean_units_input:
 # argv[10] (the old auto-ground opt-in) stays in the argument list because it still keys the slim-FBX cache, but
 # placement no longer asks it: a flyer is grounded exactly as the static path grounds one, and its flying height
 # is the Position z dial, exactly as on the static path.
+# THE MESH AND THE ARMATURE NEED NOT SHARE A FRAME (PR #70 review, P1: "Placement can separate animated bone
+# pivots from their meshes"). This measured the box in MESH-local coordinates and then added the same delta to
+# ARMATURE-local bone rests. On the convert path that is harmless — the fold above leaves identity nodes, so the
+# two frames coincide — but the LEGACY path deliberately keeps object scale, and there one delta means two
+# different distances. DRILLED, the reviewer's case: mesh scale 1, armature scale 2, mesh centre and bone pivot
+# both at world x = 10 — the old shift centred the mesh on 0 and threw the pivot to x = -10, so every later
+# rotation would swing the geometry around a point ten units away from it. (Auto-ground carried the same flaw and
+# escaped it by being opt-in, on rigs that were converted anyway; making placement unconditional is what exposes
+# it.) So measure in WORLD space — which is what the FBX export and the game see — and convert that single
+# displacement into each object's own local space before moving anything.
 if arm is not None and me.vertices:
-    _xs = [v.co.x for v in me.vertices]; _ys = [v.co.y for v in me.vertices]; _zs = [v.co.z for v in me.vertices]
-    _dx = -(min(_xs) + max(_xs)) / 2.0
-    _dy = -(min(_ys) + max(_ys)) / 2.0
+    _mw = joined.matrix_world
+    _wpts = [_mw @ v.co for v in me.vertices]
+    _zs = [p.z for p in _wpts]
+    _dx = -(min(p.x for p in _wpts) + max(p.x for p in _wpts)) / 2.0
+    _dy = -(min(p.y for p in _wpts) + max(p.y for p in _wpts)) / 2.0
     _dz = -min(_zs)
     if max(abs(_dx), abs(_dy), abs(_dz)) > 1e-3:
+        _dworld = Vector((_dx, _dy, _dz))
+        _dmesh = _mw.inverted().to_3x3() @ _dworld          # the same move, said in mesh-local terms
+        _darm = arm.matrix_world.inverted().to_3x3() @ _dworld   # ...and in armature-local terms
         for v in me.vertices:
-            v.co.x += _dx; v.co.y += _dy; v.co.z += _dz
+            v.co += _dmesh
         me.update()
         bpy.context.view_layer.objects.active = arm
         bpy.ops.object.mode_set(mode='EDIT')
         for _eb in arm.data.edit_bones:
-            _eb.head.x += _dx; _eb.head.y += _dy; _eb.head.z += _dz
-            _eb.tail.x += _dx; _eb.tail.y += _dy; _eb.tail.z += _dz
+            _eb.head += _darm; _eb.tail += _darm
         bpy.ops.object.mode_set(mode='OBJECT')
-        print("RIGANIM placement: centre (%.4f, %.4f) -> origin, lowest point %.4f -> 0 (moved %.4f, %.4f, %.4f)"
+        print("RIGANIM placement: world centre (%.4f, %.4f) -> origin, lowest point %.4f -> 0 (moved %.4f, %.4f, %.4f)"
               % (-_dx, -_dy, min(_zs), _dx, _dy, _dz))
         # THE SKY-LIFT SIGNATURE (2026-09-12, the TOW; now everyone's problem, because grounding no longer asks a
         # toggle). The rest skeleton is built from the Idle/REFERENCE clip's frame. Reference a clip that holds a
