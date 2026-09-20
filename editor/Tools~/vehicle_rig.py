@@ -114,6 +114,14 @@ def apply_part_placements(objs, tag):
         if o is None:
             print("VEHICLE WARN: placement for '%s' skipped — no such part after the split (re-Probe, then place it again)" % name)
             continue
+        # ONLY THIS PART MOVES (PR #74 review P2): the probe keeps the import hierarchy until export, so a parent's
+        # matrix_world change dragged its children along — a child at z=3 under a parent offset +2 showed at z=5 in
+        # Probe while Generate, which detaches meshes first, left it at 3. Detach the placed part from its parent
+        # AND its children from it, each keeping its world transform (a bare `.parent =` keeps LOCAL transforms and
+        # would throw root-borne placement away), so the placement reaches exactly one row on both paths.
+        for rel in [o] + [ch for ch in o.children if ch.type == 'MESH']:
+            mw = rel.matrix_world.copy(); rel.parent = None; rel.matrix_world = mw
+        bpy.context.view_layer.update()
         c0, s0 = world_bbox(o)
         T = (Matrix.Translation(Vector(off)) @ Matrix.Translation(c0)
              @ Matrix.Diagonal((scl[0], scl[1], scl[2], 1.0)) @ Matrix.Translation(-c0))
