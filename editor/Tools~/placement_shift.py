@@ -12,25 +12,38 @@
 # THE RULE. The bake removes the model's own miscentring, so folding that same amount into the dial preserves
 # today's appearance:
 #
-#     new_x = old_x + move_x        new_y = old_y + move_y        new_z = old_z - lift   (only if NOT already auto-grounded)
+#     new_x = old_x + move_x        new_y = old_y + move_y        new_z = old_z - lift   (only if NOT auto-grounded)
 #
 # An entry whose dial was PURE compensation lands on ~0, which is the tell that the sign is right. Measured on the
 # shipped ENC pack, four independently hand-dialed entries collapse at once: GatlingGuns -3.70 + 3.34 = -0.36,
-# AntiTankIFV +0.50 - 0.497 = +0.003, StealthHelicopter (-0.50, +0.50) + (+0.391, -0.525) = (-0.11, -0.03),
+# AntiTankIFV +0.50 - 0.497 = +0.003, StealthHelicopter (-0.50, +0.50) + (+0.391, -0.525) = (-0.11, -0.02),
 # TOW-Infantry -0.30 + 0.247 = -0.05. With the sign the other way those would DOUBLE (GatlingGuns to -7.04 on a
 # size-2.5 model), which no one would have shipped.
 #
-# CAVEAT, and it matters: this assumes the entry is still baked with the OLD placement. An entry you have ALREADY
-# re-baked is done — its dial is already in the new frame, and adding the move again would break it. The script
-# cannot tell; it prints the warning and leaves the judgement to you.
+# MEASURING THE SAME THING THE BAKE MEASURES — the two ways a migration tool gets this quietly wrong (PR #72
+# review, both found there):
 #
-# The measurement mirrors rig_anim.py's own: import, cull material-less junk meshes (the glTF importer's
-# placeholder icosphere is not in the file), take the WORLD box, apply the registry rotation the way rig_anim
-# composes it (Rz(Y) @ Rx(X) @ Ry(Z) in the Blender Z-up world), then scale by size/longest into game units.
+#   1. ROTATE THE GEOMETRY FIRST. rig_anim folds the registry rotation into the data and measures afterwards, so
+#      the box is the ROTATED cloud's box. Rotating an unrotated box's CENTRE is not the same thing for asymmetric
+#      geometry, and the longest axis — hence size/longest — differs too. Drilled on a size-5 triangular prism at
+#      45 degrees: rotating the centre gave (+0.589, -2.946) at scale 0.8333, the bake's order (+0.500, -1.500) at
+#      0.7071 — 1.45 game units of error. At 0/+-90/180 the two agree to 0.00000, which is why a pack of
+#      axis-aligned entries shows no symptom and the bug waits for the first model dialed to an odd angle.
+#
+#   2. MEASURE THE REFERENCE POSE, not the file's raw rest. The rest skeleton is built from the Idle/reference
+#      clip's frame, and that pose IS the geometry the bake places: reference a clip holding a struck or folded
+#      pose and the lowest point becomes a yard under the hull, not the keel (the sky-lift trap). This applies the
+#      entry's own animClip frame before measuring.
+#
+# WHAT IT STILL CANNOT REPRODUCE, and says so rather than printing a confident wrong number: a deploy-converted
+# recipe (deployConvert), whose rig and clips are synthesized by a separate conversion. Those rows are reported as
+# unsupported. The ground truth for any entry is the bake's own log line, "RIGANIM placement: world centre ...",
+# which you can compare against this table after the first re-bake.
 import bpy
 import json
 import math
 import os
+import re
 import sys
 
 from mathutils import Matrix, Vector
@@ -45,8 +58,7 @@ pack = json.load(open(pack_path, encoding="utf-8"))
 models = pack.get("models", []) if isinstance(pack, dict) else pack
 
 
-def world_box(path):
-    """The box rig_anim would measure: every mesh that survives the junk cull, in world space."""
+def load(path):
     ext = os.path.splitext(path)[1].lower()
     bpy.ops.wm.read_factory_settings(use_empty=True)
     if ext in (".glb", ".gltf"):
@@ -57,22 +69,61 @@ def world_box(path):
         bpy.ops.wm.open_mainfile(filepath=path)
     else:
         raise RuntimeError("unsupported extension " + ext)
+    # the same junk cull rig_anim does on import (the glTF importer's placeholder icosphere is not in the file)
     for junk in [o for o in bpy.context.scene.objects if o.type == 'MESH' and len(o.data.materials) == 0]:
         bpy.data.objects.remove(junk, do_unlink=True)
+
+
+def pose_to_reference(clip):
+    """Put the rig in the Idle/reference clip's frame — the pose the bake turns into the rest skeleton.
+
+    Returns a short note describing what happened, for the row's comment."""
+    arm = next((o for o in bpy.context.scene.objects if o.type == 'ARMATURE'), None)
+    if arm is None:
+        return "no armature"
+    clip = (clip or "").strip()
+    if not clip:
+        return "no reference clip set; measured at the file's rest"
+    m = re.match(r"^(.*?)\s*\[\s*(-?\d+)\s*\.\.\s*-?\d+\s*\]\s*$", clip)
+    name, frame = (m.group(1), int(m.group(2))) if m else (clip, None)
+    act = (bpy.data.actions.get(name)
+           or next((a for a in bpy.data.actions if a.name.split("|")[-1] == name), None)
+           or next((a for a in bpy.data.actions if name.lower() in a.name.lower()), None))
+    if act is None:
+        return "clip '%s' not in the file; measured at the file's rest" % name
+    arm.animation_data_create()
+    arm.animation_data.action = act
+    f = int(act.frame_range[0]) if frame is None else frame
+    bpy.context.scene.frame_set(f)
+    bpy.context.view_layer.update()
+    return "posed at %s frame %d" % (act.name.split("|")[-1], f)
+
+
+def measure(rot):
+    """The bake's own measurement: the POSED, ROTATED cloud's box."""
+    R = (Matrix.Rotation(math.radians(rot.get("y", 0.0)), 4, 'Z')
+         @ Matrix.Rotation(math.radians(rot.get("x", 0.0)), 4, 'X')
+         @ Matrix.Rotation(math.radians(rot.get("z", 0.0)), 4, 'Y'))
+    dg = bpy.context.evaluated_depsgraph_get()
     pts = []
     for o in bpy.context.scene.objects:
-        if o.type != 'MESH' or not len(o.data.vertices):
+        if o.type != 'MESH':
             continue
-        m = o.matrix_world
-        pts += [m @ v.co for v in o.data.vertices]
+        ev = o.evaluated_get(dg)           # the armature modifier applied: the reference pose's geometry
+        if not len(ev.data.vertices):
+            continue
+        mw = o.matrix_world
+        pts += [R @ (mw @ v.co) for v in ev.data.vertices]
     if not pts:
         raise RuntimeError("no mesh left after the junk cull")
-    return pts
+    lo = Vector((min(p.x for p in pts), min(p.y for p in pts), min(p.z for p in pts)))
+    hi = Vector((max(p.x for p in pts), max(p.y for p in pts), max(p.z for p in pts)))
+    return (lo + hi) / 2, lo.z, max(hi - lo)
 
 
 print("PLACEMENT pack: %s" % pack_path)
 print("PLACEMENT %-22s %-24s %-24s %s" % ("entry", "Position today", "Position after re-bake", "note"))
-print("PLACEMENT " + "-" * 92)
+print("PLACEMENT " + "-" * 100)
 
 for e in models:
     if not e.get("animated"):
@@ -82,39 +133,35 @@ for e in models:
     if not os.path.exists(src):
         print("PLACEMENT %-22s model file not found: %s" % (name, src))
         continue
+    if e.get("deployConvert"):
+        print("PLACEMENT %-22s NOT MEASURED — deploy conversion rebuilds the rig and clips; re-bake and read the "
+              "bake's own 'RIGANIM placement:' line" % name)
+        continue
     try:
-        pts = world_box(src)
+        load(src)
+        posed = pose_to_reference(e.get("animClip"))
+        centre, lowest, longest = measure(e.get("rotation") or {})
     except Exception as ex:
-        print("PLACEMENT %-22s could not measure (%s)" % (name, str(ex)[:60]))
+        print("PLACEMENT %-22s could not measure (%s)" % (name, str(ex)[:70]))
         continue
 
-    lo = Vector((min(p.x for p in pts), min(p.y for p in pts), min(p.z for p in pts)))
-    hi = Vector((max(p.x for p in pts), max(p.y for p in pts), max(p.z for p in pts)))
     size = e.get("size") or 5.0
-    longest = max(hi - lo)
     k = (size / longest) if longest > 0 else 0.0
-
-    rot = e.get("rotation") or {}
-    R = (Matrix.Rotation(math.radians(rot.get("y", 0.0)), 4, 'Z')
-         @ Matrix.Rotation(math.radians(rot.get("x", 0.0)), 4, 'X')
-         @ Matrix.Rotation(math.radians(rot.get("z", 0.0)), 4, 'Y'))
-    centre = R @ ((lo + hi) / 2)
-    lowest = min((R @ p).z for p in pts)
-
     move_x, move_y, lift = -centre.x * k, -centre.y * k, -lowest * k
     pos = e.get("position") or {}
     old = (pos.get("x", 0.0), pos.get("y", 0.0), pos.get("z", 0.0))
-    grounded = bool(e.get("autoGroundWheels"))       # RETIRED as a toggle, but it records what the last bake did
+    grounded = bool(e.get("autoGroundWheels"))   # RETIRED as a toggle, but it records what the last bake did
     new = (old[0] + move_x, old[1] + move_y, old[2] if grounded else old[2] - lift)
 
     moved = max(abs(new[i] - old[i]) for i in range(3))
-    note = "unchanged" if moved <= 0.05 else ("re-dial (%.2f)" % moved)
+    note = "unchanged" if moved <= 0.05 else "re-dial (%.2f)" % moved
     if not grounded and abs(lift) > 0.05:
         note += ", gains grounding"
-    print("PLACEMENT %-22s (%+.2f, %+.2f, %+.2f)%s(%+.2f, %+.2f, %+.2f)%s%s"
-          % (name, old[0], old[1], old[2], "        ", new[0], new[1], new[2], "        ", note))
+    print("PLACEMENT %-22s (%+.2f, %+.2f, %+.2f)        (%+.2f, %+.2f, %+.2f)        %s [%s]"
+          % (name, old[0], old[1], old[2], new[0], new[1], new[2], note, posed))
 
-print("PLACEMENT " + "-" * 92)
+print("PLACEMENT " + "-" * 100)
 print("PLACEMENT Nothing moves until an entry is RE-BAKED. An entry already re-baked since the change is done —")
 print("PLACEMENT its dial is already in the new frame, and this table would move it a second time.")
-print("PLACEMENT Verify on the entry with the LARGEST change first: if it lands right, the rest follow.")
+print("PLACEMENT Verify on the entry with the LARGEST change first: if it lands right, the rest follow. The bake's")
+print("PLACEMENT own 'RIGANIM placement: world centre ...' line is the ground truth to check a row against.")

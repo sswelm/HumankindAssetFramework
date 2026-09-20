@@ -226,9 +226,9 @@ Run the migration tool against your pack:
 blender --background --python placement_shift.py -- "…/BepInEx/config/haf_packs/<mod>/pack.json"
 ```
 
-It measures every animated entry the way `rig_anim.py` does — junk cull, world box, the registry rotation, then
-`size/longest` into game units — and prints the Position offset each entry needs **to look exactly as it does
-today**:
+It measures every animated entry the way `rig_anim.py` does — junk cull, the entry's **reference-clip pose**, the
+registry rotation folded into the geometry, then the box and `size/longest` into game units — and prints the
+Position offset each entry needs **to look exactly as it does today**:
 
 ```
 new_x = old_x + move_x     new_y = old_y + move_y     new_z = old_z − lift   (lift only if it was not auto-grounded)
@@ -240,8 +240,22 @@ pack four independently hand-dialed entries collapse at once — GatlingGuns `�
 `−0.30 + 0.247 = −0.05`. With the sign the other way each would *double* (the Gatling guns to `−7.04` on a size-2.5
 model), which nobody would have shipped.
 
+Two things it has to get right, and both are easy to get quietly wrong (PR #72 review found both):
+
+- **Rotate the geometry, then measure.** The bake folds the rotation into the data and measures afterwards, so the
+  box belongs to the *rotated* cloud. Rotating an unrotated box's centre is a different number for asymmetric
+  geometry, and the longest axis — hence `size/longest` — differs too. On a size-5 prism at 45° that was **1.45
+  game units** of error. At 0/±90/180 the two agree exactly, which is why a pack of axis-aligned entries shows no
+  symptom until someone dials an odd angle.
+- **Measure the reference pose, not the file's raw rest.** The rest skeleton comes from the Idle/reference clip's
+  frame, and that pose *is* the geometry the bake places — reference a struck or folded clip and the lowest point
+  is a yard under the hull rather than the keel.
+
 > **An entry you have ALREADY re-baked is done.** Its dial is in the new frame, and the table would move it a
-> second time. The tool cannot tell which is which — it prints the warning and leaves that to you.
+> second time. The tool cannot tell which is which — it prints the warning and leaves that to you. It also reports
+> **deploy-converted** entries as *not measured*: that recipe synthesizes its own rig and clips, so the honest
+> answer is to re-bake and read the bake's own `RIGANIM placement: world centre …` line, which is the ground truth
+> for any row here.
 
 Work the largest change first: if it lands on its hex, the rest follow. If it lands *twice* as wrong, stop and
 re-derive the sign rather than hand-fixing a dozen entries.
