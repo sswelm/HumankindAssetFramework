@@ -1118,26 +1118,73 @@ if convert_rig or clean_units_input:
         print("RIGANIM ERROR: transform_apply(rotation+scale) failed (%s) — the skeleton would ship un-normalized (~100x off the mesh). Aborting instead of exporting a broken rig." % e)
         sys.exit(1)
 
-# AUTO-GROUND (argv[10] == "1"): sit a rigged VEHICLE on the terrain with NO manual Position-offset dial — the
-# animated path has no keel->z=0 like the static path. Robust measure: drop the model's LOWEST point (the tyre
-# contact) to the skeleton origin — shift the whole rig up by -minZ. SELF-CORRECTING: a raw file lifts by its full
-# sink, an already-grounded file lifts by ~0, so it can NEVER double-apply (the earlier "wheels-on minus wheels-off"
-# protrusion measure did — a fixed lift that floated a pre-grounded file). Verts + bone rests move together (skin +
-# rotation-only clips untouched). Runs after the convert fold, so Z is world-vertical. OPT-IN: only sensible for a
-# vehicle whose lowest point IS its ground contact (a flyer/hover model would get pinned to the terrain).
-if len(argv) > 10 and argv[10].strip() == "1" and arm is not None and me.vertices:
-    _all_min = min(v.co.z for v in me.vertices)
-    _off = -_all_min
-    if abs(_off) > 1e-3:
-        for v in me.vertices: v.co.z += _off
+# PLACEMENT (2026-09-20) — "switching between static and animated should give the same result in both facing and
+# offset". FACING was unified on 2026-09-12 (the mirror-conjugated rotation); PLACEMENT never was. The static path
+# (UniversalBaker, its normalize/position steps) centres the model's box on the origin horizontally and drops its
+# lowest point to z = 0. The animated path did NEITHER — the opt-in auto-ground did the vertical half and nothing
+# ever did the horizontal one — so an animated bake sat wherever the artist happened to leave the model inside its
+# file. The frigate's box hangs 22.8 x 9.6 rig units off its own origin: about 1.4 game units at size 5, which is
+# the jump the user saw when switching a model between the two paths. (It is also what the hand-dialed horizontal
+# Position offsets in the registry were compensating for — the Gatling guns' y = -3.7.)
+#
+# ONE definition for both paths now: the box is centred on x and y and its lowest point sits at z = 0, measured
+# AFTER the rotation fold above so the two paths measure the same frame. The FBX import scales uniformly about the
+# origin (globalScale = size / longest), which preserves both. SELF-CORRECTING: an already-placed file moves by
+# ~0, so a re-bake can never double-apply it (the pre-2026-08 "wheels-on minus wheels-off" measure could). Verts
+# and bone rests move together, so skin and rotation-only clips are untouched.
+#
+# The dialed Position offset still rides on top — the runtime adds the registry position to the pawn every frame —
+# so an entry dialed against the OLD placement needs that dial re-checked once. Same one-time cost as the
+# 2026-09-12 rotation unification, and for the same reason: one convention beats two.
+#
+# argv[10] (the old auto-ground opt-in) stays in the argument list because it still keys the slim-FBX cache, but
+# placement no longer asks it: a flyer is grounded exactly as the static path grounds one, and its flying height
+# is the Position z dial, exactly as on the static path.
+# THE MESH AND THE ARMATURE NEED NOT SHARE A FRAME (PR #70 review, P1: "Placement can separate animated bone
+# pivots from their meshes"). This measured the box in MESH-local coordinates and then added the same delta to
+# ARMATURE-local bone rests. On the convert path that is harmless — the fold above leaves identity nodes, so the
+# two frames coincide — but the LEGACY path deliberately keeps object scale, and there one delta means two
+# different distances. DRILLED, the reviewer's case: mesh scale 1, armature scale 2, mesh centre and bone pivot
+# both at world x = 10 — the old shift centred the mesh on 0 and threw the pivot to x = -10, so every later
+# rotation would swing the geometry around a point ten units away from it. (Auto-ground carried the same flaw and
+# escaped it by being opt-in, on rigs that were converted anyway; making placement unconditional is what exposes
+# it.) So measure in WORLD space — which is what the FBX export and the game see — and convert that single
+# displacement into each object's own local space before moving anything.
+if arm is not None and me.vertices:
+    _mw = joined.matrix_world
+    _wpts = [_mw @ v.co for v in me.vertices]
+    _zs = [p.z for p in _wpts]
+    _dx = -(min(p.x for p in _wpts) + max(p.x for p in _wpts)) / 2.0
+    _dy = -(min(p.y for p in _wpts) + max(p.y for p in _wpts)) / 2.0
+    _dz = -min(_zs)
+    if max(abs(_dx), abs(_dy), abs(_dz)) > 1e-3:
+        _dworld = Vector((_dx, _dy, _dz))
+        _dmesh = _mw.inverted().to_3x3() @ _dworld          # the same move, said in mesh-local terms
+        _darm = arm.matrix_world.inverted().to_3x3() @ _dworld   # ...and in armature-local terms
+        for v in me.vertices:
+            v.co += _dmesh
         me.update()
         bpy.context.view_layer.objects.active = arm
         bpy.ops.object.mode_set(mode='EDIT')
-        for _eb in arm.data.edit_bones: _eb.head.z += _off; _eb.tail.z += _off
+        for _eb in arm.data.edit_bones:
+            _eb.head += _darm; _eb.tail += _darm
         bpy.ops.object.mode_set(mode='OBJECT')
-        print("RIGANIM auto-ground: lowest point %.4f -> origin (lifted %.4f)" % (_all_min, _off))
+        print("RIGANIM placement: world centre (%.4f, %.4f) -> origin, lowest point %.4f -> 0 (moved %.4f, %.4f, %.4f)"
+              % (-_dx, -_dy, min(_zs), _dx, _dy, _dz))
+        # THE SKY-LIFT SIGNATURE (2026-09-12, the TOW; now everyone's problem, because grounding no longer asks a
+        # toggle). The rest skeleton is built from the Idle/REFERENCE clip's frame. Reference a clip that holds a
+        # STRUCK pose (a yard swung under the hull, a folded trail) and the model's lowest point is that part, not
+        # the keel — so grounding lifts the whole model into the air by it. A lift worth a quarter of the model's
+        # own height is not a keel sitting down; say so in the log, where a puzzled re-bake will go looking.
+        _h = max(_zs) - min(_zs)
+        if _h > 1e-6 and _dz > 0.25 * _h:
+            print("RIGANIM WARNING: grounding lifted this model by %.1f%% of its own height. That is the signature of a"
+                  " REFERENCE clip holding a struck/folded pose (a part hanging below the keel) — reference the DEPLOYED"
+                  " frame instead (Furl[0..0], not Spin[0..0] or Furl[N..N]) and re-bake." % (100.0 * _dz / _h))
     else:
-        print("RIGANIM auto-ground: already grounded (minZ %.4f)" % _all_min)
+        print("RIGANIM placement: already centred and grounded")
+else:
+    print("RIGANIM placement: SKIPPED (no armature or no vertices) — the file's own placement is kept")
 
 # (2026-08-07: a POSITION-OFFSET block briefly lived here — argv[15]/[16], removed same-day: the runtime plugin
 # has always applied the registry position to the pawn each frame, so baking it too DOUBLE-applied it. The

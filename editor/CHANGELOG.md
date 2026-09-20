@@ -5,6 +5,29 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **An animated bake now lands where a static bake lands** (user: "switching between static and animated should give
+  the same result in both facing and offset"). Facing was unified on 2026-09-12; placement never was. The static path
+  centres the model's box on the origin and drops its lowest point to it; the animated path did neither — the opt-in
+  *Auto-ground* toggle did the vertical half and nothing did the horizontal one — so an animated bake sat wherever the
+  artist happened to leave the model inside its file. Measured on the steam frigate: baked animated, its box sat
+  **0.97 × 1.84 game units** off the pawn at size 5; now it sits at **0.0000 × 0.0000**, keel on the ground, with the
+  rig, the skin and the clip untouched (posed box drift 0.000 cm). Both paths read the same box — the frigate's file
+  gives centre (22.794, 12.024) and lowest −5.237, exactly the numbers the bake used.
+
+  **The Auto-ground toggle is retired**, because there is nothing left to tick: a flyer is grounded exactly as the
+  static path has always grounded one, and its flying height is the Position offset Z dial, the same dial on both
+  paths. The registry field stays so older `pack.json` files still round-trip.
+
+  **One-time cost, as with the 2026-09-12 rotation unification:** an animated entry dialed to compensate for the old
+  placement now over-corrects, because the bake removed what the dial was cancelling — the shipped Gatling guns carry
+  `y = −3.70` against a measured 3.34-unit miscentring. Re-check the horizontal Position dial of each animated entry
+  after its first re-bake; most should end up near zero.
+
+  **And a guard**: grounding is unconditional now, so the sky-lift trap (referencing a clip that holds a *struck*
+  pose — a yard swung under the hull — grounds the model on that part) applies to every model, not just auto-grounded
+  ones. The bake now says so in the log when it lifts a model by more than a quarter of its own height, and names the
+  fix: reference the deployed frame, `Furl[0..0]`.
+
 - **The Model Splitter is now the Model Cutter** (user: "we are mainly cutting away bad or insignificant parts and only
   on occasion split an object apart"). Menu, title and text follow the name; the window's own class keeps its old name
   so a saved Unity layout still finds it and nobody has to reopen the window.

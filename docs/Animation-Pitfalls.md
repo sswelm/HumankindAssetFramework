@@ -197,19 +197,31 @@ bones (wheels, turret, propeller-on-bone) still needs convertRig ON, *unless* it
 0.01 object scale that already cancels the ×100 (the ReconDrone's luck — which is why the drone bakes fine OFF).
 When in doubt for a rig with any spinning part: **convertRig ON**.
 
-**Grounding — the animated path has no automatic keel→z=0 (only the static path does), so a vehicle whose tyres
-stick out below the hull sinks.** Two ways to sit it on the terrain:
-- **Auto-ground (sit on terrain)** toggle — *the hands-free way.* The bake drops the model's lowest point (the
-  tyre contact) to the skeleton origin (lift by `−minZ`). It's **self-correcting** (a raw file lifts fully, an
-  already-grounded one lifts ~0 → can't double-apply) and **size-proof**: the shift is in model space, so the bake's
-  `globalScale = size/longest` scales it automatically — change Size and it stays grounded. (An earlier attempt used
-  a "wheels-on minus wheels-off" *protrusion* measure — a fixed lift that FLOATED an already-grounded file; keel→
-  origin replaced it.) Verified on the Ehrhardt: model-space lift 0.671 × size-scale (4/6) ≈ 0.45 in-game, matching
-  the hand-dialed 0.42. OFF for a flyer/hover model (it would be pinned to the ground).
+**Placement is automatic on both paths** *(2026-09-20 — "switching between static and animated should give the
+same result in both facing and offset")*. Every bake, static or animated, centres the model's box on the origin
+horizontally and drops its lowest point to it. Until this change the animated path did neither — only the opt-in
+*Auto-ground* toggle did the vertical half — so an animated bake sat wherever the artist left the model inside its
+file, and the same model switched between the two paths jumped (the steam frigate: 0.97 × 1.84 game units at
+size 5). The toggle is gone; there is nothing left to tick.
+- It is **self-correcting** (an already-placed file moves by ~0 → a re-bake can never double-apply it) and
+  **size-proof**: the shift is in model space, so the bake's `globalScale = size/longest` scales it — change Size
+  and it stays placed. (An earlier attempt used a "wheels-on minus wheels-off" *protrusion* measure — a fixed lift
+  that FLOATED an already-grounded file; keel→origin replaced it.) Verified on the Ehrhardt: model-space lift
+  0.671 × size-scale (4/6) ≈ 0.45 in-game, matching the hand-dialed 0.42.
+- A **flyer** is grounded too, exactly as the static path has always grounded one, and its flying height is the
+  Position offset Z dial — the same dial, in the same units, on both paths.
+- **The catch, once:** an entry dialed to compensate for the OLD animated placement now over-corrects, because the
+  bake has removed what the dial was cancelling. Re-check the horizontal dial of any animated entry after its first
+  re-bake (the shipped Gatling guns carry `y = −3.70` against a measured 3.34-unit miscentring). Same one-time cost
+  as the 2026-09-12 rotation unification.
+- **The sky-lift trap now applies to everyone** (it used to need Auto-ground ON): the rest skeleton comes from the
+  Idle/**reference** clip's frame, so referencing a clip that holds a STRUCK pose — a yard swung under the hull —
+  grounds the model on that part and lifts the whole ship into the air. Reference the DEPLOYED frame (`Furl[0..0]`).
+  The bake says so in the log: *"grounding lifted this model by N% of its own height"*.
 - **Position offset Z (waterline)** — the manual/runtime knob, applied at **spawn by the plugin**
   (`ApplyPositionOffset`: `ObjectSpace.Translation.y += z`), the same one you use for drone/aircraft height. It's in
   **in-game units**, so it does NOT scale with Size (a value dialed at Size 4 is wrong at Size 5). Use it for hover
-  height, or as a small fine-tune on top of Auto-ground — Save + relaunch, no re-bake.
+  height, or as a small fine-tune on top of the automatic placement — Save + relaunch, no re-bake.
 
 ## Turretize — aim a turret (or artillery barrel) at the target
 
@@ -441,7 +453,7 @@ measurement that failed on the converted rig passes on the generated one:
 
 Recipe: Vehicle Lab -> Browse the STATIC source (`m114_gun_only.glb` — no armature, no crew), mark the two road
 wheels **W** (watch the auto-guess: it also grabs the crew`s hand-cranks by name), Generate rig; then Factory/Lab
-with Deploy conversion **OFF**, Convert raw rig **ON**, Fix 100x **OFF**, Auto-ground **ON**, Idle stance
+with Deploy conversion **OFF**, Convert raw rig **ON**, Fix 100x **OFF**, Idle stance
 `Spin[0..0]`, Movement `Spin`, and every `deploy…`/`recoil` clip field **cleared**. Cost: the fold, deploy and
 recoil the converter gave you are gone until re-authored on the clean rig.
 

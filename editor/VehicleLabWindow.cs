@@ -9,7 +9,8 @@
 //      "Spin" action (frame 0 = rest — Spin[0..0] is the motionless Idle), exports <name>_Spin.glb + a preview FBX.
 //   4. The TURNTABLE PREVIEW plays the Spin clip on the real imported FBX (Unity can't import glb) — wheels visibly
 //      spinning before you ever open the Factory. Then: Factory ▸ Browse the generated GLB, Lab: Idle Spin[0..0],
-//      Movement Spin[1..N], Convert raw rig ON, Fix 100× OFF, Auto-ground ON (the settings are printed on success).
+//      Movement Spin[1..N], Convert raw rig ON, Fix 100× OFF (the settings are printed on success; placement —
+//      centred + grounded — is automatic on both bake paths since 2026-09-20, so there is no ground toggle).
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -38,7 +39,8 @@ public class VehicleLabWindow : EditorWindow
     // Rotor / TailRotor appended LAST so saved-recipe role ints stay valid (Body=0 … Gun=7). Both rig like a Wheel
     // (proximity-cluster → one bone; axle = the cluster's thinnest extent) — which is geometrically correct for BOTH a
     // main rotor (flat top disc → vertical mast axle) and a tail rotor (vertical tail disc → lateral axle). They differ
-    // from Wheel only downstream: a rotorcraft bakes CONTINUOUS (always spins) with Auto-ground OFF (flyer).
+    // from Wheel only downstream: a rotorcraft bakes CONTINUOUS (always spins). (Its flying height is the Position z
+// dial: every bake grounds the model since 2026-09-20, flyers included, exactly as the static path always has.)
     // Trail (2026-08-22, the M114 deploy): a split-trail ARM that swings OPEN when the gun deploys — one bone hinged at
     // the end nearest the body, rotating about the vertical, mirrored per side. ("Leg" is deliberately NOT used —
     // it is reserved for a walking mech limb.) Dropdown-only for now: no shortcut key.
@@ -983,7 +985,7 @@ public class VehicleLabWindow : EditorWindow
                           (Mathf.Abs(flagFoldDeg) < 0.01f ? " AND while moving (angle 0 = no fold, never struck)" : ", tucked while moving") +
                           ". Assign after baking (or press Auto-detect): Idle/reference = Furl[0..0] (the DEPLOYED frame — " +
                           "never Spin[0..0]: Spin holds the folded pose on every frame, and a folded reference bakes into " +
-                          $"the rest skeleton and Auto-ground lifts the model into the sky) · Movement = Spin · Pre-move = Furl[0..{flagFoldFrames}] " +
+                          $"the rest skeleton and the bake's grounding lifts the model into the sky) · Movement = Spin · Pre-move = Furl[0..{flagFoldFrames}] " +
                           $"(folds before moving — the unit WAITS for it) · After-move = Furl[{flagFoldFrames}..0] (redeploys on arrival)."
                         : "Flags marked: banners fly at idle and are struck below the keel while moving (an instant stance " +
                           "swap — the naval default). For a tripod/stand, tick Fold mode below: the part then folds at its " +
@@ -2143,9 +2145,9 @@ public class VehicleLabWindow : EditorWindow
         string hybrid = string.Join("\n", stdout.Split('\n').Where(l => l.Contains("HYBRID v2") || l.Contains("BONE BUDGET CLAMP")).Select(l => l.Trim()));
         string bakeRecipe = hasRotor
             ? "Animation Lab ▸ State-driven OFF (a rotor spins CONTINUOUSLY), Idle/reference = Spin (full), Convert raw rig ON, " +
-              "Fix 100× OFF, Auto-ground OFF (flyer), Keep bone translations ✓. Bake."
+              "Fix 100× OFF, Keep bone translations ✓. Bake.  (It is a flyer: the bake grounds it like any model — dial its flying height with Position z.)"
             : "Animation Lab ▸ State-driven, Idle/reference = Spin[0..0], Movement = Spin (full), Convert raw rig ON, " +
-              "Fix 100× OFF, Auto-ground ON, Keep bone translations ✓. Bake.";
+              "Fix 100× OFF, Keep bone translations ✓. Bake.";
         // The MUZZLE lines are the measured fire origin — the value the Animation Lab's Muzzle offset dial is
         // otherwise found by iterate-and-relaunch. Worth surfacing, not leaving in the Console.
         // WARNINGS ride along too (2026-08-22): the rigger's own safety findings — a recoil stroke that buries the

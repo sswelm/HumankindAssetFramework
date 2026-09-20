@@ -39,6 +39,61 @@ public class BakerRulesTests
         Assert.Equal(BakerRules.ExtractionAction.ReExtract, BakerRules.DecideExtraction(false, true, true));
         Assert.Equal(BakerRules.ExtractionAction.ReExtract, BakerRules.DecideExtraction(false, true, false));
     }
+
+    // ---- placement: the static and animated bakes must land the same model in the same spot ----
+    // (2026-09-20. Facing was unified on 2026-09-12; placement was not, and nothing noticed for eight days
+    // because each path looks right on its own — the jump only shows when you bake the same model both ways.)
+
+    [Fact]
+    public void Placement_centres_the_footprint_and_grounds_the_lowest_point()
+    {
+        // The steam frigate's own file, measured from its bytes: box x -8.11..53.70, y 3.87..20.18, z -5.24..37.99.
+        BakerRules.Placement(-8.11, 53.70, 3.87, 20.18, -5.237, out double sway, out double fore, out double raise);
+        Assert.Equal(-22.795, sway, 3);   // the model hangs 22.8 rig units off its own origin...
+        Assert.Equal(-12.025, fore, 3);   // ...and 12.0 across; ~1.4 game units at size 5, the offset the user saw
+        // (the file's own centre is 22.794 x 12.024 — these are the same numbers through the box as written above,
+        //  rounded to a hundredth of a rig unit, which is a ten-thousandth of a game unit at this model's scale)
+        Assert.Equal(5.237, raise, 3);    // keel to the ground
+    }
+
+    [Fact]
+    public void Placement_is_self_correcting_so_a_re_bake_can_never_double_apply_it()
+    {
+        // Place a box, then place the RESULT: an already-placed model must not move a second time. The
+        // pre-2026-08 grounding measure ("wheels-on minus wheels-off" protrusion) failed exactly here — a
+        // fixed lift that floated a file which was already on the ground.
+        double x0 = -8.11, x1 = 53.70, y0 = 3.87, y1 = 20.18, z0 = -5.237;
+        BakerRules.Placement(x0, x1, y0, y1, z0, out double sway, out double fore, out double raise);
+        BakerRules.Placement(x0 + sway, x1 + sway, y0 + fore, y1 + fore, z0 + raise,
+                             out double sway2, out double fore2, out double raise2);
+        Assert.Equal(0.0, sway2, 9);
+        Assert.Equal(0.0, fore2, 9);
+        Assert.Equal(0.0, raise2, 9);
+    }
+
+    [Fact]
+    public void Placement_grounds_a_flyer_too_because_the_static_path_always_has()
+    {
+        // The retired Auto-ground toggle was OFF for flyers, on the theory that grounding would pin them down.
+        // The static path never had that escape hatch: it grounds everything, and the flying height is the
+        // Position offset Z dial. One convention — so a helicopter whose file sits 40 units up comes down.
+        BakerRules.Placement(-2, 2, -3, 3, 40.0, out double sway, out double fore, out double raise);
+        Assert.Equal(0.0, sway, 9);
+        Assert.Equal(0.0, fore, 9);
+        Assert.Equal(-40.0, raise, 9);   // it descends to the ground; its altitude is the dial's job
+    }
+
+    [Fact]
+    public void Placement_of_a_model_already_on_the_origin_is_a_no_op()
+    {
+        // Why no existing static bake moves: step 2 centres the box before rotating, so at every axis-aligned
+        // rotation (0, +-90, 180) the rotated box is still centred and this adds nothing. Drilled on the frigate's
+        // real cloud: 0.00000 at 0/90/-90/180, and 0.026 at 45 degrees — where the two paths genuinely disagreed.
+        BakerRules.Placement(-30.9, 30.9, -8.2, 8.2, 0.0, out double sway, out double fore, out double raise);
+        Assert.Equal(0.0, sway, 9);
+        Assert.Equal(0.0, fore, 9);
+        Assert.Equal(0.0, raise, 9);
+    }
 }
 
 public class NaturalOrderTests

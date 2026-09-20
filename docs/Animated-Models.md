@@ -76,9 +76,10 @@ legs, landing gear, a crane, turrets. Very common for Sketchfab vehicles.
   loop). **The non-obvious trap:** rotating bones **fling off in-game** on the legacy path even though the rig is
   clean and previews perfectly — the metre→centimetre export sandwich. Bake such a rig with **Convert raw rig ON +
   Fix 100× oversize OFF** (full explanation: [Animation-Pitfalls](Animation-Pitfalls.md) → "the rotating-bone
-  fling"). Sit it on the terrain with the **Auto-ground (sit on terrain)** toggle — the bake drops the tyres to the
-  skeleton origin, self-correcting and **size-proof** (no manual Position-offset dial, and it stays grounded if you
-  change Size). Verified end-to-end on the Ehrhardt.
+  fling"). It sits on the terrain by itself: every animated bake centres the model's box on the
+  origin and drops its lowest point (the tyre contact) to it — the same placement the static bake applies, so a
+  model baked either way lands in the same spot. Self-correcting and **size-proof** (no manual Position-offset
+  dial, and it stays grounded if you change Size). Verified end-to-end on the Ehrhardt.
 
 #### Authoring the spin rig — the Vehicle Lab (automatic) or by hand
 
@@ -163,7 +164,7 @@ visibly bending IS what the eye calls slack. Real tracks (and the vanilla pair/i
 articulating at pins; only instancing reproduces that.
 
 **Bake requirements:** `Keep bone translations` **✓** (the links are translation curves — without it the tread
-freezes), Convert rig ON, Fix 100× OFF, Auto-ground ON, Idle `Spin[0..0]`, Movement `Spin[1..15]`. Wheel
+freezes), Convert rig ON, Fix 100× OFF, Idle `Spin[0..0]`, Movement `Spin[1..15]`. Wheel
 speeds are **fully automatic** (each proven with a manual dial first, then automated): the drive sprocket
 keeps the user's spin degrees (pick one matching its spoke symmetry — 60° for a six-spoke — so its restart
 is invisible); the rear idler targets the same speed but snaps to ITS OWN spoke-symmetry grid's nearest
@@ -211,7 +212,7 @@ RotationTranslation playback.
 6. **Export GLB** (`File ▸ Export ▸ glTF 2.0`), include the animation.
 7. **Factory/Lab**: Animated + State-driven, Idle/reference `Spin[0..0]`, Movement `Spin[5..15]` (or any slice —
    the speed step controls apparent speed), **Convert raw rig ON + Fix 100× OFF** (the rotating-bone fling trap,
-   see Pitfalls), **Auto-ground ON**. Bake.
+   see Pitfalls). Bake.
 
 The wheel-spin *rate* never needs to be physically right in the source — slice steps (`/N`) tune it at bake, and
 the wheels only play while moving anyway.

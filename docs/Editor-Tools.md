@@ -215,7 +215,7 @@ The deploy block's **Wheel bones (roll while moving)** + axle axis / loop frames
 > | **Vehicle Lab** — Spin | 30 frames · −360° · axle **AUTO** |
 > | **Vehicle Lab** — Deploy | Spread **28°** · **20** frames · Gun pivot **0.25** · Gun raise on deploy **45°** |
 > | **Animation Lab** — clips | Idle/reference `Spin` · Idle stance `Deploy[20..20]` · Movement `Spin` · After-move `Deploy[0..20]` · Pre-move `Deploy[20..0]` |
-> | **Animation Lab** — flags | Convert raw rig ✓ · Auto-ground ✓ · Keep bone translations ✓ · Fix 100× ✗ · `gunElevMax` **0** |
+> | **Animation Lab** — flags | Convert raw rig ✓ · Keep bone translations ✓ · Fix 100× ✗ · `gunElevMax` **0** |
 >
 > The resulting 6-bone rig (`Root, Wheel_00, Wheel_01, Gun, Trail_00, Trail_01`) separates cleanly: `Spin` moves
 > **only** the wheels, `Deploy` moves **only** the gun (45°) and the trails (28°). So it drives with the gun clamped
@@ -274,7 +274,7 @@ the **main rotor** pivots on its central hub part and spins about that hub's own
 pivots on the blades' centroid and spins about the axis *perpendicular to the duct ring* (lateral to the boom), with
 **Tail-rotor axle** X/Y/Z override plus **yaw/pitch trim sliders** for the final degrees. Rotors are excluded from the
 wheels' rolling-contact speed scaling, so main + tail spin at the same rate, and a rotor marking switches the printed
-next-step recipe to the rotorcraft bake (**continuous** spin — State-driven OFF — and Auto-ground OFF). Preview aids
+next-step recipe to the rotorcraft bake (**continuous** spin — State-driven OFF). Preview aids
 for dialing it in: **Pause**, **◀/▶ frame-step**, and a **Level line** (horizontal reference at rotor height).
 Rotor bones are authored as **axle frames** (main: local Y = mast; tail fan: local X = the canted fan axle) so the
 donor's own clip can drive them — see [Donor-Clip-Flight.md](Donor-Clip-Flight.md). Two workflow notes: Orientation
