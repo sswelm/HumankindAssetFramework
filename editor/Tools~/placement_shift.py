@@ -35,6 +35,19 @@
 #      pose and the lowest point becomes a yard under the hull, not the keel (the sky-lift trap). This applies the
 #      entry's own animClip frame before measuring.
 #
+# CHECKED AGAINST THE BAKER ITSELF, not against reasoning about it. Four fixtures, each run through rig_anim.py
+# and through this script, comparing the bake's "RIGANIM placement:" line (rig units) with this table (game units,
+# i.e. x size/longest):
+#
+#   legacy rig + location-keyed reference   baker: already centred      tool: 0.00        agree
+#   converted  + location-keyed reference   baker: centre 10.0000       tool: -25.00      agree (x2.5)
+#   converted  + rotation-only, bare clip   baker: already centred      tool: 0.00        agree
+#   converted  + rotation-only, sliced      baker: centre -0.3846       tool: +0.74       agree (x1.92)
+#
+# The first row is the one that took three attempts: choosing the raw-rest branch is not enough if the measurement
+# still reads evaluated_get(), because an imported file usually arrives with an action already active and the
+# armature modifier deforms the evaluated mesh regardless. measure() takes the branch as an argument for that reason.
+#
 # WHAT IT STILL CANNOT REPRODUCE, and says so rather than printing a confident wrong number: a deploy-converted
 # recipe (deployConvert), whose rig and clips are synthesized by a separate conversion. Those rows are reported as
 # unsupported. The ground truth for any entry is the bake's own log line, "RIGANIM placement: world centre ...",
@@ -145,16 +158,21 @@ def pose_to_reference(clip, entry):
         raise Unresolved(frame)
     sliced = bool(_SLICE_RE.match((clip or "").strip()))
     if not folds_the_pose(entry, act, sliced):
-        return "raw rest (the bake does not fold this reference pose)"
+        return "raw rest (the bake does not fold this reference pose)", False
     arm.animation_data_create()
     arm.animation_data.action = act
     bpy.context.scene.frame_set(frame)
     bpy.context.view_layer.update()
-    return "posed at %s frame %d" % (act.name.split("|")[-1], frame)
+    return "posed at %s frame %d" % (act.name.split("|")[-1], frame), True
 
 
-def measure(rot):
-    """The bake's own measurement: the POSED, ROTATED cloud's box."""
+def measure(rot, folded):
+    """The bake's own measurement: the ROTATED cloud's box, of the geometry the bake actually places.
+
+    `folded` decides WHICH vertices: the armature-deformed ones when the bake folds the reference pose into the
+    mesh, and the RAW mesh data when it does not. Reading the evaluated mesh either way was the bug PR #72's
+    review caught twice over — not assigning an action is not the same as having no pose, because an imported
+    file usually arrives with one active, and the armature modifier then deforms the evaluated result anyway."""
     R = (Matrix.Rotation(math.radians(rot.get("y", 0.0)), 4, 'Z')
          @ Matrix.Rotation(math.radians(rot.get("x", 0.0)), 4, 'X')
          @ Matrix.Rotation(math.radians(rot.get("z", 0.0)), 4, 'Y'))
@@ -163,11 +181,11 @@ def measure(rot):
     for o in bpy.context.scene.objects:
         if o.type != 'MESH':
             continue
-        ev = o.evaluated_get(dg)           # the armature modifier applied: the reference pose's geometry
-        if not len(ev.data.vertices):
+        data = o.evaluated_get(dg).data if folded else o.data
+        if not len(data.vertices):
             continue
         mw = o.matrix_world
-        pts += [R @ (mw @ v.co) for v in ev.data.vertices]
+        pts += [R @ (mw @ v.co) for v in data.vertices]
     if not pts:
         raise RuntimeError("no mesh left after the junk cull")
     lo = Vector((min(p.x for p in pts), min(p.y for p in pts), min(p.z for p in pts)))
@@ -193,8 +211,8 @@ for e in models:
         continue
     try:
         load(src)
-        posed = pose_to_reference(e.get("animClip"), e)
-        centre, lowest, longest = measure(e.get("rotation") or {})
+        posed, folded = pose_to_reference(e.get("animClip"), e)
+        centre, lowest, longest = measure(e.get("rotation") or {}, folded)
     except Unresolved as why:
         print("PLACEMENT %-22s NOT MEASURED — %s; re-bake and read the bake's own 'RIGANIM placement:' line"
               % (name, why))
