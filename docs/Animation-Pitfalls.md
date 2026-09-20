@@ -247,9 +247,12 @@ Two things it has to get right, and both are easy to get quietly wrong (PR #72 r
   geometry, and the longest axis — hence `size/longest` — differs too. On a size-5 prism at 45° that was **1.45
   game units** of error. At 0/±90/180 the two agree exactly, which is why a pack of axis-aligned entries shows no
   symptom until someone dials an odd angle.
-- **Measure the reference pose, not the file's raw rest.** The rest skeleton comes from the Idle/reference clip's
-  frame, and that pose *is* the geometry the bake places — reference a struck or folded clip and the lowest point
-  is a yard under the hull rather than the keel.
+- **Measure the pose the bake actually places — which is often the raw rest.** The bake folds the reference pose
+  into the mesh only on the **conversion** path and only when the resolved clip carries location curves
+  (`rig_anim`'s `if _loc0 and convert_rig`), and slicing a clip synthesizes those curves. So a *converted* rig with
+  a sliced or location-keyed reference is measured posed — reference a struck clip there and the lowest point is a
+  yard under the hull rather than the keel — while a **legacy** rig keeps its raw mesh and posing it would invent a
+  displacement the bake never applies. The tool mirrors that gate and says which branch each row took.
 
 > **An entry you have ALREADY re-baked is done.** Its dial is in the new frame, and the table would move it a
 > second time. The tool cannot tell which is which — it prints the warning and leaves that to you. It also reports

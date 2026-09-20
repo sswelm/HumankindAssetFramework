@@ -98,10 +98,44 @@ def reference_frame(clip):
     return act, (int(act.frame_range[0]) if frame is None else frame)
 
 
-def pose_to_reference(clip):
-    """Put the rig in the reference clip's frame — the pose the bake turns into the rest skeleton.
+def all_fcurve_owners(action):
+    """rig_anim.py's own helper, copied: Blender 4.4+ can hold curves in layered slots, not action.fcurves."""
+    if getattr(action, "fcurves", None) is not None and len(action.fcurves):
+        return [fc for fc in list(action.fcurves)]
+    out = []
+    for layer in getattr(action, "layers", []):
+        for strip in layer.strips:
+            for cb in getattr(strip, "channelbags", []):
+                out += list(cb.fcurves)
+    return out
 
-    Returns a note on success, or raises Unresolved so the row is reported as NOT MEASURED rather than
+
+def folds_the_pose(entry, act, sliced):
+    """Does the bake fold the reference pose into the MESH before placing it?
+
+    rig_anim gates its rest-normalize + visual rebake on `if _loc0 and convert_rig` — location curves in the
+    RESOLVED reference action, and the conversion path. A legacy rig keeps its raw mesh, so measuring it posed
+    invents a displacement the bake never applies (PR #72 review). DRILLED, one fixture per branch:
+
+        location curves, convertRig 0  ->  "already centred and grounded"     (raw)
+        location curves, convertRig 1  ->  "world centre (10.0000, 0.0000)"   (posed)
+        rotation only,   convertRig 1, bare clip "Ref"      ->  raw
+        rotation only,   convertRig 1, slice  "Ref[0..1]"   ->  posed
+
+    The last line is why `sliced` counts: resolve_clip SYNTHESIZES a sliced clip by keying the sampled pose, and
+    that synthesized action carries location curves even when its source had none."""
+    if not entry.get("convertRig"):
+        return False
+    if sliced:
+        return True
+    return any(fc.data_path.startswith("pose.bones") and fc.data_path.endswith(".location")
+               for fc in all_fcurve_owners(act))
+
+
+def pose_to_reference(clip, entry):
+    """Put the rig in the pose the bake will place — which for many rigs is the file's raw rest.
+
+    Raises Unresolved when the reference cannot be resolved, so the row is reported as NOT MEASURED rather than
     measured against whatever pose the file happens to open in."""
     arm = next((o for o in bpy.context.scene.objects if o.type == 'ARMATURE'), None)
     if arm is None:
@@ -109,6 +143,9 @@ def pose_to_reference(clip):
     act, frame = reference_frame(clip)
     if act is None:
         raise Unresolved(frame)
+    sliced = bool(_SLICE_RE.match((clip or "").strip()))
+    if not folds_the_pose(entry, act, sliced):
+        return "raw rest (the bake does not fold this reference pose)"
     arm.animation_data_create()
     arm.animation_data.action = act
     bpy.context.scene.frame_set(frame)
@@ -156,7 +193,7 @@ for e in models:
         continue
     try:
         load(src)
-        posed = pose_to_reference(e.get("animClip"))
+        posed = pose_to_reference(e.get("animClip"), e)
         centre, lowest, longest = measure(e.get("rotation") or {})
     except Unresolved as why:
         print("PLACEMENT %-22s NOT MEASURED — %s; re-bake and read the bake's own 'RIGANIM placement:' line"
