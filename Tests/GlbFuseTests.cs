@@ -640,6 +640,22 @@ public class GlbFuseTests
     }
 
     [Fact]
+    public void Bottom_plating_above_a_keel_keeps_facing_down()
+    {
+        // Review of PR #68 at e75a91a: floorY comes from the WHOLE model's height, so a keel hanging below the hull
+        // pushes legitimate bottom plating above that line. With the first, two-sided rule ("every level sheet above
+        // the floor is a deck") the plating was turned up and its underside vanished under back-face culling. The rule
+        // is one-sided now — only sheets ALREADY facing up are left alone — so a down-facing bottom is judged by the
+        // evidence that judged it before, and below the belly line that evidence says it is right as it is.
+        var bottom = Level("Bottom", 0, 20, 0, 6, 0f, down: true);       // plating at y = 0 …
+        var keel = Quad("Keel", 0, 20, -5, 0, 3f);                       // … with a keel hanging to y = -5
+        var sail = Quad("Sail", 0, 20, 5, 40, 0);                        // … and a rig up to y = 40
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(bottom, keel, sail), new[] { 0 }, 0.0);
+        Assert.All(FusedNormals(r, "Bottom_Fused"), n => Assert.True(n[1] < 0, "the hull bottom still faces down"));
+        Assert.Equal(0, r.FacesRewound);
+    }
+
+    [Fact]
     public void Bottom_plating_at_the_hull_floor_keeps_facing_down()
     {
         // The rule must not turn every level sheet upward: at the hull's floor, facing down is right. The bottom plate
