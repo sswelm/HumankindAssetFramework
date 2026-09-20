@@ -2408,7 +2408,10 @@ public class VehicleLabWindow : EditorWindow
         if (!rect.Contains(e.mousePosition)) return;
         // zoom-out ceiling 50 (was 5): with a TINY part focused, distance scales off its bounds — seeing the part
         // in the context of the whole vehicle needs an order of magnitude more headroom.
-        if (e.type == EventType.ScrollWheel) { zoom = Mathf.Clamp(zoom * Mathf.Pow(1.12f, e.delta.y > 0 ? 1f : -1f), 0.2f, 50f); e.Use(); }
+        // zoom-in floor 0.1 (was 0.2; 2026-09-21, user: "zoom in twice as much" — placing a floating prop against
+        // its deck wants the seam filling the view). dist = radius*2*zoom, so the camera sits 0.2 radius from the
+        // focus centre; the near plane is a fixed 0.01 and the radius floor is 0.1, so nothing clips even then.
+        if (e.type == EventType.ScrollWheel) { zoom = Mathf.Clamp(zoom * Mathf.Pow(1.12f, e.delta.y > 0 ? 1f : -1f), 0.1f, 50f); e.Use(); }
         else if (e.type == EventType.MouseDrag && e.button == 0) { orbit += new Vector2(e.delta.x, -e.delta.y) * 0.7f; orbit.y = Mathf.Clamp(orbit.y, -89f, 89f); e.Use(); }
         else if (e.type == EventType.MouseDrag && (e.button == 1 || e.button == 2))
         {

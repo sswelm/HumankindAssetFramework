@@ -20,6 +20,8 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   is a tested pure kernel (`VehicleLabRules.PartPlacementLine`, split from the right so a `|` in a name survives).
   Applied after the split and before straightening in BOTH probe and rig modes, so the preview shows exactly what
   Generate bakes, and the log prints each part's centre and size before and after.
+- **Vehicle Lab preview zooms in twice as far** (floor 0.2 → 0.1 on the scroll-wheel zoom; user request while placing a
+  floating prop against its deck). The near plane and the radius floor leave room, so nothing clips at the new limit.
 
 - **`Tools~/placement_shift.py` — the one-time re-dial after the placement change.** An animated entry dialed to
   compensate for the old placement over-corrects once the bake centres the model itself, and nothing moves until
