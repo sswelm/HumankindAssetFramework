@@ -5,6 +5,31 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Splitter / Fuser: every row shows the part's size**, the same figure the Vehicle Lab prints, from the box the
+  analyzer already reads (user: "it would really help if this list also included the dimensions" — while hunting a flat
+  panel by eye through 900 rows).
+- **Fuse: the run's mirrored verdict reaches the groups that cannot see it.** How a file stores its mirrored parts is a
+  property of the file, but the evidence — a mirrored part welded to a plain one — lives wherever it happens to live.
+  On the frigate, group A has five such parts and the deck group none, so the deck kept the glTF reversal and half of
+  it rendered see-through. The fuse now pools every group's evidence across the run and re-plans the groups that had
+  none of their own; a group whose own parts disagree keeps its own counsel (the Romanic's group H judged 1 against 2,
+  and forcing the file's verdict on it cost 12.5 % of its beam view). A single-group fuse still decides for itself.
+- **Fuse: a deck below the hull's belly line is no longer turned inside-out.** The frigate's gun deck came out of the
+  fuse see-through from above: 94 % of the group's struck surface back-facing, against 0.1 % for the same parts
+  unfused (user: "there is still an issue with the deck, in particular Object_1002"). Where an island's volume and
+  twin evidence say nothing, the fuse falls back to asking whether the surface points away from the hull's belly
+  line. That line is taken a quarter of the way up the model, and a sailing ship's rig owns most of its height and
+  area, so the line landed at 2.59 while the deck's three islands lay at 0.61, 2.06 and 2.53, every face pointing up.
+  They scored -0.67 and were reversed whole. **A level sheet above the hull's floor that ALREADY faces up is not asked
+  that question**: it is a deck and needs no correction. The rule is one-sided on purpose — turning every level sheet up
+  was tried first and draped the frigate's two zero-thickness plates (authored facing down, to be seen from below) over
+  its boat deck as a blank sheet, and keeping every level sheet as authored was tried next and left genuinely
+  interior-facing sheets uncorrected, which four of this file's own tests pin down. Confident volume and twin evidence
+  still decide first, and everything else is judged exactly as before. Measured: the frigate's deck group 94 % -> 0.0 % back-facing
+  from above, its group T 4.9 % -> 2.3 %, every other group of that ship unchanged; the Teutonic's hull and all
+  eleven Romanic groups byte-identical. Three tests (a deck kept, a deck authored upside down turned up, bottom
+  plating left facing down); the first two fail without the rule.
+
 - **Model Fuser: "Check mirrored parts", for files that store their mirrored parts already facing outward.** glTF
   says a mirrored part (a negative-scale node, one side of a symmetric hull) renders with its winding reversed, and
   the fuse applies that, which is what the Teutonic needed. The Confederate frigate's file stores its mirrored hull
