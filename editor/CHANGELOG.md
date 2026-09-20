@@ -5,6 +5,17 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **`Tools~/placement_shift.py` — the one-time re-dial after the placement change.** An animated entry dialed to
+  compensate for the old placement over-corrects once the bake centres the model itself, and nothing moves until
+  that entry is re-baked, so the migration is per-entry and easy to lose track of. Point the script at a `pack.json`
+  and it measures every animated entry exactly as `rig_anim.py` does — junk cull, world box, the registry rotation,
+  `size/longest` into game units — and prints the Position offset each one needs to look as it does today
+  (`new = old + move`, less the grounding lift where the entry was not already auto-grounded). The sign is
+  self-checking: a dial that was pure compensation lands on ~0, and on the shipped pack four independently dialed
+  entries collapse at once (GatlingGuns −3.70 + 3.34 = −0.36, AntiTankIFV +0.50 − 0.497 = +0.003, StealthHelicopter
+  and TOW-Infantry likewise). It also warns that an entry you have already re-baked is done and must not be moved
+  twice — the one thing the measurement cannot tell you.
+
 - **An animated bake now lands where a static bake lands** (user: "switching between static and animated should give
   the same result in both facing and offset"). Facing was unified on 2026-09-12; placement never was. The static path
   centres the model's box on the origin and drops its lowest point to it; the animated path did neither — the opt-in

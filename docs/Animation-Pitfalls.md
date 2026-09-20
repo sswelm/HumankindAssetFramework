@@ -211,9 +211,40 @@ size 5). The toggle is gone; there is nothing left to tick.
 - A **flyer** is grounded too, exactly as the static path has always grounded one, and its flying height is the
   Position offset Z dial — the same dial, in the same units, on both paths.
 - **The catch, once:** an entry dialed to compensate for the OLD animated placement now over-corrects, because the
-  bake has removed what the dial was cancelling. Re-check the horizontal dial of any animated entry after its first
-  re-bake (the shipped Gatling guns carry `y = −3.70` against a measured 3.34-unit miscentring). Same one-time cost
-  as the 2026-09-12 rotation unification.
+  bake has removed what the dial was cancelling. Same one-time cost as the 2026-09-12 rotation unification — and
+  **`Tools~/placement_shift.py` computes the new dials for you**, see just below.
+
+### Re-dialing after the placement change *(the one-time migration)*
+
+**Nothing moves until an entry is re-baked** — placement is baked in — so this is per-entry and can wait. When you
+do re-bake, the model centres itself, and whatever your Position offset was cancelling is suddenly an
+over-correction.
+
+Run the migration tool against your pack:
+
+```
+blender --background --python placement_shift.py -- "…/BepInEx/config/haf_packs/<mod>/pack.json"
+```
+
+It measures every animated entry the way `rig_anim.py` does — junk cull, world box, the registry rotation, then
+`size/longest` into game units — and prints the Position offset each entry needs **to look exactly as it does
+today**:
+
+```
+new_x = old_x + move_x     new_y = old_y + move_y     new_z = old_z − lift   (lift only if it was not auto-grounded)
+```
+
+**How you know the sign is right:** an entry whose dial was *pure* compensation collapses to ~0. On the shipped ENC
+pack four independently hand-dialed entries collapse at once — GatlingGuns `−3.70 + 3.34 = −0.36`, AntiTankIFV
+`+0.50 − 0.497 = +0.003`, StealthHelicopter `(−0.50, +0.50) + (+0.391, −0.525) = (−0.11, −0.03)`, TOW-Infantry
+`−0.30 + 0.247 = −0.05`. With the sign the other way each would *double* (the Gatling guns to `−7.04` on a size-2.5
+model), which nobody would have shipped.
+
+> **An entry you have ALREADY re-baked is done.** Its dial is in the new frame, and the table would move it a
+> second time. The tool cannot tell which is which — it prints the warning and leaves that to you.
+
+Work the largest change first: if it lands on its hex, the rest follow. If it lands *twice* as wrong, stop and
+re-derive the sign rather than hand-fixing a dozen entries.
 - **The sky-lift trap now applies to everyone** (it used to need Auto-ground ON): the rest skeleton comes from the
   Idle/**reference** clip's frame, so referencing a clip that holds a STRUCK pose — a yard swung under the hull —
   grounds the model on that part and lifts the whole ship into the air. Reference the DEPLOYED frame (`Furl[0..0]`).
