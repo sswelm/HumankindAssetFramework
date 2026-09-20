@@ -435,8 +435,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
                     if (r.nodeIndex == selectedIdx && (r.split != splitBefore || r.fuse != fuseBefore || r.delete != deleteBefore)) advanceFrom = ri;   // the mouse path of the A–Z / Space keys
                     bool isSel = selectedIdx == r.nodeIndex;
                     string label = r.blocked != null ? $"{(isSel ? "◉ " : "")}{r.node}   — skipped: {r.blocked}{(r.delete ? "   ✕ deleted in the output" : "")}"
-                                 : Fusing ? $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {r.islands:N0} island{(r.islands == 1 ? "" : "s")}){(r.delete ? "   ✕ deleted in the output" : "")}"
-                                 : $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {(r.islands == 1 ? "1 island — already whole" : r.islands.ToString("N0") + " islands")}){(r.delete ? "   ✕ deleted in the output" : "")}";
+                                 : Fusing ? $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {r.islands:N0} island{(r.islands == 1 ? "" : "s")}{SizeOf(r)}){(r.delete ? "   ✕ deleted in the output" : "")}"
+                                 : $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {(r.islands == 1 ? "1 island — already whole" : r.islands.ToString("N0") + " islands")}{SizeOf(r)}){(r.delete ? "   ✕ deleted in the output" : "")}";
                     // the row label is a BUTTON, exactly like the Vehicle Lab: click = highlight + frame in the preview
                     if (GUILayout.Button(label, isSel ? EditorStyles.whiteLabel : (r.blocked == null && (Fusing || r.islands > 1) ? EditorStyles.label : EditorStyles.miniLabel)))   // the Splitter dims what it cannot split
                     { ExitCutMode(); selectedIdx = isSel ? -1 : r.nodeIndex; SelectRow(isSel ? null : r); }
@@ -849,6 +849,14 @@ public abstract class ModelWorkshopWindow : EditorWindow
         boundsValid = false; previewPan = Vector2.zero;
         status = $"Plane cut mode on '{cutGeo.NodeName}': pick the axis, slide the plane, then Cut. Yellow → _CutA, grey → _CutB.";
     }
+
+    // SIZE ON THE ROW (2026-09-20, user: "it would really help if this list also included the dimensions"): the same
+    // figure the Vehicle Lab prints, from the box Analyze already read out of the accessors. Blank for a part the file
+    // does not measure.
+    static string SizeOf(Row r) =>
+        r.min == null || r.max == null ? "" :
+        string.Format(System.Globalization.CultureInfo.InvariantCulture, ", size {0:0.##}×{1:0.##}×{2:0.##}",
+                      r.max[0] - r.min[0], r.max[1] - r.min[1], r.max[2] - r.min[2]);
 
     // keep a shown row in view by its MEASURED rect (rows are not one height: "already whole" rows draw in the mini font and
     // are shorter, and an assumed 22 px per row drifted the highlight out of view past ~100 rows — user 2026-09-16)

@@ -628,12 +628,15 @@ public class GlbFuseTests
     }
 
     [Fact]
-    public void A_deck_authored_upside_down_is_turned_up()
+    public void A_level_plate_authored_facing_down_is_left_to_the_evidence()
     {
-        var deck = Level("Deck", 2, 18, 1, 5, 0.5f, down: true);   // same deck, authored inside-out
-        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(ShipWithSails(deck)), new[] { 0 }, 0.0);
-        Assert.All(FusedNormals(r, "Deck_Fused"), n => Assert.True(n[1] > 0, "turned up"));
-        Assert.Equal(2, r.FacesRewound);
+        // The rule is one-sided on purpose. The frigate carries two 11.4 x 5.2 zero-thickness plates over its boat
+        // deck, authored facing DOWN to be seen from below; turning every level sheet up draped them over the deck as
+        // a blank sheet (user: "the flat blanket"). A down-facing level sheet keeps going through the evidence that
+        // judged it before — here there is none either way, so it stays as authored.
+        var plate = Level("Plate", 2, 18, 1, 5, 0.5f, down: true);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(ShipWithSails(plate)), new[] { 0 }, 0.0);
+        Assert.All(FusedNormals(r, "Plate_Fused"), n => Assert.True(n[1] < 0, "still facing down"));
     }
 
     [Fact]

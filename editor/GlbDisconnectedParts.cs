@@ -1060,6 +1060,41 @@ public static class GlbDisconnectedParts
             if (all) break;
         }
         foreach (var t in tasks) if (t.Exception != null) throw t.Exception.InnerExceptions.Count == 1 ? t.Exception.InnerExceptions[0] : t.Exception;
+        // THE RUN'S MIRRORED VERDICT (2026-09-20, the frigate's deck). Pool every group's evidence: if the file clearly
+        // stores its mirrored parts already facing outward, the groups that had too little evidence of their own are
+        // re-planned with that answer. Only those groups are re-planned, and only when they hold mirrored parts.
+        {
+            int undoAll = 0, keepAll = 0;
+            foreach (FusePlan pl in plans) if (pl != null && pl.CheckMirrored) { undoAll += pl.MirroredJudgedUndo; keepAll += pl.MirroredJudgedKeep; }
+            int judgedRun = undoAll + keepAll;
+            if (judgedRun >= 3 && undoAll * 10 >= judgedRun * 9)
+            {
+                var again = new List<int>();
+                for (int i = 0; i < plans.Length; i++)
+                {
+                    FusePlan pl = plans[i];
+                    if (pl == null || !pl.CheckMirrored || pl.Empty || pl.MirroredParts == 0) continue;
+                    int own = pl.MirroredJudgedUndo + pl.MirroredJudgedKeep;
+                    if (own >= 3 && pl.MirroredJudgedUndo * 10 >= own * 9) continue;   // it saw the answer itself
+                    // A group that has seen CONTRARY evidence keeps its own counsel: the Romanic's group H judged one
+                    // part pre-flipped against two that need the glTF reversal, and handing it the file's verdict cost
+                    // it 12.5 % of its beam view. Only groups that saw nothing against the verdict follow it.
+                    if (pl.MirroredJudgedKeep > 0) continue;
+                    again.Add(i);
+                }
+                if (again.Count > 0)
+                {
+                    var redo = new System.Threading.Tasks.Task[again.Count];
+                    for (int k = 0; k < again.Count; k++)
+                    {
+                        int at = again[k]; FusePlan pl = plans[at];
+                        redo[k] = System.Threading.Tasks.Task.Run(() => plans[at] = PlanFuse(source, pl.NodeIndices, weldFraction, pl.FusedName, true, true));
+                    }
+                    System.Threading.Tasks.Task.WaitAll(redo);
+                    foreach (var t in redo) if (t.Exception != null) throw t.Exception.InnerExceptions.Count == 1 ? t.Exception.InnerExceptions[0] : t.Exception;
+                }
+            }
+        }
         Document document = Parse(source);
         JObject root = document.Root;
         JArray nodes = root["nodes"] as JArray ?? new JArray();
@@ -1084,10 +1119,17 @@ public static class GlbDisconnectedParts
         public double Weld, WeldFraction, Longest; public int MadeConsistent, OpenJudged, OpenReversed, ClosedReversed, FaceCount, CollapsedFaces, NotOrientable;
         public string LargestIslands, StitchedLine, RewoundByPart, Timing, FrameLine;
         public string MirroredLine;   // the mirrored-part check's verdicts (null unless the check ran with the option on)
+        public int MirroredJudgedUndo, MirroredJudgedKeep, MirroredParts;   // this group's evidence, pooled across the run by FuseGroups
+        public IList<int> NodeIndices; public string FusedName; public bool CheckMirrored;   // enough to re-plan the group once the run's verdict is known
         public bool Empty;   // no triangles: nothing to append, the sources keep their meshes, Result.Changed stays false
     }
 
-    static FusePlan PlanFuse(byte[] source, IList<int> nodeIndices, double weldFraction, string fusedName, bool checkMirrored)
+    static FusePlan PlanFuse(byte[] source, IList<int> nodeIndices, double weldFraction, string fusedName, bool checkMirrored) => PlanFuse(source, nodeIndices, weldFraction, fusedName, checkMirrored, null);
+
+    // `runVerdict`: the whole fuse run's answer to "does this FILE store its mirrored parts already facing outward",
+    // pooled by FuseGroups from every group's evidence and handed back to the groups that had none of their own.
+    // null = decide from this group alone (a single-group fuse, where the group IS the run).
+    static FusePlan PlanFuse(byte[] source, IList<int> nodeIndices, double weldFraction, string fusedName, bool checkMirrored, bool? runVerdict)
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
         if (nodeIndices == null || nodeIndices.Count == 0) throw new ArgumentException("Nothing to fuse — no node indices.", nameof(nodeIndices));
@@ -1102,7 +1144,7 @@ public static class GlbDisconnectedParts
         JArray meshes = root["meshes"] as JArray ?? throw new InvalidDataException("GLB has no meshes array.");
         byte[] originalData;
         Accessors reader = BinReader(document, root, out originalData);
-        var plan = new FusePlan(); Result result = plan.Result;
+        var plan = new FusePlan { NodeIndices = nodeIndices, FusedName = fusedName, CheckMirrored = checkMirrored }; Result result = plan.Result;
         Mark("parse");
 
         // 1) gather every triangle of every chosen part in WORLD space, with normal / UV / material per vertex
@@ -1367,7 +1409,13 @@ public static class GlbDisconnectedParts
             int judgedUndo = 0, judgedKeep = 0;
             for (int p = 0; p < nParts; p++) if (decided[p]) { if (undo[p]) judgedUndo++; else judgedKeep++; }
             int judgedAll = judgedUndo + judgedKeep;
-            bool clear = judgedAll >= 3 && judgedUndo * 10 >= judgedAll * 9;
+            plan.MirroredJudgedUndo = judgedUndo; plan.MirroredJudgedKeep = judgedKeep; plan.MirroredParts = partMirrored.Count(m => m);
+            // A GROUP OFTEN CANNOT SEE THE ANSWER. How mirrored parts are stored is a property of the FILE, but the
+            // evidence (a mirrored part welded to a plain one) lives wherever it happens to live: on the frigate, group
+            // A has five such parts and the deck group has none, so the deck kept the glTF reversal and half of it
+            // rendered see-through. FuseGroups pools the run's evidence and hands the verdict back here; a group fused
+            // on its own still decides for itself.
+            bool clear = runVerdict ?? (judgedAll >= 3 && judgedUndo * 10 >= judgedAll * 9);
             var undoSet = new HashSet<int>(); var undoNames = new List<string>(); int byConvention = 0; long undoConflicts = 0;
             if (clear)
                 for (int p = 0; p < nParts; p++)
@@ -1388,10 +1436,11 @@ public static class GlbDisconnectedParts
             if (checkMirrored)
                 plan.MirroredLine = clear
                     ? string.Format(inv3,
-                        "mirrored parts checked against their plain neighbours: {0} of {1} judged say this file already stores them facing outward, so the glTF reversal is undone for {2} part(s) ({3}){4}{5}",
+                        "mirrored parts checked against their plain neighbours: {0} of {1} judged say this file already stores them facing outward{6}, so the glTF reversal is undone for {2} part(s) ({3}){4}{5}",
                         judgedUndo, judgedAll, undoSet.Count, names,
                         byConvention > 0 ? string.Format(inv3, "; {0} of them had no plain neighbour and follow that convention", byConvention) : "",
-                        judgedKeep > 0 ? string.Format(inv3, "; {0} whose own seams disagree keep the reversal", judgedKeep) : "")
+                        judgedKeep > 0 ? string.Format(inv3, "; {0} whose own seams disagree keep the reversal", judgedKeep) : "",
+                        runVerdict.HasValue && judgedAll < 3 ? " (the verdict of the other groups in this fuse)" : "")
                     : judgedAll >= 3 && judgedKeep * 10 >= judgedAll * 9
                     ? string.Format(inv3,
                         "mirrored parts checked against their plain neighbours: {0} of {1} judged confirm the glTF reversal is right (a file stored the standard way), nothing changed",
@@ -1794,14 +1843,20 @@ public static class GlbDisconnectedParts
                 // point away from the hull's belly line", which is right for plating and wrong for a deck BELOW that
                 // line: the frigate's belly sits at 2.59 (a quarter up a model whose sails own most of its height and
                 // area) while its three gun-deck islands lie at 0.61, 2.06 and 2.53, every face pointing up — they
-                // scored -0.67 and were reversed whole, 88 % of the deck see-through from above. A LEVEL sheet is not
-                // asked the radial question at all: its facing is up or down, and above the hull's floor it is a deck,
-                // so it faces up. Below the floor (bottom plating) and for anything not level, the radial score stands.
-                // Confident volume and twin evidence still decide first, so a double-skinned deck keeps its underside.
-                bool levelSheet = Math.Abs(upness) > 0.8 && islandY > floorY;
+                // scored -0.67 and were reversed whole, 88 % of the deck see-through from above. A LEVEL sheet above
+                // the hull's floor and ALREADY FACING UP is therefore not asked that question: it is a deck and needs no
+                // correction. The rule is deliberately one-sided. Turning every level sheet up was tried first and was
+                // too strong: the frigate's two 11.4 x 5.2 zero-thickness plates over the boat deck are authored facing
+                // DOWN, to be seen from below, and facing them up draped a blank sheet over the deck (user: "the flat
+                // blanket"). Keeping every level sheet as authored was tried next and was too weak: it left the sheets
+                // that genuinely face a hull's interior uncorrected, which four of this file's own tests pin down.
+                // Down-facing level sheets therefore keep going through the evidence that was there before.
+                // Below the floor (bottom plating) and for anything not level, the radial score stands. Confident
+                // volume and twin evidence still decide first, so a double-skinned deck keeps its underside.
+                bool deckFacingUp = upness > 0.8 && islandY > floorY;
                 reverse = volumeConfident ? (volume < 0 && !enclosed)
                         : doubleSkin ? twinInFront > twinBehind
-                        : levelSheet ? upness < 0
+                        : deckFacingUp ? false                  // a deck, already facing up: nothing to correct
                         : score < -0.25;
                 if (reverse) openReversed++;
             }
