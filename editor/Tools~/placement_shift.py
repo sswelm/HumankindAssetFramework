@@ -35,6 +35,12 @@
 #      pose and the lowest point becomes a yard under the hull, not the keel (the sky-lift trap). This applies the
 #      entry's own animClip frame before measuring.
 #
+# THREE GATES TO MIRROR, not one. The bake decides separately whether to (a) fold the registry ROTATION into the
+# rig — `convert_rig or clean_units_input`, the latter being the armature name marker "DeployArmV2"; (b) fold the
+# reference POSE into the mesh — `_loc0 and convert_rig`; and (c) ground/centre at all, which it now always does.
+# A migration tool that assumes any of them is unconditional puts its correction on the wrong axis or against the
+# wrong geometry.
+#
 # CHECKED AGAINST THE BAKER ITSELF, not against reasoning about it. Four fixtures, each run through rig_anim.py
 # and through this script, comparing the bake's "RIGANIM placement:" line (rig units) with this table (game units,
 # i.e. x size/longest):
@@ -121,6 +127,23 @@ def all_fcurve_owners(action):
             for cb in getattr(strip, "channelbags", []):
                 out += list(cb.fcurves)
     return out
+
+
+def applies_rotation(entry):
+    """Does the bake fold the registry Rotation into the rig at all?
+
+    rig_anim gates it on `if convert_rig or clean_units_input`, where clean_units_input is the contract marker
+    `arm.name.startswith("DeployArmV2")`. A legacy rig without that marker is left UNROTATED, so applying the
+    registry heading here would put the suggested correction on the wrong axis (PR #72 review). DRILLED on the
+    legacy fixture at yaw 90, mesh centred at world x=10:
+
+        convertRig 0  ->  baker leaves it: "world centre (10.0000, 0.0000)"
+        convertRig 1  ->  baker rotates:   "world centre (0.0000, 10.0000)"
+    """
+    if entry.get("convertRig"):
+        return True
+    arm = next((o for o in bpy.context.scene.objects if o.type == 'ARMATURE'), None)
+    return bool(arm and arm.name.startswith("DeployArmV2"))
 
 
 def folds_the_pose(entry, act, sliced):
@@ -212,7 +235,10 @@ for e in models:
     try:
         load(src)
         posed, folded = pose_to_reference(e.get("animClip"), e)
-        centre, lowest, longest = measure(e.get("rotation") or {}, folded)
+        rot = (e.get("rotation") or {}) if applies_rotation(e) else {}
+        if not rot and any(abs((e.get("rotation") or {}).get(a, 0.0)) > 1e-6 for a in "xyz"):
+            posed += "; rotation NOT applied (legacy rig, as the bake leaves it)"
+        centre, lowest, longest = measure(rot, folded)
     except Unresolved as why:
         print("PLACEMENT %-22s NOT MEASURED — %s; re-bake and read the bake's own 'RIGANIM placement:' line"
               % (name, why))
