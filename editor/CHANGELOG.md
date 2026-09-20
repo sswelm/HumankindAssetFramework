@@ -23,6 +23,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   path, the split makes a promise and the bake now verifies it: a chunk that still measures over the ceiling fails
   the bake instead of shipping geometry that will not draw.
 
+- **A failed re-bake no longer loses the split prefab** (PR #71 review, P2). The animated split writes
+  `<name>_Split.prefab` and the baked Skeleton *references* it, but it was written under `FactorySource` — which the
+  E5 rollback does not cover — and deleted before the fallible split and skeleton steps. So a failed re-bake restored
+  the previous skeleton with its source prefab gone, and re-creating that prefab later gives it a new GUID the
+  restored skeleton cannot resolve, all while the rollback reported success. It now lives in `Resources` and is on the
+  backup whitelist, so it is carried with its `.meta` and its GUID survives — the same arrangement that has always
+  protected the static path's `_Model.prefab`. A structural check in the bake feature tests fails if it ever moves
+  back out or drops off the list.
+
 - **Splitting costs vertices, and the pool it spends is shared** (documented after it bit: units and districts all
   stopped drawing). Every chunk duplicates the vertices along its seam, by as much as the cut decides: the steam
   frigate measured 99,676 to 125,369 (**+26 %**) split static, but 99,676 to 100,648 (**+1 %**) split animated — read

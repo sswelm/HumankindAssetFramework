@@ -117,6 +117,13 @@ public static class UniversalBaker
                                                 // per-fragment ceiling ships extra _ModelMesh_B.. meshes in the same collection.
                                                 "_ModelMesh_B.asset", "_ModelMesh_C.asset", "_ModelMesh_D.asset", "_ModelMesh_E.asset",
                                                 "_ModelMesh_F.asset", "_ModelMesh_G.asset", "_ModelMesh_H.asset",
+                                                // The animated split's prefab (2026-09-20, PR #71 review P2). The baked Skeleton REFERENCES
+                                                // it, so losing it orphans a restored skeleton: a failed re-bake would put back the old
+                                                // _Skeleton.asset pointing at a prefab the bake had already deleted, and re-creating that
+                                                // prefab gives it a NEW guid the restored skeleton cannot resolve. It is listed here (and
+                                                // therefore lives in Resources, not FactorySource) so backup/restore carries it WITH its
+                                                // .meta — the same reason the static path's _Model.prefab is on this list.
+                                                "_Split.prefab",
                                                 "_ClipsMove.asset", "_ClipsMovePoseData.bytes", "_ClipsAfter.asset", "_ClipsAfterPoseData.bytes",
                                                 "_ClipsAttack.asset", "_ClipsAttackPoseData.bytes",
                                                 "_ClipsCombat.asset", "_ClipsCombatPoseData.bytes",
@@ -683,7 +690,7 @@ public static class UniversalBaker
         for (char c = 'B'; c <= 'H'; c++)   // stale chunks from a previous, bigger bake must not outlive it
             AssetDatabase.DeleteAsset("Assets/Resources/" + name + "_ModelMesh_" + c + ".asset");
         AssetDatabase.DeleteAsset("Assets/Resources/" + name + "_ModelMesh.asset");
-        string splitPrefabPath = resDir + "/" + name + "_Split.prefab";
+        string splitPrefabPath = SplitPrefabPath(name);
         AssetDatabase.DeleteAsset(splitPrefabPath);
         if (cfg.multiMesh)
         {
@@ -1879,6 +1886,11 @@ public static class UniversalBaker
     }
     // Returns how many meshes MEASURED over the ceiling (0 when all fit or when nothing could be verified —
     // read failures stay warn-only, matching this report's original advisory role).
+    // WHERE THE ANIMATED SPLIT'S PREFAB LIVES. In Assets/Resources ON PURPOSE: OutputSuffixes carries
+    // "_Split.prefab", and the E5 backup/restore only looks in Resources — a prefab under FactorySource would be
+    // deleted before the fallible split/skeleton steps and never come back (PR #71 review P2).
+    internal static string SplitPrefabPath(string name) => "Assets/Resources/" + name + "_Split.prefab";
+
     static int ReportBakedQuads(Type skelType, UnityEngine.Object skel, string name)
     {
         try
