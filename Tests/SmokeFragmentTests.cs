@@ -62,15 +62,32 @@ namespace HumankindAssetFramework.Tests
         }
 
         [Fact]
-        public void A_name_with_no_live_entry_on_the_addon_fails_as_lost()
+        public void A_dead_entry_on_the_addon_fails_and_says_it_is_dead()
         {
-            // a vanilla ReloadFragments rebuilt FragmentEntries from the definition and our prop entry is gone (or dead)
+            // a vanilla ReloadFragments rebuilt FragmentEntries from the definition and our prop entry is dead: the
+            // NAME is still listed, its encoded id reads 0. Distinct from the name being absent entirely (below) —
+            // the two point at different causes, and one message for both cost two wrong diagnoses of one report.
             var f = Facts();
             var addon = Addon(("Body", 1), ("M60_DistrictMesh", 0));
             UniversalInject.GatherFragmentFact("DroneSquadFPV", new List<string> { "M60_DistrictMesh" }, addon, new List<uint> { 1 }, f);
             Assert.Single(f.FragmentIssues);
-            Assert.Contains("'M60_DistrictMesh' (no live fragment entry on the addon)", f.FragmentIssues[0]);
+            Assert.Contains("'M60_DistrictMesh' (addon entry present but its encoded id reads 0 — unloaded since the append)", f.FragmentIssues[0]);
             Assert.Contains("block holds 1 entry(ies)", f.FragmentIssues[0]);
+        }
+
+        [Fact]
+        public void A_name_missing_from_the_addon_fails_and_says_how_many_entries_it_looked_through()
+        {
+            // The OTHER half of what used to be one message: the name is not on the addon at all. Both injection
+            // paths append to addon.FragmentEntries before any descriptor work, so a name that is simply absent
+            // means we are reading a different addon than the one we appended to — a stale reference, not a loss of
+            // geometry. The count comes with it, because "not among 2 entries" and "not among 40" read differently.
+            var f = Facts();
+            var addon = Addon(("Body", 1), ("SomethingElse", 2));
+            UniversalInject.GatherFragmentFact("DroneSquadFPV", new List<string> { "M60_DistrictMesh" }, addon, new List<uint> { 1 }, f);
+            Assert.Single(f.FragmentIssues);
+            Assert.Contains("'M60_DistrictMesh' (not among the addon's 2 fragment entry(ies)", f.FragmentIssues[0]);
+            Assert.Contains("stale addon", f.FragmentIssues[0]);
         }
 
         [Fact]

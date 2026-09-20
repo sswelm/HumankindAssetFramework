@@ -438,7 +438,18 @@ namespace HumankindAssetFramework
             for (int i = 0; i < appendedNames.Count; i++)
             {
                 string nm = appendedNames[i];
-                if (!addonEncs.TryGetValue(nm, out uint enc) || enc == 0) missing.Add($"'{nm}' (no live fragment entry on the addon)");
+                // SAY WHICH OF THE THREE HAPPENED (2026-09-20). "No live fragment entry on the addon" covered two
+                // different failures — the name absent, and the name present with a zero encoded id — and that
+                // conflation cost two wrong diagnoses of one real report: a Drone Squad whose hand prop the smoke
+                // called undone while the soldier was visibly holding it. Both appends DO reach
+                // addon.FragmentEntries before any descriptor work (InjectHandProp, InjectExtraMeshFragments), and
+                // the entry carries meshName + EncodedMeshAndVisualParticleCount, so a miss here means the addon we
+                // are reading is not the one we appended to, or its entry has since been unloaded. Which of those
+                // it is decides the fix, so the message now names it.
+                if (!addonEncs.TryGetValue(nm, out uint enc))
+                    missing.Add($"'{nm}' (not among the addon's {addonEncs.Count} fragment entry(ies) — stale addon, or re-registered under another name)");
+                else if (enc == 0)
+                    missing.Add($"'{nm}' (addon entry present but its encoded id reads 0 — unloaded since the append)");
                 else if (!liveBlock.Contains(enc)) missing.Add($"'{nm}' (0x{enc:X8} not in the descriptor block)");
             }
             if (missing.Count > 0)
