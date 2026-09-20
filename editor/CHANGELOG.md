@@ -5,6 +5,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab preview zooms in twice as far** (floor 0.2 → 0.1 on the scroll-wheel zoom; user request while placing a
+  floating prop against its deck). The near plane and the radius floor leave room, so nothing clips at the new limit.
+
 - **`Tools~/placement_shift.py` — the one-time re-dial after the placement change.** An animated entry dialed to
   compensate for the old placement over-corrects once the bake centres the model itself, and nothing moves until
   that entry is re-baked, so the migration is per-entry and easy to lose track of. Point the script at a `pack.json`
