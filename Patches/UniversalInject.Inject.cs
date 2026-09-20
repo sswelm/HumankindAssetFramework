@@ -1906,17 +1906,11 @@ namespace HumankindAssetFramework
                             try { folIdx = (uint)Convert.ToInt32(GetMember(fol, "LayerIndex")); } catch { }
                             feType.GetField("FxOutputLayerIndex").SetValue(ge, folIdx);
                             // the arithmetic is the shared, unit-tested kernel (DescriptorRepoint.cs); this site keeps the game-side writes.
-                            // Where we DO append, the smoke verifies that the live descriptor still draws this prop — by NAME through
-                            // the addon's current entry (gpuAppendedNames), so a later re-encode (data-scale clones) does not read as a loss.
-                            // THE NAME IS RECORDED ONLY WHERE WE APPEND (2026-09-20). Recording it before the branch below made the
-                            // snapshot path assert against an entry that was never put on the addon: DescriptorRepoint.Apply is what adds
-                            // our FragmentEntry to addon.FragmentEntries, and the snapshot path deliberately does not call it. The smoke
-                            // then resolved 'M60_DistrictMesh' to nothing and reported the repoint undone — on the user's screen, for a
-                            // Drone Squad visibly carrying its gun. Nothing of ours is on the addon in that path, so there is nothing for
-                            // the smoke to name: the game's registration owns that fragment.
-                            e.gpuDefId = defId; e.gpuAddon = new WeakReference(addon);
+                            // Either way the smoke verifies that the live descriptor still draws this prop — by NAME through the addon's
+                            // current entry (gpuAppendedNames), so a later re-encode (data-scale clones) does not read as a loss.
+                            e.gpuDefId = defId; e.gpuAddon = new WeakReference(addon); if (!e.gpuAppendedNames.Contains(meshName)) e.gpuAppendedNames.Add(meshName);
                             if (DescriptorRepoint.TryReadBlock(descs, defId, out _, out int curCount) && curCount == 0)
-                                Plugin.Diag($"[Props] descriptor[{defId}] not populated yet (0 fragments) — the registration snapshot carries the hand prop; no surgical repoint (not smoke-asserted: nothing of ours on the addon to name)");
+                                Plugin.Diag($"[Props] descriptor[{defId}] not populated yet (0 fragments) — the registration snapshot carries the hand prop; no surgical repoint");
                             else
                             {
                                 int tail = Convert.ToInt32(cntF.GetValue(pm));
@@ -1924,9 +1918,6 @@ namespace HumankindAssetFramework
                                     Plugin.Log.LogWarning($"[Props] '{e.resourceName}' hand prop: descriptor repoint refused — {rpErr} — prop stays invisible");
                                 else
                                 {
-                                    // AFTER the append succeeded, never before: a refused repoint adds nothing to the addon, and a name
-                                    // recorded anyway would fail the smoke for a fragment we never put there.
-                                    if (!e.gpuAppendedNames.Contains(meshName)) e.gpuAppendedNames.Add(meshName);
                                     if (rp.Grown) fragF.SetValue(pm, gfrags);
                                     cntF.SetValue(pm, rp.NewTail);
                                     dirtyF?.SetValue(pm, true);
@@ -2050,19 +2041,15 @@ namespace HumankindAssetFramework
                         ges.Add(ge);
                     }
                     // the arithmetic is the shared, unit-tested kernel (DescriptorRepoint.cs); this site keeps the game-side writes.
-                    // Where we DO append, the smoke verifies that the live descriptor still draws every chunk — by NAME through the
-                    // addon's current entries (gpuAppendedNames), so a later re-encode (data-scale clones) does not read as a loss.
-                    // Recorded ONLY where we append, for the reason spelled out at the hand-prop site: the snapshot path never calls
-                    // DescriptorRepoint.Apply, so no entry of ours reaches addon.FragmentEntries and the smoke has no name to resolve.
-                    // The animated split (2026-09-20) reaches this path too, so the false FAIL would have followed it.
+                    // Either way the smoke verifies that the live descriptor still draws every chunk — by NAME through the addon's
+                    // current entries (gpuAppendedNames), so a later re-encode (data-scale clones) does not read as a loss.
                     e.gpuDefId = defId; e.gpuAddon = new WeakReference(addon);
+                    foreach (var nm in madeNames) if (!e.gpuAppendedNames.Contains(nm)) e.gpuAppendedNames.Add(nm);
                     if (DescriptorRepoint.TryReadBlock(descs, defId, out _, out int curCount) && curCount == 0)
-                    { Plugin.Diag($"[Uni][Multi] descriptor[{defId}] not populated yet (0 fragments) — the registration snapshot carries the {made.Count} chunk(s); no surgical repoint (not smoke-asserted: nothing of ours on the addon to name)"); return; }
+                    { Plugin.Diag($"[Uni][Multi] descriptor[{defId}] not populated yet (0 fragments) — the registration snapshot carries the {made.Count} chunk(s); no surgical repoint"); return; }
                     int tail = Convert.ToInt32(cntF.GetValue(pm));
                     if (!DescriptorRepoint.Apply(ref gfrags, descs, defId, tail, ges, out var rp, out string rpErr))
                     { Plugin.Log.LogWarning($"[Uni][Multi] '{e.resourceName}': descriptor repoint refused — {rpErr} — overflow chunks stay invisible"); return; }
-                    // AFTER the append succeeded, never before (see the hand-prop site).
-                    foreach (var nm in madeNames) if (!e.gpuAppendedNames.Contains(nm)) e.gpuAppendedNames.Add(nm);
                     if (rp.Grown) fragF.SetValue(pm, gfrags);
                     cntF.SetValue(pm, rp.NewTail);
                     dirtyF?.SetValue(pm, true);
