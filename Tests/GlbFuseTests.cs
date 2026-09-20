@@ -589,6 +589,63 @@ public class GlbFuseTests
         Assert.All(FaceNormals(g, (JObject)g.Primitives(g.Node("P0_Fused"))[0]), n => Assert.True(n[2] > 0, "and every other face too"));
     }
 
+    // ---- level sheets: a deck faces up (2026-09-20, the Confederate frigate's gun deck) ----
+    // A horizontal quad at height y spanning x0..x1 by z0..z1; `down` winds it so the normal points -Y.
+    static Part Level(string name, float x0, float x1, float z0, float z1, float y, bool down)
+    {
+        var p = new Part { Name = name, Positions = new[] { x0, y, z0,  x1, y, z0,  x1, y, z1,  x0, y, z1 } };
+        p.Indices = down ? new[] { 0, 1, 2,  0, 2, 3 } : new[] { 0, 2, 1,  0, 3, 2 };
+        return p;
+    }
+
+    // A rig whose SAILS own the model's height and area, which is what puts the belly line above the decks: the fuse
+    // takes the belly a quarter of the way up the model, here about +6, while the deck sits at +0.5 — the frigate's
+    // case exactly (belly 2.59, deck islands at 0.61, 2.06 and 2.53).
+    static Part[] ShipWithSails(Part deck) => new[]
+    {
+        deck,
+        Level("Bottom", 0, 20, 0, 6, -5f, down: true),        // bottom plating, honestly facing down, at the hull's floor
+        Quad("Sail", 0, 20, 5, 40, 0),                        // a tall sail: most of the model's height and area
+    };
+
+    static List<double[]> FusedNormals(GlbDisconnectedParts.Result r, string node)
+    {
+        var g = Read(r.Bytes);
+        return FaceNormals(g, (JObject)g.Primitives(g.Node(node))[0]);
+    }
+
+    [Fact]
+    public void A_deck_below_the_belly_line_is_left_facing_up()
+    {
+        // The gun deck: level, facing up, and BELOW the belly line, so the radial score reads it as pointing inward
+        // (-0.67 on the frigate) and the fuse reversed it whole — 88 % of the deck see-through from above, 94 % for
+        // the group. A level sheet is not asked the radial question: above the hull's floor it is a deck, facing up.
+        var deck = Level("Deck", 2, 18, 1, 5, 0.5f, down: false);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(ShipWithSails(deck)), new[] { 0 }, 0.0);
+        Assert.Contains(r.Details, d => d.StartsWith("frame:", StringComparison.Ordinal));
+        Assert.All(FusedNormals(r, "Deck_Fused"), n => Assert.True(n[1] > 0, "the deck still faces up"));
+        Assert.Equal(0, r.FacesRewound);
+    }
+
+    [Fact]
+    public void A_deck_authored_upside_down_is_turned_up()
+    {
+        var deck = Level("Deck", 2, 18, 1, 5, 0.5f, down: true);   // same deck, authored inside-out
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(ShipWithSails(deck)), new[] { 0 }, 0.0);
+        Assert.All(FusedNormals(r, "Deck_Fused"), n => Assert.True(n[1] > 0, "turned up"));
+        Assert.Equal(2, r.FacesRewound);
+    }
+
+    [Fact]
+    public void Bottom_plating_at_the_hull_floor_keeps_facing_down()
+    {
+        // The rule must not turn every level sheet upward: at the hull's floor, facing down is right. The bottom plate
+        // is node 1 of the fixture, below the floor line, so the radial score decides it as before.
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(ShipWithSails(Level("Deck", 2, 18, 1, 5, 0.5f, down: false))), new[] { 1 }, 0.0);
+        Assert.All(FusedNormals(r, "Bottom_Fused"), n => Assert.True(n[1] < 0, "the hull bottom still faces down"));
+        Assert.Equal(0, r.FacesRewound);
+    }
+
     [Fact]
     public void Vertex_colours_and_a_second_UV_set_survive_the_fuse_and_keep_their_own_vertices()
     {

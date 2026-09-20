@@ -412,6 +412,8 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   press **Fuse … into one shell each**: every group becomes ONE mesh in the output GLB, their seam vertices
   welded (a UV seam or a hard edge keeps its own vertex; connectivity is by position regardless), the winding
   made **consistent by majority**
+  (and a LEVEL sheet above the hull's floor — a deck — is taken to face up rather than judged against the hull's
+  belly line, which a sailing rig pushes above the decks; 0.5.7)
   across each welded *sheet* — the faces reachable through two-face edges; an edge shared by three faces, a deck
   meeting the hull side mid-plate, is a junction no two faces own, so a hull-and-decks island holds several sheets
   and each is judged on its own (a sheet whose winding cannot be made consistent at all — a propeller blade with

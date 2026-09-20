@@ -1601,7 +1601,7 @@ public static class GlbDisconnectedParts
         // and a deck facing down scores ~0 — undecidable, kept as authored. Sampled over every mesh node in the file
         // through its world matrix (masts and funnels do not move a percentile the way they move a bounding box);
         // the group's own vertices are the fallback for a file with nothing else in it.
-        ModelBelly(nodes, meshes, reader, pos, out int lengthAxis, out int widthAxis, out double centreW, out double bellyY);
+        ModelBelly(nodes, meshes, reader, pos, out int lengthAxis, out int widthAxis, out double centreW, out double bellyY, out double floorY);
         int openJudged = 0, openReversed = 0, closedReversed = 0;
         var islandRule = new string[sheets.Count];   // per island, for the "largest islands" line: what was measured and what decided
         // DOUBLE-SKIN twin grid, built ONCE over every face of the group (the two skins of a thin solid are usually separate
@@ -1751,6 +1751,18 @@ public static class GlbDisconnectedParts
                 sum += FDot(FaceNormal(f), radial) / (rl * nl); n++;
             }
             double score = n > 0 ? sum / n : 0.0;
+            // HOW LEVEL, AND HOW HIGH (2026-09-20, the Confederate frigate's gun deck): area-weighted, so a big flat
+            // surface decides and a few skirting faces do not.
+            double upSum = 0, upArea = 0, ySum = 0;
+            foreach (int f in isl)
+            {
+                Vec3 nf = FaceNormal(f); double nlen = FLen(nf); if (nlen < 1e-12) continue;
+                double a = 0.5 * nlen;
+                upSum += (nf.Y / nlen) * a; upArea += a;
+                ySum += FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0).Y * a;
+            }
+            double upness = upArea > 0 ? upSum / upArea : 0.0;      // +1 = every face points up, -1 = down
+            double islandY = upArea > 0 ? ySum / upArea : 0.0;
             // DOUBLE-SKINNED SOLIDS (2026-09-17, the SS Romanic): the hull is two skins a few centimetres apart with
             // opposite normals, wound inside-out as a whole. Both rules above read ~0 on it (the cones of the two skins
             // cancel: agreement -0.01, thickness -0.0005; the radial score cancels the same way). What does not cancel:
@@ -1778,7 +1790,19 @@ public static class GlbDisconnectedParts
             {
                 openJudged++;
                 bool volumeConfident = Math.Abs(agreement) > 0.5 && Math.Abs(thickness) > VolumeThicknessGate;
-                reverse = volumeConfident ? (volume < 0 && !enclosed) : doubleSkin ? twinInFront > twinBehind : score < -0.25;
+                // THE LAST RESORT, and where a deck used to be lost (2026-09-20). The radial score asks "does this
+                // point away from the hull's belly line", which is right for plating and wrong for a deck BELOW that
+                // line: the frigate's belly sits at 2.59 (a quarter up a model whose sails own most of its height and
+                // area) while its three gun-deck islands lie at 0.61, 2.06 and 2.53, every face pointing up — they
+                // scored -0.67 and were reversed whole, 88 % of the deck see-through from above. A LEVEL sheet is not
+                // asked the radial question at all: its facing is up or down, and above the hull's floor it is a deck,
+                // so it faces up. Below the floor (bottom plating) and for anything not level, the radial score stands.
+                // Confident volume and twin evidence still decide first, so a double-skinned deck keeps its underside.
+                bool levelSheet = Math.Abs(upness) > 0.8 && islandY > floorY;
+                reverse = volumeConfident ? (volume < 0 && !enclosed)
+                        : doubleSkin ? twinInFront > twinBehind
+                        : levelSheet ? upness < 0
+                        : score < -0.25;
                 if (reverse) openReversed++;
             }
             if (reverse) foreach (int f in isl) flip[f] = !flip[f];
@@ -2052,7 +2076,7 @@ public static class GlbDisconnectedParts
     // The hull's frame for the inside-out score: length = the longer horizontal extent (glTF is Y-up), the side centre
     // = the middle of the width extent, the belly = the 25th percentile of height over sampled vertices of EVERY mesh
     // node (≤ ~50k samples), i.e. inside the hull mass, below the decks. Falls back to the given vertices.
-    static void ModelBelly(JArray nodes, JArray meshes, Accessors reader, List<Vec3> fallback, out int lengthAxis, out int widthAxis, out double centreW, out double bellyY)
+    static void ModelBelly(JArray nodes, JArray meshes, Accessors reader, List<Vec3> fallback, out int lengthAxis, out int widthAxis, out double centreW, out double bellyY, out double floorY)
     {
         // AREA-WEIGHTED (review of 9cacd9f): the frame is measured on FACE samples weighted by their area, not on
         // vertices — a coarse hull of a few hundred triangles outweighs a dense cabin of thousands, and a chain of 144
@@ -2110,7 +2134,7 @@ public static class GlbDisconnectedParts
                 if (kp.Count >= 8) { pts = kp; wts = kw; }
             }
         }
-        if (pts.Count == 0) { lengthAxis = 0; widthAxis = 2; centreW = 0; bellyY = 0; return; }
+        if (pts.Count == 0) { lengthAxis = 0; widthAxis = 2; centreW = 0; bellyY = 0; floorY = 0; return; }
         // robust extents: the 1st..99th area-weighted percentiles per axis (a mast top is little area)
         double x1 = WeightedPercentile(pts, wts, 0, 0.01), x99 = WeightedPercentile(pts, wts, 0, 0.99);
         double z1 = WeightedPercentile(pts, wts, 2, 0.01), z99 = WeightedPercentile(pts, wts, 2, 0.99);
@@ -2120,6 +2144,9 @@ public static class GlbDisconnectedParts
         // a quarter of the way up the model's HEIGHT RANGE (not a vertex percentile: a liner spends its vertices in rigging
         // and deckhouses, which put that percentile at deck level — the Teutonic's lower strips, 2026-09-16)
         bellyY = y1 + 0.25 * (y99 - y1);
+        // and the hull's FLOOR, just above the lowest geometry: below it a level surface may honestly face down
+        // (the bottom plating), above it a level surface is a deck and faces up (see the level-sheet rule).
+        floorY = y1 + 0.05 * (y99 - y1);
     }
 
     static double WeightedPercentile(List<Vec3> pts, List<double> wts, int axis, double q)

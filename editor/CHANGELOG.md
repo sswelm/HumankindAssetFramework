@@ -5,6 +5,20 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Fuse: a deck below the hull's belly line is no longer turned inside-out.** The frigate's gun deck came out of the
+  fuse see-through from above: 94 % of the group's struck surface back-facing, against 0.1 % for the same parts
+  unfused (user: "there is still an issue with the deck, in particular Object_1002"). Where an island's volume and
+  twin evidence say nothing, the fuse falls back to asking whether the surface points away from the hull's belly
+  line. That line is taken a quarter of the way up the model, and a sailing ship's rig owns most of its height and
+  area, so the line landed at 2.59 while the deck's three islands lay at 0.61, 2.06 and 2.53, every face pointing up.
+  They scored -0.67 and were reversed whole. **A LEVEL sheet is not asked the radial question**: its facing is up or
+  down, and above the hull's floor (the lowest twentieth of the model's height) it is a deck, so it faces up.
+  Confident volume and twin evidence still decide first, so a double-skinned deck keeps its underside, and bottom
+  plating below the floor line is judged as before. Measured: the frigate's deck group 94 % -> 0.0 % back-facing
+  from above, its group T 4.9 % -> 2.3 %, every other group of that ship unchanged; the Teutonic's hull and all
+  eleven Romanic groups byte-identical. Three tests (a deck kept, a deck authored upside down turned up, bottom
+  plating left facing down); the first two fail without the rule.
+
 - **Model Fuser: "Check mirrored parts", for files that store their mirrored parts already facing outward.** glTF
   says a mirrored part (a negative-scale node, one side of a symmetric hull) renders with its winding reversed, and
   the fuse applies that, which is what the Teutonic needed. The Confederate frigate's file stores its mirrored hull
