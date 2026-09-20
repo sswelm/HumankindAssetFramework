@@ -66,6 +66,65 @@ def world_bbox(o):
     mx = Vector((max(p.x for p in pts), max(p.y for p in pts), max(p.z for p in pts)))
     return (mn + mx) / 2.0, mx - mn
 
+# ---- PER-PART PLACEMENT (2026-09-20, user: "address the floating objects") ----
+# The pipeline was measured clean end to end (Cutter 962/962 parts in place, Fuser 20/20 groups, probe 20/20),
+# so a prop that floats or intersects is AUTHORED that way in the source. This is the hand-correction: the Lab
+# passes `parttx=@<file>` with one line per placed part, name|ox,oy,oz|sx,sy,sz, in the model file's own axes
+# and units (the same frame as the part list's centre/size and the second model's Offset). Applied right after
+# the per-source split — in probe AND rig modes, so the preview shows what Generate will bake — and BEFORE the
+# straightening rotation, so the numbers mean the same thing on both paths. Scale is about the part's own world
+# bbox centre: a shrunk wheel stays where it is. Names split from the RIGHT (a name may contain '|'), the rule
+# the Lab's own parser follows; the Lab writes the lines with VehicleLabRules.PartPlacementLine.
+def part_placements():
+    arg = next((a for a in argv if a.startswith("parttx=")), None)
+    if not arg:
+        return {}
+    spec = arg[len("parttx="):]
+    if spec.startswith("@"):
+        with open(spec[1:], "r", encoding="utf-8") as f:
+            lines = [l.rstrip("\n") for l in f]
+    else:
+        lines = spec.split(";")
+    out = {}
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            name, off, scl = line.rsplit("|", 2)
+            o = [float(x) for x in off.split(",")]
+            s = [float(x) for x in scl.split(",")]
+            if len(o) != 3 or len(s) != 3:
+                raise ValueError("not a triple")
+        except Exception:
+            print("VEHICLE WARN: bad placement line ignored: %r" % line)
+            continue
+        if any(v <= 0.0 for v in s):
+            print("VEHICLE WARN: placement for '%s' has a non-positive scale %s — using 1" % (name, s))
+            s = [1.0, 1.0, 1.0]
+        out[name] = (o, s)
+    return out
+
+def apply_part_placements(objs, tag):
+    tx = part_placements()
+    if not tx:
+        return
+    byname = {o.name: o for o in objs}
+    for name, (off, scl) in tx.items():
+        o = byname.get(name)
+        if o is None:
+            print("VEHICLE WARN: placement for '%s' skipped — no such part after the split (re-Probe, then place it again)" % name)
+            continue
+        c0, s0 = world_bbox(o)
+        T = (Matrix.Translation(Vector(off)) @ Matrix.Translation(c0)
+             @ Matrix.Diagonal((scl[0], scl[1], scl[2], 1.0)) @ Matrix.Translation(-c0))
+        o.matrix_world = T @ o.matrix_world
+        bpy.context.view_layer.update()
+        c1, s1 = world_bbox(o)
+        # the ALIGNMENT NUMBERS, as the merge prints them: dial with data, not eyeballs
+        print("VEHICLE PLACED (%s): %s | offset (%s) scale (%s) | centre (%.3f,%.3f,%.3f) -> (%.3f,%.3f,%.3f) | size (%.3f,%.3f,%.3f) -> (%.3f,%.3f,%.3f)"
+              % (tag, name, ",".join("%.3f" % v for v in off), ",".join("%.3f" % v for v in scl),
+                 c0.x, c0.y, c0.z, c1.x, c1.y, c1.z, s0.x, s0.y, s0.z, s1.x, s1.y, s1.z))
+
 def is_icosphere_artifact(o):
     """The glTF importer's bone-shape placeholder, identified by SIGNATURE, not name alone (PR #33 review
     finding 5: Blender authors keep default names, so a real ball/buoy named Icosphere.003 must survive to
@@ -491,6 +550,7 @@ if mode == "probe":
             print("VEHICLE note: single %smesh split into %d loose parts (names are synthetic)"
                   % ("second-model " if _spfx else "", len([o for o in objs if o.name.startswith("B_") == (_spfx == "B_")])))
     _lap("split")
+    apply_part_placements(objs, "probe")   # so the preview shows what Generate will bake
     # ---- visibility classification: EXTERNAL vs INTERIOR ----
     # A part is EXTERNAL if any sampled surface point can shoot a straight "escape ray" to infinity without hitting
     # other geometry; a part blocked from every sample in every direction is INTERIOR (cockpit gear, engine guts) —
@@ -938,6 +998,8 @@ if tracks_static and track_names:
 # axis is the LOCAL basis axis closest to the world axle direction, SIGNED so every wheel turns the same world
 # way (artist rigs mirror left/right bones — an unsigned shared channel would counter-rotate one side).
 if mode == "rigfast":
+    if any(a.startswith("parttx=") for a in argv):
+        print("VEHICLE WARN: per-part placement is a mesh-path feature — the source-skeleton fast path spins bones and leaves the meshes as authored; disable the fast path to apply it")
     if oar_names:
         print("VEHICLE ERROR: Oar recovery needs mesh parts; disable the source-skeleton fast path and probe the merged oar meshes")
         sys.exit(1)
@@ -1075,6 +1137,8 @@ for _spfx9 in ("", "B_"):
         bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
         bpy.ops.mesh.separate(type='LOOSE'); bpy.ops.object.mode_set(mode='OBJECT')
         objs = mesh_objects()
+
+apply_part_placements(objs, "rig")   # same point as the probe: after the split, before straightening
 
 # Ignore-marked parts are DELETED from the output — Sketchfab "options" models stack alternative versions of
 # the same part (four skirt sets on the Jagdpanzer); rendering them all is z-fighting soup.

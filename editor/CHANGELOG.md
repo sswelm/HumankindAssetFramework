@@ -5,6 +5,17 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab: per-part Offset and Scale** (user: "address the floating objects … also they are weirdly
+  intersecting each other"). Before building it, the pipeline was measured end to end on the steam frigate — the
+  Cutter keeps 962/962 parts in place, the Fuser 20/20 groups, the probe 20/20 — so a floating or intersecting prop
+  is authored that way in the source (its original file has 54 parts with nothing under their footprint), and the
+  correction belongs per part, by hand, not as another pipeline fix. Click a row and a Placement box offers Offset,
+  Scale (about the part's own centre) and Reset; placed rows carry a ⇄ tag. The values ride the recipe like roles,
+  survive a re-Probe by part name, and reach `vehicle_rig.py` through a tagged `parttx=@file` line list whose format
+  is a tested pure kernel (`VehicleLabRules.PartPlacementLine`, split from the right so a `|` in a name survives).
+  Applied after the split and before straightening in BOTH probe and rig modes, so the preview shows exactly what
+  Generate bakes, and the log prints each part's centre and size before and after.
+
 - **`Tools~/placement_shift.py` — the one-time re-dial after the placement change.** An animated entry dialed to
   compensate for the old placement over-corrects once the bake centres the model itself, and nothing moves until
   that entry is re-baked, so the migration is per-entry and easy to lose track of. Point the script at a `pack.json`

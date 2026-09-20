@@ -124,6 +124,39 @@ public static class VehicleLabRules
     // into the NAME (the only field that can legitimately contain the separator), and a row whose numeric tail then
     // fails to parse is rejected WITH a reason — a new field in the script trips the Lab loudly instead of quietly.
     // Returns false with `reason == null` for lines that are not rows at all (timing lines, blanks): silent skip.
+    // PER-PART PLACEMENT (2026-09-20, user: "address the floating objects"). The Lab hands vehicle_rig.py one line
+    // per placed part — name|ox,oy,oz|sx,sy,sz — through the tagged parttx=@file argument. The NAME may contain the
+    // separator (a Sketchfab name can be anything), so BOTH sides split from the RIGHT: the last two fields are the
+    // numeric triples and whatever is left is the name — the rule TryParsePartLine learned the hard way. Invariant
+    // culture on both sides: a comma decimal would silently corrupt a triple on a German machine.
+    public static string PartPlacementLine(string name, float ox, float oy, float oz, float sx, float sy, float sz)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        string F(float v) => v.ToString("0.####", inv);
+        return name + "|" + F(ox) + "," + F(oy) + "," + F(oz) + "|" + F(sx) + "," + F(sy) + "," + F(sz);
+    }
+
+    public static bool TryParsePartPlacementLine(string line, out string name, out float[] offset, out float[] scale)
+    {
+        name = null; offset = null; scale = null;
+        if (string.IsNullOrWhiteSpace(line)) return false;
+        int cut2 = line.LastIndexOf('|'); if (cut2 <= 0) return false;
+        int cut1 = line.LastIndexOf('|', cut2 - 1); if (cut1 <= 0) return false;
+        if (!Triple(line.Substring(cut1 + 1, cut2 - cut1 - 1), out offset) || !Triple(line.Substring(cut2 + 1), out scale)) return false;
+        name = line.Substring(0, cut1);
+        return name.Length > 0;
+    }
+
+    static bool Triple(string s, out float[] v)
+    {
+        v = null; var f = s.Split(',');
+        if (f.Length != 3) return false;
+        var r = new float[3];
+        for (int i = 0; i < 3; i++)
+            if (!float.TryParse(f[i].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out r[i])) return false;
+        v = r; return true;
+    }
+
     public static bool TryParsePartLine(string line, out PartRow row, out string reason)
     {
         row = null; reason = null;
