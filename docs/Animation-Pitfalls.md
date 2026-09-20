@@ -211,9 +211,57 @@ size 5). The toggle is gone; there is nothing left to tick.
 - A **flyer** is grounded too, exactly as the static path has always grounded one, and its flying height is the
   Position offset Z dial — the same dial, in the same units, on both paths.
 - **The catch, once:** an entry dialed to compensate for the OLD animated placement now over-corrects, because the
-  bake has removed what the dial was cancelling. Re-check the horizontal dial of any animated entry after its first
-  re-bake (the shipped Gatling guns carry `y = −3.70` against a measured 3.34-unit miscentring). Same one-time cost
-  as the 2026-09-12 rotation unification.
+  bake has removed what the dial was cancelling. Same one-time cost as the 2026-09-12 rotation unification — and
+  **`Tools~/placement_shift.py` computes the new dials for you**, see just below.
+
+### Re-dialing after the placement change *(the one-time migration)*
+
+**Nothing moves until an entry is re-baked** — placement is baked in — so this is per-entry and can wait. When you
+do re-bake, the model centres itself, and whatever your Position offset was cancelling is suddenly an
+over-correction.
+
+Run the migration tool against your pack:
+
+```
+blender --background --python placement_shift.py -- "…/BepInEx/config/haf_packs/<mod>/pack.json"
+```
+
+It measures every animated entry the way `rig_anim.py` does — junk cull, the entry's **reference-clip pose**, the
+registry rotation folded into the geometry, then the box and `size/longest` into game units — and prints the
+Position offset each entry needs **to look exactly as it does today**:
+
+```
+new_x = old_x + move_x     new_y = old_y + move_y     new_z = old_z − lift   (lift only if it was not auto-grounded)
+```
+
+**How you know the sign is right:** an entry whose dial was *pure* compensation collapses to ~0. On the shipped ENC
+pack four independently hand-dialed entries collapse at once — GatlingGuns `−3.70 + 3.34 = −0.36`, AntiTankIFV
+`+0.50 − 0.497 = +0.003`, StealthHelicopter `(−0.50, +0.50) + (+0.391, −0.525) = (−0.11, −0.03)`, TOW-Infantry
+`−0.30 + 0.247 = −0.05`. With the sign the other way each would *double* (the Gatling guns to `−7.04` on a size-2.5
+model), which nobody would have shipped.
+
+Two things it has to get right, and both are easy to get quietly wrong (PR #72 review found both):
+
+- **Rotate the geometry, then measure.** The bake folds the rotation into the data and measures afterwards, so the
+  box belongs to the *rotated* cloud. Rotating an unrotated box's centre is a different number for asymmetric
+  geometry, and the longest axis — hence `size/longest` — differs too. On a size-5 prism at 45° that was **1.45
+  game units** of error. At 0/±90/180 the two agree exactly, which is why a pack of axis-aligned entries shows no
+  symptom until someone dials an odd angle.
+- **Measure the pose the bake actually places — which is often the raw rest.** The bake folds the reference pose
+  into the mesh only on the **conversion** path and only when the resolved clip carries location curves
+  (`rig_anim`'s `if _loc0 and convert_rig`), and slicing a clip synthesizes those curves. So a *converted* rig with
+  a sliced or location-keyed reference is measured posed — reference a struck clip there and the lowest point is a
+  yard under the hull rather than the keel — while a **legacy** rig keeps its raw mesh and posing it would invent a
+  displacement the bake never applies. The tool mirrors that gate and says which branch each row took.
+
+> **An entry you have ALREADY re-baked is done.** Its dial is in the new frame, and the table would move it a
+> second time. The tool cannot tell which is which — it prints the warning and leaves that to you. It also reports
+> **deploy-converted** entries as *not measured*: that recipe synthesizes its own rig and clips, so the honest
+> answer is to re-bake and read the bake's own `RIGANIM placement: world centre …` line, which is the ground truth
+> for any row here.
+
+Work the largest change first: if it lands on its hex, the rest follow. If it lands *twice* as wrong, stop and
+re-derive the sign rather than hand-fixing a dozen entries.
 - **The sky-lift trap now applies to everyone** (it used to need Auto-ground ON): the rest skeleton comes from the
   Idle/**reference** clip's frame, so referencing a clip that holds a STRUCK pose — a yard swung under the hull —
   grounds the model on that part and lifts the whole ship into the air. Reference the DEPLOYED frame (`Furl[0..0]`).
