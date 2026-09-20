@@ -6,7 +6,10 @@ using UnityEditor;
 
 public class ModelSplitterWindow : ModelWorkshopWindow
 {
-    [MenuItem("Tools/HAF/Model Splitter")]
-    static void Open() => GetWindow<ModelSplitterWindow>("Model Splitter");
+    // NAMED "Model Cutter" since 2026-09-20 (user: "we are mainly cutting away bad or insignificant parts and only on
+    // occasion split an object apart"). The CLASS keeps its old name on purpose: Unity stores a saved window layout by
+    // type name, so renaming it would drop this window out of the user's layout and make them reopen it from the menu.
+    [MenuItem("Tools/HAF/Model Cutter")]
+    static void Open() => GetWindow<ModelSplitterWindow>("Model Cutter");
     protected override bool Fusing => false;
 }

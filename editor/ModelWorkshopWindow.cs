@@ -151,11 +151,11 @@ public abstract class ModelWorkshopWindow : EditorWindow
             EditorGUILayout.LabelField("Model Fuser — weld the parts of each ⊕ group into ONE shell with consistent winding", EditorStyles.boldLabel);
             // two short lines, not one long one: a single long label sets the window's minimum width (user 2026-09-16)
             EditorGUILayout.LabelField("For a hull authored as separate plates (see-through, holes, gaps under reduction): mark the plates with one letter, Fuse, then feed the output to the Vehicle Lab.", EditorStyles.wordWrappedMiniLabel);
-            EditorGUILayout.LabelField("Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh. To cut as well, open the output in the Model Splitter: each shell keeps its ⊕ letter there.", EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.LabelField("Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh. To cut as well, open the output in the Model Cutter: each shell keeps its ⊕ letter there.", EditorStyles.wordWrappedMiniLabel);
         }
         else
         {
-            EditorGUILayout.LabelField("Model Splitter — split chosen parts into their disconnected islands, or plane-cut a connected one", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Model Cutter — cut away the parts you do not need; split a part into its disconnected islands, or plane-cut a connected one", EditorStyles.boldLabel);
             // two short lines, not one long one: a single long label sets the window's minimum width (user 2026-09-16)
             EditorGUILayout.LabelField("For a part whose junk islands share a mesh with real geometry: split ONLY that part, then mark the junk Ignore in the Vehicle Lab.", EditorStyles.wordWrappedMiniLabel);
             EditorGUILayout.LabelField("Lossless — vertex data, materials, skins and animations are preserved; only the checked parts gain _Part_NNN children. A CONNECTED part (1 island) can instead be plane-cut in two. To fuse as well, open the output in the Model Fuser.", EditorStyles.wordWrappedMiniLabel);
