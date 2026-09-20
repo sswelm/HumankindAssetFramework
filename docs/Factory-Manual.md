@@ -225,12 +225,13 @@ their settings and work together**:
   more fragments are more draw work: reduce first, split only when further reduction would visibly hurt. Unchecked
   (default) keeps the classic behavior: one mesh, the over-ceiling dialog, overflow clipped. See the
   [quickstart's draw-ceiling section](Vehicle-Lab-Quickstart.md#9-large-models--fitting-the-engines-draw-ceiling).
-  **The second cost is vertices**, and it is the one that bites: every chunk duplicates the vertices along its seam —
-  the steam frigate went 99,676 → 125,369 (**+26%**) — and all of them live in the shared pawn vertex buffer, which is
-  1,000,000 vanilla. Fill that buffer and the game stops uploading *any* further mesh: units **and** districts stop
-  drawing at once, with no error (2026-09-20 — a single static re-bake of that frigate was the straw, on a buffer
-  already doubled to 2,000,000 by `BufferOverrides`). F8 shows the fill; raise it with
-  `BufferOverrides = MeshWithSkeleton:verts=+N`. See [Vertex-Budget](Vertex-Budget.md).
+  **The second cost is vertices**, and it is the one that bites: every chunk duplicates the vertices along its seam,
+  in the shared pawn vertex buffer (1,000,000 vanilla). *How much* depends on where the cuts fall — the same steam
+  frigate measured 99,676 → 125,369 verts (**+26%**) split static, and 99,676 → 100,648 (**+1%**) split animated, so
+  don't carry one path's figure to the other; read the `BAKED MESH` lines. Fill that buffer and the game stops
+  uploading *any* further mesh: units **and** districts stop drawing at once, with no error (2026-09-20 — a single
+  static re-bake of that frigate was the straw, on a buffer already doubled to 2,000,000 by `BufferOverrides`). F8
+  shows the fill; raise it with `BufferOverrides = MeshWithSkeleton:verts=+N`. See [Vertex-Budget](Vertex-Budget.md).
 - **Double-sided** — for **animated (rigged) vehicles** this moved to the **Vehicle Lab** in 0.5.4 (its
   *Double-sided (fix see-through parts)* checkbox, applied to the source Spin GLB when you generate the rig). The
   Factory no longer has the checkbox for animated models. For **static** single-sided/CAD shells, use **Winding

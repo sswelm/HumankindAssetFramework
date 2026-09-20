@@ -290,10 +290,11 @@ it carries bone weights and bindposes, so every chunk skins against the same ske
 the bake writes a `…_Split.prefab` holding one `SkinnedMeshRenderer` per chunk, which is what the skeleton is baked
 from. The body is renamed `<name>_ModelMesh` so the plugin retargets the right renderer onto the donor's mesh name.
 
-**Mind the vertex cost.** Splitting duplicates every seam vertex — the steam frigate went 99,676 → 125,369 (**+26%**)
-— and chunks share the pawn vertex buffer (1,000,000 vanilla). A full buffer stops the game drawing units *and*
-districts, silently. Check F8 after a split bake; raise the pool with `BufferOverrides` if you split more than one
-big model. See [Vertex-Budget](Vertex-Budget.md).
+**Mind the vertex cost.** Splitting duplicates every seam vertex, and chunks share the pawn vertex buffer
+(1,000,000 vanilla). How much it costs depends on where the cuts fall: the steam frigate measured 99,676 → 125,369
+(**+26%**) split static, but only 99,676 → 100,648 (**+1%**) split animated — the `BAKED MESH` lines give the real
+figure for your bake. A full buffer stops the game drawing units *and* districts, silently. Check F8 after a split
+bake; raise the pool with `BufferOverrides` if you split more than one big model. See [Vertex-Budget](Vertex-Budget.md).
 The plugin also logs a `[Uni][BUDGET]` audit line per injected unit at load, catching units baked before the
 check existed.
 

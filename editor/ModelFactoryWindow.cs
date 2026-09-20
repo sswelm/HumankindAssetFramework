@@ -1234,9 +1234,11 @@ public class ModelFactoryWindow : EditorWindow
                 "(_ModelMesh_B..), each drawn as its own fragment on the unit — the whole model renders instead of the tail " +
                 "silently clipping (up to 8 fragments = 261k tris). Off = the classic behavior: one mesh, a warning dialog, " +
                 "and the overflow does not draw. Works on BOTH paths (static since 2026-09-13, ANIMATED since 2026-09-20). " +
-                "Two costs: more fragments are more draw work, and every chunk duplicates the vertices on its seam " +
-                "(the steam frigate: 99,676 -> 125,369, +26%) in the shared pawn vertex buffer — a full buffer stops the " +
-                "game drawing units AND districts (raise it with BufferOverrides). Reduce first; split when reduction would visibly hurt."), cur.multiMesh, GUILayout.Width(240));
+                "Two costs: more fragments are more draw work, and every chunk duplicates the vertices along its seam, " +
+                "in the shared pawn vertex buffer. How much depends on where the cuts fall — measured on the same steam " +
+                "frigate: 99,676 -> 125,369 verts (+26%) split STATIC, 99,676 -> 100,648 (+1%) split ANIMATED. Check F8 " +
+                "after a split bake: a full pawn buffer stops the game drawing units AND districts (raise it with " +
+                "BufferOverrides). Reduce first; split when reduction would visibly hurt."), cur.multiMesh, GUILayout.Width(240));
             // Double-sided checkbox removed from the Factory (2026-09-03, user request): for ANIMATED models it's
             // applied at the source in the Vehicle Lab ("Double-sided" when generating the rig), and the Factory had
             // no runtime doubling left — so a Factory checkbox only did nothing and invited "why is it see-through".

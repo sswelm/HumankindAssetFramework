@@ -28,7 +28,7 @@ public struct BakeConfig
     public bool    reuseExtracted;  // true = reuse the existing OBJ/albedo (skip re-import) — lets the modder hand-edit the extracted texture and keep it
     public bool    doubleSided;     // true = add a reversed back face to every triangle (single-sided/CAD repair) so backface-culled parts render in-game
     public bool    windingFix;      // true = rewind faces outward from the origin (documented CAD winding fix) so single-sided meshes render, no geometry doubling
-    public bool    multiMesh;       // true = a bake over the per-fragment quad ceiling splits into _ModelMesh_B.. chunks, on EITHER path (static since 2026-09-13, animated since 2026-09-20; opt-in, off = classic warn-and-clip). Costs vertices: each chunk duplicates its seam (~+26% on the frigate) in the shared pawn vertex buffer.
+    public bool    multiMesh;       // true = a bake over the per-fragment quad ceiling splits into _ModelMesh_B.. chunks, on EITHER path (static since 2026-09-13, animated since 2026-09-20; opt-in, off = classic warn-and-clip). Costs vertices in the shared pawn vertex buffer: each chunk duplicates its seam, by as much as the cut decides (the frigate: +26% static, +1% animated).
     public bool    heightUV;        // true = override UVs with U=length, V=height so a vertical-gradient albedo maps by height (black skirt low, grey hull high)
     public float   albedoBrightness; // multiply the baked atlas RGB (1 = unchanged). >1 lifts a dark skin — the injection path ships FLAT albedo (donor PBR neutralized), so shiny/dark models read muddy in-game; this compensates at bake time
     public float   albedoSaturation; // scale colour vividness around per-pixel luminance (1 = unchanged, 0 = greyscale, >1 = punchier). Fixes desaturated albedos (game lighting can't add colour back)
@@ -673,10 +673,12 @@ public static class UniversalBaker
         // looks for when it retargets our body onto the donor's mesh name. Without the rename, with chunks in the
         // collection, that search falls through to index 0 — which may be a CHUNK, retargeting the wrong renderer.
         //
-        // IT COSTS VERTICES. Every chunk duplicates the vertices along its seam — the frigate goes 99,676 ->
-        // 125,369 (+26%) — and all of them share the pawn vertex buffer, which is 1,000,000 vanilla. Splitting a
-        // big model can fill it, and a full buffer stops the game uploading ANY further mesh: units and districts
-        // both stop drawing (user, 2026-09-20). Raise it with BufferOverrides if you split more than one ship.
+        // IT COSTS VERTICES, by as much as the cut decides. Every chunk duplicates the vertices along its seam,
+        // and all of them share the pawn vertex buffer (1,000,000 vanilla). MEASURED on the same frigate: splitting
+        // it STATIC cost 99,676 -> 125,369 verts (+26%), splitting it ANIMATED only 99,676 -> 100,648 (+1%) — the
+        // partition falls differently on the two paths' meshes, so do not carry one number over to the other.
+        // A full buffer stops the game uploading ANY further mesh: units and districts both stop drawing, with no
+        // error anywhere (user, 2026-09-20, after a static split). F8 reports the fill; BufferOverrides raises it.
         GameObject skelSource = fbxGo;
         for (char c = 'B'; c <= 'H'; c++)   // stale chunks from a previous, bigger bake must not outlive it
             AssetDatabase.DeleteAsset("Assets/Resources/" + name + "_ModelMesh_" + c + ".asset");

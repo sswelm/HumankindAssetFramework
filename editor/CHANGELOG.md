@@ -24,8 +24,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   the bake instead of shipping geometry that will not draw.
 
 - **Splitting costs vertices, and the pool it spends is shared** (documented after it bit: units and districts all
-  stopped drawing). Every chunk duplicates the vertices along its seam — the steam frigate went 99,676 to 125,369,
-  **+26 %** — and they live in the pawn vertex buffer, 1,000,000 vanilla. When that buffer fills the game stops
+  stopped drawing). Every chunk duplicates the vertices along its seam, by as much as the cut decides: the steam
+  frigate measured 99,676 to 125,369 (**+26 %**) split static, but 99,676 to 100,648 (**+1 %**) split animated — read
+  the `BAKED MESH` lines, don't carry one path's figure to the other. They live in the pawn vertex buffer,
+  1,000,000 vanilla. When that buffer fills the game stops
   uploading meshes entirely, so units **and** districts vanish at once with no error anywhere. The two ceilings pull
   against each other: reducing triangles pays both, splitting pays one by spending the other. F8 reports the fill and
   `BufferOverrides = MeshWithSkeleton:verts=+N` raises the pool (~48 MB VRAM per million). Now stated in the
