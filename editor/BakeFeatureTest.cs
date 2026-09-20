@@ -298,6 +298,21 @@ public static class BakeFeatureTest
                                     && skelGuid1 == skelGuid0 && atlasGuid1 == atlasGuid0 && normGuid1 == normGuid0;
                     Check(res, ref pass, ref fail, "E5 rollback restores a failed re-bake (GUIDs + content, surface atlases incl.)", restored,
                         $"rebakeFailed={!rBad.ok}, verts {verts0}->{(mR != null ? mR.vertexCount : -1)}, skelGuidKept={skelGuid1 == skelGuid0}, atlasGuidKept={atlasGuid1 == atlasGuid0}, normalAtlasGuidKept={normGuid1 == normGuid0}");
+
+                    // THE SPLIT PREFAB MUST BE SOMEWHERE ROLLBACK LOOKS (PR #71 review P2). The animated split writes
+                    // <name>_Split.prefab and the baked Skeleton references it; the bake deletes it BEFORE the fallible
+                    // split and skeleton steps. Written under FactorySource — as it first was — a failed re-bake
+                    // restored the old skeleton with its source prefab GONE, and re-creating it later yields a guid the
+                    // restored skeleton cannot resolve, while the rollback message claims everything is intact. This is
+                    // a structural check, not a bake: it fails the moment the prefab moves out of Resources or the
+                    // suffix leaves the whitelist. (A cube never splits, so no fixture here can reach it.)
+                    string splitPath = UniversalBaker.SplitPrefabPath("e5probe");
+                    bool splitInResources = splitPath.StartsWith("Assets/Resources/", StringComparison.Ordinal);
+                    bool splitSuffixListed = UniversalBaker.OutputSuffixes.Any(s => splitPath.EndsWith(s, StringComparison.Ordinal));
+                    Check(res, ref pass, ref fail, "the animated split's prefab is covered by the E5 rollback whitelist",
+                        splitInResources && splitSuffixListed,
+                        "path=" + splitPath + ", inResources=" + splitInResources + ", suffixListed=" + splitSuffixListed);
+
                 }
             }
         }
