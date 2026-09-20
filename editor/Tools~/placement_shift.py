@@ -74,29 +74,46 @@ def load(path):
         bpy.data.objects.remove(junk, do_unlink=True)
 
 
-def pose_to_reference(clip):
-    """Put the rig in the Idle/reference clip's frame — the pose the bake turns into the rest skeleton.
+class Unresolved(Exception):
+    """The reference pose could not be reproduced — measuring anyway would print a confident wrong number."""
 
-    Returns a short note describing what happened, for the row's comment."""
+
+# THE BAKER'S OWN SLICE GRAMMAR, copied verbatim from rig_anim.py's resolve_clip so the two cannot disagree:
+# a clip may carry a frame range AND a speed step — "deploy[179..0/3]" is every 3rd source frame. A parser that
+# only understands "[a..b]" silently fails to resolve "Spin[10..30/2]" (PR #72 review), and a reference the tool
+# cannot resolve is exactly when it must NOT print a number.
+_SLICE_RE = re.compile(r"^(.*)\[(\d+)\.\.(\d+)(?:/(\d+))?\]$")
+
+
+def reference_frame(clip):
+    """The (action, frame) the bake builds its rest skeleton from, or (None, why-not)."""
+    spec = (clip or "").strip()
+    if not spec:
+        return None, "no reference clip configured"
+    m = _SLICE_RE.match(spec)
+    name, frame = (m.group(1), int(m.group(2))) if m else (spec, None)
+    act = bpy.data.actions.get(name)          # exact, as resolve_clip matches — a near-miss is a misconfiguration
+    if act is None:
+        return None, "reference clip '%s' is not in the file" % name
+    return act, (int(act.frame_range[0]) if frame is None else frame)
+
+
+def pose_to_reference(clip):
+    """Put the rig in the reference clip's frame — the pose the bake turns into the rest skeleton.
+
+    Returns a note on success, or raises Unresolved so the row is reported as NOT MEASURED rather than
+    measured against whatever pose the file happens to open in."""
     arm = next((o for o in bpy.context.scene.objects if o.type == 'ARMATURE'), None)
     if arm is None:
-        return "no armature"
-    clip = (clip or "").strip()
-    if not clip:
-        return "no reference clip set; measured at the file's rest"
-    m = re.match(r"^(.*?)\s*\[\s*(-?\d+)\s*\.\.\s*-?\d+\s*\]\s*$", clip)
-    name, frame = (m.group(1), int(m.group(2))) if m else (clip, None)
-    act = (bpy.data.actions.get(name)
-           or next((a for a in bpy.data.actions if a.name.split("|")[-1] == name), None)
-           or next((a for a in bpy.data.actions if name.lower() in a.name.lower()), None))
+        raise Unresolved("no armature in the file")
+    act, frame = reference_frame(clip)
     if act is None:
-        return "clip '%s' not in the file; measured at the file's rest" % name
+        raise Unresolved(frame)
     arm.animation_data_create()
     arm.animation_data.action = act
-    f = int(act.frame_range[0]) if frame is None else frame
-    bpy.context.scene.frame_set(f)
+    bpy.context.scene.frame_set(frame)
     bpy.context.view_layer.update()
-    return "posed at %s frame %d" % (act.name.split("|")[-1], f)
+    return "posed at %s frame %d" % (act.name.split("|")[-1], frame)
 
 
 def measure(rot):
@@ -141,6 +158,10 @@ for e in models:
         load(src)
         posed = pose_to_reference(e.get("animClip"))
         centre, lowest, longest = measure(e.get("rotation") or {})
+    except Unresolved as why:
+        print("PLACEMENT %-22s NOT MEASURED — %s; re-bake and read the bake's own 'RIGANIM placement:' line"
+              % (name, why))
+        continue
     except Exception as ex:
         print("PLACEMENT %-22s could not measure (%s)" % (name, str(ex)[:70]))
         continue
