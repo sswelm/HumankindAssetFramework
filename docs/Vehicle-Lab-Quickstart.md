@@ -143,8 +143,9 @@ clip format has no visibility or alpha, so out-of-sight *is* the disappear, and 
 playing the move. Assign after baking: Idle/reference = **`Furl[0..0]`** (frame 0 of `Furl` is always the fully
 DEPLOYED state, and the reference clip's frame 0 becomes the model's REST — never reference `Spin[0..0]` on a
 rig with flags or sails: `Spin` holds its strike on *every* frame, so the hidden pose would bake into the rest
-skeleton, and on a land unit Auto-ground then lifts the whole model by the struck part's depth — the sky-floating
-TOW, 2026-09-12) · Idle stance (override) = `Furl[1..1]` (a ship under oars, no canvas) · Movement = `Spin`
+skeleton, and the bake's grounding then lifts the whole model by the struck part's depth — the sky-floating
+TOW, 2026-09-12; since 2026-09-20 every animated bake grounds, so this applies to every unit, and the bake warns
+in the log when the lift is worth more than a quarter of the model's height) · Idle stance (override) = `Furl[1..1]` (a ship under oars, no canvas) · Movement = `Spin`
 (sails up) · **After-move and Pre-move empty** — the state change swaps the pose in one tick. **Keep bone
 translations** can stay **OFF**: the strike is pure rotation.
 
@@ -230,12 +231,14 @@ For wheels/tracks, the expected recipe is:
 - Movement: `Spin`
 - **Convert raw rig ON**
 - **Fix 100× OFF**
-- **Auto-ground ON**
 - **Keep bone translations ON**
 
+(There is no grounding toggle: every bake centres the model's box on the origin and drops its lowest point to it,
+the same placement a static bake gets.)
+
 For a rig with **flags or sails** (a `Furl` clip exists), Auto-detect fills Idle/reference = `Furl[0..0]`
-instead — the deployed frame; `Spin[0..0]` would bake the struck/folded pose into the rest skeleton and
-Auto-ground would sky-lift a land unit (see *Flags* / *Flag fold* in §4). Add the Idle-stance/Pre/After clips
+instead — the deployed frame; `Spin[0..0]` would bake the struck/folded pose into the rest skeleton and the
+grounding would sky-lift the unit (see *Flags* / *Flag fold* in §4). Add the Idle-stance/Pre/After clips
 from the Lab's printed recipe by hand — Auto-detect leaves them empty.
 
 For rotorcraft, override the generic Spin detection with the recipe Vehicle Lab prints:
@@ -244,8 +247,8 @@ For rotorcraft, override the generic Spin detection with the recipe Vehicle Lab 
 - Clip/reference: full `Spin`
 - **Convert raw rig ON**
 - **Fix 100× OFF**
-- **Auto-ground OFF** — it is a flyer
 - **Keep bone translations ON**
+- a flyer is grounded like everything else — dial its flying height with **Position offset Z**
 
 Set Size and the target pawn in Model Factory. A donor with no unwanted animated parts is simplest.
 

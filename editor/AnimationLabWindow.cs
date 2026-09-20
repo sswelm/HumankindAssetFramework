@@ -614,7 +614,7 @@ public class AnimationLabWindow : EditorWindow
             // FLAG/SAIL rigs (a 'Furl' clip is present, 2026-09-12 TOW finding): the reference must be Furl[0..0], NOT
             // Spin[0..0] — the flag rig's Spin holds the strike mirror on EVERY frame (deliberately: movement must never
             // flash the deployed pose mid-loop), so its frame 0 is the HIDDEN pose. Using it as the reference bakes the
-            // hidden pose into the rest skeleton and Auto-ground then lifts the whole model by the mirrored part's depth
+            // hidden pose into the rest skeleton and the bake's grounding then lifts the whole model by that part's depth
             // (the sky-floating TOW). Furl frame 0 is the deployed state on every rig the Lab generates.
             cur.animStateDriven = true;
             cur.animClip = (furl != null ? furl : spin) + "[0..0]";                           // Idle/reference = the motionless DEPLOYED frame
@@ -626,12 +626,12 @@ public class AnimationLabWindow : EditorWindow
             string keepIdle = furl != null && (cur.animClipIdle ?? "").TrimStart().StartsWith(furl, StringComparison.OrdinalIgnoreCase)
                 ? cur.animClipIdle : "";
             cur.animClipAfter = ""; cur.animClipAttack = ""; cur.animClipCombat = ""; cur.animClipPreMove = ""; cur.animClipIdle = keepIdle;
-            cur.convertRig = true; cur.autoGroundWheels = true; cur.keepTranslations = true; cur.animUnitFix = false; cur.deployConvert = false;
+            cur.convertRig = true; cur.keepTranslations = true; cur.animUnitFix = false; cur.deployConvert = false;
             status = furl != null
                 ? $"Auto-detected a Vehicle Lab FLAG/SAIL rig ('{furl}' + '{spin}' clips):  State-driven ON · Idle/reference = {furl}[0..0] (deployed) · Movement = {spin}"
                   + (keepIdle.Length > 0 ? $" · Idle stance KEPT: {keepIdle}" : $" · Idle stance left EMPTY — ships usually want {furl}[N..N] (furled at anchor), land flags leave it empty (deployed); see the Lab's printed recipe")
-                  + " · Convert raw rig ON · Auto-ground ON · Keep bone translations ON · Fix 100× OFF.  Review, set Size in the Model Factory if needed, then Bake."
-                : $"Auto-detected a Vehicle Lab rig ('{spin}' clip):  State-driven ON · Idle/reference = {spin}[0..0] (still) · Movement = {spin} (rolls) · Convert raw rig ON · Auto-ground ON · Keep bone translations ON · Fix 100× OFF.  Review, set Size in the Model Factory if needed, then Bake.";
+                  + " · Convert raw rig ON · Keep bone translations ON · Fix 100× OFF.  Review, set Size in the Model Factory if needed, then Bake."
+                : $"Auto-detected a Vehicle Lab rig ('{spin}' clip):  State-driven ON · Idle/reference = {spin}[0..0] (still) · Movement = {spin} (rolls) · Convert raw rig ON · Keep bone translations ON · Fix 100× OFF.  Review, set Size in the Model Factory if needed, then Bake.";
             Repaint(); return;
         }
         if (deploy != null)
@@ -1231,12 +1231,10 @@ public class AnimationLabWindow : EditorWindow
             "Tick it when a rig plays fine in the preview but tears apart / displaces in-game; usually paired with " +
             "Fix 100× OFF. Re-bake after changing."),
             cur.convertRig);
-        cur.autoGroundWheels = EditorGUILayout.Toggle(new GUIContent("Auto-ground (sit on terrain)",
-            "Sit a rigged VEHICLE on the terrain automatically — no manual Position-offset dial. The bake drops the " +
-            "model's LOWEST point (the tyre contact) to the skeleton origin (the same keel→ground the static bake does). " +
-            "Self-correcting, so re-baking never floats it. Tick it for a car/tank. Leave OFF for a flyer/hover model " +
-            "(it would be pinned to the ground). Re-bake after changing."),
-            cur.autoGroundWheels);
+        // AUTO-GROUND WAS RETIRED HERE (2026-09-20): every animated bake now centres the model's box on the origin
+        // and drops its lowest point to the skeleton origin, exactly as the static bake does, so there is nothing
+        // left to tick. The flying height of a flyer is the Position z dial — the same dial the static path uses.
+        EditorGUILayout.LabelField(" ", "Placement: centred + grounded automatically (same as a static bake)", EditorStyles.miniLabel);
         cur.keepTranslations = EditorGUILayout.Toggle(new GUIContent("Keep bone translations",
             "CONVERSION path only: keep genuinely TRANSLATION-animated bone location curves through the bake — " +
             "the engine plays them (vanilla tank tread shuttle bones are translation-driven). Historically all " +

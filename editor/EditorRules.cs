@@ -64,6 +64,22 @@ public static class BakerRules
         if (spanU < 0 || spanV < 0 || texW < 1 || texH < 1) return false;
         return spanU * texW <= 1.0 && spanV * texH <= 1.0;
     }
+    // THE PLACEMENT RULE — one definition, both bake paths (2026-09-20; user: "switching between static and
+    // animated should give the same result in both facing and offset"). Given the model's box AFTER the bake's
+    // rotation, this is where the model has to move: its footprint centred on the origin, its lowest point on the
+    // ground. UniversalBaker applies it to the static mesh; rig_anim.py applies the identical arithmetic to the
+    // rigged mesh and its bone rests (its "PLACEMENT" block) — the two were written apart and drifted apart, which
+    // is exactly the failure this file exists to catch: an off-centre animated bake looks perfectly fine until you
+    // bake the same model the other way and it jumps (the steam frigate, 0.97 x 1.84 game units at size 5).
+    // SELF-CORRECTING by construction: feed it the box of an already-placed model and every result is 0.
+    public static void Placement(double minX, double maxX, double minY, double maxY, double minZ,
+                                 out double sway, out double fore, out double raise)
+    {
+        sway = -(minX + maxX) / 2.0;   // x: sway, centred
+        fore = -(minY + maxY) / 2.0;   // y: fore/aft, centred
+        raise = -minZ;                 // z: keel/tyre contact to the ground
+    }
+
 }
 
 /// <summary>Natural name ordering — "Object_2" before "Object_10" (Model Workshop part list; NaturalOrderTests).</summary>

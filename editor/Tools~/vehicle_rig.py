@@ -2885,9 +2885,10 @@ if (sail_found and arm.pose.bones.get("Sail") is not None) or (flag_found and ar
     arm.animation_data.action = act                                      # 'Spin' stays the active action, as before
     # IDLE/REFERENCE IS Furl[0..0], NEVER Spin[0..0] (2026-09-12, the sky-floating TOW): the Animation Lab's
     # convert path bakes the reference clip's frame 0 as the model's REST pose, and Spin holds its strike/fold
-    # pose on EVERY frame — using it as reference bakes the hidden pose into the rest skeleton, and Auto-ground
+    # pose on EVERY frame — using it as reference bakes the hidden pose into the rest skeleton, and grounding
     # then lifts the whole model by the struck part's depth. Furl frame 0 is always the deployed state. (Boats
-    # dodged this only because they don't auto-ground; the guidance is now uniform.)
+    # dodged this only because they did not auto-ground; since 2026-09-20 every bake grounds, so the guidance is
+    # not merely uniform — it is the only safe one, and rig_anim warns in the log when a lift looks like this.)
     if flag_fold_on and flag_found and not sail_found:
         print("VEHICLE 'Furl' stance: flags FOLD %.0f deg at the top hinge over %d frame(s) — Idle/reference Furl[0..0] (deployed), Movement Spin (folded), Pre-move Furl[0..%d] (folds — the unit waits), After-move Furl[%d..0] (redeploys), Keep bone translations OFF"
               % (flag_fold_deg, flag_fold_frames, flag_fold_frames, flag_fold_frames))

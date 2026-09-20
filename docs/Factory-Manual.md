@@ -135,8 +135,12 @@ draws at its battle-locked height and the keel/top readout follows, so "only the
 number (top +0.05u), not a squint.
 
 Also remember the tank-destroyer lesson: **a compensating dial outlives the defect it compensated for.** If a
-model was dialed up/down to fix a sinking bake in the past, a later bake-level fix (auto-ground) turns that
-dial into a float. The keel readout + ground/water reference makes such stale dials visible at a glance.
+model was dialed up/down to fix a sinking bake in the past, a later bake-level fix turns that dial into a float.
+The keel readout + ground/water reference makes such stale dials visible at a glance. The 2026-09-20 placement
+fix — animated bakes now centre and ground the model exactly as static ones do — retires a whole generation of
+such dials at once: an animated entry with a horizontal Position offset was most likely cancelling the very
+miscentring the bake now removes (the Gatling guns carry `y = -3.70` against a measured 3.34-unit miscentring).
+Re-check it after the first re-bake.
 
 ### Baked ≠ built: Ship Status ([full page](Ship-Status.md))
 
@@ -897,10 +901,12 @@ so it does not matter where you press Bake.
 **Auto-detect settings** *(2026-08-01)* — a button at the top of the Clip section reads the model's clips + rig and
 fills the whole animation config in one click, then explains its choice in the status bar (review-only, nothing bakes):
 a **Vehicle Lab `Spin` rig** → State-driven with Idle/reference = `Spin[0..0]` (still) and Movement = `Spin` (rolls),
-Convert-raw-rig + Auto-ground + Keep-translations ON, Fix 100× OFF — the exact recipe the Vehicle Lab prints; a
+Convert-raw-rig + Keep-translations ON, Fix 100× OFF — the exact recipe the Vehicle Lab prints; a
 **Vehicle Lab FLAG/SAIL rig** (a `Furl` clip is present) → the same, but Idle/reference = `Furl[0..0]` — the
 DEPLOYED frame (`Spin` holds its strike/fold on every frame, so referencing it bakes the hidden pose into the rest
-skeleton and Auto-ground sky-lifts the model; 2026-09-12, the TOW). Stance/Pre/After clips stay yours to fill; a
+skeleton and the grounding sky-lifts the model — which since 2026-09-20 is every animated bake, not only an
+auto-grounded one, and the bake logs the lift as a percentage of the model height when it looks like this;
+2026-09-12, the TOW). Stance/Pre/After clips stay yours to fill; a
 **character** (an `idle` + a `run`/`walk`/`move` clip) → State-driven with idle/movement guessed from the names; a
 **single clip** → continuous loop; a **deploy** clip → a hint (deploy frame-ranges can't be inferred from a baked clip).
 
@@ -951,8 +957,7 @@ reproduces from the entry alone:
 | **Slam (deg)** | the ROTATION-FAKED kick pitch in degrees (the arc trick from the rotation-only era — see the revised Laws in [Animation-Pitfalls.md](Animation-Pitfalls.md)). **With `Keep bone translations` set 0: the real translation slide replaces the fake** (they stack if you want both). POSITIVE = muzzle-down dip, NEGATIVE = muzzle-up |
 | **Recoil step** | arc sampling fineness. (Slide scale and raw Arc R are hidden from the UI: the former self-cancels under Slam-degrees, the latter is superseded — both registry fields survive for legacy recipes) |
 
-> **THE REAL KICKBACK (2026-07-26, verified on the M114):** tick **`Keep bone translations`** (Animation Lab,
-> under Auto-ground) and the source's authored recoil SLIDE bakes and plays as true translation — the tube slams
+> **THE REAL KICKBACK (2026-07-26, verified on the M114):** tick **`Keep bone translations`** (Animation Lab) and the source's authored recoil SLIDE bakes and plays as true translation — the tube slams
 > back and glides home exactly as animated. Recipe: Recoil frames `442..530,305..441/2`, **Return slow 0, Slam 0**,
 > Keep ✓. Translations are kept ONLY in the attack clip (deploy/stance stay rotation-only — keeping them there
 > displaced the assembly) and are delta-rebased (pure motion, no pose offsets) + ×100 sandwich-compensated on the

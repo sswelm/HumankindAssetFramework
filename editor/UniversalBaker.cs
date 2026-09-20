@@ -1471,12 +1471,22 @@ public static class UniversalBaker
         mesh.vertices = vv;
         if (nrm != null && nrm.Length == vv.Length) { for (int i = 0; i < nrm.Length; i++) nrm[i] = rot * nrm[i]; mesh.normals = nrm; }
 
-        // --- 3) position: keel -> z=0, then apply the configured offset (z = waterline) ---
+        // --- 3) position: box centred horizontally, keel -> z=0, then the configured offset (z = waterline) ---
+        // ONE PLACEMENT DEFINITION FOR BOTH PATHS (2026-09-20, user: "switching between static and animated should
+        // give the same result in both facing and offset"). rig_anim.py now places the animated rig the same way and
+        // measures after ITS rotation fold, so this measures after the rotation too, on the same box. Step 2 already
+        // centred the box BEFORE rotating, and for every axis-aligned rotation (0, +-90, 180) the rotated box still
+        // has its centre on the origin — so this adds nothing for the entries people actually dial, and no existing
+        // static bake moves. At an odd angle the two definitions genuinely differ, and the rotated box's own centre
+        // is the one rig_anim can see, so that is the one both paths use.
         mesh.RecalculateBounds();
-        float raise = -mesh.bounds.min.z;
+        var placed = mesh.bounds;
+        BakerRules.Placement(placed.min.x, placed.max.x, placed.min.y, placed.max.y, placed.min.z,
+                             out double swayD, out double foreD, out double raiseD);
+        float raise = (float)raiseD, sway = (float)swayD, fore = (float)foreD;
         var vr = mesh.vertices;
         for (int i = 0; i < vr.Length; i++)
-            vr[i] = new Vector3(vr[i].x + cfg.positionOffset.x, vr[i].y + cfg.positionOffset.y, vr[i].z + raise + cfg.positionOffset.z);
+            vr[i] = new Vector3(vr[i].x + sway + cfg.positionOffset.x, vr[i].y + fore + cfg.positionOffset.y, vr[i].z + raise + cfg.positionOffset.z);
         mesh.vertices = vr;
         Debug.Log($"[Factory] {name}: verts={mesh.vertexCount}, rawBox={dims}, size={size}, offset={cfg.positionOffset}, normals={cfg.normals}");
 
