@@ -208,10 +208,14 @@ public static class UniversalBaker
     static OutputBackup BackupOutputs(string name) =>
         BackupBasenames(name, (name ?? "").Length == 0 ? new List<string>() : OutputSuffixes.Select(s => name + s).ToList());
 
-    // The DISTRICT path's rollback (2026-09-21 review). Same machinery, its own output list — see
-    // BakerRules.DistrictOutputBasenames for why those names are NOT in OutputSuffixes.
-    internal static OutputBackup BackupDistrictOutputs(string name) =>
-        BackupBasenames(name, BakerRules.DistrictOutputBasenames(name));
+    // The DISTRICT path's rollback (2026-09-21 review; scope corrected by the PR #77 review). Same machinery, over
+    // the UNION of everything one district bake disturbs: the unit outputs its base bake re-mints — including the
+    // atlases the district ENTRY references by guid — plus its own four. Backing up only the latter restored the
+    // previous building while leaving the registry's atlas guids pointing at assets that no longer existed. See
+    // BakerRules.DistrictBakeBasenames, and DistrictOutputBasenames for why the district names are still NOT in
+    // OutputSuffixes (that array also drives the unit paths' DELETE sweep).
+    internal static OutputBackup BackupDistrictBake(string name) =>
+        BackupBasenames(name, BakerRules.DistrictBakeBasenames(name, OutputSuffixes));
 
     static OutputBackup BackupBasenames(string name, List<string> basenames)
     {

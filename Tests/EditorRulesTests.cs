@@ -128,6 +128,45 @@ public class BakerRulesTests
         Assert.Contains("Quarry_FxMesh.asset", BakerRules.DistrictOutputBasenames("  Quarry  "));
     }
 
+    // THE PR #77 REVIEW FINDING. A district bake's rollback set is NOT just its own four assets: step 1 runs the
+    // unit baker, which re-mints the shared atlases for the same resourceName, and the district ENTRY references
+    // those by guid. Backing up only the district's own outputs restored the previous building UNTEXTURED — the
+    // registry's atlas guids pointed at assets the base bake had already replaced. This is the assertion that
+    // distinguishes the two scopes, and it fails against the first cut of the fix.
+    [Fact]
+    public void The_district_rollback_set_covers_the_atlases_its_entry_references()
+    {
+        var unit = UnitSuffixesFromSource();
+        var set = BakerRules.DistrictBakeBasenames("Quarry", unit);
+        // the three the entry names by guid (atlasGuid / normalAtlasGuid / roughAtlasGuid)
+        Assert.Contains("Quarry_Atlas.asset", set);
+        Assert.Contains("Quarry_NormalAtlas.asset", set);
+        Assert.Contains("Quarry_RoughAtlas.asset", set);
+        // and still its own four
+        Assert.Contains("Quarry_FxMesh.asset", set);
+        Assert.Contains("CityMapSelector_Quarry.asset", set);
+        // the union is every unit output plus the four district ones, with nothing counted twice
+        Assert.Equal(unit.Length + 4, set.Count);
+        Assert.Equal(set.Count, set.Distinct(System.StringComparer.OrdinalIgnoreCase).Count());
+    }
+
+    [Fact]
+    public void A_blank_name_still_names_nothing_for_the_whole_bake()
+    {
+        Assert.Empty(BakerRules.DistrictBakeBasenames("", UnitSuffixesFromSource()));
+        Assert.Empty(BakerRules.DistrictBakeBasenames(null, UnitSuffixesFromSource()));
+    }
+
+    [Fact]
+    public void An_overlapping_suffix_is_not_backed_up_twice()
+    {
+        // Defensive: the two lists are disjoint today (the test below enforces it), but a union that double-counted
+        // would delete-then-copy the same file twice during a restore.
+        var set = BakerRules.DistrictBakeBasenames("Q", new[] { "_FxMesh.asset", "_Atlas.asset" });
+        Assert.Equal(5, set.Count);   // 4 district + _Atlas; _FxMesh already present
+        Assert.Equal(set.Count, set.Distinct(System.StringComparer.OrdinalIgnoreCase).Count());
+    }
+
     // The two lists must stay DISJOINT. The moment a district suffix appears in OutputSuffixes, the unit paths'
     // SweepAllOutputs — and the Factory's Remove — start deleting a same-named district's assets.
     [Fact]

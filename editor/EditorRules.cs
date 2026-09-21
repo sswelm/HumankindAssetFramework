@@ -109,6 +109,28 @@ public static class BakerRules
         return outp;
     }
 
+    /// <summary>Everything ONE district bake can disturb: the unit outputs its base bake re-creates, plus its own.</summary>
+    // THE SCOPE FIX (PR #77 review). A district bake is not only its four assets: step 1 runs the unit baker, which
+    // sweeps and re-mints the SHARED outputs for the same resourceName — the atlases among them — and a district
+    // entry references those by guid (atlasGuid / normalAtlasGuid / roughAtlasGuid). Backing up only the district's
+    // own four therefore restored the previous BUILDING while leaving the registry's atlas guids dangling: the old
+    // model back in place, untextured. The rollback set is the union, and the caller passes the unit suffixes in
+    // rather than this kernel naming them, so there is exactly one declaration of that list (UniversalBaker's).
+    public static List<string> DistrictBakeBasenames(string name, IEnumerable<string> unitSuffixes)
+    {
+        var outp = DistrictOutputBasenames(name);
+        if (outp.Count == 0) return outp;   // blank name: nothing, as above
+        string n = (name ?? "").Trim();
+        var seen = new HashSet<string>(outp, StringComparer.OrdinalIgnoreCase);
+        foreach (var s in unitSuffixes ?? new string[0])
+        {
+            if (string.IsNullOrEmpty(s)) continue;
+            string bn = n + s;
+            if (seen.Add(bn)) outp.Add(bn);   // de-duped: the two lists are disjoint today, and stay correct if not
+        }
+        return outp;
+    }
+
 }
 
 /// <summary>Natural name ordering — "Object_2" before "Object_10" (Model Workshop part list; NaturalOrderTests).</summary>

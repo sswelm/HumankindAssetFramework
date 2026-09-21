@@ -552,6 +552,28 @@ public class DistrictFactoryWindow : EditorWindow
         cur.modelFile = (cur.modelFile ?? "").Trim();
         cur.stripParts = (cur.stripParts ?? "").Trim();
 
+        // E5 ROLLBACK FOR THE WHOLE DISTRICT BAKE (2026-09-21 review; scope corrected by the PR #77 review).
+        // Every step below is destructive. UniversalBaker.Build sweeps and re-creates the SHARED unit outputs for
+        // this resourceName — _Atlas, _NormalAtlas, _RoughAtlas among them — and discards its own backup the moment
+        // it succeeds; DistrictBaker.BakeFxMesh then deletes _DistrictMesh and _FxMesh before re-creating them
+        // (delete-first, so CreateAsset cannot keep a stale serialized ref), and BakeScopedSelector does the same
+        // for _Element and CityMapSelector_<name>.
+        //
+        // The first cut of this rollback started AFTER Build, reasoning that the district's own assets had not been
+        // touched yet. That reasoning was wrong, and the review caught it: the district ENTRY references those
+        // shared atlases by guid (atlasGuid / normalAtlasGuid / roughAtlasGuid, read at runtime in
+        // DistrictInject.Scoped), and a delete-and-recreate mints NEW guids. So a base bake that succeeded followed
+        // by a district step that failed restored the geometry while leaving the registry's OLD atlas guids pointing
+        // at assets that no longer exist — the previous building back in place and untextured.
+        //
+        // So the backup is taken BEFORE Build and covers the union: the unit outputs Build will churn plus the four
+        // district outputs. One transaction — either the new district is fully in place AND registered, or every
+        // asset and the registry are exactly as they were.
+        var dbk = UniversalBaker.BackupDistrictBake(cur.resourceName);
+        bool districtBakeOk = false;
+        try
+        {
+
         // 1) the same static bake core as the unit Factory — pawnDescription stays empty (registry-only field, unused by Build)
         var cfg = new BakeConfig
         {
@@ -568,20 +590,6 @@ public class DistrictFactoryWindow : EditorWindow
         // 2) wrap the baked mesh as the bone-free district FxMesh
         var mesh = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Resources/" + cur.resourceName + "_ModelMesh.asset");
         if (mesh == null) { status = $"Bake succeeded but '{cur.resourceName}_ModelMesh.asset' wasn't found — can't build the FxMesh."; return; }
-
-        // E5 ROLLBACK FOR THE DISTRICT OUTPUTS (2026-09-21 review). Everything below this line is destructive:
-        // BakeFxMesh deletes _DistrictMesh and _FxMesh before re-creating them (delete-first, so CreateAsset cannot
-        // keep a stale serialized ref) and BakeScopedSelector does the same for _Element and CityMapSelector_<name>.
-        // Until now nothing put them back, so a compose that threw or a selector step that aborted left the previous
-        // building GONE while haf_districts.json still pointed at its guids — the unit paths have had this protection
-        // since E5 and their twin never got it.
-        //
-        // Taken HERE rather than at the top of the method on purpose: above this point the district's own assets have
-        // not been touched, so a failure there needs no restore and must not pay for a needless delete-and-copy-back.
-        var dbk = UniversalBaker.BackupDistrictOutputs(cur.resourceName);
-        bool districtAssetsOk = false;
-        try
-        {
 
         // 2b) PIZZA compose: bake each part with its own knobs, then merge base + parts into ONE mesh + ONE super-atlas.
         //     (Purely bake-time — the runtime still receives a single FxMesh + atlas pair, so nothing downstream changes.)
@@ -716,12 +724,7 @@ public class DistrictFactoryWindow : EditorWindow
         else
             Debug.LogWarning($"[District] '{cur.resourceName}': scoped selector NOT baked ({selErr}) — the district stays on the legacy path. Pick a single-building Footprint template (Tools/HAF/District/Footprint template...) and re-bake to migrate it.");
 
-        // Every destructive district step is done and produced assets. The registry write below is NOT covered by
-        // this rollback: its failure leaves valid new assets, and restoring the old ones over them would throw away
-        // a good bake. That case already tells the author to re-bake.
-        districtAssetsOk = true;
-
-        LoadPreviewAssets(force: true);   // fresh assets exist even if the registry save below fails
+        LoadPreviewAssets(force: true);
 
         // 3) registry entry
         bool saved = DistrictRegistry.Upsert(cur);
@@ -729,10 +732,16 @@ public class DistrictFactoryWindow : EditorWindow
         selected = Array.IndexOf(existing, cur.district); if (selected < 0) selected = 0;
         if (!saved)
         {
-            status = $"Baked '{cur.resourceName}', but the REGISTRY SAVE FAILED (see Console). Close whatever's locking haf_districts.json and re-bake.";
+            // The registry write is INSIDE the rollback (PR #77 review). The freshly baked assets carry new guids,
+            // and the entry naming them is exactly what failed to save — so keeping them would leave the old entry
+            // pointing at assets that no longer exist. Rolling back returns a district that still works.
+            status = $"'{cur.resourceName}': the REGISTRY SAVE FAILED (see Console), so the bake was rolled back and "
+                   + "the previous district is untouched. Close whatever's locking haf_districts.json and re-bake.";
             Debug.LogError("[District] " + status);
             return;
         }
+        // Assets written AND registered. Only now is the transaction complete.
+        districtBakeOk = true;
         status = $"Baked district model '{cur.resourceName}' -> '{cur.district}'\nFxMesh {guid}  (verts={mesh.vertexCount}, tris={TriCount(mesh)}{(cur.sourceTris > 0 ? $", source model {cur.sourceTris:N0} tris" : "")})\n" +
                  (composeReceipt != null ? composeReceipt + "\n" : "") +
                  (string.IsNullOrWhiteSpace(cur.selectorGuid) ? "scoped selector: NOT baked (legacy path) — see Console\n" : $"scoped selector {cur.selectorGuid} (scoped path)\n") +
@@ -744,10 +753,16 @@ public class DistrictFactoryWindow : EditorWindow
         }
         finally
         {
-            // Every exit from the block above lands here: the early `return`s (a part with no model file, a compose
-            // failure, a missing atlas) and an exception alike. Anything short of districtAssetsOk restores.
-            if (districtAssetsOk) UniversalBaker.DiscardBackup(dbk);
-            else UniversalBaker.RestoreOutputs(dbk);
+            // Every exit from the block above lands here: the early `return`s (a failed base bake, a part with no
+            // model file, a compose failure, a missing atlas, a failed registry save) and an exception alike.
+            // Anything short of a complete, registered bake restores.
+            if (districtBakeOk) UniversalBaker.DiscardBackup(dbk);
+            else
+            {
+                UniversalBaker.RestoreOutputs(dbk);
+                // The preview was pointed at the half-baked assets; show what is actually on disk again.
+                try { LoadPreviewAssets(force: true); } catch (Exception e) { Debug.LogWarning("[District] preview reload after rollback failed: " + e.Message); }
+            }
         }
     }
 
