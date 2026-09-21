@@ -23,6 +23,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   bake and covers the union. The registry write is inside the transaction for the same reason — the entry naming
   the new guids is precisely what failed to save, so keeping the new assets would strand the old entry.
 
+  **The window's form rolls back with the files.** Restoring the assets was only half of it: the bake writes its
+  results back onto the open entry (`fxMeshGuid`, the three atlas guids, `selectorGuid`, `posOffsetBaked`) and
+  nothing reloaded it afterwards, so a rollback left the Factory holding guids for assets it had just deleted. One
+  click of **Save settings** would then write those dead guids over the perfectly good restored district, because
+  `Upsert` is a wholesale replace rather than a merge. (Its comment claimed otherwise, and that wrong comment is
+  now corrected too.) `DoBake` snapshots the whole entry before baking and puts it back on any rollback — a whole
+  object rather than a list of "the fields the bake writes", since such a list is exactly what `check_handlists.sh`
+  exists to police and would need extending every time a baked field is added.
+
   **The four names are NOT added to `OutputSuffixes`,** although that array is described as the rollback whitelist.
   It also drives `SweepAllOutputs`, which *deletes*, and which both unit bake paths and the Factory's Remove call —
   and a unit and a district may legitimately share a `resourceName`, which the sweep already warns about. Folding

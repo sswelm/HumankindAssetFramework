@@ -529,8 +529,15 @@ public class DistrictFactoryWindow : EditorWindow
         EditorGUILayout.EndScrollView();
     }
 
-    // Persist the current entry's runtime knobs to haf_districts.json without re-baking (Upsert keeps the existing
-    // baked GUIDs untouched). Used to change a footprint/ground/hex choice on an already-baked district.
+    // Persist the current entry's runtime knobs to haf_districts.json without re-baking. Used to change a
+    // footprint/ground/hex choice on an already-baked district.
+    //
+    // "Without re-baking" describes what this does NOT run — it is not a promise about the baked GUIDs. Upsert is a
+    // WHOLESALE replace (RemoveAll + Add), so whatever guids `cur` is holding are what get written; they survive
+    // only because `cur` normally still carries the ones it was loaded or baked with. An earlier version of this
+    // comment said Upsert "keeps the existing baked GUIDs untouched", which is not true of Upsert at all, and that
+    // reading is what made a rolled-back bake dangerous (PR #77 review, P2): DoBake now restores `cur` alongside
+    // the assets, so this Save cannot write guids for files that no longer exist.
     void SaveSettingsNoBake()
     {
         cur.district = (cur.district ?? "").Trim();
@@ -569,6 +576,19 @@ public class DistrictFactoryWindow : EditorWindow
         // So the backup is taken BEFORE Build and covers the union: the unit outputs Build will churn plus the four
         // district outputs. One transaction — either the new district is fully in place AND registered, or every
         // asset and the registry are exactly as they were.
+        //
+        // ...AND SO IS THE FORM (PR #77 review, P2). Restoring the files is only half of it: the bake writes its
+        // results back onto `cur` — fxMeshGuid, atlasGuid, normalAtlasGuid, roughAtlasGuid, selectorGuid,
+        // posOffsetBaked — and nothing reloads `cur` from disk afterwards (RefreshList only rebuilds the name list).
+        // So a rollback left the window holding guids for assets the rollback had just deleted, and `Save settings`
+        // Upserts `cur` WHOLESALE (RemoveAll + Add, not a merge that keeps the stored baked guids — its comment
+        // claiming otherwise is only true in the sense that `cur` usually still carries them). One click after a
+        // failed bake would therefore write dead guids over a perfectly good restored district.
+        //
+        // A whole-object snapshot rather than a list of the baked fields ON PURPOSE: a hand-list of "fields the bake
+        // writes" is exactly the shape check_handlists.sh exists to police, and it would need updating every time a
+        // new baked field appears. FromJsonOverwrite restores in place, so anything holding `cur` keeps its instance.
+        string curBeforeBake = JsonUtility.ToJson(cur);
         var dbk = UniversalBaker.BackupDistrictBake(cur.resourceName);
         bool districtBakeOk = false;
         try
@@ -760,6 +780,10 @@ public class DistrictFactoryWindow : EditorWindow
             else
             {
                 UniversalBaker.RestoreOutputs(dbk);
+                // The form, too: put back the guids that match the assets now on disk (see the snapshot above).
+                // Without this the window holds the failed bake's guids, and `Save settings` would write them.
+                try { JsonUtility.FromJsonOverwrite(curBeforeBake, cur); }
+                catch (Exception e) { Debug.LogWarning("[District] form restore after rollback failed: " + e.Message); }
                 // The preview was pointed at the half-baked assets; show what is actually on disk again.
                 try { LoadPreviewAssets(force: true); } catch (Exception e) { Debug.LogWarning("[District] preview reload after rollback failed: " + e.Message); }
             }
