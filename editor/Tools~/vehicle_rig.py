@@ -384,10 +384,34 @@ _lap("import")
 # ---- SECOND MODEL MERGE (2026-09-12, user: "combine 2 3d models and merge") ----
 # A TAGGED argument, scanned rather than indexed: probe and rig BOTH need the merged scene, and one tag beats
 # maintaining two positional layouts ('|' is illegal in Windows paths, so the split is safe):
-#   merge2=<path>|ox,oy,oz|rx,ry,rz|<uniform scale>
+#   merge2=<path>|ox,oy,oz|rx,ry,rz|sx,sy,sz        (a single number is still read as a uniform scale)
 # The second file is imported into the SAME scene; its parts get a "B_" prefix (both sources typically name
 # parts Object_N — roles, part files and recipes need unambiguous names) and the transform goes onto its
 # top-level objects' matrix_world (downstream passes read world space; children follow the hierarchy).
+def _merge2_scale(text):
+    """The scale field of merge2= -> (sx, sy, sz, bad). PURE (Tests/test_vehicle_rig_math.py runs it without Blender).
+    PER AXIS since 2026-09-21 (user: "what I meant by scale is Scale X, Scale Y, Scale Z"): a part borrowed from
+    another model has to fit the new hull on each axis separately. A SINGLE number is the pre-change uniform form
+    and still means that number on all three axes, so a stale Lab and a new script agree. Anything that is not a
+    positive finite number becomes 1 and is reported in `bad`: zero collapses the model onto a plane, and a negative
+    component MIRRORS it - every triangle's winding reverses and the bake renders it inside out."""
+    raw = [t.strip() for t in (text or "").split(",")]
+    if len(raw) == 1:
+        raw = raw * 3
+    if len(raw) != 3:
+        raise ValueError("expected one number or three, got %d" % len(raw))
+    out, bad = [], []
+    for t in raw:
+        try:
+            v = float(t) if t else 1.0
+        except ValueError:
+            v = float("nan")
+        if not (v > 0.0 and v != float("inf")):   # catches <= 0, inf and nan (nan fails every comparison)
+            bad.append(t); v = 1.0
+        out.append(v)
+    return out[0], out[1], out[2], bad
+
+
 _m2arg = next((a for a in argv if a.startswith("merge2=")), None)
 if _m2arg:
     if mode == "rigfast":
@@ -421,21 +445,30 @@ if _m2arg:
         _new2.remove(_ico2); bpy.data.objects.remove(_ico2, do_unlink=True)
     _o2v = [float(v) for v in _m2off.split(",")]
     _r2v = [math.radians(float(v)) for v in _m2rot.split(",")]
-    _s2 = float(_m2scl) if _m2scl.strip() else 1.0
-    if _s2 <= 0.0:
-        # the FINAL boundary guard (review finding 7): a zero or negative scale collapses every B mesh to a
-        # degenerate point — whatever upstream formatting or hand-editing produced it, refuse it here.
-        print("VEHICLE WARN: second-model scale %s is not positive — using 1.0" % _m2scl); _s2 = 1.0
+    try:
+        _s2x, _s2y, _s2z, _s2bad = _merge2_scale(_m2scl)
+    except ValueError as _e2:
+        print("VEHICLE ERROR: malformed merge2 scale '%s' (%s)" % (_m2scl, _e2)); sys.exit(1)
+    if _s2bad:
+        # the FINAL boundary guard (review finding 7): whatever upstream formatting or hand-editing produced a
+        # zero/negative/non-number component, refuse it here rather than collapse or mirror every B mesh.
+        print("VEHICLE WARN: second-model scale component(s) %s not positive - using 1.0 there" % ", ".join(repr(t) for t in _s2bad))
     _T2 = (Matrix.Translation(Vector(_o2v))
            @ Matrix.Rotation(_r2v[2], 4, 'Z') @ Matrix.Rotation(_r2v[1], 4, 'Y') @ Matrix.Rotation(_r2v[0], 4, 'X')
-           @ Matrix.Scale(_s2, 4))
-    _new2set = set(_new2)
+           @ Matrix.Diagonal((_s2x, _s2y, _s2z, 1.0)))   # per axis, along B's OWN axes: scale, then rotate, then offset - never a shear
+    # EXACT PLACEMENT (2026-09-21). The placement used to go onto the import's top-level objects' matrix_world. A
+    # Blender object stores location/rotation/scale and CANNOT hold a shear, so that was only ever exact while the
+    # scale was uniform (a uniform scale commutes with any rotation). Per axis it is not: a second model whose file
+    # carries a rotated root - 30 degrees, say - needs "scale along the axes you see, then that rotation", which IS a
+    # shear in the root's own frame, and the assignment silently decomposed it away. Drilled: a 4 x 1 box under a
+    # 30-degree root, scale (2,1,1), measured 6.82 x 4.93 where 7.93 x 2.87 was asked (a 90-degree root, the
+    # Sketchfab shape, happened to be exact - the axes only permute). So each B mesh's TARGET world matrix is taken
+    # as a full 4x4 up front and baked into its vertices below, where a shear is just numbers.
+    bpy.context.view_layer.update()
+    _m2target = {_o2: _T2 @ _o2.matrix_world for _o2 in _new2 if _o2.type == 'MESH' and _o2.data.vertices}
     for _o2 in _new2:
         _o2.name = "B_" + _o2.name
-        if _o2.parent is None or _o2.parent not in _new2set:   # top-level of THIS import only — children ride along
-            _o2.matrix_world = _T2 @ _o2.matrix_world
-    bpy.context.view_layer.update()
-    _m2meshes = [o for o in _new2 if o.type == 'MESH' and o.data.vertices]
+    _m2meshes = [o for o in _new2 if o in _m2target]
     # FLATTEN B (field report 2026-09-12: "aligned in the probe step, not placed like that after generate"):
     # the rig path later reparents every mesh to the generated armature with a plain `.parent =`, which keeps
     # LOCAL transforms — so a B mesh whose placement lived on its import ROOT (deep Sketchfab hierarchies)
@@ -443,9 +476,13 @@ if _m2arg:
     # helper objects (empties, source armatures — the rig builds its own). The probe preview always flattened
     # at export, which is exactly why the mismatch only appeared after Generate.
     for _o2 in _m2meshes:
-        _mw2 = _o2.matrix_world.copy()
+        if _o2.data.users > 1:
+            _o2.data = _o2.data.copy()   # instanced shards share mesh data; each instance has its own target matrix
         _o2.parent = None
-        _o2.matrix_world = _mw2
+        _o2.data.transform(_m2target[_o2])
+        if _m2target[_o2].determinant() < 0.0:
+            _o2.data.flip_normals()      # a mirrored source node: what transform_apply does for a negative matrix
+        _o2.matrix_world = Matrix.Identity(4)
     _m2helpers = [o for o in _new2 if o not in _m2meshes]
     for _o2 in _m2helpers:
         _new2.remove(_o2)
@@ -460,8 +497,8 @@ if _m2arg:
         _m2mn = _lo2 if _m2mn is None else Vector((min(_m2mn.x, _lo2.x), min(_m2mn.y, _lo2.y), min(_m2mn.z, _lo2.z)))
         _m2mx = _hi2 if _m2mx is None else Vector((max(_m2mx.x, _hi2.x), max(_m2mx.y, _hi2.y), max(_m2mx.z, _hi2.z)))
     # the ALIGNMENT NUMBERS: both sources' world bboxes, so placement is dialed with data, not eyeballs
-    print("VEHICLE MERGE: second model '%s' -> %d part(s) prefixed B_ | offset (%s) rot (%s) scale %s"
-          % (_m2path.replace("\\", "/").rsplit("/", 1)[-1], len(_m2meshes), _m2off, _m2rot, _m2scl))
+    print("VEHICLE MERGE: second model '%s' -> %d part(s) prefixed B_ | offset (%s) rot (%s) scale (%.5g, %.5g, %.5g)"
+          % (_m2path.replace("\\", "/").rsplit("/", 1)[-1], len(_m2meshes), _m2off, _m2rot, _s2x, _s2y, _s2z))
     if _m2mn is not None:
         print("VEHICLE MERGE: B bbox min (%.2f, %.2f, %.2f) max (%.2f, %.2f, %.2f)"
               % (_m2mn.x, _m2mn.y, _m2mn.z, _m2mx.x, _m2mx.y, _m2mx.z))
