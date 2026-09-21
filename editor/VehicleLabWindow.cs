@@ -73,7 +73,12 @@ public class VehicleLabWindow : EditorWindow
     [Serializable] class Part { public string name; public int verts; public Vector3 center, size; public Role role;
         public int vis = -1;   // probe's escape-ray verdict: 1 = external (visible from outside), 0 = interior (never visible — strippable), -1 = unclassified (pre-visibility probe)
         public string bone = "";   // rigged sources: the bone this shard is weighted to (probe 2026-08-20) — lets a BONE row highlight its shards
-        public int flip = -1; }    // islands the inside-out fix would REVERSE in this part (probe 2026-09-13): 0 = keeps authored winding, -1 = unclassified (re-Probe)
+        public int flip = -1;      // islands the inside-out fix would REVERSE in this part (probe 2026-09-13): 0 = keeps authored winding, -1 = unclassified (re-Probe)
+        // PLACEMENT (2026-09-20, "address the floating objects"): a per-part nudge baked into the generated GLB —
+        // model-file axes and units, scale about the part's own centre. Absent-key defaults (JsonUtility runs these
+        // initializers) keep old recipes neutral; carried across a re-Probe by name, exactly like the role.
+        public Vector3 offset = Vector3.zero; public Vector3 scale = Vector3.one; }
+    static bool IsPlaced(Part p) => p.offset.sqrMagnitude > 1e-10f || (p.scale - Vector3.one).sqrMagnitude > 1e-10f;
 
     // The Generate-time fix skips these roles entirely (authored winding wins there) — the ⟲ row tag must agree.
     static bool FixSkipsRole(Role r) => r == Role.Sail || r == Role.Oar || r == Role.Flag || r == Role.Rudder || r == Role.Preserve;
@@ -412,6 +417,7 @@ public class VehicleLabWindow : EditorWindow
     Bounds bounds; bool boundsValid; float spinT; double lastTick;
     float fullRadius;   // whole-model radius — far-plane margin must NOT shrink to a focused part's bounds
     Vector2 orbit = new Vector2(140f, -18f); float zoom = 1.5f;
+    bool reprobingForMigration;   // guards the one automatic re-Probe after a fused-group rename migration (see Probe)
     [SerializeField] Vector2 previewPan;   // camera-plane pan (middle/right-drag), in dist units — ported from the Factory preview
     // part focus/highlight: clicking a row zooms onto that part and tints it — the "which shard is the wheel?" x-ray
     string selectedPart = "";
@@ -712,10 +718,43 @@ public class VehicleLabWindow : EditorWindow
                         // ⟲ = the inside-out fix would reverse island(s) of this part (probe verdict; struck through
                         // by role when the fix skips it — the mark shows the fix's REACH whether the toggle is on or off)
                         string flipTag = p.flip > 0 ? (FixSkipsRole(p.role) ? "   (⟲ fix would flip, but this role is skipped)" : $"   ⟲ fix flips {(p.flip == 1 ? "it" : p.flip + " islands")}") : "";
-                        if (GUILayout.Button($"{(isSel ? "◉ " : "")}{p.name}   ({p.verts} verts, size {p.size.x:0.00}×{p.size.y:0.00}×{p.size.z:0.00}){flipTag}", st))
+                        string placedTag = IsPlaced(p) ? "   ⇄ placed" : "";
+                        if (GUILayout.Button($"{(isSel ? "◉ " : "")}{p.name}   ({p.verts} verts, size {p.size.x:0.00}×{p.size.y:0.00}×{p.size.z:0.00}){flipTag}{placedTag}", st))
                             SelectPart(isSel ? "" : p.name);   // click again = back to full view
                     }
                 EditorGUILayout.EndScrollView();
+                // PLACEMENT of the selected part (2026-09-20, "address the floating objects"). The pipeline was measured
+                // clean end to end — Cutter 962/962 parts in place, Fuser 20/20 groups, probe 20/20 — so a prop that
+                // floats or intersects is AUTHORED that way, and the fix is per part, by hand. Lives on the selected
+                // row rather than in every row: a marking session is hundreds of rows, and six number fields each
+                // would bury the list. Applied by vehicle_rig.py right after the split, before straightening, in
+                // BOTH probe and rig modes — so re-Probe shows exactly what Generate will bake.
+                {
+                    var sp = string.IsNullOrEmpty(selectedPart) ? null : parts.FirstOrDefault(x => x.name == selectedPart);
+                    int placedCount = parts.Count(IsPlaced);
+                    if (sp != null)
+                        using (new EditorGUILayout.VerticalScope("box"))
+                        {
+                            EditorGUILayout.LabelField($"Placement — {sp.name}", EditorStyles.boldLabel);
+                            sp.offset = EditorGUILayout.Vector3Field(new GUIContent("Offset (X, Y, Z)",
+                                "Nudge this part, in the model file's own axes and units — the same frame as the centre/size " +
+                                "in the row and the second model's Offset. Applied before the Orientation straightening, so " +
+                                "Probe and Generate agree. Re-Probe to see it in the preview; Generate to bake it."), sp.offset);
+                            sp.scale = EditorGUILayout.Vector3Field(new GUIContent("Scale (X, Y, Z)",
+                                "Resize this part about its OWN centre (a shrunk wheel stays where it is). 1 = as authored; " +
+                                "unequal values stretch it. Must be positive — the rig script refuses 0 or less and uses 1."), sp.scale);
+                            using (new EditorGUILayout.HorizontalScope())
+                            {
+                                if (GUILayout.Button(new GUIContent("Reset", "Back to as authored: offset 0, scale 1."), GUILayout.Width(60)))
+                                { sp.offset = Vector3.zero; sp.scale = Vector3.one; }
+                                EditorGUILayout.LabelField(placedCount > 0
+                                    ? $"{placedCount} part(s) placed — re-Probe to see them, Generate to bake them (the log prints each part's centre and size before and after)"
+                                    : "Saved in the recipe and kept across a re-Probe by part name, like the role.", EditorStyles.miniLabel);
+                            }
+                        }
+                    else if (placedCount > 0)
+                        EditorGUILayout.LabelField($"  {placedCount} part(s) placed (⇄) — click a row to edit its Offset / Scale", EditorStyles.miniLabel);
+                }
                 if (inst == null)
                     EditorGUILayout.LabelField("  (probe preview unavailable — part focus needs the probe's preview FBX; re-Probe after recompiling)", EditorStyles.miniLabel);
                 else
@@ -1367,6 +1406,8 @@ public class VehicleLabWindow : EditorWindow
         // every unmarked part around the kept markings.
         var kept = new Dictionary<string, Role>();
         foreach (var p0 in parts) if (p0.role != Role.Default) kept[p0.name] = p0.role;   // explicit Body verdicts survive too
+        var keptPlace = new Dictionary<string, (Vector3 off, Vector3 scl)>();   // placements survive a re-Probe by name, like roles
+        foreach (var p0 in parts) if (IsPlaced(p0)) keptPlace[p0.name] = (p0.offset, p0.scale);
         var keptBones = new Dictionary<string, Role>();
         foreach (var b0 in boneParts) if (b0.role != Role.Default) keptBones[b0.name] = b0.role;
         bool hadBones = boneParts.Count > 0;
@@ -1381,7 +1422,7 @@ public class VehicleLabWindow : EditorWindow
         Directory.CreateDirectory(Path.Combine(projRoot, prevDir));
         string prevRel = prevDir + "/" + Path.GetFileNameWithoutExtension(srcFile) + "_probe.fbx";
         string prevFull = Path.Combine(projRoot, prevRel).Replace('\\', '/');
-        if (!RunBlender($"probe \"{srcFile}\" \"{prevFull}\"{Merge2Arg()}{BrightArg()}{ProbeRotArg()}", out string stdout)) return;   // failed run: session intact, error already in status/Console
+        if (!RunBlender($"probe \"{srcFile}\" \"{prevFull}\"{Merge2Arg()}{BrightArg()}{ProbeRotArg()}{PartTxArg(projRoot, prevDir, Path.GetFileNameWithoutExtension(srcFile))}", out string stdout)) return;   // failed run: session intact, error already in status/Console
         // Lenient float parse: degenerate shards can emit "nan" (python lowercase — .NET rejects it) — such a value
         // becomes 0 instead of killing the whole probe on one bad line out of thousands.
         // The row contract is parsed by the pure kernel (EditorRules.cs: VehicleLabRules.TryParsePartLine, unit-tested):
@@ -1407,6 +1448,7 @@ public class VehicleLabWindow : EditorWindow
             };
             var low = p.name.ToLowerInvariant();
             bool rigBone = row.Kind == "RIGBONE";
+            if (!rigBone && keptPlace.TryGetValue(p.name, out var kp)) { p.offset = kp.off; p.scale = kp.scl; }
             var keptMap = rigBone ? keptBones : kept;
             p.role = keptMap.TryGetValue(p.name, out var kr) ? kr
                    : low.Contains("tail") && (low.Contains("rotor") || low.Contains("prop")) ? Role.TailRotor  // "tail rotor" before the generic rotor guess
@@ -1430,6 +1472,30 @@ public class VehicleLabWindow : EditorWindow
             status = "Probe found no mesh parts — is this a mesh model? Existing markings kept. (See the Console for Blender output.)";
             return;
         }
+        // RENAMED FUSED GROUPS (2026-09-21, user: "I had given Fused_Y_Object_1740 a Z offset of -0.5 … this seems to
+        // have gotten wiped after I made some changes to the group in the Model Fuser"). The Fuser names a fused node
+        // after the group's FIRST member, so changing a group's membership renames the node — the recipe held the
+        // placement under Fused_Y_Object_1722, the re-fused file called the node Fused_Y_Object_1740 — and a role or
+        // placement kept by exact name had nothing to land on. The GROUP is the stable identity: when a kept fused
+        // name is gone and exactly ONE fresh row carries the same Fused_<group>_ prefix, the role and the placement
+        // move to it, and the status says so. Anything less certain than "exactly one" stays a manual re-mark.
+        var migrated = new List<string>();
+        {
+            var newNames = new HashSet<string>(newParts.Select(x => x.name));
+            string GroupOf(string n) { var m = System.Text.RegularExpressions.Regex.Match(n ?? "", @"^Fused_([^_]+)_"); return m.Success ? m.Groups[1].Value : null; }
+            foreach (string old in kept.Keys.Concat(keptPlace.Keys).Distinct().ToList())
+            {
+                if (newNames.Contains(old)) continue;
+                string g = GroupOf(old); if (g == null) continue;
+                var cands = newParts.Where(x => GroupOf(x.name) == g && !kept.ContainsKey(x.name) && !keptPlace.ContainsKey(x.name)).ToList();
+                if (cands.Count != 1) continue;
+                var t = cands[0]; var what = new List<string>();
+                if (kept.TryGetValue(old, out var r0)) { t.role = r0; what.Add("role " + r0); }
+                if (keptPlace.TryGetValue(old, out var pl)) { t.offset = pl.off; t.scale = pl.scl; what.Add("placement"); }
+                migrated.Add($"{old} → {t.name} ({string.Join(" + ", what)})");
+            }
+            if (migrated.Count > 0) Debug.Log("[VehicleLab] fused group(s) renamed by the Fuser — markings carried over by group: " + string.Join("; ", migrated));
+        }
         parts.Clear(); parts.AddRange(newParts);
         boneParts.Clear(); boneParts.AddRange(newBoneParts);
         DestroyPreview();
@@ -1447,7 +1513,21 @@ public class VehicleLabWindow : EditorWindow
                 : "") +
               $"Probed {parts.Count} part(s); {parts.Count(x => x.role == Role.Wheel)} wheel(s), {parts.Count(x => x.role == Role.Turret)} turret(s)" +
               (kept.Count > 0 ? $" ({parts.Count(x => kept.ContainsKey(x.name) && x.role == kept[x.name])} of {kept.Count} earlier markings kept)" : " (auto-guessed)") +
+              (migrated.Count > 0 ? $" · {migrated.Count} renamed fused group(s) carried over: {string.Join("; ", migrated)}" : "") +
               ". Click a row to see WHICH part it is (zoom + yellow highlight), assign roles, then Generate rig.";
+        // THE PREVIEW WAS EXPORTED BEFORE THE MIGRATION (PR #74 review P2). Blender ran with the placement list
+        // written from the OLD names: it warned "no such part", exported unplaced geometry, and only then did the
+        // C# above move the placement to the renamed row — so the list showed the migrated value while the preview
+        // showed the part unmoved until the next Probe. A rename is rare and a probe is seconds, so when anything
+        // migrated, Probe runs once more with the now-correct names. The guard makes it exactly once: the second
+        // run finds every kept name present, migrates nothing, and stops here.
+        if (migrated.Count > 0 && !reprobingForMigration)
+        {
+            reprobingForMigration = true;
+            try { Probe(); }
+            finally { reprobingForMigration = false; }
+            status = $"Re-probed once so the preview shows the {migrated.Count} migrated placement(s).  " + status;
+        }
     }
 
     // Sanity report on the current classification — mirrors the rig script's wheel clustering so the numbers
@@ -1932,6 +2012,12 @@ public class VehicleLabWindow : EditorWindow
                 try { if (highlightedRenderers[i] != null) highlightedRenderers[i].sharedMaterials = highlightedOriginals[i]; } catch { }
         highlightedRenderers = null; highlightedOriginals = null;
         selectedPart = name;
+        // DROP KEYBOARD FOCUS on every selection change (2026-09-21, user: the Placement values "do not consistently
+        // get updated when switching between objects"). IMGUI text fields are identified by POSITION, so the Offset
+        // and Scale fields keep their control ids from one selected part to the next — and a field that still has
+        // focus shows its own edit buffer, not the new part's value, until focus leaves. Same cure this window
+        // already applies after a recipe load (the Edit-existing dropdown above).
+        GUI.FocusControl(null); EditorGUIUtility.editingTextField = false;
         boundsValid = false;   // re-derive (full model or the part) on next render
         previewPan = Vector2.zero;   // a part focus should CENTER the part — a leftover pan would frame empty space
         if (inst == null || string.IsNullOrEmpty(name)) return;
@@ -2124,7 +2210,7 @@ public class VehicleLabWindow : EditorWindow
         string axis = axisChoice == 0 ? "AUTO" : AxisOptions[axisChoice];
         string tailAxis = tailAxisChoice == 0 ? "AUTO" : AxisOptions[tailAxisChoice];
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")} \"@{oarsFile}\" {oarSweepDeg.ToString("0.##", inv)} {oarDipDeg.ToString("0.##", inv)} {oarFrames} {(fixInsideOut ? "1" : "0")} {oarBladeRollDeg.ToString("0.##", inv)} \"@{sailsFile}\" \"@{riggingFile}\" {riggingReducePct.ToString("0.#", inv)} \"@{structureFile}\" {structureReducePct.ToString("0.#", inv)} \"@{bodiesFile}\" {bodyReducePct.ToString("0.#", inv)} \"@{flagsFile}\" {oarLiftDeg.ToString("0.##", inv)} {oarRakeDeg.ToString("0.##", inv)} {oarPivotPct.ToString("0.#", inv)} {oarLengthPct.ToString("0.#", inv)} \"@{ruddersFile}\" {oarReducePct.ToString("0.#", inv)} {sailReducePct.ToString("0.#", inv)} \"@{preserveFile}\" {rudderReducePct.ToString("0.#", inv)} {wheelReducePct.ToString("0.#", inv)} \"@{flipFile}\" {flipReducePct.ToString("0.#", inv)} {preserveReducePct.ToString("0.#", inv)} \"@{detailFile}\" {detailReducePct.ToString("0.#", inv)} {(sailFoldIdle ? "1" : "0")} {Mathf.Max(1, sailFoldFrames)} {sailFoldAngleDeg.ToString("0.#", inv)} {(sailFoldReverse ? "1" : "0")} {sailFoldSag.ToString("0.##", inv)}{Merge2Arg()}{BrightArg()}{FlagFoldArg()}{DefaultReduceArg(defaultFile)}", out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll; argv[48]: sail parts; argv[49..50]: rigging parts, reduce %; argv[51..52]: structure parts, reduce %; argv[53..54]: body parts, reduce %; argv[55]: flag parts; argv[61..62]: oar reduce %, sail reduce %; argv[63]: preserve parts; argv[64]: rudder reduce %; argv[65]: wheel reduce %; argv[66..67]: flip parts, reduce %; argv[68]: preserve reduce %; argv[69..70]: detail parts, reduce %; argv[71..75]: fold sail at idle, fold frames, curl total, curl reverse, sag
+        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")} \"@{oarsFile}\" {oarSweepDeg.ToString("0.##", inv)} {oarDipDeg.ToString("0.##", inv)} {oarFrames} {(fixInsideOut ? "1" : "0")} {oarBladeRollDeg.ToString("0.##", inv)} \"@{sailsFile}\" \"@{riggingFile}\" {riggingReducePct.ToString("0.#", inv)} \"@{structureFile}\" {structureReducePct.ToString("0.#", inv)} \"@{bodiesFile}\" {bodyReducePct.ToString("0.#", inv)} \"@{flagsFile}\" {oarLiftDeg.ToString("0.##", inv)} {oarRakeDeg.ToString("0.##", inv)} {oarPivotPct.ToString("0.#", inv)} {oarLengthPct.ToString("0.#", inv)} \"@{ruddersFile}\" {oarReducePct.ToString("0.#", inv)} {sailReducePct.ToString("0.#", inv)} \"@{preserveFile}\" {rudderReducePct.ToString("0.#", inv)} {wheelReducePct.ToString("0.#", inv)} \"@{flipFile}\" {flipReducePct.ToString("0.#", inv)} {preserveReducePct.ToString("0.#", inv)} \"@{detailFile}\" {detailReducePct.ToString("0.#", inv)} {(sailFoldIdle ? "1" : "0")} {Mathf.Max(1, sailFoldFrames)} {sailFoldAngleDeg.ToString("0.#", inv)} {(sailFoldReverse ? "1" : "0")} {sailFoldSag.ToString("0.##", inv)}{Merge2Arg()}{BrightArg()}{FlagFoldArg()}{DefaultReduceArg(defaultFile)}{PartTxArg(projRoot, prevDir, baseName)}", out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll; argv[48]: sail parts; argv[49..50]: rigging parts, reduce %; argv[51..52]: structure parts, reduce %; argv[53..54]: body parts, reduce %; argv[55]: flag parts; argv[61..62]: oar reduce %, sail reduce %; argv[63]: preserve parts; argv[64]: rudder reduce %; argv[65]: wheel reduce %; argv[66..67]: flip parts, reduce %; argv[68]: preserve reduce %; argv[69..70]: detail parts, reduce %; argv[71..75]: fold sail at idle, fold frames, curl total, curl reverse, sag
         // SUCCESS = THE SCRIPT'S OWN FINAL MARKER (the documented Blender trap: it exits 0 even when the python
         // script crashes mid-way — without this gate a half-run printed a fake "DONE" with no file on disk).
         string done = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE RIG DONE"));
@@ -2173,6 +2259,18 @@ public class VehicleLabWindow : EditorWindow
         if (modelRot == Vector3.zero) return "";
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         return $" \"proberot={modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\"";
+    }
+
+    // PER-PART PLACEMENT argument (2026-09-20): tagged like merge2= (position-independent in the long argv), travels by
+    // FILE like the role lists (hundreds of rows would pass the command-line limit). Only placed parts are written;
+    // with none, the stale file is removed and NO argument is passed, so the script never parses an empty list.
+    string PartTxArg(string projRoot, string prevDir, string baseName)
+    {
+        string file = Path.Combine(projRoot, prevDir, baseName + "_parttx.txt").Replace('\\', '/');
+        var placed = parts.Where(IsPlaced).ToList();
+        if (placed.Count == 0) { try { if (File.Exists(file)) File.Delete(file); } catch { } return ""; }
+        File.WriteAllLines(file, placed.Select(x => VehicleLabRules.PartPlacementLine(x.name, x.offset.x, x.offset.y, x.offset.z, x.scale.x, x.scale.y, x.scale.z)).ToArray());
+        return $" \"parttx=@{file}\"";
     }
 
     string Merge2Arg()

@@ -8,6 +8,33 @@ namespace HumankindAssetFramework.Tests
     // hard-capped at 8 fields, so the NEXT field added to the script would have emptied the Lab with no log.
     public class VehicleLabRulesTests
     {
+        // ---- per-part placement lines (2026-09-20): name|ox,oy,oz|sx,sy,sz, split from the RIGHT on both sides ----
+        [Fact]
+        public void Placement_line_round_trips_and_keeps_a_pipe_in_the_name()
+        {
+            string line = VehicleLabRules.PartPlacementLine("Fused_F|boat", 0f, -1.25f, 0.5f, 1f, 1f, 0.75f);
+            Assert.Equal("Fused_F|boat|0,-1.25,0.5|1,1,0.75", line);
+            Assert.True(VehicleLabRules.TryParsePartPlacementLine(line, out string name, out float[] off, out float[] scl));
+            Assert.Equal("Fused_F|boat", name);
+            Assert.Equal(new[] { 0f, -1.25f, 0.5f }, off);
+            Assert.Equal(new[] { 1f, 1f, 0.75f }, scl);
+        }
+
+        [Fact]
+        public void Placement_line_is_invariant_culture_and_rejects_a_broken_triple()
+        {
+            var prev = System.Threading.Thread.CurrentThread.CurrentCulture;
+            try
+            {
+                System.Threading.Thread.CurrentThread.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
+                Assert.Equal("W|0.5,0,0|1,1,1", VehicleLabRules.PartPlacementLine("W", 0.5f, 0f, 0f, 1f, 1f, 1f));   // never "0,5"
+            }
+            finally { System.Threading.Thread.CurrentThread.CurrentCulture = prev; }
+            Assert.False(VehicleLabRules.TryParsePartPlacementLine("W|0.5,0|1,1,1", out _, out _, out _));    // a pair is not a triple
+            Assert.False(VehicleLabRules.TryParsePartPlacementLine("no separators here", out _, out _, out _));
+            Assert.False(VehicleLabRules.TryParsePartPlacementLine("|0,0,0|1,1,1", out _, out _, out _));      // empty name
+        }
+
         static VehicleLabRules.PartRow Parse(string line)
         {
             Assert.True(VehicleLabRules.TryParsePartLine(line, out var row, out string why), why);

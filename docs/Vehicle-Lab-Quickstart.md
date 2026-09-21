@@ -103,6 +103,22 @@ axle disagreement, unpaired wheels, turret outliers, and visible interior geomet
 The **Visibility** filter can isolate parts that escape-ray probing found fully enclosed. It is conservative: anything
 visible through an opening counts as external. Review interior parts before marking them Ignore.
 
+### Placing parts — floating or intersecting props
+
+Some sources ship props that hover or cut through each other: the steam frigate's original file has **54 parts with
+nothing under their footprint**, a lifeboat hanging 0.79 above its deck among them. The pipeline does not cause it —
+measured end to end, the Cutter keeps 962/962 parts in place, the Fuser 20/20 groups, the probe 20/20 — so the
+correction is per part, by hand. **Click a row** to select it and a **Placement** box appears under the list:
+**Offset (X, Y, Z)** nudges the part, **Scale (X, Y, Z)** resizes it about its own centre, **Reset** clears both;
+placed rows carry a ⇄ tag. The numbers are in the model file's own axes and units — the same frame as the row's
+centre/size and the second model's Offset — and they apply *before* the Orientation straightening, so Probe and
+Generate agree. **Re-Probe** to see a placement in the preview, **Generate** to bake it; the Generate log prints each
+placed part's centre and size before and after (`VEHICLE PLACED`). Placements are saved in the recipe and survive a
+re-Probe by part name, like roles. If the Model Fuser renames a group's node — it is named after the group's
+first member, so changing the membership renames it — a re-Probe carries the role and the placement over to the one
+fresh row with the same `Fused_<group>_` prefix and says so in the status. The source-skeleton fast path leaves meshes as authored, so it ignores placement
+and says so in the log.
+
 ## 4. Tune and generate
 
 For ordinary wheels, leave **Axle axis = Auto**, **Spin frames = 15**, and start with one full turn. If the wheels roll
