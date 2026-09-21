@@ -109,6 +109,12 @@ public static class UniversalBaker
     // outputs (each .asset AND its .meta, so the GUIDs survive) to a temp dir OUTSIDE the project before the bake, and
     // restore them on failure. The delete-first stale-cache fix is untouched — this only wraps it.
     // OUTSIDE Assets/ is essential: a copy under Assets/ would import as a DUPLICATE-GUID asset and corrupt the original.
+    // UNIT paths only. The DISTRICT path's outputs (_DistrictMesh, _FxMesh, _Element, CityMapSelector_<name>) are
+    // deliberately NOT here, and their absence is not an oversight (2026-09-21 review): this array also drives
+    // SweepAllOutputs, which DELETES, and which both unit bake paths and the Factory's Remove call. A unit and a
+    // district may legitimately share a resourceName — SweepAllOutputs warns about exactly that layering a few lines
+    // down — so folding them in would make baking or removing a UNIT destroy a same-named DISTRICT's assets. The
+    // district path has its own list and its own rollback: BakerRules.DistrictOutputBasenames + BackupDistrictOutputs.
     // The FULL union of both paths' shipped outputs. Used by the E5 backup/rollback AND the cross-path sweep below —
     // "_ClipsPoseData.bytes" (the clip's baked pose stream, written by ClipCollection.Reimport next to _Clips) was
     // missing from this list, so a failed animated re-bake could restore an OLD _Clips next to NEW pose bytes.
@@ -180,7 +186,16 @@ public static class UniversalBaker
         return n;
     }
 
-    class OutputBackup { public string name = ""; public string dir = ""; public readonly List<string> files = new List<string>(); }
+    // `all` = every basename this backup is responsible for; `files` = the subset that actually existed and was
+    // copied. Restore needs BOTH: it wipes the partial NEW outputs (all) before copying the old ones back (files).
+    // Carrying `all` on the backup is what lets one implementation serve the unit paths and the district path,
+    // whose outputs are not expressible as one suffix list (see BakerRules.DistrictOutputBasenames).
+    internal class OutputBackup
+    {
+        public string name = ""; public string dir = "";
+        public readonly List<string> all = new List<string>();
+        public readonly List<string> files = new List<string>();
+    }
 
     static string ResourcesFull() => Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Assets", "Resources");
 
@@ -190,23 +205,36 @@ public static class UniversalBaker
     // kept as the sole surviving copy of the previous bake), simply retrying the bake destroyed that kept
     // backup and replaced it with the broken, partially-restored current state. A kept backup is now never
     // touched by later attempts; DiscardBackup removes only its own attempt's directory.
-    static OutputBackup BackupOutputs(string name)
+    static OutputBackup BackupOutputs(string name) =>
+        BackupBasenames(name, (name ?? "").Length == 0 ? new List<string>() : OutputSuffixes.Select(s => name + s).ToList());
+
+    // The DISTRICT path's rollback (2026-09-21 review; scope corrected by the PR #77 review). Same machinery, over
+    // the UNION of everything one district bake disturbs: the unit outputs its base bake re-mints — including the
+    // atlases the district ENTRY references by guid — plus its own four. Backing up only the latter restored the
+    // previous building while leaving the registry's atlas guids pointing at assets that no longer existed. See
+    // BakerRules.DistrictBakeBasenames, and DistrictOutputBasenames for why the district names are still NOT in
+    // OutputSuffixes (that array also drives the unit paths' DELETE sweep).
+    internal static OutputBackup BackupDistrictBake(string name) =>
+        BackupBasenames(name, BakerRules.DistrictBakeBasenames(name, OutputSuffixes));
+
+    static OutputBackup BackupBasenames(string name, List<string> basenames)
     {
         var b = new OutputBackup { name = name ?? "" };
-        if (string.IsNullOrEmpty(name)) return b;
+        if (string.IsNullOrEmpty(name) || basenames == null || basenames.Count == 0) return b;
+        b.all.AddRange(basenames);
         b.dir = Path.Combine(Path.GetTempPath(), "haf_rebake_backup",
                              name + "_" + DateTime.UtcNow.ToString("yyyyMMdd_HHmmssfff"));
         try
         {
             string res = ResourcesFull();
-            foreach (var s in OutputSuffixes)
+            foreach (var bn in b.all)
                 foreach (var ext in new[] { "", ".meta" })
                 {
-                    string src = Path.Combine(res, name + s + ext);
+                    string src = Path.Combine(res, bn + ext);
                     if (!File.Exists(src)) continue;
                     Directory.CreateDirectory(b.dir);
-                    File.Copy(src, Path.Combine(b.dir, name + s + ext), true);
-                    b.files.Add(name + s + ext);
+                    File.Copy(src, Path.Combine(b.dir, bn + ext), true);
+                    b.files.Add(bn + ext);
                 }
         }
         catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
@@ -214,7 +242,7 @@ public static class UniversalBaker
         return b;
     }
 
-    static void DiscardBackup(OutputBackup b)
+    internal static void DiscardBackup(OutputBackup b)
     {
         try { if (b != null && !string.IsNullOrEmpty(b.dir) && Directory.Exists(b.dir)) Directory.Delete(b.dir, true); } catch { }
     }
@@ -223,15 +251,17 @@ public static class UniversalBaker
     // verbatim (asset + meta -> original GUIDs), and reimport. A no-op when nothing was backed up (a first bake).
     // The backup is discarded ONLY after a successful restore — a failed restore is the one moment the backup is
     // the sole surviving copy (the old outputs are already deleted here), so it is KEPT and its path logged.
-    static void RestoreOutputs(OutputBackup b)
+    internal static void RestoreOutputs(OutputBackup b)
     {
         if (b == null || b.files.Count == 0) { DiscardBackup(b); return; }
         try
         {
             string res = ResourcesFull();
-            foreach (var s in OutputSuffixes)
+            // `b.all`, not OutputSuffixes: the wipe must cover exactly the outputs THIS backup owns, so the district
+            // path clears its own four partial assets and does not reach into the unit path's (or vice versa).
+            foreach (var bn in b.all)
                 foreach (var ext in new[] { "", ".meta" })
-                { string p = Path.Combine(res, b.name + s + ext); try { if (File.Exists(p)) File.Delete(p); } catch { } }
+                { string p = Path.Combine(res, bn + ext); try { if (File.Exists(p)) File.Delete(p); } catch { } }
             foreach (var f in b.files) File.Copy(Path.Combine(b.dir, f), Path.Combine(res, f), true);
             AssetDatabase.Refresh();
             int n = b.files.Count(f => !f.EndsWith(".meta"));

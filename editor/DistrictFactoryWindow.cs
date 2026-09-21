@@ -529,8 +529,15 @@ public class DistrictFactoryWindow : EditorWindow
         EditorGUILayout.EndScrollView();
     }
 
-    // Persist the current entry's runtime knobs to haf_districts.json without re-baking (Upsert keeps the existing
-    // baked GUIDs untouched). Used to change a footprint/ground/hex choice on an already-baked district.
+    // Persist the current entry's runtime knobs to haf_districts.json without re-baking. Used to change a
+    // footprint/ground/hex choice on an already-baked district.
+    //
+    // "Without re-baking" describes what this does NOT run — it is not a promise about the baked GUIDs. Upsert is a
+    // WHOLESALE replace (RemoveAll + Add), so whatever guids `cur` is holding are what get written; they survive
+    // only because `cur` normally still carries the ones it was loaded or baked with. An earlier version of this
+    // comment said Upsert "keeps the existing baked GUIDs untouched", which is not true of Upsert at all, and that
+    // reading is what made a rolled-back bake dangerous (PR #77 review, P2): DoBake now restores `cur` alongside
+    // the assets, so this Save cannot write guids for files that no longer exist.
     void SaveSettingsNoBake()
     {
         cur.district = (cur.district ?? "").Trim();
@@ -551,6 +558,41 @@ public class DistrictFactoryWindow : EditorWindow
         cur.resourceName = (cur.resourceName ?? "").Trim();
         cur.modelFile = (cur.modelFile ?? "").Trim();
         cur.stripParts = (cur.stripParts ?? "").Trim();
+
+        // E5 ROLLBACK FOR THE WHOLE DISTRICT BAKE (2026-09-21 review; scope corrected by the PR #77 review).
+        // Every step below is destructive. UniversalBaker.Build sweeps and re-creates the SHARED unit outputs for
+        // this resourceName — _Atlas, _NormalAtlas, _RoughAtlas among them — and discards its own backup the moment
+        // it succeeds; DistrictBaker.BakeFxMesh then deletes _DistrictMesh and _FxMesh before re-creating them
+        // (delete-first, so CreateAsset cannot keep a stale serialized ref), and BakeScopedSelector does the same
+        // for _Element and CityMapSelector_<name>.
+        //
+        // The first cut of this rollback started AFTER Build, reasoning that the district's own assets had not been
+        // touched yet. That reasoning was wrong, and the review caught it: the district ENTRY references those
+        // shared atlases by guid (atlasGuid / normalAtlasGuid / roughAtlasGuid, read at runtime in
+        // DistrictInject.Scoped), and a delete-and-recreate mints NEW guids. So a base bake that succeeded followed
+        // by a district step that failed restored the geometry while leaving the registry's OLD atlas guids pointing
+        // at assets that no longer exist — the previous building back in place and untextured.
+        //
+        // So the backup is taken BEFORE Build and covers the union: the unit outputs Build will churn plus the four
+        // district outputs. One transaction — either the new district is fully in place AND registered, or every
+        // asset and the registry are exactly as they were.
+        //
+        // ...AND SO IS THE FORM (PR #77 review, P2). Restoring the files is only half of it: the bake writes its
+        // results back onto `cur` — fxMeshGuid, atlasGuid, normalAtlasGuid, roughAtlasGuid, selectorGuid,
+        // posOffsetBaked — and nothing reloads `cur` from disk afterwards (RefreshList only rebuilds the name list).
+        // So a rollback left the window holding guids for assets the rollback had just deleted, and `Save settings`
+        // Upserts `cur` WHOLESALE (RemoveAll + Add, not a merge that keeps the stored baked guids — its comment
+        // claiming otherwise is only true in the sense that `cur` usually still carries them). One click after a
+        // failed bake would therefore write dead guids over a perfectly good restored district.
+        //
+        // A whole-object snapshot rather than a list of the baked fields ON PURPOSE: a hand-list of "fields the bake
+        // writes" is exactly the shape check_handlists.sh exists to police, and it would need updating every time a
+        // new baked field appears. FromJsonOverwrite restores in place, so anything holding `cur` keeps its instance.
+        string curBeforeBake = JsonUtility.ToJson(cur);
+        var dbk = UniversalBaker.BackupDistrictBake(cur.resourceName);
+        bool districtBakeOk = false;
+        try
+        {
 
         // 1) the same static bake core as the unit Factory — pawnDescription stays empty (registry-only field, unused by Build)
         var cfg = new BakeConfig
@@ -702,7 +744,7 @@ public class DistrictFactoryWindow : EditorWindow
         else
             Debug.LogWarning($"[District] '{cur.resourceName}': scoped selector NOT baked ({selErr}) — the district stays on the legacy path. Pick a single-building Footprint template (Tools/HAF/District/Footprint template...) and re-bake to migrate it.");
 
-        LoadPreviewAssets(force: true);   // fresh assets exist even if the registry save below fails
+        LoadPreviewAssets(force: true);
 
         // 3) registry entry
         bool saved = DistrictRegistry.Upsert(cur);
@@ -710,10 +752,16 @@ public class DistrictFactoryWindow : EditorWindow
         selected = Array.IndexOf(existing, cur.district); if (selected < 0) selected = 0;
         if (!saved)
         {
-            status = $"Baked '{cur.resourceName}', but the REGISTRY SAVE FAILED (see Console). Close whatever's locking haf_districts.json and re-bake.";
+            // The registry write is INSIDE the rollback (PR #77 review). The freshly baked assets carry new guids,
+            // and the entry naming them is exactly what failed to save — so keeping them would leave the old entry
+            // pointing at assets that no longer exist. Rolling back returns a district that still works.
+            status = $"'{cur.resourceName}': the REGISTRY SAVE FAILED (see Console), so the bake was rolled back and "
+                   + "the previous district is untouched. Close whatever's locking haf_districts.json and re-bake.";
             Debug.LogError("[District] " + status);
             return;
         }
+        // Assets written AND registered. Only now is the transaction complete.
+        districtBakeOk = true;
         status = $"Baked district model '{cur.resourceName}' -> '{cur.district}'\nFxMesh {guid}  (verts={mesh.vertexCount}, tris={TriCount(mesh)}{(cur.sourceTris > 0 ? $", source model {cur.sourceTris:N0} tris" : "")})\n" +
                  (composeReceipt != null ? composeReceipt + "\n" : "") +
                  (string.IsNullOrWhiteSpace(cur.selectorGuid) ? "scoped selector: NOT baked (legacy path) — see Console\n" : $"scoped selector {cur.selectorGuid} (scoped path)\n") +
@@ -721,6 +769,25 @@ public class DistrictFactoryWindow : EditorWindow
         Debug.Log("[District] " + status);
         RunHealthChecks();   // fresh bake: the stale-bundle warning should light up until the mod is rebuilt
         Selection.activeObject = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>("Assets/Resources/" + cur.resourceName + "_FxMesh.asset");
+
+        }
+        finally
+        {
+            // Every exit from the block above lands here: the early `return`s (a failed base bake, a part with no
+            // model file, a compose failure, a missing atlas, a failed registry save) and an exception alike.
+            // Anything short of a complete, registered bake restores.
+            if (districtBakeOk) UniversalBaker.DiscardBackup(dbk);
+            else
+            {
+                UniversalBaker.RestoreOutputs(dbk);
+                // The form, too: put back the guids that match the assets now on disk (see the snapshot above).
+                // Without this the window holds the failed bake's guids, and `Save settings` would write them.
+                try { JsonUtility.FromJsonOverwrite(curBeforeBake, cur); }
+                catch (Exception e) { Debug.LogWarning("[District] form restore after rollback failed: " + e.Message); }
+                // The preview was pointed at the half-baked assets; show what is actually on disk again.
+                try { LoadPreviewAssets(force: true); } catch (Exception e) { Debug.LogWarning("[District] preview reload after rollback failed: " + e.Message); }
+            }
+        }
     }
 
     // ---- embedded preview ----

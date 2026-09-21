@@ -5,6 +5,44 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **A failed district re-bake no longer destroys the previous building.** The unit paths have had E5 rollback since
+  it was built; the district path never got it, and its steps are destructive by design — `BakeFxMesh` deletes
+  `_DistrictMesh` and `_FxMesh` before re-creating them, so `CreateAsset` cannot keep a stale serialized ref, and
+  the scoped selector does the same for `_Element` and `CityMapSelector_<name>`. A compose that threw, a part with
+  no model file, a missing atlas: any of them left the previous building **gone** while `haf_districts.json` still
+  pointed at its guids. A district bake is now one transaction: either the new district is fully in place **and**
+  registered, or every asset and the registry are exactly as they were.
+
+  **The rollback covers more than the district's own four assets,** which the first cut of this fix got wrong and a
+  review caught. Step 1 of a district bake runs the *unit* baker, which sweeps and re-mints the shared outputs for
+  the same `resourceName` — the atlases among them — and discards its own backup the moment it succeeds. But a
+  district entry references those atlases **by guid** (`atlasGuid`, `normalAtlasGuid`, `roughAtlasGuid`, read at
+  runtime by the scoped path), and delete-then-recreate mints new ones. So a base bake that succeeded followed by a
+  district step that failed put the previous *geometry* back while leaving the registry's atlas guids pointing at
+  assets that no longer existed: the old building, untextured. The backup is therefore taken **before** the base
+  bake and covers the union. The registry write is inside the transaction for the same reason — the entry naming
+  the new guids is precisely what failed to save, so keeping the new assets would strand the old entry.
+
+  **The window's form rolls back with the files.** Restoring the assets was only half of it: the bake writes its
+  results back onto the open entry (`fxMeshGuid`, the three atlas guids, `selectorGuid`, `posOffsetBaked`) and
+  nothing reloaded it afterwards, so a rollback left the Factory holding guids for assets it had just deleted. One
+  click of **Save settings** would then write those dead guids over the perfectly good restored district, because
+  `Upsert` is a wholesale replace rather than a merge. (Its comment claimed otherwise, and that wrong comment is
+  now corrected too.) `DoBake` snapshots the whole entry before baking and puts it back on any rollback — a whole
+  object rather than a list of "the fields the bake writes", since such a list is exactly what `check_handlists.sh`
+  exists to police and would need extending every time a baked field is added.
+
+  **The four names are NOT added to `OutputSuffixes`,** although that array is described as the rollback whitelist.
+  It also drives `SweepAllOutputs`, which *deletes*, and which both unit bake paths and the Factory's Remove call —
+  and a unit and a district may legitimately share a `resourceName`, which the sweep already warns about. Folding
+  them in would make baking or removing a *unit* destroy a same-named *district's* assets: a worse bug than the one
+  being fixed. `CityMapSelector_<name>` settles it anyway, being a prefix that a `name + suffix` array cannot
+  express. The district list and the union are pure kernels (`BakerRules.DistrictOutputBasenames` /
+  `DistrictBakeBasenames`) with seven tests. One reads `OutputSuffixes` **out of the source file** and fails if the
+  two lists ever overlap; another pins that the rollback set contains the three atlases the entry names by guid.
+  Both were fault-injected — planting `_FxMesh.asset` in the unit array, and reverting the union to the first cut's
+  district-only scope — and each turned red.
+
 - **Vehicle Lab: markings survive a Fuser rename.** The Fuser names a fused node after the group's first member, so
   changing a group's membership renames it and a role or placement kept by exact name was lost on the next Probe
   (user: a Z offset on group Y "got wiped after I made some changes to the group in the Model Fuser"). A re-Probe now

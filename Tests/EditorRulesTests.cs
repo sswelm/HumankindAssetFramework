@@ -94,6 +94,107 @@ public class BakerRulesTests
         Assert.Equal(0.0, fore, 9);
         Assert.Equal(0.0, raise, 9);
     }
+
+    // ---- district bake outputs (2026-09-21 review) -------------------------------------------------------------
+    // These basenames drive a DELETE loop (the rollback wipes partial new outputs before copying the old ones back),
+    // so both their exact spelling and the empty-name case are load-bearing.
+    [Fact]
+    public void District_outputs_name_all_four_assets_including_the_prefix_one()
+    {
+        var n = BakerRules.DistrictOutputBasenames("BreederReactor");
+        Assert.Equal(4, n.Count);
+        Assert.Contains("BreederReactor_DistrictMesh.asset", n);
+        Assert.Contains("BreederReactor_FxMesh.asset", n);
+        Assert.Contains("BreederReactor_Element.asset", n);
+        // the one that is a PREFIX, not a suffix — the reason this is a basename list, and the reason these names
+        // could not live in UniversalBaker.OutputSuffixes even if sharing that array were otherwise safe.
+        Assert.Contains("CityMapSelector_BreederReactor.asset", n);
+    }
+
+    [Fact]
+    public void A_blank_district_name_names_nothing()
+    {
+        // "" would otherwise yield "_FxMesh.asset" and "CityMapSelector_.asset" — real files, handed to a delete loop.
+        Assert.Empty(BakerRules.DistrictOutputBasenames(""));
+        Assert.Empty(BakerRules.DistrictOutputBasenames("   "));
+        Assert.Empty(BakerRules.DistrictOutputBasenames(null));
+    }
+
+    [Fact]
+    public void District_output_names_are_trimmed_like_the_window_trims_the_field()
+    {
+        // DoBake trims cur.resourceName on the entry itself before baking, so the rollback resolves the same names
+        // the bake writes — a stray space would back up nothing and then restore nothing.
+        Assert.Contains("Quarry_FxMesh.asset", BakerRules.DistrictOutputBasenames("  Quarry  "));
+    }
+
+    // THE PR #77 REVIEW FINDING. A district bake's rollback set is NOT just its own four assets: step 1 runs the
+    // unit baker, which re-mints the shared atlases for the same resourceName, and the district ENTRY references
+    // those by guid. Backing up only the district's own outputs restored the previous building UNTEXTURED — the
+    // registry's atlas guids pointed at assets the base bake had already replaced. This is the assertion that
+    // distinguishes the two scopes, and it fails against the first cut of the fix.
+    [Fact]
+    public void The_district_rollback_set_covers_the_atlases_its_entry_references()
+    {
+        var unit = UnitSuffixesFromSource();
+        var set = BakerRules.DistrictBakeBasenames("Quarry", unit);
+        // the three the entry names by guid (atlasGuid / normalAtlasGuid / roughAtlasGuid)
+        Assert.Contains("Quarry_Atlas.asset", set);
+        Assert.Contains("Quarry_NormalAtlas.asset", set);
+        Assert.Contains("Quarry_RoughAtlas.asset", set);
+        // and still its own four
+        Assert.Contains("Quarry_FxMesh.asset", set);
+        Assert.Contains("CityMapSelector_Quarry.asset", set);
+        // the union is every unit output plus the four district ones, with nothing counted twice
+        Assert.Equal(unit.Length + 4, set.Count);
+        Assert.Equal(set.Count, set.Distinct(System.StringComparer.OrdinalIgnoreCase).Count());
+    }
+
+    [Fact]
+    public void A_blank_name_still_names_nothing_for_the_whole_bake()
+    {
+        Assert.Empty(BakerRules.DistrictBakeBasenames("", UnitSuffixesFromSource()));
+        Assert.Empty(BakerRules.DistrictBakeBasenames(null, UnitSuffixesFromSource()));
+    }
+
+    [Fact]
+    public void An_overlapping_suffix_is_not_backed_up_twice()
+    {
+        // Defensive: the two lists are disjoint today (the test below enforces it), but a union that double-counted
+        // would delete-then-copy the same file twice during a restore.
+        var set = BakerRules.DistrictBakeBasenames("Q", new[] { "_FxMesh.asset", "_Atlas.asset" });
+        Assert.Equal(5, set.Count);   // 4 district + _Atlas; _FxMesh already present
+        Assert.Equal(set.Count, set.Distinct(System.StringComparer.OrdinalIgnoreCase).Count());
+    }
+
+    // The two lists must stay DISJOINT. The moment a district suffix appears in OutputSuffixes, the unit paths'
+    // SweepAllOutputs — and the Factory's Remove — start deleting a same-named district's assets.
+    [Fact]
+    public void District_suffixes_are_not_in_the_unit_sweep_list()
+    {
+        var unit = UnitSuffixesFromSource();
+        Assert.Contains("_ModelMesh.asset", unit);   // the read worked at all
+        foreach (var s in BakerRules.DistrictOutputSuffixes) Assert.DoesNotContain(s, unit);
+    }
+
+    // UniversalBaker is Unity-bound and not compiled into this suite, so the guard above reads the array out of the
+    // source. A literal copy here would keep passing while the real array drifted — exactly the failure this file
+    // exists to catch.
+    static string[] UnitSuffixesFromSource()
+    {
+        var d = new System.IO.DirectoryInfo(System.IO.Path.GetDirectoryName(
+            new System.Uri(typeof(BakerRulesTests).Assembly.CodeBase).LocalPath));
+        while (d != null && !System.IO.File.Exists(System.IO.Path.Combine(d.FullName, "editor", "UniversalBaker.cs")))
+            d = d.Parent;
+        Assert.True(d != null, "could not find editor/UniversalBaker.cs above the test assembly");
+        string src = System.IO.File.ReadAllText(System.IO.Path.Combine(d.FullName, "editor", "UniversalBaker.cs"));
+        int i = src.IndexOf("OutputSuffixes = {");
+        Assert.True(i > 0, "OutputSuffixes array not found in UniversalBaker.cs");
+        int end = src.IndexOf("};", i);
+        return System.Text.RegularExpressions.Regex.Matches(src.Substring(i, end - i), "\"([^\"]+)\"")
+                   .Cast<System.Text.RegularExpressions.Match>().Select(m => m.Groups[1].Value).ToArray();
+    }
+
 }
 
 public class NaturalOrderTests
@@ -158,4 +259,5 @@ public class NaturalOrderTests
         Assert.False(BakerRules.PointUv(double.PositiveInfinity, 0.0, 512, 1024));   // an unmeasured span (no UVs)
         Assert.False(BakerRules.PointUv(0.0, 0.0, 0, 1024));              // a texture with no pixels is not sampled
     }
+
 }
