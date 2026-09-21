@@ -748,45 +748,77 @@ namespace HumankindAssetFramework
                     {
                         int A(JToken arr, int k) => (arr is JArray a && k < a.Count) ? (int)a[k] : 0;
                         float Fp(JToken o, string k) => o?[k] != null ? (float)o[k] : 0f;
-                        foreach (var m in models)
+                        int skipped = 0;
+                        for (int mi = 0; mi < models.Count; mi++)
                         {
-                            // position is a UnityEngine.Vector3: Newtonsoft chokes deserializing it (its `normalized`
-                            // property self-references Vector3), so pull the key OUT of the object before the generic map
-                            // and re-pin it by hand below — otherwise ToObject throws and the whole model drops to the
-                            // fragile index-aligned regex fallback. Read it first, then remove.
-                            var p = m["position"]; (m as JObject)?.Remove("position");
-                            // Strip every non-config key (see registryConfigKeys above) so the generic map below can
-                            // only ever touch declared config — runtime-state fields are unreachable from pack JSON.
-                            if (m is JObject mo)
+                            var m = models[mi];
+                            // PER ENTRY (2026-09-21 review): a value the generic deserialize can't take — a hand-edited
+                            // `"scale": "big"`, a non-numeric guid component — is THAT entry's problem, not the pack's.
+                            // It used to throw to the outer catch, which ran entries.Clear() and demoted every OTHER
+                            // entry to the index-aligned regex fallback, so one typo in one entry silently changed how
+                            // the whole registry was read (and the fallback's defaults do not all match the schema's).
+                            // The district twin has isolated per entry since 2026-08-23 — ParseDistrictsRaw, whose own
+                            // comment names this codebase's recurring shape: a fix that lands in one of two twins.
+                            try
                             {
-                                List<string> stripped = null;
-                                foreach (var prop in mo.Properties().ToList())
-                                    if (!registryConfigKeys.Contains(prop.Name))
-                                    { (stripped ?? (stripped = new List<string>())).Add(prop.Name); prop.Remove(); }
-                                if (stripped != null)
-                                    Plugin.Diag("[Uni] stripped " + stripped.Count + " non-config key(s) pre-parse: " + string.Join(", ", stripped));
+                                // position is a UnityEngine.Vector3: Newtonsoft chokes deserializing it (its `normalized`
+                                // property self-references Vector3), so pull the key OUT of the object before the generic map
+                                // and re-pin it by hand below — otherwise ToObject throws and the model is skipped for a
+                                // reason that has nothing to do with the pack. Read it first, then remove.
+                                var p = m["position"]; (m as JObject)?.Remove("position");
+                                // Strip every non-config key (see registryConfigKeys above) so the generic map below can
+                                // only ever touch declared config — runtime-state fields are unreachable from pack JSON.
+                                if (m is JObject mo)
+                                {
+                                    List<string> stripped = null;
+                                    foreach (var prop in mo.Properties().ToList())
+                                        if (!registryConfigKeys.Contains(prop.Name))
+                                        { (stripped ?? (stripped = new List<string>())).Add(prop.Name); prop.Remove(); }
+                                    if (stripped != null)
+                                        Plugin.Diag("[Uni] stripped " + stripped.Count + " non-config key(s) pre-parse: " + string.Join(", ", stripped));
+                                }
+                                // The name-matching config (every string/bool/float/int field, inherited from the shared
+                                // HafModelSchema + ModelEntry's own whitelisted keys) deserializes generically — one mapping,
+                                // no hand-list to drift against the editor. Absent keys fall to each field's initializer
+                                // (the shared defaults); runtime-state fields CANNOT bind — the strip above removed them.
+                                var e = m.ToObject<ModelEntry>();
+                                // The GUID arrays also DON'T map by name (one JSON array skel[] -> four ints sa/sb/sc/sd, etc.),
+                                // so they're extracted explicitly here.
+                                var s = m["skel"]; var t = m["atlas"]; var c = m["clip"];
+                                var cmv = m["clipMove"]; var cfa = m["clipAfter"]; var cat = m["clipAttack"]; var ccb = m["clipCombat"]; var cpv = m["clipPreMove"]; var cid = m["clipIdle"]; var cAlt = m["clipIdleAlt"]; var ca2 = m["clipIdleAlt2"];
+                                e.sa = A(s, 0); e.sb = A(s, 1); e.sc = A(s, 2); e.sd = A(s, 3);
+                                e.ta = A(t, 0); e.tb = A(t, 1); e.tc = A(t, 2); e.td = A(t, 3);
+                                // clip-role guid quads → the ROLE TABLE. One line per role, each reading its whole array:
+                                // no per-component hand-copy (the `alc` class of typo) is possible here.
+                                void R(ClipRole r, JToken arr) => e.Role(r).Set(A(arr, 0), A(arr, 1), A(arr, 2), A(arr, 3));
+                                R(ClipRole.Primary, c); R(ClipRole.Move, cmv); R(ClipRole.After, cfa); R(ClipRole.Attack, cat); R(ClipRole.Combat, ccb);
+                                R(ClipRole.PreMove, cpv); R(ClipRole.IdleOverride, cid); R(ClipRole.IdleAlt, cAlt); R(ClipRole.IdleAlt2, ca2);
+                                e.position = new UnityEngine.Vector3(Fp(p, "x"), Fp(p, "y"), Fp(p, "z"));
+                                entries.Add(e);
                             }
-                            // The name-matching config (every string/bool/float/int field, inherited from the shared
-                            // HafModelSchema + ModelEntry's own whitelisted keys) deserializes generically — one mapping,
-                            // no hand-list to drift against the editor. Absent keys fall to each field's initializer
-                            // (the shared defaults); runtime-state fields CANNOT bind — the strip above removed them.
-                            var e = m.ToObject<ModelEntry>();
-                            // The GUID arrays also DON'T map by name (one JSON array skel[] -> four ints sa/sb/sc/sd, etc.),
-                            // so they're extracted explicitly here.
-                            var s = m["skel"]; var t = m["atlas"]; var c = m["clip"];
-                            var cmv = m["clipMove"]; var cfa = m["clipAfter"]; var cat = m["clipAttack"]; var ccb = m["clipCombat"]; var cpv = m["clipPreMove"]; var cid = m["clipIdle"]; var cAlt = m["clipIdleAlt"]; var ca2 = m["clipIdleAlt2"];
-                            e.sa = A(s, 0); e.sb = A(s, 1); e.sc = A(s, 2); e.sd = A(s, 3);
-                            e.ta = A(t, 0); e.tb = A(t, 1); e.tc = A(t, 2); e.td = A(t, 3);
-                            // clip-role guid quads → the ROLE TABLE. One line per role, each reading its whole array:
-                            // no per-component hand-copy (the `alc` class of typo) is possible here.
-                            void R(ClipRole r, JToken arr) => e.Role(r).Set(A(arr, 0), A(arr, 1), A(arr, 2), A(arr, 3));
-                            R(ClipRole.Primary, c); R(ClipRole.Move, cmv); R(ClipRole.After, cfa); R(ClipRole.Attack, cat); R(ClipRole.Combat, ccb);
-                            R(ClipRole.PreMove, cpv); R(ClipRole.IdleOverride, cid); R(ClipRole.IdleAlt, cAlt); R(ClipRole.IdleAlt2, ca2);
-                            e.position = new UnityEngine.Vector3(Fp(p, "x"), Fp(p, "y"), Fp(p, "z"));
-                            entries.Add(e);
+                            catch (Exception ex)
+                            {
+                                skipped++;
+                                // Name the entry the way its author will recognise it. resourceName is read defensively:
+                                // this is the error path, and a second throw here would sink the neighbours after all.
+                                string who = null;
+                                try { who = m?["resourceName"]?.ToString(); } catch { }
+                                Plugin.Log.LogWarning($"[Uni] registry model #{mi + 1} ({(string.IsNullOrEmpty(who) ? "unnamed" : who)}) skipped "
+                                    + $"({ex.GetType().Name}: {ex.Message}) — the other entries still load. Fix that entry in pack.json.");
+                            }
                         }
-                        Plugin.Log.LogInfo($"[Uni] parsed {entries.Count} model(s) via Newtonsoft [" + string.Join(", ", entries.Select(e => e.resourceName + "->" + e.pawnDescription)) + "]");
-                        return entries;
+                        // Some entry survived: the object parse did its job and the regex fallback must NOT run, or a
+                        // recovered-by-index ghost would join the correctly-parsed ones.
+                        if (entries.Count > 0)
+                        {
+                            Plugin.Log.LogInfo($"[Uni] parsed {entries.Count} model(s) via Newtonsoft"
+                                + (skipped > 0 ? $" ({skipped} skipped — see the warning(s) above)" : "")
+                                + " [" + string.Join(", ", entries.Select(e => e.resourceName + "->" + e.pawnDescription)) + "]");
+                            return entries;
+                        }
+                        // NOTHING survived. That is the case the fallback exists for, so fall through to it rather than
+                        // return an empty list — isolation must not swallow a document the regex could still recover.
+                        Plugin.Log.LogWarning($"[Uni] all {models.Count} registry model(s) failed the object parse; using regex fallback");
                     }
                 }
                 catch (Exception ex) { Plugin.Log.LogWarning("[Uni] Newtonsoft parse failed (" + ex.Message + "); using regex fallback"); entries.Clear(); }

@@ -122,6 +122,55 @@ namespace HumankindAssetFramework.Tests
             Assert.Equal(3f, e[1].scale);
         }
 
+        // PER-ENTRY ISOLATION (2026-09-21 review). The document parses, but ONE entry carries a value the generic
+        // deserialize can't take (a hand-edited `"scale": "big"`). That threw out of the per-model loop, ran
+        // entries.Clear() and demoted the WHOLE pack to the index-aligned regex fallback — so one typo in one entry
+        // silently changed how every OTHER entry was read. The district twin has isolated per entry since
+        // 2026-08-23 (DistrictInject.ParseDistrictsRaw); this is the same fix in the sibling that was overlooked.
+        [Fact]
+        public void ParseModels_OneBadEntry_IsSkipped_NeighboursStillParse()
+        {
+            var json = @"{ ""models"": [
+                { ""resourceName"": ""Good1"", ""pawnDescription"": ""p1"" },
+                { ""resourceName"": ""Bad"",   ""pawnDescription"": ""pb"", ""scale"": ""big"" },
+                { ""resourceName"": ""Good2"", ""pawnDescription"": ""p2"", ""scale"": 3.0 }
+            ] }";
+            var e = UniversalInject.ParseModels(json);
+            Assert.Equal(2, e.Count);
+            Assert.Equal("Good1", e[0].resourceName);
+            Assert.Equal("Good2", e[1].resourceName);
+            // and the survivors are still on the OBJECT parse, not the index-aligned fallback: Good1 omitted
+            // `scale`, so it must hold the shared default rather than borrow Good2's.
+            Assert.Equal(1f, e[0].scale);
+            Assert.Equal(3f, e[1].scale);
+        }
+
+        // The same isolation one layer down: the GUID quads are extracted by hand AFTER ToObject, so a non-numeric
+        // component throws from a different line inside the same loop. It must be the same per-entry outcome.
+        [Fact]
+        public void ParseModels_BadGuidComponent_SkipsOnlyThatEntry()
+        {
+            var json = @"{ ""models"": [
+                { ""resourceName"": ""BadGuid"", ""skel"": [ ""nope"", 2, 3, 4 ] },
+                { ""resourceName"": ""Fine"",    ""skel"": [ 9, 8, 7, 6 ] }
+            ] }";
+            var e = Assert.Single(UniversalInject.ParseModels(json));
+            Assert.Equal("Fine", e.resourceName);
+            Assert.Equal(9, e.sa); Assert.Equal(6, e.sd);
+        }
+
+        // Isolation must not SWALLOW the case the fallback exists for: when every entry is bad, the object parse has
+        // recovered nothing and the regex still gets its turn.
+        [Fact]
+        public void ParseModels_EveryEntryBad_StillFallsBackToRegex()
+        {
+            var json = @"{ ""models"": [ { ""resourceName"": ""X"", ""pawnDescription"": ""Y"", ""scale"": ""big"",
+                                          ""skel"": [1,2,3,4], ""atlas"": [5,6,7,8] } ] }";
+            var e = Assert.Single(UniversalInject.ParseModels(json));
+            Assert.Equal("X", e.resourceName);
+            Assert.Equal(1, e.sa); Assert.Equal(8, e.td);
+        }
+
         // When JObject.Parse rejects the document (here: truncated), the regex fallback still recovers the fields.
         // NOTE: the fallback keys the entry count on Min(pawnDescription, skel, atlas) — a recoverable model needs all
         // three (line ~729). That's the fallback's documented shape, so the test carries an atlas too.

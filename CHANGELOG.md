@@ -10,6 +10,22 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **ONE BAD MODEL ENTRY NO LONGER RE-READS THE WHOLE PACK (2026-09-21).** The same twin, the other way round. When
+  the district registry got per-entry isolation on 2026-08-23 it was described as "matching `ParseModels`" — but
+  `ParseModels` never had it. Its per-model loop sat inside one try whose catch ran `entries.Clear()`, so a single
+  entry carrying a value the generic deserialize cannot take (a hand-edited `"scale": "big"`, a non-numeric guid
+  component) demoted **every other entry in the pack** to the index-aligned regex fallback. That is worse than
+  losing the one entry, because the fallback is not an equivalent reader: its hand-listed defaults have drifted from
+  the shared schema's — `idleAltInterval` falls back to `0` where `HafModelSchema` declares `25` — so one typo in
+  one entry silently turned off idle-alt clips on models that never mentioned the key. The loop now isolates per
+  entry and names the offender (`registry model #3 (SteamFrigate) skipped …`), keeps its neighbours, and reports the
+  skipped count on the parsed line. The fallback is **not** bypassed: it still runs when nothing at all survived,
+  which is the case it was written for. Three tests, each red before the change — one bad entry among three, a bad
+  guid component, and the all-bad document that must still reach the regex (suite 873 → 876). *The lesson is one
+  this codebase keeps re-learning:* "matching the twin" was asserted in a comment and never checked, and the
+  assertion outlived the thing it described by a month. The drifted fallback default is left standing on purpose —
+  it is a separate finding, and fixing it under this change would hide which fix moved which behaviour.
+
 - **THE COVERAGE TIER — everything the game touches gets a pure kernel and a test (2026-09-14).** The critical
   review's biggest blind spot: the code that talks to the engine or to Unity had either no test at any tier or a
   test only the opt-in editor lane runs. Now, all headless and in the per-push gate (suite 763 → 801):
