@@ -821,7 +821,7 @@ public class VehicleLabWindow : EditorWindow
                     tailYawAdj = EditorGUILayout.Slider(new GUIContent("Tail axle yaw trim", "Swing the tail axle left/right about vertical, degrees — on top of the Auto/forced axle. Dial by eye until the fan spins flat in its ring."), tailYawAdj, -90f, 90f);
                     tailPitchAdj = EditorGUILayout.Slider(new GUIContent("Tail axle pitch trim", "Tilt the tail axle up/down, degrees — on top of the Auto/forced axle. Dial by eye until the fan spins flat in its ring."), tailPitchAdj, -90f, 90f);
                 }
-                frames = EditorGUILayout.IntSlider(new GUIContent("Spin frames", "Length of the generated Spin action. Apparent speed is tuned later with slice steps (Spin[1..N/2]) — this just needs to be a smooth loop."), frames, 5, 60);
+                frames = EditorGUILayout.IntSlider(new GUIContent("Spin frames", "Length of the generated Spin action. Apparent speed is tuned later with slice steps (Spin[1..N/2]) — this just needs to be a smooth loop. Up to 100: a big slow wheel (a paddle steamer's) wants a long clip, so one turn stays smooth at the slowest slice step."), frames, 5, 100);   // ceiling 60 -> 100 (2026-09-21, user: paddle wheels); the rig script has no upper limit and the wave rock already bakes longer clips
                 degrees = EditorGUILayout.Slider(new GUIContent("Spin degrees", "Wheel rotation over the clip (one full turn = 360). Which SIGN rolls forward depends on the model's nose direction — check the preview and negate if the wheels roll backward. For a +X-facing model (like the Ehrhardt), +360 is forward."), degrees, -720f, 720f);
                 if (list.Any(x => x.role == Role.Caterpillar))
                 {

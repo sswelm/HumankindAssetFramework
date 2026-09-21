@@ -5,6 +5,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab: Spin frames goes up to 100** (was 60; user request while rigging paddle wheels). A big slow wheel
+  wants a long clip so one turn stays smooth at the slowest slice step. Only the slider was capped — the rig script
+  never had an upper limit, and the wave rock already bakes longer clips.
+
 - **Vehicle Lab: the second model scales per axis** (user: "what I meant by scale is Scale X, Scale Y, Scale Z").
   The merge had Offset and Rotation per axis and one uniform Scale — enough to reconcile units, not enough to fit a
   part borrowed from another model: paddle wheels cut from one steamer have to match the new hull's beam and its
