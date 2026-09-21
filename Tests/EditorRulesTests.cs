@@ -94,6 +94,68 @@ public class BakerRulesTests
         Assert.Equal(0.0, fore, 9);
         Assert.Equal(0.0, raise, 9);
     }
+
+    // ---- district bake outputs (2026-09-21 review) -------------------------------------------------------------
+    // These basenames drive a DELETE loop (the rollback wipes partial new outputs before copying the old ones back),
+    // so both their exact spelling and the empty-name case are load-bearing.
+    [Fact]
+    public void District_outputs_name_all_four_assets_including_the_prefix_one()
+    {
+        var n = BakerRules.DistrictOutputBasenames("BreederReactor");
+        Assert.Equal(4, n.Count);
+        Assert.Contains("BreederReactor_DistrictMesh.asset", n);
+        Assert.Contains("BreederReactor_FxMesh.asset", n);
+        Assert.Contains("BreederReactor_Element.asset", n);
+        // the one that is a PREFIX, not a suffix — the reason this is a basename list, and the reason these names
+        // could not live in UniversalBaker.OutputSuffixes even if sharing that array were otherwise safe.
+        Assert.Contains("CityMapSelector_BreederReactor.asset", n);
+    }
+
+    [Fact]
+    public void A_blank_district_name_names_nothing()
+    {
+        // "" would otherwise yield "_FxMesh.asset" and "CityMapSelector_.asset" — real files, handed to a delete loop.
+        Assert.Empty(BakerRules.DistrictOutputBasenames(""));
+        Assert.Empty(BakerRules.DistrictOutputBasenames("   "));
+        Assert.Empty(BakerRules.DistrictOutputBasenames(null));
+    }
+
+    [Fact]
+    public void District_output_names_are_trimmed_like_the_window_trims_the_field()
+    {
+        // DoBake trims cur.resourceName on the entry itself before baking, so the rollback resolves the same names
+        // the bake writes — a stray space would back up nothing and then restore nothing.
+        Assert.Contains("Quarry_FxMesh.asset", BakerRules.DistrictOutputBasenames("  Quarry  "));
+    }
+
+    // The two lists must stay DISJOINT. The moment a district suffix appears in OutputSuffixes, the unit paths'
+    // SweepAllOutputs — and the Factory's Remove — start deleting a same-named district's assets.
+    [Fact]
+    public void District_suffixes_are_not_in_the_unit_sweep_list()
+    {
+        var unit = UnitSuffixesFromSource();
+        Assert.Contains("_ModelMesh.asset", unit);   // the read worked at all
+        foreach (var s in BakerRules.DistrictOutputSuffixes) Assert.DoesNotContain(s, unit);
+    }
+
+    // UniversalBaker is Unity-bound and not compiled into this suite, so the guard above reads the array out of the
+    // source. A literal copy here would keep passing while the real array drifted — exactly the failure this file
+    // exists to catch.
+    static string[] UnitSuffixesFromSource()
+    {
+        var d = new System.IO.DirectoryInfo(System.IO.Path.GetDirectoryName(
+            new System.Uri(typeof(BakerRulesTests).Assembly.CodeBase).LocalPath));
+        while (d != null && !System.IO.File.Exists(System.IO.Path.Combine(d.FullName, "editor", "UniversalBaker.cs")))
+            d = d.Parent;
+        Assert.True(d != null, "could not find editor/UniversalBaker.cs above the test assembly");
+        string src = System.IO.File.ReadAllText(System.IO.Path.Combine(d.FullName, "editor", "UniversalBaker.cs"));
+        int i = src.IndexOf("OutputSuffixes = {");
+        Assert.True(i > 0, "OutputSuffixes array not found in UniversalBaker.cs");
+        int end = src.IndexOf("};", i);
+        return System.Text.RegularExpressions.Regex.Matches(src.Substring(i, end - i), "\"([^\"]+)\"")
+                   .Cast<System.Text.RegularExpressions.Match>().Select(m => m.Groups[1].Value).ToArray();
+    }
+
 }
 
 public class NaturalOrderTests
@@ -158,4 +220,5 @@ public class NaturalOrderTests
         Assert.False(BakerRules.PointUv(double.PositiveInfinity, 0.0, 512, 1024));   // an unmeasured span (no UVs)
         Assert.False(BakerRules.PointUv(0.0, 0.0, 0, 1024));              // a texture with no pixels is not sampled
     }
+
 }

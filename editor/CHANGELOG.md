@@ -5,6 +5,25 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **A failed district re-bake no longer destroys the previous building.** The unit paths have had E5 rollback since
+  it was built; the district path never got it, and its steps are destructive by design — `BakeFxMesh` deletes
+  `_DistrictMesh` and `_FxMesh` before re-creating them, so `CreateAsset` cannot keep a stale serialized ref, and
+  the scoped selector does the same for `_Element` and `CityMapSelector_<name>`. A compose that threw, a part with
+  no model file, a missing atlas: any of them left the previous building **gone** while `haf_districts.json` still
+  pointed at its guids. The District Factory now takes the same backup the unit Factory takes, restores on every
+  failing exit, and discards it once all four assets are written. The registry write is deliberately outside the
+  rollback: if only the save fails, the new assets are valid and putting the old ones back would throw away a good
+  bake.
+
+  **The four names are NOT added to `OutputSuffixes`,** although that array is described as the rollback whitelist.
+  It also drives `SweepAllOutputs`, which *deletes*, and which both unit bake paths and the Factory's Remove call —
+  and a unit and a district may legitimately share a `resourceName`, which the sweep already warns about. Folding
+  them in would make baking or removing a *unit* destroy a same-named *district's* assets: a worse bug than the one
+  being fixed. `CityMapSelector_<name>` settles it anyway, being a prefix that a `name + suffix` array cannot
+  express. The district list is its own pure kernel (`BakerRules.DistrictOutputBasenames`) with four tests, one of
+  which reads `OutputSuffixes` **out of the source file** and fails if the two lists ever overlap — fault-injected
+  by planting `_FxMesh.asset` in the unit array and watching it go red.
+
 - **Vehicle Lab: markings survive a Fuser rename.** The Fuser names a fused node after the group's first member, so
   changing a group's membership renames it and a role or placement kept by exact name was lost on the next Probe
   (user: a Z offset on group Y "got wiped after I made some changes to the group in the Model Fuser"). A re-Probe now

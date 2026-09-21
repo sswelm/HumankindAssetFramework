@@ -569,6 +569,20 @@ public class DistrictFactoryWindow : EditorWindow
         var mesh = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Resources/" + cur.resourceName + "_ModelMesh.asset");
         if (mesh == null) { status = $"Bake succeeded but '{cur.resourceName}_ModelMesh.asset' wasn't found — can't build the FxMesh."; return; }
 
+        // E5 ROLLBACK FOR THE DISTRICT OUTPUTS (2026-09-21 review). Everything below this line is destructive:
+        // BakeFxMesh deletes _DistrictMesh and _FxMesh before re-creating them (delete-first, so CreateAsset cannot
+        // keep a stale serialized ref) and BakeScopedSelector does the same for _Element and CityMapSelector_<name>.
+        // Until now nothing put them back, so a compose that threw or a selector step that aborted left the previous
+        // building GONE while haf_districts.json still pointed at its guids — the unit paths have had this protection
+        // since E5 and their twin never got it.
+        //
+        // Taken HERE rather than at the top of the method on purpose: above this point the district's own assets have
+        // not been touched, so a failure there needs no restore and must not pay for a needless delete-and-copy-back.
+        var dbk = UniversalBaker.BackupDistrictOutputs(cur.resourceName);
+        bool districtAssetsOk = false;
+        try
+        {
+
         // 2b) PIZZA compose: bake each part with its own knobs, then merge base + parts into ONE mesh + ONE super-atlas.
         //     (Purely bake-time — the runtime still receives a single FxMesh + atlas pair, so nothing downstream changes.)
         bool composedLeveled = false;
@@ -702,6 +716,11 @@ public class DistrictFactoryWindow : EditorWindow
         else
             Debug.LogWarning($"[District] '{cur.resourceName}': scoped selector NOT baked ({selErr}) — the district stays on the legacy path. Pick a single-building Footprint template (Tools/HAF/District/Footprint template...) and re-bake to migrate it.");
 
+        // Every destructive district step is done and produced assets. The registry write below is NOT covered by
+        // this rollback: its failure leaves valid new assets, and restoring the old ones over them would throw away
+        // a good bake. That case already tells the author to re-bake.
+        districtAssetsOk = true;
+
         LoadPreviewAssets(force: true);   // fresh assets exist even if the registry save below fails
 
         // 3) registry entry
@@ -721,6 +740,15 @@ public class DistrictFactoryWindow : EditorWindow
         Debug.Log("[District] " + status);
         RunHealthChecks();   // fresh bake: the stale-bundle warning should light up until the mod is rebuilt
         Selection.activeObject = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>("Assets/Resources/" + cur.resourceName + "_FxMesh.asset");
+
+        }
+        finally
+        {
+            // Every exit from the block above lands here: the early `return`s (a part with no model file, a compose
+            // failure, a missing atlas) and an exception alike. Anything short of districtAssetsOk restores.
+            if (districtAssetsOk) UniversalBaker.DiscardBackup(dbk);
+            else UniversalBaker.RestoreOutputs(dbk);
+        }
     }
 
     // ---- embedded preview ----

@@ -80,6 +80,35 @@ public static class BakerRules
         raise = -minZ;                 // z: keel/tyre contact to the ground
     }
 
+    // ---- DISTRICT bake outputs (2026-09-21 review) -------------------------------------------------------------
+    // The district path writes these four assets into Assets/Resources and, like the unit paths, DELETES them before
+    // its fallible steps (DistrictBaker.BakeFxMesh deletes _DistrictMesh and _FxMesh up front, so CreateAsset cannot
+    // keep a stale serialized ref). Nothing restored them: a district re-bake that threw left the previous building
+    // gone while haf_districts.json still pointed at its guids.
+    //
+    // They are deliberately NOT added to UniversalBaker.OutputSuffixes, even though that array is described as "the
+    // rollback whitelist". It also drives SweepAllOutputs, which DELETES, and which the UNIT bake paths and the
+    // Factory's Remove both call — and a unit and a district may legitimately share a resourceName. The sweep
+    // already warns about exactly that layering. Folding these in would make baking or removing a unit destroy a
+    // same-named district's assets: a worse bug than the one being fixed.
+    //
+    // CityMapSelector_<name> is also the reason this is a list of BASENAMES rather than suffixes: it is a PREFIX,
+    // which a `name + suffix` array cannot express at all.
+    public static readonly string[] DistrictOutputSuffixes = { "_DistrictMesh.asset", "_FxMesh.asset", "_Element.asset" };
+
+    /// <summary>Every file a district bake of `name` writes under Assets/Resources, as basenames (no directory).</summary>
+    // An empty/whitespace name returns NOTHING rather than the bare suffixes: these basenames are fed to a delete
+    // loop, and "" would turn "_FxMesh.asset" and "CityMapSelector_.asset" into real deletion targets.
+    public static List<string> DistrictOutputBasenames(string name)
+    {
+        var outp = new List<string>();
+        string n = (name ?? "").Trim();
+        if (n.Length == 0) return outp;
+        foreach (var s in DistrictOutputSuffixes) outp.Add(n + s);
+        outp.Add("CityMapSelector_" + n + ".asset");
+        return outp;
+    }
+
 }
 
 /// <summary>Natural name ordering — "Object_2" before "Object_10" (Model Workshop part list; NaturalOrderTests).</summary>
