@@ -417,6 +417,7 @@ public class VehicleLabWindow : EditorWindow
     Bounds bounds; bool boundsValid; float spinT; double lastTick;
     float fullRadius;   // whole-model radius — far-plane margin must NOT shrink to a focused part's bounds
     Vector2 orbit = new Vector2(140f, -18f); float zoom = 1.5f;
+    bool reprobingForMigration;   // guards the one automatic re-Probe after a fused-group rename migration (see Probe)
     [SerializeField] Vector2 previewPan;   // camera-plane pan (middle/right-drag), in dist units — ported from the Factory preview
     // part focus/highlight: clicking a row zooms onto that part and tints it — the "which shard is the wheel?" x-ray
     string selectedPart = "";
@@ -1514,6 +1515,19 @@ public class VehicleLabWindow : EditorWindow
               (kept.Count > 0 ? $" ({parts.Count(x => kept.ContainsKey(x.name) && x.role == kept[x.name])} of {kept.Count} earlier markings kept)" : " (auto-guessed)") +
               (migrated.Count > 0 ? $" · {migrated.Count} renamed fused group(s) carried over: {string.Join("; ", migrated)}" : "") +
               ". Click a row to see WHICH part it is (zoom + yellow highlight), assign roles, then Generate rig.";
+        // THE PREVIEW WAS EXPORTED BEFORE THE MIGRATION (PR #74 review P2). Blender ran with the placement list
+        // written from the OLD names: it warned "no such part", exported unplaced geometry, and only then did the
+        // C# above move the placement to the renamed row — so the list showed the migrated value while the preview
+        // showed the part unmoved until the next Probe. A rename is rare and a probe is seconds, so when anything
+        // migrated, Probe runs once more with the now-correct names. The guard makes it exactly once: the second
+        // run finds every kept name present, migrates nothing, and stops here.
+        if (migrated.Count > 0 && !reprobingForMigration)
+        {
+            reprobingForMigration = true;
+            try { Probe(); }
+            finally { reprobingForMigration = false; }
+            status = $"Re-probed once so the preview shows the {migrated.Count} migrated placement(s).  " + status;
+        }
     }
 
     // Sanity report on the current classification — mirrors the rig script's wheel clustering so the numbers
