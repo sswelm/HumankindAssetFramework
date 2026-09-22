@@ -685,6 +685,20 @@ public class GlbFuseTests
     }
 
     [Fact]
+    public void An_inverted_shallow_hull_with_a_low_rim_is_still_turned()
+    {
+        // PR #80 review, P2: the deck exemption judged height by the whole sheet's mean, which a rim lifts - so an
+        // inward-wound 20 x 6 hull with a 0.5 rim and nothing else in the model averaged to just above the floor,
+        // read as a level deck (its floor is 82 % of its area), and kept its plating pointing into the ship. The
+        // height that matters is the FLOOR's: those faces sit at the model's floor, and a hull's own bottom can never
+        // be above it.
+        var hull = Tray("Hull", 0, 20, 0, 6, -5f, 0.5f);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull), new[] { 0 }, 0.0);
+        Assert.Contains(r.Details, d => d.Contains("open, volume agreement -") && d.Contains("reversed whole"));
+        Assert.All(FusedNormals(r, "Hull_Fused").Where(n => Math.Abs(n[1]) > 0.5), n => Assert.True(n[1] < 0, "the hull bottom now faces down"));
+    }
+
+    [Fact]
     public void A_level_plate_authored_facing_down_is_left_to_the_evidence()
     {
         // The rule is one-sided on purpose. The frigate carries two 11.4 x 5.2 zero-thickness plates over its boat

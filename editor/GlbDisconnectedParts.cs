@@ -1802,16 +1802,20 @@ public static class GlbDisconnectedParts
             double score = n > 0 ? sum / n : 0.0;
             // HOW LEVEL, AND HOW HIGH (2026-09-20, the Confederate frigate's gun deck): area-weighted, so a big flat
             // surface decides and a few skirting faces do not.
-            double upSum = 0, upArea = 0, ySum = 0;
+            double upSum = 0, upArea = 0, ySum = 0, floorSum = 0, floorArea = 0;
             foreach (int f in isl)
             {
                 Vec3 nf = FaceNormal(f); double nlen = FLen(nf); if (nlen < 1e-12) continue;
-                double a = 0.5 * nlen;
-                upSum += (nf.Y / nlen) * a; upArea += a;
-                ySum += FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0).Y * a;
+                double a = 0.5 * nlen, up = nf.Y / nlen, cy = FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0).Y;
+                upSum += up * a; upArea += a; ySum += cy * a;
+                if (up > 0.5) { floorSum += cy * a; floorArea += a; }   // the FLOOR: the faces that actually point up
             }
             double upness = upArea > 0 ? upSum / upArea : 0.0;      // +1 = every face points up, -1 = down
             double islandY = upArea > 0 ? ySum / upArea : 0.0;
+            // THE DECK'S HEIGHT IS ITS FLOOR'S (PR #80 review, P2): the whole sheet's mean height counts the rim in,
+            // and a rim lifts it. An inverted shallow hull - floor at the model's floor, a low rim - averaged to just
+            // above floorY and so read as a deck. The floor faces alone do not: they sit AT the floor.
+            double floorFaceY = floorArea > 0 ? floorSum / floorArea : islandY;
             // DOUBLE-SKINNED SOLIDS (2026-09-17, the SS Romanic): the hull is two skins a few centimetres apart with
             // opposite normals, wound inside-out as a whole. Both rules above read ~0 on it (the cones of the two skins
             // cancel: agreement -0.01, thickness -0.0005; the radial score cancels the same way). What does not cancel:
@@ -1867,7 +1871,11 @@ public static class GlbDisconnectedParts
                 // reading "agreement +1.00, score +0.63" were turned over the moment the volume stopped protecting
                 // them, by a twin-in-front majority. And the exemption never reaches past the twin rule, which a
                 // double-skinned slab's underside still needs (A_double_skinned_solid_is_judged_by_which_side...).
-                bool deckFacingUp = (upness > 0.8 && islandY > floorY) || (upness > 0.5 && islandY > bellyY);
+                // `floorY` is a percentile, not the minimum, so "above the floor" carries a margin of a twentieth
+                // of the floor-to-belly rise: a hull's own bottom plating never clears it, the frigate's gun deck at
+                // 0.61 over a floor of -5 clears it by a mile.
+                double floorMargin = 0.05 * Math.Max(0.0, bellyY - floorY);
+                bool deckFacingUp = (upness > 0.8 && floorFaceY > floorY + floorMargin) || (upness > 0.5 && floorFaceY > bellyY);
                 reverse = volumeConfident && (volume >= 0 || !deckFacingUp) ? (volume < 0 && !enclosed)
                         : doubleSkin ? twinInFront > twinBehind
                         : deckFacingUp ? false                  // a deck, already facing up: nothing to correct

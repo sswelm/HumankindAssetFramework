@@ -59,6 +59,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   superstructure the source already had), the Confederate frigate, Romanic, Teutonic and paddle steamer unchanged.
   The diagnosis went wrong twice on the way — a mis-joined face map blamed the twin rule, and the first fix let the
   twin rule at correct decks — which is why every sheet's report line now carries `level` and `at y`.
+  **Review, P2:** the deck's height was the whole sheet's mean, which a rim lifts — so an inward-wound *shallow*
+  hull with a low rim averaged to just above the model's floor and kept its plating pointing into the ship. The
+  height that matters is the *floor's*: the faces that actually point up, which for a hull sit at the floor and can
+  never clear it. Its test was red on the previous cut.
 
 - **A failed district re-bake no longer destroys the previous building.** The unit paths have had E5 rollback since
   it was built; the district path never got it, and its steps are destructive by design — `BakeFxMesh` deletes
