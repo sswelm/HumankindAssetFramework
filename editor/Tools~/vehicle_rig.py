@@ -479,7 +479,11 @@ if _m2arg:
         if _o2.data.users > 1:
             _o2.data = _o2.data.copy()   # instanced shards share mesh data; each instance has its own target matrix
         _o2.parent = None
-        _o2.data.transform(_m2target[_o2])
+        # shape_keys=True (PR #78 review, P2): Mesh.transform() moves the VERTICES only by default and leaves every
+        # shape key where it was - and a mesh with shape keys is DISPLAYED from its keys, so a glTF morph target
+        # (a rigged Sketchfab download often carries one) snapped the model back to its file position with the
+        # matrix reset to identity below. Drilled: a cube at x=27 landed at the origin without this flag.
+        _o2.data.transform(_m2target[_o2], shape_keys=True)
         if _m2target[_o2].determinant() < 0.0:
             _o2.data.flip_normals()      # a mirrored source node: what transform_apply does for a negative matrix
         _o2.matrix_world = Matrix.Identity(4)

@@ -27,6 +27,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   `-0.0000`, and one — a **mirrored and rotated** root — where master was the one off (it missed an independently
   computed ground truth by up to 0.09; the new path matches it to the digit). The mirrored case needs its faces
   re-flipped after the bake, and that line is fault-injected: without it a closed cube's signed volume reads −8.
+  **Review, P2:** baking into the vertices moves the vertices only — `Mesh.transform()` leaves shape keys where
+  they were unless told, and a mesh with shape keys is *displayed* from its keys, so a glTF morph target (a rigged
+  Sketchfab download often carries one) snapped straight back to its file position, uniform recipes included. A cube
+  at x=27 landed at the origin. `shape_keys=True`, and a new manual drill (`tools/drill-merge2.py`) that generates
+  its fixtures in Blender and asserts all three placements above; it fails on exactly that line when reverted.
 
 - **A failed district re-bake no longer destroys the previous building.** The unit paths have had E5 rollback since
   it was built; the district path never got it, and its steps are destructive by design — `BakeFxMesh` deletes
