@@ -180,6 +180,34 @@ public static class VehicleLabRules
     // separator (a Sketchfab name can be anything), so BOTH sides split from the RIGHT: the last two fields are the
     // numeric triples and whatever is left is the name — the rule TryParsePartLine learned the hard way. Invariant
     // culture on both sides: a comma decimal would silently corrupt a triple on a German machine.
+    // ---- SECOND-MODEL SCALE, PER AXIS (2026-09-21; user: "what I meant by scale is Scale X, Scale Y, Scale Z") ----
+    // The second model had ONE uniform scale — enough to reconcile units (a cm file next to a metre one), not enough
+    // to fit a part borrowed from another ship: a paddle wheel cut from one hull has to match the new hull's beam AND
+    // its freeboard, and those rarely differ by the same factor. Offset and Rotation were already per axis.
+    //
+    // The scale field of the merge2= argument: "sx,sy,sz". A component that is not a positive finite number becomes 1
+    // HERE as well as at the script boundary — zero collapses the model to a plane and a negative one mirrors it,
+    // which reverses every triangle's winding and the bake then renders it inside out. Five decimals, invariant:
+    // "0.###" once rounded a sub-0.0005 unit factor to a literal 0, and a Dutch locale writes 0,5.
+    public static string Merge2ScaleField(float sx, float sy, float sz)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        string F(float v) => (v > 0f && !float.IsInfinity(v) && !float.IsNaN(v) ? v : 1f).ToString("0.#####", inv);
+        return F(sx) + "," + F(sy) + "," + F(sz);
+    }
+
+    // RECIPE MIGRATION. Recipes written before this change carry the single `model2Scale` and no per-axis key, so the
+    // per-axis value deserializes to its initializer (1,1,1) and the old number must not be lost: the effective scale
+    // is legacy x per-axis, component-wise. A new recipe writes legacy = 1, so the product is simply the per-axis
+    // value; an old recipe has per-axis = 1, so the product is the old uniform number on all three axes. Anything
+    // non-positive on either side counts as 1 (a hand-edited 0 must not collapse the model).
+    public static float[] Model2ScaleOnLoad(float legacyUniform, float sx, float sy, float sz)
+    {
+        float P(float v) => v > 0f && !float.IsInfinity(v) && !float.IsNaN(v) ? v : 1f;
+        float u = P(legacyUniform);
+        return new[] { u * P(sx), u * P(sy), u * P(sz) };
+    }
+
     public static string PartPlacementLine(string name, float ox, float oy, float oz, float sx, float sy, float sz)
     {
         var inv = System.Globalization.CultureInfo.InvariantCulture;

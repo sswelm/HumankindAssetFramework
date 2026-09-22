@@ -38,9 +38,14 @@ to build the atlas.
 into the same scene before the probe: a figurehead grafted onto a hull, a different sail on a mast, two hulls into a
 composite. Its parts arrive with a **`B_` prefix** (both sources typically name parts `Object_N`) and take roles,
 reduce dials and rigging exactly like the first model's. Three placement controls — **Offset** (in the first model's
-units), **Rotation** (Euler °, X→Y→Z about its own origin), and **Scale** (uniform — two sources rarely agree on
-units; a cm-authored file next to a meter one is 100× off). The Generate log prints the placed **`B bbox`** next to
-the part list, so alignment is dialed with numbers, not eyeballs. Not available on the source-skeleton fast path.
+units), **Rotation** (Euler °, X→Y→Z about its own origin), and **Scale (X, Y, Z)** — per axis since 0.5.7. Type
+the same number three times for a plain unit fix (two sources rarely agree on units; a cm-authored file next to a
+meter one is 100× off), or different numbers to **fit a borrowed part**: a paddle wheel cut from one ship has to match
+the new hull's beam *and* its freeboard, and those rarely differ by the same factor. Probe, read the `B_` row's size,
+and divide — wanted size ÷ current size, per axis. The order is scale, then rotation, then offset, so the scale axes
+are the second model's own, as it arrives, *before* your Rotation dial turns it; a zero or negative component counts
+as 1 (zero flattens the model, a negative one mirrors it inside out). The Generate log prints the placed **`B bbox`**
+next to the part list, so alignment is dialed with numbers, not eyeballs. Not available on the source-skeleton fast path.
 Watch the combined triangle count against the draw ceiling (section 9).
 
 Two sources rarely agree on exposure either: the **Brightness** sliders (one per source, default 1) multiply

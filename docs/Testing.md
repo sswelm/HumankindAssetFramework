@@ -87,6 +87,9 @@ the mismatch has already eaten files once, commit `db40e73`.) The hook (`tools/g
 version-controlled) then blocks a failing push; bypass only in a real emergency
 with `git push --no-verify`. Deliberately **not** in the gate (too slow / need Unity, Blender, or the game): the Blender
 golden-master `deploy_regression.sh`, the in-editor bake tests, and the in-game binding report — those stay manual.
+So does `python tools/drill-merge2.py` (six Blender launches, 1–2 min): it generates its own fixtures and drills the
+Vehicle Lab's second-model merge through the real `vehicle_rig.py` — a glTF morph target keeping its position,
+per-axis scale under a rotated root, a mirrored source facing outward. Run it after touching the merge block.
 
 ### Wiki publication after CI
 

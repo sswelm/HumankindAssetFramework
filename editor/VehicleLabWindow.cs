@@ -230,7 +230,7 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] string srcFile2 = "";
     [SerializeField] Vector3 model2Off = Vector3.zero;
     [SerializeField] Vector3 model2Rot = Vector3.zero;
-    [SerializeField] float model2Scale = 1f;
+    [SerializeField] Vector3 model2Scale = Vector3.one;   // PER AXIS since 2026-09-21 (was one uniform float); the field keeps its name, the recipe keeps its legacy key
     // BRIGHTNESS (2026-09-13, the TOW launcher vs its tripod): per-SOURCE albedo multiplier so a merged
     // pair reads as one unit instead of a patched model. Applied in Blender to base-color textures/values
     // only (never normal/roughness maps), baked into the GLB — preview, probe and Factory atlas all agree.
@@ -393,7 +393,8 @@ public class VehicleLabWindow : EditorWindow
         public string srcFile2 = "";           // optional second model merged into the scene (absent-key "" == none)
         public Vector3 model2Off = Vector3.zero;    // its placement against the first model
         public Vector3 model2Rot = Vector3.zero;    // Euler degrees, X then Y then Z, about its own origin
-        public float model2Scale = 1f;         // uniform — reconciles unit mismatches (absent-key... 0 guards to 1 on load)
+        public float model2Scale = 1f;         // LEGACY uniform scale — read for recipes saved before 2026-09-21, always written as 1 since (see VehicleLabRules.Model2ScaleOnLoad)
+        public Vector3 model2ScaleXYZ = Vector3.one;   // per-axis scale of the second model; absent key == (1,1,1), so an old recipe's legacy number carries over untouched
         public float model1Bright = 1f;        // per-source albedo multiplier, first model (absent-key 1 == untouched)
         public float model2Bright = 1f;        // per-source albedo multiplier, second model (absent-key 1 == untouched)
         // TAIL ROTOR (review round 3, 2026-09-06): these fed the Blender command since the helicopter era but
@@ -545,7 +546,7 @@ public class VehicleLabWindow : EditorWindow
                 (string.IsNullOrWhiteSpace(srcFile2) ? "none"
                     : $"{Path.GetFileName(srcFile2)} · offset ({model2Off.x:0.##}, {model2Off.y:0.##}, {model2Off.z:0.##})"
                       + (model2Rot != Vector3.zero ? $" · rot ({model2Rot.x:0.#}, {model2Rot.y:0.#}, {model2Rot.z:0.#})" : "")
-                      + (Mathf.Approximately(model2Scale, 1f) ? "" : $" · x{model2Scale:0.###}"))
+                      + (model2Scale == Vector3.one ? "" : $" · scale ({model2Scale.x:0.###}, {model2Scale.y:0.###}, {model2Scale.z:0.###})"))
                 + (Mathf.Approximately(model1Bright, 1f) ? "" : $" · bright A x{model1Bright:0.##}")
                 + (!string.IsNullOrWhiteSpace(srcFile2) && !Mathf.Approximately(model2Bright, 1f) ? $" · bright B x{model2Bright:0.##}" : "")))
         {
@@ -571,9 +572,16 @@ public class VehicleLabWindow : EditorWindow
                     "prints the placed B bbox next to the part list — align with numbers, not eyeballs."), model2Off);
                 model2Rot = EditorGUILayout.Vector3Field(new GUIContent("Rotation (°)",
                     "Euler degrees applied to the second model (X, then Y, then Z) about its own origin, before the offset."), model2Rot);
-                model2Scale = EditorGUILayout.FloatField(new GUIContent("Scale",
-                    "Uniform scale for the second model. Two sources rarely agree on units (a cm-authored file next " +
-                    "to a meter one is 100x off) — this is the dial that reconciles them. 1 = as authored."), model2Scale);
+                // A saved window layout still holds this field as the old single float; Unity cannot map that onto a
+                // Vector3 and may hand back (0,0,0). ALL THREE non-positive can only be that — typing a lone 0 into one
+                // box mid-keystroke never trips it (review finding 7: a live guard must not fight "0.5").
+                if (model2Scale.x <= 0f && model2Scale.y <= 0f && model2Scale.z <= 0f) model2Scale = Vector3.one;
+                model2Scale = EditorGUILayout.Vector3Field(new GUIContent("Scale (X, Y, Z)",
+                    "Per-axis scale for the second model, along its OWN axes — applied first, then the Rotation, then the " +
+                    "Offset, so a rotated model never shears. Type the same number three times for a plain unit fix (a " +
+                    "cm-authored file next to a meter one is 100x off); use different numbers to FIT a borrowed part — a " +
+                    "paddle wheel to a new hull's beam and freeboard. Read each B_ row's size after a Probe and divide: " +
+                    "wanted size / current size, per axis. 1 = as authored; zero or negative counts as 1."), model2Scale);
                 // NO live guard here (review finding 7: snapping 0 -> 1 mid-keystroke fought typing "0.5") —
                 // the recipe-load guard and the Merge2Arg/rig-script boundary guards own the invariant.
             }
@@ -821,7 +829,7 @@ public class VehicleLabWindow : EditorWindow
                     tailYawAdj = EditorGUILayout.Slider(new GUIContent("Tail axle yaw trim", "Swing the tail axle left/right about vertical, degrees — on top of the Auto/forced axle. Dial by eye until the fan spins flat in its ring."), tailYawAdj, -90f, 90f);
                     tailPitchAdj = EditorGUILayout.Slider(new GUIContent("Tail axle pitch trim", "Tilt the tail axle up/down, degrees — on top of the Auto/forced axle. Dial by eye until the fan spins flat in its ring."), tailPitchAdj, -90f, 90f);
                 }
-                frames = EditorGUILayout.IntSlider(new GUIContent("Spin frames", "Length of the generated Spin action. Apparent speed is tuned later with slice steps (Spin[1..N/2]) — this just needs to be a smooth loop."), frames, 5, 60);
+                frames = EditorGUILayout.IntSlider(new GUIContent("Spin frames", "Length of the generated Spin action. Apparent speed is tuned later with slice steps (Spin[1..N/2]) — this just needs to be a smooth loop. Up to 100: a big slow wheel (a paddle steamer's) wants a long clip, so one turn stays smooth at the slowest slice step."), frames, 5, 100);   // ceiling 60 -> 100 (2026-09-21, user: paddle wheels); the rig script has no upper limit and the wave rock already bakes longer clips
                 degrees = EditorGUILayout.Slider(new GUIContent("Spin degrees", "Wheel rotation over the clip (one full turn = 360). Which SIGN rolls forward depends on the model's nose direction — check the preview and negate if the wheels roll backward. For a +X-facing model (like the Ehrhardt), +360 is forward."), degrees, -720f, 720f);
                 if (list.Any(x => x.role == Role.Caterpillar))
                 {
@@ -1748,7 +1756,7 @@ public class VehicleLabWindow : EditorWindow
         // stroke into the next model) — reset to the live defaults, same values as a fresh window.
         doubleSided = false; fixInsideOut = false;
         oarSweepDeg = 24f; oarDipDeg = 18f; oarFrames = 24; oarBladeRollDeg = 0f; oarLiftDeg = 0f; oarRakeDeg = 0f; oarPivotPct = 30f; oarLengthPct = 100f;
-        riggingReducePct = 75f; structureReducePct = 50f; bodyReducePct = 0f; oarReducePct = 0f; sailReducePct = 0f; rudderReducePct = 0f; wheelReducePct = 0f; flipReducePct = 0f; preserveReducePct = 0f; defaultReducePct = 0f; detailReducePct = 0f; shroudReducePct = 0f; sailFoldIdle = false; sailFoldFrames = 12; sailFoldAngleDeg = 270f; sailFoldReverse = false; sailFoldSag = 0f; flagFoldOn = false; flagFoldDeg = 0f; flagFoldFrames = 12; srcFile2 = ""; model2Off = Vector3.zero; model2Rot = Vector3.zero; model2Scale = 1f; model1Bright = 1f; model2Bright = 1f;
+        riggingReducePct = 75f; structureReducePct = 50f; bodyReducePct = 0f; oarReducePct = 0f; sailReducePct = 0f; rudderReducePct = 0f; wheelReducePct = 0f; flipReducePct = 0f; preserveReducePct = 0f; defaultReducePct = 0f; detailReducePct = 0f; shroudReducePct = 0f; sailFoldIdle = false; sailFoldFrames = 12; sailFoldAngleDeg = 270f; sailFoldReverse = false; sailFoldSag = 0f; flagFoldOn = false; flagFoldDeg = 0f; flagFoldFrames = 12; srcFile2 = ""; model2Off = Vector3.zero; model2Rot = Vector3.zero; model2Scale = Vector3.one; model1Bright = 1f; model2Bright = 1f;
         // …and the pre-0.5.4 generation dials the reset had ALWAYS skipped (review round 2): a tuned trail
         // spread, gun trunnion, recoil or tail-rotor trim silently carried into the next model too.
         spinEnabled = true; trailSpreadDeg = 35f; trailFrames = 12; gunPivot = 0.5f; gunDeployElev = 0f;
@@ -1876,7 +1884,7 @@ public class VehicleLabWindow : EditorWindow
         srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
         parts = parts, boneParts = boneParts, useSourceRig = useSourceRig, treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink,
         // orientation + tread isolation + wave rock — the rest of what the bake command consumes
-        tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct, wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, defaultReducePct = defaultReducePct, shroudReducePct = shroudReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag, flagFoldOn = flagFoldOn, flagFoldDeg = flagFoldDeg, flagFoldFrames = flagFoldFrames, srcFile2 = srcFile2, model2Off = model2Off, model2Rot = model2Rot, model2Scale = model2Scale, model1Bright = model1Bright, model2Bright = model2Bright, tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, modelRot = modelRot, waveEnabled = waveEnabled,
+        tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct, wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, defaultReducePct = defaultReducePct, shroudReducePct = shroudReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag, flagFoldOn = flagFoldOn, flagFoldDeg = flagFoldDeg, flagFoldFrames = flagFoldFrames, srcFile2 = srcFile2, model2Off = model2Off, model2Rot = model2Rot, model2Scale = 1f, model2ScaleXYZ = model2Scale, model1Bright = model1Bright, model2Bright = model2Bright, tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, modelRot = modelRot, waveEnabled = waveEnabled,
         trailSpreadDeg = trailSpreadDeg, trailFrames = trailFrames, gunPivot = gunPivot, gunDeployElev = gunDeployElev, recoilDist = recoilDist, recoilFrames = recoilFrames, recoilLead = recoilLead,
         rockDegrees = rockDegrees, rockFrames = rockFrames, rockAxisChoice = rockAxisChoice, rockHeading = rockHeading,
         rockPitchDeg = rockPitchDeg, rockRollCycles = rockRollCycles, rockPitchCycles = rockPitchCycles, rockPitchPhase = rockPitchPhase,
@@ -1995,7 +2003,9 @@ public class VehicleLabWindow : EditorWindow
             flagFoldOn = r.flagFoldOn;   // absent-key false == the naval strike (ships unchanged)
             flagFoldDeg = Mathf.Clamp(r.flagFoldDeg, -175f, 175f); flagFoldFrames = r.flagFoldFrames <= 0 ? 12 : r.flagFoldFrames;   // in fold mode, angle 0 == stays deployed
             srcFile2 = (r.srcFile2 ?? "").Trim(); model2Off = r.model2Off; model2Rot = r.model2Rot;
-            model2Scale = r.model2Scale <= 0f ? 1f : r.model2Scale;   // absent key deserializes 0 for floats inside old recipes? No — initializer 1 holds; <=0 guards a hand-edited file
+            // legacy uniform x per-axis, component-wise: an old recipe (no per-axis key) keeps its number on all three axes,
+            // a new one (legacy written as 1) is simply its per-axis value; non-positive on either side counts as 1.
+            { var m2s = VehicleLabRules.Model2ScaleOnLoad(r.model2Scale, r.model2ScaleXYZ.x, r.model2ScaleXYZ.y, r.model2ScaleXYZ.z); model2Scale = new Vector3(m2s[0], m2s[1], m2s[2]); }
             model1Bright = r.model1Bright <= 0f ? 1f : r.model1Bright; model2Bright = r.model2Bright <= 0f ? 1f : r.model2Bright;   // same guard shape
             tailAxisChoice = r.tailAxisChoice; tailYawAdj = r.tailYawAdj; tailPitchAdj = r.tailPitchAdj;   // absent-key 0 == Auto/no trim, the old effective behavior
             trailSpreadDeg = r.trailSpreadDeg; trailFrames = r.trailFrames; gunPivot = r.gunPivot; gunDeployElev = r.gunDeployElev; recoilDist = r.recoilDist; recoilFrames = r.recoilFrames; recoilLead = r.recoilLead;
@@ -2267,7 +2277,7 @@ public class VehicleLabWindow : EditorWindow
         EditorGUIUtility.systemCopyBuffer = lastOutGlb;   // ready to paste into the Factory's Browse field
     }
 
-    // The SECOND-MODEL merge argument — TAGGED (merge2=path|off|rot|scale), scanned by the rig script rather
+    // The SECOND-MODEL merge argument — TAGGED (merge2=path|off|rot|sx,sy,sz), scanned by the rig script rather
     // than indexed, because probe and rig have different positional layouts and BOTH need the merged scene.
     // '|' is illegal in Windows paths, so the split is unambiguous. Empty when no second model is set.
     // The probe's ORIENTATION argument (review P2, 2026-09-13): the inside-out flip verdicts must be judged in
@@ -2298,7 +2308,7 @@ public class VehicleLabWindow : EditorWindow
         if (string.IsNullOrWhiteSpace(srcFile2)) return "";
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         string F(float v) => v.ToString("0.#####", inv);   // 0.### rounded a sub-0.0005 scale to a literal "0" (review finding 7) — 5 places covers any sane unit factor
-        return $" \"merge2={srcFile2.Trim().Replace('\\', '/')}|{F(model2Off.x)},{F(model2Off.y)},{F(model2Off.z)}|{F(model2Rot.x)},{F(model2Rot.y)},{F(model2Rot.z)}|{F(model2Scale <= 0f ? 1f : model2Scale)}\"";
+        return $" \"merge2={srcFile2.Trim().Replace('\\', '/')}|{F(model2Off.x)},{F(model2Off.y)},{F(model2Off.z)}|{F(model2Rot.x)},{F(model2Rot.y)},{F(model2Rot.z)}|{VehicleLabRules.Merge2ScaleField(model2Scale.x, model2Scale.y, model2Scale.z)}\"";
     }
 
     // The per-source BRIGHTNESS argument — tagged like merge2 (probe and rig both need it so the preview
