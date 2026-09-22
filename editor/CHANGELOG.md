@@ -5,6 +5,16 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab: a Shroud role with its own reduce dial** (user request). The standing rigging — shrouds, stays,
+  ratlines — is the densest geometry on a sailing ship and wants a harder cut than the running rigging, and it must
+  *not* ride the Sail bone the way Rigging can (it holds the mast up). Same soup-pass reduction as Rigging (no weld;
+  dissolve + collapse), a **Shroud reduce (%)** slider in Vertices control, a Show-only filter, and `shroud` /
+  `ratline` auto-guessed from part names. Reaches the rig script as a tagged `shroudreduce=@file|percent`, absent
+  while the dial is 0, so an older script and a newer Lab still run together. Drilled in rig mode on three identical
+  3,178-vertex rope tubes: Rigging at 50 → 46% cut, Shroud at 80 → 62% cut (the soup pass bottoms out at each
+  island's minimum topology, as for Rigging), and the two dials never touch each other's parts. The role is
+  appended *last* in the enum on purpose: a recipe stores roles as integers.
+
 - **A failed district re-bake no longer destroys the previous building.** The unit paths have had E5 rollback since
   it was built; the district path never got it, and its steps are destructive by design — `BakeFxMesh` deletes
   `_DistrictMesh` and `_FxMesh` before re-creating them, so `CreateAsset` cannot keep a stale serialized ref, and
