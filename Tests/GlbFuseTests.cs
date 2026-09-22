@@ -735,6 +735,31 @@ public class GlbFuseTests
         Assert.All(FusedNormals(r, "Hull_Fused").Where(n => Math.Abs(n[1]) > 0.5), n => Assert.True(n[1] < 0, "the hull bottom now faces down"));
     }
 
+    // ---- parity repair: a face's colour is the one most of its edges support (2026-09-23, SMS Wespe) ----
+    [Fact]
+    public void A_bridge_face_reached_through_a_reversed_patch_takes_its_neighbours_colour()
+    {
+        // Faces 0,1 = the correct majority (colour 1); 2 = a reversed patch face (colour 0, joined to the majority by a
+        // same-way edge, as a reversed patch is); 3 = the BRIDGE, consistent ("opp") with all three, reached first
+        // through the patch and so coloured 0. Its two majority edges are unsatisfied, its patch edge satisfied.
+        var parity = new[] { 1, 1, 0, 0 };
+        var edges = new List<(int a, int b, bool same)> { (0, 1, false), (2, 0, true), (3, 0, false), (3, 1, false), (3, 2, false) };
+        int n = GlbDisconnectedParts.RepairParity(parity, new[] { 0, 1, 2, 3 }, edges);
+        Assert.Equal(1, n);
+        Assert.Equal(new[] { 1, 1, 0, 1 }, parity);   // the bridge joined the majority; the patch is still the patch
+    }
+
+    [Fact]
+    public void Parity_repair_leaves_a_consistent_sheet_alone_and_terminates_on_a_contradiction()
+    {
+        var ok = new[] { 0, 1, 0, 1 };
+        Assert.Equal(0, GlbDisconnectedParts.RepairParity(ok, new[] { 0, 1, 2, 3 }, new List<(int, int, bool)> { (0, 1, true), (1, 2, true), (2, 3, true) }));
+        // an odd cycle of same-way edges (a Möbius strip in three faces) cannot be satisfied: the repair must stop
+        var m = new[] { 0, 1, 0 };
+        int n = GlbDisconnectedParts.RepairParity(m, new[] { 0, 1, 2 }, new List<(int, int, bool)> { (0, 1, true), (1, 2, true), (2, 0, true) });
+        Assert.True(n <= 16 * 3);
+    }
+
     [Fact]
     public void A_level_plate_authored_facing_down_is_left_to_the_evidence()
     {

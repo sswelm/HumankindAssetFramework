@@ -1025,6 +1025,43 @@ public static class GlbDisconnectedParts
     public sealed class FuseJob { public IList<int> NodeIndices; public string Name; public bool CheckMirrored; }
 
     /// <summary>
+    /// PARITY REPAIR (2026-09-23, SMS Wespe). The parity walk gives every face of a sheet a colour by the first path
+    /// that reaches it, and on a sheet with one contradiction that first path can be the wrong one: a BRIDGE face wound
+    /// consistently with a reversed patch AND with the correct majority (a riser at the platform step, reached through
+    /// the patch first) inherits the patch's colour, its two majority edges become the sheet's only unsatisfied edges,
+    /// and the majority flip then turns a correct face over — see-through from the bow. A face's colour should be the
+    /// one MOST of its own edges support: while any face has more unsatisfied partnered edges than satisfied ones,
+    /// recolour it. Each recolouring strictly lowers the sheet's unsatisfied count, so this terminates; a pure kernel
+    /// over the sheet's edge list so it can be pinned by a test.
+    /// Edges: (a, b, same) — faces a and b share an edge and walk it the same way (inconsistent as authored) when
+    /// `same`; an edge is satisfied when parity[a] ^ parity[b] == (same ? 1 : 0). Returns the number of recolourings.
+    /// </summary>
+    public static int RepairParity(int[] parity, IList<int> faces, IList<(int a, int b, bool same)> edges, int maxRounds = 16)
+    {
+        var byFace = new Dictionary<int, List<int>>();
+        for (int i = 0; i < edges.Count; i++)
+        {
+            if (!byFace.TryGetValue(edges[i].a, out var la)) byFace[edges[i].a] = la = new List<int>(); la.Add(i);
+            if (!byFace.TryGetValue(edges[i].b, out var lb)) byFace[edges[i].b] = lb = new List<int>(); lb.Add(i);
+        }
+        int total = 0;
+        for (int round = 0; round < maxRounds; round++)
+        {
+            int changed = 0;
+            foreach (int f in faces)
+            {
+                if (!byFace.TryGetValue(f, out var le)) continue;
+                int sat = 0, unsat = 0;
+                foreach (int i in le) { var e = edges[i]; if (((parity[e.a] ^ parity[e.b]) == (e.same ? 1 : 0))) sat++; else unsat++; }
+                if (unsat > sat) { parity[f] ^= 1; changed++; }
+            }
+            total += changed;
+            if (changed == 0) break;
+        }
+        return total;
+    }
+
+    /// <summary>
     /// Fuse several groups from ONE source in one output: every group is planned in parallel against the same source
     /// bytes, then applied in the given order (so the fused parts are appended in that order, exactly as chaining
     /// FuseNodes group by group would). <paramref name="onTick"/> is called on the CALLING thread every ~100 ms while
@@ -1592,6 +1629,16 @@ public static class GlbDisconnectedParts
         for (int ii = 0; ii < sheets.Count; ii++)
         {
             List<int> isl = sheets[ii];
+            // the sheet's partnered edges, each once, with the traversal relation the walk used (lap rule included)
+            var sheetEdges = new List<(int a, int b, bool same)>();
+            foreach (int f in isl) for (int e = 0; e < 3; e++)
+            {
+                long key = fEdgeKeys[f * 3 + e]; int g = partner[f * 3 + e];
+                if (key < 0 || g < 0 || g < f) continue;
+                bool sm; if (!edgeSame.TryGetValue(PairKey(f, g), out sm)) sm = fEdgeDir[f * 3 + e] == DirOf(g, key);
+                sheetEdges.Add((f, g, sm));
+            }
+            int repaired = RepairParity(parityOf, isl, sheetEdges);
             int ones = 0; foreach (int f in isl) ones += parityOf[f];
             // every 2-face edge (tree or not): same-traversal count before, and after the parity assignment how many
             // edges are still unsatisfied — a 2-colourable sheet (the hull: one seam, one region) resolves to zero,
@@ -1615,7 +1662,7 @@ public static class GlbDisconnectedParts
                     }
                 }
             }
-            islandConflict[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} of {1} edges same-way, {2} unsatisfied after", sameBefore, twoFaceEdges, unsatisfied);
+            islandConflict[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} of {1} edges same-way, {2} unsatisfied after{3}", sameBefore, twoFaceEdges, unsatisfied, repaired > 0 ? " (" + repaired + " recoloured)" : "");
             if (conflicts.Count > 0)   // the reader's next question is WHERE: the four heaviest part pairs
                 islandConflict[ii] += " at " + string.Join(", ", conflicts.OrderByDescending(kv => kv.Value).Take(4).Select(kv => kv.Key + " ×" + kv.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)));
             // NOT ORIENTABLE BY TRAVERSAL (2026-09-17, the Teutonic's propellers): a blade renders right yet 32 of its

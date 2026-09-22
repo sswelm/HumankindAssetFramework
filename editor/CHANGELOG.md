@@ -42,6 +42,18 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   Sketchfab download often carries one) snapped straight back to its file position, uniform recipes included. A cube
   at x=27 landed at the origin. `shape_keys=True`, and a new manual drill (`tools/drill-merge2.py`) that generates
   its fixtures in Blender and asserts all three placements above; it fails on exactly that line when reverted.
+- **Model Fuser: a bridge face no longer takes a reversed patch's colour** (user: "still see-through from the front",
+  SMS Wespe, after the deck fix). The consistency pass colours every face of a sheet by the first path that reaches
+  it. On the Wespe's hull that path ran through a 253-face patch wound backwards, and a riser at the platform step —
+  wound consistently with the patch *and* with the correct majority, a bridge — inherited the patch's colour; its two
+  majority edges became the sheet's only unsatisfied edges, and the majority flip turned a correct face over. A face's
+  colour is now the one most of its own edges support: while any face has more unsatisfied edges than satisfied,
+  recolour it (each step lowers the sheet's unsatisfied count, so it terminates). Measured per face in six directions,
+  on the committed deck fix as baseline: the Wespe's one visible bridge face turned solid and 40 invisible faces
+  recoloured; the frigate two invisible faces; Romanic, Teutonic and paddle steamer untouched. The report's
+  `unsatisfied after` now says how many faces were recoloured. Two pure-kernel tests: the bridge case, and that a
+  consistent sheet is left alone while an odd cycle terminates.
+
 - **Model Fuser: a deck with a raised edge is no longer turned over** (user: "a fusion issue causing transparent deck",
   SMS Wespe). The gun platform came out of the fuse see-through from above — 242 of the 251 see-through cells on the
   whole fused deck traced to that one 281-face sheet. Bulwark and coaming faces make a deck sheet a shallow *tray*,
