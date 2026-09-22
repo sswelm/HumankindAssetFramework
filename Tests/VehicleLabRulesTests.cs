@@ -140,5 +140,51 @@ namespace HumankindAssetFramework.Tests
             var zeroArea = new Dictionary<string, double> { ["Hull"] = 0 };
             Assert.Equal(-1f, VehicleLabRules.FlatShare("Hull", zeroArea, zeroArea));
         }
+        // ---- second-model scale, per axis (2026-09-21; user: "what I meant by scale is Scale X, Scale Y, Scale Z") ----
+        [Fact]
+        public void Merge2_scale_field_carries_three_axes_invariantly()
+        {
+            Assert.Equal("0.5,2,1.25", VehicleLabRules.Merge2ScaleField(0.5f, 2f, 1.25f));
+            // the unit-factor case "0.###" once rounded to a literal 0
+            Assert.Equal("0.0004,0.0004,0.0004", VehicleLabRules.Merge2ScaleField(0.0004f, 0.0004f, 0.0004f));
+            var prev = System.Threading.Thread.CurrentThread.CurrentCulture;
+            try
+            {
+                System.Threading.Thread.CurrentThread.CurrentCulture = new System.Globalization.CultureInfo("nl-NL");
+                Assert.Equal("0.5,1.5,2.5", VehicleLabRules.Merge2ScaleField(0.5f, 1.5f, 2.5f));   // never "0,5" — the comma is the separator
+            }
+            finally { System.Threading.Thread.CurrentThread.CurrentCulture = prev; }
+        }
+
+        [Fact]
+        public void Merge2_scale_field_refuses_collapse_and_mirror_per_component()
+        {
+            // zero flattens the model, a negative component mirrors it (reversed winding, baked inside out);
+            // only the bad component falls back, the others keep what was typed
+            Assert.Equal("1,1,3", VehicleLabRules.Merge2ScaleField(0f, -2f, 3f));
+            Assert.Equal("1,1,1", VehicleLabRules.Merge2ScaleField(float.NaN, float.PositiveInfinity, float.NegativeInfinity));
+        }
+
+        [Fact]
+        public void An_old_recipe_keeps_its_uniform_scale_on_all_three_axes()
+        {
+            // written before the change: legacy 0.01, no per-axis key -> the DTO initializer (1,1,1)
+            Assert.Equal(new[] { 0.01f, 0.01f, 0.01f }, VehicleLabRules.Model2ScaleOnLoad(0.01f, 1f, 1f, 1f));
+        }
+
+        [Fact]
+        public void A_new_recipe_is_simply_its_per_axis_value()
+        {
+            // written after the change: legacy is always saved as 1
+            Assert.Equal(new[] { 0.5f, 2f, 1.25f }, VehicleLabRules.Model2ScaleOnLoad(1f, 0.5f, 2f, 1.25f));
+        }
+
+        [Fact]
+        public void A_hand_edited_zero_in_a_recipe_never_collapses_the_model()
+        {
+            Assert.Equal(new[] { 1f, 1f, 3f }, VehicleLabRules.Model2ScaleOnLoad(0f, 0f, -4f, 3f));
+            // Vector3 absent from a JsonUtility recipe can also arrive as (0,0,0) if the initializer is ever lost
+            Assert.Equal(new[] { 0.01f, 0.01f, 0.01f }, VehicleLabRules.Model2ScaleOnLoad(0.01f, 0f, 0f, 0f));
+        }
     }
 }

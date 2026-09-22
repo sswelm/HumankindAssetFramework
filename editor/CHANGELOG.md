@@ -5,6 +5,34 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab: Spin frames goes up to 100** (was 60; user request while rigging paddle wheels). A big slow wheel
+  wants a long clip so one turn stays smooth at the slowest slice step. Only the slider was capped — the rig script
+  never had an upper limit, and the wave rock already bakes longer clips.
+
+- **Vehicle Lab: the second model scales per axis** (user: "what I meant by scale is Scale X, Scale Y, Scale Z").
+  The merge had Offset and Rotation per axis and one uniform Scale — enough to reconcile units, not enough to fit a
+  part borrowed from another model: paddle wheels cut from one steamer have to match the new hull's beam and its
+  freeboard separately. **Scale (X, Y, Z)** replaces the single number; the same value three times is the old
+  behaviour. Old recipes keep their number on all three axes (the legacy key is still read and multiplied in), a
+  single-number `merge2=` argument still means uniform, and a zero or negative component counts as 1 at the Lab,
+  in the recipe and again at the script boundary — zero flattens the model, a negative one mirrors it inside out.
+
+  **Making it per axis exposed a placement that was only ever exact by luck.** The transform went onto the
+  import's top-level objects, and a Blender object cannot hold a shear — harmless while the scale was uniform, which
+  commutes with any rotation. Per axis it does not: a 4 × 1 box under a root rotated 30° inside its file, scaled
+  (2, 1, 1), measured **6.82 × 4.93** where **7.93 × 2.87** was asked. (A 90° root, the Sketchfab shape, happened to
+  be exact — the axes only permute — which is why the first drill passed.) Each `B_` mesh's target matrix is now
+  taken as a full 4×4 and **baked into its vertices**, where a shear is just numbers; the rig path applied
+  transforms later anyway. Checked against master on six uniform cases: four byte-identical, one differing only in
+  `-0.0000`, and one — a **mirrored and rotated** root — where master was the one off (it missed an independently
+  computed ground truth by up to 0.09; the new path matches it to the digit). The mirrored case needs its faces
+  re-flipped after the bake, and that line is fault-injected: without it a closed cube's signed volume reads −8.
+  **Review, P2:** baking into the vertices moves the vertices only — `Mesh.transform()` leaves shape keys where
+  they were unless told, and a mesh with shape keys is *displayed* from its keys, so a glTF morph target (a rigged
+  Sketchfab download often carries one) snapped straight back to its file position, uniform recipes included. A cube
+  at x=27 landed at the origin. `shape_keys=True`, and a new manual drill (`tools/drill-merge2.py`) that generates
+  its fixtures in Blender and asserts all three placements above; it fails on exactly that line when reverted.
+
 - **A failed district re-bake no longer destroys the previous building.** The unit paths have had E5 rollback since
   it was built; the district path never got it, and its steps are destructive by design — `BakeFxMesh` deletes
   `_DistrictMesh` and `_FxMesh` before re-creating them, so `CreateAsset` cannot keep a stale serialized ref, and
