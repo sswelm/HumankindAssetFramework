@@ -42,6 +42,23 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   Sketchfab download often carries one) snapped straight back to its file position, uniform recipes included. A cube
   at x=27 landed at the origin. `shape_keys=True`, and a new manual drill (`tools/drill-merge2.py`) that generates
   its fixtures in Blender and asserts all three placements above; it fails on exactly that line when reverted.
+- **Model Fuser: a deck with a raised edge is no longer turned over** (user: "a fusion issue causing transparent deck",
+  SMS Wespe). The gun platform came out of the fuse see-through from above — 242 of the 251 see-through cells on the
+  whole fused deck traced to that one 281-face sheet. Bulwark and coaming faces make a deck sheet a shallow *tray*,
+  and a tray seen from above is the same surface as an open box wound inside out: its floor faces its own centroid,
+  so the signed volume reads confidently negative and the rule turned it whole. The deck exemption written for
+  exactly this sheet never got a say, because the volume rule ran first — and the rim drags the sheet's levelness
+  under the 0.8 gate besides (0.57 here). What separates a rimmed deck from an inside-out hull is height: a hull lies
+  at the model's floor, below the belly line by construction. So above the belly, facing up on balance is enough,
+  and a deck by either reading is exempt from a *negative* volume verdict — only that one. A confident positive
+  volume still settles a deck as kept ahead of the twin rule (the Romanic's seven decks reading `+1.00` were turned
+  over by a twin majority the moment the volume stopped protecting them, in the first cut), and the twin rule still
+  turns a double-skinned slab's underside. Three tests: the tray above the belly is kept, the same tray at the floor
+  is still an inside-out hull and is turned, and the slab's underside still turns. Measured by ray-casting every
+  fused ship in the model folder from above and below: the Wespe 397 → 138 see-through cells (the rest is
+  superstructure the source already had), the Confederate frigate, Romanic, Teutonic and paddle steamer unchanged.
+  The diagnosis went wrong twice on the way — a mis-joined face map blamed the twin rule, and the first fix let the
+  twin rule at correct decks — which is why every sheet's report line now carries `level` and `at y`.
 
 - **A failed district re-bake no longer destroys the previous building.** The unit paths have had E5 rollback since
   it was built; the district path never got it, and its steps are destructive by design — `BakeFxMesh` deletes

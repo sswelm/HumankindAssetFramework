@@ -1851,19 +1851,33 @@ public static class GlbDisconnectedParts
                 // blanket"). Keeping every level sheet as authored was tried next and was too weak: it left the sheets
                 // that genuinely face a hull's interior uncorrected, which four of this file's own tests pin down.
                 // Down-facing level sheets therefore keep going through the evidence that was there before.
-                // Below the floor (bottom plating) and for anything not level, the radial score stands. Confident
-                // volume and twin evidence still decide first, so a double-skinned deck keeps its underside.
-                bool deckFacingUp = upness > 0.8 && islandY > floorY;
-                reverse = volumeConfident ? (volume < 0 && !enclosed)
+                // Below the floor (bottom plating) and for anything not level, the radial score stands. Twin evidence
+                // still decides first, so a double-skinned deck keeps its underside.
+                //
+                // A DECK WITH A RIM (2026-09-22, SMS Wespe's gun platform: 242 of the 251 see-through cells on the whole
+                // fused deck came from this one 281-face sheet). Bulwark and coaming faces make a deck sheet a shallow
+                // TRAY, and a tray seen from above is the same surface as an open box wound inside out: its floor faces
+                // its own centroid, so the signed volume is confidently NEGATIVE ("volume agreement -1.00 thickness
+                // -0.0533, inside-out score +0.51: reversed whole") and the rim drags the area-weighted levelness under
+                // the 0.8 gate (0.57 here). What tells the two apart is HEIGHT: a hull wound inside out lies at the
+                // model's floor, below the belly line by construction (the belly is the 25th height percentile); a
+                // rimmed deck above the belly line is a deck. So above the belly, "facing up on balance" is enough, and
+                // a deck by either reading is exempt from a NEGATIVE volume verdict - only that one. A confident
+                // POSITIVE volume still settles a deck as kept, ahead of the twin rule: on the Romanic, seven decks
+                // reading "agreement +1.00, score +0.63" were turned over the moment the volume stopped protecting
+                // them, by a twin-in-front majority. And the exemption never reaches past the twin rule, which a
+                // double-skinned slab's underside still needs (A_double_skinned_solid_is_judged_by_which_side...).
+                bool deckFacingUp = (upness > 0.8 && islandY > floorY) || (upness > 0.5 && islandY > bellyY);
+                reverse = volumeConfident && (volume >= 0 || !deckFacingUp) ? (volume < 0 && !enclosed)
                         : doubleSkin ? twinInFront > twinBehind
                         : deckFacingUp ? false                  // a deck, already facing up: nothing to correct
                         : score < -0.25;
                 if (reverse) openReversed++;
             }
             if (reverse) foreach (int f in isl) flip[f] = !flip[f];
-            islandRule[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}, volume agreement {1:+0.00;-0.00} thickness {2:+0.0000;-0.0000}, inside-out score {3:+0.00;-0.00}{5}: {4}",
+            islandRule[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}, volume agreement {1:+0.00;-0.00} thickness {2:+0.0000;-0.0000}, inside-out score {3:+0.00;-0.00}, level {6:+0.00;-0.00} at y {7:0.##}{5}: {4}",
                 closed ? "closed" : "open", agreement, thickness, score, notOrientable[ii] ? "not judged" : reverse ? "reversed whole" : "kept",
-                partnered > 0 ? string.Format(System.Globalization.CultureInfo.InvariantCulture, ", double skin {0:0}% twinned ({1} twin in front / {2} behind, at {3:0.00} of reach, {4:0.00} straight)", 100.0 * partnered / isl.Count, twinInFront, twinBehind, twinDist[ii], twinStraight[ii]) : "");
+                partnered > 0 ? string.Format(System.Globalization.CultureInfo.InvariantCulture, ", double skin {0:0}% twinned ({1} twin in front / {2} behind, at {3:0.00} of reach, {4:0.00} straight)", 100.0 * partnered / isl.Count, twinInFront, twinBehind, twinDist[ii], twinStraight[ii]) : "", upness, islandY);
         }
         Mark("direction");
         foreach (bool b in flip) if (b) result.FacesRewound++;
