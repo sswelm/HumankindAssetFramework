@@ -419,8 +419,11 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   and each is judged on its own (a sheet whose winding cannot be made consistent at all — a propeller blade with
   fins, a twisted rim — is left as authored and named in the report, with the part pair it fails at), and direction judged once per sheet where it can be — a closed shell, a thin solid or a convex
   plating region by its signed volume about its own centroid (wound inward = reversed whole; trusted only where the
-  per-face volumes agree and there is real thickness), a *flat* sheet (deck, bulwark) by the inside-out score against
-  the hull's belly axis. Welded vertices share one position even where a UV seam or hard edge keeps them separate;
+  per-face volumes agree and there is real thickness — and never a *deck*: a level sheet already facing up above the
+  hull's floor, or facing up on balance above the belly line, is a deck however negative its volume reads, because a
+  deck with a rim is a tray and a tray seen from above is the same surface as a box wound inside out), a *flat* sheet
+  (deck, bulwark) by the inside-out score against the hull's belly axis. Every sheet's report line now carries its
+  levelness (`level +1.00` = every face up) and height, which is what makes a wrong verdict traceable. Welded vertices share one position even where a UV seam or hard edge keeps them separate;
   vertex colours, further UV sets and custom attributes ride along and keep their own seams too (tangents are the
   one thing dropped — the importer recomputes them from the new winding); and a mirrored instance (a node with negative scale, the usual "other half" of a symmetric hull) is read with the
   winding it renders with, its authored normals taking the sign of the final winding (a mirrored port side ships

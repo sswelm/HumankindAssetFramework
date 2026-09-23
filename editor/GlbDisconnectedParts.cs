@@ -1802,16 +1802,22 @@ public static class GlbDisconnectedParts
             double score = n > 0 ? sum / n : 0.0;
             // HOW LEVEL, AND HOW HIGH (2026-09-20, the Confederate frigate's gun deck): area-weighted, so a big flat
             // surface decides and a few skirting faces do not.
-            double upSum = 0, upArea = 0, ySum = 0;
+            double upSum = 0, upArea = 0, ySum = 0, floorLowY = double.PositiveInfinity;
             foreach (int f in isl)
             {
                 Vec3 nf = FaceNormal(f); double nlen = FLen(nf); if (nlen < 1e-12) continue;
-                double a = 0.5 * nlen;
-                upSum += (nf.Y / nlen) * a; upArea += a;
-                ySum += FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0).Y * a;
+                double a = 0.5 * nlen, up = nf.Y / nlen, cy = FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0).Y;
+                upSum += up * a; upArea += a; ySum += cy * a;
+                if (up > 0.5) floorLowY = Math.Min(floorLowY, Math.Min(P(f, 0).Y, Math.Min(P(f, 1).Y, P(f, 2).Y)));   // the FLOOR's lowest point
             }
             double upness = upArea > 0 ? upSum / upArea : 0.0;      // +1 = every face points up, -1 = down
             double islandY = upArea > 0 ? ySum / upArea : 0.0;
+            // THE DECK'S HEIGHT IS WHERE ITS FLOOR REACHES DOWN TO (PR #80 review, two P2s). The whole sheet's mean
+            // counts the rim in, and a rim lifts it: an inverted shallow hull averaged to just above floorY and read as
+            // a deck. The floor faces' MEAN is no better: a V-bottom's panels slope up from the keel, their mean clears
+            // the floor, and they are the hull bottom all the same. What a hull's floor does that a deck's never does
+            // is reach the model's floor - so the evidence is the lowest VERTEX of the up-facing faces.
+            double floorFaceY = double.IsPositiveInfinity(floorLowY) ? islandY : floorLowY;
             // DOUBLE-SKINNED SOLIDS (2026-09-17, the SS Romanic): the hull is two skins a few centimetres apart with
             // opposite normals, wound inside-out as a whole. Both rules above read ~0 on it (the cones of the two skins
             // cancel: agreement -0.01, thickness -0.0005; the radial score cancels the same way). What does not cancel:
@@ -1851,19 +1857,37 @@ public static class GlbDisconnectedParts
                 // blanket"). Keeping every level sheet as authored was tried next and was too weak: it left the sheets
                 // that genuinely face a hull's interior uncorrected, which four of this file's own tests pin down.
                 // Down-facing level sheets therefore keep going through the evidence that was there before.
-                // Below the floor (bottom plating) and for anything not level, the radial score stands. Confident
-                // volume and twin evidence still decide first, so a double-skinned deck keeps its underside.
-                bool deckFacingUp = upness > 0.8 && islandY > floorY;
-                reverse = volumeConfident ? (volume < 0 && !enclosed)
+                // Below the floor (bottom plating) and for anything not level, the radial score stands. Twin evidence
+                // still decides first, so a double-skinned deck keeps its underside.
+                //
+                // A DECK WITH A RIM (2026-09-22, SMS Wespe's gun platform: 242 of the 251 see-through cells on the whole
+                // fused deck came from this one 281-face sheet). Bulwark and coaming faces make a deck sheet a shallow
+                // TRAY, and a tray seen from above is the same surface as an open box wound inside out: its floor faces
+                // its own centroid, so the signed volume is confidently NEGATIVE ("volume agreement -1.00 thickness
+                // -0.0533, inside-out score +0.51: reversed whole") and the rim drags the area-weighted levelness under
+                // the 0.8 gate (0.57 here). What tells the two apart is HEIGHT: a hull wound inside out lies at the
+                // model's floor, below the belly line by construction (the belly is the 25th height percentile); a
+                // rimmed deck above the belly line is a deck. So above the belly, "facing up on balance" is enough, and
+                // a deck by either reading is exempt from a NEGATIVE volume verdict - only that one. A confident
+                // POSITIVE volume still settles a deck as kept, ahead of the twin rule: on the Romanic, seven decks
+                // reading "agreement +1.00, score +0.63" were turned over the moment the volume stopped protecting
+                // them, by a twin-in-front majority. And the exemption never reaches past the twin rule, which a
+                // double-skinned slab's underside still needs (A_double_skinned_solid_is_judged_by_which_side...).
+                // `floorY` is a percentile, not the minimum, so "above the floor" carries a margin of a twentieth
+                // of the floor-to-belly rise: a hull's own bottom plating never clears it, the frigate's gun deck at
+                // 0.61 over a floor of -5 clears it by a mile.
+                double floorMargin = 0.05 * Math.Max(0.0, bellyY - floorY);
+                bool deckFacingUp = (upness > 0.8 && floorFaceY > floorY + floorMargin) || (upness > 0.5 && floorFaceY > bellyY);
+                reverse = volumeConfident && (volume >= 0 || !deckFacingUp) ? (volume < 0 && !enclosed)
                         : doubleSkin ? twinInFront > twinBehind
                         : deckFacingUp ? false                  // a deck, already facing up: nothing to correct
                         : score < -0.25;
                 if (reverse) openReversed++;
             }
             if (reverse) foreach (int f in isl) flip[f] = !flip[f];
-            islandRule[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}, volume agreement {1:+0.00;-0.00} thickness {2:+0.0000;-0.0000}, inside-out score {3:+0.00;-0.00}{5}: {4}",
+            islandRule[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}, volume agreement {1:+0.00;-0.00} thickness {2:+0.0000;-0.0000}, inside-out score {3:+0.00;-0.00}, level {6:+0.00;-0.00} at y {7:0.##}{5}: {4}",
                 closed ? "closed" : "open", agreement, thickness, score, notOrientable[ii] ? "not judged" : reverse ? "reversed whole" : "kept",
-                partnered > 0 ? string.Format(System.Globalization.CultureInfo.InvariantCulture, ", double skin {0:0}% twinned ({1} twin in front / {2} behind, at {3:0.00} of reach, {4:0.00} straight)", 100.0 * partnered / isl.Count, twinInFront, twinBehind, twinDist[ii], twinStraight[ii]) : "");
+                partnered > 0 ? string.Format(System.Globalization.CultureInfo.InvariantCulture, ", double skin {0:0}% twinned ({1} twin in front / {2} behind, at {3:0.00} of reach, {4:0.00} straight)", 100.0 * partnered / isl.Count, twinInFront, twinBehind, twinDist[ii], twinStraight[ii]) : "", upness, islandY);
         }
         Mark("direction");
         foreach (bool b in flip) if (b) result.FacesRewound++;

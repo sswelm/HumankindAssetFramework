@@ -627,6 +627,114 @@ public class GlbFuseTests
         Assert.Equal(0, r.FacesRewound);
     }
 
+    // A deck with a RAISED EDGE: a floor at y with a rim of height `rim` all round, every face wound toward the tray's
+    // own centre - the floor up, the rim inward - which is how a deck with bulwarks, a hatch coaming or a boat's
+    // interior is seen from above. Oriented by construction (each quad turned to face the centre), so the fixture
+    // cannot be hand-wound wrong.
+    static Part Tray(string name, float x0, float x1, float z0, float z1, float y, float rim)
+    {
+        var P = new List<float>(); void V(float x, float yy, float z) { P.Add(x); P.Add(yy); P.Add(z); }
+        V(x0, y, z0); V(x1, y, z0); V(x1, y, z1); V(x0, y, z1);                       // 0..3 floor
+        V(x0, y + rim, z0); V(x1, y + rim, z0); V(x1, y + rim, z1); V(x0, y + rim, z1); // 4..7 rim top
+        double cx = (x0 + x1) / 2.0, cy = y + rim / 2.0, cz = (z0 + z1) / 2.0;
+        var I = new List<int>();
+        void Q(int a, int b, int c, int d)
+        {
+            double ax = P[3*a], ay = P[3*a+1], az = P[3*a+2];
+            double ux = P[3*b]-ax, uy = P[3*b+1]-ay, uz = P[3*b+2]-az, vx = P[3*c]-ax, vy = P[3*c+1]-ay, vz = P[3*c+2]-az;
+            double nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;            // normal of (a,b,c)
+            bool towardCentre = nx*(cx-ax) + ny*(cy-ay) + nz*(cz-az) > 0;
+            if (towardCentre) I.AddRange(new[] { a, b, c, a, c, d }); else I.AddRange(new[] { a, c, b, a, d, c });
+        }
+        Q(0, 1, 2, 3);                                                   // floor
+        Q(0, 1, 5, 4); Q(1, 2, 6, 5); Q(2, 3, 7, 6); Q(3, 0, 4, 7);     // rim walls
+        return new Part { Name = name, Positions = P.ToArray(), Indices = I.ToArray() };
+    }
+
+    [Fact]
+    public void A_deck_with_a_raised_edge_is_not_turned_over_by_its_own_volume()
+    {
+        // SMS Wespe, 2026-09-22: the fuse turned a quarter of the gun deck's faces over, and the Lab showed the hull's
+        // insides through the deck. Its deck sheets carry rims - bulwark and coaming faces - so each is a shallow tray
+        // whose floor faces up toward its own centroid: a consistent NEGATIVE signed volume, the shape of a bowl seen
+        // from inside, and above the thickness gate ("volume agreement -1.00 thickness -0.0533, inside-out score
+        // +0.51: reversed whole"). The deck exemption existed for exactly this sheet and was never consulted, because
+        // the confident-volume rule ran first. A level sheet already facing up is a deck, whatever its volume says.
+        // ABOVE the belly line (ShipWithSails puts it near +6): a raised gun platform, as on the Wespe
+        var deck = Tray("Deck", 2, 18, 1, 5, 10f, 1f);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(ShipWithSails(deck)), new[] { 0 }, 0.0);
+        // the fixture reached the volume rule: a confident, negative volume on an open sheet ...
+        Assert.Contains(r.Details, d => d.Contains("open, volume agreement -") && d.Contains("thickness -0.0"));
+        // ... and it was KEPT, floor still up
+        var normals = FusedNormals(r, "Deck_Fused");
+        Assert.All(normals.Where(n => Math.Abs(n[1]) > 0.5), n => Assert.True(n[1] > 0, "the deck floor still faces up"));
+        Assert.Equal(0, r.FacesRewound);
+    }
+
+    [Fact]
+    public void The_same_tray_at_the_floor_is_an_inside_out_hull_and_is_still_turned()
+    {
+        // The boundary of the exemption above. A bowl seen from inside and an open hull wound inside out are the same
+        // surface; what separates them is height. At the model's floor, below the belly line, this is a hull whose
+        // plating faces INTO the ship, and the volume verdict must still turn it.
+        var hull = Tray("Hull", 0, 20, 0, 6, -5f, 2f);
+        var sail = Quad("Sail", 0, 20, 5, 40, 0);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, sail), new[] { 0 }, 0.0);
+        Assert.Contains(r.Details, d => d.Contains("open, volume agreement -") && d.Contains("reversed whole"));
+        Assert.All(FusedNormals(r, "Hull_Fused").Where(n => Math.Abs(n[1]) > 0.5), n => Assert.True(n[1] < 0, "the hull bottom now faces down"));
+    }
+
+    [Fact]
+    public void An_inverted_shallow_hull_with_a_low_rim_is_still_turned()
+    {
+        // PR #80 review, P2: the deck exemption judged height by the whole sheet's mean, which a rim lifts - so an
+        // inward-wound 20 x 6 hull with a 0.5 rim and nothing else in the model averaged to just above the floor,
+        // read as a level deck (its floor is 82 % of its area), and kept its plating pointing into the ship. The
+        // height that matters is the FLOOR's: those faces sit at the model's floor, and a hull's own bottom can never
+        // be above it.
+        var hull = Tray("Hull", 0, 20, 0, 6, -5f, 0.5f);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull), new[] { 0 }, 0.0);
+        Assert.Contains(r.Details, d => d.Contains("open, volume agreement -") && d.Contains("reversed whole"));
+        Assert.All(FusedNormals(r, "Hull_Fused").Where(n => Math.Abs(n[1]) > 0.5), n => Assert.True(n[1] < 0, "the hull bottom now faces down"));
+    }
+
+    // A V-BOTTOM hull seen from inside: a keel line at keelY along the length, two panels sloping up to edgeY at the
+    // sides, a vertical rim to rimY. Every face wound toward the hull's own centre, like Tray.
+    static Part VHull(string name, float x0, float x1, float z0, float z1, float keelY, float edgeY, float rimY)
+    {
+        var P = new List<float>(); void V(float x, float y, float z) { P.Add(x); P.Add(y); P.Add(z); }
+        float zm = (z0 + z1) / 2f;
+        V(x0, keelY, zm); V(x1, keelY, zm);                       // 0,1 keel
+        V(x0, edgeY, z0); V(x1, edgeY, z0); V(x1, edgeY, z1); V(x0, edgeY, z1);   // 2..5 bottom edges
+        V(x0, rimY, z0); V(x1, rimY, z0); V(x1, rimY, z1); V(x0, rimY, z1);       // 6..9 rim top
+        double cx = (x0 + x1) / 2.0, cy = (keelY + rimY) / 2.0, cz = zm;
+        var I = new List<int>();
+        void Q(int a, int b, int c, int d)
+        {
+            double ax = P[3*a], ay = P[3*a+1], az = P[3*a+2];
+            double ux = P[3*b]-ax, uy = P[3*b+1]-ay, uz = P[3*b+2]-az, vx = P[3*c]-ax, vy = P[3*c+1]-ay, vz = P[3*c+2]-az;
+            double nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
+            bool toward = nx*(cx-ax) + ny*(cy-ay) + nz*(cz-az) > 0;
+            if (toward) I.AddRange(new[] { a, b, c, a, c, d }); else I.AddRange(new[] { a, c, b, a, d, c });
+        }
+        Q(0, 1, 3, 2); Q(0, 5, 4, 1);                            // the two sloping bottom panels
+        Q(2, 3, 7, 6); Q(3, 4, 8, 7); Q(4, 5, 9, 8); Q(5, 2, 6, 9); // rim walls
+        return new Part { Name = name, Positions = P.ToArray(), Indices = I.ToArray() };
+    }
+
+    [Fact]
+    public void An_inverted_V_bottom_hull_is_still_turned()
+    {
+        // PR #80 review, second P2: the floor faces' MEAN height cleared the floor for a V-bottom whose panels slope
+        // up from the keel - keel 0, bottom edges 0.3, rim 0.8 - and the hull kept its plating pointing inward. What a
+        // hull floor does that a deck never does is reach the model's floor: the evidence is the lowest vertex of the
+        // up-facing faces, and this one's is the keel.
+        var hull = VHull("Hull", 0, 20, 0, 6, 0f, 0.3f, 0.8f);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull), new[] { 0 }, 0.0);
+        Assert.Contains(r.Details, d => d.Contains("open, volume agreement -") && d.Contains("reversed whole"));
+        Assert.All(FusedNormals(r, "Hull_Fused").Where(n => Math.Abs(n[1]) > 0.5), n => Assert.True(n[1] < 0, "the hull bottom now faces down"));
+    }
+
     [Fact]
     public void A_level_plate_authored_facing_down_is_left_to_the_evidence()
     {
