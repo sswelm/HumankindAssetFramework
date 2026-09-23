@@ -915,6 +915,22 @@ if _dfarg:
         default_reduce = min(95.0, max(0.0, float(_dfpct)))
     except Exception as _e:
         print("VEHICLE ERROR: malformed defaultreduce argument: %s (%s)" % (_dfarg, _e)); sys.exit(1)
+# SHROUD (2026-09-21, user request): the STANDING rigging - shrouds, stays, ratlines - as a tier of its own. Same
+# soup pass as RIGGING (no weld: dissolve + collapse, ropes thin to lines), its own percentage because ratlines are
+# the densest geometry on a sailing ship and want a harder cut than the running rigging. Deliberately NOT in the
+# rigging_on_sail set below: a shroud holds the mast up, so it stays standing while the canvas gathers. Tagged like
+# defaultreduce= (the positional block is full); absent while the dial is 0.
+#   shroudreduce=@<names file>|<percent>
+shroud_names = []
+shroud_reduce = 0.0
+_sharg = next((a for a in argv if a.startswith("shroudreduce=")), None)
+if _sharg:
+    try:
+        _shnames, _shpct = _sharg[len("shroudreduce="):].rsplit("|", 1)
+        shroud_names = namelist(_shnames) if _shnames.strip() else []
+        shroud_reduce = min(95.0, max(0.0, float(_shpct)))
+    except Exception as _e:
+        print("VEHICLE ERROR: malformed shroudreduce argument: %s (%s)" % (_sharg, _e)); sys.exit(1)
 # SAIL IDLE FOLD (argv[71], 2026-09-09, vanilla-parity request): "1" = at idle the canvas FOLDS at the yard
 # (visible bundled sail, like the vanilla triaconter's brailed-up cloth) instead of the 180-degree strike below
 # the keel. ROTATION-ONLY by construction: the canvas is band-skinned to a Sail->SailF1->SailF2 chain and the
@@ -1147,7 +1163,7 @@ if mode == "rigfast":
 _role_marked = set()
 for _rl in (wheel_names, turret_names, track_names, gun_names, rotor_names, tailrotor_names, trail_names,
             muzzle_names, cradle_names, oar_names, sail_names, rigging_names, structure_names, body_names,
-            flag_names, rudder_names, preserve_names, flip_names, detail_names):
+            flag_names, rudder_names, preserve_names, flip_names, detail_names, shroud_names):
     _role_marked.update(_rl)
 for _fo in mesh_objects():
     # the import-time Icosphere purge is conservative (skips skinned ones); on THIS path all skinning is
@@ -1334,7 +1350,7 @@ _lap("prep")
 _by_name = {}
 for _o in objs:
     _by_name.setdefault(_o.name, _o)   # first wins, matching find_opt's linear-scan order
-for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RIGGING", rigging_names, rigging_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce), ("RUDDER", rudder_names, rudder_reduce), ("WHEEL", wheel_names, wheel_reduce), ("FLIP", flip_names, flip_reduce), ("PRESERVE", preserve_names, preserve_reduce), ("DETAIL", detail_names, detail_reduce)):
+for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RIGGING", rigging_names, rigging_reduce), ("SHROUD", shroud_names, shroud_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce), ("RUDDER", rudder_names, rudder_reduce), ("WHEEL", wheel_names, wheel_reduce), ("FLIP", flip_names, flip_reduce), ("PRESERVE", preserve_names, preserve_reduce), ("DETAIL", detail_names, detail_reduce)):
     if not _rnames or _rpct <= 0.5:
         continue
     try:
@@ -1349,7 +1365,7 @@ for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RI
             print("VEHICLE WARN: %s part '%s' not found — skipped" % (_rlabel.lower(), _rn)); continue
         _vraw = len(_ro2.data.vertices)
         _rb = bmesh.new(); _rb.from_mesh(_ro2.data)
-        _weld = _rlabel != "RIGGING"
+        _weld = _rlabel not in ("RIGGING", "SHROUD")   # both are rope soup: no weld, dissolve + collapse on the raw mesh
         if _weld:
             _dim = max(_ro2.dimensions) or 1.0
             # Weld WITHIN each material only. A ripped hull paints its plating, boot-topping stripe and portholes as
