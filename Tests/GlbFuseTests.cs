@@ -735,6 +735,76 @@ public class GlbFuseTests
         Assert.All(FusedNormals(r, "Hull_Fused").Where(n => Math.Abs(n[1]) > 0.5), n => Assert.True(n[1] < 0, "the hull bottom now faces down"));
     }
 
+    // ---- parity repair: a face's colour is the one most of its edges support (2026-09-23, SMS Wespe) ----
+    [Fact]
+    public void A_bridge_face_reached_through_a_reversed_patch_takes_its_neighbours_colour()
+    {
+        // Faces 0,1 = the correct majority (colour 1); 2 = a reversed patch face (colour 0, joined to the majority by a
+        // same-way edge, as a reversed patch is); 3 = the BRIDGE, consistent ("opp") with all three, reached first
+        // through the patch and so coloured 0. Its two majority edges are unsatisfied, its patch edge satisfied.
+        var parity = new[] { 1, 1, 0, 0 };
+        var edges = new List<(int a, int b, bool same)> { (0, 1, false), (2, 0, true), (3, 0, false), (3, 1, false), (3, 2, false) };
+        int n = GlbDisconnectedParts.RepairParity(parity, new[] { 0, 1, 2, 3 }, edges);
+        Assert.Equal(1, n);
+        Assert.Equal(new[] { 1, 1, 0, 1 }, parity);   // the bridge joined the majority; the patch is still the patch
+    }
+
+    static int Unsatisfied(int[] parity, IList<(int a, int b, bool same)> edges)
+        => edges.Count(e => (parity[e.a] ^ parity[e.b]) != (e.same ? 1 : 0));
+
+    [Fact]
+    public void Parity_repair_leaves_a_consistent_sheet_alone_and_only_ever_lowers_the_unsatisfied_count()
+    {
+        var ok = new[] { 0, 1, 0, 1 };
+        Assert.Equal(0, GlbDisconnectedParts.RepairParity(ok, new[] { 0, 1, 2, 3 }, new List<(int, int, bool)> { (0, 1, true), (1, 2, true), (2, 3, true) }));
+        Assert.Equal(new[] { 0, 1, 0, 1 }, ok);
+        // THE PROPERTY (PR #81 review): every recolouring converts a face's unsatisfied edges to satisfied and its
+        // fewer satisfied ones to unsatisfied, so the sheet's count strictly falls with each step - it cannot cycle,
+        // the round cap is never what stops it, and the end state has no face with more unsatisfied edges than
+        // satisfied. An odd cycle of same-way edges (a Mobius band in three faces) can never reach zero.
+        var m = new[] { 0, 1, 0 };
+        var cyc = new List<(int a, int b, bool same)> { (0, 1, true), (1, 2, true), (2, 0, true) };
+        int before = Unsatisfied(m, cyc);
+        int n = GlbDisconnectedParts.RepairParity(m, new[] { 0, 1, 2 }, cyc);
+        int after = Unsatisfied(m, cyc);
+        Assert.True(after <= before, "the count never rises");
+        Assert.True(after >= 1, "an odd cycle cannot be satisfied");
+        foreach (int f in new[] { 0, 1, 2 })
+        {
+            int sat = cyc.Count(e => (e.a == f || e.b == f) && (m[e.a] ^ m[e.b]) == (e.same ? 1 : 0));
+            int unsat = cyc.Count(e => (e.a == f || e.b == f) && (m[e.a] ^ m[e.b]) != (e.same ? 1 : 0));
+            Assert.True(unsat <= sat, "no face is left outvoted by its own edges");
+        }
+        Assert.True(n <= before, "at most one recolouring per unit of count removed");
+    }
+
+
+    [Fact]
+    public void A_correction_that_travels_against_the_face_order_is_carried_to_the_end()
+    {
+        // PR #81 review, P2: a flip is seen by later faces in the same round and by earlier faces only in the next, so
+        // a cascade running backwards through the order costs one round per step, and a fixed 16-round cap left a
+        // 565-face sheet unfinished. The cascade, built to order: a path 0..N where every face also holds one leaf edge
+        // it cannot satisfy alone, and the LAST face holds two. Only N is outvoted at first; its flip unsettles N-1,
+        // whose flip unsettles N-2 ... and faces are visited 0..N, so each step waits a round. N+1 rounds in all.
+        const int N = 40;
+        var faces = Enumerable.Range(0, N + 1).ToArray();
+        var parity = new int[2 * (N + 1) + 1];                       // faces 0..N, then their leaves (not in `faces`: never recoloured)
+        var edges = new List<(int a, int b, bool same)>();
+        for (int k = 0; k < N; k++) edges.Add((k, k + 1, false));   // the path: satisfied while parities agree (all 0)
+        for (int k = 0; k <= N; k++) edges.Add((k, N + 1 + k, true));   // one leaf each: same-way, parities equal -> unsatisfied
+        edges.Add((N, 2 * N + 2, true));                             // the last face's second leaf: it alone is outvoted
+        int unsat(int[] pr) => edges.Count(e => (pr[e.a] ^ pr[e.b]) != (e.same ? 1 : 0));
+        var capped = (int[])parity.Clone();
+        GlbDisconnectedParts.RepairParity(capped, faces, edges, 16);
+        Assert.True(unsat(capped) > 0, "with 16 rounds the cascade is cut short (the reviewer's case)");
+        var full = (int[])parity.Clone();
+        int n = GlbDisconnectedParts.RepairParity(full, faces, edges);
+        Assert.Equal(0, unsat(full));                               // run to the end, every edge is satisfied
+        Assert.Equal(N + 1, n);                                     // one recolouring per face, no more
+        Assert.All(faces, f => Assert.Equal(1, full[f]));
+    }
+
     [Fact]
     public void A_level_plate_authored_facing_down_is_left_to_the_evidence()
     {
@@ -935,6 +1005,10 @@ public class GlbFuseTests
         Assert.Contains("not judged", res.Details[1]);
         Assert.Contains("unsatisfied after at Band~Band (2-face edge)", res.Details[1]);   // …and WHERE it fails, by part pair (2026-09-18)
         Assert.Equal(0, res.FacesRewound);
+        // PR #81 review: the parity REPAIR lowers a sheet's unsatisfied count, and a refused sheet must be refused on
+        // the walk's own count — never argued under the threshold by a repair and then majority-flipped. So a refused
+        // sheet is not repaired at all: nothing recoloured, exactly as authored.
+        Assert.DoesNotContain("recoloured", res.Details[1]);
         // KEPT means kept: the same band wound the other way is not reversed whole by the direction pass either (review of 0097bd5)
         var bandReversed = new Part { Name = "Band", Positions = pos.ToArray(), Indices = idx.Select((v, i) => i % 3 == 1 ? idx[i + 1] : i % 3 == 2 ? idx[i - 1] : v).ToArray() };
         var res2 = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, bandReversed), new[] { 1 }, 0.0);

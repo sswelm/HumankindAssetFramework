@@ -42,6 +42,29 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   Sketchfab download often carries one) snapped straight back to its file position, uniform recipes included. A cube
   at x=27 landed at the origin. `shape_keys=True`, and a new manual drill (`tools/drill-merge2.py`) that generates
   its fixtures in Blender and asserts all three placements above; it fails on exactly that line when reverted.
+- **Model Fuser: a bridge face no longer takes a reversed patch's colour** (user: "still see-through from the front",
+  SMS Wespe, after the deck fix). The consistency pass colours every face of a sheet by the first path that reaches
+  it. On the Wespe's hull that path ran through a 253-face patch wound backwards, and a riser at the platform step —
+  wound consistently with the patch *and* with the correct majority, a bridge — inherited the patch's colour; its two
+  majority edges became the sheet's only unsatisfied edges, and the majority flip turned a correct face over. A face's
+  colour is now the one most of its own edges support: while any face has more unsatisfied edges than satisfied,
+  recolour it (each step lowers the sheet's unsatisfied count, so it terminates). Measured per face in six directions,
+  on the committed deck fix as baseline: the Wespe's one visible bridge face turned solid and 40 invisible faces
+  recoloured; the frigate two invisible faces; Romanic, Teutonic and paddle steamer untouched. The report's
+  `unsatisfied after` now says how many faces were recoloured and how many edges are left. **Self-review:** the repair
+  now runs only on sheets the walk has already accepted as orientable — judged on the walk's own count, never on the
+  repaired one, so a genuinely non-orientable sheet (a propeller blade) can never be argued under the 5 % threshold
+  and then majority-flipped. Byte-identical on all five ships; the Möbius-band test now also asserts nothing was
+  recoloured. Applying the lap exemption to the walk's cycle-closing edges was tried at the same time and *rejected
+  by measurement*: 35 faces moved on the Romanic and one turned see-through, because that count decides
+  orientability and was tuned on the Romanic's three-face rims. Three pure-kernel tests: the bridge case, that a
+  consistent sheet is left alone, and that the count only ever falls and no face ends outvoted by its own edges.
+  **Review, P2:** the repair ran at most 16 rounds, and a correction that has to travel *against* the face order
+  costs one round per step — a 565-face sheet was left with six unsatisfied edges and a face still outvoted, and the
+  winding pass used the unfinished repair. It now runs until nothing changes; since every round that changes
+  anything lowers the count, one round per edge is a bound that cannot bind. A 41-face backwards cascade pins it:
+  cut short at 16 rounds, finished without the cap. Byte-identical on all five ships.
+
 - **Model Fuser: a deck with a raised edge is no longer turned over** (user: "a fusion issue causing transparent deck",
   SMS Wespe). The gun platform came out of the fuse see-through from above — 242 of the 251 see-through cells on the
   whole fused deck traced to that one 281-face sheet. Bulwark and coaming faces make a deck sheet a shallow *tray*,
