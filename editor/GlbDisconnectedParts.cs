@@ -1586,6 +1586,25 @@ public static class GlbDisconnectedParts
             List<int> lf = fEdgeFaces[key]; if (lf.Count != 2) continue;
             partner[f * 3 + e] = lf[0] == f ? lf[1] : lf[0];
         }
+        // Do two partnered faces walk their shared edge the SAME way (inconsistent neighbours)? Both walking it the
+        // same way = inconsistent... unless they are a LAP: the Teutonic's Object_8 is 671 riveted lap strips lying ON
+        // the plates, stitched to them along one edge and authored facing the SAME way as the plate beneath. In
+        // manifold terms a face folded back over its neighbour must face the opposite way (a thin solid's lip), so the
+        // plain rule "corrected" every strip to face inward and they rendered as dark lines (2026-09-15). Same
+        // traversal AND authored normals already agreeing = the two faces sit on the same side of the edge on purpose:
+        // consistent as authored, parity equal, nothing to correct. Applied on the walk's tree edges; the cycle-closing
+        // edges keep the raw traversal (see the count below for why).
+        bool SameWay(int fa, int e, int fb, long key)
+        {
+            bool same = fEdgeDir[fa * 3 + e] == DirOf(fb, key);
+            if (same)
+            {
+                Vec3 na = FaceNormal(fa), nb = FaceNormal(fb);
+                double la = FLen(na), lb = FLen(nb);
+                if (la > 1e-12 && lb > 1e-12 && FDot(na, nb) / (la * lb) > 0.9) same = false;
+            }
+            return same;
+        }
         var sheets = new List<List<int>>();
         var sheetOf = new int[faceCount]; for (int f = 0; f < faceCount; f++) sheetOf[f] = -1;
         var parityOf = new int[faceCount];
@@ -1604,19 +1623,7 @@ public static class GlbDisconnectedParts
                         long key = fEdgeKeys[fa * 3 + e]; if (key < 0) continue;
                         int fb = partner[fa * 3 + e];
                         if (fb < 0 || fb == fa || sheetOf[fb] >= 0) continue;
-                        bool same = fEdgeDir[fa * 3 + e] == DirOf(fb, key);   // both walk the edge the same way = inconsistent neighbours…
-                        // …unless they are a LAP: the Teutonic's Object_8 is 671 riveted lap strips lying ON the plates,
-                        // stitched to them along one edge and authored facing the SAME way as the plate beneath. In
-                        // manifold terms a face folded back over its neighbour must face the opposite way (a thin solid's
-                        // lip), so the plain rule "corrected" every strip to face inward and they rendered as dark lines
-                        // (2026-09-15). Same traversal AND authored normals already agreeing = the two faces sit on the same
-                        // side of the edge on purpose: consistent as authored, parity equal, nothing to correct.
-                        if (same)
-                        {
-                            Vec3 na = FaceNormal(fa), nb = FaceNormal(fb);
-                            double la = FLen(na), lb = FLen(nb);
-                            if (la > 1e-12 && lb > 1e-12 && FDot(na, nb) / (la * lb) > 0.9) same = false;
-                        }
+                        bool same = SameWay(fa, e, fb, key);
                         edgeSame[PairKey(fa, fb)] = same;
                         parityOf[fb] = parityOf[fa] ^ (same ? 1 : 0);
                         sheetOf[fb] = sid; stack.Push(fb);
@@ -1629,20 +1636,14 @@ public static class GlbDisconnectedParts
         for (int ii = 0; ii < sheets.Count; ii++)
         {
             List<int> isl = sheets[ii];
-            // the sheet's partnered edges, each once, with the traversal relation the walk used (lap rule included)
-            var sheetEdges = new List<(int a, int b, bool same)>();
-            foreach (int f in isl) for (int e = 0; e < 3; e++)
-            {
-                long key = fEdgeKeys[f * 3 + e]; int g = partner[f * 3 + e];
-                if (key < 0 || g < 0 || g < f) continue;
-                bool sm; if (!edgeSame.TryGetValue(PairKey(f, g), out sm)) sm = fEdgeDir[f * 3 + e] == DirOf(g, key);
-                sheetEdges.Add((f, g, sm));
-            }
-            int repaired = RepairParity(parityOf, isl, sheetEdges);
             int ones = 0; foreach (int f in isl) ones += parityOf[f];
-            // every 2-face edge (tree or not): same-traversal count before, and after the parity assignment how many
-            // edges are still unsatisfied — a 2-colourable sheet (the hull: one seam, one region) resolves to zero,
-            // a non-orientable construction (a propeller blade with fins) cannot
+            // every 2-face edge (tree or not), each once, with the lap-aware relation the walk used: same-traversal
+            // count before, and after the WALK's parity assignment how many edges are still unsatisfied — a
+            // 2-colourable sheet (the hull: one seam, one region) resolves to zero, a non-orientable construction (a
+            // propeller blade with fins) cannot. The walk's count is what decides orientability below (PR #81 review):
+            // the repair lowers it, and a genuinely non-orientable sheet pushed under the threshold by a repair would be
+            // majority-flipped — the exact damage the threshold exists to prevent.
+            var sheetEdges = new List<(int a, int b, bool same)>();
             int sameBefore = 0, unsatisfied = 0, twoFaceEdges = 0;
             var conflicts = new Dictionary<string, int>();   // "partA~partB (n-face edge)" -> unsatisfied pairs there: WHERE a sheet fails to orient
             {
@@ -1651,7 +1652,12 @@ public static class GlbDisconnectedParts
                     long key = fEdgeKeys[f * 3 + e]; int g = partner[f * 3 + e];
                     if (key < 0 || g < 0 || g < f) continue;   // each partnered pair once
                     twoFaceEdges++;
-                    bool sm; if (!edgeSame.TryGetValue(PairKey(f, g), out sm)) { sm = fEdgeDir[f * 3 + e] == DirOf(g, key); }
+                    // a cycle-closing edge the walk never traversed reads the RAW traversal, without the lap exemption.
+                    // Applying the exemption here was tried (PR #81 review) and measured: 35 faces moved on the Romanic
+                    // and one turned see-through, because this count is what decides orientability and that decision
+                    // was tuned on the Romanic's three-face rims. The repair votes with the same relation as the count.
+                    bool sm; if (!edgeSame.TryGetValue(PairKey(f, g), out sm)) sm = fEdgeDir[f * 3 + e] == DirOf(g, key);
+                    sheetEdges.Add((f, g, sm));
                     if (sm) sameBefore++;
                     if ((parityOf[f] ^ parityOf[g]) != (sm ? 1 : 0))
                     {
@@ -1662,7 +1668,22 @@ public static class GlbDisconnectedParts
                     }
                 }
             }
-            islandConflict[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} of {1} edges same-way, {2} unsatisfied after{3}", sameBefore, twoFaceEdges, unsatisfied, repaired > 0 ? " (" + repaired + " recoloured)" : "");
+            bool orientable = !(unsatisfied > 0 && unsatisfied * 20 > sameBefore && ones > 0 && ones < isl.Count);
+            // THE REPAIR, on accepted sheets only: a face's colour becomes the one most of its own edges support (the
+            // bridge case, RepairParity). Each recolouring strictly lowers the sheet's unsatisfied count, so the count
+            // reported after it can only be lower than the walk's.
+            int repaired = 0, unsatisfiedAfter = unsatisfied;
+            if (orientable && unsatisfied > 0 && ones > 0 && ones < isl.Count)
+            {
+                repaired = RepairParity(parityOf, isl, sheetEdges);
+                if (repaired > 0)
+                {
+                    ones = 0; foreach (int f in isl) ones += parityOf[f];
+                    unsatisfiedAfter = 0; foreach (var ed in sheetEdges) if ((parityOf[ed.a] ^ parityOf[ed.b]) != (ed.same ? 1 : 0)) unsatisfiedAfter++;
+                }
+            }
+            islandConflict[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} of {1} edges same-way, {2} unsatisfied after{3}", sameBefore, twoFaceEdges, unsatisfied,
+                repaired > 0 ? string.Format(System.Globalization.CultureInfo.InvariantCulture, " ({0} recoloured, {1} left)", repaired, unsatisfiedAfter) : "");
             if (conflicts.Count > 0)   // the reader's next question is WHERE: the four heaviest part pairs
                 islandConflict[ii] += " at " + string.Join(", ", conflicts.OrderByDescending(kv => kv.Value).Take(4).Select(kv => kv.Key + " ×" + kv.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)));
             // NOT ORIENTABLE BY TRAVERSAL (2026-09-17, the Teutonic's propellers): a blade renders right yet 32 of its
@@ -1673,7 +1694,7 @@ public static class GlbDisconnectedParts
             // "0 unsatisfied" was the first rule; the SS Romanic's 41,799-face hull reached 1 unsatisfied of 92 same-way
             // edges (one stray edge in 59,000) and the whole hull was refused. Tolerance: the pass must resolve at least
             // 95 % of the same-way edges — a blade (138 left of 32) is still refused, one stray edge is not.
-            if (unsatisfied > 0 && unsatisfied * 20 > sameBefore && ones > 0 && ones < isl.Count) { islandsNotOrientable++; notOrientable[ii] = true; islandConflict[ii] += " — not orientable, kept as authored"; }
+            if (!orientable) { islandsNotOrientable++; notOrientable[ii] = true; islandConflict[ii] += " — not orientable, kept as authored"; }
             else if (ones > 0 && ones < isl.Count)
             {
                 int minor = ones * 2 <= isl.Count ? 1 : 0;

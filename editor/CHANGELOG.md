@@ -51,8 +51,14 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   recolour it (each step lowers the sheet's unsatisfied count, so it terminates). Measured per face in six directions,
   on the committed deck fix as baseline: the Wespe's one visible bridge face turned solid and 40 invisible faces
   recoloured; the frigate two invisible faces; Romanic, Teutonic and paddle steamer untouched. The report's
-  `unsatisfied after` now says how many faces were recoloured. Two pure-kernel tests: the bridge case, and that a
-  consistent sheet is left alone while an odd cycle terminates.
+  `unsatisfied after` now says how many faces were recoloured and how many edges are left. **Self-review:** the repair
+  now runs only on sheets the walk has already accepted as orientable — judged on the walk's own count, never on the
+  repaired one, so a genuinely non-orientable sheet (a propeller blade) can never be argued under the 5 % threshold
+  and then majority-flipped. Byte-identical on all five ships; the Möbius-band test now also asserts nothing was
+  recoloured. Applying the lap exemption to the walk's cycle-closing edges was tried at the same time and *rejected
+  by measurement*: 35 faces moved on the Romanic and one turned see-through, because that count decides
+  orientability and was tuned on the Romanic's three-face rims. Three pure-kernel tests: the bridge case, that a
+  consistent sheet is left alone, and that the count only ever falls and no face ends outvoted by its own edges.
 
 - **Model Fuser: a deck with a raised edge is no longer turned over** (user: "a fusion issue causing transparent deck",
   SMS Wespe). The gun platform came out of the fuse see-through from above — 242 of the 251 see-through cells on the

@@ -749,16 +749,35 @@ public class GlbFuseTests
         Assert.Equal(new[] { 1, 1, 0, 1 }, parity);   // the bridge joined the majority; the patch is still the patch
     }
 
+    static int Unsatisfied(int[] parity, IList<(int a, int b, bool same)> edges)
+        => edges.Count(e => (parity[e.a] ^ parity[e.b]) != (e.same ? 1 : 0));
+
     [Fact]
-    public void Parity_repair_leaves_a_consistent_sheet_alone_and_terminates_on_a_contradiction()
+    public void Parity_repair_leaves_a_consistent_sheet_alone_and_only_ever_lowers_the_unsatisfied_count()
     {
         var ok = new[] { 0, 1, 0, 1 };
         Assert.Equal(0, GlbDisconnectedParts.RepairParity(ok, new[] { 0, 1, 2, 3 }, new List<(int, int, bool)> { (0, 1, true), (1, 2, true), (2, 3, true) }));
-        // an odd cycle of same-way edges (a Möbius strip in three faces) cannot be satisfied: the repair must stop
+        Assert.Equal(new[] { 0, 1, 0, 1 }, ok);
+        // THE PROPERTY (PR #81 review): every recolouring converts a face's unsatisfied edges to satisfied and its
+        // fewer satisfied ones to unsatisfied, so the sheet's count strictly falls with each step - it cannot cycle,
+        // the round cap is never what stops it, and the end state has no face with more unsatisfied edges than
+        // satisfied. An odd cycle of same-way edges (a Mobius band in three faces) can never reach zero.
         var m = new[] { 0, 1, 0 };
-        int n = GlbDisconnectedParts.RepairParity(m, new[] { 0, 1, 2 }, new List<(int, int, bool)> { (0, 1, true), (1, 2, true), (2, 0, true) });
-        Assert.True(n <= 16 * 3);
+        var cyc = new List<(int a, int b, bool same)> { (0, 1, true), (1, 2, true), (2, 0, true) };
+        int before = Unsatisfied(m, cyc);
+        int n = GlbDisconnectedParts.RepairParity(m, new[] { 0, 1, 2 }, cyc);
+        int after = Unsatisfied(m, cyc);
+        Assert.True(after <= before, "the count never rises");
+        Assert.True(after >= 1, "an odd cycle cannot be satisfied");
+        foreach (int f in new[] { 0, 1, 2 })
+        {
+            int sat = cyc.Count(e => (e.a == f || e.b == f) && (m[e.a] ^ m[e.b]) == (e.same ? 1 : 0));
+            int unsat = cyc.Count(e => (e.a == f || e.b == f) && (m[e.a] ^ m[e.b]) != (e.same ? 1 : 0));
+            Assert.True(unsat <= sat, "no face is left outvoted by its own edges");
+        }
+        Assert.True(n <= before, "at most one recolouring per unit of count removed");
     }
+
 
     [Fact]
     public void A_level_plate_authored_facing_down_is_left_to_the_evidence()
@@ -960,6 +979,10 @@ public class GlbFuseTests
         Assert.Contains("not judged", res.Details[1]);
         Assert.Contains("unsatisfied after at Band~Band (2-face edge)", res.Details[1]);   // …and WHERE it fails, by part pair (2026-09-18)
         Assert.Equal(0, res.FacesRewound);
+        // PR #81 review: the parity REPAIR lowers a sheet's unsatisfied count, and a refused sheet must be refused on
+        // the walk's own count — never argued under the threshold by a repair and then majority-flipped. So a refused
+        // sheet is not repaired at all: nothing recoloured, exactly as authored.
+        Assert.DoesNotContain("recoloured", res.Details[1]);
         // KEPT means kept: the same band wound the other way is not reversed whole by the direction pass either (review of 0097bd5)
         var bandReversed = new Part { Name = "Band", Positions = pos.ToArray(), Indices = idx.Select((v, i) => i % 3 == 1 ? idx[i + 1] : i % 3 == 2 ? idx[i - 1] : v).ToArray() };
         var res2 = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, bandReversed), new[] { 1 }, 0.0);
