@@ -59,6 +59,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   by measurement*: 35 faces moved on the Romanic and one turned see-through, because that count decides
   orientability and was tuned on the Romanic's three-face rims. Three pure-kernel tests: the bridge case, that a
   consistent sheet is left alone, and that the count only ever falls and no face ends outvoted by its own edges.
+  **Review, P2:** the repair ran at most 16 rounds, and a correction that has to travel *against* the face order
+  costs one round per step — a 565-face sheet was left with six unsatisfied edges and a face still outvoted, and the
+  winding pass used the unfinished repair. It now runs until nothing changes; since every round that changes
+  anything lowers the count, one round per edge is a bound that cannot bind. A 41-face backwards cascade pins it:
+  cut short at 16 rounds, finished without the cap. Byte-identical on all five ships.
 
 - **Model Fuser: a deck with a raised edge is no longer turned over** (user: "a fusion issue causing transparent deck",
   SMS Wespe). The gun platform came out of the fuse see-through from above — 242 of the 251 see-through cells on the

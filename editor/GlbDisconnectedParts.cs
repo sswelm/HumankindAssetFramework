@@ -1035,9 +1035,15 @@ public static class GlbDisconnectedParts
     /// over the sheet's edge list so it can be pinned by a test.
     /// Edges: (a, b, same) — faces a and b share an edge and walk it the same way (inconsistent as authored) when
     /// `same`; an edge is satisfied when parity[a] ^ parity[b] == (same ? 1 : 0). Returns the number of recolourings.
+    /// Runs until no face changes (PR #81 review: a correction that has to travel AGAINST the iteration order costs one
+    /// round per step - a fixed 16-round cap left a 565-face sheet with six unsatisfied edges and a face still
+    /// outvoted, and the winding pass then used the unfinished repair). Every round that changes anything lowers the
+    /// unsatisfied count by at least one, so `edges.Count + 1` rounds is a bound that cannot bind; `maxRounds` above 0
+    /// overrides it for a test.
     /// </summary>
-    public static int RepairParity(int[] parity, IList<int> faces, IList<(int a, int b, bool same)> edges, int maxRounds = 16)
+    public static int RepairParity(int[] parity, IList<int> faces, IList<(int a, int b, bool same)> edges, int maxRounds = 0)
     {
+        if (maxRounds <= 0) maxRounds = edges.Count + 1;
         var byFace = new Dictionary<int, List<int>>();
         for (int i = 0; i < edges.Count; i++)
         {

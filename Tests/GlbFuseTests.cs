@@ -780,6 +780,32 @@ public class GlbFuseTests
 
 
     [Fact]
+    public void A_correction_that_travels_against_the_face_order_is_carried_to_the_end()
+    {
+        // PR #81 review, P2: a flip is seen by later faces in the same round and by earlier faces only in the next, so
+        // a cascade running backwards through the order costs one round per step, and a fixed 16-round cap left a
+        // 565-face sheet unfinished. The cascade, built to order: a path 0..N where every face also holds one leaf edge
+        // it cannot satisfy alone, and the LAST face holds two. Only N is outvoted at first; its flip unsettles N-1,
+        // whose flip unsettles N-2 ... and faces are visited 0..N, so each step waits a round. N+1 rounds in all.
+        const int N = 40;
+        var faces = Enumerable.Range(0, N + 1).ToArray();
+        var parity = new int[2 * (N + 1) + 1];                       // faces 0..N, then their leaves (not in `faces`: never recoloured)
+        var edges = new List<(int a, int b, bool same)>();
+        for (int k = 0; k < N; k++) edges.Add((k, k + 1, false));   // the path: satisfied while parities agree (all 0)
+        for (int k = 0; k <= N; k++) edges.Add((k, N + 1 + k, true));   // one leaf each: same-way, parities equal -> unsatisfied
+        edges.Add((N, 2 * N + 2, true));                             // the last face's second leaf: it alone is outvoted
+        int unsat(int[] pr) => edges.Count(e => (pr[e.a] ^ pr[e.b]) != (e.same ? 1 : 0));
+        var capped = (int[])parity.Clone();
+        GlbDisconnectedParts.RepairParity(capped, faces, edges, 16);
+        Assert.True(unsat(capped) > 0, "with 16 rounds the cascade is cut short (the reviewer's case)");
+        var full = (int[])parity.Clone();
+        int n = GlbDisconnectedParts.RepairParity(full, faces, edges);
+        Assert.Equal(0, unsat(full));                               // run to the end, every edge is satisfied
+        Assert.Equal(N + 1, n);                                     // one recolouring per face, no more
+        Assert.All(faces, f => Assert.Equal(1, full[f]));
+    }
+
+    [Fact]
     public void A_level_plate_authored_facing_down_is_left_to_the_evidence()
     {
         // The rule is one-sided on purpose. The frigate carries two 11.4 x 5.2 zero-thickness plates over its boat
