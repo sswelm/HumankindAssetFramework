@@ -63,6 +63,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   hull with a low rim averaged to just above the model's floor and kept its plating pointing into the ship. The
   height that matters is the *floor's*: the faces that actually point up, which for a hull sit at the floor and can
   never clear it. Its test was red on the previous cut.
+  **And its lowest vertex, not its mean** (review, second P2): a V-bottom's panels slope up from the keel, so
+  their mean height clears the floor while they are the hull bottom all the same. What a hull's floor does that a
+  deck's never does is reach the model's floor. Red on the previous cut too.
 
 - **A failed district re-bake no longer destroys the previous building.** The unit paths have had E5 rollback since
   it was built; the district path never got it, and its steps are destructive by design — `BakeFxMesh` deletes

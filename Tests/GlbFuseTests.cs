@@ -698,6 +698,43 @@ public class GlbFuseTests
         Assert.All(FusedNormals(r, "Hull_Fused").Where(n => Math.Abs(n[1]) > 0.5), n => Assert.True(n[1] < 0, "the hull bottom now faces down"));
     }
 
+    // A V-BOTTOM hull seen from inside: a keel line at keelY along the length, two panels sloping up to edgeY at the
+    // sides, a vertical rim to rimY. Every face wound toward the hull's own centre, like Tray.
+    static Part VHull(string name, float x0, float x1, float z0, float z1, float keelY, float edgeY, float rimY)
+    {
+        var P = new List<float>(); void V(float x, float y, float z) { P.Add(x); P.Add(y); P.Add(z); }
+        float zm = (z0 + z1) / 2f;
+        V(x0, keelY, zm); V(x1, keelY, zm);                       // 0,1 keel
+        V(x0, edgeY, z0); V(x1, edgeY, z0); V(x1, edgeY, z1); V(x0, edgeY, z1);   // 2..5 bottom edges
+        V(x0, rimY, z0); V(x1, rimY, z0); V(x1, rimY, z1); V(x0, rimY, z1);       // 6..9 rim top
+        double cx = (x0 + x1) / 2.0, cy = (keelY + rimY) / 2.0, cz = zm;
+        var I = new List<int>();
+        void Q(int a, int b, int c, int d)
+        {
+            double ax = P[3*a], ay = P[3*a+1], az = P[3*a+2];
+            double ux = P[3*b]-ax, uy = P[3*b+1]-ay, uz = P[3*b+2]-az, vx = P[3*c]-ax, vy = P[3*c+1]-ay, vz = P[3*c+2]-az;
+            double nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
+            bool toward = nx*(cx-ax) + ny*(cy-ay) + nz*(cz-az) > 0;
+            if (toward) I.AddRange(new[] { a, b, c, a, c, d }); else I.AddRange(new[] { a, c, b, a, d, c });
+        }
+        Q(0, 1, 3, 2); Q(0, 5, 4, 1);                            // the two sloping bottom panels
+        Q(2, 3, 7, 6); Q(3, 4, 8, 7); Q(4, 5, 9, 8); Q(5, 2, 6, 9); // rim walls
+        return new Part { Name = name, Positions = P.ToArray(), Indices = I.ToArray() };
+    }
+
+    [Fact]
+    public void An_inverted_V_bottom_hull_is_still_turned()
+    {
+        // PR #80 review, second P2: the floor faces' MEAN height cleared the floor for a V-bottom whose panels slope
+        // up from the keel - keel 0, bottom edges 0.3, rim 0.8 - and the hull kept its plating pointing inward. What a
+        // hull floor does that a deck never does is reach the model's floor: the evidence is the lowest vertex of the
+        // up-facing faces, and this one's is the keel.
+        var hull = VHull("Hull", 0, 20, 0, 6, 0f, 0.3f, 0.8f);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull), new[] { 0 }, 0.0);
+        Assert.Contains(r.Details, d => d.Contains("open, volume agreement -") && d.Contains("reversed whole"));
+        Assert.All(FusedNormals(r, "Hull_Fused").Where(n => Math.Abs(n[1]) > 0.5), n => Assert.True(n[1] < 0, "the hull bottom now faces down"));
+    }
+
     [Fact]
     public void A_level_plate_authored_facing_down_is_left_to_the_evidence()
     {

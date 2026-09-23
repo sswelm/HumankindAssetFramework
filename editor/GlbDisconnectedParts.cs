@@ -1802,20 +1802,22 @@ public static class GlbDisconnectedParts
             double score = n > 0 ? sum / n : 0.0;
             // HOW LEVEL, AND HOW HIGH (2026-09-20, the Confederate frigate's gun deck): area-weighted, so a big flat
             // surface decides and a few skirting faces do not.
-            double upSum = 0, upArea = 0, ySum = 0, floorSum = 0, floorArea = 0;
+            double upSum = 0, upArea = 0, ySum = 0, floorLowY = double.PositiveInfinity;
             foreach (int f in isl)
             {
                 Vec3 nf = FaceNormal(f); double nlen = FLen(nf); if (nlen < 1e-12) continue;
                 double a = 0.5 * nlen, up = nf.Y / nlen, cy = FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0).Y;
                 upSum += up * a; upArea += a; ySum += cy * a;
-                if (up > 0.5) { floorSum += cy * a; floorArea += a; }   // the FLOOR: the faces that actually point up
+                if (up > 0.5) floorLowY = Math.Min(floorLowY, Math.Min(P(f, 0).Y, Math.Min(P(f, 1).Y, P(f, 2).Y)));   // the FLOOR's lowest point
             }
             double upness = upArea > 0 ? upSum / upArea : 0.0;      // +1 = every face points up, -1 = down
             double islandY = upArea > 0 ? ySum / upArea : 0.0;
-            // THE DECK'S HEIGHT IS ITS FLOOR'S (PR #80 review, P2): the whole sheet's mean height counts the rim in,
-            // and a rim lifts it. An inverted shallow hull - floor at the model's floor, a low rim - averaged to just
-            // above floorY and so read as a deck. The floor faces alone do not: they sit AT the floor.
-            double floorFaceY = floorArea > 0 ? floorSum / floorArea : islandY;
+            // THE DECK'S HEIGHT IS WHERE ITS FLOOR REACHES DOWN TO (PR #80 review, two P2s). The whole sheet's mean
+            // counts the rim in, and a rim lifts it: an inverted shallow hull averaged to just above floorY and read as
+            // a deck. The floor faces' MEAN is no better: a V-bottom's panels slope up from the keel, their mean clears
+            // the floor, and they are the hull bottom all the same. What a hull's floor does that a deck's never does
+            // is reach the model's floor - so the evidence is the lowest VERTEX of the up-facing faces.
+            double floorFaceY = double.IsPositiveInfinity(floorLowY) ? islandY : floorLowY;
             // DOUBLE-SKINNED SOLIDS (2026-09-17, the SS Romanic): the hull is two skins a few centimetres apart with
             // opposite normals, wound inside-out as a whole. Both rules above read ~0 on it (the cones of the two skins
             // cancel: agreement -0.01, thickness -0.0005; the radial score cancels the same way). What does not cancel:
