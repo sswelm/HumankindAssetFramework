@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Text;
 using Newtonsoft.Json.Linq;
 using Xunit;
@@ -886,6 +887,72 @@ public class GlbFuseTests
         for (int i = 0; i < sets.Count; i++) for (int j = i + 1; j < sets.Count; j++)
             if (sets[i].SetEquals(sets[j])) Assert.True(normals[i][2] * normals[j][2] > 0, "a doubled pair collapsed onto one vertex set: one side lost");
         Assert.True(normals.Count(n => n[2] < -0.9) >= 2, "the down copy of the pair is still down");
+    }
+
+    // A vertical wall along a polyline path in the XZ plane, from y0 to y1 in ny rows, `cells` quads per segment. Wound so
+    // the geometric normal is the path's left-hand side (-dz, 0, dx) - walk the path clockwise seen from above and the
+    // wall faces the enclosed side; `flip` turns it the other way. One connected strip: a single island, a single sheet.
+    static Part Wall(string name, (float x, float z)[] path, float y0, float y1, int ny, int[] cells, bool flip)
+    {
+        var P = new List<float>(); var I = new List<int>();
+        var cols = new List<(float x, float z)>();
+        for (int k = 0; k + 1 < path.Length; k++)
+            for (int i = 0; i < cells[k]; i++) cols.Add((path[k].x + (path[k + 1].x - path[k].x) * i / cells[k], path[k].z + (path[k + 1].z - path[k].z) * i / cells[k]));
+        cols.Add(path[path.Length - 1]);
+        for (int j = 0; j <= ny; j++) foreach (var c in cols) { P.Add(c.x); P.Add(y0 + (y1 - y0) * j / ny); P.Add(c.z); }
+        int W = cols.Count;
+        for (int j = 0; j < ny; j++) for (int i = 0; i + 1 < W; i++)
+        {
+            int a = j * W + i, b = a + 1, c = a + W + 1, d = a + W;
+            if (flip) I.AddRange(new[] { a, c, b, a, d, c }); else I.AddRange(new[] { a, b, c, a, c, d });
+        }
+        return new Part { Name = name, Positions = P.ToArray(), Indices = I.ToArray() };
+    }
+
+    // every output face of a node as (centroid, geometric normal)
+    static List<(double[] c, double[] n)> FusedFaces(GlbDisconnectedParts.Result r, string node)
+    {
+        var g = Read(r.Bytes); var prim = (JObject)g.Primitives(g.Node(node))[0];
+        float[] p = g.Floats(((JObject)prim["attributes"]).Value<int>("POSITION"), 3);
+        uint[] ix = g.Indices(prim.Value<int>("indices"));
+        var normals = FaceNormals(g, prim); var res = new List<(double[], double[])>();
+        for (int t = 0; t < ix.Length; t += 3)
+            res.Add((new[] { (p[ix[t] * 3] + p[ix[t + 1] * 3] + p[ix[t + 2] * 3]) / 3.0, (p[ix[t] * 3 + 1] + p[ix[t + 1] * 3 + 1] + p[ix[t + 2] * 3 + 1]) / 3.0, (p[ix[t] * 3 + 2] + p[ix[t + 1] * 3 + 2] + p[ix[t + 2] * 3 + 2]) / 3.0 }, normals[t / 3]));
+        return res;
+    }
+
+    [Fact]
+    public void A_double_wall_with_an_indecisive_twin_vote_is_left_as_authored()
+    {
+        // The Wespe's companionway (2026-09-24): the stairwell's wall faces the well, and a hidden skin faces away just
+        // outside it - but the skin is slightly SKEWED, so along part of the wall it sits behind the visible one and
+        // along the rest in front: a twin vote of 33 in front / 44 behind, short of 70/30. The sheet then fell to the
+        // radial score, which reads a wall facing the hull's axis as inside out (-0.27 on the ship, -0.97 here), and
+        // turned the visible skin whole: the stairwell showed the hull's insides from above. A mostly-twinned sheet
+        // with an undecided vote is now left as authored: the radial score judges single skins, and this is not one.
+        var hull = Box("Hull", 400, -200, -50, -200, inward: false);            // the frame: two cubes end to end, length along Z
+        var hull2 = Box("Hull", 400, -200, -50, 200, inward: false);            // -> width axis X, side centre 0, belly 50
+        // the visible wall: the plane x = 120 from z 40 to 120, facing -X (the hull's axis); 10 columns x 4 rows = 80 faces
+        var visible = Wall("Well", new (float x, float z)[] { (120f, 40f), (120f, 120f) }, 30, 90, 4, new[] { 10 }, flip: false);
+        // the hidden skin: facing +X, 0.3 outside the wall at z = 40 and crossing it at 42 % of the way (0.286 inside at z = 120)
+        var hidden = Wall("Well", new (float x, float z)[] { (120.3f, 40f), (120.3f - 0.3f / 0.42f, 120f) }, 30, 90, 4, new[] { 10 }, flip: true);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, hull2, visible, hidden), new[] { 2, 3 }, 0.0);
+        // both sheets read double-skinned with a 60/40 vote (planar, so no volume to judge by), and neither is turned
+        string sheets = r.Details.First(d => d.StartsWith("largest islands:", StringComparison.Ordinal));
+        Assert.Contains("inside-out score -0.9", sheets);
+        Assert.Equal(2, Regex.Matches(sheets, Regex.Escape("double skin 100% twinned (48 twin in front / 32 behind")).Count);
+        Assert.DoesNotContain("reversed whole", sheets);
+        Assert.Equal(2, Regex.Matches(sheets, "double wall, kept as authored").Count);
+        Assert.Contains(r.Details, d => d.StartsWith("double walls: 2 sheet(s)", StringComparison.Ordinal));
+        Assert.Equal(0, r.FacesRewound);
+        // every face of the visible wall (exactly on x = 120) still faces the axis; every face of the skin still faces away
+        var faces = FusedFaces(r, "Well_Fused");
+        Assert.Equal(160, faces.Count);
+        foreach (var (c, n) in faces)
+        {
+            bool onTheWall = Math.Abs(c[0] - 120) < 1e-3;
+            Assert.True(onTheWall ? n[0] < 0 : n[0] > 0, "face at x " + c[0] + ", z " + c[2] + " was turned");
+        }
     }
 
     [Fact]

@@ -5,6 +5,24 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Fuser: a double wall with an undecided twin vote keeps its authored winding** (user: "another see-through
+  fuse issue next in the stairs leading below", SMS Wespe). The companionway is doubled the way the gun was — every
+  face has an opposite partner a quarter of the reach away — but the copies are not coincident, so the twin rule
+  does not see them, and as on the gun's ring the copies swap roles at the fold: the landing's up-facing faces belong
+  to the copy that faces the well on the walls. Two passes then went wrong at once. The parity walk read each copy
+  as inconsistent at the fold and turned 38 of its 77 faces, and the twin vote (33 in front / 44 behind, short of
+  the 70/30 it needs) fell through to the radial score, −0.27 against the −0.25 line, which turned the sheet whole:
+  walls facing into the deck, the hull's insides visible from above. The radial score judges a *single* skin and
+  the parity walk a surface with *one* right side; a sheet the twin evidence already describes as double-walled is
+  neither, and its source, which is the reference, renders it. An open sheet twinned on most faces whose vote is
+  undecided now keeps every face as authored — parity flips included (keeping the sheet but not the flips left the
+  landing facing down: 49 ray cells, measured). Its report line reads "double wall, kept as authored" and a Details
+  line counts such sheets. Measured with the honest per-ray census over the stairwell box: 230 cells solid in the
+  source and see-through on master → 1 (on another part); the ship's other changed clusters 6/5/6 → 0. Against
+  master the fixed fuse changes 158 faces on the Wespe, 31 on the frigate, 6 on the Romanic, 26 on the Teutonic and
+  none on the paddle steamer; every non-Wespe cluster censuses identically before and after. Test: a wall facing
+  the hull's axis with a skewed opposite skin (48 twins in front / 32 behind) was reversed whole; both now keep.
+
 - **Model Fuser: a part that is double-sided by duplication is fused as two copies, not one soup** (user: "an issue
   with the fused gun that becomes visible in the Vehicle Lab", SMS Wespe). The gun carries every face twice, wound
   both ways, each copy with its own vertices — 6,000 of its 6,053 faces. Welded by position the two copies shared

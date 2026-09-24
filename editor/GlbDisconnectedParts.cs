@@ -1162,7 +1162,7 @@ public static class GlbDisconnectedParts
         public double Weld, WeldFraction, Longest; public int MadeConsistent, OpenJudged, OpenReversed, ClosedReversed, FaceCount, CollapsedFaces, NotOrientable;
         public string LargestIslands, StitchedLine, RewoundByPart, Timing, FrameLine;
         public string MirroredLine;   // the mirrored-part check's verdicts (null unless the check ran with the option on)
-        public string TwinsLine, TwinsRestoredLine;   // doubled-face diagnostics (null unless found) - appended AFTER the summary, which the Workshop shows as Details[0] (review of PR #82, P3)
+        public string TwinsLine, TwinsRestoredLine, AsAuthoredLine;   // doubled-face diagnostics (null unless found) - appended AFTER the summary, which the Workshop shows as Details[0] (review of PR #82, P3)
         public int MirroredJudgedUndo, MirroredJudgedKeep, MirroredParts;   // this group's evidence, pooled across the run by FuseGroups
         public IList<int> NodeIndices; public string FusedName; public bool CheckMirrored;   // enough to re-plan the group once the run's verdict is known
         public bool Empty;   // no triangles: nothing to append, the sources keep their meshes, Result.Changed stays false
@@ -1651,7 +1651,7 @@ public static class GlbDisconnectedParts
         // Romanic's Object_4 alone went from 0 to 3 non-orientable sheets (its inner and outer skins meet its decks at
         // three-face rims, and a continuation pair there closes odd cycles); a branch at a junction starts its own sheet.
         var flip = new bool[faceCount];
-        int islandsMadeConsistent = 0, islandsNotOrientable = 0;
+        int islandsMadeConsistent = 0, islandsNotOrientable = 0, asAuthoredSheets = 0;
         bool DirOf(int face, long key) { for (int e = 0; e < 3; e++) if (fEdgeKeys[face * 3 + e] == key) return fEdgeDir[face * 3 + e]; return false; }
         long PairKey(int f, int g) => f < g ? ((long)f << 32) | (uint)g : ((long)g << 32) | (uint)f;
         Vec3 P(int f, int corner) => pos[tris[f * 3 + corner]];
@@ -1981,7 +1981,7 @@ public static class GlbDisconnectedParts
             // inward cubes 5 mm apart gave the central one twins behind 6 of 12 faces, and the veto kept it inside out —
             // review of a043f8e). Only an enclosed island may veto a volume reversal.
             bool enclosed = twinBehind * 10 >= isl.Count * 9 && enclosingIsland[ii] >= 0;   // …AND one enclosing island holds those twins and boxes this one in
-            bool reverse = false;
+            bool reverse = false, asAuthored = false;
             if (notOrientable[ii]) { }   // kept as authored means KEPT: no whole-island reversal either — a volume or score read off a surface with no consistent winding is noise (review of 0097bd5: the reversed Möbius band came back "6 of 6 rewound")
             // the twin rule is a TIE-BREAKER (review of 9cacd9f): from inside a gap, air between two solids looks exactly
             // like a skin of material, so four cubes 5 mm apart read "twin in front" on every facing side. A closed
@@ -2028,15 +2028,34 @@ public static class GlbDisconnectedParts
                 // 0.61 over a floor of -5 clears it by a mile.
                 double floorMargin = 0.05 * Math.Max(0.0, bellyY - floorY);
                 bool deckFacingUp = (upness > 0.8 && floorFaceY > floorY + floorMargin) || (upness > 0.5 && floorFaceY > bellyY);
-                reverse = volumeConfident && (volume >= 0 || !deckFacingUp) ? (volume < 0 && !enclosed)
-                        : doubleSkin ? twinInFront > twinBehind
-                        : deckFacingUp ? false                  // a deck, already facing up: nothing to correct
-                        : score < -0.25;
+                bool doubleWall = partnered * 2 >= isl.Count && partnered > 0;   // twinned on most faces; doubleSkin is this AND a decided vote
+                if (volumeConfident && (volume >= 0 || !deckFacingUp)) reverse = volume < 0 && !enclosed;
+                else if (doubleSkin) reverse = twinInFront > twinBehind;
+                else if (deckFacingUp) reverse = false;         // a deck, already facing up: nothing to correct
+                else if (doubleWall) asAuthored = true;         // a double wall, undecided: left as authored, see below
+                else reverse = score < -0.25;
                 if (reverse) openReversed++;
+            }
+            // A DOUBLE WALL WITH AN UNDECIDED VOTE IS LEFT AS AUTHORED, parity flips included (2026-09-24, the Wespe's
+            // companionway). The stairwell is doubled the way the gun was (every face has an opposite partner a
+            // quarter of the reach away) but the copies are not coincident, so the coincidence rule does not see
+            // them; and as on the gun's ring, the copies swap roles at the fold: the landing's up-facing faces belong
+            // to the copy that faces the well on the walls. Two things then went wrong at once. The parity walk read
+            // each copy as inconsistent at the fold and turned 38 of its 77 faces; and the twin vote (33 in front /
+            // 44 behind, short of 70/30) fell through to the radial score, -0.27 against the -0.25 line, which turned
+            // the sheet whole - walls in, landing back up: the stairwell showed the hull's insides from above. Keeping
+            // the sheet but not the parity flips left the landing facing down instead (49 ray cells, measured).
+            // The radial score judges a SINGLE skin, and parity a surface with ONE right side; a sheet the twin
+            // evidence already describes as double-walled is neither. Its author saw the skin that is visible, and
+            // the source, which is the reference, renders it. So every face keeps its authored winding.
+            if (asAuthored)
+            {
+                foreach (int f in isl) flip[f] = false;
+                asAuthoredSheets++;
             }
             if (reverse) foreach (int f in isl) flip[f] = !flip[f];
             islandRule[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}, volume agreement {1:+0.00;-0.00} thickness {2:+0.0000;-0.0000}, inside-out score {3:+0.00;-0.00}, level {6:+0.00;-0.00} at y {7:0.##}{5}: {4}",
-                closed ? "closed" : "open", agreement, thickness, score, notOrientable[ii] ? "not judged" : reverse ? "reversed whole" : "kept",
+                closed ? "closed" : "open", agreement, thickness, score, notOrientable[ii] ? "not judged" : reverse ? "reversed whole" : asAuthored ? "double wall, kept as authored" : "kept",
                 partnered > 0 ? string.Format(System.Globalization.CultureInfo.InvariantCulture, ", double skin {0:0}% twinned ({1} twin in front / {2} behind, at {3:0.00} of reach, {4:0.00} straight)", 100.0 * partnered / isl.Count, twinInFront, twinBehind, twinDist[ii], twinStraight[ii]) : "", upness, islandY);
         }
         Mark("direction");
@@ -2052,6 +2071,8 @@ public static class GlbDisconnectedParts
         // is actually turned in the output.
         int twinsRestored = 0;
         for (int f = 0; f < faceCount; f++) if (twinFace[f] && flip[f]) { flip[f] = false; twinsRestored++; }
+        if (asAuthoredSheets > 0) plan.AsAuthoredLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+            "double walls: {0} sheet(s) twinned on most faces with an undecided vote keep their authored winding - the radial score and the parity walk judge single skins", asAuthoredSheets);
         if (twinsRestored > 0) plan.TwinsRestoredLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
             "twins: {0} face(s) of doubled pairs had been turned by the winding passes and keep their authored winding instead - a pair wound both ways is already two-sided", twinsRestored);
         foreach (bool b in flip) if (b) result.FacesRewound++;
@@ -2226,6 +2247,7 @@ public static class GlbDisconnectedParts
         if (plan.MirroredLine != null) result.Details.Add(plan.MirroredLine);   // last: tests pin the earlier lines by index
         if (plan.TwinsLine != null) result.Details.Add(plan.TwinsLine);                   // after everything the tests pin by index
         if (plan.TwinsRestoredLine != null) result.Details.Add(plan.TwinsRestoredLine);
+        if (plan.AsAuthoredLine != null) result.Details.Add(plan.AsAuthoredLine);
     }
 
     // REMOVE (2026-09-18, user: "an easy way to mark a unit for removal with the Del key"): the marked nodes lose their
