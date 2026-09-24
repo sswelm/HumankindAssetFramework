@@ -829,6 +829,7 @@ public class GlbFuseTests
         var hull = Box("Hull", 6, -1, -1, -3, inward: false);    // something for the belly axis
         var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, up, down), new[] { 1, 2 }, 0.0);
         Assert.Equal(4, r.OutputTriangles);
+        Assert.StartsWith("Fused ", r.Details[0], StringComparison.Ordinal);   // the Workshop shows Details[0]: the summary, never a diagnostic (review of PR #82, P3)
         Assert.Contains(r.Details, d => d.StartsWith("twins: 2 face(s)", StringComparison.Ordinal));
         // two sheets of two faces - not four sheets of one
         Assert.Equal(2, r.IslandLines.Count(l => l.TrimStart().StartsWith("2 faces", StringComparison.Ordinal)));

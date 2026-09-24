@@ -1162,6 +1162,7 @@ public static class GlbDisconnectedParts
         public double Weld, WeldFraction, Longest; public int MadeConsistent, OpenJudged, OpenReversed, ClosedReversed, FaceCount, CollapsedFaces, NotOrientable;
         public string LargestIslands, StitchedLine, RewoundByPart, Timing, FrameLine;
         public string MirroredLine;   // the mirrored-part check's verdicts (null unless the check ran with the option on)
+        public string TwinsLine, TwinsRestoredLine;   // doubled-face diagnostics (null unless found) - appended AFTER the summary, which the Workshop shows as Details[0] (review of PR #82, P3)
         public int MirroredJudgedUndo, MirroredJudgedKeep, MirroredParts;   // this group's evidence, pooled across the run by FuseGroups
         public IList<int> NodeIndices; public string FusedName; public bool CheckMirrored;   // enough to re-plan the group once the run's verdict is known
         public bool Empty;   // no triangles: nothing to append, the sources keep their meshes, Result.Changed stays false
@@ -1441,8 +1442,8 @@ public static class GlbDisconnectedParts
                 }
                 int split = 0;
                 for (int v = 0; v < pos.Count; v++) if (onlySecond[v]) { classes[v] += pos.Count; split++; }
-                result.Details.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                    "twins: {0} face(s) coincide with another face wound the other way (a part double-sided by duplication); the second copy keeps its own {1} vertices, so each copy is judged and emitted whole", twinFaces, split));
+                plan.TwinsLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "twins: {0} face(s) coincide with another face wound the other way (a part double-sided by duplication); the second copy keeps its own {1} vertices, so each copy is judged and emitted whole", twinFaces, split);
             }
         }
         Mark("weld");   // both weld passes (the coincident-only count above and the real one) are charged here, where they run
@@ -2051,8 +2052,8 @@ public static class GlbDisconnectedParts
         // is actually turned in the output.
         int twinsRestored = 0;
         for (int f = 0; f < faceCount; f++) if (twinFace[f] && flip[f]) { flip[f] = false; twinsRestored++; }
-        if (twinsRestored > 0) result.Details.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture,
-            "twins: {0} face(s) of doubled pairs had been turned by the winding passes and keep their authored winding instead - a pair wound both ways is already two-sided", twinsRestored));
+        if (twinsRestored > 0) plan.TwinsRestoredLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+            "twins: {0} face(s) of doubled pairs had been turned by the winding passes and keep their authored winding instead - a pair wound both ways is already two-sided", twinsRestored);
         foreach (bool b in flip) if (b) result.FacesRewound++;
         // per PART: how many of its faces were turned — the reader's question after "why does my port side still render
         // inside out" is which part the pass left alone (2026-09-18, the Romanic's group D)
@@ -2223,6 +2224,8 @@ public static class GlbDisconnectedParts
         result.Details.Add("timing: " + plan.Timing + "; write " + writeClock.ElapsedMilliseconds.ToString(inv) + " ms");
         result.Details.Add(plan.FrameLine);
         if (plan.MirroredLine != null) result.Details.Add(plan.MirroredLine);   // last: tests pin the earlier lines by index
+        if (plan.TwinsLine != null) result.Details.Add(plan.TwinsLine);                   // after everything the tests pin by index
+        if (plan.TwinsRestoredLine != null) result.Details.Add(plan.TwinsRestoredLine);
     }
 
     // REMOVE (2026-09-18, user: "an easy way to mark a unit for removal with the Del key"): the marked nodes lose their
